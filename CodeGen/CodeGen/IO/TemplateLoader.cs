@@ -1,11 +1,7 @@
-﻿using System;
-using System.IO;
+﻿using System.IO;
 
-namespace VueOneMapper.IO
+namespace CodeGen.IO
 {
-    /// <summary>
-    /// Loads IEC 61499 template files
-    /// </summary>
     public class TemplateLoader
     {
         private readonly string _templateDirectory;
@@ -17,20 +13,17 @@ namespace VueOneMapper.IO
 
         public string LoadTemplate(string templateName)
         {
-            string templatePath = Path.Combine(_templateDirectory, templateName);
+            var path = GetTemplatePath(templateName);
+            if (!File.Exists(path))
+                throw new FileNotFoundException($"Template not found: {path}");
 
-            if (!File.Exists(templatePath))
-            {
-                throw new FileNotFoundException($"Template not found: {templatePath}");
-            }
-
-            return File.ReadAllText(templatePath);
+            return File.ReadAllText(path);
         }
 
         public bool TemplateExists(string templateName)
-        {
-            string templatePath = Path.Combine(_templateDirectory, templateName);
-            return File.Exists(templatePath);
-        }
+            => File.Exists(GetTemplatePath(templateName));
+
+        private string GetTemplatePath(string templateName)
+            => Path.Combine(_templateDirectory, templateName);
     }
 }
