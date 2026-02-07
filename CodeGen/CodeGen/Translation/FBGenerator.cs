@@ -1,61 +1,29 @@
 ﻿using System;
 using System.Xml.Linq;
-using VueOneMapper.Models;
+using CodeGen.Models;
 
-namespace VueOneMapper.Translation
+namespace CodeGen.Translation
 {
-    /// <summary>
-    /// Generates IEC 61499 Function Block files by modifying templates
-    /// This is the core translation logic
-    /// </summary>
     public class FBGenerator
     {
-        public GeneratedFB GenerateFromTemplate(
-            VueOneComponent component,
-            string templateContent,
-            string templateName)
+        public GeneratedFB GenerateFromTemplate(VueOneComponent component, string templateContent, string templateName)
         {
             try
             {
-                // Parse template XML
-                XDocument doc = XDocument.Parse(templateContent);
-                XElement fbType = doc.Root;
+                var doc = XDocument.Parse(templateContent);
+                var fbType = doc.Root ?? throw new Exception("Invalid template XML");
 
-                if (fbType == null || fbType.Name.LocalName != "FBType")
-                {
-                    throw new Exception("Template does not contain valid FBType element");
-                }
+                var baseName = fbType.Attribute("Name")?.Value ?? "Function_Block";
+                var newName = $"{baseName}_{component.Name}";
 
-                // 1. Change Name: Five_State_Actuator → Five_State_Actuator_Pusher
-                string baseName = fbType.Attribute("Name")?.Value ?? "Five_State_Actuator";
-                string newName = $"{baseName}_{component.Name}";
-                fbType.SetAttributeValue("Name", newName);
-
-                // 2. Generate new GUID (unique identifier for this FB)
-                string newGuid = Guid.NewGuid().ToString();
-                fbType.SetAttributeValue("GUID", newGuid);
-
-                // 3. Update VersionInfo metadata
-                XElement versionInfo = fbType.Element("VersionInfo");
-                if (versionInfo != null)
-                {
-                    versionInfo.SetAttributeValue("Author", "VueOne_Mapper");
-                    versionInfo.SetAttributeValue("Date", DateTime.Now.ToString("M/d/yyyy"));
-                    versionInfo.SetAttributeValue("Remarks", $"Generated from VueOne component: {component.Name}");
-                }
-
-                // 4. Update Comment (optional)
-                fbType.SetAttributeValue("Comment", $"Function Block for {component.Name}");
-
-                // Generate output file name
-                string outputFileName = $"{newName}.fbt";
+                UpdateFBAttributes(fbType, newName, component.Name);
 
                 return new GeneratedFB
                 {
                     FBName = newName,
-                    GUID = newGuid,
+                    GUID = Guid.NewGuid().ToString(),
                     ComponentName = component.Name,
-                    FilePath = outputFileName,
+                    FilePath = $"{newName}.fbt",
                     IsValid = true
                 };
             }
@@ -65,39 +33,36 @@ namespace VueOneMapper.Translation
                 Console.WriteLine($"\n✗ ERROR during generation: {ex.Message}");
                 Console.ForegroundColor = ConsoleColor.White;
 
-                return new GeneratedFB
-                {
-                    IsValid = false
-                };
+                return new GeneratedFB { IsValid = false };
             }
         }
 
-        public string GetModifiedTemplateContent(
-            VueOneComponent component,
-            string templateContent)
+        public string GetModifiedTemplateContent(VueOneComponent component, string templateContent)
         {
-            XDocument doc = XDocument.Parse(templateContent);
-            XElement fbType = doc.Root;
+            var doc = XDocument.Parse(templateContent);
+            var fbType = doc.Root!;
 
-            // Apply same modifications as above
-            string baseName = fbType.Attribute("Name")?.Value ?? "Five_State_Actuator";
-            string newName = $"{baseName}_{component.Name}";
+            var baseName = fbType.Attribute("Name")?.Value ?? "Function_Block";
+            var newName = $"{baseName}_{component.Name}";
+
+            UpdateFBAttributes(fbType, newName, component.Name);
+
+            return doc.ToString();
+        }
+
+        private void UpdateFBAttributes(XElement fbType, string newName, string componentName)
+        {
             fbType.SetAttributeValue("Name", newName);
+            fbType.SetAttributeValue("GUID", Guid.NewGuid().ToString());
+            fbType.SetAttributeValue("Comment", $"Function Block for {componentName}");
 
-            string newGuid = Guid.NewGuid().ToString();
-            fbType.SetAttributeValue("GUID", newGuid);
-
-            XElement versionInfo = fbType.Element("VersionInfo");
+            var versionInfo = fbType.Element("VersionInfo");
             if (versionInfo != null)
             {
                 versionInfo.SetAttributeValue("Author", "VueOne_Mapper");
                 versionInfo.SetAttributeValue("Date", DateTime.Now.ToString("M/d/yyyy"));
-                versionInfo.SetAttributeValue("Remarks", $"Generated from VueOne component: {component.Name}");
+                versionInfo.SetAttributeValue("Remarks", $"Generated from VueOne component: {componentName}");
             }
-
-            fbType.SetAttributeValue("Comment", $"Function Block for {component.Name}");
-
-            return doc.ToString();
         }
     }
 }
