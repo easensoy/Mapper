@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="../MapperUI/MapperUI/MapperUI.csproj" Id="1fc52c48-6fbd-455c-803a-2cd4c1e08e66" />
+  <Project Path="CodeGen/CodeGen.csproj" />
+</Solution>

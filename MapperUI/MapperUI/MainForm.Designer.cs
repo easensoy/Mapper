@@ -1,0 +1,316 @@
+﻿namespace MapperUI
+{
+    partial class MainForm
+    {
+        private System.ComponentModel.IContainer components = null;
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && (components != null))
+            {
+                components.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+
+        #region Windows Form Designer generated code
+
+        private void InitializeComponent()
+        {
+            this.menuStrip = new System.Windows.Forms.MenuStrip();
+            this.fileToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.dataToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.buildToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.lblVueOneModel = new System.Windows.Forms.Label();
+            this.txtModelPath = new System.Windows.Forms.TextBox();
+            this.btnBrowse = new System.Windows.Forms.Button();
+            this.grpMappingInfo = new System.Windows.Forms.GroupBox();
+            this.splitContainer = new System.Windows.Forms.SplitContainer();
+            this.dgvComponents = new System.Windows.Forms.DataGridView();
+            this.colComponent = new System.Windows.Forms.DataGridViewTextBoxColumn();
+            this.colType = new System.Windows.Forms.DataGridViewTextBoxColumn();
+            this.colFunction = new System.Windows.Forms.DataGridViewTextBoxColumn();
+            this.panelDetails = new System.Windows.Forms.Panel();
+            this.grpOutputs = new System.Windows.Forms.GroupBox();
+            this.dgvOutputs = new System.Windows.Forms.DataGridView();
+            this.colOutputName = new System.Windows.Forms.DataGridViewTextBoxColumn();
+            this.colOutputAddress = new System.Windows.Forms.DataGridViewComboBoxColumn();
+            this.grpInputs = new System.Windows.Forms.GroupBox();
+            this.dgvInputs = new System.Windows.Forms.DataGridView();
+            this.colInputName = new System.Windows.Forms.DataGridViewTextBoxColumn();
+            this.colInputAddress = new System.Windows.Forms.DataGridViewComboBoxColumn();
+            this.statusStrip = new System.Windows.Forms.StatusStrip();
+            this.lblStatus = new System.Windows.Forms.ToolStripStatusLabel();
+
+            this.menuStrip.SuspendLayout();
+            this.grpMappingInfo.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)(this.splitContainer)).BeginInit();
+            this.splitContainer.Panel1.SuspendLayout();
+            this.splitContainer.Panel2.SuspendLayout();
+            this.splitContainer.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)(this.dgvComponents)).BeginInit();
+            this.panelDetails.SuspendLayout();
+            this.grpOutputs.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)(this.dgvOutputs)).BeginInit();
+            this.grpInputs.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)(this.dgvInputs)).BeginInit();
+            this.statusStrip.SuspendLayout();
+            this.SuspendLayout();
+
+            // menuStrip
+            this.menuStrip.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
+                this.fileToolStripMenuItem,
+                this.dataToolStripMenuItem,
+                this.buildToolStripMenuItem});
+            this.menuStrip.Location = new System.Drawing.Point(0, 0);
+            this.menuStrip.Name = "menuStrip";
+            this.menuStrip.Size = new System.Drawing.Size(1400, 24);
+            this.menuStrip.TabIndex = 0;
+
+            // fileToolStripMenuItem
+            this.fileToolStripMenuItem.Name = "fileToolStripMenuItem";
+            this.fileToolStripMenuItem.Size = new System.Drawing.Size(37, 20);
+            this.fileToolStripMenuItem.Text = "File";
+
+            // dataToolStripMenuItem
+            this.dataToolStripMenuItem.Name = "dataToolStripMenuItem";
+            this.dataToolStripMenuItem.Size = new System.Drawing.Size(43, 20);
+            this.dataToolStripMenuItem.Text = "Data";
+
+            // buildToolStripMenuItem
+            this.buildToolStripMenuItem.Name = "buildToolStripMenuItem";
+            this.buildToolStripMenuItem.Size = new System.Drawing.Size(46, 20);
+            this.buildToolStripMenuItem.Text = "Build";
+
+            // lblVueOneModel
+            this.lblVueOneModel.AutoSize = true;
+            this.lblVueOneModel.Location = new System.Drawing.Point(12, 37);
+            this.lblVueOneModel.Name = "lblVueOneModel";
+            this.lblVueOneModel.Size = new System.Drawing.Size(100, 15);
+            this.lblVueOneModel.TabIndex = 1;
+            this.lblVueOneModel.Text = "vueOne Model:";
+
+            // txtModelPath
+            this.txtModelPath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
+                | System.Windows.Forms.AnchorStyles.Right)));
+            this.txtModelPath.Location = new System.Drawing.Point(118, 34);
+            this.txtModelPath.Name = "txtModelPath";
+            this.txtModelPath.ReadOnly = true;
+            this.txtModelPath.Size = new System.Drawing.Size(1150, 23);
+            this.txtModelPath.TabIndex = 2;
+
+            // btnBrowse
+            this.btnBrowse.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.btnBrowse.Location = new System.Drawing.Point(1284, 33);
+            this.btnBrowse.Name = "btnBrowse";
+            this.btnBrowse.Size = new System.Drawing.Size(100, 25);
+            this.btnBrowse.TabIndex = 3;
+            this.btnBrowse.Text = "Browse";
+            this.btnBrowse.UseVisualStyleBackColor = true;
+            this.btnBrowse.Click += new System.EventHandler(this.btnBrowse_Click);
+
+            // grpMappingInfo
+            this.grpMappingInfo.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom)
+                | System.Windows.Forms.AnchorStyles.Left)
+                | System.Windows.Forms.AnchorStyles.Right)));
+            this.grpMappingInfo.Controls.Add(this.splitContainer);
+            this.grpMappingInfo.Location = new System.Drawing.Point(12, 70);
+            this.grpMappingInfo.Name = "grpMappingInfo";
+            this.grpMappingInfo.Size = new System.Drawing.Size(1376, 650);
+            this.grpMappingInfo.TabIndex = 4;
+            this.grpMappingInfo.TabStop = false;
+            this.grpMappingInfo.Text = "Mapping Information";
+
+            // splitContainer
+            this.splitContainer.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.splitContainer.Location = new System.Drawing.Point(3, 19);
+            this.splitContainer.Name = "splitContainer";
+            this.splitContainer.Panel1.Controls.Add(this.dgvComponents);
+            this.splitContainer.Panel2.Controls.Add(this.panelDetails);
+            this.splitContainer.Size = new System.Drawing.Size(1370, 628);
+            this.splitContainer.SplitterDistance = 550;
+            this.splitContainer.TabIndex = 0;
+
+            // dgvComponents
+            this.dgvComponents.AllowUserToAddRows = false;
+            this.dgvComponents.AllowUserToDeleteRows = false;
+            this.dgvComponents.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+            this.dgvComponents.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
+                this.colComponent,
+                this.colType,
+                this.colFunction});
+            this.dgvComponents.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.dgvComponents.Location = new System.Drawing.Point(0, 0);
+            this.dgvComponents.Name = "dgvComponents";
+            this.dgvComponents.ReadOnly = true;
+            this.dgvComponents.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
+            this.dgvComponents.Size = new System.Drawing.Size(550, 628);
+            this.dgvComponents.TabIndex = 0;
+
+            // colComponent
+            this.colComponent.HeaderText = "Component";
+            this.colComponent.Name = "colComponent";
+            this.colComponent.ReadOnly = true;
+            this.colComponent.Width = 200;
+
+            // colType
+            this.colType.HeaderText = "Type";
+            this.colType.Name = "colType";
+            this.colType.ReadOnly = true;
+            this.colType.Width = 150;
+
+            // colFunction
+            this.colFunction.HeaderText = "Function";
+            this.colFunction.Name = "colFunction";
+            this.colFunction.ReadOnly = true;
+            this.colFunction.Width = 180;
+
+            // panelDetails
+            this.panelDetails.Controls.Add(this.grpOutputs);
+            this.panelDetails.Controls.Add(this.grpInputs);
+            this.panelDetails.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.panelDetails.Location = new System.Drawing.Point(0, 0);
+            this.panelDetails.Name = "panelDetails";
+            this.panelDetails.Size = new System.Drawing.Size(816, 628);
+            this.panelDetails.TabIndex = 0;
+
+            // grpOutputs
+            this.grpOutputs.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom)
+                | System.Windows.Forms.AnchorStyles.Left)
+                | System.Windows.Forms.AnchorStyles.Right)));
+            this.grpOutputs.Controls.Add(this.dgvOutputs);
+            this.grpOutputs.Location = new System.Drawing.Point(418, 15);
+            this.grpOutputs.Name = "grpOutputs";
+            this.grpOutputs.Size = new System.Drawing.Size(385, 600);
+            this.grpOutputs.TabIndex = 1;
+            this.grpOutputs.TabStop = false;
+            this.grpOutputs.Text = "Outputs";
+
+            // dgvOutputs
+            this.dgvOutputs.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+            this.dgvOutputs.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
+                this.colOutputName,
+                this.colOutputAddress});
+            this.dgvOutputs.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.dgvOutputs.Location = new System.Drawing.Point(3, 19);
+            this.dgvOutputs.Name = "dgvOutputs";
+            this.dgvOutputs.Size = new System.Drawing.Size(379, 578);
+            this.dgvOutputs.TabIndex = 0;
+
+            // colOutputName
+            this.colOutputName.HeaderText = "Name";
+            this.colOutputName.Name = "colOutputName";
+            this.colOutputName.ReadOnly = true;
+            this.colOutputName.Width = 180;
+
+            // colOutputAddress
+            this.colOutputAddress.HeaderText = "Address";
+            this.colOutputAddress.Name = "colOutputAddress";
+            this.colOutputAddress.Width = 150;
+
+            // grpInputs
+            this.grpInputs.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom)
+                | System.Windows.Forms.AnchorStyles.Left)));
+            this.grpInputs.Controls.Add(this.dgvInputs);
+            this.grpInputs.Location = new System.Drawing.Point(15, 15);
+            this.grpInputs.Name = "grpInputs";
+            this.grpInputs.Size = new System.Drawing.Size(385, 600);
+            this.grpInputs.TabIndex = 0;
+            this.grpInputs.TabStop = false;
+            this.grpInputs.Text = "Inputs";
+
+            // dgvInputs
+            this.dgvInputs.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+            this.dgvInputs.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
+                this.colInputName,
+                this.colInputAddress});
+            this.dgvInputs.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.dgvInputs.Location = new System.Drawing.Point(3, 19);
+            this.dgvInputs.Name = "dgvInputs";
+            this.dgvInputs.Size = new System.Drawing.Size(379, 578);
+            this.dgvInputs.TabIndex = 0;
+
+            // colInputName
+            this.colInputName.HeaderText = "Name";
+            this.colInputName.Name = "colInputName";
+            this.colInputName.ReadOnly = true;
+            this.colInputName.Width = 180;
+
+            // colInputAddress
+            this.colInputAddress.HeaderText = "Address";
+            this.colInputAddress.Name = "colInputAddress";
+            this.colInputAddress.Width = 150;
+
+            // statusStrip
+            this.statusStrip.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
+                this.lblStatus});
+            this.statusStrip.Location = new System.Drawing.Point(0, 728);
+            this.statusStrip.Name = "statusStrip";
+            this.statusStrip.Size = new System.Drawing.Size(1400, 22);
+            this.statusStrip.TabIndex = 5;
+
+            // lblStatus
+            this.lblStatus.Name = "lblStatus";
+            this.lblStatus.Size = new System.Drawing.Size(39, 17);
+            this.lblStatus.Text = "Ready";
+
+            // MainForm
+            this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 15F);
+            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
+            this.ClientSize = new System.Drawing.Size(1400, 750);
+            this.Controls.Add(this.statusStrip);
+            this.Controls.Add(this.grpMappingInfo);
+            this.Controls.Add(this.btnBrowse);
+            this.Controls.Add(this.txtModelPath);
+            this.Controls.Add(this.lblVueOneModel);
+            this.Controls.Add(this.menuStrip);
+            this.MainMenuStrip = this.menuStrip;
+            this.Name = "MainForm";
+            this.Text = "VueOne Mapper for IEC 61499";
+            this.menuStrip.ResumeLayout(false);
+            this.menuStrip.PerformLayout();
+            this.grpMappingInfo.ResumeLayout(false);
+            this.splitContainer.Panel1.ResumeLayout(false);
+            this.splitContainer.Panel2.ResumeLayout(false);
+            ((System.ComponentModel.ISupportInitialize)(this.splitContainer)).EndInit();
+            this.splitContainer.ResumeLayout(false);
+            ((System.ComponentModel.ISupportInitialize)(this.dgvComponents)).EndInit();
+            this.panelDetails.ResumeLayout(false);
+            this.grpOutputs.ResumeLayout(false);
+            ((System.ComponentModel.ISupportInitialize)(this.dgvOutputs)).EndInit();
+            this.grpInputs.ResumeLayout(false);
+            ((System.ComponentModel.ISupportInitialize)(this.dgvInputs)).EndInit();
+            this.statusStrip.ResumeLayout(false);
+            this.statusStrip.PerformLayout();
+            this.ResumeLayout(false);
+            this.PerformLayout();
+        }
+
+        #endregion
+
+        private MenuStrip menuStrip;
+        private ToolStripMenuItem fileToolStripMenuItem;
+        private ToolStripMenuItem dataToolStripMenuItem;
+        private ToolStripMenuItem buildToolStripMenuItem;
+        private Label lblVueOneModel;
+        private TextBox txtModelPath;
+        private Button btnBrowse;
+        private GroupBox grpMappingInfo;
+        private SplitContainer splitContainer;
+        private DataGridView dgvComponents;
+        private DataGridViewTextBoxColumn colComponent;
+        private DataGridViewTextBoxColumn colType;
+        private DataGridViewTextBoxColumn colFunction;
+        private Panel panelDetails;
+        private GroupBox grpOutputs;
+        private DataGridView dgvOutputs;
+        private DataGridViewTextBoxColumn colOutputName;
+        private DataGridViewComboBoxColumn colOutputAddress;
+        private GroupBox grpInputs;
+        private DataGridView dgvInputs;
+        private DataGridViewTextBoxColumn colInputName;
+        private DataGridViewComboBoxColumn colInputAddress;
+        private StatusStrip statusStrip;
+        private ToolStripStatusLabel lblStatus;
+    }
+}

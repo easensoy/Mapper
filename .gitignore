@@ -1,0 +1,11 @@
+.vs/
+bin/
+obj/
+Debug/
+Release/
+x64/
+x86/
+*.user
+*.suo
+*.cache
+node_modules/
