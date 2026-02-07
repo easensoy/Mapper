@@ -1,26 +1,20 @@
 ﻿using System.Collections.Generic;
 
-namespace VueOneMapper.Models
+namespace CodeGen.Models
 {
-    /// <summary>
-    /// Represents a VueOne component extracted from Control.xml
-    /// </summary>
     public class VueOneComponent
     {
-        public string ComponentID { get; set; }
-        public string Name { get; set; }
-        public string Description { get; set; }
-        public string Type { get; set; }
-        public List<VueOneState> States { get; set; } = new List<VueOneState>();
+        public string ComponentID { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string Type { get; set; } = string.Empty;
+        public List<VueOneState> States { get; set; } = new();
     }
 
-    /// <summary>
-    /// Represents a state within a VueOne component
-    /// </summary>
     public class VueOneState
     {
-        public string StateID { get; set; }
-        public string Name { get; set; }
+        public string StateID { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
         public int StateNumber { get; set; }
         public bool InitialState { get; set; }
         public int Time { get; set; }
