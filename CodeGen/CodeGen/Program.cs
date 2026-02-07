@@ -2,6 +2,7 @@
 using CodeGen.Validation;
 using System;
 using System.IO;
+using VueOneMapper.Configuration;
 using VueOneMapper.IO;
 using VueOneMapper.Mapping;
 using VueOneMapper.Translation;
@@ -16,21 +17,36 @@ namespace VueOneMapper
             Console.Clear();
             PrintHeader();
 
-            // Configuration
-            string controlXmlPath = "Control.xml";  // Your Pusher XML
-            string templateDirectory = "Templates"; // Where five_state_actuator.fbt is
-            string outputDirectory = "Output";      // Where generated files go
-
             try
             {
+                // ============================================================
+                // LOAD CONFIGURATION
+                // ============================================================
+                Console.WriteLine("\n[CONFIGURATION] Loading config.json...");
+                Console.WriteLine(new string('-', 60));
+
+                var config = MapperConfig.Load();
+                Console.WriteLine($"✓ Control.xml: {config.ControlXmlPath}");
+                Console.WriteLine($"✓ Template Dir: {config.TemplateDirectory}");
+                Console.WriteLine($"✓ Output Dir: {config.OutputDirectory}");
+                Console.WriteLine($"✓ EAE Project: {config.EAEProjectPath}");
+
                 // ============================================================
                 // PHASE 1: Read VueOne Control.xml
                 // ============================================================
                 Console.WriteLine("\n[PHASE 1] Reading VueOne Control.xml...");
                 Console.WriteLine(new string('-', 60));
 
+                if (!File.Exists(config.ControlXmlPath))
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine($"✗ ERROR: Control.xml not found at: {config.ControlXmlPath}");
+                    Console.ForegroundColor = ConsoleColor.White;
+                    return;
+                }
+
                 var xmlReader = new ControlXmlReader();
-                var component = xmlReader.ReadComponent(controlXmlPath);
+                var component = xmlReader.ReadComponent(config.ControlXmlPath);
 
                 Console.WriteLine($"Component Name: {component.Name}");
                 Console.WriteLine($"Component Type: {component.Type}");
@@ -81,13 +97,13 @@ namespace VueOneMapper
                 Console.WriteLine("\n[PHASE 4] Loading Template File...");
                 Console.WriteLine(new string('-', 60));
 
-                var templateLoader = new TemplateLoader(templateDirectory);
+                var templateLoader = new TemplateLoader(config.TemplateDirectory);
 
                 if (!templateLoader.TemplateExists(template.TemplateFilePath))
                 {
                     Console.ForegroundColor = ConsoleColor.Red;
                     Console.WriteLine($"✗ ERROR: Template file not found: {template.TemplateFilePath}");
-                    Console.WriteLine($"Expected location: {Path.Combine(templateDirectory, template.TemplateFilePath)}");
+                    Console.WriteLine($"Expected location: {Path.Combine(config.TemplateDirectory, template.TemplateFilePath)}");
                     Console.ForegroundColor = ConsoleColor.White;
                     return;
                 }
@@ -122,7 +138,7 @@ namespace VueOneMapper
                 Console.WriteLine("\n[PHASE 6] Writing Output File...");
                 Console.WriteLine(new string('-', 60));
 
-                var fbWriter = new FBWriter(outputDirectory);
+                var fbWriter = new FBWriter(config.OutputDirectory);
                 string modifiedContent = generator.GetModifiedTemplateContent(component, templateContent);
                 fbWriter.WriteFile(generatedFB.FilePath, modifiedContent);
 
@@ -130,9 +146,22 @@ namespace VueOneMapper
                 Console.WriteLine($"✓ File written to: {fullOutputPath}");
 
                 // ============================================================
+                // OPTIONAL: Copy to EAE Project
+                // ============================================================
+                if (!string.IsNullOrEmpty(config.EAEProjectPath) && Directory.Exists(config.EAEProjectPath))
+                {
+                    Console.WriteLine("\n[DEPLOYMENT] Copying to EAE Project...");
+                    Console.WriteLine(new string('-', 60));
+
+                    string eaeDestination = Path.Combine(config.EAEProjectPath, generatedFB.FilePath);
+                    File.Copy(fullOutputPath, eaeDestination, overwrite: true);
+                    Console.WriteLine($"✓ Copied to: {eaeDestination}");
+                }
+
+                // ============================================================
                 // SUCCESS SUMMARY
                 // ============================================================
-                PrintSuccess(component.Name, generatedFB.FilePath, fullOutputPath);
+                PrintSuccess(component.Name, generatedFB.FilePath, fullOutputPath, config.EAEProjectPath);
 
             }
             catch (Exception ex)
@@ -143,6 +172,7 @@ namespace VueOneMapper
                 {
                     Console.WriteLine($"   Inner: {ex.InnerException.Message}");
                 }
+                Console.WriteLine($"\nStack Trace:\n{ex.StackTrace}");
                 Console.ForegroundColor = ConsoleColor.White;
             }
 
@@ -160,7 +190,7 @@ namespace VueOneMapper
             Console.ForegroundColor = ConsoleColor.White;
         }
 
-        static void PrintSuccess(string componentName, string fileName, string fullPath)
+        static void PrintSuccess(string componentName, string fileName, string fullPath, string eaePath)
         {
             Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine("\n" + new string('=', 60));
@@ -172,12 +202,17 @@ namespace VueOneMapper
             Console.WriteLine($"Generated: {fileName}");
             Console.WriteLine($"Location: {fullPath}");
 
+            if (!string.IsNullOrEmpty(eaePath))
+            {
+                Console.WriteLine($"Deployed to EAE: {Path.Combine(eaePath, fileName)}");
+            }
+
             Console.ForegroundColor = ConsoleColor.Cyan;
             Console.WriteLine("\nNext Steps:");
-            Console.WriteLine("1. Copy this file to: SMC_Rig_Expo/Composite/");
-            Console.WriteLine("2. Open EAE");
-            Console.WriteLine("3. Right-click Solution → Refresh");
-            Console.WriteLine("4. Check console for 'Build successful'");
+            Console.WriteLine("1. Open EAE");
+            Console.WriteLine("2. Right-click Solution → Refresh");
+            Console.WriteLine("3. Check console for 'Build successful'");
+            Console.WriteLine("4. Find your FB in Composite tree");
             Console.ForegroundColor = ConsoleColor.White;
         }
     }
