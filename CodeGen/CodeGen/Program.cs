@@ -1,14 +1,12 @@
-﻿using CodeGen.IO;
-using CodeGen.Validation;
-using System;
+﻿using System;
 using System.IO;
-using VueOneMapper.Configuration;
-using VueOneMapper.IO;
-using VueOneMapper.Mapping;
-using VueOneMapper.Translation;
-using VueOneMapper.Validation;
+using CodeGen.Configuration;
+using CodeGen.IO;
+using CodeGen.Mapping;
+using CodeGen.Translation;
+using CodeGen.Validation;
 
-namespace VueOneMapper
+namespace CodeGen
 {
     class Program
     {
@@ -19,165 +17,152 @@ namespace VueOneMapper
 
             try
             {
-                // ============================================================
-                // LOAD CONFIGURATION
-                // ============================================================
-                Console.WriteLine("\n[CONFIGURATION] Loading config.json...");
-                Console.WriteLine(new string('-', 60));
-
-                var config = MapperConfig.Load();
-                Console.WriteLine($"✓ Control.xml: {config.ControlXmlPath}");
-                Console.WriteLine($"✓ Template Dir: {config.TemplateDirectory}");
-                Console.WriteLine($"✓ Output Dir: {config.OutputDirectory}");
-                Console.WriteLine($"✓ EAE Project: {config.EAEProjectPath}");
-
-                // ============================================================
-                // PHASE 1: Read VueOne Control.xml
-                // ============================================================
-                Console.WriteLine("\n[PHASE 1] Reading VueOne Control.xml...");
-                Console.WriteLine(new string('-', 60));
-
-                if (!File.Exists(config.ControlXmlPath))
-                {
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.WriteLine($"✗ ERROR: Control.xml not found at: {config.ControlXmlPath}");
-                    Console.ForegroundColor = ConsoleColor.White;
-                    return;
-                }
-
-                var xmlReader = new ControlXmlReader();
-                var component = xmlReader.ReadComponent(config.ControlXmlPath);
-
-                Console.WriteLine($"Component Name: {component.Name}");
-                Console.WriteLine($"Component Type: {component.Type}");
-                Console.WriteLine($"State Count: {component.States.Count}");
-
-                // ============================================================
-                // PHASE 2: Validate Component (INPUT VALIDATION)
-                // ============================================================
-                Console.WriteLine("\n[PHASE 2] Validating VueOne Component...");
-                Console.WriteLine(new string('-', 60));
-
-                var validator = new ComponentValidator();
-                var validationResult = validator.Validate(component);
-
-                validationResult.PrintToConsole();
+                var config = LoadConfiguration();
+                var component = ReadComponent(config.ControlXmlPath);
+                var validationResult = ValidateComponent(component);
 
                 if (!validationResult.IsValid)
                 {
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.WriteLine("Translation REJECTED due to validation errors.");
-                    Console.ForegroundColor = ConsoleColor.White;
+                    PrintError("Translation REJECTED due to validation errors.");
                     return;
                 }
 
-                // ============================================================
-                // PHASE 3: Select Template
-                // ============================================================
-                Console.WriteLine("\n[PHASE 3] Selecting IEC 61499 Template...");
-                Console.WriteLine(new string('-', 60));
-
-                var templateSelector = new TemplateSelector();
-                var template = templateSelector.SelectTemplate(component);
-
+                var template = SelectTemplate(component);
                 if (template == null)
                 {
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.WriteLine($"✗ ERROR: No template found for {component.Type} with {component.States.Count} states");
-                    Console.ForegroundColor = ConsoleColor.White;
+                    PrintError($"No template found for {component.Type} with {component.States.Count} states");
                     return;
                 }
 
-                Console.WriteLine($"✓ Selected Template: {template.TemplateName}");
-                Console.WriteLine($"✓ Expected States: {template.ExpectedStateCount}");
-
-                // ============================================================
-                // PHASE 4: Load Template
-                // ============================================================
-                Console.WriteLine("\n[PHASE 4] Loading Template File...");
-                Console.WriteLine(new string('-', 60));
-
-                var templateLoader = new TemplateLoader(config.TemplateDirectory);
-
-                if (!templateLoader.TemplateExists(template.TemplateFilePath))
-                {
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.WriteLine($"✗ ERROR: Template file not found: {template.TemplateFilePath}");
-                    Console.WriteLine($"Expected location: {Path.Combine(config.TemplateDirectory, template.TemplateFilePath)}");
-                    Console.ForegroundColor = ConsoleColor.White;
-                    return;
-                }
-
-                string templateContent = templateLoader.LoadTemplate(template.TemplateFilePath);
-                Console.WriteLine($"✓ Template loaded ({templateContent.Length} characters)");
-
-                // ============================================================
-                // PHASE 5: Generate Function Block
-                // ============================================================
-                Console.WriteLine("\n[PHASE 5] Generating IEC 61499 Function Block...");
-                Console.WriteLine(new string('-', 60));
-
-                var generator = new FBGenerator();
-                var generatedFB = generator.GenerateFromTemplate(component, templateContent, template.TemplateName);
+                var templateContent = LoadTemplate(config.TemplateDirectory, template);
+                var generatedFB = GenerateFB(component, templateContent, template.TemplateName);
 
                 if (!generatedFB.IsValid)
                 {
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.WriteLine("✗ Generation FAILED");
-                    Console.ForegroundColor = ConsoleColor.White;
+                    PrintError("Generation FAILED");
                     return;
                 }
 
-                Console.WriteLine($"✓ FB Name: {generatedFB.FBName}");
-                Console.WriteLine($"✓ GUID: {generatedFB.GUID}");
-                Console.WriteLine($"✓ Output File: {generatedFB.FilePath}");
+                var outputPath = WriteOutput(config.OutputDirectory, generatedFB, component, templateContent);
+                DeployToEAE(config.EAEProjectPath, generatedFB.FilePath, outputPath);
 
-                // ============================================================
-                // PHASE 6: Write Output File
-                // ============================================================
-                Console.WriteLine("\n[PHASE 6] Writing Output File...");
-                Console.WriteLine(new string('-', 60));
-
-                var fbWriter = new FBWriter(config.OutputDirectory);
-                string modifiedContent = generator.GetModifiedTemplateContent(component, templateContent);
-                fbWriter.WriteFile(generatedFB.FilePath, modifiedContent);
-
-                string fullOutputPath = fbWriter.GetOutputPath(generatedFB.FilePath);
-                Console.WriteLine($"✓ File written to: {fullOutputPath}");
-
-                // ============================================================
-                // OPTIONAL: Copy to EAE Project
-                // ============================================================
-                if (!string.IsNullOrEmpty(config.EAEProjectPath) && Directory.Exists(config.EAEProjectPath))
-                {
-                    Console.WriteLine("\n[DEPLOYMENT] Copying to EAE Project...");
-                    Console.WriteLine(new string('-', 60));
-
-                    string eaeDestination = Path.Combine(config.EAEProjectPath, generatedFB.FilePath);
-                    File.Copy(fullOutputPath, eaeDestination, overwrite: true);
-                    Console.WriteLine($"✓ Copied to: {eaeDestination}");
-                }
-
-                // ============================================================
-                // SUCCESS SUMMARY
-                // ============================================================
-                PrintSuccess(component.Name, generatedFB.FilePath, fullOutputPath, config.EAEProjectPath);
-
+                PrintSuccess(component.Name, generatedFB.FilePath, outputPath, config.EAEProjectPath);
             }
             catch (Exception ex)
             {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"\n✗ FATAL ERROR: {ex.Message}");
+                PrintError($"FATAL ERROR: {ex.Message}");
                 if (ex.InnerException != null)
-                {
                     Console.WriteLine($"   Inner: {ex.InnerException.Message}");
-                }
-                Console.WriteLine($"\nStack Trace:\n{ex.StackTrace}");
-                Console.ForegroundColor = ConsoleColor.White;
             }
 
             Console.WriteLine("\nPress any key to exit...");
             Console.ReadKey();
+        }
+
+        static MapperConfig LoadConfiguration()
+        {
+            PrintPhase("CONFIGURATION", "Loading config.json...");
+            var config = MapperConfig.Load();
+            Console.WriteLine($"✓ Control.xml: {config.ControlXmlPath}");
+            Console.WriteLine($"✓ Template Dir: {config.TemplateDirectory}");
+            Console.WriteLine($"✓ Output Dir: {config.OutputDirectory}");
+            if (!string.IsNullOrEmpty(config.EAEProjectPath))
+                Console.WriteLine($"✓ EAE Project: {config.EAEProjectPath}");
+            return config;
+        }
+
+        static Models.VueOneComponent ReadComponent(string xmlPath)
+        {
+            PrintPhase("PHASE 1", "Reading VueOne Control.xml...");
+
+            if (!File.Exists(xmlPath))
+                throw new FileNotFoundException($"Control.xml not found: {xmlPath}");
+
+            var xmlReader = new ControlXmlReader();
+            var component = xmlReader.ReadComponent(xmlPath);
+
+            Console.WriteLine($"Component Name: {component.Name}");
+            Console.WriteLine($"Component Type: {component.Type}");
+            Console.WriteLine($"State Count: {component.States.Count}");
+
+            return component;
+        }
+
+        static ValidationResult ValidateComponent(Models.VueOneComponent component)
+        {
+            PrintPhase("PHASE 2", "Validating VueOne Component...");
+            var validator = new ComponentValidator();
+            var result = validator.Validate(component);
+            result.PrintToConsole();
+            return result;
+        }
+
+        static Models.FBTemplate? SelectTemplate(Models.VueOneComponent component)
+        {
+            PrintPhase("PHASE 3", "Selecting IEC 61499 Template...");
+            var selector = new TemplateSelector();
+            var template = selector.SelectTemplate(component);
+
+            if (template != null)
+            {
+                Console.WriteLine($"✓ Selected Template: {template.TemplateName}");
+                Console.WriteLine($"✓ Expected States: {template.ExpectedStateCount}");
+            }
+
+            return template;
+        }
+
+        static string LoadTemplate(string templateDir, Models.FBTemplate template)
+        {
+            PrintPhase("PHASE 4", "Loading Template File...");
+            var loader = new TemplateLoader(templateDir);
+
+            if (!loader.TemplateExists(template.TemplateFilePath))
+                throw new FileNotFoundException($"Template not found: {Path.Combine(templateDir, template.TemplateFilePath)}");
+
+            var content = loader.LoadTemplate(template.TemplateFilePath);
+            Console.WriteLine($"✓ Template loaded ({content.Length} characters)");
+            return content;
+        }
+
+        static Models.GeneratedFB GenerateFB(Models.VueOneComponent component, string templateContent, string templateName)
+        {
+            PrintPhase("PHASE 5", "Generating IEC 61499 Function Block...");
+            var generator = new FBGenerator();
+            var fb = generator.GenerateFromTemplate(component, templateContent, templateName);
+
+            if (fb.IsValid)
+            {
+                Console.WriteLine($"✓ FB Name: {fb.FBName}");
+                Console.WriteLine($"✓ GUID: {fb.GUID}");
+                Console.WriteLine($"✓ Output File: {fb.FilePath}");
+            }
+
+            return fb;
+        }
+
+        static string WriteOutput(string outputDir, Models.GeneratedFB fb, Models.VueOneComponent component, string templateContent)
+        {
+            PrintPhase("PHASE 6", "Writing Output File...");
+            var writer = new FBWriter(outputDir);
+            var generator = new FBGenerator();
+            var modifiedContent = generator.GetModifiedTemplateContent(component, templateContent);
+
+            writer.WriteFile(fb.FilePath, modifiedContent);
+            var fullPath = writer.GetOutputPath(fb.FilePath);
+            Console.WriteLine($"✓ File written to: {fullPath}");
+
+            return fullPath;
+        }
+
+        static void DeployToEAE(string eaePath, string fileName, string sourcePath)
+        {
+            if (string.IsNullOrEmpty(eaePath) || !Directory.Exists(eaePath)) return;
+
+            PrintPhase("DEPLOYMENT", "Copying to EAE Project...");
+            var destination = Path.Combine(eaePath, fileName);
+            File.Copy(sourcePath, destination, overwrite: true);
+            Console.WriteLine($"✓ Copied to: {destination}");
         }
 
         static void PrintHeader()
@@ -187,6 +172,19 @@ namespace VueOneMapper
             Console.WriteLine("       VueOne to IEC 61499 Mapper");
             Console.WriteLine("       Tuesday Demonstration Build");
             Console.WriteLine(new string('=', 60));
+            Console.ForegroundColor = ConsoleColor.White;
+        }
+
+        static void PrintPhase(string phase, string description)
+        {
+            Console.WriteLine($"\n[{phase}] {description}");
+            Console.WriteLine(new string('-', 60));
+        }
+
+        static void PrintError(string message)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine($"✗ {message}");
             Console.ForegroundColor = ConsoleColor.White;
         }
 
@@ -203,9 +201,7 @@ namespace VueOneMapper
             Console.WriteLine($"Location: {fullPath}");
 
             if (!string.IsNullOrEmpty(eaePath))
-            {
                 Console.WriteLine($"Deployed to EAE: {Path.Combine(eaePath, fileName)}");
-            }
 
             Console.ForegroundColor = ConsoleColor.Cyan;
             Console.WriteLine("\nNext Steps:");
