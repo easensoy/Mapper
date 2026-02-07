@@ -1,5 +1,4 @@
-﻿using CodeGen.Models;
-using VueOneMapper.Models;
+﻿using VueOneMapper.Models;
 
 namespace VueOneMapper.Mapping
 {
