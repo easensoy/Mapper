@@ -1,25 +1,19 @@
-﻿namespace VueOneMapper.Models
+﻿namespace CodeGen.Models
 {
-    /// <summary>
-    /// Represents the metadata needed to generate an IEC 61499 Function Block
-    /// </summary>
     public class FBTemplate
     {
-        public string TemplateName { get; set; }
-        public string TemplateFilePath { get; set; }
+        public string TemplateName { get; set; } = string.Empty;
+        public string TemplateFilePath { get; set; } = string.Empty;
         public int ExpectedStateCount { get; set; }
-        public string ComponentType { get; set; }
+        public string ComponentType { get; set; } = string.Empty;
     }
 
-    /// <summary>
-    /// Represents the generated Function Block output
-    /// </summary>
     public class GeneratedFB
     {
-        public string FBName { get; set; }
-        public string GUID { get; set; }
-        public string ComponentName { get; set; }
-        public string FilePath { get; set; }
+        public string FBName { get; set; } = string.Empty;
+        public string GUID { get; set; } = string.Empty;
+        public string ComponentName { get; set; } = string.Empty;
+        public string FilePath { get; set; } = string.Empty;
         public bool IsValid { get; set; }
     }
 }
