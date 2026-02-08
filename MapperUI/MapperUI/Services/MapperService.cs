@@ -86,11 +86,11 @@ namespace MapperUI.Services
     public class MapperResult
     {
         public bool Success { get; set; }
-        public string ComponentName { get; set; }
-        public GeneratedFB GeneratedFB { get; set; }
-        public ValidationResult ValidationResult { get; set; }
-        public string OutputPath { get; set; }
-        public string DeployPath { get; set; }
-        public string ErrorMessage { get; set; }
+        public string ComponentName { get; set; } = string.Empty;
+        public GeneratedFB? GeneratedFB { get; set; }
+        public ValidationResult? ValidationResult { get; set; }
+        public string OutputPath { get; set; } = string.Empty;
+        public string DeployPath { get; set; } = string.Empty;
+        public string ErrorMessage { get; set; } = string.Empty;
     }
 }
