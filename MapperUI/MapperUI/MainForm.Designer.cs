@@ -312,5 +312,34 @@
         private DataGridViewComboBoxColumn colInputAddress;
         private StatusStrip statusStrip;
         private ToolStripStatusLabel lblStatus;
+
+        private System.Windows.Forms.Button btnGenerate;
+        private System.Windows.Forms.RichTextBox txtOutput;
+
+        private void InitializeComponent()
+        {
+            this.btnGenerate = new System.Windows.Forms.Button();
+            this.txtOutput = new System.Windows.Forms.RichTextBox();
+            this.SuspendLayout();
+
+            this.btnGenerate.Location = new System.Drawing.Point(12, 12);
+            this.btnGenerate.Name = "btnGenerate";
+            this.btnGenerate.Size = new System.Drawing.Size(150, 40);
+            this.btnGenerate.Text = "Generate FB";
+            this.btnGenerate.Click += new System.EventHandler(this.btnGenerate_Click);
+
+            this.txtOutput.Location = new System.Drawing.Point(12, 60);
+            this.txtOutput.Name = "txtOutput";
+            this.txtOutput.Size = new System.Drawing.Size(760, 480);
+            this.txtOutput.ReadOnly = true;
+            this.txtOutput.Font = new System.Drawing.Font("Consolas", 10F);
+
+            this.Controls.Add(this.btnGenerate);
+            this.Controls.Add(this.txtOutput);
+            this.Name = "MainForm";
+            this.Text = "VueOne Mapper";
+            this.Size = new System.Drawing.Size(800, 600);
+            this.ResumeLayout(false);
+        }
     }
 }
