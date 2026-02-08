@@ -1,55 +1,84 @@
-using System;
+﻿using System;
 using System.Windows.Forms;
+using MapperUI.Services;
 
 namespace MapperUI
 {
     public partial class MainForm : Form
     {
+        private readonly MapperService _mapperService;
+
         public MainForm()
         {
             InitializeComponent();
+            _mapperService = new MapperService();
         }
 
-        private void btnBrowse_Click(object sender, EventArgs e)
+        private async void btnGenerate_Click(object sender, EventArgs e)
         {
-            using (var dialog = new OpenFileDialog())
-            {
-                dialog.Filter = "XML Files (*.xml)|*.xml|All Files (*.*)|*.*";
-                dialog.Title = "Select VueOne Control.xml";
+            txtOutput.Clear();
+            AppendOutput("Starting VueOne to IEC 61499 mapping...\n");
 
-                if (dialog.ShowDialog() == DialogResult.OK)
+            var result = await _mapperService.RunMapping();
+
+            if (!result.Success)
+            {
+                AppendOutput($"\n❌ FAILED: {result.ErrorMessage}\n", true);
+
+                if (result.ValidationResult != null)
                 {
-                    txtModelPath.Text = dialog.FileName;
-                    LoadVueOneModel(dialog.FileName);
+                    AppendValidationResults(result.ValidationResult);
                 }
+                return;
             }
+
+            AppendValidationResults(result.ValidationResult);
+
+            AppendOutput($"\n✓ Component: {result.ComponentName}\n");
+            AppendOutput($"✓ Generated: {result.GeneratedFB.FBName}\n");
+            AppendOutput($"✓ GUID: {result.GeneratedFB.GUID}\n");
+            AppendOutput($"✓ Output: {result.OutputPath}\n");
+            AppendOutput($"✓ Deployed: {result.DeployPath}\n");
+            AppendOutput("\n✅ SUCCESS - Translation Complete!\n", false, true);
         }
 
-        private void LoadVueOneModel(string filePath)
+        private void AppendValidationResults(CodeGen.Validation.ValidationResult result)
         {
-            try
+            AppendOutput("\n=== VALIDATION RESULTS ===\n");
+
+            foreach (var info in result.InfoMessages)
+                AppendOutput($"{info}\n");
+
+            foreach (var warning in result.Warnings)
+                AppendOutput($"⚠ {warning}\n", true);
+
+            foreach (var error in result.Errors)
+                AppendOutput($"❌ {error}\n", true);
+
+            AppendOutput(result.IsValid
+                ? "\n✅ VALIDATION PASSED\n"
+                : "\n❌ VALIDATION FAILED\n",
+                !result.IsValid);
+        }
+
+        private void AppendOutput(string text, bool isError = false, bool isSuccess = false)
+        {
+            if (txtOutput.InvokeRequired)
             {
-                lblStatus.Text = "Loading model...";
-                statusStrip.Refresh();
-
-                // TODO: Use CodeGen classes here
-                // var parser = new CodeGen.Parser();
-                // var system = parser.Parse(filePath);
-
-                // Mock data for now
-                dgvComponents.Rows.Clear();
-                dgvComponents.Rows.Add("Feeder", "Actuator", "FiveStatePneumatic");
-                dgvComponents.Rows.Add("Transfer", "Actuator", "FiveStatePneumatic");
-                dgvComponents.Rows.Add("Assembly_Station", "Process", "Process");
-
-                lblStatus.Text = $"Loaded: {System.IO.Path.GetFileName(filePath)}";
+                txtOutput.Invoke(new Action(() => AppendOutput(text, isError, isSuccess)));
+                return;
             }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Error: {ex.Message}", "Error",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
-                lblStatus.Text = "Error loading model";
-            }
+
+            int start = txtOutput.TextLength;
+            txtOutput.AppendText(text);
+            int end = txtOutput.TextLength;
+
+            txtOutput.Select(start, end - start);
+            txtOutput.SelectionColor = isError ? System.Drawing.Color.Red
+                                      : isSuccess ? System.Drawing.Color.Green
+                                      : System.Drawing.Color.Black;
+            txtOutput.SelectionLength = 0;
+            txtOutput.ScrollToCaret();
         }
     }
 }
