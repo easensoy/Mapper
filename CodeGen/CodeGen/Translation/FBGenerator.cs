@@ -24,6 +24,9 @@ namespace CodeGen.Translation
                     GUID = Guid.NewGuid().ToString(),
                     ComponentName = component.Name,
                     FilePath = $"{newName}.fbt",
+                    FbtFile = $"{newName}.fbt",
+                    CompositeFile = $"{newName}.composite.offline.xml",
+                    DocFile = $"{newName}.doc.xml",
                     IsValid = true
                 };
             }
@@ -48,6 +51,26 @@ namespace CodeGen.Translation
             UpdateFBAttributes(fbType, newName, component.Name);
 
             return doc.ToString();
+        }
+
+        public string GetCompositeXml()
+        {
+            return @"<?xml version=""1.0"" encoding=""utf-8""?>
+                <CompositeFBTypeCompileInfo>
+                  <Signature />
+                </CompositeFBTypeCompileInfo>";
+        }
+
+        public string GetDocXml(string fbName)
+        {
+            return $@"<?xml version=""1.0"" encoding=""utf-8""?>
+                <FBTypeDocumentation>
+                  <Name>{fbName}</Name>
+                  <Description />
+                  <Author>VueOne_Mapper</Author>
+                  <Date>{DateTime.Now:yyyy-MM-dd}</Date>
+                  <Version>1.0</Version>
+                </FBTypeDocumentation>";
         }
 
         private void UpdateFBAttributes(XElement fbType, string newName, string componentName)
