@@ -139,11 +139,11 @@
             this.grpValidation.TabStop = false;
             this.grpValidation.Text = "Validation Output";
 
-            // txtOutput
-            this.txtOutput.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(30)))), ((int)(((byte)(30)))), ((int)(((byte)(30)))));
+            // txtOutput - change background to light gray with dark text
+            this.txtOutput.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(240)))), ((int)(((byte)(240)))), ((int)(((byte)(240)))));
             this.txtOutput.Dock = System.Windows.Forms.DockStyle.Fill;
             this.txtOutput.Font = new System.Drawing.Font("Consolas", 9F);
-            this.txtOutput.ForeColor = System.Drawing.Color.White;
+            this.txtOutput.ForeColor = System.Drawing.Color.Black;
             this.txtOutput.Location = new System.Drawing.Point(3, 19);
             this.txtOutput.Name = "txtOutput";
             this.txtOutput.ReadOnly = true;
