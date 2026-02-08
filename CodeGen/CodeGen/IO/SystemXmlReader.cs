@@ -1,4 +1,6 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Xml.Linq;
 using CodeGen.Models;
 
@@ -6,38 +8,79 @@ namespace CodeGen.IO
 {
     public class SystemXmlReader
     {
+        public string LastError { get; private set; } = string.Empty;
+
         public List<VueOneComponent> ReadAllComponents(string xmlFilePath)
         {
             var components = new List<VueOneComponent>();
-            var doc = XDocument.Load(xmlFilePath);
+            LastError = string.Empty;
 
-            var root = doc.Root;
-            if (root == null) return components;
-
-            var typeAttribute = root.Attribute("Type")?.Value;
-
-            if (typeAttribute == "System")
+            try
             {
-                var systemElement = root.Element("s");
-                if (systemElement != null)
+                var doc = XDocument.Load(xmlFilePath);
+                var root = doc.Root;
+
+                if (root == null)
                 {
-                    foreach (var componentElement in systemElement.Elements("Component"))
+                    LastError = "XML root is null";
+                    return components;
+                }
+
+                var typeAttribute = root.Attribute("Type")?.Value;
+                LastError = $"Type={typeAttribute}, Root={root.Name.LocalName}";
+
+                if (typeAttribute == "System")
+                {
+                    // Try BOTH <s> and <System> elements
+                    var systemElement = root.Elements().FirstOrDefault(e => e.Name.LocalName == "s" || e.Name.LocalName == "System");
+
+                    if (systemElement == null)
                     {
-                        var component = ParseComponent(componentElement, true);
-                        if (component.Type != "NonControl")
+                        LastError += ", No <s> or <System> element found";
+                        var childNames = string.Join(", ", root.Elements().Select(e => e.Name.LocalName));
+                        LastError += $", Children: [{childNames}]";
+                        return components;
+                    }
+
+                    LastError += $", System element: {systemElement.Name.LocalName}";
+
+                    var componentElements = systemElement.Elements()
+                        .Where(e => e.Name.LocalName == "Component")
+                        .ToList();
+
+                    LastError += $", Found {componentElements.Count} Component elements";
+
+                    foreach (var componentElement in componentElements)
+                    {
+                        try
                         {
-                            components.Add(component);
+                            var component = ParseComponent(componentElement, true);
+
+                            if (component.Type != "NonControl")
+                            {
+                                components.Add(component);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            LastError += $", Error: {ex.Message}";
                         }
                     }
                 }
-            }
-            else if (typeAttribute == "Component")
-            {
-                var componentElement = root.Element("Component");
-                if (componentElement != null)
+                else if (typeAttribute == "Component")
                 {
-                    components.Add(ParseComponent(componentElement, false));
+                    var componentElement = root.Elements()
+                        .FirstOrDefault(e => e.Name.LocalName == "Component");
+
+                    if (componentElement != null)
+                    {
+                        components.Add(ParseComponent(componentElement, false));
+                    }
                 }
+            }
+            catch (Exception ex)
+            {
+                LastError = $"Exception: {ex.Message}";
             }
 
             return components;
@@ -47,15 +90,32 @@ namespace CodeGen.IO
         {
             var nameElement = isSystemFile ? "n" : "Name";
 
+            // Debug: get name with fallback
+            var name = GetElementValue(componentElement, nameElement);
+
+            // Fallback: try other name fields if empty
+            if (string.IsNullOrEmpty(name))
+            {
+                name = GetElementValue(componentElement, "Name");
+            }
+            if (string.IsNullOrEmpty(name))
+            {
+                name = GetElementValue(componentElement, "VcID");
+            }
+            if (string.IsNullOrEmpty(name))
+            {
+                name = $"Component_{GetElementValue(componentElement, "ComponentID").Substring(0, 8)}";
+            }
+
             var component = new VueOneComponent
             {
                 ComponentID = GetElementValue(componentElement, "ComponentID"),
-                Name = GetElementValue(componentElement, nameElement),
+                Name = name,
                 Description = GetElementValue(componentElement, "Description"),
                 Type = GetElementValue(componentElement, "Type")
             };
 
-            foreach (var stateElement in componentElement.Elements("State"))
+            foreach (var stateElement in componentElement.Elements().Where(e => e.Name.LocalName == "State"))
             {
                 component.States.Add(ParseState(stateElement, isSystemFile));
             }
@@ -81,7 +141,10 @@ namespace CodeGen.IO
         }
 
         private string GetElementValue(XElement parent, string elementName)
-            => parent.Element(elementName)?.Value.Trim() ?? string.Empty;
+        {
+            var element = parent.Elements().FirstOrDefault(e => e.Name.LocalName == elementName);
+            return element?.Value.Trim() ?? string.Empty;
+        }
 
         private int GetIntValue(XElement parent, string elementName)
             => int.TryParse(GetElementValue(parent, elementName), out var result) ? result : 0;
