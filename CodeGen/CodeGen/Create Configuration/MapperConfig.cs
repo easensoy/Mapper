@@ -1,36 +1,42 @@
-﻿using System.IO;
-using Newtonsoft.Json;
+﻿using System;
+using System.IO;
+using System.Text.Json;
 
 namespace CodeGen.Configuration
 {
     public class MapperConfig
     {
-        public string ControlXmlPath { get; set; } = string.Empty;
-        public string TemplatePath { get; set; } = string.Empty;
+        public string ActuatorXmlPath { get; set; } = string.Empty;
+        public string SensorXmlPathHopper { get; set; } = string.Empty;
+        public string SensorXmlPathChecker { get; set; } = string.Empty;
+        public string ActuatorTemplatePath { get; set; } = string.Empty;
+        public string SensorTemplatePath { get; set; } = string.Empty;
         public string OutputDirectory { get; set; } = string.Empty;
         public string EAEDeployPath { get; set; } = string.Empty;
 
-        public static MapperConfig Load(string configPath = "config.json")
+        public static MapperConfig Load()
         {
+            string configPath = "mapper_config.json";
+
             if (!File.Exists(configPath))
             {
                 var defaultConfig = new MapperConfig
                 {
-                    ControlXmlPath = "C:\\VueOne\\component\\Pusher\\Control.xml",
-                    TemplatePath = "C:\\SMC_Rig_Expo_20260112-165857725.sln\\IEC61499\\Five_State_Actuator.fbt",
+                    ActuatorXmlPath = @"C:\VueOne\component\Pusher\Control.xml",
+                    SensorXmlPathHopper = @"C:\VueOne\component\Part_In_Hopper\Control.xml",
+                    SensorXmlPathChecker = @"C:\VueOne\component\Part_In_Checker_\Control.xml",
+                    ActuatorTemplatePath = @"C:\Station1 - Sensor and FiveStateActuator with symbolic links_20260203-120117390.sln (1)\IEC61499\Five_State_Actuator_CAT\Five_State_Actuator_CAT.fbt",
+                    SensorTemplatePath = @"C:\Station1 - Sensor and FiveStateActuator with symbolic links_20260203-120117390.sln (1)\IEC61499\Sensor_Bool_CAT\Sensor_Bool_CAT.fbt",
                     OutputDirectory = "Output",
-                    EAEDeployPath = "C:\\SMC_Rig_Expo_20260112-165857725.sln\\IEC61499"
+                    EAEDeployPath = @"C:\Station1 - Sensor and FiveStateActuator with symbolic links_20260203-120117390.sln (1)\IEC61499"
                 };
-                defaultConfig.Save(configPath);
+
+                File.WriteAllText(configPath, JsonSerializer.Serialize(defaultConfig, new JsonSerializerOptions { WriteIndented = true }));
                 return defaultConfig;
             }
 
-            return JsonConvert.DeserializeObject<MapperConfig>(File.ReadAllText(configPath))!;
-        }
-
-        public void Save(string configPath = "config.json")
-        {
-            File.WriteAllText(configPath, JsonConvert.SerializeObject(this, Formatting.Indented));
+            return JsonSerializer.Deserialize<MapperConfig>(File.ReadAllText(configPath))
+                   ?? throw new Exception("Failed to load config");
         }
     }
 }
