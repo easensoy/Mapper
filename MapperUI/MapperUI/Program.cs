@@ -1,4 +1,4 @@
-namespace MapperUI
+﻿namespace MapperUI
 {
     internal static class Program
     {
