@@ -48,15 +48,22 @@ namespace MapperUI
 
             try
             {
+                ShowValidation($"Loading: {System.IO.Path.GetFileName(xmlPath)}", Color.Black);
+
+                var systemReader = new SystemXmlReader();
+
                 await System.Threading.Tasks.Task.Run(() =>
                 {
-                    var systemReader = new SystemXmlReader();
                     _loadedComponents = systemReader.ReadAllComponents(xmlPath);
                 });
+
+                ShowValidation($"Diagnostics: {systemReader.LastError}", Color.Blue);
+                ShowValidation($"Found {_loadedComponents.Count} components", Color.Blue);
 
                 if (_loadedComponents.Count == 0)
                 {
                     ShowValidation("ERROR: No components found in Control.xml", Color.Red);
+                    ShowValidation("Check that the XML file has Type='System' or Type='Component'", Color.Red);
                     btnGenerate.Enabled = false;
                     lblStatus.Text = "No components found";
                     return;
@@ -73,20 +80,24 @@ namespace MapperUI
 
                     dgvComponents.Rows.Add(component.Name, component.Type, function);
 
-                    var validationResult = validator.Validate(component);
+                    // Only validate if we have a template for it
+                    if (template != null)
+                    {
+                        var validationResult = validator.Validate(component);
 
-                    if (!validationResult.IsValid)
-                    {
-                        allValid = false;
-                        ShowValidation($"✗ {component.Name}: FAILED", Color.Red);
-                        foreach (var error in validationResult.Errors)
+                        if (!validationResult.IsValid)
                         {
-                            ShowValidation($"  - {error}", Color.Red);
+                            allValid = false;
+                            ShowValidation($"✗ {component.Name}: FAILED", Color.Red);
+                            foreach (var error in validationResult.Errors)
+                            {
+                                ShowValidation($"  - {error}", Color.Red);
+                            }
                         }
-                    }
-                    else
-                    {
-                        ShowValidation($"✓ {component.Name}: PASSED ({component.Type}, {component.States.Count} states)", Color.Green);
+                        else
+                        {
+                            ShowValidation($"✓ {component.Name}: PASSED ({component.Type}, {component.States.Count} states)", Color.Green);
+                        }
                     }
                 }
 
@@ -107,6 +118,11 @@ namespace MapperUI
             catch (Exception ex)
             {
                 ShowValidation($"ERROR: {ex.Message}", Color.Red);
+                if (ex.InnerException != null)
+                {
+                    ShowValidation($"Inner: {ex.InnerException.Message}", Color.Red);
+                }
+                ShowValidation($"Stack: {ex.StackTrace}", Color.DarkRed);
                 btnGenerate.Enabled = false;
                 lblStatus.Text = "Error";
             }
