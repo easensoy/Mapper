@@ -24,52 +24,25 @@ namespace MapperUI.Services
             {
                 try
                 {
-                    var xmlReader = new ControlXmlReader();
-                    var component = xmlReader.ReadComponent(_config.ControlXmlPath);
+                    // Process actuator
+                    var actuatorResult = ProcessComponent(
+                        _config.ActuatorXmlPath,
+                        _config.ActuatorTemplatePath,
+                        "Five_State_Actuator");
 
-                    var validator = new ComponentValidator();
-                    var validationResult = validator.Validate(component);
+                    if (!actuatorResult.Success)
+                        return actuatorResult;
 
-                    if (!validationResult.IsValid)
-                    {
-                        return new MapperResult
-                        {
-                            Success = false,
-                            ComponentName = component.Name,
-                            ValidationResult = validationResult
-                        };
-                    }
+                    // Process sensors
+                    ProcessComponent(_config.SensorXmlPathHopper,
+                                   _config.SensorTemplatePath,
+                                   "Sensor_Bool");
 
-                    var templateContent = File.ReadAllText(_config.TemplatePath);
-                    var generator = new FBGenerator();
-                    var generatedFB = generator.GenerateFromTemplate(component, templateContent, "Five_State_Actuator");
+                    ProcessComponent(_config.SensorXmlPathChecker,
+                                   _config.SensorTemplatePath,
+                                   "Sensor_Bool");
 
-                    Directory.CreateDirectory(_config.OutputDirectory);
-
-                    var modifiedContent = generator.GetModifiedTemplateContent(component, templateContent);
-                    File.WriteAllText(Path.Combine(_config.OutputDirectory, generatedFB.FbtFile), modifiedContent);
-                    File.WriteAllText(Path.Combine(_config.OutputDirectory, generatedFB.CompositeFile), generator.GetCompositeXml());
-                    File.WriteAllText(Path.Combine(_config.OutputDirectory, generatedFB.DocFile), generator.GetDocXml(generatedFB.FBName));
-
-                    if (Directory.Exists(_config.EAEDeployPath))
-                    {
-                        File.Copy(Path.Combine(_config.OutputDirectory, generatedFB.FbtFile),
-                                  Path.Combine(_config.EAEDeployPath, generatedFB.FbtFile), true);
-                        File.Copy(Path.Combine(_config.OutputDirectory, generatedFB.CompositeFile),
-                                  Path.Combine(_config.EAEDeployPath, generatedFB.CompositeFile), true);
-                        File.Copy(Path.Combine(_config.OutputDirectory, generatedFB.DocFile),
-                                  Path.Combine(_config.EAEDeployPath, generatedFB.DocFile), true);
-                    }
-
-                    return new MapperResult
-                    {
-                        Success = true,
-                        ComponentName = component.Name,
-                        GeneratedFB = generatedFB,
-                        ValidationResult = validationResult,
-                        OutputPath = Path.Combine(_config.OutputDirectory, generatedFB.FbtFile),
-                        DeployPath = Path.Combine(_config.EAEDeployPath, generatedFB.FbtFile)
-                    };
+                    return new MapperResult { Success = true };
                 }
                 catch (Exception ex)
                 {
@@ -81,16 +54,43 @@ namespace MapperUI.Services
                 }
             });
         }
-    }
 
-    public class MapperResult
-    {
-        public bool Success { get; set; }
-        public string ComponentName { get; set; } = string.Empty;
-        public GeneratedFB? GeneratedFB { get; set; }
-        public ValidationResult? ValidationResult { get; set; }
-        public string OutputPath { get; set; } = string.Empty;
-        public string DeployPath { get; set; } = string.Empty;
-        public string ErrorMessage { get; set; } = string.Empty;
+        private MapperResult ProcessComponent(string xmlPath, string templatePath, string templateBaseName)
+        {
+            var xmlReader = new ControlXmlReader();
+            var component = xmlReader.ReadComponent(xmlPath);
+
+            var validator = new ComponentValidator();
+            var validationResult = validator.Validate(component);
+
+            if (!validationResult.IsValid)
+            {
+                return new MapperResult
+                {
+                    Success = false,
+                    ComponentName = component.Name,
+                    ValidationResult = validationResult
+                };
+            }
+
+            var templateContent = File.ReadAllText(templatePath);
+            var generator = new FBGenerator();
+            var generatedFB = generator.GenerateFromTemplate(component, templateContent, templateBaseName);
+
+            Directory.CreateDirectory(_config.OutputDirectory);
+
+            var modifiedContent = generator.GetModifiedTemplateContent(component, templateContent);
+            File.WriteAllText(Path.Combine(_config.OutputDirectory, generatedFB.FbtFile), modifiedContent);
+            File.WriteAllText(Path.Combine(_config.OutputDirectory, generatedFB.CompositeFile), generator.GetCompositeXml());
+            File.WriteAllText(Path.Combine(_config.OutputDirectory, generatedFB.DocFile), generator.GetDocXml(generatedFB.FBName));
+
+            if (Directory.Exists(_config.EAEDeployPath))
+            {
+                File.Copy(Path.Combine(_config.OutputDirectory, generatedFB.FbtFile),
+                         Path.Combine(_config.EAEDeployPath, generatedFB.FbtFile), true);
+            }
+
+            return new MapperResult { Success = true, ComponentName = component.Name };
+        }
     }
 }
