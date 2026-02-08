@@ -82,6 +82,13 @@ namespace CodeGen.Validation
 
                     hasInitialState = true;
                 }
+                if (!hasInitialState)
+                {
+                    if (component.Type == "Sensor")
+                        result.AddWarning("Sensors are reactive - no initial state required");
+                    else
+                        result.AddError("No state marked as Initial_State");
+                }
 
                 if (state.Time > 0)
                     result.AddInfo($"⚠ State '{state.Name}' Time={state.Time}ms (DISCARDED - VueOne specific)");
