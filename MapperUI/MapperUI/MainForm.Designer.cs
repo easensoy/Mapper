@@ -24,6 +24,9 @@
             this.lblVueOneModel = new System.Windows.Forms.Label();
             this.txtModelPath = new System.Windows.Forms.TextBox();
             this.btnBrowse = new System.Windows.Forms.Button();
+            this.btnGenerate = new System.Windows.Forms.Button();
+            this.grpValidation = new System.Windows.Forms.GroupBox();
+            this.txtOutput = new System.Windows.Forms.RichTextBox();
             this.grpMappingInfo = new System.Windows.Forms.GroupBox();
             this.splitContainer = new System.Windows.Forms.SplitContainer();
             this.dgvComponents = new System.Windows.Forms.DataGridView();
@@ -43,6 +46,7 @@
             this.lblStatus = new System.Windows.Forms.ToolStripStatusLabel();
 
             this.menuStrip.SuspendLayout();
+            this.grpValidation.SuspendLayout();
             this.grpMappingInfo.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.splitContainer)).BeginInit();
             this.splitContainer.Panel1.SuspendLayout();
@@ -59,13 +63,14 @@
 
             // menuStrip
             this.menuStrip.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
-                this.fileToolStripMenuItem,
-                this.dataToolStripMenuItem,
-                this.buildToolStripMenuItem});
+            this.fileToolStripMenuItem,
+            this.dataToolStripMenuItem,
+            this.buildToolStripMenuItem});
             this.menuStrip.Location = new System.Drawing.Point(0, 0);
             this.menuStrip.Name = "menuStrip";
             this.menuStrip.Size = new System.Drawing.Size(1400, 24);
             this.menuStrip.TabIndex = 0;
+            this.menuStrip.Text = "menuStrip1";
 
             // fileToolStripMenuItem
             this.fileToolStripMenuItem.Name = "fileToolStripMenuItem";
@@ -92,16 +97,16 @@
 
             // txtModelPath
             this.txtModelPath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
-                | System.Windows.Forms.AnchorStyles.Right)));
+            | System.Windows.Forms.AnchorStyles.Right)));
             this.txtModelPath.Location = new System.Drawing.Point(118, 34);
             this.txtModelPath.Name = "txtModelPath";
             this.txtModelPath.ReadOnly = true;
-            this.txtModelPath.Size = new System.Drawing.Size(1150, 23);
+            this.txtModelPath.Size = new System.Drawing.Size(1040, 23);
             this.txtModelPath.TabIndex = 2;
 
             // btnBrowse
             this.btnBrowse.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnBrowse.Location = new System.Drawing.Point(1284, 33);
+            this.btnBrowse.Location = new System.Drawing.Point(1174, 33);
             this.btnBrowse.Name = "btnBrowse";
             this.btnBrowse.Size = new System.Drawing.Size(100, 25);
             this.btnBrowse.TabIndex = 3;
@@ -109,15 +114,52 @@
             this.btnBrowse.UseVisualStyleBackColor = true;
             this.btnBrowse.Click += new System.EventHandler(this.btnBrowse_Click);
 
+            // btnGenerate
+            this.btnGenerate.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.btnGenerate.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(0)))), ((int)(((byte)(122)))), ((int)(((byte)(204)))));
+            this.btnGenerate.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnGenerate.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
+            this.btnGenerate.ForeColor = System.Drawing.Color.White;
+            this.btnGenerate.Location = new System.Drawing.Point(1284, 33);
+            this.btnGenerate.Name = "btnGenerate";
+            this.btnGenerate.Size = new System.Drawing.Size(100, 25);
+            this.btnGenerate.TabIndex = 4;
+            this.btnGenerate.Text = "Generate FB";
+            this.btnGenerate.UseVisualStyleBackColor = false;
+            this.btnGenerate.Click += new System.EventHandler(this.btnGenerate_Click);
+
+            // grpValidation
+            this.grpValidation.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
+            | System.Windows.Forms.AnchorStyles.Right)));
+            this.grpValidation.Controls.Add(this.txtOutput);
+            this.grpValidation.Location = new System.Drawing.Point(12, 70);
+            this.grpValidation.Name = "grpValidation";
+            this.grpValidation.Size = new System.Drawing.Size(1376, 250);
+            this.grpValidation.TabIndex = 5;
+            this.grpValidation.TabStop = false;
+            this.grpValidation.Text = "Validation Output";
+
+            // txtOutput
+            this.txtOutput.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(30)))), ((int)(((byte)(30)))), ((int)(((byte)(30)))));
+            this.txtOutput.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.txtOutput.Font = new System.Drawing.Font("Consolas", 9F);
+            this.txtOutput.ForeColor = System.Drawing.Color.White;
+            this.txtOutput.Location = new System.Drawing.Point(3, 19);
+            this.txtOutput.Name = "txtOutput";
+            this.txtOutput.ReadOnly = true;
+            this.txtOutput.Size = new System.Drawing.Size(1370, 228);
+            this.txtOutput.TabIndex = 0;
+            this.txtOutput.Text = "";
+
             // grpMappingInfo
             this.grpMappingInfo.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom)
-                | System.Windows.Forms.AnchorStyles.Left)
-                | System.Windows.Forms.AnchorStyles.Right)));
+            | System.Windows.Forms.AnchorStyles.Left)
+            | System.Windows.Forms.AnchorStyles.Right)));
             this.grpMappingInfo.Controls.Add(this.splitContainer);
-            this.grpMappingInfo.Location = new System.Drawing.Point(12, 70);
+            this.grpMappingInfo.Location = new System.Drawing.Point(12, 330);
             this.grpMappingInfo.Name = "grpMappingInfo";
-            this.grpMappingInfo.Size = new System.Drawing.Size(1376, 650);
-            this.grpMappingInfo.TabIndex = 4;
+            this.grpMappingInfo.Size = new System.Drawing.Size(1376, 390);
+            this.grpMappingInfo.TabIndex = 6;
             this.grpMappingInfo.TabStop = false;
             this.grpMappingInfo.Text = "Mapping Information";
 
@@ -127,7 +169,7 @@
             this.splitContainer.Name = "splitContainer";
             this.splitContainer.Panel1.Controls.Add(this.dgvComponents);
             this.splitContainer.Panel2.Controls.Add(this.panelDetails);
-            this.splitContainer.Size = new System.Drawing.Size(1370, 628);
+            this.splitContainer.Size = new System.Drawing.Size(1370, 368);
             this.splitContainer.SplitterDistance = 550;
             this.splitContainer.TabIndex = 0;
 
@@ -136,15 +178,15 @@
             this.dgvComponents.AllowUserToDeleteRows = false;
             this.dgvComponents.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             this.dgvComponents.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
-                this.colComponent,
-                this.colType,
-                this.colFunction});
+            this.colComponent,
+            this.colType,
+            this.colFunction});
             this.dgvComponents.Dock = System.Windows.Forms.DockStyle.Fill;
             this.dgvComponents.Location = new System.Drawing.Point(0, 0);
             this.dgvComponents.Name = "dgvComponents";
             this.dgvComponents.ReadOnly = true;
             this.dgvComponents.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
-            this.dgvComponents.Size = new System.Drawing.Size(550, 628);
+            this.dgvComponents.Size = new System.Drawing.Size(550, 368);
             this.dgvComponents.TabIndex = 0;
 
             // colComponent
@@ -171,17 +213,17 @@
             this.panelDetails.Dock = System.Windows.Forms.DockStyle.Fill;
             this.panelDetails.Location = new System.Drawing.Point(0, 0);
             this.panelDetails.Name = "panelDetails";
-            this.panelDetails.Size = new System.Drawing.Size(816, 628);
+            this.panelDetails.Size = new System.Drawing.Size(816, 368);
             this.panelDetails.TabIndex = 0;
 
             // grpOutputs
             this.grpOutputs.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom)
-                | System.Windows.Forms.AnchorStyles.Left)
-                | System.Windows.Forms.AnchorStyles.Right)));
+            | System.Windows.Forms.AnchorStyles.Left)
+            | System.Windows.Forms.AnchorStyles.Right)));
             this.grpOutputs.Controls.Add(this.dgvOutputs);
-            this.grpOutputs.Location = new System.Drawing.Point(418, 15);
+            this.grpOutputs.Location = new System.Drawing.Point(418, 10);
             this.grpOutputs.Name = "grpOutputs";
-            this.grpOutputs.Size = new System.Drawing.Size(385, 600);
+            this.grpOutputs.Size = new System.Drawing.Size(385, 345);
             this.grpOutputs.TabIndex = 1;
             this.grpOutputs.TabStop = false;
             this.grpOutputs.Text = "Outputs";
@@ -189,12 +231,12 @@
             // dgvOutputs
             this.dgvOutputs.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             this.dgvOutputs.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
-                this.colOutputName,
-                this.colOutputAddress});
+            this.colOutputName,
+            this.colOutputAddress});
             this.dgvOutputs.Dock = System.Windows.Forms.DockStyle.Fill;
             this.dgvOutputs.Location = new System.Drawing.Point(3, 19);
             this.dgvOutputs.Name = "dgvOutputs";
-            this.dgvOutputs.Size = new System.Drawing.Size(379, 578);
+            this.dgvOutputs.Size = new System.Drawing.Size(379, 323);
             this.dgvOutputs.TabIndex = 0;
 
             // colOutputName
@@ -210,11 +252,11 @@
 
             // grpInputs
             this.grpInputs.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom)
-                | System.Windows.Forms.AnchorStyles.Left)));
+            | System.Windows.Forms.AnchorStyles.Left)));
             this.grpInputs.Controls.Add(this.dgvInputs);
-            this.grpInputs.Location = new System.Drawing.Point(15, 15);
+            this.grpInputs.Location = new System.Drawing.Point(15, 10);
             this.grpInputs.Name = "grpInputs";
-            this.grpInputs.Size = new System.Drawing.Size(385, 600);
+            this.grpInputs.Size = new System.Drawing.Size(385, 345);
             this.grpInputs.TabIndex = 0;
             this.grpInputs.TabStop = false;
             this.grpInputs.Text = "Inputs";
@@ -222,12 +264,12 @@
             // dgvInputs
             this.dgvInputs.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             this.dgvInputs.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
-                this.colInputName,
-                this.colInputAddress});
+            this.colInputName,
+            this.colInputAddress});
             this.dgvInputs.Dock = System.Windows.Forms.DockStyle.Fill;
             this.dgvInputs.Location = new System.Drawing.Point(3, 19);
             this.dgvInputs.Name = "dgvInputs";
-            this.dgvInputs.Size = new System.Drawing.Size(379, 578);
+            this.dgvInputs.Size = new System.Drawing.Size(379, 323);
             this.dgvInputs.TabIndex = 0;
 
             // colInputName
@@ -243,11 +285,12 @@
 
             // statusStrip
             this.statusStrip.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
-                this.lblStatus});
+            this.lblStatus});
             this.statusStrip.Location = new System.Drawing.Point(0, 728);
             this.statusStrip.Name = "statusStrip";
             this.statusStrip.Size = new System.Drawing.Size(1400, 22);
-            this.statusStrip.TabIndex = 5;
+            this.statusStrip.TabIndex = 7;
+            this.statusStrip.Text = "statusStrip1";
 
             // lblStatus
             this.lblStatus.Name = "lblStatus";
@@ -260,15 +303,19 @@
             this.ClientSize = new System.Drawing.Size(1400, 750);
             this.Controls.Add(this.statusStrip);
             this.Controls.Add(this.grpMappingInfo);
+            this.Controls.Add(this.grpValidation);
+            this.Controls.Add(this.btnGenerate);
             this.Controls.Add(this.btnBrowse);
             this.Controls.Add(this.txtModelPath);
             this.Controls.Add(this.lblVueOneModel);
             this.Controls.Add(this.menuStrip);
             this.MainMenuStrip = this.menuStrip;
             this.Name = "MainForm";
+            this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Text = "VueOne Mapper for IEC 61499";
             this.menuStrip.ResumeLayout(false);
             this.menuStrip.PerformLayout();
+            this.grpValidation.ResumeLayout(false);
             this.grpMappingInfo.ResumeLayout(false);
             this.splitContainer.Panel1.ResumeLayout(false);
             this.splitContainer.Panel2.ResumeLayout(false);
@@ -295,6 +342,9 @@
         private Label lblVueOneModel;
         private TextBox txtModelPath;
         private Button btnBrowse;
+        private Button btnGenerate;
+        private GroupBox grpValidation;
+        private RichTextBox txtOutput;
         private GroupBox grpMappingInfo;
         private SplitContainer splitContainer;
         private DataGridView dgvComponents;
@@ -312,34 +362,5 @@
         private DataGridViewComboBoxColumn colInputAddress;
         private StatusStrip statusStrip;
         private ToolStripStatusLabel lblStatus;
-
-        private System.Windows.Forms.Button btnGenerate;
-        private System.Windows.Forms.RichTextBox txtOutput;
-
-        private void InitializeComponent()
-        {
-            this.btnGenerate = new System.Windows.Forms.Button();
-            this.txtOutput = new System.Windows.Forms.RichTextBox();
-            this.SuspendLayout();
-
-            this.btnGenerate.Location = new System.Drawing.Point(12, 12);
-            this.btnGenerate.Name = "btnGenerate";
-            this.btnGenerate.Size = new System.Drawing.Size(150, 40);
-            this.btnGenerate.Text = "Generate FB";
-            this.btnGenerate.Click += new System.EventHandler(this.btnGenerate_Click);
-
-            this.txtOutput.Location = new System.Drawing.Point(12, 60);
-            this.txtOutput.Name = "txtOutput";
-            this.txtOutput.Size = new System.Drawing.Size(760, 480);
-            this.txtOutput.ReadOnly = true;
-            this.txtOutput.Font = new System.Drawing.Font("Consolas", 10F);
-
-            this.Controls.Add(this.btnGenerate);
-            this.Controls.Add(this.txtOutput);
-            this.Name = "MainForm";
-            this.Text = "VueOne Mapper";
-            this.Size = new System.Drawing.Size(800, 600);
-            this.ResumeLayout(false);
-        }
     }
 }
