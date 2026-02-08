@@ -56,21 +56,28 @@ namespace CodeGen
                 }
 
                 Directory.CreateDirectory(config.OutputDirectory);
+
                 var modifiedContent = generator.GetModifiedTemplateContent(component, templateContent);
-                var outputPath = Path.Combine(config.OutputDirectory, generatedFB.FilePath);
-                File.WriteAllText(outputPath, modifiedContent);
+                File.WriteAllText(Path.Combine(config.OutputDirectory, generatedFB.FbtFile), modifiedContent);
+                File.WriteAllText(Path.Combine(config.OutputDirectory, generatedFB.CompositeFile), generator.GetCompositeXml());
+                File.WriteAllText(Path.Combine(config.OutputDirectory, generatedFB.DocFile), generator.GetDocXml(generatedFB.FBName));
 
                 Console.ForegroundColor = ConsoleColor.Green;
                 Console.WriteLine($"\n✓ Generated: {generatedFB.FBName}");
                 Console.WriteLine($"✓ GUID: {generatedFB.GUID}");
-                Console.WriteLine($"✓ Output: {outputPath}");
+                Console.WriteLine($"✓ Files: .fbt, .composite.offline.xml, .doc.xml");
                 Console.ForegroundColor = ConsoleColor.White;
 
                 if (Directory.Exists(config.EAEDeployPath))
                 {
-                    var deployPath = Path.Combine(config.EAEDeployPath, generatedFB.FilePath);
-                    File.Copy(outputPath, deployPath, overwrite: true);
-                    Console.WriteLine($"✓ Deployed: {deployPath}");
+                    File.Copy(Path.Combine(config.OutputDirectory, generatedFB.FbtFile),
+                              Path.Combine(config.EAEDeployPath, generatedFB.FbtFile), true);
+                    File.Copy(Path.Combine(config.OutputDirectory, generatedFB.CompositeFile),
+                              Path.Combine(config.EAEDeployPath, generatedFB.CompositeFile), true);
+                    File.Copy(Path.Combine(config.OutputDirectory, generatedFB.DocFile),
+                              Path.Combine(config.EAEDeployPath, generatedFB.DocFile), true);
+
+                    Console.WriteLine($"✓ Deployed to: {config.EAEDeployPath}");
                 }
 
                 Console.ForegroundColor = ConsoleColor.Cyan;
