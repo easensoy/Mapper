@@ -128,6 +128,18 @@
             this.btnGenerate.UseVisualStyleBackColor = false;
             this.btnGenerate.Click += new System.EventHandler(this.btnGenerate_Click);
 
+            // In InitializeComponent():
+            this.btnMappingRules = new System.Windows.Forms.Button();
+
+            this.btnMappingRules.Location = new System.Drawing.Point(1075, 75);
+            this.btnMappingRules.Name = "btnMappingRules";
+            this.btnMappingRules.Size = new System.Drawing.Size(120, 30);
+            this.btnMappingRules.TabIndex = 3;
+            this.btnMappingRules.Text = "Mapping Rules";
+            this.btnMappingRules.UseVisualStyleBackColor = true;
+            this.btnMappingRules.Click += new System.EventHandler(this.btnMappingRules_Click);
+
+            this.Controls.Add(this.btnMappingRules);
             // grpValidation
             this.grpValidation.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
             | System.Windows.Forms.AnchorStyles.Right)));
@@ -362,5 +374,7 @@
         private DataGridViewComboBoxColumn colInputAddress;
         private StatusStrip statusStrip;
         private ToolStripStatusLabel lblStatus;
+        private System.Windows.Forms.Button btnMappingRules;
+
     }
 }
