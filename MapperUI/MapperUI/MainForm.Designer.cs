@@ -139,6 +139,21 @@
             this.btnMappingRules.UseVisualStyleBackColor = true;
             this.btnMappingRules.Click += new System.EventHandler(this.btnMappingRules_Click);
 
+            this.grpMappingRules = new System.Windows.Forms.GroupBox();
+            this.dgvMappingRules = new System.Windows.Forms.DataGridView();
+            this.colVueOneElement = new System.Windows.Forms.DataGridViewTextBoxColumn();
+            this.colMappingType = new System.Windows.Forms.DataGridViewTextBoxColumn();
+            this.colIEC61499Element = new System.Windows.Forms.DataGridViewTextBoxColumn();
+
+            this.grpMappingRules.Controls.Add(this.dgvMappingRules);
+            this.grpMappingRules.Location = new System.Drawing.Point(15, 400);
+            this.grpMappingRules.Name = "grpMappingRules";
+            this.grpMappingRules.Size = new System.Drawing.Size(1370, 300);
+            this.grpMappingRules.TabIndex = 10;
+            this.grpMappingRules.TabStop = false;
+            this.grpMappingRules.Text = "Mapping Rules";
+            this.grpMappingRules.Visible = false;
+
             this.Controls.Add(this.btnMappingRules);
             // grpValidation
             this.grpValidation.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
@@ -201,6 +216,26 @@
             this.dgvComponents.Size = new System.Drawing.Size(550, 368);
             this.dgvComponents.TabIndex = 0;
 
+            this.dgvMappingRules.AllowUserToAddRows = false;
+            this.dgvMappingRules.AllowUserToDeleteRows = false;
+            this.dgvMappingRules.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+            this.dgvMappingRules.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
+            this.colVueOneElement,
+            this.colMappingType,
+            this.colIEC61499Element});
+            this.dgvMappingRules.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.dgvMappingRules.Location = new System.Drawing.Point(3, 19);
+            this.dgvMappingRules.Name = "dgvMappingRules";
+            this.dgvMappingRules.ReadOnly = true;
+            this.dgvMappingRules.RowHeadersVisible = false;
+            this.dgvMappingRules.Size = new System.Drawing.Size(1364, 278);
+            this.dgvMappingRules.TabIndex = 0;
+
+            this.colVueOneElement.HeaderText = "VueOne Element";
+            this.colVueOneElement.Name = "colVueOneElement";
+            this.colVueOneElement.ReadOnly = true;
+            this.colVueOneElement.Width = 350;
+
             // colComponent
             this.colComponent.HeaderText = "Component";
             this.colComponent.Name = "colComponent";
@@ -218,6 +253,11 @@
             this.colFunction.Name = "colFunction";
             this.colFunction.ReadOnly = true;
             this.colFunction.Width = 180;
+
+            this.colMappingType.HeaderText = "Mapping Type";
+            this.colMappingType.Name = "colMappingType";
+            this.colMappingType.ReadOnly = true;
+            this.colMappingType.Width = 150;
 
             // panelDetails
             this.panelDetails.Controls.Add(this.grpOutputs);
@@ -261,6 +301,12 @@
             this.colOutputAddress.HeaderText = "Address";
             this.colOutputAddress.Name = "colOutputAddress";
             this.colOutputAddress.Width = 150;
+
+            // colIEC61499Element
+            this.colIEC61499Element.HeaderText = "IEC 61499 Element";
+            this.colIEC61499Element.Name = "colIEC61499Element";
+            this.colIEC61499Element.ReadOnly = true;
+            this.colIEC61499Element.Width = 850;
 
             // grpInputs
             this.grpInputs.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom)
@@ -321,6 +367,7 @@
             this.Controls.Add(this.txtModelPath);
             this.Controls.Add(this.lblVueOneModel);
             this.Controls.Add(this.menuStrip);
+            this.Controls.Add(this.grpMappingRules);
             this.MainMenuStrip = this.menuStrip;
             this.Name = "MainForm";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
@@ -375,6 +422,11 @@
         private StatusStrip statusStrip;
         private ToolStripStatusLabel lblStatus;
         private System.Windows.Forms.Button btnMappingRules;
+        private System.Windows.Forms.DataGridView dgvMappingRules;
+        private System.Windows.Forms.DataGridViewTextBoxColumn colVueOneElement;
+        private System.Windows.Forms.DataGridViewTextBoxColumn colMappingType;
+        private System.Windows.Forms.DataGridViewTextBoxColumn colIEC61499Element;
+        private System.Windows.Forms.GroupBox grpMappingRules;
 
     }
 }
