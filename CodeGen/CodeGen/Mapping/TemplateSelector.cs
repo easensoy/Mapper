@@ -8,8 +8,18 @@ namespace CodeGen.Mapping
         {
             return (component.Type, component.States.Count) switch
             {
-                ("Actuator", 5) => CreateTemplate("five_state_actuator.fbt", 5, "Actuator"),
-                ("Sensor", 2) => CreateTemplate("two_state_sensor.fbt", 2, "Sensor"),
+                ("Actuator", 5) => new FBTemplate
+                {
+                    TemplateName = "Five_State_Actuator_CAT.fbt",  
+                    ExpectedStateCount = 5,
+                    ComponentType = "Actuator"
+                },
+                ("Sensor", 2) => new FBTemplate
+                {
+                    TemplateName = "Sensor_Bool_CAT.fbt",
+                    ExpectedStateCount = 2,
+                    ComponentType = "Sensor"
+                },
                 _ => null
             };
         }
