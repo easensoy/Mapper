@@ -2,7 +2,6 @@
 using System.IO;
 using System.Threading.Tasks;
 using CodeGen.Configuration;
-using CodeGen.IO;
 using CodeGen.Translation;
 using CodeGen.Validation;
 using CodeGen.Models;
@@ -11,62 +10,24 @@ namespace MapperUI.Services
 {
     public class MapperService
     {
-        private readonly MapperConfig _config;
+        private MapperConfig? _config;
 
         public MapperService()
         {
-            _config = MapperConfig.Load();
         }
 
-        public async Task<MapperResult> RunMapping()
+        public async Task<MapperResult> RunMapping(VueOneComponent component)
         {
             return await Task.Run(() =>
             {
                 try
                 {
-                    // -------------------------------------------------
-                    // 1. Process actuator FIRST (primary generation)
-                    // -------------------------------------------------
-                    var actuatorResult = ProcessComponent(
-                        _config.ActuatorXmlPath,
-                        _config.ActuatorTemplatePath,
-                        "Five_State_Actuator");
+                    _config = LoadConfig();
+                    var templatePath = ResolveTemplatePath(component);
 
-                    if (!actuatorResult.Success)
-                    {
-                        return actuatorResult;
-                    }
-
-                    // -------------------------------------------------
-                    // 2. Process Hopper sensor (secondary)
-                    // -------------------------------------------------
-                    var hopperResult = ProcessComponent(
-                        _config.SensorXmlPathHopper,
-                        _config.SensorTemplatePath,
-                        "Sensor_Bool");
-
-                    if (!hopperResult.Success)
-                    {
-                        return hopperResult;
-                    }
-
-                    // -------------------------------------------------
-                    // 3. Process Checker sensor (secondary)
-                    // -------------------------------------------------
-                    var checkerResult = ProcessComponent(
-                        _config.SensorXmlPathChecker,
-                        _config.SensorTemplatePath,
-                        "Sensor_Bool");
-
-                    if (!checkerResult.Success)
-                    {
-                        return checkerResult;
-                    }
-
-                    // -------------------------------------------------
-                    // 4. RETURN actuator result (contains GeneratedFB)
-                    // -------------------------------------------------
-                    return actuatorResult;
+                    return ProcessComponent(
+                        component,
+                        templatePath);
                 }
                 catch (Exception ex)
                 {
@@ -79,20 +40,32 @@ namespace MapperUI.Services
             });
         }
 
-        private MapperResult ProcessComponent(
-            string xmlPath,
-            string templatePath,
-            string templateBaseName)
+        private MapperConfig LoadConfig()
         {
-            // ------------------------------
-            // Read VueOne Control.xml
-            // ------------------------------
-            var xmlReader = new ControlXmlReader();
-            var component = xmlReader.ReadComponent(xmlPath);
+            if (_config != null)
+            {
+                return _config;
+            }
 
-            // ------------------------------
-            // Validate component semantics
-            // ------------------------------
+            return MapperConfig.Load();
+        }
+
+        private string ResolveTemplatePath(VueOneComponent component)
+        {
+            if (_config == null)
+            {
+                _config = LoadConfig();
+            }
+
+            return component.Type == "Actuator"
+                ? _config.ActuatorTemplatePath
+                : _config.SensorTemplatePath;
+        }
+
+        private MapperResult ProcessComponent(
+            VueOneComponent component,
+            string templatePath)
+        {
             var validator = new ComponentValidator();
             var validationResult = validator.Validate(component);
 
@@ -106,24 +79,15 @@ namespace MapperUI.Services
                 };
             }
 
-            // ------------------------------
-            // Load template
-            // ------------------------------
             var templateContent = File.ReadAllText(templatePath);
 
-            // ------------------------------
-            // Generate FB artifacts
-            // ------------------------------
             var generator = new FBGenerator();
             var generatedFB = generator.GenerateFromTemplate(
                 component,
                 templateContent,
-                templateBaseName);
+                Path.GetFileNameWithoutExtension(templatePath));
 
-            // ------------------------------
-            // Write output files
-            // ------------------------------
-            Directory.CreateDirectory(_config.OutputDirectory);
+            Directory.CreateDirectory(_config!.OutputDirectory);
 
             var modifiedContent = generator.GetModifiedTemplateContent(
                 component,
@@ -142,9 +106,6 @@ namespace MapperUI.Services
                 Path.Combine(_config.OutputDirectory, generatedFB.DocFile),
                 generator.GetDocXml(generatedFB.FBName));
 
-            // ------------------------------
-            // Optional deploy to EAE library
-            // ------------------------------
             if (Directory.Exists(_config.EAEDeployPath))
             {
                 File.Copy(
@@ -153,9 +114,6 @@ namespace MapperUI.Services
                     overwrite: true);
             }
 
-            // ------------------------------
-            // Return full result
-            // ------------------------------
             return new MapperResult
             {
                 Success = true,
