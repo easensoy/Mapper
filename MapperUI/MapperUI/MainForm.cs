@@ -56,7 +56,7 @@ namespace MapperUI
         {
             txtOutput.Clear();
             ShowValidation("MAPPING RULES - VueOne to IEC 61499 Translation", Color.Blue);
-            ShowValidation(new string('=', 70), Color.Black);
+            ShowValidation(new string('=', 80), Color.Black);
             ShowValidation("", Color.Black);
 
             foreach (var component in _loadedComponents)
@@ -67,58 +67,93 @@ namespace MapperUI
                 if (template == null) continue;
 
                 ShowValidation($"Component: {component.Name} ({component.Type})", Color.DarkBlue);
-                ShowValidation(new string('-', 70), Color.Gray);
+                ShowValidation(new string('-', 80), Color.Gray);
 
                 // Header
-                ShowValidation($"{"VueOne Element",-35} → {"IEC 61499 Element",-35}", Color.Black);
-                ShowValidation(new string('-', 70), Color.Gray);
+                ShowValidation($"{"VueOne Element",-40} {"Mapping Type",-15} {"IEC 61499 Element"}", Color.Black);
+                ShowValidation(new string('-', 80), Color.Gray);
 
-                // GUID
+                // GUID - TRANSLATED
                 var newGuid = Guid.NewGuid().ToString();
-                ShowValidation($"{"SystemID (auto-generated)",-35} → GUID: {newGuid}", Color.DarkGreen);
+                ShowValidation($"{"SystemID",-40} {"[TRANSLATED]",-15} GUID: {newGuid}", Color.Green);
 
-                // Name
-                ShowValidation($"{"<n>" + component.Name + "</n>",-35} → FBType Name=\"{template.ComponentType}_{component.Name}\"", Color.DarkGreen);
+                // Name - TRANSLATED
+                ShowValidation($"{"<Name>" + component.Name + "</Name>",-40} {"[TRANSLATED]",-15} FBType Name=\"{template.ComponentType}_{component.Name}\"", Color.Green);
 
-                // Type
-                ShowValidation($"{"<Type>" + component.Type + "</Type>",-35} → Template: {template.TemplateName}", Color.DarkGreen);
+                // Type - TRANSLATED
+                ShowValidation($"{"<Type>" + component.Type + "</Type>",-40} {"[TRANSLATED]",-15} Template: {template.TemplateName}", Color.Green);
 
-                // State Count
-                ShowValidation($"{"State Count: " + component.States.Count,-35} → Expected: {template.ExpectedStateCount} states", Color.DarkGreen);
+                // ComponentID - DISCARDED
+                ShowValidation($"{"<ComponentID>...",-40} {"[DISCARDED]",-15} Not used in IEC 61499", Color.Orange);
 
-                // Initial State
+                // Version - DISCARDED
+                ShowValidation($"{"Version=\"1.0.0\"",-40} {"[DISCARDED]",-15} VueOne metadata only", Color.Orange);
+
+                // State Count - TRANSLATED
+                ShowValidation($"{"State Count: " + component.States.Count,-40} {"[TRANSLATED]",-15} Expected: {template.ExpectedStateCount} states", Color.Green);
+
+                // Initial State - ENCODED
                 var initialState = component.States.FirstOrDefault(s => s.InitialState);
                 if (initialState != null)
                 {
-                    ShowValidation($"{"<Initial_State>True</Initial_State>",-35} → ECTransition Source=\"START\" Dest=\"{initialState.Name}\"", Color.DarkGreen);
+                    ShowValidation($"{"<Initial_State>True</Initial_State>",-40} {"[ENCODED]",-15} ECTransition Source=\"START\" Dest=\"{initialState.Name}\"", Color.DarkCyan);
                 }
 
-                // State Numbers
-                ShowValidation($"{"<State_Number>0..{component.States.Count-1}</State_Number>",-35} → state_val: INT (0..{component.States.Count - 1})", Color.DarkGreen);
+                // State Numbers - TRANSLATED
+                ShowValidation($"{"<State_Number>0.." + (component.States.Count - 1) + "</State_Number>",-40} {"[TRANSLATED]",-15} state_val: INT (0.." + (component.States.Count - 1) + ")", Color.Green);
 
-                // Symbolic I/O
+                // State Names - ENCODED
+                ShowValidation($"{"<Name>ReturnedHome,Advancing...</Name>",-40} {"[ENCODED]",-15} ECState Name in Actuator.fbt", Color.DarkCyan);
+
+                // Time - DISCARDED
+                ShowValidation($"{"<Time>1000</Time>",-40} {"[DISCARDED]",-15} VueOne simulation timing", Color.Orange);
+
+                // Position - DISCARDED
+                ShowValidation($"{"<Position>118</Position>",-40} {"[DISCARDED]",-15} PLC setpoint, not FB logic", Color.Orange);
+
+                // Counter - DISCARDED
+                ShowValidation($"{"<Counter>1</Counter>",-40} {"[DISCARDED]",-15} VueOne counting feature", Color.Orange);
+
+                // StaticState - ENCODED
+                ShowValidation($"{"<StaticState>True/False</StaticState>",-40} {"[ENCODED]",-15} Motion state indicator", Color.DarkCyan);
+
+                // Transitions - DISCARDED (Phase 1)
+                ShowValidation($"{"<Transition>...</Transition>",-40} {"[DISCARDED]",-15} Phase 2: Auto-wiring", Color.Orange);
+
+                // Symbolic I/O - HARDCODED
                 if (component.Type == "Actuator")
                 {
-                    ShowValidation($"{"Sensor feedback (external)",-35} → '${{PATH}}athome', '${{PATH}}atwork'", Color.DarkGreen);
+                    ShowValidation($"{"Sensor feedback (athome, atwork)",-40} {"[HARDCODED]",-15} Template: '${{PATH}}athome', '${{PATH}}atwork'", Color.Gray);
                 }
                 else if (component.Type == "Sensor")
                 {
-                    ShowValidation($"{"PLC input (external)",-35} → '${{PATH}}Input'", Color.DarkGreen);
+                    ShowValidation($"{"PLC input signal",-40} {"[HARDCODED]",-15} Template: '${{PATH}}Input'", Color.Gray);
                 }
 
                 ShowValidation("", Color.Black);
-                ShowValidation("HARDCODED (from template, not translated):", Color.DarkOrange);
-                ShowValidation("  - InterfaceList (events: pst_event, tohome, pst_out...)", Color.Gray);
-                ShowValidation("  - InputVars/OutputVars (process_state_name, state_val...)", Color.Gray);
-                ShowValidation("  - FBNetwork (internal FBs: FiveStateActuator, ToBool...)", Color.Gray);
-                ShowValidation("  - EventConnections (internal wiring)", Color.Gray);
-                ShowValidation("  - DataConnections (internal wiring)", Color.Gray);
+                ShowValidation("HARDCODED ELEMENTS (from template):", Color.Gray);
+                ShowValidation($"{"  InterfaceList (complete)",-40} {"[HARDCODED]",-15} pst_event, action_event, tohome...", Color.Gray);
+                ShowValidation($"{"  InputVars (complete)",-40} {"[HARDCODED]",-15} process_state_name, state_val, actuator_name...", Color.Gray);
+                ShowValidation($"{"  OutputVars (complete)",-40} {"[HARDCODED]",-15} current_state_to_process, current_state_to_plc", Color.Gray);
+                ShowValidation($"{"  FBNetwork (complete)",-40} {"[HARDCODED]",-15} FB1:ToBool, FB3:Actuator, connections", Color.Gray);
+                ShowValidation($"{"  EventConnections (all)",-40} {"[HARDCODED]",-15} Internal event wiring", Color.Gray);
+                ShowValidation($"{"  DataConnections (all)",-40} {"[HARDCODED]",-15} Internal data wiring", Color.Gray);
 
                 ShowValidation("", Color.Black);
-                ShowValidation(new string('=', 70), Color.Black);
+                ShowValidation(new string('=', 80), Color.Black);
                 ShowValidation("", Color.Black);
             }
 
+            ShowValidation("LEGEND:", Color.Blue);
+            ShowValidation("  [TRANSLATED]  ", Color.Green, false);
+            ShowValidation("- Direct value extraction and transformation", Color.Black);
+            ShowValidation("  [ENCODED]     ", Color.DarkCyan, false);
+            ShowValidation("- Logical transformation (True→Transition, Name→State)", Color.Black);
+            ShowValidation("  [DISCARDED]   ", Color.Orange, false);
+            ShowValidation("- VueOne-specific, not applicable to IEC 61499", Color.Black);
+            ShowValidation("  [HARDCODED]   ", Color.Gray, false);
+            ShowValidation("- From template, identical for all instances", Color.Black);
+            ShowValidation("", Color.Black);
             ShowValidation("PROOF OF TRANSLATION:", Color.Blue);
             ShowValidation("✓ Component structure validated against template requirements", Color.Green);
             ShowValidation("✓ Component-specific values extracted for FB generation", Color.Green);
@@ -212,10 +247,10 @@ namespace MapperUI
             }
         }
 
-        private void ShowValidation(string message, Color color)
+        private void ShowValidation(string message, Color color, bool newline = true)
         {
             int start = txtOutput.TextLength;
-            txtOutput.AppendText(message + "\n");
+            txtOutput.AppendText(message + (newline ? "\n" : ""));
             int end = txtOutput.TextLength;
 
             txtOutput.Select(start, end - start);
