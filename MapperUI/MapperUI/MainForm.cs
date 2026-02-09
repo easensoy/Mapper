@@ -49,19 +49,82 @@ namespace MapperUI
                 return;
             }
 
-            grpMappingRules.Visible = !grpMappingRules.Visible;
-            grpMappingInfo.Visible = !grpMappingRules.Visible;
+            txtOutput.Clear();
+            ShowMappingRules();
+        }
 
-            if (grpMappingRules.Visible)
+        private void ShowMappingRules()
+        {
+            ShowValidation("MAPPING RULES - VueOne to IEC 61499 Translation", Color.Blue);
+            ShowValidation(new string('=', 80), Color.Black);
+            ShowValidation("", Color.Black);
+
+            foreach (var component in _loadedComponents)
             {
-                PopulateMappingRules();
-                grpMappingRules.BringToFront();
-                btnMappingRules.Text = "Hide Rules";
+                var templateSelector = new TemplateSelector();
+                var template = templateSelector.SelectTemplate(component);
+
+                if (template == null) continue;
+
+                ShowValidation($"Component: {component.Name} ({component.Type})", Color.DarkBlue);
+                ShowValidation(new string('-', 80), Color.Gray);
+                ShowValidation("", Color.Black);
+
+                var newGuid = Guid.NewGuid().ToString();
+                var initialState = component.States.FirstOrDefault(s => s.InitialState);
+
+                // TRANSLATED rules (green background)
+                ShowValidation("TRANSLATED", Color.Green);
+                ShowValidation($"  SystemID → GUID: {newGuid}", Color.DarkGreen);
+                ShowValidation($"  <Name>{component.Name}</Name> → FBType Name=\"Five_State_Actuator_{component.Name}\"", Color.DarkGreen);
+                ShowValidation($"  <Type>{component.Type}</Type> → Template: {template.TemplateName}", Color.DarkGreen);
+                ShowValidation($"  State Count: {component.States.Count} → Expected: {template.ExpectedStateCount} states", Color.DarkGreen);
+                ShowValidation($"  <State_Number>0..{component.States.Count - 1} → state_val: INT (0..{component.States.Count - 1})", Color.DarkGreen);
+                ShowValidation("", Color.Black);
+
+                // ENCODED rules (cyan)
+                ShowValidation("ENCODED", Color.DarkCyan);
+                if (initialState != null)
+                {
+                    ShowValidation($"  <Initial_State>True → ECTransition Source=\"START\" Dest=\"{initialState.Name}\"", Color.Cyan);
+                }
+                ShowValidation($"  <Name>ReturnedHome,Advancing... → ECState Name in Actuator.fbt", Color.Cyan);
+                ShowValidation($"  <StaticState>True/False → Motion state indicator", Color.Cyan);
+                ShowValidation("", Color.Black);
+
+                // DISCARDED rules (orange)
+                ShowValidation("DISCARDED", Color.Orange);
+                ShowValidation($"  <ComponentID>... → Not used in IEC 61499", Color.DarkOrange);
+                ShowValidation($"  Version=\"1.0.0\" → VueOne metadata only", Color.DarkOrange);
+                ShowValidation($"  <Time>1000 → VueOne simulation timing", Color.DarkOrange);
+                ShowValidation($"  <Position>118 → PLC setpoint, not FB logic", Color.DarkOrange);
+                ShowValidation($"  <Counter>1 → VueOne counting feature", Color.DarkOrange);
+                ShowValidation($"  <Transition>... → Phase 2: Auto-wiring", Color.DarkOrange);
+                ShowValidation("", Color.Black);
+
+                // HARDCODED rules (gray)
+                ShowValidation("HARDCODED (from template)", Color.Gray);
+                if (component.Type == "Actuator")
+                {
+                    ShowValidation($"  Sensor feedback → Template: '${{PATH}}athome', '${{PATH}}atwork'", Color.DarkGray);
+                }
+                ShowValidation($"  InterfaceList → pst_event, action_event, tohome...", Color.DarkGray);
+                ShowValidation($"  InputVars → process_state_name, state_val, actuator_name", Color.DarkGray);
+                ShowValidation($"  OutputVars → current_state_to_process, current_state_to_plc", Color.DarkGray);
+                ShowValidation($"  FBNetwork → FB1:ToBool, FB3:Actuator, connections", Color.DarkGray);
+                ShowValidation($"  EventConnections → Internal event wiring", Color.DarkGray);
+                ShowValidation($"  DataConnections → Internal data wiring", Color.DarkGray);
+
+                ShowValidation("", Color.Black);
+                ShowValidation(new string('=', 80), Color.Black);
+                ShowValidation("", Color.Black);
             }
-            else
-            {
-                btnMappingRules.Text = "Mapping Rules";
-            }
+
+            ShowValidation("LEGEND:", Color.Blue);
+            ShowValidation("  TRANSLATED - Direct value extraction and transformation", Color.Green);
+            ShowValidation("  ENCODED - Logical transformation (True→Transition, Name→State)", Color.DarkCyan);
+            ShowValidation("  DISCARDED - VueOne-specific, not applicable to IEC 61499", Color.Orange);
+            ShowValidation("  HARDCODED - From template, identical for all instances", Color.Gray);
         }
 
         private void PopulateMappingRules()
