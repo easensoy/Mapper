@@ -31,18 +31,30 @@ namespace MapperUI.Services
                         "Five_State_Actuator");
 
                     if (!actuatorResult.Success)
+                    {
                         return actuatorResult;
+                    }
 
                     // Process sensors
-                    ProcessComponent(_config.SensorXmlPathHopper,
+                    var hopperResult = ProcessComponent(_config.SensorXmlPathHopper,
                                    _config.SensorTemplatePath,
                                    "Sensor_Bool");
 
-                    ProcessComponent(_config.SensorXmlPathChecker,
+                    if (!hopperResult.Success)
+                    {
+                        return hopperResult;
+                    }
+
+                    var checkerResult = ProcessComponent(_config.SensorXmlPathChecker,
                                    _config.SensorTemplatePath,
                                    "Sensor_Bool");
 
-                    return new MapperResult { Success = true };
+                    if (!checkerResult.Success)
+                    {
+                        return checkerResult;
+                    }
+
+                    return actuatorResult;
                 }
                 catch (Exception ex)
                 {
@@ -94,9 +106,9 @@ namespace MapperUI.Services
             {
                 Success = true,
                 ComponentName = component.Name,
-                GeneratedFB = generatedFB,  
-                OutputPath = _config.OutputDirectory, 
-                DeployPath = _config.EAEDeployPath 
+                GeneratedFB = generatedFB,
+                OutputPath = _config.OutputDirectory,
+                DeployPath = _config.EAEDeployPath
             };
         }
     }
