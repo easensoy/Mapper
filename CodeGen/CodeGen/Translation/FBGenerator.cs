@@ -67,7 +67,7 @@ namespace CodeGen.Translation
                 <FBTypeDocumentation>
                   <Name>{fbName}</Name>
                   <Description />
-                  <Author>VueOne_Mapper</Author>
+                  <Author>alper_sensoy</Author>
                   <Date>{DateTime.Now:yyyy-MM-dd}</Date>
                   <Version>1.0</Version>
                 </FBTypeDocumentation>";
@@ -82,7 +82,7 @@ namespace CodeGen.Translation
             var versionInfo = fbType.Element("VersionInfo");
             if (versionInfo != null)
             {
-                versionInfo.SetAttributeValue("Author", "VueOne_Mapper");
+                versionInfo.SetAttributeValue("Author", "alper_sensoy");
                 versionInfo.SetAttributeValue("Date", DateTime.Now.ToString("M/d/yyyy"));
                 versionInfo.SetAttributeValue("Remarks", $"Generated from VueOne component: {componentName}");
             }
