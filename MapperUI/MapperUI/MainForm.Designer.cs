@@ -3,6 +3,12 @@
     partial class MainForm
     {
         private System.ComponentModel.IContainer components = null;
+        private System.Windows.Forms.MenuStrip menuStrip;
+        private System.Windows.Forms.GroupBox grpMappingRules;  // ADD THIS
+        private System.Windows.Forms.DataGridView dgvMappingRules;  // ADD THIS
+        private System.Windows.Forms.DataGridViewTextBoxColumn colVueOneElement;  // ADD THIS
+        private System.Windows.Forms.DataGridViewTextBoxColumn colMappingType;  // ADD THIS
+        private System.Windows.Forms.DataGridViewTextBoxColumn colIEC61499Element;
 
         protected override void Dispose(bool disposing)
         {
@@ -17,7 +23,6 @@
 
         private void InitializeComponent()
         {
-            this.menuStrip = new System.Windows.Forms.MenuStrip();
             this.fileToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.dataToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.buildToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
@@ -45,7 +50,6 @@
             this.statusStrip = new System.Windows.Forms.StatusStrip();
             this.lblStatus = new System.Windows.Forms.ToolStripStatusLabel();
 
-            this.menuStrip.SuspendLayout();
             this.grpValidation.SuspendLayout();
             this.grpMappingInfo.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.splitContainer)).BeginInit();
@@ -61,16 +65,6 @@
             this.statusStrip.SuspendLayout();
             this.SuspendLayout();
 
-            // menuStrip
-            this.menuStrip.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
-            this.fileToolStripMenuItem,
-            this.dataToolStripMenuItem,
-            this.buildToolStripMenuItem});
-            this.menuStrip.Location = new System.Drawing.Point(0, 0);
-            this.menuStrip.Name = "menuStrip";
-            this.menuStrip.Size = new System.Drawing.Size(1400, 24);
-            this.menuStrip.TabIndex = 0;
-            this.menuStrip.Text = "menuStrip1";
 
             // fileToolStripMenuItem
             this.fileToolStripMenuItem.Name = "fileToolStripMenuItem";
@@ -422,11 +416,7 @@
         private StatusStrip statusStrip;
         private ToolStripStatusLabel lblStatus;
         private System.Windows.Forms.Button btnMappingRules;
-        private System.Windows.Forms.DataGridView dgvMappingRules;
-        private System.Windows.Forms.DataGridViewTextBoxColumn colVueOneElement;
-        private System.Windows.Forms.DataGridViewTextBoxColumn colMappingType;
-        private System.Windows.Forms.DataGridViewTextBoxColumn colIEC61499Element;
-        private System.Windows.Forms.GroupBox grpMappingRules;
+      
 
     }
 }
