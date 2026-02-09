@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using System.Windows.Forms;
 using CodeGen.IO;
 using CodeGen.Mapping;
@@ -33,8 +34,6 @@ namespace MapperUI
                 {
                     txtModelPath.Text = dialog.FileName;
                     lblStatus.Text = "Validating...";
-                    txtOutput.Clear();
-                    txtOutput.AppendText("Validating...\n");
 
                     await LoadAndValidate(dialog.FileName);
                 }
@@ -49,82 +48,8 @@ namespace MapperUI
                 return;
             }
 
-            txtOutput.Clear();
-            ShowMappingRules();
-        }
-
-        private void ShowMappingRules()
-        {
-            ShowValidation("MAPPING RULES - VueOne to IEC 61499 Translation", Color.Blue);
-            ShowValidation(new string('=', 80), Color.Black);
-            ShowValidation("", Color.Black);
-
-            foreach (var component in _loadedComponents)
-            {
-                var templateSelector = new TemplateSelector();
-                var template = templateSelector.SelectTemplate(component);
-
-                if (template == null) continue;
-
-                ShowValidation($"Component: {component.Name} ({component.Type})", Color.DarkBlue);
-                ShowValidation(new string('-', 80), Color.Gray);
-                ShowValidation("", Color.Black);
-
-                var newGuid = Guid.NewGuid().ToString();
-                var initialState = component.States.FirstOrDefault(s => s.InitialState);
-
-                // TRANSLATED rules (green background)
-                ShowValidation("TRANSLATED", Color.Green);
-                ShowValidation($"  SystemID → GUID: {newGuid}", Color.DarkGreen);
-                ShowValidation($"  <Name>{component.Name}</Name> → FBType Name=\"Five_State_Actuator_{component.Name}\"", Color.DarkGreen);
-                ShowValidation($"  <Type>{component.Type}</Type> → Template: {template.TemplateName}", Color.DarkGreen);
-                ShowValidation($"  State Count: {component.States.Count} → Expected: {template.ExpectedStateCount} states", Color.DarkGreen);
-                ShowValidation($"  <State_Number>0..{component.States.Count - 1} → state_val: INT (0..{component.States.Count - 1})", Color.DarkGreen);
-                ShowValidation("", Color.Black);
-
-                // ENCODED rules (cyan)
-                ShowValidation("ENCODED", Color.DarkCyan);
-                if (initialState != null)
-                {
-                    ShowValidation($"  <Initial_State>True → ECTransition Source=\"START\" Dest=\"{initialState.Name}\"", Color.Cyan);
-                }
-                ShowValidation($"  <Name>ReturnedHome,Advancing... → ECState Name in Actuator.fbt", Color.Cyan);
-                ShowValidation($"  <StaticState>True/False → Motion state indicator", Color.Cyan);
-                ShowValidation("", Color.Black);
-
-                // DISCARDED rules (orange)
-                ShowValidation("DISCARDED", Color.Orange);
-                ShowValidation($"  <ComponentID>... → Not used in IEC 61499", Color.DarkOrange);
-                ShowValidation($"  Version=\"1.0.0\" → VueOne metadata only", Color.DarkOrange);
-                ShowValidation($"  <Time>1000 → VueOne simulation timing", Color.DarkOrange);
-                ShowValidation($"  <Position>118 → PLC setpoint, not FB logic", Color.DarkOrange);
-                ShowValidation($"  <Counter>1 → VueOne counting feature", Color.DarkOrange);
-                ShowValidation($"  <Transition>... → Phase 2: Auto-wiring", Color.DarkOrange);
-                ShowValidation("", Color.Black);
-
-                // HARDCODED rules (gray)
-                ShowValidation("HARDCODED (from template)", Color.Gray);
-                if (component.Type == "Actuator")
-                {
-                    ShowValidation($"  Sensor feedback → Template: '${{PATH}}athome', '${{PATH}}atwork'", Color.DarkGray);
-                }
-                ShowValidation($"  InterfaceList → pst_event, action_event, tohome...", Color.DarkGray);
-                ShowValidation($"  InputVars → process_state_name, state_val, actuator_name", Color.DarkGray);
-                ShowValidation($"  OutputVars → current_state_to_process, current_state_to_plc", Color.DarkGray);
-                ShowValidation($"  FBNetwork → FB1:ToBool, FB3:Actuator, connections", Color.DarkGray);
-                ShowValidation($"  EventConnections → Internal event wiring", Color.DarkGray);
-                ShowValidation($"  DataConnections → Internal data wiring", Color.DarkGray);
-
-                ShowValidation("", Color.Black);
-                ShowValidation(new string('=', 80), Color.Black);
-                ShowValidation("", Color.Black);
-            }
-
-            ShowValidation("LEGEND:", Color.Blue);
-            ShowValidation("  TRANSLATED - Direct value extraction and transformation", Color.Green);
-            ShowValidation("  ENCODED - Logical transformation (True→Transition, Name→State)", Color.DarkCyan);
-            ShowValidation("  DISCARDED - VueOne-specific, not applicable to IEC 61499", Color.Orange);
-            ShowValidation("  HARDCODED - From template, identical for all instances", Color.Gray);
+            PopulateMappingRules();
+            UpdateDetectedInfo();
         }
 
         private void PopulateMappingRules()
@@ -142,49 +67,204 @@ namespace MapperUI
                 var initialState = component.States.FirstOrDefault(s => s.InitialState);
 
                 // Color-coded rows
-                AddMappingRow("SystemID", "TRANSLATED", $"GUID: {newGuid}", Color.LightGreen);
-                AddMappingRow($"<Name>{component.Name}</Name>", "TRANSLATED", $"FBType Name=\"{template.ComponentType}_{component.Name}\"", Color.LightGreen);
-                AddMappingRow($"<Type>{component.Type}</Type>", "TRANSLATED", $"Template: {template.TemplateName}", Color.LightGreen);
-                AddMappingRow("<ComponentID>...", "DISCARDED", "Not used in IEC 61499", Color.LightSalmon);
-                AddMappingRow("Version=\"1.0.0\"", "DISCARDED", "VueOne metadata only", Color.LightSalmon);
-                AddMappingRow($"State Count: {component.States.Count}", "TRANSLATED", $"Expected: {template.ExpectedStateCount} states", Color.LightGreen);
-
-                if (initialState != null)
-                {
-                    AddMappingRow("<Initial_State>True</Initial_State>", "ENCODED", $"ECTransition Source=\"START\" Dest=\"{initialState.Name}\"", Color.LightCyan);
-                }
-
-                AddMappingRow($"<State_Number>0..{component.States.Count - 1}</State_Number>", "TRANSLATED", $"state_val: INT (0..{component.States.Count - 1})", Color.LightGreen);
-                AddMappingRow("<Name>ReturnedHome,Advancing...</Name>", "ENCODED", "ECState Name in Actuator.fbt", Color.LightCyan);
-                AddMappingRow("<Time>1000</Time>", "DISCARDED", "VueOne simulation timing", Color.LightSalmon);
-                AddMappingRow("<Position>118</Position>", "DISCARDED", "PLC setpoint, not FB logic", Color.LightSalmon);
-                AddMappingRow("<Counter>1</Counter>", "DISCARDED", "VueOne counting feature", Color.LightSalmon);
-                AddMappingRow("<StaticState>True/False</StaticState>", "ENCODED", "Motion state indicator", Color.LightCyan);
-                AddMappingRow("<Transition>...</Transition>", "DISCARDED", "Phase 2: Auto-wiring", Color.LightSalmon);
+                AddMappingRow(
+                    "SystemID",
+                    "GUID",
+                    "TRANSLATED",
+                    $"GUID: {newGuid}",
+                    validated: true,
+                    Color.LightGreen);
+                AddMappingRow(
+                    $"<Name>{component.Name}</Name>",
+                    $"FBType Name=\"{template.ComponentType}_{component.Name}\"",
+                    "TRANSLATED",
+                    "Component naming convention",
+                    validated: true,
+                    Color.LightGreen);
+                AddMappingRow(
+                    $"<Type>{component.Type}</Type>",
+                    $"Template: {template.TemplateName}",
+                    "TRANSLATED",
+                    "Template selection",
+                    validated: true,
+                    Color.LightGreen);
+                AddMappingRow(
+                    "<ComponentID>...",
+                    "Not used in IEC 61499",
+                    "DISCARDED",
+                    "VueOne metadata only",
+                    validated: false,
+                    Color.LightSalmon);
+                AddMappingRow(
+                    "Version=\"1.0.0\"",
+                    "VueOne metadata only",
+                    "DISCARDED",
+                    "Versioning not used",
+                    validated: false,
+                    Color.LightSalmon);
 
                 if (component.Type == "Actuator")
                 {
-                    AddMappingRow("Sensor feedback (athome, atwork)", "HARDCODED", "Template: '${PATH}athome', '${PATH}atwork'", Color.LightGray);
-                }
+                    AddMappingRow(
+                        $"State Count: {component.States.Count}",
+                        $"Expected: {template.ExpectedStateCount} states",
+                        "TRANSLATED",
+                        "State count aligns with template",
+                        validated: true,
+                        Color.LightGreen);
 
-                AddMappingRow("InterfaceList (complete)", "HARDCODED", "pst_event, action_event, tohome...", Color.LightGray);
-                AddMappingRow("FBNetwork (complete)", "HARDCODED", "FB1:ToBool, FB3:Actuator, connections", Color.LightGray);
+                    if (initialState != null)
+                    {
+                        AddMappingRow(
+                            "<Initial_State>True</Initial_State>",
+                            $"ECTransition Source=\"START\" Dest=\"{initialState.Name}\"",
+                            "ENCODED",
+                            "Initial state becomes START transition",
+                            validated: true,
+                            Color.LightCyan);
+                    }
+
+                    AddMappingRow(
+                        $"<State_Number>0..{component.States.Count - 1}</State_Number>",
+                        $"state_val: INT (0..{component.States.Count - 1})",
+                        "TRANSLATED",
+                        "State index mapping",
+                        validated: true,
+                        Color.LightGreen);
+                    AddMappingRow(
+                        "<Name>ReturnedHome,Advancing...</Name>",
+                        "ECState Name in Actuator.fbt",
+                        "ENCODED",
+                        "State names become ECState nodes",
+                        validated: true,
+                        Color.LightCyan);
+                    AddMappingRow(
+                        "<Time>1000</Time>",
+                        "VueOne simulation timing",
+                        "DISCARDED",
+                        "Timing not used in IEC 61499",
+                        validated: false,
+                        Color.LightSalmon);
+                    AddMappingRow(
+                        "<Position>118</Position>",
+                        "PLC setpoint, not FB logic",
+                        "DISCARDED",
+                        "Position not encoded in FB",
+                        validated: false,
+                        Color.LightSalmon);
+                    AddMappingRow(
+                        "<Counter>1</Counter>",
+                        "VueOne counting feature",
+                        "DISCARDED",
+                        "Counter not used",
+                        validated: false,
+                        Color.LightSalmon);
+                    AddMappingRow(
+                        "<StaticState>True/False</StaticState>",
+                        "Motion state indicator",
+                        "ENCODED",
+                        "Static state becomes motion flag",
+                        validated: true,
+                        Color.LightCyan);
+                    AddMappingRow(
+                        "<Transition>...</Transition>",
+                        "Phase 2: Auto-wiring",
+                        "DISCARDED",
+                        "Not yet implemented",
+                        validated: false,
+                        Color.LightSalmon);
+                    AddMappingRow(
+                        "Sensor feedback (athome, atwork)",
+                        "Template: '${PATH}athome', '${PATH}atwork'",
+                        "HARDCODED",
+                        "Feedback naming convention",
+                        validated: true,
+                        Color.LightGray);
+                    AddMappingRow(
+                        "InterfaceList (complete)",
+                        "pst_event, action_event, tohome...",
+                        "HARDCODED",
+                        "Template interface definition",
+                        validated: true,
+                        Color.LightGray);
+                    AddMappingRow(
+                        "FBNetwork (complete)",
+                        "FB1:FiveStateActuator, IThis:HMI, Inputs/Output symlinks",
+                        "HARDCODED",
+                        "Template FB network (CAT wrapper)",
+                        validated: true,
+                        Color.LightGray);
+                }
+                else
+                {
+                    AddMappingRow(
+                        $"State Count: {component.States.Count}",
+                        "Two-state sensor (ON/OFF)",
+                        "TRANSLATED",
+                        "Sensor state count",
+                        validated: true,
+                        Color.LightGreen);
+                    AddMappingRow(
+                        "Sensor input",
+                        "FB2:SYMLINKMULTIVARDST (Input)",
+                        "HARDCODED",
+                        "Template input symlink",
+                        validated: true,
+                        Color.LightGray);
+                    AddMappingRow(
+                        "Status output",
+                        "FB1.Status → Status",
+                        "TRANSLATED",
+                        "Sensor status output mapping",
+                        validated: true,
+                        Color.LightGreen);
+                    AddMappingRow(
+                        "InterfaceList (complete)",
+                        "INIT/INITO/pst_out, Status",
+                        "HARDCODED",
+                        "Template interface definition",
+                        validated: true,
+                        Color.LightGray);
+                    AddMappingRow(
+                        "FBNetwork (complete)",
+                        "FB1:Sensor_Bool, FB2:Input symlink",
+                        "HARDCODED",
+                        "Template FB network (CAT wrapper)",
+                        validated: true,
+                        Color.LightGray);
+                }
             }
         }
-        private void AddMappingRow(string vueOne, string type, string iec61499, Color backColor)
+
+        private void UpdateDetectedInfo()
         {
-            int index = dgvMappingRules.Rows.Add(vueOne, type, iec61499);
+            if (_loadedComponents.Count == 0)
+            {
+                lblDetectedInfo.Text = string.Empty;
+                return;
+            }
+
+            var firstComponent = _loadedComponents[0];
+            lblDetectedInfo.Text =
+                $"Detected: {firstComponent.Type} its Name: {firstComponent.Name} and number of states {firstComponent.States.Count}";
+        }
+        private void AddMappingRow(
+            string vueOne,
+            string iec61499,
+            string type,
+            string rule,
+            bool validated,
+            Color backColor)
+        {
+            int index = dgvMappingRules.Rows.Add(vueOne, iec61499, type, rule, validated);
             dgvMappingRules.Rows[index].DefaultCellStyle.BackColor = backColor;
         }
         private async System.Threading.Tasks.Task LoadAndValidate(string xmlPath)
         {
             dgvComponents.Rows.Clear();
-            txtOutput.Clear();
 
             try
             {
-                ShowValidation($"Loading: {System.IO.Path.GetFileName(xmlPath)}", Color.Black);
-
                 var systemReader = new SystemXmlReader();
 
                 await System.Threading.Tasks.Task.Run(() =>
@@ -192,13 +272,13 @@ namespace MapperUI
                     _loadedComponents = systemReader.ReadAllComponents(xmlPath);
                 });
 
-                ShowValidation($"Diagnostics: {systemReader.LastError}", Color.Blue);
-                ShowValidation($"Found {_loadedComponents.Count} components", Color.Blue);
-
                 if (_loadedComponents.Count == 0)
                 {
-                    ShowValidation("ERROR: No components found in Control.xml", Color.Red);
-                    ShowValidation("Check that the XML file has Type='System' or Type='Component'", Color.Red);
+                    MessageBox.Show(
+                        "No components found in Control.xml.\nCheck that the XML file has Type='System' or Type='Component'.",
+                        "Validation Error",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
                     btnGenerate.Enabled = false;
                     lblStatus.Text = "No components found";
                     return;
@@ -223,79 +303,73 @@ namespace MapperUI
                         if (!validationResult.IsValid)
                         {
                             allValid = false;
-                            ShowValidation($"✗ {component.Name}: FAILED", Color.Red);
-                            foreach (var error in validationResult.Errors)
-                            {
-                                ShowValidation($"  - {error}", Color.Red);
-                            }
-                        }
-                        else
-                        {
-                            ShowValidation($"✓ {component.Name}: PASSED ({component.Type}, {component.States.Count} states)", Color.Green);
                         }
                     }
                 }
 
-                txtOutput.AppendText("\n");
                 if (allValid)
                 {
-                    ShowValidation("VALIDATION PASSED - Ready to generate", Color.Green);
                     btnGenerate.Enabled = true;
                     lblStatus.Text = "Validation passed";
                 }
                 else
                 {
-                    ShowValidation("VALIDATION FAILED - Fix errors before generating", Color.Red);
                     btnGenerate.Enabled = false;
                     lblStatus.Text = "Validation failed";
                 }
+
+                UpdateDetectedInfo();
             }
             catch (Exception ex)
             {
-                ShowValidation($"ERROR: {ex.Message}", Color.Red);
-                if (ex.InnerException != null)
-                {
-                    ShowValidation($"Inner: {ex.InnerException.Message}", Color.Red);
-                }
-                ShowValidation($"Stack: {ex.StackTrace}", Color.DarkRed);
+                MessageBox.Show(
+                    $"Error loading file.\n{ex.Message}",
+                    "Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
                 btnGenerate.Enabled = false;
                 lblStatus.Text = "Error";
             }
-        }
-
-        private void ShowValidation(string message, Color color, bool newline = true)
-        {
-            int start = txtOutput.TextLength;
-            txtOutput.AppendText(message + (newline ? "\n" : ""));
-            int end = txtOutput.TextLength;
-
-            txtOutput.Select(start, end - start);
-            txtOutput.SelectionColor = color;
-            txtOutput.SelectionLength = 0;
-            txtOutput.ScrollToCaret();
         }
 
         private async void btnGenerate_Click(object sender, EventArgs e)
         {
             try
             {
-                txtOutput.Clear();
-                ShowValidation("Generating IEC 61499 Function Blocks...", Color.Black);
                 lblStatus.Text = "Generating...";
                 btnGenerate.Enabled = false;
 
-                var result = await _mapperService.RunMapping();
+                var component = _loadedComponents.FirstOrDefault();
+                if (component == null)
+                {
+                    MessageBox.Show(
+                        "Load a Control.xml file first.",
+                        "No Data",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    lblStatus.Text = "No data loaded";
+                    return;
+                }
+
+                var result = await _mapperService.RunMapping(component);
 
                 if (!result.Success)
                 {
-                    ShowValidation($"\n✗ Generation failed: {result.ErrorMessage}", Color.Red);
                     if (result.ValidationResult != null && !result.ValidationResult.IsValid)
                     {
-                        ShowValidation($"Component: {result.ComponentName}", Color.Black);
-                        foreach (var error in result.ValidationResult.Errors)
-                        {
-                            ShowValidation($"  - {error}", Color.Red);
-                        }
+                        MessageBox.Show(
+                            $"Generation failed for {result.ComponentName}.\n{result.ErrorMessage}",
+                            "Generation Failed",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Error);
+                    }
+                    else
+                    {
+                        MessageBox.Show(
+                            $"Generation failed.\n{result.ErrorMessage}",
+                            "Generation Failed",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Error);
                     }
                     lblStatus.Text = "Generation failed";
                     return;
@@ -304,27 +378,35 @@ namespace MapperUI
                 // NULL CHECK
                 if (result.GeneratedFB == null)
                 {
-                    ShowValidation("\n✗ Generation failed: No FB generated", Color.Red);
+                    MessageBox.Show(
+                        "Generation failed: No FB generated.",
+                        "Generation Failed",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
                     lblStatus.Text = "Generation failed";
                     return;
                 }
 
-                txtOutput.AppendText("\n");
-                ShowValidation($"✓ Generated: {result.GeneratedFB.FBName}", Color.Green);
-                ShowValidation($"  GUID: {result.GeneratedFB.GUID}", Color.Black);
-                ShowValidation($"  Files: .fbt, .composite.offline.xml, .doc.xml", Color.Black);
-                ShowValidation($"  Location: {result.OutputPath}", Color.Black);
-                ShowValidation($"  Deployed: {result.DeployPath}", Color.Black);
-
-                txtOutput.AppendText("\n");
-                ShowValidation("Next: Open EAE → Refresh → Verify build", Color.Blue);
+                MessageBox.Show(
+                    $"Generated: {result.GeneratedFB.FBName}\n" +
+                    $"GUID: {result.GeneratedFB.GUID}\n" +
+                    "Files: .fbt, .composite.offline.xml, .doc.xml\n" +
+                    $"Location: {result.OutputPath}\n" +
+                    $"Deployed: {result.DeployPath}\n\n" +
+                    "Next: Open EAE → Refresh → Verify build",
+                    "Generation Complete",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
 
                 lblStatus.Text = $"Generated: {result.GeneratedFB.FBName}";
             }
             catch (Exception ex)
             {
-                ShowValidation($"\n✗ ERROR: {ex.Message}", Color.Red);
-                ShowValidation($"Stack: {ex.StackTrace}", Color.DarkRed);
+                MessageBox.Show(
+                    $"Error generating output.\n{ex.Message}",
+                    "Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
                 lblStatus.Text = "Error";
             }
             finally
