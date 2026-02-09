@@ -24,7 +24,9 @@ namespace MapperUI.Services
             {
                 try
                 {
-                    // Process actuator
+                    // -------------------------------------------------
+                    // 1. Process actuator FIRST (primary generation)
+                    // -------------------------------------------------
                     var actuatorResult = ProcessComponent(
                         _config.ActuatorXmlPath,
                         _config.ActuatorTemplatePath,
@@ -35,25 +37,35 @@ namespace MapperUI.Services
                         return actuatorResult;
                     }
 
-                    // Process sensors
-                    var hopperResult = ProcessComponent(_config.SensorXmlPathHopper,
-                                   _config.SensorTemplatePath,
-                                   "Sensor_Bool");
+                    // -------------------------------------------------
+                    // 2. Process Hopper sensor (secondary)
+                    // -------------------------------------------------
+                    var hopperResult = ProcessComponent(
+                        _config.SensorXmlPathHopper,
+                        _config.SensorTemplatePath,
+                        "Sensor_Bool");
 
                     if (!hopperResult.Success)
                     {
                         return hopperResult;
                     }
 
-                    var checkerResult = ProcessComponent(_config.SensorXmlPathChecker,
-                                   _config.SensorTemplatePath,
-                                   "Sensor_Bool");
+                    // -------------------------------------------------
+                    // 3. Process Checker sensor (secondary)
+                    // -------------------------------------------------
+                    var checkerResult = ProcessComponent(
+                        _config.SensorXmlPathChecker,
+                        _config.SensorTemplatePath,
+                        "Sensor_Bool");
 
                     if (!checkerResult.Success)
                     {
                         return checkerResult;
                     }
 
+                    // -------------------------------------------------
+                    // 4. RETURN actuator result (contains GeneratedFB)
+                    // -------------------------------------------------
                     return actuatorResult;
                 }
                 catch (Exception ex)
@@ -67,11 +79,20 @@ namespace MapperUI.Services
             });
         }
 
-        private MapperResult ProcessComponent(string xmlPath, string templatePath, string templateBaseName)
+        private MapperResult ProcessComponent(
+            string xmlPath,
+            string templatePath,
+            string templateBaseName)
         {
+            // ------------------------------
+            // Read VueOne Control.xml
+            // ------------------------------
             var xmlReader = new ControlXmlReader();
             var component = xmlReader.ReadComponent(xmlPath);
 
+            // ------------------------------
+            // Validate component semantics
+            // ------------------------------
             var validator = new ComponentValidator();
             var validationResult = validator.Validate(component);
 
@@ -85,30 +106,64 @@ namespace MapperUI.Services
                 };
             }
 
+            // ------------------------------
+            // Load template
+            // ------------------------------
             var templateContent = File.ReadAllText(templatePath);
-            var generator = new FBGenerator();
-            var generatedFB = generator.GenerateFromTemplate(component, templateContent, templateBaseName);
 
+            // ------------------------------
+            // Generate FB artifacts
+            // ------------------------------
+            var generator = new FBGenerator();
+            var generatedFB = generator.GenerateFromTemplate(
+                component,
+                templateContent,
+                templateBaseName);
+
+            // ------------------------------
+            // Write output files
+            // ------------------------------
             Directory.CreateDirectory(_config.OutputDirectory);
 
-            var modifiedContent = generator.GetModifiedTemplateContent(component, templateContent);
-            var outputPath = Path.Combine(_config.OutputDirectory, generatedFB.FbtFile);
-            File.WriteAllText(outputPath, modifiedContent);
-            File.WriteAllText(Path.Combine(_config.OutputDirectory, generatedFB.CompositeFile), generator.GetCompositeXml());
-            File.WriteAllText(Path.Combine(_config.OutputDirectory, generatedFB.DocFile), generator.GetDocXml(generatedFB.FBName));
+            var modifiedContent = generator.GetModifiedTemplateContent(
+                component,
+                templateContent);
 
+            var fbtPath = Path.Combine(
+                _config.OutputDirectory,
+                generatedFB.FbtFile);
+
+            File.WriteAllText(fbtPath, modifiedContent);
+            File.WriteAllText(
+                Path.Combine(_config.OutputDirectory, generatedFB.CompositeFile),
+                generator.GetCompositeXml());
+
+            File.WriteAllText(
+                Path.Combine(_config.OutputDirectory, generatedFB.DocFile),
+                generator.GetDocXml(generatedFB.FBName));
+
+            // ------------------------------
+            // Optional deploy to EAE library
+            // ------------------------------
             if (Directory.Exists(_config.EAEDeployPath))
             {
-                File.Copy(outputPath, Path.Combine(_config.EAEDeployPath, generatedFB.FbtFile), true);
+                File.Copy(
+                    fbtPath,
+                    Path.Combine(_config.EAEDeployPath, generatedFB.FbtFile),
+                    overwrite: true);
             }
 
+            // ------------------------------
+            // Return full result
+            // ------------------------------
             return new MapperResult
             {
                 Success = true,
                 ComponentName = component.Name,
                 GeneratedFB = generatedFB,
                 OutputPath = _config.OutputDirectory,
-                DeployPath = _config.EAEDeployPath
+                DeployPath = _config.EAEDeployPath,
+                ValidationResult = validationResult
             };
         }
     }
