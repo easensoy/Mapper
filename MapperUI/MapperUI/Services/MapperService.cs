@@ -80,17 +80,24 @@ namespace MapperUI.Services
             Directory.CreateDirectory(_config.OutputDirectory);
 
             var modifiedContent = generator.GetModifiedTemplateContent(component, templateContent);
-            File.WriteAllText(Path.Combine(_config.OutputDirectory, generatedFB.FbtFile), modifiedContent);
+            var outputPath = Path.Combine(_config.OutputDirectory, generatedFB.FbtFile);
+            File.WriteAllText(outputPath, modifiedContent);
             File.WriteAllText(Path.Combine(_config.OutputDirectory, generatedFB.CompositeFile), generator.GetCompositeXml());
             File.WriteAllText(Path.Combine(_config.OutputDirectory, generatedFB.DocFile), generator.GetDocXml(generatedFB.FBName));
 
             if (Directory.Exists(_config.EAEDeployPath))
             {
-                File.Copy(Path.Combine(_config.OutputDirectory, generatedFB.FbtFile),
-                         Path.Combine(_config.EAEDeployPath, generatedFB.FbtFile), true);
+                File.Copy(outputPath, Path.Combine(_config.EAEDeployPath, generatedFB.FbtFile), true);
             }
 
-            return new MapperResult { Success = true, ComponentName = component.Name };
+            return new MapperResult
+            {
+                Success = true,
+                ComponentName = component.Name,
+                GeneratedFB = generatedFB,  
+                OutputPath = _config.OutputDirectory, 
+                DeployPath = _config.EAEDeployPath 
+            };
         }
     }
 }
