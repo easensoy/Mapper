@@ -41,17 +41,6 @@ namespace MapperUI
             }
         }
 
-        //private void btnMappingRules_Click(object sender, EventArgs e)
-        //{
-        //    if (_loadedComponents.Count == 0)
-        //    {
-        //        MessageBox.Show("Load a Control.xml file first", "No Data", MessageBoxButtons.OK, MessageBoxIcon.Information);
-        //        return;
-        //    }
-
-        //    ShowMappingRules();
-        //}
-
         private void btnMappingRules_Click(object sender, EventArgs e)
         {
             if (_loadedComponents.Count == 0)
@@ -61,10 +50,12 @@ namespace MapperUI
             }
 
             grpMappingRules.Visible = !grpMappingRules.Visible;
+            grpMappingInfo.Visible = !grpMappingRules.Visible;
 
             if (grpMappingRules.Visible)
             {
                 PopulateMappingRules();
+                grpMappingRules.BringToFront();
                 btnMappingRules.Text = "Hide Rules";
             }
             else
@@ -235,6 +226,14 @@ namespace MapperUI
                 if (!result.Success)
                 {
                     ShowValidation($"\n✗ Generation failed: {result.ErrorMessage}", Color.Red);
+                    if (result.ValidationResult != null && !result.ValidationResult.IsValid)
+                    {
+                        ShowValidation($"Component: {result.ComponentName}", Color.Black);
+                        foreach (var error in result.ValidationResult.Errors)
+                        {
+                            ShowValidation($"  - {error}", Color.Red);
+                        }
+                    }
                     lblStatus.Text = "Generation failed";
                     return;
                 }
