@@ -388,7 +388,6 @@
 
         #endregion
 
-        private MenuStrip menuStrip;
         private ToolStripMenuItem fileToolStripMenuItem;
         private ToolStripMenuItem dataToolStripMenuItem;
         private ToolStripMenuItem buildToolStripMenuItem;
