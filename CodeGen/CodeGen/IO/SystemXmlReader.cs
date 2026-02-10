@@ -31,7 +31,6 @@ namespace CodeGen.IO
 
                 if (typeAttribute == "System")
                 {
-                    // Try BOTH <s> and <System> elements
                     var systemElement = root.Elements().FirstOrDefault(e => e.Name.LocalName == "s" || e.Name.LocalName == "System");
 
                     if (systemElement == null)
@@ -90,10 +89,8 @@ namespace CodeGen.IO
         {
             var nameElement = isSystemFile ? "n" : "Name";
 
-            // Debug: get name with fallback
             var name = GetElementValue(componentElement, nameElement);
 
-            // Fallback: try other name fields if empty
             if (string.IsNullOrEmpty(name))
             {
                 name = GetElementValue(componentElement, "Name");
