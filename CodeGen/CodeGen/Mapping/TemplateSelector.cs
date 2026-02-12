@@ -1,4 +1,5 @@
-﻿using CodeGen.Models;
+﻿using System;
+using CodeGen.Models;
 
 namespace CodeGen.Mapping
 {
@@ -6,25 +7,38 @@ namespace CodeGen.Mapping
     {
         public FBTemplate? SelectTemplate(VueOneComponent component)
         {
-            return (component.Type, component.States.Count) switch
+            if (component == null)
             {
-                ("Actuator", 5) => new FBTemplate
-                {
-                    TemplateName = "Five_State_Actuator_CAT.fbt",  
-                    ExpectedStateCount = 5,
-                    ComponentType = "Actuator"
-                },
-                ("Sensor", 2) => new FBTemplate
-                {
-                    TemplateName = "Sensor_Bool_CAT.fbt",
-                    ExpectedStateCount = 2,
-                    ComponentType = "Sensor"
-                },
-                _ => null
-            };
+                throw new ArgumentNullException(nameof(component));
+            }
+
+            if (component.States == null)
+            {
+                return null;
+            }
+
+            if (string.Equals(component.Type, "Actuator", StringComparison.OrdinalIgnoreCase) &&
+                component.States.Count == 5)
+            {
+                return CreateTemplate(
+                    fileName: "Five_State_Actuator.fbt",
+                    stateCount: 5,
+                    componentType: "Actuator");
+            }
+
+            if (string.Equals(component.Type, "Sensor", StringComparison.OrdinalIgnoreCase) &&
+                component.States.Count == 2)
+            {
+                return CreateTemplate(
+                    fileName: "Sensor_Bool_CAT.fbt",
+                    stateCount: 2,
+                    componentType: "Sensor");
+            }
+
+            return null;
         }
 
-        private FBTemplate CreateTemplate(string fileName, int stateCount, string componentType)
+        private static FBTemplate CreateTemplate(string fileName, int stateCount, string componentType)
         {
             return new FBTemplate
             {
