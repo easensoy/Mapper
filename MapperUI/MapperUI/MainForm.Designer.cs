@@ -28,7 +28,15 @@ namespace MapperUI
             this.btnBrowse = new System.Windows.Forms.Button();
             this.btnGenerate = new System.Windows.Forms.Button();
             this.grpValidation = new System.Windows.Forms.GroupBox();
-            this.lblDetectedInfo = new System.Windows.Forms.Label();
+            this.pnlDetectedInfo = new System.Windows.Forms.FlowLayoutPanel();
+            this.lblDetectedPrefix = new System.Windows.Forms.Label();
+            this.lblDetectedType = new System.Windows.Forms.Label();
+            this.lblNamePrefix = new System.Windows.Forms.Label();
+            this.lblDetectedName = new System.Windows.Forms.Label();
+            this.lblStatePrefix = new System.Windows.Forms.Label();
+            this.lblDetectedStates = new System.Windows.Forms.Label();
+            this.lblValidationPrefix = new System.Windows.Forms.Label();
+            this.lblValidationStatus = new System.Windows.Forms.Label();
             this.dgvMappingRules = new System.Windows.Forms.DataGridView();
             this.colVueOneElement = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.colIEC61499Element = new System.Windows.Forms.DataGridViewTextBoxColumn();
@@ -40,7 +48,7 @@ namespace MapperUI
             this.dgvComponents = new System.Windows.Forms.DataGridView();
             this.colComponent = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.colType = new System.Windows.Forms.DataGridViewTextBoxColumn();
-            this.colFunction = new System.Windows.Forms.DataGridViewTextBoxColumn();
+            this.colTemplate = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.panelDetails = new System.Windows.Forms.Panel();
             this.grpOutputs = new System.Windows.Forms.GroupBox();
             this.dgvOutputs = new System.Windows.Forms.DataGridView();
@@ -152,7 +160,7 @@ namespace MapperUI
             this.grpValidation.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
             | System.Windows.Forms.AnchorStyles.Right)));
             this.grpValidation.Controls.Add(this.dgvMappingRules);
-            this.grpValidation.Controls.Add(this.lblDetectedInfo);
+            this.grpValidation.Controls.Add(this.pnlDetectedInfo);
             this.grpValidation.Location = new System.Drawing.Point(12, 70);
             this.grpValidation.Name = "grpValidation";
             this.grpValidation.Size = new System.Drawing.Size(1376, 300);
@@ -160,14 +168,66 @@ namespace MapperUI
             this.grpValidation.TabStop = false;
             this.grpValidation.Text = "Validation Output";
 
-            // lblDetectedInfo
-            this.lblDetectedInfo.AutoSize = true;
-            this.lblDetectedInfo.Dock = System.Windows.Forms.DockStyle.Top;
-            this.lblDetectedInfo.Location = new System.Drawing.Point(3, 19);
-            this.lblDetectedInfo.Name = "lblDetectedInfo";
-            this.lblDetectedInfo.Padding = new System.Windows.Forms.Padding(0, 0, 0, 6);
-            this.lblDetectedInfo.Size = new System.Drawing.Size(0, 21);
-            this.lblDetectedInfo.TabIndex = 0;
+            // pnlDetectedInfo
+            this.pnlDetectedInfo.AutoSize = true;
+            this.pnlDetectedInfo.Dock = System.Windows.Forms.DockStyle.Top;
+            this.pnlDetectedInfo.Location = new System.Drawing.Point(3, 19);
+            this.pnlDetectedInfo.Name = "pnlDetectedInfo";
+            this.pnlDetectedInfo.Padding = new System.Windows.Forms.Padding(0, 0, 0, 6);
+            this.pnlDetectedInfo.Size = new System.Drawing.Size(1370, 21);
+            this.pnlDetectedInfo.TabIndex = 0;
+            this.pnlDetectedInfo.WrapContents = false;
+            this.pnlDetectedInfo.Controls.Add(this.lblDetectedPrefix);
+            this.pnlDetectedInfo.Controls.Add(this.lblDetectedType);
+            this.pnlDetectedInfo.Controls.Add(this.lblNamePrefix);
+            this.pnlDetectedInfo.Controls.Add(this.lblDetectedName);
+            this.pnlDetectedInfo.Controls.Add(this.lblStatePrefix);
+            this.pnlDetectedInfo.Controls.Add(this.lblDetectedStates);
+            this.pnlDetectedInfo.Controls.Add(this.lblValidationPrefix);
+            this.pnlDetectedInfo.Controls.Add(this.lblValidationStatus);
+
+            // lblDetectedPrefix
+            this.lblDetectedPrefix.AutoSize = true;
+            this.lblDetectedPrefix.Text = "Detected:";
+
+            // lblDetectedType
+            this.lblDetectedType.AutoSize = true;
+            this.lblDetectedType.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
+            this.lblDetectedType.ForeColor = System.Drawing.Color.Green;
+            this.lblDetectedType.Text = "-";
+
+            // lblNamePrefix
+            this.lblNamePrefix.AutoSize = true;
+            this.lblNamePrefix.Margin = new System.Windows.Forms.Padding(8, 0, 0, 0);
+            this.lblNamePrefix.Text = "Name:";
+
+            // lblDetectedName
+            this.lblDetectedName.AutoSize = true;
+            this.lblDetectedName.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
+            this.lblDetectedName.ForeColor = System.Drawing.Color.Green;
+            this.lblDetectedName.Text = "-";
+
+            // lblStatePrefix
+            this.lblStatePrefix.AutoSize = true;
+            this.lblStatePrefix.Margin = new System.Windows.Forms.Padding(8, 0, 0, 0);
+            this.lblStatePrefix.Text = "State Count:";
+
+            // lblDetectedStates
+            this.lblDetectedStates.AutoSize = true;
+            this.lblDetectedStates.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
+            this.lblDetectedStates.ForeColor = System.Drawing.Color.Green;
+            this.lblDetectedStates.Text = "-";
+
+            // lblValidationPrefix
+            this.lblValidationPrefix.AutoSize = true;
+            this.lblValidationPrefix.Margin = new System.Windows.Forms.Padding(8, 0, 0, 0);
+            this.lblValidationPrefix.Text = "Validation:";
+
+            // lblValidationStatus
+            this.lblValidationStatus.AutoSize = true;
+            this.lblValidationStatus.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
+            this.lblValidationStatus.ForeColor = System.Drawing.Color.Green;
+            this.lblValidationStatus.Text = "-";
 
             // dgvMappingRules
             this.dgvMappingRules.AllowUserToAddRows = false;
@@ -246,7 +306,7 @@ namespace MapperUI
             this.dgvComponents.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
             this.colComponent,
             this.colType,
-            this.colFunction});
+            this.colTemplate});
             this.dgvComponents.Dock = System.Windows.Forms.DockStyle.Fill;
             this.dgvComponents.Location = new System.Drawing.Point(0, 0);
             this.dgvComponents.Name = "dgvComponents";
@@ -267,11 +327,11 @@ namespace MapperUI
             this.colType.ReadOnly = true;
             this.colType.Width = 150;
 
-            // colFunction
-            this.colFunction.HeaderText = "Function";
-            this.colFunction.Name = "colFunction";
-            this.colFunction.ReadOnly = true;
-            this.colFunction.Width = 180;
+            // colTemplate
+            this.colTemplate.HeaderText = "Template";
+            this.colTemplate.Name = "colTemplate";
+            this.colTemplate.ReadOnly = true;
+            this.colTemplate.Width = 200;
 
             // panelDetails
             this.panelDetails.Controls.Add(this.grpOutputs);
@@ -413,7 +473,15 @@ namespace MapperUI
         private Button btnBrowse;
         private Button btnGenerate;
         private GroupBox grpValidation;
-        private Label lblDetectedInfo;
+        private FlowLayoutPanel pnlDetectedInfo;
+        private Label lblDetectedPrefix;
+        private Label lblDetectedType;
+        private Label lblNamePrefix;
+        private Label lblDetectedName;
+        private Label lblStatePrefix;
+        private Label lblDetectedStates;
+        private Label lblValidationPrefix;
+        private Label lblValidationStatus;
         private DataGridView dgvMappingRules;
         private DataGridViewTextBoxColumn colVueOneElement;
         private DataGridViewTextBoxColumn colIEC61499Element;
@@ -425,7 +493,7 @@ namespace MapperUI
         private DataGridView dgvComponents;
         private DataGridViewTextBoxColumn colComponent;
         private DataGridViewTextBoxColumn colType;
-        private DataGridViewTextBoxColumn colFunction;
+        private DataGridViewTextBoxColumn colTemplate;
         private Panel panelDetails;
         private GroupBox grpOutputs;
         private DataGridView dgvOutputs;
