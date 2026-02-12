@@ -2,9 +2,9 @@
 using System.IO;
 using System.Threading.Tasks;
 using CodeGen.Configuration;
+using CodeGen.Models;
 using CodeGen.Translation;
 using CodeGen.Validation;
-using CodeGen.Models;
 
 namespace MapperUI.Services
 {
@@ -22,18 +22,22 @@ namespace MapperUI.Services
             {
                 try
                 {
-                    _config = LoadConfig();
-                    var templatePath = ResolveTemplatePath(component);
+                    if (component == null)
+                    {
+                        throw new ArgumentNullException(nameof(component));
+                    }
 
-                    return ProcessComponent(
-                        component,
-                        templatePath);
+                    var config = LoadConfig();
+                    var templatePath = ResolveTemplatePath(component, config);
+
+                    return ProcessComponent(component, templatePath, config);
                 }
                 catch (Exception ex)
                 {
                     return new MapperResult
                     {
                         Success = false,
+                        ComponentName = component?.Name,
                         ErrorMessage = ex.Message
                     };
                 }
@@ -47,24 +51,18 @@ namespace MapperUI.Services
                 return _config;
             }
 
-            return MapperConfig.Load();
+            _config = MapperConfig.Load();
+            return _config;
         }
 
-        private string ResolveTemplatePath(VueOneComponent component)
+        private string ResolveTemplatePath(VueOneComponent component, MapperConfig config)
         {
-            if (_config == null)
-            {
-                _config = LoadConfig();
-            }
-
-            return component.Type == "Actuator"
-                ? _config.ActuatorTemplatePath
-                : _config.SensorTemplatePath;
+            return string.Equals(component.Type, "Actuator", StringComparison.OrdinalIgnoreCase)
+                ? config.ActuatorTemplatePath
+                : config.SensorTemplatePath;
         }
 
-        private MapperResult ProcessComponent(
-            VueOneComponent component,
-            string templatePath)
+        private MapperResult ProcessComponent(VueOneComponent component, string templatePath, MapperConfig config)
         {
             var validator = new ComponentValidator();
             var validationResult = validator.Validate(component);
@@ -75,7 +73,19 @@ namespace MapperUI.Services
                 {
                     Success = false,
                     ComponentName = component.Name,
-                    ValidationResult = validationResult
+                    ValidationResult = validationResult,
+                    ErrorMessage = "Validation failed for component."
+                };
+            }
+
+            if (!File.Exists(templatePath))
+            {
+                return new MapperResult
+                {
+                    Success = false,
+                    ComponentName = component.Name,
+                    ValidationResult = validationResult,
+                    ErrorMessage = $"Template not found: {templatePath}"
                 };
             }
 
@@ -87,30 +97,31 @@ namespace MapperUI.Services
                 templateContent,
                 Path.GetFileNameWithoutExtension(templatePath));
 
-            Directory.CreateDirectory(_config!.OutputDirectory);
+            if (!generatedFB.IsValid)
+            {
+                return new MapperResult
+                {
+                    Success = false,
+                    ComponentName = component.Name,
+                    ValidationResult = validationResult,
+                    ErrorMessage = "FB generation failed."
+                };
+            }
 
-            var modifiedContent = generator.GetModifiedTemplateContent(
-                component,
-                templateContent);
+            Directory.CreateDirectory(config.OutputDirectory);
 
-            var fbtPath = Path.Combine(
-                _config.OutputDirectory,
-                generatedFB.FbtFile);
+            var modifiedContent = generator.GetModifiedTemplateContent(component, templateContent);
+            var fbtPath = Path.Combine(config.OutputDirectory, generatedFB.FbtFile);
 
             File.WriteAllText(fbtPath, modifiedContent);
-            File.WriteAllText(
-                Path.Combine(_config.OutputDirectory, generatedFB.CompositeFile),
-                generator.GetCompositeXml());
+            File.WriteAllText(Path.Combine(config.OutputDirectory, generatedFB.CompositeFile), generator.GetCompositeXml());
+            File.WriteAllText(Path.Combine(config.OutputDirectory, generatedFB.DocFile), generator.GetDocXml(generatedFB.FBName));
 
-            File.WriteAllText(
-                Path.Combine(_config.OutputDirectory, generatedFB.DocFile),
-                generator.GetDocXml(generatedFB.FBName));
-
-            if (Directory.Exists(_config.EAEDeployPath))
+            if (Directory.Exists(config.EAEDeployPath))
             {
                 File.Copy(
                     fbtPath,
-                    Path.Combine(_config.EAEDeployPath, generatedFB.FbtFile),
+                    Path.Combine(config.EAEDeployPath, generatedFB.FbtFile),
                     overwrite: true);
             }
 
@@ -119,8 +130,8 @@ namespace MapperUI.Services
                 Success = true,
                 ComponentName = component.Name,
                 GeneratedFB = generatedFB,
-                OutputPath = _config.OutputDirectory,
-                DeployPath = _config.EAEDeployPath,
+                OutputPath = config.OutputDirectory,
+                DeployPath = config.EAEDeployPath,
                 ValidationResult = validationResult
             };
         }
