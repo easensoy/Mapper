@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Security.Cryptography;
+using System.Text;
 using System.Xml.Linq;
 using CodeGen.Models;
 
@@ -13,15 +15,17 @@ namespace CodeGen.Translation
                 var doc = XDocument.Parse(templateContent);
                 var fbType = doc.Root ?? throw new Exception("Invalid template XML");
 
-                var baseName = fbType.Attribute("Name")?.Value ?? "Function_Block";
-                var newName = $"{baseName}_{component.Name}";
+                var baseName = ResolveBaseName(fbType, templateName);
+                var componentToken = SanitizeToken(component.Name);
+                var newName = $"{baseName}_{componentToken}";
+                var deterministicGuid = BuildDeterministicGuid(newName);
 
-                UpdateFBAttributes(fbType, newName, component.Name);
+                UpdateFBAttributes(fbType, newName, component.Name, deterministicGuid);
 
                 return new GeneratedFB
                 {
                     FBName = newName,
-                    GUID = Guid.NewGuid().ToString(),
+                    GUID = deterministicGuid,
                     ComponentName = component.Name,
                     FilePath = $"{newName}.fbt",
                     FbtFile = $"{newName}.fbt",
@@ -43,12 +47,14 @@ namespace CodeGen.Translation
         public string GetModifiedTemplateContent(VueOneComponent component, string templateContent)
         {
             var doc = XDocument.Parse(templateContent);
-            var fbType = doc.Root!;
+            var fbType = doc.Root ?? throw new Exception("Invalid template XML");
 
             var baseName = fbType.Attribute("Name")?.Value ?? "Function_Block";
-            var newName = $"{baseName}_{component.Name}";
+            var componentToken = SanitizeToken(component.Name);
+            var newName = $"{baseName}_{componentToken}";
+            var deterministicGuid = BuildDeterministicGuid(newName);
 
-            UpdateFBAttributes(fbType, newName, component.Name);
+            UpdateFBAttributes(fbType, newName, component.Name, deterministicGuid);
 
             return doc.ToString();
         }
@@ -73,10 +79,10 @@ namespace CodeGen.Translation
                 </FBTypeDocumentation>";
         }
 
-        private void UpdateFBAttributes(XElement fbType, string newName, string componentName)
+        private static void UpdateFBAttributes(XElement fbType, string newName, string componentName, string guid)
         {
             fbType.SetAttributeValue("Name", newName);
-            fbType.SetAttributeValue("GUID", Guid.NewGuid().ToString());
+            fbType.SetAttributeValue("GUID", guid);
             fbType.SetAttributeValue("Comment", $"Function Block for {componentName}");
 
             var versionInfo = fbType.Element("VersionInfo");
@@ -86,6 +92,46 @@ namespace CodeGen.Translation
                 versionInfo.SetAttributeValue("Date", DateTime.Now.ToString("M/d/yyyy"));
                 versionInfo.SetAttributeValue("Remarks", $"Generated from VueOne component: {componentName}");
             }
+        }
+
+        private static string ResolveBaseName(XElement fbType, string templateName)
+        {
+            var fromTemplate = fbType.Attribute("Name")?.Value;
+            if (!string.IsNullOrWhiteSpace(fromTemplate))
+            {
+                return fromTemplate;
+            }
+
+            if (!string.IsNullOrWhiteSpace(templateName))
+            {
+                return templateName;
+            }
+
+            return "Function_Block";
+        }
+
+        private static string SanitizeToken(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return "Component";
+            }
+
+            var builder = new StringBuilder(value.Length);
+
+            foreach (var ch in value)
+            {
+                builder.Append(char.IsLetterOrDigit(ch) ? ch : '_');
+            }
+
+            return builder.ToString();
+        }
+
+        private static string BuildDeterministicGuid(string value)
+        {
+            using var md5 = MD5.Create();
+            var hash = md5.ComputeHash(Encoding.UTF8.GetBytes(value));
+            return new Guid(hash).ToString();
         }
     }
 }
