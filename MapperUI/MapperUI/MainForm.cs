@@ -66,11 +66,9 @@ namespace MapperUI
                     continue;
                 }
 
-                var newGuid = Guid.NewGuid().ToString();
                 var componentGuid = Guid.NewGuid().ToString();
                 var initialState = component.States.FirstOrDefault(s => s.InitialState);
 
-                // Color-coded rows
                 AddMappingRow(
                     $"<Name>{component.Name}</Name>",
                     $"FBType Name=\"{template.ComponentType}_{component.Name}\"",
@@ -100,7 +98,7 @@ namespace MapperUI
                     validated: false,
                     Color.LightSalmon);
 
-                if (component.Type == "Actuator")
+                if (string.Equals(component.Type, "Actuator", StringComparison.OrdinalIgnoreCase))
                 {
                     AddMappingRow(
                         $"State Count: {component.States.Count}",
@@ -130,7 +128,7 @@ namespace MapperUI
                         Color.LightGreen);
                     AddMappingRow(
                         "<Name>ReturnedHome,Advancing...</Name>",
-                        "ECState Name in Actuator.fbt",
+                        "ECState Name in Five_State_Actuator.fbt",
                         "ENCODED",
                         "State names become ECState nodes",
                         validated: true,
@@ -179,7 +177,7 @@ namespace MapperUI
                         Color.LightGray);
                     AddMappingRow(
                         "InterfaceList (complete)",
-                        "pst_event, action_event, tohome...",
+                        "INIT, pst_event, action_event, tohome...",
                         "HARDCODED",
                         "Template interface definition",
                         validated: true,
@@ -188,7 +186,7 @@ namespace MapperUI
                         "FBNetwork (complete)",
                         "FB1:FiveStateActuator, IThis:HMI, Inputs/Output symlinks",
                         "HARDCODED",
-                        "Template FB network (CAT wrapper)",
+                        "Template FB network (basic actuator)",
                         validated: true,
                         Color.LightGray);
                 }
@@ -249,6 +247,7 @@ namespace MapperUI
             lblDetectedName.Text = firstComponent.Name;
             lblDetectedStates.Text = firstComponent.States.Count.ToString();
         }
+
         private void AddMappingRow(
             string vueOne,
             string iec61499,
@@ -260,9 +259,11 @@ namespace MapperUI
             int index = dgvMappingRules.Rows.Add(vueOne, iec61499, type, rule, validated);
             dgvMappingRules.Rows[index].DefaultCellStyle.BackColor = backColor;
         }
+
         private async System.Threading.Tasks.Task LoadAndValidate(string xmlPath)
         {
             dgvComponents.Rows.Clear();
+            dgvMappingRules.Rows.Clear();
 
             try
             {
@@ -297,7 +298,6 @@ namespace MapperUI
 
                     dgvComponents.Rows.Add(component.Name, component.Type, templateName);
 
-                    // Only validate if we have a template for it
                     if (templateMatches)
                     {
                         var validationResult = validator.Validate(component);
@@ -344,12 +344,12 @@ namespace MapperUI
 
         private bool TemplateMatchesStateCount(VueOneComponent component, FBTemplate template)
         {
-            if (component.Type == "Actuator" && template.ExpectedStateCount > 0)
+            if (string.Equals(component.Type, "Actuator", StringComparison.OrdinalIgnoreCase) && template.ExpectedStateCount > 0)
             {
                 return component.States.Count == template.ExpectedStateCount;
             }
 
-            if (component.Type == "Sensor")
+            if (string.Equals(component.Type, "Sensor", StringComparison.OrdinalIgnoreCase))
             {
                 return component.States.Count == 2;
             }
@@ -364,8 +364,7 @@ namespace MapperUI
                 lblStatus.Text = "Generating...";
                 btnGenerate.Enabled = false;
 
-                var component = _loadedComponents.FirstOrDefault();
-                if (component == null)
+                if (_loadedComponents.Count == 0)
                 {
                     MessageBox.Show(
                         "Load a Control.xml file first.",
@@ -376,53 +375,35 @@ namespace MapperUI
                     return;
                 }
 
-                var result = await _mapperService.RunMapping(component);
+                var generatedNames = new List<string>();
 
-                if (!result.Success)
+                foreach (var component in _loadedComponents)
                 {
-                    if (result.ValidationResult != null && !result.ValidationResult.IsValid)
+                    var result = await _mapperService.RunMapping(component);
+
+                    if (!result.Success || result.GeneratedFB == null)
                     {
                         MessageBox.Show(
-                            $"Generation failed for {result.ComponentName}.\n{result.ErrorMessage}",
+                            $"Generation failed for {component.Name}.\n{result.ErrorMessage}",
                             "Generation Failed",
                             MessageBoxButtons.OK,
                             MessageBoxIcon.Error);
+                        lblStatus.Text = "Generation failed";
+                        return;
                     }
-                    else
-                    {
-                        MessageBox.Show(
-                            $"Generation failed.\n{result.ErrorMessage}",
-                            "Generation Failed",
-                            MessageBoxButtons.OK,
-                            MessageBoxIcon.Error);
-                    }
-                    lblStatus.Text = "Generation failed";
-                    return;
-                }
 
-                if (result.GeneratedFB == null)
-                {
-                    MessageBox.Show(
-                        "Generation failed: No FB generated.",
-                        "Generation Failed",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Error);
-                    lblStatus.Text = "Generation failed";
-                    return;
+                    generatedNames.Add(result.GeneratedFB.FBName);
                 }
 
                 MessageBox.Show(
-                    $"Generated: {result.GeneratedFB.FBName}\n" +
-                    $"GUID: {result.GeneratedFB.GUID}\n" +
+                    "Generated FBs:\n" + string.Join("\n", generatedNames) + "\n\n" +
                     "Files: .fbt, .composite.offline.xml, .doc.xml\n" +
-                    $"Location: {result.OutputPath}\n" +
-                    $"Deployed: {result.DeployPath}\n\n" +
-                    "",
+                    "Next: Open EAE → Refresh → Verify build",
                     "Generation Complete",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
 
-                lblStatus.Text = $"Generated: {result.GeneratedFB.FBName}";
+                lblStatus.Text = $"Generated {generatedNames.Count} component(s)";
             }
             catch (Exception ex)
             {
