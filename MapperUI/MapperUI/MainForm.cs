@@ -61,19 +61,16 @@ namespace MapperUI
                 var templateSelector = new TemplateSelector();
                 var template = templateSelector.SelectTemplate(component);
 
-                if (template == null) continue;
+                if (template == null || !TemplateMatchesStateCount(component, template))
+                {
+                    continue;
+                }
 
                 var newGuid = Guid.NewGuid().ToString();
+                var componentGuid = Guid.NewGuid().ToString();
                 var initialState = component.States.FirstOrDefault(s => s.InitialState);
 
                 // Color-coded rows
-                AddMappingRow(
-                    "SystemID",
-                    "GUID",
-                    "TRANSLATED",
-                    $"GUID: {newGuid}",
-                    validated: true,
-                    Color.LightGreen);
                 AddMappingRow(
                     $"<Name>{component.Name}</Name>",
                     $"FBType Name=\"{template.ComponentType}_{component.Name}\"",
@@ -89,12 +86,12 @@ namespace MapperUI
                     validated: true,
                     Color.LightGreen);
                 AddMappingRow(
-                    "<ComponentID>...",
-                    "Not used in IEC 61499",
-                    "DISCARDED",
-                    "VueOne metadata only",
-                    validated: false,
-                    Color.LightSalmon);
+                    "<ComponentID>",
+                    $"GUID: {componentGuid}",
+                    "TRANSLATED",
+                    "Component ID mapped to GUID",
+                    validated: true,
+                    Color.LightGreen);
                 AddMappingRow(
                     "Version=\"1.0.0\"",
                     "VueOne metadata only",
@@ -240,13 +237,17 @@ namespace MapperUI
         {
             if (_loadedComponents.Count == 0)
             {
-                lblDetectedInfo.Text = string.Empty;
+                lblDetectedType.Text = "-";
+                lblDetectedName.Text = "-";
+                lblDetectedStates.Text = "-";
+                lblValidationStatus.Text = "-";
                 return;
             }
 
             var firstComponent = _loadedComponents[0];
-            lblDetectedInfo.Text =
-                $"Detected: {firstComponent.Type} its Name: {firstComponent.Name} and number of states {firstComponent.States.Count}";
+            lblDetectedType.Text = firstComponent.Type;
+            lblDetectedName.Text = firstComponent.Name;
+            lblDetectedStates.Text = firstComponent.States.Count.ToString();
         }
         private void AddMappingRow(
             string vueOne,
@@ -291,12 +292,13 @@ namespace MapperUI
                 foreach (var component in _loadedComponents)
                 {
                     var template = templateSelector.SelectTemplate(component);
-                    string function = template?.TemplateName ?? "No Template";
+                    bool templateMatches = template != null && TemplateMatchesStateCount(component, template);
+                    string templateName = templateMatches ? template!.TemplateName : "No Template Found";
 
-                    dgvComponents.Rows.Add(component.Name, component.Type, function);
+                    dgvComponents.Rows.Add(component.Name, component.Type, templateName);
 
                     // Only validate if we have a template for it
-                    if (template != null)
+                    if (templateMatches)
                     {
                         var validationResult = validator.Validate(component);
 
@@ -305,17 +307,25 @@ namespace MapperUI
                             allValid = false;
                         }
                     }
+                    else
+                    {
+                        allValid = false;
+                    }
                 }
 
                 if (allValid)
                 {
                     btnGenerate.Enabled = true;
                     lblStatus.Text = "Validation passed";
+                    lblValidationStatus.Text = "PASSED";
+                    lblValidationStatus.ForeColor = Color.Green;
                 }
                 else
                 {
                     btnGenerate.Enabled = false;
                     lblStatus.Text = "Validation failed";
+                    lblValidationStatus.Text = "FAILED";
+                    lblValidationStatus.ForeColor = Color.Red;
                 }
 
                 UpdateDetectedInfo();
@@ -330,6 +340,21 @@ namespace MapperUI
                 btnGenerate.Enabled = false;
                 lblStatus.Text = "Error";
             }
+        }
+
+        private bool TemplateMatchesStateCount(VueOneComponent component, FBTemplate template)
+        {
+            if (component.Type == "Actuator" && template.ExpectedStateCount > 0)
+            {
+                return component.States.Count == template.ExpectedStateCount;
+            }
+
+            if (component.Type == "Sensor")
+            {
+                return component.States.Count == 2;
+            }
+
+            return true;
         }
 
         private async void btnGenerate_Click(object sender, EventArgs e)
@@ -375,7 +400,6 @@ namespace MapperUI
                     return;
                 }
 
-                // NULL CHECK
                 if (result.GeneratedFB == null)
                 {
                     MessageBox.Show(
@@ -393,7 +417,7 @@ namespace MapperUI
                     "Files: .fbt, .composite.offline.xml, .doc.xml\n" +
                     $"Location: {result.OutputPath}\n" +
                     $"Deployed: {result.DeployPath}\n\n" +
-                    "Next: Open EAE → Refresh → Verify build",
+                    "",
                     "Generation Complete",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
