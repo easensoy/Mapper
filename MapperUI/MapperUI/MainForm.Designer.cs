@@ -109,14 +109,13 @@ namespace MapperUI
             this.lblVueOneModel.Name = "lblVueOneModel";
             this.lblVueOneModel.Size = new System.Drawing.Size(100, 15);
             this.lblVueOneModel.TabIndex = 1;
-            this.lblVueOneModel.Text = "vueOne Model:";
+            this.lblVueOneModel.Text = "VueOne Model:";
 
             // txtModelPath
             this.txtModelPath.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
             | System.Windows.Forms.AnchorStyles.Right)));
             this.txtModelPath.Location = new System.Drawing.Point(118, 34);
             this.txtModelPath.Name = "txtModelPath";
-            this.txtModelPath.ReadOnly = true;
             this.txtModelPath.Size = new System.Drawing.Size(1040, 23);
             this.txtModelPath.TabIndex = 2;
 
@@ -144,18 +143,16 @@ namespace MapperUI
             this.btnGenerate.UseVisualStyleBackColor = false;
             this.btnGenerate.Click += new System.EventHandler(this.btnGenerate_Click);
 
-            // In InitializeComponent():
             this.btnMappingRules = new System.Windows.Forms.Button();
-
-            this.btnMappingRules.Location = new System.Drawing.Point(1075, 75);
+            this.btnMappingRules.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.btnMappingRules.Location = new System.Drawing.Point(1048, 33);
             this.btnMappingRules.Name = "btnMappingRules";
-            this.btnMappingRules.Size = new System.Drawing.Size(120, 30);
-            this.btnMappingRules.TabIndex = 3;
+            this.btnMappingRules.Size = new System.Drawing.Size(120, 25);
+            this.btnMappingRules.TabIndex = 5;
             this.btnMappingRules.Text = "Mapping Rules";
             this.btnMappingRules.UseVisualStyleBackColor = true;
             this.btnMappingRules.Click += new System.EventHandler(this.btnMappingRules_Click);
 
-            this.Controls.Add(this.btnMappingRules);
             // grpValidation
             this.grpValidation.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left)
             | System.Windows.Forms.AnchorStyles.Right)));
@@ -381,7 +378,7 @@ namespace MapperUI
             this.grpInputs.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom)
             | System.Windows.Forms.AnchorStyles.Left)));
             this.grpInputs.Controls.Add(this.dgvInputs);
-            this.grpInputs.Location = new System.Drawing.Point(15, 10);
+            this.grpInputs.Location = new System.Drawing.Point(10, 10);
             this.grpInputs.Name = "grpInputs";
             this.grpInputs.Size = new System.Drawing.Size(385, 345);
             this.grpInputs.TabIndex = 0;
@@ -433,6 +430,7 @@ namespace MapperUI
             this.Controls.Add(this.grpMappingInfo);
             this.Controls.Add(this.grpValidation);
             this.Controls.Add(this.btnGenerate);
+            this.Controls.Add(this.btnMappingRules);
             this.Controls.Add(this.btnBrowse);
             this.Controls.Add(this.txtModelPath);
             this.Controls.Add(this.lblVueOneModel);
