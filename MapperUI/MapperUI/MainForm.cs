@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 using CodeGen.IO;
@@ -66,12 +67,13 @@ namespace MapperUI
                     continue;
                 }
 
+                var templateBaseName = Path.GetFileNameWithoutExtension(template.TemplateName);
                 var componentGuid = Guid.NewGuid().ToString();
                 var initialState = component.States.FirstOrDefault(s => s.InitialState);
 
                 AddMappingRow(
                     $"<Name>{component.Name}</Name>",
-                    $"FBType Name=\"{template.ComponentType}_{component.Name}\"",
+                    $"FBType Name=\"{templateBaseName}_{component.Name}\"",
                     "TRANSLATED",
                     "Component naming convention",
                     validated: true,
@@ -186,7 +188,7 @@ namespace MapperUI
                         "FBNetwork (complete)",
                         "FB1:FiveStateActuator, IThis:HMI, Inputs/Output symlinks",
                         "HARDCODED",
-                        "Template FB network (basic actuator)",
+                        "Template FB network (composite wrapper)",
                         validated: true,
                         Color.LightGray);
                 }
@@ -397,7 +399,7 @@ namespace MapperUI
 
                 MessageBox.Show(
                     "Generated FBs:\n" + string.Join("\n", generatedNames) + "\n\n" +
-                    "Files: .fbt, .composite.offline.xml, .doc.xml\n" +
+                    "Files: .fbt, .composite.offline.xml, .doc.xml, .meta.xml\n" +
                     "Next: Open EAE → Refresh → Verify build",
                     "Generation Complete",
                     MessageBoxButtons.OK,
