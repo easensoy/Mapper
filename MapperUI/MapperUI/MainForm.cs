@@ -78,6 +78,7 @@ namespace MapperUI
                     "Component naming convention",
                     validated: true,
                     Color.LightGreen);
+
                 AddMappingRow(
                     $"<Type>{component.Type}</Type>",
                     $"Template: {template.TemplateName}",
@@ -85,6 +86,7 @@ namespace MapperUI
                     "Template selection",
                     validated: true,
                     Color.LightGreen);
+
                 AddMappingRow(
                     "<ComponentID>",
                     $"GUID: {componentGuid}",
@@ -92,6 +94,7 @@ namespace MapperUI
                     "Component ID mapped to GUID",
                     validated: true,
                     Color.LightGreen);
+
                 AddMappingRow(
                     "Version=\"1.0.0\"",
                     "VueOne metadata only",
@@ -128,6 +131,7 @@ namespace MapperUI
                         "State index mapping",
                         validated: true,
                         Color.LightGreen);
+
                     AddMappingRow(
                         "<Name>ReturnedHome,Advancing...</Name>",
                         "ECState Name in Five_State_Actuator.fbt",
@@ -135,6 +139,7 @@ namespace MapperUI
                         "State names become ECState nodes",
                         validated: true,
                         Color.LightCyan);
+
                     AddMappingRow(
                         "<Time>1000</Time>",
                         "VueOne simulation timing",
@@ -142,6 +147,7 @@ namespace MapperUI
                         "Timing not used in IEC 61499",
                         validated: false,
                         Color.LightSalmon);
+
                     AddMappingRow(
                         "<Position>118</Position>",
                         "PLC setpoint, not FB logic",
@@ -149,6 +155,7 @@ namespace MapperUI
                         "Position not encoded in FB",
                         validated: false,
                         Color.LightSalmon);
+
                     AddMappingRow(
                         "<Counter>1</Counter>",
                         "VueOne counting feature",
@@ -156,6 +163,7 @@ namespace MapperUI
                         "Counter not used",
                         validated: false,
                         Color.LightSalmon);
+
                     AddMappingRow(
                         "<StaticState>True/False</StaticState>",
                         "Motion state indicator",
@@ -163,6 +171,7 @@ namespace MapperUI
                         "Static state becomes motion flag",
                         validated: true,
                         Color.LightCyan);
+
                     AddMappingRow(
                         "<Transition>...</Transition>",
                         "Phase 2: Auto-wiring",
@@ -170,6 +179,7 @@ namespace MapperUI
                         "Not yet implemented",
                         validated: false,
                         Color.LightSalmon);
+
                     AddMappingRow(
                         "Sensor feedback (athome, atwork)",
                         "Template: '${PATH}athome', '${PATH}atwork'",
@@ -177,6 +187,7 @@ namespace MapperUI
                         "Feedback naming convention",
                         validated: true,
                         Color.LightGray);
+
                     AddMappingRow(
                         "InterfaceList (complete)",
                         "INIT, pst_event, action_event, tohome...",
@@ -184,6 +195,7 @@ namespace MapperUI
                         "Template interface definition",
                         validated: true,
                         Color.LightGray);
+
                     AddMappingRow(
                         "FBNetwork (complete)",
                         "FB1:FiveStateActuator, IThis:HMI, Inputs/Output symlinks",
@@ -201,6 +213,7 @@ namespace MapperUI
                         "Sensor state count",
                         validated: true,
                         Color.LightGreen);
+
                     AddMappingRow(
                         "Sensor input",
                         "FB2:SYMLINKMULTIVARDST (Input)",
@@ -208,6 +221,7 @@ namespace MapperUI
                         "Template input symlink",
                         validated: true,
                         Color.LightGray);
+
                     AddMappingRow(
                         "Status output",
                         "FB1.Status → Status",
@@ -215,6 +229,7 @@ namespace MapperUI
                         "Sensor status output mapping",
                         validated: true,
                         Color.LightGreen);
+
                     AddMappingRow(
                         "InterfaceList (complete)",
                         "INIT/INITO/pst_out, Status",
@@ -222,6 +237,7 @@ namespace MapperUI
                         "Template interface definition",
                         validated: true,
                         Color.LightGray);
+
                     AddMappingRow(
                         "FBNetwork (complete)",
                         "FB1:Sensor_Bool, FB2:Input symlink",
