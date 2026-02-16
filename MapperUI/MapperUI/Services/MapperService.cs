@@ -36,7 +36,7 @@ namespace MapperUI.Services
                     return new MapperResult
                     {
                         Success = false,
-                        ComponentName = component?.Name,
+                        ComponentName = component != null ? component.Name : string.Empty,
                         ErrorMessage = ex.Message
                     };
                 }
