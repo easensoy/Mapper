@@ -98,7 +98,12 @@ namespace CodeGen.Validation
             }
 
             if (!hasInitialState)
-                result.AddError("No state marked as Initial_State");
+            {
+                if (component.Type == "Sensor")
+                    result.AddWarning("Sensors are reactive - no initial state required");
+                else
+                    result.AddError("No state marked as Initial_State");
+            }
         }
     }
 
