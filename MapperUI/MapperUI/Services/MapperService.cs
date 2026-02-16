@@ -118,13 +118,54 @@ namespace MapperUI.Services
             File.WriteAllText(Path.Combine(config.OutputDirectory, generatedFB.DocFile), generator.GetDocXml(generatedFB.FBName));
             File.WriteAllText(Path.Combine(config.OutputDirectory, generatedFB.MetaFile), generator.GetMetaXml(generatedFB.FBName, generatedFB.GUID));
 
-            if (Directory.Exists(config.EAEDeployPath))
+            if (!Directory.Exists(config.EAEDeployPath))
             {
-                File.Copy(fbtPath, Path.Combine(config.EAEDeployPath, generatedFB.FbtFile), overwrite: true);
-                File.Copy(
-                    Path.Combine(config.OutputDirectory, generatedFB.MetaFile),
-                    Path.Combine(config.EAEDeployPath, generatedFB.MetaFile),
-                    overwrite: true);
+                return new MapperResult
+                {
+                    Success = false,
+                    ComponentName = component.Name,
+                    ValidationResult = validationResult,
+                    ErrorMessage = $"EAE deploy path not found: {config.EAEDeployPath}\nGenerated files are in: {config.OutputDirectory}"
+                };
+            }
+
+            File.Copy(fbtPath, Path.Combine(config.EAEDeployPath, generatedFB.FbtFile), overwrite: true);
+            File.Copy(
+                Path.Combine(config.OutputDirectory, generatedFB.MetaFile),
+                Path.Combine(config.EAEDeployPath, generatedFB.MetaFile),
+                overwrite: true);
+
+            // Sensor_Bool_CAT depends on Sensor_Bool.fbt as its inner Basic FB type.
+            // Copy Sensor_Bool.fbt and Sensor_Bool.meta.xml from the Station1 template
+            // source into the EAEDeployPath so EAE can resolve the type on load.
+            // Sensor_Bool.fbt lives one directory above Sensor_Bool_CAT\Sensor_Bool_CAT.fbt.
+            if (string.Equals(component.Type, "Sensor", StringComparison.OrdinalIgnoreCase))
+            {
+                var sensorTemplateFolderParent = Path.GetDirectoryName(Path.GetDirectoryName(config.SensorTemplatePath));
+
+                if (!string.IsNullOrWhiteSpace(sensorTemplateFolderParent))
+                {
+                    var sensorBoolFbtSource = Path.Combine(sensorTemplateFolderParent, "Sensor_Bool.fbt");
+                    var sensorBoolMetaSource = Path.Combine(sensorTemplateFolderParent, "Sensor_Bool.meta.xml");
+
+                    if (File.Exists(sensorBoolFbtSource))
+                    {
+                        var sensorBoolFbtDest = Path.Combine(config.EAEDeployPath, "Sensor_Bool.fbt");
+                        if (!File.Exists(sensorBoolFbtDest))
+                        {
+                            File.Copy(sensorBoolFbtSource, sensorBoolFbtDest);
+                        }
+                    }
+
+                    if (File.Exists(sensorBoolMetaSource))
+                    {
+                        var sensorBoolMetaDest = Path.Combine(config.EAEDeployPath, "Sensor_Bool.meta.xml");
+                        if (!File.Exists(sensorBoolMetaDest))
+                        {
+                            File.Copy(sensorBoolMetaSource, sensorBoolMetaDest);
+                        }
+                    }
+                }
             }
 
             return new MapperResult
