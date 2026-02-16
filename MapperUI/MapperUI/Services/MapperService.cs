@@ -29,7 +29,6 @@ namespace MapperUI.Services
 
                     var config = LoadConfig();
                     var templatePath = ResolveTemplatePath(component, config);
-
                     return ProcessComponent(component, templatePath, config);
                 }
                 catch (Exception ex)
@@ -90,12 +89,13 @@ namespace MapperUI.Services
             }
 
             var templateContent = File.ReadAllText(templatePath);
+            var templateBaseName = Path.GetFileNameWithoutExtension(templatePath);
 
             var generator = new FBGenerator();
             var generatedFB = generator.GenerateFromTemplate(
                 component,
                 templateContent,
-                Path.GetFileNameWithoutExtension(templatePath));
+                templateBaseName);
 
             if (!generatedFB.IsValid)
             {
@@ -110,18 +110,20 @@ namespace MapperUI.Services
 
             Directory.CreateDirectory(config.OutputDirectory);
 
-            var modifiedContent = generator.GetModifiedTemplateContent(component, templateContent);
+            var modifiedContent = generator.GetModifiedTemplateContent(component, templateContent, templateBaseName);
             var fbtPath = Path.Combine(config.OutputDirectory, generatedFB.FbtFile);
 
             File.WriteAllText(fbtPath, modifiedContent);
             File.WriteAllText(Path.Combine(config.OutputDirectory, generatedFB.CompositeFile), generator.GetCompositeXml());
             File.WriteAllText(Path.Combine(config.OutputDirectory, generatedFB.DocFile), generator.GetDocXml(generatedFB.FBName));
+            File.WriteAllText(Path.Combine(config.OutputDirectory, generatedFB.MetaFile), generator.GetMetaXml(generatedFB.FBName, generatedFB.GUID));
 
             if (Directory.Exists(config.EAEDeployPath))
             {
+                File.Copy(fbtPath, Path.Combine(config.EAEDeployPath, generatedFB.FbtFile), overwrite: true);
                 File.Copy(
-                    fbtPath,
-                    Path.Combine(config.EAEDeployPath, generatedFB.FbtFile),
+                    Path.Combine(config.OutputDirectory, generatedFB.MetaFile),
+                    Path.Combine(config.EAEDeployPath, generatedFB.MetaFile),
                     overwrite: true);
             }
 
