@@ -17,6 +17,7 @@
         public string FbtFile { get; set; } = string.Empty;
         public string CompositeFile { get; set; } = string.Empty;
         public string DocFile { get; set; } = string.Empty;
+        public string MetaFile { get; set; } = string.Empty;
         public bool IsValid { get; set; }
     }
 }
