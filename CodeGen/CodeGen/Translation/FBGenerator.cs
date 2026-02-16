@@ -15,8 +15,8 @@ namespace CodeGen.Translation
                 var doc = XDocument.Parse(templateContent);
                 var fbType = doc.Root ?? throw new Exception("Invalid template XML");
 
-                var baseName = ResolveBaseName(fbType, templateName);
                 var componentToken = SanitizeToken(component.Name);
+                var baseName = ResolveBaseName(templateName, fbType);
                 var newName = $"{baseName}_{componentToken}";
                 var deterministicGuid = BuildDeterministicGuid(newName);
 
@@ -31,6 +31,7 @@ namespace CodeGen.Translation
                     FbtFile = $"{newName}.fbt",
                     CompositeFile = $"{newName}.composite.offline.xml",
                     DocFile = $"{newName}.doc.xml",
+                    MetaFile = $"{newName}.meta.xml",
                     IsValid = true
                 };
             }
@@ -48,9 +49,17 @@ namespace CodeGen.Translation
         {
             var doc = XDocument.Parse(templateContent);
             var fbType = doc.Root ?? throw new Exception("Invalid template XML");
+            var fallbackTemplateName = fbType.Attribute("Name")?.Value ?? "Function_Block";
+            return GetModifiedTemplateContent(component, templateContent, fallbackTemplateName);
+        }
 
-            var baseName = fbType.Attribute("Name")?.Value ?? "Function_Block";
+        public string GetModifiedTemplateContent(VueOneComponent component, string templateContent, string templateName)
+        {
+            var doc = XDocument.Parse(templateContent);
+            var fbType = doc.Root ?? throw new Exception("Invalid template XML");
+
             var componentToken = SanitizeToken(component.Name);
+            var baseName = ResolveBaseName(templateName, fbType);
             var newName = $"{baseName}_{componentToken}";
             var deterministicGuid = BuildDeterministicGuid(newName);
 
@@ -79,6 +88,34 @@ namespace CodeGen.Translation
                 </FBTypeDocumentation>";
         }
 
+        public string GetMetaXml(string fbName, string guid)
+        {
+            return $@"<?xml version=""1.0"" encoding=""utf-8""?>
+                <FBTypeMetadata>
+                  <Name>{fbName}</Name>
+                  <Guid>{guid}</Guid>
+                  <Version>1.0.0</Version>
+                  <Classification>Generated/VueOneMapper</Classification>
+                  <GeneratedAt>{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ssZ}</GeneratedAt>
+                </FBTypeMetadata>";
+        }
+
+        private static string ResolveBaseName(string templateName, XElement fbType)
+        {
+            if (!string.IsNullOrWhiteSpace(templateName))
+            {
+                return templateName;
+            }
+
+            var fromTemplate = fbType.Attribute("Name")?.Value;
+            if (!string.IsNullOrWhiteSpace(fromTemplate))
+            {
+                return fromTemplate;
+            }
+
+            return "Function_Block";
+        }
+
         private static void UpdateFBAttributes(XElement fbType, string newName, string componentName, string guid)
         {
             fbType.SetAttributeValue("Name", newName);
@@ -92,22 +129,6 @@ namespace CodeGen.Translation
                 versionInfo.SetAttributeValue("Date", DateTime.Now.ToString("M/d/yyyy"));
                 versionInfo.SetAttributeValue("Remarks", $"Generated from VueOne component: {componentName}");
             }
-        }
-
-        private static string ResolveBaseName(XElement fbType, string templateName)
-        {
-            var fromTemplate = fbType.Attribute("Name")?.Value;
-            if (!string.IsNullOrWhiteSpace(fromTemplate))
-            {
-                return fromTemplate;
-            }
-
-            if (!string.IsNullOrWhiteSpace(templateName))
-            {
-                return templateName;
-            }
-
-            return "Function_Block";
         }
 
         private static string SanitizeToken(string value)
