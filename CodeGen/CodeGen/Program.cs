@@ -7,7 +7,7 @@ using CodeGen.Validation;
 
 namespace CodeGen
 {
-    class Program
+    internal static class Program
     {
         static void Main(string[] args)
         {
@@ -20,15 +20,12 @@ namespace CodeGen
             {
                 var config = MapperConfig.Load();
 
-                // Process Actuator
                 ProcessComponent(config.ActuatorXmlPath, config.ActuatorTemplatePath,
                                 "Five_State_Actuator", config);
 
-                // Process Hopper Sensor
                 ProcessComponent(config.SensorXmlPathHopper, config.SensorTemplatePath,
                                 "Sensor_Bool", config);
 
-                // Process Checker Sensor
                 ProcessComponent(config.SensorXmlPathChecker, config.SensorTemplatePath,
                                 "Sensor_Bool", config);
 
@@ -44,8 +41,8 @@ namespace CodeGen
             }
         }
 
-        static void ProcessComponent(string xmlPath, string templatePath,
-                                     string templateBaseName, MapperConfig config)
+        private static void ProcessComponent(string xmlPath, string templatePath,
+                                             string templateBaseName, MapperConfig config)
         {
             Console.WriteLine($"\n{new string('=', 60)}");
             Console.WriteLine($"Processing: {Path.GetFileName(xmlPath)}");
@@ -69,7 +66,9 @@ namespace CodeGen
             }
 
             if (!File.Exists(templatePath))
+            {
                 throw new FileNotFoundException($"Template not found: {templatePath}");
+            }
 
             var templateContent = File.ReadAllText(templatePath);
             var generator = new FBGenerator();
@@ -85,15 +84,16 @@ namespace CodeGen
 
             Directory.CreateDirectory(config.OutputDirectory);
 
-            var modifiedContent = generator.GetModifiedTemplateContent(component, templateContent);
+            var modifiedContent = generator.GetModifiedTemplateContent(component, templateContent, templateBaseName);
             File.WriteAllText(Path.Combine(config.OutputDirectory, generatedFB.FbtFile), modifiedContent);
             File.WriteAllText(Path.Combine(config.OutputDirectory, generatedFB.CompositeFile), generator.GetCompositeXml());
             File.WriteAllText(Path.Combine(config.OutputDirectory, generatedFB.DocFile), generator.GetDocXml(generatedFB.FBName));
+            File.WriteAllText(Path.Combine(config.OutputDirectory, generatedFB.MetaFile), generator.GetMetaXml(generatedFB.FBName, generatedFB.GUID));
 
             Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine($"✓ Generated: {generatedFB.FBName}");
             Console.WriteLine($"✓ GUID: {generatedFB.GUID}");
-            Console.WriteLine($"✓ Files: {generatedFB.FbtFile}");
+            Console.WriteLine($"✓ Files: {generatedFB.FbtFile}, {generatedFB.CompositeFile}, {generatedFB.DocFile}, {generatedFB.MetaFile}");
             Console.ForegroundColor = ConsoleColor.White;
         }
     }
