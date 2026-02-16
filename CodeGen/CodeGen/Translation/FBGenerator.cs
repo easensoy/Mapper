@@ -104,16 +104,25 @@ namespace CodeGen.Translation
         {
             if (!string.IsNullOrWhiteSpace(templateName))
             {
-                return templateName;
+                return StripCatSuffix(templateName);
             }
 
             var fromTemplate = fbType.Attribute("Name")?.Value;
             if (!string.IsNullOrWhiteSpace(fromTemplate))
             {
-                return fromTemplate;
+                return StripCatSuffix(fromTemplate);
             }
 
             return "Function_Block";
+        }
+
+        private static string StripCatSuffix(string name)
+        {
+            if (name.EndsWith("_CAT", StringComparison.OrdinalIgnoreCase))
+            {
+                return name[..^4];
+            }
+            return name;
         }
 
         private static void UpdateFBAttributes(XElement fbType, string newName, string componentName, string guid)
@@ -156,3 +165,4 @@ namespace CodeGen.Translation
         }
     }
 }
+ 
