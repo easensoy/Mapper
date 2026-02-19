@@ -9,6 +9,7 @@ namespace CodeGen.Models
         public string Description { get; set; } = string.Empty;
         public string Type { get; set; } = string.Empty;
         public List<VueOneState> States { get; set; } = new();
+        public string NameTag { get; set; } = "Name";
     }
 
     public class VueOneState
