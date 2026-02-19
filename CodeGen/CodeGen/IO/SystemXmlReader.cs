@@ -53,7 +53,7 @@ namespace CodeGen.IO
                     {
                         try
                         {
-                            var component = ParseComponent(componentElement, true);
+                            var component = ParseComponent(componentElement, isSystemFile: true);
 
                             if (component.Type != "NonControl")
                             {
@@ -73,7 +73,7 @@ namespace CodeGen.IO
 
                     if (componentElement != null)
                     {
-                        components.Add(ParseComponent(componentElement, false));
+                        components.Add(ParseComponent(componentElement, isSystemFile: false));
                     }
                 }
             }
@@ -87,9 +87,11 @@ namespace CodeGen.IO
 
         private VueOneComponent ParseComponent(XElement componentElement, bool isSystemFile)
         {
-            var nameElement = isSystemFile ? "n" : "Name";
+            // System files use <n> for the component name; component files use <Name>.
+            // NameTag is stored on the model so the UI can display the exact source tag.
+            var nameTag = isSystemFile ? "n" : "Name";
 
-            var name = GetElementValue(componentElement, nameElement);
+            var name = GetElementValue(componentElement, nameTag);
 
             if (string.IsNullOrEmpty(name))
             {
@@ -109,7 +111,8 @@ namespace CodeGen.IO
                 ComponentID = GetElementValue(componentElement, "ComponentID"),
                 Name = name,
                 Description = GetElementValue(componentElement, "Description"),
-                Type = GetElementValue(componentElement, "Type")
+                Type = GetElementValue(componentElement, "Type"),
+                NameTag = nameTag
             };
 
             foreach (var stateElement in componentElement.Elements().Where(e => e.Name.LocalName == "State"))
