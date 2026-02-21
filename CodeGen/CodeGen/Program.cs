@@ -13,21 +13,18 @@ namespace CodeGen
         {
             Console.Clear();
             Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine("VueOne to IEC 61499 Mapper - Tuesday Demo");
+            Console.WriteLine("VueOne to IEC 61499 Mapper");
             Console.ForegroundColor = ConsoleColor.White;
 
             try
             {
                 var config = MapperConfig.Load();
+                var actuatorBaseName = Path.GetFileNameWithoutExtension(config.ActuatorTemplatePath);
+                var sensorBaseName = StripCatSuffix(Path.GetFileNameWithoutExtension(config.SensorTemplatePath));
 
-                ProcessComponent(config.ActuatorXmlPath, config.ActuatorTemplatePath,
-                                "Five_State_Actuator", config);
-
-                ProcessComponent(config.SensorXmlPathHopper, config.SensorTemplatePath,
-                                "Sensor_Bool", config);
-
-                ProcessComponent(config.SensorXmlPathChecker, config.SensorTemplatePath,
-                                "Sensor_Bool", config);
+                ProcessComponent(config.ActuatorXmlPath, config.ActuatorTemplatePath, actuatorBaseName, config);
+                ProcessComponent(config.SensorXmlPathHopper, config.SensorTemplatePath, sensorBaseName, config);
+                ProcessComponent(config.SensorXmlPathChecker, config.SensorTemplatePath, sensorBaseName, config);
 
                 Console.ForegroundColor = ConsoleColor.Green;
                 Console.WriteLine("\n✓ All components generated successfully!");
@@ -40,6 +37,9 @@ namespace CodeGen
                 Console.ForegroundColor = ConsoleColor.White;
             }
         }
+
+        private static string StripCatSuffix(string name) =>
+            name.EndsWith("_CAT", StringComparison.OrdinalIgnoreCase) ? name[..^4] : name;
 
         private static void ProcessComponent(string xmlPath, string templatePath,
                                              string templateBaseName, MapperConfig config)
