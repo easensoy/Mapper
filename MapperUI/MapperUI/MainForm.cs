@@ -74,6 +74,11 @@ namespace MapperUI
                     ? template.TemplateName
                     : resolvedTemplateName;
                 var templateBaseName = Path.GetFileNameWithoutExtension(templateNameToShow);
+                if (string.Equals(component.Type, "Sensor", StringComparison.OrdinalIgnoreCase)
+                    && templateBaseName.EndsWith("_CAT", StringComparison.OrdinalIgnoreCase))
+                {
+                    templateBaseName = templateBaseName[..^4];
+                }
                 var isCatSensorTemplate = string.Equals(templateNameToShow, "Sensor_Bool_CAT.fbt", StringComparison.OrdinalIgnoreCase);
                 var componentGuid = Guid.NewGuid().ToString();
                 var initialState = component.States.FirstOrDefault(s => s.InitialState);
