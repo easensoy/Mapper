@@ -37,7 +37,6 @@ namespace CodeGen.Configuration
 
             return config;
         }
-
         private static MapperConfig CreateDefault()
         {
             return new MapperConfig
@@ -45,10 +44,11 @@ namespace CodeGen.Configuration
                 ActuatorXmlPath = @"C:\VueOne\component\Pusher\Control.xml",
                 SensorXmlPathHopper = @"C:\VueOne\component\Part_In_Hopper\Control.xml",
                 SensorXmlPathChecker = @"C:\VueOne\component\Part_In_Checker_\Control.xml",
-                ActuatorTemplatePath = @"C:\SMC_Rig_Expo_20260112-165857725.sln\IEC61499\Five_State_Actuator.fbt",
+                // FIX: was Five_State_Actuator.fbt (non-CAT). Must point to the CAT template subfolder.
+                ActuatorTemplatePath = @"C:\SMC_Rig_Expo_20260112-165857725.sln\IEC61499\Five_State_Actuator_CAT\Five_State_Actuator_CAT.fbt",
                 SensorTemplatePath = @"C:\Station1 - Sensor and FiveStateActuator with symbolic links_20260203-120117390.sln (1)\IEC61499\Sensor_Bool_CAT\Sensor_Bool_CAT.fbt",
                 OutputDirectory = "Output",
-                EAEDeployPath = @"C:\Station1 - Sensor and FiveStateActuator with symbolic links_20260203-120117390.sln (1)\IEC61499"
+                EAEDeployPath = @"C:\SMC_Rig_Expo_20260112-165857725.sln\IEC61499"
             };
         }
 
