@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Xml.Linq;
@@ -8,6 +10,16 @@ namespace CodeGen.Translation
 {
     public class FBGenerator
     {
+        private static readonly string[] CatCompanionSuffixes =
+        {
+            ".cfg",
+            "_CAT.offline.xml",
+            "_CAT.opcua.xml",
+            "_HMI.offline.xml",
+            "_HMI.opcua.xml",
+            ".dfbproj"
+        };
+
         public GeneratedFB GenerateFromTemplate(VueOneComponent component, string templateContent, string templateName)
         {
             try
@@ -76,6 +88,51 @@ namespace CodeGen.Translation
                 </CompositeFBTypeCompileInfo>";
         }
 
+        public string ResolveCompositeXml(string templatePath)
+        {
+            var templateBaseName = Path.GetFileNameWithoutExtension(templatePath);
+            var templateDir = Path.GetDirectoryName(templatePath) ?? string.Empty;
+            var companionComposite = Path.Combine(templateDir, $"{templateBaseName}.composite.offline.xml");
+
+            return File.Exists(companionComposite)
+                ? File.ReadAllText(companionComposite)
+                : GetCompositeXml();
+        }
+
+        public IReadOnlyList<string> CopyCatCompanionFiles(string templatePath, string outputDirectory, string generatedFbName)
+        {
+            var copiedFiles = new List<string>();
+            var templateBaseName = Path.GetFileNameWithoutExtension(templatePath);
+            var templateDir = Path.GetDirectoryName(templatePath) ?? string.Empty;
+
+            foreach (var suffix in CatCompanionSuffixes)
+            {
+                var sourcePath = Path.Combine(templateDir, $"{templateBaseName}{suffix}");
+                if (!File.Exists(sourcePath))
+                {
+                    continue;
+                }
+
+                var destinationFileName = $"{generatedFbName}{suffix}";
+                var destinationPath = Path.Combine(outputDirectory, destinationFileName);
+
+                if (suffix.Equals(".cfg", StringComparison.OrdinalIgnoreCase))
+                {
+                    var cfgContent = File.ReadAllText(sourcePath);
+                    cfgContent = cfgContent.Replace(templateBaseName, generatedFbName, StringComparison.Ordinal);
+                    File.WriteAllText(destinationPath, cfgContent);
+                }
+                else
+                {
+                    File.Copy(sourcePath, destinationPath, overwrite: true);
+                }
+
+                copiedFiles.Add(destinationFileName);
+            }
+
+            return copiedFiles;
+        }
+
         public string GetDocXml(string fbName)
         {
             return $@"<?xml version=""1.0"" encoding=""utf-8""?>
@@ -104,25 +161,16 @@ namespace CodeGen.Translation
         {
             if (!string.IsNullOrWhiteSpace(templateName))
             {
-                return StripCatSuffix(templateName);
+                return templateName;
             }
 
             var fromTemplate = fbType.Attribute("Name")?.Value;
             if (!string.IsNullOrWhiteSpace(fromTemplate))
             {
-                return StripCatSuffix(fromTemplate);
+                return fromTemplate;
             }
 
             return "Function_Block";
-        }
-
-        private static string StripCatSuffix(string name)
-        {
-            if (name.EndsWith("_CAT", StringComparison.OrdinalIgnoreCase))
-            {
-                return name[..^4];
-            }
-            return name;
         }
 
         private static void UpdateFBAttributes(XElement fbType, string newName, string componentName, string guid)
@@ -165,4 +213,3 @@ namespace CodeGen.Translation
         }
     }
 }
- 
