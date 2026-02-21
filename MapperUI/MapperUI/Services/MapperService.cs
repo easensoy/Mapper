@@ -89,13 +89,14 @@ namespace MapperUI.Services
             }
 
             var templateContent = File.ReadAllText(templatePath);
-            var templateBaseName = Path.GetFileNameWithoutExtension(templatePath);
+            var rawName = Path.GetFileNameWithoutExtension(templatePath);
+            var templateBaseName = string.Equals(component.Type, "Sensor", StringComparison.OrdinalIgnoreCase)
+                && rawName.EndsWith("_CAT", StringComparison.OrdinalIgnoreCase)
+                ? rawName[..^4]
+                : rawName;
 
             var generator = new FBGenerator();
-            var generatedFB = generator.GenerateFromTemplate(
-                component,
-                templateContent,
-                templateBaseName);
+            var generatedFB = generator.GenerateFromTemplate(component, templateContent, templateBaseName);
 
             if (!generatedFB.IsValid)
             {
