@@ -1,6 +1,8 @@
-﻿using System;
+﻿// CodeGen/CodeGen/Translation/FBGenerator.cs
+using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Xml.Linq;
@@ -52,7 +54,6 @@ namespace CodeGen.Translation
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine($"\n✗ ERROR during generation: {ex.Message}");
                 Console.ForegroundColor = ConsoleColor.White;
-
                 return new GeneratedFB { IsValid = false };
             }
         }
@@ -109,17 +110,18 @@ namespace CodeGen.Translation
             {
                 var sourcePath = Path.Combine(templateDir, $"{templateBaseName}{suffix}");
                 if (!File.Exists(sourcePath))
-                {
                     continue;
-                }
 
                 var destinationFileName = $"{generatedFbName}{suffix}";
                 var destinationPath = Path.Combine(outputDirectory, destinationFileName);
 
                 if (suffix.Equals(".cfg", StringComparison.OrdinalIgnoreCase))
                 {
-                    var cfgContent = File.ReadAllText(sourcePath);
-                    cfgContent = cfgContent.Replace(templateBaseName, generatedFbName, StringComparison.Ordinal);
+                    // FIX: use XML-aware generation instead of naive string replace.
+                    // The instance .cfg must keep ALL type-folder references intact
+                    // (CATFile, SymbolDefFile, HMIInterface FileName, Symbol paths).
+                    // Only the root Name attribute and Plugin.Value filenames change.
+                    var cfgContent = GenerateCfgForInstance(sourcePath, templateBaseName, generatedFbName);
                     File.WriteAllText(destinationPath, cfgContent);
                 }
                 else
@@ -133,11 +135,65 @@ namespace CodeGen.Translation
             return copiedFiles;
         }
 
+        /// <summary>
+        /// Generates the .cfg for a CAT instance.
+        /// Rule: only the root Name attribute changes to the instance name.
+        /// All CATFile / SymbolDef / HMIInterface / Symbol paths keep pointing to the
+        /// original CAT type folder so EAE can locate the shared type definition.
+        /// Plugin Value paths are rewritten to the flat instance filename
+        /// (no subfolder prefix) since instance files deploy to the IEC61499 root.
+        /// </summary>
+        private static string GenerateCfgForInstance(
+            string sourceCfgPath,
+            string templateBaseName,
+            string generatedFbName)
+        {
+            var doc = XDocument.Load(sourceCfgPath);
+            var root = doc.Root ?? throw new Exception($"Invalid .cfg XML: {sourceCfgPath}");
+
+            // The .cfg uses a default namespace — handle both ns-qualified and bare elements.
+            XNamespace ns = root.GetDefaultNamespace();
+
+            // 1. Change only the Name attribute on the root <CAT> element.
+            //    Every other root attribute (CATFile, SymbolDefFile, SymbolEventFile,
+            //    DesignFile) must keep pointing to the original type folder.
+            var nameAttr = root.Attribute("Name");
+            if (nameAttr != null)
+                nameAttr.Value = generatedFbName;
+
+            // 2. Rewrite Plugin Value attributes.
+            //    Template value:  "Five_State_Actuator_CAT\Five_State_Actuator_CAT_CAT.offline.xml"
+            //    Instance value:  "Five_State_Actuator_CAT_Pusher_CAT.offline.xml"
+            //    Strip the folder prefix; replace templateBaseName with generatedFbName
+            //    in the filename portion only.
+            var pluginElements = root.Elements(ns + "Plugin")
+                .Concat(root.Elements("Plugin"));
+
+            foreach (var plugin in pluginElements)
+            {
+                var valAttr = plugin.Attribute("Value");
+                if (valAttr == null) continue;
+
+                // Strip any folder prefix to get the flat filename.
+                var flatFileName = Path.GetFileName(valAttr.Value);
+
+                // Replace the template base name with the generated instance name.
+                // e.g. "Five_State_Actuator_CAT_CAT.offline.xml"
+                //   → "Five_State_Actuator_CAT_Pusher_CAT.offline.xml"
+                valAttr.Value = flatFileName.Replace(
+                    templateBaseName,
+                    generatedFbName,
+                    StringComparison.Ordinal);
+            }
+
+            return doc.ToString();
+        }
+
         public string GetDocXml(string fbName)
         {
             return $@"<?xml version=""1.0"" encoding=""utf-8""?>
                 <FBTypeDocumentation>
-                  <Name>{fbName}</Name>
+                  <n>{fbName}</n>
                   <Description />
                   <Author>alper_sensoy</Author>
                   <Date>{DateTime.Now:yyyy-MM-dd}</Date>
@@ -149,7 +205,7 @@ namespace CodeGen.Translation
         {
             return $@"<?xml version=""1.0"" encoding=""utf-8""?>
                 <FBTypeMetadata>
-                  <Name>{fbName}</Name>
+                  <n>{fbName}</n>
                   <Guid>{guid}</Guid>
                   <Version>1.0.0</Version>
                   <Classification>Generated/VueOneMapper</Classification>
@@ -157,59 +213,39 @@ namespace CodeGen.Translation
                 </FBTypeMetadata>";
         }
 
+        // ── private helpers ────────────────────────────────────────────────
+
         private static string ResolveBaseName(string templateName, XElement fbType)
         {
             if (!string.IsNullOrWhiteSpace(templateName))
-            {
                 return templateName;
-            }
 
             var fromTemplate = fbType.Attribute("Name")?.Value;
             if (!string.IsNullOrWhiteSpace(fromTemplate))
-            {
                 return fromTemplate;
-            }
 
             return "Function_Block";
         }
+
+        private static string SanitizeToken(string name) =>
+            new string(name.Where(c => char.IsLetterOrDigit(c) || c == '_').ToArray());
 
         private static void UpdateFBAttributes(XElement fbType, string newName, string componentName, string guid)
         {
             fbType.SetAttributeValue("Name", newName);
             fbType.SetAttributeValue("GUID", guid);
-            fbType.SetAttributeValue("Comment", $"Function Block for {componentName}");
-
-            var versionInfo = fbType.Element("VersionInfo");
-            if (versionInfo != null)
-            {
-                versionInfo.SetAttributeValue("Author", "alper_sensoy");
-                versionInfo.SetAttributeValue("Date", DateTime.Now.ToString("M/d/yyyy"));
-                versionInfo.SetAttributeValue("Remarks", $"Generated from VueOne component: {componentName}");
-            }
         }
 
-        private static string SanitizeToken(string value)
+        private static string BuildDeterministicGuid(string name)
         {
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                return "Component";
-            }
-
-            var builder = new StringBuilder(value.Length);
-
-            foreach (var ch in value)
-            {
-                builder.Append(char.IsLetterOrDigit(ch) ? ch : '_');
-            }
-
-            return builder.ToString();
-        }
-
-        private static string BuildDeterministicGuid(string value)
-        {
-            using var md5 = MD5.Create();
-            var hash = md5.ComputeHash(Encoding.UTF8.GetBytes(value));
-            return new Guid(hash).ToString();
+            using var sha = SHA256.Create();
+            var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(name));
+            var b = hash;
+            return $"{b[0]:x2}{b[1]:x2}{b[2]:x2}{b[3]:x2}-" +
+                   $"{b[4]:x2}{b[5]:x2}-" +
+                   $"{b[6]:x2}{b[7]:x2}-" +
+                   $"{b[8]:x2}{b[9]:x2}-" +
+                   $"{b[10]:x2}{b[11]:x2}{b[12]:x2}{b[13]:x2}{b[14]:x2}{b[15]:x2}";
         }
     }
 }
