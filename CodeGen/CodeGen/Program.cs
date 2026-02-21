@@ -86,14 +86,19 @@ namespace CodeGen
 
             var modifiedContent = generator.GetModifiedTemplateContent(component, templateContent, templateBaseName);
             File.WriteAllText(Path.Combine(config.OutputDirectory, generatedFB.FbtFile), modifiedContent);
-            File.WriteAllText(Path.Combine(config.OutputDirectory, generatedFB.CompositeFile), generator.GetCompositeXml());
+            File.WriteAllText(Path.Combine(config.OutputDirectory, generatedFB.CompositeFile), generator.ResolveCompositeXml(templatePath));
             File.WriteAllText(Path.Combine(config.OutputDirectory, generatedFB.DocFile), generator.GetDocXml(generatedFB.FBName));
             File.WriteAllText(Path.Combine(config.OutputDirectory, generatedFB.MetaFile), generator.GetMetaXml(generatedFB.FBName, generatedFB.GUID));
+            var copiedCompanions = generator.CopyCatCompanionFiles(templatePath, config.OutputDirectory, generatedFB.FBName);
 
             Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine($"✓ Generated: {generatedFB.FBName}");
             Console.WriteLine($"✓ GUID: {generatedFB.GUID}");
             Console.WriteLine($"✓ Files: {generatedFB.FbtFile}, {generatedFB.CompositeFile}, {generatedFB.DocFile}, {generatedFB.MetaFile}");
+            if (copiedCompanions.Count > 0)
+            {
+                Console.WriteLine($"✓ CAT Companions: {string.Join(", ", copiedCompanions)}");
+            }
             Console.ForegroundColor = ConsoleColor.White;
         }
     }
