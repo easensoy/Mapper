@@ -60,7 +60,7 @@ namespace CodeGen
             if (!result.IsValid)
             {
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine("Translation REJECTED");
+                Console.WriteLine("TRANSLATION REJECTED");
                 Console.ForegroundColor = ConsoleColor.White;
                 return;
             }
