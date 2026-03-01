@@ -8,6 +8,7 @@ namespace CodeGen.Configuration
     {
         private const string ConfigFileName = "mapper_config.json";
 
+        // ── Phase 1: Generate FB ──────────────────────────────────────────────
         public string ActuatorXmlPath { get; set; } = string.Empty;
         public string SensorXmlPathHopper { get; set; } = string.Empty;
         public string SensorXmlPathChecker { get; set; } = string.Empty;
@@ -15,6 +16,21 @@ namespace CodeGen.Configuration
         public string SensorTemplatePath { get; set; } = string.Empty;
         public string OutputDirectory { get; set; } = string.Empty;
         public string EAEDeployPath { get; set; } = string.Empty;
+
+        // ── Phase 2: Inject System ────────────────────────────────────────────
+        /// <summary>Path to the VueOne System-level Control.xml export.</summary>
+        public string SystemXmlPath { get; set; } = string.Empty;
+
+        /// <summary>Full path to the EAE .syslay file to patch.</summary>
+        public string SyslayPath { get; set; } = string.Empty;
+
+        /// <summary>Full path to the EAE .sysres file to patch.</summary>
+        public string SysresPath { get; set; } = string.Empty;
+
+        /// <summary>Full path to Process1_CAT.fbt – used to verify the type exists in workspace.</summary>
+        public string ProcessCATTemplatePath { get; set; } = string.Empty;
+
+        // ─────────────────────────────────────────────────────────────────────
 
         public static MapperConfig Load()
         {
@@ -31,12 +47,11 @@ namespace CodeGen.Configuration
             var config = JsonSerializer.Deserialize<MapperConfig>(json);
 
             if (config == null)
-            {
                 throw new Exception($"Failed to load config from '{configPath}'");
-            }
 
             return config;
         }
+
         private static MapperConfig CreateDefault()
         {
             return new MapperConfig
@@ -44,21 +59,20 @@ namespace CodeGen.Configuration
                 ActuatorXmlPath = @"C:\VueOne\component\Pusher\Control.xml",
                 SensorXmlPathHopper = @"C:\VueOne\component\Part_In_Hopper\Control.xml",
                 SensorXmlPathChecker = @"C:\VueOne\component\Part_In_Checker_\Control.xml",
-                // FIX: was Five_State_Actuator.fbt (non-CAT). Must point to the CAT template subfolder.
                 ActuatorTemplatePath = @"C:\SMC_Rig_Expo_20260112-165857725.sln\IEC61499\Five_State_Actuator_CAT\Five_State_Actuator_CAT.fbt",
                 SensorTemplatePath = @"C:\Station1 - Sensor and FiveStateActuator with symbolic links_20260203-120117390.sln (1)\IEC61499\Sensor_Bool_CAT\Sensor_Bool_CAT.fbt",
                 OutputDirectory = "Output",
-                EAEDeployPath = @"C:\SMC_Rig_Expo_20260112-165857725.sln\IEC61499"
+                EAEDeployPath = @"C:\SMC_Rig_Expo_20260112-165857725.sln\IEC61499",
+                SystemXmlPath = @"C:\VueOne\system\Control.xml",
+                SyslayPath = @"C:\Station1 - Sensor and FiveStateActuator with symbolic links_20260203-120117390.sln (1)\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000001\00000000-0000-0000-0000-000000000000.syslay",
+                SysresPath = @"C:\Station1 - Sensor and FiveStateActuator with symbolic links_20260203-120117390.sln (1)\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000002\00000000-0000-0000-0000-000000000000.sysres",
+                ProcessCATTemplatePath = @"C:\Station1 - Sensor and FiveStateActuator with symbolic links_20260203-120117390.sln (1)\IEC61499\Process1_CAT\Process1_CAT.fbt"
             };
         }
 
         private static void WriteConfig(string configPath, MapperConfig config)
         {
-            var json = JsonSerializer.Serialize(config, new JsonSerializerOptions
-            {
-                WriteIndented = true
-            });
-
+            var json = JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(configPath, json);
         }
     }
