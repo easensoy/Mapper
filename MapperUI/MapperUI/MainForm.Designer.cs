@@ -29,6 +29,7 @@ namespace MapperUI
             this.btnMappingRules = new System.Windows.Forms.Button();
             this.btnBrowse = new System.Windows.Forms.Button();
             this.btnGenerate = new System.Windows.Forms.Button();
+            this.btnInjectSystem = new System.Windows.Forms.Button();
             this.grpValidation = new System.Windows.Forms.GroupBox();
             this.dgvMappingRules = new System.Windows.Forms.DataGridView();
             this.colVueOneElement = new System.Windows.Forms.DataGridViewTextBoxColumn();
@@ -165,6 +166,23 @@ namespace MapperUI
             this.btnGenerate.Text = "Generate FB";
             this.btnGenerate.UseVisualStyleBackColor = false;
             this.btnGenerate.Click += new System.EventHandler(this.btnGenerate_Click);
+
+            // 
+            // btnInjectSystem
+            // 
+            this.btnInjectSystem.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right)));
+            this.btnInjectSystem.BackColor = System.Drawing.Color.FromArgb(0, 153, 76);
+            this.btnInjectSystem.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnInjectSystem.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point);
+            this.btnInjectSystem.ForeColor = System.Drawing.Color.White;
+            this.btnInjectSystem.Location = new System.Drawing.Point(1394, 33);
+            this.btnInjectSystem.Name = "btnInjectSystem";
+            this.btnInjectSystem.Size = new System.Drawing.Size(120, 25);
+            this.btnInjectSystem.TabIndex = 6;
+            this.btnInjectSystem.Text = "Inject System";
+            this.btnInjectSystem.UseVisualStyleBackColor = false;
+            this.btnInjectSystem.Click += new System.EventHandler(this.btnInjectSystem_Click);
+
             // 
             // grpValidation
             // 
