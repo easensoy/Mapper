@@ -37,7 +37,6 @@ namespace MapperUI
                 {
                     txtModelPath.Text = dialog.FileName;
                     lblStatus.Text = "Validating...";
-
                     await LoadAndValidate(dialog.FileName);
                 }
             }
@@ -65,31 +64,30 @@ namespace MapperUI
                 var template = templateSelector.SelectTemplate(component);
 
                 if (template == null || !TemplateMatchesStateCount(component, template))
-                {
                     continue;
-                }
+
+                bool isProcess = string.Equals(component.Type, "Process", StringComparison.OrdinalIgnoreCase);
+                bool isActuator = string.Equals(component.Type, "Actuator", StringComparison.OrdinalIgnoreCase);
+                bool isSensor = string.Equals(component.Type, "Sensor", StringComparison.OrdinalIgnoreCase);
 
                 var resolvedTemplateName = ResolveTemplateName(component);
                 var templateNameToShow = string.IsNullOrWhiteSpace(resolvedTemplateName)
                     ? template.TemplateName
                     : resolvedTemplateName;
-                var templateBaseName = Path.GetFileNameWithoutExtension(templateNameToShow);
-                if (string.Equals(component.Type, "Sensor", StringComparison.OrdinalIgnoreCase)
-                    && templateBaseName.EndsWith("_CAT", StringComparison.OrdinalIgnoreCase))
-                {
-                    templateBaseName = templateBaseName[..^4];
-                }
-                var isCatSensorTemplate = string.Equals(templateNameToShow, "Sensor_Bool_CAT.fbt", StringComparison.OrdinalIgnoreCase);
-                var componentGuid = Guid.NewGuid().ToString();
-                var initialState = component.States.FirstOrDefault(s => s.InitialState);
 
+                bool isCatSensorTemplate = templateNameToShow.Contains("_CAT", StringComparison.OrdinalIgnoreCase)
+                                           && isSensor;
+
+                // ── Name row ────────────────────────────────────────────────
                 AddMappingRow(
                     $"<Name>{component.Name}</Name>",
-                    $"FBType Name=\"{templateBaseName}_{component.Name}\"",
+                    $"FBType Name=\"{templateNameToShow.Replace(".fbt", "")}_{component.Name}\"",
                     "TRANSLATED",
                     "Component naming convention",
                     validated: true,
                     Color.LightGreen);
+
+                // ── Type row ─────────────────────────────────────────────────
                 AddMappingRow(
                     $"<Type>{component.Type}</Type>",
                     $"Template: {templateNameToShow}",
@@ -97,13 +95,17 @@ namespace MapperUI
                     "Template selection",
                     validated: true,
                     Color.LightGreen);
+
+                // ── GUID row ─────────────────────────────────────────────────
                 AddMappingRow(
                     "<ComponentID>",
-                    $"GUID: {componentGuid}",
+                    $"GUID: {System.Guid.NewGuid()}",
                     "TRANSLATED",
                     "Component ID mapped to GUID",
                     validated: true,
                     Color.LightGreen);
+
+                // ── Version row ──────────────────────────────────────────────
                 AddMappingRow(
                     "Version=\"1.0.0\"",
                     "VueOne metadata only",
@@ -112,86 +114,69 @@ namespace MapperUI
                     validated: false,
                     Color.LightSalmon);
 
-                if (string.Equals(component.Type, "Actuator", StringComparison.OrdinalIgnoreCase))
+                // ── State count row ──────────────────────────────────────────
+                AddMappingRow(
+                    $"State Count: {component.States.Count}",
+                    isActuator ? "Five-state actuator (CAT)" :
+                    isSensor ? "Two-state sensor (ON/OFF)" :
+                                  $"Process: {component.States.Count} states → Text[] array",
+                    "TRANSLATED",
+                    isActuator ? "Actuator state count" :
+                    isSensor ? "Sensor state count" :
+                                  "Process state count → Text parameter",
+                    validated: true,
+                    Color.LightGreen);
+
+                if (isProcess)
+                {
+                    // ── Process-specific rows ─────────────────────────────────
+                    var stateNames = component.States
+                        .OrderBy(s => s.StateNumber)
+                        .Select(s => $"'{s.Name}'");
+                    AddMappingRow(
+                        "States[]",
+                        $"Text=[{string.Join(", ", stateNames)}]",
+                        "TRANSLATED",
+                        "State names → Process1_CAT Text parameter",
+                        validated: true,
+                        Color.LightGreen);
+
+                    AddMappingRow(
+                        "Process FB instance",
+                        "Injected as Process1_CAT in .syslay + .sysres",
+                        "PHASE 2",
+                        "Use Inject System button — not Generate FB",
+                        validated: true,
+                        Color.LightBlue);
+
+                    AddMappingRow(
+                        "Process wiring",
+                        "state_change ← sensors/actuators.pst_out  |  state_update → actuator.pst_event",
+                        "PHASE 2",
+                        "EventConnections + DataConnections written to syslay/sysres",
+                        validated: true,
+                        Color.LightBlue);
+
+                    AddMappingRow(
+                        "Future: Rule Engine FB",
+                        "Process1_CAT hardcoded ECC → data-driven step array (pending Alex/Jyotsna)",
+                        "PENDING",
+                        "Process1_CAT type redesign required for scalability",
+                        validated: false,
+                        Color.LightYellow);
+                }
+                else if (isActuator)
                 {
                     AddMappingRow(
-                        $"State Count: {component.States.Count}",
-                        $"Expected: {template.ExpectedStateCount} states",
+                        "actuator_name parameter",
+                        $"actuator_name = '{component.Name.ToLower()}'",
                         "TRANSLATED",
-                        "State count aligns with template",
+                        "Actuator instance name parameter",
                         validated: true,
                         Color.LightGreen);
-
-                    if (initialState != null)
-                    {
-                        AddMappingRow(
-                            "<Initial_State>True</Initial_State>",
-                            $"ECTransition Source=\"START\" Dest=\"{initialState.Name}\"",
-                            "ENCODED",
-                            "Initial state becomes START transition",
-                            validated: true,
-                            Color.LightCyan);
-                    }
-
-                    AddMappingRow(
-                        $"<State_Number>0..{component.States.Count - 1}</State_Number>",
-                        $"state_val: INT (0..{component.States.Count - 1})",
-                        "TRANSLATED",
-                        "State index mapping",
-                        validated: true,
-                        Color.LightGreen);
-                    AddMappingRow(
-                        "<Name>ReturnedHome,Advancing...</Name>",
-                        "ECState Name in Five_State_Actuator.fbt",
-                        "ENCODED",
-                        "State names become ECState nodes",
-                        validated: true,
-                        Color.LightCyan);
-                    AddMappingRow(
-                        "<Time>1000</Time>",
-                        "VueOne simulation timing",
-                        "DISCARDED",
-                        "Timing not used in IEC 61499",
-                        validated: false,
-                        Color.LightSalmon);
-                    AddMappingRow(
-                        "<Position>118</Position>",
-                        "PLC setpoint, not FB logic",
-                        "DISCARDED",
-                        "Position not encoded in FB",
-                        validated: false,
-                        Color.LightSalmon);
-                    AddMappingRow(
-                        "<Counter>1</Counter>",
-                        "VueOne counting feature",
-                        "DISCARDED",
-                        "Counter not used",
-                        validated: false,
-                        Color.LightSalmon);
-                    AddMappingRow(
-                        "<StaticState>True/False</StaticState>",
-                        "Motion state indicator",
-                        "ENCODED",
-                        "Static state becomes motion flag",
-                        validated: true,
-                        Color.LightCyan);
-                    AddMappingRow(
-                        "<Transition>...</Transition>",
-                        "Phase 2: Auto-wiring",
-                        "DISCARDED",
-                        "Not yet implemented",
-                        validated: false,
-                        Color.LightSalmon);
-                    AddMappingRow(
-                        "Sensor feedback (athome, atwork)",
-                        "Template: '${PATH}athome', '${PATH}atwork'",
-                        "HARDCODED",
-                        "Feedback naming convention",
-                        validated: true,
-                        Color.LightGray);
                     AddMappingRow(
                         "InterfaceList (complete)",
-                        "INIT, pst_event, action_event, tohome...",
+                        "INIT, pst_event, action_event, pst_out, INITO, current_state_to_process, state_val, process_state_name",
                         "HARDCODED",
                         "Template interface definition",
                         validated: true,
@@ -204,15 +189,8 @@ namespace MapperUI
                         validated: true,
                         Color.LightGray);
                 }
-                else
+                else if (isSensor)
                 {
-                    AddMappingRow(
-                        $"State Count: {component.States.Count}",
-                        "Two-state sensor (ON/OFF)",
-                        "TRANSLATED",
-                        "Sensor state count",
-                        validated: true,
-                        Color.LightGreen);
                     if (isCatSensorTemplate)
                     {
                         AddMappingRow(
@@ -289,9 +267,17 @@ namespace MapperUI
         {
             var config = GetMapperConfig();
 
-            return string.Equals(component.Type, "Actuator", StringComparison.OrdinalIgnoreCase)
-                ? config.ActuatorTemplatePath
-                : config.SensorTemplatePath;
+            if (string.Equals(component.Type, "Actuator", StringComparison.OrdinalIgnoreCase))
+                return config.ActuatorTemplatePath;
+
+            if (string.Equals(component.Type, "Sensor", StringComparison.OrdinalIgnoreCase))
+                return config.SensorTemplatePath;
+
+            // Process → Process1_CAT (Phase 2 only, not cloned by Generate FB)
+            if (string.Equals(component.Type, "Process", StringComparison.OrdinalIgnoreCase))
+                return config.ProcessCATTemplatePath;
+
+            return string.Empty;
         }
 
         private string ResolveTemplateName(VueOneComponent component)
@@ -357,37 +343,44 @@ namespace MapperUI
 
                 var templateSelector = new TemplateSelector();
                 var validator = new ComponentValidator();
-                bool allValid = true;
+                bool phase1Valid = true;   // tracks only Actuator + Sensor
+                bool hasInjectables = false; // tracks whether Inject System has anything to do
 
                 foreach (var component in _loadedComponents)
                 {
                     var template = templateSelector.SelectTemplate(component);
+                    bool isProcess = string.Equals(component.Type, "Process", StringComparison.OrdinalIgnoreCase);
                     bool templateMatches = template != null && TemplateMatchesStateCount(component, template);
                     string resolvedTemplatePath = ResolveTemplatePath(component);
-                    bool templateExists = File.Exists(resolvedTemplatePath);
-                    string templateName = templateMatches && templateExists
-                        ? Path.GetFileName(resolvedTemplatePath)
+                    bool templateExists = !string.IsNullOrEmpty(resolvedTemplatePath) && File.Exists(resolvedTemplatePath);
+
+                    string templateName = templateMatches
+                        ? (templateExists ? Path.GetFileName(resolvedTemplatePath) : Path.GetFileName(resolvedTemplatePath) + " (not found)")
                         : "No Template Found";
 
                     dgvComponents.Rows.Add(component.Name, component.Type, templateName);
 
-                    if (templateMatches && templateExists)
+                    if (isProcess)
+                    {
+                        // Process never blocks Generate FB — it's Phase 2 only
+                        hasInjectables = true;
+                    }
+                    else if (templateMatches && templateExists)
                     {
                         var validationResult = validator.Validate(component);
-
                         if (!validationResult.IsValid)
-                        {
-                            allValid = false;
-                        }
+                            phase1Valid = false;
+
+                        hasInjectables = true;
                     }
                     else
                     {
-                        if (!string.Equals(component.Type, "Process", StringComparison.OrdinalIgnoreCase))
-                            allValid = false;
+                        phase1Valid = false;
                     }
                 }
 
-                if (allValid)
+                // Generate FB = enabled only when Actuators/Sensors all pass Phase 1 validation
+                if (phase1Valid)
                 {
                     btnGenerate.Enabled = true;
                     lblStatus.Text = "Validation passed";
@@ -401,6 +394,9 @@ namespace MapperUI
                     lblValidationStatus.Text = "FAILED";
                     lblValidationStatus.ForeColor = Color.Red;
                 }
+
+                // Inject System is always enabled if we have any injectable components
+                btnInjectSystem.Enabled = hasInjectables;
 
                 UpdateDetectedInfo();
             }
@@ -424,7 +420,7 @@ namespace MapperUI
             if (string.Equals(component.Type, "Sensor", StringComparison.OrdinalIgnoreCase))
                 return component.States.Count == 2;
 
-            // Process: always matches - state count varies, mapped via Phase 2 Inject System
+            // Process: state count varies, always matches for display purposes
             if (string.Equals(component.Type, "Process", StringComparison.OrdinalIgnoreCase))
                 return true;
 
@@ -441,7 +437,7 @@ namespace MapperUI
                 if (_loadedComponents.Count == 0)
                 {
                     MessageBox.Show(
-                        "Load a Control.xml file first.",
+                        "Load a Control.xml file first.\n\nNote: Use 'Inject System' for Process components.",
                         "No Data",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Information);
@@ -450,9 +446,17 @@ namespace MapperUI
                 }
 
                 var generatedNames = new List<string>();
+                var skippedProcess = new List<string>();
 
                 foreach (var component in _loadedComponents)
                 {
+                    // Process components are Phase 2 only — skip in Generate FB
+                    if (string.Equals(component.Type, "Process", StringComparison.OrdinalIgnoreCase))
+                    {
+                        skippedProcess.Add(component.Name);
+                        continue;
+                    }
+
                     var result = await _mapperService.RunMapping(component);
 
                     if (!result.Success || result.GeneratedFB == null)
@@ -469,23 +473,28 @@ namespace MapperUI
                     generatedNames.Add(result.GeneratedFB.FBName);
                 }
 
-                MessageBox.Show(
-                    "Generated FBs:\n" + string.Join("\n", generatedNames) + "\n\n" +
-                    "Files: .fbt, .composite.offline.xml, .doc.xml, .meta.xml\n" +
-                    "Next: Open EAE → Refresh → Verify build",
-                    "Generation Complete",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
+                var sb = new System.Text.StringBuilder();
+                if (generatedNames.Count > 0)
+                {
+                    sb.AppendLine("Generated FBs:");
+                    foreach (var n in generatedNames) sb.AppendLine($"  + {n}");
+                    sb.AppendLine();
+                    sb.AppendLine("Files: .fbt, .composite.offline.xml, .doc.xml, .meta.xml");
+                    sb.AppendLine("Next: Open EAE → Refresh → Verify build");
+                }
+                if (skippedProcess.Count > 0)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine("Skipped (Phase 2 — use Inject System):");
+                    foreach (var n in skippedProcess) sb.AppendLine($"  → {n} (Process1_CAT)");
+                }
 
-                lblStatus.Text = $"Generated {generatedNames.Count} component(s)";
+                MessageBox.Show(sb.ToString(), "Generate FB Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                lblStatus.Text = $"Generated {generatedNames.Count} FB(s)";
             }
             catch (Exception ex)
             {
-                MessageBox.Show(
-                    $"Error generating output.\n{ex.Message}",
-                    "Error",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error);
+                MessageBox.Show($"Error generating output.\n{ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 lblStatus.Text = "Error";
             }
             finally
@@ -514,12 +523,11 @@ namespace MapperUI
                     return;
                 }
 
-                // Build summary message
                 var sb = new System.Text.StringBuilder();
 
                 if (result.InjectedFBs.Count > 0)
                 {
-                    sb.AppendLine("Injected FBs:");
+                    sb.AppendLine("Injected into syslay + sysres:");
                     foreach (var fb in result.InjectedFBs)
                         sb.AppendLine($"  + {fb}");
                     sb.AppendLine();
@@ -527,7 +535,7 @@ namespace MapperUI
 
                 if (result.SkippedFBs.Count > 0)
                 {
-                    sb.AppendLine("Skipped (already present):");
+                    sb.AppendLine("Already present (skipped):");
                     foreach (var fb in result.SkippedFBs)
                         sb.AppendLine($"  = {fb}");
                     sb.AppendLine();
@@ -541,29 +549,18 @@ namespace MapperUI
                     sb.AppendLine();
                 }
 
-                sb.AppendLine("Files patched:");
+                sb.AppendLine("Patched files:");
                 sb.AppendLine($"  {result.SyslayPath}");
                 sb.AppendLine($"  {result.SysresPath}");
                 sb.AppendLine();
                 sb.AppendLine("Next: Open EAE → Refresh project → Verify connections → Build");
 
-                if (result.InjectedFBs.Count > 0)
-                {
-                    sb.AppendLine();
-                    sb.AppendLine("NOTE: Data connection names use camelCase of component name.");
-                    sb.AppendLine("Verify in EAE that Process FB input variable names match.");
-                }
-
-                MessageBox.Show(sb.ToString(), "Injection Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(sb.ToString(), "Inject System Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 lblStatus.Text = $"Injected {result.InjectedFBs.Count} FB(s) into syslay + sysres";
             }
             catch (Exception ex)
             {
-                MessageBox.Show(
-                    $"Unexpected error.\n{ex.Message}",
-                    "Error",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error);
+                MessageBox.Show($"Unexpected error.\n{ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 lblStatus.Text = "Error";
             }
             finally
