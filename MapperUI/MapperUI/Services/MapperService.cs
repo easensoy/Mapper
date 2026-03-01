@@ -12,9 +12,9 @@ namespace MapperUI.Services
     {
         private MapperConfig? _config;
 
-        public MapperService()
-        {
-        }
+        public MapperService() { }
+
+        // ── Phase 1: Generate FB ──────────────────────────────────────────────
 
         public async Task<MapperResult> RunMapping(VueOneComponent component)
         {
@@ -23,9 +23,7 @@ namespace MapperUI.Services
                 try
                 {
                     if (component == null)
-                    {
                         throw new ArgumentNullException(nameof(component));
-                    }
 
                     var config = LoadConfig();
                     var templatePath = ResolveTemplatePath(component, config);
@@ -43,13 +41,34 @@ namespace MapperUI.Services
             });
         }
 
+        // ── Phase 2: Inject System ────────────────────────────────────────────
+
+        public async Task<SystemInjectionResult> RunSystemInjection()
+        {
+            return await Task.Run(() =>
+            {
+                try
+                {
+                    var config = LoadConfig();
+                    var injector = new SystemInjector();
+                    return injector.Inject(config);
+                }
+                catch (Exception ex)
+                {
+                    return new SystemInjectionResult
+                    {
+                        Success = false,
+                        ErrorMessage = ex.Message
+                    };
+                }
+            });
+        }
+
+        // ── Shared private helpers ────────────────────────────────────────────
+
         private MapperConfig LoadConfig()
         {
-            if (_config != null)
-            {
-                return _config;
-            }
-
+            if (_config != null) return _config;
             _config = MapperConfig.Load();
             return _config;
         }
@@ -123,25 +142,17 @@ namespace MapperUI.Services
             if (Directory.Exists(config.EAEDeployPath))
             {
                 File.Copy(fbtPath, Path.Combine(config.EAEDeployPath, generatedFB.FbtFile), overwrite: true);
-                File.Copy(
-                    Path.Combine(config.OutputDirectory, generatedFB.CompositeFile),
-                    Path.Combine(config.EAEDeployPath, generatedFB.CompositeFile),
-                    overwrite: true);
-                File.Copy(
-                    Path.Combine(config.OutputDirectory, generatedFB.DocFile),
-                    Path.Combine(config.EAEDeployPath, generatedFB.DocFile),
-                    overwrite: true);
-                File.Copy(
-                    Path.Combine(config.OutputDirectory, generatedFB.MetaFile),
-                    Path.Combine(config.EAEDeployPath, generatedFB.MetaFile),
-                    overwrite: true);
+                File.Copy(Path.Combine(config.OutputDirectory, generatedFB.CompositeFile),
+                          Path.Combine(config.EAEDeployPath, generatedFB.CompositeFile), overwrite: true);
+                File.Copy(Path.Combine(config.OutputDirectory, generatedFB.DocFile),
+                          Path.Combine(config.EAEDeployPath, generatedFB.DocFile), overwrite: true);
+                File.Copy(Path.Combine(config.OutputDirectory, generatedFB.MetaFile),
+                          Path.Combine(config.EAEDeployPath, generatedFB.MetaFile), overwrite: true);
 
                 foreach (var companion in copiedCompanions)
                 {
-                    File.Copy(
-                        Path.Combine(config.OutputDirectory, companion),
-                        Path.Combine(config.EAEDeployPath, companion),
-                        overwrite: true);
+                    File.Copy(Path.Combine(config.OutputDirectory, companion),
+                              Path.Combine(config.EAEDeployPath, companion), overwrite: true);
                 }
             }
 
