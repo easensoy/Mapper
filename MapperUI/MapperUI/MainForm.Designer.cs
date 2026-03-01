@@ -175,7 +175,7 @@ namespace MapperUI
             this.btnInjectSystem.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnInjectSystem.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point);
             this.btnInjectSystem.ForeColor = System.Drawing.Color.White;
-            this.btnInjectSystem.Location = new System.Drawing.Point(1394, 33);
+            this.btnInjectSystem.Location = new System.Drawing.Point(1280, 63);
             this.btnInjectSystem.Name = "btnInjectSystem";
             this.btnInjectSystem.Size = new System.Drawing.Size(120, 25);
             this.btnInjectSystem.TabIndex = 6;
@@ -190,7 +190,7 @@ namespace MapperUI
             | System.Windows.Forms.AnchorStyles.Right)));
             this.grpValidation.Controls.Add(this.dgvMappingRules);
             this.grpValidation.Controls.Add(this.pnlDetectedInfo);
-            this.grpValidation.Location = new System.Drawing.Point(12, 70);
+            this.grpValidation.Location = new System.Drawing.Point(12, 100);
             this.grpValidation.Name = "grpValidation";
             this.grpValidation.Size = new System.Drawing.Size(1376, 300);
             this.grpValidation.TabIndex = 6;
@@ -528,7 +528,7 @@ namespace MapperUI
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 15F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(1400, 750);
+            this.ClientSize = new System.Drawing.Size(1400, 780);
             this.Controls.Add(this.statusStrip);
             this.Controls.Add(this.grpMappingInfo);
             this.Controls.Add(this.grpValidation);
