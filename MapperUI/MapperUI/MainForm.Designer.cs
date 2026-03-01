@@ -533,6 +533,7 @@ namespace MapperUI
             this.Controls.Add(this.grpMappingInfo);
             this.Controls.Add(this.grpValidation);
             this.Controls.Add(this.btnGenerate);
+            this.Controls.Add(this.btnInjectSystem);
             this.Controls.Add(this.btnBrowse);
             this.Controls.Add(this.btnMappingRules);
             this.Controls.Add(this.txtModelPath);
@@ -578,6 +579,7 @@ namespace MapperUI
         private System.Windows.Forms.Button btnMappingRules;
         private System.Windows.Forms.Button btnBrowse;
         private System.Windows.Forms.Button btnGenerate;
+        private System.Windows.Forms.Button btnInjectSystem;
         private System.Windows.Forms.GroupBox grpValidation;
         private System.Windows.Forms.DataGridView dgvMappingRules;
         private System.Windows.Forms.DataGridViewTextBoxColumn colVueOneElement;
