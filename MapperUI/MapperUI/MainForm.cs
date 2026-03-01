@@ -492,5 +492,83 @@ namespace MapperUI
                 btnGenerate.Enabled = true;
             }
         }
+
+        private async void btnInjectSystem_Click(object sender, EventArgs e)
+        {
+            btnInjectSystem.Enabled = false;
+            lblStatus.Text = "Injecting system...";
+
+            try
+            {
+                var result = await _mapperService.RunSystemInjection();
+
+                if (!result.Success)
+                {
+                    MessageBox.Show(
+                        $"Injection failed.\n\n{result.ErrorMessage}",
+                        "Injection Failed",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                    lblStatus.Text = "Injection failed";
+                    return;
+                }
+
+                // Build summary message
+                var sb = new System.Text.StringBuilder();
+
+                if (result.InjectedFBs.Count > 0)
+                {
+                    sb.AppendLine("Injected FBs:");
+                    foreach (var fb in result.InjectedFBs)
+                        sb.AppendLine($"  + {fb}");
+                    sb.AppendLine();
+                }
+
+                if (result.SkippedFBs.Count > 0)
+                {
+                    sb.AppendLine("Skipped (already present):");
+                    foreach (var fb in result.SkippedFBs)
+                        sb.AppendLine($"  = {fb}");
+                    sb.AppendLine();
+                }
+
+                if (result.UnsupportedComponents.Count > 0)
+                {
+                    sb.AppendLine("Unsupported (not injected):");
+                    foreach (var c in result.UnsupportedComponents)
+                        sb.AppendLine($"  ! {c}");
+                    sb.AppendLine();
+                }
+
+                sb.AppendLine("Files patched:");
+                sb.AppendLine($"  {result.SyslayPath}");
+                sb.AppendLine($"  {result.SysresPath}");
+                sb.AppendLine();
+                sb.AppendLine("Next: Open EAE → Refresh project → Verify connections → Build");
+
+                if (result.InjectedFBs.Count > 0)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine("NOTE: Data connection names use camelCase of component name.");
+                    sb.AppendLine("Verify in EAE that Process FB input variable names match.");
+                }
+
+                MessageBox.Show(sb.ToString(), "Injection Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                lblStatus.Text = $"Injected {result.InjectedFBs.Count} FB(s) into syslay + sysres";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"Unexpected error.\n{ex.Message}",
+                    "Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                lblStatus.Text = "Error";
+            }
+            finally
+            {
+                btnInjectSystem.Enabled = true;
+            }
+        }
     }
 }
