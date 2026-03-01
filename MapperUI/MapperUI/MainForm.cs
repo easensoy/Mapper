@@ -382,7 +382,8 @@ namespace MapperUI
                     }
                     else
                     {
-                        allValid = false;
+                        if (!string.Equals(component.Type, "Process", StringComparison.OrdinalIgnoreCase))
+                            allValid = false;
                     }
                 }
 
@@ -417,17 +418,17 @@ namespace MapperUI
 
         private bool TemplateMatchesStateCount(VueOneComponent component, FBTemplate template)
         {
-            if (string.Equals(component.Type, "Actuator", StringComparison.OrdinalIgnoreCase) && template.ExpectedStateCount > 0)
-            {
-                return component.States.Count == template.ExpectedStateCount;
-            }
+            if (string.Equals(component.Type, "Actuator", StringComparison.OrdinalIgnoreCase))
+                return component.States.Count == 5;
 
             if (string.Equals(component.Type, "Sensor", StringComparison.OrdinalIgnoreCase))
-            {
                 return component.States.Count == 2;
-            }
 
-            return true;
+            // Process: always matches - state count varies, mapped via Phase 2 Inject System
+            if (string.Equals(component.Type, "Process", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            return false;
         }
 
         private async void btnGenerate_Click(object sender, EventArgs e)
