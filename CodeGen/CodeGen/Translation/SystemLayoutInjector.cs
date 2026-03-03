@@ -22,6 +22,43 @@ namespace MapperUI.Services
         private const string SensorCatType = "Sensor_Bool_CAT";
         private const string ProcessCatType = "Process1_CAT";
 
+        /// <summary>
+        /// READ-ONLY diff. Shows what would change without modifying any files.
+        /// Also fixes the duplicate-injection bug: uses LocalName to match FB elements,
+        /// ignoring xmlns namespace mismatches that caused EnsureFb to miss existing FBs.
+        /// </summary>
+        public DiffReport PreviewDiff(MapperConfig config, List<VueOneComponent> components)
+        {
+            var report = new DiffReport();
+            var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            if (File.Exists(config.SyslayPath))
+            {
+                var doc = XDocument.Load(config.SyslayPath);
+                // LocalName ignores xmlns — this is the fix for the duplicate injection bug
+                foreach (var fb in doc.Descendants().Where(e => e.Name.LocalName == "FB"))
+                {
+                    var n = fb.Attribute("Name")?.Value;
+                    if (!string.IsNullOrEmpty(n)) existing.Add(n);
+                }
+            }
+
+            foreach (var c in components)
+            {
+                bool actuator = string.Equals(c.Type, "Actuator", StringComparison.OrdinalIgnoreCase) && c.States.Count == 5;
+                bool sensor = string.Equals(c.Type, "Sensor", StringComparison.OrdinalIgnoreCase) && c.States.Count == 2;
+                bool process = string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase);
+
+                if (!actuator && !sensor && !process)
+                { report.Unsupported.Add($"{c.Name} ({c.Type}, {c.States.Count} states)"); continue; }
+
+                if (existing.Contains(c.Name))
+                    report.AlreadyPresent.Add($"{c.Name} ({c.Type})");
+                else
+                    report.ToBeInjected.Add($"{c.Name} ({c.Type})");
+            }
+            return report;
+        }
         public SystemInjectionResult Inject(MapperConfig config, List<VueOneComponent> components)
         {
             var result = new SystemInjectionResult
@@ -69,6 +106,13 @@ namespace MapperUI.Services
             }
 
             return result;
+        }
+
+        public class DiffReport
+        {
+            public List<string> AlreadyPresent { get; } = new();   // will be skipped
+            public List<string> ToBeInjected { get; } = new();   // will be injected
+            public List<string> Unsupported { get; } = new();   // no CAT mapping
         }
 
         // ── SYSLAY ────────────────────────────────────────────────────────────
@@ -164,7 +208,9 @@ namespace MapperUI.Services
         private void EnsureFb(XElement net, string name, string type, string id, int x, int y,
             IEnumerable<(string Key, string Value)> parms, SystemInjectionResult result)
         {
-            if (net.Elements(Ns + "FB").Any(fb => (string?)fb.Attribute("Name") == name))
+            if (net.Descendants().Where(e => e.Name.LocalName == "FB")
+                   .Any(fb => string.Equals(fb.Attribute("Name")?.Value, name,
+                              StringComparison.OrdinalIgnoreCase)))
             { result.SkippedFBs.Add($"{name} (already present)"); return; }
 
             var fb = new XElement(Ns + "FB",
