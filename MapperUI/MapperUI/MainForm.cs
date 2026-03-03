@@ -9,6 +9,7 @@ using CodeGen.IO;
 using CodeGen.Mapping;
 using CodeGen.Models;
 using CodeGen.Validation;
+using CodeGen.Translation;
 using MapperUI.Services;
 
 namespace MapperUI
@@ -19,6 +20,7 @@ namespace MapperUI
         private MapperConfig? _mapperConfig;
         private List<VueOneComponent> _loadedComponents = new List<VueOneComponent>();
         private SystemXmlReader? _lastReader;
+        private string _baselineFolder = string.Empty;
 
 
         public MainForm()
