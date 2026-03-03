@@ -14,7 +14,7 @@ namespace CodeGen.Translation
     /// </summary>
     public class StagingProjectBuilder
     {
-        private readonly SystemLayoutInjector _injector = new();
+        private readonly SystemInjector _injector = new();
 
         public StagingResult Build(
             string baselineFolder,
