@@ -9,6 +9,8 @@ namespace CodeGen.IO
     public class SystemXmlReader
     {
         public string LastError { get; private set; } = string.Empty;
+        public string SystemName { get; private set; } = string.Empty;
+        public string SystemID { get; private set; } = string.Empty;
 
         public List<VueOneComponent> ReadAllComponents(string xmlFilePath)
         {
@@ -112,7 +114,9 @@ namespace CodeGen.IO
                 Name = name,
                 Description = GetElementValue(componentElement, "Description"),
                 Type = GetElementValue(componentElement, "Type"),
-                NameTag = nameTag
+                NameTag = nameTag,
+                SystemName = GetElementValue(systemElement, "n");
+                SystemID = GetElementValue(systemElement, "SystemID");
             };
 
             foreach (var stateElement in componentElement.Elements().Where(e => e.Name.LocalName == "State"))
@@ -136,7 +140,7 @@ namespace CodeGen.IO
                 Time = GetIntValue(stateElement, "Time"),
                 Position = GetDoubleValue(stateElement, "Position"),
                 Counter = GetIntValue(stateElement, "Counter"),
-                StaticState = GetBoolValue(stateElement, "StaticState")
+                StaticState = GetBoolValue(stateElement, "StaticState"),
             };
         }
 
