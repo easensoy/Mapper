@@ -18,6 +18,8 @@ namespace MapperUI
         private readonly MapperService _mapperService;
         private MapperConfig? _mapperConfig;
         private List<VueOneComponent> _loadedComponents = new List<VueOneComponent>();
+        private SystemXmlReader? _lastReader;
+
 
         public MainForm()
         {
@@ -288,7 +290,7 @@ namespace MapperUI
 
         private void UpdateDetectedInfo()
         {
-            if (_loadedComponents.Count == 0)
+            if (_loadedComponents.Count == 0 || _lastReader == null)
             {
                 lblDetectedType.Text = "-";
                 lblDetectedName.Text = "-";
@@ -297,10 +299,19 @@ namespace MapperUI
                 return;
             }
 
-            var firstComponent = _loadedComponents[0];
-            lblDetectedType.Text = firstComponent.Type;
-            lblDetectedName.Text = firstComponent.Name;
-            lblDetectedStates.Text = firstComponent.States.Count.ToString();
+            int actuators = _loadedComponents.Count(c => c.Type == "Actuator");
+            int sensors = _loadedComponents.Count(c => c.Type == "Sensor");
+            int processes = _loadedComponents.Count(c => c.Type == "Process");
+            int unsupported = _loadedComponents.Count(c =>
+                c.Type != "Actuator" && c.Type != "Sensor" &&
+                c.Type != "Process" && c.Type != "NonControl");
+
+            lblDetectedType.Text = "System";
+            lblDetectedName.Text = string.IsNullOrEmpty(_lastReader.SystemName)
+                                         ? "(unnamed)" : _lastReader.SystemName;
+            lblDetectedStates.Text = $"{_loadedComponents.Count} components " +
+                                     $"({actuators}A / {sensors}S / {processes}P" +
+                                     (unsupported > 0 ? $" / {unsupported} unsupported" : "") + ")";
         }
 
         private void AddMappingRow(
@@ -323,11 +334,12 @@ namespace MapperUI
             try
             {
                 var systemReader = new SystemXmlReader();
-
+                
                 await System.Threading.Tasks.Task.Run(() =>
                 {
                     _loadedComponents = systemReader.ReadAllComponents(xmlPath);
                 });
+                _lastReader = systemReader;
 
                 if (_loadedComponents.Count == 0)
                 {
