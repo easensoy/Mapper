@@ -107,9 +107,17 @@ namespace MapperUI
             // 
             // buildToolStripMenuItem
             // 
+            this.buildToolStripMenuItem.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
+            this.debugConsoleToolStripMenuItem });
             this.buildToolStripMenuItem.Name = "buildToolStripMenuItem";
             this.buildToolStripMenuItem.Size = new System.Drawing.Size(46, 20);
             this.buildToolStripMenuItem.Text = "Build";
+            // 
+            // debugConsoleToolStripMenuItem
+            // 
+            this.debugConsoleToolStripMenuItem.Name = "debugConsoleToolStripMenuItem";
+            this.debugConsoleToolStripMenuItem.Text = "Debug Console";
+            this.debugConsoleToolStripMenuItem.Click += new System.EventHandler(this.debugConsoleToolStripMenuItem_Click);
             // 
             // lblVueOneModel
             // 
@@ -544,6 +552,25 @@ namespace MapperUI
             this.Name = "MainForm";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Text = "VueOne Mapper for IEC 61499";
+            // 
+            // pnlLog
+            // 
+            this.pnlLog.Dock = System.Windows.Forms.DockStyle.Bottom;
+            this.pnlLog.Height = 160;
+            this.pnlLog.Visible = false;
+            this.pnlLog.Controls.Add(this.txtLog);
+            // 
+            // txtLog
+            // 
+            this.txtLog.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.txtLog.BackColor = System.Drawing.Color.FromArgb(30, 30, 30);
+            this.txtLog.ForeColor = System.Drawing.Color.LimeGreen;
+            this.txtLog.Font = new System.Drawing.Font("Consolas", 8.5F);
+            this.txtLog.ReadOnly = true;
+            this.txtLog.ScrollBars = System.Windows.Forms.RichTextBoxScrollBars.Vertical;
+            this.txtLog.Name = "txtLog";
+            this.Controls.Add(this.pnlLog);
+
             this.menuStrip.ResumeLayout(false);
             this.menuStrip.PerformLayout();
             this.grpValidation.ResumeLayout(false);
@@ -614,5 +641,8 @@ namespace MapperUI
         private System.Windows.Forms.DataGridViewComboBoxColumn colInputAddress;
         private System.Windows.Forms.StatusStrip statusStrip;
         private System.Windows.Forms.ToolStripStatusLabel lblStatus;
+        private System.Windows.Forms.ToolStripMenuItem debugConsoleToolStripMenuItem;
+        private System.Windows.Forms.Panel pnlLog;
+        private System.Windows.Forms.RichTextBox txtLog;
     }
 }
