@@ -334,7 +334,7 @@ namespace MapperUI
             try
             {
                 var systemReader = new SystemXmlReader();
-                
+
                 await System.Threading.Tasks.Task.Run(() =>
                 {
                     _loadedComponents = systemReader.ReadAllComponents(xmlPath);
@@ -516,62 +516,103 @@ namespace MapperUI
 
         private async void btnInjectSystem_Click(object sender, EventArgs e)
         {
+            // Guard — need components loaded
+            if (_loadedComponents == null || _loadedComponents.Count == 0)
+            {
+                MessageBox.Show("Load a Control.xml first.", "No Data",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            // Pick baseline folder if not already set this session
+            if (string.IsNullOrEmpty(_baselineFolder) || !Directory.Exists(_baselineFolder))
+            {
+                using var folderDlg = new FolderBrowserDialog
+                {
+                    Description = "Select the baseline EAE project folder (the one containing IEC61499.dfbproj).\n\nThis folder will NOT be modified.",
+                    UseDescriptionForTitle = true
+                };
+                if (folderDlg.ShowDialog() != DialogResult.OK) return;
+                _baselineFolder = folderDlg.SelectedPath;
+            }
+
+            // Staged projects land in the same parent folder as the baseline
+            var stagingRoot = Path.GetDirectoryName(_baselineFolder) ?? _baselineFolder;
+
             btnInjectSystem.Enabled = false;
-            lblStatus.Text = "Injecting system...";
+            lblStatus.Text = "Building staged project...";
 
             try
             {
-                var result = await _mapperService.RunSystemInjection(_loadedComponents);
+                var systemName = _lastReader?.SystemName ?? "Mapped";
+                var builder = new StagingProjectBuilder();
 
-                if (!result.Success)
-                {
-                    MessageBox.Show(
-                        $"Injection failed.\n\n{result.ErrorMessage}",
-                        "Injection Failed",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Error);
-                    lblStatus.Text = "Injection failed";
-                    return;
-                }
+                var staged = await Task.Run(() =>
+                    builder.Build(_baselineFolder, stagingRoot, _loadedComponents, systemName));
 
+                // Build result summary message
                 var sb = new System.Text.StringBuilder();
 
-                if (result.InjectedFBs.Count > 0)
+                if (staged.Injected.Count > 0)
                 {
-                    sb.AppendLine("Injected into syslay + sysres:");
-                    foreach (var fb in result.InjectedFBs)
-                        sb.AppendLine($"  + {fb}");
+                    sb.AppendLine($"INJECTED ({staged.Injected.Count} new):");
+                    foreach (var i in staged.Injected)
+                        sb.AppendLine($"  +  {i}");
                     sb.AppendLine();
                 }
 
-                if (result.SkippedFBs.Count > 0)
+                if (staged.Skipped.Count > 0)
                 {
-                    sb.AppendLine("Already present (skipped):");
-                    foreach (var fb in result.SkippedFBs)
-                        sb.AppendLine($"  = {fb}");
+                    sb.AppendLine($"PRESERVED ({staged.Skipped.Count} already in baseline):");
+                    foreach (var s in staged.Skipped)
+                        sb.AppendLine($"  =  {s}");
                     sb.AppendLine();
                 }
 
-                if (result.UnsupportedComponents.Count > 0)
+                if (staged.Unsupported.Count > 0)
                 {
-                    sb.AppendLine("Unsupported (not injected):");
-                    foreach (var c in result.UnsupportedComponents)
-                        sb.AppendLine($"  ! {c}");
+                    sb.AppendLine($"SKIPPED ({staged.Unsupported.Count} — no CAT type yet):");
+                    foreach (var u in staged.Unsupported)
+                        sb.AppendLine($"  !  {u}");
                     sb.AppendLine();
                 }
 
-                sb.AppendLine("Patched files:");
-                sb.AppendLine($"  {result.SyslayPath}");
-                sb.AppendLine($"  {result.SysresPath}");
-                sb.AppendLine();
-                sb.AppendLine("Next: Open EAE → Refresh project → Verify connections → Build");
+                if (staged.Success)
+                {
+                    sb.AppendLine("─────────────────────────────────────");
+                    sb.AppendLine("Staged project ready. Open in EAE:");
+                    sb.AppendLine();
+                    sb.AppendLine(staged.StagedProjectFile);
+                    sb.AppendLine();
+                    sb.AppendLine("Click Yes to open the folder in Explorer.");
 
-                MessageBox.Show(sb.ToString(), "Inject System Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                lblStatus.Text = $"Injected {result.InjectedFBs.Count} FB(s) into syslay + sysres";
+                    var answer = MessageBox.Show(
+                        sb.ToString(),
+                        "Staged Project Ready",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Information,
+                        MessageBoxDefaultButton.Button1);
+
+                    if (answer == DialogResult.Yes)
+                        System.Diagnostics.Process.Start("explorer.exe",
+                            $"/select,\"{staged.StagedProjectFile}\"");
+
+                    lblStatus.Text = $"Staged: {Path.GetFileName(staged.StagingFolder)}";
+                }
+                else
+                {
+                    MessageBox.Show(
+                        $"Staging failed:\n\n{staged.ErrorMessage}",
+                        "Build Failed",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                    lblStatus.Text = "Staging failed";
+                }
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Unexpected error.\n{ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show($"Unexpected error.\n{ex.Message}", "Error",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
                 lblStatus.Text = "Error";
             }
             finally
