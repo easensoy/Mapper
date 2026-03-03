@@ -290,28 +290,26 @@ namespace MapperUI
 
         private void UpdateDetectedInfo()
         {
-            if (_loadedComponents.Count == 0 || _lastReader == null)
+            if (_loadedComponents.Count == 0 || _lastReader == null) { /* reset labels */ return; }
+
+            // For a single component file (Actuator/Sensor), show its state count
+            if (_loadedComponents.Count == 1)
             {
-                lblDetectedType.Text = "-";
-                lblDetectedName.Text = "-";
-                lblDetectedStates.Text = "-";
-                lblValidationStatus.Text = "-";
+                var c = _loadedComponents[0];
+                lblDetectedType.Text = c.Type;
+                lblDetectedName.Text = c.Name;
+                lblDetectedStates.Text = c.States.Count.ToString();
                 return;
             }
 
-            int actuators = _loadedComponents.Count(c => c.Type == "Actuator");
-            int sensors = _loadedComponents.Count(c => c.Type == "Sensor");
-            int processes = _loadedComponents.Count(c => c.Type == "Process");
-            int unsupported = _loadedComponents.Count(c =>
-                c.Type != "Actuator" && c.Type != "Sensor" &&
-                c.Type != "Process" && c.Type != "NonControl");
+            // For a system file, show system name + component summary
+            int a = _loadedComponents.Count(c => c.Type == "Actuator");
+            int s = _loadedComponents.Count(c => c.Type == "Sensor");
+            int p = _loadedComponents.Count(c => c.Type == "Process");
 
             lblDetectedType.Text = "System";
-            lblDetectedName.Text = string.IsNullOrEmpty(_lastReader.SystemName)
-                                         ? "(unnamed)" : _lastReader.SystemName;
-            lblDetectedStates.Text = $"{_loadedComponents.Count} components " +
-                                     $"({actuators}A / {sensors}S / {processes}P" +
-                                     (unsupported > 0 ? $" / {unsupported} unsupported" : "") + ")";
+            lblDetectedName.Text = _lastReader.SystemName;
+            lblDetectedStates.Text = $"{_loadedComponents.Count} ({a}A / {s}S / {p}P)";
         }
 
         private void AddMappingRow(
@@ -340,7 +338,6 @@ namespace MapperUI
                     _loadedComponents = systemReader.ReadAllComponents(xmlPath);
                 });
                 _lastReader = systemReader;
-
                 if (_loadedComponents.Count == 0)
                 {
                     MessageBox.Show(
