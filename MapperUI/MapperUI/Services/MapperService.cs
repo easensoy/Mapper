@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using CodeGen.Configuration;
@@ -14,57 +15,39 @@ namespace MapperUI.Services
 
         public MapperService() { }
 
-        // ── Phase 1: Generate FB ──────────────────────────────────────────────
-
         public async Task<MapperResult> RunMapping(VueOneComponent component)
         {
             return await Task.Run(() =>
             {
                 try
                 {
-                    if (component == null)
-                        throw new ArgumentNullException(nameof(component));
-
+                    if (component == null) throw new ArgumentNullException(nameof(component));
                     var config = LoadConfig();
-                    var templatePath = ResolveTemplatePath(component, config);
-                    return ProcessComponent(component, templatePath, config);
+                    return ProcessComponent(component, ResolveTemplatePath(component, config), config);
                 }
                 catch (Exception ex)
                 {
-                    return new MapperResult
-                    {
-                        Success = false,
-                        ComponentName = component != null ? component.Name : string.Empty,
-                        ErrorMessage = ex.Message
-                    };
+                    return new MapperResult { Success = false, ComponentName = component?.Name ?? string.Empty, ErrorMessage = ex.Message };
                 }
             });
         }
 
-        // ── Phase 2: Inject System ────────────────────────────────────────────
-
-        public async Task<SystemInjectionResult> RunSystemInjection()
+        /// <summary>Phase 2 — uses already-loaded components, never re-reads Control.xml.</summary>
+        public async Task<SystemInjectionResult> RunSystemInjection(List<VueOneComponent> loadedComponents)
         {
             return await Task.Run(() =>
             {
                 try
                 {
                     var config = LoadConfig();
-                    var injector = new SystemInjector();
-                    return injector.Inject(config);
+                    return new SystemInjector().Inject(config, loadedComponents);
                 }
                 catch (Exception ex)
                 {
-                    return new SystemInjectionResult
-                    {
-                        Success = false,
-                        ErrorMessage = ex.Message
-                    };
+                    return new SystemInjectionResult { Success = false, ErrorMessage = ex.Message };
                 }
             });
         }
-
-        // ── Shared private helpers ────────────────────────────────────────────
 
         private MapperConfig LoadConfig()
         {
@@ -73,98 +56,48 @@ namespace MapperUI.Services
             return _config;
         }
 
-        private string ResolveTemplatePath(VueOneComponent component, MapperConfig config)
-        {
-            return string.Equals(component.Type, "Actuator", StringComparison.OrdinalIgnoreCase)
-                ? config.ActuatorTemplatePath
-                : config.SensorTemplatePath;
-        }
+        private string ResolveTemplatePath(VueOneComponent component, MapperConfig config) =>
+            string.Equals(component.Type, "Actuator", StringComparison.OrdinalIgnoreCase)
+                ? config.ActuatorTemplatePath : config.SensorTemplatePath;
 
         private MapperResult ProcessComponent(VueOneComponent component, string templatePath, MapperConfig config)
         {
             var validator = new ComponentValidator();
             var validationResult = validator.Validate(component);
-
             if (!validationResult.IsValid)
-            {
-                return new MapperResult
-                {
-                    Success = false,
-                    ComponentName = component.Name,
-                    ValidationResult = validationResult,
-                    ErrorMessage = "Validation failed for component."
-                };
-            }
-
+                return new MapperResult { Success = false, ComponentName = component.Name, ValidationResult = validationResult, ErrorMessage = "Validation failed." };
             if (!File.Exists(templatePath))
-            {
-                return new MapperResult
-                {
-                    Success = false,
-                    ComponentName = component.Name,
-                    ValidationResult = validationResult,
-                    ErrorMessage = $"Template not found: {templatePath}"
-                };
-            }
+                return new MapperResult { Success = false, ComponentName = component.Name, ValidationResult = validationResult, ErrorMessage = $"Template not found: {templatePath}" };
 
             var templateContent = File.ReadAllText(templatePath);
             var rawName = Path.GetFileNameWithoutExtension(templatePath);
-            var templateBaseName = string.Equals(component.Type, "Sensor", StringComparison.OrdinalIgnoreCase)
-                && rawName.EndsWith("_CAT", StringComparison.OrdinalIgnoreCase)
-                ? rawName[..^4]
-                : rawName;
+            var templateBaseName = string.Equals(component.Type, "Sensor", StringComparison.OrdinalIgnoreCase) && rawName.EndsWith("_CAT", StringComparison.OrdinalIgnoreCase) ? rawName[..^4] : rawName;
 
             var generator = new FBGenerator();
             var generatedFB = generator.GenerateFromTemplate(component, templateContent, templateBaseName);
-
             if (!generatedFB.IsValid)
-            {
-                return new MapperResult
-                {
-                    Success = false,
-                    ComponentName = component.Name,
-                    ValidationResult = validationResult,
-                    ErrorMessage = "FB generation failed."
-                };
-            }
+                return new MapperResult { Success = false, ComponentName = component.Name, ValidationResult = validationResult, ErrorMessage = "FB generation failed." };
 
             Directory.CreateDirectory(config.OutputDirectory);
-
             var modifiedContent = generator.GetModifiedTemplateContent(component, templateContent, templateBaseName);
             var fbtPath = Path.Combine(config.OutputDirectory, generatedFB.FbtFile);
-
             File.WriteAllText(fbtPath, modifiedContent);
             File.WriteAllText(Path.Combine(config.OutputDirectory, generatedFB.CompositeFile), generator.ResolveCompositeXml(templatePath));
             File.WriteAllText(Path.Combine(config.OutputDirectory, generatedFB.DocFile), generator.GetDocXml(generatedFB.FBName));
             File.WriteAllText(Path.Combine(config.OutputDirectory, generatedFB.MetaFile), generator.GetMetaXml(generatedFB.FBName, generatedFB.GUID));
-            var copiedCompanions = generator.CopyCatCompanionFiles(templatePath, config.OutputDirectory, generatedFB.FBName);
+            var companions = generator.CopyCatCompanionFiles(templatePath, config.OutputDirectory, generatedFB.FBName);
 
             if (Directory.Exists(config.EAEDeployPath))
             {
-                File.Copy(fbtPath, Path.Combine(config.EAEDeployPath, generatedFB.FbtFile), overwrite: true);
-                File.Copy(Path.Combine(config.OutputDirectory, generatedFB.CompositeFile),
-                          Path.Combine(config.EAEDeployPath, generatedFB.CompositeFile), overwrite: true);
-                File.Copy(Path.Combine(config.OutputDirectory, generatedFB.DocFile),
-                          Path.Combine(config.EAEDeployPath, generatedFB.DocFile), overwrite: true);
-                File.Copy(Path.Combine(config.OutputDirectory, generatedFB.MetaFile),
-                          Path.Combine(config.EAEDeployPath, generatedFB.MetaFile), overwrite: true);
-
-                foreach (var companion in copiedCompanions)
-                {
-                    File.Copy(Path.Combine(config.OutputDirectory, companion),
-                              Path.Combine(config.EAEDeployPath, companion), overwrite: true);
-                }
+                File.Copy(fbtPath, Path.Combine(config.EAEDeployPath, generatedFB.FbtFile), true);
+                File.Copy(Path.Combine(config.OutputDirectory, generatedFB.CompositeFile), Path.Combine(config.EAEDeployPath, generatedFB.CompositeFile), true);
+                File.Copy(Path.Combine(config.OutputDirectory, generatedFB.DocFile), Path.Combine(config.EAEDeployPath, generatedFB.DocFile), true);
+                File.Copy(Path.Combine(config.OutputDirectory, generatedFB.MetaFile), Path.Combine(config.EAEDeployPath, generatedFB.MetaFile), true);
+                foreach (var c in companions)
+                    File.Copy(Path.Combine(config.OutputDirectory, c), Path.Combine(config.EAEDeployPath, c), true);
             }
 
-            return new MapperResult
-            {
-                Success = true,
-                ComponentName = component.Name,
-                GeneratedFB = generatedFB,
-                OutputPath = config.OutputDirectory,
-                DeployPath = config.EAEDeployPath,
-                ValidationResult = validationResult
-            };
+            return new MapperResult { Success = true, ComponentName = component.Name, GeneratedFB = generatedFB, OutputPath = config.OutputDirectory, DeployPath = config.EAEDeployPath, ValidationResult = validationResult };
         }
     }
 }
