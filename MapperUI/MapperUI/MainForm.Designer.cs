@@ -319,7 +319,8 @@ namespace MapperUI
             this.lblStatePrefix.Name = "lblStatePrefix";
             this.lblStatePrefix.Size = new System.Drawing.Size(71, 15);
             this.lblStatePrefix.TabIndex = 4;
-            this.lblStatePrefix.Text = "State Count:";
+            //this.lblStatePrefix.Text = "State Count:";
+            this.lblStatePrefix.Text = "Components:";
             // 
             // lblDetectedStates
             // 
