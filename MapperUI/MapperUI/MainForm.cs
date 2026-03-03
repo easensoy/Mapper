@@ -20,8 +20,6 @@ namespace MapperUI
         private MapperConfig? _mapperConfig;
         private List<VueOneComponent> _loadedComponents = new List<VueOneComponent>();
         private SystemXmlReader? _lastReader;
-        private string _baselineFolder = string.Empty;
-
 
         public MainForm()
         {
@@ -514,9 +512,35 @@ namespace MapperUI
             }
         }
 
+        /// <summary>
+        /// Walks up from the syslay file path until it finds a folder containing a .dfbproj.
+        /// That folder is the EAE project root (baseline).
+        /// </summary>
+        private static string? DeriveBaselineFolder(string syslayPath)
+        {
+            var dir = Path.GetDirectoryName(syslayPath);
+            while (dir != null)
+            {
+                if (Directory.GetFiles(dir, "*.dfbproj").Any())
+                    return dir;
+                dir = Path.GetDirectoryName(dir);
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Appends a timestamped line to the status log in the UI.
+        /// Uses the existing status label as a simple log if no log box exists,
+        /// or writes to txtLog if you add one.
+        /// </summary>
+        private void AppendLog(string message)
+        {
+            var line = string.IsNullOrEmpty(message) ? "" : $"[{DateTime.Now:HH:mm:ss}] {message}";
+            System.Diagnostics.Debug.WriteLine(line);   // always visible in VS Output window
+            lblStatus.Text = string.IsNullOrEmpty(message) ? lblStatus.Text : message;
+        }
         private async void btnInjectSystem_Click(object sender, EventArgs e)
         {
-            // Guard — need components loaded
             if (_loadedComponents == null || _loadedComponents.Count == 0)
             {
                 MessageBox.Show("Load a Control.xml first.", "No Data",
@@ -524,23 +548,24 @@ namespace MapperUI
                 return;
             }
 
-            // Pick baseline folder if not already set this session
-            if (string.IsNullOrEmpty(_baselineFolder) || !Directory.Exists(_baselineFolder))
+            // Derive baseline folder from the syslay path already in config — no Browse needed
+            _mapperConfig = MapperConfig.Load();
+            var baselineFolder = DeriveBaselineFolder(_mapperConfig.SyslayPath);
+
+            if (baselineFolder == null)
             {
-                using var folderDlg = new FolderBrowserDialog
-                {
-                    Description = "Select the baseline EAE project folder (the one containing IEC61499.dfbproj).\n\nThis folder will NOT be modified.",
-                    UseDescriptionForTitle = true
-                };
-                if (folderDlg.ShowDialog() != DialogResult.OK) return;
-                _baselineFolder = folderDlg.SelectedPath;
+                MessageBox.Show(
+                    $"Cannot find EAE project root (.dfbproj) above:\n{_mapperConfig.SyslayPath}\n\nCheck mapper_config.json has a valid SyslayPath.",
+                    "Config Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
             }
 
-            // Staged projects land in the same parent folder as the baseline
-            var stagingRoot = Path.GetDirectoryName(_baselineFolder) ?? _baselineFolder;
+            var stagingRoot = Path.GetDirectoryName(baselineFolder) ?? baselineFolder;
 
             btnInjectSystem.Enabled = false;
             lblStatus.Text = "Building staged project...";
+            AppendLog($"--- Generate Staged Project ---");
+            AppendLog($"Baseline: {baselineFolder}");
 
             try
             {
@@ -548,69 +573,45 @@ namespace MapperUI
                 var builder = new StagingProjectBuilder();
 
                 var staged = await Task.Run(() =>
-                    builder.Build(_baselineFolder, stagingRoot, _loadedComponents, systemName));
+                    builder.Build(baselineFolder, stagingRoot, _loadedComponents, systemName));
 
-                // Build result summary message
-                var sb = new System.Text.StringBuilder();
-
-                if (staged.Injected.Count > 0)
-                {
-                    sb.AppendLine($"INJECTED ({staged.Injected.Count} new):");
-                    foreach (var i in staged.Injected)
-                        sb.AppendLine($"  +  {i}");
-                    sb.AppendLine();
-                }
-
-                if (staged.Skipped.Count > 0)
-                {
-                    sb.AppendLine($"PRESERVED ({staged.Skipped.Count} already in baseline):");
-                    foreach (var s in staged.Skipped)
-                        sb.AppendLine($"  =  {s}");
-                    sb.AppendLine();
-                }
-
-                if (staged.Unsupported.Count > 0)
-                {
-                    sb.AppendLine($"SKIPPED ({staged.Unsupported.Count} — no CAT type yet):");
-                    foreach (var u in staged.Unsupported)
-                        sb.AppendLine($"  !  {u}");
-                    sb.AppendLine();
-                }
+                // Show full log in UI
+                foreach (var line in staged.Log)
+                    AppendLog(line);
 
                 if (staged.Success)
                 {
-                    sb.AppendLine("─────────────────────────────────────");
-                    sb.AppendLine("Staged project ready. Open in EAE:");
-                    sb.AppendLine();
-                    sb.AppendLine(staged.StagedProjectFile);
-                    sb.AppendLine();
-                    sb.AppendLine("Click Yes to open the folder in Explorer.");
+                    AppendLog($"");
+                    AppendLog($"READY: {staged.StagedProjectFile}");
+                    AppendLog($"In EAE: File > Open Solution > select the .dfbproj above");
 
                     var answer = MessageBox.Show(
-                        sb.ToString(),
+                        $"Staged project ready.\n\n{staged.StagedProjectFile}\n\nOpen folder in Explorer?",
                         "Staged Project Ready",
                         MessageBoxButtons.YesNo,
-                        MessageBoxIcon.Information,
-                        MessageBoxDefaultButton.Button1);
+                        MessageBoxIcon.Information);
 
                     if (answer == DialogResult.Yes)
-                        System.Diagnostics.Process.Start("explorer.exe",
-                            $"/select,\"{staged.StagedProjectFile}\"");
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = "explorer.exe",
+                            Arguments = $"/select,\"{staged.StagedProjectFile}\"",
+                            UseShellExecute = true   // required in .NET 5+
+                        });
 
                     lblStatus.Text = $"Staged: {Path.GetFileName(staged.StagingFolder)}";
                 }
                 else
                 {
-                    MessageBox.Show(
-                        $"Staging failed:\n\n{staged.ErrorMessage}",
-                        "Build Failed",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Error);
+                    AppendLog($"[ERROR] {staged.ErrorMessage}");
+                    MessageBox.Show($"Staging failed:\n\n{staged.ErrorMessage}",
+                        "Build Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     lblStatus.Text = "Staging failed";
                 }
             }
             catch (Exception ex)
             {
+                AppendLog($"[EXCEPTION] {ex.Message}");
                 MessageBox.Show($"Unexpected error.\n{ex.Message}", "Error",
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
                 lblStatus.Text = "Error";
