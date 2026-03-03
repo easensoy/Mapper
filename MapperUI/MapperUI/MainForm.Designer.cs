@@ -177,9 +177,9 @@ namespace MapperUI
             this.btnInjectSystem.ForeColor = System.Drawing.Color.White;
             this.btnInjectSystem.Location = new System.Drawing.Point(1280, 63);
             this.btnInjectSystem.Name = "btnInjectSystem";
-            this.btnInjectSystem.Size = new System.Drawing.Size(120, 25);
+            this.btnInjectSystem.Size = new System.Drawing.Size(170, 25);
             this.btnInjectSystem.TabIndex = 6;
-            this.btnInjectSystem.Text = "Inject System";
+            this.btnInjectSystem.Text = "Generate Staged Project";
             this.btnInjectSystem.UseVisualStyleBackColor = false;
             this.btnInjectSystem.Click += new System.EventHandler(this.btnInjectSystem_Click);
 
