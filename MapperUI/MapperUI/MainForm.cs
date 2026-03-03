@@ -521,8 +521,8 @@ namespace MapperUI
             var dir = Path.GetDirectoryName(syslayPath);
             while (dir != null)
             {
-                if (Directory.GetFiles(dir, "*.dfbproj").Any())
-                    return dir;
+                var match = Directory.GetFiles(dir, "*.dfbproj").FirstOrDefault();
+                if (match != null) return match;
                 dir = Path.GetDirectoryName(dir);
             }
             return null;
@@ -535,86 +535,159 @@ namespace MapperUI
         /// </summary>
         private void AppendLog(string message)
         {
-            var line = string.IsNullOrEmpty(message) ? "" : $"[{DateTime.Now:HH:mm:ss}] {message}";
-            System.Diagnostics.Debug.WriteLine(line);   // always visible in VS Output window
-            lblStatus.Text = string.IsNullOrEmpty(message) ? lblStatus.Text : message;
+            var line = string.IsNullOrEmpty(message)
+                ? ""
+                : $"[{DateTime.Now:HH:mm:ss}]  {message}";
+
+            // Always write to VS Output window
+            System.Diagnostics.Debug.WriteLine(line);
+
+            // Write to the visible console panel (thread-safe)
+            if (txtLog.InvokeRequired)
+            {
+                txtLog.Invoke(new Action(() => AppendLog(message)));
+                return;
+            }
+
+            txtLog.AppendText(line + Environment.NewLine);
+            txtLog.ScrollToCaret();
+
+            // Keep last 500 lines — prevents unbounded memory growth
+            const int maxLines = 500;
+            if (txtLog.Lines.Length > maxLines)
+            {
+                var lines = txtLog.Lines.Skip(txtLog.Lines.Length - maxLines).ToArray();
+                txtLog.Lines = lines;
+            }
+
+            // Update status bar with last meaningful line
+            if (!string.IsNullOrEmpty(message))
+                lblStatus.Text = message.Length > 80 ? message[..80] + "…" : message;
+        }
+        private void debugConsoleToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            pnlLog.Visible = !pnlLog.Visible;
+            debugConsoleToolStripMenuItem.Checked = pnlLog.Visible;
+            if (pnlLog.Visible)
+                AppendLog("=== Debug Console opened ===");
         }
         private async void btnInjectSystem_Click(object sender, EventArgs e)
         {
             if (_loadedComponents == null || _loadedComponents.Count == 0)
             {
+                AppendLog("[ERROR] No components loaded — browse a Control.xml first.");
                 MessageBox.Show("Load a Control.xml first.", "No Data",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
-            // Derive baseline folder from the syslay path already in config — no Browse needed
-            _mapperConfig = MapperConfig.Load();
-            var baselineFolder = DeriveBaselineFolder(_mapperConfig.SyslayPath);
-
-            if (baselineFolder == null)
-            {
-                MessageBox.Show(
-                    $"Cannot find EAE project root (.dfbproj) above:\n{_mapperConfig.SyslayPath}\n\nCheck mapper_config.json has a valid SyslayPath.",
-                    "Config Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
-            }
-
-            var stagingRoot = Path.GetDirectoryName(baselineFolder) ?? baselineFolder;
-
             btnInjectSystem.Enabled = false;
-            lblStatus.Text = "Building staged project...";
-            AppendLog($"--- Generate Staged Project ---");
-            AppendLog($"Baseline: {baselineFolder}");
 
             try
             {
-                var systemName = _lastReader?.SystemName ?? "Mapped";
-                var builder = new StagingProjectBuilder();
+                // ── 1. Load config and find the live EAE project ──────────────────
+                _mapperConfig = MapperConfig.Load();
+                AppendLog($"Config loaded.");
+                AppendLog($"  syslay → {_mapperConfig.SyslayPath}");
+                AppendLog($"  sysres → {_mapperConfig.SysresPath}");
 
-                var staged = await Task.Run(() =>
-                    builder.Build(baselineFolder, stagingRoot, _loadedComponents, systemName));
-
-                // Show full log in UI
-                foreach (var line in staged.Log)
-                    AppendLog(line);
-
-                if (staged.Success)
+                if (!File.Exists(_mapperConfig.SyslayPath))
                 {
-                    AppendLog($"");
-                    AppendLog($"READY: {staged.StagedProjectFile}");
-                    AppendLog($"In EAE: File > Open Solution > select the .dfbproj above");
-
-                    var answer = MessageBox.Show(
-                        $"Staged project ready.\n\n{staged.StagedProjectFile}\n\nOpen folder in Explorer?",
-                        "Staged Project Ready",
-                        MessageBoxButtons.YesNo,
-                        MessageBoxIcon.Information);
-
-                    if (answer == DialogResult.Yes)
-                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                        {
-                            FileName = "explorer.exe",
-                            Arguments = $"/select,\"{staged.StagedProjectFile}\"",
-                            UseShellExecute = true   // required in .NET 5+
-                        });
-
-                    lblStatus.Text = $"Staged: {Path.GetFileName(staged.StagingFolder)}";
+                    AppendLog($"[ERROR] syslay not found: {_mapperConfig.SyslayPath}");
+                    MessageBox.Show($"syslay not found:\n{_mapperConfig.SyslayPath}\n\nCheck mapper_config.json.",
+                        "Config Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
                 }
-                else
+
+                var dfbproj = DeriveBaselineFolder(_mapperConfig.SyslayPath);
+                if (dfbproj == null)
                 {
-                    AppendLog($"[ERROR] {staged.ErrorMessage}");
-                    MessageBox.Show($"Staging failed:\n\n{staged.ErrorMessage}",
-                        "Build Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    lblStatus.Text = "Staging failed";
+                    AppendLog("[ERROR] Could not find IEC61499.dfbproj above syslay path.");
+                    MessageBox.Show("Cannot find .dfbproj above the syslay path.\nCheck mapper_config.json.",
+                        "Config Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
                 }
+                AppendLog($"  dfbproj → {dfbproj}");
+
+                // ── 2. Verify CAT types are registered in .dfbproj ────────────────
+                AppendLog("Checking CAT type registrations in .dfbproj...");
+                var dfbprojContent = await File.ReadAllTextAsync(dfbproj);
+                bool actuatorRegistered = dfbprojContent.Contains("Five_State_Actuator_CAT");
+                bool sensorRegistered = dfbprojContent.Contains("Sensor_Bool_CAT");
+                bool processRegistered = dfbprojContent.Contains("Process1_CAT");
+
+                AppendLog($"  Five_State_Actuator_CAT : {(actuatorRegistered ? "FOUND ✓" : "MISSING ✗")}");
+                AppendLog($"  Sensor_Bool_CAT         : {(sensorRegistered ? "FOUND ✓" : "MISSING ✗")}");
+                AppendLog($"  Process1_CAT            : {(processRegistered ? "FOUND ✓" : "MISSING ✗")}");
+
+                if (!actuatorRegistered || !sensorRegistered)
+                {
+                    AppendLog("[ERROR] Required CAT types not registered. Is this the right EAE project?");
+                    MessageBox.Show("Required CAT types not found in .dfbproj.\nIs mapper_config.json pointing at the right project?",
+                        "Wrong Project", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+
+                // ── 3. Preview diff before touching anything ──────────────────────
+                AppendLog("Running diff against live syslay...");
+                var injector = new CodeGen.Translation.SystemInjector();
+                var config = new CodeGen.Configuration.MapperConfig
+                {
+                    SyslayPath = _mapperConfig.SyslayPath,
+                    SysresPath = _mapperConfig.SysresPath
+                };
+                var diff = injector.PreviewDiff(config, _loadedComponents);
+
+                AppendLog($"  Already in project  : {diff.AlreadyPresent.Count}");
+                foreach (var s in diff.AlreadyPresent) AppendLog($"    = {s}");
+                AppendLog($"  Will be injected    : {diff.ToBeInjected.Count}");
+                foreach (var i in diff.ToBeInjected) AppendLog($"    + {i}");
+                AppendLog($"  Unsupported (skip)  : {diff.Unsupported.Count}");
+                foreach (var u in diff.Unsupported) AppendLog($"    ! {u}");
+
+                if (diff.ToBeInjected.Count == 0)
+                {
+                    AppendLog("Nothing new to inject — project already up to date.");
+                    MessageBox.Show("All components already exist in the project.\nNothing to inject.",
+                        "Up To Date", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                // ── 4. Inject directly into live syslay + sysres ──────────────────
+                AppendLog("Injecting into live project files...");
+                var result = await Task.Run(() => injector.Inject(config, _loadedComponents));
+
+                if (!result.Success)
+                {
+                    AppendLog($"[ERROR] Injection failed: {result.ErrorMessage}");
+                    MessageBox.Show($"Injection failed:\n\n{result.ErrorMessage}",
+                        "Injection Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+
+                AppendLog($"Injection complete — {result.InjectedFBs.Count} FB(s) written.");
+                foreach (var fb in result.InjectedFBs) AppendLog($"  + {fb}");
+
+                // ── 5. Touch .dfbproj → EAE detects change → Reload Solution ─────
+                AppendLog($"Touching .dfbproj to trigger EAE reload...");
+                File.SetLastWriteTime(dfbproj, DateTime.Now);
+                AppendLog($"  Touched: {Path.GetFileName(dfbproj)}");
+                AppendLog($"  EAE will now show 'Reload Solution' — click Yes in EAE.");
+
+                MessageBox.Show(
+                    $"Injected {result.InjectedFBs.Count} component(s) into the live project.\n\n" +
+                    $"Switch to EAE — it will show a 'Reload Solution' dialog.\nClick Yes to load the changes.",
+                    "Done — Reload EAE",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+
+                AppendLog("=== Done ===");
             }
             catch (Exception ex)
             {
-                AppendLog($"[EXCEPTION] {ex.Message}");
-                MessageBox.Show($"Unexpected error.\n{ex.Message}", "Error",
+                AppendLog($"[EXCEPTION] {ex.GetType().Name}: {ex.Message}");
+                MessageBox.Show($"Unexpected error:\n{ex.Message}", "Error",
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
-                lblStatus.Text = "Error";
             }
             finally
             {
