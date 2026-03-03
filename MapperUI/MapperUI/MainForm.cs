@@ -510,7 +510,7 @@ namespace MapperUI
 
             try
             {
-                var result = await _mapperService.RunSystemInjection();
+                var result = await _mapperService.RunSystemInjection(_loadedComponents);
 
                 if (!result.Success)
                 {
