@@ -175,9 +175,9 @@ namespace MapperUI
             this.btnInjectSystem.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnInjectSystem.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point);
             this.btnInjectSystem.ForeColor = System.Drawing.Color.White;
-            this.btnInjectSystem.Location = new System.Drawing.Point(1280, 63);
+            this.btnInjectSystem.Location = new System.Drawing.Point(1048, 63);
             this.btnInjectSystem.Name = "btnInjectSystem";
-            this.btnInjectSystem.Size = new System.Drawing.Size(170, 25);
+            this.btnInjectSystem.Size = new System.Drawing.Size(340, 25);
             this.btnInjectSystem.TabIndex = 6;
             this.btnInjectSystem.Text = "Generate Staged Project";
             this.btnInjectSystem.UseVisualStyleBackColor = false;
