@@ -6,33 +6,23 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Xml.Linq;
 using CodeGen.Configuration;
-using CodeGen.IO;
 using CodeGen.Models;
 
 namespace MapperUI.Services
 {
     /// <summary>
-    /// Phase 2 – Inject CAT instances into an existing EAE .syslay and .sysres.
-    ///
-    /// Rules:
-    ///   Actuator  + 5 states  → Five_State_Actuator_CAT
-    ///   Sensor    + 2 states  → Sensor_Bool_CAT
-    ///   Process   (any)       → Process1_CAT
-    ///   Everything else       → skipped with a warning
-    ///
-    /// IDs are derived deterministically from component name so the operation
-    /// is fully idempotent (safe to run multiple times).
+    /// Phase 2 – Injects CAT instances into an existing EAE .syslay and .sysres.
+    /// Receives pre-loaded components directly — does NOT re-read any Control.xml.
     /// </summary>
     public class SystemInjector
     {
-        // EAE XML namespace – confirmed from the real syslay / sysres files
         private static readonly XNamespace Ns = "https://www.se.com/LibraryElements";
 
         private const string ActuatorCatType = "Five_State_Actuator_CAT";
         private const string SensorCatType = "Sensor_Bool_CAT";
         private const string ProcessCatType = "Process1_CAT";
 
-        public SystemInjectionResult Inject(MapperConfig config)
+        public SystemInjectionResult Inject(MapperConfig config, List<VueOneComponent> components)
         {
             var result = new SystemInjectionResult
             {
@@ -42,22 +32,13 @@ namespace MapperUI.Services
 
             try
             {
-                // ── 1. Validate paths ─────────────────────────────────────────
-                if (!File.Exists(config.SystemXmlPath))
-                    throw new FileNotFoundException($"System XML not found: {config.SystemXmlPath}");
                 if (!File.Exists(config.SyslayPath))
                     throw new FileNotFoundException($"syslay not found: {config.SyslayPath}");
                 if (!File.Exists(config.SysresPath))
                     throw new FileNotFoundException($"sysres not found: {config.SysresPath}");
+                if (components == null || components.Count == 0)
+                    throw new Exception("No components loaded. Use Browse to load a Control.xml first.");
 
-                // ── 2. Parse VueOne system XML ────────────────────────────────
-                var reader = new SystemXmlReader();
-                var components = reader.ReadAllComponents(config.SystemXmlPath);
-
-                if (components.Count == 0)
-                    throw new Exception("No components found in system XML. Ensure it is Type='System'.");
-
-                // ── 3. Categorise components ──────────────────────────────────
                 var actuators = new List<VueOneComponent>();
                 var sensors = new List<VueOneComponent>();
                 var processes = new List<VueOneComponent>();
@@ -74,14 +55,10 @@ namespace MapperUI.Services
                         result.UnsupportedComponents.Add($"{c.Name} ({c.Type}, {c.States.Count} states)");
                 }
 
-                // We need exactly one Process FB to wire into
-                var processComponent = processes.FirstOrDefault();
+                var processComp = processes.FirstOrDefault();
 
-                // ── 4. Patch .syslay ──────────────────────────────────────────
-                PatchSyslay(config.SyslayPath, actuators, sensors, processComponent, result);
-
-                // ── 5. Patch .sysres ──────────────────────────────────────────
-                PatchSysres(config.SysresPath, actuators, sensors, processComponent, result);
+                PatchSyslay(config.SyslayPath, actuators, sensors, processComp, result);
+                PatchSysres(config.SysresPath, actuators, sensors, processComp, result);
 
                 result.Success = true;
             }
@@ -94,348 +71,180 @@ namespace MapperUI.Services
             return result;
         }
 
-        // ─────────────────────────────────────────────────────────────────────
-        // SYSLAY
-        // ─────────────────────────────────────────────────────────────────────
+        // ── SYSLAY ────────────────────────────────────────────────────────────
 
-        private void PatchSyslay(
-            string path,
-            List<VueOneComponent> actuators,
-            List<VueOneComponent> sensors,
-            VueOneComponent? processComp,
-            SystemInjectionResult result)
+        private void PatchSyslay(string path, List<VueOneComponent> actuators,
+            List<VueOneComponent> sensors, VueOneComponent? processComp, SystemInjectionResult result)
         {
             var doc = XDocument.Load(path);
-            var subAppNetwork = doc.Root?.Element(Ns + "SubAppNetwork")
-                ?? throw new Exception("SubAppNetwork element not found in syslay.");
+            var net = doc.Root?.Element(Ns + "SubAppNetwork")
+                ?? throw new Exception("SubAppNetwork not found in syslay.");
 
-            int xPos = 1200;
-            int yPos = 500;
+            int x = 1200, y = 500;
 
-            // ── Inject Process FB ─────────────────────────────────────────────
             if (processComp != null)
-            {
-                var textParam = BuildTextParam(processComp);
-                EnsureFbInNetwork(subAppNetwork, processComp.Name, ProcessCatType,
-                    SyslayId(processComp.Name), xPos + 2000, yPos + 1000,
-                    new[] { ("Text", textParam) },
-                    result);
-            }
+                EnsureFb(net, processComp.Name, ProcessCatType, SyslayId(processComp.Name),
+                    x + 2000, y + 1000, new[] { ("Text", BuildTextParam(processComp)) }, result);
 
-            // ── Inject Sensor FBs ─────────────────────────────────────────────
-            foreach (var sensor in sensors)
-            {
-                EnsureFbInNetwork(subAppNetwork, sensor.Name, SensorCatType,
-                    SyslayId(sensor.Name), xPos, yPos,
-                    Array.Empty<(string, string)>(),
-                    result);
-                yPos += 500;
-            }
+            foreach (var s in sensors)
+            { EnsureFb(net, s.Name, SensorCatType, SyslayId(s.Name), x, y, Array.Empty<(string, string)>(), result); y += 500; }
 
-            // ── Inject Actuator FBs ───────────────────────────────────────────
-            foreach (var actuator in actuators)
-            {
-                EnsureFbInNetwork(subAppNetwork, actuator.Name, ActuatorCatType,
-                    SyslayId(actuator.Name), xPos, yPos,
-                    new[] { ("actuator_name", $"'{actuator.Name.ToLower()}'") },
-                    result);
-                yPos += 500;
-            }
+            foreach (var a in actuators)
+            { EnsureFb(net, a.Name, ActuatorCatType, SyslayId(a.Name), x, y, new[] { ("actuator_name", $"'{a.Name.ToLower()}'") }, result); y += 500; }
 
-            // ── Inject Connections ────────────────────────────────────────────
             if (processComp != null)
-            {
-                var evtConns = EnsureOrAddElement(subAppNetwork, "EventConnections");
-                var dataConns = EnsureOrAddElement(subAppNetwork, "DataConnections");
-
-                foreach (var sensor in sensors)
-                {
-                    // sensor.pst_out → Process.state_change  (event)
-                    EnsureConnection(evtConns, $"{sensor.Name}.pst_out", $"{processComp.Name}.state_change", "60");
-                }
-
-                foreach (var actuator in actuators)
-                {
-                    // Actuator.pst_out → Process.state_change  (event – feedback)
-                    EnsureConnection(evtConns, $"{actuator.Name}.pst_out", $"{processComp.Name}.state_change", "383");
-                    // Process.state_update → Actuator.pst_event  (event – command)
-                    EnsureConnection(evtConns, $"{processComp.Name}.state_update", $"{actuator.Name}.pst_event", "100");
-
-                    // Actuator.current_state_to_process → Process.<actuatorVar>  (data)
-                    EnsureConnection(dataConns, $"{actuator.Name}.current_state_to_process",
-                        $"{processComp.Name}.{ToCamelCase(actuator.Name)}", "463");
-                    // Process.actuator_name → Actuator.process_state_name  (data)
-                    EnsureConnection(dataConns, $"{processComp.Name}.actuator_name",
-                        $"{actuator.Name}.process_state_name", "110");
-                    // Process.state_val → Actuator.state_val  (data)
-                    EnsureConnection(dataConns, $"{processComp.Name}.state_val",
-                        $"{actuator.Name}.state_val", "60");
-                }
-
-                foreach (var sensor in sensors)
-                {
-                    // Sensor.Status → Process.<sensorVar>  (data)
-                    EnsureConnection(dataConns, $"{sensor.Name}.Status",
-                        $"{processComp.Name}.{ToCamelCase(sensor.Name)}", "206");
-                }
-            }
-
-            // ── Build INIT chain among injected FBs ───────────────────────────
-            if (processComp != null && (sensors.Count > 0 || actuators.Count > 0))
-            {
-                var evtConns = EnsureOrAddElement(subAppNetwork, "EventConnections");
-                var chain = new List<string>();
-                chain.AddRange(sensors.Select(s => s.Name));
-                chain.AddRange(actuators.Select(a => a.Name));
-                chain.Add(processComp.Name);
-
-                for (int i = 0; i < chain.Count - 1; i++)
-                    EnsureConnection(evtConns, $"{chain[i]}.INITO", $"{chain[i + 1]}.INIT", "60");
-            }
+                AddWiring(net, actuators, sensors, processComp);
 
             doc.Save(path);
         }
 
-        // ─────────────────────────────────────────────────────────────────────
-        // SYSRES
-        // ─────────────────────────────────────────────────────────────────────
+        // ── SYSRES ────────────────────────────────────────────────────────────
 
-        private void PatchSysres(
-            string path,
-            List<VueOneComponent> actuators,
-            List<VueOneComponent> sensors,
-            VueOneComponent? processComp,
-            SystemInjectionResult result)
+        private void PatchSysres(string path, List<VueOneComponent> actuators,
+            List<VueOneComponent> sensors, VueOneComponent? processComp, SystemInjectionResult result)
         {
             var doc = XDocument.Load(path);
-            // sysres root container is <FBNetwork> inside <Resource>
-            var fbNetwork = doc.Root?.Element(Ns + "FBNetwork")
-                ?? throw new Exception("FBNetwork element not found in sysres.");
+            var net = doc.Root?.Element(Ns + "FBNetwork")
+                ?? throw new Exception("FBNetwork not found in sysres.");
 
-            int xPos = 2500;
-            int yPos = 2000;
+            int x = 2500, y = 2000;
 
-            // ── Inject Process FB ─────────────────────────────────────────────
             if (processComp != null)
-            {
-                var textParam = BuildTextParam(processComp);
-                EnsureFbInNetworkRes(fbNetwork, processComp.Name, ProcessCatType,
+                EnsureFbRes(net, processComp.Name, ProcessCatType,
                     SysresId(processComp.Name), SyslayId(processComp.Name),
-                    xPos + 2000, yPos + 1000,
-                    new[] { ("Text", textParam) });
-            }
+                    x + 2000, y + 1000, new[] { ("Text", BuildTextParam(processComp)) });
 
-            // ── Inject Sensor FBs ─────────────────────────────────────────────
-            foreach (var sensor in sensors)
-            {
-                EnsureFbInNetworkRes(fbNetwork, sensor.Name, SensorCatType,
-                    SysresId(sensor.Name), SyslayId(sensor.Name),
-                    xPos, yPos,
-                    Array.Empty<(string, string)>());
-                yPos += 500;
-            }
+            foreach (var s in sensors)
+            { EnsureFbRes(net, s.Name, SensorCatType, SysresId(s.Name), SyslayId(s.Name), x, y, Array.Empty<(string, string)>()); y += 500; }
 
-            // ── Inject Actuator FBs ───────────────────────────────────────────
-            foreach (var actuator in actuators)
-            {
-                EnsureFbInNetworkRes(fbNetwork, actuator.Name, ActuatorCatType,
-                    SysresId(actuator.Name), SyslayId(actuator.Name),
-                    xPos, yPos,
-                    new[] { ("actuator_name", $"'{actuator.Name.ToLower()}'") });
-                yPos += 500;
-            }
+            foreach (var a in actuators)
+            { EnsureFbRes(net, a.Name, ActuatorCatType, SysresId(a.Name), SyslayId(a.Name), x, y, new[] { ("actuator_name", $"'{a.Name.ToLower()}'") }); y += 500; }
 
-            // ── Inject Connections (mirror syslay) ────────────────────────────
             if (processComp != null)
-            {
-                var evtConns = EnsureOrAddElement(fbNetwork, "EventConnections");
-                var dataConns = EnsureOrAddElement(fbNetwork, "DataConnections");
-
-                foreach (var sensor in sensors)
-                    EnsureConnection(evtConns, $"{sensor.Name}.pst_out", $"{processComp.Name}.state_change", "60");
-
-                foreach (var actuator in actuators)
-                {
-                    EnsureConnection(evtConns, $"{actuator.Name}.pst_out", $"{processComp.Name}.state_change", "383");
-                    EnsureConnection(evtConns, $"{processComp.Name}.state_update", $"{actuator.Name}.pst_event", "100");
-                    EnsureConnection(dataConns, $"{actuator.Name}.current_state_to_process",
-                        $"{processComp.Name}.{ToCamelCase(actuator.Name)}", "463");
-                    EnsureConnection(dataConns, $"{processComp.Name}.actuator_name",
-                        $"{actuator.Name}.process_state_name", "110");
-                    EnsureConnection(dataConns, $"{processComp.Name}.state_val",
-                        $"{actuator.Name}.state_val", "60");
-                }
-
-                foreach (var sensor in sensors)
-                    EnsureConnection(dataConns, $"{sensor.Name}.Status",
-                        $"{processComp.Name}.{ToCamelCase(sensor.Name)}", "206");
-            }
-
-            if (processComp != null && (sensors.Count > 0 || actuators.Count > 0))
-            {
-                var evtConns = EnsureOrAddElement(fbNetwork, "EventConnections");
-                var chain = new List<string>();
-                chain.AddRange(sensors.Select(s => s.Name));
-                chain.AddRange(actuators.Select(a => a.Name));
-                chain.Add(processComp.Name);
-
-                for (int i = 0; i < chain.Count - 1; i++)
-                    EnsureConnection(evtConns, $"{chain[i]}.INITO", $"{chain[i + 1]}.INIT", "60");
-            }
+                AddWiring(net, actuators, sensors, processComp);
 
             doc.Save(path);
         }
 
-        // ─────────────────────────────────────────────────────────────────────
-        // Helpers
-        // ─────────────────────────────────────────────────────────────────────
+        // ── Wiring (shared for both syslay and sysres) ───────────────────────
 
-        /// <summary>Add FB to SubAppNetwork if it doesn't already exist by Name.</summary>
-        private void EnsureFbInNetwork(
-            XElement network,
-            string name,
-            string type,
-            string id,
-            int x,
-            int y,
-            IEnumerable<(string Key, string Value)> parameters,
-            SystemInjectionResult result)
+        private void AddWiring(XElement net, List<VueOneComponent> actuators,
+            List<VueOneComponent> sensors, VueOneComponent proc)
         {
-            bool exists = network.Elements(Ns + "FB")
-                .Any(fb => (string?)fb.Attribute("Name") == name);
+            var evt = EnsureOrAddElement(net, "EventConnections");
+            var data = EnsureOrAddElement(net, "DataConnections");
 
-            if (exists)
+            foreach (var s in sensors)
             {
-                result.SkippedFBs.Add($"{name} (already present)");
-                return;
+                EnsureConn(evt, $"{s.Name}.pst_out", $"{proc.Name}.state_change", "60");
+                EnsureConn(data, $"{s.Name}.Status", $"{proc.Name}.{ToCamel(s.Name)}", "206");
             }
+
+            foreach (var a in actuators)
+            {
+                EnsureConn(evt, $"{a.Name}.pst_out", $"{proc.Name}.state_change", "383");
+                EnsureConn(evt, $"{proc.Name}.state_update", $"{a.Name}.pst_event", "100");
+                EnsureConn(data, $"{a.Name}.current_state_to_process", $"{proc.Name}.{ToCamel(a.Name)}", "463");
+                EnsureConn(data, $"{proc.Name}.actuator_name", $"{a.Name}.process_state_name", "110");
+                EnsureConn(data, $"{proc.Name}.state_val", $"{a.Name}.state_val", "60");
+            }
+
+            // INIT chain: sensor(s) → actuator(s) → process
+            var chain = sensors.Select(s => s.Name)
+                .Concat(actuators.Select(a => a.Name))
+                .Concat(new[] { proc.Name })
+                .ToList();
+
+            for (int i = 0; i < chain.Count - 1; i++)
+                EnsureConn(evt, $"{chain[i]}.INITO", $"{chain[i + 1]}.INIT", "60");
+        }
+
+        // ── XML helpers ───────────────────────────────────────────────────────
+
+        private void EnsureFb(XElement net, string name, string type, string id, int x, int y,
+            IEnumerable<(string Key, string Value)> parms, SystemInjectionResult result)
+        {
+            if (net.Elements(Ns + "FB").Any(fb => (string?)fb.Attribute("Name") == name))
+            { result.SkippedFBs.Add($"{name} (already present)"); return; }
 
             var fb = new XElement(Ns + "FB",
-                new XAttribute("ID", id),
-                new XAttribute("Name", name),
-                new XAttribute("Type", type),
-                new XAttribute("Namespace", "Main"),
-                new XAttribute("x", x.ToString()),
-                new XAttribute("y", y.ToString()));
+                new XAttribute("ID", id), new XAttribute("Name", name),
+                new XAttribute("Type", type), new XAttribute("Namespace", "Main"),
+                new XAttribute("x", x), new XAttribute("y", y));
 
-            foreach (var (key, value) in parameters)
-                fb.Add(new XElement(Ns + "Parameter",
-                    new XAttribute("Name", key),
-                    new XAttribute("Value", value)));
+            foreach (var (k, v) in parms)
+                fb.Add(new XElement(Ns + "Parameter", new XAttribute("Name", k), new XAttribute("Value", v)));
 
-            // Insert before first connection element so FBs stay grouped at top
-            var firstConn = network.Elements()
-                .FirstOrDefault(e => e.Name.LocalName is "EventConnections" or "DataConnections" or "AdapterConnections");
-
-            if (firstConn != null)
-                firstConn.AddBeforeSelf(fb);
-            else
-                network.Add(fb);
-
+            InsertBeforeConnections(net, fb);
             result.InjectedFBs.Add($"{name} ({type})");
         }
 
-        /// <summary>Add FB to FBNetwork (sysres) with Mapping= attribute.</summary>
-        private void EnsureFbInNetworkRes(
-            XElement network,
-            string name,
-            string type,
-            string id,
-            string mappingId,
-            int x,
-            int y,
-            IEnumerable<(string Key, string Value)> parameters)
+        private void EnsureFbRes(XElement net, string name, string type, string id, string mapping,
+            int x, int y, IEnumerable<(string Key, string Value)> parms)
         {
-            bool exists = network.Elements(Ns + "FB")
-                .Any(fb => (string?)fb.Attribute("Name") == name);
-
-            if (exists) return;
+            if (net.Elements(Ns + "FB").Any(fb => (string?)fb.Attribute("Name") == name)) return;
 
             var fb = new XElement(Ns + "FB",
-                new XAttribute("ID", id),
-                new XAttribute("Name", name),
-                new XAttribute("Type", type),
-                new XAttribute("Namespace", "Main"),
-                new XAttribute("Mapping", mappingId),
-                new XAttribute("x", x.ToString()),
-                new XAttribute("y", y.ToString()));
+                new XAttribute("ID", id), new XAttribute("Name", name),
+                new XAttribute("Type", type), new XAttribute("Namespace", "Main"),
+                new XAttribute("Mapping", mapping),
+                new XAttribute("x", x), new XAttribute("y", y));
 
-            foreach (var (key, value) in parameters)
-                fb.Add(new XElement(Ns + "Parameter",
-                    new XAttribute("Name", key),
-                    new XAttribute("Value", value)));
+            foreach (var (k, v) in parms)
+                fb.Add(new XElement(Ns + "Parameter", new XAttribute("Name", k), new XAttribute("Value", v)));
 
-            var firstConn = network.Elements()
-                .FirstOrDefault(e => e.Name.LocalName is "EventConnections" or "DataConnections" or "AdapterConnections");
-
-            if (firstConn != null)
-                firstConn.AddBeforeSelf(fb);
-            else
-                network.Add(fb);
+            InsertBeforeConnections(net, fb);
         }
 
-        /// <summary>Add connection if not already present (matched on Source+Destination).</summary>
-        private void EnsureConnection(XElement connGroup, string source, string destination, string dx1)
+        private void EnsureConn(XElement grp, string src, string dst, string dx1)
         {
-            bool exists = connGroup.Elements(Ns + "Connection")
-                .Any(c => (string?)c.Attribute("Source") == source
-                       && (string?)c.Attribute("Destination") == destination);
-
-            if (exists) return;
-
-            connGroup.Add(new XElement(Ns + "Connection",
-                new XAttribute("Source", source),
-                new XAttribute("Destination", destination),
-                new XAttribute("dx1", dx1)));
+            if (grp.Elements(Ns + "Connection")
+                    .Any(c => (string?)c.Attribute("Source") == src && (string?)c.Attribute("Destination") == dst))
+                return;
+            grp.Add(new XElement(Ns + "Connection",
+                new XAttribute("Source", src), new XAttribute("Destination", dst), new XAttribute("dx1", dx1)));
         }
 
-        /// <summary>Find or create a child element (EventConnections / DataConnections).</summary>
         private XElement EnsureOrAddElement(XElement parent, string localName)
         {
-            var existing = parent.Element(Ns + localName);
-            if (existing != null) return existing;
-
-            var newEl = new XElement(Ns + localName);
-            parent.Add(newEl);
-            return newEl;
+            var el = parent.Element(Ns + localName);
+            if (el != null) return el;
+            el = new XElement(Ns + localName);
+            parent.Add(el);
+            return el;
         }
 
-        /// <summary>Build Process1_CAT Text parameter from process state names.</summary>
-        private string BuildTextParam(VueOneComponent processComp)
+        private void InsertBeforeConnections(XElement net, XElement fb)
         {
-            var names = processComp.States
-                .OrderBy(s => s.StateNumber)
-                .Select(s => $"'{s.Name}'")
-                .ToList();
+            var anchor = net.Elements().FirstOrDefault(
+                e => e.Name.LocalName is "EventConnections" or "DataConnections" or "AdapterConnections");
+            if (anchor != null) anchor.AddBeforeSelf(fb);
+            else net.Add(fb);
+        }
 
-            int padding = Math.Max(0, 14 - names.Count);
-            if (padding > 0)
-                names.Add($"{padding}('')");
-
+        private string BuildTextParam(VueOneComponent proc)
+        {
+            var names = proc.States.OrderBy(s => s.StateNumber).Select(s => $"'{s.Name}'").ToList();
+            int pad = Math.Max(0, 14 - names.Count);
+            if (pad > 0) names.Add($"{pad}('')");
             return "[" + string.Join(",", names) + "]";
         }
 
-        /// <summary>Deterministic 16-char uppercase hex ID for syslay (based on component name).</summary>
         private static string SyslayId(string name)
         {
             using var md5 = MD5.Create();
-            var hash = md5.ComputeHash(Encoding.UTF8.GetBytes("SYSLAY:" + name.ToUpperInvariant()));
-            return BitConverter.ToString(hash).Replace("-", "")[..16].ToUpper();
+            return BitConverter.ToString(md5.ComputeHash(
+                Encoding.UTF8.GetBytes("SYSLAY:" + name.ToUpperInvariant()))).Replace("-", "")[..16].ToUpper();
         }
 
-        /// <summary>Deterministic 16-char uppercase hex ID for sysres.</summary>
         private static string SysresId(string name)
         {
             using var md5 = MD5.Create();
-            var hash = md5.ComputeHash(Encoding.UTF8.GetBytes("SYSRES:" + name.ToUpperInvariant()));
-            return BitConverter.ToString(hash).Replace("-", "")[..16].ToUpper();
+            return BitConverter.ToString(md5.ComputeHash(
+                Encoding.UTF8.GetBytes("SYSRES:" + name.ToUpperInvariant()))).Replace("-", "")[..16].ToUpper();
         }
 
-        /// <summary>Convert "PartInHopper" → "partInHopper" (first letter lower).</summary>
-        private static string ToCamelCase(string name)
-        {
-            if (string.IsNullOrEmpty(name)) return name;
-            return char.ToLower(name[0]) + name[1..];
-        }
+        private static string ToCamel(string name) =>
+            string.IsNullOrEmpty(name) ? name : char.ToLower(name[0]) + name[1..];
     }
 }
