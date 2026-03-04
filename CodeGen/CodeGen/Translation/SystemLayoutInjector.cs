@@ -7,6 +7,7 @@ using System.Text;
 using System.Xml.Linq;
 using CodeGen.Configuration;
 using CodeGen.Models;
+using MapperUI;
 
 namespace MapperUI.Services
 {
@@ -86,6 +87,9 @@ namespace MapperUI.Services
             foreach (var c in components.Where(c => !IsActuator(c) && !IsSensor(c) && !IsProcess(c)))
                 report.Unsupported.Add($"{c.Name} ({c.Type}, {c.States.Count} states — no CAT type)");
 
+            MapperLogger.Diff($"Reading syslay: {Path.GetFileName(config.SyslayPath)}");
+            MapperLogger.Diff($"Found {existing[ProcessCatType].Count} Process1_CAT, {existing[SensorCatType].Count} Sensor_Bool_CAT, {existing[ActuatorCatType].Count} Five_State_Actuator_CAT in baseline");
+            
             return report;
         }
 
@@ -137,6 +141,11 @@ namespace MapperUI.Services
             SystemInjectionResult result)
         {
             var doc = XDocument.Load(path);
+
+            MapperLogger.Remap($"Processing {Path.GetFileName(path)} (isSysres={isSysres})");
+            MapperLogger.Remap($"  {oldName} → {newName} [{catType}] ID preserved");
+            MapperLogger.Remap($"  Rewriting {renames.Count} name prefix(es) in connections");
+            MapperLogger.Write($"Saved: {Path.GetFileName(path)}");
 
             // syslay uses SubAppNetwork, sysres uses FBNetwork
             var net = isSysres
