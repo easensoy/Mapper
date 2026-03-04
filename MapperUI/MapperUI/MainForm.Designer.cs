@@ -24,6 +24,9 @@ namespace MapperUI
             this.fileToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.dataToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.buildToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.debugConsoleToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.pnlLog = new System.Windows.Forms.Panel();
+            this.txtLog = new System.Windows.Forms.RichTextBox();
             this.lblVueOneModel = new System.Windows.Forms.Label();
             this.txtModelPath = new System.Windows.Forms.TextBox();
             this.btnMappingRules = new System.Windows.Forms.Button();
