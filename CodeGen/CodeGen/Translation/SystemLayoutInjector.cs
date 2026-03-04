@@ -124,7 +124,7 @@ namespace MapperUI.Services
             var net = doc.Root?.Element(Ns + "SubAppNetwork")
                 ?? throw new Exception("SubAppNetwork not found in syslay.");
 
-            int x = 1200, y = 500;
+            var (x, y) = FindSafePlacementOrigin(net);
 
             if (processComp != null)
                 EnsureFb(net, processComp.Name, ProcessCatType, SyslayId(processComp.Name),
@@ -151,7 +151,7 @@ namespace MapperUI.Services
             var net = doc.Root?.Element(Ns + "FBNetwork")
                 ?? throw new Exception("FBNetwork not found in sysres.");
 
-            int x = 2500, y = 2000;
+            var (x, y) = FindSafePlacementOrigin(net);
 
             if (processComp != null)
                 EnsureFbRes(net, processComp.Name, ProcessCatType,
@@ -266,6 +266,31 @@ namespace MapperUI.Services
                 e => e.Name.LocalName is "EventConnections" or "DataConnections" or "AdapterConnections");
             if (anchor != null) anchor.AddBeforeSelf(fb);
             else net.Add(fb);
+        }
+
+        /// <summary>
+        /// Reads all existing FB x/y coordinates from the network element and returns
+        /// a placement origin that is clear of everything already on the canvas.
+        /// New FBs are placed in a column starting at (leftmostX, maxY + gap).
+        /// </summary>
+        private static (int x, int y) FindSafePlacementOrigin(XElement net, int gapY = 800)
+        {
+            var existingFBs = net.Descendants()
+                .Where(e => e.Name.LocalName == "FB")
+                .ToList();
+
+            if (!existingFBs.Any())
+                return (1200, 500);
+
+            int maxY = existingFBs
+                .Select(fb => int.TryParse(fb.Attribute("y")?.Value, out var v) ? v : 0)
+                .Max();
+
+            int minX = existingFBs
+                .Select(fb => int.TryParse(fb.Attribute("x")?.Value, out var v) ? v : 1200)
+                .Min();
+
+            return (minX, maxY + gapY);
         }
 
         private string BuildTextParam(VueOneComponent proc)
