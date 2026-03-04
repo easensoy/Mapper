@@ -751,6 +751,5 @@ namespace MapperUI
         private System.Windows.Forms.DataGridViewTextBoxColumn colLogTime;
         private System.Windows.Forms.DataGridViewTextBoxColumn colLogStep;
         private System.Windows.Forms.DataGridViewTextBoxColumn colLogAction;
-        private System.Windows.Forms.ToolStripMenuItem debugConsoleToolStripMenuItem;
     }
 }
