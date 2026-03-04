@@ -1,18 +1,19 @@
-﻿using System;
+﻿using CodeGen.Configuration;
+using CodeGen.IO;
+using CodeGen.Mapping;
+using CodeGen.Models;
+using CodeGen.Translation;
+using CodeGen.Validation;
+using MapperUI.Services;
+using MapperUI.Services.MapperUI;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Windows.Forms;
-using CodeGen.Configuration;
-using CodeGen.IO;
-using CodeGen.Mapping;
-using CodeGen.Models;
-using CodeGen.Validation;
-using CodeGen.Translation;
-using MapperUI.Services;
 
-namespace MapperUI
+namespace MapperUI.Services
 {
     public partial class MainForm : Form
     {
@@ -571,14 +572,7 @@ namespace MapperUI
             dgvLog.Rows.Clear();
             MapperLogger.Info("Log cleared.");
         }
-        private void debugConsoleToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            pnlLog.Visible = !pnlLog.Visible;
-            debugConsoleToolStripMenuItem.Checked = pnlLog.Visible;
-            if (pnlLog.Visible)
-                AppendLog("=== Debug Console opened ===");
-        }
-
+   
         private async void btnInjectSystem_Click(object sender, EventArgs e)
         {
             if (_loadedComponents == null || _loadedComponents.Count == 0)
@@ -648,7 +642,7 @@ namespace MapperUI
                 MapperLogger.Diff($"Already in project: {diff.AlreadyPresent.Count}");
                     foreach (var s in diff.AlreadyPresent) MapperLogger.Info($"  = {s}");
                 MapperLogger.Diff($"Will be remapped: {diff.ToBeInjected.Count}");
-                    foreach (var i in diff.ToBeInjected) MapperLogger.Diff($"  + {i}");
+                    foreach (var i in diff.ToBeInjected) MapperLogger.Info($"  + {i}");
                 MapperLogger.Diff($"  Unsupported (skip)  : {diff.Unsupported.Count}");
                     foreach (var u in diff.Unsupported) MapperLogger.Warn($"  ! {u}");
 
