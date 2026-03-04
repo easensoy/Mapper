@@ -4,7 +4,6 @@ using CodeGen.Mapping;
 using CodeGen.Models;
 using CodeGen.Validation;
 using MapperUI.Services;
-using MapperUI.Services.MapperUI;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
@@ -460,11 +459,11 @@ namespace MapperUI
 
             if (comp == null) return;
 
-            foreach (var input in comp.Inputs)
-                dgvInputs.Rows.Add(input.Name, input.Address);
-
-            foreach (var output in comp.Outputs)
-                dgvOutputs.Rows.Add(output.Name, output.Address);
+            // VueOneComponent has no Inputs/Outputs — show states as reference instead
+            foreach (var state in comp.States.OrderBy(s => s.StateNumber))
+            {
+                dgvInputs.Rows.Add($"State {state.StateNumber}: {state.Name}", "");
+            }
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────
