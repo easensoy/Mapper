@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+namespace MapperUI.Services
 
 namespace MapperUI
 {
@@ -50,6 +51,7 @@ namespace MapperUI
         public static void Diff(string msg) => Log(LogStep.DIFF, msg);
         public static void Remap(string msg) => Log(LogStep.REMAP, msg);
         public static void Write(string msg) => Log(LogStep.WRITE, msg);
+        public static void Touch(string msg) => Log(LogStep.TOUCH, msg);
         public static void Info(string msg) => Log(LogStep.INFO, msg);
         public static void Warn(string msg) => Log(LogStep.WARN, msg);
         public static void Error(string msg) => Log(LogStep.ERROR, msg);
