@@ -645,13 +645,12 @@ namespace MapperUI
                     SysresPath = _mapperConfig.SysresPath
                 };
                 var diff = injector.PreviewDiff(config, _loadedComponents);
-
                 MapperLogger.Diff($"Already in project: {diff.AlreadyPresent.Count}");
-                foreach (var s in diff.AlreadyPresent) MapperLogger($"    = {s}");
+                    foreach (var s in diff.AlreadyPresent) MapperLogger.Info($"  = {s}");
                 MapperLogger.Diff($"Will be remapped: {diff.ToBeInjected.Count}");
-                    foreach (var i in diff.ToBeInjected) MapperLogger($"    + {i}");
+                    foreach (var i in diff.ToBeInjected) MapperLogger.Diff($"  + {i}");
                 MapperLogger.Diff($"  Unsupported (skip)  : {diff.Unsupported.Count}");
-                foreach (var u in diff.Unsupported) MapperLogger($"    ! {u}");
+                    foreach (var u in diff.Unsupported) MapperLogger.Warn($"  ! {u}");
 
                 if (diff.ToBeInjected.Count == 0)
                 {
@@ -667,7 +666,7 @@ namespace MapperUI
 
                 if (!result.Success)
                 {
-                    AppendLog($"[ERROR] Injection failed: {result.ErrorMessage}");
+                    MapperLogger.Error($"Injection failed: {result.ErrorMessage}");
                     MessageBox.Show($"Injection failed:\n\n{result.ErrorMessage}",
                         "Injection Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
