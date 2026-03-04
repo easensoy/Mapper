@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-namespace MapperUI.Services
+namespace MapperUI.Services;
 
 namespace MapperUI
 {
@@ -56,4 +56,5 @@ namespace MapperUI
         public static void Warn(string msg) => Log(LogStep.WARN, msg);
         public static void Error(string msg) => Log(LogStep.ERROR, msg);
     }
+}
 }
