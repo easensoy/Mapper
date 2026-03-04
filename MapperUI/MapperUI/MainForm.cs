@@ -630,7 +630,7 @@ namespace MapperUI
 
                 // ── 3. Preview diff before touching anything ──────────────────────
                 AppendLog("Running diff against live syslay...");
-                var injector = new CodeGen.Translation.SystemInjector();
+                var injector = new MapperUI.Services.SystemInjector();
                 var config = new CodeGen.Configuration.MapperConfig
                 {
                     SyslayPath = _mapperConfig.SyslayPath,
