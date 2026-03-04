@@ -66,6 +66,15 @@ namespace MapperUI
             this.colInputAddress = new System.Windows.Forms.DataGridViewComboBoxColumn();
             this.statusStrip = new System.Windows.Forms.StatusStrip();
             this.lblStatus = new System.Windows.Forms.ToolStripStatusLabel();
+            this.tabMain = new System.Windows.Forms.TabControl();
+            this.tabPageMapper = new System.Windows.Forms.TabPage();
+            this.tabPageDebug = new System.Windows.Forms.TabPage();
+            this.dgvLog = new System.Windows.Forms.DataGridView();
+            this.btnClearLog = new System.Windows.Forms.Button();
+            this.colLogTime = new System.Windows.Forms.DataGridViewTextBoxColumn();
+            this.colLogStep = new System.Windows.Forms.DataGridViewTextBoxColumn();
+            this.colLogAction = new System.Windows.Forms.DataGridViewTextBoxColumn();
+            this.debugConsoleToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.menuStrip.SuspendLayout();
             this.grpValidation.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.dgvMappingRules)).BeginInit();
@@ -541,16 +550,97 @@ namespace MapperUI
             this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 15F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(1400, 780);
+            this.ClientSize = new System.Drawing.Size(1400, 820);
+
+            // ── tabPageMapper — move all existing controls here ───────────────────────
+            this.tabPageMapper.Text = "Mapper";
+            this.tabPageMapper.Padding = new System.Windows.Forms.Padding(3);
+            this.tabPageMapper.Controls.Add(this.grpMappingInfo);
+            this.tabPageMapper.Controls.Add(this.grpValidation);
+            this.tabPageMapper.Controls.Add(this.btnGenerate);
+            this.tabPageMapper.Controls.Add(this.btnInjectSystem);
+            this.tabPageMapper.Controls.Add(this.btnBrowse);
+            this.tabPageMapper.Controls.Add(this.btnMappingRules);
+            this.tabPageMapper.Controls.Add(this.txtModelPath);
+            this.tabPageMapper.Controls.Add(this.lblVueOneModel);
+
+            // Adjust positions: lblVueOneModel and txtModelPath were at y=34/37,
+            // grpValidation was at y=63, grpMappingInfo at y=376.
+            // Inside a TabPage the top is already offset by the tab header (~25px) — keep as-is.
+
+            // ── tabPageDebug — Debug Console ──────────────────────────────────────────
+            this.tabPageDebug.Text = "Debug Console";
+            this.tabPageDebug.Padding = new System.Windows.Forms.Padding(3);
+
+            // Clear button
+            this.btnClearLog.Text = "Clear";
+            this.btnClearLog.Dock = System.Windows.Forms.DockStyle.Top;
+            this.btnClearLog.Height = 26;
+            this.btnClearLog.BackColor = System.Drawing.Color.FromArgb(60, 60, 60);
+            this.btnClearLog.ForeColor = System.Drawing.Color.White;
+            this.btnClearLog.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnClearLog.Click += new System.EventHandler(this.btnClearLog_Click);
+
+            // dgvLog
+            this.dgvLog.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.dgvLog.AllowUserToAddRows = false;
+            this.dgvLog.AllowUserToDeleteRows = false;
+            this.dgvLog.ReadOnly = true;
+            this.dgvLog.RowHeadersVisible = false;
+            this.dgvLog.AutoSizeRowsMode = System.Windows.Forms.DataGridViewAutoSizeRowsMode.None;
+            this.dgvLog.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
+            this.dgvLog.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
+            this.dgvLog.BackgroundColor = System.Drawing.Color.FromArgb(30, 30, 30);
+            this.dgvLog.GridColor = System.Drawing.Color.FromArgb(60, 60, 60);
+            this.dgvLog.DefaultCellStyle.BackColor = System.Drawing.Color.FromArgb(30, 30, 30);
+            this.dgvLog.DefaultCellStyle.ForeColor = System.Drawing.Color.LimeGreen;
+            this.dgvLog.DefaultCellStyle.Font = new System.Drawing.Font("Consolas", 9F);
+            this.dgvLog.ColumnHeadersDefaultCellStyle.BackColor = System.Drawing.Color.FromArgb(45, 45, 45);
+            this.dgvLog.ColumnHeadersDefaultCellStyle.ForeColor = System.Drawing.Color.White;
+            this.dgvLog.ColumnHeadersDefaultCellStyle.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
+            this.dgvLog.EnableHeadersVisualStyles = false;
+            this.dgvLog.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
+            this.colLogTime, this.colLogStep, this.colLogAction });
+            this.dgvLog.Name = "dgvLog";
+
+            // colLogTime
+            this.colLogTime.HeaderText = "Timestamp";
+            this.colLogTime.Name = "colLogTime";
+            this.colLogTime.ReadOnly = true;
+            this.colLogTime.Width = 110;
+            this.colLogTime.DefaultCellStyle.ForeColor = System.Drawing.Color.Cyan;
+
+            // colLogStep
+            this.colLogStep.HeaderText = "Step";
+            this.colLogStep.Name = "colLogStep";
+            this.colLogStep.ReadOnly = true;
+            this.colLogStep.Width = 90;
+            this.colLogStep.DefaultCellStyle.Font = new System.Drawing.Font("Consolas", 9F, System.Drawing.FontStyle.Bold);
+
+            // colLogAction
+            this.colLogAction.HeaderText = "Action";
+            this.colLogAction.Name = "colLogAction";
+            this.colLogAction.ReadOnly = true;
+            this.colLogAction.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill;
+
+            this.tabPageDebug.Controls.Add(this.dgvLog);
+            this.tabPageDebug.Controls.Add(this.btnClearLog);
+
+            // ── tabMain ───────────────────────────────────────────────────────────────
+            this.tabMain.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.tabMain.TabPages.Add(this.tabPageMapper);
+            this.tabMain.TabPages.Add(this.tabPageDebug);
+            this.tabMain.Name = "tabMain";
+
+            // ── Form ─────────────────────────────────────────────────────────────────
+            this.Controls.Add(this.tabMain);
             this.Controls.Add(this.statusStrip);
-            this.Controls.Add(this.grpMappingInfo);
-            this.Controls.Add(this.grpValidation);
-            this.Controls.Add(this.btnGenerate);
-            this.Controls.Add(this.btnInjectSystem);
-            this.Controls.Add(this.btnBrowse);
-            this.Controls.Add(this.btnMappingRules);
-            this.Controls.Add(this.txtModelPath);
-            this.Controls.Add(this.lblVueOneModel);
             this.Controls.Add(this.menuStrip);
+            this.MainMenuStrip = this.menuStrip;
+            this.Name = "MainForm";
+            this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
+            this.Text = "VueOne Mapper for IEC 61499";
+
             this.MainMenuStrip = this.menuStrip;
             this.Name = "MainForm";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
@@ -574,9 +664,15 @@ namespace MapperUI
             this.txtLog.Name = "txtLog";
             this.Controls.Add(this.pnlLog);
 
+
             this.menuStrip.ResumeLayout(false);
             this.menuStrip.PerformLayout();
             this.grpValidation.ResumeLayout(false);
+            this.tabMain.ResumeLayout(false);
+            this.tabPageMapper.ResumeLayout(false);
+            this.tabPageDebug.ResumeLayout(false);
+
+            ((System.ComponentModel.ISupportInitialize)(this.dgvLog)).EndInit();
             this.grpValidation.PerformLayout();
             ((System.ComponentModel.ISupportInitialize)(this.dgvMappingRules)).EndInit();
             this.pnlDetectedInfo.ResumeLayout(false);
@@ -647,5 +743,14 @@ namespace MapperUI
         private System.Windows.Forms.ToolStripMenuItem debugConsoleToolStripMenuItem;
         private System.Windows.Forms.Panel pnlLog;
         private System.Windows.Forms.RichTextBox txtLog;
+        private System.Windows.Forms.TabControl tabMain;
+        private System.Windows.Forms.TabPage tabPageMapper;
+        private System.Windows.Forms.TabPage tabPageDebug;
+        private System.Windows.Forms.DataGridView dgvLog;
+        private System.Windows.Forms.Button btnClearLog;
+        private System.Windows.Forms.DataGridViewTextBoxColumn colLogTime;
+        private System.Windows.Forms.DataGridViewTextBoxColumn colLogStep;
+        private System.Windows.Forms.DataGridViewTextBoxColumn colLogAction;
+        private System.Windows.Forms.ToolStripMenuItem debugConsoleToolStripMenuItem;
     }
 }
