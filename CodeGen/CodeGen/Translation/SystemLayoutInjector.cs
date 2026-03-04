@@ -49,6 +49,9 @@ namespace MapperUI.Services
 
             var existing = GetExistingByType(net);
 
+            MapperLogger.Diff($"Reading syslay: {Path.GetFileName(config.SyslayPath)}");
+            MapperLogger.Diff($"Found {existing[ProcessCatType].Count} Process1_CAT, {existing[SensorCatType].Count} Sensor_Bool_CAT, {existing[ActuatorCatType].Count} Five_State_Actuator_CAT in baseline");
+
             var actuators = components.Where(c => IsActuator(c)).ToList();
             var sensors = components.Where(c => IsSensor(c)).ToList();
             var processes = components.Where(c => IsProcess(c)).ToList();
@@ -143,10 +146,6 @@ namespace MapperUI.Services
             var doc = XDocument.Load(path);
 
             MapperLogger.Remap($"Processing {Path.GetFileName(path)} (isSysres={isSysres})");
-            MapperLogger.Remap($"  {oldName} → {newName} [{catType}] ID preserved");
-            MapperLogger.Remap($"  Rewriting {renames.Count} name prefix(es) in connections");
-            MapperLogger.Write($"Saved: {Path.GetFileName(path)}");
-
             // syslay uses SubAppNetwork, sysres uses FBNetwork
             var net = isSysres
                 ? doc.Root?.Element(Ns + "FBNetwork")
@@ -168,6 +167,8 @@ namespace MapperUI.Services
                 var fb = FindFbByName(net, oldName)!;
                 fb.SetAttributeValue("Name", newName);
 
+                MapperLogger.Remap($"  {oldName} → {newName} [Process1_CAT] ID preserved");
+
                 // Update Text parameter with new state names
                 SetOrAddParameter(fb, "Text", BuildTextParam(processes[i]));
 
@@ -184,6 +185,8 @@ namespace MapperUI.Services
                 var fb = FindFbByName(net, oldName)!;
                 fb.SetAttributeValue("Name", newName);
 
+                MapperLogger.Remap($"  {oldName} → {newName} [Sensor_Bool_CAT] ID preserved");
+
                 if (!isSysres) result.InjectedFBs.Add($"{oldName} → {newName} (Sensor_Bool_CAT)");
             }
 
@@ -196,6 +199,9 @@ namespace MapperUI.Services
 
                 var fb = FindFbByName(net, oldName)!;
                 fb.SetAttributeValue("Name", newName);
+
+                MapperLogger.Remap($"  {oldName} → {newName} [Five_State_Actuator_CAT] ID preserved");
+
                 SetOrAddParameter(fb, "actuator_name", $"'{newName.ToLower()}'");
 
                 if (!isSysres) result.InjectedFBs.Add($"{oldName} → {newName} (Five_State_Actuator_CAT)");
@@ -205,7 +211,10 @@ namespace MapperUI.Services
             if (renames.Any())
                 RewriteConnections(net, renames);
 
+            MapperLogger.Remap($"  Rewrote {renames.Count} name prefix(es) in connections");
+
             doc.Save(path);
+            MapperLogger.Write($"Saved: {Path.GetFileName(path)}");
         }
 
         /// <summary>
