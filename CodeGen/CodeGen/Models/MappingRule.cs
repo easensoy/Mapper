@@ -7,13 +7,15 @@
         public MappingType Type { get; set; }
         public string TransformationRule { get; set; } = string.Empty;
         public string Notes { get; set; } = string.Empty;
+        public bool Validated { get; set; } = true;
     }
 
     public enum MappingType
     {
         TRANSLATED,
+        HARDCODED,
+        ASSUMED,
         ENCODED,
-        DISCARDED,
-        ASSUMED
+        DISCARDED
     }
 }
