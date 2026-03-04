@@ -1,9 +1,7 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Diagnostics;
-namespace MapperUI.Services;
 
-namespace MapperUI
+namespace MapperUI.Services
 {
     public enum LogStep
     {
@@ -25,10 +23,6 @@ namespace MapperUI
         public string Action { get; init; } = string.Empty;
     }
 
-    /// <summary>
-    /// Static logger all code in the codebase writes to.
-    /// Subscribe on MainForm.Load, unsubscribe on close.
-    /// </summary>
     public static class MapperLogger
     {
         public static event Action<LogEntry>? OnEntry;
@@ -45,7 +39,6 @@ namespace MapperUI
             OnEntry?.Invoke(entry);
         }
 
-        // Convenience shortcuts
         public static void Parse(string msg) => Log(LogStep.PARSE, msg);
         public static void Validate(string msg) => Log(LogStep.VALIDATE, msg);
         public static void Diff(string msg) => Log(LogStep.DIFF, msg);
@@ -56,5 +49,4 @@ namespace MapperUI
         public static void Warn(string msg) => Log(LogStep.WARN, msg);
         public static void Error(string msg) => Log(LogStep.ERROR, msg);
     }
-}
 }
