@@ -1,6 +1,4 @@
-﻿using System.Windows.Forms;
-
-namespace MapperUI
+﻿namespace MapperUI
 {
     partial class MainForm
     {
@@ -8,8 +6,7 @@ namespace MapperUI
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing && (components != null))
-                components.Dispose();
+            if (disposing && components != null) components.Dispose();
             base.Dispose(disposing);
         }
 
@@ -21,11 +18,7 @@ namespace MapperUI
             this.fileToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.dataToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.buildToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
-            this.menuItemMapper = new System.Windows.Forms.ToolStripMenuItem();
             this.menuItemDebugConsole = new System.Windows.Forms.ToolStripMenuItem();
-            this.tabMain = new System.Windows.Forms.TabControl();
-            this.tabPageMapper = new System.Windows.Forms.TabPage();
-            this.tabPageDebug = new System.Windows.Forms.TabPage();
             this.lblVueOneModel = new System.Windows.Forms.Label();
             this.txtModelPath = new System.Windows.Forms.TextBox();
             this.btnMappingRules = new System.Windows.Forms.Button();
@@ -46,7 +39,6 @@ namespace MapperUI
             this.colIEC61499Element = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.colMappingType = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.colMappingRule = new System.Windows.Forms.DataGridViewTextBoxColumn();
-            this.colValidated = new System.Windows.Forms.DataGridViewCheckBoxColumn();
             this.grpMappingInfo = new System.Windows.Forms.GroupBox();
             this.splitContainer = new System.Windows.Forms.SplitContainer();
             this.dgvComponents = new System.Windows.Forms.DataGridView();
@@ -64,16 +56,8 @@ namespace MapperUI
             this.colInputAddress = new System.Windows.Forms.DataGridViewComboBoxColumn();
             this.statusStrip = new System.Windows.Forms.StatusStrip();
             this.lblStatus = new System.Windows.Forms.ToolStripStatusLabel();
-            this.dgvLog = new System.Windows.Forms.DataGridView();
-            this.colLogTime = new System.Windows.Forms.DataGridViewTextBoxColumn();
-            this.colLogStep = new System.Windows.Forms.DataGridViewTextBoxColumn();
-            this.colLogAction = new System.Windows.Forms.DataGridViewTextBoxColumn();
-            this.btnClearLog = new System.Windows.Forms.Button();
 
             this.menuStrip.SuspendLayout();
-            this.tabMain.SuspendLayout();
-            this.tabPageMapper.SuspendLayout();
-            this.tabPageDebug.SuspendLayout();
             this.grpValidation.SuspendLayout();
             this.pnlDetectedInfo.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.dgvMappingRules)).BeginInit();
@@ -88,7 +72,6 @@ namespace MapperUI
             ((System.ComponentModel.ISupportInitialize)(this.dgvOutputs)).BeginInit();
             this.grpInputs.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.dgvInputs)).BeginInit();
-            ((System.ComponentModel.ISupportInitialize)(this.dgvLog)).BeginInit();
             this.statusStrip.SuspendLayout();
             this.SuspendLayout();
 
@@ -101,80 +84,27 @@ namespace MapperUI
             this.menuStrip.Name = "menuStrip";
             this.menuStrip.Size = new System.Drawing.Size(1400, 24);
             this.menuStrip.TabIndex = 0;
-            this.menuStrip.Text = "menuStrip";
 
             this.fileToolStripMenuItem.Name = "fileToolStripMenuItem";
-            this.fileToolStripMenuItem.Size = new System.Drawing.Size(37, 20);
             this.fileToolStripMenuItem.Text = "File";
 
             this.dataToolStripMenuItem.Name = "dataToolStripMenuItem";
-            this.dataToolStripMenuItem.Size = new System.Drawing.Size(43, 20);
             this.dataToolStripMenuItem.Text = "Data";
 
-            // Build menu: two items for navigating between the hidden tabs.
-            // "← Mapper" returns to the main view; "Debug Console" shows the log.
+            // Build > Debug Console only. No "← Mapper".
             this.buildToolStripMenuItem.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
-                this.menuItemMapper,
                 this.menuItemDebugConsole });
             this.buildToolStripMenuItem.Name = "buildToolStripMenuItem";
-            this.buildToolStripMenuItem.Size = new System.Drawing.Size(46, 20);
             this.buildToolStripMenuItem.Text = "Build";
-
-            this.menuItemMapper.Name = "menuItemMapper";
-            this.menuItemMapper.Text = "← Mapper";
-            this.menuItemMapper.Click += new System.EventHandler(this.menuItemMapper_Click);
 
             this.menuItemDebugConsole.Name = "menuItemDebugConsole";
             this.menuItemDebugConsole.Text = "Debug Console";
             this.menuItemDebugConsole.Click += new System.EventHandler(this.menuItemDebugConsole_Click);
 
-            // ── Tab control ──────────────────────────────────────────────────
-            // Tab strip is hidden. Navigation is via Build menu only.
-            // Appearance=FlatButtons + ItemSize=(0,1) + SizeMode=Fixed collapses the header row.
-            this.tabMain.Controls.Add(this.tabPageMapper);
-            this.tabMain.Controls.Add(this.tabPageDebug);
-            this.tabMain.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.tabMain.Location = new System.Drawing.Point(0, 24);
-            this.tabMain.Name = "tabMain";
-            this.tabMain.SelectedIndex = 0;
-            this.tabMain.Size = new System.Drawing.Size(1400, 756);
-            this.tabMain.TabIndex = 1;
-            this.tabMain.Appearance = System.Windows.Forms.TabAppearance.FlatButtons;
-            this.tabMain.ItemSize = new System.Drawing.Size(0, 1);
-            this.tabMain.SizeMode = System.Windows.Forms.TabSizeMode.Fixed;
-
-            // ── tabPageMapper ────────────────────────────────────────────────
-            this.tabPageMapper.Controls.Add(this.grpMappingInfo);
-            this.tabPageMapper.Controls.Add(this.grpValidation);
-            this.tabPageMapper.Controls.Add(this.btnGenerateCode);
-            this.tabPageMapper.Controls.Add(this.btnBrowse);
-            this.tabPageMapper.Controls.Add(this.btnMappingRules);
-            this.tabPageMapper.Controls.Add(this.txtModelPath);
-            this.tabPageMapper.Controls.Add(this.lblVueOneModel);
-            this.tabPageMapper.Location = new System.Drawing.Point(4, 1);
-            this.tabPageMapper.Name = "tabPageMapper";
-            this.tabPageMapper.Padding = new System.Windows.Forms.Padding(3);
-            this.tabPageMapper.Size = new System.Drawing.Size(1392, 751);
-            this.tabPageMapper.TabIndex = 0;
-            this.tabPageMapper.Text = "Mapper";
-            this.tabPageMapper.UseVisualStyleBackColor = true;
-
-            // ── tabPageDebug ─────────────────────────────────────────────────
-            this.tabPageDebug.Controls.Add(this.dgvLog);
-            this.tabPageDebug.Controls.Add(this.btnClearLog);
-            this.tabPageDebug.Location = new System.Drawing.Point(4, 1);
-            this.tabPageDebug.Name = "tabPageDebug";
-            this.tabPageDebug.Padding = new System.Windows.Forms.Padding(3);
-            this.tabPageDebug.Size = new System.Drawing.Size(1392, 751);
-            this.tabPageDebug.TabIndex = 1;
-            this.tabPageDebug.Text = "Debug Console";
-            this.tabPageDebug.UseVisualStyleBackColor = true;
-
             // ── Header row ───────────────────────────────────────────────────
             this.lblVueOneModel.AutoSize = true;
             this.lblVueOneModel.Location = new System.Drawing.Point(12, 37);
             this.lblVueOneModel.Name = "lblVueOneModel";
-            this.lblVueOneModel.Size = new System.Drawing.Size(100, 15);
             this.lblVueOneModel.TabIndex = 1;
             this.lblVueOneModel.Text = "vueOne Model:";
 
@@ -207,7 +137,6 @@ namespace MapperUI
             this.btnBrowse.UseVisualStyleBackColor = true;
             this.btnBrowse.Click += new System.EventHandler(this.btnBrowse_Click);
 
-            // Generate Code replaces "Generate FB" + "Generate Staged Project"
             this.btnGenerateCode.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Top
                 | System.Windows.Forms.AnchorStyles.Right)));
             this.btnGenerateCode.BackColor = System.Drawing.Color.FromArgb(0, 122, 204);
@@ -224,7 +153,6 @@ namespace MapperUI
             this.btnGenerateCode.Click += new System.EventHandler(this.btnGenerateCode_Click);
 
             // ── Validation Output group ──────────────────────────────────────
-            // Moved up from y=100 to y=68 — the second button row is removed.
             this.grpValidation.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top
                 | System.Windows.Forms.AnchorStyles.Left)
                 | System.Windows.Forms.AnchorStyles.Right)));
@@ -249,7 +177,7 @@ namespace MapperUI
             this.pnlDetectedInfo.Dock = System.Windows.Forms.DockStyle.Top;
             this.pnlDetectedInfo.Location = new System.Drawing.Point(3, 19);
             this.pnlDetectedInfo.Name = "pnlDetectedInfo";
-            this.pnlDetectedInfo.Padding = new System.Windows.Forms.Padding(0, 0, 0, 6);
+            this.pnlDetectedInfo.Padding = new System.Windows.Forms.Padding(0, 0, 0, 4);
             this.pnlDetectedInfo.Size = new System.Drawing.Size(1370, 21);
             this.pnlDetectedInfo.TabIndex = 0;
             this.pnlDetectedInfo.WrapContents = false;
@@ -257,112 +185,96 @@ namespace MapperUI
             this.lblDetectedPrefix.AutoSize = true;
             this.lblDetectedPrefix.Location = new System.Drawing.Point(3, 0);
             this.lblDetectedPrefix.Name = "lblDetectedPrefix";
-            this.lblDetectedPrefix.Size = new System.Drawing.Size(57, 15);
             this.lblDetectedPrefix.TabIndex = 0;
             this.lblDetectedPrefix.Text = "Detected:";
 
             this.lblDetectedType.AutoSize = true;
-            this.lblDetectedType.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point);
+            this.lblDetectedType.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
             this.lblDetectedType.ForeColor = System.Drawing.Color.Green;
             this.lblDetectedType.Location = new System.Drawing.Point(66, 0);
             this.lblDetectedType.Name = "lblDetectedType";
-            this.lblDetectedType.Size = new System.Drawing.Size(12, 15);
             this.lblDetectedType.TabIndex = 1;
             this.lblDetectedType.Text = "-";
 
             this.lblNamePrefix.AutoSize = true;
-            this.lblNamePrefix.Location = new System.Drawing.Point(86, 0);
             this.lblNamePrefix.Margin = new System.Windows.Forms.Padding(8, 0, 0, 0);
             this.lblNamePrefix.Name = "lblNamePrefix";
-            this.lblNamePrefix.Size = new System.Drawing.Size(42, 15);
             this.lblNamePrefix.TabIndex = 2;
             this.lblNamePrefix.Text = "Name:";
 
             this.lblDetectedName.AutoSize = true;
-            this.lblDetectedName.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point);
+            this.lblDetectedName.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
             this.lblDetectedName.ForeColor = System.Drawing.Color.Green;
-            this.lblDetectedName.Location = new System.Drawing.Point(128, 0);
             this.lblDetectedName.Name = "lblDetectedName";
-            this.lblDetectedName.Size = new System.Drawing.Size(12, 15);
             this.lblDetectedName.TabIndex = 3;
             this.lblDetectedName.Text = "-";
 
             this.lblStatePrefix.AutoSize = true;
-            this.lblStatePrefix.Location = new System.Drawing.Point(148, 0);
             this.lblStatePrefix.Margin = new System.Windows.Forms.Padding(8, 0, 0, 0);
             this.lblStatePrefix.Name = "lblStatePrefix";
-            this.lblStatePrefix.Size = new System.Drawing.Size(71, 15);
             this.lblStatePrefix.TabIndex = 4;
             this.lblStatePrefix.Text = "Components:";
 
             this.lblDetectedStates.AutoSize = true;
-            this.lblDetectedStates.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point);
+            this.lblDetectedStates.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
             this.lblDetectedStates.ForeColor = System.Drawing.Color.Green;
-            this.lblDetectedStates.Location = new System.Drawing.Point(219, 0);
             this.lblDetectedStates.Name = "lblDetectedStates";
-            this.lblDetectedStates.Size = new System.Drawing.Size(12, 15);
             this.lblDetectedStates.TabIndex = 5;
             this.lblDetectedStates.Text = "-";
 
             this.lblValidationPrefix.AutoSize = true;
-            this.lblValidationPrefix.Location = new System.Drawing.Point(239, 0);
             this.lblValidationPrefix.Margin = new System.Windows.Forms.Padding(8, 0, 0, 0);
             this.lblValidationPrefix.Name = "lblValidationPrefix";
-            this.lblValidationPrefix.Size = new System.Drawing.Size(64, 15);
             this.lblValidationPrefix.TabIndex = 6;
             this.lblValidationPrefix.Text = "Validation:";
 
             this.lblValidationStatus.AutoSize = true;
-            this.lblValidationStatus.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point);
+            this.lblValidationStatus.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
             this.lblValidationStatus.ForeColor = System.Drawing.Color.Gray;
-            this.lblValidationStatus.Location = new System.Drawing.Point(311, 0);
             this.lblValidationStatus.Name = "lblValidationStatus";
-            this.lblValidationStatus.Size = new System.Drawing.Size(12, 15);
             this.lblValidationStatus.TabIndex = 7;
             this.lblValidationStatus.Text = "-";
 
+            // dgvMappingRules — four text columns, no checkbox, alternating row colors applied in code
             this.dgvMappingRules.AllowUserToAddRows = false;
             this.dgvMappingRules.AllowUserToDeleteRows = false;
             this.dgvMappingRules.BackgroundColor = System.Drawing.SystemColors.Window;
+            this.dgvMappingRules.BorderStyle = System.Windows.Forms.BorderStyle.None;
             this.dgvMappingRules.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             this.dgvMappingRules.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
                 this.colVueOneElement,
                 this.colIEC61499Element,
                 this.colMappingType,
-                this.colMappingRule,
-                this.colValidated });
+                this.colMappingRule });
             this.dgvMappingRules.Dock = System.Windows.Forms.DockStyle.Fill;
             this.dgvMappingRules.Location = new System.Drawing.Point(3, 40);
             this.dgvMappingRules.Name = "dgvMappingRules";
             this.dgvMappingRules.ReadOnly = true;
             this.dgvMappingRules.RowHeadersVisible = false;
-            this.dgvMappingRules.Size = new System.Drawing.Size(1370, 257);
             this.dgvMappingRules.TabIndex = 1;
+            // Prevent automatic row recoloring from overriding our cell-level colors
+            this.dgvMappingRules.RowsDefaultCellStyle.SelectionBackColor = System.Drawing.Color.FromArgb(173, 214, 255);
+            this.dgvMappingRules.RowsDefaultCellStyle.SelectionForeColor = System.Drawing.Color.Black;
 
-            this.colVueOneElement.FillWeight = 18F;
             this.colVueOneElement.HeaderText = "VueOne Element";
             this.colVueOneElement.Name = "colVueOneElement";
             this.colVueOneElement.ReadOnly = true;
+            this.colVueOneElement.Width = 220;
 
-            this.colIEC61499Element.FillWeight = 22F;
             this.colIEC61499Element.HeaderText = "IEC 61499 Element";
             this.colIEC61499Element.Name = "colIEC61499Element";
             this.colIEC61499Element.ReadOnly = true;
+            this.colIEC61499Element.Width = 280;
 
-            this.colMappingType.FillWeight = 12F;
             this.colMappingType.HeaderText = "Mapping Type";
             this.colMappingType.Name = "colMappingType";
             this.colMappingType.ReadOnly = true;
+            this.colMappingType.Width = 110;
 
-            this.colMappingRule.FillWeight = 40F;
-            this.colMappingRule.HeaderText = "Mapping Rule";
+            this.colMappingRule.HeaderText = "Transformation Rule";
             this.colMappingRule.Name = "colMappingRule";
             this.colMappingRule.ReadOnly = true;
-
-            this.colValidated.FillWeight = 8F;
-            this.colValidated.HeaderText = "Validated";
-            this.colValidated.Name = "colValidated";
-            this.colValidated.ReadOnly = true;
+            this.colMappingRule.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill;
 
             // ── Mapping Information group ────────────────────────────────────
             this.grpMappingInfo.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top
@@ -381,7 +293,7 @@ namespace MapperUI
             this.splitContainer.Location = new System.Drawing.Point(3, 19);
             this.splitContainer.Name = "splitContainer";
             this.splitContainer.Size = new System.Drawing.Size(1370, 338);
-            this.splitContainer.SplitterDistance = 400;
+            this.splitContainer.SplitterDistance = 420;
             this.splitContainer.TabIndex = 0;
 
             this.dgvComponents.AllowUserToAddRows = false;
@@ -389,9 +301,7 @@ namespace MapperUI
             this.dgvComponents.BackgroundColor = System.Drawing.SystemColors.Window;
             this.dgvComponents.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             this.dgvComponents.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
-                this.colComponent,
-                this.colType,
-                this.colTemplate });
+                this.colComponent, this.colType, this.colTemplate });
             this.dgvComponents.Dock = System.Windows.Forms.DockStyle.Fill;
             this.dgvComponents.Name = "dgvComponents";
             this.dgvComponents.ReadOnly = true;
@@ -422,7 +332,6 @@ namespace MapperUI
 
             this.grpInputs.Controls.Add(this.dgvInputs);
             this.grpInputs.Dock = System.Windows.Forms.DockStyle.Left;
-            this.grpInputs.Location = new System.Drawing.Point(0, 0);
             this.grpInputs.Name = "grpInputs";
             this.grpInputs.Size = new System.Drawing.Size(385, 324);
             this.grpInputs.TabIndex = 0;
@@ -434,10 +343,8 @@ namespace MapperUI
             this.dgvInputs.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
                 this.colInputName, this.colInputAddress });
             this.dgvInputs.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.dgvInputs.Location = new System.Drawing.Point(3, 19);
             this.dgvInputs.Name = "dgvInputs";
             this.dgvInputs.RowHeadersVisible = false;
-            this.dgvInputs.Size = new System.Drawing.Size(379, 302);
             this.dgvInputs.TabIndex = 0;
 
             this.colInputName.FillWeight = 55F;
@@ -474,64 +381,27 @@ namespace MapperUI
             this.colOutputAddress.HeaderText = "Address";
             this.colOutputAddress.Name = "colOutputAddress";
 
-            // ── Debug Console tab ────────────────────────────────────────────
-            this.btnClearLog.Dock = System.Windows.Forms.DockStyle.Top;
-            this.btnClearLog.Height = 28;
-            this.btnClearLog.Text = "Clear Log";
-            this.btnClearLog.BackColor = System.Drawing.Color.FromArgb(60, 60, 60);
-            this.btnClearLog.ForeColor = System.Drawing.Color.White;
-            this.btnClearLog.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-            this.btnClearLog.Name = "btnClearLog";
-            this.btnClearLog.Click += new System.EventHandler(this.btnClearLog_Click);
-
-            this.dgvLog.AllowUserToAddRows = false;
-            this.dgvLog.AllowUserToDeleteRows = false;
-            this.dgvLog.BackgroundColor = System.Drawing.Color.FromArgb(30, 30, 30);
-            this.dgvLog.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
-            this.dgvLog.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
-                this.colLogTime, this.colLogStep, this.colLogAction });
-            this.dgvLog.DefaultCellStyle.BackColor = System.Drawing.Color.FromArgb(30, 30, 30);
-            this.dgvLog.DefaultCellStyle.ForeColor = System.Drawing.Color.LimeGreen;
-            this.dgvLog.DefaultCellStyle.Font = new System.Drawing.Font("Consolas", 9F);
-            this.dgvLog.DefaultCellStyle.SelectionBackColor = System.Drawing.Color.FromArgb(60, 60, 60);
-            this.dgvLog.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.dgvLog.Name = "dgvLog";
-            this.dgvLog.ReadOnly = true;
-            this.dgvLog.RowHeadersVisible = false;
-            this.dgvLog.TabIndex = 1;
-
-            this.colLogTime.FillWeight = 12F;
-            this.colLogTime.HeaderText = "Time";
-            this.colLogTime.Name = "colLogTime";
-            this.colLogTime.ReadOnly = true;
-
-            this.colLogStep.FillWeight = 12F;
-            this.colLogStep.HeaderText = "Step";
-            this.colLogStep.Name = "colLogStep";
-            this.colLogStep.ReadOnly = true;
-
-            this.colLogAction.FillWeight = 76F;
-            this.colLogAction.HeaderText = "Action";
-            this.colLogAction.Name = "colLogAction";
-            this.colLogAction.ReadOnly = true;
-
             // ── Status strip ─────────────────────────────────────────────────
             this.statusStrip.Items.AddRange(new System.Windows.Forms.ToolStripItem[] { this.lblStatus });
-            this.statusStrip.Location = new System.Drawing.Point(0, 728);
+            this.statusStrip.Location = new System.Drawing.Point(0, 748);
             this.statusStrip.Name = "statusStrip";
             this.statusStrip.Size = new System.Drawing.Size(1400, 22);
             this.statusStrip.TabIndex = 8;
-            this.statusStrip.Text = "statusStrip";
 
             this.lblStatus.Name = "lblStatus";
-            this.lblStatus.Size = new System.Drawing.Size(39, 17);
             this.lblStatus.Text = "Ready";
 
             // ── Form ─────────────────────────────────────────────────────────
             this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 15F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(1400, 750);
-            this.Controls.Add(this.tabMain);
+            this.ClientSize = new System.Drawing.Size(1400, 770);
+            this.Controls.Add(this.grpMappingInfo);
+            this.Controls.Add(this.grpValidation);
+            this.Controls.Add(this.btnGenerateCode);
+            this.Controls.Add(this.btnBrowse);
+            this.Controls.Add(this.btnMappingRules);
+            this.Controls.Add(this.txtModelPath);
+            this.Controls.Add(this.lblVueOneModel);
             this.Controls.Add(this.statusStrip);
             this.Controls.Add(this.menuStrip);
             this.MainMenuStrip = this.menuStrip;
@@ -542,14 +412,11 @@ namespace MapperUI
 
             this.menuStrip.ResumeLayout(false);
             this.menuStrip.PerformLayout();
-            this.tabMain.ResumeLayout(false);
-            this.tabPageMapper.ResumeLayout(false);
-            this.tabPageDebug.ResumeLayout(false);
             this.grpValidation.ResumeLayout(false);
             this.grpValidation.PerformLayout();
-            ((System.ComponentModel.ISupportInitialize)(this.dgvMappingRules)).EndInit();
             this.pnlDetectedInfo.ResumeLayout(false);
             this.pnlDetectedInfo.PerformLayout();
+            ((System.ComponentModel.ISupportInitialize)(this.dgvMappingRules)).EndInit();
             this.grpMappingInfo.ResumeLayout(false);
             this.splitContainer.Panel1.ResumeLayout(false);
             this.splitContainer.Panel2.ResumeLayout(false);
@@ -561,7 +428,6 @@ namespace MapperUI
             ((System.ComponentModel.ISupportInitialize)(this.dgvOutputs)).EndInit();
             this.grpInputs.ResumeLayout(false);
             ((System.ComponentModel.ISupportInitialize)(this.dgvInputs)).EndInit();
-            ((System.ComponentModel.ISupportInitialize)(this.dgvLog)).EndInit();
             this.statusStrip.ResumeLayout(false);
             this.statusStrip.PerformLayout();
             this.ResumeLayout(false);
@@ -574,11 +440,7 @@ namespace MapperUI
         private System.Windows.Forms.ToolStripMenuItem fileToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem dataToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem buildToolStripMenuItem;
-        private System.Windows.Forms.ToolStripMenuItem menuItemMapper;
         private System.Windows.Forms.ToolStripMenuItem menuItemDebugConsole;
-        private System.Windows.Forms.TabControl tabMain;
-        private System.Windows.Forms.TabPage tabPageMapper;
-        private System.Windows.Forms.TabPage tabPageDebug;
         private System.Windows.Forms.Label lblVueOneModel;
         private System.Windows.Forms.TextBox txtModelPath;
         private System.Windows.Forms.Button btnMappingRules;
@@ -599,7 +461,6 @@ namespace MapperUI
         private System.Windows.Forms.DataGridViewTextBoxColumn colIEC61499Element;
         private System.Windows.Forms.DataGridViewTextBoxColumn colMappingType;
         private System.Windows.Forms.DataGridViewTextBoxColumn colMappingRule;
-        private System.Windows.Forms.DataGridViewCheckBoxColumn colValidated;
         private System.Windows.Forms.GroupBox grpMappingInfo;
         private System.Windows.Forms.SplitContainer splitContainer;
         private System.Windows.Forms.DataGridView dgvComponents;
@@ -617,10 +478,5 @@ namespace MapperUI
         private System.Windows.Forms.DataGridViewComboBoxColumn colInputAddress;
         private System.Windows.Forms.StatusStrip statusStrip;
         private System.Windows.Forms.ToolStripStatusLabel lblStatus;
-        private System.Windows.Forms.DataGridView dgvLog;
-        private System.Windows.Forms.DataGridViewTextBoxColumn colLogTime;
-        private System.Windows.Forms.DataGridViewTextBoxColumn colLogStep;
-        private System.Windows.Forms.DataGridViewTextBoxColumn colLogAction;
-        private System.Windows.Forms.Button btnClearLog;
     }
 }
