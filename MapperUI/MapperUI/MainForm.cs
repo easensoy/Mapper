@@ -15,6 +15,7 @@ using System.Windows.Forms;
 
 // CS0104 guard: both CodeGen.Mapping and MapperUI.Services define MappingRuleEngine.
 using RuleEngine = MapperUI.Services.MappingRuleEngine;
+using UiMappingType = MapperUI.Services.MappingType;
 
 namespace MapperUI
 {
@@ -122,15 +123,15 @@ namespace MapperUI
                 {
                     // Section header row — spans all columns visually
                     int idx = dgvMappingRules.Rows.Add(rule.SectionTitle, "", "", "", "");
-                    var row = dgvMappingRules.Rows[idx];
-                    row.Tag = "section";
-                    for (int c = 0; c < row.Cells.Count; c++)
+                    var sectionRow = dgvMappingRules.Rows[idx];
+                    sectionRow.Tag = "section";
+                    for (int c = 0; c < sectionRow.Cells.Count; c++)
                     {
-                        row.Cells[c].Style.BackColor = ColorSection;
-                        row.Cells[c].Style.ForeColor = Color.FromArgb(28, 57, 100);
-                        row.Cells[c].Style.Font = new Font(dgvMappingRules.Font, FontStyle.Bold);
-                        row.Cells[c].Style.SelectionBackColor = ColorSection;
-                        row.Cells[c].Style.SelectionForeColor = Color.FromArgb(28, 57, 100);
+                        sectionRow.Cells[c].Style.BackColor = ColorSection;
+                        sectionRow.Cells[c].Style.ForeColor = Color.FromArgb(28, 57, 100);
+                        sectionRow.Cells[c].Style.Font = new Font(dgvMappingRules.Font, FontStyle.Bold);
+                        sectionRow.Cells[c].Style.SelectionBackColor = ColorSection;
+                        sectionRow.Cells[c].Style.SelectionForeColor = Color.FromArgb(28, 57, 100);
                     }
                     continue;
                 }
@@ -157,11 +158,11 @@ namespace MapperUI
                 var typeCell = row.Cells[colMappingType.Index];
                 (typeCell.Style.ForeColor, typeCell.Style.Font) = rule.Type switch
                 {
-                    MappingType.TRANSLATED => (ColorTranslated, new Font(dgvMappingRules.Font, FontStyle.Bold)),
-                    MappingType.DISCARDED => (ColorDiscarded, new Font(dgvMappingRules.Font, FontStyle.Bold)),
-                    MappingType.ASSUMED => (ColorAssumed, new Font(dgvMappingRules.Font, FontStyle.Bold)),
-                    MappingType.ENCODED => (ColorEncoded, new Font(dgvMappingRules.Font, FontStyle.Bold)),
-                    MappingType.HARDCODED => (ColorHardcoded, new Font(dgvMappingRules.Font, FontStyle.Regular)),
+                    UiMappingType.TRANSLATED => (ColorTranslated, new Font(dgvMappingRules.Font, FontStyle.Bold)),
+                    UiMappingType.DISCARDED => (ColorDiscarded, new Font(dgvMappingRules.Font, FontStyle.Bold)),
+                    UiMappingType.ASSUMED => (ColorAssumed, new Font(dgvMappingRules.Font, FontStyle.Bold)),
+                    UiMappingType.ENCODED => (ColorEncoded, new Font(dgvMappingRules.Font, FontStyle.Bold)),
+                    UiMappingType.HARDCODED => (ColorHardcoded, new Font(dgvMappingRules.Font, FontStyle.Regular)),
                     _ => (Color.Black, dgvMappingRules.Font)
                 };
                 typeCell.Style.BackColor = bg;
@@ -240,8 +241,8 @@ namespace MapperUI
                 bool allPassed = _validationRows.All(r => r.IsValid);
                 SetValidationLabel(allPassed ? "PASSED" : "FAILED", allPassed ? Color.Green : Color.Red);
                 lblStatus.Text = allPassed
-                    ? "Validation passed — select components below, then Generate Code"
-                    : "Validation FAILED — select valid components below, then Generate Code";
+                    ? "Validation passed — click Generate Code to inject all valid components"
+                    : "Validation FAILED — click Generate Code to inject only valid components";
 
                 // Enable Generate Code only when at least one valid (injectable) component loaded
                 btnGenerateCode.Enabled = _validationRows.Any(r => r.IsValid);
@@ -273,7 +274,9 @@ namespace MapperUI
         {
             // Template name respects state-count guard — 13-state → "No Template Found"
             string tPath = ResolveTemplatePath(comp, cfg);
-            string tName = string.IsNullOrEmpty(tPath) ? "No Template Found" : Path.GetFileName(tPath);
+            string tName = string.IsNullOrEmpty(tPath)
+                ? "No template found (discarded for this phase)"
+                : Path.GetFileName(tPath);
 
             switch (comp.Type.ToLowerInvariant())
             {
@@ -287,16 +290,12 @@ namespace MapperUI
 
                 case "actuator":
                     if (comp.States.Count != 5)
-                        return Fail(comp, tName,
-                            $"Unsupported actuator — {comp.States.Count} states " +
-                            $"(only 5-state / Five_State_Actuator_CAT supported this phase)");
+                        return Fail(comp, tName, "No template found (discarded for this phase)");
                     break;
 
                 case "sensor":
                     if (comp.States.Count != 2)
-                        return Fail(comp, tName,
-                            $"Unsupported sensor — {comp.States.Count} states " +
-                            $"(only 2-state / Sensor_Bool_CAT supported this phase)");
+                        return Fail(comp, tName, "No template found (discarded for this phase)");
                     break;
 
                 default:
@@ -316,63 +315,42 @@ namespace MapperUI
         private static ComponentValidationRow Fail(VueOneComponent c, string t, string reason) =>
             new() { Component = c, TemplateName = t, IsValid = false, FailReason = reason };
 
-        // ── Generate Code — injects SELECTED components only ──────────────────
+        // ── Generate Code — injects ALL valid loaded components ───────────────
 
         private async void btnGenerateCode_Click(object sender, EventArgs e)
         {
-            // Collect selected components from the component grid
-            var selectedNames = dgvComponents.SelectedRows
-                .Cast<DataGridViewRow>()
-                .Select(r => r.Cells[0].Value?.ToString() ?? "")
-                .Where(n => !string.IsNullOrEmpty(n))
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-            if (selectedNames.Count == 0)
-            {
-                MessageBox.Show(
-                    "No components selected.\n\nClick rows in the Mapping Information table to select " +
-                    "the components you want to inject, then click Generate Code.",
-                    "Nothing Selected", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            // Filter to selected components only
-            var toInject = _loadedComponents
-                .Where(c => selectedNames.Contains(c.Name))
-                .ToList();
-
-            // Warn about any selected components that failed validation
             var failed = _validationRows
-                .Where(r => selectedNames.Contains(r.Component.Name) && !r.IsValid)
+                .Where(r => !r.IsValid)
                 .ToList();
 
             if (failed.Any())
             {
                 var sb = new StringBuilder();
-                sb.AppendLine($"⚠  {failed.Count} selected component(s) failed validation and will be SKIPPED:\n");
+                sb.AppendLine($"⚠  {failed.Count} component(s) failed validation and will be skipped:\n");
                 foreach (var f in failed)
                     sb.AppendLine($"  ✗  {f.Component.Name} ({f.Component.Type}) — {f.FailReason}");
-                sb.AppendLine("\nValid selected components will still be injected. Continue?");
+                sb.AppendLine("\nAll valid components will be injected. Continue?");
 
                 if (MessageBox.Show(sb.ToString(), "Validation Warnings",
                         MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
                         MessageBoxDefaultButton.Button2) != DialogResult.Yes)
                     return;
-
-                // Remove invalid ones from the inject list
-                toInject = toInject.Where(c => _validationRows
-                    .First(r => r.Component.Name == c.Name).IsValid).ToList();
             }
+
+            var toInject = _validationRows
+                .Where(r => r.IsValid)
+                .Select(r => r.Component)
+                .ToList();
 
             if (toInject.Count == 0)
             {
-                MessageBox.Show("No valid components remain to inject after filtering.",
+                MessageBox.Show("No valid components are available to inject.",
                     "Nothing to Inject", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
             btnGenerateCode.Enabled = false;
-            MapperLogger.Info($"=== Generate Code — {toInject.Count} component(s) selected ===");
+            MapperLogger.Info($"=== Generate Code — {toInject.Count} valid component(s) ===");
             foreach (var c in toInject) MapperLogger.Info($"  → {c.Name} ({c.Type})");
 
             try
@@ -421,7 +399,7 @@ namespace MapperUI
                 if (diff.ToBeInjected.Count == 0)
                 {
                     MessageBox.Show(
-                        "All selected components already match the project.\nNothing to inject.",
+                        "All valid components already match the project.\nNothing to inject.",
                         "Up To Date", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     MapperLogger.Info("Nothing to inject.");
                     return;
