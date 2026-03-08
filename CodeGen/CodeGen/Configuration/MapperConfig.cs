@@ -25,19 +25,9 @@ namespace CodeGen.Configuration
 
         /// <summary>
         /// Full path to Robot_Task_CAT.fbt.
-        /// All VueOne Robot-type components map to this single CAT type.
-        /// Leave empty to treat robots as unsupported (shows ✗ in UI).
+        /// Leave empty to treat Robot components as unsupported (shows ✗ in UI).
         /// </summary>
         public string RobotTemplatePath { get; set; } = string.Empty;
-
-        // ── Safety ────────────────────────────────────────────────────────────
-        /// <summary>
-        /// Maximum number of brand-new FB inserts per Generate Code run.
-        /// Remapping existing slots does not count.
-        /// Set to 0 to disable the limit (inject everything at once).
-        /// Default: 3 — safe for EAE to reload without crashing.
-        /// </summary>
-        public int MaxNewInsertionsPerRun { get; set; } = 3;
 
         // ─────────────────────────────────────────────────────────────────────
 
@@ -72,8 +62,7 @@ namespace CodeGen.Configuration
             SyslayPath = @"C:\Station1 - Sensor and FiveStateActuator with symbolic links_20260203-120117390.sln (1)\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000001\00000000-0000-0000-0000-000000000000.syslay",
             SysresPath = @"C:\Station1 - Sensor and FiveStateActuator with symbolic links_20260203-120117390.sln (1)\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000002\00000000-0000-0000-0000-000000000000.sysres",
             ProcessCATTemplatePath = @"C:\Station1 - Sensor and FiveStateActuator with symbolic links_20260203-120117390.sln (1)\IEC61499\Process1_CAT\Process1_CAT.fbt",
-            RobotTemplatePath = @"C:\SMC_Rig_Expo_20260112-165857725.sln\IEC61499\Robot_Task_CAT\Robot_Task_CAT.fbt",
-            MaxNewInsertionsPerRun = 3
+            RobotTemplatePath = @"C:\SMC_Rig_Expo_20260112-165857725.sln\IEC61499\Robot_Task_CAT\Robot_Task_CAT.fbt"
         };
 
         private static void WriteConfig(string path, MapperConfig config)
