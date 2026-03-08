@@ -36,19 +36,24 @@
             this.lblDetectedStates = new System.Windows.Forms.Label();
             this.lblValidationPrefix = new System.Windows.Forms.Label();
             this.lblValidationStatus = new System.Windows.Forms.Label();
+
+            // Mapping Rules grid — includes Validated column
             this.dgvMappingRules = new System.Windows.Forms.DataGridView();
             this.colVueOneElement = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.colIEC61499Element = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.colMappingType = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.colMappingRule = new System.Windows.Forms.DataGridViewTextBoxColumn();
+            this.colMappingValidated = new System.Windows.Forms.DataGridViewTextBoxColumn();  // ✓ / ✗ per rule
 
             this.grpMappingInfo = new System.Windows.Forms.GroupBox();
             this.splitContainer = new System.Windows.Forms.SplitContainer();
+
+            // Component grid — Component / Type / Template only (no Validated); multi-select
             this.dgvComponents = new System.Windows.Forms.DataGridView();
             this.colComponent = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.colType = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.colTemplate = new System.Windows.Forms.DataGridViewTextBoxColumn();
-            this.colValidated = new System.Windows.Forms.DataGridViewTextBoxColumn();  // ✓ / ✗ per component
+
             this.panelDetails = new System.Windows.Forms.Panel();
             this.grpInputs = new System.Windows.Forms.GroupBox();
             this.dgvInputs = new System.Windows.Forms.DataGridView();
@@ -92,21 +97,17 @@
 
             this.fileToolStripMenuItem.Name = "fileToolStripMenuItem";
             this.fileToolStripMenuItem.Text = "File";
-
             this.dataToolStripMenuItem.Name = "dataToolStripMenuItem";
             this.dataToolStripMenuItem.Text = "Data";
-
             this.buildToolStripMenuItem.Name = "buildToolStripMenuItem";
             this.buildToolStripMenuItem.Text = "Build";
             this.buildToolStripMenuItem.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
                 this.menuItemDebugConsole });
-
             this.menuItemDebugConsole.Name = "menuItemDebugConsole";
             this.menuItemDebugConsole.Text = "Debug Console";
             this.menuItemDebugConsole.Click += new System.EventHandler(this.menuItemDebugConsole_Click);
 
-            // ── Header row ───────────────────────────────────────────────────
-            // y=33, h=25 for all controls — clean single row
+            // ── Header row (y=33, h=25) ───────────────────────────────────────
             this.lblVueOneModel.AutoSize = true;
             this.lblVueOneModel.Location = new System.Drawing.Point(12, 37);
             this.lblVueOneModel.Name = "lblVueOneModel";
@@ -162,7 +163,7 @@
             this.btnGenerateCode.UseVisualStyleBackColor = false;
             this.btnGenerateCode.Click += new System.EventHandler(this.btnGenerateCode_Click);
 
-            // ── Validation Output group ──────────────────────────────────────
+            // ── Validation Output group ───────────────────────────────────────
             this.grpValidation.Anchor = ((System.Windows.Forms.AnchorStyles)(
                 System.Windows.Forms.AnchorStyles.Top |
                 System.Windows.Forms.AnchorStyles.Left |
@@ -189,7 +190,6 @@
             this.pnlDetectedInfo.Location = new System.Drawing.Point(3, 19);
             this.pnlDetectedInfo.Name = "pnlDetectedInfo";
             this.pnlDetectedInfo.Padding = new System.Windows.Forms.Padding(0, 0, 0, 4);
-            this.pnlDetectedInfo.Size = new System.Drawing.Size(1370, 21);
             this.pnlDetectedInfo.WrapContents = false;
 
             this.lblDetectedPrefix.AutoSize = true;
@@ -198,7 +198,7 @@
 
             this.lblDetectedType.AutoSize = true;
             this.lblDetectedType.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
-            this.lblDetectedType.ForeColor = System.Drawing.Color.Green;
+            this.lblDetectedType.ForeColor = System.Drawing.Color.Gray;
             this.lblDetectedType.Text = "-";
             this.lblDetectedType.Name = "lblDetectedType";
 
@@ -209,18 +209,18 @@
 
             this.lblDetectedName.AutoSize = true;
             this.lblDetectedName.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
-            this.lblDetectedName.ForeColor = System.Drawing.Color.Green;
+            this.lblDetectedName.ForeColor = System.Drawing.Color.Gray;
             this.lblDetectedName.Text = "-";
             this.lblDetectedName.Name = "lblDetectedName";
 
             this.lblStatePrefix.AutoSize = true;
             this.lblStatePrefix.Margin = new System.Windows.Forms.Padding(8, 0, 0, 0);
-            this.lblStatePrefix.Text = "Components:";
+            this.lblStatePrefix.Text = "State Count:";
             this.lblStatePrefix.Name = "lblStatePrefix";
 
             this.lblDetectedStates.AutoSize = true;
             this.lblDetectedStates.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
-            this.lblDetectedStates.ForeColor = System.Drawing.Color.Green;
+            this.lblDetectedStates.ForeColor = System.Drawing.Color.Gray;
             this.lblDetectedStates.Text = "-";
             this.lblDetectedStates.Name = "lblDetectedStates";
 
@@ -235,17 +235,19 @@
             this.lblValidationStatus.Text = "-";
             this.lblValidationStatus.Name = "lblValidationStatus";
 
-            // dgvMappingRules — "Mapping Rule" header (not "Transformation Rule")
+            // ── dgvMappingRules — now includes Validated column ───────────────
             this.dgvMappingRules.AllowUserToAddRows = false;
             this.dgvMappingRules.AllowUserToDeleteRows = false;
             this.dgvMappingRules.BackgroundColor = System.Drawing.SystemColors.Window;
             this.dgvMappingRules.BorderStyle = System.Windows.Forms.BorderStyle.None;
-            this.dgvMappingRules.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+            this.dgvMappingRules.ColumnHeadersHeightSizeMode =
+                System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             this.dgvMappingRules.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
                 this.colVueOneElement,
                 this.colIEC61499Element,
                 this.colMappingType,
-                this.colMappingRule });
+                this.colMappingRule,
+                this.colMappingValidated });
             this.dgvMappingRules.Dock = System.Windows.Forms.DockStyle.Fill;
             this.dgvMappingRules.Name = "dgvMappingRules";
             this.dgvMappingRules.ReadOnly = true;
@@ -253,29 +255,38 @@
             this.dgvMappingRules.TabIndex = 1;
             this.dgvMappingRules.RowsDefaultCellStyle.SelectionBackColor = System.Drawing.Color.FromArgb(173, 214, 255);
             this.dgvMappingRules.RowsDefaultCellStyle.SelectionForeColor = System.Drawing.Color.Black;
+            this.dgvMappingRules.CellFormatting += new System.Windows.Forms.DataGridViewCellFormattingEventHandler(this.dgvMappingRules_CellFormatting);
 
             this.colVueOneElement.HeaderText = "VueOne Element";
             this.colVueOneElement.Name = "colVueOneElement";
             this.colVueOneElement.ReadOnly = true;
-            this.colVueOneElement.Width = 210;
+            this.colVueOneElement.Width = 200;
 
             this.colIEC61499Element.HeaderText = "IEC 61499 Element";
             this.colIEC61499Element.Name = "colIEC61499Element";
             this.colIEC61499Element.ReadOnly = true;
-            this.colIEC61499Element.Width = 280;
+            this.colIEC61499Element.Width = 270;
 
             this.colMappingType.HeaderText = "Mapping Type";
             this.colMappingType.Name = "colMappingType";
             this.colMappingType.ReadOnly = true;
             this.colMappingType.Width = 110;
 
-            // ← "Mapping Rule" — matches the spec table header exactly
             this.colMappingRule.HeaderText = "Mapping Rule";
             this.colMappingRule.Name = "colMappingRule";
             this.colMappingRule.ReadOnly = true;
             this.colMappingRule.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill;
 
-            // ── Mapping Information group ────────────────────────────────────
+            this.colMappingValidated.HeaderText = "Validated";
+            this.colMappingValidated.Name = "colMappingValidated";
+            this.colMappingValidated.ReadOnly = true;
+            this.colMappingValidated.Width = 72;
+            this.colMappingValidated.DefaultCellStyle.Alignment =
+                System.Windows.Forms.DataGridViewContentAlignment.MiddleCenter;
+            this.colMappingValidated.DefaultCellStyle.Font =
+                new System.Drawing.Font("Segoe UI", 11F, System.Drawing.FontStyle.Bold);
+
+            // ── Mapping Information group ─────────────────────────────────────
             this.grpMappingInfo.Anchor = ((System.Windows.Forms.AnchorStyles)(
                 System.Windows.Forms.AnchorStyles.Top |
                 System.Windows.Forms.AnchorStyles.Bottom |
@@ -289,25 +300,28 @@
             this.grpMappingInfo.TabStop = false;
             this.grpMappingInfo.Text = "Mapping Information";
 
-            // SplitContainer: left = wide component list, right = narrow I/O panels
             this.splitContainer.Dock = System.Windows.Forms.DockStyle.Fill;
             this.splitContainer.Location = new System.Drawing.Point(3, 19);
             this.splitContainer.Name = "splitContainer";
             this.splitContainer.Size = new System.Drawing.Size(1370, 330);
-            this.splitContainer.SplitterDistance = 860;   // ~63% left
+            this.splitContainer.SplitterDistance = 860;
             this.splitContainer.TabIndex = 0;
 
-            // Left: Component / Type / Template / Validated
+            // ── Component grid: Component / Type / Template (no Validated)
+            //    MultiSelect = true so user picks which components to inject
             this.dgvComponents.AllowUserToAddRows = false;
             this.dgvComponents.AllowUserToDeleteRows = false;
             this.dgvComponents.BackgroundColor = System.Drawing.SystemColors.Window;
-            this.dgvComponents.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+            this.dgvComponents.ColumnHeadersHeightSizeMode =
+                System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             this.dgvComponents.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
-                this.colComponent, this.colType, this.colTemplate, this.colValidated });
+                this.colComponent, this.colType, this.colTemplate });
             this.dgvComponents.Dock = System.Windows.Forms.DockStyle.Fill;
             this.dgvComponents.Name = "dgvComponents";
             this.dgvComponents.ReadOnly = true;
-            this.dgvComponents.RowHeadersVisible = false;
+            this.dgvComponents.RowHeadersVisible = true;   // visible so user can see selection state
+            this.dgvComponents.MultiSelect = true;
+            this.dgvComponents.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
             this.dgvComponents.DefaultCellStyle.Font = new System.Drawing.Font("Segoe UI", 9F);
             this.dgvComponents.TabIndex = 0;
             this.dgvComponents.SelectionChanged += new System.EventHandler(this.dgvComponents_SelectionChanged);
@@ -328,15 +342,7 @@
             this.colTemplate.ReadOnly = true;
             this.colTemplate.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill;
 
-            // Validated column — shows ✓ or ✗ with bold font; color set in code
-            this.colValidated.HeaderText = "Validated";
-            this.colValidated.Name = "colValidated";
-            this.colValidated.ReadOnly = true;
-            this.colValidated.Width = 72;
-            this.colValidated.DefaultCellStyle.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleCenter;
-            this.colValidated.DefaultCellStyle.Font = new System.Drawing.Font("Segoe UI", 11F, System.Drawing.FontStyle.Bold);
-
-            // Right: I/O panels
+            // ── I/O panels ────────────────────────────────────────────────────
             this.panelDetails.Dock = System.Windows.Forms.DockStyle.Fill;
             this.panelDetails.Controls.Add(this.grpOutputs);
             this.panelDetails.Controls.Add(this.grpInputs);
@@ -353,7 +359,8 @@
             this.dgvInputs.AllowUserToAddRows = false;
             this.dgvInputs.AllowUserToDeleteRows = false;
             this.dgvInputs.AutoSizeColumnsMode = System.Windows.Forms.DataGridViewAutoSizeColumnsMode.Fill;
-            this.dgvInputs.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+            this.dgvInputs.ColumnHeadersHeightSizeMode =
+                System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             this.dgvInputs.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
                 this.colInputName, this.colInputAddress });
             this.dgvInputs.Dock = System.Windows.Forms.DockStyle.Fill;
@@ -380,7 +387,8 @@
             this.dgvOutputs.AllowUserToAddRows = false;
             this.dgvOutputs.AllowUserToDeleteRows = false;
             this.dgvOutputs.AutoSizeColumnsMode = System.Windows.Forms.DataGridViewAutoSizeColumnsMode.Fill;
-            this.dgvOutputs.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+            this.dgvOutputs.ColumnHeadersHeightSizeMode =
+                System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             this.dgvOutputs.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
                 this.colOutputName, this.colOutputAddress });
             this.dgvOutputs.Dock = System.Windows.Forms.DockStyle.Fill;
@@ -397,14 +405,14 @@
             this.colOutputAddress.HeaderText = "Address";
             this.colOutputAddress.Name = "colOutputAddress";
 
-            // ── Status strip ─────────────────────────────────────────────────
+            // ── Status strip ──────────────────────────────────────────────────
             this.statusStrip.Items.AddRange(new System.Windows.Forms.ToolStripItem[] { this.lblStatus });
             this.statusStrip.Name = "statusStrip";
             this.statusStrip.TabIndex = 8;
             this.lblStatus.Name = "lblStatus";
-            this.lblStatus.Text = "Ready";
+            this.lblStatus.Text = "Browse a Control.xml to begin";
 
-            // ── Form ─────────────────────────────────────────────────────────
+            // ── Form ──────────────────────────────────────────────────────────
             this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 15F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(1400, 770);
@@ -474,13 +482,13 @@
         private System.Windows.Forms.DataGridViewTextBoxColumn colIEC61499Element;
         private System.Windows.Forms.DataGridViewTextBoxColumn colMappingType;
         private System.Windows.Forms.DataGridViewTextBoxColumn colMappingRule;
+        private System.Windows.Forms.DataGridViewTextBoxColumn colMappingValidated;
         private System.Windows.Forms.GroupBox grpMappingInfo;
         private System.Windows.Forms.SplitContainer splitContainer;
         private System.Windows.Forms.DataGridView dgvComponents;
         private System.Windows.Forms.DataGridViewTextBoxColumn colComponent;
         private System.Windows.Forms.DataGridViewTextBoxColumn colType;
         private System.Windows.Forms.DataGridViewTextBoxColumn colTemplate;
-        private System.Windows.Forms.DataGridViewTextBoxColumn colValidated;
         private System.Windows.Forms.Panel panelDetails;
         private System.Windows.Forms.GroupBox grpInputs;
         private System.Windows.Forms.DataGridView dgvInputs;
