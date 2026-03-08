@@ -18,17 +18,26 @@ namespace CodeGen.Configuration
         public string EAEDeployPath { get; set; } = string.Empty;
 
         // ── Phase 2: Inject System ────────────────────────────────────────────
-        /// <summary>Path to the VueOne System-level Control.xml export.</summary>
         public string SystemXmlPath { get; set; } = string.Empty;
-
-        /// <summary>Full path to the EAE .syslay file to patch.</summary>
         public string SyslayPath { get; set; } = string.Empty;
-
-        /// <summary>Full path to the EAE .sysres file to patch.</summary>
         public string SysresPath { get; set; } = string.Empty;
-
-        /// <summary>Full path to Process1_CAT.fbt – used to verify the type exists in workspace.</summary>
         public string ProcessCATTemplatePath { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Full path to Robot_Task_CAT.fbt.
+        /// All VueOne Robot-type components map to this single CAT type.
+        /// Leave empty to treat robots as unsupported (shows ✗ in UI).
+        /// </summary>
+        public string RobotTemplatePath { get; set; } = string.Empty;
+
+        // ── Safety ────────────────────────────────────────────────────────────
+        /// <summary>
+        /// Maximum number of brand-new FB inserts per Generate Code run.
+        /// Remapping existing slots does not count.
+        /// Set to 0 to disable the limit (inject everything at once).
+        /// Default: 3 — safe for EAE to reload without crashing.
+        /// </summary>
+        public int MaxNewInsertionsPerRun { get; set; } = 3;
 
         // ─────────────────────────────────────────────────────────────────────
 
@@ -38,42 +47,39 @@ namespace CodeGen.Configuration
 
             if (!File.Exists(configPath))
             {
-                var defaultConfig = CreateDefault();
-                WriteConfig(configPath, defaultConfig);
-                return defaultConfig;
+                var def = CreateDefault();
+                WriteConfig(configPath, def);
+                return def;
             }
 
             var json = File.ReadAllText(configPath);
-            var config = JsonSerializer.Deserialize<MapperConfig>(json);
-
-            if (config == null)
-                throw new Exception($"Failed to load config from '{configPath}'");
+            var config = JsonSerializer.Deserialize<MapperConfig>(json)
+                ?? throw new Exception($"Failed to deserialise config from '{configPath}'");
 
             return config;
         }
 
-        private static MapperConfig CreateDefault()
+        private static MapperConfig CreateDefault() => new()
         {
-            return new MapperConfig
-            {
-                ActuatorXmlPath = @"C:\VueOne\component\Pusher\Control.xml",
-                SensorXmlPathHopper = @"C:\VueOne\component\Part_In_Hopper\Control.xml",
-                SensorXmlPathChecker = @"C:\VueOne\component\Part_In_Checker_\Control.xml",
-                ActuatorTemplatePath = @"C:\SMC_Rig_Expo_20260112-165857725.sln\IEC61499\Five_State_Actuator_CAT\Five_State_Actuator_CAT.fbt",
-                SensorTemplatePath = @"C:\Station1 - Sensor and FiveStateActuator with symbolic links_20260203-120117390.sln (1)\IEC61499\Sensor_Bool_CAT\Sensor_Bool_CAT.fbt",
-                OutputDirectory = "Output",
-                EAEDeployPath = @"C:\SMC_Rig_Expo_20260112-165857725.sln\IEC61499",
-                SystemXmlPath = @"C:\VueOne\system\Control.xml",
-                SyslayPath = @"C:\Station1 - Sensor and FiveStateActuator with symbolic links_20260203-120117390.sln (1)\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000001\00000000-0000-0000-0000-000000000000.syslay",
-                SysresPath = @"C:\Station1 - Sensor and FiveStateActuator with symbolic links_20260203-120117390.sln (1)\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000002\00000000-0000-0000-0000-000000000000.sysres",
-                ProcessCATTemplatePath = @"C:\Station1 - Sensor and FiveStateActuator with symbolic links_20260203-120117390.sln (1)\IEC61499\Process1_CAT\Process1_CAT.fbt"
-            };
-        }
+            ActuatorXmlPath = @"C:\VueOne\component\Pusher\Control.xml",
+            SensorXmlPathHopper = @"C:\VueOne\component\Part_In_Hopper\Control.xml",
+            SensorXmlPathChecker = @"C:\VueOne\component\Part_In_Checker_\Control.xml",
+            ActuatorTemplatePath = @"C:\SMC_Rig_Expo_20260112-165857725.sln\IEC61499\Five_State_Actuator_CAT\Five_State_Actuator_CAT.fbt",
+            SensorTemplatePath = @"C:\Station1 - Sensor and FiveStateActuator with symbolic links_20260203-120117390.sln (1)\IEC61499\Sensor_Bool_CAT\Sensor_Bool_CAT.fbt",
+            OutputDirectory = "Output",
+            EAEDeployPath = @"C:\SMC_Rig_Expo_20260112-165857725.sln\IEC61499",
+            SystemXmlPath = @"C:\VueOne\system\Control.xml",
+            SyslayPath = @"C:\Station1 - Sensor and FiveStateActuator with symbolic links_20260203-120117390.sln (1)\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000001\00000000-0000-0000-0000-000000000000.syslay",
+            SysresPath = @"C:\Station1 - Sensor and FiveStateActuator with symbolic links_20260203-120117390.sln (1)\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000002\00000000-0000-0000-0000-000000000000.sysres",
+            ProcessCATTemplatePath = @"C:\Station1 - Sensor and FiveStateActuator with symbolic links_20260203-120117390.sln (1)\IEC61499\Process1_CAT\Process1_CAT.fbt",
+            RobotTemplatePath = @"C:\SMC_Rig_Expo_20260112-165857725.sln\IEC61499\Robot_Task_CAT\Robot_Task_CAT.fbt",
+            MaxNewInsertionsPerRun = 3
+        };
 
-        private static void WriteConfig(string configPath, MapperConfig config)
+        private static void WriteConfig(string path, MapperConfig config)
         {
             var json = JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(configPath, json);
+            File.WriteAllText(path, json);
         }
     }
 }
