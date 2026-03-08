@@ -12,16 +12,10 @@ namespace MapperUI.Services
         /// <summary>FBs that were remapped or newly inserted in this run.</summary>
         public List<string> InjectedFBs { get; set; } = new();
 
-        /// <summary>FBs that were already correct and needed no change.</summary>
+        /// <summary>FBs already present and correct — no change needed.</summary>
         public List<string> SkippedFBs { get; set; } = new();
 
-        /// <summary>Components skipped due to unsupported type or batch limit.</summary>
+        /// <summary>Components skipped because their type has no CAT template.</summary>
         public List<string> UnsupportedComponents { get; set; } = new();
-
-        /// <summary>
-        /// True when MaxNewInsertionsPerRun was reached before all components were injected.
-        /// The user should run Generate Code again to inject the next batch.
-        /// </summary>
-        public bool LimitReached { get; set; }
     }
 }
