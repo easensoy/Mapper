@@ -14,20 +14,28 @@ namespace MapperUI.Services
     /// Injects ONLY the components the caller supplies.  The caller (MainForm) is
     /// responsible for passing only the user-selected, validated subset.
     ///
-    /// Overlap-free positioning:
-    ///   nextY = max(existing y of same CAT type in network) + YGap
-    ///   Each successive new FB increments nextY by another YGap.
+    /// Layout (matches reference SMC syslay image):
     ///
-    /// Wiring added for newly-injected ACTUATORS ONLY (syslay):
-    ///   Event  Process.state_update         → Actuator.pst_event
-    ///   Event  Actuator.pst_out             → Process.state_change
-    ///   Data   Process.actuator_name        → Actuator.process_state_name
-    ///   Data   Process.state_val            → Actuator.state_val
+    ///   Column 1 — Actuators  x=1300   (stacked vertically, YGap=900)
+    ///   Column 2 — Sensors    x=2600   (clearly to the right of actuators)
+    ///   Column 3 — Process    x=4200   (to the right of sensors)
+    ///   Column 4 — Robot      x=5800
+    ///
+    ///   All columns start at the same Y=1480 so FBs align horizontally.
+    ///
+    /// Wiring added for newly-injected ACTUATORS (syslay only):
+    ///   Event  Process.state_update              → Actuator.pst_event
+    ///   Event  Actuator.pst_out                  → Process.state_change
+    ///   Data   Process.actuator_name             → Actuator.process_state_name
+    ///   Data   Process.state_val                 → Actuator.state_val
     ///   Data   Actuator.current_state_to_process → Process.{lowercase_name}
     ///
     /// INIT chain extended for newly-injected actuators (syslay):
     ///   Before:  X.INITO → Process.INIT
     ///   After:   X.INITO → Act1.INIT → ... → ActN.INITO → Process.INIT
+    ///
+    /// Process name is taken directly from the VueOne component name
+    /// (e.g. "Feed_Station") — never hard-coded.
     /// </summary>
     public class SystemInjector
     {
@@ -38,13 +46,20 @@ namespace MapperUI.Services
         private const string ProcessCatType = "Process1_CAT";
         private const string RobotCatType = "Robot_Task_CAT";
 
-        private const int YGap = 1400;   // vertical gap between new FBs
+        // ── Layout constants ──────────────────────────────────────────────────
+        // Reduced vertical gap: actuators are clearly separated but not sprawling.
+        private const int YGap = 900;
 
-        // X column per type — match reference syslay exactly
+        // Horizontal columns: Actuators | Sensors | Process | Robot
+        // Sensors sit clearly to the right of actuators.
+        // Process sits clearly to the right of sensors.
         private const int ActuatorX = 1300;
-        private const int SensorX = 1560;
-        private const int ProcessX = 3360;
-        private const int RobotX = 5000;
+        private const int SensorX = 2600;
+        private const int ProcessX = 4200;
+        private const int RobotX = 5800;
+
+        // All types start at the same Y so rows align across columns.
+        private const int StartY = 1480;
 
         // ── Public API ────────────────────────────────────────────────────────
 
@@ -112,9 +127,10 @@ namespace MapperUI.Services
                 ?? throw new Exception("SubAppNetwork not found in syslay");
 
             var renames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            var newActuators = new List<string>(); // ONLY actuators — used for wiring + INIT
+            var newActuators = new List<string>();
 
-            // Each group gets its own column and tracks only its own newly injected FBs
+            // Inject order: Process first (so wiring can find it by name),
+            // then Sensors, then Actuators, then Robots.
             InjectGroup(net, Processes(components), ProcessCatType, ProcessX, false, renames, result, syslayIds, null);
             InjectGroup(net, Sensors(components), SensorCatType, SensorX, false, renames, result, syslayIds, null);
             InjectGroup(net, Actuators(components), ActuatorCatType, ActuatorX, false, renames, result, syslayIds, newActuators);
@@ -125,6 +141,7 @@ namespace MapperUI.Services
 
             if (newActuators.Any())
             {
+                // Use the injected/remapped process name (e.g. "Feed_Station"), not "Process1".
                 string? proc = FirstFbOfType(net, ProcessCatType)?.Attribute("Name")?.Value;
                 if (proc != null)
                 {
@@ -133,7 +150,7 @@ namespace MapperUI.Services
                 }
                 else
                 {
-                    result.UnsupportedComponents.Add("No Process1_CAT found — wiring skipped");
+                    result.UnsupportedComponents.Add("No Process1_CAT found in syslay — wiring skipped");
                 }
             }
 
@@ -173,7 +190,7 @@ namespace MapperUI.Services
             Dictionary<string, string> renames,
             SystemInjectionResult result,
             Dictionary<string, string> syslayIds,
-            List<string>? newList)   // non-null only for actuators in syslay
+            List<string>? newList)
         {
             if (!group.Any()) return;
 
@@ -185,12 +202,11 @@ namespace MapperUI.Services
                 .ToList();
             int spareIdx = 0;
 
-            // Start Y cursor: one YGap below the current lowest of this type
             int nextY = ComputeStartY(net, catType);
 
             foreach (var comp in group)
             {
-                // 1. Exact match already present
+                // 1. Exact match already present — update params only
                 var present = FindFb(net, comp.Name, catType);
                 if (present != null)
                 {
@@ -200,7 +216,7 @@ namespace MapperUI.Services
                     continue;
                 }
 
-                // 2. Spare slot — remap
+                // 2. Spare slot (different name, same type) — remap
                 if (spareIdx < spares.Count)
                 {
                     var slot = spares[spareIdx++];
@@ -214,7 +230,7 @@ namespace MapperUI.Services
                     continue;
                 }
 
-                // 3. New FB insert
+                // 3. Brand-new FB
                 string id = isSysres ? MakeId(comp.Name, "sysres") : MakeId(comp.Name, "syslay");
 
                 var fb = new XElement(Ns + "FB",
@@ -235,16 +251,16 @@ namespace MapperUI.Services
                 result.InjectedFBs.Add($"{comp.Name} → x={columnX}, y={nextY} (new {catType})");
                 newList?.Add(comp.Name);
 
-                nextY += YGap;   // next new FB of this type goes further down
+                nextY += YGap;
             }
         }
 
         // ── Position helper ───────────────────────────────────────────────────
 
         /// <summary>
-        /// Returns the Y coordinate for the first new FB of a given type.
-        /// = max(existing y of same type) + YGap
-        /// Falls back to type-specific defaults if no existing FBs.
+        /// Returns the Y for the first new FB of a given type.
+        /// If existing FBs of this type are present → place below the lowest one.
+        /// If none → use the shared StartY constant (all types align on the same row).
         /// </summary>
         private static int ComputeStartY(XElement net, string catType)
         {
@@ -252,15 +268,7 @@ namespace MapperUI.Services
                 .Select(fb => ParseInt(fb.Attribute("y")?.Value, 0))
                 .ToList();
 
-            if (ys.Any()) return ys.Max() + YGap;
-
-            return catType switch
-            {
-                ActuatorCatType => 2480,
-                SensorCatType => 1480,
-                ProcessCatType => 1460,
-                _ => 3000
-            };
+            return ys.Any() ? ys.Max() + YGap : StartY;
         }
 
         // ── Actuator wiring ───────────────────────────────────────────────────
@@ -311,6 +319,33 @@ namespace MapperUI.Services
 
             result.InjectedFBs.Add(
                 $"INIT chain: {prev ?? "?"} → {string.Join(" → ", newActs)} → {proc}");
+        }
+
+        // ── Component filter helpers ──────────────────────────────────────────
+
+        private static List<VueOneComponent> Actuators(List<VueOneComponent> all) =>
+            all.Where(c => string.Equals(c.Type, "Actuator", StringComparison.OrdinalIgnoreCase))
+               .ToList();
+
+        private static List<VueOneComponent> Sensors(List<VueOneComponent> all) =>
+            all.Where(c => string.Equals(c.Type, "Sensor", StringComparison.OrdinalIgnoreCase))
+               .ToList();
+
+        private static List<VueOneComponent> Processes(List<VueOneComponent> all) =>
+            all.Where(c => string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase))
+               .ToList();
+
+        private static List<VueOneComponent> Robots(List<VueOneComponent> all, MapperConfig cfg) =>
+            string.IsNullOrWhiteSpace(cfg.RobotTemplatePath)
+                ? new List<VueOneComponent>()
+                : all.Where(c => string.Equals(c.Type, "Robot", StringComparison.OrdinalIgnoreCase))
+                     .ToList();
+
+        private static List<VueOneComponent> Unsupported(List<VueOneComponent> all, MapperConfig cfg)
+        {
+            var supported = new HashSet<VueOneComponent>(
+                Actuators(all).Concat(Sensors(all)).Concat(Processes(all)).Concat(Robots(all, cfg)));
+            return all.Except(supported).ToList();
         }
 
         // ── XML helpers ───────────────────────────────────────────────────────
@@ -370,8 +405,7 @@ namespace MapperUI.Services
             }
         }
 
-        private static void PatchAttr(XElement el, string attr,
-            Dictionary<string, string> renames)
+        private static void PatchAttr(XElement el, string attr, Dictionary<string, string> renames)
         {
             var v = el.Attribute(attr)?.Value;
             if (string.IsNullOrEmpty(v)) return;
@@ -433,53 +467,19 @@ namespace MapperUI.Services
             List<VueOneComponent> group, DiffReport report)
         {
             var existing = FbsOfType(net, catType)
-                .Select(fb => fb.Attribute("Name")?.Value ?? "").ToList();
-            var spares = existing.Where(n =>
-                !group.Any(c => string.Equals(c.Name, n, StringComparison.OrdinalIgnoreCase))).ToList();
-            int si = 0;
+                .Select(fb => fb.Attribute("Name")?.Value ?? "")
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
             foreach (var c in group)
             {
-                if (existing.Any(n => string.Equals(n, c.Name, StringComparison.OrdinalIgnoreCase)))
+                if (existing.Contains(c.Name))
                     report.AlreadyPresent.Add($"{c.Name} ({catType})");
-                else if (si < spares.Count)
-                    report.ToBeInjected.Add($"{spares[si++]} → {c.Name} ({catType} remap)");
                 else
-                    report.ToBeInjected.Add($"{c.Name} (new {catType})");
+                    report.ToBeInjected.Add($"{c.Name} → {catType}");
             }
         }
 
-        // ── Type filters ──────────────────────────────────────────────────────
-
-        private static bool IsActuator(VueOneComponent c) =>
-            string.Equals(c.Type, "Actuator", StringComparison.OrdinalIgnoreCase)
-            && c.States.Count == 5;
-
-        private static bool IsSensor(VueOneComponent c) =>
-            string.Equals(c.Type, "Sensor", StringComparison.OrdinalIgnoreCase)
-            && c.States.Count == 2;
-
-        private static bool IsProcess(VueOneComponent c) =>
-            string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase);
-
-        private static bool IsRobot(VueOneComponent c, MapperConfig cfg) =>
-            string.Equals(c.Type, "Robot", StringComparison.OrdinalIgnoreCase)
-            && !string.IsNullOrWhiteSpace(cfg.RobotTemplatePath);
-
-        private static bool IsSupported(VueOneComponent c, MapperConfig cfg) =>
-            IsActuator(c) || IsSensor(c) || IsProcess(c) || IsRobot(c, cfg);
-
-        private static List<VueOneComponent> Actuators(List<VueOneComponent> all) =>
-            all.Where(IsActuator).ToList();
-        private static List<VueOneComponent> Sensors(List<VueOneComponent> all) =>
-            all.Where(IsSensor).ToList();
-        private static List<VueOneComponent> Processes(List<VueOneComponent> all) =>
-            all.Where(IsProcess).ToList();
-        private static List<VueOneComponent> Robots(List<VueOneComponent> all, MapperConfig cfg) =>
-            all.Where(c => IsRobot(c, cfg)).ToList();
-        private static List<VueOneComponent> Unsupported(List<VueOneComponent> all, MapperConfig cfg) =>
-            all.Where(c => !IsSupported(c, cfg)).ToList();
-
-        // ── Result types ──────────────────────────────────────────────────────
+        // ── Diff report ───────────────────────────────────────────────────────
 
         public class DiffReport
         {
