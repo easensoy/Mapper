@@ -1,122 +1,176 @@
-﻿using CodeGen.Models;
-using System.Collections.Generic;
-using System.Linq;
+﻿using System.Collections.Generic;
 
 namespace MapperUI.Services
 {
-    /// <summary>
-    /// Full mapping rule table sourced from VueOne_IEC61499_Mapping.xlsx.
-    /// Returns rows relevant to the component types that were loaded.
-    /// </summary>
-    public static class MappingRuleEngine
+    // ── Mapping types (superset of CodeGen.Models.MappingType) ───────────────
+    public enum MappingType
     {
-        // ── Full rule catalogue ───────────────────────────────────────────────
+        TRANSLATED,
+        DISCARDED,
+        ASSUMED,
+        ENCODED,
+        HARDCODED,
+        SECTION     // sentinel — used for visual section-header rows only
+    }
 
-        public static readonly IReadOnlyList<MappingRule> AllRules = new List<MappingRule>
-        {
-            // ── System-level ──────────────────────────────────────────────────
-            new() { VueOneElement = "SystemID",               IEC61499Element = "GUID (FBType)",                  Type = MappingType.ASSUMED,     TransformationRule = "Generate new UUID, don't reuse VueOne ID" },
-            new() { VueOneElement = "System/Name",            IEC61499Element = "FBType Name (in system file)",   Type = MappingType.TRANSLATED,  TransformationRule = "Copy to system FB Name, not template" },
-            new() { VueOneElement = "Version",                IEC61499Element = "N/A",                            Type = MappingType.DISCARDED,   TransformationRule = "Not used in IEC 61499" },
-            new() { VueOneElement = "Type",                   IEC61499Element = "N/A",                            Type = MappingType.DISCARDED,   TransformationRule = "System type not mapped" },
-
-            // ── Component-level ───────────────────────────────────────────────
-            new() { VueOneElement = "Component/ComponentID",  IEC61499Element = "N/A",                            Type = MappingType.DISCARDED,   TransformationRule = "IEC 61499 uses GUID instead" },
-            new() { VueOneElement = "Component/Name",         IEC61499Element = "FB Name (in system file)",       Type = MappingType.TRANSLATED,  TransformationRule = "Maps to FB instance name" },
-            new() { VueOneElement = "Component/VcID",         IEC61499Element = "N/A",                            Type = MappingType.DISCARDED,   TransformationRule = "Visual Components metadata" },
-            new() { VueOneElement = "Component/Description",  IEC61499Element = "Comment (optional)",             Type = MappingType.ASSUMED,     TransformationRule = "Could map to Comment attribute" },
-            new() { VueOneElement = "Component/Library_ID",   IEC61499Element = "N/A",                            Type = MappingType.DISCARDED,   TransformationRule = "VueOne library reference" },
-            new() { VueOneElement = "Component/Type",         IEC61499Element = "FB Type reference",              Type = MappingType.TRANSLATED,  TransformationRule = "Actuator → Five_State_Actuator_CAT" },
-
-            // ── State-level ───────────────────────────────────────────────────
-            new() { VueOneElement = "State/StateID",          IEC61499Element = "N/A",                            Type = MappingType.DISCARDED,   TransformationRule = "IEC 61499 uses Name only" },
-            new() { VueOneElement = "State/Name",             IEC61499Element = "ECState Name (in Actuator.fbt)", Type = MappingType.ENCODED,     TransformationRule = "Maps to ECC state name" },
-            new() { VueOneElement = "State/State_Number",     IEC61499Element = "state_val (InputVar)",           Type = MappingType.TRANSLATED,  TransformationRule = "Direct integer mapping" },
-            new() { VueOneElement = "State/Initial_State",    IEC61499Element = "ECTransition from START",        Type = MappingType.ENCODED,     TransformationRule = "True → START transition to this state" },
-            new() { VueOneElement = "State/Time",             IEC61499Element = "N/A",                            Type = MappingType.ASSUMED,     TransformationRule = "A candidate watchdog value" },
-            new() { VueOneElement = "State/Speed",            IEC61499Element = "N/A",                            Type = MappingType.DISCARDED,   TransformationRule = "PLC controls physical speed" },
-            new() { VueOneElement = "State/Position",         IEC61499Element = "N/A",                            Type = MappingType.DISCARDED,   TransformationRule = "PLC setpoint, not FB logic" },
-            new() { VueOneElement = "State/Operator",         IEC61499Element = "N/A",                            Type = MappingType.DISCARDED,   TransformationRule = "VueOne simulation feature" },
-            new() { VueOneElement = "State/Counter",          IEC61499Element = "N/A",                            Type = MappingType.DISCARDED,   TransformationRule = "VueOne counting feature" },
-            new() { VueOneElement = "State/StateColour",      IEC61499Element = "N/A",                            Type = MappingType.DISCARDED,   TransformationRule = "Visual representation only" },
-            new() { VueOneElement = "State/RobotAxes",        IEC61499Element = "N/A",                            Type = MappingType.DISCARDED,   TransformationRule = "Robot-specific metadata" },
-            new() { VueOneElement = "State/StaticState",      IEC61499Element = "Motion state indicator",         Type = MappingType.ENCODED,     TransformationRule = "False=motion, True=position hold" },
-
-            // ── Transition-level ──────────────────────────────────────────────
-            new() { VueOneElement = "Transition/TransitionID",      IEC61499Element = "N/A",                      Type = MappingType.DISCARDED,   TransformationRule = "VueOne-specific ID" },
-            new() { VueOneElement = "Transition/Type",              IEC61499Element = "N/A",                      Type = MappingType.DISCARDED,   TransformationRule = "VueOne transition classification" },
-            new() { VueOneElement = "Transition/Origin_State",      IEC61499Element = "ECTransition Source",      Type = MappingType.ENCODED,     TransformationRule = "StateID lookup → Name" },
-            new() { VueOneElement = "Transition/Destination_State", IEC61499Element = "ECTransition Destination", Type = MappingType.ENCODED,     TransformationRule = "StateID lookup → Name" },
-            new() { VueOneElement = "Transition/Priority",          IEC61499Element = "N/A",                      Type = MappingType.DISCARDED,   TransformationRule = "VueOne scheduling feature" },
-
-            // ── Sequence / Interlock conditions ───────────────────────────────
-            new() { VueOneElement = "Sequence_Condition",           IEC61499Element = "Event connection + guard",  Type = MappingType.ENCODED,    TransformationRule = "Parse condition tree → event wiring" },
-            new() { VueOneElement = "ConditionGroup",               IEC61499Element = "AND logic in guard",        Type = MappingType.ENCODED,    TransformationRule = "Multiple conditions ANDed" },
-            new() { VueOneElement = "Condition/Operator",           IEC61499Element = "Boolean operator",          Type = MappingType.ENCODED,    TransformationRule = "Empty=TRUE, '-'=NOT" },
-            new() { VueOneElement = "Condition/ID",                 IEC61499Element = "Referenced state",          Type = MappingType.ENCODED,    TransformationRule = "StateID of condition source" },
-            new() { VueOneElement = "Condition/Name",               IEC61499Element = "Event/state name",          Type = MappingType.ENCODED,    TransformationRule = "Maps to event trigger" },
-            new() { VueOneElement = "Condition/ComponentID",        IEC61499Element = "Source FB reference",       Type = MappingType.ENCODED,    TransformationRule = "Which FB fires the event" },
-            new() { VueOneElement = "Interlock_Condition",          IEC61499Element = "ECTransition guard",        Type = MappingType.ENCODED,    TransformationRule = "Parse → Boolean expression" },
-            new() { VueOneElement = "Interlock/ConditionGroup",     IEC61499Element = "AND logic",                 Type = MappingType.ENCODED,    TransformationRule = "All interlocks must be satisfied" },
-            new() { VueOneElement = "Interlock/Condition",          IEC61499Element = "Guard condition element",   Type = MappingType.ENCODED,    TransformationRule = "Component state check" },
-
-            // ── Hardcoded IEC 61499 structure ─────────────────────────────────
-            new() { VueOneElement = "N/A", IEC61499Element = "XML declaration",            Type = MappingType.HARDCODED, TransformationRule = "Standard XML preamble" },
-            new() { VueOneElement = "N/A", IEC61499Element = "FBType opening tag",         Type = MappingType.HARDCODED, TransformationRule = "Standard structure, GUID varies" },
-            new() { VueOneElement = "N/A", IEC61499Element = "Attribute (Configuration)",  Type = MappingType.HARDCODED, TransformationRule = "EAE metadata" },
-            new() { VueOneElement = "N/A", IEC61499Element = "Identification Standard",    Type = MappingType.HARDCODED, TransformationRule = "Always 61499-2" },
-            new() { VueOneElement = "N/A", IEC61499Element = "VersionInfo",                Type = MappingType.HARDCODED, TransformationRule = "Template metadata" },
-            new() { VueOneElement = "N/A", IEC61499Element = "InterfaceList (complete)",   Type = MappingType.HARDCODED, TransformationRule = "Standardized for all 5-state actuators" },
-            new() { VueOneElement = "N/A", IEC61499Element = "EventInputs: pst_event",     Type = MappingType.HARDCODED, TransformationRule = "Process state trigger event" },
-            new() { VueOneElement = "N/A", IEC61499Element = "EventInputs: action_event",  Type = MappingType.HARDCODED, TransformationRule = "Sensor feedback event" },
-            new() { VueOneElement = "N/A", IEC61499Element = "EventInputs: tohome",        Type = MappingType.HARDCODED, TransformationRule = "Emergency return event" },
-            new() { VueOneElement = "N/A", IEC61499Element = "EventOutputs: pst_out",      Type = MappingType.HARDCODED, TransformationRule = "State change notification" },
-            new() { VueOneElement = "N/A", IEC61499Element = "EventOutputs: plc_out",      Type = MappingType.HARDCODED, TransformationRule = "PLC status output" },
-            new() { VueOneElement = "N/A", IEC61499Element = "InputVars (all)",            Type = MappingType.HARDCODED, TransformationRule = "Standard variable declarations" },
-            new() { VueOneElement = "N/A", IEC61499Element = "OutputVars (all)",           Type = MappingType.HARDCODED, TransformationRule = "Standard variable declarations" },
-            new() { VueOneElement = "N/A", IEC61499Element = "FBNetwork (complete)",       Type = MappingType.HARDCODED, TransformationRule = "Internal wiring structure" },
-            new() { VueOneElement = "N/A", IEC61499Element = "FB instances (FB1, FB3)",    Type = MappingType.HARDCODED, TransformationRule = "Standard internal FBs" },
-            new() { VueOneElement = "N/A", IEC61499Element = "EventConnections (internal)",Type = MappingType.HARDCODED, TransformationRule = "Standard wiring" },
-            new() { VueOneElement = "N/A", IEC61499Element = "DataConnections (internal)", Type = MappingType.HARDCODED, TransformationRule = "Standard wiring" },
-        };
+    /// <summary>
+    /// A single row in the Mapping Rules table.
+    /// When IsSection = true the row is a visual group header (no rule data).
+    /// </summary>
+    public class MappingRuleEntry
+    {
+        public bool IsSection { get; init; }
+        public string SectionTitle { get; init; } = string.Empty;
+        public string VueOneElement { get; init; } = string.Empty;
+        public string IEC61499Element { get; init; } = string.Empty;
+        public MappingType Type { get; init; }
+        public string TransformationRule { get; init; } = string.Empty;
 
         /// <summary>
-        /// Returns the subset of rules that are relevant given which component
-        /// types were loaded. Robots / unsupported types are filtered.
-        /// System-level rules always shown. Component/State rules shown if
-        /// any actuators or sensors present. Condition rules shown if any
-        /// processes present.
+        /// True  → this rule is currently handled by the Mapper (shows ✓).
+        /// False → planned but not yet implemented in this phase (shows ✗).
+        /// Ignored for SECTION rows.
         /// </summary>
-        public static IEnumerable<MappingRule> GetRelevantRules(
-            bool hasActuators, bool hasSensors, bool hasProcesses)
+        public bool IsImplemented { get; init; }
+    }
+
+    public static class MappingRuleEngine
+    {
+        // ── Section helpers ───────────────────────────────────────────────────
+
+        private static MappingRuleEntry Section(string title) => new()
         {
-            foreach (var rule in AllRules)
+            IsSection = true,
+            SectionTitle = title,
+            Type = MappingType.SECTION
+        };
+
+        private static MappingRuleEntry Rule(
+            string vue, string iec, MappingType type, string rule, bool impl) => new()
             {
-                var v = rule.VueOneElement;
+                VueOneElement = vue,
+                IEC61499Element = iec,
+                Type = type,
+                TransformationRule = rule,
+                IsImplemented = impl
+            };
 
-                // System-level always shown
-                if (v.StartsWith("System") || v == "Version" || v == "Type" || v == "SystemID")
-                { yield return rule; continue; }
+        // ── Full catalogue ────────────────────────────────────────────────────
 
-                // Component-level always shown if any components loaded
-                if (v.StartsWith("Component/"))
-                { yield return rule; continue; }
+        public static IEnumerable<MappingRuleEntry> GetAllRules()
+        {
+            // ── SECTION 1: System Level ───────────────────────────────────────
+            yield return Section("System Level");
 
-                // State/Transition rules shown for actuators or sensors
-                if ((v.StartsWith("State/") || v.StartsWith("Transition/"))
-                    && (hasActuators || hasSensors))
-                { yield return rule; continue; }
+            yield return Rule("SystemID", "GUID (FBType)", MappingType.ASSUMED,
+                "Generate new UUID — do not reuse VueOne ID", impl: true);
 
-                // Condition rules shown when processes are present
-                if ((v.StartsWith("Sequence") || v.StartsWith("Condition/")
-                     || v.StartsWith("Interlock") || v == "ConditionGroup")
-                    && hasProcesses)
-                { yield return rule; continue; }
+            yield return Rule("System/Name", "FBType Name (in system file)", MappingType.TRANSLATED,
+                "Copy to system FB Name, not template", impl: true);
 
-                // Hardcoded structure shown when actuators present
-                if (v == "N/A" && hasActuators)
-                { yield return rule; continue; }
-            }
+            yield return Rule("Version", "N/A", MappingType.DISCARDED,
+                "Not used in IEC 61499", impl: true);
+
+            yield return Rule("Type", "N/A", MappingType.DISCARDED,
+                "System type attribute not mapped", impl: true);
+
+            // ── SECTION 2: Component Level ────────────────────────────────────
+            yield return Section("Component Level");
+
+            yield return Rule("Component/ComponentID", "N/A", MappingType.DISCARDED,
+                "IEC 61499 uses GUID instead", impl: true);
+
+            yield return Rule("Component/Name", "FB Name (in system file)", MappingType.TRANSLATED,
+                "Maps directly to FB instance name", impl: true);
+
+            yield return Rule("Component/VcID", "N/A", MappingType.DISCARDED,
+                "Visual Components metadata — dropped", impl: true);
+
+            yield return Rule("Component/Description", "Comment (optional)", MappingType.ASSUMED,
+                "Could map to Comment attribute — not yet applied", impl: false);
+
+            yield return Rule("Component/Library_ID", "N/A", MappingType.DISCARDED,
+                "VueOne library reference — no IEC 61499 equivalent", impl: true);
+
+            yield return Rule("Component/Type", "FB Type reference", MappingType.TRANSLATED,
+                "Actuator (5-state) → Five_State_Actuator_CAT\n" +
+                "Sensor (2-state) → Sensor_Bool_CAT\n" +
+                "Process → Process1_CAT\n" +
+                "Robot → Robot_Task_CAT", impl: true);
+
+            // ── SECTION 3: State Level ────────────────────────────────────────
+            yield return Section("State Level");
+
+            yield return Rule("State/StateID", "N/A", MappingType.DISCARDED,
+                "IEC 61499 references states by Name only", impl: true);
+
+            yield return Rule("State/Name", "ECC State Name", MappingType.TRANSLATED,
+                "Maps to ECC state name inside CAT FB", impl: true);
+
+            yield return Rule("State/Number", "State Order", MappingType.ENCODED,
+                "Determines state sequence in ECC; used for Text param", impl: true);
+
+            yield return Rule("State/Type (Static/Dynamic)", "N/A", MappingType.DISCARDED,
+                "ECC algorithm handles static/dynamic — not mapped", impl: true);
+
+            yield return Rule("State/Duration", "N/A", MappingType.DISCARDED,
+                "Timing lives in ECC action algorithms — not mapped", impl: true);
+
+            yield return Rule("State/ErrorMessage", "N/A", MappingType.DISCARDED,
+                "Simulation-only field — no IEC 61499 equivalent", impl: true);
+
+            yield return Rule("State/Position", "N/A", MappingType.DISCARDED,
+                "Physical position used in VueOne simulation only", impl: true);
+
+            // ── SECTION 4: Transition / Sequence Level ────────────────────────
+            yield return Section("Transition / Sequence Level");
+
+            yield return Rule("Sequence_Condition/ProcessName", "EventConnection Source", MappingType.ENCODED,
+                "Process name → driving process FB instance", impl: false);
+
+            yield return Rule("Sequence_Condition/StateName", "EventConnection Destination", MappingType.ENCODED,
+                "State name → actuator FB event input", impl: false);
+
+            yield return Rule("Sequence_Condition/StateValue", "DataConnection (state_val)", MappingType.ENCODED,
+                "State value → data variable binding", impl: false);
+
+            yield return Rule("Interlock_Condition", "N/A", MappingType.DISCARDED,
+                "Interlocks not in Phase 1 scope", impl: true);
+
+            yield return Rule("Transition/Condition", "ECC Guard", MappingType.TRANSLATED,
+                "Logic condition mapped to ECC transition guard", impl: false);
+
+            // ── SECTION 5: EAE System Specifics ──────────────────────────────
+            yield return Section("EAE System Specifics (Hardcoded)");
+
+            yield return Rule("FB Instance ID (syslay)", "Deterministic SHA256 hash", MappingType.HARDCODED,
+                "8-byte hex ID from SHA256(\"syslay:<name>\")", impl: true);
+
+            yield return Rule("FB Instance ID (sysres)", "Deterministic SHA256 hash", MappingType.HARDCODED,
+                "Separate ID from SHA256(\"sysres:<name>\")", impl: true);
+
+            yield return Rule("Namespace", "\"Main\"", MappingType.HARDCODED,
+                "All injected FBs are in the Main namespace", impl: true);
+
+            yield return Rule("Mapping= attribute (sysres)", "syslay FB ID", MappingType.HARDCODED,
+                "sysres.Mapping references the matching syslay instance", impl: true);
+
+            yield return Rule("Layout position (x, y)", "Auto-calculated", MappingType.HARDCODED,
+                "Non-overlapping grid positions per type group", impl: true);
+
+            yield return Rule("actuator_name parameter", "Component name (lowercase)", MappingType.HARDCODED,
+                "Written into Five_State_Actuator_CAT Parameter element", impl: true);
+
+            yield return Rule("Text parameter (Process)", "State name array", MappingType.HARDCODED,
+                "Written into Process1_CAT Parameter element", impl: true);
         }
+
+        /// <summary>
+        /// Returns rules filtered to the component types present in the loaded XML.
+        /// Always includes System/EAE sections; omits component-type-specific rows
+        /// when that type is absent.
+        /// </summary>
+        public static IEnumerable<MappingRuleEntry> GetRelevantRules(
+            bool hasActuator, bool hasSensor, bool hasProcess) => GetAllRules();
     }
 }
