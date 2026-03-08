@@ -13,31 +13,31 @@ namespace MapperUI.Services
     /// <summary>
     /// Injects VueOne components as CAT FB instances into EAE .syslay and .sysres files.
     ///
-    /// STRATEGY per component (in priority order):
+    /// Strategy per component (priority order):
     ///   1. Correct Name + Type already present → update parameters only (idempotent)
-    ///   2. Spare slot of correct Type (wrong Name) exists → rename + update parameters
-    ///   3. No slot → INSERT a new FB element with deterministic SHA256 ID
+    ///   2. Spare slot of correct Type (wrong Name) → rename + update parameters
+    ///   3. No slot → INSERT a new FB with deterministic SHA256 ID
     ///
-    /// NEW INSERTION LIMIT:
-    ///   MapperConfig.MaxNewInsertionsPerRun (default 3) caps how many brand-new FBs
-    ///   may be written in a single run.  Remapping existing slots is unlimited.
-    ///   Set to 0 in mapper_config.json to disable the cap and inject everything at once.
+    /// Batch limit: MapperConfig.MaxNewInsertionsPerRun caps new inserts per run.
+    /// Remaps never count toward the limit. Set 0 to disable.
+    ///
+    /// Template paths come exclusively from MapperConfig — nothing is hardcoded here.
     /// </summary>
     public class SystemInjector
     {
         private static readonly XNamespace Ns = "https://www.se.com/LibraryElements";
 
+        // CAT type names — these are stable EAE type strings, not configurable
         private const string ActuatorCatType = "Five_State_Actuator_CAT";
         private const string SensorCatType = "Sensor_Bool_CAT";
         private const string ProcessCatType = "Process1_CAT";
+        private const string RobotCatType = "Robot_Task_CAT";
 
-        // Auto-layout positions for newly inserted FBs
-        private const int ActuatorStartX = 1300;
-        private const int ActuatorStartY = 3200;
-        private const int SensorStartX = 1700;
-        private const int SensorStartY = 3200;
-        private const int ProcessStartX = 3600;
-        private const int ProcessStartY = 3200;
+        // Auto-layout positions for newly inserted FBs (x, startY, stepY)
+        private static readonly (int x, int y) ActuatorLayout = (1300, 3200);
+        private static readonly (int x, int y) SensorLayout = (1700, 3200);
+        private static readonly (int x, int y) ProcessLayout = (3600, 3200);
+        private static readonly (int x, int y) RobotLayout = (5000, 3200);
         private const int LayoutStepY = 600;
 
         // ── Public API ────────────────────────────────────────────────────────
@@ -56,14 +56,15 @@ namespace MapperUI.Services
             var net = doc.Root?.Element(Ns + "SubAppNetwork");
             if (net == null) { report.Unsupported.Add("SubAppNetwork not found"); return report; }
 
-            var existingByType = GetExistingByType(net);
-            var existingNames = GetAllExistingNames(net);
+            var byType = GetExistingByType(net);
+            var allNames = GetAllNames(net);
 
-            ClassifyGroup(ProcessCatType, components.Where(IsProcess).ToList(), existingByType, existingNames, report);
-            ClassifyGroup(SensorCatType, components.Where(IsSensor).ToList(), existingByType, existingNames, report);
-            ClassifyGroup(ActuatorCatType, components.Where(IsActuator).ToList(), existingByType, existingNames, report);
+            ClassifyGroup(ProcessCatType, Processes(components), byType, allNames, report);
+            ClassifyGroup(SensorCatType, Sensors(components), byType, allNames, report);
+            ClassifyGroup(ActuatorCatType, Actuators(components), byType, allNames, report);
+            ClassifyGroup(RobotCatType, Robots(components, config), byType, allNames, report);
 
-            foreach (var c in components.Where(c => !IsActuator(c) && !IsSensor(c) && !IsProcess(c)))
+            foreach (var c in Unsupported(components, config))
                 report.Unsupported.Add($"{c.Name} ({c.Type}, {c.States.Count} states — no CAT type)");
 
             return report;
@@ -84,27 +85,20 @@ namespace MapperUI.Services
                 if (!File.Exists(config.SysresPath))
                     throw new FileNotFoundException($"sysres not found: {config.SysresPath}");
 
-                var actuators = components.Where(IsActuator).ToList();
-                var sensors = components.Where(IsSensor).ToList();
-                var processes = components.Where(IsProcess).ToList();
+                foreach (var c in Unsupported(components, config))
+                    result.UnsupportedComponents.Add($"{c.Name} ({c.Type}, {c.States.Count} states — no CAT type)");
 
-                foreach (var c in components.Where(c => !IsActuator(c) && !IsSensor(c) && !IsProcess(c)))
-                    result.UnsupportedComponents.Add($"{c.Name} ({c.Type}, {c.States.Count} states)");
-
-                // Shared new-insertion counter across both files and all component types.
-                // Only incremented when a brand-new <FB> element is written (not on remaps).
-                int newInsertionCount = 0;
-                int maxNew = config.MaxNewInsertionsPerRun; // 0 = unlimited
-
-                var syslayIdMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                int newCount = 0;
+                int maxNew = config.MaxNewInsertionsPerRun;
+                var syslayIds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
                 ProcessFile(config.SyslayPath, "SubAppNetwork", isSysres: false,
-                    actuators, sensors, processes, result, syslayIdMap, maxNew, ref newInsertionCount);
+                    config, components, result, syslayIds, maxNew, ref newCount);
 
                 ProcessFile(config.SysresPath, "FBNetwork", isSysres: true,
-                    actuators, sensors, processes, result, syslayIdMap, maxNew, ref newInsertionCount);
+                    config, components, result, syslayIds, maxNew, ref newCount);
 
-                if (maxNew > 0 && newInsertionCount >= maxNew)
+                if (maxNew > 0 && newCount >= maxNew)
                     result.LimitReached = true;
 
                 result.Success = true;
@@ -118,15 +112,14 @@ namespace MapperUI.Services
             return result;
         }
 
-        // ── Core per-file logic ───────────────────────────────────────────────
+        // ── Per-file processing ───────────────────────────────────────────────
 
         private void ProcessFile(
             string path, string networkTag, bool isSysres,
-            List<VueOneComponent> actuators,
-            List<VueOneComponent> sensors,
-            List<VueOneComponent> processes,
+            MapperConfig config,
+            List<VueOneComponent> components,
             SystemInjectionResult result,
-            Dictionary<string, string> syslayIdMap,
+            Dictionary<string, string> syslayIds,
             int maxNew, ref int newCount)
         {
             var doc = XDocument.Load(path);
@@ -135,16 +128,19 @@ namespace MapperUI.Services
 
             var renames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-            int newActIdx = 0, newSnsIdx = 0, newPrcIdx = 0;
+            int ai = 0, si = 0, pi = 0, ri = 0;
 
-            InjectGroup(net, processes, ProcessCatType, isSysres, renames,
-                ref newPrcIdx, ProcessStartX, ProcessStartY, result, syslayIdMap, maxNew, ref newCount);
+            InjectGroup(net, Processes(components), ProcessCatType, isSysres,
+                ProcessLayout, renames, ref pi, result, syslayIds, maxNew, ref newCount);
 
-            InjectGroup(net, sensors, SensorCatType, isSysres, renames,
-                ref newSnsIdx, SensorStartX, SensorStartY, result, syslayIdMap, maxNew, ref newCount);
+            InjectGroup(net, Sensors(components), SensorCatType, isSysres,
+                SensorLayout, renames, ref si, result, syslayIds, maxNew, ref newCount);
 
-            InjectGroup(net, actuators, ActuatorCatType, isSysres, renames,
-                ref newActIdx, ActuatorStartX, ActuatorStartY, result, syslayIdMap, maxNew, ref newCount);
+            InjectGroup(net, Actuators(components), ActuatorCatType, isSysres,
+                ActuatorLayout, renames, ref ai, result, syslayIds, maxNew, ref newCount);
+
+            InjectGroup(net, Robots(components, config), RobotCatType, isSysres,
+                RobotLayout, renames, ref ri, result, syslayIds, maxNew, ref newCount);
 
             if (renames.Any())
                 RewriteConnections(net, renames);
@@ -152,116 +148,109 @@ namespace MapperUI.Services
             doc.Save(path);
         }
 
+        // ── Group injection ───────────────────────────────────────────────────
+
         private void InjectGroup(
             XElement net,
-            List<VueOneComponent> components,
+            List<VueOneComponent> group,
             string catType,
             bool isSysres,
+            (int x, int y) layout,
             Dictionary<string, string> renames,
-            ref int newFbIndex,
-            int startX, int startY,
+            ref int groupIdx,
             SystemInjectionResult result,
-            Dictionary<string, string> syslayIdMap,
+            Dictionary<string, string> syslayIds,
             int maxNew, ref int newCount)
         {
-            var componentNames = new HashSet<string>(
-                components.Select(c => c.Name), StringComparer.OrdinalIgnoreCase);
+            var groupNames = new HashSet<string>(group.Select(c => c.Name), StringComparer.OrdinalIgnoreCase);
 
-            var spareSlots = net.Descendants()
+            // Slots of the correct type that don't already match a component name
+            var spares = net.Descendants()
                 .Where(e => e.Name.LocalName == "FB"
                          && string.Equals(e.Attribute("Type")?.Value, catType, StringComparison.OrdinalIgnoreCase)
-                         && !componentNames.Contains(e.Attribute("Name")?.Value ?? ""))
+                         && !groupNames.Contains(e.Attribute("Name")?.Value ?? ""))
                 .ToList();
 
             int spareIdx = 0;
 
-            foreach (var component in components)
+            foreach (var comp in group)
             {
-                // 1. Already present with correct name+type → update params only
-                var existing = FindFbByNameAndType(net, component.Name, catType);
+                // 1. Already present with correct name+type
+                var existing = FindByNameAndType(net, comp.Name, catType);
                 if (existing != null)
                 {
-                    UpdateParams(existing, component, catType);
-                    if (!isSysres)
-                    {
-                        syslayIdMap[component.Name] = existing.Attribute("ID")?.Value ?? MakeId(component.Name, "syslay");
-                        result.InjectedFBs.Add($"{component.Name} (present — params updated)");
-                    }
+                    ApplyParams(existing, comp, catType);
+                    TrackSyslay(existing, comp.Name, isSysres, syslayIds, result, "params updated");
                     continue;
                 }
 
-                // 2. Spare slot → remap (does not count toward new limit)
-                if (spareIdx < spareSlots.Count)
+                // 2. Spare slot — remap (free, does not count toward batch limit)
+                if (spareIdx < spares.Count)
                 {
-                    var slot = spareSlots[spareIdx++];
+                    var slot = spares[spareIdx++];
                     var oldName = slot.Attribute("Name")?.Value ?? "";
-                    renames[oldName] = component.Name;
-                    slot.SetAttributeValue("Name", component.Name);
-                    UpdateParams(slot, component, catType);
-
-                    if (!isSysres)
-                    {
-                        syslayIdMap[component.Name] = slot.Attribute("ID")?.Value ?? MakeId(component.Name, "syslay");
-                        result.InjectedFBs.Add($"{oldName} → {component.Name} ({catType} remap)");
-                    }
+                    renames[oldName] = comp.Name;
+                    slot.SetAttributeValue("Name", comp.Name);
+                    ApplyParams(slot, comp, catType);
+                    TrackSyslay(slot, comp.Name, isSysres, syslayIds, result, $"← {oldName} remap");
                     continue;
                 }
 
-                // 3. Insert new FB — check batch limit first
+                // 3. New insert — check batch limit
                 if (maxNew > 0 && newCount >= maxNew)
                 {
                     result.UnsupportedComponents.Add(
-                        $"{component.Name} — batch limit ({maxNew}) reached; run Generate Code again to inject next batch");
+                        $"{comp.Name} — batch limit ({maxNew}) reached; run again to inject next batch");
                     continue;
                 }
 
-                var id = isSysres ? MakeId(component.Name, "sysres") : MakeId(component.Name, "syslay");
-                int x = startX;
-                int y = startY + (newFbIndex * LayoutStepY);
-                newFbIndex++;
-                newCount++;
-
-                var newFb = new XElement(Ns + "FB",
+                var id = isSysres ? MakeId(comp.Name, "sysres") : MakeId(comp.Name, "syslay");
+                var fb = new XElement(Ns + "FB",
                     new XAttribute("ID", id),
-                    new XAttribute("Name", component.Name),
+                    new XAttribute("Name", comp.Name),
                     new XAttribute("Type", catType),
                     new XAttribute("Namespace", "Main"),
-                    new XAttribute("x", x),
-                    new XAttribute("y", y));
+                    new XAttribute("x", layout.x),
+                    new XAttribute("y", layout.y + (groupIdx * LayoutStepY)));
 
-                if (isSysres && syslayIdMap.TryGetValue(component.Name, out var slId))
-                    newFb.SetAttributeValue("Mapping", slId);
+                if (isSysres && syslayIds.TryGetValue(comp.Name, out var slId))
+                    fb.SetAttributeValue("Mapping", slId);
 
-                UpdateParams(newFb, component, catType);
-                net.Add(newFb);
+                ApplyParams(fb, comp, catType);
+                net.Add(fb);
+                groupIdx++;
+                newCount++;
 
-                if (!isSysres)
-                {
-                    syslayIdMap[component.Name] = id;
-                    result.InjectedFBs.Add($"{component.Name} (new {catType} inserted — {newCount}/{(maxNew > 0 ? maxNew.ToString() : "∞")})");
-                }
+                TrackSyslay(fb, comp.Name, isSysres, syslayIds, result,
+                    $"new insert ({newCount}/{(maxNew > 0 ? maxNew.ToString() : "∞")})");
             }
         }
 
         // ── Parameter helpers ─────────────────────────────────────────────────
 
-        private static void UpdateParams(XElement fb, VueOneComponent component, string catType)
+        private static void ApplyParams(XElement fb, VueOneComponent comp, string catType)
         {
-            if (catType == ActuatorCatType)
-                SetOrAddParameter(fb, "actuator_name", $"'{component.Name.ToLower()}'");
-            else if (catType == ProcessCatType)
-                SetOrAddParameter(fb, "Text", BuildTextParam(component));
+            switch (catType)
+            {
+                case ActuatorCatType:
+                    SetParam(fb, "actuator_name", $"'{comp.Name.ToLower()}'");
+                    break;
+                case ProcessCatType:
+                    SetParam(fb, "Text", BuildTextParam(comp));
+                    break;
+                    // Sensor and Robot_Task_CAT have no injected parameters at this phase
+            }
         }
 
-        private static void SetOrAddParameter(XElement fb, string paramName, string value)
+        private static void SetParam(XElement fb, string name, string value)
         {
-            var existing = fb.Elements()
-                .FirstOrDefault(e => e.Name.LocalName == "Parameter" && e.Attribute("Name")?.Value == paramName);
-            if (existing != null)
-                existing.SetAttributeValue("Value", value);
+            var el = fb.Elements()
+                .FirstOrDefault(e => e.Name.LocalName == "Parameter" && e.Attribute("Name")?.Value == name);
+            if (el != null)
+                el.SetAttributeValue("Value", value);
             else
                 fb.Add(new XElement(Ns + "Parameter",
-                    new XAttribute("Name", paramName), new XAttribute("Value", value)));
+                    new XAttribute("Name", name), new XAttribute("Value", value)));
         }
 
         private static string BuildTextParam(VueOneComponent proc)
@@ -278,12 +267,12 @@ namespace MapperUI.Services
         {
             foreach (var conn in net.Descendants().Where(e => e.Name.LocalName == "Connection"))
             {
-                RenameAttrPrefix(conn, "Source", renames);
-                RenameAttrPrefix(conn, "Destination", renames);
+                PatchPrefix(conn, "Source", renames);
+                PatchPrefix(conn, "Destination", renames);
             }
         }
 
-        private static void RenameAttrPrefix(XElement el, string attr, Dictionary<string, string> renames)
+        private static void PatchPrefix(XElement el, string attr, Dictionary<string, string> renames)
         {
             var val = el.Attribute(attr)?.Value;
             if (string.IsNullOrEmpty(val)) return;
@@ -293,35 +282,34 @@ namespace MapperUI.Services
                 el.SetAttributeValue(attr, newPrefix + val[dot..]);
         }
 
-        // ── DiffReport helpers ────────────────────────────────────────────────
+        // ── Diff helper ───────────────────────────────────────────────────────
 
         private static void ClassifyGroup(
-            string catType, List<VueOneComponent> components,
-            Dictionary<string, List<string>> existingByType,
-            HashSet<string> existingNames, DiffReport report)
+            string catType, List<VueOneComponent> group,
+            Dictionary<string, List<string>> byType,
+            HashSet<string> allNames, DiffReport report)
         {
-            var slots = existingByType.GetValueOrDefault(catType, new());
-            var spares = slots.Where(n => !components.Any(c =>
+            var slots = byType.GetValueOrDefault(catType, new());
+            var spares = slots.Where(n => !group.Any(c =>
                 string.Equals(c.Name, n, StringComparison.OrdinalIgnoreCase))).ToList();
             int spareIdx = 0;
 
-            foreach (var c in components)
+            foreach (var c in group)
             {
-                bool alreadyPresent = existingNames.Contains(c.Name)
-                    && slots.Contains(c.Name, StringComparer.OrdinalIgnoreCase);
-
-                if (alreadyPresent)
+                bool present = allNames.Contains(c.Name)
+                            && slots.Contains(c.Name, StringComparer.OrdinalIgnoreCase);
+                if (present)
                     report.AlreadyPresent.Add($"{c.Name} ({catType})");
                 else if (spareIdx < spares.Count)
                     report.ToBeInjected.Add($"{spares[spareIdx++]} → {c.Name} ({catType} remap)");
                 else
-                    report.ToBeInjected.Add($"{c.Name} (new {catType} — will be inserted)");
+                    report.ToBeInjected.Add($"{c.Name} (new {catType})");
             }
         }
 
         // ── XML helpers ───────────────────────────────────────────────────────
 
-        private static XElement? FindFbByNameAndType(XElement net, string name, string type) =>
+        private static XElement? FindByNameAndType(XElement net, string name, string type) =>
             net.Descendants()
                .Where(e => e.Name.LocalName == "FB")
                .FirstOrDefault(fb =>
@@ -330,22 +318,23 @@ namespace MapperUI.Services
 
         private static Dictionary<string, List<string>> GetExistingByType(XElement net)
         {
-            var result = new Dictionary<string, List<string>>
+            var d = new Dictionary<string, List<string>>
             {
                 [ProcessCatType] = new(),
                 [SensorCatType] = new(),
-                [ActuatorCatType] = new()
+                [ActuatorCatType] = new(),
+                [RobotCatType] = new()
             };
             foreach (var fb in net.Descendants().Where(e => e.Name.LocalName == "FB"))
             {
-                var type = fb.Attribute("Type")?.Value ?? "";
-                var name = fb.Attribute("Name")?.Value ?? "";
-                if (result.ContainsKey(type)) result[type].Add(name);
+                var t = fb.Attribute("Type")?.Value ?? "";
+                var n = fb.Attribute("Name")?.Value ?? "";
+                if (d.ContainsKey(t)) d[t].Add(n);
             }
-            return result;
+            return d;
         }
 
-        private static HashSet<string> GetAllExistingNames(XElement net) =>
+        private static HashSet<string> GetAllNames(XElement net) =>
             new(net.Descendants()
                    .Where(e => e.Name.LocalName == "FB")
                    .Select(fb => fb.Attribute("Name")?.Value ?? ""),
@@ -358,7 +347,18 @@ namespace MapperUI.Services
             return BitConverter.ToString(hash, 0, 8).Replace("-", "").ToUpperInvariant();
         }
 
-        // ── Type guards ───────────────────────────────────────────────────────
+        private static void TrackSyslay(
+            XElement fb, string name, bool isSysres,
+            Dictionary<string, string> syslayIds,
+            SystemInjectionResult result, string note)
+        {
+            if (isSysres) return;
+            syslayIds[name] = fb.Attribute("ID")?.Value ?? MakeId(name, "syslay");
+            result.InjectedFBs.Add($"{name} ({note})");
+        }
+
+        // ── Component type filters ────────────────────────────────────────────
+        // All type discrimination is in one place — no duplication across methods.
 
         private static bool IsActuator(VueOneComponent c) =>
             string.Equals(c.Type, "Actuator", StringComparison.OrdinalIgnoreCase) && c.States.Count == 5;
@@ -368,6 +368,28 @@ namespace MapperUI.Services
 
         private static bool IsProcess(VueOneComponent c) =>
             string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Robot is injectable only when RobotTemplatePath is configured.
+        /// If the path is empty the robot will fall through to Unsupported.
+        /// </summary>
+        private static bool IsRobot(VueOneComponent c, MapperConfig config) =>
+            string.Equals(c.Type, "Robot", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(config.RobotTemplatePath);
+
+        private static bool IsSupported(VueOneComponent c, MapperConfig config) =>
+            IsActuator(c) || IsSensor(c) || IsProcess(c) || IsRobot(c, config);
+
+        private static List<VueOneComponent> Actuators(List<VueOneComponent> all) =>
+            all.Where(IsActuator).ToList();
+        private static List<VueOneComponent> Sensors(List<VueOneComponent> all) =>
+            all.Where(IsSensor).ToList();
+        private static List<VueOneComponent> Processes(List<VueOneComponent> all) =>
+            all.Where(IsProcess).ToList();
+        private static List<VueOneComponent> Robots(List<VueOneComponent> all, MapperConfig config) =>
+            all.Where(c => IsRobot(c, config)).ToList();
+        private static List<VueOneComponent> Unsupported(List<VueOneComponent> all, MapperConfig config) =>
+            all.Where(c => !IsSupported(c, config)).ToList();
 
         // ── Result types ──────────────────────────────────────────────────────
 
