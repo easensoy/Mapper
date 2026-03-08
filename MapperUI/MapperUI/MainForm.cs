@@ -9,31 +9,46 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+
+// CS0104: both CodeGen.Mapping and MapperUI.Services define MappingRuleEngine.
+using RuleEngine = MapperUI.Services.MappingRuleEngine;
 
 namespace MapperUI
 {
     public partial class MainForm : Form
     {
         private MapperConfig? _mapperConfig;
-        private List<VueOneComponent> _loadedComponents = new List<VueOneComponent>();
+        private List<VueOneComponent> _loadedComponents = new();
+        private List<ComponentValidationRow> _validationRows = new();
         private SystemXmlReader? _lastReader;
-
-        // Single Debug Console instance — shown/hidden, never re-created
         private DebugConsoleForm? _debugConsole;
 
-        // ── Mapping type font colors (from VueOne_IEC61499_Mapping.xlsx) ────
-        // Background of xlsx cells converted to equivalent readable text colors
-        private static readonly Color ColorTranslated = Color.FromArgb(56, 142, 60);   // bold green
-        private static readonly Color ColorDiscarded = Color.FromArgb(204, 72, 0);   // orange-red
-        private static readonly Color ColorAssumed = Color.FromArgb(180, 130, 0);   // dark amber
-        private static readonly Color ColorEncoded = Color.FromArgb(31, 97, 180);  // royal blue
-        private static readonly Color ColorHardcoded = Color.FromArgb(100, 100, 100);  // gray
+        // ── Per-component validation state ────────────────────────────────────
 
-        // Alternating row backgrounds — plain white and very light gray
+        private sealed class ComponentValidationRow
+        {
+            public VueOneComponent Component { get; init; } = null!;
+            public string TemplateName { get; init; } = string.Empty;
+            public bool IsValid { get; init; }
+            public string FailReason { get; init; } = string.Empty;
+        }
+
+        // ── Mapping type colors (from xlsx cell fills) ────────────────────────
+        private static readonly Color ColorTranslated = Color.FromArgb(56, 142, 60);
+        private static readonly Color ColorDiscarded = Color.FromArgb(204, 72, 0);
+        private static readonly Color ColorAssumed = Color.FromArgb(180, 130, 0);
+        private static readonly Color ColorEncoded = Color.FromArgb(31, 97, 180);
+        private static readonly Color ColorHardcoded = Color.FromArgb(110, 110, 110);
+
         private static readonly Color RowEven = Color.White;
         private static readonly Color RowOdd = Color.FromArgb(245, 245, 245);
+
+        // ── Validated cell symbols ────────────────────────────────────────────
+        private const string SymPass = "✓";
+        private const string SymFail = "✗";
 
         public MainForm()
         {
@@ -41,17 +56,15 @@ namespace MapperUI
             btnGenerateCode.Enabled = false;
         }
 
-        // ── Build menu ────────────────────────────────────────────────────────
+        // ── Build > Debug Console ─────────────────────────────────────────────
 
         private void menuItemDebugConsole_Click(object sender, EventArgs e)
         {
-            // Create once; re-use if already open
             if (_debugConsole == null || _debugConsole.IsDisposed)
             {
                 _debugConsole = new DebugConsoleForm();
                 _debugConsole.PositionBelow(this);
             }
-
             _debugConsole.Show();
             _debugConsole.BringToFront();
         }
@@ -60,19 +73,17 @@ namespace MapperUI
 
         private async void btnBrowse_Click(object sender, EventArgs e)
         {
-            using var dialog = new OpenFileDialog
+            using var dlg = new OpenFileDialog
             {
                 Filter = "XML Files (*.xml)|*.xml|All Files (*.*)|*.*",
                 Title = "Select VueOne Control.xml"
             };
+            if (dlg.ShowDialog() != DialogResult.OK) return;
 
-            if (dialog.ShowDialog() == DialogResult.OK)
-            {
-                txtModelPath.Text = dialog.FileName;
-                lblStatus.Text = "Validating...";
-                MapperLogger.Parse($"Loading: {dialog.FileName}");
-                await LoadAndValidate(dialog.FileName);
-            }
+            txtModelPath.Text = dlg.FileName;
+            lblStatus.Text = "Validating...";
+            MapperLogger.Parse($"Loading: {dlg.FileName}");
+            await LoadAndValidate(dlg.FileName);
         }
 
         // ── Mapping Rules ─────────────────────────────────────────────────────
@@ -85,27 +96,18 @@ namespace MapperUI
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
-
             PopulateMappingRules();
         }
 
-        /// <summary>
-        /// Fills the Mapping Rules grid with element-level rules from MappingRuleEngine.
-        /// Row backgrounds alternate white / light gray.
-        /// Only the Mapping Type cell carries a colored font — no colored backgrounds.
-        /// </summary>
         private void PopulateMappingRules()
         {
             dgvMappingRules.Rows.Clear();
 
-            bool hasActuators = _loadedComponents.Any(c =>
-                string.Equals(c.Type, "Actuator", StringComparison.OrdinalIgnoreCase));
-            bool hasSensors = _loadedComponents.Any(c =>
-                string.Equals(c.Type, "Sensor", StringComparison.OrdinalIgnoreCase));
-            bool hasProcesses = _loadedComponents.Any(c =>
-                string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase));
+            bool hasAct = _loadedComponents.Any(c => IsActuator(c));
+            bool hasSns = _loadedComponents.Any(c => IsSensor(c));
+            bool hasPrc = _loadedComponents.Any(c => IsProcess(c));
 
-            var rules = MappingRuleEngine.GetRelevantRules(hasActuators, hasSensors, hasProcesses).ToList();
+            var rules = RuleEngine.GetRelevantRules(hasAct, hasSns, hasPrc).ToList();
 
             for (int i = 0; i < rules.Count; i++)
             {
@@ -117,30 +119,21 @@ namespace MapperUI
                     rule.TransformationRule);
 
                 var row = dgvMappingRules.Rows[idx];
-
-                // Alternating white / light-gray row background — no color-coded backgrounds
-                Color rowBg = (i % 2 == 0) ? RowEven : RowOdd;
-                row.DefaultCellStyle.BackColor = rowBg;
+                Color bg = (i % 2 == 0) ? RowEven : RowOdd;
+                row.DefaultCellStyle.BackColor = bg;
                 row.DefaultCellStyle.ForeColor = Color.Black;
 
-                // Color and bold only the Mapping Type cell
                 var typeCell = row.Cells[colMappingType.Index];
                 (typeCell.Style.ForeColor, typeCell.Style.Font) = rule.Type switch
                 {
-                    MappingType.TRANSLATED => (ColorTranslated,
-                        new Font(dgvMappingRules.Font, FontStyle.Bold)),
-                    MappingType.DISCARDED => (ColorDiscarded,
-                        new Font(dgvMappingRules.Font, FontStyle.Bold)),
-                    MappingType.ASSUMED => (ColorAssumed,
-                        new Font(dgvMappingRules.Font, FontStyle.Bold)),
-                    MappingType.ENCODED => (ColorEncoded,
-                        new Font(dgvMappingRules.Font, FontStyle.Bold)),
-                    MappingType.HARDCODED => (ColorHardcoded,
-                        new Font(dgvMappingRules.Font, FontStyle.Regular)),
-                    _ => (Color.Black,
-                        dgvMappingRules.Font)
+                    MappingType.TRANSLATED => (ColorTranslated, new Font(dgvMappingRules.Font, FontStyle.Bold)),
+                    MappingType.DISCARDED => (ColorDiscarded, new Font(dgvMappingRules.Font, FontStyle.Bold)),
+                    MappingType.ASSUMED => (ColorAssumed, new Font(dgvMappingRules.Font, FontStyle.Bold)),
+                    MappingType.ENCODED => (ColorEncoded, new Font(dgvMappingRules.Font, FontStyle.Bold)),
+                    MappingType.HARDCODED => (ColorHardcoded, new Font(dgvMappingRules.Font, FontStyle.Regular)),
+                    _ => (Color.Black, dgvMappingRules.Font)
                 };
-                typeCell.Style.BackColor = rowBg; // keep same background, no highlight
+                typeCell.Style.BackColor = bg;
             }
         }
 
@@ -150,6 +143,7 @@ namespace MapperUI
         {
             dgvMappingRules.Rows.Clear();
             dgvComponents.Rows.Clear();
+            _validationRows.Clear();
             btnGenerateCode.Enabled = false;
 
             try
@@ -166,91 +160,175 @@ namespace MapperUI
                     return;
                 }
 
-                var templateSelector = new TemplateSelector();
+                var selector = new TemplateSelector();
                 var validator = new ComponentValidator();
-                bool phase1Valid = true;
-                bool hasInjectables = false;
-
+                bool anyValid = false;
                 int rowIdx = 0;
-                foreach (var component in _loadedComponents)
+
+                foreach (var comp in _loadedComponents)
                 {
-                    var template = templateSelector.SelectTemplate(component);
-                    bool isProcess = string.Equals(component.Type, "Process", StringComparison.OrdinalIgnoreCase);
-                    bool matchesType = template != null && TemplateMatchesStateCount(component, template);
-                    string tPath = ResolveTemplatePath(component);
-                    bool tExists = !string.IsNullOrEmpty(tPath) && File.Exists(tPath);
+                    var vr = ValidateComponent(comp, selector, validator);
+                    _validationRows.Add(vr);
 
-                    string templateName;
-                    if (isProcess)
-                        templateName = Path.GetFileName(tPath);
-                    else if (matchesType && tExists)
-                        templateName = Path.GetFileName(tPath);
-                    else
-                        templateName = "No Template Found";
+                    int idx = dgvComponents.Rows.Add(
+                        comp.Name,
+                        comp.Type,
+                        vr.TemplateName,
+                        vr.IsValid ? SymPass : SymFail);
 
-                    int idx = dgvComponents.Rows.Add(component.Name, component.Type, templateName);
                     var row = dgvComponents.Rows[idx];
+                    Color bg = (rowIdx++ % 2 == 0) ? RowEven : RowOdd;
+                    row.DefaultCellStyle.BackColor = bg;
+                    row.DefaultCellStyle.ForeColor = Color.Black;
 
-                    // Alternating background — no validation color-coding
-                    row.DefaultCellStyle.BackColor = (rowIdx % 2 == 0) ? RowEven : RowOdd;
-                    rowIdx++;
+                    // Color only the Validated cell
+                    var cell = row.Cells[colValidated.Index];
+                    cell.Style.ForeColor = vr.IsValid
+                        ? Color.FromArgb(56, 142, 60)   // bold green
+                        : Color.FromArgb(204, 72, 0);   // orange-red
+                    cell.Style.BackColor = bg;
 
-                    MapperLogger.Validate($"{component.Name} ({component.Type}) → {templateName}");
+                    if (vr.IsValid) anyValid = true;
 
-                    if (isProcess)
-                    {
-                        hasInjectables = true;
-                    }
-                    else if (matchesType && tExists)
-                    {
-                        var vr = validator.Validate(component);
-                        if (!vr.IsValid) phase1Valid = false;
-                        hasInjectables = true;
-                    }
-                    else
-                    {
-                        phase1Valid = false;
-                    }
+                    MapperLogger.Validate(
+                        $"{comp.Name} ({comp.Type}) → {vr.TemplateName} [{(vr.IsValid ? "PASS" : "FAIL: " + vr.FailReason)}]");
                 }
 
-                // Update the detected info bar
                 UpdateDetectedInfo();
 
-                if (phase1Valid)
+                bool allSupported = _validationRows.All(r => r.IsValid);
+                bool anySupported = _validationRows.Any(r => r.IsValid);
+
+                if (allSupported)
                 {
-                    lblValidationStatus.Text = "PASSED";
-                    lblValidationStatus.ForeColor = Color.Green;
+                    SetValidationLabel("PASSED", Color.Green);
                     lblStatus.Text = "Validation passed";
-                    MapperLogger.Validate("Phase 1 validation PASSED");
                 }
                 else
                 {
-                    lblValidationStatus.Text = "FAILED";
-                    lblValidationStatus.ForeColor = Color.Red;
+                    SetValidationLabel("FAILED", Color.Red);
                     lblStatus.Text = "Validation FAILED — unsupported components present";
-                    MapperLogger.Warn("Phase 1 validation FAILED");
                 }
 
-                btnGenerateCode.Enabled = hasInjectables;
+                // Enable Generate Code as long as at least one injectable component exists
+                btnGenerateCode.Enabled = anySupported;
             }
             catch (Exception ex)
             {
-                MapperLogger.Error($"LoadAndValidate failed: {ex.Message}");
+                MapperLogger.Error($"LoadAndValidate: {ex.Message}");
                 MessageBox.Show($"Error loading file.\n{ex.Message}", "Error",
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
                 lblStatus.Text = "Error";
             }
         }
 
+        // ── Per-component validation ──────────────────────────────────────────
+
+        /// <summary>
+        /// Validates a single component against its specific CAT type rules:
+        ///   Actuator → exactly 5 states required
+        ///   Sensor   → exactly 2 states required
+        ///   Process  → always valid (any state count)
+        ///   Other    → invalid (no CAT template)
+        /// </summary>
+        private ComponentValidationRow ValidateComponent(
+            VueOneComponent comp, TemplateSelector selector, ComponentValidator validator)
+        {
+            string tPath = ResolveTemplatePath(comp);
+            string tName = string.IsNullOrEmpty(tPath) ? "No Template Found" : Path.GetFileName(tPath);
+
+            if (IsProcess(comp))
+                return new ComponentValidationRow { Component = comp, TemplateName = tName, IsValid = true };
+
+            if (IsActuator(comp))
+            {
+                // 5-state rule
+                if (comp.States.Count != 5)
+                    return new ComponentValidationRow
+                    {
+                        Component = comp,
+                        TemplateName = tName,
+                        IsValid = false,
+                        FailReason = $"Actuator must have 5 states (has {comp.States.Count})"
+                    };
+
+                var vr = validator.Validate(comp);
+                return new ComponentValidationRow
+                {
+                    Component = comp,
+                    TemplateName = tName,
+                    IsValid = vr.IsValid,
+                    FailReason = vr.IsValid ? "" : string.Join("; ", vr.Errors)
+                };
+            }
+
+            if (IsSensor(comp))
+            {
+                // 2-state rule
+                if (comp.States.Count != 2)
+                    return new ComponentValidationRow
+                    {
+                        Component = comp,
+                        TemplateName = tName,
+                        IsValid = false,
+                        FailReason = $"Sensor must have 2 states (has {comp.States.Count})"
+                    };
+
+                var vr = validator.Validate(comp);
+                return new ComponentValidationRow
+                {
+                    Component = comp,
+                    TemplateName = tName,
+                    IsValid = vr.IsValid,
+                    FailReason = vr.IsValid ? "" : string.Join("; ", vr.Errors)
+                };
+            }
+
+            // Robot, unknown type, or wrong state count
+            string reason = comp.Type.ToLower() switch
+            {
+                "robot" => "Robot type not yet supported",
+                "actuator" => $"Unsupported actuator ({comp.States.Count} states — only 5-state supported)",
+                "sensor" => $"Unsupported sensor ({comp.States.Count} states — only 2-state supported)",
+                _ => $"Unknown type '{comp.Type}'"
+            };
+            return new ComponentValidationRow
+            {
+                Component = comp,
+                TemplateName = tName,
+                IsValid = false,
+                FailReason = reason
+            };
+        }
+
         // ── Generate Code ─────────────────────────────────────────────────────
 
         private async void btnGenerateCode_Click(object sender, EventArgs e)
         {
-            if (_loadedComponents == null || _loadedComponents.Count == 0)
+            if (_loadedComponents.Count == 0)
             {
                 MessageBox.Show("Load a Control.xml first.", "No Data",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
+            }
+
+            // BLOCKER: warn user if any components failed validation
+            var failed = _validationRows.Where(r => !r.IsValid).ToList();
+            if (failed.Any())
+            {
+                var sb = new StringBuilder();
+                sb.AppendLine($"⚠  {failed.Count} component(s) failed validation and will be SKIPPED:\n");
+                foreach (var f in failed)
+                    sb.AppendLine($"  ✗  {f.Component.Name} ({f.Component.Type}) — {f.FailReason}");
+                sb.AppendLine();
+                sb.AppendLine("Valid components will still be injected.");
+                sb.AppendLine("Continue?");
+
+                var answer = MessageBox.Show(sb.ToString(), "Validation Warnings",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
+                    MessageBoxDefaultButton.Button2);
+
+                if (answer != DialogResult.Yes) return;
             }
 
             btnGenerateCode.Enabled = false;
@@ -259,6 +337,7 @@ namespace MapperUI
             try
             {
                 _mapperConfig = MapperConfig.Load();
+                MapperLogger.Info($"Batch limit : {(_mapperConfig.MaxNewInsertionsPerRun == 0 ? "unlimited" : _mapperConfig.MaxNewInsertionsPerRun.ToString())} new FBs per run");
                 MapperLogger.Info($"syslay → {_mapperConfig.SyslayPath}");
                 MapperLogger.Info($"sysres → {_mapperConfig.SysresPath}");
 
@@ -274,22 +353,17 @@ namespace MapperUI
                 if (dfbproj == null)
                 {
                     MapperLogger.Error("Cannot find .dfbproj above syslay path.");
-                    MessageBox.Show("Cannot find .dfbproj above the syslay path.\nCheck mapper_config.json.",
+                    MessageBox.Show("Cannot find .dfbproj above syslay path.\nCheck mapper_config.json.",
                         "Config Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
                 }
                 MapperLogger.Info($"dfbproj → {dfbproj}");
 
-                // Verify CAT type registrations
-                MapperLogger.Validate("Checking CAT type registrations");
                 var dfbContent = await File.ReadAllTextAsync(dfbproj);
                 bool actuatorReg = dfbContent.Contains("Five_State_Actuator_CAT");
                 bool sensorReg = dfbContent.Contains("Sensor_Bool_CAT");
-                bool processReg = dfbContent.Contains("Process1_CAT");
-
                 MapperLogger.Validate($"Five_State_Actuator_CAT : {(actuatorReg ? "FOUND ✓" : "MISSING ✗")}");
                 MapperLogger.Validate($"Sensor_Bool_CAT         : {(sensorReg ? "FOUND ✓" : "MISSING ✗")}");
-                MapperLogger.Validate($"Process1_CAT            : {(processReg ? "FOUND ✓" : "MISSING ✗")}");
 
                 if (!actuatorReg || !sensorReg)
                 {
@@ -299,16 +373,16 @@ namespace MapperUI
                     return;
                 }
 
-                // Diff
-                MapperLogger.Diff("Running diff against live syslay");
                 var injector = new SystemInjector();
-                var config = new MapperConfig
+                var cfg = new MapperConfig
                 {
                     SyslayPath = _mapperConfig.SyslayPath,
-                    SysresPath = _mapperConfig.SysresPath
+                    SysresPath = _mapperConfig.SysresPath,
+                    MaxNewInsertionsPerRun = _mapperConfig.MaxNewInsertionsPerRun
                 };
-                var diff = injector.PreviewDiff(config, _loadedComponents);
 
+                // Diff
+                var diff = injector.PreviewDiff(cfg, _loadedComponents);
                 MapperLogger.Diff($"Already present    : {diff.AlreadyPresent.Count}");
                 foreach (var s in diff.AlreadyPresent) MapperLogger.Info($"  = {s}");
                 MapperLogger.Diff($"To be injected     : {diff.ToBeInjected.Count}");
@@ -318,15 +392,15 @@ namespace MapperUI
 
                 if (diff.ToBeInjected.Count == 0)
                 {
-                    MapperLogger.Info("Nothing to inject — project already up to date.");
-                    MessageBox.Show("All components already match the project.\nNothing to inject.",
+                    MessageBox.Show("All injectable components already match the project.\nNothing to inject.",
                         "Up To Date", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MapperLogger.Info("Nothing to inject — project already up to date.");
                     return;
                 }
 
                 // Inject
                 MapperLogger.Write("Injecting into EAE project files");
-                var result = await Task.Run(() => injector.Inject(config, _loadedComponents));
+                var result = await Task.Run(() => injector.Inject(cfg, _loadedComponents));
 
                 if (!result.Success)
                 {
@@ -338,14 +412,9 @@ namespace MapperUI
 
                 MapperLogger.Write($"Injected {result.InjectedFBs.Count} FB(s)");
                 foreach (var fb in result.InjectedFBs) MapperLogger.Info($"  ✓ {fb}");
+                foreach (var u in result.UnsupportedComponents) MapperLogger.Warn($"  ! skipped: {u}");
 
-                if (result.UnsupportedComponents.Count > 0)
-                {
-                    MapperLogger.Warn($"Skipped {result.UnsupportedComponents.Count} unsupported component(s)");
-                    foreach (var u in result.UnsupportedComponents) MapperLogger.Warn($"  ! {u}");
-                }
-
-                // Touch .dfbproj → triggers EAE Reload Solution
+                // Touch .dfbproj → EAE shows Reload Solution
                 MapperLogger.Touch($"Touching {Path.GetFileName(dfbproj)}");
                 File.SetLastWriteTime(dfbproj, DateTime.Now);
                 MapperLogger.Info("EAE will show 'Reload Solution' — click Yes.");
@@ -353,10 +422,16 @@ namespace MapperUI
                 lblStatus.Text = $"Done — {result.InjectedFBs.Count} component(s) injected";
                 MapperLogger.Info("=== Done ===");
 
-                MessageBox.Show(
-                    $"Injected {result.InjectedFBs.Count} component(s) successfully.\n\n" +
-                    "Switch to EAE — it will show a 'Reload Solution' dialog.\nClick Yes.",
-                    "Done — Reload EAE", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                var doneMsg = new StringBuilder();
+                doneMsg.AppendLine($"Injected {result.InjectedFBs.Count} component(s) successfully.");
+                if (result.LimitReached)
+                    doneMsg.AppendLine($"\n⚠  Batch limit ({cfg.MaxNewInsertionsPerRun}) reached.\nRun Generate Code again to inject the next batch.");
+                if (result.UnsupportedComponents.Any())
+                    doneMsg.AppendLine($"\n{result.UnsupportedComponents.Count} unsupported component(s) were skipped.");
+                doneMsg.AppendLine("\nSwitch to EAE — click 'Reload Solution'.");
+
+                MessageBox.Show(doneMsg.ToString(), "Done — Reload EAE",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
@@ -378,7 +453,6 @@ namespace MapperUI
             dgvOutputs.Rows.Clear();
 
             if (dgvComponents.SelectedRows.Count == 0) return;
-
             var name = dgvComponents.SelectedRows[0].Cells[0].Value?.ToString();
             var comp = _loadedComponents.FirstOrDefault(c =>
                 string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase));
@@ -386,51 +460,45 @@ namespace MapperUI
 
             foreach (var state in comp.States.OrderBy(s => s.StateNumber))
                 dgvInputs.Rows.Add($"State {state.StateNumber}: {state.Name}", "");
+
+            // Show fail reason in output panel if component is invalid
+            var vr = _validationRows.FirstOrDefault(r =>
+                string.Equals(r.Component.Name, name, StringComparison.OrdinalIgnoreCase));
+            if (vr != null && !vr.IsValid && !string.IsNullOrEmpty(vr.FailReason))
+                dgvOutputs.Rows.Add(vr.FailReason, "");
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────
 
         private void UpdateDetectedInfo()
         {
-            if (_loadedComponents.Count == 0 || _lastReader == null) return;
-
-            if (_loadedComponents.Count == 1)
-            {
-                var c = _loadedComponents[0];
-                lblDetectedType.Text = c.Type;
-                lblDetectedName.Text = c.Name;
-                lblDetectedStates.Text = c.States.Count.ToString();
-                return;
-            }
+            if (_loadedComponents.Count == 0) return;
 
             int a = _loadedComponents.Count(c => c.Type == "Actuator");
             int s = _loadedComponents.Count(c => c.Type == "Sensor");
             int p = _loadedComponents.Count(c => c.Type == "Process");
 
-            lblDetectedType.Text = "System";
-            lblDetectedName.Text = _lastReader.SystemName;
-            lblDetectedStates.Text = $"{_loadedComponents.Count} ({a}A / {s}S / {p}P)";
+            lblDetectedType.Text = _loadedComponents.Count == 1 ? _loadedComponents[0].Type : "System";
+            lblDetectedName.Text = _loadedComponents.Count == 1 ? _loadedComponents[0].Name : (_lastReader?.SystemName ?? "-");
+            lblDetectedStates.Text = _loadedComponents.Count == 1
+                ? _loadedComponents[0].States.Count.ToString()
+                : $"{_loadedComponents.Count} ({a}A / {s}S / {p}P)";
         }
 
-        private bool TemplateMatchesStateCount(VueOneComponent component, FBTemplate template)
+        private void SetValidationLabel(string text, Color color)
         {
-            return component.Type.ToLower() switch
-            {
-                "actuator" => component.States.Count == 5,
-                "sensor" => component.States.Count == 2,
-                "process" => true,
-                _ => false
-            };
+            lblValidationStatus.Text = text;
+            lblValidationStatus.ForeColor = color;
         }
 
-        private string ResolveTemplatePath(VueOneComponent component)
+        private string ResolveTemplatePath(VueOneComponent c)
         {
-            var config = GetMapperConfig();
-            return component.Type.ToLower() switch
+            var cfg = GetMapperConfig();
+            return c.Type.ToLowerInvariant() switch
             {
-                "actuator" => config.ActuatorTemplatePath,
-                "sensor" => config.SensorTemplatePath,
-                "process" => config.ProcessCATTemplatePath,
+                "actuator" => cfg.ActuatorTemplatePath,
+                "sensor" => cfg.SensorTemplatePath,
+                "process" => cfg.ProcessCATTemplatePath,
                 _ => string.Empty
             };
         }
@@ -441,9 +509,6 @@ namespace MapperUI
             return _mapperConfig;
         }
 
-        /// <summary>
-        /// Walks up from the syslay path until it finds a folder containing a .dfbproj.
-        /// </summary>
         private static string? DeriveBaselineFolder(string syslayPath)
         {
             var dir = Path.GetDirectoryName(syslayPath);
@@ -455,5 +520,13 @@ namespace MapperUI
             }
             return null;
         }
+
+        // ── Type guards ───────────────────────────────────────────────────────
+        private static bool IsActuator(VueOneComponent c) =>
+            string.Equals(c.Type, "Actuator", StringComparison.OrdinalIgnoreCase);
+        private static bool IsSensor(VueOneComponent c) =>
+            string.Equals(c.Type, "Sensor", StringComparison.OrdinalIgnoreCase);
+        private static bool IsProcess(VueOneComponent c) =>
+            string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase);
     }
 }
