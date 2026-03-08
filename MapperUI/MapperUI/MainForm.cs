@@ -20,11 +20,40 @@ namespace MapperUI
         private List<VueOneComponent> _loadedComponents = new List<VueOneComponent>();
         private SystemXmlReader? _lastReader;
 
+        // Single Debug Console instance — shown/hidden, never re-created
+        private DebugConsoleForm? _debugConsole;
+
+        // ── Mapping type font colors (from VueOne_IEC61499_Mapping.xlsx) ────
+        // Background of xlsx cells converted to equivalent readable text colors
+        private static readonly Color ColorTranslated = Color.FromArgb(56, 142, 60);   // bold green
+        private static readonly Color ColorDiscarded = Color.FromArgb(204, 72, 0);   // orange-red
+        private static readonly Color ColorAssumed = Color.FromArgb(180, 130, 0);   // dark amber
+        private static readonly Color ColorEncoded = Color.FromArgb(31, 97, 180);  // royal blue
+        private static readonly Color ColorHardcoded = Color.FromArgb(100, 100, 100);  // gray
+
+        // Alternating row backgrounds — plain white and very light gray
+        private static readonly Color RowEven = Color.White;
+        private static readonly Color RowOdd = Color.FromArgb(245, 245, 245);
+
         public MainForm()
         {
             InitializeComponent();
-            MapperLogger.OnEntry += OnLogEntry;
             btnGenerateCode.Enabled = false;
+        }
+
+        // ── Build menu ────────────────────────────────────────────────────────
+
+        private void menuItemDebugConsole_Click(object sender, EventArgs e)
+        {
+            // Create once; re-use if already open
+            if (_debugConsole == null || _debugConsole.IsDisposed)
+            {
+                _debugConsole = new DebugConsoleForm();
+                _debugConsole.PositionBelow(this);
+            }
+
+            _debugConsole.Show();
+            _debugConsole.BringToFront();
         }
 
         // ── Browse ────────────────────────────────────────────────────────────
@@ -52,39 +81,66 @@ namespace MapperUI
         {
             if (_loadedComponents.Count == 0)
             {
-                MessageBox.Show("Load a Control.xml file first", "No Data",
+                MessageBox.Show("Load a Control.xml file first.", "No Data",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
             PopulateMappingRules();
-            UpdateDetectedInfo();
         }
 
+        /// <summary>
+        /// Fills the Mapping Rules grid with element-level rules from MappingRuleEngine.
+        /// Row backgrounds alternate white / light gray.
+        /// Only the Mapping Type cell carries a colored font — no colored backgrounds.
+        /// </summary>
         private void PopulateMappingRules()
         {
             dgvMappingRules.Rows.Clear();
 
-            foreach (var component in _loadedComponents)
+            bool hasActuators = _loadedComponents.Any(c =>
+                string.Equals(c.Type, "Actuator", StringComparison.OrdinalIgnoreCase));
+            bool hasSensors = _loadedComponents.Any(c =>
+                string.Equals(c.Type, "Sensor", StringComparison.OrdinalIgnoreCase));
+            bool hasProcesses = _loadedComponents.Any(c =>
+                string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase));
+
+            var rules = MappingRuleEngine.GetRelevantRules(hasActuators, hasSensors, hasProcesses).ToList();
+
+            for (int i = 0; i < rules.Count; i++)
             {
-                var templateSelector = new TemplateSelector();
-                var template = templateSelector.SelectTemplate(component);
+                var rule = rules[i];
+                int idx = dgvMappingRules.Rows.Add(
+                    rule.VueOneElement,
+                    rule.IEC61499Element,
+                    rule.Type.ToString(),
+                    rule.TransformationRule);
 
-                if (template == null || !TemplateMatchesStateCount(component, template))
-                    continue;
+                var row = dgvMappingRules.Rows[idx];
 
-                var resolvedTemplateName = ResolveTemplateName(component);
-                var templateNameToShow = string.IsNullOrWhiteSpace(resolvedTemplateName)
-                    ? "No Template Found"
-                    : resolvedTemplateName;
+                // Alternating white / light-gray row background — no color-coded backgrounds
+                Color rowBg = (i % 2 == 0) ? RowEven : RowOdd;
+                row.DefaultCellStyle.BackColor = rowBg;
+                row.DefaultCellStyle.ForeColor = Color.Black;
 
-                AddMappingRow(
-                    component.Name,
-                    templateNameToShow,
-                    component.Type,
-                    $"State count: {component.States.Count}",
-                    true,
-                    Color.White);
+                // Color and bold only the Mapping Type cell
+                var typeCell = row.Cells[colMappingType.Index];
+                (typeCell.Style.ForeColor, typeCell.Style.Font) = rule.Type switch
+                {
+                    MappingType.TRANSLATED => (ColorTranslated,
+                        new Font(dgvMappingRules.Font, FontStyle.Bold)),
+                    MappingType.DISCARDED => (ColorDiscarded,
+                        new Font(dgvMappingRules.Font, FontStyle.Bold)),
+                    MappingType.ASSUMED => (ColorAssumed,
+                        new Font(dgvMappingRules.Font, FontStyle.Bold)),
+                    MappingType.ENCODED => (ColorEncoded,
+                        new Font(dgvMappingRules.Font, FontStyle.Bold)),
+                    MappingType.HARDCODED => (ColorHardcoded,
+                        new Font(dgvMappingRules.Font, FontStyle.Regular)),
+                    _ => (Color.Black,
+                        dgvMappingRules.Font)
+                };
+                typeCell.Style.BackColor = rowBg; // keep same background, no highlight
             }
         }
 
@@ -99,14 +155,13 @@ namespace MapperUI
             try
             {
                 var reader = new SystemXmlReader();
-                _loadedComponents = reader.ReadComponents(path);
+                _loadedComponents = reader.ReadAllComponents(path);
                 _lastReader = reader;
 
                 if (_loadedComponents.Count == 0)
                 {
-                    MessageBox.Show("No components found in Control.xml",
+                    MessageBox.Show("No components found in Control.xml.",
                         "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    btnGenerateCode.Enabled = false;
                     lblStatus.Text = "No components found";
                     return;
                 }
@@ -116,26 +171,37 @@ namespace MapperUI
                 bool phase1Valid = true;
                 bool hasInjectables = false;
 
+                int rowIdx = 0;
                 foreach (var component in _loadedComponents)
                 {
                     var template = templateSelector.SelectTemplate(component);
                     bool isProcess = string.Equals(component.Type, "Process", StringComparison.OrdinalIgnoreCase);
-                    bool templateMatch = template != null && TemplateMatchesStateCount(component, template);
+                    bool matchesType = template != null && TemplateMatchesStateCount(component, template);
                     string tPath = ResolveTemplatePath(component);
                     bool tExists = !string.IsNullOrEmpty(tPath) && File.Exists(tPath);
 
-                    string templateName = templateMatch
-                        ? (tExists ? Path.GetFileName(tPath) : Path.GetFileName(tPath) + " (not found)")
-                        : "No Template Found";
+                    string templateName;
+                    if (isProcess)
+                        templateName = Path.GetFileName(tPath);
+                    else if (matchesType && tExists)
+                        templateName = Path.GetFileName(tPath);
+                    else
+                        templateName = "No Template Found";
 
-                    dgvComponents.Rows.Add(component.Name, component.Type, templateName);
+                    int idx = dgvComponents.Rows.Add(component.Name, component.Type, templateName);
+                    var row = dgvComponents.Rows[idx];
+
+                    // Alternating background — no validation color-coding
+                    row.DefaultCellStyle.BackColor = (rowIdx % 2 == 0) ? RowEven : RowOdd;
+                    rowIdx++;
+
                     MapperLogger.Validate($"{component.Name} ({component.Type}) → {templateName}");
 
                     if (isProcess)
                     {
                         hasInjectables = true;
                     }
-                    else if (templateMatch && tExists)
+                    else if (matchesType && tExists)
                     {
                         var vr = validator.Validate(component);
                         if (!vr.IsValid) phase1Valid = false;
@@ -147,76 +213,93 @@ namespace MapperUI
                     }
                 }
 
+                // Update the detected info bar
+                UpdateDetectedInfo();
+
                 if (phase1Valid)
                 {
-                    lblStatus.Text = "Validation passed";
                     lblValidationStatus.Text = "PASSED";
                     lblValidationStatus.ForeColor = Color.Green;
+                    lblStatus.Text = "Validation passed";
                     MapperLogger.Validate("Phase 1 validation PASSED");
                 }
                 else
                 {
-                    lblStatus.Text = "Phase 1 validation FAILED — check templates";
                     lblValidationStatus.Text = "FAILED";
                     lblValidationStatus.ForeColor = Color.Red;
-                    MapperLogger.Warn("Phase 1 validation FAILED — check templates");
+                    lblStatus.Text = "Validation FAILED — unsupported components present";
+                    MapperLogger.Warn("Phase 1 validation FAILED");
                 }
 
-                // Generate Code is enabled whenever there are any injectable components,
-                // even if some are unsupported. Unsupported ones will be skipped and logged.
                 btnGenerateCode.Enabled = hasInjectables;
-                UpdateDetectedInfo();
             }
             catch (Exception ex)
             {
                 MapperLogger.Error($"LoadAndValidate failed: {ex.Message}");
                 MessageBox.Show($"Error loading file.\n{ex.Message}", "Error",
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
-                btnGenerateCode.Enabled = false;
                 lblStatus.Text = "Error";
             }
         }
 
         // ── Generate Code ─────────────────────────────────────────────────────
-        // Single entry point replacing the old "Generate FB" + "Generate Staged Project".
-        // Calls SystemInjector directly — no StagingProjectBuilder, no baseline copy.
 
         private async void btnGenerateCode_Click(object sender, EventArgs e)
         {
             if (_loadedComponents == null || _loadedComponents.Count == 0)
             {
-                MapperLogger.Error("No components loaded — browse a Control.xml first.");
                 MessageBox.Show("Load a Control.xml first.", "No Data",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
             btnGenerateCode.Enabled = false;
-
-            // Switch to Debug Console immediately so the user sees live output
-            tabMain.SelectedTab = tabPageDebug;
             MapperLogger.Info("=== Generate Code ===");
 
             try
             {
                 _mapperConfig = MapperConfig.Load();
+                MapperLogger.Info($"syslay → {_mapperConfig.SyslayPath}");
+                MapperLogger.Info($"sysres → {_mapperConfig.SysresPath}");
 
-                // 1. Validate required config paths
-                var dfbproj = Directory
-                    .GetFiles(_mapperConfig.ProjectFolder ?? "", "*.dfbproj", SearchOption.AllDirectories)
-                    .FirstOrDefault();
-
-                if (dfbproj == null)
+                if (!File.Exists(_mapperConfig.SyslayPath))
                 {
-                    MapperLogger.Error("No .dfbproj found — check mapper_config.json ProjectFolder setting.");
-                    MessageBox.Show("No .dfbproj found in the configured project folder.\nCheck mapper_config.json.",
+                    MapperLogger.Error($"syslay not found: {_mapperConfig.SyslayPath}");
+                    MessageBox.Show($"syslay not found:\n{_mapperConfig.SyslayPath}\n\nCheck mapper_config.json.",
                         "Config Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
                 }
 
-                MapperLogger.Validate($".dfbproj : {Path.GetFileName(dfbproj)}");
+                var dfbproj = DeriveBaselineFolder(_mapperConfig.SyslayPath);
+                if (dfbproj == null)
+                {
+                    MapperLogger.Error("Cannot find .dfbproj above syslay path.");
+                    MessageBox.Show("Cannot find .dfbproj above the syslay path.\nCheck mapper_config.json.",
+                        "Config Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+                MapperLogger.Info($"dfbproj → {dfbproj}");
 
-                // 2. Diff
+                // Verify CAT type registrations
+                MapperLogger.Validate("Checking CAT type registrations");
+                var dfbContent = await File.ReadAllTextAsync(dfbproj);
+                bool actuatorReg = dfbContent.Contains("Five_State_Actuator_CAT");
+                bool sensorReg = dfbContent.Contains("Sensor_Bool_CAT");
+                bool processReg = dfbContent.Contains("Process1_CAT");
+
+                MapperLogger.Validate($"Five_State_Actuator_CAT : {(actuatorReg ? "FOUND ✓" : "MISSING ✗")}");
+                MapperLogger.Validate($"Sensor_Bool_CAT         : {(sensorReg ? "FOUND ✓" : "MISSING ✗")}");
+                MapperLogger.Validate($"Process1_CAT            : {(processReg ? "FOUND ✓" : "MISSING ✗")}");
+
+                if (!actuatorReg || !sensorReg)
+                {
+                    MapperLogger.Error("Required CAT types not registered — wrong project?");
+                    MessageBox.Show("Required CAT types not found in .dfbproj.\nCheck mapper_config.json.",
+                        "Wrong Project", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+
+                // Diff
                 MapperLogger.Diff("Running diff against live syslay");
                 var injector = new SystemInjector();
                 var config = new MapperConfig
@@ -226,46 +309,52 @@ namespace MapperUI
                 };
                 var diff = injector.PreviewDiff(config, _loadedComponents);
 
-                MapperLogger.Diff($"Already in project : {diff.AlreadyPresent.Count}");
+                MapperLogger.Diff($"Already present    : {diff.AlreadyPresent.Count}");
                 foreach (var s in diff.AlreadyPresent) MapperLogger.Info($"  = {s}");
-                MapperLogger.Diff($"Will be generated  : {diff.ToBeInjected.Count}");
+                MapperLogger.Diff($"To be injected     : {diff.ToBeInjected.Count}");
                 foreach (var i in diff.ToBeInjected) MapperLogger.Info($"  + {i}");
                 MapperLogger.Diff($"Unsupported (skip) : {diff.Unsupported.Count}");
                 foreach (var u in diff.Unsupported) MapperLogger.Warn($"  ! {u}");
 
                 if (diff.ToBeInjected.Count == 0)
                 {
-                    MapperLogger.Info("Nothing to generate — project already up to date.");
-                    MessageBox.Show("All components already match the project.\nNothing to generate.",
+                    MapperLogger.Info("Nothing to inject — project already up to date.");
+                    MessageBox.Show("All components already match the project.\nNothing to inject.",
                         "Up To Date", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return;
                 }
 
-                // 3. Inject / generate
-                MapperLogger.Write("Generating EAE project files");
+                // Inject
+                MapperLogger.Write("Injecting into EAE project files");
                 var result = await Task.Run(() => injector.Inject(config, _loadedComponents));
 
                 if (!result.Success)
                 {
-                    MapperLogger.Error($"Generation failed: {result.ErrorMessage}");
-                    MessageBox.Show($"Generation failed:\n\n{result.ErrorMessage}",
+                    MapperLogger.Error($"Injection failed: {result.ErrorMessage}");
+                    MessageBox.Show($"Injection failed:\n\n{result.ErrorMessage}",
                         "Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
                 }
 
-                MapperLogger.Write($"Generated {result.InjectedFBs.Count} FB(s)");
+                MapperLogger.Write($"Injected {result.InjectedFBs.Count} FB(s)");
                 foreach (var fb in result.InjectedFBs) MapperLogger.Info($"  ✓ {fb}");
 
-                // 4. Touch .dfbproj → triggers EAE Reload Solution
+                if (result.UnsupportedComponents.Count > 0)
+                {
+                    MapperLogger.Warn($"Skipped {result.UnsupportedComponents.Count} unsupported component(s)");
+                    foreach (var u in result.UnsupportedComponents) MapperLogger.Warn($"  ! {u}");
+                }
+
+                // Touch .dfbproj → triggers EAE Reload Solution
                 MapperLogger.Touch($"Touching {Path.GetFileName(dfbproj)}");
                 File.SetLastWriteTime(dfbproj, DateTime.Now);
                 MapperLogger.Info("EAE will show 'Reload Solution' — click Yes.");
 
-                lblStatus.Text = $"Done — {result.InjectedFBs.Count} component(s) generated";
+                lblStatus.Text = $"Done — {result.InjectedFBs.Count} component(s) injected";
                 MapperLogger.Info("=== Done ===");
 
                 MessageBox.Show(
-                    $"Generated {result.InjectedFBs.Count} component(s) successfully.\n\n" +
+                    $"Injected {result.InjectedFBs.Count} component(s) successfully.\n\n" +
                     "Switch to EAE — it will show a 'Reload Solution' dialog.\nClick Yes.",
                     "Done — Reload EAE", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
@@ -281,62 +370,7 @@ namespace MapperUI
             }
         }
 
-        // ── Build menu navigation ─────────────────────────────────────────────
-
-        private void menuItemMapper_Click(object sender, EventArgs e)
-        {
-            tabMain.SelectedTab = tabPageMapper;
-        }
-
-        private void menuItemDebugConsole_Click(object sender, EventArgs e)
-        {
-            tabMain.SelectedTab = tabPageDebug;
-            MapperLogger.Info("=== Debug Console ===");
-        }
-
-        // ── Debug Console ─────────────────────────────────────────────────────
-
-        private void OnLogEntry(LogEntry entry)
-        {
-            if (dgvLog.InvokeRequired) { dgvLog.Invoke(() => OnLogEntry(entry)); return; }
-
-            var color = entry.Step switch
-            {
-                LogStep.ERROR => Color.OrangeRed,
-                LogStep.WARN => Color.Yellow,
-                LogStep.REMAP => Color.LimeGreen,
-                LogStep.WRITE => Color.DeepSkyBlue,
-                LogStep.TOUCH => Color.Plum,
-                LogStep.VALIDATE => Color.Aquamarine,
-                LogStep.DIFF => Color.LightSkyBlue,
-                LogStep.PARSE => Color.LightSalmon,
-                _ => Color.LimeGreen
-            };
-
-            var idx = dgvLog.Rows.Add(
-                entry.Timestamp.ToString("HH:mm:ss.fff"),
-                entry.Step.ToString(),
-                entry.Action);
-
-            dgvLog.Rows[idx].DefaultCellStyle.ForeColor = color;
-            dgvLog.FirstDisplayedScrollingRowIndex = dgvLog.Rows.Count - 1;
-
-            if (dgvLog.Rows.Count > 1000)
-                dgvLog.Rows.RemoveAt(0);
-
-            if (entry.Step != LogStep.INFO)
-                lblStatus.Text = entry.Action.Length > 100
-                    ? entry.Action[..100] + "…"
-                    : entry.Action;
-        }
-
-        private void btnClearLog_Click(object sender, EventArgs e)
-        {
-            dgvLog.Rows.Clear();
-            MapperLogger.Info("Log cleared.");
-        }
-
-        // ── Component selection → I/O details ────────────────────────────────
+        // ── Component selection → Inputs panel ───────────────────────────────
 
         private void dgvComponents_SelectionChanged(object sender, EventArgs e)
         {
@@ -348,7 +382,6 @@ namespace MapperUI
             var name = dgvComponents.SelectedRows[0].Cells[0].Value?.ToString();
             var comp = _loadedComponents.FirstOrDefault(c =>
                 string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase));
-
             if (comp == null) return;
 
             foreach (var state in comp.States.OrderBy(s => s.StateNumber))
@@ -379,44 +412,48 @@ namespace MapperUI
             lblDetectedStates.Text = $"{_loadedComponents.Count} ({a}A / {s}S / {p}P)";
         }
 
-        private void AddMappingRow(string vueOne, string iec61499, string type,
-            string rule, bool validated, Color backColor)
-        {
-            int idx = dgvMappingRules.Rows.Add(vueOne, iec61499, type, rule, validated);
-            dgvMappingRules.Rows[idx].DefaultCellStyle.BackColor = backColor;
-        }
-
         private bool TemplateMatchesStateCount(VueOneComponent component, FBTemplate template)
         {
-            if (string.Equals(component.Type, "Actuator", StringComparison.OrdinalIgnoreCase))
-                return component.States.Count == 5;
-            if (string.Equals(component.Type, "Sensor", StringComparison.OrdinalIgnoreCase))
-                return component.States.Count == 2;
-            if (string.Equals(component.Type, "Process", StringComparison.OrdinalIgnoreCase))
-                return true;
-            return false;
+            return component.Type.ToLower() switch
+            {
+                "actuator" => component.States.Count == 5,
+                "sensor" => component.States.Count == 2,
+                "process" => true,
+                _ => false
+            };
         }
 
         private string ResolveTemplatePath(VueOneComponent component)
         {
-            var config = MapperConfig.Load();
-            if (string.Equals(component.Type, "Actuator", StringComparison.OrdinalIgnoreCase))
-                return config.ActuatorTemplatePath;
-            if (string.Equals(component.Type, "Sensor", StringComparison.OrdinalIgnoreCase))
-                return config.SensorTemplatePath;
-            return string.Empty;
-        }
-
-        private string ResolveTemplateName(VueOneComponent component)
-        {
-            var path = ResolveTemplatePath(component);
-            return string.IsNullOrEmpty(path) ? string.Empty : Path.GetFileName(path);
+            var config = GetMapperConfig();
+            return component.Type.ToLower() switch
+            {
+                "actuator" => config.ActuatorTemplatePath,
+                "sensor" => config.SensorTemplatePath,
+                "process" => config.ProcessCATTemplatePath,
+                _ => string.Empty
+            };
         }
 
         private MapperConfig GetMapperConfig()
         {
             _mapperConfig ??= MapperConfig.Load();
             return _mapperConfig;
+        }
+
+        /// <summary>
+        /// Walks up from the syslay path until it finds a folder containing a .dfbproj.
+        /// </summary>
+        private static string? DeriveBaselineFolder(string syslayPath)
+        {
+            var dir = Path.GetDirectoryName(syslayPath);
+            while (dir != null)
+            {
+                var match = Directory.GetFiles(dir, "*.dfbproj").FirstOrDefault();
+                if (match != null) return match;
+                dir = Path.GetDirectoryName(dir);
+            }
+            return null;
         }
     }
 }
