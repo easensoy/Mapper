@@ -43,16 +43,17 @@
             this.colIEC61499Element = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.colMappingType = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.colMappingRule = new System.Windows.Forms.DataGridViewTextBoxColumn();
-            this.colMappingValidated = new System.Windows.Forms.DataGridViewTextBoxColumn();  // ✓ / ✗ per rule
+            this.colMappingValidated = new System.Windows.Forms.DataGridViewTextBoxColumn();
 
             this.grpMappingInfo = new System.Windows.Forms.GroupBox();
             this.splitContainer = new System.Windows.Forms.SplitContainer();
 
-            // Component grid — Component / Type / Template only (no Validated); multi-select
+            // Component grid — Component / Type / Template / Validated
             this.dgvComponents = new System.Windows.Forms.DataGridView();
             this.colComponent = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.colType = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.colTemplate = new System.Windows.Forms.DataGridViewTextBoxColumn();
+            this.colValidated = new System.Windows.Forms.DataGridViewTextBoxColumn();  // ✓ / ✗ per instance
 
             this.panelDetails = new System.Windows.Forms.Panel();
             this.grpInputs = new System.Windows.Forms.GroupBox();
@@ -107,7 +108,7 @@
             this.menuItemDebugConsole.Text = "Debug Console";
             this.menuItemDebugConsole.Click += new System.EventHandler(this.menuItemDebugConsole_Click);
 
-            // ── Header row (y=33, h=25) ───────────────────────────────────────
+            // ── Header row ───────────────────────────────────────────────────
             this.lblVueOneModel.AutoSize = true;
             this.lblVueOneModel.Location = new System.Drawing.Point(12, 37);
             this.lblVueOneModel.Name = "lblVueOneModel";
@@ -187,13 +188,13 @@
             this.pnlDetectedInfo.Controls.Add(this.lblValidationPrefix);
             this.pnlDetectedInfo.Controls.Add(this.lblValidationStatus);
             this.pnlDetectedInfo.Dock = System.Windows.Forms.DockStyle.Top;
-            this.pnlDetectedInfo.Location = new System.Drawing.Point(3, 19);
             this.pnlDetectedInfo.Name = "pnlDetectedInfo";
-            this.pnlDetectedInfo.Padding = new System.Windows.Forms.Padding(0, 0, 0, 4);
-            this.pnlDetectedInfo.WrapContents = false;
+            this.pnlDetectedInfo.Size = new System.Drawing.Size(1370, 28);
+            this.pnlDetectedInfo.TabIndex = 0;
+            this.pnlDetectedInfo.Padding = new System.Windows.Forms.Padding(4, 4, 0, 4);
 
             this.lblDetectedPrefix.AutoSize = true;
-            this.lblDetectedPrefix.Text = "Detected:";
+            this.lblDetectedPrefix.Text = "Type:";
             this.lblDetectedPrefix.Name = "lblDetectedPrefix";
 
             this.lblDetectedType.AutoSize = true;
@@ -201,9 +202,9 @@
             this.lblDetectedType.ForeColor = System.Drawing.Color.Gray;
             this.lblDetectedType.Text = "-";
             this.lblDetectedType.Name = "lblDetectedType";
+            this.lblDetectedType.Margin = new System.Windows.Forms.Padding(4, 0, 12, 0);
 
             this.lblNamePrefix.AutoSize = true;
-            this.lblNamePrefix.Margin = new System.Windows.Forms.Padding(8, 0, 0, 0);
             this.lblNamePrefix.Text = "Name:";
             this.lblNamePrefix.Name = "lblNamePrefix";
 
@@ -212,10 +213,10 @@
             this.lblDetectedName.ForeColor = System.Drawing.Color.Gray;
             this.lblDetectedName.Text = "-";
             this.lblDetectedName.Name = "lblDetectedName";
+            this.lblDetectedName.Margin = new System.Windows.Forms.Padding(4, 0, 12, 0);
 
             this.lblStatePrefix.AutoSize = true;
-            this.lblStatePrefix.Margin = new System.Windows.Forms.Padding(8, 0, 0, 0);
-            this.lblStatePrefix.Text = "State Count:";
+            this.lblStatePrefix.Text = "Components:";
             this.lblStatePrefix.Name = "lblStatePrefix";
 
             this.lblDetectedStates.AutoSize = true;
@@ -223,6 +224,7 @@
             this.lblDetectedStates.ForeColor = System.Drawing.Color.Gray;
             this.lblDetectedStates.Text = "-";
             this.lblDetectedStates.Name = "lblDetectedStates";
+            this.lblDetectedStates.Margin = new System.Windows.Forms.Padding(4, 0, 12, 0);
 
             this.lblValidationPrefix.AutoSize = true;
             this.lblValidationPrefix.Margin = new System.Windows.Forms.Padding(8, 0, 0, 0);
@@ -235,7 +237,7 @@
             this.lblValidationStatus.Text = "-";
             this.lblValidationStatus.Name = "lblValidationStatus";
 
-            // ── dgvMappingRules — now includes Validated column ───────────────
+            // ── dgvMappingRules ───────────────────────────────────────────────
             this.dgvMappingRules.AllowUserToAddRows = false;
             this.dgvMappingRules.AllowUserToDeleteRows = false;
             this.dgvMappingRules.BackgroundColor = System.Drawing.SystemColors.Window;
@@ -255,7 +257,8 @@
             this.dgvMappingRules.TabIndex = 1;
             this.dgvMappingRules.RowsDefaultCellStyle.SelectionBackColor = System.Drawing.Color.FromArgb(173, 214, 255);
             this.dgvMappingRules.RowsDefaultCellStyle.SelectionForeColor = System.Drawing.Color.Black;
-            this.dgvMappingRules.CellFormatting += new System.Windows.Forms.DataGridViewCellFormattingEventHandler(this.dgvMappingRules_CellFormatting);
+            this.dgvMappingRules.CellFormatting += new System.Windows.Forms.DataGridViewCellFormattingEventHandler(
+                this.dgvMappingRules_CellFormatting);
 
             this.colVueOneElement.HeaderText = "VueOne Element";
             this.colVueOneElement.Name = "colVueOneElement";
@@ -307,21 +310,24 @@
             this.splitContainer.SplitterDistance = 860;
             this.splitContainer.TabIndex = 0;
 
-            // ── Component grid: Component / Type / Template (no Validated)
-            //    MultiSelect = true so user picks which components to inject
+            // ── Component grid: Component / Type / Template / Validated ───────
             this.dgvComponents.AllowUserToAddRows = false;
             this.dgvComponents.AllowUserToDeleteRows = false;
             this.dgvComponents.BackgroundColor = System.Drawing.SystemColors.Window;
             this.dgvComponents.ColumnHeadersHeightSizeMode =
                 System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             this.dgvComponents.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
-                this.colComponent, this.colType, this.colTemplate });
+                this.colComponent,
+                this.colType,
+                this.colTemplate,
+                this.colValidated });
             this.dgvComponents.Dock = System.Windows.Forms.DockStyle.Fill;
             this.dgvComponents.Name = "dgvComponents";
             this.dgvComponents.ReadOnly = true;
-            this.dgvComponents.RowHeadersVisible = true;   // visible so user can see selection state
+            this.dgvComponents.RowHeadersVisible = true;
             this.dgvComponents.MultiSelect = true;
-            this.dgvComponents.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
+            this.dgvComponents.SelectionMode =
+                System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
             this.dgvComponents.DefaultCellStyle.Font = new System.Drawing.Font("Segoe UI", 9F);
             this.dgvComponents.TabIndex = 0;
             this.dgvComponents.SelectionChanged += new System.EventHandler(this.dgvComponents_SelectionChanged);
@@ -342,6 +348,16 @@
             this.colTemplate.ReadOnly = true;
             this.colTemplate.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill;
 
+            // Validated column — ✓ green for whitelisted+valid, ✗ red for all others
+            this.colValidated.HeaderText = "Validated";
+            this.colValidated.Name = "colValidated";
+            this.colValidated.ReadOnly = true;
+            this.colValidated.Width = 72;
+            this.colValidated.DefaultCellStyle.Alignment =
+                System.Windows.Forms.DataGridViewContentAlignment.MiddleCenter;
+            this.colValidated.DefaultCellStyle.Font =
+                new System.Drawing.Font("Segoe UI", 11F, System.Drawing.FontStyle.Bold);
+
             // ── I/O panels ────────────────────────────────────────────────────
             this.panelDetails.Dock = System.Windows.Forms.DockStyle.Fill;
             this.panelDetails.Controls.Add(this.grpOutputs);
@@ -358,7 +374,8 @@
 
             this.dgvInputs.AllowUserToAddRows = false;
             this.dgvInputs.AllowUserToDeleteRows = false;
-            this.dgvInputs.AutoSizeColumnsMode = System.Windows.Forms.DataGridViewAutoSizeColumnsMode.Fill;
+            this.dgvInputs.AutoSizeColumnsMode =
+                System.Windows.Forms.DataGridViewAutoSizeColumnsMode.Fill;
             this.dgvInputs.ColumnHeadersHeightSizeMode =
                 System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             this.dgvInputs.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
@@ -386,7 +403,8 @@
 
             this.dgvOutputs.AllowUserToAddRows = false;
             this.dgvOutputs.AllowUserToDeleteRows = false;
-            this.dgvOutputs.AutoSizeColumnsMode = System.Windows.Forms.DataGridViewAutoSizeColumnsMode.Fill;
+            this.dgvOutputs.AutoSizeColumnsMode =
+                System.Windows.Forms.DataGridViewAutoSizeColumnsMode.Fill;
             this.dgvOutputs.ColumnHeadersHeightSizeMode =
                 System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             this.dgvOutputs.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
@@ -489,6 +507,7 @@
         private System.Windows.Forms.DataGridViewTextBoxColumn colComponent;
         private System.Windows.Forms.DataGridViewTextBoxColumn colType;
         private System.Windows.Forms.DataGridViewTextBoxColumn colTemplate;
+        private System.Windows.Forms.DataGridViewTextBoxColumn colValidated;
         private System.Windows.Forms.Panel panelDetails;
         private System.Windows.Forms.GroupBox grpInputs;
         private System.Windows.Forms.DataGridView dgvInputs;
