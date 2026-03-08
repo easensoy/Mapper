@@ -11,32 +11,23 @@ using CodeGen.Models;
 namespace MapperUI.Services
 {
     /// <summary>
-    /// Injects the CALLER-SUPPLIED list of VueOne components into EAE .syslay and .sysres.
+    /// Injects ONLY the components the caller supplies.  The caller (MainForm) is
+    /// responsible for passing only the user-selected, validated subset.
     ///
-    /// This class never decides which components to include — the UI passes
-    /// only the user-selected rows.  It operates in three phases:
+    /// Overlap-free positioning:
+    ///   nextY = max(existing y of same CAT type in network) + YGap
+    ///   Each successive new FB increments nextY by another YGap.
     ///
-    ///   Phase A — FB elements (syslay + sysres)
-    ///     1. Correct Name + Type already present  → update parameters only (idempotent)
-    ///     2. Spare slot of correct Type (wrong Name) → rename + update parameters
-    ///     3. No slot at all → INSERT new FB with deterministic SHA-256 ID
-    ///     Positions are computed dynamically: new FBs are placed 1400 units below the
-    ///     lowest existing FB of the same type, so NOTHING OVERLAPS.
+    /// Wiring added for newly-injected ACTUATORS ONLY (syslay):
+    ///   Event  Process.state_update         → Actuator.pst_event
+    ///   Event  Actuator.pst_out             → Process.state_change
+    ///   Data   Process.actuator_name        → Actuator.process_state_name
+    ///   Data   Process.state_val            → Actuator.state_val
+    ///   Data   Actuator.current_state_to_process → Process.{lowercase_name}
     ///
-    ///   Phase B — Connections (syslay only)
-    ///     For every newly inserted/remapped actuator:
-    ///       EventConnection  Process1.state_update   → Actuator.pst_event
-    ///       EventConnection  Actuator.pst_out        → Process1.state_change
-    ///       DataConnection   Process1.actuator_name  → Actuator.process_state_name
-    ///       DataConnection   Process1.state_val      → Actuator.state_val
-    ///       DataConnection   Actuator.current_state_to_process → Process1.{lc_name}
-    ///     All connections are idempotent (skipped if already present).
-    ///
-    ///   Phase C — INIT chain extension (syslay only)
-    ///     Finds the existing connection whose Destination ends in ".INIT" pointing
-    ///     to the process FB (e.g. "Pusher.INITO → Process1.INIT"), removes it,
-    ///     threads the new actuators through the chain, and restores the terminal
-    ///     "lastNew.INITO → Process1.INIT".
+    /// INIT chain extended for newly-injected actuators (syslay):
+    ///   Before:  X.INITO → Process.INIT
+    ///   After:   X.INITO → Act1.INIT → ... → ActN.INITO → Process.INIT
     /// </summary>
     public class SystemInjector
     {
@@ -47,41 +38,34 @@ namespace MapperUI.Services
         private const string ProcessCatType = "Process1_CAT";
         private const string RobotCatType = "Robot_Task_CAT";
 
-        // Vertical gap between consecutive new FBs of the same type (EAE units)
-        private const int FbGap = 1400;
+        private const int YGap = 1400;   // vertical gap between new FBs
 
-        // Default x-columns per type (matching the reference project layout)
-        private const int ActuatorColumnX = 1300;
-        private const int SensorColumnX = 1560;
-        private const int ProcessColumnX = 3360;
-        private const int RobotColumnX = 5000;
+        // X column per type — match reference syslay exactly
+        private const int ActuatorX = 1300;
+        private const int SensorX = 1560;
+        private const int ProcessX = 3360;
+        private const int RobotX = 5000;
 
         // ── Public API ────────────────────────────────────────────────────────
 
         public DiffReport PreviewDiff(MapperConfig config, List<VueOneComponent> components)
         {
             var report = new DiffReport();
-
             if (!File.Exists(config.SyslayPath))
             {
                 report.Unsupported.Add($"syslay not found: {config.SyslayPath}");
                 return report;
             }
-
-            var doc = XDocument.Load(config.SyslayPath);
-            var net = doc.Root?.Element(Ns + "SubAppNetwork");
+            var net = LoadNet(config.SyslayPath, "SubAppNetwork");
             if (net == null) { report.Unsupported.Add("SubAppNetwork not found"); return report; }
 
-            var byType = GetExistingByType(net);
-            var allNames = GetAllNames(net);
-
-            ClassifyGroup(ProcessCatType, Processes(components), byType, allNames, report);
-            ClassifyGroup(SensorCatType, Sensors(components), byType, allNames, report);
-            ClassifyGroup(ActuatorCatType, Actuators(components), byType, allNames, report);
-            ClassifyGroup(RobotCatType, Robots(components, config), byType, allNames, report);
+            Classify(net, ActuatorCatType, Actuators(components), report);
+            Classify(net, SensorCatType, Sensors(components), report);
+            Classify(net, ProcessCatType, Processes(components), report);
+            Classify(net, RobotCatType, Robots(components, config), report);
 
             foreach (var c in Unsupported(components, config))
-                report.Unsupported.Add($"{c.Name} ({c.Type}, {c.States.Count} states — no CAT type)");
+                report.Unsupported.Add($"{c.Name} — {c.Type}/{c.States.Count} states: no template this phase");
 
             return report;
         }
@@ -93,7 +77,6 @@ namespace MapperUI.Services
                 SyslayPath = config.SyslayPath,
                 SysresPath = config.SysresPath
             };
-
             try
             {
                 if (!File.Exists(config.SyslayPath))
@@ -106,11 +89,8 @@ namespace MapperUI.Services
 
                 var syslayIds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-                // ── Phase A+B+C: syslay ───────────────────────────────────────
-                var newlyInjectedActuators = ProcessSyslay(config.SyslayPath, config, components, result, syslayIds);
-
-                // ── Phase A only: sysres ──────────────────────────────────────
-                ProcessSysres(config.SysresPath, config, components, result, syslayIds);
+                InjectSyslay(config, components, result, syslayIds);
+                InjectSysres(config, components, result, syslayIds);
 
                 result.Success = true;
             }
@@ -119,145 +99,131 @@ namespace MapperUI.Services
                 result.Success = false;
                 result.ErrorMessage = ex.Message;
             }
-
             return result;
         }
 
-        // ── Syslay: FBs + connections + INIT chain ────────────────────────────
+        // ── Syslay ────────────────────────────────────────────────────────────
 
-        private List<string> ProcessSyslay(
-            string path,
-            MapperConfig config,
-            List<VueOneComponent> components,
-            SystemInjectionResult result,
-            Dictionary<string, string> syslayIds)
+        private void InjectSyslay(MapperConfig config, List<VueOneComponent> components,
+            SystemInjectionResult result, Dictionary<string, string> syslayIds)
         {
-            var doc = XDocument.Load(path);
+            var doc = XDocument.Load(config.SyslayPath);
             var net = doc.Root?.Element(Ns + "SubAppNetwork")
                 ?? throw new Exception("SubAppNetwork not found in syslay");
 
             var renames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            var newlyInjectedActuators = new List<string>();
+            var newActuators = new List<string>(); // ONLY actuators — used for wiring + INIT
 
-            // Phase A — FB elements
-            InjectGroup(net, Processes(components), ProcessCatType, false, ActuatorColumnX, renames, result, syslayIds, newlyInjectedActuators);
-            InjectGroup(net, Sensors(components), SensorCatType, false, SensorColumnX, renames, result, syslayIds, newlyInjectedActuators);
-            InjectGroup(net, Actuators(components), ActuatorCatType, false, ActuatorColumnX, renames, result, syslayIds, newlyInjectedActuators);
-            InjectGroup(net, Robots(components, config), RobotCatType, false, RobotColumnX, renames, result, syslayIds, newlyInjectedActuators);
+            // Each group gets its own column and tracks only its own newly injected FBs
+            InjectGroup(net, Processes(components), ProcessCatType, ProcessX, false, renames, result, syslayIds, null);
+            InjectGroup(net, Sensors(components), SensorCatType, SensorX, false, renames, result, syslayIds, null);
+            InjectGroup(net, Actuators(components), ActuatorCatType, ActuatorX, false, renames, result, syslayIds, newActuators);
+            InjectGroup(net, Robots(components, config), RobotCatType, RobotX, false, renames, result, syslayIds, null);
 
             if (renames.Any())
                 RewriteConnections(net, renames);
 
-            // Phase B — wire actuators to their process
-            if (newlyInjectedActuators.Any())
+            if (newActuators.Any())
             {
-                var processName = FindProcessFbName(net);
-                if (processName != null)
+                string? proc = FirstFbOfType(net, ProcessCatType)?.Attribute("Name")?.Value;
+                if (proc != null)
                 {
-                    WireActuatorsToProcess(net, newlyInjectedActuators, processName, result);
-                    // Phase C — extend INIT chain
-                    ExtendInitChain(net, newlyInjectedActuators, processName, result);
+                    WireActuators(net, newActuators, proc, result);
+                    ExtendInitChain(net, newActuators, proc, result);
                 }
                 else
                 {
-                    result.UnsupportedComponents.Add(
-                        "No Process1_CAT found in syslay — skipped wiring and INIT chain");
+                    result.UnsupportedComponents.Add("No Process1_CAT found — wiring skipped");
                 }
             }
 
-            doc.Save(path);
-            return newlyInjectedActuators;
+            doc.Save(config.SyslayPath);
         }
 
-        // ── Sysres: FB elements only ──────────────────────────────────────────
+        // ── Sysres ────────────────────────────────────────────────────────────
 
-        private void ProcessSysres(
-            string path,
-            MapperConfig config,
-            List<VueOneComponent> components,
-            SystemInjectionResult result,
-            Dictionary<string, string> syslayIds)
+        private void InjectSysres(MapperConfig config, List<VueOneComponent> components,
+            SystemInjectionResult result, Dictionary<string, string> syslayIds)
         {
-            var doc = XDocument.Load(path);
+            var doc = XDocument.Load(config.SysresPath);
             var net = doc.Root?.Element(Ns + "FBNetwork")
                 ?? throw new Exception("FBNetwork not found in sysres");
 
             var renames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            var dummy = new List<string>(); // sysres doesn't track injected names
 
-            InjectGroup(net, Processes(components), ProcessCatType, true, ProcessColumnX, renames, result, syslayIds, dummy);
-            InjectGroup(net, Sensors(components), SensorCatType, true, SensorColumnX, renames, result, syslayIds, dummy);
-            InjectGroup(net, Actuators(components), ActuatorCatType, true, ActuatorColumnX, renames, result, syslayIds, dummy);
-            InjectGroup(net, Robots(components, config), RobotCatType, true, RobotColumnX, renames, result, syslayIds, dummy);
+            InjectGroup(net, Processes(components), ProcessCatType, ProcessX, true, renames, result, syslayIds, null);
+            InjectGroup(net, Sensors(components), SensorCatType, SensorX, true, renames, result, syslayIds, null);
+            InjectGroup(net, Actuators(components), ActuatorCatType, ActuatorX, true, renames, result, syslayIds, null);
+            InjectGroup(net, Robots(components, config), RobotCatType, RobotX, true, renames, result, syslayIds, null);
 
             if (renames.Any())
                 RewriteConnections(net, renames);
 
-            doc.Save(path);
+            doc.Save(config.SysresPath);
         }
 
-        // ── Phase A: FB group injection ───────────────────────────────────────
+        // ── Group injection ───────────────────────────────────────────────────
 
         private void InjectGroup(
             XElement net,
             List<VueOneComponent> group,
             string catType,
-            bool isSysres,
             int columnX,
+            bool isSysres,
             Dictionary<string, string> renames,
             SystemInjectionResult result,
             Dictionary<string, string> syslayIds,
-            List<string> newlyInjected)
+            List<string>? newList)   // non-null only for actuators in syslay
         {
             if (!group.Any()) return;
 
             var groupNames = new HashSet<string>(
                 group.Select(c => c.Name), StringComparer.OrdinalIgnoreCase);
 
-            // Spare slots: correct type, name not in the incoming group
-            var spares = AllFbsOfType(net, catType)
+            var spares = FbsOfType(net, catType)
                 .Where(fb => !groupNames.Contains(fb.Attribute("Name")?.Value ?? ""))
                 .ToList();
-
             int spareIdx = 0;
+
+            // Start Y cursor: one YGap below the current lowest of this type
+            int nextY = ComputeStartY(net, catType);
 
             foreach (var comp in group)
             {
-                // 1. Already present with correct name + type
-                var existing = FindByNameAndType(net, comp.Name, catType);
-                if (existing != null)
+                // 1. Exact match already present
+                var present = FindFb(net, comp.Name, catType);
+                if (present != null)
                 {
-                    ApplyParams(existing, comp, catType);
-                    Track(existing, comp.Name, isSysres, syslayIds, result,
-                        "params updated", newlyInjected);
+                    ApplyParams(present, comp, catType);
+                    RecordId(present, comp.Name, isSysres, syslayIds);
+                    result.SkippedFBs.Add($"{comp.Name} — already present, params updated");
                     continue;
                 }
 
-                // 2. Spare slot → remap
+                // 2. Spare slot — remap
                 if (spareIdx < spares.Count)
                 {
                     var slot = spares[spareIdx++];
-                    var oldName = slot.Attribute("Name")?.Value ?? "";
-                    renames[oldName] = comp.Name;
+                    var old = slot.Attribute("Name")?.Value ?? "";
+                    renames[old] = comp.Name;
                     slot.SetAttributeValue("Name", comp.Name);
                     ApplyParams(slot, comp, catType);
-                    Track(slot, comp.Name, isSysres, syslayIds, result,
-                        $"← {oldName} remap", newlyInjected);
+                    RecordId(slot, comp.Name, isSysres, syslayIds);
+                    result.InjectedFBs.Add($"{comp.Name} (remapped from {old})");
+                    newList?.Add(comp.Name);
                     continue;
                 }
 
-                // 3. New insert — position below the lowest existing FB of this type
-                var id = isSysres ? MakeId(comp.Name, "sysres") : MakeId(comp.Name, "syslay");
-                int x = columnX;
-                int y = ComputeNextY(net, catType, columnX);
+                // 3. New FB insert
+                string id = isSysres ? MakeId(comp.Name, "sysres") : MakeId(comp.Name, "syslay");
 
                 var fb = new XElement(Ns + "FB",
                     new XAttribute("ID", id),
                     new XAttribute("Name", comp.Name),
                     new XAttribute("Type", catType),
                     new XAttribute("Namespace", "Main"),
-                    new XAttribute("x", x),
-                    new XAttribute("y", y));
+                    new XAttribute("x", columnX),
+                    new XAttribute("y", nextY));
 
                 if (isSysres && syslayIds.TryGetValue(comp.Name, out var slId))
                     fb.SetAttributeValue("Mapping", slId);
@@ -265,136 +231,29 @@ namespace MapperUI.Services
                 ApplyParams(fb, comp, catType);
                 net.Add(fb);
 
-                Track(fb, comp.Name, isSysres, syslayIds, result,
-                    $"new insert at ({x},{y})", newlyInjected);
+                RecordId(fb, comp.Name, isSysres, syslayIds);
+                result.InjectedFBs.Add($"{comp.Name} → x={columnX}, y={nextY} (new {catType})");
+                newList?.Add(comp.Name);
+
+                nextY += YGap;   // next new FB of this type goes further down
             }
         }
 
-        // ── Phase B: Actuator ↔ Process wiring ───────────────────────────────
+        // ── Position helper ───────────────────────────────────────────────────
 
         /// <summary>
-        /// Wires each newly-injected actuator to the first Process1_CAT instance
-        /// found in the syslay.  Pattern taken directly from the reference syslay:
-        ///
-        ///   EventConnections
-        ///     ProcessName.state_update  →  Actuator.pst_event
-        ///     Actuator.pst_out          →  ProcessName.state_change
-        ///
-        ///   DataConnections
-        ///     ProcessName.actuator_name →  Actuator.process_state_name
-        ///     ProcessName.state_val     →  Actuator.state_val
-        ///     Actuator.current_state_to_process  →  ProcessName.{lc_actuator_name}
-        ///
-        /// All connections are idempotent.
+        /// Returns the Y coordinate for the first new FB of a given type.
+        /// = max(existing y of same type) + YGap
+        /// Falls back to type-specific defaults if no existing FBs.
         /// </summary>
-        private static void WireActuatorsToProcess(
-            XElement net,
-            List<string> actuatorNames,
-            string processName,
-            SystemInjectionResult result)
+        private static int ComputeStartY(XElement net, string catType)
         {
-            var ec = EnsureSection(net, "EventConnections");
-            var dc = EnsureSection(net, "DataConnections");
-
-            foreach (var name in actuatorNames)
-            {
-                string lc = name.ToLower();
-
-                // ── Event connections ─────────────────────────────────────────
-                AddConn(ec, $"{processName}.state_update", $"{name}.pst_event", result);
-                AddConn(ec, $"{name}.pst_out", $"{processName}.state_change", result);
-
-                // ── Data connections ──────────────────────────────────────────
-                AddConn(dc, $"{processName}.actuator_name", $"{name}.process_state_name", result);
-                AddConn(dc, $"{processName}.state_val", $"{name}.state_val", result);
-                AddConn(dc, $"{name}.current_state_to_process", $"{processName}.{lc}", result);
-            }
-        }
-
-        // ── Phase C: INIT chain extension ─────────────────────────────────────
-
-        /// <summary>
-        /// Inserts new actuators into the INIT chain just before the process FB.
-        ///
-        /// Before:  ...SomeFB.INITO  →  ProcessName.INIT
-        /// After:   ...SomeFB.INITO  →  Checker.INIT
-        ///          Checker.INITO    →  Transfer.INIT
-        ///          Transfer.INITO   →  Ejector.INIT
-        ///          Ejector.INITO    →  ProcessName.INIT
-        ///
-        /// If the connection "→ ProcessName.INIT" is not found, each new actuator
-        /// is still chained together (open-ended — user can connect the start manually).
-        /// </summary>
-        private static void ExtendInitChain(
-            XElement net,
-            List<string> newActuators,
-            string processName,
-            SystemInjectionResult result)
-        {
-            if (!newActuators.Any()) return;
-
-            var ec = EnsureSection(net, "EventConnections");
-
-            // Find the existing connection whose Destination is "ProcessName.INIT"
-            var processInitConn = ec.Elements()
-                .Where(e => e.Name.LocalName == "Connection")
-                .FirstOrDefault(c => string.Equals(
-                    c.Attribute("Destination")?.Value,
-                    $"{processName}.INIT",
-                    StringComparison.OrdinalIgnoreCase));
-
-            string? chainEntry = processInitConn?.Attribute("Source")?.Value;
-
-            // Remove the old direct link to Process.INIT
-            processInitConn?.Remove();
-
-            // Re-attach: chainEntry → first new actuator
-            if (!string.IsNullOrEmpty(chainEntry))
-                AddConn(ec, chainEntry, $"{newActuators[0]}.INIT", result);
-            else
-                result.UnsupportedComponents.Add(
-                    $"INIT chain: could not find '→ {processName}.INIT' — " +
-                    $"connect {newActuators[0]}.INIT manually");
-
-            // Chain through remaining new actuators
-            for (int i = 0; i < newActuators.Count - 1; i++)
-                AddConn(ec, $"{newActuators[i]}.INITO", $"{newActuators[i + 1]}.INIT", result);
-
-            // Last new actuator → Process.INIT
-            AddConn(ec, $"{newActuators[^1]}.INITO", $"{processName}.INIT", result);
-
-            result.InjectedFBs.Add(
-                $"INIT chain extended: ...→ {newActuators[0]} → ... → {newActuators[^1]} → {processName}");
-        }
-
-        // ── Layout helpers ────────────────────────────────────────────────────
-
-        /// <summary>
-        /// Finds the maximum Y coordinate of all existing FBs of the given type,
-        /// then returns that + FbGap.  Falls back to a sensible default if no
-        /// FBs of that type exist yet.
-        /// </summary>
-        private static int ComputeNextY(XElement net, string catType, int columnX)
-        {
-            var existing = AllFbsOfType(net, catType)
-                .Select(fb => TryParseInt(fb.Attribute("y")?.Value, 0))
+            var ys = FbsOfType(net, catType)
+                .Select(fb => ParseInt(fb.Attribute("y")?.Value, 0))
                 .ToList();
 
-            if (existing.Any())
-                return existing.Max() + FbGap;
+            if (ys.Any()) return ys.Max() + YGap;
 
-            // No FBs of this type yet — find max Y of ANY FB in this column,
-            // fall back to sensible defaults per type.
-            var anyInColumn = net.Descendants()
-                .Where(e => e.Name.LocalName == "FB"
-                         && TryParseInt(e.Attribute("x")?.Value, -1) == columnX)
-                .Select(fb => TryParseInt(fb.Attribute("y")?.Value, 0))
-                .ToList();
-
-            if (anyInColumn.Any())
-                return anyInColumn.Max() + FbGap;
-
-            // Absolute fallback
             return catType switch
             {
                 ActuatorCatType => 2480,
@@ -404,104 +263,122 @@ namespace MapperUI.Services
             };
         }
 
-        private static int TryParseInt(string? s, int fallback) =>
-            int.TryParse(s, out var v) ? v : fallback;
+        // ── Actuator wiring ───────────────────────────────────────────────────
+
+        private static void WireActuators(XElement net, List<string> actuators,
+            string proc, SystemInjectionResult result)
+        {
+            var ec = EnsureSection(net, "EventConnections");
+            var dc = EnsureSection(net, "DataConnections");
+
+            foreach (var name in actuators)
+            {
+                string lc = name.ToLower();
+                AddConn(ec, $"{proc}.state_update", $"{name}.pst_event", result);
+                AddConn(ec, $"{name}.pst_out", $"{proc}.state_change", result);
+                AddConn(dc, $"{proc}.actuator_name", $"{name}.process_state_name", result);
+                AddConn(dc, $"{proc}.state_val", $"{name}.state_val", result);
+                AddConn(dc, $"{name}.current_state_to_process", $"{proc}.{lc}", result);
+            }
+        }
+
+        // ── INIT chain ────────────────────────────────────────────────────────
+
+        private static void ExtendInitChain(XElement net, List<string> newActs,
+            string proc, SystemInjectionResult result)
+        {
+            if (!newActs.Any()) return;
+
+            var ec = EnsureSection(net, "EventConnections");
+            string procInit = $"{proc}.INIT";
+
+            var existingConn = ec.Elements()
+                .Where(e => e.Name.LocalName == "Connection")
+                .FirstOrDefault(c => string.Equals(
+                    c.Attribute("Destination")?.Value, procInit,
+                    StringComparison.OrdinalIgnoreCase));
+
+            string? prev = existingConn?.Attribute("Source")?.Value;
+            existingConn?.Remove();
+
+            if (!string.IsNullOrEmpty(prev))
+                AddConn(ec, prev, $"{newActs[0]}.INIT", result);
+
+            for (int i = 0; i < newActs.Count - 1; i++)
+                AddConn(ec, $"{newActs[i]}.INITO", $"{newActs[i + 1]}.INIT", result);
+
+            AddConn(ec, $"{newActs[^1]}.INITO", procInit, result);
+
+            result.InjectedFBs.Add(
+                $"INIT chain: {prev ?? "?"} → {string.Join(" → ", newActs)} → {proc}");
+        }
 
         // ── XML helpers ───────────────────────────────────────────────────────
 
-        private static string? FindProcessFbName(XElement net) =>
-            AllFbsOfType(net, ProcessCatType)
-                .FirstOrDefault()?.Attribute("Name")?.Value;
+        private static XElement? LoadNet(string path, string tag)
+        {
+            var doc = XDocument.Load(path);
+            return doc.Root?.Element(Ns + tag);
+        }
 
-        private static IEnumerable<XElement> AllFbsOfType(XElement net, string type) =>
+        private static IEnumerable<XElement> FbsOfType(XElement net, string type) =>
             net.Descendants()
                .Where(e => e.Name.LocalName == "FB"
                         && string.Equals(e.Attribute("Type")?.Value, type,
                                StringComparison.OrdinalIgnoreCase));
 
-        private static XElement? FindByNameAndType(XElement net, string name, string type) =>
+        private static XElement? FindFb(XElement net, string name, string type) =>
             net.Descendants()
                .Where(e => e.Name.LocalName == "FB")
                .FirstOrDefault(fb =>
                    string.Equals(fb.Attribute("Name")?.Value, name, StringComparison.OrdinalIgnoreCase) &&
                    string.Equals(fb.Attribute("Type")?.Value, type, StringComparison.OrdinalIgnoreCase));
 
-        private static Dictionary<string, List<string>> GetExistingByType(XElement net)
+        private static XElement? FirstFbOfType(XElement net, string type) =>
+            FbsOfType(net, type).FirstOrDefault();
+
+        private static XElement EnsureSection(XElement net, string tag)
         {
-            var d = new Dictionary<string, List<string>>
-            {
-                [ProcessCatType] = new(),
-                [SensorCatType] = new(),
-                [ActuatorCatType] = new(),
-                [RobotCatType] = new()
-            };
-            foreach (var fb in net.Descendants().Where(e => e.Name.LocalName == "FB"))
-            {
-                var t = fb.Attribute("Type")?.Value ?? "";
-                var n = fb.Attribute("Name")?.Value ?? "";
-                if (d.ContainsKey(t)) d[t].Add(n);
-            }
-            return d;
+            var s = net.Elements().FirstOrDefault(e => e.Name.LocalName == tag);
+            if (s != null) return s;
+            s = new XElement(Ns + tag);
+            net.Add(s);
+            return s;
         }
 
-        private static HashSet<string> GetAllNames(XElement net) =>
-            new(net.Descendants()
-                   .Where(e => e.Name.LocalName == "FB")
-                   .Select(fb => fb.Attribute("Name")?.Value ?? ""),
-                StringComparer.OrdinalIgnoreCase);
-
-        /// <summary>Returns the EventConnections or DataConnections section, creating it if absent.</summary>
-        private static XElement EnsureSection(XElement net, string sectionName)
-        {
-            var section = net.Elements()
-                .FirstOrDefault(e => e.Name.LocalName == sectionName);
-            if (section != null) return section;
-
-            section = new XElement(Ns + sectionName);
-            net.Add(section);
-            return section;
-        }
-
-        /// <summary>
-        /// Adds a Connection element if the same Source+Destination pair is not
-        /// already present in the section.
-        /// </summary>
-        private static void AddConn(
-            XElement section, string source, string destination,
+        private static void AddConn(XElement section, string src, string dst,
             SystemInjectionResult result)
         {
             bool exists = section.Elements()
                 .Where(e => e.Name.LocalName == "Connection")
                 .Any(c =>
-                    string.Equals(c.Attribute("Source")?.Value, source, StringComparison.OrdinalIgnoreCase) &&
-                    string.Equals(c.Attribute("Destination")?.Value, destination, StringComparison.OrdinalIgnoreCase));
-
+                    string.Equals(c.Attribute("Source")?.Value, src, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(c.Attribute("Destination")?.Value, dst, StringComparison.OrdinalIgnoreCase));
             if (exists) return;
-
             section.Add(new XElement(Ns + "Connection",
-                new XAttribute("Source", source),
-                new XAttribute("Destination", destination)));
-
-            result.InjectedFBs.Add($"  wire: {source} → {destination}");
+                new XAttribute("Source", src),
+                new XAttribute("Destination", dst)));
+            result.InjectedFBs.Add($"  conn: {src} → {dst}");
         }
 
         private static void RewriteConnections(XElement net, Dictionary<string, string> renames)
         {
-            foreach (var conn in net.Descendants().Where(e => e.Name.LocalName == "Connection"))
+            foreach (var c in net.Descendants().Where(e => e.Name.LocalName == "Connection"))
             {
-                PatchPrefix(conn, "Source", renames);
-                PatchPrefix(conn, "Destination", renames);
+                PatchAttr(c, "Source", renames);
+                PatchAttr(c, "Destination", renames);
             }
         }
 
-        private static void PatchPrefix(XElement el, string attr, Dictionary<string, string> renames)
+        private static void PatchAttr(XElement el, string attr,
+            Dictionary<string, string> renames)
         {
-            var val = el.Attribute(attr)?.Value;
-            if (string.IsNullOrEmpty(val)) return;
-            int dot = val.IndexOf('.');
-            if (dot < 0) return;
-            if (renames.TryGetValue(val[..dot], out var np))
-                el.SetAttributeValue(attr, np + val[dot..]);
+            var v = el.Attribute(attr)?.Value;
+            if (string.IsNullOrEmpty(v)) return;
+            int d = v.IndexOf('.');
+            if (d < 0) return;
+            if (renames.TryGetValue(v[..d], out var np))
+                el.SetAttributeValue(attr, np + v[d..]);
         }
 
         private static string MakeId(string name, string salt)
@@ -511,31 +388,35 @@ namespace MapperUI.Services
             return BitConverter.ToString(hash, 0, 8).Replace("-", "").ToUpperInvariant();
         }
 
+        private static void RecordId(XElement fb, string name, bool isSysres,
+            Dictionary<string, string> syslayIds)
+        {
+            if (!isSysres)
+                syslayIds[name] = fb.Attribute("ID")?.Value ?? MakeId(name, "syslay");
+        }
+
+        private static int ParseInt(string? s, int fallback) =>
+            int.TryParse(s, out var v) ? v : fallback;
+
         // ── Parameter helpers ─────────────────────────────────────────────────
 
         private static void ApplyParams(XElement fb, VueOneComponent comp, string catType)
         {
-            switch (catType)
-            {
-                case ActuatorCatType:
-                    SetParam(fb, "actuator_name", $"'{comp.Name.ToLower()}'");
-                    break;
-                case ProcessCatType:
-                    SetParam(fb, "Text", BuildTextParam(comp));
-                    break;
-            }
+            if (catType == ActuatorCatType)
+                SetParam(fb, "actuator_name", $"'{comp.Name.ToLower()}'");
+            else if (catType == ProcessCatType)
+                SetParam(fb, "Text", BuildTextParam(comp));
         }
 
         private static void SetParam(XElement fb, string name, string value)
         {
             var el = fb.Elements()
-                .FirstOrDefault(e => e.Name.LocalName == "Parameter" && e.Attribute("Name")?.Value == name);
-            if (el != null)
-                el.SetAttributeValue("Value", value);
-            else
-                fb.Add(new XElement(Ns + "Parameter",
-                    new XAttribute("Name", name),
-                    new XAttribute("Value", value)));
+                .FirstOrDefault(e => e.Name.LocalName == "Parameter" &&
+                                     e.Attribute("Name")?.Value == name);
+            if (el != null) el.SetAttributeValue("Value", value);
+            else fb.Add(new XElement(Ns + "Parameter",
+                new XAttribute("Name", name),
+                new XAttribute("Value", value)));
         }
 
         private static string BuildTextParam(VueOneComponent proc)
@@ -546,36 +427,19 @@ namespace MapperUI.Services
             return "[" + string.Join(",", names) + "]";
         }
 
-        private static void Track(
-            XElement fb, string name, bool isSysres,
-            Dictionary<string, string> syslayIds,
-            SystemInjectionResult result,
-            string note,
-            List<string> newlyInjected)
-        {
-            if (isSysres) return;
-            syslayIds[name] = fb.Attribute("ID")?.Value ?? MakeId(name, "syslay");
-            result.InjectedFBs.Add($"{name} ({note})");
-            newlyInjected.Add(name);
-        }
-
         // ── Diff classification ───────────────────────────────────────────────
 
-        private static void ClassifyGroup(
-            string catType, List<VueOneComponent> group,
-            Dictionary<string, List<string>> byType,
-            HashSet<string> allNames, DiffReport report)
+        private static void Classify(XElement net, string catType,
+            List<VueOneComponent> group, DiffReport report)
         {
-            var slots = byType.GetValueOrDefault(catType, new());
-            var spares = slots.Where(n => !group.Any(c =>
-                string.Equals(c.Name, n, StringComparison.OrdinalIgnoreCase))).ToList();
+            var existing = FbsOfType(net, catType)
+                .Select(fb => fb.Attribute("Name")?.Value ?? "").ToList();
+            var spares = existing.Where(n =>
+                !group.Any(c => string.Equals(c.Name, n, StringComparison.OrdinalIgnoreCase))).ToList();
             int si = 0;
-
             foreach (var c in group)
             {
-                bool present = allNames.Contains(c.Name)
-                            && slots.Contains(c.Name, StringComparer.OrdinalIgnoreCase);
-                if (present)
+                if (existing.Any(n => string.Equals(n, c.Name, StringComparison.OrdinalIgnoreCase)))
                     report.AlreadyPresent.Add($"{c.Name} ({catType})");
                 else if (si < spares.Count)
                     report.ToBeInjected.Add($"{spares[si++]} → {c.Name} ({catType} remap)");
@@ -584,23 +448,25 @@ namespace MapperUI.Services
             }
         }
 
-        // ── Component type filters ────────────────────────────────────────────
+        // ── Type filters ──────────────────────────────────────────────────────
 
         private static bool IsActuator(VueOneComponent c) =>
-            string.Equals(c.Type, "Actuator", StringComparison.OrdinalIgnoreCase) && c.States.Count == 5;
+            string.Equals(c.Type, "Actuator", StringComparison.OrdinalIgnoreCase)
+            && c.States.Count == 5;
 
         private static bool IsSensor(VueOneComponent c) =>
-            string.Equals(c.Type, "Sensor", StringComparison.OrdinalIgnoreCase) && c.States.Count == 2;
+            string.Equals(c.Type, "Sensor", StringComparison.OrdinalIgnoreCase)
+            && c.States.Count == 2;
 
         private static bool IsProcess(VueOneComponent c) =>
             string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase);
 
-        private static bool IsRobot(VueOneComponent c, MapperConfig config) =>
+        private static bool IsRobot(VueOneComponent c, MapperConfig cfg) =>
             string.Equals(c.Type, "Robot", StringComparison.OrdinalIgnoreCase)
-            && !string.IsNullOrWhiteSpace(config.RobotTemplatePath);
+            && !string.IsNullOrWhiteSpace(cfg.RobotTemplatePath);
 
-        private static bool IsSupported(VueOneComponent c, MapperConfig config) =>
-            IsActuator(c) || IsSensor(c) || IsProcess(c) || IsRobot(c, config);
+        private static bool IsSupported(VueOneComponent c, MapperConfig cfg) =>
+            IsActuator(c) || IsSensor(c) || IsProcess(c) || IsRobot(c, cfg);
 
         private static List<VueOneComponent> Actuators(List<VueOneComponent> all) =>
             all.Where(IsActuator).ToList();
@@ -608,10 +474,10 @@ namespace MapperUI.Services
             all.Where(IsSensor).ToList();
         private static List<VueOneComponent> Processes(List<VueOneComponent> all) =>
             all.Where(IsProcess).ToList();
-        private static List<VueOneComponent> Robots(List<VueOneComponent> all, MapperConfig config) =>
-            all.Where(c => IsRobot(c, config)).ToList();
-        private static List<VueOneComponent> Unsupported(List<VueOneComponent> all, MapperConfig config) =>
-            all.Where(c => !IsSupported(c, config)).ToList();
+        private static List<VueOneComponent> Robots(List<VueOneComponent> all, MapperConfig cfg) =>
+            all.Where(c => IsRobot(c, cfg)).ToList();
+        private static List<VueOneComponent> Unsupported(List<VueOneComponent> all, MapperConfig cfg) =>
+            all.Where(c => !IsSupported(c, cfg)).ToList();
 
         // ── Result types ──────────────────────────────────────────────────────
 
