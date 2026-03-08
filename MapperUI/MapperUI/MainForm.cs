@@ -27,6 +27,17 @@ namespace MapperUI
         private SystemXmlReader? _lastReader;
         private DebugConsoleForm? _debugConsole;
 
+        // ── Phase 1 whitelist — ONLY these instances are injected ─────────────
+        // All other components from Control.xml are read and displayed but BLOCKED.
+        private static readonly HashSet<string> _allowedInstances =
+            new(StringComparer.OrdinalIgnoreCase)
+            {
+                "Checker",
+                "Transfer",
+                "Feeder",
+                "Ejector"
+            };
+
         // ── Per-component validation record ───────────────────────────────────
 
         private sealed class ComponentValidationRow
@@ -121,7 +132,6 @@ namespace MapperUI
             {
                 if (rule.IsSection)
                 {
-                    // Section header row — spans all columns visually
                     int idx = dgvMappingRules.Rows.Add(rule.SectionTitle, "", "", "", "");
                     var sectionRow = dgvMappingRules.Rows[idx];
                     sectionRow.Tag = "section";
@@ -137,8 +147,6 @@ namespace MapperUI
                 }
 
                 Color bg = (ruleRowIdx++ % 2 == 0) ? RowEven : RowOdd;
-
-                // Validated symbol
                 string sym = rule.IsImplemented ? SymPass : SymFail;
 
                 int rowIdx = dgvMappingRules.Rows.Add(
@@ -150,11 +158,10 @@ namespace MapperUI
 
                 var row = dgvMappingRules.Rows[rowIdx];
 
-                // Base row background
                 for (int c = 0; c < row.Cells.Count; c++)
                     row.Cells[c].Style.BackColor = bg;
 
-                // Mapping Type cell — colored font only
+                // Mapping Type cell — colored bold font
                 var typeCell = row.Cells[colMappingType.Index];
                 (typeCell.Style.ForeColor, typeCell.Style.Font) = rule.Type switch
                 {
@@ -219,33 +226,52 @@ namespace MapperUI
                     var vr = ValidateComponent(comp, validator, cfg);
                     _validationRows.Add(vr);
 
-                    int idx = dgvComponents.Rows.Add(comp.Name, comp.Type, vr.TemplateName);
+                    // Determine if this component is in the phase-1 whitelist
+                    bool inScope = _allowedInstances.Contains(comp.Name);
+                    string validSym = (vr.IsValid && inScope) ? SymPass : SymFail;
+
+                    int idx = dgvComponents.Rows.Add(comp.Name, comp.Type, vr.TemplateName, validSym);
 
                     var row = dgvComponents.Rows[idx];
                     Color bg = (rowIdx++ % 2 == 0) ? RowEven : RowOdd;
                     row.DefaultCellStyle.BackColor = bg;
                     row.DefaultCellStyle.ForeColor = Color.Black;
 
-                    // Color the Template cell: green for valid, red for "No Template Found"
+                    // Template cell: green for valid, red for unsupported/missing
                     var tmplCell = row.Cells[colTemplate.Index];
                     tmplCell.Style.ForeColor = vr.IsValid ? ColorTranslated : ColorDiscarded;
                     tmplCell.Style.BackColor = bg;
 
+                    // Validated cell: green ✓ only for whitelisted+valid; red ✗ for everything else
+                    var validCell = row.Cells[colValidated.Index];
+                    validCell.Style.ForeColor = (vr.IsValid && inScope) ? ColorTranslated : ColorDiscarded;
+                    validCell.Style.Font = new Font(dgvComponents.Font, FontStyle.Bold);
+                    validCell.Style.BackColor = bg;
+
                     MapperLogger.Validate(
                         $"{comp.Name} ({comp.Type}) → {vr.TemplateName} " +
-                        $"[{(vr.IsValid ? "PASS" : "FAIL: " + vr.FailReason)}]");
+                        $"[{(vr.IsValid ? "PASS" : "FAIL: " + vr.FailReason)}]" +
+                        $"{(inScope ? "" : " [OUT OF SCOPE]")}");
                 }
 
                 UpdateDetectedInfo();
 
-                bool allPassed = _validationRows.All(r => r.IsValid);
-                SetValidationLabel(allPassed ? "PASSED" : "FAILED", allPassed ? Color.Green : Color.Red);
-                lblStatus.Text = allPassed
-                    ? "Validation passed — click Generate Code to inject all valid components"
-                    : "Validation FAILED — click Generate Code to inject only valid components";
+                // Validation status reflects only the in-scope whitelist components
+                bool allScopedPassed = _validationRows
+                    .Where(r => _allowedInstances.Contains(r.Component.Name))
+                    .All(r => r.IsValid);
 
-                // Enable Generate Code only when at least one valid (injectable) component loaded
-                btnGenerateCode.Enabled = _validationRows.Any(r => r.IsValid);
+                SetValidationLabel(
+                    allScopedPassed ? "PASSED" : "FAILED",
+                    allScopedPassed ? Color.Green : Color.Red);
+
+                lblStatus.Text = allScopedPassed
+                    ? "Validation passed — Checker, Transfer, Feeder, Ejector ready to inject"
+                    : "Validation FAILED — check in-scope components (Checker / Transfer / Feeder / Ejector)";
+
+                // Enable Generate Code only when at least one in-scope valid component exists
+                btnGenerateCode.Enabled = _validationRows
+                    .Any(r => r.IsValid && _allowedInstances.Contains(r.Component.Name));
             }
             catch (Exception ex)
             {
@@ -265,14 +291,10 @@ namespace MapperUI
         ///   Process  → always valid
         ///   Robot    → valid when RobotTemplatePath is set in mapper_config.json
         ///   Other    → always invalid (no CAT template)
-        ///
-        /// ResolveTemplatePath already returns empty for wrong state counts, so
-        /// tName will be "No Template Found" for e.g. 13-state actuators.
         /// </summary>
         private static ComponentValidationRow ValidateComponent(
             VueOneComponent comp, ComponentValidator validator, MapperConfig cfg)
         {
-            // Template name respects state-count guard — 13-state → "No Template Found"
             string tPath = ResolveTemplatePath(comp, cfg);
             string tName = string.IsNullOrEmpty(tPath)
                 ? "No template found (discarded for this phase)"
@@ -302,7 +324,6 @@ namespace MapperUI
                     return Fail(comp, tName, $"Unknown type '{comp.Type}'");
             }
 
-            // Actuator/sensor with correct state count — run standard validator
             var vr = validator.Validate(comp);
             return vr.IsValid
                 ? Pass(comp, tName)
@@ -315,21 +336,24 @@ namespace MapperUI
         private static ComponentValidationRow Fail(VueOneComponent c, string t, string reason) =>
             new() { Component = c, TemplateName = t, IsValid = false, FailReason = reason };
 
-        // ── Generate Code — injects ALL valid loaded components ───────────────
+        // ── Generate Code ─────────────────────────────────────────────────────
+        // ONLY injects Checker, Transfer, Feeder, Ejector (the _allowedInstances
+        // whitelist).  Everything else from Control.xml is blocked here.
 
         private async void btnGenerateCode_Click(object sender, EventArgs e)
         {
-            var failed = _validationRows
-                .Where(r => !r.IsValid)
+            // Warn if any whitelisted component failed validation
+            var failedInScope = _validationRows
+                .Where(r => !r.IsValid && _allowedInstances.Contains(r.Component.Name))
                 .ToList();
 
-            if (failed.Any())
+            if (failedInScope.Any())
             {
                 var sb = new StringBuilder();
-                sb.AppendLine($"⚠  {failed.Count} component(s) failed validation and will be skipped:\n");
-                foreach (var f in failed)
+                sb.AppendLine($"⚠  {failedInScope.Count} in-scope component(s) failed validation:\n");
+                foreach (var f in failedInScope)
                     sb.AppendLine($"  ✗  {f.Component.Name} ({f.Component.Type}) — {f.FailReason}");
-                sb.AppendLine("\nAll valid components will be injected. Continue?");
+                sb.AppendLine("\nOnly the remaining valid in-scope components will be injected. Continue?");
 
                 if (MessageBox.Show(sb.ToString(), "Validation Warnings",
                         MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
@@ -337,21 +361,34 @@ namespace MapperUI
                     return;
             }
 
+            // Build the inject list: valid AND in the whitelist only
             var toInject = _validationRows
-                .Where(r => r.IsValid)
+                .Where(r => r.IsValid && _allowedInstances.Contains(r.Component.Name))
                 .Select(r => r.Component)
                 .ToList();
 
+            // Log every component that is blocked (out of scope)
+            var blocked = _validationRows
+                .Where(r => !_allowedInstances.Contains(r.Component.Name))
+                .ToList();
+            foreach (var b in blocked)
+                MapperLogger.Info(
+                    $"  ⊘ {b.Component.Name} ({b.Component.Type}) — blocked (not in scope for this phase)");
+
             if (toInject.Count == 0)
             {
-                MessageBox.Show("No valid components are available to inject.",
+                MessageBox.Show(
+                    "No in-scope components are ready to inject.\n\n" +
+                    "Only Checker, Transfer, Feeder, and Ejector are in scope for this phase.",
                     "Nothing to Inject", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
             btnGenerateCode.Enabled = false;
-            MapperLogger.Info($"=== Generate Code — {toInject.Count} valid component(s) ===");
-            foreach (var c in toInject) MapperLogger.Info($"  → {c.Name} ({c.Type})");
+            MapperLogger.Info(
+                $"=== Generate Code — {toInject.Count} component(s) " +
+                $"[Checker / Transfer / Feeder / Ejector] ===");
+            foreach (var c in toInject) MapperLogger.Info($"  ✓ {c.Name} ({c.Type})");
 
             try
             {
@@ -383,11 +420,13 @@ namespace MapperUI
                 if (!string.IsNullOrWhiteSpace(cfg.RobotTemplatePath))
                     LogCatCheck(dfbContent, "Robot_Task_CAT");
 
-                if (!dfbContent.Contains("Five_State_Actuator_CAT") || !dfbContent.Contains("Sensor_Bool_CAT"))
+                if (!dfbContent.Contains("Five_State_Actuator_CAT") ||
+                    !dfbContent.Contains("Sensor_Bool_CAT"))
                 {
                     MapperLogger.Error("Required CAT types not registered — wrong project?");
                     MessageBox.Show(
-                        "Five_State_Actuator_CAT or Sensor_Bool_CAT not found in .dfbproj.\nCheck mapper_config.json.",
+                        "Five_State_Actuator_CAT or Sensor_Bool_CAT not found in .dfbproj.\n" +
+                        "Check mapper_config.json.",
                         "Wrong Project", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
                 }
@@ -399,7 +438,7 @@ namespace MapperUI
                 if (diff.ToBeInjected.Count == 0)
                 {
                     MessageBox.Show(
-                        "All valid components already match the project.\nNothing to inject.",
+                        "All in-scope components already match the project.\nNothing to inject.",
                         "Up To Date", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     MapperLogger.Info("Nothing to inject.");
                     return;
@@ -429,7 +468,8 @@ namespace MapperUI
                 var msg = new StringBuilder();
                 msg.AppendLine($"Injected {result.InjectedFBs.Count} component(s) successfully.");
                 if (result.UnsupportedComponents.Any())
-                    msg.AppendLine($"\n{result.UnsupportedComponents.Count} component(s) skipped (see Debug Console).");
+                    msg.AppendLine(
+                        $"\n{result.UnsupportedComponents.Count} component(s) skipped (see Debug Console).");
                 msg.AppendLine("\nSwitch to EAE and click 'Reload Solution'.");
 
                 MessageBox.Show(msg.ToString(), "Done — Reload EAE",
@@ -456,7 +496,6 @@ namespace MapperUI
 
             if (dgvComponents.SelectedRows.Count == 0) return;
 
-            // Show detail for the most recently selected row
             var name = dgvComponents.SelectedRows[0].Cells[0].Value?.ToString();
             var comp = _loadedComponents.FirstOrDefault(c =>
                 string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase));
@@ -465,7 +504,6 @@ namespace MapperUI
             foreach (var s in comp.States.OrderBy(st => st.StateNumber))
                 dgvInputs.Rows.Add($"State {s.StateNumber}: {s.Name}", "");
 
-            // Show fail reason in Outputs if component is invalid
             var vr = _validationRows.FirstOrDefault(r =>
                 string.Equals(r.Component.Name, name, StringComparison.OrdinalIgnoreCase));
             if (vr != null && !vr.IsValid && !string.IsNullOrEmpty(vr.FailReason))
@@ -488,7 +526,6 @@ namespace MapperUI
                 ? _loadedComponents[0].States.Count.ToString()
                 : $"{_loadedComponents.Count} ({a}A / {s}S / {p}P)";
 
-            // Update label colors after loading
             lblDetectedType.ForeColor = Color.FromArgb(0, 100, 180);
             lblDetectedName.ForeColor = Color.FromArgb(0, 100, 180);
             lblDetectedStates.ForeColor = Color.FromArgb(0, 100, 180);
@@ -511,7 +548,8 @@ namespace MapperUI
         }
 
         private static void LogCatCheck(string dfbContent, string catType) =>
-            MapperLogger.Validate($"{catType,-30} : {(dfbContent.Contains(catType) ? "FOUND ✓" : "MISSING ✗")}");
+            MapperLogger.Validate(
+                $"{catType,-30} : {(dfbContent.Contains(catType) ? "FOUND ✓" : "MISSING ✗")}");
 
         private MapperConfig GetMapperConfig()
         {
@@ -521,10 +559,8 @@ namespace MapperUI
 
         /// <summary>
         /// Resolves the CAT template path for a component.
-        /// Returns empty string (→ "No Template Found") for:
-        ///   - Actuators that are NOT 5-state (e.g. 13-state Bearing_PnP)
-        ///   - Sensors that are NOT 2-state
-        ///   - Robot when RobotTemplatePath is not configured
+        /// Returns empty string for actuators not exactly 5-state, sensors not
+        /// exactly 2-state, and robot when RobotTemplatePath is not configured.
         /// </summary>
         private static string ResolveTemplatePath(VueOneComponent comp, MapperConfig cfg) =>
             comp.Type.ToLowerInvariant() switch
