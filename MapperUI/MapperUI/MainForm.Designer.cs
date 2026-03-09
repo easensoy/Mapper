@@ -184,7 +184,7 @@ namespace MapperUI
             this.btnGenerateRobotWrapper.Name = "btnGenerateRobotWrapper";
             this.btnGenerateRobotWrapper.Size = new System.Drawing.Size(140, 25);
             this.btnGenerateRobotWrapper.TabIndex = 6;
-            this.btnGenerateRobotWrapper.Text = "Generate Robot_Task_CAT";
+            this.btnGenerateRobotWrapper.Text = "CAT Wrapper Generator";
             this.btnGenerateRobotWrapper.UseVisualStyleBackColor = false;
             this.btnGenerateRobotWrapper.Click += new System.EventHandler(this.btnGenerateRobotWrapper_Click);
 
