@@ -50,11 +50,12 @@
             this.splitContainer = new System.Windows.Forms.SplitContainer();
 
             // ── Component grid (Mapping Information) ───────────────────────────
-            // Component / Type / Template only — NO Validated column here
+            // Component / Type / Template / Validated
             this.dgvComponents = new System.Windows.Forms.DataGridView();
             this.colComponent = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.colType = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.colTemplate = new System.Windows.Forms.DataGridViewTextBoxColumn();
+            this.colValidated = new System.Windows.Forms.DataGridViewTextBoxColumn();
 
             this.panelDetails = new System.Windows.Forms.Panel();
             this.grpInputs = new System.Windows.Forms.GroupBox();
@@ -313,7 +314,7 @@
             this.splitContainer.SplitterDistance = 760;   // ↓ was 860 — narrower left pane
             this.splitContainer.TabIndex = 0;
 
-            // ── Component grid: Component / Type / Template (NO Validated) ────
+            // ── Component grid: Component / Type / Template / Validated ─────
             this.dgvComponents.AllowUserToAddRows = false;
             this.dgvComponents.AllowUserToDeleteRows = false;
             this.dgvComponents.BackgroundColor = System.Drawing.SystemColors.Window;
@@ -322,7 +323,8 @@
             this.dgvComponents.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
                 this.colComponent,
                 this.colType,
-                this.colTemplate });
+                this.colTemplate,
+                this.colValidated });
             this.dgvComponents.Dock = System.Windows.Forms.DockStyle.Fill;
             this.dgvComponents.Name = "dgvComponents";
             this.dgvComponents.ReadOnly = true;
@@ -338,17 +340,24 @@
             this.colComponent.HeaderText = "Component";
             this.colComponent.Name = "colComponent";
             this.colComponent.ReadOnly = true;
-            this.colComponent.Width = 130;   // ↓ was 160
+            this.colComponent.Width = 130;
 
             this.colType.HeaderText = "Type";
             this.colType.Name = "colType";
             this.colType.ReadOnly = true;
-            this.colType.Width = 75;   // ↓ was 90
+            this.colType.Width = 75;
 
             this.colTemplate.HeaderText = "Template";
             this.colTemplate.Name = "colTemplate";
             this.colTemplate.ReadOnly = true;
             this.colTemplate.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill;
+
+            this.colValidated.HeaderText = "✓";
+            this.colValidated.Name = "colValidated";
+            this.colValidated.ReadOnly = true;
+            this.colValidated.Width = 36;
+            this.colValidated.DefaultCellStyle.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleCenter;
+            this.colValidated.DefaultCellStyle.Font = new System.Drawing.Font("Segoe UI", 11F, System.Drawing.FontStyle.Bold);
 
             // ── I/O panels ────────────────────────────────────────────────────
             this.panelDetails.Dock = System.Windows.Forms.DockStyle.Fill;
@@ -497,7 +506,7 @@
         private System.Windows.Forms.DataGridViewTextBoxColumn colComponent;
         private System.Windows.Forms.DataGridViewTextBoxColumn colType;
         private System.Windows.Forms.DataGridViewTextBoxColumn colTemplate;
-        // NOTE: colValidated intentionally absent — Validated is NOT shown in Mapping Information
+        private System.Windows.Forms.DataGridViewTextBoxColumn colValidated;
         private System.Windows.Forms.Panel panelDetails;
         private System.Windows.Forms.GroupBox grpInputs;
         private System.Windows.Forms.DataGridView dgvInputs;
