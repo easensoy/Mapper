@@ -50,12 +50,11 @@
             this.splitContainer = new System.Windows.Forms.SplitContainer();
 
             // ── Component grid (Mapping Information) ───────────────────────────
-            // Component / Type / Template / Validated
+            // Component / Type / Template  (no Validated column here)
             this.dgvComponents = new System.Windows.Forms.DataGridView();
             this.colComponent = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.colType = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.colTemplate = new System.Windows.Forms.DataGridViewTextBoxColumn();
-            this.colValidated = new System.Windows.Forms.DataGridViewTextBoxColumn();
 
             this.panelDetails = new System.Windows.Forms.Panel();
             this.grpInputs = new System.Windows.Forms.GroupBox();
@@ -262,32 +261,33 @@
             this.dgvMappingRules.CellFormatting += new System.Windows.Forms.DataGridViewCellFormattingEventHandler(
                 this.dgvMappingRules_CellFormatting);
 
-            // Columns — tighter widths so Validated sits close to Mapping Rule
+            // Columns — match the proportions visible in the demo screenshot
             this.colVueOneElement.HeaderText = "VueOne Element";
             this.colVueOneElement.Name = "colVueOneElement";
             this.colVueOneElement.ReadOnly = true;
-            this.colVueOneElement.Width = 160;   // ↓ was 200
+            this.colVueOneElement.Width = 160;
 
             this.colIEC61499Element.HeaderText = "IEC 61499 Element";
             this.colIEC61499Element.Name = "colIEC61499Element";
             this.colIEC61499Element.ReadOnly = true;
-            this.colIEC61499Element.Width = 220;   // ↓ was 270
+            this.colIEC61499Element.Width = 220;
 
             this.colMappingType.HeaderText = "Mapping Type";
             this.colMappingType.Name = "colMappingType";
             this.colMappingType.ReadOnly = true;
-            this.colMappingType.Width = 90;   // ↓ was 110
+            this.colMappingType.Width = 100;
 
-            // Fixed width instead of Fill — keeps Validated column snug
+            // Mapping Rule fills remaining space
             this.colMappingRule.HeaderText = "Mapping Rule";
             this.colMappingRule.Name = "colMappingRule";
             this.colMappingRule.ReadOnly = true;
-            this.colMappingRule.Width = 280;   // fixed, not Fill
+            this.colMappingRule.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill;
 
-            this.colMappingValidated.HeaderText = "✓";
+            // "Validated" — fixed width, centred tick/cross symbol
+            this.colMappingValidated.HeaderText = "Validated";
             this.colMappingValidated.Name = "colMappingValidated";
             this.colMappingValidated.ReadOnly = true;
-            this.colMappingValidated.Width = 40;   // ↓ was 72 — tight, just for the symbol
+            this.colMappingValidated.Width = 72;
             this.colMappingValidated.DefaultCellStyle.Alignment =
                 System.Windows.Forms.DataGridViewContentAlignment.MiddleCenter;
             this.colMappingValidated.DefaultCellStyle.Font =
@@ -314,7 +314,7 @@
             this.splitContainer.SplitterDistance = 760;   // ↓ was 860 — narrower left pane
             this.splitContainer.TabIndex = 0;
 
-            // ── Component grid: Component / Type / Template / Validated ─────
+            // ── Component grid: Component / Type / Template ──────────────────
             this.dgvComponents.AllowUserToAddRows = false;
             this.dgvComponents.AllowUserToDeleteRows = false;
             this.dgvComponents.BackgroundColor = System.Drawing.SystemColors.Window;
@@ -323,8 +323,7 @@
             this.dgvComponents.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
                 this.colComponent,
                 this.colType,
-                this.colTemplate,
-                this.colValidated });
+                this.colTemplate });
             this.dgvComponents.Dock = System.Windows.Forms.DockStyle.Fill;
             this.dgvComponents.Name = "dgvComponents";
             this.dgvComponents.ReadOnly = true;
@@ -351,13 +350,6 @@
             this.colTemplate.Name = "colTemplate";
             this.colTemplate.ReadOnly = true;
             this.colTemplate.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill;
-
-            this.colValidated.HeaderText = "✓";
-            this.colValidated.Name = "colValidated";
-            this.colValidated.ReadOnly = true;
-            this.colValidated.Width = 36;
-            this.colValidated.DefaultCellStyle.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleCenter;
-            this.colValidated.DefaultCellStyle.Font = new System.Drawing.Font("Segoe UI", 11F, System.Drawing.FontStyle.Bold);
 
             // ── I/O panels ────────────────────────────────────────────────────
             this.panelDetails.Dock = System.Windows.Forms.DockStyle.Fill;
@@ -506,7 +498,6 @@
         private System.Windows.Forms.DataGridViewTextBoxColumn colComponent;
         private System.Windows.Forms.DataGridViewTextBoxColumn colType;
         private System.Windows.Forms.DataGridViewTextBoxColumn colTemplate;
-        private System.Windows.Forms.DataGridViewTextBoxColumn colValidated;
         private System.Windows.Forms.Panel panelDetails;
         private System.Windows.Forms.GroupBox grpInputs;
         private System.Windows.Forms.DataGridView dgvInputs;
