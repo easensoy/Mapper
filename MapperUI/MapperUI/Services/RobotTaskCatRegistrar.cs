@@ -10,6 +10,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Xml;
 using System.Xml.Linq;
 using CodeGen.Configuration;
 
@@ -20,6 +21,8 @@ namespace MapperUI.Services
         // ── File names that make up a complete Robot_Task_CAT type folder ─────
         private const string CatName = "Robot_Task_CAT";
         private const string HmiName = "Robot_Task_CAT_HMI";
+        private const string CoreName = "Robot_Task_Core";
+        private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
         // ── Entry point ───────────────────────────────────────────────────────
 
@@ -40,6 +43,15 @@ namespace MapperUI.Services
                 throw new FileNotFoundException(
                     $"Robot template not found:\n{cfg.RobotTemplatePath}");
 
+            if (string.IsNullOrWhiteSpace(cfg.RobotBasicTemplatePath))
+                throw new InvalidOperationException(
+                    "RobotBasicTemplatePath is not set in mapper_config.json.\n" +
+                    "Point it to Robot_Task_Core.fbt in the template project.");
+
+            if (!File.Exists(cfg.RobotBasicTemplatePath))
+                throw new FileNotFoundException(
+                    $"Robot basic template not found:\n{cfg.RobotBasicTemplatePath}");
+
             if (!File.Exists(dfbprojPath))
                 throw new FileNotFoundException(
                     $"IEC61499.dfbproj not found:\n{dfbprojPath}");
@@ -53,6 +65,18 @@ namespace MapperUI.Services
 
             MapperLogger.Info($"[Robot_Task_CAT] Source template dir : {templateDir}");
             MapperLogger.Info($"[Robot_Task_CAT] Target CAT dir       : {targetCatDir}");
+
+            // Ensure Robot_Task_Core basic FB is present in IEC61499 root
+            var coreTarget = Path.Combine(iec61499Dir, $"{CoreName}.fbt");
+            if (!File.Exists(coreTarget))
+            {
+                File.Copy(cfg.RobotBasicTemplatePath, coreTarget, overwrite: false);
+                MapperLogger.Info($"[Robot_Task_CAT]  Copied    {CoreName}.fbt");
+            }
+            else
+            {
+                MapperLogger.Info($"[Robot_Task_CAT]  Skipped   {CoreName}.fbt (already present)");
+            }
 
             // ── 3. Copy / generate each file ──────────────────────────────────
             int copied = 0;
@@ -132,6 +156,7 @@ namespace MapperUI.Services
             sb.AppendLine($"  Files generated : {generated}");
             sb.AppendLine($"  Files skipped   : {skipped} (already present)");
             sb.AppendLine($"  dfbproj entries : {registered} added / already present");
+            sb.AppendLine($"  Basic FB        : {CoreName}.fbt ensured in IEC61499 root");
             sb.AppendLine();
             sb.AppendLine("Robot_Task_CAT is now registered in IEC61499.dfbproj.");
 
@@ -163,7 +188,7 @@ namespace MapperUI.Services
             }
             else if (generator != null)
             {
-                File.WriteAllText(target, generator(), Encoding.UTF8);
+                File.WriteAllText(target, NormalizeXmlContent(generator()), Utf8NoBom);
                 generated++;
                 MapperLogger.Info($"[Robot_Task_CAT]  Generated {fileName}");
             }
@@ -172,6 +197,9 @@ namespace MapperUI.Services
                 MapperLogger.Info($"[Robot_Task_CAT]  WARNING: {fileName} not found in template dir and no generator – skipping.");
             }
         }
+
+        private static string NormalizeXmlContent(string content) =>
+            content.TrimStart('﻿', '\r', '\n', '\t', ' ');
 
         private static void CopyOrGenerateCfg(
             string templateDir, string targetDir,
@@ -186,14 +214,24 @@ namespace MapperUI.Services
             {
                 // XML-aware copy: Name attr stays "Robot_Task_CAT" (already correct)
                 // but Plugin paths must reference the folder, not a flat path.
-                var cfgXml = PatchCfgPluginPaths(source);
-                File.WriteAllText(target, cfgXml, Encoding.UTF8);
+                var cfgDoc = PatchCfgPluginPaths(source);
+                var settings = new XmlWriterSettings
+                {
+                    Encoding = Utf8NoBom,
+                    Indent = true
+                };
+
+                using (var writer = XmlWriter.Create(target, settings))
+                {
+                    cfgDoc.Save(writer);
+                }
+
                 copied++;
                 MapperLogger.Info($"[Robot_Task_CAT]  Copied+Patched {fileName}");
             }
             else
             {
-                File.WriteAllText(target, GenerateCfgXml(), Encoding.UTF8);
+                File.WriteAllText(target, NormalizeXmlContent(GenerateCfgXml()), Utf8NoBom);
                 generated++;
                 MapperLogger.Info($"[Robot_Task_CAT]  Generated {fileName}");
             }
@@ -249,6 +287,11 @@ namespace MapperUI.Services
                     new XElement(ns + "DependentUpon", $@"{CatName}\{CatName}.fbt"),
                     new XElement(ns + "Usage", "Private")));
 
+            EnsureEntry(compileGroup,
+                new XElement(ns + "Compile",
+                    new XAttribute("Include", $@"{CoreName}.fbt"),
+                    new XElement(ns + "IEC61499Type", "BASICFB")));
+
             // ── None entries (companion plugin / meta files) ──────────────────
 
             EnsureEntry(noneGroup,
@@ -298,7 +341,7 @@ namespace MapperUI.Services
 
         // ── .cfg patch: ensure Plugin paths use folder-relative paths ─────────
 
-        private static string PatchCfgPluginPaths(string sourceCfgPath)
+        private static XDocument PatchCfgPluginPaths(string sourceCfgPath)
         {
             var doc = XDocument.Load(sourceCfgPath);
             var root = doc.Root!;
@@ -313,13 +356,11 @@ namespace MapperUI.Services
                 var val = (string?)plugin.Attribute("Value");
                 if (val == null) continue;
 
-                var flat = Path.GetFileName(val);   // strip any existing folder prefix
+                var flat = val.Replace("/", "\\").Split('\\').Last();
                 plugin.SetAttributeValue("Value", $@"{CatName}\{flat}");
             }
 
-            using var sw = new StringWriter();
-            doc.Save(sw);
-            return sw.ToString();
+            return doc;
         }
 
         // ── Content generators (used when template file is absent) ────────────
