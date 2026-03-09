@@ -12,7 +12,6 @@ using System.Linq;
 using System.Text;
 using System.Xml.Linq;
 using CodeGen.Configuration;
-using MapperUI.Logging;
 
 namespace MapperUI.Services
 {
