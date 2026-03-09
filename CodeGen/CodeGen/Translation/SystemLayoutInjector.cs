@@ -41,13 +41,20 @@ namespace MapperUI.Services
         private const string ProcessCatType = "Process1_CAT";
         private const string RobotCatType = "Robot_Task_CAT";
 
-        private const int YGap = 480;   // vertical gap between new FBs (matches sensor column spacing)
+        // Vertical gaps — composite CAT blocks (actuators) are much taller than basic blocks (sensors)
+        private const int ActuatorYGap = 1400;  // Five_State_Actuator_CAT is a composite; needs generous spacing
+        private const int SensorYGap = 480;   // Sensor_Bool_CAT is a basic block; matches reference syslay spacing
+        private const int ProcessYGap = 800;
+        private const int DefaultYGap = 1400;
 
-        // X columns actuators LEFT of sensors to match reference syslay
+        // X columns — actuators LEFT of sensors to match reference syslay
         private const int ActuatorX = 1300;
         private const int SensorX = 1560;
         private const int ProcessX = 3360;
         private const int RobotX = 5000;
+
+        // Process instance name override: VueOne "Process1" → EAE "Feed_Station"
+        private const string ProcessFbInstanceName = "Feed_Station";
 
         // ── Public API ────────────────────────────────────────────────────────
 
@@ -146,7 +153,7 @@ namespace MapperUI.Services
             }
             else
             {
-                result.UnsupportedComponents.Add("No Process1_CAT found in syslay wiring skipped");
+                result.UnsupportedComponents.Add($"No {ProcessCatType} ({ProcessFbInstanceName}) found in syslay — wiring skipped");
             }
 
             doc.Save(config.SyslayPath);
@@ -190,7 +197,7 @@ namespace MapperUI.Services
             if (!group.Any()) return;
 
             var groupNames = new HashSet<string>(
-                group.Select(c => c.Name), StringComparer.OrdinalIgnoreCase);
+                group.Select(c => FbName(c, catType)), StringComparer.OrdinalIgnoreCase);
 
             var spares = FbsOfType(net, catType)
                 .Where(fb => !groupNames.Contains(fb.Attribute("Name")?.Value ?? ""))
@@ -201,56 +208,73 @@ namespace MapperUI.Services
 
             foreach (var comp in group)
             {
-                // 1. Exact match already present update params only
-                var present = FindFb(net, comp.Name, catType);
+                string fbName = FbName(comp, catType);
+
+                // 1. Exact match already present — update params only
+                var present = FindFb(net, fbName, catType);
                 if (present != null)
                 {
                     ApplyParams(present, comp, catType);
-                    RecordId(present, comp.Name, isSysres, syslayIds);
-                    result.SkippedFBs.Add($"{comp.Name} already present, params updated");
+                    RecordId(present, fbName, isSysres, syslayIds);
+                    result.SkippedFBs.Add($"{fbName} already present, params updated");
                     continue;
                 }
 
-                // 2. Spare slot remap existing placeholder
+                // 2. Spare slot — remap existing placeholder
                 if (spareIdx < spares.Count)
                 {
                     var slot = spares[spareIdx++];
                     var old = slot.Attribute("Name")?.Value ?? "";
-                    renames[old] = comp.Name;
-                    slot.SetAttributeValue("Name", comp.Name);
+                    renames[old] = fbName;
+                    slot.SetAttributeValue("Name", fbName);
                     ApplyParams(slot, comp, catType);
-                    RecordId(slot, comp.Name, isSysres, syslayIds);
-                    result.InjectedFBs.Add($"{comp.Name} (remapped from {old})");
-                    newList?.Add(comp.Name);
+                    RecordId(slot, fbName, isSysres, syslayIds);
+                    result.InjectedFBs.Add($"{fbName} (remapped from {old})");
+                    newList?.Add(fbName);
                     continue;
                 }
 
                 // 3. Brand-new FB placed at columnX, nextY
-                string id = isSysres ? MakeId(comp.Name, "sysres") : MakeId(comp.Name, "syslay");
+                string id = isSysres ? MakeId(fbName, "sysres") : MakeId(fbName, "syslay");
 
                 var fb = new XElement(Ns + "FB",
                     new XAttribute("ID", id),
-                    new XAttribute("Name", comp.Name),
+                    new XAttribute("Name", fbName),
                     new XAttribute("Type", catType),
                     new XAttribute("Namespace", "Main"),
                     new XAttribute("x", columnX),
                     new XAttribute("y", nextY));
 
-                if (isSysres && syslayIds.TryGetValue(comp.Name, out var slId))
+                if (isSysres && syslayIds.TryGetValue(fbName, out var slId))
                     fb.SetAttributeValue("Mapping", slId);
 
                 ApplyParams(fb, comp, catType);
                 net.Add(fb);
 
-                RecordId(fb, comp.Name, isSysres, syslayIds);
-                result.InjectedFBs.Add($"{comp.Name} → x={columnX}, y={nextY} (new {catType})");
-                newList?.Add(comp.Name);
+                RecordId(fb, fbName, isSysres, syslayIds);
+                result.InjectedFBs.Add($"{fbName} → x={columnX}, y={nextY} (new {catType})");
+                newList?.Add(fbName);
 
-                nextY += YGap;
+                nextY += GapFor(catType);
             }
         }
 
+        /// <summary>
+        /// Returns the EAE FB instance name for a component.
+        /// Process FBs are always named Feed_Station regardless of the VueOne component name.
+        /// </summary>
+        private static string FbName(VueOneComponent comp, string catType) =>
+            catType == ProcessCatType ? ProcessFbInstanceName : comp.Name;
+
         // ── Position helper ───────────────────────────────────────────────────
+
+        private static int GapFor(string catType) => catType switch
+        {
+            ActuatorCatType => ActuatorYGap,
+            SensorCatType => SensorYGap,
+            ProcessCatType => ProcessYGap,
+            _ => DefaultYGap
+        };
 
         private static int ComputeStartY(XElement net, string catType)
         {
@@ -258,7 +282,7 @@ namespace MapperUI.Services
                 .Select(fb => ParseInt(fb.Attribute("y")?.Value, 0))
                 .ToList();
 
-            if (ys.Any()) return ys.Max() + YGap;
+            if (ys.Any()) return ys.Max() + GapFor(catType);
 
             return catType switch
             {
