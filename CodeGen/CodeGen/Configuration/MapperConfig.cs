@@ -29,6 +29,11 @@ namespace CodeGen.Configuration
         /// </summary>
         public string RobotTemplatePath { get; set; } = string.Empty;
 
+        /// <summary>
+        /// Full path to Robot_Task_Core.fbt (basic FB used by Robot_Task_CAT).
+        /// </summary>
+        public string RobotBasicTemplatePath { get; set; } = string.Empty;
+
         // ─────────────────────────────────────────────────────────────────────
 
         public static MapperConfig Load()
@@ -62,7 +67,8 @@ namespace CodeGen.Configuration
             SyslayPath = @"C:\Station1 - Sensor and FiveStateActuator with symbolic links_20260203-120117390.sln (1)\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000001\00000000-0000-0000-0000-000000000000.syslay",
             SysresPath = @"C:\Station1 - Sensor and FiveStateActuator with symbolic links_20260203-120117390.sln (1)\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000002\00000000-0000-0000-0000-000000000000.sysres",
             ProcessCATTemplatePath = @"C:\Station1 - Sensor and FiveStateActuator with symbolic links_20260203-120117390.sln (1)\IEC61499\Process1_CAT\Process1_CAT.fbt",
-            RobotTemplatePath = @"C:\SMC_Rig_Expo_20260112-165857725.sln\IEC61499\Robot_Task_CAT\Robot_Task_CAT.fbt"
+            RobotTemplatePath = @"C:\SMC_Rig_Expo_20260112-165857725.sln\IEC61499\Robot_Task_CAT\Robot_Task_CAT.fbt",
+            RobotBasicTemplatePath = @"C:\SMC_Rig_Expo_20260112-165857725.sln\IEC61499\Robot_Task_Core.fbt"
         };
 
         private static void WriteConfig(string path, MapperConfig config)
