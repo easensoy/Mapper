@@ -41,7 +41,7 @@ namespace MapperUI.Services
         private const string ProcessCatType = "Process1_CAT";
         private const string RobotCatType = "Robot_Task_CAT";
 
-        private const int YGap = 1400;  // vertical gap between new FBs
+        private const int YGap = 480;   // vertical gap between new FBs (matches sensor column spacing)
 
         // X columns actuators LEFT of sensors to match reference syslay
         private const int ActuatorX = 1300;
