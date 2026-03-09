@@ -99,6 +99,16 @@ namespace MapperUI.Services
                 if (!File.Exists(config.SysresPath))
                     throw new FileNotFoundException($"sysres not found: {config.SysresPath}");
 
+                MapperLogger.Parse($"Parsing syslay: {System.IO.Path.GetFileName(config.SyslayPath)}");
+                MapperLogger.Parse($"Parsing sysres: {System.IO.Path.GetFileName(config.SysresPath)}");
+
+                int nAct = components.Count(c => string.Equals(c.Type, "Actuator", StringComparison.OrdinalIgnoreCase));
+                int nSns = components.Count(c => string.Equals(c.Type, "Sensor", StringComparison.OrdinalIgnoreCase));
+                int nPrc = components.Count(c => string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase));
+                MapperLogger.Validate($"Components to inject: {components.Count} total  ({nAct} Actuator / {nSns} Sensor / {nPrc} Process)");
+                foreach (var c in components)
+                    MapperLogger.Validate($"  + {c.Name,-20} ({c.Type}, {c.States.Count} states)");
+
                 foreach (var c in Unsupported(components, config))
                     result.UnsupportedComponents.Add($"{c.Name} ({c.Type}, {c.States.Count} states)");
 
@@ -128,6 +138,12 @@ namespace MapperUI.Services
 
             var renames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var newActuators = new List<string>();
+
+            // ── Rename any legacy "Process1" instance to match Control.xml name ──
+            // If syslay already has a Process1_CAT named "Process1" but Control.xml
+            // provides a component named "Feed_Station", rename it so wiring uses
+            // the correct instance name throughout.
+            RenameExistingProcessIfNeeded(net, Processes(components), renames, result);
 
             // Inject order: Process first (so wiring can find it by name),
             // then Sensors, then Actuators, then Robots.
@@ -279,14 +295,28 @@ namespace MapperUI.Services
             var ec = EnsureSection(net, "EventConnections");
             var dc = EnsureSection(net, "DataConnections");
 
+            MapperLogger.Write($"── Wiring table: Process='{proc}', Actuators={actuators.Count} ──");
+            MapperLogger.Write($"  {"Source",-45} → Destination");
+            MapperLogger.Write($"  {"──────────────────────────────────────────────",-45}   ─────────────────────────────────────────────");
+
             foreach (var name in actuators)
             {
                 string lc = name.ToLower();
+
+                // Event connections
                 AddConn(ec, $"{proc}.state_update", $"{name}.pst_event", result);
                 AddConn(ec, $"{name}.pst_out", $"{proc}.state_change", result);
+                // Data connections
                 AddConn(dc, $"{proc}.actuator_name", $"{name}.process_state_name", result);
                 AddConn(dc, $"{proc}.state_val", $"{name}.state_val", result);
                 AddConn(dc, $"{name}.current_state_to_process", $"{proc}.{lc}", result);
+
+                // Log wiring table row
+                MapperLogger.Write($"  {proc}.state_update,-45} → {name}.pst_event");
+                MapperLogger.Write($"  {$"{name}.pst_out",-45} → {proc}.state_change");
+                MapperLogger.Write($"  {$"{proc}.actuator_name",-45} → {name}.process_state_name  [DATA]");
+                MapperLogger.Write($"  {$"{proc}.state_val",-45} → {name}.state_val  [DATA]");
+                MapperLogger.Write($"  {$"{name}.current_state_to_process",-45} → {proc}.{lc}  [DATA]");
             }
         }
 
@@ -371,6 +401,45 @@ namespace MapperUI.Services
 
         private static XElement? FirstFbOfType(XElement net, string type) =>
             FbsOfType(net, type).FirstOrDefault();
+
+        /// <summary>
+        /// If the syslay contains a Process1_CAT instance whose Name does NOT match
+        /// any process component in Control.xml (e.g. the legacy "Process1" stub),
+        /// rename it in-place to the Control.xml component name (e.g. "Feed_Station")
+        /// and record the rename in the renames dictionary so connections are updated.
+        /// 
+        /// This handles the case where EAE's baseline project ships with "Process1"
+        /// but VueOne Control.xml names the process "Feed_Station".
+        /// </summary>
+        private static void RenameExistingProcessIfNeeded(
+            XElement net,
+            IEnumerable<VueOneComponent> processComps,
+            Dictionary<string, string> renames,
+            SystemInjectionResult result)
+        {
+            var targets = processComps.ToList();
+            if (!targets.Any()) return;
+
+            var existing = FbsOfType(net, ProcessCatType).ToList();
+            foreach (var fb in existing)
+            {
+                string oldName = fb.Attribute("Name")?.Value ?? "";
+                // Skip if name already matches one of our components
+                if (targets.Any(c => string.Equals(c.Name, oldName, StringComparison.OrdinalIgnoreCase)))
+                    continue;
+
+                // Rename to first unmatched process component
+                var match = targets.FirstOrDefault(c =>
+                    !existing.Any(f => string.Equals(f.Attribute("Name")?.Value, c.Name,
+                                                     StringComparison.OrdinalIgnoreCase)));
+                if (match == null) continue;
+
+                fb.SetAttributeValue("Name", match.Name);
+                renames[oldName] = match.Name;
+                MapperLogger.Remap($"Renamed Process1_CAT instance \"{oldName}\" → \"{match.Name}\"");
+                result.InjectedFBs.Add($"[RENAMED] {oldName} → {match.Name} (Process1_CAT)");
+            }
+        }
 
         private static XElement EnsureSection(XElement net, string tag)
         {
