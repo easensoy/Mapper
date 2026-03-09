@@ -26,12 +26,12 @@ namespace MapperUI
         private SystemXmlReader? _lastReader;
         private DebugConsoleForm? _debugConsole;
 
-        // ── Phase 1 whitelist ─────────────────────────────────────────────────
+        // Phase 1 whitelist
         private static readonly HashSet<string> _allowedInstances =
             new(StringComparer.OrdinalIgnoreCase)
             { "Checker", "Transfer", "Feeder", "Ejector" };
 
-        // ── Per-component validation record ───────────────────────────────────
+        // Per-component validation record
         private sealed class ComponentValidationRow
         {
             public VueOneComponent Component { get; init; } = null!;
@@ -40,7 +40,7 @@ namespace MapperUI
             public string FailReason { get; init; } = string.Empty;
         }
 
-        // ── Colors ────────────────────────────────────────────────────────────
+        // Colors
         private static readonly Color ColorTranslated = Color.FromArgb(56, 142, 60);
         private static readonly Color ColorDiscarded = Color.FromArgb(204, 72, 0);
         private static readonly Color ColorAssumed = Color.FromArgb(180, 130, 0);
@@ -58,7 +58,7 @@ namespace MapperUI
             btnGenerateCode.Enabled = false;
         }
 
-        // ── Build > Debug Console ─────────────────────────────────────────────
+        // Build > Debug Console
         private void menuItemDebugConsole_Click(object sender, EventArgs e)
         {
             if (_debugConsole == null || _debugConsole.IsDisposed)
@@ -70,7 +70,7 @@ namespace MapperUI
             _debugConsole.BringToFront();
         }
 
-        // ── Browse ────────────────────────────────────────────────────────────
+        // Browse
         private async void btnBrowse_Click(object sender, EventArgs e)
         {
             using var dlg = new OpenFileDialog
@@ -85,7 +85,7 @@ namespace MapperUI
             await LoadAndValidate(dlg.FileName);
         }
 
-        // ── Mapping Rules button ──────────────────────────────────────────────
+        // Mapping Rules button
         private void btnMappingRules_Click(object sender, EventArgs e)
         {
             if (_loadedComponents.Count == 0)
@@ -97,7 +97,7 @@ namespace MapperUI
             PopulateMappingRules();
         }
 
-        // ── Populate Mapping Rules table ──────────────────────────────────────
+        // Populate Mapping Rules table
         private void PopulateMappingRules()
         {
             dgvMappingRules.Rows.Clear();
@@ -163,7 +163,7 @@ namespace MapperUI
             }
         }
 
-        // ── Load and Validate ─────────────────────────────────────────────────
+        // Load and Validate
         private async Task LoadAndValidate(string path)
         {
             dgvMappingRules.Rows.Clear();
@@ -202,13 +202,12 @@ namespace MapperUI
                     row.DefaultCellStyle.BackColor = bg;
                     row.DefaultCellStyle.ForeColor = Color.Black;
 
-                    // Template cell: green for valid, red for unsupported/missing
                     var tmplCell = row.Cells[colTemplate.Index];
                     tmplCell.Style.ForeColor = vr.IsValid ? ColorTranslated : ColorDiscarded;
                     tmplCell.Style.BackColor = bg;
 
                     MapperLogger.Validate(
-                        $"{comp.Name} ({comp.Type}) → {vr.TemplateName} " +
+                        $"{comp.Name} ({comp.Type}) {vr.TemplateName} " +
                         $"[{(vr.IsValid ? "PASS" : "FAIL: " + vr.FailReason)}]" +
                         $"{(inScope ? "" : " [OUT OF SCOPE]")}");
                 }
@@ -224,8 +223,8 @@ namespace MapperUI
                     allScopedPassed ? Color.Green : Color.Red);
 
                 lblStatus.Text = allScopedPassed
-                    ? "Validation passed — Checker, Transfer, Feeder, Ejector ready to inject"
-                    : "Validation FAILED — check in-scope components (Checker / Transfer / Feeder / Ejector)";
+                    ? "Validation passed. Checker, Transfer, Feeder, Ejector ready to inject."
+                    : "Validation failed. Check in-scope components: Checker, Transfer, Feeder, Ejector.";
 
                 btnGenerateCode.Enabled = _validationRows
                     .Any(r => r.IsValid && _allowedInstances.Contains(r.Component.Name));
@@ -239,7 +238,7 @@ namespace MapperUI
             }
         }
 
-        // ── Per-component validation ──────────────────────────────────────────
+        // Per-component validation
         private static ComponentValidationRow ValidateComponent(
             VueOneComponent comp, ComponentValidator validator, MapperConfig cfg)
         {
@@ -275,10 +274,11 @@ namespace MapperUI
 
         private static ComponentValidationRow Pass(VueOneComponent c, string t) =>
             new() { Component = c, TemplateName = t, IsValid = true };
+
         private static ComponentValidationRow Fail(VueOneComponent c, string t, string reason) =>
             new() { Component = c, TemplateName = t, IsValid = false, FailReason = reason };
 
-        // ── Generate Code ─────────────────────────────────────────────────────
+        // Generate Code
         private async void btnGenerateCode_Click(object sender, EventArgs e)
         {
             var failedInScope = _validationRows
@@ -288,9 +288,9 @@ namespace MapperUI
             if (failedInScope.Any())
             {
                 var sb = new StringBuilder();
-                sb.AppendLine($"⚠  {failedInScope.Count} in-scope component(s) failed validation:\n");
+                sb.AppendLine($"{failedInScope.Count} in-scope component(s) failed validation:\n");
                 foreach (var f in failedInScope)
-                    sb.AppendLine($"  ✗  {f.Component.Name} ({f.Component.Type}) — {f.FailReason}");
+                    sb.AppendLine($"  {SymFail}  {f.Component.Name} ({f.Component.Type}): {f.FailReason}");
                 sb.AppendLine("\nOnly the remaining valid in-scope components will be injected. Continue?");
                 if (MessageBox.Show(sb.ToString(), "Validation Warnings",
                         MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
@@ -303,7 +303,7 @@ namespace MapperUI
                 .Select(r => r.Component).ToList();
 
             foreach (var b in _validationRows.Where(r => !_allowedInstances.Contains(r.Component.Name)))
-                MapperLogger.Info($"  ⊘ {b.Component.Name} ({b.Component.Type}) — blocked (not in scope)");
+                MapperLogger.Info($"{b.Component.Name} ({b.Component.Type}) out of scope, skipped.");
 
             if (toInject.Count == 0)
             {
@@ -315,14 +315,14 @@ namespace MapperUI
             }
 
             btnGenerateCode.Enabled = false;
-            MapperLogger.Info($"=== Generate Code — {toInject.Count} component(s) [Checker / Transfer / Feeder / Ejector] ===");
-            foreach (var c in toInject) MapperLogger.Info($"  ✓ {c.Name} ({c.Type})");
+            MapperLogger.Info($"Generating code. {toInject.Count} component(s): Checker, Transfer, Feeder, Ejector.");
+            foreach (var c in toInject) MapperLogger.Info($"{SymPass} {c.Name} ({c.Type})");
 
             try
             {
                 var cfg = GetMapperConfig();
-                MapperLogger.Info($"syslay → {cfg.SyslayPath}");
-                MapperLogger.Info($"sysres → {cfg.SysresPath}");
+                MapperLogger.Info($"syslay: {cfg.SyslayPath}");
+                MapperLogger.Info($"sysres: {cfg.SysresPath}");
 
                 if (!File.Exists(cfg.SyslayPath))
                 {
@@ -340,7 +340,7 @@ namespace MapperUI
                         "Config Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
                 }
-                MapperLogger.Info($"dfbproj → {dfbproj}");
+                MapperLogger.Info($"Project: {Path.GetFileName(dfbproj)}");
 
                 var dfbContent = await File.ReadAllTextAsync(dfbproj);
                 LogCatCheck(dfbContent, "Five_State_Actuator_CAT");
@@ -350,7 +350,7 @@ namespace MapperUI
 
                 if (!dfbContent.Contains("Five_State_Actuator_CAT") || !dfbContent.Contains("Sensor_Bool_CAT"))
                 {
-                    MapperLogger.Error("Required CAT types not registered — wrong project?");
+                    MapperLogger.Error("Required CAT types not registered in this project.");
                     MessageBox.Show("Five_State_Actuator_CAT or Sensor_Bool_CAT not found in .dfbproj.\nCheck mapper_config.json.",
                         "Wrong Project", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
@@ -368,7 +368,7 @@ namespace MapperUI
                     return;
                 }
 
-                MapperLogger.Write("Injecting into EAE project files");
+                MapperLogger.Write("Injecting into EAE project files.");
                 var result = await Task.Run(() => injector.Inject(cfg, toInject));
 
                 if (!result.Success)
@@ -379,22 +379,22 @@ namespace MapperUI
                     return;
                 }
 
-                foreach (var fb in result.InjectedFBs) MapperLogger.Info($"  ✓ {fb}");
-                foreach (var u in result.UnsupportedComponents) MapperLogger.Warn($"  ! {u}");
+                foreach (var fb in result.InjectedFBs) MapperLogger.Info($"{SymPass} {fb}");
+                foreach (var u in result.UnsupportedComponents) MapperLogger.Warn(u);
 
                 MapperLogger.Touch($"Touching {Path.GetFileName(dfbproj)}");
                 File.SetLastWriteTime(dfbproj, DateTime.Now);
-                MapperLogger.Info("EAE will show 'Reload Solution' — click Yes.");
+                MapperLogger.Info("Reload Solution in EAE to apply changes.");
 
-                lblStatus.Text = $"Done — {result.InjectedFBs.Count} component(s) injected";
-                MapperLogger.Info("=== Done ===");
+                lblStatus.Text = $"Done. {result.InjectedFBs.Count} component(s) injected.";
+                MapperLogger.Info("Injection complete.");
 
                 var msg = new StringBuilder();
                 msg.AppendLine($"Injected {result.InjectedFBs.Count} component(s) successfully.");
                 if (result.UnsupportedComponents.Any())
                     msg.AppendLine($"\n{result.UnsupportedComponents.Count} component(s) skipped (see Debug Console).");
-                msg.AppendLine("\nSwitch to EAE and click 'Reload Solution'.");
-                MessageBox.Show(msg.ToString(), "Done — Reload EAE", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                msg.AppendLine("\nSwitch to EAE and click Reload Solution.");
+                MessageBox.Show(msg.ToString(), "Done: Reload EAE", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
@@ -404,7 +404,7 @@ namespace MapperUI
             finally { btnGenerateCode.Enabled = true; }
         }
 
-        // ── Component selection ───────────────────────────────────────────────
+        // Component selection
         private void dgvComponents_SelectionChanged(object sender, EventArgs e)
         {
             dgvInputs.Rows.Clear();
@@ -422,7 +422,7 @@ namespace MapperUI
                 dgvOutputs.Rows.Add(vr.FailReason, "");
         }
 
-        // ── Helpers ───────────────────────────────────────────────────────────
+        // Helpers
         private void UpdateDetectedInfo()
         {
             if (_loadedComponents.Count == 0) return;
@@ -431,8 +431,11 @@ namespace MapperUI
             int p = _loadedComponents.Count(c => TypeIs(c, "Process"));
             lblDetectedType.Text = _loadedComponents.Count == 1 ? _loadedComponents[0].Type : "System";
             lblDetectedName.Text = _loadedComponents.Count == 1 ? _loadedComponents[0].Name : (_lastReader?.SystemName ?? "-");
-            lblDetectedStates.Text = _loadedComponents.Count == 1 ? _loadedComponents[0].States.Count.ToString() : $"{_loadedComponents.Count} ({a}A / {s}S / {p}P)";
-            lblDetectedType.ForeColor = lblDetectedName.ForeColor = lblDetectedStates.ForeColor = Color.FromArgb(0, 100, 180);
+            lblDetectedStates.Text = _loadedComponents.Count == 1
+                ? _loadedComponents[0].States.Count.ToString()
+                : $"{_loadedComponents.Count} ({a}A / {s}S / {p}P)";
+            lblDetectedType.ForeColor = lblDetectedName.ForeColor = lblDetectedStates.ForeColor =
+                Color.FromArgb(0, 100, 180);
         }
 
         private void SetValidationLabel(string text, Color color)
@@ -443,16 +446,21 @@ namespace MapperUI
 
         private void LogDiff(SystemInjector.DiffReport diff)
         {
-            MapperLogger.Diff($"Already present    : {diff.AlreadyPresent.Count}");
-            foreach (var s in diff.AlreadyPresent) MapperLogger.Info($"  = {s}");
-            MapperLogger.Diff($"To be injected     : {diff.ToBeInjected.Count}");
-            foreach (var i in diff.ToBeInjected) MapperLogger.Info($"  + {i}");
-            MapperLogger.Diff($"Unsupported (skip) : {diff.Unsupported.Count}");
-            foreach (var u in diff.Unsupported) MapperLogger.Warn($"  ! {u}");
+            MapperLogger.Diff($"Present   {diff.AlreadyPresent.Count}");
+            foreach (var s in diff.AlreadyPresent) MapperLogger.Info(s);
+
+            MapperLogger.Diff($"Injecting {diff.ToBeInjected.Count}");
+            foreach (var i in diff.ToBeInjected) MapperLogger.Info(i);
+
+            if (diff.Unsupported.Count > 0)
+            {
+                MapperLogger.Diff($"Skipped   {diff.Unsupported.Count}");
+                foreach (var u in diff.Unsupported) MapperLogger.Warn(u);
+            }
         }
 
         private static void LogCatCheck(string dfbContent, string catType) =>
-            MapperLogger.Validate($"{catType,-30} : {(dfbContent.Contains(catType) ? "FOUND ✓" : "MISSING ✗")}");
+            MapperLogger.Validate($"{catType} {(dfbContent.Contains(catType) ? "✓" : "✗")}");
 
         private MapperConfig GetMapperConfig() { _mapperConfig ??= MapperConfig.Load(); return _mapperConfig; }
 
