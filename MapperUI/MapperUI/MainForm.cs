@@ -298,14 +298,24 @@ namespace MapperUI
                     return;
             }
 
+            // Include valid actuators (allowed list) AND the Process component (needed to rename
+            // the existing Process1 FB → Feed_Station, as read from Control.xml <n> tag).
             var toInject = _validationRows
-                .Where(r => r.IsValid && _allowedInstances.Contains(r.Component.Name))
+                .Where(r => r.IsValid &&
+                    (_allowedInstances.Contains(r.Component.Name) || TypeIs(r.Component, "Process")))
                 .Select(r => r.Component).ToList();
 
-            foreach (var b in _validationRows.Where(r => !_allowedInstances.Contains(r.Component.Name)))
+            foreach (var b in _validationRows.Where(r =>
+                !_allowedInstances.Contains(r.Component.Name) && !TypeIs(r.Component, "Process")))
                 MapperLogger.Info($"{b.Component.Name} ({b.Component.Type}) out of scope, skipped.");
 
-            if (toInject.Count == 0)
+            // Guard: if only the Process component is in toInject (no actuators) and nothing needs renaming, still proceed.
+            if (toInject.Count(c => TypeIs(c, "Actuator") || TypeIs(c, "Sensor")) == 0 &&
+                toInject.All(c => TypeIs(c, "Process")))
+            {
+                // Process-only — injector will just rename Process1 → Feed_Station if needed.
+            }
+            else if (toInject.Count == 0)
             {
                 MessageBox.Show(
                     "No in-scope components are ready to inject.\n\n" +
@@ -315,7 +325,8 @@ namespace MapperUI
             }
 
             btnGenerateCode.Enabled = false;
-            MapperLogger.Info($"Generating code. {toInject.Count} component(s): Checker, Transfer, Feeder, Ejector.");
+            var actuatorNames = toInject.Where(c => TypeIs(c, "Actuator")).Select(c => c.Name);
+            MapperLogger.Info($"Generating code. {toInject.Count} component(s): {string.Join(", ", actuatorNames)}.");
             foreach (var c in toInject) MapperLogger.Info($"{SymPass} {c.Name} ({c.Type})");
 
             try
@@ -357,7 +368,7 @@ namespace MapperUI
                 }
 
                 var injector = new SystemInjector();
-                var diff = injector.PreviewDiff(cfg, toInject);
+                var diff = injector.PreviewDiff(cfg, toInject, txtModelPath.Text);
                 LogDiff(diff);
 
                 if (diff.ToBeInjected.Count == 0)
@@ -369,7 +380,7 @@ namespace MapperUI
                 }
 
                 MapperLogger.Write("Injecting into EAE project files.");
-                var result = await Task.Run(() => injector.Inject(cfg, toInject));
+                var result = await Task.Run(() => injector.Inject(cfg, toInject, txtModelPath.Text));
 
                 if (!result.Success)
                 {
