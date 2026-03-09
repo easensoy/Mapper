@@ -37,8 +37,7 @@
             this.lblValidationPrefix = new System.Windows.Forms.Label();
             this.lblValidationStatus = new System.Windows.Forms.Label();
 
-            // ── Mapping Rules grid (Validation Output) ─────────────────────────
-            // Has Validated column (✓/✗ per rule)
+            // Mapping Rules grid (Validation Output) — has Validated column
             this.dgvMappingRules = new System.Windows.Forms.DataGridView();
             this.colVueOneElement = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.colIEC61499Element = new System.Windows.Forms.DataGridViewTextBoxColumn();
@@ -49,8 +48,7 @@
             this.grpMappingInfo = new System.Windows.Forms.GroupBox();
             this.splitContainer = new System.Windows.Forms.SplitContainer();
 
-            // ── Component grid (Mapping Information) ───────────────────────────
-            // Component / Type / Template  (no Validated column here)
+            // Component grid (Mapping Information) — Component / Type / Template
             this.dgvComponents = new System.Windows.Forms.DataGridView();
             this.colComponent = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.colType = new System.Windows.Forms.DataGridViewTextBoxColumn();
@@ -87,7 +85,7 @@
             this.statusStrip.SuspendLayout();
             this.SuspendLayout();
 
-            // ── Menu ──────────────────────────────────────────────────────────
+            // Menu
             this.menuStrip.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
                 this.fileToolStripMenuItem,
                 this.dataToolStripMenuItem,
@@ -109,7 +107,7 @@
             this.menuItemDebugConsole.Text = "Debug Console";
             this.menuItemDebugConsole.Click += new System.EventHandler(this.menuItemDebugConsole_Click);
 
-            // ── Header row ────────────────────────────────────────────────────
+            // Header row
             this.lblVueOneModel.AutoSize = true;
             this.lblVueOneModel.Location = new System.Drawing.Point(12, 37);
             this.lblVueOneModel.Name = "lblVueOneModel";
@@ -165,7 +163,7 @@
             this.btnGenerateCode.UseVisualStyleBackColor = false;
             this.btnGenerateCode.Click += new System.EventHandler(this.btnGenerateCode_Click);
 
-            // ── Validation Output group ───────────────────────────────────────
+            // Validation Output group
             this.grpValidation.Anchor = ((System.Windows.Forms.AnchorStyles)(
                 System.Windows.Forms.AnchorStyles.Top |
                 System.Windows.Forms.AnchorStyles.Left |
@@ -238,7 +236,7 @@
             this.lblValidationStatus.Text = "-";
             this.lblValidationStatus.Name = "lblValidationStatus";
 
-            // ── dgvMappingRules ── (Validation Output section — HAS Validated) ──
+            // dgvMappingRules (Validation Output — has Validated column)
             this.dgvMappingRules.AllowUserToAddRows = false;
             this.dgvMappingRules.AllowUserToDeleteRows = false;
             this.dgvMappingRules.BackgroundColor = System.Drawing.SystemColors.Window;
@@ -256,34 +254,54 @@
             this.dgvMappingRules.ReadOnly = true;
             this.dgvMappingRules.RowHeadersVisible = false;
             this.dgvMappingRules.TabIndex = 1;
-            this.dgvMappingRules.RowsDefaultCellStyle.SelectionBackColor = System.Drawing.Color.FromArgb(173, 214, 255);
-            this.dgvMappingRules.RowsDefaultCellStyle.SelectionForeColor = System.Drawing.Color.Black;
-            this.dgvMappingRules.CellFormatting += new System.Windows.Forms.DataGridViewCellFormattingEventHandler(
-                this.dgvMappingRules_CellFormatting);
+            this.dgvMappingRules.RowTemplate.Height = 28;
+            // Center all cell content by default; Mapping Rule column overrides to Left below
+            this.dgvMappingRules.DefaultCellStyle.Alignment =
+                System.Windows.Forms.DataGridViewContentAlignment.MiddleCenter;
+            this.dgvMappingRules.RowsDefaultCellStyle.SelectionBackColor =
+                System.Drawing.Color.FromArgb(173, 214, 255);
+            this.dgvMappingRules.RowsDefaultCellStyle.SelectionForeColor =
+                System.Drawing.Color.Black;
+            this.dgvMappingRules.CellFormatting +=
+                new System.Windows.Forms.DataGridViewCellFormattingEventHandler(
+                    this.dgvMappingRules_CellFormatting);
 
-            // Columns — match the proportions visible in the demo screenshot
+            // VueOne Element column
             this.colVueOneElement.HeaderText = "VueOne Element";
             this.colVueOneElement.Name = "colVueOneElement";
             this.colVueOneElement.ReadOnly = true;
-            this.colVueOneElement.Width = 160;
+            this.colVueOneElement.Width = 170;
+            this.colVueOneElement.DefaultCellStyle.Alignment =
+                System.Windows.Forms.DataGridViewContentAlignment.MiddleCenter;
 
+            // IEC 61499 Element column
             this.colIEC61499Element.HeaderText = "IEC 61499 Element";
             this.colIEC61499Element.Name = "colIEC61499Element";
             this.colIEC61499Element.ReadOnly = true;
-            this.colIEC61499Element.Width = 220;
+            this.colIEC61499Element.Width = 240;
+            this.colIEC61499Element.DefaultCellStyle.Alignment =
+                System.Windows.Forms.DataGridViewContentAlignment.MiddleCenter;
 
+            // Mapping Type column — widened so header fits on one line
             this.colMappingType.HeaderText = "Mapping Type";
             this.colMappingType.Name = "colMappingType";
             this.colMappingType.ReadOnly = true;
-            this.colMappingType.Width = 100;
+            this.colMappingType.Width = 140;
+            this.colMappingType.DefaultCellStyle.Alignment =
+                System.Windows.Forms.DataGridViewContentAlignment.MiddleCenter;
 
-            // Mapping Rule fills remaining space
+            // Mapping Rule column — left-aligned, fills remaining space
             this.colMappingRule.HeaderText = "Mapping Rule";
             this.colMappingRule.Name = "colMappingRule";
             this.colMappingRule.ReadOnly = true;
-            this.colMappingRule.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill;
+            this.colMappingRule.AutoSizeMode =
+                System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill;
+            this.colMappingRule.DefaultCellStyle.Alignment =
+                System.Windows.Forms.DataGridViewContentAlignment.MiddleLeft;
+            this.colMappingRule.DefaultCellStyle.WrapMode =
+                System.Windows.Forms.DataGridViewTriState.True;
 
-            // "Validated" — fixed width, centred tick/cross symbol
+            // Validated column — fixed width, centred tick/cross
             this.colMappingValidated.HeaderText = "Validated";
             this.colMappingValidated.Name = "colMappingValidated";
             this.colMappingValidated.ReadOnly = true;
@@ -293,7 +311,7 @@
             this.colMappingValidated.DefaultCellStyle.Font =
                 new System.Drawing.Font("Segoe UI", 11F, System.Drawing.FontStyle.Bold);
 
-            // ── Mapping Information group ─────────────────────────────────────
+            // Mapping Information group
             this.grpMappingInfo.Anchor = ((System.Windows.Forms.AnchorStyles)(
                 System.Windows.Forms.AnchorStyles.Top |
                 System.Windows.Forms.AnchorStyles.Bottom |
@@ -311,13 +329,14 @@
             this.splitContainer.Location = new System.Drawing.Point(3, 19);
             this.splitContainer.Name = "splitContainer";
             this.splitContainer.Size = new System.Drawing.Size(1370, 330);
-            this.splitContainer.SplitterDistance = 760;   // ↓ was 860 — narrower left pane
+            this.splitContainer.SplitterDistance = 760;
             this.splitContainer.TabIndex = 0;
 
-            // ── Component grid: Component / Type / Template ──────────────────
+            // Component grid: Component / Type / Template
             this.dgvComponents.AllowUserToAddRows = false;
             this.dgvComponents.AllowUserToDeleteRows = false;
             this.dgvComponents.BackgroundColor = System.Drawing.SystemColors.Window;
+            this.dgvComponents.BorderStyle = System.Windows.Forms.BorderStyle.None;
             this.dgvComponents.ColumnHeadersHeightSizeMode =
                 System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             this.dgvComponents.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
@@ -349,9 +368,10 @@
             this.colTemplate.HeaderText = "Template";
             this.colTemplate.Name = "colTemplate";
             this.colTemplate.ReadOnly = true;
-            this.colTemplate.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill;
+            this.colTemplate.AutoSizeMode =
+                System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill;
 
-            // ── I/O panels ────────────────────────────────────────────────────
+            // I/O panels
             this.panelDetails.Dock = System.Windows.Forms.DockStyle.Fill;
             this.panelDetails.Controls.Add(this.grpOutputs);
             this.panelDetails.Controls.Add(this.grpInputs);
@@ -367,61 +387,73 @@
 
             this.dgvInputs.AllowUserToAddRows = false;
             this.dgvInputs.AllowUserToDeleteRows = false;
-            this.dgvInputs.AutoSizeColumnsMode = System.Windows.Forms.DataGridViewAutoSizeColumnsMode.Fill;
+            this.dgvInputs.AutoSizeColumnsMode =
+                System.Windows.Forms.DataGridViewAutoSizeColumnsMode.Fill;
+            this.dgvInputs.BackgroundColor = System.Drawing.SystemColors.Window;
+            this.dgvInputs.BorderStyle = System.Windows.Forms.BorderStyle.None;
             this.dgvInputs.ColumnHeadersHeightSizeMode =
                 System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             this.dgvInputs.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
-                this.colInputName, this.colInputAddress });
+                this.colInputName,
+                this.colInputAddress });
             this.dgvInputs.Dock = System.Windows.Forms.DockStyle.Fill;
             this.dgvInputs.Name = "dgvInputs";
+            this.dgvInputs.ReadOnly = true;
             this.dgvInputs.RowHeadersVisible = false;
             this.dgvInputs.TabIndex = 0;
 
-            this.colInputName.FillWeight = 60F;
-            this.colInputName.HeaderText = "Name";
+            this.colInputName.HeaderText = "State";
             this.colInputName.Name = "colInputName";
             this.colInputName.ReadOnly = true;
 
-            this.colInputAddress.FillWeight = 40F;
-            this.colInputAddress.HeaderText = "Address";
+            this.colInputAddress.HeaderText = "PLC Address";
             this.colInputAddress.Name = "colInputAddress";
+            this.colInputAddress.ReadOnly = true;
 
             this.grpOutputs.Controls.Add(this.dgvOutputs);
             this.grpOutputs.Dock = System.Windows.Forms.DockStyle.Fill;
             this.grpOutputs.Name = "grpOutputs";
             this.grpOutputs.TabIndex = 1;
             this.grpOutputs.TabStop = false;
-            this.grpOutputs.Text = "Outputs";
+            this.grpOutputs.Text = "Validation Notes";
 
             this.dgvOutputs.AllowUserToAddRows = false;
             this.dgvOutputs.AllowUserToDeleteRows = false;
-            this.dgvOutputs.AutoSizeColumnsMode = System.Windows.Forms.DataGridViewAutoSizeColumnsMode.Fill;
+            this.dgvOutputs.AutoSizeColumnsMode =
+                System.Windows.Forms.DataGridViewAutoSizeColumnsMode.Fill;
+            this.dgvOutputs.BackgroundColor = System.Drawing.SystemColors.Window;
+            this.dgvOutputs.BorderStyle = System.Windows.Forms.BorderStyle.None;
             this.dgvOutputs.ColumnHeadersHeightSizeMode =
                 System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             this.dgvOutputs.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
-                this.colOutputName, this.colOutputAddress });
+                this.colOutputName,
+                this.colOutputAddress });
             this.dgvOutputs.Dock = System.Windows.Forms.DockStyle.Fill;
             this.dgvOutputs.Name = "dgvOutputs";
+            this.dgvOutputs.ReadOnly = true;
             this.dgvOutputs.RowHeadersVisible = false;
             this.dgvOutputs.TabIndex = 0;
 
-            this.colOutputName.FillWeight = 60F;
-            this.colOutputName.HeaderText = "Name";
+            this.colOutputName.HeaderText = "Field";
             this.colOutputName.Name = "colOutputName";
             this.colOutputName.ReadOnly = true;
 
-            this.colOutputAddress.FillWeight = 40F;
-            this.colOutputAddress.HeaderText = "Address";
+            this.colOutputAddress.HeaderText = "Value";
             this.colOutputAddress.Name = "colOutputAddress";
+            this.colOutputAddress.ReadOnly = true;
 
-            // ── Status strip ──────────────────────────────────────────────────
-            this.statusStrip.Items.AddRange(new System.Windows.Forms.ToolStripItem[] { this.lblStatus });
+            // Status strip
+            this.statusStrip.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
+                this.lblStatus });
+            this.statusStrip.Location = new System.Drawing.Point(0, 748);
             this.statusStrip.Name = "statusStrip";
+            this.statusStrip.Size = new System.Drawing.Size(1400, 22);
             this.statusStrip.TabIndex = 8;
+
             this.lblStatus.Name = "lblStatus";
             this.lblStatus.Text = "Browse a Control.xml to begin";
 
-            // ── Form ──────────────────────────────────────────────────────────
+            // Form
             this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 15F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(1400, 770);
