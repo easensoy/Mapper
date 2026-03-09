@@ -1,4 +1,5 @@
-﻿using System;
+﻿// CodeGen/CodeGen/Configuration/MapperConfig.cs
+using System;
 using System.IO;
 using System.Text.Json;
 
@@ -24,13 +25,18 @@ namespace CodeGen.Configuration
         public string ProcessCATTemplatePath { get; set; } = string.Empty;
 
         /// <summary>
-        /// Full path to Robot_Task_CAT.fbt.
+        /// Full path to Robot_Task_CAT.fbt (the Composite CAT wrapper).
+        /// This file lives inside the Robot_Task_CAT\ subfolder of the template project.
         /// Leave empty to treat Robot components as unsupported (shows ✗ in UI).
+        /// Example: C:\SMC_Rig_Expo_20260112-165857725.sln\IEC61499\Robot_Task_CAT\Robot_Task_CAT.fbt
         /// </summary>
         public string RobotTemplatePath { get; set; } = string.Empty;
 
         /// <summary>
-        /// Full path to Robot_Task_Core.fbt (basic FB used by Robot_Task_CAT).
+        /// Full path to Robot_Task_Core.fbt (the Basic FB used internally by Robot_Task_CAT).
+        /// This file lives at the IEC61499 ROOT — NOT inside the Robot_Task_CAT\ subfolder.
+        /// It is required because Robot_Task_CAT.fbt references it as the StateMachine instance.
+        /// Example: C:\SMC_Rig_Expo_20260112-165857725.sln\IEC61499\Robot_Task_Core.fbt
         /// </summary>
         public string RobotBasicTemplatePath { get; set; } = string.Empty;
 
@@ -48,7 +54,8 @@ namespace CodeGen.Configuration
             }
 
             var json = File.ReadAllText(configPath);
-            var config = JsonSerializer.Deserialize<MapperConfig>(json)
+            var config = JsonSerializer.Deserialize<MapperConfig>(json,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
                 ?? throw new Exception($"Failed to deserialise config from '{configPath}'");
 
             return config;
@@ -68,12 +75,14 @@ namespace CodeGen.Configuration
             SysresPath = @"C:\Station1 - Sensor and FiveStateActuator with symbolic links_20260203-120117390.sln (1)\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000002\00000000-0000-0000-0000-000000000000.sysres",
             ProcessCATTemplatePath = @"C:\Station1 - Sensor and FiveStateActuator with symbolic links_20260203-120117390.sln (1)\IEC61499\Process1_CAT\Process1_CAT.fbt",
             RobotTemplatePath = @"C:\SMC_Rig_Expo_20260112-165857725.sln\IEC61499\Robot_Task_CAT\Robot_Task_CAT.fbt",
+            // Basic FB lives at IEC61499 root, NOT inside the Robot_Task_CAT\ subfolder
             RobotBasicTemplatePath = @"C:\SMC_Rig_Expo_20260112-165857725.sln\IEC61499\Robot_Task_Core.fbt"
         };
 
         private static void WriteConfig(string path, MapperConfig config)
         {
-            var json = JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
+            var json = JsonSerializer.Serialize(config,
+                new JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(path, json);
         }
     }
