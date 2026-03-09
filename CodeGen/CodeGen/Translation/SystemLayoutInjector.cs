@@ -14,10 +14,10 @@ namespace MapperUI.Services
     /// Injects ONLY the components the caller supplies.  The caller (MainForm) is
     /// responsible for passing only the user-selected, validated subset.
     ///
-    /// Overlap-free positioning:
-    ///   Actuators  → x=1300 (LEFT of sensors)
-    ///   Sensors    → x=1560
-    ///   Processes  → x=3360
+    /// Overlap-free positioning (derived from user-verified reference syslay):
+    ///   Actuators  → x=1300 (LEFT of sensors), y starts at 2080, gap 800
+    ///   Sensors    → x=1560, y starts at 1000, gap 480
+    ///   Processes  → x=3000, y starts at 1000
     ///   nextY = max(existing y of same CAT type in network) + YGap
     ///
     /// Wiring: ALL actuators in the network are wired after every injection run.
@@ -41,16 +41,19 @@ namespace MapperUI.Services
         private const string ProcessCatType = "Process1_CAT";
         private const string RobotCatType = "Robot_Task_CAT";
 
-        // Vertical gaps — composite CAT blocks (actuators) are much taller than basic blocks (sensors)
-        private const int ActuatorYGap = 1400;  // Five_State_Actuator_CAT is a composite; needs generous spacing
-        private const int SensorYGap = 480;   // Sensor_Bool_CAT is a basic block; matches reference syslay spacing
+        // Vertical gaps between FBs of the same type.
+        // Derived from the reference syslay (user-verified layout):
+        //   hopper y=1000, Part_At_Checker y=1480  → SensorYGap   = 480
+        //   Pusher y=2080, Checker y=2880           → ActuatorYGap = 800
+        private const int ActuatorYGap = 800;
+        private const int SensorYGap = 480;
         private const int ProcessYGap = 800;
-        private const int DefaultYGap = 1400;
+        private const int DefaultYGap = 800;
 
-        // X columns — actuators LEFT of sensors to match reference syslay
+        // X columns — derived from user-verified reference syslay
         private const int ActuatorX = 1300;
         private const int SensorX = 1560;
-        private const int ProcessX = 3360;
+        private const int ProcessX = 3000;
         private const int RobotX = 5000;
 
         // Process instance name override: VueOne "Process1" → EAE "Feed_Station"
@@ -284,11 +287,13 @@ namespace MapperUI.Services
 
             if (ys.Any()) return ys.Max() + GapFor(catType);
 
+            // Default start positions when no existing FB of that type is found.
+            // Values match the user-verified reference syslay exactly.
             return catType switch
             {
-                ActuatorCatType => 2480,
-                SensorCatType => 1480,
-                ProcessCatType => 1460,
+                ActuatorCatType => 2080,   // Pusher first, below sensor column bottom (~1860)
+                SensorCatType => 1000,   // hopper first, compact zone start
+                ProcessCatType => 1000,   // Feed_Station aligned with first sensor
                 _ => 3000
             };
         }
