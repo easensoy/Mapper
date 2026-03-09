@@ -177,33 +177,33 @@ namespace MapperUI.Services
             // SECTION 5: EAE System Specifics
             yield return Section("EAE System Specifics (Hardcoded)");
 
-            yield return Rule("FB Instance ID (syslay)", "Deterministic SHA256 hash",
+            yield return Rule("", "Deterministic SHA256 hash (syslay ID)",
                 MappingType.HARDCODED,
-                "8 byte hex ID from SHA256(\"syslay:<name>\")", impl: true);
+                "8 byte hex ID from SHA256(\"syslay:<n>\")", impl: true);
 
-            yield return Rule("FB Instance ID (sysres)", "Deterministic SHA256 hash",
+            yield return Rule("", "Deterministic SHA256 hash (sysres ID)",
                 MappingType.HARDCODED,
-                "Separate ID from SHA256(\"sysres:<name>\")", impl: true);
+                "Separate ID from SHA256(\"sysres:<n>\")", impl: true);
 
-            yield return Rule("Namespace", "\"Main\"", MappingType.HARDCODED,
-                "All injected FBs are in the Main namespace.", impl: true);
+            yield return Rule("", "Namespace: \"Main\"", MappingType.HARDCODED,
+                "All injected FBs are placed in the Main namespace.", impl: true);
 
-            yield return Rule("Mapping attribute (sysres)", "syslay FB ID",
+            yield return Rule("", "sysres Mapping = syslay FB ID",
                 MappingType.HARDCODED,
                 "sysres Mapping attribute references the matching syslay instance.", impl: true);
 
-            yield return Rule("Layout position (x, y)", "Auto calculated", MappingType.HARDCODED,
+            yield return Rule("", "Layout position (x, y) auto calculated",
+                MappingType.HARDCODED,
                 "Non overlapping grid positions per type group. Actuators left of sensors.", impl: true);
 
-            yield return Rule("actuator_name parameter", "Component name (lowercase)",
+            yield return Rule("", "Five_State_Actuator_CAT: actuator_name parameter",
                 MappingType.HARDCODED,
                 "Written into Five_State_Actuator_CAT Parameter element.", impl: true);
 
-            yield return Rule("Text parameter (Process)", "State name array",
+            yield return Rule("", "Process1_CAT: Text parameter (state name array)",
                 MappingType.HARDCODED,
                 "Written into Process1_CAT Parameter element.", impl: true);
         }
-
         /// <summary>
         /// Returns rules filtered to the component types present in the loaded XML.
         /// Always includes System/EAE sections.
