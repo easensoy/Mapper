@@ -63,7 +63,8 @@ namespace MapperUI.Services
 
         // ── Public API ────────────────────────────────────────────────────────
 
-        public DiffReport PreviewDiff(MapperConfig config, List<VueOneComponent> components)
+        public DiffReport PreviewDiff(MapperConfig config, List<VueOneComponent> components,
+            string? controlXmlPath = null)
         {
             var report = new DiffReport();
             if (!File.Exists(config.SyslayPath))
@@ -71,6 +72,10 @@ namespace MapperUI.Services
                 report.Unsupported.Add($"syslay not found: {config.SyslayPath}");
                 return report;
             }
+
+            if (controlXmlPath != null && File.Exists(controlXmlPath))
+                PatchProcessNames(components, controlXmlPath);
+
             var net = LoadNet(config.SyslayPath, "SubAppNetwork");
             if (net == null) { report.Unsupported.Add("SubAppNetwork not found"); return report; }
 
@@ -85,7 +90,8 @@ namespace MapperUI.Services
             return report;
         }
 
-        public SystemInjectionResult Inject(MapperConfig config, List<VueOneComponent> components)
+        public SystemInjectionResult Inject(MapperConfig config, List<VueOneComponent> components,
+            string? controlXmlPath = null)
         {
             var result = new SystemInjectionResult
             {
@@ -98,6 +104,13 @@ namespace MapperUI.Services
                     throw new FileNotFoundException($"syslay not found: {config.SyslayPath}");
                 if (!File.Exists(config.SysresPath))
                     throw new FileNotFoundException($"sysres not found: {config.SysresPath}");
+
+                // Resolve the true process name from the <n> element in Control.xml.
+                // The SystemXmlReader populates comp.Name using NameTag="Name", but Control.xml
+                // stores the component name in <n> (lowercase), so we re-parse directly here
+                // to guarantee Feed_Station (not Process1) is used as the FB instance name.
+                if (controlXmlPath != null && File.Exists(controlXmlPath))
+                    PatchProcessNames(components, controlXmlPath);
 
                 foreach (var c in Unsupported(components, config))
                     result.UnsupportedComponents.Add($"{c.Name} ({c.Type}, {c.States.Count} states)");
@@ -512,6 +525,47 @@ namespace MapperUI.Services
         }
 
         // ── Component filters ─────────────────────────────────────────────────
+
+        /// <summary>
+        /// Re-reads the Control.xml <n> element for each Process component and updates comp.Name.
+        /// The SystemXmlReader uses NameTag="Name" which misses the lowercase <n> tag in VueOne XML.
+        /// This ensures the FB instance name is Feed_Station (not Process1).
+        /// </summary>
+        private static void PatchProcessNames(List<VueOneComponent> components, string controlXmlPath)
+        {
+            var procs = components.Where(c =>
+                c.Type?.Equals("Process", StringComparison.OrdinalIgnoreCase) == true).ToList();
+            if (!procs.Any()) return;
+
+            try
+            {
+                var doc = XDocument.Load(controlXmlPath);
+                var xmlComps = doc.Descendants()
+                    .Where(e => e.Name.LocalName == "Component")
+                    .ToList();
+
+                foreach (var comp in procs)
+                {
+                    // Find the XML <Component> whose <Type> = "Process"
+                    var xmlComp = xmlComps.FirstOrDefault(c =>
+                    {
+                        var type = c.Elements().FirstOrDefault(e => e.Name.LocalName == "Type")?.Value;
+                        return type?.Equals("Process", StringComparison.OrdinalIgnoreCase) == true;
+                    });
+                    if (xmlComp == null) continue;
+
+                    // Read the <n> element (VueOne uses lowercase <n> for component name)
+                    var nTag = xmlComp.Elements()
+                        .FirstOrDefault(e => e.Name.LocalName == "n")?.Value?.Trim();
+                    if (!string.IsNullOrWhiteSpace(nTag))
+                        comp.Name = nTag;   // e.g. "Feed_Station"
+                }
+            }
+            catch
+            {
+                // If parsing fails, proceed with whatever comp.Name was set to by the reader
+            }
+        }
 
         private static List<VueOneComponent> Actuators(List<VueOneComponent> all) =>
             all.Where(c => c.Type?.Equals("Actuator", StringComparison.OrdinalIgnoreCase) == true
