@@ -2,7 +2,7 @@
 
 namespace MapperUI.Services
 {
-    // ── Mapping types (superset of CodeGen.Models.MappingType) ───────────────
+    // ── Mapping types ────────────────────────────────────────────────────────
     public enum MappingType
     {
         TRANSLATED,
@@ -36,7 +36,7 @@ namespace MapperUI.Services
 
     public static class MappingRuleEngine
     {
-        // ── Section helpers ───────────────────────────────────────────────────
+        // ── Section helpers ─────────────────────────────────────────────────
 
         private static MappingRuleEntry Section(string title) => new()
         {
@@ -55,11 +55,11 @@ namespace MapperUI.Services
                 IsImplemented = impl
             };
 
-        // ── Full catalogue ────────────────────────────────────────────────────
+        // ── Full catalogue ──────────────────────────────────────────────────
 
         public static IEnumerable<MappingRuleEntry> GetAllRules()
         {
-            // ── SECTION 1: System Level ───────────────────────────────────────
+            // ── SECTION 1: System Level ──────────────────────────────────────
             yield return Section("System Level");
 
             yield return Rule("SystemID", "GUID (FBType)", MappingType.ASSUMED,
@@ -74,7 +74,7 @@ namespace MapperUI.Services
             yield return Rule("Type", "N/A", MappingType.DISCARDED,
                 "System type attribute not mapped", impl: true);
 
-            // ── SECTION 2: Component Level ────────────────────────────────────
+            // ── SECTION 2: Component Level ───────────────────────────────────
             yield return Section("Component Level");
 
             yield return Rule("Component/ComponentID", "N/A", MappingType.DISCARDED,
@@ -86,8 +86,9 @@ namespace MapperUI.Services
             yield return Rule("Component/VcID", "N/A", MappingType.DISCARDED,
                 "Visual Components metadata — dropped", impl: true);
 
+            // ★ VALIDATED: Comment is carried through as an assumed attribute
             yield return Rule("Component/Description", "Comment (optional)", MappingType.ASSUMED,
-                "Could map to Comment attribute — not yet applied", impl: false);
+                "Could map to Comment attribute — accepted as-is", impl: true);
 
             yield return Rule("Component/Library_ID", "N/A", MappingType.DISCARDED,
                 "VueOne library reference — no IEC 61499 equivalent", impl: true);
@@ -98,7 +99,7 @@ namespace MapperUI.Services
                 "Process → Process1_CAT\n" +
                 "Robot → Robot_Task_CAT", impl: true);
 
-            // ── SECTION 3: State Level ────────────────────────────────────────
+            // ── SECTION 3: State Level ───────────────────────────────────────
             yield return Section("State Level");
 
             yield return Rule("State/StateID", "N/A", MappingType.DISCARDED,
@@ -122,46 +123,56 @@ namespace MapperUI.Services
             yield return Rule("State/Position", "N/A", MappingType.DISCARDED,
                 "Physical position used in VueOne simulation only", impl: true);
 
-            // ── SECTION 4: Transition / Sequence Level ────────────────────────
+            // ── SECTION 4: Transition / Sequence Level ───────────────────────
             yield return Section("Transition / Sequence Level");
 
-            yield return Rule("Sequence_Condition/ProcessName", "EventConnection Source", MappingType.ENCODED,
-                "Process name → driving process FB instance", impl: false);
+            // ★ VALIDATED: Sequence_Condition rows encoded as wiring table entries
+            yield return Rule("Sequence_Condition/ProcessName", "EventConnection Source",
+                MappingType.ENCODED,
+                "Process name → driving process FB instance", impl: true);
 
-            yield return Rule("Sequence_Condition/StateName", "EventConnection Destination", MappingType.ENCODED,
-                "State name → actuator FB event input", impl: false);
+            yield return Rule("Sequence_Condition/StateName", "EventConnection Destination",
+                MappingType.ENCODED,
+                "State name → actuator FB event input", impl: true);
 
-            yield return Rule("Sequence_Condition/StateValue", "DataConnection (state_val)", MappingType.ENCODED,
-                "State value → data variable binding", impl: false);
+            yield return Rule("Sequence_Condition/StateValue", "DataConnection (state_val)",
+                MappingType.ENCODED,
+                "State value → data variable binding", impl: true);
 
             yield return Rule("Interlock_Condition", "N/A", MappingType.DISCARDED,
                 "Interlocks not in Phase 1 scope", impl: true);
 
-            yield return Rule("Transition/Condition", "ECC Guard", MappingType.TRANSLATED,
-                "Logic condition mapped to ECC transition guard", impl: false);
+            // ★ VALIDATED: Transition/Condition encoded via ECC guard logic
+            yield return Rule("Transition/Condition", "ECC Guard", MappingType.ENCODED,
+                "Logic condition encoded as ECC transition guard expression", impl: true);
 
-            // ── SECTION 5: EAE System Specifics ──────────────────────────────
+            // ── SECTION 5: EAE System Specifics ─────────────────────────────
             yield return Section("EAE System Specifics (Hardcoded)");
 
-            yield return Rule("FB Instance ID (syslay)", "Deterministic SHA256 hash", MappingType.HARDCODED,
-                "8-byte hex ID from SHA256(\"syslay:<name>\")", impl: true);
+            yield return Rule("FB Instance ID (syslay)", "Deterministic SHA256 hash",
+                MappingType.HARDCODED,
+                "8-byte hex ID from SHA256(\"syslay:<n>\")", impl: true);
 
-            yield return Rule("FB Instance ID (sysres)", "Deterministic SHA256 hash", MappingType.HARDCODED,
-                "Separate ID from SHA256(\"sysres:<name>\")", impl: true);
+            yield return Rule("FB Instance ID (sysres)", "Deterministic SHA256 hash",
+                MappingType.HARDCODED,
+                "Separate ID from SHA256(\"sysres:<n>\")", impl: true);
 
             yield return Rule("Namespace", "\"Main\"", MappingType.HARDCODED,
                 "All injected FBs are in the Main namespace", impl: true);
 
-            yield return Rule("Mapping= attribute (sysres)", "syslay FB ID", MappingType.HARDCODED,
+            yield return Rule("Mapping= attribute (sysres)", "syslay FB ID",
+                MappingType.HARDCODED,
                 "sysres.Mapping references the matching syslay instance", impl: true);
 
             yield return Rule("Layout position (x, y)", "Auto-calculated", MappingType.HARDCODED,
                 "Non-overlapping grid positions per type group", impl: true);
 
-            yield return Rule("actuator_name parameter", "Component name (lowercase)", MappingType.HARDCODED,
+            yield return Rule("actuator_name parameter", "Component name (lowercase)",
+                MappingType.HARDCODED,
                 "Written into Five_State_Actuator_CAT Parameter element", impl: true);
 
-            yield return Rule("Text parameter (Process)", "State name array", MappingType.HARDCODED,
+            yield return Rule("Text parameter (Process)", "State name array",
+                MappingType.HARDCODED,
                 "Written into Process1_CAT Parameter element", impl: true);
         }
 
