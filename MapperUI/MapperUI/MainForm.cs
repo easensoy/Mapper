@@ -298,22 +298,29 @@ namespace MapperUI
                     return;
             }
 
-            // Include valid actuators (allowed list) AND the Process component (needed to rename
-            // the existing Process1 FB → Feed_Station, as read from Control.xml <n> tag).
+            // Include valid actuators (allowed list) AND the single Process component for THIS station.
+            // Control.xml may contain multiple Process components (Feed_Station, Assembly_Station, etc.)
+            // but we only inject the first one — it maps to the Process1_CAT spare slot in this syslay.
+            // The true instance name (Feed_Station) is resolved later via PatchProcessNames → <n> tag.
+            var firstProcess = _loadedComponents
+                .FirstOrDefault(c => TypeIs(c, "Process") &&
+                    _validationRows.Any(r => r.Component == c && r.IsValid));
+
             var toInject = _validationRows
                 .Where(r => r.IsValid &&
-                    (_allowedInstances.Contains(r.Component.Name) || TypeIs(r.Component, "Process")))
+                    (_allowedInstances.Contains(r.Component.Name) ||
+                     r.Component == firstProcess))
                 .Select(r => r.Component).ToList();
 
             foreach (var b in _validationRows.Where(r =>
-                !_allowedInstances.Contains(r.Component.Name) && !TypeIs(r.Component, "Process")))
+                !_allowedInstances.Contains(r.Component.Name) && r.Component != firstProcess))
                 MapperLogger.Info($"{b.Component.Name} ({b.Component.Type}) out of scope, skipped.");
 
-            // Guard: if only the Process component is in toInject (no actuators) and nothing needs renaming, still proceed.
-            if (toInject.Count(c => TypeIs(c, "Actuator") || TypeIs(c, "Sensor")) == 0 &&
-                toInject.All(c => TypeIs(c, "Process")))
+            // Guard: if only the Process component is in toInject (no actuators), still proceed —
+            // injector will just rename Process1 → Feed_Station.
+            if (toInject.Count == 1 && firstProcess != null && toInject[0] == firstProcess)
             {
-                // Process-only — injector will just rename Process1 → Feed_Station if needed.
+                // Process-only run — valid, continue.
             }
             else if (toInject.Count == 0)
             {
