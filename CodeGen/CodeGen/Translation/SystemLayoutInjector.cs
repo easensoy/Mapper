@@ -21,7 +21,7 @@ namespace MapperUI.Services
     ///   nextY = max(existing y of same CAT type in network) + YGap
     ///
     /// Wiring: ALL actuators in the network are wired after every injection run.
-    ///   AddConn is idempotent — existing connections are never duplicated.
+    ///   AddConn is idempotent existing connections are never duplicated.
     ///   Event  Process.state_update              → Actuator.pst_event
     ///   Event  Actuator.pst_out                  → Process.state_change
     ///   Data   Process.actuator_name             → Actuator.process_state_name
@@ -43,7 +43,7 @@ namespace MapperUI.Services
 
         private const int YGap = 1400;  // vertical gap between new FBs
 
-        // X columns — actuators LEFT of sensors to match reference syslay
+        // X columns actuators LEFT of sensors to match reference syslay
         private const int ActuatorX = 1300;
         private const int SensorX = 1560;
         private const int ProcessX = 3360;
@@ -68,7 +68,7 @@ namespace MapperUI.Services
             Classify(net, RobotCatType, Robots(components, config), report);
 
             foreach (var c in Unsupported(components, config))
-                report.Unsupported.Add($"{c.Name} — {c.Type}/{c.States.Count} states: no template this phase");
+                report.Unsupported.Add($"{c.Name} {c.Type}/{c.States.Count} states: no template this phase");
 
             return report;
         }
@@ -127,7 +127,7 @@ namespace MapperUI.Services
             if (renames.Any())
                 RewriteConnections(net, renames);
 
-            // Wire ALL actuators in the network — AddConn is idempotent so existing
+            // Wire ALL actuators in the network AddConn is idempotent so existing
             // wiring (e.g. Pusher→Process1) is never duplicated, and new actuators
             // (Checker, Transfer, Ejector) get their connections even on re-runs.
             string? proc = FirstFbOfType(net, ProcessCatType)?.Attribute("Name")?.Value;
@@ -146,7 +146,7 @@ namespace MapperUI.Services
             }
             else
             {
-                result.UnsupportedComponents.Add("No Process1_CAT found in syslay — wiring skipped");
+                result.UnsupportedComponents.Add("No Process1_CAT found in syslay wiring skipped");
             }
 
             doc.Save(config.SyslayPath);
@@ -201,17 +201,17 @@ namespace MapperUI.Services
 
             foreach (var comp in group)
             {
-                // 1. Exact match already present — update params only
+                // 1. Exact match already present update params only
                 var present = FindFb(net, comp.Name, catType);
                 if (present != null)
                 {
                     ApplyParams(present, comp, catType);
                     RecordId(present, comp.Name, isSysres, syslayIds);
-                    result.SkippedFBs.Add($"{comp.Name} — already present, params updated");
+                    result.SkippedFBs.Add($"{comp.Name} already present, params updated");
                     continue;
                 }
 
-                // 2. Spare slot — remap existing placeholder
+                // 2. Spare slot remap existing placeholder
                 if (spareIdx < spares.Count)
                 {
                     var slot = spares[spareIdx++];
@@ -225,7 +225,7 @@ namespace MapperUI.Services
                     continue;
                 }
 
-                // 3. Brand-new FB — placed at columnX, nextY
+                // 3. Brand-new FB placed at columnX, nextY
                 string id = isSysres ? MakeId(comp.Name, "sysres") : MakeId(comp.Name, "syslay");
 
                 var fb = new XElement(Ns + "FB",
@@ -270,7 +270,7 @@ namespace MapperUI.Services
         }
 
         // ── Actuator wiring ───────────────────────────────────────────────────
-        // Wires ALL supplied actuators — AddConn skips duplicates so safe to call
+        // Wires ALL supplied actuators AddConn skips duplicates so safe to call
         // on every run regardless of whether actuators were newly injected or not.
 
         private static void WireActuators(XElement net, List<string> actuators,
@@ -451,10 +451,32 @@ namespace MapperUI.Services
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
             foreach (var n in wanted)
-                (existing.Contains(n) ? report.Present : report.ToInject).Add(n);
+                (existing.Contains(n) ? report.AlreadyPresent : report.ToBeInjected).Add(n);
 
             foreach (var n in existing.Where(e => !wanted.Contains(e)))
                 report.Spare.Add(n);
+        }
+
+        // ── DiffReport ────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Summarises what PreviewDiff found: which components are already in the
+        /// project, which need injecting, which are spare placeholders, and which
+        /// are unsupported in this phase.
+        /// </summary>
+        public class DiffReport
+        {
+            /// <summary>FBs already present in the syslay with the correct type.</summary>
+            public List<string> AlreadyPresent { get; } = new();
+
+            /// <summary>Components that will be injected on the next Generate run.</summary>
+            public List<string> ToBeInjected { get; } = new();
+
+            /// <summary>Existing FBs of the same CAT type with no matching component.</summary>
+            public List<string> Spare { get; } = new();
+
+            /// <summary>Components with no template for this phase (skipped).</summary>
+            public List<string> Unsupported { get; } = new();
         }
 
         // ── Component filters ─────────────────────────────────────────────────
