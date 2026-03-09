@@ -195,7 +195,7 @@ namespace MapperUI
         {
             dgvMappingRules.Rows.Clear();
 
-            var cfg = GetMapperConfig();
+            _ = GetMapperConfig();
             foreach (var rule in RuleEngine.GetAllRules())
                 AddMappingRuleRow(rule);
 
@@ -307,7 +307,7 @@ namespace MapperUI
         private static ComponentValidationRow Fail(VueOneComponent c, string t, string reason) =>
             new() { Component = c, TemplateName = t, IsValid = false, FailReason = reason };
 
-        // ────────────────────────────────────────────────────────────────────
+        // ─────────────────────────────────────────────────────────────────────
         // Generate Code (Actuators + Sensors → syslay / sysres injection)
         // ─────────────────────────────────────────────────────────────────────
 
@@ -459,7 +459,7 @@ namespace MapperUI
         {
             btnGenerateRobotWrapper.Enabled = false;
             MapperLogger.Info("──────────────────────────────────────────");
-            MapperLogger.Info("Generate Robot_Task_CAT Wrapper — started.");
+            MapperLogger.Info("Generate CAT wrapper — started.");
 
             try
             {
@@ -482,10 +482,10 @@ namespace MapperUI
                 var result = await Task.Run(
                     () => RobotTaskCatRegistrar.Register(cfg, dfbprojPath));
 
-                MapperLogger.Info("Generate Robot_Task_CAT Wrapper — complete.");
+                MapperLogger.Info("Generate CAT wrapper — complete.");
                 MapperLogger.Info(result);
 
-                MessageBox.Show(result, "Robot_Task_CAT Wrapper Generated",
+                MessageBox.Show(result, "CAT Wrapper Generated",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
 
                 // Refresh dfbproj check line in log
@@ -494,8 +494,8 @@ namespace MapperUI
             }
             catch (Exception ex)
             {
-                MapperLogger.Error($"Robot_Task_CAT generation failed: {ex.Message}");
-                MessageBox.Show($"Robot_Task_CAT generation failed:\n\n{ex.Message}",
+                MapperLogger.Error($"CAT wrapper generation failed: {ex.Message}");
+                MessageBox.Show($"CAT wrapper generation failed:\n\n{ex.Message}",
                     "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
@@ -528,7 +528,7 @@ namespace MapperUI
                 dgvOutputs.Rows.Add(vr.FailReason, "");
         }
 
-        // ─────────────────────────────────────────────────────────────────────
+        // ────────────────────────────────────────────────────────────────────
         // Helpers
         // ─────────────────────────────────────────────────────────────────────
 
