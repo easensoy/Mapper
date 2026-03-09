@@ -194,18 +194,27 @@ namespace MapperUI
                     var vr = ValidateComponent(comp, validator, cfg);
                     _validationRows.Add(vr);
 
-                    // 3-column grid — no Validated column in Mapping Information
-                    int idx = dgvComponents.Rows.Add(comp.Name, comp.Type, vr.TemplateName);
+                    // Determine if this component is in the phase-1 whitelist
+                    bool inScope = _allowedInstances.Contains(comp.Name);
+                    string validSym = (vr.IsValid && inScope) ? SymPass : SymFail;
+
+                    int idx = dgvComponents.Rows.Add(comp.Name, comp.Type, vr.TemplateName, validSym);
                     var row = dgvComponents.Rows[idx];
                     Color bg = (rowIdx++ % 2 == 0) ? RowEven : RowOdd;
                     row.DefaultCellStyle.BackColor = bg;
                     row.DefaultCellStyle.ForeColor = Color.Black;
 
+                    // Template cell: green for valid, red for unsupported/missing
                     var tmplCell = row.Cells[colTemplate.Index];
                     tmplCell.Style.ForeColor = vr.IsValid ? ColorTranslated : ColorDiscarded;
                     tmplCell.Style.BackColor = bg;
 
-                    bool inScope = _allowedInstances.Contains(comp.Name);
+                    // Validated cell: green ✓ only for whitelisted+valid; red ✗ for everything else
+                    var validCell = row.Cells[colValidated.Index];
+                    validCell.Style.ForeColor = (vr.IsValid && inScope) ? ColorTranslated : ColorDiscarded;
+                    validCell.Style.Font = new Font(dgvComponents.Font, FontStyle.Bold);
+                    validCell.Style.BackColor = bg;
+
                     MapperLogger.Validate(
                         $"{comp.Name} ({comp.Type}) → {vr.TemplateName} " +
                         $"[{(vr.IsValid ? "PASS" : "FAIL: " + vr.FailReason)}]" +
