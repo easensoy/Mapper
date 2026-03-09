@@ -15,6 +15,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 
 using RuleEngine = MapperUI.Services.MappingRuleEngine;
+using MappingRule = MapperUI.Services.MappingRuleEntry;
 using UiMappingType = MapperUI.Services.MappingType;
 
 namespace MapperUI
@@ -115,11 +116,9 @@ namespace MapperUI
             {
                 MapperLogger.Info($"Loading: {path}");
 
-                var reader = new ControlXmlReader();
                 _lastReader = new SystemXmlReader();
 
-                _loadedComponents = await Task.Run(() => reader.ReadComponents(path));
-                _ = await Task.Run(() => _lastReader.ReadSystem(path));
+                _loadedComponents = await Task.Run(() => _lastReader.ReadAllComponents(path));
 
                 if (_loadedComponents.Count == 0)
                 {
@@ -131,9 +130,7 @@ namespace MapperUI
                 }
 
                 // ── Populate Mapping Rules grid ───────────────────────────────
-                var systemRules = RuleEngine.GetSystemRules(
-                    _lastReader.SystemId ?? "—", _lastReader.SystemName ?? "—");
-                foreach (var rule in systemRules)
+                foreach (var rule in RuleEngine.GetAllRules())
                     AddMappingRuleRow(rule);
 
                 var validator = new ComponentValidator();
@@ -142,11 +139,6 @@ namespace MapperUI
 
                 foreach (var comp in _loadedComponents)
                 {
-                    // Mapping rules per component
-                    var compRules = RuleEngine.GetComponentRules(comp);
-                    foreach (var rule in compRules)
-                        AddMappingRuleRow(rule);
-
                     // Validation row
                     var vr = ValidateComponent(comp, validator, cfg);
                     _validationRows.Add(vr);
@@ -204,29 +196,30 @@ namespace MapperUI
             dgvMappingRules.Rows.Clear();
 
             var cfg = GetMapperConfig();
-            foreach (var rule in RuleEngine.GetSystemRules("—", "—"))
+            foreach (var rule in RuleEngine.GetAllRules())
                 AddMappingRuleRow(rule);
-
-            if (_loadedComponents.Any())
-                foreach (var comp in _loadedComponents)
-                    foreach (var rule in RuleEngine.GetComponentRules(comp))
-                        AddMappingRuleRow(rule);
 
             MapperLogger.Info("Mapping rules refreshed.");
         }
 
         private void AddMappingRuleRow(MappingRule rule)
         {
+            var vueOneElement = rule.IsSection ? rule.SectionTitle : rule.VueOneElement;
+            var iecElement = rule.IsSection ? string.Empty : rule.IEC61499Element;
+            var mapType = rule.IsSection ? string.Empty : rule.Type.ToString();
+            var transformRule = rule.IsSection ? string.Empty : rule.TransformationRule;
+            var validated = rule.IsSection ? string.Empty : (rule.IsImplemented ? SymPass : SymFail);
+
             int idx = dgvMappingRules.Rows.Add(
-                rule.VueOneElement,
-                rule.IEC61499Element,
-                rule.MappingType.ToString(),
-                rule.Rule,
-                rule.IsValidated ? SymPass : SymFail);
+                vueOneElement,
+                iecElement,
+                mapType,
+                transformRule,
+                validated);
 
             var row = dgvMappingRules.Rows[idx];
 
-            Color fg = rule.MappingType switch
+            Color fg = rule.Type switch
             {
                 UiMappingType.TRANSLATED => ColorTranslated,
                 UiMappingType.DISCARDED => ColorDiscarded,
@@ -251,7 +244,7 @@ namespace MapperUI
             }
 
             row.Cells[colMappingValidated.Index].Style.ForeColor =
-                rule.IsValidated ? ColorTranslated : ColorDiscarded;
+                rule.IsImplemented ? ColorTranslated : ColorDiscarded;
         }
 
         // ─────────────────────────────────────────────────────────────────────
@@ -314,7 +307,7 @@ namespace MapperUI
         private static ComponentValidationRow Fail(VueOneComponent c, string t, string reason) =>
             new() { Component = c, TemplateName = t, IsValid = false, FailReason = reason };
 
-        // ─────────────────────────────────────────────────────────────────────
+        // ────────────────────────────────────────────────────────────────────
         // Generate Code (Actuators + Sensors → syslay / sysres injection)
         // ─────────────────────────────────────────────────────────────────────
 
@@ -600,7 +593,7 @@ namespace MapperUI
                 MapperLogger.Warn($"  {SymFail} {catName} NOT found in .dfbproj");
         }
 
-        private static void LogDiff(DiffReport diff)
+        private static void LogDiff(SystemInjector.DiffReport diff)
         {
             MapperLogger.Info($"Diff: {diff.ToBeInjected.Count} to inject, " +
                               $"{diff.AlreadyPresent.Count} already present.");
