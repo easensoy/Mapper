@@ -56,8 +56,10 @@ namespace MapperUI.Services
         private const int ProcessX = 3000;
         private const int RobotX = 5000;
 
-        // Process instance name override: VueOne "Process1" → EAE "Feed_Station"
-        private const string ProcessFbInstanceName = "Feed_Station";
+        // Process instance name: read from comp.Name, which is parsed directly from
+        // the <n> element inside the Process <Component> block in Control.xml.
+        // e.g. Control.xml → <n>Feed_Station</n> / <Type>Process</Type>  → FbName = "Feed_Station"
+        // No hardcoding needed — whatever VueOne names it becomes the EAE FB instance name.
 
         // ── Public API ────────────────────────────────────────────────────────
 
@@ -156,7 +158,7 @@ namespace MapperUI.Services
             }
             else
             {
-                result.UnsupportedComponents.Add($"No {ProcessCatType} ({ProcessFbInstanceName}) found in syslay — wiring skipped");
+                result.UnsupportedComponents.Add($"No {ProcessCatType} found in syslay — wiring skipped");
             }
 
             doc.Save(config.SyslayPath);
@@ -264,10 +266,11 @@ namespace MapperUI.Services
 
         /// <summary>
         /// Returns the EAE FB instance name for a component.
-        /// Process FBs are always named Feed_Station regardless of the VueOne component name.
+        /// The name is taken directly from comp.Name, which the ControlXmlReader populates
+        /// from the &lt;n&gt; element of the matching &lt;Component&gt; block in Control.xml.
+        /// For a Process component named "Feed_Station" in VueOne, comp.Name = "Feed_Station".
         /// </summary>
-        private static string FbName(VueOneComponent comp, string catType) =>
-            catType == ProcessCatType ? ProcessFbInstanceName : comp.Name;
+        private static string FbName(VueOneComponent comp, string catType) => comp.Name;
 
         // ── Position helper ───────────────────────────────────────────────────
 
@@ -293,7 +296,7 @@ namespace MapperUI.Services
             {
                 ActuatorCatType => 2080,   // Pusher first, below sensor column bottom (~1860)
                 SensorCatType => 1000,   // hopper first, compact zone start
-                ProcessCatType => 1000,   // Feed_Station aligned with first sensor
+                ProcessCatType => 1000,   // Process FB aligned with first sensor
                 _ => 3000
             };
         }
