@@ -552,13 +552,15 @@ namespace MapperUI
             try
             {
                 var cfg = GetMapperConfig();
-                string result = PusherFBGenerator.Generate(cfg);
+
+                // Pass the already-loaded components from Control.xml — no re-read needed
+                string result = PusherFBGenerator.Generate(cfg, _loadedComponents);
 
                 MapperLogger.Info(result);
                 MessageBox.Show(result, "Pusher FB Generated",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
 
-                // Open Output folder in Explorer so you can zip and send to Alex/Jyotsna
+                // Open the output folder so you can hand it to Jyotsna
                 string outputRoot = string.IsNullOrWhiteSpace(cfg.OutputDirectory)
                     ? System.IO.Path.Combine(Environment.CurrentDirectory, "Output")
                     : cfg.OutputDirectory;
@@ -570,9 +572,7 @@ namespace MapperUI
             {
                 MapperLogger.Error($"Generate Pusher FB failed: {ex.Message}");
                 MessageBox.Show(
-                    $"Failed to generate Pusher FB:\n\n{ex.Message}\n\n" +
-                    "Check ActuatorTemplatePath in mapper_config.json.\n" +
-                    @"It must point to: ...\IEC61499\Five_State_Actuator_CAT\Five_State_Actuator_CAT.fbt",
+                    $"Failed to generate Pusher FB:\n\n{ex.Message}",
                     "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
