@@ -60,7 +60,7 @@ namespace MapperUI.Services
                 : cfg.OutputDirectory;
 
             string timestamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
-            string projectDir = Path.Combine(outputRoot, $"PusherValidation_{timestamp}");
+            string projectDir = Path.Combine(outputRoot, $"Five_State_Actuator_CAT_Pusher_{timestamp}");
             string iec61499Dir = Path.Combine(projectDir, "IEC61499");
             Directory.CreateDirectory(iec61499Dir);
 
