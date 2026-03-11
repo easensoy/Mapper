@@ -149,7 +149,8 @@ namespace MapperUI
                     row.DefaultCellStyle.ForeColor = Color.Black;
 
                     var tmplCell = row.Cells[2]; // Template column (3rd column)
-                    tmplCell.Style.ForeColor = vr.IsValid ? ColorTranslated : ColorDiscarded;
+                    bool showAsActive = vr.IsValid && inScope;
+                    tmplCell.Style.ForeColor = showAsActive ? ColorTranslated : ColorDiscarded;
                     tmplCell.Style.BackColor = bg;
 
                     MapperLogger.Validate(
@@ -251,10 +252,16 @@ namespace MapperUI
         private static ComponentValidationRow ValidateComponent(
             VueOneComponent comp, ComponentValidator validator, MapperConfig cfg)
         {
-            string tPath = ResolveTemplatePath(comp, cfg);
+            // Out-of-scope components get no template — they are not processed.
+            bool inScope = _allowedInstances.Contains(comp.Name);
+
+            string tPath = inScope ? ResolveTemplatePath(comp, cfg) : string.Empty;
             string tName = string.IsNullOrEmpty(tPath)
                 ? "No template found (discarded for this phase)"
                 : Path.GetFileName(tPath);
+
+            if (!inScope)
+                return Pass(comp, tName); // out of scope — show as discarded, not failed
 
             switch (comp.Type.ToLowerInvariant())
             {
