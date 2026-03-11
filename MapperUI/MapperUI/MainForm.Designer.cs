@@ -188,6 +188,24 @@ namespace MapperUI
             this.btnGenerateRobotWrapper.UseVisualStyleBackColor = false;
             this.btnGenerateRobotWrapper.Click += new System.EventHandler(this.btnGenerateRobotWrapper_Click);
 
+            //   // "Generate Pusher FB" — orange, below CAT Wrapper Generator
+            this.btnGeneratePusherFB.Anchor =
+                System.Windows.Forms.AnchorStyles.Top |
+                System.Windows.Forms.AnchorStyles.Right;
+            this.btnGeneratePusherFB.BackColor = System.Drawing.Color.FromArgb(200, 100, 0);
+            this.btnGeneratePusherFB.Enabled = true;
+            this.btnGeneratePusherFB.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnGeneratePusherFB.FlatAppearance.BorderSize = 0;
+            this.btnGeneratePusherFB.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
+            this.btnGeneratePusherFB.ForeColor = System.Drawing.Color.White;
+            this.btnGeneratePusherFB.Location = new System.Drawing.Point(1248, 86);   // 29 px below RobotWrapper
+            this.btnGeneratePusherFB.Name = "btnGeneratePusherFB";
+            this.btnGeneratePusherFB.Size = new System.Drawing.Size(140, 25);
+            this.btnGeneratePusherFB.TabIndex = 7;
+            this.btnGeneratePusherFB.Text = "Generate Pusher FB";
+            this.btnGeneratePusherFB.UseVisualStyleBackColor = false;
+            this.btnGeneratePusherFB.Click += new System.EventHandler(this.btnGeneratePusherFB_Click);
+
             // ── Validation Output group (starts at y=90 to clear both buttons) ─
             this.grpValidation.Anchor =
                 System.Windows.Forms.AnchorStyles.Top |
@@ -415,7 +433,8 @@ namespace MapperUI
 
             this.Controls.Add(this.grpMappingInfo);
             this.Controls.Add(this.grpValidation);
-            this.Controls.Add(this.btnGenerateRobotWrapper);   // ← NEW (add before GenerateCode so tab order is natural)
+            this.Controls.Add(this.btnGenerateRobotWrapper);
+            this.Controls.Add(this.btnGeneratePusherFB);
             this.Controls.Add(this.btnGenerateCode);
             this.Controls.Add(this.btnBrowse);
             this.Controls.Add(this.btnMappingRules);
