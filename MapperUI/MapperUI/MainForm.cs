@@ -61,13 +61,47 @@ namespace MapperUI
         private static readonly Color RowOdd = Color.FromArgb(245, 245, 245);
         private const string SymPass = "✓";
         private const string SymFail = "✗";
+        private const string ColComponentName = "colComponentName";
+        private const string ColComponentType = "colComponentType";
+        private const string ColComponentTemplate = "colComponentTemplate";
 
         // ── Constructor ───────────────────────────────────────────────────────
         public MainForm()
         {
             InitializeComponent();
+            EnsureComponentGridColumns();
             btnGenerateCode.Enabled = false;
             btnGenerateRobotWrapper.Enabled = true;
+        }
+
+        private void EnsureComponentGridColumns()
+        {
+            if (dgvComponents.Columns.Count > 0)
+                return;
+
+            dgvComponents.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = ColComponentName,
+                HeaderText = "Component",
+                Width = 200,
+                ReadOnly = true
+            });
+
+            dgvComponents.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = ColComponentType,
+                HeaderText = "Type",
+                Width = 140,
+                ReadOnly = true
+            });
+
+            dgvComponents.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = ColComponentTemplate,
+                HeaderText = "Template",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                ReadOnly = true
+            });
         }
 
         // ─────────────────────────────────────────────────────────────────────
@@ -152,7 +186,7 @@ namespace MapperUI
                     row.DefaultCellStyle.BackColor = bg;
                     row.DefaultCellStyle.ForeColor = Color.Black;
 
-                    var tmplCell = row.Cells[colTemplate.Index];
+                    var tmplCell = row.Cells[ColComponentTemplate];
                     tmplCell.Style.ForeColor = vr.IsValid ? ColorTranslated : ColorDiscarded;
                     tmplCell.Style.BackColor = bg;
 
