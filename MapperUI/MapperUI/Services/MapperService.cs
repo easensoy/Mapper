@@ -9,6 +9,7 @@ using CodeGen.Models;
 using CodeGen.Translation;
 using CodeGen.Validation;
 
+// Rewritten for deterministic CAT companion handling and dfbproj registration.
 namespace MapperUI.Services
 {
     public class MapperService
@@ -80,7 +81,8 @@ namespace MapperUI.Services
                 };
             }
 
-            var deploySubDir = Path.Combine(config.EAEDeployPath, generatedFB.FBName);
+            var deployRoot = NormalizeDeployRoot(config.EAEDeployPath, generatedFB.FBName);
+            var deploySubDir = Path.Combine(deployRoot, generatedFB.FBName);
             Directory.CreateDirectory(deploySubDir);
 
             CopyFile(localSubDir, deploySubDir, generatedFB.FbtFile);
@@ -92,9 +94,7 @@ namespace MapperUI.Services
 
             MapperLogger.Info($"[PusherFB] Deployed to EAEDeployPath: {deploySubDir}");
 
-            var dfbproj = Directory
-                .GetFiles(config.EAEDeployPath, "*.dfbproj", SearchOption.TopDirectoryOnly)
-                .FirstOrDefault();
+            var dfbproj = FindDfbproj(deployRoot);
 
             if (dfbproj == null)
             {
@@ -286,6 +286,39 @@ namespace MapperUI.Services
             using var writer = System.Xml.XmlWriter.Create(dfbprojPath, settings);
             xml.Save(writer);
             return adds;
+        }
+
+        private static string NormalizeDeployRoot(string configuredPath, string generatedFbName)
+        {
+            var fullPath = Path.GetFullPath(configuredPath);
+            var leaf = Path.GetFileName(fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+
+            if (string.Equals(leaf, generatedFbName, StringComparison.OrdinalIgnoreCase))
+            {
+                var parent = Directory.GetParent(fullPath)?.FullName;
+                if (!string.IsNullOrWhiteSpace(parent))
+                {
+                    MapperLogger.Warn($"[PusherFB] EAEDeployPath points to '{generatedFbName}' folder. Using parent IEC61499 root: {parent}");
+                    return parent;
+                }
+            }
+
+            return fullPath;
+        }
+
+        private static string FindDfbproj(string startDirectory)
+        {
+            var dir = new DirectoryInfo(startDirectory);
+            while (dir != null)
+            {
+                var match = dir.GetFiles("*.dfbproj", SearchOption.TopDirectoryOnly).FirstOrDefault();
+                if (match != null)
+                    return match.FullName;
+
+                dir = dir.Parent;
+            }
+
+            return null;
         }
 
         private static MapperResult Fail(string name, ValidationResult vr, string msg) =>
