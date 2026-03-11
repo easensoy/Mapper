@@ -8,6 +8,7 @@ using System.Text;
 using System.Xml.Linq;
 using CodeGen.Models;
 
+// Rewritten for deterministic CAT companion handling and dfbproj registration.
 namespace CodeGen.Translation
 {
     public class FBGenerator
