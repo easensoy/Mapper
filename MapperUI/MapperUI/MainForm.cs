@@ -110,6 +110,7 @@ namespace MapperUI
             _loadedComponents.Clear();
             _validationRows.Clear();
             btnGenerateCode.Enabled = false;
+            btnGeneratePusherFB.Enabled = true;
             lblStatus.Text = "Loading…";
 
             try
@@ -506,7 +507,9 @@ namespace MapperUI
 
         private void btnGeneratePusherFB_Click(object sender, EventArgs e)
         {
-            MapperLogger.Info("=== Generate Pusher FB ===");
+            btnGeneratePusherFB.Enabled = false;
+            MapperLogger.Info("══════════════════════════════════════════");
+            MapperLogger.Info("Generate Pusher FB — started.");
 
             try
             {
@@ -514,15 +517,15 @@ namespace MapperUI
                 string result = PusherFBGenerator.Generate(cfg);
 
                 MapperLogger.Info(result);
-                MessageBox.Show(result, "Pusher FB Generated", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(result, "Pusher FB Generated",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
 
-                // Open the output folder in Explorer so the user can immediately
-                // zip it up and send it to Alex / Jyotsna.
+                // Open Output folder in Explorer so you can zip and send to Alex/Jyotsna
                 string outputRoot = string.IsNullOrWhiteSpace(cfg.OutputDirectory)
-                    ? Path.Combine(Environment.CurrentDirectory, "Output")
+                    ? System.IO.Path.Combine(Environment.CurrentDirectory, "Output")
                     : cfg.OutputDirectory;
 
-                if (Directory.Exists(outputRoot))
+                if (System.IO.Directory.Exists(outputRoot))
                     System.Diagnostics.Process.Start("explorer.exe", outputRoot);
             }
             catch (Exception ex)
@@ -530,9 +533,13 @@ namespace MapperUI
                 MapperLogger.Error($"Generate Pusher FB failed: {ex.Message}");
                 MessageBox.Show(
                     $"Failed to generate Pusher FB:\n\n{ex.Message}\n\n" +
-                    "Check ActuatorTemplatePath in mapper_config.json points to:\n" +
-                    @"...\IEC61499\Five_State_Actuator_CAT\Five_State_Actuator_CAT.fbt",
+                    "Check ActuatorTemplatePath in mapper_config.json.\n" +
+                    @"It must point to: ...\IEC61499\Five_State_Actuator_CAT\Five_State_Actuator_CAT.fbt",
                     "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                btnGeneratePusherFB.Enabled = true;
             }
         }
 
