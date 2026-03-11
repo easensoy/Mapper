@@ -29,13 +29,11 @@ namespace MapperUI
         private SystemXmlReader? _lastReader;
         private DebugConsoleForm? _debugConsole;
 
-        // ── In-scope whitelist (actuators + sensors that are ready to inject) ─
+        // ── In-scope whitelist ────────────────────────────────────────────────
         private static readonly HashSet<string> _allowedInstances =
             new(StringComparer.OrdinalIgnoreCase)
             {
-                // Actuators
                 "Checker", "Transfer", "Feeder", "Ejector",
-                // Sensors
                 "PartInHopper", "PartAtChecker"
             };
 
@@ -66,16 +64,6 @@ namespace MapperUI
             InitializeComponent();
             btnGenerateCode.Enabled = false;
             btnGenerateRobotWrapper.Enabled = true;
-
-            // ── Layout fix: shrink Validation Output, expand Mapping Information ──
-            // Validation Output (mapping rules grid) only needs ~200px — it scrolls.
-            // Mapping Information needs more space to show components + Inputs + Outputs.
-            grpValidation.Height = 200;
-            grpMappingInfo.Top = grpValidation.Bottom + 6;
-            // grpMappingInfo is anchored Top+Bottom so it auto-fills remaining space.
-
-            // Rename Inputs group to "Inputs / States" to match the header
-            grpInputs.Text = "Inputs / States";
         }
 
         // ─────────────────────────────────────────────────────────────────────
@@ -125,7 +113,6 @@ namespace MapperUI
                 MapperLogger.Info($"Loading: {path}");
 
                 _lastReader = new SystemXmlReader();
-
                 _loadedComponents = await Task.Run(() => _lastReader.ReadAllComponents(path));
 
                 if (_loadedComponents.Count == 0)
@@ -137,7 +124,6 @@ namespace MapperUI
                     return;
                 }
 
-                // ── Populate Mapping Rules grid ───────────────────────────────
                 foreach (var rule in RuleEngine.GetAllRules())
                     AddMappingRuleRow(rule);
 
@@ -158,7 +144,7 @@ namespace MapperUI
                     row.DefaultCellStyle.BackColor = bg;
                     row.DefaultCellStyle.ForeColor = Color.Black;
 
-                    var tmplCell = row.Cells[2]; // Template column (3rd column)
+                    var tmplCell = row.Cells[colTemplate.Index];
                     tmplCell.Style.ForeColor = vr.IsValid ? ColorTranslated : ColorDiscarded;
                     tmplCell.Style.BackColor = bg;
 
@@ -201,11 +187,9 @@ namespace MapperUI
         private void btnMappingRules_Click(object sender, EventArgs e)
         {
             dgvMappingRules.Rows.Clear();
-
             _ = GetMapperConfig();
             foreach (var rule in RuleEngine.GetAllRules())
                 AddMappingRuleRow(rule);
-
             MapperLogger.Info("Mapping rules refreshed.");
         }
 
@@ -218,11 +202,7 @@ namespace MapperUI
             var validated = rule.IsSection ? string.Empty : (rule.IsImplemented ? SymPass : SymFail);
 
             int idx = dgvMappingRules.Rows.Add(
-                vueOneElement,
-                iecElement,
-                mapType,
-                transformRule,
-                validated);
+                vueOneElement, iecElement, mapType, transformRule, validated);
 
             var row = dgvMappingRules.Rows[idx];
 
@@ -261,8 +241,8 @@ namespace MapperUI
         private static ComponentValidationRow ValidateComponent(
             VueOneComponent comp, ComponentValidator validator, MapperConfig cfg)
         {
-            // Template resolves for ALL components by type — not by scope.
-            // Scope only controls whether generation runs and the display colour.
+            // Template resolves by TYPE for all components.
+            // Bearing_PnP etc. get discarded because they don't have 5 states.
             string tPath = ResolveTemplatePath(comp, cfg);
             string tName = string.IsNullOrEmpty(tPath)
                 ? "No template found (discarded for this phase)"
@@ -281,13 +261,13 @@ namespace MapperUI
                 case "actuator":
                     if (comp.States.Count != 5)
                         return Fail(comp, "No template found (discarded for this phase)",
-                            $"Actuator has {comp.States.Count} states, not 5 — no matching template");
+                            $"Actuator has {comp.States.Count} states, not 5");
                     break;
 
                 case "sensor":
                     if (comp.States.Count != 2)
                         return Fail(comp, "No template found (discarded for this phase)",
-                            $"Sensor has {comp.States.Count} states, not 2 — no matching template");
+                            $"Sensor has {comp.States.Count} states, not 2");
                     break;
 
                 default:
@@ -324,7 +304,6 @@ namespace MapperUI
 
         private async void btnGenerateCode_Click(object sender, EventArgs e)
         {
-            // ── pre-flight validation warnings ────────────────────────────────
             var failedInScope = _validationRows
                 .Where(r => !r.IsValid && _allowedInstances.Contains(r.Component.Name))
                 .ToList();
@@ -342,7 +321,6 @@ namespace MapperUI
                     return;
             }
 
-            // ── build inject list: all valid in-scope components ──────────────
             var toInject = _validationRows
                 .Where(r => r.IsValid && _allowedInstances.Contains(r.Component.Name))
                 .Select(r => r.Component)
@@ -363,8 +341,8 @@ namespace MapperUI
 
             btnGenerateCode.Enabled = false;
 
-            var inScope = toInject.Select(c => $"{c.Name} ({c.Type})");
-            MapperLogger.Info($"Generating code. {toInject.Count} component(s): {string.Join(", ", inScope)}");
+            var inScopeNames = toInject.Select(c => $"{c.Name} ({c.Type})");
+            MapperLogger.Info($"Generating code. {toInject.Count} component(s): {string.Join(", ", inScopeNames)}");
             foreach (var c in toInject) MapperLogger.Info($"{SymPass} {c.Name} ({c.Type})");
 
             try
@@ -408,12 +386,9 @@ namespace MapperUI
                     return;
                 }
 
-                // ─────────────────────────────────────────────────────────────
+                // ──────────────────────────────────────────────────────────
                 // PHASE 1: Clone CAT types for each in-scope component
-                // ─────────────────────────────────────────────────────────────
-                // Creates IEC61499\{TemplateName}_{ComponentName}\ with all 11
-                // files and registers them in dfbproj.
-
+                // ──────────────────────────────────────────────────────────
                 MapperLogger.Info("── Phase 1: Cloning CAT types ──");
                 int cloned = 0;
                 foreach (var comp in toInject)
@@ -432,8 +407,7 @@ namespace MapperUI
 
                     try
                     {
-                        var cloneResult = CatTypeCloner.Clone(
-                            templatePath, newCatName, dfbproj, comp.Name);
+                        CatTypeCloner.Clone(templatePath, newCatName, dfbproj, comp.Name);
                         MapperLogger.Info($"  {SymPass} {newCatName} — created and registered.");
                         cloned++;
                     }
@@ -444,10 +418,9 @@ namespace MapperUI
                 }
                 MapperLogger.Info($"── Phase 1 complete: {cloned} CAT type(s) cloned ──");
 
-                // ─────────────────────────────────────────────────────────────
+                // ──────────────────────────────────────────────────────────
                 // PHASE 2: Inject instances into syslay / sysres
-                // ─────────────────────────────────────────────────────────────
-
+                // ──────────────────────────────────────────────────────────
                 MapperLogger.Info("── Phase 2: Injecting instances into syslay/sysres ──");
 
                 var injector = new SystemInjector();
@@ -461,7 +434,7 @@ namespace MapperUI
                         "All in-scope instances already present in syslay.\n" +
                         "Switch to EAE and click Reload Solution.",
                         "Done", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    MapperLogger.Info("No new instances to inject (syslay already up to date).");
+                    MapperLogger.Info("No new instances to inject.");
                     return;
                 }
 
@@ -490,8 +463,7 @@ namespace MapperUI
                 msg.AppendLine($"Cloned {cloned} CAT type(s).");
                 msg.AppendLine($"Injected {result.InjectedFBs.Count} instance(s) into syslay/sysres.");
                 if (result.UnsupportedComponents.Any())
-                    msg.AppendLine(
-                        $"\n{result.UnsupportedComponents.Count} component(s) skipped (see Debug Console).");
+                    msg.AppendLine($"\n{result.UnsupportedComponents.Count} component(s) skipped (see Debug Console).");
                 msg.AppendLine("\nSwitch to EAE and click Reload Solution.");
                 MessageBox.Show(msg.ToString(), "Done: Reload EAE",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -521,7 +493,6 @@ namespace MapperUI
             try
             {
                 var cfg = GetMapperConfig();
-
                 var dfbprojPath = DeriveProjectFile(cfg.SyslayPath);
                 if (dfbprojPath == null)
                 {
@@ -561,7 +532,7 @@ namespace MapperUI
         }
 
         // ─────────────────────────────────────────────────────────────────────
-        // Generate Single Pusher FB (legacy / test button)
+        // Generate Pusher FB (test button wired in Designer)
         // ─────────────────────────────────────────────────────────────────────
 
         private async void btnGeneratePusherFB_Click(object sender, EventArgs e)
@@ -665,9 +636,6 @@ namespace MapperUI
             return _mapperConfig;
         }
 
-        /// <summary>
-        /// Walks up from the given path until IEC61499.dfbproj is found.
-        /// </summary>
         private static string? DeriveProjectFile(string startPath)
         {
             var dir = Directory.Exists(startPath)
