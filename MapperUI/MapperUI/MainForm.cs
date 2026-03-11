@@ -148,7 +148,7 @@ namespace MapperUI
                     row.DefaultCellStyle.BackColor = bg;
                     row.DefaultCellStyle.ForeColor = Color.Black;
 
-                    var tmplCell = row.Cells[colTemplate.Index];
+                    var tmplCell = row.Cells[2]; // Template column (3rd column)
                     tmplCell.Style.ForeColor = vr.IsValid ? ColorTranslated : ColorDiscarded;
                     tmplCell.Style.BackColor = bg;
 
@@ -253,10 +253,34 @@ namespace MapperUI
         {
             string tPath = ResolveTemplatePath(comp, cfg);
             string tName = string.IsNullOrEmpty(tPath)
-                ? "(no template)"
-                : Path.GetFileNameWithoutExtension(tPath);
+                ? "No template found (discarded for this phase)"
+                : Path.GetFileName(tPath);
 
-            var vr = validator.Validate(comp, tPath);
+            switch (comp.Type.ToLowerInvariant())
+            {
+                case "process":
+                    return Pass(comp, tName);
+
+                case "robot":
+                    if (string.IsNullOrWhiteSpace(cfg.RobotTemplatePath))
+                        return Fail(comp, tName, "RobotTemplatePath not set in mapper_config.json");
+                    return Pass(comp, tName);
+
+                case "actuator":
+                    if (comp.States.Count != 5)
+                        return Fail(comp, tName, "Actuator must have exactly 5 states");
+                    break;
+
+                case "sensor":
+                    if (comp.States.Count != 2)
+                        return Fail(comp, tName, "Sensor must have exactly 2 states");
+                    break;
+
+                default:
+                    return Fail(comp, tName, $"Unknown type '{comp.Type}'");
+            }
+
+            var vr = validator.Validate(comp);
             return vr.IsValid
                 ? Pass(comp, tName)
                 : Fail(comp, tName, string.Join("; ", vr.Errors));
@@ -519,6 +543,50 @@ namespace MapperUI
             finally
             {
                 btnGenerateRobotWrapper.Enabled = true;
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // Generate Single Pusher FB (legacy / test button)
+        // ─────────────────────────────────────────────────────────────────────
+
+        private async void btnGeneratePusherFB_Click(object sender, EventArgs e)
+        {
+            MapperLogger.Info("Generate Pusher FB — started.");
+            try
+            {
+                var cfg = GetMapperConfig();
+                var dfbprojPath = DeriveProjectFile(cfg.SyslayPath);
+                if (dfbprojPath == null)
+                {
+                    MessageBox.Show("Cannot locate IEC61499.dfbproj.\nCheck mapper_config.json.",
+                        "Config Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+
+                var templatePath = cfg.ActuatorTemplatePath;
+                if (string.IsNullOrEmpty(templatePath) || !File.Exists(templatePath))
+                {
+                    MessageBox.Show("ActuatorTemplatePath not found.\nCheck mapper_config.json.",
+                        "Config Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+
+                var templateBaseName = Path.GetFileNameWithoutExtension(templatePath);
+                var newCatName = $"{templateBaseName}_Pusher";
+
+                var result = await Task.Run(
+                    () => CatTypeCloner.Clone(templatePath, newCatName, dfbprojPath, "Pusher"));
+
+                MapperLogger.Info(result);
+                MessageBox.Show(result, "Pusher FB Generated",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MapperLogger.Error($"Pusher FB generation failed: {ex.Message}");
+                MessageBox.Show($"Failed:\n\n{ex.Message}", "Error",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
