@@ -57,8 +57,12 @@ namespace MapperUI
             this.panelDetails = new System.Windows.Forms.Panel();
             this.grpInputs = new System.Windows.Forms.GroupBox();
             this.dgvInputs = new System.Windows.Forms.DataGridView();
+            this.colInputState = new System.Windows.Forms.DataGridViewTextBoxColumn();
+            this.colInputValue = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.grpOutputs = new System.Windows.Forms.GroupBox();
             this.dgvOutputs = new System.Windows.Forms.DataGridView();
+            this.colOutputName = new System.Windows.Forms.DataGridViewTextBoxColumn();
+            this.colOutputAddress = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.statusStrip = new System.Windows.Forms.StatusStrip();
             this.lblStatus = new System.Windows.Forms.ToolStripStatusLabel();
 
@@ -348,11 +352,25 @@ namespace MapperUI
             this.dgvInputs.BorderStyle = System.Windows.Forms.BorderStyle.None;
             this.dgvInputs.ColumnHeadersHeightSizeMode =
                 System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+            this.dgvInputs.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
+                this.colInputState,
+                this.colInputValue });
             this.dgvInputs.Dock = System.Windows.Forms.DockStyle.Fill;
             this.dgvInputs.Name = "dgvInputs";
             this.dgvInputs.ReadOnly = true;
             this.dgvInputs.RowHeadersVisible = false;
             this.dgvInputs.TabIndex = 0;
+
+            this.colInputState.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill;
+            this.colInputState.HeaderText = "Input / State";
+            this.colInputState.Name = "colInputState";
+            this.colInputState.ReadOnly = true;
+            this.colInputState.FillWeight = 70F;
+            this.colInputValue.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill;
+            this.colInputValue.HeaderText = "Address";
+            this.colInputValue.Name = "colInputValue";
+            this.colInputValue.ReadOnly = true;
+            this.colInputValue.FillWeight = 30F;
 
             this.grpOutputs.Controls.Add(this.dgvOutputs);
             this.grpOutputs.Dock = System.Windows.Forms.DockStyle.Fill;
@@ -366,11 +384,25 @@ namespace MapperUI
             this.dgvOutputs.BorderStyle = System.Windows.Forms.BorderStyle.None;
             this.dgvOutputs.ColumnHeadersHeightSizeMode =
                 System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+            this.dgvOutputs.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
+                this.colOutputName,
+                this.colOutputAddress });
             this.dgvOutputs.Dock = System.Windows.Forms.DockStyle.Fill;
             this.dgvOutputs.Name = "dgvOutputs";
             this.dgvOutputs.ReadOnly = true;
             this.dgvOutputs.RowHeadersVisible = false;
             this.dgvOutputs.TabIndex = 0;
+
+            this.colOutputName.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill;
+            this.colOutputName.HeaderText = "Output";
+            this.colOutputName.Name = "colOutputName";
+            this.colOutputName.ReadOnly = true;
+            this.colOutputName.FillWeight = 70F;
+            this.colOutputAddress.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill;
+            this.colOutputAddress.HeaderText = "Address";
+            this.colOutputAddress.Name = "colOutputAddress";
+            this.colOutputAddress.ReadOnly = true;
+            this.colOutputAddress.FillWeight = 30F;
 
             // ── StatusStrip ───────────────────────────────────────────────────
             this.statusStrip.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
@@ -431,7 +463,7 @@ namespace MapperUI
             this.PerformLayout();
         }
 
-        // ── Label helper ─────────────────────────────────────────────────────
+        // ── Label helper ──────────────────────────────────────────────────────
         private static void SetLabel(System.Windows.Forms.Label lbl, string text, bool bold)
         {
             lbl.AutoSize = true;
@@ -481,8 +513,12 @@ namespace MapperUI
         private System.Windows.Forms.Panel panelDetails;
         private System.Windows.Forms.GroupBox grpInputs;
         private System.Windows.Forms.DataGridView dgvInputs;
+        private System.Windows.Forms.DataGridViewTextBoxColumn colInputState;
+        private System.Windows.Forms.DataGridViewTextBoxColumn colInputValue;
         private System.Windows.Forms.GroupBox grpOutputs;
         private System.Windows.Forms.DataGridView dgvOutputs;
+        private System.Windows.Forms.DataGridViewTextBoxColumn colOutputName;
+        private System.Windows.Forms.DataGridViewTextBoxColumn colOutputAddress;
         private System.Windows.Forms.StatusStrip statusStrip;
         private System.Windows.Forms.ToolStripStatusLabel lblStatus;
     }
