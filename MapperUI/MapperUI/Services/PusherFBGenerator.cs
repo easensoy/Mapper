@@ -1,110 +1,169 @@
 ﻿// MapperUI/MapperUI/Services/PusherFBGenerator.cs
 // ─────────────────────────────────────────────────────────────────────────────
-// Creates a folder called Five_State_Actuator_CAT_Pusher inside OutputDirectory.
-// Every file from the Five_State_Actuator_CAT template folder is copied in,
-// with ALL occurrences of "Five_State_Actuator_CAT" renamed to
-// "Five_State_Actuator_CAT_Pusher" — in both the filename and the file content.
+// Scoped single-component generation for validation with Jyotsna.
 //
-// Output is ONLY the folder + its files. No dfbproj. No system files.
-// Jyotsna drops this folder into her EAE project and opens it.
+// Uses the SAME pipeline as the main "Generate Code" button:
+//   loaded VueOneComponent (from Control.xml)
+//   → FBGenerator.GetModifiedTemplateContent()   (injects Name + GUID)
+//   → FBGenerator.CopyCatCompanionFiles()         (copies .cfg, offline, opcua etc.)
+//   → writes Five_State_Actuator_CAT_Pusher/ folder
+//
+// No Control.xml re-read. No parallel system. No invented logic.
+// The components are already in memory from the Browse/Load step.
 // ─────────────────────────────────────────────────────────────────────────────
 
 using CodeGen.Configuration;
+using CodeGen.Models;
+using CodeGen.Translation;
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 
 namespace MapperUI.Services
 {
     public static class PusherFBGenerator
     {
-        private const string SourceName = "Five_State_Actuator_CAT";
-        private const string TargetName = "Five_State_Actuator_CAT_Pusher";
-
         /// <summary>
-        /// Copies the Five_State_Actuator_CAT template folder into OutputDirectory,
-        /// renaming every file and all content references to Five_State_Actuator_CAT_Pusher.
+        /// Finds the first five-state actuator in the loaded components,
+        /// runs it through FBGenerator, and writes the output folder.
         /// Returns a human-readable result message.
         /// </summary>
-        public static string Generate(MapperConfig cfg)
+        public static string Generate(MapperConfig cfg, List<VueOneComponent> loadedComponents)
         {
-            // ── 1. Validate config ────────────────────────────────────────────
+            // ── 1. Guard: need a loaded Control.xml ───────────────────────────
+            if (loadedComponents == null || loadedComponents.Count == 0)
+                throw new InvalidOperationException(
+                    "No components loaded.\n" +
+                    "Please Browse and load a Control.xml file first.");
+
+            // ── 2. Find first five-state actuator (Pusher, Feeder, etc.) ──────
+            var component = loadedComponents.FirstOrDefault(c =>
+                string.Equals(c.Type, "Actuator", StringComparison.OrdinalIgnoreCase) &&
+                c.States.Count == 5);
+
+            if (component == null)
+                throw new InvalidOperationException(
+                    "No five-state actuator found in the loaded Control.xml.\n" +
+                    "Expected a component with Type=Actuator and 5 states (e.g. Pusher, Feeder).");
+
+            MapperLogger.Info($"[PusherFB] Component   : {component.Name} ({component.Type}, {component.States.Count} states)");
+
+            // ── 3. Validate template path ─────────────────────────────────────
             if (string.IsNullOrWhiteSpace(cfg.ActuatorTemplatePath))
                 throw new InvalidOperationException(
                     "ActuatorTemplatePath is empty in mapper_config.json.\n" +
-                    $"Set it to the full path of {SourceName}.fbt in your EAE project.");
+                    "Set it to: ...\\IEC61499\\Five_State_Actuator_CAT\\Five_State_Actuator_CAT.fbt");
 
             if (!File.Exists(cfg.ActuatorTemplatePath))
                 throw new FileNotFoundException(
                     $"ActuatorTemplatePath not found:\n{cfg.ActuatorTemplatePath}");
 
-            string? sourceCatDir = Path.GetDirectoryName(cfg.ActuatorTemplatePath);
-            if (sourceCatDir == null || !Directory.Exists(sourceCatDir))
-                throw new DirectoryNotFoundException(
-                    $"Cannot find source CAT folder at:\n{sourceCatDir}");
+            string templateContent = File.ReadAllText(cfg.ActuatorTemplatePath);
+            string templateBaseName = Path.GetFileNameWithoutExtension(cfg.ActuatorTemplatePath);
+            // e.g. "Five_State_Actuator_CAT"
 
-            // ── 2. Set up output folder ───────────────────────────────────────
+            MapperLogger.Info($"[PusherFB] Template    : {templateBaseName}");
+
+            // ── 4. Set up output folder: Five_State_Actuator_CAT_Pusher ───────
             string outputRoot = string.IsNullOrWhiteSpace(cfg.OutputDirectory)
                 ? Path.Combine(Environment.CurrentDirectory, "Output")
                 : cfg.OutputDirectory;
 
-            string targetCatDir = Path.Combine(outputRoot, TargetName);
+            var generator = new FBGenerator();
+            var generatedFB = generator.GenerateFromTemplate(component, templateContent, templateBaseName);
 
-            // If folder already exists, wipe it so output is always fresh
-            if (Directory.Exists(targetCatDir))
-                Directory.Delete(targetCatDir, recursive: true);
+            if (!generatedFB.IsValid)
+                throw new InvalidOperationException(
+                    $"FBGenerator failed for component '{component.Name}'.\nCheck the Debug Console for details.");
 
-            Directory.CreateDirectory(targetCatDir);
-            MapperLogger.Info($"[PusherFB] Source folder : {sourceCatDir}");
-            MapperLogger.Info($"[PusherFB] Target folder : {targetCatDir}");
+            // Output folder is named after the generated FB, e.g. Five_State_Actuator_CAT_Pusher
+            string outputDir = Path.Combine(outputRoot, generatedFB.FBName);
+            if (Directory.Exists(outputDir))
+                Directory.Delete(outputDir, recursive: true);
+            Directory.CreateDirectory(outputDir);
 
-            // ── 3. Copy every file, renaming and patching content ─────────────
-            int copied = 0;
-            int skipped = 0;
+            MapperLogger.Info($"[PusherFB] Output dir  : {outputDir}");
+            MapperLogger.Info($"[PusherFB] FB name     : {generatedFB.FBName}");
+            MapperLogger.Info($"[PusherFB] GUID        : {generatedFB.GUID}");
 
-            foreach (string srcPath in Directory.GetFiles(sourceCatDir, "*", SearchOption.TopDirectoryOnly))
+            // ── 5. Write .fbt (template content with Name + GUID injected) ────
+            string modifiedFbt = generator.GetModifiedTemplateContent(component, templateContent, templateBaseName);
+            File.WriteAllText(Path.Combine(outputDir, generatedFB.FbtFile), modifiedFbt);
+            MapperLogger.Info($"[PusherFB]   Written   {generatedFB.FbtFile}");
+
+            // ── 6. Write companion XML files ──────────────────────────────────
+            File.WriteAllText(
+                Path.Combine(outputDir, generatedFB.CompositeFile),
+                generator.ResolveCompositeXml(cfg.ActuatorTemplatePath));
+            MapperLogger.Info($"[PusherFB]   Written   {generatedFB.CompositeFile}");
+
+            File.WriteAllText(
+                Path.Combine(outputDir, generatedFB.DocFile),
+                generator.GetDocXml(generatedFB.FBName));
+            MapperLogger.Info($"[PusherFB]   Written   {generatedFB.DocFile}");
+
+            File.WriteAllText(
+                Path.Combine(outputDir, generatedFB.MetaFile),
+                generator.GetMetaXml(generatedFB.FBName, generatedFB.GUID));
+            MapperLogger.Info($"[PusherFB]   Written   {generatedFB.MetaFile}");
+
+            // ── 7. Copy CAT companion files (.cfg, offline.xml, opcua.xml etc.) ─
+            var companions = generator.CopyCatCompanionFiles(
+                cfg.ActuatorTemplatePath, outputDir, generatedFB.FBName);
+            foreach (var f in companions)
+                MapperLogger.Info($"[PusherFB]   Copied    {Path.GetFileName(f)}");
+
+            // ── 8. Also copy to EAEDeployPath if configured ───────────────────
+            bool deployed = false;
+            if (!string.IsNullOrWhiteSpace(cfg.EAEDeployPath) &&
+                Directory.Exists(cfg.EAEDeployPath))
             {
-                string srcFileName = Path.GetFileName(srcPath);
-
-                // Rename the file itself
-                string destFileName = srcFileName.Replace(SourceName, TargetName);
-                string destPath = Path.Combine(targetCatDir, destFileName);
-
-                // Read as text (all CAT companion files are XML/text)
-                string content;
                 try
                 {
-                    content = File.ReadAllText(srcPath, Encoding.UTF8);
+                    string deployTarget = Path.Combine(cfg.EAEDeployPath, generatedFB.FBName);
+                    CopyDirectory(outputDir, deployTarget);
+                    MapperLogger.Info($"[PusherFB] Deployed to EAEDeployPath: {deployTarget}");
+                    deployed = true;
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // Binary file (shouldn't be any, but skip safely)
-                    MapperLogger.Warn($"[PusherFB]   Skipped binary : {srcFileName}");
-                    skipped++;
-                    continue;
+                    MapperLogger.Warn($"[PusherFB] EAEDeployPath copy failed (non-fatal): {ex.Message}");
                 }
-
-                // Replace all references to the source CAT name with the target name
-                string patched = content.Replace(SourceName, TargetName);
-
-                File.WriteAllText(destPath, patched, Encoding.UTF8);
-                MapperLogger.Info($"[PusherFB]   {srcFileName}  →  {destFileName}");
-                copied++;
             }
 
-            // ── 4. Build result message ───────────────────────────────────────
+            // ── 9. Summary ────────────────────────────────────────────────────
             var sb = new StringBuilder();
-            sb.AppendLine($"Generated: {TargetName}");
+            sb.AppendLine($"Generated: {generatedFB.FBName}");
+            sb.AppendLine($"Component: {component.Name}  ({component.States.Count} states)");
+            sb.AppendLine($"GUID: {generatedFB.GUID}");
             sb.AppendLine();
-            sb.AppendLine($"  Location : {targetCatDir}");
-            sb.AppendLine($"  Files    : {copied} copied, {skipped} skipped");
+            sb.AppendLine($"Output folder: {outputDir}");
+            sb.AppendLine($"Files: {generatedFB.FbtFile}");
+            sb.AppendLine($"       {generatedFB.CompositeFile}");
+            sb.AppendLine($"       {generatedFB.DocFile}");
+            sb.AppendLine($"       {generatedFB.MetaFile}");
+            foreach (var f in companions)
+                sb.AppendLine($"       {Path.GetFileName(f)}");
+            if (deployed)
+                sb.AppendLine($"\nAlso deployed to: {cfg.EAEDeployPath}");
             sb.AppendLine();
             sb.AppendLine("What Jyotsna should do:");
-            sb.AppendLine($"  1. Copy the {TargetName} folder into her EAE project's IEC61499 folder");
+            sb.AppendLine($"  1. Copy the {generatedFB.FBName}/ folder into her EAE project's IEC61499 folder");
             sb.AppendLine("  2. Open EAE → Reload Solution");
-            sb.AppendLine($"  3. Confirm {TargetName}.fbt appears and loads without errors");
+            sb.AppendLine($"  3. Confirm {generatedFB.FBName}.fbt appears and loads without errors");
 
             return sb.ToString();
+        }
+
+        private static void CopyDirectory(string source, string dest)
+        {
+            Directory.CreateDirectory(dest);
+            foreach (var file in Directory.GetFiles(source))
+                File.Copy(file, Path.Combine(dest, Path.GetFileName(file)), overwrite: true);
+            foreach (var dir in Directory.GetDirectories(source))
+                CopyDirectory(dir, Path.Combine(dest, Path.GetFileName(dir)));
         }
     }
 }
