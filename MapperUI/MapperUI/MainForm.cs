@@ -137,6 +137,8 @@ namespace MapperUI
 
         private async Task LoadAndValidateAsync(string path)
         {
+            EnsureComponentGridColumns();
+
             dgvComponents.Rows.Clear();
             dgvMappingRules.Rows.Clear();
             dgvInputs.Rows.Clear();
@@ -171,6 +173,8 @@ namespace MapperUI
                 var validator = new ComponentValidator();
                 var cfg = GetMapperConfig();
                 int rowIdx = 0;
+
+                EnsureComponentGridColumns();
 
                 foreach (var comp in _loadedComponents)
                 {
