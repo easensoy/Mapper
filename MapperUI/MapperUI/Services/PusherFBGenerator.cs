@@ -138,19 +138,26 @@ namespace MapperUI.Services
 
         private static VueOneComponent ResolveTargetComponent(List<VueOneComponent> loadedComponents)
         {
-            var fiveStateActuator = loadedComponents
+            var fiveStateActuators = loadedComponents
                 .Where(c => string.Equals(c.Type, "Actuator", StringComparison.OrdinalIgnoreCase) && c.States.Count == 5)
-                .OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
-                .FirstOrDefault();
+                .ToList();
 
-            if (fiveStateActuator == null)
+            if (fiveStateActuators.Count == 0)
             {
                 throw new InvalidOperationException(
                     "No five-state actuator found in the loaded Control.xml.\n" +
-                    "Expected a component with Type=Actuator and 5 states (e.g. Pusher, Feeder).");
+                    "Expected a component with Type=Actuator and 5 states (e.g. Feeder, Pusher).");
             }
 
-            return fiveStateActuator;
+            var feeder = fiveStateActuators.FirstOrDefault(c =>
+                string.Equals(c.Name, "Feeder", StringComparison.OrdinalIgnoreCase));
+
+            if (feeder != null)
+                return feeder;
+
+            return fiveStateActuators
+                .OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
+                .First();
         }
 
         private static string PrepareOutputDirectory(string outputRoot, string fbName)
