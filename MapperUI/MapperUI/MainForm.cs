@@ -504,6 +504,38 @@ namespace MapperUI
             }
         }
 
+        private void btnGeneratePusherFB_Click(object sender, EventArgs e)
+        {
+            MapperLogger.Info("=== Generate Pusher FB ===");
+
+            try
+            {
+                var cfg = GetMapperConfig();
+                string result = PusherFBGenerator.Generate(cfg);
+
+                MapperLogger.Info(result);
+                MessageBox.Show(result, "Pusher FB Generated", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                // Open the output folder in Explorer so the user can immediately
+                // zip it up and send it to Alex / Jyotsna.
+                string outputRoot = string.IsNullOrWhiteSpace(cfg.OutputDirectory)
+                    ? Path.Combine(Environment.CurrentDirectory, "Output")
+                    : cfg.OutputDirectory;
+
+                if (Directory.Exists(outputRoot))
+                    System.Diagnostics.Process.Start("explorer.exe", outputRoot);
+            }
+            catch (Exception ex)
+            {
+                MapperLogger.Error($"Generate Pusher FB failed: {ex.Message}");
+                MessageBox.Show(
+                    $"Failed to generate Pusher FB:\n\n{ex.Message}\n\n" +
+                    "Check ActuatorTemplatePath in mapper_config.json points to:\n" +
+                    @"...\IEC61499\Five_State_Actuator_CAT\Five_State_Actuator_CAT.fbt",
+                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
         // ─────────────────────────────────────────────────────────────────────
         // Component grid selection → I/O detail panels
         // ─────────────────────────────────────────────────────────────────────
