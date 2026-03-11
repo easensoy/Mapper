@@ -18,13 +18,22 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Xml;
 using System.Xml.Linq;
 using CodeGen.Configuration;
+
+// ── UTF-8 WITHOUT BOM ─────────────────────────────────────────────────────────
+// EAE's XML parser rejects files that start with a BOM (0xEF 0xBB 0xBF).
+// System.Text.Encoding.UTF8 (the static property) emits a BOM.
+// Use Utf8NoBom (defined in the class) everywhere instead.
 
 namespace MapperUI.Services
 {
     public static class RobotTaskCatRegistrar
     {
+        // ── Encoding: NO BOM — EAE XML parser dies on BOM at position (0,0) ──────
+        private static readonly UTF8Encoding Utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+
         // ── Names ─────────────────────────────────────────────────────────────
         private const string CatName = "Robot_Task_CAT";
         private const string HmiName = "Robot_Task_CAT_HMI";
@@ -201,7 +210,7 @@ namespace MapperUI.Services
             }
             else if (generator != null)
             {
-                File.WriteAllText(target, generator(), Encoding.UTF8);
+                File.WriteAllText(target, generator(), Utf8NoBom);
                 generated++;
                 MapperLogger.Info($"[RobotCAT]  Generated {fileName}");
             }
@@ -228,16 +237,15 @@ namespace MapperUI.Services
 
             if (source != null && File.Exists(source))
             {
-                var patched = PatchCfgPluginPaths(source);
-                File.WriteAllText(target, patched, Encoding.UTF8);
+                PatchAndWriteCfg(source, target);
                 copied++;
-                MapperLogger.Info($"[RobotCAT]  Copied+patched {CatName}.cfg");
+                MapperLogger.Info($"[RobotCAT]  Copied+patched {CatName}.cfg (UTF-8 no BOM)");
             }
             else
             {
-                File.WriteAllText(target, GenerateCfgXml(), Encoding.UTF8);
+                File.WriteAllText(target, GenerateCfgXml(), Utf8NoBom);
                 generated++;
-                MapperLogger.Info($"[RobotCAT]  Generated {CatName}.cfg (fallback)");
+                MapperLogger.Info($"[RobotCAT]  Generated {CatName}.cfg (fallback, UTF-8 no BOM)");
             }
         }
 
@@ -349,7 +357,16 @@ namespace MapperUI.Services
 
         // ── .cfg patch: ensure Plugin paths use folder-relative paths ─────────
 
-        private static string PatchCfgPluginPaths(string sourceCfgPath)
+        /// <summary>
+        /// Loads the template .cfg, patches Name + Plugin Value paths, then writes
+        /// directly to <paramref name="targetPath"/> using UTF-8 WITHOUT BOM.
+        ///
+        /// NEVER use StringWriter here — StringWriter.Encoding = UTF-16,
+        /// so XDocument.Save(stringWriter) emits encoding="utf-16" in the XML
+        /// declaration, which conflicts with the actual UTF-8 bytes on disk and
+        /// causes EAE to report "There is an error in XML document (0, 0)".
+        /// </summary>
+        private static void PatchAndWriteCfg(string sourceCfgPath, string targetPath)
         {
             var doc = XDocument.Load(sourceCfgPath);
             var root = doc.Root!;
@@ -365,9 +382,16 @@ namespace MapperUI.Services
                 plugin.SetAttributeValue("Value", $@"{CatName}\{flat}");
             }
 
-            using var sw = new StringWriter();
-            doc.Save(sw);
-            return sw.ToString();
+            // Write directly with XmlWriter so encoding="utf-8" (no BOM) is correct
+            var settings = new XmlWriterSettings
+            {
+                Encoding = Utf8NoBom,
+                Indent = true,
+                IndentChars = "  ",
+                OmitXmlDeclaration = false
+            };
+            using var writer = XmlWriter.Create(targetPath, settings);
+            doc.Save(writer);
         }
 
         // ── Content generators ────────────────────────────────────────────────
