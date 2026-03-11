@@ -66,6 +66,16 @@ namespace MapperUI
             InitializeComponent();
             btnGenerateCode.Enabled = false;
             btnGenerateRobotWrapper.Enabled = true;
+
+            // ── Layout fix: shrink Validation Output, expand Mapping Information ──
+            // Validation Output (mapping rules grid) only needs ~200px — it scrolls.
+            // Mapping Information needs more space to show components + Inputs + Outputs.
+            grpValidation.Height = 200;
+            grpMappingInfo.Top = grpValidation.Bottom + 6;
+            // grpMappingInfo is anchored Top+Bottom so it auto-fills remaining space.
+
+            // Rename Inputs group to "Inputs / States" to match the header
+            grpInputs.Text = "Inputs / States";
         }
 
         // ─────────────────────────────────────────────────────────────────────
@@ -149,8 +159,7 @@ namespace MapperUI
                     row.DefaultCellStyle.ForeColor = Color.Black;
 
                     var tmplCell = row.Cells[2]; // Template column (3rd column)
-                    bool showAsActive = vr.IsValid && inScope;
-                    tmplCell.Style.ForeColor = showAsActive ? ColorTranslated : ColorDiscarded;
+                    tmplCell.Style.ForeColor = vr.IsValid ? ColorTranslated : ColorDiscarded;
                     tmplCell.Style.BackColor = bg;
 
                     MapperLogger.Validate(
@@ -252,16 +261,12 @@ namespace MapperUI
         private static ComponentValidationRow ValidateComponent(
             VueOneComponent comp, ComponentValidator validator, MapperConfig cfg)
         {
-            // Out-of-scope components get no template — they are not processed.
-            bool inScope = _allowedInstances.Contains(comp.Name);
-
-            string tPath = inScope ? ResolveTemplatePath(comp, cfg) : string.Empty;
+            // Template resolves for ALL components by type — not by scope.
+            // Scope only controls whether generation runs and the display colour.
+            string tPath = ResolveTemplatePath(comp, cfg);
             string tName = string.IsNullOrEmpty(tPath)
                 ? "No template found (discarded for this phase)"
                 : Path.GetFileName(tPath);
-
-            if (!inScope)
-                return Pass(comp, tName); // out of scope — show as discarded, not failed
 
             switch (comp.Type.ToLowerInvariant())
             {
@@ -275,12 +280,14 @@ namespace MapperUI
 
                 case "actuator":
                     if (comp.States.Count != 5)
-                        return Fail(comp, tName, "Actuator must have exactly 5 states");
+                        return Fail(comp, "No template found (discarded for this phase)",
+                            $"Actuator has {comp.States.Count} states, not 5 — no matching template");
                     break;
 
                 case "sensor":
                     if (comp.States.Count != 2)
-                        return Fail(comp, tName, "Sensor must have exactly 2 states");
+                        return Fail(comp, "No template found (discarded for this phase)",
+                            $"Sensor has {comp.States.Count} states, not 2 — no matching template");
                     break;
 
                 default:
