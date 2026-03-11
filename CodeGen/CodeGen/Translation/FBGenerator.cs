@@ -19,7 +19,8 @@ namespace CodeGen.Translation
             "_CAT.opcua.xml",
             "_HMI.offline.xml",
             "_HMI.opcua.xml",
-            ".dfbproj"
+            "_HMI.meta.xml",
+            "_HMI.fbt"
         };
 
         public GeneratedFB GenerateFromTemplate(VueOneComponent component, string templateContent, string templateName)
@@ -34,7 +35,7 @@ namespace CodeGen.Translation
                 var newName = $"{baseName}_{componentToken}";
                 var deterministicGuid = BuildDeterministicGuid(newName);
 
-                UpdateFBAttributes(fbType, newName, component.Name, deterministicGuid);
+                UpdateFBAttributes(fbType, newName, deterministicGuid);
 
                 return new GeneratedFB
                 {
@@ -53,7 +54,7 @@ namespace CodeGen.Translation
             {
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine($"\n✗ ERROR during generation: {ex.Message}");
-                Console.ForegroundColor = ConsoleColor.White;
+                Console.ResetColor();
                 return new GeneratedFB { IsValid = false };
             }
         }
@@ -76,7 +77,7 @@ namespace CodeGen.Translation
             var newName = $"{baseName}_{componentToken}";
             var deterministicGuid = BuildDeterministicGuid(newName);
 
-            UpdateFBAttributes(fbType, newName, component.Name, deterministicGuid);
+            UpdateFBAttributes(fbType, newName, deterministicGuid);
 
             return doc.ToString();
         }
@@ -117,12 +118,14 @@ namespace CodeGen.Translation
 
                 if (suffix.Equals(".cfg", StringComparison.OrdinalIgnoreCase))
                 {
-                    // FIX: use XML-aware generation instead of naive string replace.
-                    // The instance .cfg must keep ALL type-folder references intact
-                    // (CATFile, SymbolDefFile, HMIInterface FileName, Symbol paths).
-                    // Only the root Name attribute and Plugin.Value filenames change.
                     var cfgContent = GenerateCfgForInstance(sourcePath, templateBaseName, generatedFbName);
                     File.WriteAllText(destinationPath, cfgContent);
+                }
+                else if (suffix.Equals("_HMI.fbt", StringComparison.OrdinalIgnoreCase))
+                {
+                    var hmiContent = File.ReadAllText(sourcePath);
+                    var hmiUpdated = UpdateHmiFbtContent(hmiContent, templateBaseName, generatedFbName);
+                    File.WriteAllText(destinationPath, hmiUpdated);
                 }
                 else
                 {
@@ -135,37 +138,16 @@ namespace CodeGen.Translation
             return copiedFiles;
         }
 
-        /// <summary>
-        /// Generates the .cfg for a CAT instance.
-        /// Rule: only the root Name attribute changes to the instance name.
-        /// All CATFile / SymbolDef / HMIInterface / Symbol paths keep pointing to the
-        /// original CAT type folder so EAE can locate the shared type definition.
-        /// Plugin Value paths are rewritten to the flat instance filename
-        /// (no subfolder prefix) since instance files deploy to the IEC61499 root.
-        /// </summary>
-        private static string GenerateCfgForInstance(
-            string sourceCfgPath,
-            string templateBaseName,
-            string generatedFbName)
+        private static string GenerateCfgForInstance(string sourceCfgPath, string templateBaseName, string generatedFbName)
         {
             var doc = XDocument.Load(sourceCfgPath);
             var root = doc.Root ?? throw new Exception($"Invalid .cfg XML: {sourceCfgPath}");
-
-            // The .cfg uses a default namespace — handle both ns-qualified and bare elements.
             XNamespace ns = root.GetDefaultNamespace();
 
-            // 1. Change only the Name attribute on the root <CAT> element.
-            //    Every other root attribute (CATFile, SymbolDefFile, SymbolEventFile,
-            //    DesignFile) must keep pointing to the original type folder.
             var nameAttr = root.Attribute("Name");
             if (nameAttr != null)
                 nameAttr.Value = generatedFbName;
 
-            // 2. Rewrite Plugin Value attributes.
-            //    Template value:  "Five_State_Actuator_CAT\Five_State_Actuator_CAT_CAT.offline.xml"
-            //    Instance value:  "Five_State_Actuator_CAT_Pusher_CAT.offline.xml"
-            //    Strip the folder prefix; replace templateBaseName with generatedFbName
-            //    in the filename portion only.
             var pluginElements = root.Elements(ns + "Plugin")
                 .Concat(root.Elements("Plugin"));
 
@@ -174,16 +156,33 @@ namespace CodeGen.Translation
                 var valAttr = plugin.Attribute("Value");
                 if (valAttr == null) continue;
 
-                // Strip any folder prefix to get the flat filename.
                 var flatFileName = Path.GetFileName(valAttr.Value);
+                valAttr.Value = flatFileName.Replace(templateBaseName, generatedFbName, StringComparison.Ordinal);
+            }
 
-                // Replace the template base name with the generated instance name.
-                // e.g. "Five_State_Actuator_CAT_CAT.offline.xml"
-                //   → "Five_State_Actuator_CAT_Pusher_CAT.offline.xml"
-                valAttr.Value = flatFileName.Replace(
-                    templateBaseName,
-                    generatedFbName,
-                    StringComparison.Ordinal);
+            return doc.ToString();
+        }
+
+        private static string UpdateHmiFbtContent(string hmiContent, string templateBaseName, string generatedFbName)
+        {
+            var doc = XDocument.Parse(hmiContent);
+            var root = doc.Root;
+            if (root == null)
+                return hmiContent;
+
+            var hmiName = $"{generatedFbName}_HMI";
+            root.SetAttributeValue("Name", hmiName);
+
+            var guidAttr = root.Attribute("GUID");
+            if (guidAttr != null)
+                guidAttr.Value = BuildDeterministicGuid(hmiName);
+
+            foreach (var attr in root.Descendants().Attributes())
+            {
+                if (string.IsNullOrWhiteSpace(attr.Value))
+                    continue;
+
+                attr.Value = attr.Value.Replace(templateBaseName, generatedFbName, StringComparison.Ordinal);
             }
 
             return doc.ToString();
@@ -213,8 +212,6 @@ namespace CodeGen.Translation
                 </FBTypeMetadata>";
         }
 
-        // ── private helpers ────────────────────────────────────────────────
-
         private static string ResolveBaseName(string templateName, XElement fbType)
         {
             if (!string.IsNullOrWhiteSpace(templateName))
@@ -230,7 +227,7 @@ namespace CodeGen.Translation
         private static string SanitizeToken(string name) =>
             new string(name.Where(c => char.IsLetterOrDigit(c) || c == '_').ToArray());
 
-        private static void UpdateFBAttributes(XElement fbType, string newName, string componentName, string guid)
+        private static void UpdateFBAttributes(XElement fbType, string newName, string guid)
         {
             fbType.SetAttributeValue("Name", newName);
             fbType.SetAttributeValue("GUID", guid);
