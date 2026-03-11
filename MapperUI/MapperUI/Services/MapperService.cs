@@ -18,20 +18,24 @@ namespace MapperUI.Services
             MapperConfig config,
             ValidationResult validationResult)
         {
-            // ── 1. Validate template exists ───────────────────────────────────
-            if (!File.Exists(config.ActuatorTemplatePath))
+            if (component == null)
+                return Fail("Unknown", validationResult, "Component is null.");
+
+            if (config == null)
+                return Fail(component.Name, validationResult, "Mapper config is null.");
+
+            if (string.IsNullOrWhiteSpace(config.ActuatorTemplatePath) || !File.Exists(config.ActuatorTemplatePath))
+            {
                 return Fail(component.Name, validationResult,
                     $"Template not found:\n{config.ActuatorTemplatePath}\n\n" +
                     "Check ActuatorTemplatePath in mapper_config.json.");
+            }
 
             var templateContent = File.ReadAllText(config.ActuatorTemplatePath);
             var templateBaseName = Path.GetFileNameWithoutExtension(config.ActuatorTemplatePath);
 
-            // ── 2. Generate FB ────────────────────────────────────────────────
             var generator = new FBGenerator();
-            var generatedFB = generator.GenerateFromTemplate(
-                component, templateContent, templateBaseName);
-
+            var generatedFB = generator.GenerateFromTemplate(component, templateContent, templateBaseName);
             if (!generatedFB.IsValid)
                 return Fail(component.Name, validationResult, "FB generation failed.");
 
@@ -41,36 +45,29 @@ namespace MapperUI.Services
             MapperLogger.Info($"[PusherFB] FB name       : {generatedFB.FBName}");
             MapperLogger.Info($"[PusherFB] GUID          : {generatedFB.GUID}");
 
-            // ── 3. Write to local Output\<FBName>\ ────────────────────────────
-            var localSubDir = Path.Combine(config.OutputDirectory, generatedFB.FBName);
+            var outputRoot = string.IsNullOrWhiteSpace(config.OutputDirectory)
+                ? Path.Combine(Environment.CurrentDirectory, "Output")
+                : config.OutputDirectory;
+
+            var localSubDir = Path.Combine(outputRoot, generatedFB.FBName);
             Directory.CreateDirectory(localSubDir);
 
-            var modifiedContent = generator.GetModifiedTemplateContent(
-                component, templateContent, templateBaseName);
-
+            var modifiedContent = generator.GetModifiedTemplateContent(component, templateContent, templateBaseName);
             WriteFile(localSubDir, generatedFB.FbtFile, modifiedContent);
-            WriteFile(localSubDir, generatedFB.CompositeFile,
-                generator.ResolveCompositeXml(config.ActuatorTemplatePath));
-            WriteFile(localSubDir, generatedFB.DocFile,
-                generator.GetDocXml(generatedFB.FBName));
-            WriteFile(localSubDir, generatedFB.MetaFile,
-                generator.GetMetaXml(generatedFB.FBName, generatedFB.GUID));
+            WriteFile(localSubDir, generatedFB.CompositeFile, generator.ResolveCompositeXml(config.ActuatorTemplatePath));
+            WriteFile(localSubDir, generatedFB.DocFile, generator.GetDocXml(generatedFB.FBName));
+            WriteFile(localSubDir, generatedFB.MetaFile, generator.GetMetaXml(generatedFB.FBName, generatedFB.GUID));
 
-            // Copy _CAT.offline.xml, _CAT.opcua.xml, _HMI.offline.xml, _HMI.opcua.xml
-            var copiedCompanions = generator.CopyCatCompanionFiles(
-                config.ActuatorTemplatePath, localSubDir, generatedFB.FBName);
+            var copiedCompanions = generator.CopyCatCompanionFiles(config.ActuatorTemplatePath, localSubDir, generatedFB.FBName);
             foreach (var f in copiedCompanions)
                 MapperLogger.Info($"[PusherFB] Copied      {f}");
 
-            // ── 4. Deploy to <EAEDeployPath>\<FBName>\ ───────────────────────
-            // EAEDeployPath must be the IEC61499 root — mapper creates the subfolder.
-            if (string.IsNullOrWhiteSpace(config.EAEDeployPath) ||
-                !Directory.Exists(config.EAEDeployPath))
+            if (string.IsNullOrWhiteSpace(config.EAEDeployPath) || !Directory.Exists(config.EAEDeployPath))
             {
                 MapperLogger.Warn(
                     $"[PusherFB] EAEDeployPath not found — skipping EAE deploy.\n" +
                     $"           Path: {config.EAEDeployPath}\n" +
-                    $"           Set EAEDeployPath = IEC61499 root in mapper_config.json.");
+                    "           Set EAEDeployPath = IEC61499 root in mapper_config.json.");
 
                 return new MapperResult
                 {
@@ -83,7 +80,6 @@ namespace MapperUI.Services
                 };
             }
 
-            // Create <IEC61499>\<FBName>\ subfolder
             var deploySubDir = Path.Combine(config.EAEDeployPath, generatedFB.FBName);
             Directory.CreateDirectory(deploySubDir);
 
@@ -96,7 +92,6 @@ namespace MapperUI.Services
 
             MapperLogger.Info($"[PusherFB] Deployed to EAEDeployPath: {deploySubDir}");
 
-            // ── 5. Find IEC61499.dfbproj in EAEDeployPath root ───────────────
             var dfbproj = Directory
                 .GetFiles(config.EAEDeployPath, "*.dfbproj", SearchOption.TopDirectoryOnly)
                 .FirstOrDefault();
@@ -110,8 +105,7 @@ namespace MapperUI.Services
             }
             else
             {
-                // ── 6. Register all Feeder files in dfbproj ──────────────────
-                int added = RegisterInDfbproj(
+                var added = RegisterInDfbproj(
                     dfbprojPath: dfbproj,
                     subfolderName: generatedFB.FBName,
                     generatedFB: generatedFB,
@@ -119,10 +113,8 @@ namespace MapperUI.Services
                     deploySubDir: deploySubDir);
 
                 MapperLogger.Info($"[PusherFB] dfbproj     : {Path.GetFileName(dfbproj)}");
-                MapperLogger.Info($"[PusherFB] dfbproj new entries : {added}" +
-                                  $" (0 = already registered, no duplicates added)");
+                MapperLogger.Info($"[PusherFB] dfbproj new entries : {added} (0 = already registered, no duplicates added)");
 
-                // ── 7. Touch dfbproj → triggers EAE "Reload Solution" ────────
                 File.SetLastWriteTime(dfbproj, DateTime.Now);
                 MapperLogger.Touch($"Touched   {Path.GetFileName(dfbproj)}");
                 MapperLogger.Info("EAE will show 'Reload Solution' — click Yes.");
@@ -146,8 +138,6 @@ namespace MapperUI.Services
             };
         }
 
-        // ── Helpers ───────────────────────────────────────────────────────────
-
         private static void WriteFile(string dir, string fileName, string content)
         {
             File.WriteAllText(Path.Combine(dir, fileName), content, Encoding.UTF8);
@@ -157,19 +147,12 @@ namespace MapperUI.Services
         private static void CopyFile(string srcDir, string dstDir, string fileName)
         {
             var src = Path.Combine(srcDir, fileName);
-            if (File.Exists(src))
-                File.Copy(src, Path.Combine(dstDir, fileName), overwrite: true);
+            if (!File.Exists(src))
+                return;
+
+            File.Copy(src, Path.Combine(dstDir, fileName), overwrite: true);
         }
 
-        /// <summary>
-        /// Adds entries for all generated Feeder files to IEC61499.dfbproj.
-        ///
-        ///   .fbt  →  &lt;Compile Include="Five_State_Actuator_CAT_Feeder\filename.fbt" /&gt;
-        ///   rest  →  &lt;None    Include="Five_State_Actuator_CAT_Feeder\filename.ext" /&gt;
-        ///
-        /// Idempotent: re-running never duplicates entries.
-        /// Returns the count of NEW entries added.
-        /// </summary>
         private static int RegisterInDfbproj(
             string dfbprojPath,
             string subfolderName,
@@ -180,140 +163,128 @@ namespace MapperUI.Services
             var xml = XDocument.Load(dfbprojPath);
             var ns = xml.Root!.GetDefaultNamespace();
 
-            // Locate or create the <ItemGroup> that holds <Compile> entries (.fbt files)
-            var compileGroup = xml.Descendants(ns + "ItemGroup")
-                .FirstOrDefault(g => g.Elements(ns + "Compile").Any());
+            var compileGroup = xml.Descendants(ns + "ItemGroup").FirstOrDefault(g => g.Elements(ns + "Compile").Any());
             if (compileGroup == null)
             {
                 compileGroup = new XElement(ns + "ItemGroup");
                 xml.Root.Add(compileGroup);
             }
 
-            // Locate or create the <ItemGroup> that holds <None> entries (companion files)
-            var noneGroup = xml.Descendants(ns + "ItemGroup")
-                .FirstOrDefault(g => g.Elements(ns + "None").Any());
+            var noneGroup = xml.Descendants(ns + "ItemGroup").FirstOrDefault(g => g.Elements(ns + "None").Any());
             if (noneGroup == null)
             {
                 noneGroup = new XElement(ns + "ItemGroup");
                 xml.Root.Add(noneGroup);
             }
 
-            int adds = 0;
-
-            bool AlreadyPresent(XElement group, XName tag, string path) =>
-                group.Elements(tag).Any(e =>
-                    string.Equals((string?)e.Attribute("Include"), path,
-                        StringComparison.OrdinalIgnoreCase));
-
-            void EnsureCompile(string rel, string iecType = null, string dependentUpon = null, string usage = null)
-            {
-                var existing = compileGroup.Elements(ns + "Compile")
-                    .FirstOrDefault(e => string.Equals((string?)e.Attribute("Include"), rel, StringComparison.OrdinalIgnoreCase));
-
-                if (existing == null)
-                {
-                    existing = new XElement(ns + "Compile", new XAttribute("Include", rel));
-                    compileGroup.Add(existing);
-                    MapperLogger.Info($"[dfbproj]  + Compile  {rel}");
-                    adds++;
-                }
-
-                UpsertChild(existing, "IEC61499Type", iecType);
-                UpsertChild(existing, "DependentUpon", dependentUpon);
-                UpsertChild(existing, "Usage", usage);
-            }
-
-            void EnsureNone(string rel, string dependentUpon = null, string plugin = null, string iecType = null)
-            {
-                var existing = noneGroup.Elements(ns + "None")
-                    .FirstOrDefault(e => string.Equals((string?)e.Attribute("Include"), rel, StringComparison.OrdinalIgnoreCase));
-
-                if (existing == null)
-                {
-                    existing = new XElement(ns + "None", new XAttribute("Include", rel));
-                    noneGroup.Add(existing);
-                    MapperLogger.Info($"[dfbproj]  + None     {rel}");
-                    adds++;
-                }
-
-                UpsertChild(existing, "DependentUpon", dependentUpon);
-                UpsertChild(existing, "Plugin", plugin);
-                UpsertChild(existing, "IEC61499Type", iecType);
-            }
+            var adds = 0;
 
             void UpsertChild(XElement parent, string childName, string value)
             {
                 if (string.IsNullOrWhiteSpace(value)) return;
-
                 var child = parent.Element(ns + childName);
                 if (child == null)
-                {
                     parent.Add(new XElement(ns + childName, value));
-                    return;
-                }
-
-                child.Value = value;
+                else
+                    child.Value = value;
             }
 
-            // Register .fbt as Compile
+            void EnsureCompile(string rel, string iecType = null, string dependentUpon = null, string usage = null)
+            {
+                var item = compileGroup.Elements(ns + "Compile")
+                    .FirstOrDefault(e => string.Equals((string?)e.Attribute("Include"), rel, StringComparison.OrdinalIgnoreCase));
+
+                if (item == null)
+                {
+                    item = new XElement(ns + "Compile", new XAttribute("Include", rel));
+                    compileGroup.Add(item);
+                    adds++;
+                    MapperLogger.Info($"[dfbproj]  + Compile  {rel}");
+                }
+
+                UpsertChild(item, "IEC61499Type", iecType);
+                UpsertChild(item, "DependentUpon", dependentUpon);
+                UpsertChild(item, "Usage", usage);
+            }
+
+            void EnsureNone(string rel, string dependentUpon = null, string plugin = null, string iecType = null)
+            {
+                var item = noneGroup.Elements(ns + "None")
+                    .FirstOrDefault(e => string.Equals((string?)e.Attribute("Include"), rel, StringComparison.OrdinalIgnoreCase));
+
+                if (item == null)
+                {
+                    item = new XElement(ns + "None", new XAttribute("Include", rel));
+                    noneGroup.Add(item);
+                    adds++;
+                    MapperLogger.Info($"[dfbproj]  + None     {rel}");
+                }
+
+                UpsertChild(item, "DependentUpon", dependentUpon);
+                UpsertChild(item, "Plugin", plugin);
+                UpsertChild(item, "IEC61499Type", iecType);
+            }
+
             EnsureCompile($@"{subfolderName}\{generatedFB.FbtFile}", iecType: "CAT");
 
-            // Register companion files as None
             EnsureNone($@"{subfolderName}\{generatedFB.CompositeFile}", dependentUpon: generatedFB.FbtFile);
             EnsureNone($@"{subfolderName}\{generatedFB.DocFile}", dependentUpon: generatedFB.FbtFile);
             EnsureNone($@"{subfolderName}\{generatedFB.MetaFile}", dependentUpon: generatedFB.FbtFile);
 
-            // .cfg (generated by CopyCatCompanionFiles, lives in deploySubDir)
             var cfgName = $"{generatedFB.FBName}.cfg";
             if (File.Exists(Path.Combine(deploySubDir, cfgName)))
             {
-                EnsureNone(
-                    $@"{subfolderName}\{cfgName}",
-                    dependentUpon: generatedFB.FbtFile,
-                    iecType: "CAT");
+                EnsureNone($@"{subfolderName}\{cfgName}", dependentUpon: generatedFB.FbtFile, iecType: "CAT");
             }
 
-            // _CAT.offline.xml, _CAT.opcua.xml, _HMI.offline.xml, _HMI.opcua.xml
             foreach (var companion in companions)
             {
+                var include = $@"{subfolderName}\{companion}";
+
+                if (companion.EndsWith("_HMI.fbt", StringComparison.OrdinalIgnoreCase))
+                {
+                    EnsureCompile(
+                        include,
+                        iecType: "CAT",
+                        dependentUpon: $@"{subfolderName}\{generatedFB.FbtFile}",
+                        usage: "Private");
+                    continue;
+                }
+
+                if (companion.EndsWith("_HMI.meta.xml", StringComparison.OrdinalIgnoreCase))
+                {
+                    EnsureNone(
+                        include,
+                        dependentUpon: companion.Replace(".meta.xml", ".fbt", StringComparison.OrdinalIgnoreCase));
+                    continue;
+                }
+
                 if (companion.EndsWith("_CAT.offline.xml", StringComparison.OrdinalIgnoreCase) ||
                     companion.EndsWith("_HMI.offline.xml", StringComparison.OrdinalIgnoreCase))
                 {
-                    EnsureNone(
-                        $@"{subfolderName}\{companion}",
-                        dependentUpon: generatedFB.FbtFile,
-                        plugin: "OfflineParametrizationEditor",
-                        iecType: "CAT_OFFLINE");
+                    EnsureNone(include, generatedFB.FbtFile, "OfflineParametrizationEditor", "CAT_OFFLINE");
                     continue;
                 }
 
                 if (companion.EndsWith("_CAT.opcua.xml", StringComparison.OrdinalIgnoreCase) ||
                     companion.EndsWith("_HMI.opcua.xml", StringComparison.OrdinalIgnoreCase))
                 {
-                    EnsureNone(
-                        $@"{subfolderName}\{companion}",
-                        dependentUpon: generatedFB.FbtFile,
-                        plugin: "OPCUAConfigurator",
-                        iecType: "CAT_OPCUA");
+                    EnsureNone(include, generatedFB.FbtFile, "OPCUAConfigurator", "CAT_OPCUA");
                     continue;
                 }
 
-                if (companion.EndsWith(".dfbproj", StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                EnsureNone($@"{subfolderName}\{companion}", dependentUpon: generatedFB.FbtFile);
+                EnsureNone(include, generatedFB.FbtFile);
             }
 
-            // Save with UTF-8 BOM to match EAE's existing dfbproj encoding
             var settings = new System.Xml.XmlWriterSettings
             {
                 Indent = true,
                 IndentChars = "  ",
                 Encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: true)
             };
+
             using var writer = System.Xml.XmlWriter.Create(dfbprojPath, settings);
             xml.Save(writer);
-
             return adds;
         }
 
