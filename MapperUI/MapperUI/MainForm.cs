@@ -30,8 +30,6 @@ namespace MapperUI
         private DebugConsoleForm? _debugConsole;
 
         // ── In-scope whitelist (actuators + sensors that are ready to inject) ─
-        // Actuators: Checker, Transfer, Feeder, Ejector
-        // Sensors  : PartInHopper, PartAtChecker   ← ADDED
         private static readonly HashSet<string> _allowedInstances =
             new(StringComparer.OrdinalIgnoreCase)
             {
@@ -59,49 +57,15 @@ namespace MapperUI
         private static readonly Color ColorSection = Color.FromArgb(220, 230, 242);
         private static readonly Color RowEven = Color.White;
         private static readonly Color RowOdd = Color.FromArgb(245, 245, 245);
-        private const string SymPass = "✓";
-        private const string SymFail = "✗";
-        private const string ColComponentName = "colComponentName";
-        private const string ColComponentType = "colComponentType";
-        private const string ColComponentTemplate = "colComponentTemplate";
+        private const string SymPass = "\u2713";
+        private const string SymFail = "\u2717";
 
         // ── Constructor ───────────────────────────────────────────────────────
         public MainForm()
         {
             InitializeComponent();
-            EnsureComponentGridColumns();
             btnGenerateCode.Enabled = false;
             btnGenerateRobotWrapper.Enabled = true;
-        }
-
-        private void EnsureComponentGridColumns()
-        {
-            if (dgvComponents.Columns.Count > 0)
-                return;
-
-            dgvComponents.Columns.Add(new DataGridViewTextBoxColumn
-            {
-                Name = ColComponentName,
-                HeaderText = "Component",
-                Width = 200,
-                ReadOnly = true
-            });
-
-            dgvComponents.Columns.Add(new DataGridViewTextBoxColumn
-            {
-                Name = ColComponentType,
-                HeaderText = "Type",
-                Width = 140,
-                ReadOnly = true
-            });
-
-            dgvComponents.Columns.Add(new DataGridViewTextBoxColumn
-            {
-                Name = ColComponentTemplate,
-                HeaderText = "Template",
-                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                ReadOnly = true
-            });
         }
 
         // ─────────────────────────────────────────────────────────────────────
@@ -137,8 +101,6 @@ namespace MapperUI
 
         private async Task LoadAndValidateAsync(string path)
         {
-            EnsureComponentGridColumns();
-
             dgvComponents.Rows.Clear();
             dgvMappingRules.Rows.Clear();
             dgvInputs.Rows.Clear();
@@ -146,8 +108,7 @@ namespace MapperUI
             _loadedComponents.Clear();
             _validationRows.Clear();
             btnGenerateCode.Enabled = false;
-            btnGeneratePusherFB.Enabled = true;
-            lblStatus.Text = "Loading…";
+            lblStatus.Text = "Loading\u2026";
 
             try
             {
@@ -174,11 +135,8 @@ namespace MapperUI
                 var cfg = GetMapperConfig();
                 int rowIdx = 0;
 
-                EnsureComponentGridColumns();
-
                 foreach (var comp in _loadedComponents)
                 {
-                    // Validation row
                     var vr = ValidateComponent(comp, validator, cfg);
                     _validationRows.Add(vr);
 
@@ -190,7 +148,7 @@ namespace MapperUI
                     row.DefaultCellStyle.BackColor = bg;
                     row.DefaultCellStyle.ForeColor = Color.Black;
 
-                    var tmplCell = row.Cells[ColComponentTemplate];
+                    var tmplCell = row.Cells[colTemplate.Index];
                     tmplCell.Style.ForeColor = vr.IsValid ? ColorTranslated : ColorDiscarded;
                     tmplCell.Style.BackColor = bg;
 
@@ -295,34 +253,10 @@ namespace MapperUI
         {
             string tPath = ResolveTemplatePath(comp, cfg);
             string tName = string.IsNullOrEmpty(tPath)
-                ? "No template found (discarded for this phase)"
-                : Path.GetFileName(tPath);
+                ? "(no template)"
+                : Path.GetFileNameWithoutExtension(tPath);
 
-            switch (comp.Type.ToLowerInvariant())
-            {
-                case "process":
-                    return Pass(comp, tName);
-
-                case "robot":
-                    if (string.IsNullOrWhiteSpace(cfg.RobotTemplatePath))
-                        return Fail(comp, tName, "RobotTemplatePath not set in mapper_config.json");
-                    return Pass(comp, tName);
-
-                case "actuator":
-                    if (comp.States.Count != 5)
-                        return Fail(comp, tName, "Actuator must have exactly 5 states");
-                    break;
-
-                case "sensor":
-                    if (comp.States.Count != 2)
-                        return Fail(comp, tName, "Sensor must have exactly 2 states");
-                    break;
-
-                default:
-                    return Fail(comp, tName, $"Unknown type '{comp.Type}'");
-            }
-
-            var vr = validator.Validate(comp);
+            var vr = validator.Validate(comp, tPath);
             return vr.IsValid
                 ? Pass(comp, tName)
                 : Fail(comp, tName, string.Join("; ", vr.Errors));
@@ -347,7 +281,7 @@ namespace MapperUI
             new() { Component = c, TemplateName = t, IsValid = false, FailReason = reason };
 
         // ─────────────────────────────────────────────────────────────────────
-        // Generate Code (Actuators + Sensors → syslay / sysres injection)
+        // Generate Code (Clone CAT types + Inject into syslay / sysres)
         // ─────────────────────────────────────────────────────────────────────
 
         private async void btnGenerateCode_Click(object sender, EventArgs e)
@@ -436,19 +370,64 @@ namespace MapperUI
                     return;
                 }
 
+                // ─────────────────────────────────────────────────────────────
+                // PHASE 1: Clone CAT types for each in-scope component
+                // ─────────────────────────────────────────────────────────────
+                // Creates IEC61499\{TemplateName}_{ComponentName}\ with all 11
+                // files and registers them in dfbproj.
+
+                MapperLogger.Info("── Phase 1: Cloning CAT types ──");
+                int cloned = 0;
+                foreach (var comp in toInject)
+                {
+                    var templatePath = ResolveTemplatePath(comp, cfg);
+                    if (string.IsNullOrEmpty(templatePath) || !File.Exists(templatePath))
+                    {
+                        MapperLogger.Warn($"  {SymFail} {comp.Name}: no template — skipped clone.");
+                        continue;
+                    }
+
+                    var templateBaseName = Path.GetFileNameWithoutExtension(templatePath);
+                    var componentToken = new string(comp.Name
+                        .Where(c => char.IsLetterOrDigit(c) || c == '_').ToArray());
+                    var newCatName = $"{templateBaseName}_{componentToken}";
+
+                    try
+                    {
+                        var cloneResult = CatTypeCloner.Clone(
+                            templatePath, newCatName, dfbproj, comp.Name);
+                        MapperLogger.Info($"  {SymPass} {newCatName} — created and registered.");
+                        cloned++;
+                    }
+                    catch (Exception ex)
+                    {
+                        MapperLogger.Error($"  {SymFail} {comp.Name}: clone failed — {ex.Message}");
+                    }
+                }
+                MapperLogger.Info($"── Phase 1 complete: {cloned} CAT type(s) cloned ──");
+
+                // ─────────────────────────────────────────────────────────────
+                // PHASE 2: Inject instances into syslay / sysres
+                // ─────────────────────────────────────────────────────────────
+
+                MapperLogger.Info("── Phase 2: Injecting instances into syslay/sysres ──");
+
                 var injector = new SystemInjector();
                 var diff = injector.PreviewDiff(cfg, toInject);
                 LogDiff(diff);
 
                 if (diff.ToBeInjected.Count == 0)
                 {
-                    MessageBox.Show("All in-scope components already match the project.\nNothing to inject.",
-                        "Up To Date", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    MapperLogger.Info("Nothing to inject.");
+                    MessageBox.Show(
+                        $"{cloned} CAT type(s) cloned.\n\n" +
+                        "All in-scope instances already present in syslay.\n" +
+                        "Switch to EAE and click Reload Solution.",
+                        "Done", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MapperLogger.Info("No new instances to inject (syslay already up to date).");
                     return;
                 }
 
-                MapperLogger.Write("Injecting into EAE project files…");
+                MapperLogger.Write("Injecting into EAE project files\u2026");
                 var result = await Task.Run(() => injector.Inject(cfg, toInject));
 
                 if (!result.Success)
@@ -466,11 +445,12 @@ namespace MapperUI
                 File.SetLastWriteTime(dfbproj, DateTime.Now);
                 MapperLogger.Info("Reload Solution in EAE to apply changes.");
 
-                lblStatus.Text = $"Done. {result.InjectedFBs.Count} component(s) injected.";
-                MapperLogger.Info("Injection complete.");
+                lblStatus.Text = $"Done. {cloned} type(s) cloned, {result.InjectedFBs.Count} instance(s) injected.";
+                MapperLogger.Info("Generation complete.");
 
                 var msg = new StringBuilder();
-                msg.AppendLine($"Injected {result.InjectedFBs.Count} component(s) successfully.");
+                msg.AppendLine($"Cloned {cloned} CAT type(s).");
+                msg.AppendLine($"Injected {result.InjectedFBs.Count} instance(s) into syslay/sysres.");
                 if (result.UnsupportedComponents.Any())
                     msg.AppendLine(
                         $"\n{result.UnsupportedComponents.Count} component(s) skipped (see Debug Console).");
@@ -510,7 +490,7 @@ namespace MapperUI
                     MapperLogger.Error("Cannot locate IEC61499.dfbproj above syslay path.");
                     MessageBox.Show(
                         "Cannot locate IEC61499.dfbproj above the syslay path.\n\n" +
-                        "Check mapper_config.json → SyslayPath.",
+                        "Check mapper_config.json \u2192 SyslayPath.",
                         "Config Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
                 }
@@ -527,7 +507,6 @@ namespace MapperUI
                 MessageBox.Show(result, "CAT Wrapper Generated",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
 
-                // Refresh dfbproj check line in log
                 var dfbContent = await File.ReadAllTextAsync(dfbprojPath);
                 LogCatCheck(dfbContent, "Robot_Task_CAT");
             }
@@ -543,46 +522,8 @@ namespace MapperUI
             }
         }
 
-        private void btnGeneratePusherFB_Click(object sender, EventArgs e)
-        {
-            btnGeneratePusherFB.Enabled = false;
-            MapperLogger.Info("══════════════════════════════════════════");
-            MapperLogger.Info("Generate Pusher FB — started.");
-
-            try
-            {
-                var cfg = GetMapperConfig();
-
-                // Pass the already-loaded components from Control.xml — no re-read needed
-                string result = PusherFBGenerator.Generate(cfg, _loadedComponents);
-
-                MapperLogger.Info(result);
-                MessageBox.Show(result, "Pusher FB Generated",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
-
-                // Open the output folder so you can hand it to Jyotsna
-                string outputRoot = string.IsNullOrWhiteSpace(cfg.OutputDirectory)
-                    ? System.IO.Path.Combine(Environment.CurrentDirectory, "Output")
-                    : cfg.OutputDirectory;
-
-                if (System.IO.Directory.Exists(outputRoot))
-                    System.Diagnostics.Process.Start("explorer.exe", outputRoot);
-            }
-            catch (Exception ex)
-            {
-                MapperLogger.Error($"Generate Pusher FB failed: {ex.Message}");
-                MessageBox.Show(
-                    $"Failed to generate Pusher FB:\n\n{ex.Message}",
-                    "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-            finally
-            {
-                btnGeneratePusherFB.Enabled = true;
-            }
-        }
-
         // ─────────────────────────────────────────────────────────────────────
-        // Component grid selection → I/O detail panels
+        // Component grid selection -> I/O detail panels
         // ─────────────────────────────────────────────────────────────────────
 
         private void dgvComponents_SelectionChanged(object sender, EventArgs e)
@@ -605,7 +546,7 @@ namespace MapperUI
                 dgvOutputs.Rows.Add(vr.FailReason, "");
         }
 
-        // ────────────────────────────────────────────────────────────────────
+        // ─────────────────────────────────────────────────────────────────────
         // Helpers
         // ─────────────────────────────────────────────────────────────────────
 
