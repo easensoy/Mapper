@@ -507,8 +507,8 @@ namespace MapperUI
                 await Task.Run(() => DeployTemplates(cfg, dfbprojPath));
                 MapperLogger.Info("Templates deployed.");
 
-                // Phase 1: Build a Pusher component and inject it
-                MapperLogger.Info("── Phase 1: Injecting Pusher instance ──");
+                // Phase 1: Build components and inject them
+                MapperLogger.Info("── Phase 1: Injecting instances ──");
 
                 var pusher = new VueOneComponent
                 {
@@ -524,12 +524,34 @@ namespace MapperUI
                     }
                 };
 
+                var partInHopper = new VueOneComponent
+                {
+                    Name = "PartInHopper",
+                    Type = "Sensor",
+                    States = new List<VueOneState>
+                    {
+                        new() { Name = "Off", StateNumber = 0, InitialState = true },
+                        new() { Name = "On",  StateNumber = 1 },
+                    }
+                };
+
+                var partAtChecker = new VueOneComponent
+                {
+                    Name = "PartAtChecker",
+                    Type = "Sensor",
+                    States = new List<VueOneState>
+                    {
+                        new() { Name = "Off", StateNumber = 0, InitialState = true },
+                        new() { Name = "On",  StateNumber = 1 },
+                    }
+                };
+
                 var injectionCfg = MapperConfig.Load();
                 injectionCfg.SyslayPath = activeSyslay;
                 injectionCfg.SysresPath = activeSysres;
 
                 var injector = new SystemInjector();
-                var toInject = new List<VueOneComponent> { pusher };
+                var toInject = new List<VueOneComponent> { pusher, partInHopper, partAtChecker };
 
                 var result = await Task.Run(() => injector.Inject(injectionCfg, toInject));
 
@@ -548,11 +570,13 @@ namespace MapperUI
                 MapperLogger.Info("Generate Pusher FB — complete.");
 
                 MessageBox.Show(
-                    "Pusher FB generated successfully.\n\n" +
-                    "Templates deployed + Pusher instance injected into syslay/sysres.\n" +
-                    "actuator_name = 'pusher'\n\n" +
+                    "Generated successfully.\n\n" +
+                    "Templates deployed + 3 instances injected:\n" +
+                    "  - Pusher (Five_State_Actuator_CAT) → actuator_name='pusher'\n" +
+                    "  - PartInHopper (Sensor_Bool_CAT)\n" +
+                    "  - PartAtChecker (Sensor_Bool_CAT)\n\n" +
                     "Switch to EAE and click Reload Solution.",
-                    "Pusher FB Generated",
+                    "FBs Generated",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
