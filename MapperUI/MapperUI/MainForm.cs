@@ -22,14 +22,12 @@ namespace MapperUI
 {
     public partial class MainForm : Form
     {
-        // ── State ─────────────────────────────────────────────────────────────
         private MapperConfig? _mapperConfig;
         private List<VueOneComponent> _loadedComponents = new();
         private List<ComponentValidationRow> _validationRows = new();
         private SystemXmlReader? _lastReader;
         private DebugConsoleForm? _debugConsole;
 
-        // ── In-scope whitelist ────────────────────────────────────────────────
         private static readonly HashSet<string> _allowedInstances =
             new(StringComparer.OrdinalIgnoreCase)
             {
@@ -37,7 +35,6 @@ namespace MapperUI
                 "PartInHopper", "PartAtChecker"
             };
 
-        // ── Per-component validation record ──────────────────────────────────
         private sealed class ComponentValidationRow
         {
             public VueOneComponent Component { get; init; } = null!;
@@ -46,7 +43,6 @@ namespace MapperUI
             public string FailReason { get; init; } = string.Empty;
         }
 
-        // ── Palette ───────────────────────────────────────────────────────────
         private static readonly Color ColorTranslated = Color.FromArgb(56, 142, 60);
         private static readonly Color ColorDiscarded = Color.FromArgb(204, 72, 0);
         private static readonly Color ColorAssumed = Color.FromArgb(180, 130, 0);
@@ -58,7 +54,6 @@ namespace MapperUI
         private const string SymPass = "\u2713";
         private const string SymFail = "\u2717";
 
-        // ── Constructor ───────────────────────────────────────────────────────
         public MainForm()
         {
             InitializeComponent();
@@ -111,7 +106,6 @@ namespace MapperUI
             try
             {
                 MapperLogger.Info($"Loading: {path}");
-
                 _lastReader = new SystemXmlReader();
                 _loadedComponents = await Task.Run(() => _lastReader.ReadAllComponents(path));
 
@@ -241,8 +235,6 @@ namespace MapperUI
         private static ComponentValidationRow ValidateComponent(
             VueOneComponent comp, ComponentValidator validator, MapperConfig cfg)
         {
-            // Template resolves by TYPE for all components.
-            // Bearing_PnP etc. get discarded because they don't have 5 states.
             string tPath = ResolveTemplatePath(comp, cfg);
             string tName = string.IsNullOrEmpty(tPath)
                 ? "No template found (discarded for this phase)"
@@ -299,7 +291,7 @@ namespace MapperUI
             new() { Component = c, TemplateName = t, IsValid = false, FailReason = reason };
 
         // ─────────────────────────────────────────────────────────────────────
-        // Generate Code (Clone CAT types + Inject into syslay / sysres)
+        // Generate Code
         // ─────────────────────────────────────────────────────────────────────
 
         private async void btnGenerateCode_Click(object sender, EventArgs e)
@@ -348,18 +340,23 @@ namespace MapperUI
             try
             {
                 var cfg = GetMapperConfig();
-                MapperLogger.Info($"syslay : {cfg.SyslayPath}");
-                MapperLogger.Info($"sysres : {cfg.SysresPath}");
 
-                if (!File.Exists(cfg.SyslayPath))
+                // Use Path2 (Demonstrator) if available, else fall back to Path1 (Station1)
+                var activeSyslay = !string.IsNullOrEmpty(cfg.SyslayPath2) ? cfg.SyslayPath2 : cfg.SyslayPath;
+                var activeSysres = !string.IsNullOrEmpty(cfg.SysresPath2) ? cfg.SysresPath2 : cfg.SysresPath;
+
+                MapperLogger.Info($"syslay : {activeSyslay}");
+                MapperLogger.Info($"sysres : {activeSysres}");
+
+                if (!File.Exists(activeSyslay))
                 {
-                    MapperLogger.Error($"syslay not found: {cfg.SyslayPath}");
-                    MessageBox.Show($"syslay not found:\n{cfg.SyslayPath}\n\nCheck mapper_config.json.",
+                    MapperLogger.Error($"syslay not found: {activeSyslay}");
+                    MessageBox.Show($"syslay not found:\n{activeSyslay}\n\nCheck mapper_config.json.",
                         "Config Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
                 }
 
-                var dfbproj = DeriveProjectFile(cfg.SyslayPath);
+                var dfbproj = DeriveProjectFile(activeSyslay);
                 if (dfbproj == null)
                 {
                     MapperLogger.Error("Cannot find .dfbproj above syslay path.");
@@ -369,68 +366,46 @@ namespace MapperUI
                 }
                 MapperLogger.Info($"Project: {Path.GetFileName(dfbproj)}");
 
-                var dfbContent = await File.ReadAllTextAsync(dfbproj);
-                LogCatCheck(dfbContent, "Five_State_Actuator_CAT");
-                LogCatCheck(dfbContent, "Sensor_Bool_CAT");
-                if (!string.IsNullOrWhiteSpace(cfg.RobotTemplatePath))
-                    LogCatCheck(dfbContent, "Robot_Task_CAT");
+                // ──────────────────────────────────────────────────────────
+                // PHASE 0: Deploy templates into target project
+                // ──────────────────────────────────────────────────────────
+                MapperLogger.Info("── Phase 0: Deploying templates ──");
 
-                if (!dfbContent.Contains("Five_State_Actuator_CAT") ||
-                    !dfbContent.Contains("Sensor_Bool_CAT"))
+                var sourceIec = Path.GetDirectoryName(Path.GetDirectoryName(cfg.ActuatorTemplatePath))!;
+                var targetIec = Path.GetDirectoryName(dfbproj)!;
+                var sourceHmi = Path.Combine(Path.GetDirectoryName(sourceIec)!, "HMI");
+                var targetHmi = Path.Combine(Path.GetDirectoryName(targetIec)!, "HMI");
+
+                var packageResult = TemplatePackager.Package(
+                    sourceIec, targetIec, dfbproj, sourceHmi, targetHmi);
+                MapperLogger.Info(packageResult);
+                MapperLogger.Info("── Phase 0 complete ──");
+
+                // ──────────────────────────────────────────────────────────
+                // PHASE 1: Inject instances into syslay / sysres
+                // ──────────────────────────────────────────────────────────
+                MapperLogger.Info("── Phase 1: Injecting instances into syslay/sysres ──");
+
+                // Build a temporary config that points to the active paths
+                var injectionCfg = cfg;
+                // Override syslay/sysres to target the active project
+                if (!string.IsNullOrEmpty(cfg.SyslayPath2))
                 {
-                    MapperLogger.Error("Required CAT types not registered in this project.");
-                    MessageBox.Show(
-                        "Five_State_Actuator_CAT or Sensor_Bool_CAT not found in .dfbproj.\n" +
-                        "Check mapper_config.json.",
-                        "Wrong Project", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    return;
+                    injectionCfg = MapperConfig.Load();
+                    // We use reflection-free approach: SystemInjector reads cfg.SyslayPath and cfg.SysresPath
+                    // For now, swap the paths in the loaded config object
+                    injectionCfg.SyslayPath = activeSyslay;
+                    injectionCfg.SysresPath = activeSysres;
                 }
-
-                // ──────────────────────────────────────────────────────────
-                // PHASE 1: Clone CAT types for each in-scope component
-                // ──────────────────────────────────────────────────────────
-                MapperLogger.Info("── Phase 1: Cloning CAT types ──");
-                int cloned = 0;
-                foreach (var comp in toInject)
-                {
-                    var templatePath = ResolveTemplatePath(comp, cfg);
-                    if (string.IsNullOrEmpty(templatePath) || !File.Exists(templatePath))
-                    {
-                        MapperLogger.Warn($"  {SymFail} {comp.Name}: no template — skipped clone.");
-                        continue;
-                    }
-
-                    var templateBaseName = Path.GetFileNameWithoutExtension(templatePath);
-                    var componentToken = new string(comp.Name
-                        .Where(c => char.IsLetterOrDigit(c) || c == '_').ToArray());
-                    var newCatName = $"{templateBaseName}_{componentToken}";
-
-                    try
-                    {
-                        CatTypeCloner.Clone(templatePath, newCatName, dfbproj, comp.Name);
-                        MapperLogger.Info($"  {SymPass} {newCatName} — created and registered.");
-                        cloned++;
-                    }
-                    catch (Exception ex)
-                    {
-                        MapperLogger.Error($"  {SymFail} {comp.Name}: clone failed — {ex.Message}");
-                    }
-                }
-                MapperLogger.Info($"── Phase 1 complete: {cloned} CAT type(s) cloned ──");
-
-                // ──────────────────────────────────────────────────────────
-                // PHASE 2: Inject instances into syslay / sysres
-                // ──────────────────────────────────────────────────────────
-                MapperLogger.Info("── Phase 2: Injecting instances into syslay/sysres ──");
 
                 var injector = new SystemInjector();
-                var diff = injector.PreviewDiff(cfg, toInject);
+                var diff = injector.PreviewDiff(injectionCfg, toInject);
                 LogDiff(diff);
 
                 if (diff.ToBeInjected.Count == 0)
                 {
                     MessageBox.Show(
-                        $"{cloned} CAT type(s) cloned.\n\n" +
+                        "Templates deployed.\n\n" +
                         "All in-scope instances already present in syslay.\n" +
                         "Switch to EAE and click Reload Solution.",
                         "Done", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -439,7 +414,7 @@ namespace MapperUI
                 }
 
                 MapperLogger.Write("Injecting into EAE project files\u2026");
-                var result = await Task.Run(() => injector.Inject(cfg, toInject));
+                var result = await Task.Run(() => injector.Inject(injectionCfg, toInject));
 
                 if (!result.Success)
                 {
@@ -454,13 +429,12 @@ namespace MapperUI
 
                 MapperLogger.Touch($"Touching {Path.GetFileName(dfbproj)}");
                 File.SetLastWriteTime(dfbproj, DateTime.Now);
-                MapperLogger.Info("Reload Solution in EAE to apply changes.");
 
-                lblStatus.Text = $"Done. {cloned} type(s) cloned, {result.InjectedFBs.Count} instance(s) injected.";
+                lblStatus.Text = $"Done. Templates deployed, {result.InjectedFBs.Count} instance(s) injected.";
                 MapperLogger.Info("Generation complete.");
 
                 var msg = new StringBuilder();
-                msg.AppendLine($"Cloned {cloned} CAT type(s).");
+                msg.AppendLine("Templates deployed to target project.");
                 msg.AppendLine($"Injected {result.InjectedFBs.Count} instance(s) into syslay/sysres.");
                 if (result.UnsupportedComponents.Any())
                     msg.AppendLine($"\n{result.UnsupportedComponents.Count} component(s) skipped (see Debug Console).");
@@ -493,13 +467,14 @@ namespace MapperUI
             try
             {
                 var cfg = GetMapperConfig();
-                var dfbprojPath = DeriveProjectFile(cfg.SyslayPath);
+                var activeSyslay = !string.IsNullOrEmpty(cfg.SyslayPath2) ? cfg.SyslayPath2 : cfg.SyslayPath;
+                var dfbprojPath = DeriveProjectFile(activeSyslay);
                 if (dfbprojPath == null)
                 {
                     MapperLogger.Error("Cannot locate IEC61499.dfbproj above syslay path.");
                     MessageBox.Show(
                         "Cannot locate IEC61499.dfbproj above the syslay path.\n\n" +
-                        "Check mapper_config.json \u2192 SyslayPath.",
+                        "Check mapper_config.json.",
                         "Config Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
                 }
@@ -541,7 +516,8 @@ namespace MapperUI
             try
             {
                 var cfg = GetMapperConfig();
-                var dfbprojPath = DeriveProjectFile(cfg.SyslayPath);
+                var activeSyslay = !string.IsNullOrEmpty(cfg.SyslayPath2) ? cfg.SyslayPath2 : cfg.SyslayPath;
+                var dfbprojPath = DeriveProjectFile(activeSyslay);
                 if (dfbprojPath == null)
                 {
                     MessageBox.Show("Cannot locate IEC61499.dfbproj.\nCheck mapper_config.json.",
@@ -549,23 +525,22 @@ namespace MapperUI
                     return;
                 }
 
-                var templatePath = cfg.ActuatorTemplatePath;
-                if (string.IsNullOrEmpty(templatePath) || !File.Exists(templatePath))
-                {
-                    MessageBox.Show("ActuatorTemplatePath not found.\nCheck mapper_config.json.",
-                        "Config Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    return;
-                }
+                // Phase 0: deploy templates
+                var sourceIec = Path.GetDirectoryName(Path.GetDirectoryName(cfg.ActuatorTemplatePath))!;
+                var targetIec = Path.GetDirectoryName(dfbprojPath)!;
+                var sourceHmi = Path.Combine(Path.GetDirectoryName(sourceIec)!, "HMI");
+                var targetHmi = Path.Combine(Path.GetDirectoryName(targetIec)!, "HMI");
 
-                var templateBaseName = Path.GetFileNameWithoutExtension(templatePath);
-                var newCatName = $"{templateBaseName}_Pusher";
+                await Task.Run(() => TemplatePackager.Package(
+                    sourceIec, targetIec, dfbprojPath, sourceHmi, targetHmi));
 
-                var result = await Task.Run(
-                    () => CatTypeCloner.Clone(templatePath, newCatName, dfbprojPath, "Pusher"));
-
-                MapperLogger.Info(result);
-                MessageBox.Show(result, "Pusher FB Generated",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MapperLogger.Info("Templates deployed for Pusher FB.");
+                MessageBox.Show(
+                    "Templates deployed to target project.\n\n" +
+                    "Open EAE, click Reload Solution.\n" +
+                    "Five_State_Actuator_CAT and FiveStateActuator will appear.\n\n" +
+                    "Use Generate Code with system Control.xml to inject Pusher instance into syslay.",
+                    "Templates Deployed", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
