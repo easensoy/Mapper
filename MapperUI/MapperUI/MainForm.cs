@@ -1,5 +1,4 @@
-﻿// MapperUI/MapperUI/MainForm.cs
-using CodeGen.Configuration;
+﻿using CodeGen.Configuration;
 using CodeGen.IO;
 using CodeGen.Mapping;
 using CodeGen.Models;
@@ -22,20 +21,19 @@ namespace MapperUI
 {
     public partial class MainForm : Form
     {
-        private MapperConfig? _mapperConfig;
-        private List<VueOneComponent> _loadedComponents = new();
-        private List<ComponentValidationRow> _validationRows = new();
-        private SystemXmlReader? _lastReader;
-        private DebugConsoleForm? _debugConsole;
+        MapperConfig? _mapperConfig;
+        List<VueOneComponent> _loadedComponents = new();
+        List<ComponentValidationRow> _validationRows = new();
+        SystemXmlReader? _lastReader;
+        DebugConsoleForm? _debugConsole;
 
-        private static readonly HashSet<string> _allowedInstances =
-            new(StringComparer.OrdinalIgnoreCase)
-            {
-                "Checker", "Transfer", "Feeder", "Ejector",
-                "PartInHopper", "PartAtChecker"
-            };
+        static readonly HashSet<string> _allowedInstances = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "Checker", "Transfer", "Feeder", "Ejector",
+            "PartInHopper", "PartAtChecker"
+        };
 
-        private sealed class ComponentValidationRow
+        sealed class ComponentValidationRow
         {
             public VueOneComponent Component { get; init; } = null!;
             public string TemplateName { get; init; } = string.Empty;
@@ -43,16 +41,16 @@ namespace MapperUI
             public string FailReason { get; init; } = string.Empty;
         }
 
-        private static readonly Color ColorTranslated = Color.FromArgb(56, 142, 60);
-        private static readonly Color ColorDiscarded = Color.FromArgb(204, 72, 0);
-        private static readonly Color ColorAssumed = Color.FromArgb(180, 130, 0);
-        private static readonly Color ColorEncoded = Color.FromArgb(31, 97, 180);
-        private static readonly Color ColorHardcoded = Color.FromArgb(110, 110, 110);
-        private static readonly Color ColorSection = Color.FromArgb(220, 230, 242);
-        private static readonly Color RowEven = Color.White;
-        private static readonly Color RowOdd = Color.FromArgb(245, 245, 245);
-        private const string SymPass = "\u2713";
-        private const string SymFail = "\u2717";
+        static readonly Color ColorTranslated = Color.FromArgb(56, 142, 60);
+        static readonly Color ColorDiscarded = Color.FromArgb(204, 72, 0);
+        static readonly Color ColorAssumed = Color.FromArgb(180, 130, 0);
+        static readonly Color ColorEncoded = Color.FromArgb(31, 97, 180);
+        static readonly Color ColorHardcoded = Color.FromArgb(110, 110, 110);
+        static readonly Color ColorSection = Color.FromArgb(220, 230, 242);
+        static readonly Color RowEven = Color.White;
+        static readonly Color RowOdd = Color.FromArgb(245, 245, 245);
+        const string SymPass = "\u2713";
+        const string SymFail = "\u2717";
 
         public MainForm()
         {
@@ -61,11 +59,7 @@ namespace MapperUI
             btnGenerateRobotWrapper.Enabled = true;
         }
 
-        // ─────────────────────────────────────────────────────────────────────
-        // Menu
-        // ─────────────────────────────────────────────────────────────────────
-
-        private void menuItemDebugConsole_Click(object sender, EventArgs e)
+        void menuItemDebugConsole_Click(object sender, EventArgs e)
         {
             if (_debugConsole == null || _debugConsole.IsDisposed)
             {
@@ -76,11 +70,7 @@ namespace MapperUI
             _debugConsole.BringToFront();
         }
 
-        // ─────────────────────────────────────────────────────────────────────
-        // Browse + Load
-        // ─────────────────────────────────────────────────────────────────────
-
-        private async void btnBrowse_Click(object sender, EventArgs e)
+        async void btnBrowse_Click(object sender, EventArgs e)
         {
             using var dlg = new OpenFileDialog
             {
@@ -92,7 +82,7 @@ namespace MapperUI
             await LoadAndValidateAsync(dlg.FileName);
         }
 
-        private async Task LoadAndValidateAsync(string path)
+        async Task LoadAndValidateAsync(string path)
         {
             dgvComponents.Rows.Clear();
             dgvMappingRules.Rows.Clear();
@@ -111,23 +101,20 @@ namespace MapperUI
 
                 if (_loadedComponents.Count == 0)
                 {
-                    MapperLogger.Error("No components found in file.");
-                    MessageBox.Show("No components found in the selected file.",
-                        "Validation Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show("No components found.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     lblStatus.Text = "No components found";
                     return;
                 }
 
-                foreach (var rule in RuleEngine.GetAllRules())
-                    AddMappingRuleRow(rule);
+                foreach (var rule in RuleEngine.GetAllRules()) AddMappingRuleRow(rule);
 
                 var validator = new ComponentValidator();
-                var cfg = GetMapperConfig();
+                var cfg = Cfg();
                 int rowIdx = 0;
 
                 foreach (var comp in _loadedComponents)
                 {
-                    var vr = ValidateComponent(comp, validator, cfg);
+                    var vr = Validate(comp, validator, cfg);
                     _validationRows.Add(vr);
 
                     int idx = dgvComponents.Rows.Add(comp.Name, comp.Type, vr.TemplateName);
@@ -135,79 +122,44 @@ namespace MapperUI
                     Color bg = (rowIdx++ % 2 == 0) ? RowEven : RowOdd;
                     row.DefaultCellStyle.BackColor = bg;
                     row.DefaultCellStyle.ForeColor = Color.Black;
-
-                    var tmplCell = row.Cells[2];
-                    tmplCell.Style.ForeColor = vr.IsValid ? ColorTranslated : ColorDiscarded;
-                    tmplCell.Style.BackColor = bg;
-
-                    bool inScope = _allowedInstances.Contains(comp.Name);
-                    MapperLogger.Validate(
-                        $"{comp.Name} ({comp.Type})  {vr.TemplateName} " +
-                        $"[{(vr.IsValid ? "PASS" : "FAIL: " + vr.FailReason)}]" +
-                        $"{(inScope ? "" : " [OUT OF SCOPE]")}");
+                    row.Cells[2].Style.ForeColor = vr.IsValid ? ColorTranslated : ColorDiscarded;
+                    row.Cells[2].Style.BackColor = bg;
                 }
 
                 UpdateDetectedInfo();
 
-                bool allScopedPassed = _validationRows
+                bool ok = _validationRows
                     .Where(r => _allowedInstances.Contains(r.Component.Name))
                     .All(r => r.IsValid);
 
-                SetValidationLabel(
-                    allScopedPassed ? "PASSED" : "FAILED",
-                    allScopedPassed ? Color.Green : Color.Red);
-
-                lblStatus.Text = allScopedPassed
-                    ? "Validation passed. In-scope components ready to inject."
-                    : "Validation failed. Check in-scope components.";
-
-                btnGenerateCode.Enabled = _validationRows
-                    .Any(r => r.IsValid && _allowedInstances.Contains(r.Component.Name));
+                SetValidationLabel(ok ? "PASSED" : "FAILED", ok ? Color.Green : Color.Red);
+                lblStatus.Text = ok ? "Validation passed." : "Validation failed.";
+                btnGenerateCode.Enabled = _validationRows.Any(r => r.IsValid && _allowedInstances.Contains(r.Component.Name));
             }
             catch (Exception ex)
             {
-                MapperLogger.Error($"LoadAndValidate: {ex.Message}");
-                MessageBox.Show($"Error loading file.\n{ex.Message}", "Error",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MapperLogger.Error(ex.Message);
+                MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 lblStatus.Text = "Error";
             }
         }
 
-        // ─────────────────────────────────────────────────────────────────────
-        // Mapping Rules (View)
-        // ─────────────────────────────────────────────────────────────────────
-
-        private void btnMappingRules_Click(object sender, EventArgs e)
+        void btnMappingRules_Click(object sender, EventArgs e)
         {
             dgvMappingRules.Rows.Clear();
-            _ = GetMapperConfig();
-            foreach (var rule in RuleEngine.GetAllRules())
-                AddMappingRuleRow(rule);
-            MapperLogger.Info("Mapping rules refreshed.");
+            foreach (var rule in RuleEngine.GetAllRules()) AddMappingRuleRow(rule);
         }
 
-        private void AddMappingRuleRow(MappingRule rule)
+        void AddMappingRuleRow(MappingRule rule)
         {
-            var vueOneElement = rule.IsSection ? rule.SectionTitle : rule.VueOneElement;
-            var iecElement = rule.IsSection ? string.Empty : rule.IEC61499Element;
-            var mapType = rule.IsSection ? string.Empty : rule.Type.ToString();
-            var transformRule = rule.IsSection ? string.Empty : rule.TransformationRule;
-            var validated = rule.IsSection ? string.Empty : (rule.IsImplemented ? SymPass : SymFail);
-
             int idx = dgvMappingRules.Rows.Add(
-                vueOneElement, iecElement, mapType, transformRule, validated);
+                rule.IsSection ? rule.SectionTitle : rule.VueOneElement,
+                rule.IsSection ? "" : rule.IEC61499Element,
+                rule.IsSection ? "" : rule.Type.ToString(),
+                rule.IsSection ? "" : rule.TransformationRule,
+                rule.IsSection ? "" : (rule.IsImplemented ? SymPass : SymFail));
 
             var row = dgvMappingRules.Rows[idx];
-
-            Color fg = rule.Type switch
-            {
-                UiMappingType.TRANSLATED => ColorTranslated,
-                UiMappingType.DISCARDED => ColorDiscarded,
-                UiMappingType.ASSUMED => ColorAssumed,
-                UiMappingType.ENCODED => ColorEncoded,
-                UiMappingType.HARDCODED => ColorHardcoded,
-                _ => Color.Black
-            };
 
             if (rule.IsSection)
             {
@@ -220,465 +172,223 @@ namespace MapperUI
             }
             else
             {
-                row.Cells[colMappingType.Index].Style.ForeColor = fg;
+                row.Cells[colMappingType.Index].Style.ForeColor = rule.Type switch
+                {
+                    UiMappingType.TRANSLATED => ColorTranslated,
+                    UiMappingType.DISCARDED => ColorDiscarded,
+                    UiMappingType.ASSUMED => ColorAssumed,
+                    UiMappingType.ENCODED => ColorEncoded,
+                    UiMappingType.HARDCODED => ColorHardcoded,
+                    _ => Color.Black
+                };
             }
 
             row.Cells[colMappingValidated.Index].Style.ForeColor =
                 rule.IsImplemented ? ColorTranslated : ColorDiscarded;
         }
 
-        // ─────────────────────────────────────────────────────────────────────
-        // Per-component validation
-        // ─────────────────────────────────────────────────────────────────────
-
-        private static ComponentValidationRow ValidateComponent(
-            VueOneComponent comp, ComponentValidator validator, MapperConfig cfg)
+        static ComponentValidationRow Validate(VueOneComponent comp, ComponentValidator validator, MapperConfig cfg)
         {
-            string tPath = ResolveTemplatePath(comp, cfg);
-            string tName = string.IsNullOrEmpty(tPath)
-                ? "No template found (discarded for this phase)"
-                : Path.GetFileName(tPath);
+            string tPath = TemplatePath(comp, cfg);
+            string tName = string.IsNullOrEmpty(tPath) ? "No template found (discarded for this phase)" : Path.GetFileName(tPath);
 
             switch (comp.Type.ToLowerInvariant())
             {
-                case "process":
-                    return Pass(comp, tName);
+                case "process": return Pass(comp, tName);
                 case "robot":
-                    if (string.IsNullOrWhiteSpace(cfg.RobotTemplatePath))
-                        return Fail(comp, tName, "RobotTemplatePath not set in mapper_config.json");
-                    return Pass(comp, tName);
+                    return string.IsNullOrWhiteSpace(cfg.RobotTemplatePath)
+                        ? Fail(comp, tName, "RobotTemplatePath not set") : Pass(comp, tName);
                 case "actuator":
-                    if (comp.States.Count != 5)
-                        return Fail(comp, "No template found (discarded for this phase)",
-                            $"Actuator has {comp.States.Count} states, not 5");
+                    if (comp.States.Count != 5) return Fail(comp, "No template found (discarded for this phase)", $"{comp.States.Count} states, not 5");
                     break;
                 case "sensor":
-                    if (comp.States.Count != 2)
-                        return Fail(comp, "No template found (discarded for this phase)",
-                            $"Sensor has {comp.States.Count} states, not 2");
+                    if (comp.States.Count != 2) return Fail(comp, "No template found (discarded for this phase)", $"{comp.States.Count} states, not 2");
                     break;
-                default:
-                    return Fail(comp, tName, $"Unknown type '{comp.Type}'");
+                default: return Fail(comp, tName, $"Unknown type '{comp.Type}'");
             }
 
             var vr = validator.Validate(comp);
-            return vr.IsValid
-                ? Pass(comp, tName)
-                : Fail(comp, tName, string.Join("; ", vr.Errors));
+            return vr.IsValid ? Pass(comp, tName) : Fail(comp, tName, string.Join("; ", vr.Errors));
         }
 
-        private static string ResolveTemplatePath(VueOneComponent comp, MapperConfig cfg)
+        static string TemplatePath(VueOneComponent comp, MapperConfig cfg) => comp.Type.ToLowerInvariant() switch
         {
-            return comp.Type.ToLowerInvariant() switch
-            {
-                "actuator" => cfg.ActuatorTemplatePath,
-                "sensor" => cfg.SensorTemplatePath,
-                "process" => cfg.ProcessCATTemplatePath,
-                "robot" => cfg.RobotTemplatePath,
-                _ => string.Empty
-            };
-        }
+            "actuator" => cfg.ActuatorTemplatePath,
+            "sensor" => cfg.SensorTemplatePath,
+            "process" => cfg.ProcessCATTemplatePath,
+            "robot" => cfg.RobotTemplatePath,
+            _ => string.Empty
+        };
 
-        private static ComponentValidationRow Pass(VueOneComponent c, string t) =>
-            new() { Component = c, TemplateName = t, IsValid = true };
+        static ComponentValidationRow Pass(VueOneComponent c, string t) => new() { Component = c, TemplateName = t, IsValid = true };
+        static ComponentValidationRow Fail(VueOneComponent c, string t, string r) => new() { Component = c, TemplateName = t, IsValid = false, FailReason = r };
 
-        private static ComponentValidationRow Fail(VueOneComponent c, string t, string reason) =>
-            new() { Component = c, TemplateName = t, IsValid = false, FailReason = reason };
-
-        // ─────────────────────────────────────────────────────────────────────
-        // Shared: resolve active syslay/sysres/dfbproj from config
-        // ─────────────────────────────────────────────────────────────────────
-
-        private static (string syslay, string sysres, string? dfbproj) ResolveActivePaths(MapperConfig cfg)
+        async void btnGenerateCode_Click(object sender, EventArgs e)
         {
-            var syslay = !string.IsNullOrEmpty(cfg.SyslayPath2) ? cfg.SyslayPath2 : cfg.SyslayPath;
-            var sysres = !string.IsNullOrEmpty(cfg.SysresPath2) ? cfg.SysresPath2 : cfg.SysresPath;
-            var dfbproj = DeriveProjectFile(syslay);
-            return (syslay, sysres, dfbproj);
-        }
-
-        private static void DeployTemplates(MapperConfig cfg, string dfbproj)
-        {
-            var sourceIec = Path.GetDirectoryName(Path.GetDirectoryName(cfg.ActuatorTemplatePath))!;
-            var targetIec = Path.GetDirectoryName(dfbproj)!;
-            var sourceHmi = Path.Combine(Path.GetDirectoryName(sourceIec)!, "HMI");
-            var targetHmi = Path.Combine(Path.GetDirectoryName(targetIec)!, "HMI");
-
-            TemplatePackager.Package(sourceIec, targetIec, dfbproj, sourceHmi, targetHmi);
-        }
-
-        // ─────────────────────────────────────────────────────────────────────
-        // Generate Code (all in-scope components)
-        // ─────────────────────────────────────────────────────────────────────
-
-        private async void btnGenerateCode_Click(object sender, EventArgs e)
-        {
-            var failedInScope = _validationRows
-                .Where(r => !r.IsValid && _allowedInstances.Contains(r.Component.Name))
-                .ToList();
-
-            if (failedInScope.Any())
-            {
-                var sb = new StringBuilder();
-                sb.AppendLine($"{failedInScope.Count} in-scope component(s) failed validation:\n");
-                foreach (var f in failedInScope)
-                    sb.AppendLine($"  {SymFail}  {f.Component.Name} ({f.Component.Type}): {f.FailReason}");
-                sb.AppendLine("\nOnly the remaining valid in-scope components will be injected. Continue?");
-                if (MessageBox.Show(sb.ToString(), "Validation Warnings",
-                        MessageBoxButtons.YesNo, MessageBoxIcon.Warning,
-                        MessageBoxDefaultButton.Button2) != DialogResult.Yes)
-                    return;
-            }
-
             var toInject = _validationRows
                 .Where(r => r.IsValid && _allowedInstances.Contains(r.Component.Name))
-                .Select(r => r.Component)
-                .ToList();
-
-            foreach (var b in _validationRows.Where(r => !_allowedInstances.Contains(r.Component.Name)))
-                MapperLogger.Info($"{b.Component.Name} ({b.Component.Type}) out of scope — skipped.");
+                .Select(r => r.Component).ToList();
 
             if (toInject.Count == 0)
             {
-                MessageBox.Show(
-                    "No in-scope components are ready to inject.\n\n" +
-                    "In-scope: Checker, Transfer, Feeder, Ejector (actuators) " +
-                    "and PartInHopper, PartAtChecker (sensors).",
-                    "Nothing to Inject", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("No in-scope components to inject.", "Nothing to Inject", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
             btnGenerateCode.Enabled = false;
-
-            var inScopeNames = toInject.Select(c => $"{c.Name} ({c.Type})");
-            MapperLogger.Info($"Generating code. {toInject.Count} component(s): {string.Join(", ", inScopeNames)}");
-
             try
             {
-                var cfg = GetMapperConfig();
-                var (activeSyslay, activeSysres, dfbproj) = ResolveActivePaths(cfg);
+                var cfg = Cfg();
+                var dfbproj = FindDfbproj(cfg.ActiveSyslayPath);
+                if (dfbproj == null) { ShowError("Cannot find .dfbproj."); return; }
+                if (!File.Exists(cfg.ActiveSyslayPath)) { ShowError($"syslay not found:\n{cfg.ActiveSyslayPath}"); return; }
 
-                MapperLogger.Info($"syslay : {activeSyslay}");
-                MapperLogger.Info($"sysres : {activeSysres}");
-
-                if (!File.Exists(activeSyslay))
-                {
-                    MapperLogger.Error($"syslay not found: {activeSyslay}");
-                    MessageBox.Show($"syslay not found:\n{activeSyslay}\n\nCheck mapper_config.json.",
-                        "Config Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    return;
-                }
-                if (dfbproj == null)
-                {
-                    MapperLogger.Error("Cannot find .dfbproj above syslay path.");
-                    MessageBox.Show("Cannot find .dfbproj.\nCheck mapper_config.json.",
-                        "Config Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    return;
-                }
                 MapperLogger.Info($"Project: {Path.GetFileName(dfbproj)}");
 
-                // Phase 0: Deploy templates
-                MapperLogger.Info("── Phase 0: Deploying templates ──");
-                await Task.Run(() => DeployTemplates(cfg, dfbproj));
-                MapperLogger.Info("── Phase 0 complete ──");
+                await Task.Run(() => TemplatePackager.Package(
+                    cfg.TemplateIec61499Dir, Path.GetDirectoryName(dfbproj)!,
+                    dfbproj, cfg.TemplateHmiDir,
+                    Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(dfbproj)!)!, "HMI")));
 
-                // Phase 1: Inject instances
-                MapperLogger.Info("── Phase 1: Injecting instances ──");
-
-                var injectionCfg = MapperConfig.Load();
-                injectionCfg.SyslayPath = activeSyslay;
-                injectionCfg.SysresPath = activeSysres;
+                var injCfg = MapperConfig.Load();
+                injCfg.SyslayPath = cfg.ActiveSyslayPath;
+                injCfg.SysresPath = cfg.ActiveSysresPath;
 
                 var injector = new SystemInjector();
-                var diff = injector.PreviewDiff(injectionCfg, toInject);
-                LogDiff(diff);
+                var result = await Task.Run(() => injector.Inject(injCfg, toInject));
 
-                MapperLogger.Write("Injecting into EAE project files\u2026");
-                var result = await Task.Run(() => injector.Inject(injectionCfg, toInject));
-
-                if (!result.Success)
-                {
-                    MapperLogger.Error($"Injection failed: {result.ErrorMessage}");
-                    MessageBox.Show($"Injection failed:\n\n{result.ErrorMessage}",
-                        "Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    return;
-                }
-
-                foreach (var fb in result.InjectedFBs) MapperLogger.Info($"{SymPass} {fb}");
-                foreach (var u in result.UnsupportedComponents) MapperLogger.Warn(u);
+                if (!result.Success) { ShowError($"Injection failed:\n{result.ErrorMessage}"); return; }
 
                 File.SetLastWriteTime(dfbproj, DateTime.Now);
-
                 lblStatus.Text = $"Done. {result.InjectedFBs.Count} instance(s) injected.";
-                MapperLogger.Info("Generation complete.");
-
-                var msg = new StringBuilder();
-                msg.AppendLine("Templates deployed.");
-                msg.AppendLine($"Injected {result.InjectedFBs.Count} instance(s) into syslay/sysres.");
-                if (result.UnsupportedComponents.Any())
-                    msg.AppendLine($"\n{result.UnsupportedComponents.Count} component(s) skipped.");
-                msg.AppendLine("\nSwitch to EAE and click Reload Solution.");
-                MessageBox.Show(msg.ToString(), "Done: Reload EAE",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show($"Injected {result.InjectedFBs.Count} instance(s).\nReload Solution in EAE.",
+                    "Done", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
-            catch (Exception ex)
-            {
-                MapperLogger.Error($"Exception: {ex.Message}");
-                MessageBox.Show($"Unexpected error:\n{ex.Message}", "Error",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-            finally
-            {
-                btnGenerateCode.Enabled = true;
-            }
+            catch (Exception ex) { ShowError(ex.Message); }
+            finally { btnGenerateCode.Enabled = true; }
         }
 
-        // ─────────────────────────────────────────────────────────────────────
-        // Generate Robot_Task_CAT Wrapper
-        // ─────────────────────────────────────────────────────────────────────
-
-        private async void btnGenerateRobotWrapper_Click(object sender, EventArgs e)
+        async void btnGenerateRobotWrapper_Click(object sender, EventArgs e)
         {
             btnGenerateRobotWrapper.Enabled = false;
-            MapperLogger.Info("Generate CAT wrapper — started.");
-
             try
             {
-                var cfg = GetMapperConfig();
-                var (_, _, dfbprojPath) = ResolveActivePaths(cfg);
-                if (dfbprojPath == null)
-                {
-                    MessageBox.Show("Cannot locate IEC61499.dfbproj.\nCheck mapper_config.json.",
-                        "Config Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    return;
-                }
+                var cfg = Cfg();
+                var dfbproj = FindDfbproj(cfg.ActiveSyslayPath);
+                if (dfbproj == null) { ShowError("Cannot find .dfbproj."); return; }
 
-                var result = await Task.Run(
-                    () => RobotTaskCatRegistrar.Register(cfg, dfbprojPath));
-
-                MapperLogger.Info(result);
-                MessageBox.Show(result, "CAT Wrapper Generated",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                var result = await Task.Run(() => RobotTaskCatRegistrar.Register(cfg, dfbproj));
+                MessageBox.Show(result, "CAT Wrapper Generated", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
-            catch (Exception ex)
-            {
-                MapperLogger.Error($"CAT wrapper generation failed: {ex.Message}");
-                MessageBox.Show($"Failed:\n\n{ex.Message}", "Error",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-            finally
-            {
-                btnGenerateRobotWrapper.Enabled = true;
-            }
+            catch (Exception ex) { ShowError(ex.Message); }
+            finally { btnGenerateRobotWrapper.Enabled = true; }
         }
 
-        // ─────────────────────────────────────────────────────────────────────
-        // Generate Pusher FB — full end-to-end:
-        //   1. Deploy templates to target project
-        //   2. Create Pusher as a 5-state actuator component
-        //   3. Inject it into syslay/sysres with actuator_name='pusher'
-        // ─────────────────────────────────────────────────────────────────────
-
-        private async void btnGeneratePusherFB_Click(object sender, EventArgs e)
+        async void btnGeneratePusherFB_Click(object sender, EventArgs e)
         {
-            MapperLogger.Info("══════════════════════════════════════════");
-            MapperLogger.Info("Generate Pusher FB — started.");
-
             try
             {
-                var cfg = GetMapperConfig();
-                var (activeSyslay, activeSysres, dfbprojPath) = ResolveActivePaths(cfg);
+                var cfg = Cfg();
+                var dfbproj = FindDfbproj(cfg.ActiveSyslayPath);
+                if (dfbproj == null) { ShowError("Cannot find .dfbproj."); return; }
+                if (!File.Exists(cfg.ActiveSyslayPath)) { ShowError("syslay not found."); return; }
 
-                if (dfbprojPath == null)
+                await Task.Run(() => TemplatePackager.Package(
+                    cfg.TemplateIec61499Dir, Path.GetDirectoryName(dfbproj)!,
+                    dfbproj, cfg.TemplateHmiDir,
+                    Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(dfbproj)!)!, "HMI")));
+
+                var components = new List<VueOneComponent>
                 {
-                    MessageBox.Show("Cannot locate IEC61499.dfbproj.\nCheck mapper_config.json.",
-                        "Config Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    return;
-                }
-                if (!File.Exists(activeSyslay))
-                {
-                    MessageBox.Show($"syslay not found:\n{activeSyslay}",
-                        "Config Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    return;
-                }
-
-                // Phase 0: Deploy templates
-                MapperLogger.Info("── Phase 0: Deploying templates ──");
-                await Task.Run(() => DeployTemplates(cfg, dfbprojPath));
-                MapperLogger.Info("Templates deployed.");
-
-                // Phase 1: Build components and inject them
-                MapperLogger.Info("── Phase 1: Injecting instances ──");
-
-                var pusher = new VueOneComponent
-                {
-                    Name = "Pusher",
-                    Type = "Actuator",
-                    States = new List<VueOneState>
+                    new() { Name = "Pusher", Type = "Actuator", States = new()
                     {
-                        new() { Name = "AtHome",    StateNumber = 0, InitialState = true },
-                        new() { Name = "ToWork",    StateNumber = 1 },
-                        new() { Name = "AtWork",    StateNumber = 2 },
-                        new() { Name = "ToHome",    StateNumber = 3 },
-                        new() { Name = "Stopped",   StateNumber = 4 },
-                    }
-                };
-
-                var partInHopper = new VueOneComponent
-                {
-                    Name = "PartInHopper",
-                    Type = "Sensor",
-                    States = new List<VueOneState>
+                        new() { Name = "AtHome", StateNumber = 0, InitialState = true },
+                        new() { Name = "ToWork", StateNumber = 1 },
+                        new() { Name = "AtWork", StateNumber = 2 },
+                        new() { Name = "ToHome", StateNumber = 3 },
+                        new() { Name = "Stopped", StateNumber = 4 },
+                    }},
+                    new() { Name = "PartInHopper", Type = "Sensor", States = new()
                     {
                         new() { Name = "Off", StateNumber = 0, InitialState = true },
-                        new() { Name = "On",  StateNumber = 1 },
-                    }
-                };
-
-                var partAtChecker = new VueOneComponent
-                {
-                    Name = "PartAtChecker",
-                    Type = "Sensor",
-                    States = new List<VueOneState>
+                        new() { Name = "On", StateNumber = 1 },
+                    }},
+                    new() { Name = "PartAtChecker", Type = "Sensor", States = new()
                     {
                         new() { Name = "Off", StateNumber = 0, InitialState = true },
-                        new() { Name = "On",  StateNumber = 1 },
-                    }
+                        new() { Name = "On", StateNumber = 1 },
+                    }},
                 };
 
-                var injectionCfg = MapperConfig.Load();
-                injectionCfg.SyslayPath = activeSyslay;
-                injectionCfg.SysresPath = activeSysres;
+                var injCfg = MapperConfig.Load();
+                injCfg.SyslayPath = cfg.ActiveSyslayPath;
+                injCfg.SysresPath = cfg.ActiveSysresPath;
 
-                var injector = new SystemInjector();
-                var toInject = new List<VueOneComponent> { pusher, partInHopper, partAtChecker };
+                var result = await Task.Run(() => new SystemInjector().Inject(injCfg, components));
 
-                var result = await Task.Run(() => injector.Inject(injectionCfg, toInject));
+                if (!result.Success) { ShowError($"Injection failed:\n{result.ErrorMessage}"); return; }
 
-                if (!result.Success)
-                {
-                    MapperLogger.Error($"Injection failed: {result.ErrorMessage}");
-                    MessageBox.Show($"Injection failed:\n\n{result.ErrorMessage}",
-                        "Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    return;
-                }
-
-                foreach (var fb in result.InjectedFBs) MapperLogger.Info($"{SymPass} {fb}");
-
-                File.SetLastWriteTime(dfbprojPath, DateTime.Now);
-
-                MapperLogger.Info("Generate Pusher FB — complete.");
-
+                File.SetLastWriteTime(dfbproj, DateTime.Now);
                 MessageBox.Show(
-                    "Generated successfully.\n\n" +
-                    "Templates deployed + 3 instances injected:\n" +
-                    "  - Pusher (Five_State_Actuator_CAT) → actuator_name='pusher'\n" +
-                    "  - PartInHopper (Sensor_Bool_CAT)\n" +
-                    "  - PartAtChecker (Sensor_Bool_CAT)\n\n" +
-                    "Switch to EAE and click Reload Solution.",
-                    "FBs Generated",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    $"Generated {result.InjectedFBs.Count} instance(s).\nReload Solution in EAE.",
+                    "FBs Generated", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
-            catch (Exception ex)
-            {
-                MapperLogger.Error($"Pusher FB generation failed: {ex.Message}");
-                MessageBox.Show($"Failed:\n\n{ex.Message}", "Error",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
+            catch (Exception ex) { ShowError(ex.Message); }
         }
 
-        // ─────────────────────────────────────────────────────────────────────
-        // Component grid selection -> I/O detail panels
-        // ─────────────────────────────────────────────────────────────────────
-
-        private void dgvComponents_SelectionChanged(object sender, EventArgs e)
+        void dgvComponents_SelectionChanged(object sender, EventArgs e)
         {
             dgvInputs.Rows.Clear();
             dgvOutputs.Rows.Clear();
             if (dgvComponents.SelectedRows.Count == 0) return;
 
             var name = dgvComponents.SelectedRows[0].Cells[0].Value?.ToString();
-            var comp = _loadedComponents.FirstOrDefault(c =>
-                string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase));
+            var comp = _loadedComponents.FirstOrDefault(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase));
             if (comp == null) return;
 
             foreach (var s in comp.States.OrderBy(st => st.StateNumber))
                 dgvInputs.Rows.Add($"State {s.StateNumber}: {s.Name}", "");
 
-            var vr = _validationRows.FirstOrDefault(r =>
-                string.Equals(r.Component.Name, name, StringComparison.OrdinalIgnoreCase));
-            if (vr != null && !vr.IsValid && !string.IsNullOrEmpty(vr.FailReason))
+            var vr = _validationRows.FirstOrDefault(r => string.Equals(r.Component.Name, name, StringComparison.OrdinalIgnoreCase));
+            if (vr is { IsValid: false, FailReason.Length: > 0 })
                 dgvOutputs.Rows.Add(vr.FailReason, "");
         }
 
-        // ─────────────────────────────────────────────────────────────────────
-        // Helpers
-        // ─────────────────────────────────────────────────────────────────────
-
-        private void UpdateDetectedInfo()
+        void UpdateDetectedInfo()
         {
             if (_loadedComponents.Count == 0) return;
+            int a = _loadedComponents.Count(c => c.Type == "Actuator");
+            int s = _loadedComponents.Count(c => c.Type == "Sensor");
+            int p = _loadedComponents.Count(c => c.Type == "Process");
+            int r = _loadedComponents.Count(c => c.Type == "Robot");
 
-            int a = _loadedComponents.Count(c => TypeIs(c, "Actuator"));
-            int s = _loadedComponents.Count(c => TypeIs(c, "Sensor"));
-            int p = _loadedComponents.Count(c => TypeIs(c, "Process"));
-            int r = _loadedComponents.Count(c => TypeIs(c, "Robot"));
-
-            lblDetectedType.Text = _loadedComponents.Count == 1
-                ? _loadedComponents[0].Type : "System";
-            lblDetectedName.Text = _loadedComponents.Count == 1
-                ? _loadedComponents[0].Name : (_lastReader?.SystemName ?? "-");
+            lblDetectedType.Text = _loadedComponents.Count == 1 ? _loadedComponents[0].Type : "System";
+            lblDetectedName.Text = _loadedComponents.Count == 1 ? _loadedComponents[0].Name : (_lastReader?.SystemName ?? "-");
             lblDetectedStates.Text = _loadedComponents.Count == 1
                 ? $"{_loadedComponents[0].States.Count} states"
                 : $"{a} actuators, {s} sensors, {p} processes, {r} robots";
         }
 
-        private static bool TypeIs(VueOneComponent c, string t) =>
-            string.Equals(c.Type, t, StringComparison.OrdinalIgnoreCase);
-
-        private void SetValidationLabel(string text, Color color)
+        void SetValidationLabel(string text, Color color)
         {
             lblValidationStatus.Text = text;
             lblValidationStatus.ForeColor = color;
         }
 
-        private MapperConfig GetMapperConfig()
-        {
-            _mapperConfig ??= MapperConfig.Load();
-            return _mapperConfig;
-        }
+        MapperConfig Cfg() => _mapperConfig ??= MapperConfig.Load();
 
-        private static string? DeriveProjectFile(string startPath)
+        static string? FindDfbproj(string startPath)
         {
-            var dir = Directory.Exists(startPath)
-                ? startPath
-                : Path.GetDirectoryName(startPath);
-
+            var dir = Directory.Exists(startPath) ? startPath : Path.GetDirectoryName(startPath);
             while (dir != null)
             {
-                var candidate = Directory.GetFiles(dir, "*.dfbproj", SearchOption.TopDirectoryOnly)
-                    .FirstOrDefault();
-                if (candidate != null) return candidate;
+                var f = Directory.GetFiles(dir, "*.dfbproj", SearchOption.TopDirectoryOnly).FirstOrDefault();
+                if (f != null) return f;
                 dir = Directory.GetParent(dir)?.FullName;
             }
             return null;
         }
 
-        private static void LogCatCheck(string dfbContent, string catName)
-        {
-            bool found = dfbContent.Contains(catName);
-            if (found)
-                MapperLogger.Info($"  {SymPass} {catName} registered in .dfbproj");
-            else
-                MapperLogger.Warn($"  {SymFail} {catName} NOT found in .dfbproj");
-        }
-
-        private static void LogDiff(SystemInjector.DiffReport diff)
-        {
-            MapperLogger.Info($"Diff: {diff.ToBeInjected.Count} to inject, " +
-                              $"{diff.AlreadyPresent.Count} already present.");
-            foreach (var n in diff.ToBeInjected) MapperLogger.Info($"  + {n}");
-            foreach (var n in diff.AlreadyPresent) MapperLogger.Info($"  = {n} (already exists)");
-        }
+        static void ShowError(string msg) => MessageBox.Show(msg, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
     }
 }
