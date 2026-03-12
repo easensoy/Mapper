@@ -10,28 +10,6 @@ using CodeGen.Models;
 
 namespace MapperUI.Services
 {
-    /// <summary>
-    /// Injects ONLY the components the caller supplies.  The caller (MainForm) is
-    /// responsible for passing only the user-selected, validated subset.
-    ///
-    /// Overlap-free positioning (derived from user-verified reference syslay):
-    ///   Actuators  → x=1300 (LEFT of sensors), y starts at 2080, gap 800
-    ///   Sensors    → x=1560, y starts at 1000, gap 480
-    ///   Processes  → x=3000, y starts at 1000
-    ///   nextY = max(existing y of same CAT type in network) + YGap
-    ///
-    /// Wiring: ALL actuators in the network are wired after every injection run.
-    ///   AddConn is idempotent existing connections are never duplicated.
-    ///   Event  Process.state_update              → Actuator.pst_event
-    ///   Event  Actuator.pst_out                  → Process.state_change
-    ///   Data   Process.actuator_name             → Actuator.process_state_name
-    ///   Data   Process.state_val                 → Actuator.state_val
-    ///   Data   Actuator.current_state_to_process → Process.{lowercase_name}
-    ///
-    /// INIT chain extended for NEWLY-injected actuators only (syslay):
-    ///   Before:  X.INITO → Process.INIT
-    ///   After:   X.INITO → Act1.INIT → ... → ActN.INITO → Process.INIT
-    /// </summary>
     public class SystemInjector
     {
         private static readonly XNamespace Ns = "https://www.se.com/LibraryElements";
@@ -41,27 +19,15 @@ namespace MapperUI.Services
         private const string ProcessCatType = "Process1_CAT";
         private const string RobotCatType = "Robot_Task_CAT";
 
-        // Vertical gaps between FBs of the same type.
-        // Derived from the reference syslay (user-verified layout):
-        //   hopper y=1000, Part_At_Checker y=1480  → SensorYGap   = 480
-        //   Pusher y=2080, Checker y=2880           → ActuatorYGap = 800
         private const int ActuatorYGap = 800;
         private const int SensorYGap = 480;
         private const int ProcessYGap = 800;
         private const int DefaultYGap = 800;
 
-        // X columns — derived from user-verified reference syslay
         private const int ActuatorX = 1300;
         private const int SensorX = 1560;
         private const int ProcessX = 3000;
         private const int RobotX = 5000;
-
-        // Process instance name: read from comp.Name, which is parsed directly from
-        // the <n> element inside the Process <Component> block in Control.xml.
-        // e.g. Control.xml → <n>Feed_Station</n> / <Type>Process</Type>  → FbName = "Feed_Station"
-        // No hardcoding needed — whatever VueOne names it becomes the EAE FB instance name.
-
-        // ── Public API ────────────────────────────────────────────────────────
 
         public DiffReport PreviewDiff(MapperConfig config, List<VueOneComponent> components,
             string? controlXmlPath = null)
@@ -105,10 +71,6 @@ namespace MapperUI.Services
                 if (!File.Exists(config.SysresPath))
                     throw new FileNotFoundException($"sysres not found: {config.SysresPath}");
 
-                // Resolve the true process name from the <n> element in Control.xml.
-                // The SystemXmlReader populates comp.Name using NameTag="Name", but Control.xml
-                // stores the component name in <n> (lowercase), so we re-parse directly here
-                // to guarantee Feed_Station (not Process1) is used as the FB instance name.
                 if (controlXmlPath != null && File.Exists(controlXmlPath))
                     PatchProcessNames(components, controlXmlPath);
 
@@ -130,8 +92,6 @@ namespace MapperUI.Services
             return result;
         }
 
-        // ── Syslay ────────────────────────────────────────────────────────────
-
         private void InjectSyslay(MapperConfig config, List<VueOneComponent> components,
             SystemInjectionResult result, Dictionary<string, string> syslayIds)
         {
@@ -140,10 +100,8 @@ namespace MapperUI.Services
                 ?? throw new Exception("SubAppNetwork not found in syslay");
 
             var renames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            var newActuators = new List<string>(); // tracks only NEWLY injected actuators
+            var newActuators = new List<string>();
 
-            // Inject in order: Process, Sensors, Actuators, Robots
-            // Actuators use x=1300 (LEFT of sensors at x=1560)
             InjectGroup(net, Processes(components), ProcessCatType, ProcessX, false, renames, result, syslayIds, null);
             InjectGroup(net, Sensors(components), SensorCatType, SensorX, false, renames, result, syslayIds, null);
             InjectGroup(net, Actuators(components), ActuatorCatType, ActuatorX, false, renames, result, syslayIds, newActuators);
@@ -152,9 +110,6 @@ namespace MapperUI.Services
             if (renames.Any())
                 RewriteConnections(net, renames);
 
-            // Wire ALL actuators in the network AddConn is idempotent so existing
-            // wiring (e.g. Pusher→Process1) is never duplicated, and new actuators
-            // (Checker, Transfer, Ejector) get their connections even on re-runs.
             string? proc = FirstFbOfType(net, ProcessCatType)?.Attribute("Name")?.Value;
             if (proc != null)
             {
@@ -165,7 +120,6 @@ namespace MapperUI.Services
 
                 WireActuators(net, allActuators!, proc, result);
 
-                // Only extend the INIT chain for NEWLY injected actuators
                 if (newActuators.Any())
                     ExtendInitChain(net, newActuators, proc, result);
             }
@@ -176,8 +130,6 @@ namespace MapperUI.Services
 
             doc.Save(config.SyslayPath);
         }
-
-        // ── Sysres ────────────────────────────────────────────────────────────
 
         private void InjectSysres(MapperConfig config, List<VueOneComponent> components,
             SystemInjectionResult result, Dictionary<string, string> syslayIds)
@@ -198,9 +150,6 @@ namespace MapperUI.Services
 
             doc.Save(config.SysresPath);
         }
-
-        // ── Group injection ───────────────────────────────────────────────────
-
         private void InjectGroup(
             XElement net,
             List<VueOneComponent> group,
@@ -228,7 +177,6 @@ namespace MapperUI.Services
             {
                 string fbName = FbName(comp, catType);
 
-                // 1. Exact match already present — update params only
                 var present = FindFb(net, fbName, catType);
                 if (present != null)
                 {
@@ -238,7 +186,6 @@ namespace MapperUI.Services
                     continue;
                 }
 
-                // 2. Spare slot — remap existing placeholder
                 if (spareIdx < spares.Count)
                 {
                     var slot = spares[spareIdx++];
@@ -252,7 +199,6 @@ namespace MapperUI.Services
                     continue;
                 }
 
-                // 3. Brand-new FB placed at columnX, nextY
                 string id = isSysres ? MakeId(fbName, "sysres") : MakeId(fbName, "syslay");
 
                 var fb = new XElement(Ns + "FB",
@@ -276,17 +222,7 @@ namespace MapperUI.Services
                 nextY += GapFor(catType);
             }
         }
-
-        /// <summary>
-        /// Returns the EAE FB instance name for a component.
-        /// The name is taken directly from comp.Name, which the ControlXmlReader populates
-        /// from the &lt;n&gt; element of the matching &lt;Component&gt; block in Control.xml.
-        /// For a Process component named "Feed_Station" in VueOne, comp.Name = "Feed_Station".
-        /// </summary>
         private static string FbName(VueOneComponent comp, string catType) => comp.Name;
-
-        // ── Position helper ───────────────────────────────────────────────────
-
         private static int GapFor(string catType) => catType switch
         {
             ActuatorCatType => ActuatorYGap,
@@ -303,21 +239,14 @@ namespace MapperUI.Services
 
             if (ys.Any()) return ys.Max() + GapFor(catType);
 
-            // Default start positions when no existing FB of that type is found.
-            // Values match the user-verified reference syslay exactly.
             return catType switch
             {
-                ActuatorCatType => 2080,   // Pusher first, below sensor column bottom (~1860)
-                SensorCatType => 1000,   // hopper first, compact zone start
-                ProcessCatType => 1000,   // Process FB aligned with first sensor
+                ActuatorCatType => 2080,   
+                SensorCatType => 1000, 
+                ProcessCatType => 1000, 
                 _ => 3000
             };
         }
-
-        // ── Actuator wiring ───────────────────────────────────────────────────
-        // Wires ALL supplied actuators AddConn skips duplicates so safe to call
-        // on every run regardless of whether actuators were newly injected or not.
-
         private static void WireActuators(XElement net, List<string> actuators,
             string proc, SystemInjectionResult result)
         {
@@ -334,9 +263,6 @@ namespace MapperUI.Services
                 AddConn(dc, $"{name}.current_state_to_process", $"{proc}.{lc}", result);
             }
         }
-
-        // ── INIT chain ────────────────────────────────────────────────────────
-
         private static void ExtendInitChain(XElement net, List<string> newActs,
             string proc, SystemInjectionResult result)
         {
@@ -345,7 +271,6 @@ namespace MapperUI.Services
             var ec = EnsureSection(net, "EventConnections");
             string procInit = $"{proc}.INIT";
 
-            // Find the connection that currently drives Process.INIT
             var existingConn = ec.Elements()
                 .Where(e => e.Name.LocalName == "Connection")
                 .FirstOrDefault(c => string.Equals(
@@ -355,7 +280,6 @@ namespace MapperUI.Services
             string? prev = existingConn?.Attribute("Source")?.Value;
             existingConn?.Remove();
 
-            // Chain: prev → newActs[0].INIT → ... → newActs[n].INITO → Process.INIT
             if (!string.IsNullOrEmpty(prev))
                 AddConn(ec, prev, $"{newActs[0]}.INIT", result);
 
@@ -367,9 +291,6 @@ namespace MapperUI.Services
             result.InjectedFBs.Add(
                 $"INIT chain: {prev ?? "?"} → {string.Join(" → ", newActs)} → {proc}");
         }
-
-        // ── XML helpers ───────────────────────────────────────────────────────
-
         private static XElement? LoadNet(string path, string tag)
         {
             var doc = XDocument.Load(path);
@@ -454,7 +375,6 @@ namespace MapperUI.Services
         private static int ParseInt(string? s, int fallback) =>
             int.TryParse(s, out var v) ? v : fallback;
 
-        // ── Parameter helpers ─────────────────────────────────────────────────
 
         private static void ApplyParams(XElement fb, VueOneComponent comp, string catType)
         {
@@ -483,8 +403,6 @@ namespace MapperUI.Services
             return "[" + string.Join(",", names) + "]";
         }
 
-        // ── Diff classification ───────────────────────────────────────────────
-
         private static void Classify(XElement net, string catType,
             List<VueOneComponent> group, DiffReport report)
         {
@@ -502,35 +420,17 @@ namespace MapperUI.Services
                 report.Spare.Add(n);
         }
 
-        // ── DiffReport ────────────────────────────────────────────────────────
-
-        /// <summary>
-        /// Summarises what PreviewDiff found: which components are already in the
-        /// project, which need injecting, which are spare placeholders, and which
-        /// are unsupported in this phase.
-        /// </summary>
         public class DiffReport
         {
-            /// <summary>FBs already present in the syslay with the correct type.</summary>
             public List<string> AlreadyPresent { get; } = new();
 
-            /// <summary>Components that will be injected on the next Generate run.</summary>
             public List<string> ToBeInjected { get; } = new();
 
-            /// <summary>Existing FBs of the same CAT type with no matching component.</summary>
             public List<string> Spare { get; } = new();
 
-            /// <summary>Components with no template for this phase (skipped).</summary>
             public List<string> Unsupported { get; } = new();
         }
 
-        // ── Component filters ─────────────────────────────────────────────────
-
-        /// <summary>
-        /// Re-reads the Control.xml <n> element for each Process component and updates comp.Name.
-        /// The SystemXmlReader uses NameTag="Name" which misses the lowercase <n> tag in VueOne XML.
-        /// This ensures the FB instance name is Feed_Station (not Process1).
-        /// </summary>
         private static void PatchProcessNames(List<VueOneComponent> components, string controlXmlPath)
         {
             var procs = components.Where(c =>
@@ -546,7 +446,6 @@ namespace MapperUI.Services
 
                 foreach (var comp in procs)
                 {
-                    // Find the XML <Component> whose <Type> = "Process"
                     var xmlComp = xmlComps.FirstOrDefault(c =>
                     {
                         var type = c.Elements().FirstOrDefault(e => e.Name.LocalName == "Type")?.Value;
@@ -554,7 +453,6 @@ namespace MapperUI.Services
                     });
                     if (xmlComp == null) continue;
 
-                    // Read the <n> element (VueOne uses lowercase <n> for component name)
                     var nTag = xmlComp.Elements()
                         .FirstOrDefault(e => e.Name.LocalName == "n")?.Value?.Trim();
                     if (!string.IsNullOrWhiteSpace(nTag))
@@ -563,7 +461,6 @@ namespace MapperUI.Services
             }
             catch
             {
-                // If parsing fails, proceed with whatever comp.Name was set to by the reader
             }
         }
 
