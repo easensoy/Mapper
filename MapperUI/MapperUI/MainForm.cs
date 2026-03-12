@@ -1,6 +1,5 @@
 ﻿using CodeGen.Configuration;
 using CodeGen.IO;
-using CodeGen.Mapping;
 using CodeGen.Models;
 using CodeGen.Validation;
 using MapperUI.Services;
@@ -12,10 +11,6 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-
-using RuleEngine = MapperUI.Services.MappingRuleEngine;
-using MappingRule = MapperUI.Services.MappingRuleEntry;
-using UiMappingType = MapperUI.Services.MappingType;
 
 namespace MapperUI
 {
@@ -95,7 +90,6 @@ namespace MapperUI
 
             try
             {
-                MapperLogger.Info($"Loading: {path}");
                 _lastReader = new SystemXmlReader();
                 _loadedComponents = await Task.Run(() => _lastReader.ReadAllComponents(path));
 
@@ -150,7 +144,7 @@ namespace MapperUI
             foreach (var rule in RuleEngine.GetAllRules()) AddMappingRuleRow(rule);
         }
 
-        void AddMappingRuleRow(MappingRule rule)
+        void AddMappingRuleRow(MappingRuleEntry rule)
         {
             int idx = dgvMappingRules.Rows.Add(
                 rule.IsSection ? rule.SectionTitle : rule.VueOneElement,
@@ -174,11 +168,11 @@ namespace MapperUI
             {
                 row.Cells[colMappingType.Index].Style.ForeColor = rule.Type switch
                 {
-                    UiMappingType.TRANSLATED => ColorTranslated,
-                    UiMappingType.DISCARDED => ColorDiscarded,
-                    UiMappingType.ASSUMED => ColorAssumed,
-                    UiMappingType.ENCODED => ColorEncoded,
-                    UiMappingType.HARDCODED => ColorHardcoded,
+                    MappingType.TRANSLATED => ColorTranslated,
+                    MappingType.DISCARDED => ColorDiscarded,
+                    MappingType.ASSUMED => ColorAssumed,
+                    MappingType.ENCODED => ColorEncoded,
+                    MappingType.HARDCODED => ColorHardcoded,
                     _ => Color.Black
                 };
             }
@@ -243,8 +237,6 @@ namespace MapperUI
                 if (dfbproj == null) { ShowError("Cannot find .dfbproj."); return; }
                 if (!File.Exists(cfg.ActiveSyslayPath)) { ShowError($"syslay not found:\n{cfg.ActiveSyslayPath}"); return; }
 
-                MapperLogger.Info($"Project: {Path.GetFileName(dfbproj)}");
-
                 await Task.Run(() => TemplatePackager.Package(
                     cfg.TemplateIec61499Dir, Path.GetDirectoryName(dfbproj)!,
                     dfbproj, cfg.TemplateHmiDir,
@@ -254,8 +246,7 @@ namespace MapperUI
                 injCfg.SyslayPath = cfg.ActiveSyslayPath;
                 injCfg.SysresPath = cfg.ActiveSysresPath;
 
-                var injector = new SystemInjector();
-                var result = await Task.Run(() => injector.Inject(injCfg, toInject));
+                var result = await Task.Run(() => new SystemInjector().Inject(injCfg, toInject));
 
                 if (!result.Success) { ShowError($"Injection failed:\n{result.ErrorMessage}"); return; }
 
@@ -276,7 +267,6 @@ namespace MapperUI
                 var cfg = Cfg();
                 var dfbproj = FindDfbproj(cfg.ActiveSyslayPath);
                 if (dfbproj == null) { ShowError("Cannot find .dfbproj."); return; }
-
                 var result = await Task.Run(() => RobotTaskCatRegistrar.Register(cfg, dfbproj));
                 MessageBox.Show(result, "CAT Wrapper Generated", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
@@ -325,12 +315,10 @@ namespace MapperUI
                 injCfg.SysresPath = cfg.ActiveSysresPath;
 
                 var result = await Task.Run(() => new SystemInjector().Inject(injCfg, components));
-
                 if (!result.Success) { ShowError($"Injection failed:\n{result.ErrorMessage}"); return; }
 
                 File.SetLastWriteTime(dfbproj, DateTime.Now);
-                MessageBox.Show(
-                    $"Generated {result.InjectedFBs.Count} instance(s).\nReload Solution in EAE.",
+                MessageBox.Show($"Generated {result.InjectedFBs.Count} instance(s).\nReload Solution in EAE.",
                     "FBs Generated", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex) { ShowError(ex.Message); }
