@@ -6,13 +6,6 @@ using CodeGen.Models;
 
 namespace CodeGen.IO
 {
-    /// <summary>
-    /// Reads a VueOne Control.xml (Type="System") or single-component XML (Type="Component").
-    /// After calling ReadAllComponents():
-    ///   SystemName → value of <n> inside <s>       e.g. "SMC_Vue2VC_With_Processes"
-    ///   SystemID   → value of <SystemID> inside <s> e.g. "SYS-8133a338-..."
-    /// For single-component files these remain empty.
-    /// </summary>
     public class SystemXmlReader
     {
         public string SystemName { get; private set; } = string.Empty;
@@ -67,7 +60,6 @@ namespace CodeGen.IO
                 return;
             }
 
-            // VueOne stores system name as <n>, not <Name>
             SystemName = GetElementValue(s, "n");
             if (string.IsNullOrWhiteSpace(SystemName))
                 SystemName = GetElementValue(s, "Name");
