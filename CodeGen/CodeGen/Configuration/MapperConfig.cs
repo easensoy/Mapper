@@ -41,7 +41,22 @@ namespace CodeGen.Configuration
         public string RobotBasicTemplatePath { get; set; } = string.Empty;
 
         // ─────────────────────────────────────────────────────────────────────
+        /// <summary>
+        /// Root of the blank target EAE project (e.g. Demonstrator).
+        /// The Mapper copies templates here and injects instances.
+        /// Example: C:\Demonstrator\Demonstator
+        /// </summary>
+        public string EAEDeployPath2 { get; set; } = string.Empty;
 
+        /// <summary>
+        /// syslay path inside the blank target project.
+        /// </summary>
+        public string SyslayPath2 { get; set; } = string.Empty;
+
+        /// <summary>
+        /// sysres path inside the blank target project.
+        /// </summary>
+        public string SysresPath2 { get; set; } = string.Empty;
         public static MapperConfig Load()
         {
             var configPath = Path.Combine(Environment.CurrentDirectory, ConfigFileName);
