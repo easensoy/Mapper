@@ -11,6 +11,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using MappingType = MapperUI.Services.MappingType;
 
 namespace MapperUI
 {
@@ -247,7 +248,6 @@ namespace MapperUI
                 injCfg.SysresPath = cfg.ActiveSysresPath;
 
                 var result = await Task.Run(() => new SystemInjector().Inject(injCfg, toInject));
-
                 if (!result.Success) { ShowError($"Injection failed:\n{result.ErrorMessage}"); return; }
 
                 File.SetLastWriteTime(dfbproj, DateTime.Now);
