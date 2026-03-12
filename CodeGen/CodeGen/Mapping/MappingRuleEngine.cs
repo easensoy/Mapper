@@ -4,29 +4,8 @@ using System.Linq;
 
 namespace CodeGen.Mapping
 {
-    /// <summary>
-    /// Produces the complete VueOne → IEC 61499 mapping-rule rows as defined in
-    /// VueOne_IEC61499_Mapping.xlsx.
-    ///
-    /// Row order mirrors the spreadsheet:
-    ///   System rows first (SystemID, System/Name, Version, Type)
-    ///   Then per-component rows in the order they appear in the xlsx table.
-    ///
-    /// All rows have Validated = true.
-    /// DISCARDED rows are still validated — they represent deliberate drop decisions.
-    /// </summary>
     public static class MappingRuleEngine
     {
-        // ── colour hints (used by MainForm to pick row BackColor) ─────────────
-        // Type → BackColor string is resolved in the UI layer; engine is colour-agnostic.
-
-        // ─────────────────────────────────────────────────────────────────────
-        // PUBLIC API
-        // ─────────────────────────────────────────────────────────────────────
-
-        /// <summary>
-        /// System-level rows — appear once at the top regardless of component count.
-        /// </summary>
         public static List<MappingRule> GetSystemRules(string systemId, string systemName)
         {
             return new List<MappingRule>
