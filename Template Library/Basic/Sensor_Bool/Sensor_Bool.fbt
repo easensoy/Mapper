@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="d234a331-9b41-4734-90a7-9525bee65ade" Name="Sensor_Bool" Comment="Basic Function Block Type" Namespace="Main">
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author=" " Date="2/2/2026" Remarks="Template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT" Comment="Initialization Request">
+        <With Var="Input" />
+      </Event>
+      <Event Name="REQ" Comment="Normal Execution Request">
+        <With Var="Input" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO" Comment="Initialization Confirm">
+        <With Var="Status" />
+      </Event>
+      <Event Name="CNF" Comment="Execution Confirmation">
+        <With Var="Status" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="Input" Type="BOOL" Comment="Input event qualifier" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="Status" Type="INT" Comment="Output event qualifier" />
+    </OutputVars>
+  </InterfaceList>
+  <BasicFB>
+    <Attribute Name="FBType.Basic.Algorithm.Order" Value="INIT,Sensor_TRUE,Sensor_FALSE" />
+    <ECC>
+      <ECState Name="START" Comment="Initial State" x="552.9412" y="429.4117" />
+      <ECState Name="INIT" Comment="Initialization" x="923.5294" y="141.1765">
+        <ECAction Algorithm="INIT" Output="INITO" />
+      </ECState>
+      <ECState Name="Sensor_TRUE" Comment="Normal execution" x="1177.647" y="836.9412">
+        <ECAction Algorithm="Sensor_TRUE" Output="CNF" />
+      </ECState>
+      <ECState Name="Sensor_FALSE" Comment="Normal execution" x="729.6471" y="1648.941">
+        <ECAction Algorithm="Sensor_FALSE" Output="CNF" />
+      </ECState>
+      <ECTransition Source="START" Destination="INIT" Condition="INIT" x="731.1476" y="204.8375" />
+      <ECTransition Source="INIT" Destination="START" Condition="1" x="797.5924" y="348.3231" />
+      <ECTransition Source="START" Destination="Sensor_TRUE" Condition="REQ AND Input = 1" x="917.4869" y="567.7199">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="210.6194,124.7237,249.3464,149.9874" />
+      </ECTransition>
+      <ECTransition Source="Sensor_TRUE" Destination="Sensor_FALSE" Condition="REQ AND Input=0&#xD;&#xA;" x="950.9171" y="1345.723">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="256.3064,312.5898,216.0954,377.4017" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="Sensor_FALSE" Condition="REQ AND Input=0" x="712.8248" y="1026.073">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="176.4071,208.9465,189.9943,301.9059" />
+      </ECTransition>
+      <ECTransition Source="Sensor_FALSE" Destination="Sensor_TRUE" Condition="REQ AND Input=1" x="945.4842" y="1114.041">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="222.363,297.9651,253.7397,237.5723" />
+      </ECTransition>
+    </ECC>
+    <Algorithm Name="INIT" Comment="Initialization algorithm">
+      <ST><![CDATA[;]]></ST>
+    </Algorithm>
+    <Algorithm Name="Sensor_TRUE" Comment="Normally executed algorithm">
+      <ST><![CDATA[Status := 1;]]></ST>
+    </Algorithm>
+    <Algorithm Name="Sensor_FALSE">
+      <ST><![CDATA[Status:= 0;]]></ST>
+    </Algorithm>
+  </BasicFB>
+</FBType>

@@ -1,0 +1,234 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="b0bef37f-c4a6-40bb-9927-8b1fba97284f" Name="Station_Core" Comment="Basic Function Block Type" Namespace="Main">
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author="Evans_A" Date="7/10/2025" Remarks="Template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT" Comment="Initialization Request" />
+      <Event Name="AMREQ" Comment="Normal Execution Request">
+        <With Var="AreaModeCmd" />
+      </Event>
+      <Event Name="ACTREQ">
+        <With Var="AreaCycleTypeCmd" />
+      </Event>
+      <Event Name="SMREQ">
+        <With Var="StationModeCmd" />
+      </Event>
+      <Event Name="SCTREQ">
+        <With Var="StationCycleTypeCmd" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO" Comment="Initialization Confirm">
+        <With Var="StationMode" />
+        <With Var="StationCycleType" />
+      </Event>
+      <Event Name="MCNF" Comment="Execution Confirmation">
+        <With Var="StationMode" />
+      </Event>
+      <Event Name="CTCNF">
+        <With Var="StationCycleType" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="AreaModeCmd" Type="INT" Comment="Input event qualifier" />
+      <VarDeclaration Name="AreaCycleTypeCmd" Type="INT" />
+      <VarDeclaration Name="StationModeCmd" Type="INT" />
+      <VarDeclaration Name="StationCycleTypeCmd" Type="INT" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="StationMode" Type="INT" Comment="Output event qualifier" />
+      <VarDeclaration Name="StationCycleType" Type="INT" />
+    </OutputVars>
+  </InterfaceList>
+  <BasicFB>
+    <Attribute Name="FBType.Basic.Algorithm.Order" Value="INIT,REQ,Auto_Stop,Manual_Stop,Setup_Mode,Initial_Position,Continuous,Stop_At_End,Single_Cycle,Dry_Cycle,Cycle_Stop" />
+    <ECC>
+      <ECState Name="START" Comment="Initial State" x="1272.941" y="460.5228" />
+      <ECState Name="INIT" Comment="Initialization" x="1815.529" y="173.1765">
+        <ECAction Algorithm="INIT" Output="INITO" />
+      </ECState>
+      <ECState Name="AUTO" x="2831.555" y="496.8889">
+        <ECAction Algorithm="Auto_Stop" Output="MCNF" />
+        <ECAction Algorithm="Cycle_Stop" Output="CTCNF" />
+      </ECState>
+      <ECState Name="MANUAL" x="1847.111" y="2681.335">
+        <ECAction Algorithm="Manual_Stop" Output="MCNF" />
+        <ECAction Algorithm="Cycle_Stop" Output="CTCNF" />
+      </ECState>
+      <ECState Name="SETUP_MODE" x="527.9999" y="2261.333">
+        <ECAction Algorithm="Setup_Mode" Output="MCNF" />
+      </ECState>
+      <ECState Name="HOME" x="488.8889" y="848.8888">
+        <ECAction Algorithm="Initial_Position" Output="MCNF" />
+      </ECState>
+      <ECState Name="CONTINUOUS_AUTO" x="4321.778" y="1284.038">
+        <ECAction Algorithm="Continuous" Output="CTCNF" />
+      </ECState>
+      <ECState Name="STOP_AT_END_AUTO" x="3987.008" y="1685.778">
+        <ECAction Algorithm="Stop_At_End" Output="CTCNF" />
+      </ECState>
+      <ECState Name="SINGLE_CYCLE_AUTO" x="3521.231" y="2068">
+        <ECAction Algorithm="Single_Cycle" Output="CTCNF" />
+      </ECState>
+      <ECState Name="DRY_CYCLE_AUTO" x="2887.896" y="2394.667">
+        <ECAction Algorithm="Dry_Cycle" Output="CTCNF" />
+      </ECState>
+      <ECState Name="CONTINUOUS_MANUAL" x="3772.444" y="3715.557">
+        <ECAction Algorithm="Continuous" Output="CTCNF" />
+      </ECState>
+      <ECState Name="STOP_AT_END_MANUAL" x="2968.341" y="4147.112">
+        <ECAction Algorithm="Stop_At_End" Output="CTCNF" />
+      </ECState>
+      <ECState Name="SINGLE_CYCLE_MANUAL" x="2009.23" y="4469.334">
+        <ECAction Algorithm="Single_Cycle" Output="CTCNF" />
+      </ECState>
+      <ECState Name="DRY_CYCLE_MANUAL" x="753.2305" y="4112.002">
+        <ECAction Algorithm="Dry_Cycle" Output="CTCNF" />
+      </ECState>
+      <ECTransition Source="START" Destination="INIT" Condition="INIT" x="1541.572" y="234.7074">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="372.1763,61.56437,401.4837,46.0436" />
+      </ECTransition>
+      <ECTransition Source="INIT" Destination="START" Condition="1" x="1592.499" y="386.8313">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="413.1839,93.1367,383.8765,108.6575" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="AUTO" Condition="AMREQ AND AreaModeCmd=1 OR SMREQ AND StationModeCmd=1" x="1981.621" y="411.0077">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="431.0755,98.34289,546.8531,98.99751" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="MANUAL" Condition="AMREQ AND AreaModeCmd=2 OR SMREQ AND StationModeCmd=2" x="1626.514" y="1545.03">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="388.6915,295.8333,434.5491,472.3652" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="SETUP_MODE" Condition="AMREQ AND AreaModeCmd=3 OR SMREQ AND StationModeCmd=3" x="965.3394" y="1393.173">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="275.3763,280.2565,216.67,421.704" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="HOME" Condition="AMREQ AND AreaModeCmd=9 OR SMREQ AND StationModeCmd=9" x="902.6347" y="729.7361">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="251.1601,174.8022,198.4986,199.8689" />
+      </ECTransition>
+      <ECTransition Source="AUTO" Destination="MANUAL" Condition="AMREQ AND AreaModeCmd=2 OR SMREQ AND StationModeCmd=2" x="2394.285" y="1618.822">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="641.726,320.52,563.5339,493.8427" />
+      </ECTransition>
+      <ECTransition Source="MANUAL" Destination="AUTO" Condition="AMREQ AND AreaModeCmd=1 OR SMREQ AND StationModeCmd=1" x="2454.582" y="1306.082">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="584.1463,389.6569,662.598,216.2124" />
+      </ECTransition>
+      <ECTransition Source="AUTO" Destination="SETUP_MODE" Condition="AMREQ AND AreaModeCmd=3 OR SMREQ AND StationModeCmd=3" x="1660.104" y="1473.899">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="505.4822,305.8886,319.2628,446.8588" />
+      </ECTransition>
+      <ECTransition Source="SETUP_MODE" Destination="AUTO" Condition="AMREQ AND AreaModeCmd=1 OR SMREQ AND StationModeCmd=1" x="1785.561" y="1232.938">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="362.8405,366.619,549.3278,225.4882" />
+      </ECTransition>
+      <ECTransition Source="AUTO" Destination="HOME" Condition="AMREQ AND AreaModeCmd=9 OR SMREQ AND StationModeCmd=9" x="1672.798" y="731.277">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="506.3666,173.1523,331.6345,200.4409" />
+      </ECTransition>
+      <ECTransition Source="HOME" Destination="AUTO" Condition="AMREQ AND AreaModeCmd=1 OR SMREQ AND StationModeCmd=1" x="1663.997" y="612.4862">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="328.3839,161.693,503.7502,136.3979" />
+      </ECTransition>
+      <ECTransition Source="MANUAL" Destination="SETUP_MODE" Condition="AMREQ AND AreaModeCmd=3 OR SMREQ AND StationModeCmd=3" x="1135.411" y="2510.69">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="320.2417,642.707,242.3107,617.34" />
+      </ECTransition>
+      <ECTransition Source="SETUP_MODE" Destination="MANUAL" Condition="AMREQ AND AreaModeCmd=2 OR SMREQ AND StationModeCmd=2" x="1265.117" y="2436.839">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="281.5861,594.5739,354.1726,618.7695" />
+      </ECTransition>
+      <ECTransition Source="MANUAL" Destination="HOME" Condition="AMREQ AND AreaModeCmd=9 OR SMREQ AND StationModeCmd=9" x="1226.228" y="1926.946">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="368.7279,570.0898,255.3461,420.3558" />
+      </ECTransition>
+      <ECTransition Source="HOME" Destination="MANUAL" Condition="AMREQ AND AreaModeCmd=2 OR SMREQ AND StationModeCmd=2" x="1200.124" y="1699.785">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="249.2191,348.9368,354.7392,490.0681" />
+      </ECTransition>
+      <ECTransition Source="SETUP_MODE" Destination="HOME" Condition="AMREQ AND AreaModeCmd=9 OR SMREQ AND StationModeCmd=9" x="500.7269" y="1749.386">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="126.4204,508.1754,123.0617,398.8967" />
+      </ECTransition>
+      <ECTransition Source="HOME" Destination="SETUP_MODE" Condition="AMREQ AND AreaModeCmd=3 OR SMREQ AND StationModeCmd=3" x="573.802" y="1541.442">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="146.4509,329.6092,149.8325,438.8338" />
+      </ECTransition>
+      <ECTransition Source="AUTO" Destination="CONTINUOUS_AUTO" Condition="ACTREQ AND AreaCycleTypeCmd=1 OR SCTREQ AND StationCycleTypeCmd=1" x="3619.223" y="847.1021">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="853.1403,178.9379,960.1972,238.091" />
+      </ECTransition>
+      <ECTransition Source="AUTO" Destination="STOP_AT_END_AUTO" Condition="ACTREQ AND AreaCycleTypeCmd=2 OR SCTREQ AND StationCycleTypeCmd=2" x="3469.615" y="1049.882">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="827.8432,213.3729,914.2407,304.6595" />
+      </ECTransition>
+      <ECTransition Source="AUTO" Destination="SINGLE_CYCLE_AUTO" Condition="ACTREQ AND AreaCycleTypeCmd=3 OR SCTREQ AND StationCycleTypeCmd=3" x="3246.708" y="1256.554">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="790.3909,250.676,842.9749,373.286" />
+      </ECTransition>
+      <ECTransition Source="SINGLE_CYCLE_AUTO" Destination="AUTO" Condition="ACTREQ AND AreaCycleTypeCmd=0 OR SCTREQ AND StationCycleTypeCmd=0" x="3107.455" y="1308.571">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="799.1742,390.2405,744.7352,268.3994" />
+      </ECTransition>
+      <ECTransition Source="STOP_AT_END_AUTO" Destination="AUTO" Condition="ACTREQ AND AreaCycleTypeCmd=0 OR SCTREQ AND StationCycleTypeCmd=0" x="3351.056" y="1133.096">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="878.5382,331.4792,789.9698,242.0295" />
+      </ECTransition>
+      <ECTransition Source="CONTINUOUS_AUTO" Destination="AUTO" Condition="ACTREQ AND AreaCycleTypeCmd=0 OR SCTREQ AND StationCycleTypeCmd=0" x="3510.098" y="926.5438">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="926.9036,261.6755,822.335,207.6098" />
+      </ECTransition>
+      <ECTransition Source="AUTO" Destination="DRY_CYCLE_AUTO" Condition="ACTREQ AND AreaCycleTypeCmd=4 OR SCTREQ AND StationCycleTypeCmd=4" x="2936.029" y="1443.96">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="737.8204,286.1047,741.5843,435.5721" />
+      </ECTransition>
+      <ECTransition Source="DRY_CYCLE_AUTO" Destination="AUTO" Condition="ACTREQ AND AreaCycleTypeCmd=0 OR SCTREQ AND StationCycleTypeCmd=0" x="2784.329" y="1447.828">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="692.9728,436.8451,687.9365,287.4106" />
+      </ECTransition>
+      <ECTransition Source="CONTINUOUS_AUTO" Destination="STOP_AT_END_AUTO" Condition="ACTREQ AND AreaCycleTypeCmd=2 OR SCTREQ AND StationCycleTypeCmd=2" x="4242.253" y="1447.661">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="1075.206,341.6225,1056,376" />
+      </ECTransition>
+      <ECTransition Source="MANUAL" Destination="CONTINUOUS_MANUAL" Condition="ACTREQ AND AreaCycleTypeCmd=1 OR SCTREQ AND StationCycleTypeCmd=1" x="2853.347" y="3162.239">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="643.8373,748.168,786.6004,826.9172" />
+      </ECTransition>
+      <ECTransition Source="MANUAL" Destination="STOP_AT_END_MANUAL" Condition="ACTREQ AND AreaCycleTypeCmd=2 OR SCTREQ AND StationCycleTypeCmd=2" x="2466.508" y="3379.354">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="577.732,784.875,663.4002,898.9908" />
+      </ECTransition>
+      <ECTransition Source="CONTINUOUS_MANUAL" Destination="STOP_AT_END_MANUAL" Condition="ACTREQ AND AreaCycleTypeCmd=2 OR SCTREQ AND StationCycleTypeCmd=2" x="3449.774" y="3962.167">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="887.9954,979.559,840.6236,1006.663" />
+      </ECTransition>
+      <ECTransition Source="MANUAL" Destination="SINGLE_CYCLE_MANUAL" Condition="ACTREQ AND AreaCycleTypeCmd=3 OR SCTREQ AND StationCycleTypeCmd=3" x="1999.333" y="3569.938">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="499.199,821.8471,511.0097,962.2225" />
+      </ECTransition>
+      <ECTransition Source="MANUAL" Destination="DRY_CYCLE_MANUAL" Condition="ACTREQ AND AreaCycleTypeCmd=4 OR SCTREQ AND StationCycleTypeCmd=4" x="1366.652" y="3437.529">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="388.4503,807.6847,303.7195,917.8897" />
+      </ECTransition>
+      <ECTransition Source="CONTINUOUS_MANUAL" Destination="MANUAL" Condition="ACTREQ AND AreaCycleTypeCmd=0 OR SCTREQ AND StationCycleTypeCmd=0" x="2720.657" y="3211.344">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="741.0573,839.4182,607.7647,768.4036" />
+      </ECTransition>
+      <ECTransition Source="STOP_AT_END_MANUAL" Destination="MANUAL" Condition="ACTREQ AND AreaCycleTypeCmd=0 OR SCTREQ AND StationCycleTypeCmd=0" x="2351.974" y="3449.313">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="628.0896,921.6254,540.4414,808.8793" />
+      </ECTransition>
+      <ECTransition Source="SINGLE_CYCLE_MANUAL" Destination="MANUAL" Condition="ACTREQ AND AreaCycleTypeCmd=0 OR SCTREQ AND StationCycleTypeCmd=0" x="1857.161" y="3581.189">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="465.8375,965.8987,452.2225,825.6716" />
+      </ECTransition>
+      <ECTransition Source="DRY_CYCLE_MANUAL" Destination="MANUAL" Condition="ACTREQ AND AreaCycleTypeCmd=0 OR SCTREQ AND StationCycleTypeCmd=0" x="1233.426" y="3356.26">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="262.0319,891.1296,345.8023,780.2653" />
+      </ECTransition>
+    </ECC>
+    <Algorithm Name="INIT" Comment="Initialization algorithm">
+      <ST><![CDATA[StationMode := 0;
+StationCycleType :=0;]]></ST>
+    </Algorithm>
+    <Algorithm Name="REQ" Comment="Normally executed algorithm">
+      <ST><![CDATA[;]]></ST>
+    </Algorithm>
+    <Algorithm Name="Auto_Stop">
+      <ST><![CDATA[StationMode:=1;]]></ST>
+    </Algorithm>
+    <Algorithm Name="Manual_Stop">
+      <ST><![CDATA[StationMode:=2;]]></ST>
+    </Algorithm>
+    <Algorithm Name="Setup_Mode">
+      <ST><![CDATA[StationMode:=3;]]></ST>
+    </Algorithm>
+    <Algorithm Name="Initial_Position">
+      <ST><![CDATA[StationMode:=9;]]></ST>
+    </Algorithm>
+    <Algorithm Name="Continuous">
+      <ST><![CDATA[StationCycleType:=1;]]></ST>
+    </Algorithm>
+    <Algorithm Name="Stop_At_End">
+      <ST><![CDATA[StationCycleType:=2;]]></ST>
+    </Algorithm>
+    <Algorithm Name="Single_Cycle">
+      <ST><![CDATA[StationCycleType:=3;]]></ST>
+    </Algorithm>
+    <Algorithm Name="Dry_Cycle">
+      <ST><![CDATA[StationCycleType:=4;]]></ST>
+    </Algorithm>
+    <Algorithm Name="Cycle_Stop">
+      <ST><![CDATA[StationCycleType:=0;]]></ST>
+    </Algorithm>
+  </BasicFB>
+</FBType>

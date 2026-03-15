@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="0109f77b-8722-4696-92b2-059f368dd1b1" Name="FiveStateActuator" Comment="Basic Function Block Type" Namespace="Main">
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author="azam_w" Date="5/13/2025" Remarks="Template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT">
+        <With Var="athome" />
+        <With Var="atwork" />
+      </Event>
+      <Event Name="pst_event" Comment="Normal Execution Request">
+        <With Var="process_state_name" />
+        <With Var="state_val" />
+        <With Var="actuator_name" />
+      </Event>
+      <Event Name="action_event">
+        <With Var="athome" />
+        <With Var="atwork" />
+      </Event>
+      <Event Name="tohome" />
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO" />
+      <Event Name="pst_out" Comment="Execution Confirmation">
+        <With Var="current_state_to_process" />
+        <With Var="current_state_to_plc" />
+      </Event>
+      <Event Name="plc_out">
+        <With Var="current_state_to_plc" />
+        <With Var="current_state_to_process" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="athome" Type="BOOL" />
+      <VarDeclaration Name="atwork" Type="BOOL" />
+      <VarDeclaration Name="process_state_name" Type="STRING[150]" />
+      <VarDeclaration Name="state_val" Type="INT" />
+      <VarDeclaration Name="actuator_name" Type="STRING[150]" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="current_state_to_process" Type="INT" Comment="Output event qualifier" />
+      <VarDeclaration Name="current_state_to_plc" Type="BOOL" />
+    </OutputVars>
+  </InterfaceList>
+  <BasicFB>
+    <Attribute Name="FBType.Basic.Algorithm.Order" Value="INIT,REQ,toHome,atWork,toWork,atHomeInit,atHomeEnd,Initialise" />
+    <ECC>
+      <ECState Name="START" Comment="Initial State" x="1776.83" y="324.7454" />
+      <ECState Name="ToWork" x="1766.604" y="1913.459">
+        <ECAction Algorithm="toWork" Output="plc_out" />
+        <ECAction Output="pst_out" />
+      </ECState>
+      <ECState Name="AtWork" x="1735.047" y="2428.571">
+        <ECAction Algorithm="atWork" Output="pst_out" />
+      </ECState>
+      <ECState Name="ToHome" x="1734.381" y="2946.31">
+        <ECAction Algorithm="toHome" Output="plc_out" />
+        <ECAction Output="pst_out" />
+      </ECState>
+      <ECState Name="AtHome" x="1719.714" y="3469.21">
+        <ECAction Algorithm="atHomeEnd" Output="pst_out" />
+      </ECState>
+      <ECState Name="AtHomeInit" x="1777.143" y="1440">
+        <ECAction Algorithm="atHomeInit" Output="pst_out" />
+      </ECState>
+      <ECState Name="INIT" x="1800" y="800">
+        <ECAction Algorithm="Initialise" Output="INITO" />
+      </ECState>
+      <ECTransition Source="AtHomeInit" Destination="ToWork" Condition="process_state_name = actuator_name AND state_val = 1" x="1749.696" y="1733.799">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="436.2806,422.8625,436.3531,453.5483" />
+      </ECTransition>
+      <ECTransition Source="ToWork" Destination="AtWork" Condition="process_state_name = actuator_name AND atwork = TRUE" x="1824.545" y="2173.856">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="461.2461,526.5859,459.1616,560.8159" />
+      </ECTransition>
+      <ECTransition Source="AtHome" Destination="AtHomeInit" Condition="atwork = FALSE  AND athome = TRUE" x="805.1057" y="2585.615">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="226.3342,788.3066,40.75508,526.3361" />
+      </ECTransition>
+      <ECTransition Source="ToHome" Destination="AtHome" Condition="process_state_name = actuator_name AND athome" x="1802.733" y="3204.71">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="455.1491,783.4536,454.6357,818.3934" />
+      </ECTransition>
+      <ECTransition Source="AtWork" Destination="ToHome" Condition="process_state_name = actuator_name AND state_val = 3" x="1927.145" y="2698.976">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="507.2523,656.9275,477.4431,694.483" />
+      </ECTransition>
+      <ECTransition Source="ToWork" Destination="ToHome" Condition="tohome" x="1395.459" y="2491.51">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="249.1406,573.3728,400.8673,682.6533" />
+      </ECTransition>
+      <ECTransition Source="AtWork" Destination="ToHome" Condition="tohome" x="1629.197" y="2664.474">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="383.915,630.8895,423.3643,697.5194" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="INIT" Condition="INIT" x="1847.304" y="618.5694">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="464.5471,145.2746,465.0772,173.3762" />
+      </ECTransition>
+      <ECTransition Source="INIT" Destination="AtHomeInit" Condition="atwork = FALSE" x="1842.75" y="1169.576">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="465.7585,274.8029,461.8958,318.2476" />
+      </ECTransition>
+      <ECTransition Source="INIT" Destination="AtWork" Condition="atwork = TRUE AND athome = FALSE" x="2827.282" y="1558.122">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="858.1447,314.835,716.2418,457.0484" />
+      </ECTransition>
+    </ECC>
+    <Algorithm Name="INIT" Comment="Initialization algorithm">
+      <ST><![CDATA[;]]></ST>
+    </Algorithm>
+    <Algorithm Name="REQ" Comment="Normally executed algorithm">
+      <ST><![CDATA[;]]></ST>
+    </Algorithm>
+    <Algorithm Name="toHome">
+      <ST><![CDATA[;
+current_state_to_process := 3;
+current_state_to_plc:= FALSE;]]></ST>
+    </Algorithm>
+    <Algorithm Name="atHomeInit">
+      <ST><![CDATA[current_state_to_process := 0;
+]]></ST>
+    </Algorithm>
+    <Algorithm Name="atWork">
+      <ST><![CDATA[
+current_state_to_process := 2;
+
+ ]]></ST>
+    </Algorithm>
+    <Algorithm Name="toWork">
+      <ST><![CDATA[;
+current_state_to_process := 1;
+current_state_to_plc:= TRUE;
+ ]]></ST>
+    </Algorithm>
+    <Algorithm Name="atHomeEnd">
+      <ST><![CDATA[current_state_to_process := 4;
+]]></ST>
+    </Algorithm>
+    <Algorithm Name="Initialise">
+      <ST><![CDATA[;]]></ST>
+    </Algorithm>
+  </BasicFB>
+</FBType>
