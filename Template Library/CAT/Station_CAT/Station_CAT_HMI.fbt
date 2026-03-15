@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="a483457a-786c-49de-a521-912700da8edc" Name="Station_CAT_HMI" Comment="Service Interface Function Block Type" Namespace="Main">
+  <Attribute Name="Configuration.FB.IDCounter" Value="0" />
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author="Evans_A" Date="7/31/2025" Remarks="template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event ID="D1A7D66CB30DA325" Name="INIT">
+        <With Var="QI" />
+      </Event>
+      <Event ID="591CB7C120256668" Name="SREQ">
+        <With Var="StationName" />
+        <With Var="ParentName" />
+      </Event>
+      <Event ID="5F6F5350C313C243" Name="LMREQ">
+        <With Var="LocalMode" />
+      </Event>
+      <Event ID="58BCDE9DEA820BDE" Name="LCTREQ">
+        <With Var="LocalCycleType" />
+      </Event>
+      <Event ID="9934777FBEF02484" Name="LLFREQ">
+        <With Var="LL_Fault" />
+      </Event>
+      <Event ID="3F4108AD06B2B72A" Name="LLMREQ">
+        <With Var="LL_Mode" />
+      </Event>
+      <Event ID="5C961A2D0357AB9D" Name="LLCTREQ">
+        <With Var="LL_CycleType" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event ID="AD55511A797DF6C7" Name="INITO">
+        <With Var="QO" />
+        <With Var="STATUS" />
+      </Event>
+      <Event ID="AFC523B8F283FB4A" Name="MCNF">
+        <With Var="Mode" />
+      </Event>
+      <Event ID="28A8642B28A43989" Name="CTCNF">
+        <With Var="CycleType" />
+      </Event>
+      <Event ID="7A6FF2B9B218D8F2" Name="FRCNF">
+        <With Var="FaultReset" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration ID="8576DD38EF48062A" Name="QI" Type="BOOL" />
+      <VarDeclaration ID="379E9A8D605587D9" Name="StationName" Type="STRING" />
+      <VarDeclaration ID="61DA093F1706E361" Name="ParentName" Type="STRING" />
+      <VarDeclaration ID="6CB30BD8F8F76F45" Name="LocalMode" Type="INT" />
+      <VarDeclaration ID="21895364178EFD87" Name="LocalCycleType" Type="INT" />
+      <VarDeclaration ID="5A40CFFEF09C7C99" Name="LL_Fault" Type="BOOL" />
+      <VarDeclaration ID="423470ADE9FD10A9" Name="LL_Mode" Type="INT" />
+      <VarDeclaration ID="A86F525404A38969" Name="LL_CycleType" Type="INT" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration ID="DC5EA1EC41E0CF72" Name="QO" Type="BOOL" Comment="Event Output Qualifier" />
+      <VarDeclaration ID="7B55F7B50BB84AAF" Name="STATUS" Type="STRING" Comment="Service Status" />
+      <VarDeclaration ID="63382D747B1851F3" Name="Mode" Type="INT" />
+      <VarDeclaration ID="EB4C5CE892AD72C8" Name="CycleType" Type="INT" />
+      <VarDeclaration ID="7E749086905B7978" Name="FaultReset" Type="BOOL" />
+    </OutputVars>
+  </InterfaceList>
+  <Service RightInterface="" LeftInterface="">
+    <ServiceSequence Name="" />
+  </Service>
+</FBType>

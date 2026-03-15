@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="e77e9062-3b6c-40bb-ad3c-346f2b55c437" Name="Area_CAT_HMI" Comment="Service Interface Function Block Type" Namespace="Main">
+  <Attribute Name="Configuration.FB.IDCounter" Value="0" />
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author="Evans_A" Date="7/23/2025" Remarks="template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event ID="7B41061E43F655B" Name="INIT">
+        <With Var="QI" />
+      </Event>
+      <Event ID="39CB13E58ABA192D" Name="MSTS">
+        <With Var="System_Mode" />
+      </Event>
+      <Event ID="C5691FC295BDC1D2" Name="CTSTS">
+        <With Var="System_Cycle_Type" />
+      </Event>
+      <Event ID="398F0B9BE87FDB72" Name="LLFSTS">
+        <With Var="LL_Fault_Status" />
+      </Event>
+      <Event ID="7E564FF6AB4CDE89" Name="INIT_NAME">
+        <With Var="Area_Name" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event ID="7D0C17DCE1F3D4C2" Name="INITO">
+        <With Var="QO" />
+        <With Var="STATUS" />
+      </Event>
+      <Event ID="D4C5E237FDBE4B2E" Name="MCNF">
+        <With Var="Mode" />
+      </Event>
+      <Event ID="2159C82562AA0A9A" Name="CTCNF">
+        <With Var="CycleType" />
+      </Event>
+      <Event ID="C97E69364304E2F9" Name="FRCNF">
+        <With Var="Fault_Reset" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration ID="70D61BBDFF635508" Name="QI" Type="BOOL" />
+      <VarDeclaration ID="A1B0947624B6296C" Name="System_Mode" Type="INT" />
+      <VarDeclaration ID="8808DA607632E6D8" Name="System_Cycle_Type" Type="INT" />
+      <VarDeclaration ID="22621D1831577910" Name="LL_Fault_Status" Type="BOOL" />
+      <VarDeclaration ID="4CCCEF24A06F2ED5" Name="Area_Name" Type="STRING" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration ID="1DFA3EE3FCA6D46D" Name="QO" Type="BOOL" Comment="Event Output Qualifier" />
+      <VarDeclaration ID="801F796C5643CE1E" Name="STATUS" Type="STRING" Comment="Service Status" />
+      <VarDeclaration ID="38488A1E01A33DBB" Name="Mode" Type="INT" />
+      <VarDeclaration ID="666362EF723C28DA" Name="CycleType" Type="INT" />
+      <VarDeclaration ID="EDEE1022B76084D5" Name="Fault_Reset" Type="BOOL" />
+    </OutputVars>
+  </InterfaceList>
+  <Service RightInterface="" LeftInterface="">
+    <ServiceSequence Name="" />
+  </Service>
+</FBType>

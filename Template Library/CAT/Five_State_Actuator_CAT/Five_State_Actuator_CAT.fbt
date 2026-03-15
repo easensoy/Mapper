@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="514cf36d-5f85-4576-9a78-b12a355c3703" Name="Five_State_Actuator_CAT" Comment="Composite Function Block Type" Namespace="Main">
+  <Attribute Name="HMI.Alias" Value="" />
+  <Attribute Name="Configuration.FB.IDCounter" Value="11" />
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author=" " Date="10/7/2025" Remarks="template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT" Comment="Initialization Request" />
+      <Event Name="pst_event" Comment="Normal Execution Request">
+        <With Var="process_state_name" />
+        <With Var="state_val" />
+      </Event>
+      <Event Name="tohome" />
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO" Comment="Initialization Confirm" />
+      <Event Name="pst_out" Comment="Execution Confirmation">
+        <With Var="current_state_to_process" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="process_state_name" Type="STRING[150]" />
+      <VarDeclaration Name="state_val" Type="INT" />
+      <VarDeclaration Name="actuator_name" Type="STRING[150]" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="current_state_to_process" Type="INT" Comment="Output event qualifier" />
+    </OutputVars>
+  </InterfaceList>
+  <FBNetwork>
+    <FB ID="1" Name="FB1" Type="FiveStateActuator" x="2220" y="600" Namespace="Main" />
+    <FB ID="3" Name="IThis" Type="Five_State_Actuator_CAT_HMI" x="3840" y="1580" Namespace="Main">
+      <Parameter Name="QI" Value="TRUE" />
+    </FB>
+    <FB ID="10" UID="8" Name="Inputs" Type="SYMLINKMULTIVARDST_277E97BEC1451D2C" x="460" y="880" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.System#I:=2;VALUE${I}:BOOL,BOOL" />
+      <Parameter Name="NAME1" Value="'$${PATH}athome'" />
+      <Parameter Name="NAME2" Value="'$${PATH}atwork'" />
+    </FB>
+    <FB ID="11" UID="9" Name="Output" Type="SYMLINKMULTIVARSRC_1559B0FF8170C9BA0" x="4020" y="980" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.System#I:=1;VALUE${I}:BOOL" />
+      <Parameter Name="NAME1" Value="'$${PATH}Output'" />
+    </FB>
+    <Input Name="INIT" x="1620" y="612" Type="Event" />
+    <Input Name="pst_event" x="79.99999" y="612" Type="Event" />
+    <Input Name="tohome" x="1360" y="732" Type="Event" />
+    <Input Name="process_state_name" x="1240" y="1052" Type="Data" />
+    <Input Name="state_val" x="1240" y="1132" Type="Data" />
+    <Input Name="actuator_name" x="1240" y="1212" Type="Data" />
+    <Output Name="INITO" x="4660" y="1592" Type="Event" />
+    <Output Name="pst_out" x="4220" y="632" Type="Event" />
+    <Output Name="current_state_to_process" x="3800" y="812" Type="Data" />
+    <EventConnections>
+      <Connection Source="pst_event" Destination="FB1.pst_event" dx1="883.5832">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="tohome" Destination="FB1.tohome" dx1="40" />
+      <Connection Source="FB1.pst_out" Destination="pst_out" dx1="73.396" />
+      <Connection Source="Inputs.CNF" Destination="FB1.action_event" dx1="641.625" />
+      <Connection Source="INIT" Destination="FB1.INIT" />
+      <Connection Source="FB1.INITO" Destination="IThis.INIT" dx1="120" />
+      <Connection Source="FB1.plc_out" Destination="IThis.plc_out" dx1="80" />
+      <Connection Source="FB1.pst_out" Destination="IThis.pst_out" dx1="100" />
+      <Connection Source="Inputs.CNF" Destination="IThis.action_event" dx1="81.625" />
+      <Connection Source="IThis.INITO" Destination="INITO">
+        <Points>
+          <Points>
+            <X>1157.302</X>
+            <Y>404.999969</Y>
+          </Points>
+          <Points>
+            <X>1165</X>
+            <Y>404.999969</Y>
+          </Points>
+          <Points>
+            <X>1165</X>
+            <Y>405</Y>
+          </Points>
+        </Points>
+      </Connection>
+      <Connection Source="FB1.plc_out" Destination="Output.REQ" dx1="80" />
+    </EventConnections>
+    <DataConnections>
+      <Connection Source="process_state_name" Destination="FB1.process_state_name" dx1="47.021" dx2="170" dy="50" />
+      <Connection Source="state_val" Destination="FB1.state_val" dx1="279.25" />
+      <Connection Source="actuator_name" Destination="FB1.actuator_name" dx1="18.29175" />
+      <Connection Source="FB1.current_state_to_process" Destination="current_state_to_process" dx1="113.396" />
+      <Connection Source="Inputs.VALUE1" Destination="FB1.athome" dx1="70" />
+      <Connection Source="Inputs.VALUE2" Destination="FB1.atwork" dx1="1061.625" />
+      <Connection Source="FB1.current_state_to_plc" Destination="IThis.current_state_to_plc" dx1="40" />
+      <Connection Source="FB1.current_state_to_process" Destination="IThis.current_state_to_process" dx1="60" />
+      <Connection Source="Inputs.VALUE1" Destination="IThis.atHome" dx1="61.625" />
+      <Connection Source="Inputs.VALUE2" Destination="IThis.atWork" dx1="41.625" />
+      <Connection Source="FB1.current_state_to_plc" Destination="Output.VALUE1" dx1="40" />
+    </DataConnections>
+  </FBNetwork>
+</FBType>
