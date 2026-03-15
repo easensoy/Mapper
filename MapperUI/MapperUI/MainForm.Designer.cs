@@ -131,7 +131,7 @@
             this.grpValidation.Controls.Add(this.dgvMappingRules);
             this.grpValidation.Controls.Add(this.pnlDetectedInfo);
             this.grpValidation.Location = new System.Drawing.Point(12, 60);
-            this.grpValidation.Size = new System.Drawing.Size(1376, 280);
+            this.grpValidation.Size = new System.Drawing.Size(1376, 380);
             this.grpValidation.Text = "Validation Output";
 
             this.pnlDetectedInfo.AutoSize = true;
@@ -164,7 +164,7 @@
             this.dgvMappingRules.BackgroundColor = System.Drawing.Color.White;
             this.dgvMappingRules.BorderStyle = System.Windows.Forms.BorderStyle.None;
             this.dgvMappingRules.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.DisableResizing;
-            this.dgvMappingRules.ColumnHeadersHeight = 22;
+            this.dgvMappingRules.ColumnHeadersHeight = 32;
             this.dgvMappingRules.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
                 this.colVueOneElement, this.colIEC61499Element, this.colMappingType, this.colMappingRule, this.colMappingValidated });
             this.dgvMappingRules.Dock = System.Windows.Forms.DockStyle.Fill;
@@ -173,23 +173,23 @@
             this.dgvMappingRules.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
 
             this.colVueOneElement.HeaderText = "VueOne Element";
-            this.colVueOneElement.Width = 150;
+            this.colVueOneElement.Width = 140;
             this.colIEC61499Element.HeaderText = "IEC 61499 Element";
-            this.colIEC61499Element.Width = 170;
+            this.colIEC61499Element.Width = 160;
             this.colMappingType.HeaderText = "Mapping Type";
-            this.colMappingType.Width = 105;
+            this.colMappingType.Width = 145;
             this.colMappingRule.HeaderText = "Transformation Rule";
             this.colMappingRule.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill;
             this.colMappingValidated.HeaderText = "Validated";
-            this.colMappingValidated.Width = 65;
+            this.colMappingValidated.Width = 90;
             this.colMappingValidated.DefaultCellStyle.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleCenter;
             this.colMappingValidated.DefaultCellStyle.Font = new System.Drawing.Font("Segoe UI", 11F, System.Drawing.FontStyle.Bold);
 
             // Mapping Information
             this.grpMappingInfo.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left | System.Windows.Forms.AnchorStyles.Right;
             this.grpMappingInfo.Controls.Add(this.splitMain);
-            this.grpMappingInfo.Location = new System.Drawing.Point(12, 346);
-            this.grpMappingInfo.Size = new System.Drawing.Size(1376, 420);
+            this.grpMappingInfo.Location = new System.Drawing.Point(12, 446);
+            this.grpMappingInfo.Size = new System.Drawing.Size(1376, 320);
             this.grpMappingInfo.Text = "Mapping Information";
 
             // Main split: Left=Components, Right=Detail
@@ -231,7 +231,7 @@
             // Top: Inputs / States
             this.grpInputs.Controls.Add(this.dgvInputs);
             this.grpInputs.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.grpInputs.Text = "Inputs / States";
+            this.grpInputs.Text = "States";
             this.splitDetail.Panel1.Controls.Add(this.grpInputs);
 
             this.dgvInputs.AllowUserToAddRows = false;
@@ -244,7 +244,7 @@
             this.dgvInputs.RowHeadersVisible = false;
 
             this.colInputName.FillWeight = 60F;
-            this.colInputName.HeaderText = "Input / State";
+            this.colInputName.HeaderText = "State";
             this.colInputName.ReadOnly = true;
             this.colInputAddress.FillWeight = 40F;
             this.colInputAddress.HeaderText = "Address";
@@ -252,7 +252,7 @@
             // Bottom: Outputs / Validation
             this.grpOutputs.Controls.Add(this.dgvOutputs);
             this.grpOutputs.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.grpOutputs.Text = "Outputs / Validation";
+            this.grpOutputs.Text = "Validation";
             this.splitDetail.Panel2.Controls.Add(this.grpOutputs);
 
             this.dgvOutputs.AllowUserToAddRows = false;
