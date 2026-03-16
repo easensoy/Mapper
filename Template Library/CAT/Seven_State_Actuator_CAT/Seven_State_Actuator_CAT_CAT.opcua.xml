@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<OPCUAComplexObject xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <OPCUAAttribute Name="Exposed" Value="True" Locked="false" AttributeMask="True;True|False;True" Context="11.E4EA2F29C16ABA40" />
-  <OPCUAAttribute Name="Exposed" Value="True" Locked="false" AttributeMask="True;True|False;True" Context="11.EE9E2328D05B58EA" />
-  <OPCUAAttribute Name="Exposed" Value="True" Locked="false" AttributeMask="True;True|False;True" Context="11.6350143051390A81" />
-</OPCUAComplexObject>
