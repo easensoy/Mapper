@@ -1,5 +1,6 @@
 ﻿using CodeGen.Configuration;
 using CodeGen.IO;
+using CodeGen.Mapping;
 using CodeGen.Models;
 using CodeGen.Validation;
 using MapperUI.Services;
@@ -11,6 +12,10 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+
+using RuleEngine = MapperUI.Services.MappingRuleEngine;
+using MappingRule = MapperUI.Services.MappingRuleEntry;
+using UiMappingType = MapperUI.Services.MappingType;
 
 namespace MapperUI
 {
@@ -104,6 +109,8 @@ namespace MapperUI
                 var cfg = Cfg();
                 int rowIdx = 0;
 
+                foreach (var rule in RuleEngine.GetAllRules()) AddMappingRuleRow(rule);
+
                 foreach (var comp in _loadedComponents)
                 {
                     var vr = Validate(comp, validator, cfg);
@@ -187,6 +194,44 @@ namespace MapperUI
         void btnMappingRules_Click(object sender, EventArgs e)
         {
             dgvMappingRules.Rows.Clear();
+            foreach (var rule in RuleEngine.GetAllRules()) AddMappingRuleRow(rule);
+        }
+
+        void AddMappingRuleRow(MappingRule rule)
+        {
+            int idx = dgvMappingRules.Rows.Add(
+                rule.IsSection ? rule.SectionTitle : rule.VueOneElement,
+                rule.IsSection ? "" : rule.IEC61499Element,
+                rule.IsSection ? "" : rule.Type.ToString(),
+                rule.IsSection ? "" : rule.TransformationRule,
+                rule.IsSection ? "" : (rule.IsImplemented ? SymPass : SymFail));
+
+            var row = dgvMappingRules.Rows[idx];
+
+            if (rule.IsSection)
+            {
+                foreach (DataGridViewCell cell in row.Cells)
+                {
+                    cell.Style.BackColor = ColorSection;
+                    cell.Style.ForeColor = Color.FromArgb(30, 50, 100);
+                    cell.Style.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
+                }
+            }
+            else
+            {
+                row.Cells[colMappingType.Index].Style.ForeColor = rule.Type switch
+                {
+                    UiMappingType.TRANSLATED => ColorTranslated,
+                    UiMappingType.DISCARDED => ColorDiscarded,
+                    UiMappingType.ASSUMED => ColorAssumed,
+                    UiMappingType.ENCODED => ColorEncoded,
+                    UiMappingType.HARDCODED => ColorHardcoded,
+                    _ => Color.Black
+                };
+            }
+
+            row.Cells[colMappingValidated.Index].Style.ForeColor =
+                rule.IsImplemented ? ColorTranslated : ColorDiscarded;
         }
 
         static ComponentValidationRow Validate(VueOneComponent comp, ComponentValidator validator, MapperConfig cfg)
