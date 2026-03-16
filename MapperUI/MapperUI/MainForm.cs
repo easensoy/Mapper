@@ -221,14 +221,21 @@ namespace MapperUI
 
         async void btnGenerateCode_Click(object sender, EventArgs e)
         {
-            var toInject = _validationRows
-                .Where(r => r.IsValid && _allowedInstances.Contains(r.Component.Name))
-                .Select(r => r.Component).ToList();
-
-            if (toInject.Count == 0)
+            if (_loadedComponents == null || _loadedComponents.Count == 0)
             {
-                MessageBox.Show("No in-scope components to inject.", "Nothing to Inject",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("Browse and load a Control.xml first.",
+                    "Nothing to generate", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var toInject = _loadedComponents
+                .Where(c => _allowedInstances.Contains(c.Name))
+                .ToList();
+
+            if (!toInject.Any())
+            {
+                MessageBox.Show("No supported components found.",
+                    "Nothing to Inject", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -236,31 +243,50 @@ namespace MapperUI
             try
             {
                 var cfg = Cfg();
-                var dfbproj = FindDfbproj(cfg.ActiveSyslayPath);
-                if (dfbproj == null) { ShowError("Cannot find .dfbproj."); return; }
-                if (!File.Exists(cfg.ActiveSyslayPath)) { ShowError($"syslay not found:\n{cfg.ActiveSyslayPath}"); return; }
 
-                MapperLogger.Info($"Target: {Path.GetFileName(dfbproj)}");
+                // ── Phase A: Deploy types from Template Library into EAE ──────
+                MapperLogger.Info("[Generate] Phase A — Deploying types from Template Library...");
+                var deployResult = await Task.Run(() => TemplateLibraryDeployer.Deploy(cfg, toInject));
 
-                await Task.Run(() => TemplatePackager.Package(
-                    cfg.TemplateIec61499Dir,
-                    Path.GetDirectoryName(dfbproj)!,
-                    dfbproj,
-                    cfg.TemplateHmiDir,
-                    Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(dfbproj)!)!, "HMI")));
+                if (!deployResult.Success)
+                {
+                    ShowError("Type deployment failed.");
+                    return;
+                }
+
+                foreach (var w in deployResult.Warnings)
+                    MapperLogger.Warn($"[Deploy] {w}");
+
+                MapperLogger.Info($"[Deploy] Basics: {string.Join(", ", deployResult.BasicFBsDeployed)}");
+                MapperLogger.Info($"[Deploy] CATs: {string.Join(", ", deployResult.CATsDeployed)}");
+                MapperLogger.Info($"[Deploy] Extracted: {deployResult.FilesExtracted}, Skipped: {deployResult.FilesSkipped}");
+
+                // ── Phase B: Inject instances + wiring into syslay/sysres ─────
+                MapperLogger.Info("[Generate] Phase B — Injecting instances into syslay/sysres...");
 
                 var injCfg = MapperConfig.Load();
                 injCfg.SyslayPath = cfg.ActiveSyslayPath;
                 injCfg.SysresPath = cfg.ActiveSysresPath;
 
-                var result = await Task.Run(() => new SystemInjector().Inject(injCfg, toInject));
-                if (!result.Success) { ShowError($"Injection failed:\n{result.ErrorMessage}"); return; }
+                var injector = new SystemInjector();
+                var result = await Task.Run(() => injector.Inject(injCfg, toInject));
 
-                foreach (var fb in result.InjectedFBs) MapperLogger.Info($"{Tick} {fb}");
+                if (!result.Success)
+                {
+                    ShowError($"Injection failed:\n{result.ErrorMessage}");
+                    return;
+                }
 
-                File.SetLastWriteTime(dfbproj, DateTime.Now);
+                var dfbproj = FindDfbproj(cfg.ActiveSyslayPath);
+                if (dfbproj != null)
+                    File.SetLastWriteTime(dfbproj, DateTime.Now);
+
                 lblStatus.Text = $"Done. {result.InjectedFBs.Count} instance(s) injected.";
-                MessageBox.Show($"Injected {result.InjectedFBs.Count} instance(s).\nReload Solution in EAE.",
+                MessageBox.Show(
+                    $"Phase A: {deployResult.CATsDeployed.Count} CAT(s), " +
+                    $"{deployResult.BasicFBsDeployed.Count} Basic FB(s) deployed.\n" +
+                    $"Phase B: {result.InjectedFBs.Count} instance(s) injected.\n\n" +
+                    "Reload Solution in EAE.",
                     "Done", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex) { ShowError(ex.Message); }
