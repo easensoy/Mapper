@@ -1,6 +1,5 @@
 ﻿using CodeGen.Configuration;
 using CodeGen.IO;
-using CodeGen.Mapping;
 using CodeGen.Models;
 using CodeGen.Validation;
 using MapperUI.Services;
