@@ -1,25 +1,48 @@
-﻿// MapperUI/MapperUI/Services/RuleEngine.cs
-// Reads VueOne → IEC 61499 mapping rules from VueOne_IEC61499_Mapping.xlsx.
-// Types (MappingRuleEntry, MappingType) are defined in MappingRuleEngine.cs.
-// Requires NuGet: ClosedXML  (Install-Package ClosedXML)
-
-using ClosedXML.Excel;
+﻿using ClosedXML.Excel;
 using System;
 using System.Collections.Generic;
 using System.IO;
 
 namespace MapperUI.Services
 {
+    public enum MappingType
+    {
+        TRANSLATED,
+        DISCARDED,
+        ASSUMED,
+        ENCODED,
+        HARDCODED,
+        SECTION
+    }
+
+    public record MappingRuleEntry(
+        bool IsSection,
+        string SectionTitle,
+        string VueOneElement,
+        string IEC61499Element,
+        MappingType Type,
+        string TransformationRule,
+        bool IsImplemented
+    );
+
+    public static class MappingRuleEngine
+    {
+        public static IEnumerable<MappingRuleEntry> GetAllRules(string xlsxPath)
+            => XlsxRuleLoader.Load(xlsxPath);
+
+        public static IEnumerable<MappingRuleEntry> GetRelevantRules(
+            string xlsxPath, bool hasActuator, bool hasSensor, bool hasProcess)
+            => XlsxRuleLoader.Load(xlsxPath);
+    }
+
     public static class XlsxRuleLoader
     {
-        // ── Column indices (1-based) matching the spreadsheet ─────────────────
-        private const int ColVueOne = 1; // "VueOne Element"
-        private const int ColIec = 2; // "IEC 61499 Element"
-        private const int ColType = 3; // "Mapping Type"
-        private const int ColRule = 4; // "Transformation Rule"
-        private const int ColNotes = 5; // "Notes / Phase"
+        private const int ColVueOne = 1;
+        private const int ColIec = 2;
+        private const int ColType = 3;
+        private const int ColRule = 4;
+        private const int ColNotes = 5;
 
-        // ── Section prefix → title lookup ─────────────────────────────────────
         private static readonly (string Prefix, string Title)[] SectionMap =
         {
             ("SystemID",           "System Level"),
@@ -38,17 +61,15 @@ namespace MapperUI.Services
             if (string.IsNullOrWhiteSpace(xlsxPath) || !File.Exists(xlsxPath))
                 throw new FileNotFoundException(
                     $"Mapping rules spreadsheet not found:\n{xlsxPath}\n\n" +
-                    "Set MappingRulesPath in mapper_config.json to point to " +
-                    "VueOne_IEC61499_Mapping.xlsx.");
+                    "Set MappingRulesPath in mapper_config.json.");
 
             using var wb = new XLWorkbook(xlsxPath);
             var ws = wb.Worksheet(1);
-
             string currentSection = string.Empty;
 
             foreach (var row in ws.RowsUsed())
             {
-                if (row.RowNumber() == 1) continue; // skip header
+                if (row.RowNumber() == 1) continue;
 
                 var vue = Cell(row, ColVueOne);
                 var iec = Cell(row, ColIec);
@@ -64,7 +85,6 @@ namespace MapperUI.Services
 
                 if (!TryParseType(type, out var mappingType)) continue;
 
-                // Emit a section header when the group changes
                 var section = ResolveSection(vue, mappingType);
                 if (!string.IsNullOrEmpty(section) && section != currentSection)
                 {
@@ -91,8 +111,6 @@ namespace MapperUI.Services
                 );
             }
         }
-
-        // ── Helpers ───────────────────────────────────────────────────────────
 
         private static string Cell(IXLRow row, int col)
             => row.Cell(col).GetString()?.Trim() ?? string.Empty;
