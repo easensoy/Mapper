@@ -1,5 +1,6 @@
 ﻿// MapperUI/MapperUI/Services/MappingRuleEngine.cs
-// Types live here. Xlsx reading lives in RuleEngine.cs (XlsxRuleLoader).
+// Defines the data types and the public API.
+// Xlsx reading is handled by XlsxRuleLoader in RuleEngine.cs.
 
 using System.Collections.Generic;
 
@@ -17,36 +18,31 @@ namespace MapperUI.Services
 
     /// <summary>
     /// A single row in the Mapping Rules table.
+    /// Records are immutable by default — no getters/setters needed.
     /// When IsSection = true the row is a visual group header (no rule data).
     /// </summary>
-    public class MappingRuleEntry
-    {
-        public bool IsSection { get; init; }
-        public string SectionTitle { get; init; } = string.Empty;
-        public string VueOneElement { get; init; } = string.Empty;
-        public string IEC61499Element { get; init; } = string.Empty;
-        public MappingType Type { get; init; }
-        public string TransformationRule { get; init; } = string.Empty;
-
-        /// <summary>
-        /// True  = handled in current phase (shows ✓).
-        /// False = planned but not yet implemented (shows ✗).
-        /// Ignored for SECTION rows.
-        /// </summary>
-        public bool IsImplemented { get; init; }
-    }
+    public record MappingRuleEntry(
+        bool IsSection,
+        string SectionTitle,
+        string VueOneElement,
+        string IEC61499Element,
+        MappingType Type,
+        string TransformationRule,
+        bool IsImplemented
+    );
 
     public static class MappingRuleEngine
     {
         /// <summary>
         /// Loads all mapping rules from the xlsx spreadsheet at
-        /// <paramref name="xlsxPath"/>. Delegates to XlsxRuleLoader in RuleEngine.cs.
+        /// <paramref name="xlsxPath"/>.
         /// </summary>
         public static IEnumerable<MappingRuleEntry> GetAllRules(string xlsxPath)
             => XlsxRuleLoader.Load(xlsxPath);
 
         /// <summary>
-        /// Same as GetAllRules — component-type filters reserved for a future phase.
+        /// Same as <see cref="GetAllRules"/> — component-type filters reserved for
+        /// a future phase.
         /// </summary>
         public static IEnumerable<MappingRuleEntry> GetRelevantRules(
             string xlsxPath,
