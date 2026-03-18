@@ -1,127 +1,153 @@
-﻿using System;
+﻿// MapperUI/MapperUI/Services/RuleEngine.cs
+// Reads VueOne → IEC 61499 mapping rules from VueOne_IEC61499_Mapping.xlsx.
+// All types (MappingRuleEntry, MappingType) live in MappingRuleEngine.cs — NOT here.
+// Requires NuGet: ClosedXML  (Install-Package ClosedXML)
+
+using ClosedXML.Excel;
+using System;
 using System.Collections.Generic;
 using System.IO;
-using ClosedXML.Excel;
-using CodeGen.Configuration;
 
 namespace MapperUI.Services
 {
-    public enum MappingType { TRANSLATED, DISCARDED, ASSUMED, ENCODED, HARDCODED, SECTION }
-
-    public class MappingRuleEntry
+    /// <summary>
+    /// Loads mapping rules from the VueOne_IEC61499_Mapping.xlsx spreadsheet.
+    /// Call <see cref="MappingRuleEngine.LoadFromXlsx"/> — this class wires the
+    /// xlsx reader into the existing engine.
+    /// </summary>
+    public static class XlsxRuleLoader
     {
-        public bool IsSection { get; init; }
-        public string SectionTitle { get; init; } = string.Empty;
-        public string VueOneElement { get; init; } = string.Empty;
-        public string IEC61499Element { get; init; } = string.Empty;
-        public MappingType Type { get; init; }
-        public string TransformationRule { get; init; } = string.Empty;
-        public string Notes { get; init; } = string.Empty;
-        public string Example { get; init; } = string.Empty;
-        public bool IsImplemented { get; init; }
-    }
+        // ── Column indices (1-based) matching the spreadsheet ─────────────────
+        private const int ColVueOne = 1; // "VueOne Element"
+        private const int ColIec = 2; // "IEC 61499 Element"
+        private const int ColType = 3; // "Mapping Type"
+        private const int ColRule = 4; // "Transformation Rule"
+        private const int ColNotes = 5; // "Notes / Phase"
 
-    public static class RuleEngine
-    {
-        const string SheetName = "VueOne to IEC61499 Mapping";
-        static List<MappingRuleEntry>? _cached;
-        static string? _cachedPath;
-
-        public static IEnumerable<MappingRuleEntry> GetAllRules()
+        // ── Section prefix lookup ─────────────────────────────────────────────
+        private static readonly (string Prefix, string Title)[] SectionMap =
         {
-            var path = MapperConfig.Load().RuleEnginePath;
+            ("SystemID",           "System Level"),
+            ("System/",            "System Level"),
+            ("Component/",         "Component Level"),
+            ("State/",             "State Level"),
+            ("Transition/",        "Transition / Sequence Level"),
+            ("Sequence_Condition", "Sequence & Condition Level"),
+            ("ConditionGroup",     "Sequence & Condition Level"),
+            ("Condition/",         "Sequence & Condition Level"),
+            ("Interlock",          "Sequence & Condition Level"),
+        };
 
-            if (string.IsNullOrEmpty(path) || !File.Exists(path))
-            {
-                MapperLogger.Warn($"[RuleEngine] xlsx not found: {path}");
-                return Fallback();
-            }
-
-            if (path == _cachedPath && _cached != null) return _cached;
-
-            _cached = LoadFromXlsx(path);
-            _cachedPath = path;
-            MapperLogger.Info($"[RuleEngine] Loaded {_cached.Count} rules from {Path.GetFileName(path)}");
-            return _cached;
-        }
-
-        static List<MappingRuleEntry> LoadFromXlsx(string path)
+        /// <summary>
+        /// Opens <paramref name="xlsxPath"/> and yields one
+        /// <see cref="MappingRuleEntry"/> per data row, inserting section-header
+        /// rows whenever the element group changes.
+        /// </summary>
+        public static IEnumerable<MappingRuleEntry> Load(string xlsxPath)
         {
-            var rules = new List<MappingRuleEntry>();
-            string? currentSection = null;
+            if (string.IsNullOrWhiteSpace(xlsxPath) || !File.Exists(xlsxPath))
+                throw new FileNotFoundException(
+                    $"Mapping rules spreadsheet not found:\n{xlsxPath}\n\n" +
+                    "Set MappingRulesPath in mapper_config.json to point to " +
+                    "VueOne_IEC61499_Mapping.xlsx.");
 
-            using var wb = new XLWorkbook(path);
-            var ws = wb.Worksheet(SheetName);
-            int lastRow = ws.LastRowUsed()?.RowNumber() ?? 1;
+            using var wb = new XLWorkbook(xlsxPath);
+            var ws = wb.Worksheet(1); // first sheet
 
-            for (int r = 2; r <= lastRow; r++)
+            string currentSection = string.Empty;
+
+            foreach (var row in ws.RowsUsed())
             {
-                var col1 = Cell(ws, r, 1);
-                var col3 = Cell(ws, r, 3);
+                if (row.RowNumber() == 1) continue; // skip header row
 
-                if (string.IsNullOrWhiteSpace(col1) && string.IsNullOrWhiteSpace(col3)) continue;
-                if (IsLegend(col1)) break;
+                var vueRaw = GetCell(row, ColVueOne);
+                var iecRaw = GetCell(row, ColIec);
+                var typeRaw = GetCell(row, ColType);
+                var rule = GetCell(row, ColRule);
+                var notes = GetCell(row, ColNotes);
 
-                var section = DetectSection(col1);
-                if (section != null && section != currentSection)
+                // Stop at the legend block at the bottom of the sheet
+                if (IsLegendRow(vueRaw, typeRaw)) break;
+
+                // Skip fully empty rows
+                if (string.IsNullOrWhiteSpace(vueRaw) &&
+                    string.IsNullOrWhiteSpace(iecRaw) &&
+                    string.IsNullOrWhiteSpace(typeRaw)) continue;
+
+                // Must have a parseable mapping type
+                if (!TryParseMappingType(typeRaw, out var mappingType)) continue;
+
+                // Determine section from VueOne element prefix
+                var section = ResolveSection(vueRaw, mappingType);
+
+                // Emit section-header row when the group changes
+                if (!string.IsNullOrEmpty(section) && section != currentSection)
                 {
                     currentSection = section;
-                    rules.Add(new MappingRuleEntry { IsSection = true, SectionTitle = currentSection });
+                    yield return new MappingRuleEntry
+                    {
+                        IsSection = true,
+                        SectionTitle = section,
+                        Type = MappingType.SECTION
+                    };
                 }
 
-                var type = ParseType(col3);
+                // Phase 2/3/4 notes → not yet implemented in Phase 1
+                bool implemented = !IsFuturePhase(notes);
 
-                rules.Add(new MappingRuleEntry
+                yield return new MappingRuleEntry
                 {
-                    VueOneElement = col1,
-                    IEC61499Element = Cell(ws, r, 2),
-                    Type = type,
-                    TransformationRule = Cell(ws, r, 4),
-                    Notes = Cell(ws, r, 5),
-                    Example = Cell(ws, r, 6),
-                    IsImplemented = type != MappingType.ENCODED
-                });
+                    IsSection = false,
+                    VueOneElement = vueRaw,
+                    IEC61499Element = iecRaw,
+                    Type = mappingType,
+                    TransformationRule = rule,
+                    IsImplemented = implemented
+                };
             }
-            return rules;
         }
 
-        static string? DetectSection(string v)
+        // ── Helpers ───────────────────────────────────────────────────────────
+
+        private static string GetCell(IXLRow row, int col)
+            => row.Cell(col).GetString()?.Trim() ?? string.Empty;
+
+        private static bool TryParseMappingType(string raw, out MappingType result)
         {
-            if (string.IsNullOrWhiteSpace(v)) return null;
-            if (v.StartsWith("System")) return "System Level";
-            if (v.StartsWith("Component/")) return "Component Level";
-            if (v.StartsWith("State/")) return "State Level";
-            if (v.StartsWith("Transition/") || v.StartsWith("Sequence") || v.StartsWith("Condition") || v.StartsWith("Interlock"))
-                return "Transition / Sequence Level";
-            if (v == "N/A") return "EAE Specifics (Hardcoded)";
-            return null;
+            result = MappingType.TRANSLATED;
+            if (string.IsNullOrWhiteSpace(raw)) return false;
+            return Enum.TryParse(raw.Trim().ToUpperInvariant(), out result);
         }
 
-        static bool IsLegend(string v) => v is "HARDCODED" or "TRANSLATED" or "ASSUMED" or "DISCARDED" or "ENCODED";
-
-        static MappingType ParseType(string v) => v?.Trim().ToUpperInvariant() switch
+        private static string ResolveSection(string vueElement, MappingType type)
         {
-            "TRANSLATED" => MappingType.TRANSLATED,
-            "DISCARDED" => MappingType.DISCARDED,
-            "ASSUMED" => MappingType.ASSUMED,
-            "ENCODED" => MappingType.ENCODED,
-            "HARDCODED" => MappingType.HARDCODED,
-            _ => MappingType.DISCARDED
-        };
+            if (string.IsNullOrWhiteSpace(vueElement))
+                return type == MappingType.HARDCODED ? "EAE Template (Hardcoded)" : string.Empty;
 
-        static string Cell(IXLWorksheet ws, int row, int col) => ws.Cell(row, col).GetString()?.Trim() ?? "";
+            foreach (var (prefix, title) in SectionMap)
+                if (vueElement.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    return title;
 
-        static List<MappingRuleEntry> Fallback() => new()
+            return string.Empty;
+        }
+
+        private static bool IsLegendRow(string vueElement, string typeRaw)
         {
-            new() { IsSection = true, SectionTitle = "VueOne_IEC61499_Mapping.xlsx not found" },
-            new()
+            // Legend rows have the type keyword in the VueOne column and no type column value
+            if (string.IsNullOrWhiteSpace(typeRaw) && !string.IsNullOrWhiteSpace(vueElement))
             {
-                VueOneElement = "Set RuleEnginePath in mapper_config.json",
-                IEC61499Element = "Path to VueOne_IEC61499_Mapping.xlsx",
-                Type = MappingType.ASSUMED,
-                TransformationRule = "Rules load automatically from xlsx",
-                IsImplemented = false
+                var upper = vueElement.ToUpperInvariant();
+                return upper is "HARDCODED" or "TRANSLATED" or "ASSUMED"
+                             or "DISCARDED" or "ENCODED";
             }
-        };
+            return false;
+        }
+
+        private static bool IsFuturePhase(string notes)
+        {
+            if (string.IsNullOrWhiteSpace(notes)) return false;
+            var n = notes.ToUpperInvariant();
+            return n.Contains("PHASE 2") || n.Contains("PHASE 3") || n.Contains("PHASE 4");
+        }
     }
 }
