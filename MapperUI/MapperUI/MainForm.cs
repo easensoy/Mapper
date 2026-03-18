@@ -1,20 +1,18 @@
 ﻿using CodeGen.Configuration;
 using CodeGen.IO;
+using CodeGen.Mapping;
 using CodeGen.Models;
 using CodeGen.Validation;
 using MapperUI.Services;
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-
-using RuleEngine = MapperUI.Services.MappingRuleEngine;
-using MappingRule = MapperUI.Services.MappingRuleEntry;
-using UiMappingType = MapperUI.Services.MappingType;
 
 namespace MapperUI
 {
@@ -55,6 +53,7 @@ namespace MapperUI
         {
             InitializeComponent();
             btnGenerateCode.Enabled = false;
+            btnGenerateRobotWrapper.Enabled = true;
         }
 
         void menuItemDebugConsole_Click(object sender, EventArgs e)
@@ -104,11 +103,20 @@ namespace MapperUI
                     return;
                 }
 
+                try
+                {
+                    foreach (var rule in MappingRuleEngine.GetAllRules(Cfg().MappingRulesPath))
+                        AddMappingRuleRow(rule);
+                }
+                catch (Exception ex)
+                {
+                    MapperLogger.Error(ex.Message);
+                    MessageBox.Show(ex.Message, "Mapping Rules", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+
                 var validator = new ComponentValidator();
                 var cfg = Cfg();
                 int rowIdx = 0;
-
-                foreach (var rule in RuleEngine.GetAllRules()) AddMappingRuleRow(rule);
 
                 foreach (var comp in _loadedComponents)
                 {
@@ -133,8 +141,6 @@ namespace MapperUI
                 SetValidationLabel(ok ? "PASSED" : "FAILED", ok ? Color.Green : Color.Red);
                 lblStatus.Text = ok ? "Validation passed." : "Validation failed.";
                 btnGenerateCode.Enabled = _validationRows.Any(r => r.IsValid && _allowedInstances.Contains(r.Component.Name));
-
-                GenerateImportInstructions();
             }
             catch (Exception ex)
             {
@@ -144,59 +150,21 @@ namespace MapperUI
             }
         }
 
-        void GenerateImportInstructions()
-        {
-            try
-            {
-                var cfg = Cfg();
-                if (string.IsNullOrWhiteSpace(cfg.TemplateLibraryPath) ||
-                    !Directory.Exists(cfg.TemplateLibraryPath))
-                {
-                    MapperLogger.Warn("[ImportInstructions] TemplateLibraryPath not set or not found. Skipping.");
-                    return;
-                }
-
-                var instructions = ImportInstructionGenerator.Generate(cfg, _loadedComponents);
-
-                var summary = new StringBuilder();
-                summary.AppendLine("Manual Import Instructions generated.");
-                summary.AppendLine();
-                summary.AppendLine($"Components detected: {instructions.ComponentMappings.Count}");
-                summary.AppendLine($"Types to import: {instructions.ImportSteps.Count}");
-                summary.AppendLine();
-                summary.AppendLine("Import order:");
-                foreach (var step in instructions.ImportSteps)
-                    summary.AppendLine($"  Step {step.StepNumber}: {step.FileName}");
-                summary.AppendLine();
-                summary.AppendLine($"Output: {instructions.OutputDirectory}");
-                summary.AppendLine($"Full instructions: IMPORT_ORDER.txt");
-
-                if (instructions.Warnings.Any())
-                {
-                    summary.AppendLine();
-                    foreach (var w in instructions.Warnings)
-                        summary.AppendLine($"Warning: {w}");
-                }
-
-                MessageBox.Show(summary.ToString(),
-                    "Import Instructions Ready",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
-
-                System.Diagnostics.Process.Start("explorer.exe", instructions.OutputDirectory);
-            }
-            catch (Exception ex)
-            {
-                MapperLogger.Warn($"[ImportInstructions] {ex.Message}");
-            }
-        }
-
         void btnMappingRules_Click(object sender, EventArgs e)
         {
             dgvMappingRules.Rows.Clear();
-            foreach (var rule in RuleEngine.GetAllRules()) AddMappingRuleRow(rule);
+            try
+            {
+                foreach (var rule in MappingRuleEngine.GetAllRules(Cfg().MappingRulesPath))
+                    AddMappingRuleRow(rule);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Mapping Rules", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         }
 
-        void AddMappingRuleRow(MappingRule rule)
+        void AddMappingRuleRow(MappingRuleEntry rule)
         {
             int idx = dgvMappingRules.Rows.Add(
                 rule.IsSection ? rule.SectionTitle : rule.VueOneElement,
@@ -220,11 +188,11 @@ namespace MapperUI
             {
                 row.Cells[colMappingType.Index].Style.ForeColor = rule.Type switch
                 {
-                    UiMappingType.TRANSLATED => ColorTranslated,
-                    UiMappingType.DISCARDED => ColorDiscarded,
-                    UiMappingType.ASSUMED => ColorAssumed,
-                    UiMappingType.ENCODED => ColorEncoded,
-                    UiMappingType.HARDCODED => ColorHardcoded,
+                    MappingType.TRANSLATED => ColorTranslated,
+                    MappingType.DISCARDED => ColorDiscarded,
+                    MappingType.ASSUMED => ColorAssumed,
+                    MappingType.ENCODED => ColorEncoded,
+                    MappingType.HARDCODED => ColorHardcoded,
                     _ => Color.Black
                 };
             }
@@ -266,8 +234,11 @@ namespace MapperUI
             _ => string.Empty
         };
 
-        static ComponentValidationRow Pass(VueOneComponent c, string t) => new() { Component = c, TemplateName = t, IsValid = true };
-        static ComponentValidationRow Fail(VueOneComponent c, string t, string r) => new() { Component = c, TemplateName = t, IsValid = false, FailReason = r };
+        static ComponentValidationRow Pass(VueOneComponent c, string t) =>
+            new() { Component = c, TemplateName = t, IsValid = true };
+
+        static ComponentValidationRow Fail(VueOneComponent c, string t, string r) =>
+            new() { Component = c, TemplateName = t, IsValid = false, FailReason = r };
 
         async void btnGenerateCode_Click(object sender, EventArgs e)
         {
@@ -291,6 +262,11 @@ namespace MapperUI
 
                 MapperLogger.Info($"Project: {Path.GetFileName(dfbproj)}");
 
+                await Task.Run(() => TemplatePackager.Package(
+                    cfg.TemplateIec61499Dir, Path.GetDirectoryName(dfbproj)!,
+                    dfbproj, cfg.TemplateHmiDir,
+                    Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(dfbproj)!)!, "HMI")));
+
                 var injCfg = MapperConfig.Load();
                 injCfg.SyslayPath = cfg.ActiveSyslayPath;
                 injCfg.SysresPath = cfg.ActiveSysresPath;
@@ -307,6 +283,37 @@ namespace MapperUI
             }
             catch (Exception ex) { ShowError(ex.Message); }
             finally { btnGenerateCode.Enabled = true; }
+        }
+
+        async void btnGenerateRobotWrapper_Click(object sender, EventArgs e)
+        {
+            btnGenerateRobotWrapper.Enabled = false;
+            try
+            {
+                var cfg = Cfg();
+                var dfbproj = FindDfbproj(cfg.ActiveSyslayPath);
+                if (dfbproj == null) { ShowError("Cannot find .dfbproj."); return; }
+
+                var result = await Task.Run(() => RobotTaskCatRegistrar.Register(cfg, dfbproj));
+                MessageBox.Show(result, "CAT Wrapper Generated", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex) { ShowError(ex.Message); }
+            finally { btnGenerateRobotWrapper.Enabled = true; }
+        }
+
+        async void btnGeneratePusherFB_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                var cfg = Cfg();
+                var dfbproj = FindDfbproj(cfg.ActiveSyslayPath);
+                if (dfbproj == null) { ShowError("Cannot find .dfbproj."); return; }
+                if (!File.Exists(cfg.ActiveSyslayPath)) { ShowError("syslay not found."); return; }
+
+                var result = await Task.Run(() => PusherFBGenerator.Generate(cfg, _loadedComponents));
+                MessageBox.Show(result, "FBs Generated", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex) { ShowError(ex.Message); }
         }
 
         void dgvComponents_SelectionChanged(object sender, EventArgs e)
@@ -362,10 +369,7 @@ namespace MapperUI
             return null;
         }
 
-        void btnGenerateRobotWrapper_Click(object sender, EventArgs e) { }
-
-        void btnGeneratePusherFB_Click(object sender, EventArgs e) { }
-
-        static void ShowError(string msg) => MessageBox.Show(msg, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        static void ShowError(string msg) =>
+            MessageBox.Show(msg, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
     }
 }
