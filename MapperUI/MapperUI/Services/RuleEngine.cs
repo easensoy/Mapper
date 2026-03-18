@@ -1,7 +1,9 @@
-﻿using ClosedXML.Excel;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
+using System.Linq;
+using System.Xml.Linq;
 
 namespace MapperUI.Services
 {
@@ -37,11 +39,11 @@ namespace MapperUI.Services
 
     public static class XlsxRuleLoader
     {
-        private const int ColVueOne = 1;
-        private const int ColIec = 2;
-        private const int ColType = 3;
-        private const int ColRule = 4;
-        private const int ColNotes = 5;
+        private const int ColVueOne = 0;
+        private const int ColIec = 1;
+        private const int ColType = 2;
+        private const int ColRule = 3;
+        private const int ColNotes = 4;
 
         private static readonly (string Prefix, string Title)[] SectionMap =
         {
@@ -63,19 +65,19 @@ namespace MapperUI.Services
                     $"Mapping rules spreadsheet not found:\n{xlsxPath}\n\n" +
                     "Set MappingRulesPath in mapper_config.json.");
 
-            using var wb = new XLWorkbook(xlsxPath);
-            var ws = wb.Worksheet(1);
+            var rawRows = ReadXlsx(xlsxPath);
             string currentSection = string.Empty;
+            bool firstRow = true;
 
-            foreach (var row in ws.RowsUsed())
+            foreach (var row in rawRows)
             {
-                if (row.RowNumber() == 1) continue;
+                if (firstRow) { firstRow = false; continue; }
 
-                var vue = Cell(row, ColVueOne);
-                var iec = Cell(row, ColIec);
-                var type = Cell(row, ColType);
-                var rule = Cell(row, ColRule);
-                var notes = Cell(row, ColNotes);
+                var vue = Get(row, ColVueOne);
+                var iec = Get(row, ColIec);
+                var type = Get(row, ColType);
+                var rule = Get(row, ColRule);
+                var notes = Get(row, ColNotes);
 
                 if (IsLegendRow(vue, type)) break;
 
@@ -112,8 +114,76 @@ namespace MapperUI.Services
             }
         }
 
-        private static string Cell(IXLRow row, int col)
-            => row.Cell(col).GetString()?.Trim() ?? string.Empty;
+        private static List<List<string>> ReadXlsx(string path)
+        {
+            var rows = new List<List<string>>();
+
+            using var zip = ZipFile.OpenRead(path);
+
+            var sharedStrings = new List<string>();
+            var ssEntry = zip.GetEntry("xl/sharedStrings.xml");
+            if (ssEntry != null)
+            {
+                using var ss = ssEntry.Open();
+                var ssDoc = XDocument.Load(ss);
+                XNamespace ns = ssDoc.Root!.GetDefaultNamespace();
+                foreach (var si in ssDoc.Root.Elements(ns + "si"))
+                    sharedStrings.Add(string.Join("",
+                        si.Descendants(ns + "t").Select(t => t.Value)));
+            }
+
+            var sheetEntry = zip.GetEntry("xl/worksheets/sheet1.xml");
+            if (sheetEntry == null) return rows;
+
+            using var sheetStream = sheetEntry.Open();
+            var doc = XDocument.Load(sheetStream);
+            XNamespace sNs = doc.Root!.GetDefaultNamespace();
+
+            foreach (var rowEl in doc.Descendants(sNs + "row"))
+            {
+                var rowData = new List<string>();
+                int lastCol = 0;
+
+                foreach (var cell in rowEl.Elements(sNs + "c"))
+                {
+                    var colIdx = ColIndex((string?)cell.Attribute("r") ?? "");
+
+                    while (lastCol < colIdx - 1) { rowData.Add(""); lastCol++; }
+
+                    var cellType = (string?)cell.Attribute("t") ?? "";
+                    var valueText = cell.Element(sNs + "v")?.Value ?? "";
+
+                    string val;
+                    if (cellType == "s" && int.TryParse(valueText, out int si) && si < sharedStrings.Count)
+                        val = sharedStrings[si];
+                    else if (cellType == "inlineStr")
+                        val = string.Join("", cell.Descendants(sNs + "t").Select(t => t.Value));
+                    else
+                        val = valueText;
+
+                    rowData.Add(val.Trim());
+                    lastCol = colIdx;
+                }
+
+                rows.Add(rowData);
+            }
+
+            return rows;
+        }
+
+        private static int ColIndex(string cellRef)
+        {
+            int col = 0;
+            foreach (var c in cellRef)
+            {
+                if (!char.IsLetter(c)) break;
+                col = col * 26 + (char.ToUpperInvariant(c) - 'A' + 1);
+            }
+            return col;
+        }
+
+        private static string Get(List<string> row, int col)
+            => col < row.Count ? row[col] : string.Empty;
 
         private static bool TryParseType(string raw, out MappingType result)
         {
