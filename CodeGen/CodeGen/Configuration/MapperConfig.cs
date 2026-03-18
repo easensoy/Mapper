@@ -1,5 +1,4 @@
-﻿// CodeGen/CodeGen/Configuration/MapperConfig.cs
-using System;
+﻿using System;
 using System.IO;
 using System.Text.Json;
 
@@ -9,28 +8,19 @@ namespace CodeGen.Configuration
     {
         private const string ConfigFileName = "mapper_config.json";
 
-        // ── Source: VueOne Control.xml ─────────────────────────────────────
         public string SystemXmlPath { get; set; } = string.Empty;
-
-        // ── Mapping rules spreadsheet ──────────────────────────────────────
         public string MappingRulesPath { get; set; } = string.Empty;
-
-        // ── Template library ───────────────────────────────────────────────
+        public string TemplateLibraryPath { get; set; } = string.Empty;
         public string ActuatorTemplatePath { get; set; } = string.Empty;
         public string SensorTemplatePath { get; set; } = string.Empty;
         public string ProcessCATTemplatePath { get; set; } = string.Empty;
         public string RobotTemplatePath { get; set; } = string.Empty;
         public string RobotBasicTemplatePath { get; set; } = string.Empty;
-
-        // ── Target project ─────────────────────────────────────────────────
         public string SyslayPath { get; set; } = string.Empty;
         public string SysresPath { get; set; } = string.Empty;
-
-        // ── Secondary target ───────────────────────────────────────────────
         public string SyslayPath2 { get; set; } = string.Empty;
         public string SysresPath2 { get; set; } = string.Empty;
 
-        // ── Derived helpers ────────────────────────────────────────────────
         public string ActiveSyslayPath =>
             !string.IsNullOrEmpty(SyslayPath2) ? SyslayPath2 : SyslayPath;
 
@@ -43,7 +33,6 @@ namespace CodeGen.Configuration
         public string TemplateHmiDir =>
             Path.Combine(Path.GetDirectoryName(TemplateIec61499Dir) ?? string.Empty, "HMI");
 
-        // ── Load / Save ────────────────────────────────────────────────────
         public static MapperConfig Load()
         {
             var configPath = Path.Combine(Environment.CurrentDirectory, ConfigFileName);
@@ -65,15 +54,16 @@ namespace CodeGen.Configuration
         {
             SystemXmlPath = @"C:\VueOne\system\Control.xml",
             MappingRulesPath = @"C:\VueOne\VueOne_IEC61499_Mapping.xlsx",
+            TemplateLibraryPath = @"C:\VueOne\TemplateLibrary",
             ActuatorTemplatePath = @"C:\Station1\IEC61499\Five_State_Actuator_CAT\Five_State_Actuator_CAT.fbt",
             SensorTemplatePath = @"C:\Station1\IEC61499\Sensor_Bool_CAT\Sensor_Bool_CAT.fbt",
             ProcessCATTemplatePath = @"C:\Station1\IEC61499\Process1_CAT\Process1_CAT.fbt",
             RobotTemplatePath = @"C:\SMC_Rig\IEC61499\Robot_Task_CAT\Robot_Task_CAT.fbt",
             RobotBasicTemplatePath = @"C:\SMC_Rig\IEC61499\Robot_Task_Core.fbt",
-            SyslayPath = @"C:\Station1\IEC61499\System\...\00000000-0000-0000-0000-000000000000.syslay",
-            SysresPath = @"C:\Station1\IEC61499\System\...\00000000-0000-0000-0000-000000000000.sysres",
-            SyslayPath2 = @"C:\Demonstrator\IEC61499\System\...\00000000-0000-0000-0000-000000000000.syslay",
-            SysresPath2 = @"C:\Demonstrator\IEC61499\System\...\00000000-0000-0000-0000-000000000000.sysres",
+            SyslayPath = @"C:\Station1\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000001\00000000-0000-0000-0000-000000000000.syslay",
+            SysresPath = @"C:\Station1\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000002\00000000-0000-0000-0000-000000000000.sysres",
+            SyslayPath2 = @"C:\Demonstrator\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000001\00000000-0000-0000-0000-000000000000.syslay",
+            SysresPath2 = @"C:\Demonstrator\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000002\00000000-0000-0000-0000-000000000000.sysres",
         };
 
         private static void Save(string path, MapperConfig config)
