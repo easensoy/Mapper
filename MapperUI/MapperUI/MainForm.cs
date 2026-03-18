@@ -1,16 +1,13 @@
 ﻿using CodeGen.Configuration;
 using CodeGen.IO;
-using CodeGen.Mapping;
 using CodeGen.Models;
 using CodeGen.Validation;
 using MapperUI.Services;
 using System;
 using System.Collections.Generic;
-using System.Data;
 using System.Drawing;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -204,21 +201,27 @@ namespace MapperUI
         static ComponentValidationRow Validate(VueOneComponent comp, ComponentValidator validator, MapperConfig cfg)
         {
             string tPath = TemplatePath(comp, cfg);
-            string tName = string.IsNullOrEmpty(tPath) ? "No template found (discarded for this phase)" : Path.GetFileName(tPath);
+            string tName = string.IsNullOrEmpty(tPath)
+                ? "No template found (discarded for this phase)"
+                : Path.GetFileName(tPath);
 
             switch (comp.Type.ToLowerInvariant())
             {
                 case "process": return Pass(comp, tName);
                 case "robot":
                     return string.IsNullOrWhiteSpace(cfg.RobotTemplatePath)
-                        ? Fail(comp, tName, "RobotTemplatePath not set") : Pass(comp, tName);
+                        ? Fail(comp, tName, "RobotTemplatePath not set")
+                        : Pass(comp, tName);
                 case "actuator":
-                    if (comp.States.Count != 5) return Fail(comp, "No template found (discarded for this phase)", $"{comp.States.Count} states, not 5");
+                    if (comp.States.Count != 5)
+                        return Fail(comp, "No template found (discarded for this phase)", $"{comp.States.Count} states, not 5");
                     break;
                 case "sensor":
-                    if (comp.States.Count != 2) return Fail(comp, "No template found (discarded for this phase)", $"{comp.States.Count} states, not 2");
+                    if (comp.States.Count != 2)
+                        return Fail(comp, "No template found (discarded for this phase)", $"{comp.States.Count} states, not 2");
                     break;
-                default: return Fail(comp, tName, $"Unknown type '{comp.Type}'");
+                default:
+                    return Fail(comp, tName, $"Unknown type '{comp.Type}'");
             }
 
             var vr = validator.Validate(comp);
@@ -248,7 +251,8 @@ namespace MapperUI
 
             if (toInject.Count == 0)
             {
-                MessageBox.Show("No in-scope components to inject.", "Nothing to Inject", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show("No in-scope components to inject.", "Nothing to Inject",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -263,8 +267,10 @@ namespace MapperUI
                 MapperLogger.Info($"Project: {Path.GetFileName(dfbproj)}");
 
                 await Task.Run(() => TemplatePackager.Package(
-                    cfg.TemplateIec61499Dir, Path.GetDirectoryName(dfbproj)!,
-                    dfbproj, cfg.TemplateHmiDir,
+                    cfg.TemplateIec61499Dir,
+                    Path.GetDirectoryName(dfbproj)!,
+                    dfbproj,
+                    cfg.TemplateHmiDir,
                     Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(dfbproj)!)!, "HMI")));
 
                 var injCfg = MapperConfig.Load();
@@ -323,13 +329,15 @@ namespace MapperUI
             if (dgvComponents.SelectedRows.Count == 0) return;
 
             var name = dgvComponents.SelectedRows[0].Cells[0].Value?.ToString();
-            var comp = _loadedComponents.FirstOrDefault(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase));
+            var comp = _loadedComponents.FirstOrDefault(c =>
+                string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase));
             if (comp == null) return;
 
             foreach (var s in comp.States.OrderBy(st => st.StateNumber))
                 dgvInputs.Rows.Add($"State {s.StateNumber}: {s.Name}", "");
 
-            var vr = _validationRows.FirstOrDefault(r => string.Equals(r.Component.Name, name, StringComparison.OrdinalIgnoreCase));
+            var vr = _validationRows.FirstOrDefault(r =>
+                string.Equals(r.Component.Name, name, StringComparison.OrdinalIgnoreCase));
             if (vr is { IsValid: false, FailReason.Length: > 0 })
                 dgvOutputs.Rows.Add(vr.FailReason, "");
         }
