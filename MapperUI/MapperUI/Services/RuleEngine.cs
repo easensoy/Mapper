@@ -62,22 +62,21 @@ namespace MapperUI.Services
         {
             if (string.IsNullOrWhiteSpace(xlsxPath) || !File.Exists(xlsxPath))
                 throw new FileNotFoundException(
-                    $"Mapping rules spreadsheet not found:\n{xlsxPath}\n\n" +
-                    "Set MappingRulesPath in mapper_config.json.");
+                    $"Mapping rules spreadsheet not found:\n{xlsxPath}\n\nSet MappingRulesPath in mapper_config.json.");
 
             var rawRows = ReadXlsx(xlsxPath);
             string currentSection = string.Empty;
             bool firstRow = true;
 
-            foreach (var row in rawRows)
+            foreach (var cells in rawRows)
             {
                 if (firstRow) { firstRow = false; continue; }
 
-                var vue = Get(row, ColVueOne);
-                var iec = Get(row, ColIec);
-                var type = Get(row, ColType);
-                var rule = Get(row, ColRule);
-                var notes = Get(row, ColNotes);
+                var vue = Get(cells, ColVueOne);
+                var iec = Get(cells, ColIec);
+                var type = Get(cells, ColType);
+                var rule = Get(cells, ColRule);
+                var notes = Get(cells, ColNotes);
 
                 if (IsLegendRow(vue, type)) break;
 
@@ -98,8 +97,7 @@ namespace MapperUI.Services
                         IEC61499Element: string.Empty,
                         Type: MappingType.SECTION,
                         TransformationRule: string.Empty,
-                        IsImplemented: false
-                    );
+                        IsImplemented: false);
                 }
 
                 yield return new MappingRuleEntry(
@@ -109,8 +107,7 @@ namespace MapperUI.Services
                     IEC61499Element: iec,
                     Type: mappingType,
                     TransformationRule: rule,
-                    IsImplemented: !IsFuturePhase(notes)
-                );
+                    IsImplemented: !IsFuturePhase(notes));
             }
         }
 
@@ -124,57 +121,55 @@ namespace MapperUI.Services
             var ssEntry = zip.GetEntry("xl/sharedStrings.xml");
             if (ssEntry != null)
             {
-                using var ss = ssEntry.Open();
-                var ssDoc = XDocument.Load(ss);
-                XNamespace ns = ssDoc.Root!.GetDefaultNamespace();
-                foreach (var si in ssDoc.Root.Elements(ns + "si"))
-                    sharedStrings.Add(string.Join("",
-                        si.Descendants(ns + "t").Select(t => t.Value)));
+                using var ssStream = ssEntry.Open();
+                var ssDoc = XDocument.Load(ssStream);
+                XNamespace ssNs = ssDoc.Root!.GetDefaultNamespace();
+                foreach (var si in ssDoc.Root.Elements(ssNs + "si"))
+                    sharedStrings.Add(string.Concat(si.Descendants(ssNs + "t").Select(t => t.Value)));
             }
 
             var sheetEntry = zip.GetEntry("xl/worksheets/sheet1.xml");
             if (sheetEntry == null) return rows;
 
             using var sheetStream = sheetEntry.Open();
-            var doc = XDocument.Load(sheetStream);
-            XNamespace sNs = doc.Root!.GetDefaultNamespace();
+            var sheetDoc = XDocument.Load(sheetStream);
+            XNamespace ns = sheetDoc.Root!.GetDefaultNamespace();
 
-            foreach (var rowEl in doc.Descendants(sNs + "row"))
+            foreach (var rowEl in sheetDoc.Descendants(ns + "row"))
             {
-                var rowData = new List<string>();
-                int lastCol = 0;
+                var cells = new List<string>();
+                int lastColIdx = 0;
 
-                foreach (var cell in rowEl.Elements(sNs + "c"))
+                foreach (var cell in rowEl.Elements(ns + "c"))
                 {
-                    var colIdx = ColIndex((string?)cell.Attribute("r") ?? "");
+                    int colIdx = ParseColIndex((string?)cell.Attribute("r") ?? string.Empty);
+                    while (lastColIdx < colIdx - 1) { cells.Add(string.Empty); lastColIdx++; }
 
-                    while (lastCol < colIdx - 1) { rowData.Add(""); lastCol++; }
-
-                    var cellType = (string?)cell.Attribute("t") ?? "";
-                    var valueText = cell.Element(sNs + "v")?.Value ?? "";
+                    string cellType = (string?)cell.Attribute("t") ?? string.Empty;
+                    string cellValue = cell.Element(ns + "v")?.Value ?? string.Empty;
 
                     string val;
-                    if (cellType == "s" && int.TryParse(valueText, out int si) && si < sharedStrings.Count)
-                        val = sharedStrings[si];
+                    if (cellType == "s" && int.TryParse(cellValue, out int ssIdx) && ssIdx < sharedStrings.Count)
+                        val = sharedStrings[ssIdx];
                     else if (cellType == "inlineStr")
-                        val = string.Join("", cell.Descendants(sNs + "t").Select(t => t.Value));
+                        val = string.Concat(cell.Descendants(ns + "t").Select(t => t.Value));
                     else
-                        val = valueText;
+                        val = cellValue;
 
-                    rowData.Add(val.Trim());
-                    lastCol = colIdx;
+                    cells.Add(val.Trim());
+                    lastColIdx = colIdx;
                 }
 
-                rows.Add(rowData);
+                rows.Add(cells);
             }
 
             return rows;
         }
 
-        private static int ColIndex(string cellRef)
+        private static int ParseColIndex(string cellRef)
         {
             int col = 0;
-            foreach (var c in cellRef)
+            foreach (char c in cellRef)
             {
                 if (!char.IsLetter(c)) break;
                 col = col * 26 + (char.ToUpperInvariant(c) - 'A' + 1);
@@ -188,30 +183,30 @@ namespace MapperUI.Services
         private static bool TryParseType(string raw, out MappingType result)
         {
             result = MappingType.TRANSLATED;
-            return !string.IsNullOrWhiteSpace(raw) &&
-                   Enum.TryParse(raw.ToUpperInvariant(), out result);
+            return !string.IsNullOrWhiteSpace(raw) && Enum.TryParse(raw.ToUpperInvariant(), out result);
         }
 
         private static string ResolveSection(string vue, MappingType type)
         {
             if (string.IsNullOrWhiteSpace(vue))
                 return type == MappingType.HARDCODED ? "EAE Template (Hardcoded)" : string.Empty;
-
             foreach (var (prefix, title) in SectionMap)
                 if (vue.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                     return title;
-
             return string.Empty;
         }
 
         private static bool IsLegendRow(string vue, string type)
-            => string.IsNullOrWhiteSpace(type) &&
-               vue.ToUpperInvariant() is "HARDCODED" or "TRANSLATED"
-                   or "ASSUMED" or "DISCARDED" or "ENCODED";
+        {
+            if (!string.IsNullOrWhiteSpace(type)) return false;
+            string upper = vue.ToUpperInvariant();
+            return upper == "HARDCODED" || upper == "TRANSLATED" ||
+                   upper == "ASSUMED" || upper == "DISCARDED" || upper == "ENCODED";
+        }
 
         private static bool IsFuturePhase(string notes)
         {
-            var n = notes.ToUpperInvariant();
+            string n = notes.ToUpperInvariant();
             return n.Contains("PHASE 2") || n.Contains("PHASE 3") || n.Contains("PHASE 4");
         }
     }
