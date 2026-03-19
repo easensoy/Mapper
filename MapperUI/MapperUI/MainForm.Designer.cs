@@ -52,6 +52,9 @@
             this.lblEngineStatusDot = new System.Windows.Forms.Label();
             this.txtActivityLog = new System.Windows.Forms.TextBox();
             this.pnlEngineBottom = new System.Windows.Forms.Panel();
+            this.btnIO = new System.Windows.Forms.Button();
+            this.btnGenerateTemplate = new System.Windows.Forms.Button();
+            this.btnADP = new System.Windows.Forms.Button();
             this.btnGenerate = new System.Windows.Forms.Button();
             this.statusStrip = new System.Windows.Forms.StatusStrip();
             this.lblStatus = new System.Windows.Forms.ToolStripStatusLabel();
@@ -187,7 +190,7 @@
 
             // Main split: Left=Components, Right=Detail
             this.splitMain.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.splitMain.SplitterDistance = 550;
+            this.splitMain.SplitterDistance = 380;
 
             // Left: Components grid
             this.dgvComponents.AllowUserToAddRows = false;
@@ -239,25 +242,55 @@
             this.lblEngineStatusDot.AutoSize = true;
             this.lblEngineStatusDot.Location = new System.Drawing.Point(96, 4);
             this.lblEngineStatusDot.Text = "\u25cf";
-            this.lblEngineStatusDot.ForeColor = System.Drawing.Color.Red;
+            this.lblEngineStatusDot.ForeColor = System.Drawing.Color.Silver;
             this.lblEngineStatusDot.Font = new System.Drawing.Font("Segoe UI", 11F, System.Drawing.FontStyle.Bold);
 
             // Activity log
-            this.txtActivityLog.BackColor = System.Drawing.Color.FromArgb(18, 18, 18);
-            this.txtActivityLog.ForeColor = System.Drawing.Color.FromArgb(180, 220, 180);
+            this.txtActivityLog.BackColor = System.Drawing.Color.White;
+            this.txtActivityLog.ForeColor = System.Drawing.SystemColors.WindowText;
             this.txtActivityLog.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.txtActivityLog.Font = new System.Drawing.Font("Consolas", 8.5F);
+            this.txtActivityLog.Font = new System.Drawing.Font("Segoe UI", 9.5F);
             this.txtActivityLog.Multiline = true;
             this.txtActivityLog.ReadOnly = true;
             this.txtActivityLog.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
-            this.txtActivityLog.WordWrap = false;
+            this.txtActivityLog.WordWrap = true;
+            this.txtActivityLog.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
 
-            // Bottom bar with Generate button
+            // Bottom bar with action buttons
             this.pnlEngineBottom.Controls.Add(this.btnGenerate);
+            this.pnlEngineBottom.Controls.Add(this.btnADP);
+            this.pnlEngineBottom.Controls.Add(this.btnGenerateTemplate);
+            this.pnlEngineBottom.Controls.Add(this.btnIO);
             this.pnlEngineBottom.Dock = System.Windows.Forms.DockStyle.Bottom;
-            this.pnlEngineBottom.Height = 36;
+            this.pnlEngineBottom.Height = 44;
             this.pnlEngineBottom.BackColor = System.Drawing.SystemColors.Control;
+            this.pnlEngineBottom.Padding = new System.Windows.Forms.Padding(4, 6, 4, 4);
 
+            // IO button
+            this.btnIO.Location = new System.Drawing.Point(8, 8);
+            this.btnIO.Size = new System.Drawing.Size(70, 28);
+            this.btnIO.Text = "IO";
+            this.btnIO.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
+            this.btnIO.FlatStyle = System.Windows.Forms.FlatStyle.System;
+            this.btnIO.Click += new System.EventHandler(this.btnIO_Click);
+
+            // Generate Template button
+            this.btnGenerateTemplate.Location = new System.Drawing.Point(84, 8);
+            this.btnGenerateTemplate.Size = new System.Drawing.Size(140, 28);
+            this.btnGenerateTemplate.Text = "Generate Template";
+            this.btnGenerateTemplate.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
+            this.btnGenerateTemplate.FlatStyle = System.Windows.Forms.FlatStyle.System;
+            this.btnGenerateTemplate.Click += new System.EventHandler(this.btnGenerateTemplate_Click);
+
+            // ADP button
+            this.btnADP.Location = new System.Drawing.Point(230, 8);
+            this.btnADP.Size = new System.Drawing.Size(70, 28);
+            this.btnADP.Text = "ADP";
+            this.btnADP.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
+            this.btnADP.FlatStyle = System.Windows.Forms.FlatStyle.System;
+            this.btnADP.Click += new System.EventHandler(this.btnADP_Click);
+
+            // Generate button (right-aligned)
             this.btnGenerate.Anchor = System.Windows.Forms.AnchorStyles.Right | System.Windows.Forms.AnchorStyles.Top;
             this.btnGenerate.BackColor = System.Drawing.Color.FromArgb(0, 122, 204);
             this.btnGenerate.Enabled = false;
@@ -265,8 +298,8 @@
             this.btnGenerate.FlatAppearance.BorderSize = 0;
             this.btnGenerate.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
             this.btnGenerate.ForeColor = System.Drawing.Color.White;
-            this.btnGenerate.Location = new System.Drawing.Point(510, 5);
-            this.btnGenerate.Size = new System.Drawing.Size(100, 26);
+            this.btnGenerate.Location = new System.Drawing.Point(880, 8);
+            this.btnGenerate.Size = new System.Drawing.Size(110, 28);
             this.btnGenerate.Text = "Generate";
             this.btnGenerate.UseVisualStyleBackColor = false;
             this.btnGenerate.Click += new System.EventHandler(this.btnGenerate_Click);
@@ -365,6 +398,9 @@
         private System.Windows.Forms.Label lblEngineStatusDot;
         private System.Windows.Forms.TextBox txtActivityLog;
         private System.Windows.Forms.Panel pnlEngineBottom;
+        private System.Windows.Forms.Button btnIO;
+        private System.Windows.Forms.Button btnGenerateTemplate;
+        private System.Windows.Forms.Button btnADP;
         private System.Windows.Forms.Button btnGenerate;
         private System.Windows.Forms.StatusStrip statusStrip;
         private System.Windows.Forms.ToolStripStatusLabel lblStatus;
