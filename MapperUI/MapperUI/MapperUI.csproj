@@ -12,4 +12,10 @@
 		<ProjectReference Include="..\..\CodeGen\CodeGen\CodeGen.csproj" />
 	</ItemGroup>
 
+	<ItemGroup>
+		<Content Include="Input\**">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+		</Content>
+	</ItemGroup>
+
 </Project>
