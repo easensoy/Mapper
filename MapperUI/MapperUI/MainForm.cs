@@ -152,7 +152,7 @@ namespace MapperUI
 
         void SetEngineStatus(bool running)
         {
-            lblEngineStatusDot.ForeColor = running ? Color.LimeGreen : Color.Red;
+            lblEngineStatusDot.ForeColor = running ? Color.LimeGreen : Color.Silver;
         }
 
         // ── Generation Engine button ────────────────────────────────────────
@@ -333,6 +333,23 @@ namespace MapperUI
                 return;
             }
             txtActivityLog.AppendText($"[{DateTime.Now:HH:mm:ss}] {text}{Environment.NewLine}");
+        }
+
+        // ── LLM action buttons ──────────────────────────────────────────────
+
+        void btnIO_Click(object sender, EventArgs e)
+        {
+            AppendActivity("IO extraction requested.");
+        }
+
+        void btnGenerateTemplate_Click(object sender, EventArgs e)
+        {
+            AppendActivity("Generate Template requested.");
+        }
+
+        void btnADP_Click(object sender, EventArgs e)
+        {
+            AppendActivity("ADP generation requested.");
         }
 
         // ── Existing handlers ───────────────────────────────────────────────
