@@ -46,15 +46,13 @@
             this.colComponent = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.colType = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.colTemplate = new System.Windows.Forms.DataGridViewTextBoxColumn();
-            this.splitDetail = new System.Windows.Forms.SplitContainer();
-            this.grpInputs = new System.Windows.Forms.GroupBox();
-            this.dgvInputs = new System.Windows.Forms.DataGridView();
-            this.colInputName = new System.Windows.Forms.DataGridViewTextBoxColumn();
-            this.colInputAddress = new System.Windows.Forms.DataGridViewComboBoxColumn();
-            this.grpOutputs = new System.Windows.Forms.GroupBox();
-            this.dgvOutputs = new System.Windows.Forms.DataGridView();
-            this.colOutputName = new System.Windows.Forms.DataGridViewTextBoxColumn();
-            this.colOutputAddress = new System.Windows.Forms.DataGridViewComboBoxColumn();
+            this.grpGenerationEngine = new System.Windows.Forms.GroupBox();
+            this.pnlEngineHeader = new System.Windows.Forms.Panel();
+            this.lblEngineLabel = new System.Windows.Forms.Label();
+            this.lblEngineStatusDot = new System.Windows.Forms.Label();
+            this.txtActivityLog = new System.Windows.Forms.TextBox();
+            this.pnlEngineBottom = new System.Windows.Forms.Panel();
+            this.btnGenerate = new System.Windows.Forms.Button();
             this.statusStrip = new System.Windows.Forms.StatusStrip();
             this.lblStatus = new System.Windows.Forms.ToolStripStatusLabel();
 
@@ -68,14 +66,9 @@
             this.splitMain.Panel2.SuspendLayout();
             this.splitMain.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.dgvComponents)).BeginInit();
-            ((System.ComponentModel.ISupportInitialize)(this.splitDetail)).BeginInit();
-            this.splitDetail.Panel1.SuspendLayout();
-            this.splitDetail.Panel2.SuspendLayout();
-            this.splitDetail.SuspendLayout();
-            this.grpInputs.SuspendLayout();
-            ((System.ComponentModel.ISupportInitialize)(this.dgvInputs)).BeginInit();
-            this.grpOutputs.SuspendLayout();
-            ((System.ComponentModel.ISupportInitialize)(this.dgvOutputs)).BeginInit();
+            this.grpGenerationEngine.SuspendLayout();
+            this.pnlEngineHeader.SuspendLayout();
+            this.pnlEngineBottom.SuspendLayout();
             this.statusStrip.SuspendLayout();
             this.SuspendLayout();
 
@@ -194,7 +187,7 @@
 
             // Main split: Left=Components, Right=Detail
             this.splitMain.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.splitMain.SplitterDistance = 760;
+            this.splitMain.SplitterDistance = 550;
 
             // Left: Components grid
             this.dgvComponents.AllowUserToAddRows = false;
@@ -210,6 +203,7 @@
             this.dgvComponents.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
             this.dgvComponents.DefaultCellStyle.Font = new System.Drawing.Font("Segoe UI", 9F);
             this.dgvComponents.SelectionChanged += new System.EventHandler(this.dgvComponents_SelectionChanged);
+            // dgvComponents.SelectionChanged is kept for future use; right panel replaced by Generation Engine
             this.splitMain.Panel1.Controls.Add(this.dgvComponents);
 
             this.colComponent.HeaderText = "Component";
@@ -222,55 +216,60 @@
             this.colTemplate.ReadOnly = true;
             this.colTemplate.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill;
 
-            // Right: Detail split — Top=Inputs, Bottom=Outputs
-            this.splitDetail.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.splitDetail.Orientation = System.Windows.Forms.Orientation.Horizontal;
-            this.splitDetail.SplitterDistance = 200;
-            this.splitMain.Panel2.Controls.Add(this.splitDetail);
+            // Right: Generation Engine panel
+            this.grpGenerationEngine.Controls.Add(this.txtActivityLog);
+            this.grpGenerationEngine.Controls.Add(this.pnlEngineBottom);
+            this.grpGenerationEngine.Controls.Add(this.pnlEngineHeader);
+            this.grpGenerationEngine.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.grpGenerationEngine.Text = "Generation Engine";
+            this.splitMain.Panel2.Controls.Add(this.grpGenerationEngine);
 
-            // Top: Inputs / States
-            this.grpInputs.Controls.Add(this.dgvInputs);
-            this.grpInputs.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.grpInputs.Text = "States";
-            this.splitDetail.Panel1.Controls.Add(this.grpInputs);
+            // Status header
+            this.pnlEngineHeader.Controls.Add(this.lblEngineLabel);
+            this.pnlEngineHeader.Controls.Add(this.lblEngineStatusDot);
+            this.pnlEngineHeader.Dock = System.Windows.Forms.DockStyle.Top;
+            this.pnlEngineHeader.Height = 28;
+            this.pnlEngineHeader.BackColor = System.Drawing.SystemColors.Control;
 
-            this.dgvInputs.AllowUserToAddRows = false;
-            this.dgvInputs.AllowUserToDeleteRows = false;
-            this.dgvInputs.AutoSizeColumnsMode = System.Windows.Forms.DataGridViewAutoSizeColumnsMode.Fill;
-            this.dgvInputs.BackgroundColor = System.Drawing.Color.White;
-            this.dgvInputs.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
-            this.dgvInputs.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] { this.colInputName, this.colInputAddress });
-            this.dgvInputs.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.dgvInputs.RowHeadersVisible = false;
+            this.lblEngineLabel.AutoSize = true;
+            this.lblEngineLabel.Location = new System.Drawing.Point(8, 6);
+            this.lblEngineLabel.Text = "LLM Engine:";
+            this.lblEngineLabel.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
 
-            this.colInputName.FillWeight = 60F;
-            this.colInputName.HeaderText = "State";
-            this.colInputName.ReadOnly = true;
-            this.colInputAddress.FillWeight = 40F;
-            this.colInputAddress.HeaderText = "Address";
+            this.lblEngineStatusDot.AutoSize = true;
+            this.lblEngineStatusDot.Location = new System.Drawing.Point(96, 4);
+            this.lblEngineStatusDot.Text = "\u25cf";
+            this.lblEngineStatusDot.ForeColor = System.Drawing.Color.Red;
+            this.lblEngineStatusDot.Font = new System.Drawing.Font("Segoe UI", 11F, System.Drawing.FontStyle.Bold);
 
-            // Bottom: Outputs / Validation
-            this.grpOutputs.Controls.Add(this.dgvOutputs);
-            this.grpOutputs.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.grpOutputs.Text = "Validation";
-            this.splitDetail.Panel2.Controls.Add(this.grpOutputs);
+            // Activity log
+            this.txtActivityLog.BackColor = System.Drawing.Color.FromArgb(18, 18, 18);
+            this.txtActivityLog.ForeColor = System.Drawing.Color.FromArgb(180, 220, 180);
+            this.txtActivityLog.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.txtActivityLog.Font = new System.Drawing.Font("Consolas", 8.5F);
+            this.txtActivityLog.Multiline = true;
+            this.txtActivityLog.ReadOnly = true;
+            this.txtActivityLog.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
+            this.txtActivityLog.WordWrap = false;
 
-            this.dgvOutputs.AllowUserToAddRows = false;
-            this.dgvOutputs.AllowUserToDeleteRows = false;
-            this.dgvOutputs.AutoSizeColumnsMode = System.Windows.Forms.DataGridViewAutoSizeColumnsMode.Fill;
-            this.dgvOutputs.BackgroundColor = System.Drawing.Color.White;
-            this.dgvOutputs.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
-            this.dgvOutputs.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] { this.colOutputName, this.colOutputAddress });
-            this.dgvOutputs.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.dgvOutputs.ReadOnly = true;
-            this.dgvOutputs.RowHeadersVisible = false;
+            // Bottom bar with Generate button
+            this.pnlEngineBottom.Controls.Add(this.btnGenerate);
+            this.pnlEngineBottom.Dock = System.Windows.Forms.DockStyle.Bottom;
+            this.pnlEngineBottom.Height = 36;
+            this.pnlEngineBottom.BackColor = System.Drawing.SystemColors.Control;
 
-            this.colOutputName.FillWeight = 70F;
-            this.colOutputName.HeaderText = "Output";
-            this.colOutputName.ReadOnly = true;
-            this.colOutputAddress.FillWeight = 30F;
-            this.colOutputAddress.HeaderText = "Address";
-            this.colOutputAddress.ReadOnly = true;
+            this.btnGenerate.Anchor = System.Windows.Forms.AnchorStyles.Right | System.Windows.Forms.AnchorStyles.Top;
+            this.btnGenerate.BackColor = System.Drawing.Color.FromArgb(0, 122, 204);
+            this.btnGenerate.Enabled = false;
+            this.btnGenerate.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnGenerate.FlatAppearance.BorderSize = 0;
+            this.btnGenerate.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
+            this.btnGenerate.ForeColor = System.Drawing.Color.White;
+            this.btnGenerate.Location = new System.Drawing.Point(510, 5);
+            this.btnGenerate.Size = new System.Drawing.Size(100, 26);
+            this.btnGenerate.Text = "Generate";
+            this.btnGenerate.UseVisualStyleBackColor = false;
+            this.btnGenerate.Click += new System.EventHandler(this.btnGenerate_Click);
 
             // Status strip
             this.statusStrip.Items.AddRange(new System.Windows.Forms.ToolStripItem[] { this.lblStatus });
@@ -307,14 +306,10 @@
             ((System.ComponentModel.ISupportInitialize)(this.splitMain)).EndInit();
             this.splitMain.ResumeLayout(false);
             ((System.ComponentModel.ISupportInitialize)(this.dgvComponents)).EndInit();
-            this.splitDetail.Panel1.ResumeLayout(false);
-            this.splitDetail.Panel2.ResumeLayout(false);
-            ((System.ComponentModel.ISupportInitialize)(this.splitDetail)).EndInit();
-            this.splitDetail.ResumeLayout(false);
-            this.grpInputs.ResumeLayout(false);
-            ((System.ComponentModel.ISupportInitialize)(this.dgvInputs)).EndInit();
-            this.grpOutputs.ResumeLayout(false);
-            ((System.ComponentModel.ISupportInitialize)(this.dgvOutputs)).EndInit();
+            this.pnlEngineHeader.ResumeLayout(false);
+            this.pnlEngineHeader.PerformLayout();
+            this.pnlEngineBottom.ResumeLayout(false);
+            this.grpGenerationEngine.ResumeLayout(false);
             this.statusStrip.ResumeLayout(false);
             this.statusStrip.PerformLayout();
             this.ResumeLayout(false);
@@ -364,15 +359,13 @@
         private System.Windows.Forms.DataGridViewTextBoxColumn colComponent;
         private System.Windows.Forms.DataGridViewTextBoxColumn colType;
         private System.Windows.Forms.DataGridViewTextBoxColumn colTemplate;
-        private System.Windows.Forms.SplitContainer splitDetail;
-        private System.Windows.Forms.GroupBox grpInputs;
-        private System.Windows.Forms.DataGridView dgvInputs;
-        private System.Windows.Forms.DataGridViewTextBoxColumn colInputName;
-        private System.Windows.Forms.DataGridViewComboBoxColumn colInputAddress;
-        private System.Windows.Forms.GroupBox grpOutputs;
-        private System.Windows.Forms.DataGridView dgvOutputs;
-        private System.Windows.Forms.DataGridViewTextBoxColumn colOutputName;
-        private System.Windows.Forms.DataGridViewComboBoxColumn colOutputAddress;
+        private System.Windows.Forms.GroupBox grpGenerationEngine;
+        private System.Windows.Forms.Panel pnlEngineHeader;
+        private System.Windows.Forms.Label lblEngineLabel;
+        private System.Windows.Forms.Label lblEngineStatusDot;
+        private System.Windows.Forms.TextBox txtActivityLog;
+        private System.Windows.Forms.Panel pnlEngineBottom;
+        private System.Windows.Forms.Button btnGenerate;
         private System.Windows.Forms.StatusStrip statusStrip;
         private System.Windows.Forms.ToolStripStatusLabel lblStatus;
     }
