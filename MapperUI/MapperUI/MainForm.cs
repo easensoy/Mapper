@@ -1,15 +1,21 @@
-﻿using CodeGen.Configuration;
+using CodeGen.Configuration;
 using CodeGen.IO;
 using CodeGen.Models;
 using CodeGen.Validation;
 using MapperUI.Services;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
+using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+
+using UiMappingType = MapperUI.Services.MappingType;
 
 namespace MapperUI
 {
@@ -20,6 +26,14 @@ namespace MapperUI
         List<ComponentValidationRow> _validationRows = new();
         SystemXmlReader? _lastReader;
         DebugConsoleForm? _debugConsole;
+        Process? _llmProcess;
+        System.Windows.Forms.Timer? _healthTimer;
+
+        static readonly HttpClient _http = new()
+        {
+            BaseAddress = new Uri("http://127.0.0.1:8100/"),
+            Timeout = TimeSpan.FromMinutes(10),
+        };
 
         static readonly HashSet<string> _allowedInstances = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -50,8 +64,278 @@ namespace MapperUI
         {
             InitializeComponent();
             btnGenerateCode.Enabled = false;
-            btnGenerateRobotWrapper.Enabled = true;
         }
+
+        protected override void OnLoad(EventArgs e)
+        {
+            base.OnLoad(e);
+            StartLlmEngine();
+            StartHealthPolling();
+        }
+
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            base.OnFormClosed(e);
+            _healthTimer?.Stop();
+            try { _llmProcess?.Kill(); } catch { }
+        }
+
+        // ── LLM Engine process ──────────────────────────────────────────────
+
+        void StartLlmEngine()
+        {
+            var runBat = FindRunBat();
+            if (runBat == null)
+            {
+                AppendActivity("LLMEngine/run.bat not found — start the service manually.");
+                return;
+            }
+
+            try
+            {
+                _llmProcess = new Process
+                {
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = runBat,
+                        WorkingDirectory = Path.GetDirectoryName(runBat)!,
+                        UseShellExecute = true,
+                        WindowStyle = ProcessWindowStyle.Minimized,
+                    }
+                };
+                _llmProcess.Start();
+                AppendActivity("LLM Engine process started.");
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"Could not start LLM Engine: {ex.Message}");
+            }
+        }
+
+        static string? FindRunBat()
+        {
+            var dir = AppContext.BaseDirectory;
+            for (int i = 0; i < 7; i++)
+            {
+                var candidate = Path.Combine(dir, "LLMEngine", "run.bat");
+                if (File.Exists(candidate)) return candidate;
+                var parent = Path.GetDirectoryName(dir);
+                if (parent == null) break;
+                dir = parent;
+            }
+            return null;
+        }
+
+        // ── Health polling ──────────────────────────────────────────────────
+
+        void StartHealthPolling()
+        {
+            _healthTimer = new System.Windows.Forms.Timer { Interval = 2000 };
+            _healthTimer.Tick += async (_, _) => await CheckHealthAsync();
+            _healthTimer.Start();
+        }
+
+        async Task CheckHealthAsync()
+        {
+            bool ok;
+            try
+            {
+                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(1.5));
+                var resp = await _http.GetAsync("health", cts.Token);
+                ok = resp.IsSuccessStatusCode;
+            }
+            catch { ok = false; }
+
+            if (InvokeRequired) Invoke(() => SetEngineStatus(ok));
+            else SetEngineStatus(ok);
+        }
+
+        void SetEngineStatus(bool running)
+        {
+            lblEngineStatusDot.ForeColor = running ? Color.LimeGreen : Color.Red;
+        }
+
+        // ── Generation Engine button ────────────────────────────────────────
+
+        async void btnGenerate_Click(object sender, EventArgs e)
+        {
+            btnGenerate.Enabled = false;
+            txtActivityLog.Clear();
+
+            var rejected = _validationRows
+                .Where(r => r.TemplateName.StartsWith("No template found"))
+                .Select(r => r.Component)
+                .ToList();
+
+            if (rejected.Count == 0)
+            {
+                AppendActivity("No rejected components to generate.");
+                btnGenerate.Enabled = true;
+                return;
+            }
+
+            AppendActivity($"Sending {rejected.Count} component(s) to LLM Engine…");
+
+            try
+            {
+                var payload = new
+                {
+                    components = rejected.Select(c => new
+                    {
+                        ComponentID = c.ComponentID,
+                        Name = c.Name,
+                        Description = c.Description,
+                        Type = c.Type,
+                        States = c.States.Select(s => new
+                        {
+                            StateID = s.StateID,
+                            Name = s.Name,
+                            StateNumber = s.StateNumber,
+                            InitialState = s.InitialState,
+                            Time = s.Time,
+                            Position = s.Position,
+                            Counter = s.Counter,
+                            StaticState = s.StaticState,
+                        }),
+                        NameTag = c.NameTag,
+                    }),
+                    control_xml_path = txtModelPath.Text,
+                    pdf_paths = Array.Empty<string>(),
+                };
+
+                var json = JsonSerializer.Serialize(payload);
+                using var body = new StringContent(json, Encoding.UTF8, "application/json");
+                var postResp = await _http.PostAsync("generate", body);
+                postResp.EnsureSuccessStatusCode();
+
+                var postJson = await postResp.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(postJson);
+                var jobId = doc.RootElement.GetProperty("job_id").GetString()
+                    ?? throw new Exception("No job_id in response.");
+
+                AppendActivity($"Job started: {jobId}");
+                await StreamSseAsync(jobId);
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"[Error] {ex.Message}");
+                btnGenerate.Enabled = true;
+            }
+        }
+
+        async Task StreamSseAsync(string jobId)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"stream/{jobId}");
+            request.Headers.Accept.ParseAdd("text/event-stream");
+
+            using var response = await _http.SendAsync(
+                request, HttpCompletionOption.ResponseHeadersRead);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                AppendActivity($"Stream error: {response.StatusCode}");
+                Invoke(() => btnGenerate.Enabled = true);
+                return;
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync();
+            using var reader = new StreamReader(stream);
+
+            var eventType = "log";
+            var dataBuf = new StringBuilder();
+
+            while (true)
+            {
+                var line = await reader.ReadLineAsync();
+                if (line == null) break;
+
+                if (line.StartsWith("event:"))
+                {
+                    eventType = line[6..].Trim();
+                }
+                else if (line.StartsWith("data:"))
+                {
+                    dataBuf.Append(line[5..].Trim());
+                }
+                else if (line.Length == 0 && dataBuf.Length > 0)
+                {
+                    var data = dataBuf.ToString();
+                    dataBuf.Clear();
+
+                    switch (eventType)
+                    {
+                        case "log":
+                            AppendActivity(data);
+                            break;
+
+                        case "complete":
+                            AppendActivity("Generation complete. Running injection…");
+                            await HandleGeneratedComponentsAsync(data);
+                            return;
+
+                        case "error":
+                            AppendActivity($"[Error] {data}");
+                            Invoke(() => btnGenerate.Enabled = true);
+                            return;
+                    }
+                    eventType = "log";
+                }
+            }
+
+            Invoke(() => btnGenerate.Enabled = true);
+        }
+
+        async Task HandleGeneratedComponentsAsync(string json)
+        {
+            try
+            {
+                var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                var generated = JsonSerializer.Deserialize<List<VueOneComponent>>(json, opts);
+
+                if (generated == null || generated.Count == 0)
+                {
+                    AppendActivity("No components in LLM response.");
+                    return;
+                }
+
+                AppendActivity($"Deserialised {generated.Count} component(s). Injecting…");
+
+                var cfg = Cfg();
+                var injector = new SystemInjector();
+                var result = await Task.Run(() => injector.Inject(cfg, generated));
+
+                if (result.Success)
+                {
+                    AppendActivity($"Done. {result.InjectedFBs.Count} FB(s) injected.");
+                    Invoke(() => lblStatus.Text =
+                        $"LLM injection done — {result.InjectedFBs.Count} FB(s).");
+                }
+                else
+                {
+                    AppendActivity($"Injection failed: {result.ErrorMessage}");
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"[Error] {ex.Message}");
+            }
+            finally
+            {
+                Invoke(() => btnGenerate.Enabled = true);
+            }
+        }
+
+        void AppendActivity(string text)
+        {
+            if (txtActivityLog.InvokeRequired)
+            {
+                txtActivityLog.Invoke(() => AppendActivity(text));
+                return;
+            }
+            txtActivityLog.AppendText($"[{DateTime.Now:HH:mm:ss}] {text}{Environment.NewLine}");
+        }
+
+        // ── Existing handlers ───────────────────────────────────────────────
 
         void menuItemDebugConsole_Click(object sender, EventArgs e)
         {
@@ -80,11 +364,11 @@ namespace MapperUI
         {
             dgvComponents.Rows.Clear();
             dgvMappingRules.Rows.Clear();
-            dgvInputs.Rows.Clear();
-            dgvOutputs.Rows.Clear();
             _loadedComponents.Clear();
             _validationRows.Clear();
             btnGenerateCode.Enabled = false;
+            btnGenerate.Enabled = false;
+            txtActivityLog.Clear();
             lblStatus.Text = "Loading\u2026";
 
             try
@@ -138,6 +422,18 @@ namespace MapperUI
                 SetValidationLabel(ok ? "PASSED" : "FAILED", ok ? Color.Green : Color.Red);
                 lblStatus.Text = ok ? "Validation passed." : "Validation failed.";
                 btnGenerateCode.Enabled = _validationRows.Any(r => r.IsValid && _allowedInstances.Contains(r.Component.Name));
+
+                var noTemplate = _validationRows
+                    .Where(r => r.TemplateName.StartsWith("No template found"))
+                    .ToList();
+
+                if (noTemplate.Count > 0)
+                {
+                    btnGenerate.Enabled = true;
+                    AppendActivity(
+                        $"{noTemplate.Count} component(s) have no template and can be generated by the LLM Engine: " +
+                        string.Join(", ", noTemplate.Select(r => r.Component.Name)));
+                }
             }
             catch (Exception ex)
             {
@@ -185,11 +481,11 @@ namespace MapperUI
             {
                 row.Cells[colMappingType.Index].Style.ForeColor = rule.Type switch
                 {
-                    MappingType.TRANSLATED => ColorTranslated,
-                    MappingType.DISCARDED => ColorDiscarded,
-                    MappingType.ASSUMED => ColorAssumed,
-                    MappingType.ENCODED => ColorEncoded,
-                    MappingType.HARDCODED => ColorHardcoded,
+                    UiMappingType.TRANSLATED => ColorTranslated,
+                    UiMappingType.DISCARDED => ColorDiscarded,
+                    UiMappingType.ASSUMED => ColorAssumed,
+                    UiMappingType.ENCODED => ColorEncoded,
+                    UiMappingType.HARDCODED => ColorHardcoded,
                     _ => Color.Black
                 };
             }
@@ -291,22 +587,6 @@ namespace MapperUI
             finally { btnGenerateCode.Enabled = true; }
         }
 
-        async void btnGenerateRobotWrapper_Click(object sender, EventArgs e)
-        {
-            btnGenerateRobotWrapper.Enabled = false;
-            try
-            {
-                var cfg = Cfg();
-                var dfbproj = FindDfbproj(cfg.ActiveSyslayPath);
-                if (dfbproj == null) { ShowError("Cannot find .dfbproj."); return; }
-
-                var result = await Task.Run(() => RobotTaskCatRegistrar.Register(cfg, dfbproj));
-                MessageBox.Show(result, "CAT Wrapper Generated", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-            catch (Exception ex) { ShowError(ex.Message); }
-            finally { btnGenerateRobotWrapper.Enabled = true; }
-        }
-
         async void btnGeneratePusherFB_Click(object sender, EventArgs e)
         {
             try
@@ -324,22 +604,7 @@ namespace MapperUI
 
         void dgvComponents_SelectionChanged(object sender, EventArgs e)
         {
-            dgvInputs.Rows.Clear();
-            dgvOutputs.Rows.Clear();
-            if (dgvComponents.SelectedRows.Count == 0) return;
-
-            var name = dgvComponents.SelectedRows[0].Cells[0].Value?.ToString();
-            var comp = _loadedComponents.FirstOrDefault(c =>
-                string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase));
-            if (comp == null) return;
-
-            foreach (var s in comp.States.OrderBy(st => st.StateNumber))
-                dgvInputs.Rows.Add($"State {s.StateNumber}: {s.Name}", "");
-
-            var vr = _validationRows.FirstOrDefault(r =>
-                string.Equals(r.Component.Name, name, StringComparison.OrdinalIgnoreCase));
-            if (vr is { IsValid: false, FailReason.Length: > 0 })
-                dgvOutputs.Rows.Add(vr.FailReason, "");
+            // Right panel replaced by Generation Engine — no component detail view needed.
         }
 
         void UpdateDetectedInfo()
