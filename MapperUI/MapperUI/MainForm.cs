@@ -69,6 +69,8 @@ namespace MapperUI
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
+            // Defer splitter until after the form is fully laid out and painted
+            BeginInvoke(() => splitMain.SplitterDistance = (int)(splitMain.Width * 0.32));
             StartLlmEngine();
             StartHealthPolling();
         }
