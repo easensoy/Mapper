@@ -127,7 +127,7 @@
             this.grpValidation.Controls.Add(this.dgvMappingRules);
             this.grpValidation.Controls.Add(this.pnlDetectedInfo);
             this.grpValidation.Location = new System.Drawing.Point(12, 60);
-            this.grpValidation.Size = new System.Drawing.Size(1376, 380);
+            this.grpValidation.Size = new System.Drawing.Size(1376, 370);
             this.grpValidation.Text = "Validation Output";
 
             this.pnlDetectedInfo.AutoSize = true;
@@ -185,7 +185,7 @@
             this.grpMappingInfo.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left | System.Windows.Forms.AnchorStyles.Right;
             this.grpMappingInfo.Controls.Add(this.splitMain);
             this.grpMappingInfo.Location = new System.Drawing.Point(12, 446);
-            this.grpMappingInfo.Size = new System.Drawing.Size(1376, 320);
+            this.grpMappingInfo.Size = new System.Drawing.Size(1376, 330);
             this.grpMappingInfo.Text = "Mapping Information";
 
             // Main split: Left=Components, Right=Detail
