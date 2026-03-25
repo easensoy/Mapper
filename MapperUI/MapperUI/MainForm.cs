@@ -5,7 +5,6 @@ using CodeGen.Validation;
 using MapperUI.Services;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
@@ -26,7 +25,6 @@ namespace MapperUI
         List<ComponentValidationRow> _validationRows = new();
         SystemXmlReader? _lastReader;
         DebugConsoleForm? _debugConsole;
-        Process? _llmProcess;
         System.Windows.Forms.Timer? _healthTimer;
 
         static readonly HttpClient _http = new()
@@ -69,9 +67,7 @@ namespace MapperUI
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
-            // Defer splitter until after the form is fully laid out and painted
             BeginInvoke(() => splitMain.SplitterDistance = (int)(splitMain.Width * 0.32));
-            StartLlmEngine();
             StartHealthPolling();
         }
 
@@ -79,53 +75,6 @@ namespace MapperUI
         {
             base.OnFormClosed(e);
             _healthTimer?.Stop();
-            try { _llmProcess?.Kill(); } catch { }
-        }
-
-        // ── LLM Engine process ──────────────────────────────────────────────
-
-        void StartLlmEngine()
-        {
-            var runBat = FindRunBat();
-            if (runBat == null)
-            {
-                AppendActivity("LLMEngine/run.bat not found — start the service manually.");
-                return;
-            }
-
-            try
-            {
-                _llmProcess = new Process
-                {
-                    StartInfo = new ProcessStartInfo
-                    {
-                        FileName = runBat,
-                        WorkingDirectory = Path.GetDirectoryName(runBat)!,
-                        UseShellExecute = true,
-                        WindowStyle = ProcessWindowStyle.Minimized,
-                    }
-                };
-                _llmProcess.Start();
-                AppendActivity("LLM Engine process started.");
-            }
-            catch (Exception ex)
-            {
-                AppendActivity($"Could not start LLM Engine: {ex.Message}");
-            }
-        }
-
-        static string? FindRunBat()
-        {
-            var dir = AppContext.BaseDirectory;
-            for (int i = 0; i < 7; i++)
-            {
-                var candidate = Path.Combine(dir, "LLMEngine", "run.bat");
-                if (File.Exists(candidate)) return candidate;
-                var parent = Path.GetDirectoryName(dir);
-                if (parent == null) break;
-                dir = parent;
-            }
-            return null;
         }
 
         // ── Health polling ──────────────────────────────────────────────────
