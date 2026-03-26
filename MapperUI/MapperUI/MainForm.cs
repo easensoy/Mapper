@@ -594,6 +594,21 @@ namespace MapperUI
             return null;
         }
 
+        void btnIO_Click(object sender, EventArgs e)
+        {
+            // IO mapping — future phase
+        }
+
+        void btnGenerateTemplate_Click(object sender, EventArgs e)
+        {
+            // Template generation — future phase
+        }
+
+        void btnADP_Click(object sender, EventArgs e)
+        {
+            // ADP — future phase
+        }
+
         static void ShowError(string msg) =>
             MessageBox.Show(msg, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
     }
