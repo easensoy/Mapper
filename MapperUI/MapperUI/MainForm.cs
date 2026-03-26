@@ -330,7 +330,12 @@ namespace MapperUI
 
                 try
                 {
-                    foreach (var rule in MappingRuleEngine.GetAllRules(Cfg().MappingRulesPath))
+                    bool hasActuator5 = _loadedComponents.Any(c => c.Type == "Actuator" && c.States.Count == 5);
+                    bool hasActuator7 = _loadedComponents.Any(c => c.Type == "Actuator" && c.States.Count == 7);
+                    bool hasSensor = _loadedComponents.Any(c => c.Type == "Sensor" && c.States.Count == 2);
+
+                    foreach (var rule in MappingRuleEngine.GetRelevantRules(
+                        Cfg().MappingRulesPath, hasActuator5, hasActuator7, hasSensor))
                         AddMappingRuleRow(rule);
                 }
                 catch (Exception ex)
@@ -392,7 +397,21 @@ namespace MapperUI
             dgvMappingRules.Rows.Clear();
             try
             {
-                foreach (var rule in MappingRuleEngine.GetAllRules(Cfg().MappingRulesPath))
+                IEnumerable<MappingRuleEntry> rules;
+                if (_loadedComponents.Count > 0)
+                {
+                    bool hasActuator5 = _loadedComponents.Any(c => c.Type == "Actuator" && c.States.Count == 5);
+                    bool hasActuator7 = _loadedComponents.Any(c => c.Type == "Actuator" && c.States.Count == 7);
+                    bool hasSensor = _loadedComponents.Any(c => c.Type == "Sensor" && c.States.Count == 2);
+                    rules = MappingRuleEngine.GetRelevantRules(
+                        Cfg().MappingRulesPath, hasActuator5, hasActuator7, hasSensor);
+                }
+                else
+                {
+                    rules = MappingRuleEngine.GetAllRules(Cfg().MappingRulesPath);
+                }
+
+                foreach (var rule in rules)
                     AddMappingRuleRow(rule);
             }
             catch (Exception ex)
