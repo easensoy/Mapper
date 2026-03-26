@@ -248,8 +248,12 @@ namespace MapperUI.Services
                 var target = (string?)rel.Attribute("Target");
                 if (string.IsNullOrEmpty(target)) return null;
 
-                // Target is relative to xl/, e.g. "worksheets/sheet2.xml"
-                return "xl/" + target;
+                // Target can be absolute ("/xl/worksheets/sheet1.xml")
+                // or relative ("worksheets/sheet1.xml")
+                if (target.StartsWith("/"))
+                    return target.TrimStart('/');
+                else
+                    return "xl/" + target;
             }
         }
 
