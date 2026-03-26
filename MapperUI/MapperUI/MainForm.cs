@@ -38,7 +38,8 @@ namespace MapperUI
         static readonly HashSet<string> _allowedInstances = new(StringComparer.OrdinalIgnoreCase)
         {
             "Checker", "Transfer", "Feeder", "Ejector",
-            "PartInHopper", "PartAtChecker"
+            "PartInHopper", "PartAtChecker",
+            "Bearing_PnP"
         };
 
         sealed class ComponentValidationRow
@@ -437,6 +438,8 @@ namespace MapperUI
                 rule.IsImplemented ? ColorTranslated : ColorDiscarded;
         }
 
+        // ── Validation & template routing ───────────────────────────────────
+
         static ComponentValidationRow Validate(VueOneComponent comp, ComponentValidator validator, MapperConfig cfg)
         {
             string tPath = TemplatePath(comp, cfg);
@@ -491,6 +494,8 @@ namespace MapperUI
         static ComponentValidationRow Fail(VueOneComponent c, string t, string r) =>
             new() { Component = c, TemplateName = t, IsValid = false, FailReason = r };
 
+        // ── Code generation ─────────────────────────────────────────────────
+
         async void btnGenerateCode_Click(object sender, EventArgs e)
         {
             var toInject = _validationRows
@@ -514,6 +519,21 @@ namespace MapperUI
 
                 MapperLogger.Info($"Project: {Path.GetFileName(dfbproj)}");
 
+                // ── Step 1: Deploy CAT types + Basic FB dependencies from Template Library ──
+                // Extracts zip packages into the target EAE project's IEC61499 folder
+                // and registers them in .dfbproj so EAE can resolve all type references.
+                var deployResult = await Task.Run(() => TemplateLibraryDeployer.Deploy(cfg, toInject));
+                if (!deployResult.Success)
+                {
+                    var warns = string.Join("\n", deployResult.Warnings);
+                    MapperLogger.Error($"Template deploy warnings: {warns}");
+                }
+                MapperLogger.Info($"[Deploy] {deployResult.CATsDeployed.Count} CAT(s), " +
+                                 $"{deployResult.BasicFBsDeployed.Count} Basic FB(s), " +
+                                 $"{deployResult.FilesExtracted} files extracted, " +
+                                 $"{deployResult.FilesSkipped} skipped (already present).");
+
+                // ── Step 2: Copy template files (legacy TemplatePackager path) ──
                 await Task.Run(() => TemplatePackager.Package(
                     cfg.TemplateIec61499Dir,
                     Path.GetDirectoryName(dfbproj)!,
@@ -521,6 +541,7 @@ namespace MapperUI
                     cfg.TemplateHmiDir,
                     Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(dfbproj)!)!, "HMI")));
 
+                // ── Step 3: Inject FB instances into syslay + sysres ──
                 var injCfg = MapperConfig.Load();
                 injCfg.SyslayPath = cfg.ActiveSyslayPath;
                 injCfg.SysresPath = cfg.ActiveSysresPath;
@@ -559,6 +580,25 @@ namespace MapperUI
             // Right panel replaced by Generation Engine — no component detail view needed.
         }
 
+        // ── Designer stub handlers ──────────────────────────────────────────
+
+        void btnIO_Click(object sender, EventArgs e)
+        {
+            // IO mapping — future phase
+        }
+
+        void btnGenerateTemplate_Click(object sender, EventArgs e)
+        {
+            // Template generation — future phase
+        }
+
+        void btnADP_Click(object sender, EventArgs e)
+        {
+            // ADP — future phase
+        }
+
+        // ── UI helpers ──────────────────────────────────────────────────────
+
         void UpdateDetectedInfo()
         {
             if (_loadedComponents.Count == 0) return;
@@ -592,21 +632,6 @@ namespace MapperUI
                 dir = Directory.GetParent(dir)?.FullName;
             }
             return null;
-        }
-
-        void btnIO_Click(object sender, EventArgs e)
-        {
-            // IO mapping — future phase
-        }
-
-        void btnGenerateTemplate_Click(object sender, EventArgs e)
-        {
-            // Template generation — future phase
-        }
-
-        void btnADP_Click(object sender, EventArgs e)
-        {
-            // ADP — future phase
         }
 
         static void ShowError(string msg) =>
