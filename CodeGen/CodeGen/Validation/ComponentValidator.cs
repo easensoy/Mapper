@@ -45,11 +45,18 @@ namespace CodeGen.Validation
             }
 
             var isValidPattern = (count == 5 && component.Type == "Actuator") ||
+                                (count == 7 && component.Type == "Actuator") ||
                                 (count == 2 && component.Type == "Sensor");
 
             if (isValidPattern)
             {
-                var pattern = count == 5 ? "Five-State Actuator" : "Two-State Sensor";
+                var pattern = count switch
+                {
+                    5 => "Five-State Actuator",
+                    7 => "Seven-State Actuator",
+                    2 => "Two-State Sensor",
+                    _ => "Unknown"
+                };
                 result.AddInfo($"✓ State Count: {count} (matches {pattern} pattern)");
             }
             else
