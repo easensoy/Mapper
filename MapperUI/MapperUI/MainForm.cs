@@ -5,6 +5,7 @@ using CodeGen.Validation;
 using MapperUI.Services;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
@@ -25,6 +26,7 @@ namespace MapperUI
         List<ComponentValidationRow> _validationRows = new();
         SystemXmlReader? _lastReader;
         DebugConsoleForm? _debugConsole;
+        Process? _llmProcess;
         System.Windows.Forms.Timer? _healthTimer;
 
         static readonly HttpClient _http = new()
@@ -67,7 +69,7 @@ namespace MapperUI
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
-            BeginInvoke(() => splitMain.SplitterDistance = (int)(splitMain.Width * 0.32));
+            StartLlmEngine();
             StartHealthPolling();
         }
 
@@ -75,6 +77,53 @@ namespace MapperUI
         {
             base.OnFormClosed(e);
             _healthTimer?.Stop();
+            try { _llmProcess?.Kill(); } catch { }
+        }
+
+        // ── LLM Engine process ──────────────────────────────────────────────
+
+        void StartLlmEngine()
+        {
+            var runBat = FindRunBat();
+            if (runBat == null)
+            {
+                AppendActivity("LLMEngine/run.bat not found — start the service manually.");
+                return;
+            }
+
+            try
+            {
+                _llmProcess = new Process
+                {
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = runBat,
+                        WorkingDirectory = Path.GetDirectoryName(runBat)!,
+                        UseShellExecute = true,
+                        WindowStyle = ProcessWindowStyle.Minimized,
+                    }
+                };
+                _llmProcess.Start();
+                AppendActivity("LLM Engine process started.");
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"Could not start LLM Engine: {ex.Message}");
+            }
+        }
+
+        static string? FindRunBat()
+        {
+            var dir = AppContext.BaseDirectory;
+            for (int i = 0; i < 7; i++)
+            {
+                var candidate = Path.Combine(dir, "LLMEngine", "run.bat");
+                if (File.Exists(candidate)) return candidate;
+                var parent = Path.GetDirectoryName(dir);
+                if (parent == null) break;
+                dir = parent;
+            }
+            return null;
         }
 
         // ── Health polling ──────────────────────────────────────────────────
@@ -103,7 +152,7 @@ namespace MapperUI
 
         void SetEngineStatus(bool running)
         {
-            lblEngineStatusDot.ForeColor = running ? Color.LimeGreen : Color.Silver;
+            lblEngineStatusDot.ForeColor = running ? Color.LimeGreen : Color.Red;
         }
 
         // ── Generation Engine button ────────────────────────────────────────
@@ -164,89 +213,32 @@ namespace MapperUI
                 var jobId = doc.RootElement.GetProperty("job_id").GetString()
                     ?? throw new Exception("No job_id in response.");
 
-                AppendActivity($"Job started: {jobId}");
-                await StreamSseAsync(jobId);
-            }
-            catch (Exception ex)
-            {
-                AppendActivity($"[Error] {ex.Message}");
-                btnGenerate.Enabled = true;
-            }
-        }
+                AppendActivity($"Job submitted: {jobId}. Polling…");
 
-        async Task StreamSseAsync(string jobId)
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Get, $"stream/{jobId}");
-            request.Headers.Accept.ParseAdd("text/event-stream");
-
-            using var response = await _http.SendAsync(
-                request, HttpCompletionOption.ResponseHeadersRead);
-
-            if (!response.IsSuccessStatusCode)
-            {
-                AppendActivity($"Stream error: {response.StatusCode}");
-                Invoke(() => btnGenerate.Enabled = true);
-                return;
-            }
-
-            await using var stream = await response.Content.ReadAsStreamAsync();
-            using var reader = new StreamReader(stream);
-
-            var eventType = "log";
-            var dataBuf = new StringBuilder();
-
-            while (true)
-            {
-                var line = await reader.ReadLineAsync();
-                if (line == null) break;
-
-                if (line.StartsWith("event:"))
+                List<VueOneComponent> generated;
+                while (true)
                 {
-                    eventType = line[6..].Trim();
-                }
-                else if (line.StartsWith("data:"))
-                {
-                    dataBuf.Append(line[5..].Trim());
-                }
-                else if (line.Length == 0 && dataBuf.Length > 0)
-                {
-                    var data = dataBuf.ToString();
-                    dataBuf.Clear();
+                    await Task.Delay(2000);
+                    var pollResp = await _http.GetAsync($"status/{jobId}");
+                    pollResp.EnsureSuccessStatusCode();
+                    var pollJson = await pollResp.Content.ReadAsStringAsync();
+                    using var pollDoc = JsonDocument.Parse(pollJson);
+                    var status = pollDoc.RootElement.GetProperty("status").GetString();
+                    AppendActivity($"  status = {status}");
 
-                    switch (eventType)
+                    if (status == "completed")
                     {
-                        case "log":
-                            AppendActivity(data);
-                            break;
-
-                        case "complete":
-                            AppendActivity("Generation complete. Running injection…");
-                            await HandleGeneratedComponentsAsync(data);
-                            return;
-
-                        case "error":
-                            AppendActivity($"[Error] {data}");
-                            Invoke(() => btnGenerate.Enabled = true);
-                            return;
+                        var resultJson = pollDoc.RootElement.GetProperty("result").GetRawText();
+                        generated = JsonSerializer.Deserialize<List<VueOneComponent>>(resultJson,
+                            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                            ?? new();
+                        break;
                     }
-                    eventType = "log";
-                }
-            }
-
-            Invoke(() => btnGenerate.Enabled = true);
-        }
-
-        async Task HandleGeneratedComponentsAsync(string json)
-        {
-            try
-            {
-                var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-                var generated = JsonSerializer.Deserialize<List<VueOneComponent>>(json, opts);
-
-                if (generated == null || generated.Count == 0)
-                {
-                    AppendActivity("No components in LLM response.");
-                    return;
+                    if (status == "failed")
+                    {
+                        AppendActivity("LLM generation failed.");
+                        return;
+                    }
                 }
 
                 AppendActivity($"Deserialised {generated.Count} component(s). Injecting…");
@@ -284,23 +276,6 @@ namespace MapperUI
                 return;
             }
             txtActivityLog.AppendText($"[{DateTime.Now:HH:mm:ss}] {text}{Environment.NewLine}");
-        }
-
-        // ── LLM action buttons ──────────────────────────────────────────────
-
-        void btnIO_Click(object sender, EventArgs e)
-        {
-            AppendActivity("IO extraction requested.");
-        }
-
-        void btnGenerateTemplate_Click(object sender, EventArgs e)
-        {
-            AppendActivity("Generate Template requested.");
-        }
-
-        void btnADP_Click(object sender, EventArgs e)
-        {
-            AppendActivity("ADP generation requested.");
         }
 
         // ── Existing handlers ───────────────────────────────────────────────
@@ -477,19 +452,28 @@ namespace MapperUI
                         ? Fail(comp, tName, "RobotTemplatePath not set")
                         : Pass(comp, tName);
                 case "actuator":
-                    if (comp.States.Count != 5)
-                        return Fail(comp, "No template found (discarded for this phase)", $"{comp.States.Count} states, not 5");
+                    if (comp.States.Count == 7)
+                    {
+                        tName = "Seven_State_Actuator_CAT.fbt";
+                    }
+                    else if (comp.States.Count != 5)
+                    {
+                        return Fail(comp, "No template found (discarded for this phase)",
+                            $"{comp.States.Count} states — not 5 or 7");
+                    }
                     break;
                 case "sensor":
                     if (comp.States.Count != 2)
-                        return Fail(comp, "No template found (discarded for this phase)", $"{comp.States.Count} states, not 2");
+                        return Fail(comp, "No template found (discarded for this phase)",
+                            $"{comp.States.Count} states, not 2");
                     break;
                 default:
                     return Fail(comp, tName, $"Unknown type '{comp.Type}'");
             }
 
             var vr = validator.Validate(comp);
-            return vr.IsValid ? Pass(comp, tName) : Fail(comp, tName, string.Join("; ", vr.Errors));
+            return vr.IsValid ?
+                Pass(comp, tName) : Fail(comp, tName, string.Join("; ", vr.Errors));
         }
 
         static string TemplatePath(VueOneComponent comp, MapperConfig cfg) => comp.Type.ToLowerInvariant() switch
