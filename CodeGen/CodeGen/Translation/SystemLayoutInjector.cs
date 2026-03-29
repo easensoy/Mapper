@@ -14,18 +14,18 @@ namespace MapperUI.Services
     {
         private static readonly XNamespace Ns = "https://www.se.com/LibraryElements";
 
-        private const string ActuatorCatType = "Seven_State_Actuator_CAT";
-        // private const string SensorCatType = "Sensor_Bool_CAT";  // Sensor code generation commented out
+        private const string ActuatorCatType = "Five_State_Actuator_CAT";
+        private const string SensorCatType = "Sensor_Bool_CAT";
         private const string ProcessCatType = "Process1_CAT";
         private const string RobotCatType = "Robot_Task_CAT";
 
         private const int ActuatorYGap = 800;
-        // private const int SensorYGap = 480;  // Sensor code generation commented out
+        private const int SensorYGap = 480;
         private const int ProcessYGap = 800;
         private const int DefaultYGap = 800;
 
         private const int ActuatorX = 1300;
-        // private const int SensorX = 1560;  // Sensor code generation commented out
+        private const int SensorX = 1560;
         private const int ProcessX = 3000;
         private const int RobotX = 5000;
 
@@ -46,7 +46,7 @@ namespace MapperUI.Services
             if (net == null) { report.Unsupported.Add("SubAppNetwork not found"); return report; }
 
             Classify(net, ActuatorCatType, Actuators(components), report);
-            // Classify(net, SensorCatType, Sensors(components), report);  // Sensor code generation commented out
+            Classify(net, SensorCatType, Sensors(components), report);
             Classify(net, ProcessCatType, Processes(components), report);
             Classify(net, RobotCatType, Robots(components, config), report);
 
@@ -103,7 +103,7 @@ namespace MapperUI.Services
             var newActuators = new List<string>();
 
             InjectGroup(net, Processes(components), ProcessCatType, ProcessX, false, renames, result, syslayIds, null);
-            // InjectGroup(net, Sensors(components), SensorCatType, SensorX, false, renames, result, syslayIds, null);  // Sensor code generation commented out
+            InjectGroup(net, Sensors(components), SensorCatType, SensorX, false, renames, result, syslayIds, null);
             InjectGroup(net, Actuators(components), ActuatorCatType, ActuatorX, false, renames, result, syslayIds, newActuators);
             InjectGroup(net, Robots(components, config), RobotCatType, RobotX, false, renames, result, syslayIds, null);
 
@@ -141,7 +141,7 @@ namespace MapperUI.Services
             var renames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
             InjectGroup(net, Processes(components), ProcessCatType, ProcessX, true, renames, result, syslayIds, null);
-            // InjectGroup(net, Sensors(components), SensorCatType, SensorX, true, renames, result, syslayIds, null);  // Sensor code generation commented out
+            InjectGroup(net, Sensors(components), SensorCatType, SensorX, true, renames, result, syslayIds, null);
             InjectGroup(net, Actuators(components), ActuatorCatType, ActuatorX, true, renames, result, syslayIds, null);
             InjectGroup(net, Robots(components, config), RobotCatType, RobotX, true, renames, result, syslayIds, null);
 
@@ -226,7 +226,7 @@ namespace MapperUI.Services
         private static int GapFor(string catType) => catType switch
         {
             ActuatorCatType => ActuatorYGap,
-            // SensorCatType => SensorYGap,  // Sensor code generation commented out
+            SensorCatType => SensorYGap,
             ProcessCatType => ProcessYGap,
             _ => DefaultYGap
         };
@@ -242,7 +242,7 @@ namespace MapperUI.Services
             return catType switch
             {
                 ActuatorCatType => 2080,
-                // SensorCatType => 1000,  // Sensor code generation commented out
+                SensorCatType => 1000,
                 ProcessCatType => 1000,
                 _ => 3000
             };
@@ -466,12 +466,11 @@ namespace MapperUI.Services
 
         private static List<VueOneComponent> Actuators(List<VueOneComponent> all) =>
             all.Where(c => c.Type?.Equals("Actuator", StringComparison.OrdinalIgnoreCase) == true
-                        && c.States.Count == 7).ToList();
+                        && c.States.Count == 5).ToList();
 
-        // Sensor code generation commented out
-        // private static List<VueOneComponent> Sensors(List<VueOneComponent> all) =>
-        //     all.Where(c => c.Type?.Equals("Sensor", StringComparison.OrdinalIgnoreCase) == true
-        //                 && c.States.Count == 2).ToList();
+        private static List<VueOneComponent> Sensors(List<VueOneComponent> all) =>
+            all.Where(c => c.Type?.Equals("Sensor", StringComparison.OrdinalIgnoreCase) == true
+                        && c.States.Count == 2).ToList();
 
         private static List<VueOneComponent> Processes(List<VueOneComponent> all) =>
             all.Where(c => c.Type?.Equals("Process", StringComparison.OrdinalIgnoreCase) == true).ToList();
@@ -481,7 +480,7 @@ namespace MapperUI.Services
 
         private static List<VueOneComponent> Unsupported(List<VueOneComponent> all, MapperConfig config) =>
             all.Where(c => !Actuators(all).Contains(c)
-                        // && !Sensors(all).Contains(c)  // Sensor code generation commented out
+                        && !Sensors(all).Contains(c)
                         && !Processes(all).Contains(c)
                         && !Robots(all, config).Contains(c)).ToList();
     }
