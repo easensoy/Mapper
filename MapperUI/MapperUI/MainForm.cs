@@ -475,14 +475,10 @@ namespace MapperUI
                         : Pass(comp, tName);
                 case "actuator":
                     if (comp.States.Count == 7)
-                    {
-                        tName = "Seven_State_Actuator_CAT.fbt";
-                    }
-                    else if (comp.States.Count != 5)
-                    {
+                        return Pass(comp, "Seven_State_Actuator_CAT.fbt");
+                    if (comp.States.Count != 5)
                         return Fail(comp, "No template found",
                             $"{comp.States.Count} states — not 5 or 7");
-                    }
                     break;
                 case "sensor":
                     if (comp.States.Count != 2)
