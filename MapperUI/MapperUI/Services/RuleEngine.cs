@@ -39,9 +39,9 @@ namespace MapperUI.Services
             string xlsxPath, bool hasActuator5, bool hasActuator7, bool hasSensor)
         {
             var sheets = new List<string>();
-            // if (hasActuator5) sheets.Add("Five_State_Actuator_CAT");  // Five-state actuator commented out
+            if (hasActuator5) sheets.Add("Five_State_Actuator_CAT");
             if (hasActuator7) sheets.Add("Seven_State_Actuator_CAT");
-            // if (hasSensor) sheets.Add("Sensor_Bool_CAT");  // Sensor commented out
+            if (hasSensor) sheets.Add("Sensor_Bool_CAT");
 
             // Fallback: if nothing matched, load all
             if (sheets.Count == 0)
