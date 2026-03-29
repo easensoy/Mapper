@@ -16,7 +16,7 @@ namespace MapperUI.Services
             { "Sensor_Bool_CAT",         new[] { "Sensor_Bool" } },
             { "Actuator_Fault_CAT",      new[] { "FaultLatch" } },
             { "Robot_Task_CAT",          new[] { "Robot_Task_Core" } },
-            { "Seven_State_Actuator_CAT",new[] { "SevenStateActuator" } },
+            { "Seven_State_Actuator_CAT",new[] { "SevenStateActuator2" } },
             { "Station_CAT",             new[] { "Station_Core", "Station_Fault", "Station_Status" } },
         };
 
