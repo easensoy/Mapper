@@ -15,6 +15,7 @@ namespace MapperUI.Services
         private static readonly XNamespace Ns = "https://www.se.com/LibraryElements";
 
         private const string ActuatorCatType = "Five_State_Actuator_CAT";
+        private const string SevenStateActuatorCatType = "Seven_State_Actuator_CAT";
         private const string SensorCatType = "Sensor_Bool_CAT";
         private const string ProcessCatType = "Process1_CAT";
         private const string RobotCatType = "Robot_Task_CAT";
@@ -25,6 +26,7 @@ namespace MapperUI.Services
         private const int DefaultYGap = 800;
 
         private const int ActuatorX = 1300;
+        private const int SevenStateActuatorX = 1820;
         private const int SensorX = 1560;
         private const int ProcessX = 3000;
         private const int RobotX = 5000;
@@ -46,6 +48,7 @@ namespace MapperUI.Services
             if (net == null) { report.Unsupported.Add("SubAppNetwork not found"); return report; }
 
             Classify(net, ActuatorCatType, Actuators(components), report);
+            Classify(net, SevenStateActuatorCatType, SevenStateActuators(components), report);
             Classify(net, SensorCatType, Sensors(components), report);
             Classify(net, ProcessCatType, Processes(components), report);
             Classify(net, RobotCatType, Robots(components, config), report);
@@ -105,6 +108,7 @@ namespace MapperUI.Services
             InjectGroup(net, Processes(components), ProcessCatType, ProcessX, false, renames, result, syslayIds, null);
             InjectGroup(net, Sensors(components), SensorCatType, SensorX, false, renames, result, syslayIds, null);
             InjectGroup(net, Actuators(components), ActuatorCatType, ActuatorX, false, renames, result, syslayIds, newActuators);
+            InjectGroup(net, SevenStateActuators(components), SevenStateActuatorCatType, SevenStateActuatorX, false, renames, result, syslayIds, newActuators);
             InjectGroup(net, Robots(components, config), RobotCatType, RobotX, false, renames, result, syslayIds, null);
 
             if (renames.Any())
@@ -114,6 +118,7 @@ namespace MapperUI.Services
             if (proc != null)
             {
                 var allActuators = FbsOfType(net, ActuatorCatType)
+                    .Concat(FbsOfType(net, SevenStateActuatorCatType))
                     .Select(fb => fb.Attribute("Name")?.Value)
                     .Where(n => !string.IsNullOrEmpty(n))
                     .ToList()!;
@@ -143,6 +148,7 @@ namespace MapperUI.Services
             InjectGroup(net, Processes(components), ProcessCatType, ProcessX, true, renames, result, syslayIds, null);
             InjectGroup(net, Sensors(components), SensorCatType, SensorX, true, renames, result, syslayIds, null);
             InjectGroup(net, Actuators(components), ActuatorCatType, ActuatorX, true, renames, result, syslayIds, null);
+            InjectGroup(net, SevenStateActuators(components), SevenStateActuatorCatType, SevenStateActuatorX, true, renames, result, syslayIds, null);
             InjectGroup(net, Robots(components, config), RobotCatType, RobotX, true, renames, result, syslayIds, null);
 
             if (renames.Any())
@@ -226,6 +232,7 @@ namespace MapperUI.Services
         private static int GapFor(string catType) => catType switch
         {
             ActuatorCatType => ActuatorYGap,
+            SevenStateActuatorCatType => ActuatorYGap,
             SensorCatType => SensorYGap,
             ProcessCatType => ProcessYGap,
             _ => DefaultYGap
@@ -242,6 +249,7 @@ namespace MapperUI.Services
             return catType switch
             {
                 ActuatorCatType => 2080,
+                SevenStateActuatorCatType => 2080,
                 SensorCatType => 1000,
                 ProcessCatType => 1000,
                 _ => 3000
@@ -378,7 +386,7 @@ namespace MapperUI.Services
 
         private static void ApplyParams(XElement fb, VueOneComponent comp, string catType)
         {
-            if (catType == ActuatorCatType)
+            if (catType == ActuatorCatType || catType == SevenStateActuatorCatType)
                 SetParam(fb, "actuator_name", $"'{comp.Name.ToLower()}'");
             else if (catType == ProcessCatType)
                 SetParam(fb, "Text", BuildTextParam(comp));
@@ -468,6 +476,10 @@ namespace MapperUI.Services
             all.Where(c => c.Type?.Equals("Actuator", StringComparison.OrdinalIgnoreCase) == true
                         && c.States.Count == 5).ToList();
 
+        private static List<VueOneComponent> SevenStateActuators(List<VueOneComponent> all) =>
+            all.Where(c => c.Type?.Equals("Actuator", StringComparison.OrdinalIgnoreCase) == true
+                        && c.States.Count == 7).ToList();
+
         private static List<VueOneComponent> Sensors(List<VueOneComponent> all) =>
             all.Where(c => c.Type?.Equals("Sensor", StringComparison.OrdinalIgnoreCase) == true
                         && c.States.Count == 2).ToList();
@@ -480,6 +492,7 @@ namespace MapperUI.Services
 
         private static List<VueOneComponent> Unsupported(List<VueOneComponent> all, MapperConfig config) =>
             all.Where(c => !Actuators(all).Contains(c)
+                        && !SevenStateActuators(all).Contains(c)
                         && !Sensors(all).Contains(c)
                         && !Processes(all).Contains(c)
                         && !Robots(all, config).Contains(c)).ToList();
