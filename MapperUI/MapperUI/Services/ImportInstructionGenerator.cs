@@ -12,8 +12,8 @@ namespace MapperUI.Services
     {
         static readonly Dictionary<string, string[]> CatDependencies = new()
         {
-            { "Five_State_Actuator_CAT", new[] { "FiveStateActuator" } },
-            { "Sensor_Bool_CAT",         new[] { "Sensor_Bool" } },
+            // { "Five_State_Actuator_CAT", new[] { "FiveStateActuator" } },  // Five-state actuator commented out
+            // { "Sensor_Bool_CAT",         new[] { "Sensor_Bool" } },        // Sensor commented out
             { "Actuator_Fault_CAT",      new[] { "FaultLatch" } },
             { "Robot_Task_CAT",          new[] { "Robot_Task_Core" } },
             { "Seven_State_Actuator_CAT",new[] { "SevenStateActuator" } },
@@ -22,9 +22,9 @@ namespace MapperUI.Services
 
         static readonly Dictionary<string, string> ComponentTypeToCat = new(StringComparer.OrdinalIgnoreCase)
         {
-            { "Actuator_5",  "Five_State_Actuator_CAT" },
+            // { "Actuator_5",  "Five_State_Actuator_CAT" },  // Five-state actuator commented out
             { "Actuator_7",  "Seven_State_Actuator_CAT" },
-            { "Sensor_2",    "Sensor_Bool_CAT" },
+            // { "Sensor_2",    "Sensor_Bool_CAT" },          // Sensor commented out
         };
 
         public static ImportInstructions Generate(MapperConfig cfg, List<VueOneComponent> components)
