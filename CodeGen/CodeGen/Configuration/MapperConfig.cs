@@ -54,7 +54,7 @@ namespace CodeGen.Configuration
         {
             SystemXmlPath = @"C:\VueOne\system\Control.xml",
             MappingRulesPath = @"Input\VueOne_IEC61499_Mapping.xlsx",
-            TemplateLibraryPath = @"C:\VueOne\TemplateLibrary",
+            TemplateLibraryPath = @"C:\VueOneMapper\Template Library",
             ActuatorTemplatePath = @"C:\Station1\IEC61499\Five_State_Actuator_CAT\Five_State_Actuator_CAT.fbt",
             SensorTemplatePath = @"C:\Station1\IEC61499\Sensor_Bool_CAT\Sensor_Bool_CAT.fbt",
             ProcessCATTemplatePath = @"C:\Station1\IEC61499\Process1_CAT\Process1_CAT.fbt",
