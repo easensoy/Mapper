@@ -56,6 +56,7 @@
             this.btnGenerateTemplate = new System.Windows.Forms.Button();
             this.btnADP = new System.Windows.Forms.Button();
             this.btnGenerate = new System.Windows.Forms.Button();
+            this.btnGenerateSevenState = new System.Windows.Forms.Button();
             this.statusStrip = new System.Windows.Forms.StatusStrip();
             this.lblStatus = new System.Windows.Forms.ToolStripStatusLabel();
 
@@ -95,19 +96,32 @@
             this.txtModelPath.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left | System.Windows.Forms.AnchorStyles.Right;
             this.txtModelPath.Location = new System.Drawing.Point(102, 30);
             this.txtModelPath.ReadOnly = true;
-            this.txtModelPath.Size = new System.Drawing.Size(1000, 23);
+            this.txtModelPath.Size = new System.Drawing.Size(820, 23);
 
             this.btnMappingRules.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
-            this.btnMappingRules.Location = new System.Drawing.Point(1110, 28);
+            this.btnMappingRules.Location = new System.Drawing.Point(928, 28);
             this.btnMappingRules.Size = new System.Drawing.Size(80, 25);
             this.btnMappingRules.Text = "Mapping";
             this.btnMappingRules.Click += new System.EventHandler(this.btnMappingRules_Click);
 
             this.btnBrowse.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
-            this.btnBrowse.Location = new System.Drawing.Point(1196, 28);
+            this.btnBrowse.Location = new System.Drawing.Point(1014, 28);
             this.btnBrowse.Size = new System.Drawing.Size(60, 25);
             this.btnBrowse.Text = "Browse";
             this.btnBrowse.Click += new System.EventHandler(this.btnBrowse_Click);
+
+            this.btnGenerateSevenState.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
+            this.btnGenerateSevenState.BackColor = System.Drawing.Color.FromArgb(0, 153, 76);
+            this.btnGenerateSevenState.Enabled = false;
+            this.btnGenerateSevenState.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnGenerateSevenState.FlatAppearance.BorderSize = 0;
+            this.btnGenerateSevenState.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
+            this.btnGenerateSevenState.ForeColor = System.Drawing.Color.White;
+            this.btnGenerateSevenState.Location = new System.Drawing.Point(1080, 28);
+            this.btnGenerateSevenState.Size = new System.Drawing.Size(175, 25);
+            this.btnGenerateSevenState.Text = "Generate Seven State FB";
+            this.btnGenerateSevenState.UseVisualStyleBackColor = false;
+            this.btnGenerateSevenState.Click += new System.EventHandler(this.btnGenerateSevenState_Click);
 
             this.btnGenerateCode.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
             this.btnGenerateCode.BackColor = System.Drawing.Color.FromArgb(0, 122, 204);
@@ -315,6 +329,7 @@
             this.Controls.Add(this.grpMappingInfo);
             this.Controls.Add(this.grpValidation);
             this.Controls.Add(this.btnGenerateCode);
+            this.Controls.Add(this.btnGenerateSevenState);
             this.Controls.Add(this.btnBrowse);
             this.Controls.Add(this.btnMappingRules);
             this.Controls.Add(this.txtModelPath);
@@ -402,6 +417,7 @@
         private System.Windows.Forms.Button btnGenerateTemplate;
         private System.Windows.Forms.Button btnADP;
         private System.Windows.Forms.Button btnGenerate;
+        private System.Windows.Forms.Button btnGenerateSevenState;
         private System.Windows.Forms.StatusStrip statusStrip;
         private System.Windows.Forms.ToolStripStatusLabel lblStatus;
     }
