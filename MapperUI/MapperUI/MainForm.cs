@@ -549,12 +549,15 @@ namespace MapperUI
                                  $"{deployResult.FilesSkipped} skipped (already present).");
 
                 // ── Step 2: Copy template files (legacy TemplatePackager path) ──
-                await Task.Run(() => TemplatePackager.Package(
-                    cfg.TemplateIec61499Dir,
-                    Path.GetDirectoryName(dfbproj)!,
-                    dfbproj,
-                    cfg.TemplateHmiDir,
-                    Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(dfbproj)!)!, "HMI")));
+                if (Directory.Exists(cfg.TemplateIec61499Dir))
+                {
+                    await Task.Run(() => TemplatePackager.Package(
+                        cfg.TemplateIec61499Dir,
+                        Path.GetDirectoryName(dfbproj)!,
+                        dfbproj,
+                        cfg.TemplateHmiDir,
+                        Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(dfbproj)!)!, "HMI")));
+                }
 
                 // ── Step 3: Inject FB instances into syslay + sysres ──
                 var injCfg = MapperConfig.Load();
@@ -609,12 +612,15 @@ namespace MapperUI
                                  $"{deployResult.FilesExtracted} files extracted, " +
                                  $"{deployResult.FilesSkipped} skipped (already present).");
 
-                await Task.Run(() => TemplatePackager.Package(
-                    cfg.TemplateIec61499Dir,
-                    Path.GetDirectoryName(dfbproj)!,
-                    dfbproj,
-                    cfg.TemplateHmiDir,
-                    Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(dfbproj)!)!, "HMI")));
+                if (Directory.Exists(cfg.TemplateIec61499Dir))
+                {
+                    await Task.Run(() => TemplatePackager.Package(
+                        cfg.TemplateIec61499Dir,
+                        Path.GetDirectoryName(dfbproj)!,
+                        dfbproj,
+                        cfg.TemplateHmiDir,
+                        Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(dfbproj)!)!, "HMI")));
+                }
 
                 var injCfg = MapperConfig.Load();
                 injCfg.SyslayPath = cfg.ActiveSyslayPath;
