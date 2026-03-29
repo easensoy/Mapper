@@ -365,14 +365,12 @@ namespace MapperUI
 
                 UpdateDetectedInfo();
 
-                bool ok = _validationRows
-                    .Where(r => _allowedInstances.Contains(r.Component.Name))
-                    .All(r => r.IsValid);
+                bool ok = _validationRows.All(r => r.IsValid);
 
                 SetValidationLabel(ok ? "PASSED" : "FAILED", ok ? Color.Green : Color.Red);
                 lblStatus.Text = ok ? "Validation passed." : "Validation failed.";
-                btnGenerateCode.Enabled = _validationRows.Any(r => r.IsValid && _allowedInstances.Contains(r.Component.Name));
-                btnGenerateSevenState.Enabled = _loadedComponents.Any(c => c.Type == "Actuator" && c.States.Count == 7);
+                btnGenerateCode.Enabled = ok && _validationRows.Any(r => r.IsValid && _allowedInstances.Contains(r.Component.Name));
+                btnGenerateSevenState.Enabled = ok && _loadedComponents.Any(c => c.Type == "Actuator" && c.States.Count == 7);
 
                 var noTemplate = _validationRows
                     .Where(r => r.TemplateName.StartsWith("No template found"))
@@ -465,7 +463,7 @@ namespace MapperUI
         {
             string tPath = TemplatePath(comp, cfg);
             string tName = string.IsNullOrEmpty(tPath)
-                ? "No template found (discarded for this phase)"
+                ? "No template found"
                 : Path.GetFileName(tPath);
 
             switch (comp.Type.ToLowerInvariant())
@@ -482,13 +480,13 @@ namespace MapperUI
                     }
                     else if (comp.States.Count != 5)
                     {
-                        return Fail(comp, "No template found (discarded for this phase)",
+                        return Fail(comp, "No template found",
                             $"{comp.States.Count} states — not 5 or 7");
                     }
                     break;
                 case "sensor":
                     if (comp.States.Count != 2)
-                        return Fail(comp, "No template found (discarded for this phase)",
+                        return Fail(comp, "No template found",
                             $"{comp.States.Count} states, not 2");
                     break;
                 default:
