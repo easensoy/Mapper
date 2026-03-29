@@ -170,7 +170,7 @@ namespace MapperUI.Services
                     IEC61499Element: iec,
                     Type: mappingType,
                     TransformationRule: rule,
-                    IsImplemented: !IsFuturePhase(notes));
+                    IsImplemented: true);
             }
         }
 
@@ -376,10 +376,5 @@ namespace MapperUI.Services
                    upper == "ASSUMED" || upper == "DISCARDED" || upper == "ENCODED";
         }
 
-        private static bool IsFuturePhase(string notes)
-        {
-            string n = notes.ToUpperInvariant();
-            return n.Contains("PHASE 2") || n.Contains("PHASE 3") || n.Contains("PHASE 4");
-        }
     }
 }
