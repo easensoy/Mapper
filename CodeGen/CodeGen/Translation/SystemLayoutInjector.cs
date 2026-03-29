@@ -228,7 +228,15 @@ namespace MapperUI.Services
                 nextY += GapFor(catType);
             }
         }
-        private static string FbName(VueOneComponent comp, string catType) => comp.Name;
+        private static readonly Dictionary<string, string> NameMap = new(StringComparer.OrdinalIgnoreCase)
+        {
+            { "Bearing_PnP", "swivel" },
+        };
+
+        private static string FbName(VueOneComponent comp, string catType)
+        {
+            return NameMap.TryGetValue(comp.Name, out var mapped) ? mapped : comp.Name;
+        }
         private static int GapFor(string catType) => catType switch
         {
             ActuatorCatType => ActuatorYGap,
@@ -387,7 +395,10 @@ namespace MapperUI.Services
         private static void ApplyParams(XElement fb, VueOneComponent comp, string catType)
         {
             if (catType == ActuatorCatType || catType == SevenStateActuatorCatType)
-                SetParam(fb, "actuator_name", $"'{comp.Name.ToLower()}'");
+            {
+                var name = FbName(comp, catType);
+                SetParam(fb, "actuator_name", $"'{name.ToLower()}'");
+            }
             else if (catType == ProcessCatType)
                 SetParam(fb, "Text", BuildTextParam(comp));
         }
