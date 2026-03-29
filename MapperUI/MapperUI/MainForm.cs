@@ -330,12 +330,12 @@ namespace MapperUI
 
                 try
                 {
-                    bool hasActuator5 = _loadedComponents.Any(c => c.Type == "Actuator" && c.States.Count == 5);
+                    // bool hasActuator5 = _loadedComponents.Any(c => c.Type == "Actuator" && c.States.Count == 5);  // Five-state actuator commented out
                     bool hasActuator7 = _loadedComponents.Any(c => c.Type == "Actuator" && c.States.Count == 7);
-                    bool hasSensor = _loadedComponents.Any(c => c.Type == "Sensor" && c.States.Count == 2);
+                    // bool hasSensor = _loadedComponents.Any(c => c.Type == "Sensor" && c.States.Count == 2);  // Sensor commented out
 
                     foreach (var rule in MappingRuleEngine.GetRelevantRules(
-                        Cfg().MappingRulesPath, hasActuator5, hasActuator7, hasSensor))
+                        Cfg().MappingRulesPath, false, hasActuator7, false))
                         AddMappingRuleRow(rule);
                 }
                 catch (Exception ex)
@@ -400,11 +400,11 @@ namespace MapperUI
                 IEnumerable<MappingRuleEntry> rules;
                 if (_loadedComponents.Count > 0)
                 {
-                    bool hasActuator5 = _loadedComponents.Any(c => c.Type == "Actuator" && c.States.Count == 5);
+                    // bool hasActuator5 = _loadedComponents.Any(c => c.Type == "Actuator" && c.States.Count == 5);  // Five-state actuator commented out
                     bool hasActuator7 = _loadedComponents.Any(c => c.Type == "Actuator" && c.States.Count == 7);
-                    bool hasSensor = _loadedComponents.Any(c => c.Type == "Sensor" && c.States.Count == 2);
+                    // bool hasSensor = _loadedComponents.Any(c => c.Type == "Sensor" && c.States.Count == 2);  // Sensor commented out
                     rules = MappingRuleEngine.GetRelevantRules(
-                        Cfg().MappingRulesPath, hasActuator5, hasActuator7, hasSensor);
+                        Cfg().MappingRulesPath, false, hasActuator7, false);
                 }
                 else
                 {
@@ -478,17 +478,22 @@ namespace MapperUI
                     {
                         tName = "Seven_State_Actuator_CAT.fbt";
                     }
-                    else if (comp.States.Count != 5)
+                    else
                     {
+                        // Only seven-state actuators are supported; five-state commented out
                         return Fail(comp, "No template found (discarded for this phase)",
-                            $"{comp.States.Count} states — not 5 or 7");
+                            $"{comp.States.Count} states — only 7-state actuators supported");
                     }
                     break;
+                // Sensor code generation commented out
+                // case "sensor":
+                //     if (comp.States.Count != 2)
+                //         return Fail(comp, "No template found (discarded for this phase)",
+                //             $"{comp.States.Count} states, not 2");
+                //     break;
                 case "sensor":
-                    if (comp.States.Count != 2)
-                        return Fail(comp, "No template found (discarded for this phase)",
-                            $"{comp.States.Count} states, not 2");
-                    break;
+                    return Fail(comp, "No template found (discarded for this phase)",
+                        "Sensor code generation disabled");
                 default:
                     return Fail(comp, tName, $"Unknown type '{comp.Type}'");
             }
@@ -501,7 +506,7 @@ namespace MapperUI
         static string TemplatePath(VueOneComponent comp, MapperConfig cfg) => comp.Type.ToLowerInvariant() switch
         {
             "actuator" => cfg.ActuatorTemplatePath,
-            "sensor" => cfg.SensorTemplatePath,
+            // "sensor" => cfg.SensorTemplatePath,  // Sensor code generation commented out
             "process" => cfg.ProcessCATTemplatePath,
             "robot" => cfg.RobotTemplatePath,
             _ => string.Empty
