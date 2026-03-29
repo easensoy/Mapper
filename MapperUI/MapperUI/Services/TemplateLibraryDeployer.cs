@@ -69,6 +69,7 @@ namespace MapperUI.Services
                 MapperLogger.Info($"[Deploy] CAT: {cat}");
             }
 
+            GenerateCfgFiles(eaeProjectDir, result);
             RegisterInDfbproj(eaeProjectDir, result);
 
             result.Success = true;
@@ -137,6 +138,38 @@ namespace MapperUI.Services
                 {
                     result.FilesSkipped++;
                 }
+            }
+        }
+
+        static void GenerateCfgFiles(string eaeProjectDir, DeployResult result)
+        {
+            var iec61499Dir = Path.Combine(eaeProjectDir, "IEC61499");
+            foreach (var cat in result.CATsDeployed)
+            {
+                var catDir = Path.Combine(iec61499Dir, cat);
+                var cfgPath = Path.Combine(catDir, $"{cat}.cfg");
+                if (File.Exists(cfgPath)) continue;
+                if (!Directory.Exists(catDir)) continue;
+
+                var hmi = cat + "_HMI";
+                var cfg = $@"<?xml version=""1.0"" encoding=""utf-8""?>
+<CAT xmlns:xsd=""http://www.w3.org/2001/XMLSchema"" xmlns:xsi=""http://www.w3.org/2001/XMLSchema-instance"" Name=""{cat}"" CATFile=""{cat}\{cat}.fbt"" SymbolDefFile=""..\HMI\{cat}\{cat}.def.cs"" SymbolEventFile=""..\HMI\{cat}\{cat}.event.cs"" DesignFile=""..\HMI\{cat}\{cat}.Design.resx"" xmlns=""http://www.nxtcontrol.com/IEC61499.xsd"">
+  <HMIInterface Name=""IThis"" FileName=""{cat}\{hmi}.fbt"" UsedInCAT=""true"" Usage=""Private"">
+    <Symbol Name=""sDefault"" FileName=""..\HMI\{cat}\{cat}_sDefault.cnv.cs"">
+      <DependentFiles>..\HMI\{cat}\{cat}_sDefault.cnv.Designer.cs</DependentFiles>
+      <DependentFiles>..\HMI\{cat}\{cat}_sDefault.cnv.resx</DependentFiles>
+      <DependentFiles>..\HMI\{cat}\{cat}_sDefault.cnv.xml</DependentFiles>
+    </Symbol>
+  </HMIInterface>
+  <Plugin Name=""Plugin=OfflineParametrizationEditor;IEC61499Type=CAT_OFFLINE;$ItemType$=None"" Project=""IEC61499"" Value=""{cat}\{cat}_CAT.offline.xml"" />
+  <Plugin Name=""Plugin=OPCUAConfigurator;IEC61499Type=CAT_OPCUA;$ItemType$=None"" Project=""IEC61499"" Value=""{cat}\{cat}_CAT.opcua.xml"" />
+  <Plugin Name=""Plugin=OfflineParametrizationEditor;IEC61499Type=CAT_OFFLINE;$ItemType$=None"" Project=""IEC61499"" Value=""{cat}\{hmi}.offline.xml"" />
+  <Plugin Name=""Plugin=OPCUAConfigurator;IEC61499Type=CAT_OPCUA;$ItemType$=None"" Project=""IEC61499"" Value=""{cat}\{hmi}.opcua.xml"" />
+  <HWConfiguration xsi:nil=""true"" />
+</CAT>";
+                File.WriteAllText(cfgPath, cfg);
+                result.FilesExtracted++;
+                MapperLogger.Info($"[Deploy] Generated {cat}.cfg");
             }
         }
 
