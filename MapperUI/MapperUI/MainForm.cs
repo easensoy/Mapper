@@ -312,6 +312,7 @@ namespace MapperUI
             _validationRows.Clear();
             btnGenerateCode.Enabled = false;
             btnGenerate.Enabled = false;
+            btnGenerateSevenState.Enabled = false;
             txtActivityLog.Clear();
             lblStatus.Text = "Loading\u2026";
 
@@ -330,12 +331,12 @@ namespace MapperUI
 
                 try
                 {
-                    // bool hasActuator5 = _loadedComponents.Any(c => c.Type == "Actuator" && c.States.Count == 5);  // Five-state actuator commented out
+                    bool hasActuator5 = _loadedComponents.Any(c => c.Type == "Actuator" && c.States.Count == 5);
                     bool hasActuator7 = _loadedComponents.Any(c => c.Type == "Actuator" && c.States.Count == 7);
-                    // bool hasSensor = _loadedComponents.Any(c => c.Type == "Sensor" && c.States.Count == 2);  // Sensor commented out
+                    bool hasSensor = _loadedComponents.Any(c => c.Type == "Sensor" && c.States.Count == 2);
 
                     foreach (var rule in MappingRuleEngine.GetRelevantRules(
-                        Cfg().MappingRulesPath, false, hasActuator7, false))
+                        Cfg().MappingRulesPath, hasActuator5, hasActuator7, hasSensor))
                         AddMappingRuleRow(rule);
                 }
                 catch (Exception ex)
@@ -371,6 +372,7 @@ namespace MapperUI
                 SetValidationLabel(ok ? "PASSED" : "FAILED", ok ? Color.Green : Color.Red);
                 lblStatus.Text = ok ? "Validation passed." : "Validation failed.";
                 btnGenerateCode.Enabled = _validationRows.Any(r => r.IsValid && _allowedInstances.Contains(r.Component.Name));
+                btnGenerateSevenState.Enabled = _loadedComponents.Any(c => c.Type == "Actuator" && c.States.Count == 7);
 
                 var noTemplate = _validationRows
                     .Where(r => r.TemplateName.StartsWith("No template found"))
@@ -400,11 +402,11 @@ namespace MapperUI
                 IEnumerable<MappingRuleEntry> rules;
                 if (_loadedComponents.Count > 0)
                 {
-                    // bool hasActuator5 = _loadedComponents.Any(c => c.Type == "Actuator" && c.States.Count == 5);  // Five-state actuator commented out
+                    bool hasActuator5 = _loadedComponents.Any(c => c.Type == "Actuator" && c.States.Count == 5);
                     bool hasActuator7 = _loadedComponents.Any(c => c.Type == "Actuator" && c.States.Count == 7);
-                    // bool hasSensor = _loadedComponents.Any(c => c.Type == "Sensor" && c.States.Count == 2);  // Sensor commented out
+                    bool hasSensor = _loadedComponents.Any(c => c.Type == "Sensor" && c.States.Count == 2);
                     rules = MappingRuleEngine.GetRelevantRules(
-                        Cfg().MappingRulesPath, false, hasActuator7, false);
+                        Cfg().MappingRulesPath, hasActuator5, hasActuator7, hasSensor);
                 }
                 else
                 {
@@ -478,22 +480,17 @@ namespace MapperUI
                     {
                         tName = "Seven_State_Actuator_CAT.fbt";
                     }
-                    else
+                    else if (comp.States.Count != 5)
                     {
-                        // Only seven-state actuators are supported; five-state commented out
                         return Fail(comp, "No template found (discarded for this phase)",
-                            $"{comp.States.Count} states — only 7-state actuators supported");
+                            $"{comp.States.Count} states — not 5 or 7");
                     }
                     break;
-                // Sensor code generation commented out
-                // case "sensor":
-                //     if (comp.States.Count != 2)
-                //         return Fail(comp, "No template found (discarded for this phase)",
-                //             $"{comp.States.Count} states, not 2");
-                //     break;
                 case "sensor":
-                    return Fail(comp, "No template found (discarded for this phase)",
-                        "Sensor code generation disabled");
+                    if (comp.States.Count != 2)
+                        return Fail(comp, "No template found (discarded for this phase)",
+                            $"{comp.States.Count} states, not 2");
+                    break;
                 default:
                     return Fail(comp, tName, $"Unknown type '{comp.Type}'");
             }
@@ -506,7 +503,7 @@ namespace MapperUI
         static string TemplatePath(VueOneComponent comp, MapperConfig cfg) => comp.Type.ToLowerInvariant() switch
         {
             "actuator" => cfg.ActuatorTemplatePath,
-            // "sensor" => cfg.SensorTemplatePath,  // Sensor code generation commented out
+            "sensor" => cfg.SensorTemplatePath,
             "process" => cfg.ProcessCATTemplatePath,
             "robot" => cfg.RobotTemplatePath,
             _ => string.Empty
@@ -582,6 +579,65 @@ namespace MapperUI
             }
             catch (Exception ex) { ShowError(ex.Message); }
             finally { btnGenerateCode.Enabled = true; }
+        }
+
+        async void btnGenerateSevenState_Click(object sender, EventArgs e)
+        {
+            var sevenStateComps = _loadedComponents
+                .Where(c => c.Type == "Actuator" && c.States.Count == 7)
+                .ToList();
+
+            if (sevenStateComps.Count == 0)
+            {
+                MessageBox.Show("No seven-state actuator components found.", "Nothing to Inject",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            btnGenerateSevenState.Enabled = false;
+            try
+            {
+                var cfg = Cfg();
+                var dfbproj = FindDfbproj(cfg.ActiveSyslayPath);
+                if (dfbproj == null) { ShowError("Cannot find .dfbproj."); return; }
+                if (!File.Exists(cfg.ActiveSyslayPath)) { ShowError($"syslay not found:\n{cfg.ActiveSyslayPath}"); return; }
+
+                MapperLogger.Info($"Seven State FB generation — {sevenStateComps.Count} component(s)");
+
+                var deployResult = await Task.Run(() => TemplateLibraryDeployer.Deploy(cfg, sevenStateComps));
+                if (!deployResult.Success)
+                {
+                    var warns = string.Join("\n", deployResult.Warnings);
+                    MapperLogger.Error($"Template deploy warnings: {warns}");
+                }
+                MapperLogger.Info($"[Deploy] {deployResult.CATsDeployed.Count} CAT(s), " +
+                                 $"{deployResult.BasicFBsDeployed.Count} Basic FB(s), " +
+                                 $"{deployResult.FilesExtracted} files extracted, " +
+                                 $"{deployResult.FilesSkipped} skipped (already present).");
+
+                await Task.Run(() => TemplatePackager.Package(
+                    cfg.TemplateIec61499Dir,
+                    Path.GetDirectoryName(dfbproj)!,
+                    dfbproj,
+                    cfg.TemplateHmiDir,
+                    Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(dfbproj)!)!, "HMI")));
+
+                var injCfg = MapperConfig.Load();
+                injCfg.SyslayPath = cfg.ActiveSyslayPath;
+                injCfg.SysresPath = cfg.ActiveSysresPath;
+
+                var injector = new SystemInjector();
+                var result = await Task.Run(() => injector.Inject(injCfg, sevenStateComps));
+
+                if (!result.Success) { ShowError($"Injection failed:\n{result.ErrorMessage}"); return; }
+
+                File.SetLastWriteTime(dfbproj, DateTime.Now);
+                lblStatus.Text = $"Done. {result.InjectedFBs.Count} seven-state instance(s) injected.";
+                MessageBox.Show($"Injected {result.InjectedFBs.Count} seven-state actuator instance(s).\nReload Solution in EAE.",
+                    "Done", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex) { ShowError(ex.Message); }
+            finally { btnGenerateSevenState.Enabled = true; }
         }
 
         async void btnGeneratePusherFB_Click(object sender, EventArgs e)
