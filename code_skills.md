@@ -8,6 +8,7 @@
 - No Claude attribution. No Co-Authored-By. No "Generated with Claude Code". Nothing Claude-related in commits or pushes.
 - Commits go under the developer's name only.
 - Write clear, concise commit messages describing what changed.
+- Even temporary changes must be committed and pushed. No exceptions.
 
 ## After Code Changes
 
