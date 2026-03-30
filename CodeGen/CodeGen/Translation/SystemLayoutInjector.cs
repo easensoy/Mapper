@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -7,6 +7,7 @@ using System.Text;
 using System.Xml.Linq;
 using CodeGen.Configuration;
 using CodeGen.Models;
+using CodeGen.Translation;
 
 namespace MapperUI.Services
 {
@@ -30,6 +31,24 @@ namespace MapperUI.Services
         private const int SensorX = 1560;
         private const int ProcessX = 3000;
         private const int RobotX = 5000;
+
+        // Standard FB XML attributes — never set via Parameter elements
+        private static readonly HashSet<string> StandardAttributes =
+            new(StringComparer.OrdinalIgnoreCase)
+            { "Name", "Type", "ID", "Namespace", "x", "y", "Mapping" };
+
+        // ── Instance-level name translations (VueOne name → IEC 61499 name) ──
+        private static readonly Dictionary<string, string> NameMap =
+            new(StringComparer.OrdinalIgnoreCase)
+            {
+                { "Bearing_PnP", "swivel" },
+            };
+
+        // ── Rule cache per injection run ──
+        private string? _mappingRulesPath;
+        private Dictionary<string, List<MappingRuleEntry>>? _ruleCache;
+
+        // ── Public API ─────────────────────────────────────────────────────
 
         public DiffReport PreviewDiff(MapperConfig config, List<VueOneComponent> components,
             string? controlXmlPath = null)
@@ -59,9 +78,20 @@ namespace MapperUI.Services
             return report;
         }
 
+        /// <summary>
+        /// Injects FB instances into syslay + sysres, driven by Excel mapping rules.
+        /// </summary>
+        /// <param name="mappingRulesPath">
+        /// Path to the VueOne_IEC61499_Mapping.xlsx file.
+        /// When provided, the per-CAT sheet rules drive parameter mapping.
+        /// When null, falls back to hardcoded parameter logic.
+        /// </param>
         public SystemInjectionResult Inject(MapperConfig config, List<VueOneComponent> components,
-            string? controlXmlPath = null)
+            string? controlXmlPath = null, string? mappingRulesPath = null)
         {
+            _mappingRulesPath = mappingRulesPath;
+            _ruleCache = null;
+
             var result = new SystemInjectionResult
             {
                 SyslayPath = config.SyslayPath,
@@ -80,6 +110,9 @@ namespace MapperUI.Services
                 foreach (var c in Unsupported(components, config))
                     result.UnsupportedComponents.Add($"{c.Name} ({c.Type}, {c.States.Count} states)");
 
+                if (!string.IsNullOrEmpty(_mappingRulesPath) && File.Exists(_mappingRulesPath))
+                    result.InjectedFBs.Add($"[Rules] Loaded mapping rules from {Path.GetFileName(_mappingRulesPath)}");
+
                 var syslayIds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
                 InjectSyslay(config, components, result, syslayIds);
@@ -94,6 +127,25 @@ namespace MapperUI.Services
             }
             return result;
         }
+
+        // ── Rule loading ───────────────────────────────────────────────────
+
+        private List<MappingRuleEntry> GetRulesForCat(string catType)
+        {
+            if (string.IsNullOrEmpty(_mappingRulesPath) || !File.Exists(_mappingRulesPath))
+                return new List<MappingRuleEntry>();
+
+            _ruleCache ??= new Dictionary<string, List<MappingRuleEntry>>(StringComparer.OrdinalIgnoreCase);
+
+            if (!_ruleCache.TryGetValue(catType, out var rules))
+            {
+                rules = MappingRuleEngine.GetActiveRulesForCat(_mappingRulesPath, catType);
+                _ruleCache[catType] = rules;
+            }
+            return rules;
+        }
+
+        // ── syslay / sysres injection ──────────────────────────────────────
 
         private void InjectSyslay(MapperConfig config, List<VueOneComponent> components,
             SystemInjectionResult result, Dictionary<string, string> syslayIds)
@@ -117,13 +169,23 @@ namespace MapperUI.Services
             string? proc = FirstFbOfType(net, ProcessCatType)?.Attribute("Name")?.Value;
             if (proc != null)
             {
-                var allActuators = FbsOfType(net, ActuatorCatType)
-                    .Concat(FbsOfType(net, SevenStateActuatorCatType))
+                // Five-state actuators: full bidirectional wiring (pst_out → state_change)
+                var fiveStateNames = FbsOfType(net, ActuatorCatType)
                     .Select(fb => fb.Attribute("Name")?.Value)
                     .Where(n => !string.IsNullOrEmpty(n))
                     .ToList()!;
 
-                WireActuators(net, allActuators!, proc, result);
+                WireActuators(net, fiveStateNames!, proc, result);
+
+                // Seven-state actuators: command-only wiring (NO pst_out → state_change feedback)
+                // The seven-state ECC has unconditional transitions and timer delays that
+                // cause an infinite event loop when pst_out feeds back into the process.
+                var sevenStateNames = FbsOfType(net, SevenStateActuatorCatType)
+                    .Select(fb => fb.Attribute("Name")?.Value)
+                    .Where(n => !string.IsNullOrEmpty(n))
+                    .ToList()!;
+
+                WireSevenStateActuators(net, sevenStateNames!, proc, result);
 
                 if (newActuators.Any())
                     ExtendInitChain(net, newActuators, proc, result);
@@ -156,6 +218,7 @@ namespace MapperUI.Services
 
             doc.Save(config.SysresPath);
         }
+
         private void InjectGroup(
             XElement net,
             List<VueOneComponent> group,
@@ -228,15 +291,225 @@ namespace MapperUI.Services
                 nextY += GapFor(catType);
             }
         }
-        private static readonly Dictionary<string, string> NameMap = new(StringComparer.OrdinalIgnoreCase)
+
+        // ── Rule-driven parameter application ──────────────────────────────
+
+        private void ApplyParams(XElement fb, VueOneComponent comp, string catType)
         {
-            { "Bearing_PnP", "swivel" },
-        };
+            var rules = GetRulesForCat(catType);
+            if (rules.Count > 0)
+            {
+                ApplyRuleDrivenParams(fb, comp, catType, rules);
+            }
+            else
+            {
+                // No rules found for this CAT — fall back to hardcoded logic
+                ApplyFallbackParams(fb, comp, catType);
+            }
+        }
+
+        /// <summary>
+        /// Applies FB parameters based on Excel mapping rules.
+        /// Iterates TRANSLATED/ENCODED/ASSUMED rules and sets parameters accordingly.
+        /// </summary>
+        private void ApplyRuleDrivenParams(XElement fb, VueOneComponent comp, string catType,
+            List<MappingRuleEntry> rules)
+        {
+            foreach (var rule in rules)
+            {
+                // Only process rules that target an IEC 61499 element
+                if (string.IsNullOrWhiteSpace(rule.IEC61499Element))
+                    continue;
+
+                // Parse target: expect "FB.paramName" or just "paramName"
+                string target = rule.IEC61499Element.Trim();
+                string paramName;
+                if (target.StartsWith("FB.", StringComparison.OrdinalIgnoreCase))
+                    paramName = target.Substring(3);
+                else
+                    paramName = target;
+
+                // Skip standard FB attributes — they're set during element creation
+                if (StandardAttributes.Contains(paramName))
+                    continue;
+
+                // Resolve the source value from the VueOne component
+                string? sourceValue = ResolveSourceValue(rule.VueOneElement, comp, catType);
+
+                string paramValue;
+                switch (rule.Type)
+                {
+                    case MappingType.TRANSLATED:
+                        // Direct mapping from VueOne → IEC 61499
+                        if (sourceValue == null) continue;
+                        paramValue = ApplyTransformation(sourceValue, rule.TransformationRule, comp, catType);
+                        break;
+
+                    case MappingType.ENCODED:
+                        // Transformed mapping with specific encoding
+                        if (sourceValue == null) continue;
+                        paramValue = ApplyTransformation(sourceValue, rule.TransformationRule, comp, catType);
+                        break;
+
+                    case MappingType.ASSUMED:
+                        // Value is assumed/generated — use the transformation rule as the value
+                        // or generate based on context
+                        paramValue = ResolveAssumedValue(rule, comp, catType);
+                        break;
+
+                    case MappingType.HARDCODED:
+                        // Value comes from the EAE template — skip, don't overwrite
+                        continue;
+
+                    default:
+                        continue;
+                }
+
+                SetParam(fb, paramName, paramValue);
+            }
+
+            // Also apply process-specific Text param if this is a process CAT
+            // (state-to-text aggregation is structural, not a single-field rule)
+            if (catType == ProcessCatType)
+                SetParam(fb, "Text", BuildTextParam(comp));
+        }
+
+        /// <summary>
+        /// Fallback for CAT types with no Excel rules (e.g., Process1_CAT, Robot_Task_CAT).
+        /// Preserves original hardcoded behavior.
+        /// </summary>
+        private static void ApplyFallbackParams(XElement fb, VueOneComponent comp, string catType)
+        {
+            if (catType == ActuatorCatType || catType == SevenStateActuatorCatType)
+            {
+                var name = FbName(comp, catType);
+                SetParam(fb, "actuator_name", $"'{name.ToLower()}'");
+            }
+            else if (catType == ProcessCatType)
+                SetParam(fb, "Text", BuildTextParam(comp));
+        }
+
+        /// <summary>
+        /// Resolves a VueOne element reference to the actual value from the component.
+        /// </summary>
+        private static string? ResolveSourceValue(string vueOneElement, VueOneComponent comp, string catType)
+        {
+            if (string.IsNullOrWhiteSpace(vueOneElement))
+                return null;
+
+            var el = vueOneElement.Trim();
+
+            // Component-level fields
+            if (el.Equals("Component/Name", StringComparison.OrdinalIgnoreCase)
+                || el.Equals("Component Name", StringComparison.OrdinalIgnoreCase))
+            {
+                // Apply instance-level name mapping (e.g. Bearing_PnP → swivel)
+                return FbName(comp, catType);
+            }
+
+            if (el.Equals("Component/Type", StringComparison.OrdinalIgnoreCase))
+                return comp.Type;
+
+            if (el.Equals("Component/Description", StringComparison.OrdinalIgnoreCase))
+                return comp.Description;
+
+            if (el.Equals("Component/ComponentID", StringComparison.OrdinalIgnoreCase)
+                || el.Equals("ComponentID", StringComparison.OrdinalIgnoreCase))
+                return comp.ComponentID;
+
+            if (el.Equals("SystemID", StringComparison.OrdinalIgnoreCase)
+                || el.StartsWith("System/", StringComparison.OrdinalIgnoreCase))
+                return comp.ComponentID;
+
+            // State-level fields — return first state's value as representative
+            if (el.StartsWith("State/", StringComparison.OrdinalIgnoreCase) && comp.States.Count > 0)
+            {
+                var field = el.Substring(6);
+                var state = comp.States[0];
+                if (field.Equals("Name", StringComparison.OrdinalIgnoreCase)) return state.Name;
+                if (field.Equals("StateNumber", StringComparison.OrdinalIgnoreCase)) return state.StateNumber.ToString();
+                if (field.Equals("StateID", StringComparison.OrdinalIgnoreCase)) return state.StateID;
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Applies the transformation described in the Excel rule to a source value.
+        /// Interprets human-readable transformation descriptions.
+        /// </summary>
+        private static string ApplyTransformation(string value, string transformRule,
+            VueOneComponent comp, string catType)
+        {
+            if (string.IsNullOrWhiteSpace(transformRule))
+                return value;
+
+            var rule = transformRule.ToLowerInvariant();
+            string result = value;
+
+            // Direct copy — no transformation
+            if (rule.Contains("direct") && rule.Contains("copy"))
+                return result;
+
+            // Apply casing transformations
+            if (rule.Contains("lowercase") || rule.Contains("lower case") || rule.Contains("lower-case"))
+                result = result.ToLower();
+            else if (rule.Contains("uppercase") || rule.Contains("upper case") || rule.Contains("upper-case"))
+                result = result.ToUpper();
+
+            // Apply wrapping
+            if (rule.Contains("single quote") || (rule.Contains("wrap") && rule.Contains("quote"))
+                || rule.Contains("'value'") || rule.Contains("quoted"))
+                result = $"'{result}'";
+
+            // SHA256 hashing
+            if (rule.Contains("sha256") || rule.Contains("sha-256")
+                || (rule.Contains("hash") && rule.Contains("hex")))
+                result = MakeId(result, "encoded");
+
+            // Prefix/suffix patterns
+            if (rule.Contains("prefix"))
+            {
+                // Try to extract prefix from rule like "Prefix with 'xyz'"
+                var match = System.Text.RegularExpressions.Regex.Match(transformRule, @"'([^']+)'");
+                if (match.Success) result = match.Groups[1].Value + result;
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Resolves an ASSUMED value — the value is generated or constant, not from VueOne data.
+        /// </summary>
+        private static string ResolveAssumedValue(MappingRuleEntry rule, VueOneComponent comp, string catType)
+        {
+            // For ASSUMED rules, the TransformationRule often contains the literal value
+            // or a description of what to generate
+            var transform = rule.TransformationRule?.Trim() ?? string.Empty;
+
+            // If the rule text looks like a literal value (e.g., "Main", "Seven_State_Actuator_CAT")
+            if (!string.IsNullOrEmpty(transform) && !transform.Contains(" "))
+                return transform;
+
+            // Otherwise try to derive from context
+            if (rule.IEC61499Element?.Contains("Type", StringComparison.OrdinalIgnoreCase) == true)
+                return catType;
+
+            if (rule.IEC61499Element?.Contains("Namespace", StringComparison.OrdinalIgnoreCase) == true)
+                return "Main";
+
+            return transform;
+        }
+
+        // ── Name resolution ────────────────────────────────────────────────
 
         private static string FbName(VueOneComponent comp, string catType)
         {
             return NameMap.TryGetValue(comp.Name, out var mapped) ? mapped : comp.Name;
         }
+
+        // ── Layout helpers ─────────────────────────────────────────────────
+
         private static int GapFor(string catType) => catType switch
         {
             ActuatorCatType => ActuatorYGap,
@@ -263,6 +536,12 @@ namespace MapperUI.Services
                 _ => 3000
             };
         }
+
+        // ── Wiring ─────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Wires five-state actuators with full bidirectional event flow.
+        /// </summary>
         private static void WireActuators(XElement net, List<string> actuators,
             string proc, SystemInjectionResult result)
         {
@@ -279,6 +558,35 @@ namespace MapperUI.Services
                 AddConn(dc, $"{name}.current_state_to_process", $"{proc}.{lc}", result);
             }
         }
+
+        /// <summary>
+        /// Wires seven-state actuators: command-only, NO pst_out feedback to process.
+        /// The seven-state ECC has unconditional transitions (timerStart→ToHome, timerEnd→athome)
+        /// and sensor-less guard conditions (atwork1=FALSE AND atwork2=FALSE) that always pass.
+        /// Wiring pst_out → state_change creates an infinite event loop:
+        ///   handshake→START→timerStart→ToHome→timerEnd→athome→handshake (repeats).
+        /// Instead, the process sends commands via state_update/pst_event (one-way),
+        /// and the actuator reports state via data connections only.
+        /// </summary>
+        private static void WireSevenStateActuators(XElement net, List<string> actuators,
+            string proc, SystemInjectionResult result)
+        {
+            var ec = EnsureSection(net, "EventConnections");
+            var dc = EnsureSection(net, "DataConnections");
+
+            foreach (var name in actuators)
+            {
+                string lc = name.ToLower();
+                // Process commands the actuator (one-way event)
+                AddConn(ec, $"{proc}.state_update", $"{name}.pst_event", result);
+                // NO pst_out → state_change — this is what caused the loop
+                // Data connections for name matching and state reporting
+                AddConn(dc, $"{proc}.actuator_name", $"{name}.process_state_name", result);
+                AddConn(dc, $"{proc}.state_val", $"{name}.state_val", result);
+                AddConn(dc, $"{name}.current_state_to_process", $"{proc}.{lc}", result);
+            }
+        }
+
         private static void ExtendInitChain(XElement net, List<string> newActs,
             string proc, SystemInjectionResult result)
         {
@@ -307,6 +615,9 @@ namespace MapperUI.Services
             result.InjectedFBs.Add(
                 $"INIT chain: {prev ?? "?"} → {string.Join(" → ", newActs)} → {proc}");
         }
+
+        // ── XML helpers ────────────────────────────────────────────────────
+
         private static XElement? LoadNet(string path, string tag)
         {
             var doc = XDocument.Load(path);
@@ -391,18 +702,6 @@ namespace MapperUI.Services
         private static int ParseInt(string? s, int fallback) =>
             int.TryParse(s, out var v) ? v : fallback;
 
-
-        private static void ApplyParams(XElement fb, VueOneComponent comp, string catType)
-        {
-            if (catType == ActuatorCatType || catType == SevenStateActuatorCatType)
-            {
-                var name = FbName(comp, catType);
-                SetParam(fb, "actuator_name", $"'{name.ToLower()}'");
-            }
-            else if (catType == ProcessCatType)
-                SetParam(fb, "Text", BuildTextParam(comp));
-        }
-
         private static void SetParam(XElement fb, string name, string value)
         {
             var el = fb.Elements()
@@ -421,6 +720,8 @@ namespace MapperUI.Services
             if (pad > 0) names.Add($"{pad}('')");
             return "[" + string.Join(",", names) + "]";
         }
+
+        // ── Component classification ───────────────────────────────────────
 
         private static void Classify(XElement net, string catType,
             List<VueOneComponent> group, DiffReport report)
@@ -442,11 +743,8 @@ namespace MapperUI.Services
         public class DiffReport
         {
             public List<string> AlreadyPresent { get; } = new();
-
             public List<string> ToBeInjected { get; } = new();
-
             public List<string> Spare { get; } = new();
-
             public List<string> Unsupported { get; } = new();
         }
 
@@ -475,7 +773,7 @@ namespace MapperUI.Services
                     var nTag = xmlComp.Elements()
                         .FirstOrDefault(e => e.Name.LocalName == "n")?.Value?.Trim();
                     if (!string.IsNullOrWhiteSpace(nTag))
-                        comp.Name = nTag;   // e.g. "Feed_Station"
+                        comp.Name = nTag;
                 }
             }
             catch
