@@ -169,14 +169,17 @@ namespace MapperUI.Services
             string? proc = FirstFbOfType(net, ProcessCatType)?.Attribute("Name")?.Value;
             if (proc != null)
             {
-                // TEMP: OLD BUGGY WIRING — both five-state and seven-state use same feedback loop
-                var allActuators = FbsOfType(net, ActuatorCatType)
-                    .Concat(FbsOfType(net, SevenStateActuatorCatType))
+                var fiveStateActs = FbsOfType(net, ActuatorCatType)
                     .Select(fb => fb.Attribute("Name")?.Value)
                     .Where(n => !string.IsNullOrEmpty(n))
                     .ToList()!;
+                WireActuators(net, fiveStateActs!, proc, result);
 
-                WireActuators(net, allActuators!, proc, result);
+                var sevenStateActs = FbsOfType(net, SevenStateActuatorCatType)
+                    .Select(fb => fb.Attribute("Name")?.Value)
+                    .Where(n => !string.IsNullOrEmpty(n))
+                    .ToList()!;
+                WireSevenStateActuators(net, sevenStateActs!, proc, result);
 
                 if (newActuators.Any())
                     ExtendInitChain(net, newActuators, proc, result);
