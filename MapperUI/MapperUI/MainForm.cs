@@ -15,7 +15,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-using UiMappingType = MapperUI.Services.MappingType;
+using UiMappingType = CodeGen.Models.MappingType;
 
 namespace MapperUI
 {
@@ -246,7 +246,8 @@ namespace MapperUI
 
                 var cfg = Cfg();
                 var injector = new SystemInjector();
-                var result = await Task.Run(() => injector.Inject(cfg, generated));
+                var result = await Task.Run(() => injector.Inject(cfg, generated,
+                    controlXmlPath: null, mappingRulesPath: cfg.MappingRulesPath));
 
                 if (result.Success)
                 {
@@ -565,7 +566,9 @@ namespace MapperUI
                 injCfg.SysresPath = cfg.ActiveSysresPath;
 
                 var injector = new SystemInjector();
-                var result = await Task.Run(() => injector.Inject(injCfg, toInject));
+                var rulesPath = cfg.MappingRulesPath;
+                var result = await Task.Run(() => injector.Inject(injCfg, toInject,
+                    controlXmlPath: null, mappingRulesPath: rulesPath));
 
                 if (!result.Success) { ShowError($"Injection failed:\n{result.ErrorMessage}"); return; }
 
@@ -627,7 +630,9 @@ namespace MapperUI
                 injCfg.SysresPath = cfg.ActiveSysresPath;
 
                 var injector = new SystemInjector();
-                var result = await Task.Run(() => injector.Inject(injCfg, sevenStateComps));
+                var rulesPath = cfg.MappingRulesPath;
+                var result = await Task.Run(() => injector.Inject(injCfg, sevenStateComps,
+                    controlXmlPath: null, mappingRulesPath: rulesPath));
 
                 if (!result.Success) { ShowError($"Injection failed:\n{result.ErrorMessage}"); return; }
 
