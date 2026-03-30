@@ -8,3 +8,8 @@
 - No Claude attribution. No Co-Authored-By. No "Generated with Claude Code". Nothing Claude-related in commits or pushes.
 - Commits go under the developer's name only.
 - Write clear, concise commit messages describing what changed.
+
+## After Code Changes
+
+- After committing and pushing, rerun MapperUI so changes take effect immediately.
+- Command: `dotnet run --project MapperUI/MapperUI/MapperUI.csproj`
