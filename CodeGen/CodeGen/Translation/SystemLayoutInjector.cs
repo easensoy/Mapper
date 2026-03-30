@@ -169,23 +169,14 @@ namespace MapperUI.Services
             string? proc = FirstFbOfType(net, ProcessCatType)?.Attribute("Name")?.Value;
             if (proc != null)
             {
-                // Five-state actuators: full bidirectional wiring (pst_out → state_change)
-                var fiveStateNames = FbsOfType(net, ActuatorCatType)
+                // TEMP: OLD BUGGY WIRING — both five-state and seven-state use same feedback loop
+                var allActuators = FbsOfType(net, ActuatorCatType)
+                    .Concat(FbsOfType(net, SevenStateActuatorCatType))
                     .Select(fb => fb.Attribute("Name")?.Value)
                     .Where(n => !string.IsNullOrEmpty(n))
                     .ToList()!;
 
-                WireActuators(net, fiveStateNames!, proc, result);
-
-                // Seven-state actuators: command-only wiring (NO pst_out → state_change feedback)
-                // The seven-state ECC has unconditional transitions and timer delays that
-                // cause an infinite event loop when pst_out feeds back into the process.
-                var sevenStateNames = FbsOfType(net, SevenStateActuatorCatType)
-                    .Select(fb => fb.Attribute("Name")?.Value)
-                    .Where(n => !string.IsNullOrEmpty(n))
-                    .ToList()!;
-
-                WireSevenStateActuators(net, sevenStateNames!, proc, result);
+                WireActuators(net, allActuators!, proc, result);
 
                 if (newActuators.Any())
                     ExtendInitChain(net, newActuators, proc, result);
