@@ -296,21 +296,35 @@ namespace MapperUI.Services
 
         private void ApplyParams(XElement fb, VueOneComponent comp, string catType)
         {
+            // Always apply essential parameters first
+            ApplyFallbackParams(fb, comp, catType);
+
+            // Then overlay any rule-driven parameters from the Excel
             var rules = GetRulesForCat(catType);
             if (rules.Count > 0)
-            {
                 ApplyRuleDrivenParams(fb, comp, catType, rules);
-            }
-            else
+        }
+
+        /// <summary>
+        /// Returns true if the string is a valid IEC 61499 parameter name
+        /// (identifier-like: no spaces, no parentheses, no slashes).
+        /// </summary>
+        private static bool IsValidParamName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return false;
+            // Valid param names are identifier-like: letters, digits, underscores
+            // Reject anything with spaces, parens, slashes, commas — those are descriptions
+            foreach (char c in name)
             {
-                // No rules found for this CAT — fall back to hardcoded logic
-                ApplyFallbackParams(fb, comp, catType);
+                if (c != '_' && !char.IsLetterOrDigit(c)) return false;
             }
+            return true;
         }
 
         /// <summary>
         /// Applies FB parameters based on Excel mapping rules.
-        /// Iterates TRANSLATED/ENCODED/ASSUMED rules and sets parameters accordingly.
+        /// Only sets parameters where the IEC 61499 Element is a valid parameter name
+        /// (not a human-readable description like "GUID (FBType)").
         /// </summary>
         private void ApplyRuleDrivenParams(XElement fb, VueOneComponent comp, string catType,
             List<MappingRuleEntry> rules)
@@ -333,6 +347,11 @@ namespace MapperUI.Services
                 if (StandardAttributes.Contains(paramName))
                     continue;
 
+                // Skip descriptive text that isn't a valid parameter name
+                // e.g. "GUID (FBType)", "FBType Name (in system file)"
+                if (!IsValidParamName(paramName))
+                    continue;
+
                 // Resolve the source value from the VueOne component
                 string? sourceValue = ResolveSourceValue(rule.VueOneElement, comp, catType);
 
@@ -340,25 +359,20 @@ namespace MapperUI.Services
                 switch (rule.Type)
                 {
                     case MappingType.TRANSLATED:
-                        // Direct mapping from VueOne → IEC 61499
                         if (sourceValue == null) continue;
                         paramValue = ApplyTransformation(sourceValue, rule.TransformationRule, comp, catType);
                         break;
 
                     case MappingType.ENCODED:
-                        // Transformed mapping with specific encoding
                         if (sourceValue == null) continue;
                         paramValue = ApplyTransformation(sourceValue, rule.TransformationRule, comp, catType);
                         break;
 
                     case MappingType.ASSUMED:
-                        // Value is assumed/generated — use the transformation rule as the value
-                        // or generate based on context
                         paramValue = ResolveAssumedValue(rule, comp, catType);
                         break;
 
                     case MappingType.HARDCODED:
-                        // Value comes from the EAE template — skip, don't overwrite
                         continue;
 
                     default:
