@@ -81,7 +81,6 @@ namespace MapperUI
             try { _llmProcess?.Kill(); } catch { }
         }
 
-        // ── LLM Engine process ──────────────────────────────────────────────
 
         void StartLlmEngine()
         {
@@ -127,7 +126,6 @@ namespace MapperUI
             return null;
         }
 
-        // ── Health polling ──────────────────────────────────────────────────
 
         void StartHealthPolling()
         {
@@ -156,7 +154,6 @@ namespace MapperUI
             lblEngineStatusDot.ForeColor = running ? Color.LimeGreen : Color.Red;
         }
 
-        // ── Generation Engine button ────────────────────────────────────────
 
         async void btnGenerate_Click(object sender, EventArgs e)
         {
@@ -280,7 +277,6 @@ namespace MapperUI
             txtActivityLog.AppendText($"[{DateTime.Now:HH:mm:ss}] {text}{Environment.NewLine}");
         }
 
-        // ── Existing handlers ───────────────────────────────────────────────
 
         void menuItemDebugConsole_Click(object sender, EventArgs e)
         {
@@ -458,7 +454,6 @@ namespace MapperUI
                 rule.IsImplemented ? ColorTranslated : ColorDiscarded;
         }
 
-        // ── Validation & template routing ───────────────────────────────────
 
         static ComponentValidationRow Validate(VueOneComponent comp, ComponentValidator validator, MapperConfig cfg)
         {
@@ -510,7 +505,6 @@ namespace MapperUI
         static ComponentValidationRow Fail(VueOneComponent c, string t, string r) =>
             new() { Component = c, TemplateName = t, IsValid = false, FailReason = r };
 
-        // ── Code generation ─────────────────────────────────────────────────
 
         async void btnGenerateCode_Click(object sender, EventArgs e)
         {
@@ -535,9 +529,6 @@ namespace MapperUI
 
                 MapperLogger.Info($"Project: {Path.GetFileName(dfbproj)}");
 
-                // ── Step 1: Deploy CAT types + Basic FB dependencies from Template Library ──
-                // Extracts zip packages into the target EAE project's IEC61499 folder
-                // and registers them in .dfbproj so EAE can resolve all type references.
                 var deployResult = await Task.Run(() => TemplateLibraryDeployer.Deploy(cfg, toInject));
                 if (!deployResult.Success)
                 {
@@ -549,7 +540,6 @@ namespace MapperUI
                                  $"{deployResult.FilesExtracted} files extracted, " +
                                  $"{deployResult.FilesSkipped} skipped (already present).");
 
-                // ── Step 2: Copy template files (legacy TemplatePackager path) ──
                 if (Directory.Exists(cfg.TemplateIec61499Dir))
                 {
                     await Task.Run(() => TemplatePackager.Package(
@@ -560,7 +550,6 @@ namespace MapperUI
                         Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(dfbproj)!)!, "HMI")));
                 }
 
-                // ── Step 3: Inject FB instances into syslay + sysres ──
                 var injCfg = MapperConfig.Load();
                 injCfg.SyslayPath = cfg.ActiveSyslayPath;
                 injCfg.SysresPath = cfg.ActiveSysresPath;
@@ -660,29 +649,13 @@ namespace MapperUI
             catch (Exception ex) { ShowError(ex.Message); }
         }
 
-        void dgvComponents_SelectionChanged(object sender, EventArgs e)
-        {
-            // Right panel replaced by Generation Engine — no component detail view needed.
-        }
+        void dgvComponents_SelectionChanged(object sender, EventArgs e) { }
 
-        // ── Designer stub handlers ──────────────────────────────────────────
+        void btnIO_Click(object sender, EventArgs e) { }
 
-        void btnIO_Click(object sender, EventArgs e)
-        {
-            // IO mapping — future phase
-        }
+        void btnGenerateTemplate_Click(object sender, EventArgs e) { }
 
-        void btnGenerateTemplate_Click(object sender, EventArgs e)
-        {
-            // Template generation — future phase
-        }
-
-        void btnADP_Click(object sender, EventArgs e)
-        {
-            // ADP — future phase
-        }
-
-        // ── UI helpers ──────────────────────────────────────────────────────
+        void btnADP_Click(object sender, EventArgs e) { }
 
         void UpdateDetectedInfo()
         {
