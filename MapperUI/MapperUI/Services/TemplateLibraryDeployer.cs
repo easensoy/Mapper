@@ -119,10 +119,6 @@ namespace MapperUI.Services
         {
             using var zip = ZipFile.OpenRead(zipPath);
 
-            // Detect wrapper prefix: if all entries share a common folder prefix
-            // that doesn't map to a known project folder (IEC61499, HMI, etc.),
-            // strip it so files land in the right place.
-            // e.g. "SevenStateActuator2.Basic/IEC61499/..." → "IEC61499/..."
             var knownRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
                 { "IEC61499", "HMI", "HwConfiguration" };
             string? prefixToStrip = null;
