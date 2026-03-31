@@ -30,16 +30,9 @@ namespace CodeGen.Translation
             return XlsxRuleLoader.LoadSheets(xlsxPath, sheets);
         }
 
-        /// <summary>
-        /// Returns sheet names present in the workbook (each sheet = a CAT type).
-        /// </summary>
         public static List<string> GetSheetNames(string xlsxPath)
             => XlsxRuleLoader.GetSheetNames(xlsxPath);
 
-        /// <summary>
-        /// Returns only non-section, non-DISCARDED rules for a specific CAT sheet.
-        /// These are the rules that should actively drive code generation.
-        /// </summary>
         public static List<MappingRuleEntry> GetActiveRulesForCat(string xlsxPath, string catSheetName)
         {
             return XlsxRuleLoader.LoadSheet(xlsxPath, catSheetName)
@@ -160,7 +153,6 @@ namespace CodeGen.Translation
             }
         }
 
-        // ── xlsx multi-sheet reading ────────────────────────────────────────
 
         private static List<string> ReadSheetNames(string xlsxPath)
         {
@@ -288,7 +280,6 @@ namespace CodeGen.Translation
             return sharedStrings;
         }
 
-        // ── Helpers ─────────────────────────────────────────────────────────
 
         private static void ValidatePath(string xlsxPath)
         {
