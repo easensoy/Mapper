@@ -118,11 +118,31 @@ namespace MapperUI.Services
         static void ExtractToEae(string zipPath, string eaeProjectDir, DeployResult result)
         {
             using var zip = ZipFile.OpenRead(zipPath);
+
+            // Detect wrapper prefix: if all entries share a common folder prefix
+            // that doesn't map to a known project folder (IEC61499, HMI, etc.),
+            // strip it so files land in the right place.
+            // e.g. "SevenStateActuator2.Basic/IEC61499/..." → "IEC61499/..."
+            var knownRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                { "IEC61499", "HMI", "HwConfiguration" };
+            string? prefixToStrip = null;
+
+            var firstFile = zip.Entries.FirstOrDefault(e => !string.IsNullOrEmpty(e.Name));
+            if (firstFile != null)
+            {
+                var parts = firstFile.FullName.Split('/');
+                if (parts.Length >= 2 && !knownRoots.Contains(parts[0]))
+                    prefixToStrip = parts[0] + "/";
+            }
+
             foreach (var entry in zip.Entries)
             {
                 if (string.IsNullOrEmpty(entry.Name)) continue;
 
                 var relativePath = entry.FullName;
+                if (prefixToStrip != null && relativePath.StartsWith(prefixToStrip, StringComparison.OrdinalIgnoreCase))
+                    relativePath = relativePath.Substring(prefixToStrip.Length);
+
                 var targetPath = Path.Combine(eaeProjectDir, relativePath);
                 var targetDir = Path.GetDirectoryName(targetPath)!;
 
