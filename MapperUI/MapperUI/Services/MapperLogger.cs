@@ -18,17 +18,10 @@ namespace MapperUI.Services
 
     public record LogEntry(DateTime Timestamp, LogStep Step, string Action);
 
-    /// <summary>
-    /// Static logger that fires events AND buffers the last 500 entries.
-    /// DebugConsoleForm subscribes to OnEntry for live updates and replays
-    /// RecentEntries on construction to catch anything logged before it opened.
-    /// </summary>
     public static class MapperLogger
     {
-        // ── Event ────────────────────────────────────────────────────────────
         public static event Action<LogEntry>? OnEntry;
 
-        // ── Buffer (ring, last 500 entries) ──────────────────────────────────
         private static readonly List<LogEntry> _buffer = new();
         private static readonly object _lock = new();
         private const int MaxBuffer = 500;
@@ -38,7 +31,6 @@ namespace MapperUI.Services
             get { lock (_lock) return _buffer.ToArray(); }
         }
 
-        // ── Internal fire + buffer ────────────────────────────────────────────
         private static void Fire(LogStep step, string action)
         {
             var entry = new LogEntry(DateTime.Now, step, action);
@@ -51,7 +43,6 @@ namespace MapperUI.Services
             OnEntry?.Invoke(entry);
         }
 
-        // ── Public logging methods ────────────────────────────────────────────
         public static void Parse(string action) => Fire(LogStep.PARSE, action);
         public static void Validate(string action) => Fire(LogStep.VALIDATE, action);
         public static void Info(string action) => Fire(LogStep.INFO, action);
