@@ -76,7 +76,7 @@
             this.statusStrip.SuspendLayout();
             this.SuspendLayout();
 
-            // Menu
+
             this.menuStrip.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
                 this.fileToolStripMenuItem, this.dataToolStripMenuItem, this.buildToolStripMenuItem });
             this.menuStrip.Location = new System.Drawing.Point(0, 0);
@@ -88,7 +88,7 @@
             this.menuItemDebugConsole.Text = "Debug Console";
             this.menuItemDebugConsole.Click += new System.EventHandler(this.menuItemDebugConsole_Click);
 
-            // Toolbar
+
             this.lblVueOneModel.AutoSize = true;
             this.lblVueOneModel.Location = new System.Drawing.Point(12, 33);
             this.lblVueOneModel.Text = "vueOne Model:";
@@ -136,7 +136,7 @@
             this.btnGenerateCode.UseVisualStyleBackColor = false;
             this.btnGenerateCode.Click += new System.EventHandler(this.btnGenerateCode_Click);
 
-            // Validation Output
+
             this.grpValidation.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left | System.Windows.Forms.AnchorStyles.Right;
             this.grpValidation.Controls.Add(this.dgvMappingRules);
             this.grpValidation.Controls.Add(this.pnlDetectedInfo);
@@ -168,7 +168,7 @@
             SetLabel(this.lblValidationPrefix, "  Status: ", false);
             SetLabel(this.lblValidationStatus, "-", true);
 
-            // Mapping rules grid — columns sized to be readable
+
             this.dgvMappingRules.AllowUserToAddRows = false;
             this.dgvMappingRules.AllowUserToDeleteRows = false;
             this.dgvMappingRules.BackgroundColor = System.Drawing.Color.White;
@@ -195,18 +195,18 @@
             this.colMappingValidated.DefaultCellStyle.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleCenter;
             this.colMappingValidated.DefaultCellStyle.Font = new System.Drawing.Font("Segoe UI", 11F, System.Drawing.FontStyle.Bold);
 
-            // Mapping Information
+
             this.grpMappingInfo.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left | System.Windows.Forms.AnchorStyles.Right;
             this.grpMappingInfo.Controls.Add(this.splitMain);
             this.grpMappingInfo.Location = new System.Drawing.Point(12, 446);
             this.grpMappingInfo.Size = new System.Drawing.Size(1376, 330);
             this.grpMappingInfo.Text = "Mapping Information";
 
-            // Main split: Left=Components, Right=Detail
+
             this.splitMain.Dock = System.Windows.Forms.DockStyle.Fill;
             this.splitMain.SplitterDistance = 380;
 
-            // Left: Components grid
+
             this.dgvComponents.AllowUserToAddRows = false;
             this.dgvComponents.AllowUserToDeleteRows = false;
             this.dgvComponents.BackgroundColor = System.Drawing.SystemColors.Window;
@@ -220,7 +220,6 @@
             this.dgvComponents.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
             this.dgvComponents.DefaultCellStyle.Font = new System.Drawing.Font("Segoe UI", 9F);
             this.dgvComponents.SelectionChanged += new System.EventHandler(this.dgvComponents_SelectionChanged);
-            // dgvComponents.SelectionChanged is kept for future use; right panel replaced by Generation Engine
             this.splitMain.Panel1.Controls.Add(this.dgvComponents);
 
             this.colComponent.HeaderText = "Component";
@@ -233,7 +232,7 @@
             this.colTemplate.ReadOnly = true;
             this.colTemplate.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill;
 
-            // Right: Generation Engine panel
+
             this.grpGenerationEngine.Controls.Add(this.txtActivityLog);
             this.grpGenerationEngine.Controls.Add(this.pnlEngineBottom);
             this.grpGenerationEngine.Controls.Add(this.pnlEngineHeader);
@@ -241,7 +240,7 @@
             this.grpGenerationEngine.Text = "Generation Engine";
             this.splitMain.Panel2.Controls.Add(this.grpGenerationEngine);
 
-            // Status header
+
             this.pnlEngineHeader.Controls.Add(this.lblEngineLabel);
             this.pnlEngineHeader.Controls.Add(this.lblEngineStatusDot);
             this.pnlEngineHeader.Dock = System.Windows.Forms.DockStyle.Top;
@@ -259,7 +258,7 @@
             this.lblEngineStatusDot.ForeColor = System.Drawing.Color.Silver;
             this.lblEngineStatusDot.Font = new System.Drawing.Font("Segoe UI", 11F, System.Drawing.FontStyle.Bold);
 
-            // Activity log
+
             this.txtActivityLog.BackColor = System.Drawing.Color.White;
             this.txtActivityLog.ForeColor = System.Drawing.SystemColors.WindowText;
             this.txtActivityLog.Dock = System.Windows.Forms.DockStyle.Fill;
@@ -270,7 +269,7 @@
             this.txtActivityLog.WordWrap = true;
             this.txtActivityLog.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
 
-            // Bottom bar with action buttons
+
             this.pnlEngineBottom.Controls.Add(this.btnGenerate);
             this.pnlEngineBottom.Controls.Add(this.btnADP);
             this.pnlEngineBottom.Controls.Add(this.btnGenerateTemplate);
@@ -280,7 +279,7 @@
             this.pnlEngineBottom.BackColor = System.Drawing.SystemColors.Control;
             this.pnlEngineBottom.Padding = new System.Windows.Forms.Padding(4, 6, 4, 4);
 
-            // IO button
+
             this.btnIO.Location = new System.Drawing.Point(8, 8);
             this.btnIO.Size = new System.Drawing.Size(70, 28);
             this.btnIO.Text = "IO";
@@ -288,7 +287,7 @@
             this.btnIO.FlatStyle = System.Windows.Forms.FlatStyle.System;
             this.btnIO.Click += new System.EventHandler(this.btnIO_Click);
 
-            // Generate Template button
+
             this.btnGenerateTemplate.Location = new System.Drawing.Point(84, 8);
             this.btnGenerateTemplate.Size = new System.Drawing.Size(140, 28);
             this.btnGenerateTemplate.Text = "Generate Template";
@@ -296,7 +295,7 @@
             this.btnGenerateTemplate.FlatStyle = System.Windows.Forms.FlatStyle.System;
             this.btnGenerateTemplate.Click += new System.EventHandler(this.btnGenerateTemplate_Click);
 
-            // ADP button
+
             this.btnADP.Location = new System.Drawing.Point(230, 8);
             this.btnADP.Size = new System.Drawing.Size(70, 28);
             this.btnADP.Text = "ADP";
@@ -304,7 +303,7 @@
             this.btnADP.FlatStyle = System.Windows.Forms.FlatStyle.System;
             this.btnADP.Click += new System.EventHandler(this.btnADP_Click);
 
-            // Generate button (right-aligned)
+
             this.btnGenerate.Anchor = System.Windows.Forms.AnchorStyles.Right | System.Windows.Forms.AnchorStyles.Top;
             this.btnGenerate.BackColor = System.Drawing.Color.FromArgb(0, 122, 204);
             this.btnGenerate.Enabled = false;
@@ -318,11 +317,11 @@
             this.btnGenerate.UseVisualStyleBackColor = false;
             this.btnGenerate.Click += new System.EventHandler(this.btnGenerate_Click);
 
-            // Status strip
+
             this.statusStrip.Items.AddRange(new System.Windows.Forms.ToolStripItem[] { this.lblStatus });
             this.lblStatus.Text = "Ready";
 
-            // Form
+
             this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 15F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(1400, 792);
