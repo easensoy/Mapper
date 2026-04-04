@@ -23,7 +23,7 @@
             ((System.ComponentModel.ISupportInitialize)(this.dgvLog)).BeginInit();
             this.SuspendLayout();
 
-            // btnClearLog
+
             this.btnClearLog.Dock = System.Windows.Forms.DockStyle.Top;
             this.btnClearLog.Height = 28;
             this.btnClearLog.Text = "Clear Log";
@@ -35,7 +35,7 @@
             this.btnClearLog.TabIndex = 0;
             this.btnClearLog.Click += new System.EventHandler(this.btnClearLog_Click);
 
-            // dgvLog
+
             this.dgvLog.AllowUserToAddRows = false;
             this.dgvLog.AllowUserToDeleteRows = false;
             this.dgvLog.BackgroundColor = System.Drawing.Color.FromArgb(30, 30, 30);
@@ -76,7 +76,7 @@
             this.colLogAction.ReadOnly = true;
             this.colLogAction.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill;
 
-            // Form
+
             this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 15F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.BackColor = System.Drawing.Color.FromArgb(30, 30, 30);
