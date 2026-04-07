@@ -677,7 +677,7 @@ namespace MapperUI
 
                 if (result.Success)
                 {
-                    var summary = $"Imported {result.ImportedCount} template(s). Build in EAE to register.";
+                    var summary = $"Imported {result.ImportedCount} template(s) into EAE.";
                     AppendActivity(summary);
                     lblStatus.Text = summary;
                     MessageBox.Show(summary, "Import Templates", MessageBoxButtons.OK, MessageBoxIcon.Information);
