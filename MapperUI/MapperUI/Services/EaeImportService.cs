@@ -33,14 +33,13 @@ namespace MapperUI.Services
         };
 
         [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hWnd);
-        [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
         [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
         [DllImport("user32.dll")] static extern void mouse_event(int f, int dx, int dy, int b, int e);
-        const int SW_RESTORE = 9;
         const int MOUSEEVENTF_LEFTDOWN = 0x02, MOUSEEVENTF_LEFTUP = 0x04;
         const int MOUSEEVENTF_RIGHTDOWN = 0x08, MOUSEEVENTF_RIGHTUP = 0x10;
 
         static Action<string>? _log;
+        static int _eaePid;
 
         static void Log(string msg)
         {
@@ -91,9 +90,9 @@ namespace MapperUI.Services
                 return result;
             }
 
-            Log($"Connected: {eaeProcess.MainWindowTitle}");
+            _eaePid = eaeProcess.Id;
+            Log($"Connected: {eaeProcess.MainWindowTitle} (PID {_eaePid})");
 
-            ShowWindow(hwnd, SW_RESTORE);
             SetForegroundWindow(hwnd);
             Thread.Sleep(500);
 
@@ -112,22 +111,20 @@ namespace MapperUI.Services
             {
                 var exportFile = exportFiles[i];
                 var fileName = Path.GetFileName(exportFile);
-                Log($"[{i + 1}/{exportFiles.Count}] Importing {fileName}...");
+                Log($"[{i + 1}/{exportFiles.Count}] {fileName}");
 
                 SetForegroundWindow(hwnd);
-                Thread.Sleep(300);
+                Thread.Sleep(200);
 
                 bool ok = DoImport(hwnd, projectNode, exportFile);
                 if (ok)
                 {
                     result.ImportedCount++;
-                    Log($"[{i + 1}/{exportFiles.Count}] Done: {fileName}");
                     Thread.Sleep(1500);
                 }
                 else
                 {
                     result.Warnings.Add($"Failed: {fileName}");
-                    Log($"[{i + 1}/{exportFiles.Count}] FAILED: {fileName}");
                 }
             }
 
@@ -140,73 +137,65 @@ namespace MapperUI.Services
             try
             {
                 var rect = projectNode.Current.BoundingRectangle;
-                if (rect.IsEmpty)
-                {
-                    Log("  Project node has no bounds — cannot click.");
-                    return false;
-                }
+                if (rect.IsEmpty) { Log("  No bounds on project node."); return false; }
 
                 int cx = (int)(rect.X + rect.Width / 3);
                 int cy = (int)(rect.Y + rect.Height / 2);
 
-                Log($"  Left-clicking project at ({cx}, {cy})...");
+                SetForegroundWindow(hwnd);
+                Thread.Sleep(150);
+
                 SetCursorPos(cx, cy);
-                Thread.Sleep(100);
+                Thread.Sleep(80);
                 mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
                 Thread.Sleep(30);
                 mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-                Thread.Sleep(300);
+                Thread.Sleep(250);
 
-                Log("  Right-clicking for context menu...");
+                SetForegroundWindow(hwnd);
+                Thread.Sleep(100);
+
                 mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0);
                 Thread.Sleep(50);
                 mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0);
-                Thread.Sleep(1000);
+                Thread.Sleep(800);
 
-                bool foundImport = TryClickImportInMenu();
+                SendKeys.SendWait("i");
+                Thread.Sleep(1500);
 
-                if (!foundImport)
+                var dialog = WaitForEaeDialog(6);
+                if (dialog == null)
                 {
-                    Log("  Import not found via UIAutomation. Trying keyboard 'I'...");
+                    Log("  No EAE dialog found after 'I'. Trying Shift+F10 then 'I'...");
+                    SendKeys.SendWait("{ESCAPE}");
+                    Thread.Sleep(300);
+
+                    SetForegroundWindow(hwnd);
+                    Thread.Sleep(100);
+                    SetCursorPos(cx, cy);
+                    Thread.Sleep(80);
+                    mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+                    Thread.Sleep(30);
+                    mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+                    Thread.Sleep(200);
+
+                    SendKeys.SendWait("+{F10}");
+                    Thread.Sleep(800);
                     SendKeys.SendWait("i");
-                    Thread.Sleep(500);
+                    Thread.Sleep(1500);
 
-                    foundImport = IsFileDialogOpen();
-                    if (!foundImport)
-                    {
-                        Log("  Keyboard 'I' didn't work. Trying 'p' then 'i'...");
-                        SendKeys.SendWait("{ESCAPE}");
-                        Thread.Sleep(300);
-
-                        mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0);
-                        Thread.Sleep(50);
-                        mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0);
-                        Thread.Sleep(1000);
-
-                        SendKeys.SendWait("p");
-                        Thread.Sleep(500);
-
-                        var menus2 = AutomationElement.RootElement.FindAll(TreeScope.Children,
-                            new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Menu));
-                        Log($"  Menus after 'p': {menus2.Count}");
-
-                        SendKeys.SendWait("i");
-                        Thread.Sleep(500);
-                        foundImport = IsFileDialogOpen();
-                    }
+                    dialog = WaitForEaeDialog(6);
                 }
 
-                if (!foundImport)
+                if (dialog == null)
                 {
-                    Log("  Could not trigger Import. Dismissing menu...");
-                    SendKeys.SendWait("{ESCAPE}");
-                    Thread.Sleep(200);
+                    Log("  No import dialog appeared.");
                     SendKeys.SendWait("{ESCAPE}");
                     return false;
                 }
 
-                Log("  File dialog detected. Filling path...");
-                return FillFileDialog(exportFilePath);
+                Log($"  Dialog: '{dialog.Current.Name}' (PID {dialog.Current.ProcessId})");
+                return FillDialog(dialog, exportFilePath);
             }
             catch (Exception ex)
             {
@@ -216,137 +205,91 @@ namespace MapperUI.Services
             }
         }
 
-        static bool TryClickImportInMenu()
+        static AutomationElement? WaitForEaeDialog(int maxSeconds)
         {
-            var menus = AutomationElement.RootElement.FindAll(TreeScope.Children,
-                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Menu));
-
-            Log($"  Found {menus.Count} menu(s).");
-
-            foreach (AutomationElement menu in menus)
+            for (int i = 0; i < maxSeconds * 4; i++)
             {
-                var items = menu.FindAll(TreeScope.Descendants,
-                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.MenuItem));
+                Thread.Sleep(250);
+                var windows = AutomationElement.RootElement.FindAll(TreeScope.Children,
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Window));
 
-                Log($"  Menu has {items.Count} item(s):");
-                foreach (AutomationElement item in items)
+                foreach (AutomationElement w in windows)
                 {
-                    Log($"    '{item.Current.Name}'");
+                    if (w.Current.ProcessId != _eaePid) continue;
 
-                    if (item.Current.Name.Equals("Import", StringComparison.OrdinalIgnoreCase))
+                    var name = w.Current.Name;
+                    var cls = w.Current.ClassName;
+
+                    if (cls == "#32770" ||
+                        name.Contains("Open", StringComparison.OrdinalIgnoreCase) ||
+                        name.Contains("Import", StringComparison.OrdinalIgnoreCase) ||
+                        name.Contains("Select", StringComparison.OrdinalIgnoreCase))
                     {
-                        Log("  Clicking 'Import'...");
-                        if (item.TryGetCurrentPattern(InvokePattern.Pattern, out var ip))
-                            ((InvokePattern)ip).Invoke();
-                        else
-                            ClickAt(item.Current.BoundingRectangle);
-
-                        Thread.Sleep(1000);
-                        return true;
+                        if (w.FindFirst(TreeScope.Descendants,
+                            new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit)) != null)
+                            return w;
                     }
                 }
-            }
-
-            var popups = AutomationElement.RootElement.FindAll(TreeScope.Children,
-                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Window));
-            Log($"  Top-level windows: {popups.Count}");
-            foreach (AutomationElement popup in popups)
-                Log($"    Window: '{popup.Current.Name}' class='{popup.Current.ClassName}'");
-
-            return false;
-        }
-
-        static bool IsFileDialogOpen()
-        {
-            return FindFileDialog() != null;
-        }
-
-        static bool FillFileDialog(string filePath)
-        {
-            for (int wait = 0; wait < 40; wait++)
-            {
-                Thread.Sleep(150);
-                var dialog = FindFileDialog();
-                if (dialog == null) continue;
-
-                Log($"  Dialog: '{dialog.Current.Name}'");
-
-                var edits = dialog.FindAll(TreeScope.Descendants,
-                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit));
-
-                AutomationElement? fileBox = null;
-                foreach (AutomationElement edit in edits)
-                {
-                    if (edit.Current.Name.Contains("name", StringComparison.OrdinalIgnoreCase))
-                    { fileBox = edit; break; }
-                }
-                if (fileBox == null && edits.Count > 0)
-                    fileBox = edits[edits.Count - 1];
-
-                if (fileBox == null) { Log("  No filename box found."); continue; }
-
-                if (fileBox.TryGetCurrentPattern(ValuePattern.Pattern, out var vp))
-                    ((ValuePattern)vp).SetValue(filePath);
-                else
-                {
-                    fileBox.SetFocus();
-                    Thread.Sleep(100);
-                    SendKeys.SendWait("^a");
-                    Thread.Sleep(50);
-                    SendKeys.SendWait(EscapeSendKeys(filePath));
-                }
-
-                Thread.Sleep(300);
-
-                var buttons = dialog.FindAll(TreeScope.Descendants,
-                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button));
-                foreach (AutomationElement btn in buttons)
-                {
-                    if (btn.Current.Name.Equals("Open", StringComparison.OrdinalIgnoreCase) ||
-                        btn.Current.Name.Equals("OK", StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (btn.TryGetCurrentPattern(InvokePattern.Pattern, out var ip))
-                            ((InvokePattern)ip).Invoke();
-                        else
-                            ClickAt(btn.Current.BoundingRectangle);
-                        Thread.Sleep(3000);
-                        return true;
-                    }
-                }
-
-                SendKeys.SendWait("{ENTER}");
-                Thread.Sleep(3000);
-                return true;
-            }
-
-            Log("  File dialog did not appear.");
-            return false;
-        }
-
-        static AutomationElement? FindFileDialog()
-        {
-            var windows = AutomationElement.RootElement.FindAll(TreeScope.Children,
-                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Window));
-            foreach (AutomationElement w in windows)
-            {
-                var name = w.Current.Name;
-                var cls = w.Current.ClassName;
-                if ((name.Contains("Open", StringComparison.OrdinalIgnoreCase) ||
-                     name.Contains("Import", StringComparison.OrdinalIgnoreCase) ||
-                     name.Contains("Select", StringComparison.OrdinalIgnoreCase) ||
-                     cls == "#32770") &&
-                    w.FindFirst(TreeScope.Descendants,
-                        new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit)) != null)
-                    return w;
             }
             return null;
+        }
+
+        static bool FillDialog(AutomationElement dialog, string filePath)
+        {
+            var edits = dialog.FindAll(TreeScope.Descendants,
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit));
+
+            AutomationElement? fileBox = null;
+            foreach (AutomationElement edit in edits)
+            {
+                if (edit.Current.Name.Contains("name", StringComparison.OrdinalIgnoreCase))
+                { fileBox = edit; break; }
+            }
+            if (fileBox == null && edits.Count > 0)
+                fileBox = edits[edits.Count - 1];
+
+            if (fileBox == null) { Log("  No filename box in dialog."); return false; }
+
+            if (fileBox.TryGetCurrentPattern(ValuePattern.Pattern, out var vp))
+                ((ValuePattern)vp).SetValue(filePath);
+            else
+            {
+                fileBox.SetFocus();
+                Thread.Sleep(100);
+                SendKeys.SendWait("^a");
+                Thread.Sleep(50);
+                SendKeys.SendWait(EscapeSendKeys(filePath));
+            }
+
+            Thread.Sleep(300);
+
+            var buttons = dialog.FindAll(TreeScope.Descendants,
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button));
+            foreach (AutomationElement btn in buttons)
+            {
+                if (btn.Current.Name.Equals("Open", StringComparison.OrdinalIgnoreCase) ||
+                    btn.Current.Name.Equals("OK", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (btn.TryGetCurrentPattern(InvokePattern.Pattern, out var ip))
+                        ((InvokePattern)ip).Invoke();
+                    else
+                        ClickAt(btn.Current.BoundingRectangle);
+                    Thread.Sleep(3000);
+                    Log("  Imported.");
+                    return true;
+                }
+            }
+
+            SendKeys.SendWait("{ENTER}");
+            Thread.Sleep(3000);
+            Log("  Imported (Enter).");
+            return true;
         }
 
         static AutomationElement? FindProjectNode(AutomationElement eaeWindow)
         {
             var trees = eaeWindow.FindAll(TreeScope.Descendants,
                 new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Tree));
-            Log($"Found {trees.Count} tree control(s).");
 
             foreach (AutomationElement tree in trees)
             {
@@ -355,10 +298,7 @@ namespace MapperUI.Services
 
                 foreach (AutomationElement item in topItems)
                 {
-                    var name = item.Current.Name;
-                    Log($"  Tree root: '{name}'");
-
-                    if (name.Contains("Solution", StringComparison.OrdinalIgnoreCase))
+                    if (item.Current.Name.Contains("Solution", StringComparison.OrdinalIgnoreCase))
                     {
                         if (item.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out var ecp))
                         {
@@ -373,7 +313,6 @@ namespace MapperUI.Services
 
                         foreach (AutomationElement child in children)
                         {
-                            Log($"    Child: '{child.Current.Name}'");
                             if (!child.Current.Name.Contains("Librar", StringComparison.OrdinalIgnoreCase))
                                 return child;
                         }
@@ -381,18 +320,6 @@ namespace MapperUI.Services
                     }
                 }
             }
-
-            Log("No Solution node found. Scanning all tree items...");
-            var allItems = eaeWindow.FindAll(TreeScope.Descendants,
-                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.TreeItem));
-            foreach (AutomationElement ti in allItems)
-            {
-                Log($"  TreeItem: '{ti.Current.Name}'");
-                if (ti.Current.Name.Contains("Demonstr", StringComparison.OrdinalIgnoreCase) ||
-                    ti.Current.Name.Contains("Station", StringComparison.OrdinalIgnoreCase))
-                    return ti;
-            }
-
             return null;
         }
 
