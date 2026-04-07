@@ -40,12 +40,20 @@ namespace MapperUI.Services
         const int MOUSEEVENTF_LEFTDOWN = 0x02, MOUSEEVENTF_LEFTUP = 0x04;
         const int MOUSEEVENTF_RIGHTDOWN = 0x08, MOUSEEVENTF_RIGHTUP = 0x10;
 
+        static Action<string>? _log;
+
+        static void Log(string msg)
+        {
+            _log?.Invoke(msg);
+            MapperLogger.Info(msg);
+        }
+
         public static EaeImportResult Import(MapperConfig cfg, List<VueOneComponent> components,
             Action<string>? onProgress = null)
         {
+            _log = onProgress;
             var result = new EaeImportResult();
             var libPath = cfg.TemplateLibraryPath;
-            void Log(string msg) { onProgress?.Invoke(msg); MapperLogger.Info(msg); }
 
             if (string.IsNullOrWhiteSpace(libPath) || !Directory.Exists(libPath))
                 throw new DirectoryNotFoundException($"Template Library not found: {libPath}");
@@ -72,7 +80,7 @@ namespace MapperUI.Services
             var eaeProcess = FindEaeProcess();
             if (eaeProcess == null)
             {
-                result.Warnings.Add("EAE is not running. Start EAE with a project open and try again.");
+                result.Warnings.Add("EAE is not running.");
                 return result;
             }
 
@@ -83,7 +91,7 @@ namespace MapperUI.Services
                 return result;
             }
 
-            Log($"Connected to EAE: {eaeProcess.MainWindowTitle}");
+            Log($"Connected: {eaeProcess.MainWindowTitle}");
 
             ShowWindow(hwnd, SW_RESTORE);
             SetForegroundWindow(hwnd);
@@ -94,12 +102,11 @@ namespace MapperUI.Services
 
             if (projectNode == null)
             {
-                result.Warnings.Add("Could not find project node in EAE Solution Explorer.");
-                DumpTree(eaeWindow);
+                result.Warnings.Add("Could not find project node in EAE.");
                 return result;
             }
 
-            Log($"Found project: {projectNode.Current.Name}");
+            Log($"Project node: '{projectNode.Current.Name}'");
 
             for (int i = 0; i < exportFiles.Count; i++)
             {
@@ -110,11 +117,11 @@ namespace MapperUI.Services
                 SetForegroundWindow(hwnd);
                 Thread.Sleep(300);
 
-                bool ok = DoImport(projectNode, exportFile);
+                bool ok = DoImport(hwnd, projectNode, exportFile);
                 if (ok)
                 {
                     result.ImportedCount++;
-                    Log($"[{i + 1}/{exportFiles.Count}] {fileName} imported.");
+                    Log($"[{i + 1}/{exportFiles.Count}] Done: {fileName}");
                     Thread.Sleep(1500);
                 }
                 else
@@ -128,81 +135,130 @@ namespace MapperUI.Services
             return result;
         }
 
-        static bool DoImport(AutomationElement projectNode, string exportFilePath)
+        static bool DoImport(IntPtr hwnd, AutomationElement projectNode, string exportFilePath)
         {
             try
             {
-                if (projectNode.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var sp))
-                    ((SelectionItemPattern)sp).Select();
-
-                projectNode.SetFocus();
-                Thread.Sleep(300);
-
                 var rect = projectNode.Current.BoundingRectangle;
                 if (rect.IsEmpty)
                 {
-                    MapperLogger.Warn("[Import] Project node bounding rect is empty.");
+                    Log("  Project node has no bounds — cannot click.");
                     return false;
                 }
 
                 int cx = (int)(rect.X + rect.Width / 3);
                 int cy = (int)(rect.Y + rect.Height / 2);
 
+                Log($"  Left-clicking project at ({cx}, {cy})...");
                 SetCursorPos(cx, cy);
                 Thread.Sleep(100);
                 mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
                 Thread.Sleep(30);
                 mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-                Thread.Sleep(200);
+                Thread.Sleep(300);
 
-                SendKeys.SendWait("+{F10}");
-                Thread.Sleep(800);
+                Log("  Right-clicking for context menu...");
+                mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0);
+                Thread.Sleep(50);
+                mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0);
+                Thread.Sleep(1000);
 
-                bool foundImport = false;
-                var menus = AutomationElement.RootElement.FindAll(TreeScope.Children,
-                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Menu));
+                bool foundImport = TryClickImportInMenu();
 
-                foreach (AutomationElement menu in menus)
+                if (!foundImport)
                 {
-                    var items = menu.FindAll(TreeScope.Descendants,
-                        new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.MenuItem));
+                    Log("  Import not found via UIAutomation. Trying keyboard 'I'...");
+                    SendKeys.SendWait("i");
+                    Thread.Sleep(500);
 
-                    foreach (AutomationElement item in items)
+                    foundImport = IsFileDialogOpen();
+                    if (!foundImport)
                     {
-                        var name = item.Current.Name;
-                        MapperLogger.Info($"[Import] Context menu item: '{name}'");
+                        Log("  Keyboard 'I' didn't work. Trying 'p' then 'i'...");
+                        SendKeys.SendWait("{ESCAPE}");
+                        Thread.Sleep(300);
 
-                        if (name.Equals("Import", StringComparison.OrdinalIgnoreCase) ||
-                            name.StartsWith("Import", StringComparison.OrdinalIgnoreCase))
-                        {
-                            if (item.TryGetCurrentPattern(InvokePattern.Pattern, out var ip))
-                                ((InvokePattern)ip).Invoke();
-                            else
-                                ClickAt(item.Current.BoundingRectangle);
+                        mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0);
+                        Thread.Sleep(50);
+                        mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0);
+                        Thread.Sleep(1000);
 
-                            foundImport = true;
-                            break;
-                        }
+                        SendKeys.SendWait("p");
+                        Thread.Sleep(500);
+
+                        var menus2 = AutomationElement.RootElement.FindAll(TreeScope.Children,
+                            new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Menu));
+                        Log($"  Menus after 'p': {menus2.Count}");
+
+                        SendKeys.SendWait("i");
+                        Thread.Sleep(500);
+                        foundImport = IsFileDialogOpen();
                     }
-                    if (foundImport) break;
                 }
 
                 if (!foundImport)
                 {
-                    MapperLogger.Warn("[Import] 'Import' not found in context menu.");
+                    Log("  Could not trigger Import. Dismissing menu...");
+                    SendKeys.SendWait("{ESCAPE}");
+                    Thread.Sleep(200);
                     SendKeys.SendWait("{ESCAPE}");
                     return false;
                 }
 
-                Thread.Sleep(1000);
+                Log("  File dialog detected. Filling path...");
                 return FillFileDialog(exportFilePath);
             }
             catch (Exception ex)
             {
-                MapperLogger.Error($"[Import] {ex.Message}");
+                Log($"  Error: {ex.Message}");
                 try { SendKeys.SendWait("{ESCAPE}"); } catch { }
                 return false;
             }
+        }
+
+        static bool TryClickImportInMenu()
+        {
+            var menus = AutomationElement.RootElement.FindAll(TreeScope.Children,
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Menu));
+
+            Log($"  Found {menus.Count} menu(s).");
+
+            foreach (AutomationElement menu in menus)
+            {
+                var items = menu.FindAll(TreeScope.Descendants,
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.MenuItem));
+
+                Log($"  Menu has {items.Count} item(s):");
+                foreach (AutomationElement item in items)
+                {
+                    Log($"    '{item.Current.Name}'");
+
+                    if (item.Current.Name.Equals("Import", StringComparison.OrdinalIgnoreCase))
+                    {
+                        Log("  Clicking 'Import'...");
+                        if (item.TryGetCurrentPattern(InvokePattern.Pattern, out var ip))
+                            ((InvokePattern)ip).Invoke();
+                        else
+                            ClickAt(item.Current.BoundingRectangle);
+
+                        Thread.Sleep(1000);
+                        return true;
+                    }
+                }
+            }
+
+            var popups = AutomationElement.RootElement.FindAll(TreeScope.Children,
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Window));
+            Log($"  Top-level windows: {popups.Count}");
+            foreach (AutomationElement popup in popups)
+                Log($"    Window: '{popup.Current.Name}' class='{popup.Current.ClassName}'");
+
+            return false;
+        }
+
+        static bool IsFileDialogOpen()
+        {
+            return FindFileDialog() != null;
         }
 
         static bool FillFileDialog(string filePath)
@@ -213,7 +269,7 @@ namespace MapperUI.Services
                 var dialog = FindFileDialog();
                 if (dialog == null) continue;
 
-                MapperLogger.Info($"[Import] Dialog found: '{dialog.Current.Name}'");
+                Log($"  Dialog: '{dialog.Current.Name}'");
 
                 var edits = dialog.FindAll(TreeScope.Descendants,
                     new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit));
@@ -221,17 +277,13 @@ namespace MapperUI.Services
                 AutomationElement? fileBox = null;
                 foreach (AutomationElement edit in edits)
                 {
-                    if (edit.Current.Name.Contains("name", StringComparison.OrdinalIgnoreCase) ||
-                        edit.Current.Name.Contains("Name", StringComparison.OrdinalIgnoreCase))
-                    {
-                        fileBox = edit;
-                        break;
-                    }
+                    if (edit.Current.Name.Contains("name", StringComparison.OrdinalIgnoreCase))
+                    { fileBox = edit; break; }
                 }
                 if (fileBox == null && edits.Count > 0)
                     fileBox = edits[edits.Count - 1];
 
-                if (fileBox == null) continue;
+                if (fileBox == null) { Log("  No filename box found."); continue; }
 
                 if (fileBox.TryGetCurrentPattern(ValuePattern.Pattern, out var vp))
                     ((ValuePattern)vp).SetValue(filePath);
@@ -248,7 +300,6 @@ namespace MapperUI.Services
 
                 var buttons = dialog.FindAll(TreeScope.Descendants,
                     new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button));
-
                 foreach (AutomationElement btn in buttons)
                 {
                     if (btn.Current.Name.Equals("Open", StringComparison.OrdinalIgnoreCase) ||
@@ -258,7 +309,6 @@ namespace MapperUI.Services
                             ((InvokePattern)ip).Invoke();
                         else
                             ClickAt(btn.Current.BoundingRectangle);
-
                         Thread.Sleep(3000);
                         return true;
                     }
@@ -269,7 +319,7 @@ namespace MapperUI.Services
                 return true;
             }
 
-            MapperLogger.Warn("[Import] File dialog did not appear.");
+            Log("  File dialog did not appear.");
             return false;
         }
 
@@ -277,7 +327,6 @@ namespace MapperUI.Services
         {
             var windows = AutomationElement.RootElement.FindAll(TreeScope.Children,
                 new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Window));
-
             foreach (AutomationElement w in windows)
             {
                 var name = w.Current.Name;
@@ -297,8 +346,7 @@ namespace MapperUI.Services
         {
             var trees = eaeWindow.FindAll(TreeScope.Descendants,
                 new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Tree));
-
-            MapperLogger.Info($"[Import] Found {trees.Count} tree control(s) in EAE.");
+            Log($"Found {trees.Count} tree control(s).");
 
             foreach (AutomationElement tree in trees)
             {
@@ -308,12 +356,16 @@ namespace MapperUI.Services
                 foreach (AutomationElement item in topItems)
                 {
                     var name = item.Current.Name;
-                    MapperLogger.Info($"[Import] Top-level tree item: '{name}'");
+                    Log($"  Tree root: '{name}'");
 
                     if (name.Contains("Solution", StringComparison.OrdinalIgnoreCase))
                     {
                         if (item.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out var ecp))
-                            ((ExpandCollapsePattern)ecp).Expand();
+                        {
+                            var state = ((ExpandCollapsePattern)ecp).Current.ExpandCollapseState;
+                            if (state == ExpandCollapseState.Collapsed)
+                                ((ExpandCollapsePattern)ecp).Expand();
+                        }
                         Thread.Sleep(300);
 
                         var children = item.FindAll(TreeScope.Children,
@@ -321,23 +373,21 @@ namespace MapperUI.Services
 
                         foreach (AutomationElement child in children)
                         {
-                            MapperLogger.Info($"[Import] Child: '{child.Current.Name}'");
-                            if (!child.Current.Name.Contains("Libraries", StringComparison.OrdinalIgnoreCase) &&
-                                !child.Current.Name.Contains("Library", StringComparison.OrdinalIgnoreCase))
+                            Log($"    Child: '{child.Current.Name}'");
+                            if (!child.Current.Name.Contains("Librar", StringComparison.OrdinalIgnoreCase))
                                 return child;
                         }
-
                         return item;
                     }
                 }
             }
 
-            var allTreeItems = eaeWindow.FindAll(TreeScope.Descendants,
+            Log("No Solution node found. Scanning all tree items...");
+            var allItems = eaeWindow.FindAll(TreeScope.Descendants,
                 new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.TreeItem));
-            MapperLogger.Info($"[Import] Total tree items found: {allTreeItems.Count}");
-            foreach (AutomationElement ti in allTreeItems)
+            foreach (AutomationElement ti in allItems)
             {
-                MapperLogger.Info($"[Import] TreeItem: '{ti.Current.Name}' class='{ti.Current.ClassName}'");
+                Log($"  TreeItem: '{ti.Current.Name}'");
                 if (ti.Current.Name.Contains("Demonstr", StringComparison.OrdinalIgnoreCase) ||
                     ti.Current.Name.Contains("Station", StringComparison.OrdinalIgnoreCase))
                     return ti;
@@ -346,26 +396,10 @@ namespace MapperUI.Services
             return null;
         }
 
-        static void DumpTree(AutomationElement root)
-        {
-            try
-            {
-                var all = root.FindAll(TreeScope.Children, Condition.TrueCondition);
-                foreach (AutomationElement el in all)
-                {
-                    MapperLogger.Info($"[Dump] {el.Current.ControlType.ProgrammaticName} " +
-                        $"name='{el.Current.Name}' class='{el.Current.ClassName}'");
-                }
-            }
-            catch { }
-        }
-
         static void ClickAt(System.Windows.Rect rect)
         {
             if (rect.IsEmpty) return;
-            int x = (int)(rect.X + rect.Width / 2);
-            int y = (int)(rect.Y + rect.Height / 2);
-            SetCursorPos(x, y);
+            SetCursorPos((int)(rect.X + rect.Width / 2), (int)(rect.Y + rect.Height / 2));
             Thread.Sleep(50);
             mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
             Thread.Sleep(30);
@@ -398,7 +432,6 @@ namespace MapperUI.Services
         {
             var files = new List<string>();
             int step = 1;
-
             foreach (var basic in neededBasics.OrderBy(b => b))
             {
                 var zip = FindPackage(libPath, "Basic", basic, ".Basic");
@@ -410,7 +443,6 @@ namespace MapperUI.Services
                 if (ef != null) files.Add(ef);
                 step++;
             }
-
             foreach (var cat in neededCats.OrderBy(c => c))
             {
                 var zip = FindPackage(libPath, "CAT", cat, ".cat");
@@ -422,7 +454,6 @@ namespace MapperUI.Services
                 if (ef != null) files.Add(ef);
                 step++;
             }
-
             return files;
         }
 
