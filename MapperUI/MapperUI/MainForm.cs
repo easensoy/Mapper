@@ -677,10 +677,10 @@ namespace MapperUI
 
                 if (result.Success)
                 {
-                    var summary = $"Deployed {result.ImportedCount} template(s). Reload Solution in EAE.";
+                    var summary = $"Imported {result.ImportedCount} template(s). Build in EAE to register.";
                     AppendActivity(summary);
                     lblStatus.Text = summary;
-                    MessageBox.Show(summary, "Import CAT", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show(summary, "Import Templates", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 else
                 {
