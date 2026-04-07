@@ -666,25 +666,27 @@ namespace MapperUI
             }
 
             btnImportCAT.Enabled = false;
+            lblStatus.Text = "Importing templates into EAE...";
             try
             {
                 var cfg = Cfg();
-                AppendActivity($"Importing {toImport.Count} component template(s) into EAE...");
+                AppendActivity("Importing templates into EAE. Please wait...");
 
-                var result = await Task.Run(() => EaeImportService.Import(cfg, toImport));
+                var result = await Task.Run(() =>
+                    EaeImportService.Import(cfg, toImport, msg => Invoke(() => AppendActivity(msg))));
 
                 if (result.Success)
                 {
-                    AppendActivity($"Imported {result.ImportedCount}/{result.ImportFiles.Count} template(s) via EAE automation.");
-                    lblStatus.Text = $"Imported {result.ImportedCount} template(s) into EAE.";
-                    MessageBox.Show(
-                        $"Imported {result.ImportedCount} template(s) into EAE.",
-                        "Import CAT", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    var summary = $"Imported {result.ImportedCount}/{result.ImportFiles.Count} template(s).";
+                    AppendActivity(summary);
+                    lblStatus.Text = summary;
+                    MessageBox.Show(summary, "Import CAT", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 else
                 {
                     var warns = string.Join("\n", result.Warnings);
                     ShowError($"Import failed:\n{warns}");
+                    lblStatus.Text = "Import failed.";
                 }
             }
             catch (Exception ex) { ShowError(ex.Message); }
