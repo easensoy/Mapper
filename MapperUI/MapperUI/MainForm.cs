@@ -310,6 +310,7 @@ namespace MapperUI
             btnGenerateCode.Enabled = false;
             btnGenerate.Enabled = false;
             btnGenerateSevenState.Enabled = false;
+            btnImportCAT.Enabled = false;
             txtActivityLog.Clear();
             lblStatus.Text = "Loading\u2026";
 
@@ -368,6 +369,8 @@ namespace MapperUI
                 lblStatus.Text = ok ? "Validation passed." : "Validation failed.";
                 btnGenerateCode.Enabled = ok && _validationRows.Any(r => r.IsValid && _allowedInstances.Contains(r.Component.Name));
                 btnGenerateSevenState.Enabled = ok && _loadedComponents.Any(c => c.Type == "Actuator" && c.States.Count == 7);
+                btnImportCAT.Enabled = ok && _loadedComponents.Any(c =>
+                    c.Type == "Actuator" || c.Type == "Sensor");
 
                 var noTemplate = _validationRows
                     .Where(r => r.TemplateName.StartsWith("No template found"))
@@ -647,6 +650,51 @@ namespace MapperUI
                 MessageBox.Show(result, "FBs Generated", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex) { ShowError(ex.Message); }
+        }
+
+        async void btnImportCAT_Click(object sender, EventArgs e)
+        {
+            var toImport = _loadedComponents
+                .Where(c => c.Type == "Actuator" || c.Type == "Sensor")
+                .ToList();
+
+            if (toImport.Count == 0)
+            {
+                MessageBox.Show("No actuator or sensor components to import.", "Nothing to Import",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            btnImportCAT.Enabled = false;
+            try
+            {
+                var cfg = Cfg();
+                AppendActivity($"Staging {toImport.Count} component template(s) for EAE import...");
+
+                var result = await Task.Run(() => EaeImportService.Import(cfg, toImport));
+
+                if (result.Success)
+                {
+                    AppendActivity($"Staged {result.ImportFiles.Count} .export file(s) at: {result.StagingDirectory}");
+                    AppendActivity("Import order:");
+                    foreach (var f in result.ImportFiles)
+                        AppendActivity($"  {Path.GetFileName(f)}");
+
+                    lblStatus.Text = $"Staged {result.ImportFiles.Count} template(s). Import in EAE via right-click > Import.";
+                    MessageBox.Show(
+                        $"Staged {result.ImportFiles.Count} template(s) for import.\n\n" +
+                        "The staging folder is now open.\n" +
+                        "In EAE: right-click project > Import > select each .export file in order.",
+                        "Import CAT", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                else
+                {
+                    var warns = string.Join("\n", result.Warnings);
+                    ShowError($"Import staging failed:\n{warns}");
+                }
+            }
+            catch (Exception ex) { ShowError(ex.Message); }
+            finally { btnImportCAT.Enabled = true; }
         }
 
         void dgvComponents_SelectionChanged(object sender, EventArgs e) { }
