@@ -32,35 +32,8 @@ namespace MapperUI.Services
         };
 
         [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hWnd);
-        [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
-        [DllImport("user32.dll")] static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
-        [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
-
-        [StructLayout(LayoutKind.Sequential)]
-        struct INPUT { public int type; public INPUTUNION u; }
-
-        [StructLayout(LayoutKind.Explicit)]
-        struct INPUTUNION
-        {
-            [FieldOffset(0)] public MOUSEINPUT mi;
-            [FieldOffset(0)] public KEYBDINPUT ki;
-        }
-
-        [StructLayout(LayoutKind.Sequential)]
-        struct MOUSEINPUT { public int dx, dy; public uint mouseData; public uint dwFlags; public uint time; public IntPtr dwExtraInfo; }
-
-        [StructLayout(LayoutKind.Sequential)]
-        struct KEYBDINPUT { public ushort wVk; public ushort wScan; public uint dwFlags; public uint time; public IntPtr dwExtraInfo; }
-
-        const int INPUT_MOUSE = 0, INPUT_KEYBOARD = 1;
-        const uint MOUSEEVENTF_LEFTDOWN = 0x02, MOUSEEVENTF_LEFTUP = 0x04;
-        const uint MOUSEEVENTF_RIGHTDOWN = 0x08, MOUSEEVENTF_RIGHTUP = 0x10;
-        const uint MOUSEEVENTF_ABSOLUTE = 0x8000, MOUSEEVENTF_MOVE = 0x0001;
-        const uint KEYEVENTF_KEYUP = 0x0002;
 
         static Action<string>? _log;
-        static int _eaePid;
-
         static void Log(string msg) { _log?.Invoke(msg); MapperLogger.Info(msg); }
 
         public static EaeImportResult Import(MapperConfig cfg, List<VueOneComponent> components,
@@ -73,313 +46,204 @@ namespace MapperUI.Services
             if (string.IsNullOrWhiteSpace(libPath) || !Directory.Exists(libPath))
                 throw new DirectoryNotFoundException($"Template Library not found: {libPath}");
 
-            Log("Preparing templates...");
-            var stagingDir = Path.Combine(Path.GetTempPath(), "VueOneMapper_Import");
-            if (Directory.Exists(stagingDir)) Directory.Delete(stagingDir, true);
-            Directory.CreateDirectory(stagingDir);
+            var eaeProjectDir = DeriveEaeProjectDir(cfg);
+            if (string.IsNullOrWhiteSpace(eaeProjectDir))
+                throw new InvalidOperationException("Cannot determine EAE project directory.");
+
+            var eaeProcess = FindEaeProcess();
+            int eaePid = eaeProcess?.Id ?? 0;
 
             var neededCats = ResolveNeededCats(components);
             var neededBasics = ResolveNeededBasics(neededCats);
-            var exportFiles = StageExportFiles(libPath, stagingDir, neededBasics, neededCats, result);
 
-            if (exportFiles.Count == 0) { result.Warnings.Add("No templates found."); return result; }
+            var iec61499Dir = Path.Combine(eaeProjectDir, "IEC61499");
+            var dfbproj = Directory.GetFiles(iec61499Dir, "*.dfbproj").FirstOrDefault();
 
-            result.ImportFiles = exportFiles;
+            var reloadWatcher = eaePid > 0
+                ? StartReloadWatcher(eaePid)
+                : null;
 
-            var eaeProcess = FindEaeProcess();
-            if (eaeProcess == null) { result.Warnings.Add("EAE is not running."); return result; }
+            Log("Deploying templates...");
 
-            var hwnd = eaeProcess.MainWindowHandle;
-            if (hwnd == IntPtr.Zero) { result.Warnings.Add("EAE window not found."); return result; }
-
-            _eaePid = eaeProcess.Id;
-            Log($"EAE found (PID {_eaePid})");
-
-            SetForegroundWindow(hwnd);
-            Thread.Sleep(500);
-
-            var eaeWindow = AutomationElement.FromHandle(hwnd);
-            var projectNode = FindProjectNode(eaeWindow);
-            if (projectNode == null) { result.Warnings.Add("Project node not found."); return result; }
-
-            Log($"Project: '{projectNode.Current.Name}'");
-
-            for (int i = 0; i < exportFiles.Count; i++)
+            foreach (var basic in neededBasics.OrderBy(b => b))
             {
-                var exportFile = exportFiles[i];
-                var fileName = Path.GetFileName(exportFile);
-                Log($"[{i + 1}/{exportFiles.Count}] {fileName}");
+                var zipPath = FindPackage(libPath, "Basic", basic, ".Basic");
+                if (zipPath == null) { result.Warnings.Add($"Basic not found: {basic}"); continue; }
 
-                bool ok = ImportOneFile(hwnd, projectNode, exportFile);
-                if (ok)
-                    result.ImportedCount++;
-                else
-                    result.Warnings.Add($"Failed: {fileName}");
+                ExtractToProject(zipPath, eaeProjectDir);
+                if (dfbproj != null)
+                    DfbprojRegistrar.RegisterBasicFb(dfbproj, basic + ".fbt");
+                result.ImportedCount++;
+                Log($"  Basic: {basic}");
+            }
+
+            foreach (var cat in neededCats.OrderBy(c => c))
+            {
+                var zipPath = FindPackage(libPath, "CAT", cat, ".cat");
+                if (zipPath == null) { result.Warnings.Add($"CAT not found: {cat}"); continue; }
+
+                ExtractToProject(zipPath, eaeProjectDir);
+                GenerateCfgFile(iec61499Dir, cat);
+                if (dfbproj != null)
+                    DfbprojRegistrar.RegisterCat(dfbproj, cat);
+                result.ImportedCount++;
+                Log($"  CAT: {cat}");
+            }
+
+            if (dfbproj != null)
+                File.SetLastWriteTime(dfbproj, DateTime.Now);
+
+            if (eaePid > 0)
+            {
+                Log("Waiting for EAE to detect changes...");
+                SetForegroundWindow(eaeProcess!.MainWindowHandle);
+                Thread.Sleep(2000);
+
+                if (reloadWatcher != null)
+                {
+                    reloadWatcher.Join(TimeSpan.FromSeconds(10));
+                    Log("EAE reload handled.");
+                }
             }
 
             result.Success = result.ImportedCount > 0;
             if (result.Success)
-                Log($"Imported {result.ImportedCount}/{exportFiles.Count} template(s).");
+                Log($"Done. {result.ImportedCount} template(s) deployed.");
             return result;
         }
 
-        static bool ImportOneFile(IntPtr hwnd, AutomationElement projectNode, string exportFilePath)
+        static Thread StartReloadWatcher(int eaePid)
         {
-            try
+            var thread = new Thread(() => WatchForReloadDialog(eaePid))
             {
-                var rect = projectNode.Current.BoundingRectangle;
-                if (rect.IsEmpty) return false;
-
-                int sx = (int)(rect.X + rect.Width / 3);
-                int sy = (int)(rect.Y + rect.Height / 2);
-
-                SetForegroundWindow(hwnd);
-                Thread.Sleep(200);
-
-                MouseClick(sx, sy, false);
-                Thread.Sleep(300);
-
-                MouseClick(sx, sy, true);
-                Thread.Sleep(1000);
-
-                Log("  Context menu opened. Sending 'I'...");
-                KeyPress(0x49);
-                Thread.Sleep(2000);
-
-                var dialog = WaitForEaeDialog(10);
-                if (dialog == null)
-                {
-                    Log("  No dialog from EAE. Retrying with Applications key...");
-                    KeyPress(0x5D);
-                    Thread.Sleep(1000);
-                    KeyPress(0x49);
-                    Thread.Sleep(2000);
-                    dialog = WaitForEaeDialog(10);
-                }
-
-                if (dialog == null)
-                {
-                    Log("  Import dialog not found.");
-                    KeyPress(0x1B);
-                    return false;
-                }
-
-                Log($"  Dialog: '{dialog.Current.Name}'");
-                return FillDialog(dialog, exportFilePath);
-            }
-            catch (Exception ex)
-            {
-                Log($"  Error: {ex.Message}");
-                KeyPress(0x1B);
-                return false;
-            }
+                IsBackground = true,
+                Name = "EAE-Reload-Watcher"
+            };
+            thread.Start();
+            return thread;
         }
 
-        static void MouseClick(int screenX, int screenY, bool rightButton)
+        static void WatchForReloadDialog(int eaePid)
         {
-            SetCursorPos(screenX, screenY);
-            Thread.Sleep(50);
-
-            uint downFlag = rightButton ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_LEFTDOWN;
-            uint upFlag = rightButton ? MOUSEEVENTF_RIGHTUP : MOUSEEVENTF_LEFTUP;
-
-            var inputs = new INPUT[2];
-            inputs[0].type = INPUT_MOUSE;
-            inputs[0].u.mi.dwFlags = downFlag;
-            inputs[1].type = INPUT_MOUSE;
-            inputs[1].u.mi.dwFlags = upFlag;
-            SendInput(2, inputs, Marshal.SizeOf<INPUT>());
-        }
-
-        static void KeyPress(ushort vk)
-        {
-            var inputs = new INPUT[2];
-            inputs[0].type = INPUT_KEYBOARD;
-            inputs[0].u.ki.wVk = vk;
-            inputs[1].type = INPUT_KEYBOARD;
-            inputs[1].u.ki.wVk = vk;
-            inputs[1].u.ki.dwFlags = KEYEVENTF_KEYUP;
-            SendInput(2, inputs, Marshal.SizeOf<INPUT>());
-        }
-
-        static void TypeString(string text)
-        {
-            foreach (char c in text)
+            for (int i = 0; i < 60; i++)
             {
-                var inputs = new INPUT[2];
-                inputs[0].type = INPUT_KEYBOARD;
-                inputs[0].u.ki.wVk = 0;
-                inputs[0].u.ki.wScan = (ushort)c;
-                inputs[0].u.ki.dwFlags = 0x04;
-                inputs[1].type = INPUT_KEYBOARD;
-                inputs[1].u.ki.wVk = 0;
-                inputs[1].u.ki.wScan = (ushort)c;
-                inputs[1].u.ki.dwFlags = 0x04 | KEYEVENTF_KEYUP;
-                SendInput(2, inputs, Marshal.SizeOf<INPUT>());
-                Thread.Sleep(5);
-            }
-        }
-
-        static AutomationElement? WaitForEaeDialog(int maxSeconds)
-        {
-            for (int i = 0; i < maxSeconds * 4; i++)
-            {
-                Thread.Sleep(250);
-                var windows = AutomationElement.RootElement.FindAll(TreeScope.Children,
-                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Window));
-
-                foreach (AutomationElement w in windows)
-                {
-                    if (w.Current.ProcessId != _eaePid) continue;
-
-                    var name = w.Current.Name;
-                    var cls = w.Current.ClassName;
-
-                    if (cls == "#32770" ||
-                        name.Contains("Open", StringComparison.OrdinalIgnoreCase) ||
-                        name.Contains("Import", StringComparison.OrdinalIgnoreCase) ||
-                        name.Contains("Select", StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (w.FindFirst(TreeScope.Descendants,
-                            new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit)) != null)
-                            return w;
-                    }
-                }
-            }
-            return null;
-        }
-
-        static bool FillDialog(AutomationElement dialog, string filePath)
-        {
-            var edits = dialog.FindAll(TreeScope.Descendants,
-                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit));
-
-            AutomationElement? fileBox = null;
-            foreach (AutomationElement edit in edits)
-            {
-                if (edit.Current.Name.Contains("name", StringComparison.OrdinalIgnoreCase))
-                { fileBox = edit; break; }
-            }
-            if (fileBox == null && edits.Count > 0)
-                fileBox = edits[edits.Count - 1];
-            if (fileBox == null) { Log("  No filename box."); return false; }
-
-            if (fileBox.TryGetCurrentPattern(ValuePattern.Pattern, out var vp))
-                ((ValuePattern)vp).SetValue(filePath);
-            else
-            {
-                fileBox.SetFocus();
-                Thread.Sleep(100);
-                KeyPress(0x41 | 0x00);
-                TypeString(filePath);
-            }
-
-            Thread.Sleep(300);
-
-            var buttons = dialog.FindAll(TreeScope.Descendants,
-                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button));
-            foreach (AutomationElement btn in buttons)
-            {
-                if (btn.Current.Name.Equals("Open", StringComparison.OrdinalIgnoreCase) ||
-                    btn.Current.Name.Equals("OK", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (btn.TryGetCurrentPattern(InvokePattern.Pattern, out var ip))
-                        ((InvokePattern)ip).Invoke();
-                    else
-                    {
-                        var r = btn.Current.BoundingRectangle;
-                        MouseClick((int)(r.X + r.Width / 2), (int)(r.Y + r.Height / 2), false);
-                    }
-                    Thread.Sleep(3000);
-                    Log("  Imported.");
-                    return true;
-                }
-            }
-
-            KeyPress(0x0D);
-            Thread.Sleep(3000);
-            Log("  Imported (Enter).");
-            return true;
-        }
-
-        static AutomationElement? FindProjectNode(AutomationElement eaeWindow)
-        {
-            var trees = eaeWindow.FindAll(TreeScope.Descendants,
-                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Tree));
-
-            foreach (AutomationElement tree in trees)
-            {
-                var topItems = tree.FindAll(TreeScope.Children,
-                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.TreeItem));
-
-                foreach (AutomationElement item in topItems)
-                {
-                    if (item.Current.Name.Contains("Solution", StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (item.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out var ecp))
-                        {
-                            var state = ((ExpandCollapsePattern)ecp).Current.ExpandCollapseState;
-                            if (state == ExpandCollapseState.Collapsed)
-                                ((ExpandCollapsePattern)ecp).Expand();
-                        }
-                        Thread.Sleep(300);
-
-                        var children = item.FindAll(TreeScope.Children,
-                            new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.TreeItem));
-
-                        foreach (AutomationElement child in children)
-                            if (!child.Current.Name.Contains("Librar", StringComparison.OrdinalIgnoreCase))
-                                return child;
-                        return item;
-                    }
-                }
-            }
-            return null;
-        }
-
-        static Process? FindEaeProcess()
-        {
-            foreach (var proc in Process.GetProcesses())
-            {
+                Thread.Sleep(500);
                 try
                 {
-                    if (!string.IsNullOrEmpty(proc.MainWindowTitle) &&
-                        proc.MainWindowTitle.Contains("Automation Expert", StringComparison.OrdinalIgnoreCase))
-                        return proc;
+                    var windows = AutomationElement.RootElement.FindAll(TreeScope.Children,
+                        new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Window));
+
+                    foreach (AutomationElement w in windows)
+                    {
+                        if (w.Current.ProcessId != eaePid) continue;
+
+                        var name = w.Current.Name ?? "";
+                        var cls = w.Current.ClassName ?? "";
+
+                        if (cls == "#32770" ||
+                            name.Contains("Reload", StringComparison.OrdinalIgnoreCase) ||
+                            name.Contains("modified", StringComparison.OrdinalIgnoreCase) ||
+                            name.Contains("changed", StringComparison.OrdinalIgnoreCase) ||
+                            name.Contains("EcoStruxure", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var buttons = w.FindAll(TreeScope.Descendants,
+                                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button));
+
+                            foreach (AutomationElement btn in buttons)
+                            {
+                                var btnName = btn.Current.Name ?? "";
+                                if (btnName.Contains("Reload", StringComparison.OrdinalIgnoreCase) ||
+                                    btnName.Contains("Yes", StringComparison.OrdinalIgnoreCase) ||
+                                    btnName.Equals("OK", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    Log($"  Auto-clicking '{btnName}' on EAE dialog.");
+                                    if (btn.TryGetCurrentPattern(InvokePattern.Pattern, out var ip))
+                                        ((InvokePattern)ip).Invoke();
+                                    return;
+                                }
+                            }
+                        }
+                    }
                 }
                 catch { }
             }
-            return null;
         }
 
-        static List<string> StageExportFiles(string libPath, string stagingDir,
-            HashSet<string> neededBasics, HashSet<string> neededCats, EaeImportResult result)
+        static void ExtractToProject(string zipPath, string eaeProjectDir)
         {
-            var files = new List<string>();
-            int step = 1;
-            foreach (var basic in neededBasics.OrderBy(b => b))
+            using var zip = ZipFile.OpenRead(zipPath);
+
+            var knownRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                { "IEC61499", "HMI", "HwConfiguration" };
+            string? prefixToStrip = null;
+
+            var firstFile = zip.Entries.FirstOrDefault(e => !string.IsNullOrEmpty(e.Name));
+            if (firstFile != null)
             {
-                var zip = FindPackage(libPath, "Basic", basic, ".Basic");
-                if (zip == null) { result.Warnings.Add($"Basic not found: {basic}"); continue; }
-                var dir = Path.Combine(stagingDir, $"{step:D2}_Basic_{basic}");
-                Directory.CreateDirectory(dir);
-                ExtractZip(zip, dir);
-                var ef = Directory.GetFiles(dir, "*.export", SearchOption.AllDirectories).FirstOrDefault();
-                if (ef != null) files.Add(ef);
-                step++;
+                var parts = firstFile.FullName.Split('/');
+                if (parts.Length >= 2 && !knownRoots.Contains(parts[0]))
+                    prefixToStrip = parts[0] + "/";
             }
-            foreach (var cat in neededCats.OrderBy(c => c))
+
+            foreach (var entry in zip.Entries)
             {
-                var zip = FindPackage(libPath, "CAT", cat, ".cat");
-                if (zip == null) { result.Warnings.Add($"CAT not found: {cat}"); continue; }
-                var dir = Path.Combine(stagingDir, $"{step:D2}_CAT_{cat}");
-                Directory.CreateDirectory(dir);
-                ExtractZip(zip, dir);
-                var ef = Directory.GetFiles(dir, "*.export", SearchOption.AllDirectories).FirstOrDefault();
-                if (ef != null) files.Add(ef);
-                step++;
+                if (string.IsNullOrEmpty(entry.Name)) continue;
+
+                var relativePath = entry.FullName;
+                if (prefixToStrip != null && relativePath.StartsWith(prefixToStrip, StringComparison.OrdinalIgnoreCase))
+                    relativePath = relativePath.Substring(prefixToStrip.Length);
+
+                var targetPath = Path.Combine(eaeProjectDir, relativePath);
+                var targetDir = Path.GetDirectoryName(targetPath)!;
+                if (!Directory.Exists(targetDir))
+                    Directory.CreateDirectory(targetDir);
+                if (!File.Exists(targetPath))
+                    entry.ExtractToFile(targetPath);
             }
-            return files;
+        }
+
+        static void GenerateCfgFile(string iec61499Dir, string cat)
+        {
+            var catDir = Path.Combine(iec61499Dir, cat);
+            var cfgPath = Path.Combine(catDir, $"{cat}.cfg");
+            if (File.Exists(cfgPath) || !Directory.Exists(catDir)) return;
+
+            var hmi = cat + "_HMI";
+            var cfg = $@"<?xml version=""1.0"" encoding=""utf-8""?>
+<CAT xmlns:xsd=""http://www.w3.org/2001/XMLSchema"" xmlns:xsi=""http://www.w3.org/2001/XMLSchema-instance"" Name=""{cat}"" CATFile=""{cat}\{cat}.fbt"" SymbolDefFile=""..\HMI\{cat}\{cat}.def.cs"" SymbolEventFile=""..\HMI\{cat}\{cat}.event.cs"" DesignFile=""..\HMI\{cat}\{cat}.Design.resx"" xmlns=""http://www.nxtcontrol.com/IEC61499.xsd"">
+  <HMIInterface Name=""IThis"" FileName=""{cat}\{hmi}.fbt"" UsedInCAT=""true"" Usage=""Private"">
+    <Symbol Name=""sDefault"" FileName=""..\HMI\{cat}\{cat}_sDefault.cnv.cs"">
+      <DependentFiles>..\HMI\{cat}\{cat}_sDefault.cnv.Designer.cs</DependentFiles>
+      <DependentFiles>..\HMI\{cat}\{cat}_sDefault.cnv.resx</DependentFiles>
+      <DependentFiles>..\HMI\{cat}\{cat}_sDefault.cnv.xml</DependentFiles>
+    </Symbol>
+  </HMIInterface>
+  <Plugin Name=""Plugin=OfflineParametrizationEditor;IEC61499Type=CAT_OFFLINE;$ItemType$=None"" Project=""IEC61499"" Value=""{cat}\{cat}_CAT.offline.xml"" />
+  <Plugin Name=""Plugin=OPCUAConfigurator;IEC61499Type=CAT_OPCUA;$ItemType$=None"" Project=""IEC61499"" Value=""{cat}\{cat}_CAT.opcua.xml"" />
+  <Plugin Name=""Plugin=OfflineParametrizationEditor;IEC61499Type=CAT_OFFLINE;$ItemType$=None"" Project=""IEC61499"" Value=""{cat}\{hmi}.offline.xml"" />
+  <Plugin Name=""Plugin=OPCUAConfigurator;IEC61499Type=CAT_OPCUA;$ItemType$=None"" Project=""IEC61499"" Value=""{cat}\{hmi}.opcua.xml"" />
+  <HWConfiguration xsi:nil=""true"" />
+</CAT>";
+            File.WriteAllText(cfgPath, cfg);
+        }
+
+        static string? DeriveEaeProjectDir(MapperConfig cfg)
+        {
+            var syslayPath = cfg.ActiveSyslayPath;
+            if (string.IsNullOrWhiteSpace(syslayPath)) return null;
+            var dir = Path.GetDirectoryName(syslayPath);
+            while (dir != null)
+            {
+                var checkDir = dir;
+                while (checkDir != null)
+                {
+                    if (Directory.GetFiles(checkDir, "*.dfbproj").Any())
+                        return Path.GetDirectoryName(checkDir);
+                    checkDir = Path.GetDirectoryName(checkDir);
+                }
+                dir = Path.GetDirectoryName(dir);
+            }
+            return null;
         }
 
         static HashSet<string> ResolveNeededCats(List<VueOneComponent> components)
@@ -416,17 +280,19 @@ namespace MapperUI.Services
             return null;
         }
 
-        static void ExtractZip(string zipPath, string targetDir)
+        static Process? FindEaeProcess()
         {
-            using var zip = ZipFile.OpenRead(zipPath);
-            foreach (var entry in zip.Entries)
+            foreach (var proc in Process.GetProcesses())
             {
-                if (string.IsNullOrEmpty(entry.Name)) continue;
-                var path = Path.Combine(targetDir, entry.FullName);
-                var folder = Path.GetDirectoryName(path)!;
-                if (!Directory.Exists(folder)) Directory.CreateDirectory(folder);
-                entry.ExtractToFile(path, true);
+                try
+                {
+                    if (!string.IsNullOrEmpty(proc.MainWindowTitle) &&
+                        proc.MainWindowTitle.Contains("Automation Expert", StringComparison.OrdinalIgnoreCase))
+                        return proc;
+                }
+                catch { }
             }
+            return null;
         }
     }
 
@@ -434,7 +300,6 @@ namespace MapperUI.Services
     {
         public bool Success { get; set; }
         public int ImportedCount { get; set; }
-        public List<string> ImportFiles { get; set; } = new();
         public List<string> Warnings { get; set; } = new();
     }
 }

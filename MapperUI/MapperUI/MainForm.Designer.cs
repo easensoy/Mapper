@@ -119,8 +119,8 @@
             this.btnImportCAT.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
             this.btnImportCAT.ForeColor = System.Drawing.Color.White;
             this.btnImportCAT.Location = new System.Drawing.Point(1080, 28);
-            this.btnImportCAT.Size = new System.Drawing.Size(100, 25);
-            this.btnImportCAT.Text = "Import CAT";
+            this.btnImportCAT.Size = new System.Drawing.Size(120, 25);
+            this.btnImportCAT.Text = "Import Templates";
             this.btnImportCAT.UseVisualStyleBackColor = false;
             this.btnImportCAT.Click += new System.EventHandler(this.btnImportCAT_Click);
 
