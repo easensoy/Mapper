@@ -677,7 +677,7 @@ namespace MapperUI
 
                 if (result.Success)
                 {
-                    var summary = $"Imported {result.ImportedCount}/{result.ImportFiles.Count} template(s).";
+                    var summary = $"Deployed {result.ImportedCount} template(s). Reload Solution in EAE.";
                     AppendActivity(summary);
                     lblStatus.Text = summary;
                     MessageBox.Show(summary, "Import CAT", MessageBoxButtons.OK, MessageBoxIcon.Information);
