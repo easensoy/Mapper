@@ -57,7 +57,6 @@
             this.btnADP = new System.Windows.Forms.Button();
             this.btnGenerate = new System.Windows.Forms.Button();
             this.btnGenerateSevenState = new System.Windows.Forms.Button();
-            this.btnImportCAT = new System.Windows.Forms.Button();
             this.statusStrip = new System.Windows.Forms.StatusStrip();
             this.lblStatus = new System.Windows.Forms.ToolStripStatusLabel();
 
@@ -111,19 +110,6 @@
             this.btnBrowse.Text = "Browse";
             this.btnBrowse.Click += new System.EventHandler(this.btnBrowse_Click);
 
-            this.btnImportCAT.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
-            this.btnImportCAT.BackColor = System.Drawing.Color.FromArgb(156, 39, 176);
-            this.btnImportCAT.Enabled = false;
-            this.btnImportCAT.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-            this.btnImportCAT.FlatAppearance.BorderSize = 0;
-            this.btnImportCAT.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
-            this.btnImportCAT.ForeColor = System.Drawing.Color.White;
-            this.btnImportCAT.Location = new System.Drawing.Point(1080, 28);
-            this.btnImportCAT.Size = new System.Drawing.Size(120, 25);
-            this.btnImportCAT.Text = "Import Templates";
-            this.btnImportCAT.UseVisualStyleBackColor = false;
-            this.btnImportCAT.Click += new System.EventHandler(this.btnImportCAT_Click);
-
             this.btnGenerateSevenState.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
             this.btnGenerateSevenState.BackColor = System.Drawing.Color.FromArgb(0, 153, 76);
             this.btnGenerateSevenState.Enabled = false;
@@ -131,7 +117,7 @@
             this.btnGenerateSevenState.FlatAppearance.BorderSize = 0;
             this.btnGenerateSevenState.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
             this.btnGenerateSevenState.ForeColor = System.Drawing.Color.White;
-            this.btnGenerateSevenState.Location = new System.Drawing.Point(1186, 28);
+            this.btnGenerateSevenState.Location = new System.Drawing.Point(1080, 28);
             this.btnGenerateSevenState.Size = new System.Drawing.Size(175, 25);
             this.btnGenerateSevenState.Text = "Generate Seven State FB";
             this.btnGenerateSevenState.UseVisualStyleBackColor = false;
@@ -343,7 +329,6 @@
             this.Controls.Add(this.grpValidation);
             this.Controls.Add(this.btnGenerateCode);
             this.Controls.Add(this.btnGenerateSevenState);
-            this.Controls.Add(this.btnImportCAT);
             this.Controls.Add(this.btnBrowse);
             this.Controls.Add(this.btnMappingRules);
             this.Controls.Add(this.txtModelPath);
@@ -432,7 +417,6 @@
         private System.Windows.Forms.Button btnADP;
         private System.Windows.Forms.Button btnGenerate;
         private System.Windows.Forms.Button btnGenerateSevenState;
-        private System.Windows.Forms.Button btnImportCAT;
         private System.Windows.Forms.StatusStrip statusStrip;
         private System.Windows.Forms.ToolStripStatusLabel lblStatus;
     }
