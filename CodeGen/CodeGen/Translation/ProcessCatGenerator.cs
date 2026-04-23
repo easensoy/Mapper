@@ -7,6 +7,8 @@ namespace CodeGen.Translation
 {
     public static class ProcessCatGenerator
     {
+        public const int DefaultStepTableCapacity = 14;
+
         public static ProcessCatDefinition Build(VueOneComponent processComponent)
         {
             var def = new ProcessCatDefinition
@@ -31,6 +33,48 @@ namespace CodeGen.Translation
             return def;
         }
 
+        public static StepTable BuildStepTable(ProcessCatDefinition def, int capacity = DefaultStepTableCapacity)
+        {
+            var ordered = def.States.OrderBy(s => s.StateNumber).ToList();
+
+            var table = new StepTable
+            {
+                Capacity = capacity,
+                ActualStateCount = ordered.Count,
+                Overflow = ordered.Count > capacity
+            };
+
+            foreach (var state in ordered.Take(capacity))
+                table.Entries.Add(state.Name);
+
+            int pad = Math.Max(0, capacity - table.Entries.Count);
+            table.PaddingSlots = pad;
+
+            return table;
+        }
+
+        public static string SerializeStepTable(StepTable table)
+        {
+            var names = table.Entries.Select(n => $"'{n}'").ToList();
+            if (table.PaddingSlots > 0)
+                names.Add($"{table.PaddingSlots}('')");
+            return "[" + string.Join(",", names) + "]";
+        }
+
+        public static Dictionary<string, string> BuildParameters(ProcessCatDefinition def, int capacity = DefaultStepTableCapacity)
+        {
+            var parameters = new Dictionary<string, string>();
+            var table = BuildStepTable(def, capacity);
+            parameters["Text"] = SerializeStepTable(table);
+            parameters["StateCount"] = table.ActualStateCount.ToString();
+            return parameters;
+        }
+
+        public static bool FitsDefaultTemplate(ProcessCatDefinition def, int capacity = DefaultStepTableCapacity)
+        {
+            return def.StateCount <= capacity;
+        }
+
         public static List<ProcessTransition> ExtractTransitions(VueOneComponent processComponent)
         {
             throw new NotImplementedException(
@@ -41,23 +85,6 @@ namespace CodeGen.Translation
         {
             throw new NotImplementedException(
                 "ECC XML generation not yet implemented. Planned: emit ECState and ECTransition elements driven by ProcessTransition list.");
-        }
-
-        public static Dictionary<string, string> BuildParameters(ProcessCatDefinition def)
-        {
-            var parameters = new Dictionary<string, string>();
-
-            var names = def.States.OrderBy(s => s.StateNumber).Select(s => $"'{s.Name}'").ToList();
-            int pad = Math.Max(0, 14 - names.Count);
-            if (pad > 0) names.Add($"{pad}('')");
-            parameters["Text"] = "[" + string.Join(",", names) + "]";
-
-            return parameters;
-        }
-
-        public static bool FitsDefaultTemplate(ProcessCatDefinition def, int templateStateCapacity = 14)
-        {
-            return def.StateCount <= templateStateCapacity;
         }
     }
 
@@ -84,5 +111,14 @@ namespace CodeGen.Translation
         public string DestinationStateId { get; set; } = string.Empty;
         public string Condition { get; set; } = string.Empty;
         public int Priority { get; set; }
+    }
+
+    public class StepTable
+    {
+        public int Capacity { get; set; }
+        public int ActualStateCount { get; set; }
+        public int PaddingSlots { get; set; }
+        public bool Overflow { get; set; }
+        public List<string> Entries { get; set; } = new();
     }
 }
