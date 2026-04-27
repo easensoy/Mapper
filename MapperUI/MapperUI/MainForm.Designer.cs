@@ -111,17 +111,7 @@
             this.btnBrowse.Text = "Browse";
             this.btnBrowse.Click += new System.EventHandler(this.btnBrowse_Click);
 
-            this.btnGenerateSevenState.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
-            this.btnGenerateSevenState.BackColor = System.Drawing.Color.FromArgb(0, 153, 76);
-            this.btnGenerateSevenState.Enabled = false;
-            this.btnGenerateSevenState.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-            this.btnGenerateSevenState.FlatAppearance.BorderSize = 0;
-            this.btnGenerateSevenState.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
-            this.btnGenerateSevenState.ForeColor = System.Drawing.Color.White;
-            this.btnGenerateSevenState.Location = new System.Drawing.Point(1080, 28);
-            this.btnGenerateSevenState.Size = new System.Drawing.Size(175, 25);
-            this.btnGenerateSevenState.Text = "Generate Seven State FB";
-            this.btnGenerateSevenState.UseVisualStyleBackColor = false;
+            this.btnGenerateSevenState.Visible = false;
             this.btnGenerateSevenState.Click += new System.EventHandler(this.btnGenerateSevenState_Click);
 
             this.btnGenerateProcessFB.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
@@ -129,25 +119,15 @@
             this.btnGenerateProcessFB.Enabled = false;
             this.btnGenerateProcessFB.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnGenerateProcessFB.FlatAppearance.BorderSize = 0;
-            this.btnGenerateProcessFB.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
+            this.btnGenerateProcessFB.Font = new System.Drawing.Font("Segoe UI", 10F, System.Drawing.FontStyle.Bold);
             this.btnGenerateProcessFB.ForeColor = System.Drawing.Color.White;
-            this.btnGenerateProcessFB.Location = new System.Drawing.Point(1260, 28);
-            this.btnGenerateProcessFB.Size = new System.Drawing.Size(108, 25);
+            this.btnGenerateProcessFB.Location = new System.Drawing.Point(1080, 24);
+            this.btnGenerateProcessFB.Size = new System.Drawing.Size(220, 32);
             this.btnGenerateProcessFB.Text = "Generate Process FB";
             this.btnGenerateProcessFB.UseVisualStyleBackColor = false;
             this.btnGenerateProcessFB.Click += new System.EventHandler(this.btnGenerateProcessFB_Click);
 
-            this.btnGenerateCode.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
-            this.btnGenerateCode.BackColor = System.Drawing.Color.FromArgb(0, 122, 204);
-            this.btnGenerateCode.Enabled = false;
-            this.btnGenerateCode.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-            this.btnGenerateCode.FlatAppearance.BorderSize = 0;
-            this.btnGenerateCode.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
-            this.btnGenerateCode.ForeColor = System.Drawing.Color.White;
-            this.btnGenerateCode.Location = new System.Drawing.Point(1372, 28);
-            this.btnGenerateCode.Size = new System.Drawing.Size(126, 25);
-            this.btnGenerateCode.Text = "Generate Code";
-            this.btnGenerateCode.UseVisualStyleBackColor = false;
+            this.btnGenerateCode.Visible = false;
             this.btnGenerateCode.Click += new System.EventHandler(this.btnGenerateCode_Click);
 
 
@@ -294,41 +274,16 @@
             this.pnlEngineBottom.Padding = new System.Windows.Forms.Padding(4, 6, 4, 4);
 
 
-            this.btnIO.Location = new System.Drawing.Point(8, 8);
-            this.btnIO.Size = new System.Drawing.Size(70, 28);
-            this.btnIO.Text = "IO";
-            this.btnIO.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
-            this.btnIO.FlatStyle = System.Windows.Forms.FlatStyle.System;
+            this.btnIO.Visible = false;
             this.btnIO.Click += new System.EventHandler(this.btnIO_Click);
 
-
-            this.btnGenerateTemplate.Location = new System.Drawing.Point(84, 8);
-            this.btnGenerateTemplate.Size = new System.Drawing.Size(140, 28);
-            this.btnGenerateTemplate.Text = "Generate Template";
-            this.btnGenerateTemplate.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
-            this.btnGenerateTemplate.FlatStyle = System.Windows.Forms.FlatStyle.System;
+            this.btnGenerateTemplate.Visible = false;
             this.btnGenerateTemplate.Click += new System.EventHandler(this.btnGenerateTemplate_Click);
 
-
-            this.btnADP.Location = new System.Drawing.Point(230, 8);
-            this.btnADP.Size = new System.Drawing.Size(70, 28);
-            this.btnADP.Text = "ADP";
-            this.btnADP.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
-            this.btnADP.FlatStyle = System.Windows.Forms.FlatStyle.System;
+            this.btnADP.Visible = false;
             this.btnADP.Click += new System.EventHandler(this.btnADP_Click);
 
-
-            this.btnGenerate.Anchor = System.Windows.Forms.AnchorStyles.Right | System.Windows.Forms.AnchorStyles.Top;
-            this.btnGenerate.BackColor = System.Drawing.Color.FromArgb(0, 122, 204);
-            this.btnGenerate.Enabled = false;
-            this.btnGenerate.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-            this.btnGenerate.FlatAppearance.BorderSize = 0;
-            this.btnGenerate.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
-            this.btnGenerate.ForeColor = System.Drawing.Color.White;
-            this.btnGenerate.Location = new System.Drawing.Point(880, 8);
-            this.btnGenerate.Size = new System.Drawing.Size(110, 28);
-            this.btnGenerate.Text = "Generate";
-            this.btnGenerate.UseVisualStyleBackColor = false;
+            this.btnGenerate.Visible = false;
             this.btnGenerate.Click += new System.EventHandler(this.btnGenerate_Click);
 
 
