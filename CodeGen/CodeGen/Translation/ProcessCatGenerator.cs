@@ -77,8 +77,32 @@ namespace CodeGen.Translation
 
         public static List<ProcessTransition> ExtractTransitions(VueOneComponent processComponent)
         {
-            throw new NotImplementedException(
-                "Transition extraction not yet implemented. Planned: parse Sequence_Condition and Interlock_Condition from Control.xml per state.");
+            var transitions = new List<ProcessTransition>();
+
+            foreach (var state in processComponent.States)
+            {
+                foreach (var t in state.Transitions)
+                {
+                    var pt = new ProcessTransition
+                    {
+                        SourceStateId = t.OriginStateID,
+                        DestinationStateId = t.DestinationStateID,
+                        Priority = t.Priority
+                    };
+
+                    if (t.Conditions.Count > 0)
+                    {
+                        var first = t.Conditions[0];
+                        pt.Condition = first.Name;
+                        pt.Wait1ComponentId = first.ComponentID;
+                        pt.Wait1StateId = first.ID;
+                    }
+
+                    transitions.Add(pt);
+                }
+            }
+
+            return transitions;
         }
 
         public static string GenerateEccXml(ProcessCatDefinition def)
@@ -111,6 +135,8 @@ namespace CodeGen.Translation
         public string DestinationStateId { get; set; } = string.Empty;
         public string Condition { get; set; } = string.Empty;
         public int Priority { get; set; }
+        public string Wait1ComponentId { get; set; } = string.Empty;
+        public string Wait1StateId { get; set; } = string.Empty;
     }
 
     public class StepTable
