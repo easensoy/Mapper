@@ -83,11 +83,12 @@ namespace MapperUI.Services
         }
 
         public SystemInjectionResult Inject(MapperConfig config, List<VueOneComponent> components,
-            string? controlXmlPath = null, string? mappingRulesPath = null)
+            string? controlXmlPath = null, string? mappingRulesPath = null,
+            List<VueOneComponent>? crossReferenceComponents = null)
         {
             _mappingRulesPath = mappingRulesPath;
             _ruleCache = null;
-            _allComponents = components;
+            _allComponents = crossReferenceComponents ?? components;
 
             var result = new SystemInjectionResult
             {
