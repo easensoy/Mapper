@@ -18,7 +18,7 @@ namespace MapperUI.Services
         private const string ActuatorCatType = "Five_State_Actuator_CAT";
         private const string SevenStateActuatorCatType = "Seven_State_Actuator_CAT";
         private const string SensorCatType = "Sensor_Bool_CAT";
-        private const string ProcessCatType = "Process1_CAT";
+        private const string ProcessCatType = "Process1_Generic";
         private const string RobotCatType = "Robot_Task_CAT";
 
         private const int ActuatorYGap = 800;
@@ -44,6 +44,8 @@ namespace MapperUI.Services
 
         private string? _mappingRulesPath;
         private Dictionary<string, List<MappingRuleEntry>>? _ruleCache;
+        private List<VueOneComponent> _allComponents = new();
+        private SystemInjectionResult? _currentResult;
 
 
         public DiffReport PreviewDiff(MapperConfig config, List<VueOneComponent> components,
@@ -79,12 +81,14 @@ namespace MapperUI.Services
         {
             _mappingRulesPath = mappingRulesPath;
             _ruleCache = null;
+            _allComponents = components;
 
             var result = new SystemInjectionResult
             {
                 SyslayPath = config.SyslayPath,
                 SysresPath = config.SysresPath
             };
+            _currentResult = result;
             try
             {
                 if (!File.Exists(config.SyslayPath))
@@ -342,10 +346,10 @@ namespace MapperUI.Services
             }
 
             if (catType == ProcessCatType)
-                SetParam(fb, "Text", BuildTextParam(comp));
+                ApplyProcessStepTableParams(fb, comp);
         }
 
-        private static void ApplyFallbackParams(XElement fb, VueOneComponent comp, string catType)
+        private void ApplyFallbackParams(XElement fb, VueOneComponent comp, string catType)
         {
             if (catType == ActuatorCatType || catType == SevenStateActuatorCatType)
             {
@@ -353,7 +357,47 @@ namespace MapperUI.Services
                 SetParam(fb, "actuator_name", $"'{name.ToLower()}'");
             }
             else if (catType == ProcessCatType)
+            {
+                ApplyProcessStepTableParams(fb, comp);
+            }
+        }
+
+        private void ApplyProcessStepTableParams(XElement fb, VueOneComponent comp)
+        {
+            SetParam(fb, "process_name", $"'{comp.Name}'");
+            SetParam(fb, "process_id", "10");
+
+            var stepTable = ProcessStepTableGenerator.Generate(comp, _allComponents);
+
+            if (stepTable.Success)
+            {
+                SetParam(fb, "num_steps", stepTable.NumSteps.ToString());
+                SetParam(fb, "num_comps", stepTable.NumComps.ToString());
+                SetParam(fb, "st_type", stepTable.StepType);
+                SetParam(fb, "cmd_target", stepTable.CmdTarget);
+                SetParam(fb, "cmd_state", stepTable.CmdState);
+                SetParam(fb, "st_wait_comp", stepTable.WaitComp);
+                SetParam(fb, "st_wait_state", stepTable.WaitState);
+                SetParam(fb, "st_next", stepTable.NextStep);
+                SetParam(fb, "cr_name", stepTable.CompNames);
+                SetParam(fb, "Text", stepTable.Text);
+
+                if (_currentResult != null)
+                {
+                    _currentResult.InjectedFBs.Add(
+                        $"[StepTable] {comp.Name}: {stepTable.NumSteps} steps, {stepTable.NumComps} components");
+                    foreach (var desc in stepTable.StepDescriptions)
+                        _currentResult.InjectedFBs.Add($"  {desc}");
+                    foreach (var warn in stepTable.Warnings)
+                        _currentResult.InjectedFBs.Add($"  WARN: {warn}");
+                }
+            }
+            else
+            {
+                _currentResult?.UnsupportedComponents.Add(
+                    $"Step table generation failed for '{comp.Name}': {stepTable.ErrorMessage}");
                 SetParam(fb, "Text", BuildTextParam(comp));
+            }
         }
 
         private static string? ResolveSourceValue(string vueOneElement, VueOneComponent comp, string catType)
