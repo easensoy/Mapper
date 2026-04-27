@@ -18,6 +18,7 @@ namespace MapperUI.Services
             { "Robot_Task_CAT",          new[] { "Robot_Task_Core" } },
             { "Seven_State_Actuator_CAT",new[] { "SevenStateActuator2" } },
             { "Station_CAT",             new[] { "Station_Core", "Station_Fault", "Station_Status" } },
+            { "Process1_Generic",        new[] { "ProcessRuntime_Generic_v1", "ProcessStateBusHandler" } },
         };
 
         static readonly Dictionary<string, string> ComponentTypeToCat = new(StringComparer.OrdinalIgnoreCase)
@@ -25,6 +26,7 @@ namespace MapperUI.Services
             { "Actuator_5",  "Five_State_Actuator_CAT" },
             { "Actuator_7",  "Seven_State_Actuator_CAT" },
             { "Sensor_2",    "Sensor_Bool_CAT" },
+            { "Process_Any", "Process1_Generic" },
         };
 
         public static DeployResult Deploy(MapperConfig cfg, List<VueOneComponent> components)
@@ -84,6 +86,10 @@ namespace MapperUI.Services
                 var key = $"{c.Type}_{c.States.Count}";
                 if (ComponentTypeToCat.TryGetValue(key, out var cat))
                     cats.Add(cat);
+
+                if (string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase) &&
+                    ComponentTypeToCat.TryGetValue("Process_Any", out var procCat))
+                    cats.Add(procCat);
             }
             return cats;
         }
