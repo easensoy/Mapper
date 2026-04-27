@@ -42,6 +42,12 @@ namespace MapperUI.Services
                 { "Bearing_PnP", "swivel" },
             };
 
+        private static readonly Dictionary<string, string> CatTypeToSheet =
+            new(StringComparer.OrdinalIgnoreCase)
+            {
+                { "Process1_Generic", "Process_DD_CAT" },
+            };
+
         private string? _mappingRulesPath;
         private Dictionary<string, List<MappingRuleEntry>>? _ruleCache;
         private List<VueOneComponent> _allComponents = new();
@@ -130,7 +136,8 @@ namespace MapperUI.Services
 
             if (!_ruleCache.TryGetValue(catType, out var rules))
             {
-                rules = MappingRuleEngine.GetActiveRulesForCat(_mappingRulesPath, catType);
+                var sheetName = CatTypeToSheet.TryGetValue(catType, out var mapped) ? mapped : catType;
+                rules = MappingRuleEngine.GetActiveRulesForCat(_mappingRulesPath, sheetName);
                 _ruleCache[catType] = rules;
             }
             return rules;
