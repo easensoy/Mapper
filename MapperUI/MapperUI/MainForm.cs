@@ -687,8 +687,9 @@ namespace MapperUI
 
                 var injector = new SystemInjector();
                 var rulesPath = cfg.MappingRulesPath;
-                var result = await Task.Run(() => injector.Inject(injCfg, _loadedComponents,
-                    controlXmlPath: null, mappingRulesPath: rulesPath));
+                var result = await Task.Run(() => injector.Inject(injCfg, processes,
+                    controlXmlPath: null, mappingRulesPath: rulesPath,
+                    crossReferenceComponents: _loadedComponents));
 
                 if (!result.Success) { ShowError($"Injection failed:\n{result.ErrorMessage}"); return; }
 
