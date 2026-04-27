@@ -57,6 +57,7 @@
             this.btnADP = new System.Windows.Forms.Button();
             this.btnGenerate = new System.Windows.Forms.Button();
             this.btnGenerateSevenState = new System.Windows.Forms.Button();
+            this.btnGenerateProcessFB = new System.Windows.Forms.Button();
             this.statusStrip = new System.Windows.Forms.StatusStrip();
             this.lblStatus = new System.Windows.Forms.ToolStripStatusLabel();
 
@@ -123,6 +124,19 @@
             this.btnGenerateSevenState.UseVisualStyleBackColor = false;
             this.btnGenerateSevenState.Click += new System.EventHandler(this.btnGenerateSevenState_Click);
 
+            this.btnGenerateProcessFB.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
+            this.btnGenerateProcessFB.BackColor = System.Drawing.Color.FromArgb(255, 140, 0);
+            this.btnGenerateProcessFB.Enabled = false;
+            this.btnGenerateProcessFB.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnGenerateProcessFB.FlatAppearance.BorderSize = 0;
+            this.btnGenerateProcessFB.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
+            this.btnGenerateProcessFB.ForeColor = System.Drawing.Color.White;
+            this.btnGenerateProcessFB.Location = new System.Drawing.Point(1260, 28);
+            this.btnGenerateProcessFB.Size = new System.Drawing.Size(108, 25);
+            this.btnGenerateProcessFB.Text = "Generate Process FB";
+            this.btnGenerateProcessFB.UseVisualStyleBackColor = false;
+            this.btnGenerateProcessFB.Click += new System.EventHandler(this.btnGenerateProcessFB_Click);
+
             this.btnGenerateCode.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
             this.btnGenerateCode.BackColor = System.Drawing.Color.FromArgb(0, 122, 204);
             this.btnGenerateCode.Enabled = false;
@@ -130,7 +144,7 @@
             this.btnGenerateCode.FlatAppearance.BorderSize = 0;
             this.btnGenerateCode.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
             this.btnGenerateCode.ForeColor = System.Drawing.Color.White;
-            this.btnGenerateCode.Location = new System.Drawing.Point(1368, 28);
+            this.btnGenerateCode.Location = new System.Drawing.Point(1372, 28);
             this.btnGenerateCode.Size = new System.Drawing.Size(126, 25);
             this.btnGenerateCode.Text = "Generate Code";
             this.btnGenerateCode.UseVisualStyleBackColor = false;
@@ -329,6 +343,7 @@
             this.Controls.Add(this.grpValidation);
             this.Controls.Add(this.btnGenerateCode);
             this.Controls.Add(this.btnGenerateSevenState);
+            this.Controls.Add(this.btnGenerateProcessFB);
             this.Controls.Add(this.btnBrowse);
             this.Controls.Add(this.btnMappingRules);
             this.Controls.Add(this.txtModelPath);
@@ -417,6 +432,7 @@
         private System.Windows.Forms.Button btnADP;
         private System.Windows.Forms.Button btnGenerate;
         private System.Windows.Forms.Button btnGenerateSevenState;
+        private System.Windows.Forms.Button btnGenerateProcessFB;
         private System.Windows.Forms.StatusStrip statusStrip;
         private System.Windows.Forms.ToolStripStatusLabel lblStatus;
     }
