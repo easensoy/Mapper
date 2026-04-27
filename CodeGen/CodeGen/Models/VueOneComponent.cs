@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 
 namespace CodeGen.Models
 {
@@ -22,5 +22,24 @@ namespace CodeGen.Models
         public double Position { get; set; }
         public int Counter { get; set; }
         public bool StaticState { get; set; }
+
+        public List<VueOneTransition> Transitions { get; set; } = new();
+    }
+
+    public class VueOneTransition
+    {
+        public string TransitionID { get; set; } = string.Empty;
+        public string OriginStateID { get; set; } = string.Empty;
+        public string DestinationStateID { get; set; } = string.Empty;
+        public int Priority { get; set; }
+        public List<VueOneCondition> Conditions { get; set; } = new();
+    }
+
+    public class VueOneCondition
+    {
+        public string ID { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string ComponentID { get; set; } = string.Empty;
+        public string Operator { get; set; } = string.Empty;
     }
 }
