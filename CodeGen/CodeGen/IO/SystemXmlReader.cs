@@ -120,7 +120,7 @@ namespace CodeGen.IO
         private VueOneState ParseState(XElement elem, bool isSystemFile)
         {
             var nameTag = isSystemFile ? "n" : "Name";
-            return new VueOneState
+            var state = new VueOneState
             {
                 StateID = GetElementValue(elem, "StateID"),
                 Name = GetElementValue(elem, nameTag),
@@ -131,6 +131,39 @@ namespace CodeGen.IO
                 Counter = GetIntValue(elem, "Counter"),
                 StaticState = GetBoolValue(elem, "StaticState")
             };
+
+            foreach (var transElem in elem.Elements().Where(e => e.Name.LocalName == "Transition"))
+                state.Transitions.Add(ParseTransition(transElem));
+
+            return state;
+        }
+
+        private VueOneTransition ParseTransition(XElement elem)
+        {
+            var trans = new VueOneTransition
+            {
+                TransitionID = GetElementValue(elem, "TransitionID"),
+                OriginStateID = GetElementValue(elem, "Origin_State"),
+                DestinationStateID = GetElementValue(elem, "Destination_State"),
+                Priority = GetIntValue(elem, "Priority")
+            };
+
+            var seq = elem.Elements().FirstOrDefault(e => e.Name.LocalName == "Sequence_Condition");
+            if (seq != null)
+            {
+                foreach (var cond in seq.Descendants().Where(e => e.Name.LocalName == "Condition"))
+                {
+                    trans.Conditions.Add(new VueOneCondition
+                    {
+                        ID = cond.Attribute("ID")?.Value ?? string.Empty,
+                        Name = cond.Attribute("Name")?.Value ?? string.Empty,
+                        ComponentID = cond.Attribute("ComponentID")?.Value ?? string.Empty,
+                        Operator = cond.Attribute("Operator")?.Value ?? string.Empty
+                    });
+                }
+            }
+
+            return trans;
         }
 
         private string GetElementValue(XElement parent, string elementName)
