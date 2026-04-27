@@ -310,6 +310,7 @@ namespace MapperUI
             btnGenerateCode.Enabled = false;
             btnGenerate.Enabled = false;
             btnGenerateSevenState.Enabled = false;
+            btnGenerateProcessFB.Enabled = false;
             txtActivityLog.Clear();
             lblStatus.Text = "Loading\u2026";
 
@@ -368,6 +369,7 @@ namespace MapperUI
                 lblStatus.Text = ok ? "Validation passed." : "Validation failed.";
                 btnGenerateCode.Enabled = ok && _validationRows.Any(r => r.IsValid && _allowedInstances.Contains(r.Component.Name));
                 btnGenerateSevenState.Enabled = ok && _loadedComponents.Any(c => c.Type == "Actuator" && c.States.Count == 7);
+                btnGenerateProcessFB.Enabled = ok && _loadedComponents.Any(c => c.Type == "Process");
 
                 var noTemplate = _validationRows
                     .Where(r => r.TemplateName.StartsWith("No template found"))
@@ -632,6 +634,75 @@ namespace MapperUI
             }
             catch (Exception ex) { ShowError(ex.Message); }
             finally { btnGenerateSevenState.Enabled = true; }
+        }
+
+        async void btnGenerateProcessFB_Click(object sender, EventArgs e)
+        {
+            var processes = _loadedComponents
+                .Where(c => c.Type == "Process")
+                .ToList();
+
+            if (processes.Count == 0)
+            {
+                MessageBox.Show("No Process components found in Control.xml.", "Nothing to Generate",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            btnGenerateProcessFB.Enabled = false;
+            try
+            {
+                var cfg = Cfg();
+                var dfbproj = FindDfbproj(cfg.ActiveSyslayPath);
+                if (dfbproj == null) { ShowError("Cannot find .dfbproj."); return; }
+                if (!File.Exists(cfg.ActiveSyslayPath)) { ShowError($"syslay not found:\n{cfg.ActiveSyslayPath}"); return; }
+
+                MapperLogger.Info($"Process FB generation — {processes.Count} process(es)");
+                AppendActivity($"Generating Process FB for {processes.Count} process(es)...");
+
+                var deployResult = await Task.Run(() => TemplateLibraryDeployer.Deploy(cfg, processes));
+                if (!deployResult.Success)
+                {
+                    var warns = string.Join("\n", deployResult.Warnings);
+                    MapperLogger.Error($"Template deploy warnings: {warns}");
+                }
+                MapperLogger.Info($"[Deploy] {deployResult.CATsDeployed.Count} CAT(s), " +
+                                 $"{deployResult.BasicFBsDeployed.Count} Basic FB(s), " +
+                                 $"{deployResult.FilesExtracted} files extracted, " +
+                                 $"{deployResult.FilesSkipped} skipped (already present).");
+
+                if (Directory.Exists(cfg.TemplateIec61499Dir))
+                {
+                    await Task.Run(() => TemplatePackager.Package(
+                        cfg.TemplateIec61499Dir,
+                        Path.GetDirectoryName(dfbproj)!,
+                        dfbproj,
+                        cfg.TemplateHmiDir,
+                        Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(dfbproj)!)!, "HMI")));
+                }
+
+                var injCfg = MapperConfig.Load();
+                injCfg.SyslayPath = cfg.ActiveSyslayPath;
+                injCfg.SysresPath = cfg.ActiveSysresPath;
+
+                var injector = new SystemInjector();
+                var rulesPath = cfg.MappingRulesPath;
+                var result = await Task.Run(() => injector.Inject(injCfg, _loadedComponents,
+                    controlXmlPath: null, mappingRulesPath: rulesPath));
+
+                if (!result.Success) { ShowError($"Injection failed:\n{result.ErrorMessage}"); return; }
+
+                File.SetLastWriteTime(dfbproj, DateTime.Now);
+
+                foreach (var msg in result.InjectedFBs.Where(s => s.StartsWith("[StepTable]") || s.StartsWith("  Step ") || s.StartsWith("  WARN")))
+                    AppendActivity(msg);
+
+                lblStatus.Text = $"Done. {processes.Count} process(es) generated with step tables.";
+                MessageBox.Show($"Generated {processes.Count} Process FB(s) with step tables.\nReload Solution in EAE.",
+                    "Done", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex) { ShowError(ex.Message); }
+            finally { btnGenerateProcessFB.Enabled = true; }
         }
 
         async void btnGeneratePusherFB_Click(object sender, EventArgs e)
