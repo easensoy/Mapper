@@ -375,7 +375,14 @@ namespace MapperUI.Services
             SetParam(fb, "process_name", $"'{comp.Name}'");
             SetParam(fb, "process_id", "10");
 
-            var stepTable = ProcessStepTableGenerator.Generate(comp, _allComponents);
+            ProcessStepTableRules? rules = null;
+            if (!string.IsNullOrEmpty(_mappingRulesPath) && File.Exists(_mappingRulesPath))
+            {
+                var sheetName = CatTypeToSheet.TryGetValue(ProcessCatType, out var s) ? s : ProcessCatType;
+                rules = ProcessStepTableRules.LoadFromSheet(_mappingRulesPath, sheetName);
+            }
+
+            var stepTable = ProcessStepTableGenerator.Generate(comp, _allComponents, rules);
 
             if (stepTable.Success)
             {
