@@ -100,6 +100,17 @@ namespace CodeGen.Translation
 
     public static class ProcessStepTableGenerator
     {
+        /// <summary>
+        /// Generates the eight EAE Parameter values for a Process FB instance from a VueOne Process component.
+        /// Walks the process states in order, classifies each step (CMD / WAIT / END), resolves wait component
+        /// IDs and state numbers from transition conditions, infers command states from done conditions, and
+        /// produces array literal strings (st_type, cmd_target, cmd_state, st_wait_comp, st_wait_state, st_next,
+        /// cr_name, Text) ready to be set as <Parameter> values in the syslay/sysres XML.
+        /// </summary>
+        /// <param name="process">The VueOne Process component to generate the step table from.</param>
+        /// <param name="allComponents">All components in the system (used for cross-referencing actuator/sensor states by ID).</param>
+        /// <param name="rules">Optional Process_DD_CAT mapping rules to override auto-derived values per section.</param>
+        /// <returns>Result with the eight Parameter strings, step descriptions, and any warnings.</returns>
         public static ProcessStepTableResult Generate(
             VueOneComponent process,
             List<VueOneComponent> allComponents,
