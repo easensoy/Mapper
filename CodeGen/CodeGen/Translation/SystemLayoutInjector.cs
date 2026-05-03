@@ -792,12 +792,20 @@ namespace MapperUI.Services
                 throw new ArgumentException("Output folder is required.", nameof(outputFolder));
             if (!Directory.Exists(outputFolder))
                 throw new DirectoryNotFoundException($"Output folder does not exist: {outputFolder}");
+            return GeneratePusherTestSyslayToPath(Path.Combine(outputFolder, "Pusher_Test.syslay"));
+        }
 
-            var fileName = "Pusher_Test.syslay";
-            var fullPath = Path.Combine(outputFolder, fileName);
+        public string GeneratePusherTestSyslayToPath(string targetSyslayPath)
+        {
+            if (string.IsNullOrEmpty(targetSyslayPath))
+                throw new ArgumentException("Target syslay path is required.", nameof(targetSyslayPath));
 
+            var fileName = Path.GetFileName(targetSyslayPath);
             var layerId = FBIdGenerator.GenerateFBId(fileName);
             var builder = new SyslayBuilder(layerId);
+            builder.SetTopComment(
+                "v1 limitations: Pusher test only. Demonstrator was cleaned of universal-architecture instances " +
+                "before this generation; restore via 'git checkout' on the Demonstrator repo to revert.");
 
             var pusherId = FBIdGenerator.GenerateFBId("Pusher_Test_v1");
             var parameters = new Dictionary<string, string>
@@ -817,20 +825,32 @@ namespace MapperUI.Services
             builder.AddFB(pusherId, "Pusher", "Five_State_Actuator_CAT", "Main", 1300, 2480, parameters);
 
             var doc = builder.Build();
-            doc.Save(fullPath);
-            return fullPath;
+            doc.Save(targetSyslayPath);
+            return targetSyslayPath;
         }
 
         public string GenerateFeedStationSyslay(string controlXmlPath, string outputFolder)
+        {
+            if (string.IsNullOrEmpty(outputFolder))
+                throw new ArgumentException("Output folder is required.", nameof(outputFolder));
+            if (!Directory.Exists(outputFolder))
+                throw new DirectoryNotFoundException($"Output folder does not exist: {outputFolder}");
+
+            var reader = new CodeGen.IO.SystemXmlReader();
+            reader.ReadAllComponents(controlXmlPath);
+            var projectName = !string.IsNullOrWhiteSpace(reader.SystemName) ? reader.SystemName : "FeedStation_Generated";
+            var fileName = $"{SanitizeFileName(projectName)}.syslay";
+            return GenerateFeedStationSyslayToPath(controlXmlPath, Path.Combine(outputFolder, fileName));
+        }
+
+        public string GenerateFeedStationSyslayToPath(string controlXmlPath, string targetSyslayPath)
         {
             if (string.IsNullOrEmpty(controlXmlPath))
                 throw new ArgumentException("Control.xml path is required.", nameof(controlXmlPath));
             if (!File.Exists(controlXmlPath))
                 throw new FileNotFoundException($"Control.xml not found: {controlXmlPath}");
-            if (string.IsNullOrEmpty(outputFolder))
-                throw new ArgumentException("Output folder is required.", nameof(outputFolder));
-            if (!Directory.Exists(outputFolder))
-                throw new DirectoryNotFoundException($"Output folder does not exist: {outputFolder}");
+            if (string.IsNullOrEmpty(targetSyslayPath))
+                throw new ArgumentException("Target syslay path is required.", nameof(targetSyslayPath));
 
             var reader = new CodeGen.IO.SystemXmlReader();
             var allComponents = reader.ReadAllComponents(controlXmlPath);
@@ -844,16 +864,17 @@ namespace MapperUI.Services
             var grouping = new StationGroupingService();
             var contents = grouping.GroupStationContents(process, allComponents);
 
-            var projectName = !string.IsNullOrWhiteSpace(reader.SystemName) ? reader.SystemName : "FeedStation_Generated";
-            var fileName = $"{SanitizeFileName(projectName)}.syslay";
-            var fullPath = Path.Combine(outputFolder, fileName);
+            var fileName = Path.GetFileName(targetSyslayPath);
+            var fullPath = targetSyslayPath;
 
             var layerId = FBIdGenerator.GenerateFBId(fileName);
             var builder = new SyslayBuilder(layerId);
             builder.SetTopComment(
                 "v1 limitations: Process1 recipe arrays are default-empty; sensor-to-process " +
                 "DataConnections not generated; manual recipe loading required in " +
-                "ProcessRuntime_Generic_v1.initialize before Process1 will sequence.");
+                "ProcessRuntime_Generic_v1.initialize before Process1 will sequence. " +
+                "Demonstrator was cleaned of universal-architecture instances before this generation; " +
+                "restore via 'git checkout' on the Demonstrator repo to revert.");
 
             int sensorIdStart = 0;
             int actuatorIdStart = contents.Sensors.Count;
@@ -1048,6 +1069,90 @@ namespace MapperUI.Services
 
         public static string StationAdptrOut(string fbType) => "stationAdptr_out";
         public static string StationAdptrIn(string fbType) => "stationAdptr_in";
+
+        private static readonly HashSet<string> UniversalCatTypes = new(StringComparer.Ordinal)
+        {
+            "Five_State_Actuator_CAT", "Sensor_Bool_CAT", "Process1_Generic",
+            "Station_CAT", "Area_CAT", "CaSAdptrTerminator", "Station", "Area"
+        };
+
+        public class CleanupReport
+        {
+            public List<string> RemovedFbs { get; } = new();
+            public List<string> PreservedFbs { get; } = new();
+            public List<string> Unmatched { get; } = new();
+            public int RemovedConnections { get; set; }
+        }
+
+        public CleanupReport PrepareDemonstratorForGeneration(MapperConfig config)
+        {
+            var report = new CleanupReport();
+
+            if (string.IsNullOrEmpty(config.SyslayPath2) || !File.Exists(config.SyslayPath2))
+                throw new FileNotFoundException(
+                    $"Demonstrator syslay not configured or missing: '{config.SyslayPath2}'");
+
+            CleanFile(config.SyslayPath2, "SubAppNetwork", report);
+
+            if (!string.IsNullOrEmpty(config.SysresPath2) && File.Exists(config.SysresPath2))
+                CleanFile(config.SysresPath2, "FBNetwork", report);
+
+            return report;
+        }
+
+        private static void CleanFile(string path, string netTag, CleanupReport report)
+        {
+            XNamespace ns = "https://www.se.com/LibraryElements";
+            var doc = XDocument.Load(path);
+            var net = doc.Root?.Element(ns + netTag);
+            if (net == null) return;
+
+            var fbsToRemove = new List<XElement>();
+            var namesToRemove = new HashSet<string>(StringComparer.Ordinal);
+
+            foreach (var fb in net.Elements(ns + "FB").ToList())
+            {
+                var fbType = fb.Attribute("Type")?.Value ?? string.Empty;
+                var fbName = fb.Attribute("Name")?.Value ?? string.Empty;
+                var fbNs = fb.Attribute("Namespace")?.Value ?? string.Empty;
+
+                bool isUniversal = UniversalCatTypes.Contains(fbType) ||
+                    (fbType == "plcStart" && fbNs == "SE.AppBase");
+
+                if (isUniversal)
+                {
+                    fbsToRemove.Add(fb);
+                    namesToRemove.Add(fbName);
+                    report.RemovedFbs.Add($"{fbName} ({fbType})");
+                }
+                else
+                {
+                    report.PreservedFbs.Add($"{fbName} ({fbType})");
+                }
+            }
+
+            foreach (var fb in fbsToRemove) fb.Remove();
+
+            foreach (var section in new[] { "EventConnections", "DataConnections", "AdapterConnections" })
+            {
+                var s = net.Element(ns + section);
+                if (s == null) continue;
+                foreach (var conn in s.Elements(ns + "Connection").ToList())
+                {
+                    var src = conn.Attribute("Source")?.Value ?? string.Empty;
+                    var dst = conn.Attribute("Destination")?.Value ?? string.Empty;
+                    var srcFb = src.Split('.', 2)[0];
+                    var dstFb = dst.Split('.', 2)[0];
+                    if (namesToRemove.Contains(srcFb) || namesToRemove.Contains(dstFb))
+                    {
+                        conn.Remove();
+                        report.RemovedConnections++;
+                    }
+                }
+            }
+
+            doc.Save(path);
+        }
 
         private static string SanitizeFileName(string name)
         {
