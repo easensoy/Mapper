@@ -15,6 +15,7 @@ namespace CodeGen.Translation
         private readonly XElement _dataConnections;
         private readonly XElement _adapterConnections;
         private readonly XElement _layer;
+        private string? _topComment;
 
         public SyslayBuilder(string layerId)
         {
@@ -84,6 +85,12 @@ namespace CodeGen.Translation
             return this;
         }
 
+        public SyslayBuilder SetTopComment(string commentText)
+        {
+            _topComment = commentText;
+            return this;
+        }
+
         public XDocument Build()
         {
             if (_eventConnections.HasElements && _eventConnections.Parent == null)
@@ -92,6 +99,9 @@ namespace CodeGen.Translation
                 _subAppNetwork.Add(_dataConnections);
             if (_adapterConnections.HasElements && _adapterConnections.Parent == null)
                 _subAppNetwork.Add(_adapterConnections);
+
+            if (!string.IsNullOrEmpty(_topComment))
+                _layer.AddFirst(new XComment(" " + _topComment + " "));
 
             return new XDocument(new XDeclaration("1.0", "utf-8", null), _layer);
         }
