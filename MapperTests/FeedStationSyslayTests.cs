@@ -21,12 +21,12 @@ namespace MapperTests
         }
 
         [Fact]
-        public void GeneratesTwelveFBs()
+        public void GeneratesThirteenFBs()
         {
             var (doc, _) = Generate();
             var ns = (XNamespace)"https://www.se.com/LibraryElements";
             var fbs = doc.Descendants(ns + "FB").ToList();
-            Assert.Equal(12, fbs.Count);
+            Assert.Equal(13, fbs.Count);
         }
 
         [Fact]
@@ -51,13 +51,61 @@ namespace MapperTests
         }
 
         [Fact]
-        public void InitChainHasSevenConnections()
+        public void InitChainHasNineConnections()
         {
             var (doc, _) = Generate();
             var ns = (XNamespace)"https://www.se.com/LibraryElements";
             var ec = doc.Descendants(ns + "EventConnections").Single();
             var connections = ec.Elements(ns + "Connection").ToList();
-            Assert.Equal(7, connections.Count);
+            Assert.Equal(9, connections.Count);
+        }
+
+        [Fact]
+        public void PlcStartBootstrapTest()
+        {
+            var (doc, _) = Generate();
+            var ns = (XNamespace)"https://www.se.com/LibraryElements";
+
+            var plcStart = doc.Descendants(ns + "FB")
+                .FirstOrDefault(fb => fb.Attribute("Name")!.Value == "PLC_Start");
+            Assert.NotNull(plcStart);
+            Assert.Equal("plcStart", plcStart!.Attribute("Type")!.Value);
+            Assert.Equal("SE.AppBase", plcStart.Attribute("Namespace")!.Value);
+
+            var ec = doc.Descendants(ns + "EventConnections").Single();
+            var hasFirstInit = ec.Elements(ns + "Connection").Any(c =>
+                c.Attribute("Source")!.Value == "PLC_Start.FIRST_INIT" &&
+                c.Attribute("Destination")!.Value == "Area.INIT");
+            Assert.True(hasFirstInit);
+
+            var hasAck = ec.Elements(ns + "Connection").Any(c =>
+                c.Attribute("Source")!.Value == "Process1.INITO" &&
+                c.Attribute("Destination")!.Value == "PLC_Start.ACK_FIRST");
+            Assert.True(hasAck);
+        }
+
+        [Fact]
+        public void AreaTerminatorDaisyChainTest()
+        {
+            var (doc, _) = Generate();
+            var ns = (XNamespace)"https://www.se.com/LibraryElements";
+            var ac = doc.Descendants(ns + "AdapterConnections").Single();
+            var conns = ac.Elements(ns + "Connection")
+                .Select(c => (Source: c.Attribute("Source")!.Value, Dest: c.Attribute("Destination")!.Value))
+                .ToList();
+
+            Assert.Contains(conns, c => c.Source == "Station1.AreaAdptrOUT" && c.Dest == "Area_Term.CasAdptrIN");
+            Assert.DoesNotContain(conns, c => c.Source == "Area.AreaAdptrOUT" && c.Dest == "Area_Term.CasAdptrIN");
+        }
+
+        [Fact]
+        public void V1LimitationCommentNearTop()
+        {
+            var (doc, _) = Generate();
+            Assert.NotNull(doc.Root);
+            var firstNode = doc.Root!.FirstNode;
+            Assert.IsType<XComment>(firstNode);
+            Assert.Contains("v1 limitations", ((XComment)firstNode!).Value);
         }
 
         [Fact]
