@@ -92,31 +92,29 @@
             this.menuItemDebugConsole.Click += new System.EventHandler(this.menuItemDebugConsole_Click);
 
 
-            this.lblVueOneModel.Visible = false;
-            this.txtModelPath.Visible = false;
+            this.lblVueOneModel.AutoSize = true;
+            this.lblVueOneModel.Location = new System.Drawing.Point(12, 33);
+            this.lblVueOneModel.Text = "vueOne Model:";
 
-            this.btnBrowse.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left;
-            this.btnBrowse.Location = new System.Drawing.Point(12, 28);
-            this.btnBrowse.Size = new System.Drawing.Size(140, 28);
-            this.btnBrowse.Text = "Browse Control.xml";
-            this.btnBrowse.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
-            this.btnBrowse.Click += new System.EventHandler(this.btnBrowse_Click);
-
-            this.btnMappingRules.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left;
-            this.btnMappingRules.Location = new System.Drawing.Point(158, 28);
-            this.btnMappingRules.Size = new System.Drawing.Size(140, 28);
-            this.btnMappingRules.Text = "Load Mapping Rules";
-            this.btnMappingRules.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
-            this.btnMappingRules.Click += new System.EventHandler(this.btnMappingRules_Click);
+            this.txtModelPath.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left | System.Windows.Forms.AnchorStyles.Right;
+            this.txtModelPath.Location = new System.Drawing.Point(102, 30);
+            this.txtModelPath.ReadOnly = true;
+            this.txtModelPath.Size = new System.Drawing.Size(560, 23);
 
             this.lblLoadedFile = new System.Windows.Forms.Label();
-            this.lblLoadedFile.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left | System.Windows.Forms.AnchorStyles.Right;
-            this.lblLoadedFile.Location = new System.Drawing.Point(304, 33);
-            this.lblLoadedFile.Size = new System.Drawing.Size(380, 22);
-            this.lblLoadedFile.Text = "no file loaded";
-            this.lblLoadedFile.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Italic);
-            this.lblLoadedFile.ForeColor = System.Drawing.Color.Gray;
-            this.lblLoadedFile.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            this.lblLoadedFile.Visible = false;
+
+            this.btnMappingRules.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
+            this.btnMappingRules.Location = new System.Drawing.Point(668, 28);
+            this.btnMappingRules.Size = new System.Drawing.Size(95, 25);
+            this.btnMappingRules.Text = "Mapping Rules";
+            this.btnMappingRules.Click += new System.EventHandler(this.btnMappingRules_Click);
+
+            this.btnBrowse.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
+            this.btnBrowse.Location = new System.Drawing.Point(769, 28);
+            this.btnBrowse.Size = new System.Drawing.Size(60, 25);
+            this.btnBrowse.Text = "Browse";
+            this.btnBrowse.Click += new System.EventHandler(this.btnBrowse_Click);
 
             this.btnGenerateSevenState.Visible = false;
             this.btnGenerateSevenState.Click += new System.EventHandler(this.btnGenerateSevenState_Click);
@@ -125,11 +123,11 @@
             this.btnGeneratePusherTest.BackColor = System.Drawing.Color.FromArgb(0, 122, 204);
             this.btnGeneratePusherTest.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnGeneratePusherTest.FlatAppearance.BorderSize = 0;
-            this.btnGeneratePusherTest.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
+            this.btnGeneratePusherTest.Font = new System.Drawing.Font("Segoe UI", 8.5F, System.Drawing.FontStyle.Bold);
             this.btnGeneratePusherTest.ForeColor = System.Drawing.Color.White;
-            this.btnGeneratePusherTest.Location = new System.Drawing.Point(900, 24);
-            this.btnGeneratePusherTest.Size = new System.Drawing.Size(160, 32);
-            this.btnGeneratePusherTest.Text = "1. Generate Test (Pusher)";
+            this.btnGeneratePusherTest.Location = new System.Drawing.Point(835, 28);
+            this.btnGeneratePusherTest.Size = new System.Drawing.Size(120, 25);
+            this.btnGeneratePusherTest.Text = "1. Test (Pusher)";
             this.btnGeneratePusherTest.UseVisualStyleBackColor = false;
             this.btnGeneratePusherTest.Click += new System.EventHandler(this.btnGeneratePusherTest_Click);
 
@@ -138,11 +136,11 @@
             this.btnGenerateProcessFB.Enabled = false;
             this.btnGenerateProcessFB.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnGenerateProcessFB.FlatAppearance.BorderSize = 0;
-            this.btnGenerateProcessFB.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
+            this.btnGenerateProcessFB.Font = new System.Drawing.Font("Segoe UI", 8.5F, System.Drawing.FontStyle.Bold);
             this.btnGenerateProcessFB.ForeColor = System.Drawing.Color.White;
-            this.btnGenerateProcessFB.Location = new System.Drawing.Point(1066, 24);
-            this.btnGenerateProcessFB.Size = new System.Drawing.Size(160, 32);
-            this.btnGenerateProcessFB.Text = "2. Generate Process FB";
+            this.btnGenerateProcessFB.Location = new System.Drawing.Point(961, 28);
+            this.btnGenerateProcessFB.Size = new System.Drawing.Size(130, 25);
+            this.btnGenerateProcessFB.Text = "2. Process FB";
             this.btnGenerateProcessFB.UseVisualStyleBackColor = false;
             this.btnGenerateProcessFB.Click += new System.EventHandler(this.btnGenerateProcessFB_Click);
 
@@ -151,11 +149,11 @@
             this.btnGenerateFeedStation.Enabled = false;
             this.btnGenerateFeedStation.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnGenerateFeedStation.FlatAppearance.BorderSize = 0;
-            this.btnGenerateFeedStation.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
+            this.btnGenerateFeedStation.Font = new System.Drawing.Font("Segoe UI", 8.5F, System.Drawing.FontStyle.Bold);
             this.btnGenerateFeedStation.ForeColor = System.Drawing.Color.White;
-            this.btnGenerateFeedStation.Location = new System.Drawing.Point(1232, 24);
-            this.btnGenerateFeedStation.Size = new System.Drawing.Size(186, 32);
-            this.btnGenerateFeedStation.Text = "3. Generate Full Feed Station";
+            this.btnGenerateFeedStation.Location = new System.Drawing.Point(1097, 28);
+            this.btnGenerateFeedStation.Size = new System.Drawing.Size(160, 25);
+            this.btnGenerateFeedStation.Text = "3. Full Feed Station";
             this.btnGenerateFeedStation.UseVisualStyleBackColor = false;
             this.btnGenerateFeedStation.Click += new System.EventHandler(this.btnGenerateFeedStation_Click);
 

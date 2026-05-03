@@ -327,9 +327,6 @@ namespace MapperUI
             if (dlg.ShowDialog() != DialogResult.OK) return;
             txtModelPath.Text = dlg.FileName;
             _loadedControlXmlPath = dlg.FileName;
-            lblLoadedFile.Text = Path.GetFileName(dlg.FileName);
-            lblLoadedFile.ForeColor = Color.Black;
-            lblLoadedFile.Font = new Font("Segoe UI", 9F, FontStyle.Regular);
             btnGenerateProcessFB.Enabled = true;
             btnGenerateFeedStation.Enabled = true;
             await LoadAndValidateAsync(dlg.FileName);
