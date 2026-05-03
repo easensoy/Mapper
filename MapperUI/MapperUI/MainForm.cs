@@ -332,36 +332,51 @@ namespace MapperUI
             await LoadAndValidateAsync(dlg.FileName);
         }
 
-        string PromptForOutputFolder()
+        bool TryResolveDemonstratorPath(out string syslayPath)
         {
-            var defaultPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                "Documents", "MapperOutput");
-
-            using var dlg = new FolderBrowserDialog
+            var cfg = Cfg();
+            syslayPath = cfg.SyslayPath2 ?? string.Empty;
+            if (string.IsNullOrEmpty(syslayPath))
             {
-                Description = "Select output folder for .syslay file",
-                SelectedPath = Directory.Exists(defaultPath) ? defaultPath : Environment.CurrentDirectory,
-                ShowNewFolderButton = false
-            };
-            return dlg.ShowDialog() == DialogResult.OK ? dlg.SelectedPath : string.Empty;
+                AppendActivity("[Error] Demonstrator paths not configured in mapper_config.json; cannot generate.");
+                ShowError("Demonstrator paths not configured in mapper_config.json; cannot generate.");
+                return false;
+            }
+            if (!File.Exists(syslayPath))
+            {
+                AppendActivity($"[Error] Demonstrator syslay missing: {syslayPath}");
+                ShowError($"Demonstrator syslay missing: {syslayPath}");
+                return false;
+            }
+            return true;
+        }
+
+        void LogCleanup(SystemInjector.CleanupReport report)
+        {
+            AppendActivity($"[Cleanup] Removed {report.RemovedFbs.Count} universal FB(s), {report.RemovedConnections} connection(s)");
+            foreach (var name in report.RemovedFbs) AppendActivity($"  - {name}");
+            AppendActivity($"[Cleanup] Preserved {report.PreservedFbs.Count} non-universal FB(s)");
+            foreach (var name in report.PreservedFbs) AppendActivity($"  + {name}");
         }
 
         async void btnGeneratePusherTest_Click(object sender, EventArgs e)
         {
             try
             {
-                var folder = PromptForOutputFolder();
-                if (string.IsNullOrEmpty(folder)) return;
+                if (!TryResolveDemonstratorPath(out var syslayPath)) return;
 
                 lblStatus.Text = "Generating...";
-                AppendActivity($"Generating Pusher_Test.syslay at {folder}...");
+                AppendActivity($"Generating Pusher Test into Demonstrator at {syslayPath}...");
+
                 var injector = new SystemInjector();
-                var path = await Task.Run(() => injector.GeneratePusherTestSyslay(folder));
+                var report = await Task.Run(() => injector.PrepareDemonstratorForGeneration(Cfg()));
+                LogCleanup(report);
+
+                var path = await Task.Run(() => injector.GeneratePusherTestSyslayToPath(syslayPath));
 
                 AppendActivity($"Generated: {path}");
                 lblStatus.Text = $"Ready  |  {path}";
-                MessageBox.Show($"Generated: {path}", "Pusher Test",
+                MessageBox.Show($"Generated into Demonstrator:\n{path}", "Pusher Test",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
@@ -381,19 +396,21 @@ namespace MapperUI
                     ShowError("Load a Control.xml first via Browse.");
                     return;
                 }
-
-                var folder = PromptForOutputFolder();
-                if (string.IsNullOrEmpty(folder)) return;
+                if (!TryResolveDemonstratorPath(out var syslayPath)) return;
 
                 lblStatus.Text = "Generating...";
-                AppendActivity($"Generating Feed_Station .syslay from {_loadedControlXmlPath}...");
+                AppendActivity($"Generating Feed_Station into Demonstrator at {syslayPath}...");
+
                 var injector = new SystemInjector();
-                var path = await Task.Run(() => injector.GenerateFeedStationSyslay(_loadedControlXmlPath, folder));
+                var report = await Task.Run(() => injector.PrepareDemonstratorForGeneration(Cfg()));
+                LogCleanup(report);
+
+                var path = await Task.Run(() => injector.GenerateFeedStationSyslayToPath(_loadedControlXmlPath, syslayPath));
 
                 AppendActivity($"Generated: {path}");
                 AppendActivity("[v1] DataConnections not generated; manual wiring required for sensor-to-process status feeds.");
                 lblStatus.Text = $"Ready  |  {path}";
-                MessageBox.Show($"Generated: {path}\n\nv1 limitation: DataConnections empty.",
+                MessageBox.Show($"Generated into Demonstrator:\n{path}\n\nv1 limitation: DataConnections empty.",
                     "Feed Station", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
@@ -762,6 +779,10 @@ namespace MapperUI
 
                 MapperLogger.Info($"Process FB generation — {processes.Count} process(es)");
                 AppendActivity($"Generating Process FB for {processes.Count} process(es)...");
+
+                var cleanupInjector = new SystemInjector();
+                var cleanupReport = await Task.Run(() => cleanupInjector.PrepareDemonstratorForGeneration(cfg));
+                LogCleanup(cleanupReport);
 
                 var deployResult = await Task.Run(() => TemplateLibraryDeployer.Deploy(cfg, processes));
                 if (!deployResult.Success)
