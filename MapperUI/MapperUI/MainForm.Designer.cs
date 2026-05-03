@@ -58,6 +58,8 @@
             this.btnGenerate = new System.Windows.Forms.Button();
             this.btnGenerateSevenState = new System.Windows.Forms.Button();
             this.btnGenerateProcessFB = new System.Windows.Forms.Button();
+            this.btnGeneratePusherTest = new System.Windows.Forms.Button();
+            this.btnGenerateFeedStation = new System.Windows.Forms.Button();
             this.statusStrip = new System.Windows.Forms.StatusStrip();
             this.lblStatus = new System.Windows.Forms.ToolStripStatusLabel();
 
@@ -126,6 +128,30 @@
             this.btnGenerateProcessFB.Text = "Generate Process FB";
             this.btnGenerateProcessFB.UseVisualStyleBackColor = false;
             this.btnGenerateProcessFB.Click += new System.EventHandler(this.btnGenerateProcessFB_Click);
+
+            this.btnGeneratePusherTest.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
+            this.btnGeneratePusherTest.BackColor = System.Drawing.Color.FromArgb(0, 122, 204);
+            this.btnGeneratePusherTest.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnGeneratePusherTest.FlatAppearance.BorderSize = 0;
+            this.btnGeneratePusherTest.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
+            this.btnGeneratePusherTest.ForeColor = System.Drawing.Color.White;
+            this.btnGeneratePusherTest.Location = new System.Drawing.Point(720, 24);
+            this.btnGeneratePusherTest.Size = new System.Drawing.Size(180, 32);
+            this.btnGeneratePusherTest.Text = "Generate Pusher Only (Test)";
+            this.btnGeneratePusherTest.UseVisualStyleBackColor = false;
+            this.btnGeneratePusherTest.Click += new System.EventHandler(this.btnGeneratePusherTest_Click);
+
+            this.btnGenerateFeedStation.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
+            this.btnGenerateFeedStation.BackColor = System.Drawing.Color.FromArgb(0, 153, 76);
+            this.btnGenerateFeedStation.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnGenerateFeedStation.FlatAppearance.BorderSize = 0;
+            this.btnGenerateFeedStation.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Bold);
+            this.btnGenerateFeedStation.ForeColor = System.Drawing.Color.White;
+            this.btnGenerateFeedStation.Location = new System.Drawing.Point(905, 24);
+            this.btnGenerateFeedStation.Size = new System.Drawing.Size(170, 32);
+            this.btnGenerateFeedStation.Text = "Generate Full Feed Station";
+            this.btnGenerateFeedStation.UseVisualStyleBackColor = false;
+            this.btnGenerateFeedStation.Click += new System.EventHandler(this.btnGenerateFeedStation_Click);
 
             this.btnGenerateCode.Visible = false;
             this.btnGenerateCode.Click += new System.EventHandler(this.btnGenerateCode_Click);
@@ -299,6 +325,8 @@
             this.Controls.Add(this.btnGenerateCode);
             this.Controls.Add(this.btnGenerateSevenState);
             this.Controls.Add(this.btnGenerateProcessFB);
+            this.Controls.Add(this.btnGeneratePusherTest);
+            this.Controls.Add(this.btnGenerateFeedStation);
             this.Controls.Add(this.btnBrowse);
             this.Controls.Add(this.btnMappingRules);
             this.Controls.Add(this.txtModelPath);
@@ -388,6 +416,8 @@
         private System.Windows.Forms.Button btnGenerate;
         private System.Windows.Forms.Button btnGenerateSevenState;
         private System.Windows.Forms.Button btnGenerateProcessFB;
+        private System.Windows.Forms.Button btnGeneratePusherTest;
+        private System.Windows.Forms.Button btnGenerateFeedStation;
         private System.Windows.Forms.StatusStrip statusStrip;
         private System.Windows.Forms.ToolStripStatusLabel lblStatus;
     }
