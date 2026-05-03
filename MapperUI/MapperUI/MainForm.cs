@@ -72,6 +72,32 @@ namespace MapperUI
             base.OnLoad(e);
             StartLlmEngine();
             StartHealthPolling();
+            ValidatePortNamesOnStartup();
+            lblStatus.Text = "Ready";
+        }
+
+        void ValidatePortNamesOnStartup()
+        {
+            try
+            {
+                var libRoot = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "Template Library");
+                libRoot = Path.GetFullPath(libRoot);
+                var mismatches = CodeGen.Translation.PortNameValidator.Validate(libRoot);
+                if (mismatches.Count == 0)
+                {
+                    AppendActivity($"[Startup] Port name validation passed against {libRoot}");
+                }
+                else
+                {
+                    AppendActivity($"[Startup] Port name validation found {mismatches.Count} issue(s):");
+                    foreach (var m in mismatches)
+                        AppendActivity($"  {m.FbType}: {m.Reason}");
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"[Startup] Port name validation skipped: {ex.Message}");
+            }
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)
@@ -301,6 +327,11 @@ namespace MapperUI
             if (dlg.ShowDialog() != DialogResult.OK) return;
             txtModelPath.Text = dlg.FileName;
             _loadedControlXmlPath = dlg.FileName;
+            lblLoadedFile.Text = Path.GetFileName(dlg.FileName);
+            lblLoadedFile.ForeColor = Color.Black;
+            lblLoadedFile.Font = new Font("Segoe UI", 9F, FontStyle.Regular);
+            btnGenerateProcessFB.Enabled = true;
+            btnGenerateFeedStation.Enabled = true;
             await LoadAndValidateAsync(dlg.FileName);
         }
 
@@ -326,18 +357,20 @@ namespace MapperUI
                 var folder = PromptForOutputFolder();
                 if (string.IsNullOrEmpty(folder)) return;
 
+                lblStatus.Text = "Generating...";
                 AppendActivity($"Generating Pusher_Test.syslay at {folder}...");
                 var injector = new SystemInjector();
                 var path = await Task.Run(() => injector.GeneratePusherTestSyslay(folder));
 
                 AppendActivity($"Generated: {path}");
-                lblStatus.Text = $"Success: {path}";
+                lblStatus.Text = $"Ready  |  {path}";
                 MessageBox.Show($"Generated: {path}", "Pusher Test",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
                 AppendActivity($"[Error] {ex}");
+                lblStatus.Text = "Ready";
                 ShowError(ex.Message);
             }
         }
@@ -355,19 +388,21 @@ namespace MapperUI
                 var folder = PromptForOutputFolder();
                 if (string.IsNullOrEmpty(folder)) return;
 
+                lblStatus.Text = "Generating...";
                 AppendActivity($"Generating Feed_Station .syslay from {_loadedControlXmlPath}...");
                 var injector = new SystemInjector();
                 var path = await Task.Run(() => injector.GenerateFeedStationSyslay(_loadedControlXmlPath, folder));
 
                 AppendActivity($"Generated: {path}");
                 AppendActivity("[v1] DataConnections not generated; manual wiring required for sensor-to-process status feeds.");
-                lblStatus.Text = $"Success: {path}";
+                lblStatus.Text = $"Ready  |  {path}";
                 MessageBox.Show($"Generated: {path}\n\nv1 limitation: DataConnections empty.",
                     "Feed Station", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
                 AppendActivity($"[Error] {ex}");
+                lblStatus.Text = "Ready";
                 ShowError(ex.Message);
             }
         }
