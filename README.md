@@ -12,11 +12,15 @@ dotnet run --project MapperUI/MapperUI/MapperUI.csproj
 
 Requires .NET 10 SDK on Windows. The WinForms app launches and presents the toolbar with the generation buttons.
 
-## Buttons
+## Workflow
 
-**Generate Pusher Only (Test)** — Produces a minimal `Pusher_Test.syslay` containing one `Five_State_Actuator_CAT` FB named `Pusher` with all 10 parameters set (no sensors fitted, 2-second travel times, 4-second fault timeouts). Smoke test for the pipeline. Output goes to a folder picker (default `%USERPROFILE%/Documents/MapperOutput`).
+The toolbar is a three-step progression. Run the buttons in order to validate the pipeline incrementally.
 
-**Generate Full Feed Station** — Reads the loaded `Control.xml`, finds the Process named `Feed_Station`, walks its referenced components, and emits a `<ProjectName>.syslay` with: 1 `Area_HMI`, 1 `Area`, 1 `Station1`, 1 `Station1_HMI`, 1 `Process1` (`Process1_Generic`), one `Five_State_Actuator_CAT` per actuator, one `Sensor_Bool_CAT` per sensor, plus station-level and area-level `CaSAdptrTerminator`. Wires the INIT chain, the `Area→Station→Components→Stn1_Term` `CaSAdptr` chain, and the closed `stateRptCmdAdptr` ring among components plus `Process1`. HMI adapters wire `Area_HMI→Area` and `Station1_HMI→Station1`.
+**1. Generate Test (Pusher)** — blue. Smallest possible `.syslay` output: one `Five_State_Actuator_CAT` FB named `Pusher` with all 10 parameters set (no sensors, 2-second travel, 4-second fault). No `Control.xml` required. Validates that the syslay schema is correct and that EAE imports without parse errors.
+
+**2. Generate Process FB** — orange. Generates a Process FB syslay with the data-driven step table arrays (`st_type`, `cmd_target`, `cmd_state`, `st_wait_comp`, `st_wait_state`, `st_next`, `cr_name`, `Text`) without surrounding station infrastructure. Validates the recipe arrays in isolation. Requires `Control.xml` loaded via Browse.
+
+**3. Generate Full Feed Station** — green. End-to-end. Reads the loaded `Control.xml`, finds the Process named `Feed_Station`, walks its referenced components, and emits a `<ProjectName>.syslay` with: 1 `PLC_Start` (`SE.AppBase.plcStart`), 1 `Area_HMI`, 1 `Area`, 1 `Station1`, 1 `Station1_HMI`, 1 `Process1` (`Process1_Generic`), one `Five_State_Actuator_CAT` per actuator, one `Sensor_Bool_CAT` per sensor, plus station-level and area-level `CaSAdptrTerminator`. Wires: INIT chain triggered by `PLC_Start.FIRST_INIT`, `Area→Station→Term` daisy-chain, `Station→Actuators→Process1→Stn1_Term` CaSBus chain (sensors are skipped because `Sensor_Bool_CAT` lacks station ports), closed `stateRptCmdAdptr` ring across all components plus `Process1`, and `Area_HMI→Area`/`Station1_HMI→Station1` HMI adapters. The chain ends with `Process1.INITO → PLC_Start.ACK_FIRST`.
 
 ## Prerequisite CAT and Basic templates
 
@@ -28,10 +32,11 @@ Internal helper Basic FBs: `ProcessRuntime_Generic_v1`, `ProcessStateBusHandler`
 
 ## v1 limitations
 
-- Process recipe arrays (`StepType[]`, `CmdTargetName[]`, etc.) are default-empty; `Process1` will not actually sequence anything until the `ProcessRuntime_Generic_v1.initialize` algorithm is hand-edited or the upcoming step-table generator is wired in.
-- `DataConnections` are not auto-generated; manual wiring is required for sensor-to-process status feeds and PLC I/O routing.
-- Components of `Type=Robot` in `Control.xml` are skipped with a warning logged to the Validation Results panel.
-- Multi-Process per Station is not supported in this build; Button B works for single-Process stations like `Feed_Station`.
+- **Process recipe is default-empty.** Button 3 emits `process_name` and `process_id` only; it does NOT populate the step-table recipe arrays inside `ProcessRuntime_Generic_v1.initialize`. `Process1` will start but will not sequence anything until you either run Button 2 to emit the recipe, or hand-edit `ProcessRuntime_Generic_v1.initialize` after import. The generated `.syslay` includes an XML comment near the top stating this limitation.
+- **`DataConnections` are not auto-generated** by Button 3. Manual wiring is required for sensor-to-process status feeds and PLC I/O routing after EAE import.
+- **`Type=Robot` components are skipped** with a warning logged to the Validation Output panel.
+- **Multi-Process per Station is not supported.** Button 3 works only for single-Process stations like `Feed_Station`.
+- **CaSBus chain skips sensors.** Verified against `.fbt` files: `Sensor_Bool_CAT` has only `stateRprtCmd_in/out` ports; it lacks `stationAdptr_in/out`. The chain therefore goes `Station → Actuators → Process1 → Stn1_Term`, with sensors participating only in the `stateRptCmdAdptr` ring.
 
 ## Run tests
 
