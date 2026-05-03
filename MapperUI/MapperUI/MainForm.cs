@@ -289,6 +289,8 @@ namespace MapperUI
             _debugConsole.BringToFront();
         }
 
+        string? _loadedControlXmlPath;
+
         async void btnBrowse_Click(object sender, EventArgs e)
         {
             using var dlg = new OpenFileDialog
@@ -298,7 +300,76 @@ namespace MapperUI
             };
             if (dlg.ShowDialog() != DialogResult.OK) return;
             txtModelPath.Text = dlg.FileName;
+            _loadedControlXmlPath = dlg.FileName;
             await LoadAndValidateAsync(dlg.FileName);
+        }
+
+        string PromptForOutputFolder()
+        {
+            var defaultPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                "Documents", "MapperOutput");
+
+            using var dlg = new FolderBrowserDialog
+            {
+                Description = "Select output folder for .syslay file",
+                SelectedPath = Directory.Exists(defaultPath) ? defaultPath : Environment.CurrentDirectory,
+                ShowNewFolderButton = false
+            };
+            return dlg.ShowDialog() == DialogResult.OK ? dlg.SelectedPath : string.Empty;
+        }
+
+        async void btnGeneratePusherTest_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                var folder = PromptForOutputFolder();
+                if (string.IsNullOrEmpty(folder)) return;
+
+                AppendActivity($"Generating Pusher_Test.syslay at {folder}...");
+                var injector = new SystemInjector();
+                var path = await Task.Run(() => injector.GeneratePusherTestSyslay(folder));
+
+                AppendActivity($"Generated: {path}");
+                lblStatus.Text = $"Success: {path}";
+                MessageBox.Show($"Generated: {path}", "Pusher Test",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"[Error] {ex}");
+                ShowError(ex.Message);
+            }
+        }
+
+        async void btnGenerateFeedStation_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(_loadedControlXmlPath) || !File.Exists(_loadedControlXmlPath))
+                {
+                    ShowError("Load a Control.xml first via Browse.");
+                    return;
+                }
+
+                var folder = PromptForOutputFolder();
+                if (string.IsNullOrEmpty(folder)) return;
+
+                AppendActivity($"Generating Feed_Station .syslay from {_loadedControlXmlPath}...");
+                var injector = new SystemInjector();
+                var path = await Task.Run(() => injector.GenerateFeedStationSyslay(_loadedControlXmlPath, folder));
+
+                AppendActivity($"Generated: {path}");
+                AppendActivity("[v1] DataConnections not generated; manual wiring required for sensor-to-process status feeds.");
+                lblStatus.Text = $"Success: {path}";
+                MessageBox.Show($"Generated: {path}\n\nv1 limitation: DataConnections empty.",
+                    "Feed Station", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"[Error] {ex}");
+                ShowError(ex.Message);
+            }
         }
 
         async Task LoadAndValidateAsync(string path)
