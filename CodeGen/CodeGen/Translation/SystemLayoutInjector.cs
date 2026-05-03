@@ -850,10 +850,22 @@ namespace MapperUI.Services
 
             var layerId = FBIdGenerator.GenerateFBId(fileName);
             var builder = new SyslayBuilder(layerId);
+            builder.SetTopComment(
+                "v1 limitations: Process1 recipe arrays are default-empty; sensor-to-process " +
+                "DataConnections not generated; manual recipe loading required in " +
+                "ProcessRuntime_Generic_v1.initialize before Process1 will sequence.");
 
             int sensorIdStart = 0;
             int actuatorIdStart = contents.Sensors.Count;
             const int processId = 10;
+
+            builder.AddFB(FBIdGenerator.GenerateFBId("PLC_Start"),
+                "PLC_Start", "plcStart", "SE.AppBase", 80, 580,
+                new Dictionary<string, string>
+                {
+                    ["Prio"] = SyslayBuilder.FormatInt(35),
+                    ["Delay"] = SyslayBuilder.FormatTimeMs(0)
+                });
 
             builder.AddFB(FBIdGenerator.GenerateFBId("Area_HMI"),
                 "Area_HMI", "Area_CAT", "Main", 240, 140);
@@ -965,58 +977,77 @@ namespace MapperUI.Services
         private static void BuildFeedStationWiring(SyslayBuilder builder, StationContents contents)
         {
             var initChain = new List<string>();
+            initChain.Add("Area");
             initChain.Add("Station1");
             foreach (var s in contents.Sensors) initChain.Add(s.Name);
             foreach (var a in contents.Actuators) initChain.Add(a.Name);
             initChain.Add("Process1");
 
-            builder.AddEventConnection("Area.INITO", "Station1.INIT");
+            builder.AddEventConnection("PLC_Start.FIRST_INIT", "Area.INIT");
             for (int i = 0; i < initChain.Count - 1; i++)
                 builder.AddEventConnection($"{initChain[i]}.INITO", $"{initChain[i + 1]}.INIT");
+            builder.AddEventConnection("Process1.INITO", "PLC_Start.ACK_FIRST");
 
             builder.AddAdapterConnection("Area_HMI.AreaHMIAdptrOUT", "Area.AreaHMIAdptrIN");
             builder.AddAdapterConnection("Station1_HMI.StationHMIAdptrOUT", "Station1.StationHMIAdptrIN");
             builder.AddAdapterConnection("Area.AreaAdptrOUT", "Station1.AreaAdptrIN");
-            builder.AddAdapterConnection("Area.AreaAdptrOUT", "Area_Term.CasAdptrIN");
+            builder.AddAdapterConnection("Station1.AreaAdptrOUT", "Area_Term.CasAdptrIN");
 
-            var allComponents = new List<string>();
-            foreach (var s in contents.Sensors) allComponents.Add(s.Name);
-            foreach (var a in contents.Actuators) allComponents.Add(a.Name);
-            allComponents.Add("Process1");
+            // v1-assumption: Sensor_Bool_CAT lacks stationAdptr ports per .fbt verification.
+            // CaSBus chain skips sensors and includes only actuators + Process1.
+            var stationChain = new List<(string Name, string Type)>();
+            foreach (var a in contents.Actuators)
+                stationChain.Add((a.Name, "Five_State_Actuator_CAT"));
+            stationChain.Add(("Process1", "Process1_Generic"));
 
-            if (allComponents.Count > 0)
+            if (stationChain.Count > 0)
             {
-                builder.AddAdapterConnection("Station1.StationAdaptrOUT", $"{allComponents[0]}.stationAdptr_in");
-                for (int i = 0; i < allComponents.Count - 1; i++)
+                builder.AddAdapterConnection("Station1.StationAdaptrOUT",
+                    $"{stationChain[0].Name}.{StationAdptrIn(stationChain[0].Type)}");
+                for (int i = 0; i < stationChain.Count - 1; i++)
                     builder.AddAdapterConnection(
-                        $"{allComponents[i]}.stationAdptr_out",
-                        $"{allComponents[i + 1]}.stationAdptr_in");
+                        $"{stationChain[i].Name}.{StationAdptrOut(stationChain[i].Type)}",
+                        $"{stationChain[i + 1].Name}.{StationAdptrIn(stationChain[i + 1].Type)}");
                 builder.AddAdapterConnection(
-                    $"{allComponents[^1]}.stationAdptr_out", "Stn1_Term.CasAdptrIN");
+                    $"{stationChain[^1].Name}.{StationAdptrOut(stationChain[^1].Type)}",
+                    "Stn1_Term.CasAdptrIN");
+            }
 
-                for (int i = 0; i < allComponents.Count - 1; i++)
+            var ringComponents = new List<(string Name, string Type)>();
+            foreach (var s in contents.Sensors)
+                ringComponents.Add((s.Name, "Sensor_Bool_CAT"));
+            foreach (var a in contents.Actuators)
+                ringComponents.Add((a.Name, "Five_State_Actuator_CAT"));
+            ringComponents.Add(("Process1", "Process1_Generic"));
+
+            if (ringComponents.Count > 1)
+            {
+                for (int i = 0; i < ringComponents.Count - 1; i++)
                     builder.AddAdapterConnection(
-                        StateRprtOut(allComponents[i]),
-                        StateRprtIn(allComponents[i + 1]));
+                        $"{ringComponents[i].Name}.{StateRprtOut(ringComponents[i].Type)}",
+                        $"{ringComponents[i + 1].Name}.{StateRprtIn(ringComponents[i + 1].Type)}");
                 builder.AddAdapterConnection(
-                    StateRprtOut(allComponents[^1]),
-                    StateRprtIn(allComponents[0]));
+                    $"{ringComponents[^1].Name}.{StateRprtOut(ringComponents[^1].Type)}",
+                    $"{ringComponents[0].Name}.{StateRprtIn(ringComponents[0].Type)}");
             }
         }
 
-        private static string StateRprtOut(string componentName)
+        public static string StateRprtOut(string fbType)
         {
-            if (string.Equals(componentName, "Process1", StringComparison.OrdinalIgnoreCase))
-                return $"{componentName}.stateRptCmdAdptr_out";
-            return $"{componentName}.stateRprtCmd_out";
+            return string.Equals(fbType, "Process1_Generic", StringComparison.Ordinal)
+                ? "stateRptCmdAdptr_out"
+                : "stateRprtCmd_out";
         }
 
-        private static string StateRprtIn(string componentName)
+        public static string StateRprtIn(string fbType)
         {
-            if (string.Equals(componentName, "Process1", StringComparison.OrdinalIgnoreCase))
-                return $"{componentName}.stateRptCmdAdptr_in";
-            return $"{componentName}.stateRprtCmd_in";
+            return string.Equals(fbType, "Process1_Generic", StringComparison.Ordinal)
+                ? "stateRptCmdAdptr_in"
+                : "stateRprtCmd_in";
         }
+
+        public static string StationAdptrOut(string fbType) => "stationAdptr_out";
+        public static string StationAdptrIn(string fbType) => "stationAdptr_in";
 
         private static string SanitizeFileName(string name)
         {
