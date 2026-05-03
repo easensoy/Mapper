@@ -785,5 +785,244 @@ namespace MapperUI.Services
                         && !Sensors(all).Contains(c)
                         && !Processes(all).Contains(c)
                         && !Robots(all, config).Contains(c)).ToList();
+
+        public string GeneratePusherTestSyslay(string outputFolder)
+        {
+            if (string.IsNullOrEmpty(outputFolder))
+                throw new ArgumentException("Output folder is required.", nameof(outputFolder));
+            if (!Directory.Exists(outputFolder))
+                throw new DirectoryNotFoundException($"Output folder does not exist: {outputFolder}");
+
+            var fileName = "Pusher_Test.syslay";
+            var fullPath = Path.Combine(outputFolder, fileName);
+
+            var layerId = FBIdGenerator.GenerateFBId(fileName);
+            var builder = new SyslayBuilder(layerId);
+
+            var pusherId = FBIdGenerator.GenerateFBId("Pusher_Test_v1");
+            var parameters = new Dictionary<string, string>
+            {
+                ["actuator_name"] = SyslayBuilder.FormatString("pusher"),
+                ["actuator_id"] = SyslayBuilder.FormatInt(0),
+                ["WorkSensorFitted"] = SyslayBuilder.FormatBool(false),
+                ["HomeSensorFitted"] = SyslayBuilder.FormatBool(false),
+                ["toWorkTime"] = SyslayBuilder.FormatTimeMs(2000),
+                ["toHomeTime"] = SyslayBuilder.FormatTimeMs(2000),
+                ["enableToWorkFaultTimeout"] = SyslayBuilder.FormatBool(false),
+                ["enableToHomeFaultTimeout"] = SyslayBuilder.FormatBool(false),
+                ["faultTimeoutWork"] = SyslayBuilder.FormatTimeMs(4000),
+                ["faultTimeoutHome"] = SyslayBuilder.FormatTimeMs(4000),
+            };
+
+            builder.AddFB(pusherId, "Pusher", "Five_State_Actuator_CAT", "Main", 1300, 2480, parameters);
+
+            var doc = builder.Build();
+            doc.Save(fullPath);
+            return fullPath;
+        }
+
+        public string GenerateFeedStationSyslay(string controlXmlPath, string outputFolder)
+        {
+            if (string.IsNullOrEmpty(controlXmlPath))
+                throw new ArgumentException("Control.xml path is required.", nameof(controlXmlPath));
+            if (!File.Exists(controlXmlPath))
+                throw new FileNotFoundException($"Control.xml not found: {controlXmlPath}");
+            if (string.IsNullOrEmpty(outputFolder))
+                throw new ArgumentException("Output folder is required.", nameof(outputFolder));
+            if (!Directory.Exists(outputFolder))
+                throw new DirectoryNotFoundException($"Output folder does not exist: {outputFolder}");
+
+            var reader = new CodeGen.IO.SystemXmlReader();
+            var allComponents = reader.ReadAllComponents(controlXmlPath);
+
+            var process = allComponents.FirstOrDefault(c =>
+                string.Equals(c.Type, "Process", StringComparison.Ordinal) &&
+                string.Equals(c.Name, "Feed_Station", StringComparison.Ordinal));
+            if (process == null)
+                throw new InvalidOperationException("No Process named 'Feed_Station' found in Control.xml.");
+
+            var grouping = new StationGroupingService();
+            var contents = grouping.GroupStationContents(process, allComponents);
+
+            var projectName = !string.IsNullOrWhiteSpace(reader.SystemName) ? reader.SystemName : "FeedStation_Generated";
+            var fileName = $"{SanitizeFileName(projectName)}.syslay";
+            var fullPath = Path.Combine(outputFolder, fileName);
+
+            var layerId = FBIdGenerator.GenerateFBId(fileName);
+            var builder = new SyslayBuilder(layerId);
+
+            int sensorIdStart = 0;
+            int actuatorIdStart = contents.Sensors.Count;
+            const int processId = 10;
+
+            builder.AddFB(FBIdGenerator.GenerateFBId("Area_HMI"),
+                "Area_HMI", "Area_CAT", "Main", 240, 140);
+
+            builder.AddFB(FBIdGenerator.GenerateFBId("Area"),
+                "Area", "Area", "Main", 400, 580,
+                new Dictionary<string, string>
+                {
+                    ["AreaName"] = SyslayBuilder.FormatString("Area")
+                });
+
+            builder.AddFB(FBIdGenerator.GenerateFBId("Station1"),
+                "Station1", "Station", "Main", 2120, 600,
+                new Dictionary<string, string>
+                {
+                    ["StationName"] = SyslayBuilder.FormatString("Station1")
+                });
+
+            builder.AddFB(FBIdGenerator.GenerateFBId("Station1_HMI"),
+                "Station1_HMI", "Station_CAT", "Main", 2220, 100);
+
+            builder.AddFB(FBIdGenerator.GenerateFBId(contents.Process.ComponentID),
+                "Process1", "Process1_Generic", "Main", 3360, 1460,
+                new Dictionary<string, string>
+                {
+                    ["process_name"] = SyslayBuilder.FormatString("Process1"),
+                    ["process_id"] = SyslayBuilder.FormatInt(processId)
+                });
+
+            for (int i = 0; i < contents.Actuators.Count; i++)
+            {
+                var actuator = contents.Actuators[i];
+                int assignedId = actuatorIdStart + i;
+                var actParams = BuildActuatorParameters(actuator, assignedId, contents.Process);
+                builder.AddFB(FBIdGenerator.GenerateFBId(actuator.ComponentID),
+                    actuator.Name, "Five_State_Actuator_CAT", "Main",
+                    1300 + i * 400, 2480, actParams);
+            }
+
+            for (int i = 0; i < contents.Sensors.Count; i++)
+            {
+                var sensor = contents.Sensors[i];
+                int assignedId = sensorIdStart + i;
+                builder.AddFB(FBIdGenerator.GenerateFBId(sensor.ComponentID),
+                    sensor.Name, "Sensor_Bool_CAT", "Main",
+                    1560 + i * 400, 1480,
+                    new Dictionary<string, string>
+                    {
+                        ["name"] = SyslayBuilder.FormatString(sensor.Name),
+                        ["id"] = SyslayBuilder.FormatInt(assignedId)
+                    });
+            }
+
+            builder.AddFB(FBIdGenerator.GenerateFBId("Stn1_Term"),
+                "Stn1_Term", "CaSAdptrTerminator", "Main", 4780, 2360);
+
+            builder.AddFB(FBIdGenerator.GenerateFBId("Area_Term"),
+                "Area_Term", "CaSAdptrTerminator", "Main", 3760, 720);
+
+            BuildFeedStationWiring(builder, contents);
+
+            var doc = builder.Build();
+            doc.Save(fullPath);
+            return fullPath;
+        }
+
+        private static Dictionary<string, string> BuildActuatorParameters(
+            VueOneComponent actuator, int assignedId, VueOneComponent process)
+        {
+            bool workSensorFitted = ConditionReferences(process, actuator.Name, "atWork");
+            bool homeSensorFitted = ConditionReferences(process, actuator.Name, "atHome");
+
+            int toWorkMs = 2000;
+            int toHomeMs = 2000;
+
+            return new Dictionary<string, string>
+            {
+                ["actuator_name"] = SyslayBuilder.FormatString(actuator.Name.ToLowerInvariant()),
+                ["actuator_id"] = SyslayBuilder.FormatInt(assignedId),
+                ["WorkSensorFitted"] = SyslayBuilder.FormatBool(workSensorFitted),
+                ["HomeSensorFitted"] = SyslayBuilder.FormatBool(homeSensorFitted),
+                ["toWorkTime"] = SyslayBuilder.FormatTimeMs(toWorkMs),
+                ["toHomeTime"] = SyslayBuilder.FormatTimeMs(toHomeMs),
+                ["faultTimeoutWork"] = SyslayBuilder.FormatTimeMs(toWorkMs * 2),
+                ["faultTimeoutHome"] = SyslayBuilder.FormatTimeMs(toHomeMs * 2),
+                ["enableToWorkFaultTimeout"] = SyslayBuilder.FormatBool(workSensorFitted),
+                ["enableToHomeFaultTimeout"] = SyslayBuilder.FormatBool(homeSensorFitted)
+            };
+        }
+
+        public static bool ConditionReferences(VueOneComponent process, string actuatorName, string suffix)
+        {
+            var pattern = $"{actuatorName}/{suffix}";
+            foreach (var state in process.States)
+            {
+                foreach (var trans in state.Transitions)
+                {
+                    foreach (var cond in trans.Conditions)
+                    {
+                        if (cond.Name != null &&
+                            cond.Name.IndexOf(pattern, StringComparison.OrdinalIgnoreCase) >= 0)
+                            return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        private static void BuildFeedStationWiring(SyslayBuilder builder, StationContents contents)
+        {
+            var initChain = new List<string>();
+            initChain.Add("Station1");
+            foreach (var s in contents.Sensors) initChain.Add(s.Name);
+            foreach (var a in contents.Actuators) initChain.Add(a.Name);
+            initChain.Add("Process1");
+
+            builder.AddEventConnection("Area.INITO", "Station1.INIT");
+            for (int i = 0; i < initChain.Count - 1; i++)
+                builder.AddEventConnection($"{initChain[i]}.INITO", $"{initChain[i + 1]}.INIT");
+
+            builder.AddAdapterConnection("Area_HMI.AreaHMIAdptrOUT", "Area.AreaHMIAdptrIN");
+            builder.AddAdapterConnection("Station1_HMI.StationHMIAdptrOUT", "Station1.StationHMIAdptrIN");
+            builder.AddAdapterConnection("Area.AreaAdptrOUT", "Station1.AreaAdptrIN");
+            builder.AddAdapterConnection("Area.AreaAdptrOUT", "Area_Term.CasAdptrIN");
+
+            var allComponents = new List<string>();
+            foreach (var s in contents.Sensors) allComponents.Add(s.Name);
+            foreach (var a in contents.Actuators) allComponents.Add(a.Name);
+            allComponents.Add("Process1");
+
+            if (allComponents.Count > 0)
+            {
+                builder.AddAdapterConnection("Station1.StationAdaptrOUT", $"{allComponents[0]}.stationAdptr_in");
+                for (int i = 0; i < allComponents.Count - 1; i++)
+                    builder.AddAdapterConnection(
+                        $"{allComponents[i]}.stationAdptr_out",
+                        $"{allComponents[i + 1]}.stationAdptr_in");
+                builder.AddAdapterConnection(
+                    $"{allComponents[^1]}.stationAdptr_out", "Stn1_Term.CasAdptrIN");
+
+                for (int i = 0; i < allComponents.Count - 1; i++)
+                    builder.AddAdapterConnection(
+                        StateRprtOut(allComponents[i]),
+                        StateRprtIn(allComponents[i + 1]));
+                builder.AddAdapterConnection(
+                    StateRprtOut(allComponents[^1]),
+                    StateRprtIn(allComponents[0]));
+            }
+        }
+
+        private static string StateRprtOut(string componentName)
+        {
+            if (string.Equals(componentName, "Process1", StringComparison.OrdinalIgnoreCase))
+                return $"{componentName}.stateRptCmdAdptr_out";
+            return $"{componentName}.stateRprtCmd_out";
+        }
+
+        private static string StateRprtIn(string componentName)
+        {
+            if (string.Equals(componentName, "Process1", StringComparison.OrdinalIgnoreCase))
+                return $"{componentName}.stateRptCmdAdptr_in";
+            return $"{componentName}.stateRprtCmd_in";
+        }
+
+        private static string SanitizeFileName(string name)
+        {
+            foreach (var c in Path.GetInvalidFileNameChars())
+                name = name.Replace(c, '_');
+            return name;
+        }
     }
 }
