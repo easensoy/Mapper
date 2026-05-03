@@ -1,0 +1,2569 @@
+<?xml version='1.0' encoding='utf-8'?>
+<vueOne_SystemDefinition Version="1.0.0" Type="System"><System><SystemID>SYS-8133a338-a8af-4b6d-9d25-7504f3d3934a</SystemID>
+    <Name>SMC_Vue2VC_With_Processes</Name>
+    <Project_Number>
+    </Project_Number>
+    <Serial_No>
+    </Serial_No>
+    <Manufacturer>
+    </Manufacturer>
+    <Component>
+      <ComponentID>C-db29c7cb-08df-46da-ab6a-28d2593bd5bb</ComponentID>
+      <Name>Feeder</Name>
+      <VcID>Pusher</VcID>
+      <Description>
+      </Description>
+      <Library_ID>C-53da9144-de2c-4ba0-a937-bf7ff82ffc62</Library_ID>
+      <Type>Actuator</Type>
+      <State>
+        <StateID>S-7d375f41-9cdb-46d5-9d74-23bc4bd2151e</StateID>
+        <Name>ReturnedHome</Name>
+        <State_Number>0</State_Number>
+        <Initial_State>True</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>-40</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-4797872c-30b9-49aa-805d-bb30aaa9f910</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-7d375f41-9cdb-46d5-9d74-23bc4bd2151e</Origin_State>
+          <Destination_State>S-5376706a-5cf1-47c9-a02f-86682c122062</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-164d3366-c377-4b11-ad22-54964636199c" Name="Feed_Station/FeederAdvancing" ComponentID="C-0c804da8-b3b6-4119-abbe-12fbb268a847" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-5376706a-5cf1-47c9-a02f-86682c122062</StateID>
+        <Name>Advancing</Name>
+        <State_Number>1</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>1000</Time>
+        <Speed>100</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition>
+          <ConditionValue>
+            <ConditionGroup Operator="" GroupName="Group_1">
+              <Condition Operator="-" ID="S-5d2a68f4-3880-4c0b-a8a4-682cccd798a6" Name="Checker/Down" ComponentID="C-21a332b3-e2fd-4a5b-850e-c4197abf62c3" />
+              <Condition Operator="-" ID="S-668f1d9f-db19-43cd-8cff-e8cf77e8b3bb" Name="Transfer/Advanced" ComponentID="C-c9b8c68c-5030-4d93-91ca-06310726ddc5" />
+            </ConditionGroup>
+          </ConditionValue>
+        </Interlock_Condition>
+        <StaticState>False</StaticState>
+        <Transition>
+          <TransitionID>T-3457983c-dae4-4f29-b8f8-d59b8186a580</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-5376706a-5cf1-47c9-a02f-86682c122062</Origin_State>
+          <Destination_State>S-d23161f7-0005-4853-ad3a-6f66b8c56b69</Destination_State>
+          <Sequence_Condition />
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-d23161f7-0005-4853-ad3a-6f66b8c56b69</StateID>
+        <Name>Advanced</Name>
+        <State_Number>2</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>118</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-6af10733-33d9-4628-8fb4-0bf2fd332d06</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-d23161f7-0005-4853-ad3a-6f66b8c56b69</Origin_State>
+          <Destination_State>S-c79916bd-e08e-4554-a3bd-3e50e00ebf5e</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-c11d53a6-9bbd-4c9b-901e-fddbe5b179ea" Name="Feed_Station/FeederReturning" ComponentID="C-0c804da8-b3b6-4119-abbe-12fbb268a847" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-c79916bd-e08e-4554-a3bd-3e50e00ebf5e</StateID>
+        <Name>Returning</Name>
+        <State_Number>3</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>1000</Time>
+        <Speed>100</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>False</StaticState>
+        <Transition>
+          <TransitionID>T-10a3fe89-ee43-4752-9700-0b3f763e4254</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-c79916bd-e08e-4554-a3bd-3e50e00ebf5e</Origin_State>
+          <Destination_State>S-24418316-3e13-4b71-8860-9c0435b70004</Destination_State>
+          <Sequence_Condition />
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-24418316-3e13-4b71-8860-9c0435b70004</StateID>
+        <Name>ReturnedFinished</Name>
+        <State_Number>4</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-feb01d79-f85d-4b0d-bac5-01b72f82867f</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-24418316-3e13-4b71-8860-9c0435b70004</Origin_State>
+          <Destination_State>S-7d375f41-9cdb-46d5-9d74-23bc4bd2151e</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-bb9316a3-f3be-4236-9a82-db2854af110a" Name="Feed_Station/HandShake" ComponentID="C-0c804da8-b3b6-4119-abbe-12fbb268a847" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+    </Component>
+    <Component>
+      <ComponentID>C-21a332b3-e2fd-4a5b-850e-c4197abf62c3</ComponentID>
+      <Name>Checker</Name>
+      <VcID>CheckerComp</VcID>
+      <Description>
+      </Description>
+      <Library_ID>C-4e81fa96-fefb-43cb-973d-bee1dbb9437f</Library_ID>
+      <Type>Actuator</Type>
+      <State>
+        <StateID>S-258304bf-4579-428a-93c5-6fd8caf389b3</StateID>
+        <Name>ReturnedHome</Name>
+        <State_Number>0</State_Number>
+        <Initial_State>True</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-dfa505a7-79a7-4473-85b8-f17068be7885</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-258304bf-4579-428a-93c5-6fd8caf389b3</Origin_State>
+          <Destination_State>S-6fdf0d45-6e73-42a7-9199-cb64d0548056</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-10626f0e-414e-484f-b1a9-2734b15aa9fe" Name="Feed_Station/PartChecking" ComponentID="C-0c804da8-b3b6-4119-abbe-12fbb268a847" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-6fdf0d45-6e73-42a7-9199-cb64d0548056</StateID>
+        <Name>Lowering</Name>
+        <State_Number>1</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>1000</Time>
+        <Speed>100</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition>
+          <ConditionValue>
+            <ConditionGroup Operator="" GroupName="Group_1">
+              <Condition Operator="-" ID="S-668f1d9f-db19-43cd-8cff-e8cf77e8b3bb" Name="Transfer/Advanced" ComponentID="C-c9b8c68c-5030-4d93-91ca-06310726ddc5" />
+              <Condition Operator="-" ID="S-24418316-3e13-4b71-8860-9c0435b70004" Name="Feeder/ReturnedFinished" ComponentID="C-db29c7cb-08df-46da-ab6a-28d2593bd5bb" />
+            </ConditionGroup>
+          </ConditionValue>
+        </Interlock_Condition>
+        <StaticState>False</StaticState>
+        <Transition>
+          <TransitionID>T-85507beb-65c1-4d2c-8287-8cad57f5e5cc</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-6fdf0d45-6e73-42a7-9199-cb64d0548056</Origin_State>
+          <Destination_State>S-5d2a68f4-3880-4c0b-a8a4-682cccd798a6</Destination_State>
+          <Sequence_Condition />
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-5d2a68f4-3880-4c0b-a8a4-682cccd798a6</StateID>
+        <Name>Down</Name>
+        <State_Number>2</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>30</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-60584cf2-b9ba-40c1-9dfa-8de76ef93ab7</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-5d2a68f4-3880-4c0b-a8a4-682cccd798a6</Origin_State>
+          <Destination_State>S-718878d1-542b-4b5c-842f-86dc84979e59</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-10626f0e-414e-484f-b1a9-2734b15aa9fe" Name="Feed_Station/PartChecking" ComponentID="C-0c804da8-b3b6-4119-abbe-12fbb268a847" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-718878d1-542b-4b5c-842f-86dc84979e59</StateID>
+        <Name>Rising</Name>
+        <State_Number>3</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>1000</Time>
+        <Speed>2000</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>False</StaticState>
+        <Transition>
+          <TransitionID>T-d347102e-1950-442f-b760-e8bb684c3bf6</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-718878d1-542b-4b5c-842f-86dc84979e59</Origin_State>
+          <Destination_State>S-017a1e09-f115-4c4e-bbca-6e07b9c15544</Destination_State>
+          <Sequence_Condition />
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-017a1e09-f115-4c4e-bbca-6e07b9c15544</StateID>
+        <Name>RisingFinished</Name>
+        <State_Number>4</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-95f97d33-f69c-47f8-ad45-f3b3380cc8e5</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-017a1e09-f115-4c4e-bbca-6e07b9c15544</Origin_State>
+          <Destination_State>S-258304bf-4579-428a-93c5-6fd8caf389b3</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-24418316-3e13-4b71-8860-9c0435b70004" Name="Feeder/ReturnedFinished" ComponentID="C-db29c7cb-08df-46da-ab6a-28d2593bd5bb" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+    </Component>
+    <Component>
+      <ComponentID>C-c9b8c68c-5030-4d93-91ca-06310726ddc5</ComponentID>
+      <Name>Transfer</Name>
+      <VcID>TransferComp</VcID>
+      <Description>
+      </Description>
+      <Library_ID>C-7a42bd65-7a9e-4896-aa26-40d00fad5602</Library_ID>
+      <Type>Actuator</Type>
+      <State>
+        <StateID>S-d88c0db3-f0cf-418b-ad22-539175636167</StateID>
+        <Name>ReturnedHome</Name>
+        <State_Number>0</State_Number>
+        <Initial_State>True</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-dc7632b4-9dc3-47bd-a31f-06265622dd00</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-d88c0db3-f0cf-418b-ad22-539175636167</Origin_State>
+          <Destination_State>S-c9c8f259-8c09-43a2-a4ff-799e371a381d</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-5e8ab206-15fd-4576-be53-82a002b5a476" Name="Feed_Station/TransferAdvancing" ComponentID="C-0c804da8-b3b6-4119-abbe-12fbb268a847" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-c9c8f259-8c09-43a2-a4ff-799e371a381d</StateID>
+        <Name>Advancing</Name>
+        <State_Number>1</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>1500</Time>
+        <Speed>100</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition>
+          <ConditionValue>
+            <ConditionGroup Operator="" GroupName="Group_1">
+              <Condition Operator="-" ID="S-5d2a68f4-3880-4c0b-a8a4-682cccd798a6" Name="Checker/Down" ComponentID="C-21a332b3-e2fd-4a5b-850e-c4197abf62c3" />
+            </ConditionGroup>
+            <ConditionGroup Operator="" GroupName="Group_2">
+              <Condition Operator="-" ID="S-d23161f7-0005-4853-ad3a-6f66b8c56b69" Name="Feeder/Advanced" ComponentID="C-db29c7cb-08df-46da-ab6a-28d2593bd5bb" />
+            </ConditionGroup>
+          </ConditionValue>
+        </Interlock_Condition>
+        <StaticState>False</StaticState>
+        <Transition>
+          <TransitionID>T-5f816e06-c46a-417c-9c06-92ac9bdab687</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-c9c8f259-8c09-43a2-a4ff-799e371a381d</Origin_State>
+          <Destination_State>S-668f1d9f-db19-43cd-8cff-e8cf77e8b3bb</Destination_State>
+          <Sequence_Condition />
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-668f1d9f-db19-43cd-8cff-e8cf77e8b3bb</StateID>
+        <Name>Advanced</Name>
+        <State_Number>2</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>218</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-6f17a17d-8649-4f7c-b89a-1231476aed6b</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-668f1d9f-db19-43cd-8cff-e8cf77e8b3bb</Origin_State>
+          <Destination_State>S-e5a51fda-a702-461f-9e63-1f1326b3c1ee</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-11dea3f8-58f4-4214-973d-3b7c3ea5f5e7" Name="Disassembly/transfer_return" ComponentID="C-4376f4d7-210e-4f18-a2ae-16492012db4f" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-e5a51fda-a702-461f-9e63-1f1326b3c1ee</StateID>
+        <Name>Returning</Name>
+        <State_Number>3</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>1000</Time>
+        <Speed>200</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>False</StaticState>
+        <Transition>
+          <TransitionID>T-745cc9aa-10df-48eb-b465-b5d64bbacb8f</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-e5a51fda-a702-461f-9e63-1f1326b3c1ee</Origin_State>
+          <Destination_State>S-7f957139-aef3-4503-ad02-c4b4f561c57f</Destination_State>
+          <Sequence_Condition />
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-7f957139-aef3-4503-ad02-c4b4f561c57f</StateID>
+        <Name>ReturnedFinished</Name>
+        <State_Number>4</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-3a11639b-59ad-4238-8091-a16652caf448</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-7f957139-aef3-4503-ad02-c4b4f561c57f</Origin_State>
+          <Destination_State>S-d88c0db3-f0cf-418b-ad22-539175636167</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-bb9316a3-f3be-4236-9a82-db2854af110a" Name="Feed_Station/HandShake" ComponentID="C-0c804da8-b3b6-4119-abbe-12fbb268a847" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+    </Component>
+    <Component>
+      <ComponentID>C-0c804da8-b3b6-4119-abbe-12fbb268a847</ComponentID>
+      <Name>Feed_Station</Name>
+      <VcID>
+      </VcID>
+      <Description>
+      </Description>
+      <Library_ID>C-44841856-22fe-4247-8853-0e7df8dd656c</Library_ID>
+      <Type>Process</Type>
+      <State>
+        <StateID>S-96daa832-5aac-4565-a045-539f555d7f91</StateID>
+        <Name>Initialisation</Name>
+        <State_Number>0</State_Number>
+        <Initial_State>True</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-fa850de7-6b60-475d-80de-487d0e8f5d74</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-96daa832-5aac-4565-a045-539f555d7f91</Origin_State>
+          <Destination_State>S-fe4fd8c4-d220-4fcf-ada1-18cebf9c2003</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-c20c8248-df73-49bc-85ff-c33d84ea6fce" Name="Assembly_Station/Initialisation" ComponentID="C-b455b9c6-47f7-4172-a1c1-4c43fc03b55e" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-fe4fd8c4-d220-4fcf-ada1-18cebf9c2003</StateID>
+        <Name>CheckPartInHopper</Name>
+        <State_Number>1</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-42e92e60-3ee6-4ad3-83d2-166c132de763</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-fe4fd8c4-d220-4fcf-ada1-18cebf9c2003</Origin_State>
+          <Destination_State>S-164d3366-c377-4b11-ad22-54964636199c</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-64af871a-9da9-4cdb-adac-4a05bdeebb1e" Name="PartInHopper/On" ComponentID="C-eaa52671-72f1-4739-8dc8-203adc8b7aa2" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-164d3366-c377-4b11-ad22-54964636199c</StateID>
+        <Name>FeederAdvancing</Name>
+        <State_Number>2</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-e1794fde-e142-41b2-a484-9a0f5787e0e0</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-164d3366-c377-4b11-ad22-54964636199c</Origin_State>
+          <Destination_State>S-10626f0e-414e-484f-b1a9-2734b15aa9fe</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-d23161f7-0005-4853-ad3a-6f66b8c56b69" Name="Feeder/Advanced" ComponentID="C-db29c7cb-08df-46da-ab6a-28d2593bd5bb" />
+                <Condition Operator="" ID="S-64af871a-9da9-9nnb-adac-4a05bdeeiknb" Name="PartAtChecker/On" ComponentID="C-eaa52671-ui89-4739-8dc8-203adc8bpopo" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-10626f0e-414e-484f-b1a9-2734b15aa9fe</StateID>
+        <Name>PartChecking</Name>
+        <State_Number>3</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-6121136d-ef54-4090-84dd-137518282e69</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-10626f0e-414e-484f-b1a9-2734b15aa9fe</Origin_State>
+          <Destination_State>S-c11d53a6-9bbd-4c9b-901e-fddbe5b179ea</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-017a1e09-f115-4c4e-bbca-6e07b9c15544" Name="Checker/RisingFinished" ComponentID="C-21a332b3-e2fd-4a5b-850e-c4197abf62c3" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-c11d53a6-9bbd-4c9b-901e-fddbe5b179ea</StateID>
+        <Name>FeederReturning</Name>
+        <State_Number>4</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-abdc3d6a-73e1-47c5-b90f-7d8106fc5cf8</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-c11d53a6-9bbd-4c9b-901e-fddbe5b179ea</Origin_State>
+          <Destination_State>S-5e8ab206-15fd-4576-be53-82a002b5a476</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-24418316-3e13-4b71-8860-9c0435b70004" Name="Feeder/ReturnedFinished" ComponentID="C-db29c7cb-08df-46da-ab6a-28d2593bd5bb" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-5e8ab206-15fd-4576-be53-82a002b5a476</StateID>
+        <Name>TransferAdvancing</Name>
+        <State_Number>5</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-fe9dd00b-416e-4f2b-8e91-a6171b26dde5</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-5e8ab206-15fd-4576-be53-82a002b5a476</Origin_State>
+          <Destination_State>S-a3359501-a21a-483c-82d3-5dc8aeab0f04</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-668f1d9f-db19-43cd-8cff-e8cf77e8b3bb" Name="Transfer/Advanced" ComponentID="C-c9b8c68c-5030-4d93-91ca-06310726ddc5" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-a3359501-a21a-483c-82d3-5dc8aeab0f04</StateID>
+        <Name>WaitingReleaseSt2</Name>
+        <State_Number>8</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-6a9f7b91-3864-46fd-a8cc-aa3493c93942</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-a3359501-a21a-483c-82d3-5dc8aeab0f04</Origin_State>
+          <Destination_State>S-bb9316a3-f3be-4236-9a82-db2854af110a</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-24418316-3e13-4b71-8860-9c0435b70004" Name="Feeder/ReturnedFinished" ComponentID="C-db29c7cb-08df-46da-ab6a-28d2593bd5bb" />
+                <Condition Operator="" ID="S-258304bf-4579-428a-93c5-6fd8caf389b3" Name="Checker/ReturnedHome" ComponentID="C-21a332b3-e2fd-4a5b-850e-c4197abf62c3" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-bb9316a3-f3be-4236-9a82-db2854af110a</StateID>
+        <Name>HandShake</Name>
+        <State_Number>9</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-a181e09f-b214-42b8-aa82-d396e3086e43</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-bb9316a3-f3be-4236-9a82-db2854af110a</Origin_State>
+          <Destination_State>S-96daa832-5aac-4565-a045-539f555d7f91</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-446ce5b8-2bf8-4912-83b5-a4c3ef6e10c3" Name="Disassembly/handshake" ComponentID="C-4376f4d7-210e-4f18-a2ae-16492012db4f" />
+                <Condition Operator="" ID="S-bb9316a3-f3be-4236-9a82-db2854af110a" Name="Feed_Station/HandShake" ComponentID="C-0c804da8-b3b6-4119-abbe-12fbb268a847" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+    </Component>
+    <Component>
+      <ComponentID>C-b455b9c6-47f7-4172-a1c1-4c43fc03b55e</ComponentID>
+      <Name>Assembly_Station</Name>
+      <VcID>
+      </VcID>
+      <Description>
+      </Description>
+      <Library_ID>C-9856390f-522a-4a97-b525-83d0410c142f</Library_ID>
+      <Type>Process</Type>
+      <State>
+        <StateID>S-c20c8248-df73-49bc-85ff-c33d84ea6fce</StateID>
+        <Name>Initialisation</Name>
+        <State_Number>1</State_Number>
+        <Initial_State>True</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-71fccbe4-d7b0-488f-86bb-0cedddb3849b</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-c20c8248-df73-49bc-85ff-c33d84ea6fce</Origin_State>
+          <Destination_State>S-a3224e39-ee0a-4fb6-8452-d51e5b80d1d4</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-64af871a-09op-4cdb-adac-4a05bdee4t65" Name="PartAtAssembly/On" ComponentID="C-eaa52671-8ocz-4739-8dc8-203adc8b36ll" />
+                <Condition Operator="" ID="S-64117e47-d7f7-4260-8ef3-7bcf63183e58" Name="BearingSensor/On" ComponentID="C-cc2cb0cf-3436-4b0d-8d34-ffc237f7dc53" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-a3224e39-ee0a-4fb6-8452-d51e5b80d1d4</StateID>
+        <Name>Bearing_PnP_Picking</Name>
+        <State_Number>2</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-2b8877ad-3ade-4c2c-bbdd-07a2cbb3bce6</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-a3224e39-ee0a-4fb6-8452-d51e5b80d1d4</Origin_State>
+          <Destination_State>S-045f9b9d-9c50-4fba-9b0c-a6c8fb37a0e3</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-0195c20f-fd4d-43d1-be38-1b35a04a3238" Name="Bearing_PnP/AtPick" ComponentID="C-bf525cbb-78e3-4426-aee1-cc0afabb9438" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-045f9b9d-9c50-4fba-9b0c-a6c8fb37a0e3</StateID>
+        <Name>Gripping_Part</Name>
+        <State_Number>3</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-d3983a50-88e2-4dc7-be7d-3f839b1f1dcc</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-045f9b9d-9c50-4fba-9b0c-a6c8fb37a0e3</Origin_State>
+          <Destination_State>S-d5d0b92a-a1cc-431c-a019-59360a520f61</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-4a36e7bc-8c30-4190-bba7-e1063e18260d" Name="Bearing_Gripper/ReturnedHome" ComponentID="C-9b28d7b0-bb3d-4617-8adc-5546ce5102f2" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-d5d0b92a-a1cc-431c-a019-59360a520f61</StateID>
+        <Name>BeringPnPPlaceBearing</Name>
+        <State_Number>4</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-06b1dc26-a153-42ae-bf1a-88dfeb4d3eb9</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-d5d0b92a-a1cc-431c-a019-59360a520f61</Origin_State>
+          <Destination_State>S-de164927-ae4c-43ba-a498-07c27b817a77</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-bb227d48-782a-4793-afa1-cacb62b27343" Name="Bearing_PnP/Place" ComponentID="C-bf525cbb-78e3-4426-aee1-cc0afabb9438" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-de164927-ae4c-43ba-a498-07c27b817a77</StateID>
+        <Name>BearingPnPOpenGripper</Name>
+        <State_Number>5</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-7fe7503f-5cf6-4729-95a1-c81a3c9426a3</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-de164927-ae4c-43ba-a498-07c27b817a77</Origin_State>
+          <Destination_State>S-cbe65791-2f95-44af-918b-284ed8a5d15b</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-4a36e7bc-8c30-4190-bba7-e1063e18260d" Name="Bearing_Gripper/ReturnedHome" ComponentID="C-9b28d7b0-bb3d-4617-8adc-5546ce5102f2" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-cbe65791-2f95-44af-918b-284ed8a5d15b</StateID>
+        <Name>BearingPnPGoHome</Name>
+        <State_Number>6</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-5e2596cd-4674-4315-b106-b07baa554296</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-cbe65791-2f95-44af-918b-284ed8a5d15b</Origin_State>
+          <Destination_State>S-76aaca60-7fc9-463f-8dd6-1801cdd44523</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-860a790c-7eef-4560-a40e-fd6f4c265de8" Name="Bearing_PnP/ReturnedHome" ComponentID="C-bf525cbb-78e3-4426-aee1-cc0afabb9438" />
+                <Condition Operator="" ID="S-e65b3fae-7fba-41f6-b136-b7d4fe530e0f" Name="ShaftSensor/On" ComponentID="C-52201992-51d3-478f-9580-2d22da544338" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-76aaca60-7fc9-463f-8dd6-1801cdd44523</StateID>
+        <Name>Shaft_PnP_Going_down</Name>
+        <State_Number>7</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-646e0bb7-3e0f-498b-b24a-3e62c4572607</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-76aaca60-7fc9-463f-8dd6-1801cdd44523</Origin_State>
+          <Destination_State>S-9f4babe8-8959-4943-a130-2942b4288cd4</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-bb7b05c2-8c97-4303-8377-e26cdde85d56" Name="Shaft_Vr/Advanced" ComponentID="C-8dddc889-0888-4654-87ce-1051b5b592fb" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-9f4babe8-8959-4943-a130-2942b4288cd4</StateID>
+        <Name>Gripping_Part</Name>
+        <State_Number>8</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-bd12b348-18a3-4cdc-b7c0-4b20969d25ea</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-9f4babe8-8959-4943-a130-2942b4288cd4</Origin_State>
+          <Destination_State>S-511da848-5c27-494a-928b-d157fcfd55aa</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-463c009f-dcbd-4423-b2b4-4e331a4ec4dd" Name="Shaft_Gripper/CloseGripper" ComponentID="C-2ebe6ac7-27c2-4fc4-8160-c65ad81d130a" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-511da848-5c27-494a-928b-d157fcfd55aa</StateID>
+        <Name>Shaft_PnP_Go_Up</Name>
+        <State_Number>9</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-f9918ca8-2ac5-4e4d-bbda-1cee2b577770</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-511da848-5c27-494a-928b-d157fcfd55aa</Origin_State>
+          <Destination_State>S-1c37ba85-e852-472e-9145-b4d8f267e564</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-e3b3fa78-7350-40a2-ade7-44a931d6377a" Name="Shaft_Vr/ReturnedHome" ComponentID="C-8dddc889-0888-4654-87ce-1051b5b592fb" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-1c37ba85-e852-472e-9145-b4d8f267e564</StateID>
+        <Name>SHaft_PnP_Turn_Work</Name>
+        <State_Number>10</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-d4476738-f99f-4ebd-8c6f-c50d32291f9c</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-1c37ba85-e852-472e-9145-b4d8f267e564</Origin_State>
+          <Destination_State>S-e24b3e1d-0d05-41e0-a4d7-6e0fad13fa69</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-e3e06922-7149-4e70-b809-605245a2df21" Name="Shaft_Hr/AtWork" ComponentID="C-1dee4fbd-41df-4d2a-9cdc-c08329aa1303" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-e24b3e1d-0d05-41e0-a4d7-6e0fad13fa69</StateID>
+        <Name>Shaft_PnP_Go_DownPlace</Name>
+        <State_Number>0</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-746ab25d-354a-491a-9d70-af64137a07e3</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-e24b3e1d-0d05-41e0-a4d7-6e0fad13fa69</Origin_State>
+          <Destination_State>S-55acf802-145a-42e3-8a7c-f89931175150</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-bb7b05c2-8c97-4303-8377-e26cdde85d56" Name="Shaft_Vr/Advanced" ComponentID="C-8dddc889-0888-4654-87ce-1051b5b592fb" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-55acf802-145a-42e3-8a7c-f89931175150</StateID>
+        <Name>Shaft_PnP_Place</Name>
+        <State_Number>0</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-ab10ebc5-20cf-433a-930b-c73bd27a6da8</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-55acf802-145a-42e3-8a7c-f89931175150</Origin_State>
+          <Destination_State>S-59b828b3-a568-462d-99fc-aaa3c0e533d0</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-5a52760e-d710-42cf-85e5-ad4faa3421a8" Name="Shaft_Gripper/ReturnedHome" ComponentID="C-2ebe6ac7-27c2-4fc4-8160-c65ad81d130a" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-59b828b3-a568-462d-99fc-aaa3c0e533d0</StateID>
+        <Name>Shaft_PnP_Go_Up</Name>
+        <State_Number>0</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-467eae90-a4ac-40b6-b428-4b7f37766679</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-59b828b3-a568-462d-99fc-aaa3c0e533d0</Origin_State>
+          <Destination_State>S-b3fe9df9-aac5-4929-8c78-7ce57500768a</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-e3b3fa78-7350-40a2-ade7-44a931d6377a" Name="Shaft_Vr/ReturnedHome" ComponentID="C-8dddc889-0888-4654-87ce-1051b5b592fb" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-b3fe9df9-aac5-4929-8c78-7ce57500768a</StateID>
+        <Name>Shaft_PnP_Return_Home</Name>
+        <State_Number>0</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-537f44ab-74d3-49a8-b677-6c2a0ddd005a</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-b3fe9df9-aac5-4929-8c78-7ce57500768a</Origin_State>
+          <Destination_State>S-745b7fc7-4dd6-4972-b7e6-895edfed7d0e</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-7aa4d8c4-5b97-4c05-9dfb-b8bd0f700eb1" Name="Shaft_Hr/ReturnedHome" ComponentID="C-1dee4fbd-41df-4d2a-9cdc-c08329aa1303" />
+                <Condition Operator="" ID="S-79786807-3156-4462-aaae-ff730499bac0" Name="TopCoverSensor/On" ComponentID="C-a0d6f289-346e-41ab-84ff-5884fc5db8e4" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-745b7fc7-4dd6-4972-b7e6-895edfed7d0e</StateID>
+        <Name>Cover_PnP_GoDown_Pick</Name>
+        <State_Number>0</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-ea42e2ac-9191-484e-8d29-385f09325fb6</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-745b7fc7-4dd6-4972-b7e6-895edfed7d0e</Origin_State>
+          <Destination_State>S-cf93875f-8291-4868-8218-7b37d4805997</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-9404282f-3ee4-42d8-911f-99c1cc050046" Name="CoverPNP_Vr/Down" ComponentID="C-59c1b8e7-fdc5-43b6-86b8-f09a26f55565" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-cf93875f-8291-4868-8218-7b37d4805997</StateID>
+        <Name>GripCover</Name>
+        <State_Number>0</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-76334054-8177-4948-9047-edace0e94931</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-cf93875f-8291-4868-8218-7b37d4805997</Origin_State>
+          <Destination_State>S-a462eac6-8283-4a80-823e-b09f07d91309</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-fe84feda-3cf4-4b09-aac3-b88f6a1abde8" Name="CoverPnp_Gripper/grasp" ComponentID="C-04b36f02-736d-4123-b08a-0ad534255d4f" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-a462eac6-8283-4a80-823e-b09f07d91309</StateID>
+        <Name>Cover_PnP_GoUp_Pic</Name>
+        <State_Number>1</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-19318053-9158-4482-bb9e-fa1e3353cbac</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-a462eac6-8283-4a80-823e-b09f07d91309</Origin_State>
+          <Destination_State>S-98b2553d-92f4-4c93-8ebf-5680fcef6c1f</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-d8e8497d-8c6c-4280-83d0-d7eb98499498" Name="CoverPNP_Vr/ReturnedHome" ComponentID="C-59c1b8e7-fdc5-43b6-86b8-f09a26f55565" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-98b2553d-92f4-4c93-8ebf-5680fcef6c1f</StateID>
+        <Name>Cover_Pnp_advanced</Name>
+        <State_Number>2</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-b2062906-dd4e-4cf6-89ae-cb6361fd90e2</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-98b2553d-92f4-4c93-8ebf-5680fcef6c1f</Origin_State>
+          <Destination_State>S-21248344-c8f3-47a5-a6a8-8167a3a33453</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-059f169c-7583-4ef0-8ad4-b52aae8328e1" Name="CoverPNP_Hr/Advanced" ComponentID="C-4aa80b42-17f5-48b0-bfd1-93234a83d575" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-21248344-c8f3-47a5-a6a8-8167a3a33453</StateID>
+        <Name>Cover_Pnp_Go_Down_Place</Name>
+        <State_Number>3</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-632781b7-e642-4e0c-b07f-734ece6f8d13</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-21248344-c8f3-47a5-a6a8-8167a3a33453</Origin_State>
+          <Destination_State>S-b4f418a0-ef39-4bba-8b99-e64a02e93982</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-9404282f-3ee4-42d8-911f-99c1cc050046" Name="CoverPNP_Vr/Down" ComponentID="C-59c1b8e7-fdc5-43b6-86b8-f09a26f55565" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-b4f418a0-ef39-4bba-8b99-e64a02e93982</StateID>
+        <Name>ReleaseCover</Name>
+        <State_Number>4</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-17a5522c-d2f1-4874-a64c-4d8693012c2e</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-b4f418a0-ef39-4bba-8b99-e64a02e93982</Origin_State>
+          <Destination_State>S-1e28d684-141f-455d-9ff2-1f415b837ff6</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-fd76efbd-055e-4270-ba25-8592429c6dec" Name="CoverPnp_Gripper/AtReleasePos" ComponentID="C-04b36f02-736d-4123-b08a-0ad534255d4f" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-1e28d684-141f-455d-9ff2-1f415b837ff6</StateID>
+        <Name>Cover_PnP_GoUp_Place</Name>
+        <State_Number>5</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-25ad2a1a-d817-4959-8489-b6499227c288</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-1e28d684-141f-455d-9ff2-1f415b837ff6</Origin_State>
+          <Destination_State>S-e026777d-ccc8-47e9-8075-92b78bba4606</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-d8e8497d-8c6c-4280-83d0-d7eb98499498" Name="CoverPNP_Vr/ReturnedHome" ComponentID="C-59c1b8e7-fdc5-43b6-86b8-f09a26f55565" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-e026777d-ccc8-47e9-8075-92b78bba4606</StateID>
+        <Name>Cover_PnP_returned</Name>
+        <State_Number>6</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-bb936cde-e01c-4f0e-9faf-7f8e37840e34</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-e026777d-ccc8-47e9-8075-92b78bba4606</Origin_State>
+          <Destination_State>S-8450f78d-1059-4cbc-9baa-b86427a67c0d</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-fd76efbd-055e-4270-ba25-8592429c6dec" Name="CoverPnp_Gripper/AtReleasePos" ComponentID="C-04b36f02-736d-4123-b08a-0ad534255d4f" />
+                <Condition Operator="" ID="S-c8b8c217-d7ab-4939-814e-da1e539decbf" Name="CoverPNP_Hr/ReturnedHome" ComponentID="C-4aa80b42-17f5-48b0-bfd1-93234a83d575" />
+                <Condition Operator="" ID="S-d8e8497d-8c6c-4280-83d0-d7eb98499498" Name="CoverPNP_Vr/ReturnedHome" ComponentID="C-59c1b8e7-fdc5-43b6-86b8-f09a26f55565" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-8450f78d-1059-4cbc-9baa-b86427a67c0d</StateID>
+        <Name>HandShaking</Name>
+        <State_Number>7</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-57757caf-9afe-4c12-b8b8-8c2d52ca5f34</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-8450f78d-1059-4cbc-9baa-b86427a67c0d</Origin_State>
+          <Destination_State>S-c20c8248-df73-49bc-85ff-c33d84ea6fce</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-446ce5b8-2bf8-4912-83b5-a4c3ef6e10c3" Name="Disassembly/handshake" ComponentID="C-4376f4d7-210e-4f18-a2ae-16492012db4f" />
+                <Condition Operator="" ID="S-8450f78d-1059-4cbc-9baa-b86427a67c0d" Name="Assembly_Station/HandShaking" ComponentID="C-b455b9c6-47f7-4172-a1c1-4c43fc03b55e" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+    </Component>
+    <Component>
+      <ComponentID>C-eaa52671-72f1-4739-8dc8-203adc8b7aa2</ComponentID>
+      <Name>PartInHopper</Name>
+      <VcID>Part Sensor</VcID>
+      <Description>
+      </Description>
+      <Library_ID>C-7da10783-02c1-432e-a829-c32556d56544</Library_ID>
+      <Type>Sensor</Type>
+      <State>
+        <StateID>S-a099c8e0-b7ba-4ebe-969a-7f76807c8fa6</StateID>
+        <Name>Off</Name>
+        <State_Number>0</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>000,000,000</StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+      </State>
+      <State>
+        <StateID>S-64af871a-9da9-4cdb-adac-4a05bdeebb1e</StateID>
+        <Name>On</Name>
+        <State_Number>1</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>000,000,000</StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+      </State>
+    </Component>
+    <Component>
+      <ComponentID>C-eaa52671-ui89-4739-8dc8-203adc8bpopo</ComponentID>
+      <Name>PartAtChecker</Name>
+      <VcID>PartAtCheckerSensor</VcID>
+      <Description>
+      </Description>
+      <Library_ID>C-7da10783-02c1-71wq-a829-c32556d5bczx</Library_ID>
+      <Type>Sensor</Type>
+      <State>
+        <StateID>S-a099c8e0-b7ba-8wcd-969a-7f76807colmn</StateID>
+        <Name>Off</Name>
+        <State_Number>0</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>000,000,000</StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+      </State>
+      <State>
+        <StateID>S-64af871a-9da9-9nnb-adac-4a05bdeeiknb</StateID>
+        <Name>On</Name>
+        <State_Number>1</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>000,000,000</StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+      </State>
+    </Component>
+    <Component>
+      <ComponentID>C-4376f4d7-210e-4f18-a2ae-16492012db4f</ComponentID>
+      <Name>Disassembly</Name>
+      <VcID>
+      </VcID>
+      <Description>
+      </Description>
+      <Library_ID>C-76b225b6-44e1-43c6-8797-d1a8bfc10686</Library_ID>
+      <Type>Process</Type>
+      <State>
+        <StateID>S-e67c3d44-2e5e-46dc-a62b-46d9226cdd65</StateID>
+        <Name>Initialize</Name>
+        <State_Number>7</State_Number>
+        <Initial_State>True</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-32524bbc-1941-46bc-a38e-14c654c4489d</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-e67c3d44-2e5e-46dc-a62b-46d9226cdd65</Origin_State>
+          <Destination_State>S-7f3ff6e9-36c3-4d20-9d2d-c3ed4797b028</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-8450f78d-1059-4cbc-9baa-b86427a67c0d" Name="Assembly_Station/HandShaking" ComponentID="C-b455b9c6-47f7-4172-a1c1-4c43fc03b55e" />
+                <Condition Operator="" ID="S-bb9316a3-f3be-4236-9a82-db2854af110a" Name="Feed_Station/HandShake" ComponentID="C-0c804da8-b3b6-4119-abbe-12fbb268a847" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-7f3ff6e9-36c3-4d20-9d2d-c3ed4797b028</StateID>
+        <Name>cover_pnp_hr_forward</Name>
+        <State_Number>8</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-1c0ebb59-2f52-433c-ac6e-7f701e5a155b</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-7f3ff6e9-36c3-4d20-9d2d-c3ed4797b028</Origin_State>
+          <Destination_State>S-d7c7a870-8cd4-47f8-b751-dbf109e32e18</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-059f169c-7583-4ef0-8ad4-b52aae8328e1" Name="CoverPNP_Hr/Advanced" ComponentID="C-4aa80b42-17f5-48b0-bfd1-93234a83d575" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-d7c7a870-8cd4-47f8-b751-dbf109e32e18</StateID>
+        <Name>cover_pnp_down</Name>
+        <State_Number>9</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-e56c77e5-9fed-4e98-9a6f-a0054eb17456</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-d7c7a870-8cd4-47f8-b751-dbf109e32e18</Origin_State>
+          <Destination_State>S-c13ee9dd-d70c-4630-9bd5-fb3b37efb53f</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-9404282f-3ee4-42d8-911f-99c1cc050046" Name="CoverPNP_Vr/Down" ComponentID="C-59c1b8e7-fdc5-43b6-86b8-f09a26f55565" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-c13ee9dd-d70c-4630-9bd5-fb3b37efb53f</StateID>
+        <Name>cover_pnp_grasp</Name>
+        <State_Number>10</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-e7fb8e97-8d00-4395-9373-512747571f3f</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-c13ee9dd-d70c-4630-9bd5-fb3b37efb53f</Origin_State>
+          <Destination_State>S-c8c767d6-6666-414a-89cb-d95b6dc36bb3</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-fe84feda-3cf4-4b09-aac3-b88f6a1abde8" Name="CoverPnp_Gripper/grasp" ComponentID="C-04b36f02-736d-4123-b08a-0ad534255d4f" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-c8c767d6-6666-414a-89cb-d95b6dc36bb3</StateID>
+        <Name>cover_pnp_up</Name>
+        <State_Number>11</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-9cb429b4-8b55-4bd2-bb55-20923b881b07</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-c8c767d6-6666-414a-89cb-d95b6dc36bb3</Origin_State>
+          <Destination_State>S-2c00099f-08db-41d8-b45c-8d47d1eb528d</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-059f169c-7583-4ef0-8ad4-b52aae8328e1" Name="CoverPNP_Hr/Advanced" ComponentID="C-4aa80b42-17f5-48b0-bfd1-93234a83d575" />
+              </ConditionGroup>
+              <ConditionGroup Operator="" GroupName="Group_2">
+                <Condition Operator="" ID="S-d8e8497d-8c6c-4280-83d0-d7eb98499498" Name="Cover_PnP/ReturnedHome" ComponentID="C-59c1b8e7-fdc5-43b6-86b8-f09a26f55565" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-2c00099f-08db-41d8-b45c-8d47d1eb528d</StateID>
+        <Name>cover_pnp_hr_back</Name>
+        <State_Number>6</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-c34fafaa-078f-4dc1-bda0-345abe4f7018</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-2c00099f-08db-41d8-b45c-8d47d1eb528d</Origin_State>
+          <Destination_State>S-0a989f2c-2e01-414c-b954-c4249c3ebc7e</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-c8b8c217-d7ab-4939-814e-da1e539decbf" Name="CoverPNP_Hr/ReturnedHome" ComponentID="C-4aa80b42-17f5-48b0-bfd1-93234a83d575" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-0a989f2c-2e01-414c-b954-c4249c3ebc7e</StateID>
+        <Name>cover_pnp_down_place</Name>
+        <State_Number>5</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-a4d4c74a-3a36-4844-82df-ea1153f636ff</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-0a989f2c-2e01-414c-b954-c4249c3ebc7e</Origin_State>
+          <Destination_State>S-17bba6d8-0a38-4ccf-827d-be1033368a7b</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-9404282f-3ee4-42d8-911f-99c1cc050046" Name="CoverPNP_Vr/Down" ComponentID="C-59c1b8e7-fdc5-43b6-86b8-f09a26f55565" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-17bba6d8-0a38-4ccf-827d-be1033368a7b</StateID>
+        <Name>cover_pnp_release</Name>
+        <State_Number>4</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-1d410fe9-84dc-477b-9574-e256fa732e72</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-17bba6d8-0a38-4ccf-827d-be1033368a7b</Origin_State>
+          <Destination_State>S-dc4219de-75f2-4ee3-88a1-c4b2d8078405</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-fd76efbd-055e-4270-ba25-8592429c6dec" Name="CoverPnp_Gripper/AtReleasePos" ComponentID="C-04b36f02-736d-4123-b08a-0ad534255d4f" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-dc4219de-75f2-4ee3-88a1-c4b2d8078405</StateID>
+        <Name>cover_pnp_up_place</Name>
+        <State_Number>3</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-1256f706-c797-457d-bd35-54415686d624</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-dc4219de-75f2-4ee3-88a1-c4b2d8078405</Origin_State>
+          <Destination_State>S-560ba678-3aff-4a8e-bf4d-f24b5b2f90f9</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-e3b3fa78-7350-40a2-ade7-44a931d6377a" Name="Shaft_Vr/ReturnedHome" ComponentID="C-8dddc889-0888-4654-87ce-1051b5b592fb" />
+                <Condition Operator="" ID="S-c8b8c217-d7ab-4939-814e-da1e539decbf" Name="CoverPNP_Hr/ReturnedHome" ComponentID="C-4aa80b42-17f5-48b0-bfd1-93234a83d575" />
+                <Condition Operator="" ID="S-d8e8497d-8c6c-4280-83d0-d7eb98499498" Name="CoverPNP_Vr/ReturnedHome" ComponentID="C-59c1b8e7-fdc5-43b6-86b8-f09a26f55565" />
+                <Condition Operator="" ID="S-7aa4d8c4-5b97-4c05-9dfb-b8bd0f700eb1" Name="Shaft_Hr/ReturnedHome" ComponentID="C-1dee4fbd-41df-4d2a-9cdc-c08329aa1303" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-560ba678-3aff-4a8e-bf4d-f24b5b2f90f9</StateID>
+        <Name>shaft_hr_to_work</Name>
+        <State_Number>2</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-7016cd7a-3326-40fb-8542-d9afc8143cab</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-560ba678-3aff-4a8e-bf4d-f24b5b2f90f9</Origin_State>
+          <Destination_State>S-2b0c0cb9-e913-447e-aec9-e5e35aafa1fe</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-e3e06922-7149-4e70-b809-605245a2df21" Name="Shaft_Hr/AtWork" ComponentID="C-1dee4fbd-41df-4d2a-9cdc-c08329aa1303" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-2b0c0cb9-e913-447e-aec9-e5e35aafa1fe</StateID>
+        <Name>shaft_vr_down_place</Name>
+        <State_Number>1</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-cd8b1984-e3f3-4939-8b81-3a3abb2a78cf</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-2b0c0cb9-e913-447e-aec9-e5e35aafa1fe</Origin_State>
+          <Destination_State>S-5812ffad-bb3b-4650-9fbb-71ed1eda07a9</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-bb7b05c2-8c97-4303-8377-e26cdde85d56" Name="Shaft_Vr/Advanced" ComponentID="C-8dddc889-0888-4654-87ce-1051b5b592fb" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-5812ffad-bb3b-4650-9fbb-71ed1eda07a9</StateID>
+        <Name>shaft_pnp_grasp</Name>
+        <State_Number>0</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-5e5290dc-50a9-4756-a8bf-ae64e0ea57f9</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-5812ffad-bb3b-4650-9fbb-71ed1eda07a9</Origin_State>
+          <Destination_State>S-6b4ae74e-afa1-4137-b764-bbecb0b81bb0</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-463c009f-dcbd-4423-b2b4-4e331a4ec4dd" Name="Shaft_Gripper/CloseGripper" ComponentID="C-2ebe6ac7-27c2-4fc4-8160-c65ad81d130a" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-6b4ae74e-afa1-4137-b764-bbecb0b81bb0</StateID>
+        <Name>shaft_pnp_up_place</Name>
+        <State_Number>0</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-c164f338-02c8-4e19-9671-9088299dcf37</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-6b4ae74e-afa1-4137-b764-bbecb0b81bb0</Origin_State>
+          <Destination_State>S-1192d16a-2097-47b5-bfb4-3ef2bf5f4aa5</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-e3b3fa78-7350-40a2-ade7-44a931d6377a" Name="Shaft_Vr/ReturnedHome" ComponentID="C-8dddc889-0888-4654-87ce-1051b5b592fb" />
+              </ConditionGroup>
+              <ConditionGroup Operator="" GroupName="Group_2">
+                <Condition Operator="" ID="S-d6db046c-1c88-4103-86e4-84871edb6bdd" Name="Shaft_Vr/ReturnedFinished" ComponentID="C-8dddc889-0888-4654-87ce-1051b5b592fb" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-1192d16a-2097-47b5-bfb4-3ef2bf5f4aa5</StateID>
+        <Name>shaft_hr_home</Name>
+        <State_Number>0</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-aeb6d858-2435-4b15-98bd-94f85b06521f</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-1192d16a-2097-47b5-bfb4-3ef2bf5f4aa5</Origin_State>
+          <Destination_State>S-2a84ef96-8324-4006-bea2-aac36a8ff258</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-7aa4d8c4-5b97-4c05-9dfb-b8bd0f700eb1" Name="Shaft_Hr/ReturnedHome" ComponentID="C-1dee4fbd-41df-4d2a-9cdc-c08329aa1303" />
+              </ConditionGroup>
+              <ConditionGroup Operator="" GroupName="Group_2">
+                <Condition Operator="" ID="S-c68fcfcf-adde-48dc-9643-16e607eebb2b" Name="Shaft_Hr/ReturnedFinished" ComponentID="C-1dee4fbd-41df-4d2a-9cdc-c08329aa1303" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-2a84ef96-8324-4006-bea2-aac36a8ff258</StateID>
+        <Name>shaft_vr_down_pic</Name>
+        <State_Number>0</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-90067a3b-8e4b-40df-a05c-2f7f446854a9</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-2a84ef96-8324-4006-bea2-aac36a8ff258</Origin_State>
+          <Destination_State>S-9f42c537-770a-45d6-83b4-65dbebb4eb42</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-bb7b05c2-8c97-4303-8377-e26cdde85d56" Name="Shaft_Vr/Advanced" ComponentID="C-8dddc889-0888-4654-87ce-1051b5b592fb" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-9f42c537-770a-45d6-83b4-65dbebb4eb42</StateID>
+        <Name>shaf_pnp_release</Name>
+        <State_Number>0</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-4d94d0e4-5ca2-4bd6-a602-a7f095cfc815</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-9f42c537-770a-45d6-83b4-65dbebb4eb42</Origin_State>
+          <Destination_State>S-08cdaedf-02fa-4118-a2e8-db5f487bb173</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-5a52760e-d710-42cf-85e5-ad4faa3421a8" Name="Shaft_Gripper/ReturnedHome" ComponentID="C-2ebe6ac7-27c2-4fc4-8160-c65ad81d130a" />
+              </ConditionGroup>
+              <ConditionGroup Operator="" GroupName="Group_2">
+                <Condition Operator="" ID="S-df0d3b13-0512-4813-a6f0-7807dc340d06" Name="Shaft_Gripper/OpenGripper" ComponentID="C-2ebe6ac7-27c2-4fc4-8160-c65ad81d130a" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-08cdaedf-02fa-4118-a2e8-db5f487bb173</StateID>
+        <Name>shaft_pnp_up_pick</Name>
+        <State_Number>0</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-96813394-3367-4cc6-b33d-9d22d8c590d9</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-08cdaedf-02fa-4118-a2e8-db5f487bb173</Origin_State>
+          <Destination_State>S-2edde651-d8ed-458b-917b-eb644093b529</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-860a790c-7eef-4560-a40e-fd6f4c265de8" Name="Bearing_PnP/ReturnedHome" ComponentID="C-bf525cbb-78e3-4426-aee1-cc0afabb9438" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-2edde651-d8ed-458b-917b-eb644093b529</StateID>
+        <Name>bearing_work2_Pos</Name>
+        <State_Number>0</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-4f381f75-2811-4e0f-a5cd-9ead171deb73</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-2edde651-d8ed-458b-917b-eb644093b529</Origin_State>
+          <Destination_State>S-96231599-ceaf-4813-a317-c4a113c1ffaf</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-a101f3b6-a623-4499-b064-698cb6d45490" Name="Bearing_PnP/AtPick2" ComponentID="C-bf525cbb-78e3-4426-aee1-cc0afabb9438" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-96231599-ceaf-4813-a317-c4a113c1ffaf</StateID>
+        <Name>bearing_pnp_gripper_open</Name>
+        <State_Number>0</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-d5bb7b66-8277-4a89-9e7a-6f068c8a2d47</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-96231599-ceaf-4813-a317-c4a113c1ffaf</Origin_State>
+          <Destination_State>S-7c378a8e-3f8e-4c66-9d8d-1d496df7a299</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-08a31304-c11c-46cc-aac1-135df6357174" Name="Bearing_Gripper/openGripper" ComponentID="C-9b28d7b0-bb3d-4617-8adc-5546ce5102f2" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-7c378a8e-3f8e-4c66-9d8d-1d496df7a299</StateID>
+        <Name>bearing_pnp_work1</Name>
+        <State_Number>0</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-c9902120-c633-442b-bbce-8b0693d002ed</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-7c378a8e-3f8e-4c66-9d8d-1d496df7a299</Origin_State>
+          <Destination_State>S-4c19e881-ebe9-43de-9e45-6c234ebeebb8</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-9029aed5-99fc-4fd1-9e79-7b3a0fed2013" Name="Bearing_PnP/AtPlace2" ComponentID="C-bf525cbb-78e3-4426-aee1-cc0afabb9438" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-4c19e881-ebe9-43de-9e45-6c234ebeebb8</StateID>
+        <Name>bearing_pnp_gripper_close</Name>
+        <State_Number>0</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-3f0759c0-88d6-49c7-88a9-226f05c0e86d</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-4c19e881-ebe9-43de-9e45-6c234ebeebb8</Origin_State>
+          <Destination_State>S-327def4d-dda6-4d13-840d-56f00a4c67a4</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-4a36e7bc-8c30-4190-bba7-e1063e18260d" Name="Bearing_Gripper/ReturnedHome" ComponentID="C-9b28d7b0-bb3d-4617-8adc-5546ce5102f2" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-327def4d-dda6-4d13-840d-56f00a4c67a4</StateID>
+        <Name>bearing_pnp_home_pos</Name>
+        <State_Number>0</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-3e95cf98-332e-4db1-84f8-a313043bebe1</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-327def4d-dda6-4d13-840d-56f00a4c67a4</Origin_State>
+          <Destination_State>S-11dea3f8-58f4-4214-973d-3b7c3ea5f5e7</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-860a790c-7eef-4560-a40e-fd6f4c265de8" Name="Bearing_PnP/ReturnedHome" ComponentID="C-bf525cbb-78e3-4426-aee1-cc0afabb9438" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-446ce5b8-2bf8-4912-83b5-a4c3ef6e10c3</StateID>
+        <Name>handshake</Name>
+        <State_Number>0</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-9ce5e41a-db3b-44b8-8ece-07e766a46798</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-446ce5b8-2bf8-4912-83b5-a4c3ef6e10c3</Origin_State>
+          <Destination_State>S-e67c3d44-2e5e-46dc-a62b-46d9226cdd65</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-c20c8248-df73-49bc-85ff-c33d84ea6fce" Name="Assembly_Station/Initialisation" ComponentID="C-b455b9c6-47f7-4172-a1c1-4c43fc03b55e" />
+                <Condition Operator="" ID="S-fe4fd8c4-d220-4fcf-ada1-18cebf9c2003" Name="Feed_Station/CheckPartInHopper" ComponentID="C-0c804da8-b3b6-4119-abbe-12fbb268a847" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-d8fbdfc6-9205-4baa-b129-8edd4b7a0de9</StateID>
+        <Name>EjectorForward</Name>
+        <State_Number>0</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-5c570391-2d26-40b4-be3e-b54608bb920d</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-d8fbdfc6-9205-4baa-b129-8edd4b7a0de9</Origin_State>
+          <Destination_State>S-335035c2-8f12-4a64-95e3-e76039b56197</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-3eb88732-9da6-4e50-8572-571a5593a7fa" Name="Ejector/AtWork" ComponentID="C-b14052db-8661-4759-b2eb-72fa1dde5275" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-335035c2-8f12-4a64-95e3-e76039b56197</StateID>
+        <Name>EjectorBack</Name>
+        <State_Number>0</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-13181c8b-b546-47ed-890e-ce84a8b3c720</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-335035c2-8f12-4a64-95e3-e76039b56197</Origin_State>
+          <Destination_State>S-12cacf80-7880-4ee9-875e-1e4108bcb113</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-64af871a-9da9-55oi-adac-4a05bdee23dd" Name="PartAtExit/On" ComponentID="C-eaa52671-67tg-4739-8dc8-203adc8bkjhg" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-12cacf80-7880-4ee9-875e-1e4108bcb113</StateID>
+        <Name>RobotPickPart</Name>
+        <State_Number>0</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-62a11c1a-e2aa-43f1-9c21-39a2165adbc2</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-12cacf80-7880-4ee9-875e-1e4108bcb113</Origin_State>
+          <Destination_State>S-59094c0e-f2f4-457b-96fb-2e0e0705291d</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-ef0a4aef-94cb-4b0e-ba3c-9a04617ff066" Name="Robot/PickPart" ComponentID="C-c4ebfd68-0a5b-4512-889e-f6ab61bccecb" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-59094c0e-f2f4-457b-96fb-2e0e0705291d</StateID>
+        <Name>RobotDropPart</Name>
+        <State_Number>0</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-c337a3c8-c59d-4ccb-afad-a6a1a1f32170</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-59094c0e-f2f4-457b-96fb-2e0e0705291d</Origin_State>
+          <Destination_State>S-d64d10ef-a62d-474d-b6bc-37c8d082fa03</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-11aa174a-68b2-4980-b637-05141b9e4b7e" Name="Robot/DropPart" ComponentID="C-c4ebfd68-0a5b-4512-889e-f6ab61bccecb" />
+              </ConditionGroup>
+              <ConditionGroup Operator="" GroupName="Group_2">
+                <Condition Operator="" ID="S-ef0a4aef-94cb-4b0e-ba3c-9a04617ff066" Name="Robot/PickPart" ComponentID="C-c4ebfd68-0a5b-4512-889e-f6ab61bccecb" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-d64d10ef-a62d-474d-b6bc-37c8d082fa03</StateID>
+        <Name>RobotHome</Name>
+        <State_Number>0</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-3c965533-013c-4a32-82ea-c814e741ac45</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-d64d10ef-a62d-474d-b6bc-37c8d082fa03</Origin_State>
+          <Destination_State>S-446ce5b8-2bf8-4912-83b5-a4c3ef6e10c3</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-be034a9f-2668-4f10-919b-bb0226ea8784" Name="Robot/Home Pos" ComponentID="C-c4ebfd68-0a5b-4512-889e-f6ab61bccecb" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+      <State>
+        <StateID>S-11dea3f8-58f4-4214-973d-3b7c3ea5f5e7</StateID>
+        <Name>transfer_return</Name>
+        <State_Number>0</State_Number>
+        <Initial_State>False</Initial_State>
+        <Time>0</Time>
+        <Speed>0</Speed>
+        <Position>0</Position>
+        <Operator>equal</Operator>
+        <Counter>1</Counter>
+        <EndCounter>False</EndCounter>
+        <StateColour>
+        </StateColour>
+        <RobotAxes>
+        </RobotAxes>
+        <Interlock_Condition />
+        <StaticState>True</StaticState>
+        <Transition>
+          <TransitionID>T-f91cd4d7-aa7d-4651-b39f-b7ce2da4c09a</TransitionID>
+          <Type>SINGLE</Type>
+          <Origin_State>S-11dea3f8-58f4-4214-973d-3b7c3ea5f5e7</Origin_State>
+          <Destination_State>S-d8fbdfc6-9205-4baa-b129-8edd4b7a0de9</Destination_State>
+          <Sequence_Condition>
+            <ConditionValue>
+              <ConditionGroup Operator="" GroupName="Group_1">
+                <Condition Operator="" ID="S-d88c0db3-f0cf-418b-ad22-539175636167" Name="Transfer/ReturnedHome" ComponentID="C-c9b8c68c-5030-4d93-91ca-06310726ddc5" />
+              </ConditionGroup>
+            </ConditionValue>
+          </Sequence_Condition>
+          <Priority>0</Priority>
+        </Transition>
+      </State>
+    </Component>
+    </System></vueOne_SystemDefinition>
