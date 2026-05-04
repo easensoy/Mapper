@@ -219,7 +219,7 @@ namespace CodeGen.Translation
             }
         }
 
-        private static List<List<string>> ReadXlsxSheet(string path, string sheetName)
+        public static List<List<string>> ReadXlsxSheet(string path, string sheetName)
         {
             var rows = new List<List<string>>();
             using var zip = ZipFile.OpenRead(path);
