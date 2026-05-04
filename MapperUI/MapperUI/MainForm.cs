@@ -688,8 +688,11 @@ namespace MapperUI
                 }
                 catch (Exception ex)
                 {
-                    MapperLogger.Error(ex.Message);
-                    MessageBox.Show(ex.Message, "Mapping Rules", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    var detail = string.IsNullOrWhiteSpace(ex.Message)
+                        ? $"{ex.GetType().FullName} (no message)\n{ex.StackTrace}"
+                        : $"{ex.GetType().Name}: {ex.Message}";
+                    MapperLogger.Error(detail);
+                    MessageBox.Show(detail, "Mapping Rules", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
 
                 var validator = new ComponentValidator();
@@ -764,7 +767,10 @@ namespace MapperUI
             }
             catch (Exception ex)
             {
-                MessageBox.Show(ex.Message, "Mapping Rules", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                var detail = string.IsNullOrWhiteSpace(ex.Message)
+                    ? $"{ex.GetType().FullName} (no message)\n{ex.StackTrace}"
+                    : $"{ex.GetType().Name}: {ex.Message}";
+                MessageBox.Show(detail, "Mapping Rules", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
