@@ -73,6 +73,7 @@ namespace MapperUI
             StartLlmEngine();
             StartHealthPolling();
             ValidatePortNamesOnStartup();
+            LogInputFolderContents();
             lblStatus.Text = "Ready";
         }
 
@@ -389,7 +390,44 @@ namespace MapperUI
             foreach (var (comp, detail) in report.Bound)
                 AppendActivity($"[IoBindings] {comp} bound: {detail}");
             foreach (var miss in report.Missing)
-                AppendActivity($"[IoBindings] No binding for component {miss}; symlinks remain at template default $${{PATH}}<var>; component will not bind to physical I/O");
+                AppendActivity($"[IoBindings] No binding for component {miss}; component will not bind to physical I/O");
+            if (report.Bound.Count > 0)
+            {
+                AppendActivity("[IoBindings] Symlink override via nested FB is invalid IEC 61499; PLC_RW_M262 variables must be renamed to match $${PATH} expansion: " +
+                    "PusherAtHome to Pusher.athome, PusherAtWork to Pusher.atwork, ExtendPusher to Pusher.OutputToWork, Hopper to PartInHopper.Input. " +
+                    "This is a one-time manual edit in PLC_RW_M262.fbt and is not Mapper's job.");
+            }
+        }
+
+        void LogInputFolderContents()
+        {
+            try
+            {
+                var inputDir = Path.Combine(AppContext.BaseDirectory, "Input");
+                if (!Directory.Exists(inputDir))
+                {
+                    AppendActivity($"[Startup] Input folder not found at {inputDir}");
+                    return;
+                }
+                var files = Directory.GetFiles(inputDir);
+                AppendActivity($"[Startup] Input folder ({inputDir}):");
+                foreach (var f in files)
+                {
+                    var name = Path.GetFileName(f);
+                    string status = name.ToLowerInvariant() switch
+                    {
+                        "vueone_iec61499_mapping.xlsx" => "consumed (mapping rules)",
+                        "smc_rig_io_bindings.xlsx" => "consumed (IO bindings)",
+                        "appendix_a_iotab_newstop.docx" => "ignored (reference only)",
+                        _ => "ignored (unrecognised)"
+                    };
+                    AppendActivity($"  - {name}: {status}");
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"[Startup] Failed to enumerate Input folder: {ex.Message}");
+            }
         }
 
         async void btnProcessFB_Click(object sender, EventArgs e)
