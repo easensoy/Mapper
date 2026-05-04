@@ -17,14 +17,14 @@
     <FB ID="E0AEF2679BD52F88" Name="Feeder" Type="Five_State_Actuator_CAT" Namespace="Main" x="1300" y="2480">
       <Parameter Name="actuator_name" Value="'feeder'" />
       <Parameter Name="actuator_id" Value="1" />
-      <Parameter Name="WorkSensorFitted" Value="FALSE" />
-      <Parameter Name="HomeSensorFitted" Value="FALSE" />
-      <Parameter Name="toWorkTime" Value="T#2000ms" />
-      <Parameter Name="toHomeTime" Value="T#2000ms" />
-      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
-      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
-      <Parameter Name="enableToWorkFaultTimeout" Value="FALSE" />
-      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
+      <Parameter Name="WorkSensorFitted" Value="TRUE" />
+      <Parameter Name="HomeSensorFitted" Value="TRUE" />
+      <Parameter Name="toWorkTime" Value="T#1000ms" />
+      <Parameter Name="toHomeTime" Value="T#1000ms" />
+      <Parameter Name="faultTimeoutWork" Value="T#2000ms" />
+      <Parameter Name="faultTimeoutHome" Value="T#2000ms" />
+      <Parameter Name="enableToWorkFaultTimeout" Value="TRUE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="TRUE" />
     </FB>
     <FB ID="B0F014C3AB79E174" Name="PartInHopper" Type="Sensor_Bool_CAT" Namespace="Main" x="1560" y="1480">
       <Parameter Name="name" Value="'PartInHopper'" />
