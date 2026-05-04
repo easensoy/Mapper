@@ -58,22 +58,12 @@ namespace CodeGen.Translation
                 }
             }
 
-            if (nestedFbParameters != null)
-            {
-                foreach (var inner in nestedFbParameters)
-                {
-                    if (inner.Value == null || inner.Value.Count == 0) continue;
-                    var innerFb = new XElement(Ns + "FB",
-                        new XAttribute("Name", inner.Key));
-                    foreach (var p in inner.Value)
-                    {
-                        innerFb.Add(new XElement(Ns + "Parameter",
-                            new XAttribute("Name", p.Key),
-                            new XAttribute("Value", p.Value)));
-                    }
-                    fb.Add(innerFb);
-                }
-            }
+            // Nested FB overrides intentionally NOT emitted: EAE rejects FBs containing nested
+            // FB elements as schema-invalid. Inner FB parameter overrides are not part of the
+            // syslay surface; they belong inside the CAT's .fbt initialize algorithm or via PLC
+            // I/O variable renames. The nestedFbParameters parameter is preserved for binary
+            // compatibility but ignored.
+            _ = nestedFbParameters;
 
             _subAppNetwork.Add(fb);
             return this;
