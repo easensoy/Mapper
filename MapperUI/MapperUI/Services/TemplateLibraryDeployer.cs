@@ -29,6 +29,159 @@ namespace MapperUI.Services
             { "Process_Any", "Process1_Generic" },
         };
 
+        static readonly string[] UniversalCats = new[]
+        {
+            "Five_State_Actuator_CAT", "Sensor_Bool_CAT", "Process1_Generic"
+        };
+
+        static readonly string[] UniversalComposites = new[]
+        {
+            "Area", "Station", "CaSAdptrTerminator", "faultDetection"
+        };
+
+        static readonly string[] UniversalAdapters = new[]
+        {
+            "CaSAdptr", "AreaHMIAdptr", "StationHMIAdptr", "stateRptCmdAdptr"
+        };
+
+        static readonly string[] UniversalBasics = new[]
+        {
+            "FiveStateActuator", "Sensor_Bool",
+            "Station_Core", "Station_Fault", "Station_Status",
+            "ProcessRuntime_Generic_v1", "ProcessStateBusHandler",
+            "FaultLatch", "actuatorStateEvents",
+            "updateComponentState", "updateComponentState_Sensor",
+            "No_Sensor_Handler"
+        };
+
+        static readonly string[] UniversalHmiCats = new[]
+        {
+            "Area_CAT", "Station_CAT"
+        };
+
+        public static DeployResult DeployUniversalArchitecture(MapperConfig cfg)
+        {
+            var result = new DeployResult();
+            var libPath = cfg.TemplateLibraryPath;
+            if (string.IsNullOrWhiteSpace(libPath) || !Directory.Exists(libPath))
+                throw new DirectoryNotFoundException($"Template Library not found: {libPath}");
+
+            var eaeProjectDir = DeriveEaeProjectDir(cfg);
+            if (string.IsNullOrWhiteSpace(eaeProjectDir))
+                throw new InvalidOperationException("Cannot determine EAE project directory from syslay path.");
+
+            foreach (var name in UniversalBasics)
+                DeployArtifact(libPath, "Basic", name, eaeProjectDir, result, isBasic: true);
+
+            foreach (var name in UniversalAdapters)
+                DeployArtifact(libPath, "Adapter", name, eaeProjectDir, result, isBasic: true);
+
+            foreach (var name in UniversalComposites)
+                DeployArtifact(libPath, "Composite", name, eaeProjectDir, result, isBasic: false);
+
+            foreach (var name in UniversalHmiCats)
+                DeployArtifact(libPath, "CAT", name, eaeProjectDir, result, isBasic: false, isCat: true);
+
+            foreach (var name in UniversalCats)
+                DeployArtifact(libPath, "CAT", name, eaeProjectDir, result, isBasic: false, isCat: true);
+
+            GenerateCfgFiles(eaeProjectDir, result);
+            RegisterInDfbproj(eaeProjectDir, result);
+
+            result.Success = true;
+            return result;
+        }
+
+        static void DeployArtifact(string libPath, string subfolder, string name,
+            string eaeProjectDir, DeployResult result, bool isBasic, bool isCat = false)
+        {
+            var folder = Path.Combine(libPath, subfolder);
+            if (!Directory.Exists(folder))
+            {
+                result.Warnings.Add($"Library subfolder missing: {subfolder}");
+                return;
+            }
+
+            var zipPath = FindArtifactZip(folder, name);
+            if (zipPath != null)
+            {
+                ExtractToEae(zipPath, eaeProjectDir, result);
+            }
+            else
+            {
+                var dirPath = FindArtifactDir(folder, name);
+                if (dirPath != null)
+                {
+                    CopyDirToEae(dirPath, eaeProjectDir, result);
+                }
+                else
+                {
+                    result.Warnings.Add($"Artifact not found: {subfolder}/{name}");
+                    return;
+                }
+            }
+
+            if (isCat) result.CATsDeployed.Add(name);
+            else if (isBasic) result.BasicFBsDeployed.Add(name);
+        }
+
+        static string? FindArtifactZip(string folder, string name)
+        {
+            foreach (var f in Directory.GetFiles(folder, "*.zip"))
+            {
+                var fn = Path.GetFileName(f);
+                if (fn.StartsWith(name + ".", StringComparison.OrdinalIgnoreCase) ||
+                    fn.StartsWith(name + "-", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(fn, name + ".zip", StringComparison.OrdinalIgnoreCase))
+                    return f;
+            }
+            foreach (var f in Directory.GetFiles(folder, "*.zip"))
+            {
+                if (Path.GetFileName(f).Contains(name + ".", StringComparison.OrdinalIgnoreCase))
+                    return f;
+            }
+            return null;
+        }
+
+        static string? FindArtifactDir(string folder, string name)
+        {
+            foreach (var d in Directory.GetDirectories(folder))
+            {
+                var dn = Path.GetFileName(d);
+                if (dn.StartsWith(name + ".", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(dn, name, StringComparison.OrdinalIgnoreCase))
+                    return d;
+            }
+            return null;
+        }
+
+        static void CopyDirToEae(string sourceDir, string eaeProjectDir, DeployResult result)
+        {
+            var knownRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                { "IEC61499", "HMI", "HwConfiguration" };
+
+            foreach (var file in Directory.GetFiles(sourceDir, "*", SearchOption.AllDirectories))
+            {
+                var rel = Path.GetRelativePath(sourceDir, file).Replace('\\', '/');
+                var parts = rel.Split('/');
+                if (parts.Length >= 2 && !knownRoots.Contains(parts[0]))
+                    rel = string.Join("/", parts.Skip(1));
+
+                var targetPath = Path.Combine(eaeProjectDir, rel);
+                var targetDir = Path.GetDirectoryName(targetPath)!;
+                if (!Directory.Exists(targetDir)) Directory.CreateDirectory(targetDir);
+                if (!File.Exists(targetPath))
+                {
+                    File.Copy(file, targetPath);
+                    result.FilesExtracted++;
+                }
+                else
+                {
+                    result.FilesSkipped++;
+                }
+            }
+        }
+
         public static DeployResult Deploy(MapperConfig cfg, List<VueOneComponent> components)
         {
             var result = new DeployResult();
