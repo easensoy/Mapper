@@ -327,8 +327,9 @@ namespace MapperUI
             if (dlg.ShowDialog() != DialogResult.OK) return;
             txtModelPath.Text = dlg.FileName;
             _loadedControlXmlPath = dlg.FileName;
-            btnGenerateProcessFB.Enabled = true;
-            btnGenerateFeedStation.Enabled = true;
+            btnProcessFB.Enabled = true;
+            btnTestStation1.Enabled = true;
+            btnGenerateAll.Enabled = true;
             await LoadAndValidateAsync(dlg.FileName);
         }
 
@@ -389,6 +390,108 @@ namespace MapperUI
                 AppendActivity($"[IoBindings] {comp} bound: {detail}");
             foreach (var miss in report.Missing)
                 AppendActivity($"[IoBindings] No binding for component {miss}; symlinks remain at template default $${{PATH}}<var>; component will not bind to physical I/O");
+        }
+
+        async void btnProcessFB_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(_loadedControlXmlPath) || !File.Exists(_loadedControlXmlPath))
+                { ShowError("Load a Control.xml first via Browse."); return; }
+                if (!TryResolveDemonstratorPath(out var syslayPath)) return;
+
+                lblStatus.Text = "Generating...";
+                AppendActivity($"[Button 1] Generating Process FB into Demonstrator at {syslayPath}...");
+
+                var injector = new SystemInjector();
+                var cleanup = await Task.Run(() => injector.PrepareDemonstratorForGeneration(Cfg()));
+                LogCleanup(cleanup);
+
+                AppendActivity("[IoBindings] skipped, Process FB has no symlinks");
+                SystemInjector.BindingApplicationReport report = null!;
+                var path = await Task.Run(() =>
+                    injector.GenerateProcessFBSyslay(Cfg(), _loadedControlXmlPath, null, out report));
+                LogBindingsReport(report);
+
+                AppendActivity($"Generated: {path}");
+                lblStatus.Text = $"Ready  |  {path}  |  Process FB only";
+                MessageBox.Show($"Generated Process FB into Demonstrator:\n{path}",
+                    "Process FB", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"[Error] {ex}");
+                lblStatus.Text = "Ready";
+                ShowError(ex.Message);
+            }
+        }
+
+        async void btnTestStation1_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(_loadedControlXmlPath) || !File.Exists(_loadedControlXmlPath))
+                { ShowError("Load a Control.xml first via Browse."); return; }
+                if (!TryResolveDemonstratorPath(out var syslayPath)) return;
+
+                lblStatus.Text = "Generating...";
+                AppendActivity($"[Button 2] Generating Test Station 1 (Pusher) into Demonstrator at {syslayPath}...");
+
+                var injector = new SystemInjector();
+                var cleanup = await Task.Run(() => injector.PrepareDemonstratorForGeneration(Cfg()));
+                LogCleanup(cleanup);
+
+                var bindings = TryLoadBindings();
+                SystemInjector.BindingApplicationReport report = null!;
+                var path = await Task.Run(() =>
+                    injector.GenerateStation1TestSyslay(Cfg(), _loadedControlXmlPath, bindings, out report));
+                LogBindingsReport(report);
+
+                AppendActivity($"Generated: {path}");
+                lblStatus.Text = $"Ready  |  {path}  |  {report.Bound.Count} bound, {report.Missing.Count} unbound";
+                MessageBox.Show($"Generated Test Station 1 into Demonstrator:\n{path}\n\n{report.Bound.Count} bound, {report.Missing.Count} unbound.",
+                    "Test Station 1", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"[Error] {ex}");
+                lblStatus.Text = "Ready";
+                ShowError(ex.Message);
+            }
+        }
+
+        async void btnGenerateAll_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(_loadedControlXmlPath) || !File.Exists(_loadedControlXmlPath))
+                { ShowError("Load a Control.xml first via Browse."); return; }
+                if (!TryResolveDemonstratorPath(out var syslayPath)) return;
+
+                lblStatus.Text = "Generating...";
+                AppendActivity($"[Button 3] Generating Full System (all stations) into Demonstrator at {syslayPath}...");
+
+                var injector = new SystemInjector();
+                var cleanup = await Task.Run(() => injector.PrepareDemonstratorForGeneration(Cfg()));
+                LogCleanup(cleanup);
+
+                var bindings = TryLoadBindings();
+                SystemInjector.BindingApplicationReport report = null!;
+                var path = await Task.Run(() =>
+                    injector.GenerateFullSystemSyslay(Cfg(), _loadedControlXmlPath, bindings, out report));
+                LogBindingsReport(report);
+
+                AppendActivity($"Generated: {path}");
+                lblStatus.Text = $"Ready  |  {path}  |  {report.Bound.Count} bound, {report.Missing.Count} unbound";
+                MessageBox.Show($"Generated Full System into Demonstrator:\n{path}\n\n{report.Bound.Count} bound, {report.Missing.Count} unbound.",
+                    "Generate All", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"[Error] {ex}");
+                lblStatus.Text = "Ready";
+                ShowError(ex.Message);
+            }
         }
 
         async void btnGeneratePusherTest_Click(object sender, EventArgs e)
