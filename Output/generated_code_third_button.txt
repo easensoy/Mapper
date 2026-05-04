@@ -1,0 +1,397 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Layer ID="181B0C22C0068E66" Name="Default" Comment="" IsDefault="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="https://www.se.com/LibraryElements">
+  <!-- Button 3 / Generate All. 3 stations under one Area. Demonstrator was cleaned of universal-architecture instances before this generation. -->
+  <SubAppNetwork>
+    <FB ID="CD51A86105BFFF79" Name="PLC_Start" Type="plcStart" Namespace="SE.AppBase" x="80" y="580">
+      <Parameter Name="Prio" Value="35" />
+      <Parameter Name="Delay" Value="T#0ms" />
+    </FB>
+    <FB ID="86119B275B332F9D" Name="Area_HMI" Type="Area_CAT" Namespace="Main" x="240" y="140" />
+    <FB ID="024DC204D7BA77A8" Name="Area" Type="Area" Namespace="Main" x="400" y="580">
+      <Parameter Name="AreaName" Value="'Area'" />
+    </FB>
+    <FB ID="64BA446714940BA3" Name="Station1" Type="Station" Namespace="Main" x="2120" y="600">
+      <Parameter Name="StationName" Value="'Station1'" />
+    </FB>
+    <FB ID="A1D4FECE65B60B9D" Name="Station1_HMI" Type="Station_CAT" Namespace="Main" x="2220" y="100" />
+    <FB ID="F8DBD8A29CB500EC" Name="Process1" Type="Process1_Generic" Namespace="Main" x="3360" y="1460">
+      <Parameter Name="process_name" Value="'Feed_Station'" />
+      <Parameter Name="process_id" Value="11" />
+      <FB Name="ProcessRuntime_Generic_v1">
+        <Parameter Name="StepType" Value="[2,2,1,1,1,1,1,2]" />
+        <Parameter Name="CmdTargetName" Value="['','','Feeder','Checker','Feeder','Transfer','Feeder','']" />
+        <Parameter Name="CmdStateArr" Value="[0,0,1,3,3,1,3,0]" />
+        <Parameter Name="Wait1Id" Value="[0,1,2,4,2,5,2,6]" />
+        <Parameter Name="Wait1State" Value="[1,1,2,4,4,2,4,0]" />
+        <Parameter Name="NextStep" Value="[1,2,3,4,5,6,7,0]" />
+      </FB>
+    </FB>
+    <FB ID="E0AEF2679BD52F88" Name="Feeder" Type="Five_State_Actuator_CAT" Namespace="Main" x="1320" y="2480">
+      <Parameter Name="actuator_name" Value="'feeder'" />
+      <Parameter Name="actuator_id" Value="2" />
+      <Parameter Name="WorkSensorFitted" Value="FALSE" />
+      <Parameter Name="HomeSensorFitted" Value="FALSE" />
+      <Parameter Name="toWorkTime" Value="T#2000ms" />
+      <Parameter Name="toHomeTime" Value="T#2000ms" />
+      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
+      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
+      <Parameter Name="enableToWorkFaultTimeout" Value="FALSE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
+      <FB Name="Inputs">
+        <Parameter Name="NAME1" Value="'PusherAtHome'" />
+        <Parameter Name="NAME2" Value="'PusherAtWork'" />
+      </FB>
+      <FB Name="Output">
+        <Parameter Name="NAME2" Value="'ExtendPusher'" />
+      </FB>
+    </FB>
+    <FB ID="7C837DE5770A8EEE" Name="Checker" Type="Five_State_Actuator_CAT" Namespace="Main" x="1720" y="2480">
+      <Parameter Name="actuator_name" Value="'checker'" />
+      <Parameter Name="actuator_id" Value="3" />
+      <Parameter Name="WorkSensorFitted" Value="FALSE" />
+      <Parameter Name="HomeSensorFitted" Value="FALSE" />
+      <Parameter Name="toWorkTime" Value="T#2000ms" />
+      <Parameter Name="toHomeTime" Value="T#2000ms" />
+      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
+      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
+      <Parameter Name="enableToWorkFaultTimeout" Value="FALSE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
+      <FB Name="Inputs">
+        <Parameter Name="NAME1" Value="'CheckerUp'" />
+        <Parameter Name="NAME2" Value="'CheckerDown'" />
+      </FB>
+      <FB Name="Output">
+        <Parameter Name="NAME2" Value="'ExtendChecker'" />
+      </FB>
+    </FB>
+    <FB ID="4056993A201F2282" Name="Transfer" Type="Five_State_Actuator_CAT" Namespace="Main" x="2120" y="2480">
+      <Parameter Name="actuator_name" Value="'transfer'" />
+      <Parameter Name="actuator_id" Value="4" />
+      <Parameter Name="WorkSensorFitted" Value="FALSE" />
+      <Parameter Name="HomeSensorFitted" Value="FALSE" />
+      <Parameter Name="toWorkTime" Value="T#2000ms" />
+      <Parameter Name="toHomeTime" Value="T#2000ms" />
+      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
+      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
+      <Parameter Name="enableToWorkFaultTimeout" Value="FALSE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
+      <FB Name="Inputs">
+        <Parameter Name="NAME1" Value="'TransferAtHome'" />
+        <Parameter Name="NAME2" Value="'TransferAtWork'" />
+      </FB>
+      <FB Name="Output">
+        <Parameter Name="NAME2" Value="'ExtendTransfer'" />
+      </FB>
+    </FB>
+    <FB ID="B0F014C3AB79E174" Name="PartInHopper" Type="Sensor_Bool_CAT" Namespace="Main" x="1560" y="1480">
+      <Parameter Name="name" Value="'PartInHopper'" />
+      <Parameter Name="id" Value="0" />
+      <FB Name="Input">
+        <Parameter Name="NAME1" Value="'Hopper'" />
+      </FB>
+    </FB>
+    <FB ID="9802BD7FA7D15529" Name="PartAtChecker" Type="Sensor_Bool_CAT" Namespace="Main" x="1960" y="1480">
+      <Parameter Name="name" Value="'PartAtChecker'" />
+      <Parameter Name="id" Value="1" />
+      <FB Name="Input">
+        <Parameter Name="NAME1" Value="'PartAtChecker'" />
+      </FB>
+    </FB>
+    <FB ID="CFCD1D7B180BE7F5" Name="Station2" Type="Station" Namespace="Main" x="4320" y="600">
+      <Parameter Name="StationName" Value="'Station2'" />
+    </FB>
+    <FB ID="6B8F46ACF1FE46AF" Name="Station2_HMI" Type="Station_CAT" Namespace="Main" x="4420" y="100" />
+    <FB ID="A219BC2DC64B6DFE" Name="Process2" Type="Process1_Generic" Namespace="Main" x="5560" y="1460">
+      <Parameter Name="process_name" Value="'Assembly_Station'" />
+      <Parameter Name="process_id" Value="12" />
+      <FB Name="ProcessRuntime_Generic_v1">
+        <Parameter Name="StepType" Value="[1,2,1,1,1,2,2,1,1,1,2,1,1,2,2,1,1,2,1,2,2,1,1]" />
+        <Parameter Name="CmdTargetName" Value="['Shaft_Vr','','Shaft_Vr','Shaft_Hr','CoverPNP_Vr','','','CoverPNP_Vr','Bearing_PnP','CoverPNP_Hr','','CoverPNP_Vr','Bearing_PnP','','','CoverPNP_Vr','Bearing_PnP','','Shaft_Vr','','','Shaft_Vr','Shaft_Hr']" />
+        <Parameter Name="CmdStateArr" Value="[1,0,0,0,1,0,0,0,1,1,0,1,3,0,0,0,0,0,1,0,0,0,1]" />
+        <Parameter Name="Wait1Id" Value="[5,6,5,7,9,10,0,9,2,11,3,9,2,10,3,9,2,10,5,12,6,5,7]" />
+        <Parameter Name="Wait1State" Value="[2,0,0,0,2,2,1,0,2,2,0,2,4,0,0,0,0,0,2,0,2,0,2]" />
+        <Parameter Name="NextStep" Value="[1,2,3,4,5,7,8,9,10,11,12,13,14,15,16,17,18,19,20,6,21,22,0]" />
+      </FB>
+    </FB>
+    <FB ID="7633272FE8DC12FB" Name="Bearing_PnP" Type="Five_State_Actuator_CAT" Namespace="Main" x="3520" y="2480">
+      <Parameter Name="actuator_name" Value="'bearing_pnp'" />
+      <Parameter Name="actuator_id" Value="4" />
+      <Parameter Name="WorkSensorFitted" Value="FALSE" />
+      <Parameter Name="HomeSensorFitted" Value="FALSE" />
+      <Parameter Name="toWorkTime" Value="T#2000ms" />
+      <Parameter Name="toHomeTime" Value="T#2000ms" />
+      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
+      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
+      <Parameter Name="enableToWorkFaultTimeout" Value="FALSE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
+    </FB>
+    <FB ID="2C5F84BA3C43A064" Name="CoverPNP_Vr" Type="Five_State_Actuator_CAT" Namespace="Main" x="3920" y="2480">
+      <Parameter Name="actuator_name" Value="'coverpnp_vr'" />
+      <Parameter Name="actuator_id" Value="5" />
+      <Parameter Name="WorkSensorFitted" Value="FALSE" />
+      <Parameter Name="HomeSensorFitted" Value="FALSE" />
+      <Parameter Name="toWorkTime" Value="T#2000ms" />
+      <Parameter Name="toHomeTime" Value="T#2000ms" />
+      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
+      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
+      <Parameter Name="enableToWorkFaultTimeout" Value="FALSE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
+    </FB>
+    <FB ID="EC87D797727FF5F4" Name="Shaft_Hr" Type="Five_State_Actuator_CAT" Namespace="Main" x="4320" y="2480">
+      <Parameter Name="actuator_name" Value="'shaft_hr'" />
+      <Parameter Name="actuator_id" Value="6" />
+      <Parameter Name="WorkSensorFitted" Value="TRUE" />
+      <Parameter Name="HomeSensorFitted" Value="FALSE" />
+      <Parameter Name="toWorkTime" Value="T#2000ms" />
+      <Parameter Name="toHomeTime" Value="T#2000ms" />
+      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
+      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
+      <Parameter Name="enableToWorkFaultTimeout" Value="TRUE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
+    </FB>
+    <FB ID="10C5485ED8865854" Name="CoverPNP_Hr" Type="Five_State_Actuator_CAT" Namespace="Main" x="4720" y="2480">
+      <Parameter Name="actuator_name" Value="'coverpnp_hr'" />
+      <Parameter Name="actuator_id" Value="7" />
+      <Parameter Name="WorkSensorFitted" Value="FALSE" />
+      <Parameter Name="HomeSensorFitted" Value="FALSE" />
+      <Parameter Name="toWorkTime" Value="T#2000ms" />
+      <Parameter Name="toHomeTime" Value="T#2000ms" />
+      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
+      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
+      <Parameter Name="enableToWorkFaultTimeout" Value="FALSE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
+    </FB>
+    <FB ID="BE9C6422D3414357" Name="Shaft_Vr" Type="Five_State_Actuator_CAT" Namespace="Main" x="5120" y="2480">
+      <Parameter Name="actuator_name" Value="'shaft_vr'" />
+      <Parameter Name="actuator_id" Value="8" />
+      <Parameter Name="WorkSensorFitted" Value="FALSE" />
+      <Parameter Name="HomeSensorFitted" Value="FALSE" />
+      <Parameter Name="toWorkTime" Value="T#2000ms" />
+      <Parameter Name="toHomeTime" Value="T#2000ms" />
+      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
+      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
+      <Parameter Name="enableToWorkFaultTimeout" Value="FALSE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
+    </FB>
+    <FB ID="C3C1B2AAE7A991C7" Name="PartAtAssembly" Type="Sensor_Bool_CAT" Namespace="Main" x="3760" y="1480">
+      <Parameter Name="name" Value="'PartAtAssembly'" />
+      <Parameter Name="id" Value="0" />
+      <FB Name="Input">
+        <Parameter Name="NAME1" Value="'PartAtAssembly'" />
+      </FB>
+    </FB>
+    <FB ID="C61A006F92284FC7" Name="BearingSensor" Type="Sensor_Bool_CAT" Namespace="Main" x="4160" y="1480">
+      <Parameter Name="name" Value="'BearingSensor'" />
+      <Parameter Name="id" Value="1" />
+    </FB>
+    <FB ID="36CB62CD82BD5AE2" Name="ShaftSensor" Type="Sensor_Bool_CAT" Namespace="Main" x="4560" y="1480">
+      <Parameter Name="name" Value="'ShaftSensor'" />
+      <Parameter Name="id" Value="2" />
+    </FB>
+    <FB ID="DB4A26A3E129798F" Name="TopCoverSensor" Type="Sensor_Bool_CAT" Namespace="Main" x="4960" y="1480">
+      <Parameter Name="name" Value="'TopCoverSensor'" />
+      <Parameter Name="id" Value="3" />
+    </FB>
+    <FB ID="85D4BD00E8670A1A" Name="Station3" Type="Station" Namespace="Main" x="6520" y="600">
+      <Parameter Name="StationName" Value="'Station3'" />
+    </FB>
+    <FB ID="781157B6D6CC0004" Name="Station3_HMI" Type="Station_CAT" Namespace="Main" x="6620" y="100" />
+    <FB ID="DA6F878A52416E4E" Name="Process3" Type="Process1_Generic" Namespace="Main" x="7760" y="1460">
+      <Parameter Name="process_name" Value="'Disassembly'" />
+      <Parameter Name="process_id" Value="13" />
+      <FB Name="ProcessRuntime_Generic_v1">
+        <Parameter Name="StepType" Value="[2,1,1,1,2,1,1,2,1,2,1,2,1,2,2,2,2,1,1,1,1,2,1,1,2,1,1,2,1]" />
+        <Parameter Name="CmdTargetName" Value="['','Shaft_Vr','Shaft_Hr','Shaft_Vr','','Bearing_PnP','Bearing_PnP','','Bearing_PnP','','Bearing_PnP','','Ejector','','','','','Transfer','Shaft_Vr','Shaft_Hr','Shaft_Vr','','CoverPNP_Vr','CoverPNP_Hr','','CoverPNP_Hr','CoverPNP_Vr','','CoverPNP_Hr']" />
+        <Parameter Name="CmdStateArr" Value="[0,0,0,1,0,0,11,0,0,0,0,0,1,0,0,0,0,0,1,1,0,0,1,0,0,1,1,0,1]" />
+        <Parameter Name="Wait1Id" Value="[7,5,6,5,7,8,8,9,8,9,8,0,10,11,12,12,12,13,5,6,5,4,3,2,0,2,3,4,2]" />
+        <Parameter Name="Wait1State" Value="[2,0,0,2,0,0,12,2,0,0,0,1,2,1,2,4,0,0,2,2,0,0,2,0,7,2,2,2,2]" />
+        <Parameter Name="NextStep" Value="[1,2,3,4,5,6,7,8,9,10,17,24,13,14,15,16,11,12,0,18,19,20,21,22,25,26,27,28,23]" />
+      </FB>
+    </FB>
+    <FB ID="4056993A201F2282" Name="Transfer" Type="Five_State_Actuator_CAT" Namespace="Main" x="5720" y="2480">
+      <Parameter Name="actuator_name" Value="'transfer'" />
+      <Parameter Name="actuator_id" Value="1" />
+      <Parameter Name="WorkSensorFitted" Value="FALSE" />
+      <Parameter Name="HomeSensorFitted" Value="FALSE" />
+      <Parameter Name="toWorkTime" Value="T#2000ms" />
+      <Parameter Name="toHomeTime" Value="T#2000ms" />
+      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
+      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
+      <Parameter Name="enableToWorkFaultTimeout" Value="FALSE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
+      <FB Name="Inputs">
+        <Parameter Name="NAME1" Value="'TransferAtHome'" />
+        <Parameter Name="NAME2" Value="'TransferAtWork'" />
+      </FB>
+      <FB Name="Output">
+        <Parameter Name="NAME2" Value="'ExtendTransfer'" />
+      </FB>
+    </FB>
+    <FB ID="7633272FE8DC12FB" Name="Bearing_PnP" Type="Five_State_Actuator_CAT" Namespace="Main" x="6120" y="2480">
+      <Parameter Name="actuator_name" Value="'bearing_pnp'" />
+      <Parameter Name="actuator_id" Value="2" />
+      <Parameter Name="WorkSensorFitted" Value="FALSE" />
+      <Parameter Name="HomeSensorFitted" Value="FALSE" />
+      <Parameter Name="toWorkTime" Value="T#2000ms" />
+      <Parameter Name="toHomeTime" Value="T#2000ms" />
+      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
+      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
+      <Parameter Name="enableToWorkFaultTimeout" Value="FALSE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
+    </FB>
+    <FB ID="2C5F84BA3C43A064" Name="CoverPNP_Vr" Type="Five_State_Actuator_CAT" Namespace="Main" x="6520" y="2480">
+      <Parameter Name="actuator_name" Value="'coverpnp_vr'" />
+      <Parameter Name="actuator_id" Value="3" />
+      <Parameter Name="WorkSensorFitted" Value="FALSE" />
+      <Parameter Name="HomeSensorFitted" Value="FALSE" />
+      <Parameter Name="toWorkTime" Value="T#2000ms" />
+      <Parameter Name="toHomeTime" Value="T#2000ms" />
+      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
+      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
+      <Parameter Name="enableToWorkFaultTimeout" Value="FALSE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
+    </FB>
+    <FB ID="EC87D797727FF5F4" Name="Shaft_Hr" Type="Five_State_Actuator_CAT" Namespace="Main" x="6920" y="2480">
+      <Parameter Name="actuator_name" Value="'shaft_hr'" />
+      <Parameter Name="actuator_id" Value="4" />
+      <Parameter Name="WorkSensorFitted" Value="TRUE" />
+      <Parameter Name="HomeSensorFitted" Value="FALSE" />
+      <Parameter Name="toWorkTime" Value="T#2000ms" />
+      <Parameter Name="toHomeTime" Value="T#2000ms" />
+      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
+      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
+      <Parameter Name="enableToWorkFaultTimeout" Value="TRUE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
+    </FB>
+    <FB ID="10C5485ED8865854" Name="CoverPNP_Hr" Type="Five_State_Actuator_CAT" Namespace="Main" x="7320" y="2480">
+      <Parameter Name="actuator_name" Value="'coverpnp_hr'" />
+      <Parameter Name="actuator_id" Value="5" />
+      <Parameter Name="WorkSensorFitted" Value="FALSE" />
+      <Parameter Name="HomeSensorFitted" Value="FALSE" />
+      <Parameter Name="toWorkTime" Value="T#2000ms" />
+      <Parameter Name="toHomeTime" Value="T#2000ms" />
+      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
+      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
+      <Parameter Name="enableToWorkFaultTimeout" Value="FALSE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
+    </FB>
+    <FB ID="BE9C6422D3414357" Name="Shaft_Vr" Type="Five_State_Actuator_CAT" Namespace="Main" x="7720" y="2480">
+      <Parameter Name="actuator_name" Value="'shaft_vr'" />
+      <Parameter Name="actuator_id" Value="6" />
+      <Parameter Name="WorkSensorFitted" Value="FALSE" />
+      <Parameter Name="HomeSensorFitted" Value="FALSE" />
+      <Parameter Name="toWorkTime" Value="T#2000ms" />
+      <Parameter Name="toHomeTime" Value="T#2000ms" />
+      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
+      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
+      <Parameter Name="enableToWorkFaultTimeout" Value="FALSE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
+    </FB>
+    <FB ID="16D4FD16BC34B8FD" Name="Ejector" Type="Five_State_Actuator_CAT" Namespace="Main" x="8120" y="2480">
+      <Parameter Name="actuator_name" Value="'ejector'" />
+      <Parameter Name="actuator_id" Value="7" />
+      <Parameter Name="WorkSensorFitted" Value="TRUE" />
+      <Parameter Name="HomeSensorFitted" Value="FALSE" />
+      <Parameter Name="toWorkTime" Value="T#2000ms" />
+      <Parameter Name="toHomeTime" Value="T#2000ms" />
+      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
+      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
+      <Parameter Name="enableToWorkFaultTimeout" Value="TRUE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
+    </FB>
+    <FB ID="A6B3497E1A8445C7" Name="PartAtExit" Type="Sensor_Bool_CAT" Namespace="Main" x="5960" y="1480">
+      <Parameter Name="name" Value="'PartAtExit'" />
+      <Parameter Name="id" Value="0" />
+      <FB Name="Input">
+        <Parameter Name="NAME1" Value="'PartAtExit'" />
+      </FB>
+    </FB>
+    <FB ID="B78A936D9A420446" Name="Area_Term" Type="CaSAdptrTerminator" Namespace="Main" x="8920" y="720" />
+    <EventConnections>
+      <Connection Source="PLC_Start.FIRST_INIT" Destination="Area.INIT" />
+      <Connection Source="Area.INITO" Destination="Station1.INIT" />
+      <Connection Source="Station1.INITO" Destination="PartInHopper.INIT" />
+      <Connection Source="PartInHopper.INITO" Destination="PartAtChecker.INIT" />
+      <Connection Source="PartAtChecker.INITO" Destination="Feeder.INIT" />
+      <Connection Source="Feeder.INITO" Destination="Checker.INIT" />
+      <Connection Source="Checker.INITO" Destination="Transfer.INIT" />
+      <Connection Source="Transfer.INITO" Destination="Process1.INIT" />
+      <Connection Source="Process1.INITO" Destination="Station2.INIT" />
+      <Connection Source="Station2.INITO" Destination="PartAtAssembly.INIT" />
+      <Connection Source="PartAtAssembly.INITO" Destination="BearingSensor.INIT" />
+      <Connection Source="BearingSensor.INITO" Destination="ShaftSensor.INIT" />
+      <Connection Source="ShaftSensor.INITO" Destination="TopCoverSensor.INIT" />
+      <Connection Source="TopCoverSensor.INITO" Destination="Bearing_PnP.INIT" />
+      <Connection Source="Bearing_PnP.INITO" Destination="CoverPNP_Vr.INIT" />
+      <Connection Source="CoverPNP_Vr.INITO" Destination="Shaft_Hr.INIT" />
+      <Connection Source="Shaft_Hr.INITO" Destination="CoverPNP_Hr.INIT" />
+      <Connection Source="CoverPNP_Hr.INITO" Destination="Shaft_Vr.INIT" />
+      <Connection Source="Shaft_Vr.INITO" Destination="Process2.INIT" />
+      <Connection Source="Process2.INITO" Destination="Station3.INIT" />
+      <Connection Source="Station3.INITO" Destination="PartAtExit.INIT" />
+      <Connection Source="PartAtExit.INITO" Destination="Transfer.INIT" />
+      <Connection Source="Transfer.INITO" Destination="Bearing_PnP.INIT" />
+      <Connection Source="Bearing_PnP.INITO" Destination="CoverPNP_Vr.INIT" />
+      <Connection Source="CoverPNP_Vr.INITO" Destination="Shaft_Hr.INIT" />
+      <Connection Source="Shaft_Hr.INITO" Destination="CoverPNP_Hr.INIT" />
+      <Connection Source="CoverPNP_Hr.INITO" Destination="Shaft_Vr.INIT" />
+      <Connection Source="Shaft_Vr.INITO" Destination="Ejector.INIT" />
+      <Connection Source="Ejector.INITO" Destination="Process3.INIT" />
+      <Connection Source="Process3.INITO" Destination="PLC_Start.ACK_FIRST" />
+    </EventConnections>
+    <DataConnections />
+    <AdapterConnections>
+      <Connection Source="Area_HMI.AreaHMIAdptrOUT" Destination="Area.AreaHMIAdptrIN" />
+      <Connection Source="Station1_HMI.StationHMIAdptrOUT" Destination="Station1.StationHMIAdptrIN" />
+      <Connection Source="Station2_HMI.StationHMIAdptrOUT" Destination="Station2.StationHMIAdptrIN" />
+      <Connection Source="Station3_HMI.StationHMIAdptrOUT" Destination="Station3.StationHMIAdptrIN" />
+      <Connection Source="Area.AreaAdptrOUT" Destination="Station1.AreaAdptrIN" />
+      <Connection Source="Station1.AreaAdptrOUT" Destination="Station2.AreaAdptrIN" />
+      <Connection Source="Station2.AreaAdptrOUT" Destination="Station3.AreaAdptrIN" />
+      <Connection Source="Station3.AreaAdptrOUT" Destination="Area_Term.CasAdptrIN" />
+      <Connection Source="Station1.StationAdaptrOUT" Destination="Feeder.stationAdptr_in" />
+      <Connection Source="Feeder.stationAdptr_out" Destination="Checker.stationAdptr_in" />
+      <Connection Source="Checker.stationAdptr_out" Destination="Transfer.stationAdptr_in" />
+      <Connection Source="Transfer.stationAdptr_out" Destination="Process1.stationAdptr_in" />
+      <Connection Source="PartInHopper.stateRprtCmd_out" Destination="PartAtChecker.stateRprtCmd_in" />
+      <Connection Source="PartAtChecker.stateRprtCmd_out" Destination="Feeder.stateRprtCmd_in" />
+      <Connection Source="Feeder.stateRprtCmd_out" Destination="Checker.stateRprtCmd_in" />
+      <Connection Source="Checker.stateRprtCmd_out" Destination="Transfer.stateRprtCmd_in" />
+      <Connection Source="Transfer.stateRprtCmd_out" Destination="Process1.stateRptCmdAdptr_in" />
+      <Connection Source="Process1.stateRptCmdAdptr_out" Destination="PartInHopper.stateRprtCmd_in" />
+      <Connection Source="Station2.StationAdaptrOUT" Destination="Bearing_PnP.stationAdptr_in" />
+      <Connection Source="Bearing_PnP.stationAdptr_out" Destination="CoverPNP_Vr.stationAdptr_in" />
+      <Connection Source="CoverPNP_Vr.stationAdptr_out" Destination="Shaft_Hr.stationAdptr_in" />
+      <Connection Source="Shaft_Hr.stationAdptr_out" Destination="CoverPNP_Hr.stationAdptr_in" />
+      <Connection Source="CoverPNP_Hr.stationAdptr_out" Destination="Shaft_Vr.stationAdptr_in" />
+      <Connection Source="Shaft_Vr.stationAdptr_out" Destination="Process2.stationAdptr_in" />
+      <Connection Source="PartAtAssembly.stateRprtCmd_out" Destination="BearingSensor.stateRprtCmd_in" />
+      <Connection Source="BearingSensor.stateRprtCmd_out" Destination="ShaftSensor.stateRprtCmd_in" />
+      <Connection Source="ShaftSensor.stateRprtCmd_out" Destination="TopCoverSensor.stateRprtCmd_in" />
+      <Connection Source="TopCoverSensor.stateRprtCmd_out" Destination="Bearing_PnP.stateRprtCmd_in" />
+      <Connection Source="Bearing_PnP.stateRprtCmd_out" Destination="CoverPNP_Vr.stateRprtCmd_in" />
+      <Connection Source="CoverPNP_Vr.stateRprtCmd_out" Destination="Shaft_Hr.stateRprtCmd_in" />
+      <Connection Source="Shaft_Hr.stateRprtCmd_out" Destination="CoverPNP_Hr.stateRprtCmd_in" />
+      <Connection Source="CoverPNP_Hr.stateRprtCmd_out" Destination="Shaft_Vr.stateRprtCmd_in" />
+      <Connection Source="Shaft_Vr.stateRprtCmd_out" Destination="Process2.stateRptCmdAdptr_in" />
+      <Connection Source="Process2.stateRptCmdAdptr_out" Destination="PartAtAssembly.stateRprtCmd_in" />
+      <Connection Source="Station3.StationAdaptrOUT" Destination="Transfer.stationAdptr_in" />
+      <Connection Source="Transfer.stationAdptr_out" Destination="Bearing_PnP.stationAdptr_in" />
+      <Connection Source="Bearing_PnP.stationAdptr_out" Destination="CoverPNP_Vr.stationAdptr_in" />
+      <Connection Source="CoverPNP_Vr.stationAdptr_out" Destination="Shaft_Hr.stationAdptr_in" />
+      <Connection Source="Shaft_Hr.stationAdptr_out" Destination="CoverPNP_Hr.stationAdptr_in" />
+      <Connection Source="CoverPNP_Hr.stationAdptr_out" Destination="Shaft_Vr.stationAdptr_in" />
+      <Connection Source="Shaft_Vr.stationAdptr_out" Destination="Ejector.stationAdptr_in" />
+      <Connection Source="Ejector.stationAdptr_out" Destination="Process3.stationAdptr_in" />
+      <Connection Source="PartAtExit.stateRprtCmd_out" Destination="Transfer.stateRprtCmd_in" />
+      <Connection Source="Transfer.stateRprtCmd_out" Destination="Bearing_PnP.stateRprtCmd_in" />
+      <Connection Source="Bearing_PnP.stateRprtCmd_out" Destination="CoverPNP_Vr.stateRprtCmd_in" />
+      <Connection Source="CoverPNP_Vr.stateRprtCmd_out" Destination="Shaft_Hr.stateRprtCmd_in" />
+      <Connection Source="Shaft_Hr.stateRprtCmd_out" Destination="CoverPNP_Hr.stateRprtCmd_in" />
+      <Connection Source="CoverPNP_Hr.stateRprtCmd_out" Destination="Shaft_Vr.stateRprtCmd_in" />
+      <Connection Source="Shaft_Vr.stateRprtCmd_out" Destination="Ejector.stateRprtCmd_in" />
+      <Connection Source="Ejector.stateRprtCmd_out" Destination="Process3.stateRptCmdAdptr_in" />
+      <Connection Source="Process3.stateRptCmdAdptr_out" Destination="PartAtExit.stateRprtCmd_in" />
+    </AdapterConnections>
+  </SubAppNetwork>
+</Layer>

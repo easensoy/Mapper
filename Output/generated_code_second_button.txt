@@ -1,0 +1,132 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Layer ID="C8703AB5D97FF851" Name="Default" Comment="" IsDefault="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="https://www.se.com/LibraryElements">
+  <!-- v1 limitations: Process1 recipe arrays are default-empty; sensor-to-process DataConnections not generated; manual recipe loading required in ProcessRuntime_Generic_v1.initialize before Process1 will sequence. Demonstrator was cleaned of universal-architecture instances before this generation; restore via 'git checkout' on the Demonstrator repo to revert. -->
+  <SubAppNetwork>
+    <FB ID="CD51A86105BFFF79" Name="PLC_Start" Type="plcStart" Namespace="SE.AppBase" x="80" y="580">
+      <Parameter Name="Prio" Value="35" />
+      <Parameter Name="Delay" Value="T#0ms" />
+    </FB>
+    <FB ID="86119B275B332F9D" Name="Area_HMI" Type="Area_CAT" Namespace="Main" x="240" y="140" />
+    <FB ID="024DC204D7BA77A8" Name="Area" Type="Area" Namespace="Main" x="400" y="580">
+      <Parameter Name="AreaName" Value="'Area'" />
+    </FB>
+    <FB ID="64BA446714940BA3" Name="Station1" Type="Station" Namespace="Main" x="2120" y="600">
+      <Parameter Name="StationName" Value="'Station1'" />
+    </FB>
+    <FB ID="A1D4FECE65B60B9D" Name="Station1_HMI" Type="Station_CAT" Namespace="Main" x="2220" y="100" />
+    <FB ID="F8DBD8A29CB500EC" Name="Process1" Type="Process1_Generic" Namespace="Main" x="3360" y="1460">
+      <Parameter Name="process_name" Value="'Process1'" />
+      <Parameter Name="process_id" Value="10" />
+      <FB Name="ProcessRuntime_Generic_v1">
+        <Parameter Name="StepType" Value="[2,2,1,1,1,1,1,2]" />
+        <Parameter Name="CmdTargetName" Value="['','','Feeder','Checker','Feeder','Transfer','Feeder','']" />
+        <Parameter Name="CmdStateArr" Value="[0,0,1,3,3,1,3,0]" />
+        <Parameter Name="Wait1Id" Value="[0,1,2,4,2,5,2,6]" />
+        <Parameter Name="Wait1State" Value="[1,1,2,4,4,2,4,0]" />
+        <Parameter Name="NextStep" Value="[1,2,3,4,5,6,7,0]" />
+      </FB>
+    </FB>
+    <FB ID="E0AEF2679BD52F88" Name="Feeder" Type="Five_State_Actuator_CAT" Namespace="Main" x="1300" y="2480">
+      <Parameter Name="actuator_name" Value="'feeder'" />
+      <Parameter Name="actuator_id" Value="2" />
+      <Parameter Name="WorkSensorFitted" Value="FALSE" />
+      <Parameter Name="HomeSensorFitted" Value="FALSE" />
+      <Parameter Name="toWorkTime" Value="T#2000ms" />
+      <Parameter Name="toHomeTime" Value="T#2000ms" />
+      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
+      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
+      <Parameter Name="enableToWorkFaultTimeout" Value="FALSE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
+      <FB Name="Inputs">
+        <Parameter Name="NAME1" Value="'PusherAtHome'" />
+        <Parameter Name="NAME2" Value="'PusherAtWork'" />
+      </FB>
+      <FB Name="Output">
+        <Parameter Name="NAME2" Value="'ExtendPusher'" />
+      </FB>
+    </FB>
+    <FB ID="7C837DE5770A8EEE" Name="Checker" Type="Five_State_Actuator_CAT" Namespace="Main" x="1700" y="2480">
+      <Parameter Name="actuator_name" Value="'checker'" />
+      <Parameter Name="actuator_id" Value="3" />
+      <Parameter Name="WorkSensorFitted" Value="FALSE" />
+      <Parameter Name="HomeSensorFitted" Value="FALSE" />
+      <Parameter Name="toWorkTime" Value="T#2000ms" />
+      <Parameter Name="toHomeTime" Value="T#2000ms" />
+      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
+      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
+      <Parameter Name="enableToWorkFaultTimeout" Value="FALSE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
+      <FB Name="Inputs">
+        <Parameter Name="NAME1" Value="'CheckerUp'" />
+        <Parameter Name="NAME2" Value="'CheckerDown'" />
+      </FB>
+      <FB Name="Output">
+        <Parameter Name="NAME2" Value="'ExtendChecker'" />
+      </FB>
+    </FB>
+    <FB ID="4056993A201F2282" Name="Transfer" Type="Five_State_Actuator_CAT" Namespace="Main" x="2100" y="2480">
+      <Parameter Name="actuator_name" Value="'transfer'" />
+      <Parameter Name="actuator_id" Value="4" />
+      <Parameter Name="WorkSensorFitted" Value="FALSE" />
+      <Parameter Name="HomeSensorFitted" Value="FALSE" />
+      <Parameter Name="toWorkTime" Value="T#2000ms" />
+      <Parameter Name="toHomeTime" Value="T#2000ms" />
+      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
+      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
+      <Parameter Name="enableToWorkFaultTimeout" Value="FALSE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
+      <FB Name="Inputs">
+        <Parameter Name="NAME1" Value="'TransferAtHome'" />
+        <Parameter Name="NAME2" Value="'TransferAtWork'" />
+      </FB>
+      <FB Name="Output">
+        <Parameter Name="NAME2" Value="'ExtendTransfer'" />
+      </FB>
+    </FB>
+    <FB ID="B0F014C3AB79E174" Name="PartInHopper" Type="Sensor_Bool_CAT" Namespace="Main" x="1560" y="1480">
+      <Parameter Name="name" Value="'PartInHopper'" />
+      <Parameter Name="id" Value="0" />
+      <FB Name="Input">
+        <Parameter Name="NAME1" Value="'Hopper'" />
+      </FB>
+    </FB>
+    <FB ID="9802BD7FA7D15529" Name="PartAtChecker" Type="Sensor_Bool_CAT" Namespace="Main" x="1960" y="1480">
+      <Parameter Name="name" Value="'PartAtChecker'" />
+      <Parameter Name="id" Value="1" />
+      <FB Name="Input">
+        <Parameter Name="NAME1" Value="'PartAtChecker'" />
+      </FB>
+    </FB>
+    <FB ID="967D05C9E7F55159" Name="Stn1_Term" Type="CaSAdptrTerminator" Namespace="Main" x="4780" y="2360" />
+    <FB ID="B78A936D9A420446" Name="Area_Term" Type="CaSAdptrTerminator" Namespace="Main" x="3760" y="720" />
+    <EventConnections>
+      <Connection Source="PLC_Start.FIRST_INIT" Destination="Area.INIT" />
+      <Connection Source="Area.INITO" Destination="Station1.INIT" />
+      <Connection Source="Station1.INITO" Destination="PartInHopper.INIT" />
+      <Connection Source="PartInHopper.INITO" Destination="PartAtChecker.INIT" />
+      <Connection Source="PartAtChecker.INITO" Destination="Feeder.INIT" />
+      <Connection Source="Feeder.INITO" Destination="Checker.INIT" />
+      <Connection Source="Checker.INITO" Destination="Transfer.INIT" />
+      <Connection Source="Transfer.INITO" Destination="Process1.INIT" />
+      <Connection Source="Process1.INITO" Destination="PLC_Start.ACK_FIRST" />
+    </EventConnections>
+    <DataConnections />
+    <AdapterConnections>
+      <Connection Source="Area_HMI.AreaHMIAdptrOUT" Destination="Area.AreaHMIAdptrIN" />
+      <Connection Source="Station1_HMI.StationHMIAdptrOUT" Destination="Station1.StationHMIAdptrIN" />
+      <Connection Source="Area.AreaAdptrOUT" Destination="Station1.AreaAdptrIN" />
+      <Connection Source="Station1.AreaAdptrOUT" Destination="Area_Term.CasAdptrIN" />
+      <Connection Source="Station1.StationAdaptrOUT" Destination="Feeder.stationAdptr_in" />
+      <Connection Source="Feeder.stationAdptr_out" Destination="Checker.stationAdptr_in" />
+      <Connection Source="Checker.stationAdptr_out" Destination="Transfer.stationAdptr_in" />
+      <Connection Source="Transfer.stationAdptr_out" Destination="Process1.stationAdptr_in" />
+      <Connection Source="Process1.stationAdptr_out" Destination="Stn1_Term.CasAdptrIN" />
+      <Connection Source="PartInHopper.stateRprtCmd_out" Destination="PartAtChecker.stateRprtCmd_in" />
+      <Connection Source="PartAtChecker.stateRprtCmd_out" Destination="Feeder.stateRprtCmd_in" />
+      <Connection Source="Feeder.stateRprtCmd_out" Destination="Checker.stateRprtCmd_in" />
+      <Connection Source="Checker.stateRprtCmd_out" Destination="Transfer.stateRprtCmd_in" />
+      <Connection Source="Transfer.stateRprtCmd_out" Destination="Process1.stateRptCmdAdptr_in" />
+      <Connection Source="Process1.stateRptCmdAdptr_out" Destination="PartInHopper.stateRprtCmd_in" />
+    </AdapterConnections>
+  </SubAppNetwork>
+</Layer>

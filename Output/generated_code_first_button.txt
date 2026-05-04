@@ -1,0 +1,19 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Layer ID="4302771FB0003E54" Name="Default" Comment="" IsDefault="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="https://www.se.com/LibraryElements">
+  <!-- Button 1 / Process FB only. Process: Feed_Station. Demonstrator was cleaned of universal-architecture instances before this generation. -->
+  <SubAppNetwork>
+    <FB ID="F8DBD8A29CB500EC" Name="Feed_Station" Type="Process1_Generic" Namespace="Main" x="3360" y="1460">
+      <Parameter Name="process_name" Value="'Feed_Station'" />
+      <Parameter Name="process_id" Value="10" />
+      <FB Name="ProcessRuntime_Generic_v1">
+        <Parameter Name="StepType" Value="[2,2,1,1,1,1,1,2]" />
+        <Parameter Name="CmdTargetName" Value="['','','Feeder','Checker','Feeder','Transfer','Feeder','']" />
+        <Parameter Name="CmdStateArr" Value="[0,0,1,3,3,1,3,0]" />
+        <Parameter Name="Wait1Id" Value="[0,1,2,4,2,5,2,6]" />
+        <Parameter Name="Wait1State" Value="[1,1,2,4,4,2,4,0]" />
+        <Parameter Name="NextStep" Value="[1,2,3,4,5,6,7,0]" />
+      </FB>
+    </FB>
+    <DataConnections />
+  </SubAppNetwork>
+</Layer>
