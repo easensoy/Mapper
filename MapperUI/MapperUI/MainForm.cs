@@ -353,6 +353,27 @@ namespace MapperUI
             return true;
         }
 
+        void TouchDfbprojToTriggerEaeReload()
+        {
+            try
+            {
+                var dfbproj = FindDfbproj(Cfg().SyslayPath2);
+                if (dfbproj != null && File.Exists(dfbproj))
+                {
+                    File.SetLastWriteTime(dfbproj, DateTime.Now);
+                    AppendActivity($"[EAE] Touched {Path.GetFileName(dfbproj)} to trigger Reload Solution prompt.");
+                }
+                else
+                {
+                    AppendActivity("[EAE] .dfbproj not found; EAE will not auto-detect external changes. Use File > Reload Solution.");
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"[EAE] Failed to touch .dfbproj: {ex.Message}");
+            }
+        }
+
         void LogCleanup(SystemInjector.CleanupReport report)
         {
             AppendActivity($"[Cleanup] Removed {report.RemovedFbs.Count} universal FB(s), {report.RemovedConnections} connection(s)");
@@ -450,6 +471,7 @@ namespace MapperUI
                 var path = await Task.Run(() =>
                     injector.GenerateProcessFBSyslay(Cfg(), _loadedControlXmlPath, null, out report));
                 LogBindingsReport(report);
+                TouchDfbprojToTriggerEaeReload();
 
                 AppendActivity($"Generated: {path}");
                 lblStatus.Text = $"Ready  |  {path}  |  Process FB only";
@@ -484,6 +506,7 @@ namespace MapperUI
                 var path = await Task.Run(() =>
                     injector.GenerateStation1TestSyslay(Cfg(), _loadedControlXmlPath, bindings, out report));
                 LogBindingsReport(report);
+                TouchDfbprojToTriggerEaeReload();
 
                 AppendActivity($"Generated: {path}");
                 lblStatus.Text = $"Ready  |  {path}  |  {report.Bound.Count} bound, {report.Missing.Count} unbound";
@@ -518,6 +541,7 @@ namespace MapperUI
                 var path = await Task.Run(() =>
                     injector.GenerateFullSystemSyslay(Cfg(), _loadedControlXmlPath, bindings, out report));
                 LogBindingsReport(report);
+                TouchDfbprojToTriggerEaeReload();
 
                 AppendActivity($"Generated: {path}");
                 lblStatus.Text = $"Ready  |  {path}  |  {report.Bound.Count} bound, {report.Missing.Count} unbound";
