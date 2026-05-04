@@ -37,7 +37,8 @@ namespace CodeGen.Translation
         }
 
         public SyslayBuilder AddFB(string id, string name, string type, string ns, double x, double y,
-            IDictionary<string, string>? parameters = null)
+            IDictionary<string, string>? parameters = null,
+            IDictionary<string, IDictionary<string, string>>? nestedFbParameters = null)
         {
             var fb = new XElement(Ns + "FB",
                 new XAttribute("ID", id),
@@ -54,6 +55,23 @@ namespace CodeGen.Translation
                     fb.Add(new XElement(Ns + "Parameter",
                         new XAttribute("Name", kv.Key),
                         new XAttribute("Value", kv.Value)));
+                }
+            }
+
+            if (nestedFbParameters != null)
+            {
+                foreach (var inner in nestedFbParameters)
+                {
+                    if (inner.Value == null || inner.Value.Count == 0) continue;
+                    var innerFb = new XElement(Ns + "FB",
+                        new XAttribute("Name", inner.Key));
+                    foreach (var p in inner.Value)
+                    {
+                        innerFb.Add(new XElement(Ns + "Parameter",
+                            new XAttribute("Name", p.Key),
+                            new XAttribute("Value", p.Value)));
+                    }
+                    fb.Add(innerFb);
                 }
             }
 
