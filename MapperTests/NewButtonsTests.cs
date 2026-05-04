@@ -25,7 +25,7 @@ namespace MapperTests
         }
 
         [Fact]
-        public void Button1ProducesOneProcessFbWithSixRecipeArrays()
+        public void Button1ProducesOneProcessFbWithOnlyOuterParameters()
         {
             var cfg = MakeConfig(out _, out _);
             var injector = new SystemInjector();
@@ -39,18 +39,13 @@ namespace MapperTests
             var fbs = doc.Descendants(ns + "SubAppNetwork").Single().Elements(ns + "FB").ToList();
             Assert.Single(fbs);
             Assert.Equal("Process1_Generic", fbs[0].Attribute("Type")!.Value);
+            Assert.Empty(fbs[0].Elements(ns + "FB"));
 
-            var inner = fbs[0].Elements(ns + "FB")
-                .First(f => f.Attribute("Name")!.Value == "ProcessRuntime_Generic_v1");
-            var paramNames = inner.Elements(ns + "Parameter")
+            var paramNames = fbs[0].Elements(ns + "Parameter")
                 .Select(p => p.Attribute("Name")!.Value).ToList();
-
-            Assert.Contains("StepType", paramNames);
-            Assert.Contains("CmdTargetName", paramNames);
-            Assert.Contains("CmdStateArr", paramNames);
-            Assert.Contains("Wait1Id", paramNames);
-            Assert.Contains("Wait1State", paramNames);
-            Assert.Contains("NextStep", paramNames);
+            Assert.Equal(2, paramNames.Count);
+            Assert.Contains("process_name", paramNames);
+            Assert.Contains("process_id", paramNames);
         }
     }
 
@@ -84,12 +79,62 @@ namespace MapperTests
             var doc = XDocument.Load(path);
             var ns = (XNamespace)"https://www.se.com/LibraryElements";
             var fbs = doc.Descendants(ns + "SubAppNetwork").Single().Elements(ns + "FB").ToList();
-            Assert.True(fbs.Count >= 10, $"Expected at least 10 top-level FBs, got {fbs.Count}");
+            Assert.Equal(10, fbs.Count);
+
+            var expectedNames = new[]
+            {
+                "PLC_Start", "Area_HMI", "Area", "Station1", "Station1_HMI",
+                "Process1", "Feeder", "PartInHopper", "Stn1_Term", "Area_Term"
+            };
+            foreach (var name in expectedNames)
+                Assert.Contains(fbs, f => f.Attribute("Name")!.Value == name);
+
+            foreach (var fb in fbs)
+                Assert.Empty(fb.Elements(ns + "FB"));
 
             var feeder = fbs.First(f => f.Attribute("Name")!.Value == "Feeder");
-            var inputs = feeder.Elements(ns + "FB").First(f => f.Attribute("Name")!.Value == "Inputs");
-            var name1 = inputs.Elements(ns + "Parameter").First(p => p.Attribute("Name")!.Value == "NAME1");
-            Assert.Equal("'PusherAtHome'", name1.Attribute("Value")!.Value);
+            var feederParamNames = feeder.Elements(ns + "Parameter")
+                .Select(p => p.Attribute("Name")!.Value).ToHashSet();
+            var expectedActuatorParams = new[]
+            {
+                "actuator_name", "actuator_id", "WorkSensorFitted", "HomeSensorFitted",
+                "toWorkTime", "toHomeTime", "faultTimeoutWork", "faultTimeoutHome",
+                "enableToWorkFaultTimeout", "enableToHomeFaultTimeout"
+            };
+            foreach (var p in expectedActuatorParams)
+                Assert.Contains(p, feederParamNames);
+            Assert.Equal(expectedActuatorParams.Length, feederParamNames.Count);
+
+            var process1 = fbs.First(f => f.Attribute("Name")!.Value == "Process1");
+            var process1Params = process1.Elements(ns + "Parameter")
+                .Select(p => p.Attribute("Name")!.Value).ToList();
+            Assert.Equal(2, process1Params.Count);
+            Assert.Contains("process_name", process1Params);
+            Assert.Contains("process_id", process1Params);
+        }
+
+        [Fact]
+        public void Button2OutputHasNoNestedFBsAnywhere()
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "TS1Nest_" + Path.GetRandomFileName());
+            Directory.CreateDirectory(dir);
+            var syslay = Path.Combine(dir, "test.syslay");
+            var sysres = Path.Combine(dir, "test.sysres");
+            File.WriteAllText(syslay, "<Layer xmlns=\"https://www.se.com/LibraryElements\"><SubAppNetwork/></Layer>");
+            File.WriteAllText(sysres, "<Layer xmlns=\"https://www.se.com/LibraryElements\"><FBNetwork/></Layer>");
+            var cfg = new MapperConfig { SyslayPath2 = syslay, SysresPath2 = sysres };
+
+            IoBindingsLoader.InvalidateCache();
+            var bindings = IoBindingsLoader.LoadBindings(BindingsPath());
+            var injector = new SystemInjector();
+            injector.PrepareDemonstratorForGeneration(cfg);
+            SystemInjector.BindingApplicationReport report = null!;
+            var path = injector.GenerateStation1TestSyslay(cfg, FixturePath(), bindings, out report);
+
+            var doc = XDocument.Load(path);
+            var ns = (XNamespace)"https://www.se.com/LibraryElements";
+            foreach (var fb in doc.Descendants(ns + "FB"))
+                Assert.Empty(fb.Elements(ns + "FB"));
         }
     }
 

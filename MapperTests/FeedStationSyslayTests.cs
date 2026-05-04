@@ -21,23 +21,24 @@ namespace MapperTests
         }
 
         [Fact]
-        public void GeneratesThirteenFBs()
+        public void GeneratesTenFBs()
         {
             var (doc, _) = Generate();
             var ns = (XNamespace)"https://www.se.com/LibraryElements";
             var fbs = doc.Descendants(ns + "SubAppNetwork").Single().Elements(ns + "FB").ToList();
-            Assert.Equal(13, fbs.Count);
+            Assert.Equal(10, fbs.Count);
         }
 
         [Fact]
-        public void ContainsAllExpectedTopLevelInstances()
+        public void ContainsTuesdaySliceTopLevelInstances()
         {
             var (doc, _) = Generate();
             var ns = (XNamespace)"https://www.se.com/LibraryElements";
-            var names = doc.Descendants(ns + "FB")
+            var names = doc.Descendants(ns + "SubAppNetwork").Single().Elements(ns + "FB")
                 .Select(fb => fb.Attribute("Name")!.Value)
                 .ToList();
 
+            Assert.Contains("PLC_Start", names);
             Assert.Contains("Area_HMI", names);
             Assert.Contains("Area", names);
             Assert.Contains("Station1", names);
@@ -46,18 +47,21 @@ namespace MapperTests
             Assert.Contains("Stn1_Term", names);
             Assert.Contains("Area_Term", names);
             Assert.Contains("Feeder", names);
-            Assert.Contains("Checker", names);
-            Assert.Contains("Transfer", names);
+            Assert.Contains("PartInHopper", names);
+            Assert.DoesNotContain("Checker", names);
+            Assert.DoesNotContain("Transfer", names);
         }
 
         [Fact]
-        public void InitChainHasNineConnections()
+        public void InitChainHasFiveConnections()
         {
             var (doc, _) = Generate();
             var ns = (XNamespace)"https://www.se.com/LibraryElements";
             var ec = doc.Descendants(ns + "EventConnections").Single();
             var connections = ec.Elements(ns + "Connection").ToList();
-            Assert.Equal(9, connections.Count);
+            // PLC_Start.FIRST_INIT -> Area, Area -> Station1, Station1 -> PartInHopper,
+            // PartInHopper -> Feeder, Feeder -> Process1, Process1.INITO -> PLC_Start.ACK_FIRST
+            Assert.Equal(6, connections.Count);
         }
 
         [Fact]
@@ -119,14 +123,11 @@ namespace MapperTests
                 .Where(c => c.Source.Contains("stateR") || c.Dest.Contains("stateR"))
                 .ToList();
 
-            Assert.NotEmpty(conns);
+            // Tuesday slice ring: PartInHopper -> Feeder -> Process1 -> PartInHopper (3 edges)
+            Assert.True(conns.Count >= 3);
             var lastConnection = conns.Last();
             Assert.Contains("stateR", lastConnection.Source);
             Assert.Contains("stateR", lastConnection.Dest);
-
-            var firstInRingDest = conns.First().Dest;
-            var ringSize = conns.Count;
-            Assert.True(ringSize >= 6);
         }
 
         [Fact]

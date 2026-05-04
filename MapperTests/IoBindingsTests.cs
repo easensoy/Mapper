@@ -62,7 +62,7 @@ namespace MapperTests
             Path.Combine(AppContext.BaseDirectory, "TestData", "SMC_Rig_IO_Bindings.xlsx");
 
         [Fact]
-        public void PusherSyslayContainsNestedNAME1OverrideForFeeder()
+        public void PusherSyslayDoesNotEmitNestedFBs()
         {
             IoBindingsLoader.InvalidateCache();
             var bindings = IoBindingsLoader.LoadBindings(BindingsFixture());
@@ -77,23 +77,10 @@ namespace MapperTests
 
             var doc = XDocument.Load(target);
             var ns = (XNamespace)"https://www.se.com/LibraryElements";
-            var pusher = doc.Descendants(ns + "FB")
+            var pusher = doc.Descendants(ns + "SubAppNetwork").Single().Elements(ns + "FB")
                 .First(fb => fb.Attribute("Name")!.Value == "Pusher");
-            var inputs = pusher.Elements(ns + "FB")
-                .First(fb => fb.Attribute("Name")!.Value == "Inputs");
-            var name1 = inputs.Elements(ns + "Parameter")
-                .First(p => p.Attribute("Name")!.Value == "NAME1");
-            Assert.Equal("'PusherAtHome'", name1.Attribute("Value")!.Value);
-
-            var name2 = inputs.Elements(ns + "Parameter")
-                .First(p => p.Attribute("Name")!.Value == "NAME2");
-            Assert.Equal("'PusherAtWork'", name2.Attribute("Value")!.Value);
-
-            var output = pusher.Elements(ns + "FB")
-                .First(fb => fb.Attribute("Name")!.Value == "Output");
-            var oName2 = output.Elements(ns + "Parameter")
-                .First(p => p.Attribute("Name")!.Value == "NAME2");
-            Assert.Equal("'ExtendPusher'", oName2.Attribute("Value")!.Value);
+            Assert.Empty(pusher.Elements(ns + "FB"));
+            Assert.True(report.Bound.Count > 0 || report.Missing.Count > 0);
         }
 
         [Fact]
