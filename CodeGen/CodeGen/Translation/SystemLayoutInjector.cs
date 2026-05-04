@@ -920,11 +920,10 @@ namespace MapperUI.Services
             var reader = new CodeGen.IO.SystemXmlReader();
             var allComponents = reader.ReadAllComponents(controlXmlPath);
 
-            var process = allComponents.FirstOrDefault(c =>
-                string.Equals(c.Type, "Process", StringComparison.Ordinal) &&
-                string.Equals(c.Name, "Feed_Station", StringComparison.Ordinal));
+            var process = FindStation1Process(allComponents);
             if (process == null)
-                throw new InvalidOperationException("No Process named 'Feed_Station' found in Control.xml.");
+                throw new InvalidOperationException(
+                    "No Process referencing a 'Feeder' actuator was found in Control.xml.");
 
             var grouping = new StationGroupingService();
             var contents = grouping.GroupStationContents(process, allComponents);
@@ -973,13 +972,11 @@ namespace MapperUI.Services
             builder.AddFB(FBIdGenerator.GenerateFBId("Station1_HMI"),
                 "Station1_HMI", "Station_CAT", "Main", 2220, 100);
 
+            var (processOuter, processNested) = BuildProcessFbParameters(
+                contents.Process, allComponents, "Process1", processId);
             builder.AddFB(FBIdGenerator.GenerateFBId(contents.Process.ComponentID),
                 "Process1", "Process1_Generic", "Main", 3360, 1460,
-                new Dictionary<string, string>
-                {
-                    ["process_name"] = SyslayBuilder.FormatString("Process1"),
-                    ["process_id"] = SyslayBuilder.FormatInt(processId)
-                });
+                processOuter, processNested);
 
             for (int i = 0; i < contents.Actuators.Count; i++)
             {
@@ -1233,6 +1230,294 @@ namespace MapperUI.Services
             }
 
             doc.Save(path);
+        }
+
+        public static VueOneComponent? FindStation1Process(List<VueOneComponent> all)
+        {
+            var feeder = all.FirstOrDefault(c =>
+                string.Equals(c.Type, "Actuator", StringComparison.Ordinal) &&
+                string.Equals(c.Name, "Feeder", StringComparison.Ordinal));
+            if (feeder == null) return null;
+
+            return all.FirstOrDefault(c =>
+                string.Equals(c.Type, "Process", StringComparison.Ordinal) &&
+                c.States.Any(s => s.Transitions.Any(t =>
+                    t.Conditions.Any(cond =>
+                        string.Equals(cond.ComponentID, feeder.ComponentID, StringComparison.OrdinalIgnoreCase)))));
+        }
+
+        public static (Dictionary<string, string> Outer, IDictionary<string, IDictionary<string, string>> Nested)
+            BuildProcessFbParameters(VueOneComponent process, List<VueOneComponent> allComponents,
+                string processName, int processId)
+        {
+            var outer = new Dictionary<string, string>
+            {
+                ["process_name"] = SyslayBuilder.FormatString(processName),
+                ["process_id"] = SyslayBuilder.FormatInt(processId)
+            };
+
+            var stepTable = ProcessStepTableGenerator.Generate(process, allComponents);
+            var nested = new Dictionary<string, IDictionary<string, string>>(StringComparer.Ordinal);
+
+            if (stepTable.Success)
+            {
+                nested["ProcessRuntime_Generic_v1"] = new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["StepType"] = stepTable.StepType,
+                    ["CmdTargetName"] = stepTable.CmdTarget,
+                    ["CmdStateArr"] = stepTable.CmdState,
+                    ["Wait1Id"] = stepTable.WaitComp,
+                    ["Wait1State"] = stepTable.WaitState,
+                    ["NextStep"] = stepTable.NextStep
+                };
+            }
+            return (outer, nested);
+        }
+
+        public string GenerateProcessFBSyslay(MapperConfig config, string controlXmlPath,
+            string? processName, out BindingApplicationReport report)
+        {
+            report = new BindingApplicationReport();
+            if (string.IsNullOrEmpty(config.SyslayPath2))
+                throw new InvalidOperationException("MapperConfig.SyslayPath2 is not configured.");
+            if (!File.Exists(controlXmlPath))
+                throw new FileNotFoundException($"Control.xml not found: {controlXmlPath}");
+
+            var reader = new CodeGen.IO.SystemXmlReader();
+            var allComponents = reader.ReadAllComponents(controlXmlPath);
+
+            var process = !string.IsNullOrEmpty(processName)
+                ? allComponents.FirstOrDefault(c =>
+                    string.Equals(c.Type, "Process", StringComparison.Ordinal) &&
+                    string.Equals(c.Name, processName, StringComparison.Ordinal))
+                : allComponents.FirstOrDefault(c => string.Equals(c.Type, "Process", StringComparison.Ordinal));
+
+            if (process == null)
+                throw new InvalidOperationException("No Process component found in Control.xml.");
+
+            var fileName = Path.GetFileName(config.SyslayPath2);
+            var layerId = FBIdGenerator.GenerateFBId(fileName + ":ProcessFB");
+            var builder = new SyslayBuilder(layerId);
+            builder.SetTopComment(
+                $"Button 1 / Process FB only. Process: {process.Name}. " +
+                "Demonstrator was cleaned of universal-architecture instances before this generation.");
+
+            var (outer, nested) = BuildProcessFbParameters(process, allComponents, process.Name, 10);
+            builder.AddFB(FBIdGenerator.GenerateFBId(process.ComponentID),
+                process.Name, "Process1_Generic", "Main", 3360, 1460, outer, nested);
+
+            report.Bound.Add((process.Name, $"recipe arrays populated from {process.States.Count} states"));
+
+            var doc = builder.Build();
+            doc.Save(config.SyslayPath2);
+            return config.SyslayPath2;
+        }
+
+        public string GenerateStation1TestSyslay(MapperConfig config, string controlXmlPath,
+            IoBindings? bindings, out BindingApplicationReport report)
+        {
+            if (string.IsNullOrEmpty(config.SyslayPath2))
+                throw new InvalidOperationException("MapperConfig.SyslayPath2 is not configured.");
+            return GenerateFeedStationSyslayToPath(controlXmlPath, config.SyslayPath2, bindings, out report);
+        }
+
+        public string GenerateFullSystemSyslay(MapperConfig config, string controlXmlPath,
+            IoBindings? bindings, out BindingApplicationReport report)
+        {
+            report = new BindingApplicationReport();
+            if (string.IsNullOrEmpty(config.SyslayPath2))
+                throw new InvalidOperationException("MapperConfig.SyslayPath2 is not configured.");
+            if (!File.Exists(controlXmlPath))
+                throw new FileNotFoundException($"Control.xml not found: {controlXmlPath}");
+
+            var reader = new CodeGen.IO.SystemXmlReader();
+            var allComponents = reader.ReadAllComponents(controlXmlPath);
+            var processes = allComponents.Where(c => string.Equals(c.Type, "Process", StringComparison.Ordinal)).ToList();
+            if (processes.Count == 0)
+                throw new InvalidOperationException("No Process components found in Control.xml.");
+
+            var fileName = Path.GetFileName(config.SyslayPath2);
+            var layerId = FBIdGenerator.GenerateFBId(fileName + ":FullSystem");
+            var builder = new SyslayBuilder(layerId);
+            builder.SetTopComment(
+                $"Button 3 / Generate All. {processes.Count} stations under one Area. " +
+                "Demonstrator was cleaned of universal-architecture instances before this generation.");
+
+            builder.AddFB(FBIdGenerator.GenerateFBId("PLC_Start"),
+                "PLC_Start", "plcStart", "SE.AppBase", 80, 580,
+                new Dictionary<string, string>
+                {
+                    ["Prio"] = SyslayBuilder.FormatInt(35),
+                    ["Delay"] = SyslayBuilder.FormatTimeMs(0)
+                });
+            builder.AddFB(FBIdGenerator.GenerateFBId("Area_HMI"),
+                "Area_HMI", "Area_CAT", "Main", 240, 140);
+            builder.AddFB(FBIdGenerator.GenerateFBId("Area"),
+                "Area", "Area", "Main", 400, 580,
+                new Dictionary<string, string> { ["AreaName"] = SyslayBuilder.FormatString("Area") });
+
+            var grouping = new StationGroupingService();
+            var stationNames = new List<string>();
+            int xCol = 2120;
+            int stationIndex = 0;
+            var perStationContents = new List<(string StationName, StationContents Contents)>();
+
+            foreach (var proc in processes)
+            {
+                stationIndex++;
+                var stationName = $"Station{stationIndex}";
+                var hmiName = $"{stationName}_HMI";
+                stationNames.Add(stationName);
+
+                StationContents contents;
+                try
+                {
+                    contents = grouping.GroupStationContents(proc, allComponents);
+                }
+                catch
+                {
+                    report.Missing.Add($"{proc.Name} (skipped: grouping failed)");
+                    continue;
+                }
+                perStationContents.Add((stationName, contents));
+
+                builder.AddFB(FBIdGenerator.GenerateFBId(stationName),
+                    stationName, "Station", "Main", xCol, 600,
+                    new Dictionary<string, string>
+                    {
+                        ["StationName"] = SyslayBuilder.FormatString(stationName)
+                    });
+                builder.AddFB(FBIdGenerator.GenerateFBId(hmiName),
+                    hmiName, "Station_CAT", "Main", xCol + 100, 100);
+
+                var (outer, nested) = BuildProcessFbParameters(proc, allComponents, proc.Name, 10 + stationIndex);
+                var processInstanceName = $"Process{stationIndex}";
+                builder.AddFB(FBIdGenerator.GenerateFBId(proc.ComponentID),
+                    processInstanceName, "Process1_Generic", "Main", xCol + 1240, 1460, outer, nested);
+
+                int sensorBase = 0;
+                int actuatorBase = contents.Sensors.Count;
+
+                for (int i = 0; i < contents.Actuators.Count; i++)
+                {
+                    var act = contents.Actuators[i];
+                    int aid = actuatorBase + i;
+                    var actParams = BuildActuatorParameters(act, aid, contents.Process);
+
+                    ActuatorBinding? ab = null;
+                    bindings?.Actuators.TryGetValue(act.Name, out ab);
+                    if (ab != null) report.Bound.Add((act.Name, DescribeBinding(ab)));
+                    else if (bindings != null) report.Missing.Add(act.Name);
+
+                    builder.AddFB(FBIdGenerator.GenerateFBId(act.ComponentID),
+                        act.Name, "Five_State_Actuator_CAT", "Main",
+                        xCol - 800 + i * 400, 2480, actParams,
+                        BuildActuatorNestedOverrides(ab));
+                }
+
+                for (int i = 0; i < contents.Sensors.Count; i++)
+                {
+                    var sen = contents.Sensors[i];
+                    int sid = sensorBase + i;
+                    SensorBinding? sb = null;
+                    bindings?.Sensors.TryGetValue(sen.Name, out sb);
+                    if (sb != null) report.Bound.Add((sen.Name, DescribeBinding(sb)));
+                    else if (bindings != null) report.Missing.Add(sen.Name);
+
+                    builder.AddFB(FBIdGenerator.GenerateFBId(sen.ComponentID),
+                        sen.Name, "Sensor_Bool_CAT", "Main",
+                        xCol - 560 + i * 400, 1480,
+                        new Dictionary<string, string>
+                        {
+                            ["name"] = SyslayBuilder.FormatString(sen.Name),
+                            ["id"] = SyslayBuilder.FormatInt(sid)
+                        }, BuildSensorNestedOverrides(sb));
+                }
+
+                xCol += 2200;
+            }
+
+            builder.AddFB(FBIdGenerator.GenerateFBId("Area_Term"),
+                "Area_Term", "CaSAdptrTerminator", "Main", xCol + 200, 720);
+
+            BuildFullSystemWiring(builder, perStationContents);
+
+            var doc = builder.Build();
+            doc.Save(config.SyslayPath2);
+            return config.SyslayPath2;
+        }
+
+        private static void BuildFullSystemWiring(SyslayBuilder builder,
+            List<(string StationName, StationContents Contents)> stations)
+        {
+            if (stations.Count == 0) return;
+
+            builder.AddEventConnection("PLC_Start.FIRST_INIT", "Area.INIT");
+
+            var initChain = new List<string> { "Area" };
+            for (int s = 0; s < stations.Count; s++)
+            {
+                var (stationName, contents) = stations[s];
+                initChain.Add(stationName);
+                foreach (var sn in contents.Sensors) initChain.Add(sn.Name);
+                foreach (var a in contents.Actuators) initChain.Add(a.Name);
+                initChain.Add($"Process{s + 1}");
+            }
+            for (int i = 0; i < initChain.Count - 1; i++)
+                builder.AddEventConnection($"{initChain[i]}.INITO", $"{initChain[i + 1]}.INIT");
+            builder.AddEventConnection($"{initChain[^1]}.INITO", "PLC_Start.ACK_FIRST");
+
+            builder.AddAdapterConnection("Area_HMI.AreaHMIAdptrOUT", "Area.AreaHMIAdptrIN");
+            for (int s = 0; s < stations.Count; s++)
+            {
+                var (stationName, _) = stations[s];
+                builder.AddAdapterConnection($"{stationName}_HMI.StationHMIAdptrOUT", $"{stationName}.StationHMIAdptrIN");
+            }
+
+            builder.AddAdapterConnection("Area.AreaAdptrOUT", $"{stations[0].StationName}.AreaAdptrIN");
+            for (int s = 0; s < stations.Count - 1; s++)
+                builder.AddAdapterConnection($"{stations[s].StationName}.AreaAdptrOUT",
+                    $"{stations[s + 1].StationName}.AreaAdptrIN");
+            builder.AddAdapterConnection($"{stations[^1].StationName}.AreaAdptrOUT", "Area_Term.CasAdptrIN");
+
+            for (int s = 0; s < stations.Count; s++)
+            {
+                var (stationName, contents) = stations[s];
+                var processInstanceName = $"Process{s + 1}";
+
+                var stationChain = new List<(string Name, string Type)>();
+                foreach (var a in contents.Actuators)
+                    stationChain.Add((a.Name, "Five_State_Actuator_CAT"));
+                stationChain.Add((processInstanceName, "Process1_Generic"));
+
+                if (stationChain.Count > 0)
+                {
+                    builder.AddAdapterConnection($"{stationName}.StationAdaptrOUT",
+                        $"{stationChain[0].Name}.{StationAdptrIn(stationChain[0].Type)}");
+                    for (int i = 0; i < stationChain.Count - 1; i++)
+                        builder.AddAdapterConnection(
+                            $"{stationChain[i].Name}.{StationAdptrOut(stationChain[i].Type)}",
+                            $"{stationChain[i + 1].Name}.{StationAdptrIn(stationChain[i + 1].Type)}");
+                }
+
+                var ringComponents = new List<(string Name, string Type)>();
+                foreach (var sn in contents.Sensors)
+                    ringComponents.Add((sn.Name, "Sensor_Bool_CAT"));
+                foreach (var a in contents.Actuators)
+                    ringComponents.Add((a.Name, "Five_State_Actuator_CAT"));
+                ringComponents.Add((processInstanceName, "Process1_Generic"));
+
+                if (ringComponents.Count > 1)
+                {
+                    for (int i = 0; i < ringComponents.Count - 1; i++)
+                        builder.AddAdapterConnection(
+                            $"{ringComponents[i].Name}.{StateRprtOut(ringComponents[i].Type)}",
+                            $"{ringComponents[i + 1].Name}.{StateRprtIn(ringComponents[i + 1].Type)}");
+                    builder.AddAdapterConnection(
+                        $"{ringComponents[^1].Name}.{StateRprtOut(ringComponents[^1].Type)}",
+                        $"{ringComponents[0].Name}.{StateRprtIn(ringComponents[0].Type)}");
+                }
+            }
         }
 
         private static string SanitizeFileName(string name)
