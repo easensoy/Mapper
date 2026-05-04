@@ -17,38 +17,38 @@
     <FB ID="E0AEF2679BD52F88" Name="Feeder" Type="Five_State_Actuator_CAT" Namespace="Main" x="1320" y="2480">
       <Parameter Name="actuator_name" Value="'feeder'" />
       <Parameter Name="actuator_id" Value="2" />
-      <Parameter Name="WorkSensorFitted" Value="FALSE" />
-      <Parameter Name="HomeSensorFitted" Value="FALSE" />
-      <Parameter Name="toWorkTime" Value="T#2000ms" />
-      <Parameter Name="toHomeTime" Value="T#2000ms" />
-      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
-      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
-      <Parameter Name="enableToWorkFaultTimeout" Value="FALSE" />
-      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
+      <Parameter Name="WorkSensorFitted" Value="TRUE" />
+      <Parameter Name="HomeSensorFitted" Value="TRUE" />
+      <Parameter Name="toWorkTime" Value="T#1000ms" />
+      <Parameter Name="toHomeTime" Value="T#1000ms" />
+      <Parameter Name="faultTimeoutWork" Value="T#2000ms" />
+      <Parameter Name="faultTimeoutHome" Value="T#2000ms" />
+      <Parameter Name="enableToWorkFaultTimeout" Value="TRUE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="TRUE" />
     </FB>
     <FB ID="7C837DE5770A8EEE" Name="Checker" Type="Five_State_Actuator_CAT" Namespace="Main" x="1720" y="2480">
       <Parameter Name="actuator_name" Value="'checker'" />
       <Parameter Name="actuator_id" Value="3" />
       <Parameter Name="WorkSensorFitted" Value="FALSE" />
-      <Parameter Name="HomeSensorFitted" Value="FALSE" />
-      <Parameter Name="toWorkTime" Value="T#2000ms" />
-      <Parameter Name="toHomeTime" Value="T#2000ms" />
-      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
-      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
+      <Parameter Name="HomeSensorFitted" Value="TRUE" />
+      <Parameter Name="toWorkTime" Value="T#1000ms" />
+      <Parameter Name="toHomeTime" Value="T#1000ms" />
+      <Parameter Name="faultTimeoutWork" Value="T#2000ms" />
+      <Parameter Name="faultTimeoutHome" Value="T#2000ms" />
       <Parameter Name="enableToWorkFaultTimeout" Value="FALSE" />
-      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="TRUE" />
     </FB>
     <FB ID="4056993A201F2282" Name="Transfer" Type="Five_State_Actuator_CAT" Namespace="Main" x="2120" y="2480">
       <Parameter Name="actuator_name" Value="'transfer'" />
       <Parameter Name="actuator_id" Value="4" />
-      <Parameter Name="WorkSensorFitted" Value="FALSE" />
-      <Parameter Name="HomeSensorFitted" Value="FALSE" />
-      <Parameter Name="toWorkTime" Value="T#2000ms" />
-      <Parameter Name="toHomeTime" Value="T#2000ms" />
-      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
-      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
-      <Parameter Name="enableToWorkFaultTimeout" Value="FALSE" />
-      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
+      <Parameter Name="WorkSensorFitted" Value="TRUE" />
+      <Parameter Name="HomeSensorFitted" Value="TRUE" />
+      <Parameter Name="toWorkTime" Value="T#1500ms" />
+      <Parameter Name="toHomeTime" Value="T#1000ms" />
+      <Parameter Name="faultTimeoutWork" Value="T#3000ms" />
+      <Parameter Name="faultTimeoutHome" Value="T#2000ms" />
+      <Parameter Name="enableToWorkFaultTimeout" Value="TRUE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="TRUE" />
     </FB>
     <FB ID="B0F014C3AB79E174" Name="PartInHopper" Type="Sensor_Bool_CAT" Namespace="Main" x="1560" y="1480">
       <Parameter Name="name" Value="'PartInHopper'" />
@@ -69,62 +69,62 @@
     <FB ID="7633272FE8DC12FB" Name="Bearing_PnP" Type="Five_State_Actuator_CAT" Namespace="Main" x="3520" y="2480">
       <Parameter Name="actuator_name" Value="'bearing_pnp'" />
       <Parameter Name="actuator_id" Value="4" />
-      <Parameter Name="WorkSensorFitted" Value="FALSE" />
-      <Parameter Name="HomeSensorFitted" Value="FALSE" />
-      <Parameter Name="toWorkTime" Value="T#2000ms" />
-      <Parameter Name="toHomeTime" Value="T#2000ms" />
-      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
-      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
-      <Parameter Name="enableToWorkFaultTimeout" Value="FALSE" />
-      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
+      <Parameter Name="WorkSensorFitted" Value="TRUE" />
+      <Parameter Name="HomeSensorFitted" Value="TRUE" />
+      <Parameter Name="toWorkTime" Value="T#1250ms" />
+      <Parameter Name="toHomeTime" Value="T#2500ms" />
+      <Parameter Name="faultTimeoutWork" Value="T#2500ms" />
+      <Parameter Name="faultTimeoutHome" Value="T#5000ms" />
+      <Parameter Name="enableToWorkFaultTimeout" Value="TRUE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="TRUE" />
     </FB>
     <FB ID="2C5F84BA3C43A064" Name="CoverPNP_Vr" Type="Five_State_Actuator_CAT" Namespace="Main" x="3920" y="2480">
       <Parameter Name="actuator_name" Value="'coverpnp_vr'" />
       <Parameter Name="actuator_id" Value="5" />
-      <Parameter Name="WorkSensorFitted" Value="FALSE" />
-      <Parameter Name="HomeSensorFitted" Value="FALSE" />
-      <Parameter Name="toWorkTime" Value="T#2000ms" />
-      <Parameter Name="toHomeTime" Value="T#2000ms" />
-      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
-      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
-      <Parameter Name="enableToWorkFaultTimeout" Value="FALSE" />
-      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
-    </FB>
-    <FB ID="EC87D797727FF5F4" Name="Shaft_Hr" Type="Five_State_Actuator_CAT" Namespace="Main" x="4320" y="2480">
-      <Parameter Name="actuator_name" Value="'shaft_hr'" />
-      <Parameter Name="actuator_id" Value="6" />
       <Parameter Name="WorkSensorFitted" Value="TRUE" />
-      <Parameter Name="HomeSensorFitted" Value="FALSE" />
+      <Parameter Name="HomeSensorFitted" Value="TRUE" />
       <Parameter Name="toWorkTime" Value="T#2000ms" />
       <Parameter Name="toHomeTime" Value="T#2000ms" />
       <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
       <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
       <Parameter Name="enableToWorkFaultTimeout" Value="TRUE" />
-      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="TRUE" />
+    </FB>
+    <FB ID="EC87D797727FF5F4" Name="Shaft_Hr" Type="Five_State_Actuator_CAT" Namespace="Main" x="4320" y="2480">
+      <Parameter Name="actuator_name" Value="'shaft_hr'" />
+      <Parameter Name="actuator_id" Value="6" />
+      <Parameter Name="WorkSensorFitted" Value="TRUE" />
+      <Parameter Name="HomeSensorFitted" Value="TRUE" />
+      <Parameter Name="toWorkTime" Value="T#2000ms" />
+      <Parameter Name="toHomeTime" Value="T#2000ms" />
+      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
+      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
+      <Parameter Name="enableToWorkFaultTimeout" Value="TRUE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="TRUE" />
     </FB>
     <FB ID="10C5485ED8865854" Name="CoverPNP_Hr" Type="Five_State_Actuator_CAT" Namespace="Main" x="4720" y="2480">
       <Parameter Name="actuator_name" Value="'coverpnp_hr'" />
       <Parameter Name="actuator_id" Value="7" />
-      <Parameter Name="WorkSensorFitted" Value="FALSE" />
-      <Parameter Name="HomeSensorFitted" Value="FALSE" />
-      <Parameter Name="toWorkTime" Value="T#2000ms" />
-      <Parameter Name="toHomeTime" Value="T#2000ms" />
-      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
-      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
-      <Parameter Name="enableToWorkFaultTimeout" Value="FALSE" />
-      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
+      <Parameter Name="WorkSensorFitted" Value="TRUE" />
+      <Parameter Name="HomeSensorFitted" Value="TRUE" />
+      <Parameter Name="toWorkTime" Value="T#1000ms" />
+      <Parameter Name="toHomeTime" Value="T#1000ms" />
+      <Parameter Name="faultTimeoutWork" Value="T#2000ms" />
+      <Parameter Name="faultTimeoutHome" Value="T#2000ms" />
+      <Parameter Name="enableToWorkFaultTimeout" Value="TRUE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="TRUE" />
     </FB>
     <FB ID="BE9C6422D3414357" Name="Shaft_Vr" Type="Five_State_Actuator_CAT" Namespace="Main" x="5120" y="2480">
       <Parameter Name="actuator_name" Value="'shaft_vr'" />
       <Parameter Name="actuator_id" Value="8" />
-      <Parameter Name="WorkSensorFitted" Value="FALSE" />
-      <Parameter Name="HomeSensorFitted" Value="FALSE" />
-      <Parameter Name="toWorkTime" Value="T#2000ms" />
-      <Parameter Name="toHomeTime" Value="T#2000ms" />
-      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
-      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
-      <Parameter Name="enableToWorkFaultTimeout" Value="FALSE" />
-      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
+      <Parameter Name="WorkSensorFitted" Value="TRUE" />
+      <Parameter Name="HomeSensorFitted" Value="TRUE" />
+      <Parameter Name="toWorkTime" Value="T#1000ms" />
+      <Parameter Name="toHomeTime" Value="T#1000ms" />
+      <Parameter Name="faultTimeoutWork" Value="T#2000ms" />
+      <Parameter Name="faultTimeoutHome" Value="T#2000ms" />
+      <Parameter Name="enableToWorkFaultTimeout" Value="TRUE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="TRUE" />
     </FB>
     <FB ID="C3C1B2AAE7A991C7" Name="PartAtAssembly" Type="Sensor_Bool_CAT" Namespace="Main" x="3760" y="1480">
       <Parameter Name="name" Value="'PartAtAssembly'" />
@@ -153,74 +153,74 @@
     <FB ID="4056993A201F2282" Name="Transfer" Type="Five_State_Actuator_CAT" Namespace="Main" x="5720" y="2480">
       <Parameter Name="actuator_name" Value="'transfer'" />
       <Parameter Name="actuator_id" Value="1" />
-      <Parameter Name="WorkSensorFitted" Value="FALSE" />
-      <Parameter Name="HomeSensorFitted" Value="FALSE" />
-      <Parameter Name="toWorkTime" Value="T#2000ms" />
-      <Parameter Name="toHomeTime" Value="T#2000ms" />
-      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
-      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
-      <Parameter Name="enableToWorkFaultTimeout" Value="FALSE" />
-      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
+      <Parameter Name="WorkSensorFitted" Value="TRUE" />
+      <Parameter Name="HomeSensorFitted" Value="TRUE" />
+      <Parameter Name="toWorkTime" Value="T#1500ms" />
+      <Parameter Name="toHomeTime" Value="T#1000ms" />
+      <Parameter Name="faultTimeoutWork" Value="T#3000ms" />
+      <Parameter Name="faultTimeoutHome" Value="T#2000ms" />
+      <Parameter Name="enableToWorkFaultTimeout" Value="TRUE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="TRUE" />
     </FB>
     <FB ID="7633272FE8DC12FB" Name="Bearing_PnP" Type="Five_State_Actuator_CAT" Namespace="Main" x="6120" y="2480">
       <Parameter Name="actuator_name" Value="'bearing_pnp'" />
       <Parameter Name="actuator_id" Value="2" />
-      <Parameter Name="WorkSensorFitted" Value="FALSE" />
-      <Parameter Name="HomeSensorFitted" Value="FALSE" />
-      <Parameter Name="toWorkTime" Value="T#2000ms" />
-      <Parameter Name="toHomeTime" Value="T#2000ms" />
-      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
-      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
-      <Parameter Name="enableToWorkFaultTimeout" Value="FALSE" />
-      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
+      <Parameter Name="WorkSensorFitted" Value="TRUE" />
+      <Parameter Name="HomeSensorFitted" Value="TRUE" />
+      <Parameter Name="toWorkTime" Value="T#1250ms" />
+      <Parameter Name="toHomeTime" Value="T#2500ms" />
+      <Parameter Name="faultTimeoutWork" Value="T#2500ms" />
+      <Parameter Name="faultTimeoutHome" Value="T#5000ms" />
+      <Parameter Name="enableToWorkFaultTimeout" Value="TRUE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="TRUE" />
     </FB>
     <FB ID="2C5F84BA3C43A064" Name="CoverPNP_Vr" Type="Five_State_Actuator_CAT" Namespace="Main" x="6520" y="2480">
       <Parameter Name="actuator_name" Value="'coverpnp_vr'" />
       <Parameter Name="actuator_id" Value="3" />
-      <Parameter Name="WorkSensorFitted" Value="FALSE" />
-      <Parameter Name="HomeSensorFitted" Value="FALSE" />
-      <Parameter Name="toWorkTime" Value="T#2000ms" />
-      <Parameter Name="toHomeTime" Value="T#2000ms" />
-      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
-      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
-      <Parameter Name="enableToWorkFaultTimeout" Value="FALSE" />
-      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
-    </FB>
-    <FB ID="EC87D797727FF5F4" Name="Shaft_Hr" Type="Five_State_Actuator_CAT" Namespace="Main" x="6920" y="2480">
-      <Parameter Name="actuator_name" Value="'shaft_hr'" />
-      <Parameter Name="actuator_id" Value="4" />
       <Parameter Name="WorkSensorFitted" Value="TRUE" />
-      <Parameter Name="HomeSensorFitted" Value="FALSE" />
+      <Parameter Name="HomeSensorFitted" Value="TRUE" />
       <Parameter Name="toWorkTime" Value="T#2000ms" />
       <Parameter Name="toHomeTime" Value="T#2000ms" />
       <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
       <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
       <Parameter Name="enableToWorkFaultTimeout" Value="TRUE" />
-      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="TRUE" />
+    </FB>
+    <FB ID="EC87D797727FF5F4" Name="Shaft_Hr" Type="Five_State_Actuator_CAT" Namespace="Main" x="6920" y="2480">
+      <Parameter Name="actuator_name" Value="'shaft_hr'" />
+      <Parameter Name="actuator_id" Value="4" />
+      <Parameter Name="WorkSensorFitted" Value="TRUE" />
+      <Parameter Name="HomeSensorFitted" Value="TRUE" />
+      <Parameter Name="toWorkTime" Value="T#2000ms" />
+      <Parameter Name="toHomeTime" Value="T#2000ms" />
+      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
+      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
+      <Parameter Name="enableToWorkFaultTimeout" Value="TRUE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="TRUE" />
     </FB>
     <FB ID="10C5485ED8865854" Name="CoverPNP_Hr" Type="Five_State_Actuator_CAT" Namespace="Main" x="7320" y="2480">
       <Parameter Name="actuator_name" Value="'coverpnp_hr'" />
       <Parameter Name="actuator_id" Value="5" />
-      <Parameter Name="WorkSensorFitted" Value="FALSE" />
-      <Parameter Name="HomeSensorFitted" Value="FALSE" />
-      <Parameter Name="toWorkTime" Value="T#2000ms" />
-      <Parameter Name="toHomeTime" Value="T#2000ms" />
-      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
-      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
-      <Parameter Name="enableToWorkFaultTimeout" Value="FALSE" />
-      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
+      <Parameter Name="WorkSensorFitted" Value="TRUE" />
+      <Parameter Name="HomeSensorFitted" Value="TRUE" />
+      <Parameter Name="toWorkTime" Value="T#1000ms" />
+      <Parameter Name="toHomeTime" Value="T#1000ms" />
+      <Parameter Name="faultTimeoutWork" Value="T#2000ms" />
+      <Parameter Name="faultTimeoutHome" Value="T#2000ms" />
+      <Parameter Name="enableToWorkFaultTimeout" Value="TRUE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="TRUE" />
     </FB>
     <FB ID="BE9C6422D3414357" Name="Shaft_Vr" Type="Five_State_Actuator_CAT" Namespace="Main" x="7720" y="2480">
       <Parameter Name="actuator_name" Value="'shaft_vr'" />
       <Parameter Name="actuator_id" Value="6" />
-      <Parameter Name="WorkSensorFitted" Value="FALSE" />
-      <Parameter Name="HomeSensorFitted" Value="FALSE" />
-      <Parameter Name="toWorkTime" Value="T#2000ms" />
-      <Parameter Name="toHomeTime" Value="T#2000ms" />
-      <Parameter Name="faultTimeoutWork" Value="T#4000ms" />
-      <Parameter Name="faultTimeoutHome" Value="T#4000ms" />
-      <Parameter Name="enableToWorkFaultTimeout" Value="FALSE" />
-      <Parameter Name="enableToHomeFaultTimeout" Value="FALSE" />
+      <Parameter Name="WorkSensorFitted" Value="TRUE" />
+      <Parameter Name="HomeSensorFitted" Value="TRUE" />
+      <Parameter Name="toWorkTime" Value="T#1000ms" />
+      <Parameter Name="toHomeTime" Value="T#1000ms" />
+      <Parameter Name="faultTimeoutWork" Value="T#2000ms" />
+      <Parameter Name="faultTimeoutHome" Value="T#2000ms" />
+      <Parameter Name="enableToWorkFaultTimeout" Value="TRUE" />
+      <Parameter Name="enableToHomeFaultTimeout" Value="TRUE" />
     </FB>
     <FB ID="16D4FD16BC34B8FD" Name="Ejector" Type="Five_State_Actuator_CAT" Namespace="Main" x="8120" y="2480">
       <Parameter Name="actuator_name" Value="'ejector'" />
