@@ -2,10 +2,6 @@
 <Layer ID="C8703AB5D97FF851" Name="Default" Comment="" IsDefault="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="https://www.se.com/LibraryElements">
   <!-- v1 limitations: Process1 recipe arrays are default-empty; sensor-to-process DataConnections not generated; manual recipe loading required in ProcessRuntime_Generic_v1.initialize before Process1 will sequence. Demonstrator was cleaned of universal-architecture instances before this generation; restore via 'git checkout' on the Demonstrator repo to revert. -->
   <SubAppNetwork>
-    <FB ID="CD51A86105BFFF79" Name="PLC_Start" Type="plcStart" Namespace="SE.AppBase" x="80" y="580">
-      <Parameter Name="Prio" Value="35" />
-      <Parameter Name="Delay" Value="T#0ms" />
-    </FB>
     <FB ID="86119B275B332F9D" Name="Area_HMI" Type="Area_CAT" Namespace="Main" x="240" y="140" />
     <FB ID="024DC204D7BA77A8" Name="Area" Type="Area" Namespace="Main" x="400" y="580">
       <Parameter Name="AreaName" Value="'Area'" />
@@ -37,12 +33,10 @@
     <FB ID="967D05C9E7F55159" Name="Stn1_Term" Type="CaSAdptrTerminator" Namespace="Main" x="4780" y="2360" />
     <FB ID="B78A936D9A420446" Name="Area_Term" Type="CaSAdptrTerminator" Namespace="Main" x="3760" y="720" />
     <EventConnections>
-      <Connection Source="PLC_Start.FIRST_INIT" Destination="Area.INIT" />
       <Connection Source="Area.INITO" Destination="Station1.INIT" />
       <Connection Source="Station1.INITO" Destination="PartInHopper.INIT" />
       <Connection Source="PartInHopper.INITO" Destination="Feeder.INIT" />
       <Connection Source="Feeder.INITO" Destination="Process1.INIT" />
-      <Connection Source="Process1.INITO" Destination="PLC_Start.ACK_FIRST" />
     </EventConnections>
     <DataConnections />
     <AdapterConnections>
