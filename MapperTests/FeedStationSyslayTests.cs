@@ -25,7 +25,7 @@ namespace MapperTests
         {
             var (doc, _) = Generate();
             var ns = (XNamespace)"https://www.se.com/LibraryElements";
-            var fbs = doc.Descendants(ns + "FB").ToList();
+            var fbs = doc.Descendants(ns + "SubAppNetwork").Single().Elements(ns + "FB").ToList();
             Assert.Equal(13, fbs.Count);
         }
 
