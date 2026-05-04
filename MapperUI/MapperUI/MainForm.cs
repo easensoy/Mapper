@@ -359,6 +359,38 @@ namespace MapperUI
             foreach (var name in report.PreservedFbs) AppendActivity($"  + {name}");
         }
 
+        CodeGen.Translation.IoBindings? TryLoadBindings()
+        {
+            try
+            {
+                var cfg = Cfg();
+                var path = cfg.IoBindingsPath;
+                if (!Path.IsPathRooted(path))
+                    path = Path.Combine(AppContext.BaseDirectory, path);
+                if (!File.Exists(path))
+                {
+                    AppendActivity($"[IoBindings] Bindings file not found at {path}; symlinks will use template defaults.");
+                    return null;
+                }
+                var bindings = CodeGen.Translation.IoBindingsLoader.LoadBindings(path);
+                AppendActivity($"[IoBindings] Loaded {bindings.Actuators.Count} actuator + {bindings.Sensors.Count} sensor binding(s) from {path}");
+                return bindings;
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"[IoBindings] Failed to load: {ex.Message}");
+                return null;
+            }
+        }
+
+        void LogBindingsReport(SystemInjector.BindingApplicationReport report)
+        {
+            foreach (var (comp, detail) in report.Bound)
+                AppendActivity($"[IoBindings] {comp} bound: {detail}");
+            foreach (var miss in report.Missing)
+                AppendActivity($"[IoBindings] No binding for component {miss}; symlinks remain at template default $${{PATH}}<var>; component will not bind to physical I/O");
+        }
+
         async void btnGeneratePusherTest_Click(object sender, EventArgs e)
         {
             try
@@ -372,12 +404,15 @@ namespace MapperUI
                 var report = await Task.Run(() => injector.PrepareDemonstratorForGeneration(Cfg()));
                 LogCleanup(report);
 
-                var path = await Task.Run(() => injector.GeneratePusherTestSyslayToPath(syslayPath));
+                var bindings = TryLoadBindings();
+                SystemInjector.BindingApplicationReport bindingReport = null!;
+                var path = await Task.Run(() => injector.GeneratePusherTestSyslayToPath(syslayPath, bindings, out bindingReport));
+                LogBindingsReport(bindingReport);
 
                 AppendActivity($"Generated: {path}");
-                lblStatus.Text = $"Ready  |  {path}";
-                MessageBox.Show($"Generated into Demonstrator:\n{path}", "Pusher Test",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                lblStatus.Text = $"Ready  |  {path}  |  {bindingReport.Bound.Count} bound, {bindingReport.Missing.Count} unbound";
+                MessageBox.Show($"Generated into Demonstrator:\n{path}\n\n{bindingReport.Bound.Count} components bound, {bindingReport.Missing.Count} without bindings.",
+                    "Pusher Test", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
@@ -405,12 +440,15 @@ namespace MapperUI
                 var report = await Task.Run(() => injector.PrepareDemonstratorForGeneration(Cfg()));
                 LogCleanup(report);
 
-                var path = await Task.Run(() => injector.GenerateFeedStationSyslayToPath(_loadedControlXmlPath, syslayPath));
+                var bindings = TryLoadBindings();
+                SystemInjector.BindingApplicationReport bindingReport = null!;
+                var path = await Task.Run(() => injector.GenerateFeedStationSyslayToPath(_loadedControlXmlPath, syslayPath, bindings, out bindingReport));
+                LogBindingsReport(bindingReport);
 
                 AppendActivity($"Generated: {path}");
                 AppendActivity("[v1] DataConnections not generated; manual wiring required for sensor-to-process status feeds.");
-                lblStatus.Text = $"Ready  |  {path}";
-                MessageBox.Show($"Generated into Demonstrator:\n{path}\n\nv1 limitation: DataConnections empty.",
+                lblStatus.Text = $"Ready  |  {path}  |  {bindingReport.Bound.Count} bound, {bindingReport.Missing.Count} unbound";
+                MessageBox.Show($"Generated into Demonstrator:\n{path}\n\n{bindingReport.Bound.Count} components bound, {bindingReport.Missing.Count} without bindings.\nv1 limitation: DataConnections empty.",
                     "Feed Station", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
@@ -779,6 +817,7 @@ namespace MapperUI
 
                 MapperLogger.Info($"Process FB generation — {processes.Count} process(es)");
                 AppendActivity($"Generating Process FB for {processes.Count} process(es)...");
+                AppendActivity("[IoBindings] skipped, Process FB has no symlinks");
 
                 var cleanupInjector = new SystemInjector();
                 var cleanupReport = await Task.Run(() => cleanupInjector.PrepareDemonstratorForGeneration(cfg));
