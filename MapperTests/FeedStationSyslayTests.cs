@@ -21,12 +21,13 @@ namespace MapperTests
         }
 
         [Fact]
-        public void GeneratesTenFBs()
+        public void GeneratesNineFBs()
         {
             var (doc, _) = Generate();
             var ns = (XNamespace)"https://www.se.com/LibraryElements";
             var fbs = doc.Descendants(ns + "SubAppNetwork").Single().Elements(ns + "FB").ToList();
-            Assert.Equal(10, fbs.Count);
+            // Top-level PLC_Start removed; Area_CAT/Station_CAT bootstrap themselves.
+            Assert.Equal(9, fbs.Count);
         }
 
         [Fact]
@@ -38,7 +39,7 @@ namespace MapperTests
                 .Select(fb => fb.Attribute("Name")!.Value)
                 .ToList();
 
-            Assert.Contains("PLC_Start", names);
+            Assert.DoesNotContain("PLC_Start", names);
             Assert.Contains("Area_HMI", names);
             Assert.Contains("Area", names);
             Assert.Contains("Station1", names);
@@ -53,39 +54,31 @@ namespace MapperTests
         }
 
         [Fact]
-        public void InitChainHasFiveConnections()
+        public void InitChainHasFourConnections()
         {
             var (doc, _) = Generate();
             var ns = (XNamespace)"https://www.se.com/LibraryElements";
             var ec = doc.Descendants(ns + "EventConnections").Single();
             var connections = ec.Elements(ns + "Connection").ToList();
-            // PLC_Start.FIRST_INIT -> Area, Area -> Station1, Station1 -> PartInHopper,
-            // PartInHopper -> Feeder, Feeder -> Process1, Process1.INITO -> PLC_Start.ACK_FIRST
-            Assert.Equal(6, connections.Count);
+            // Area -> Station1, Station1 -> PartInHopper, PartInHopper -> Feeder,
+            // Feeder -> Process1. Bootstrap edges to/from PLC_Start removed.
+            Assert.Equal(4, connections.Count);
         }
 
         [Fact]
-        public void PlcStartBootstrapTest()
+        public void NoPlcStartBootstrapEdges()
         {
             var (doc, _) = Generate();
             var ns = (XNamespace)"https://www.se.com/LibraryElements";
 
             var plcStart = doc.Descendants(ns + "FB")
                 .FirstOrDefault(fb => fb.Attribute("Name")!.Value == "PLC_Start");
-            Assert.NotNull(plcStart);
-            Assert.Equal("plcStart", plcStart!.Attribute("Type")!.Value);
-            Assert.Equal("SE.AppBase", plcStart.Attribute("Namespace")!.Value);
+            Assert.Null(plcStart);
 
             var ec = doc.Descendants(ns + "EventConnections").Single();
-            var hasFirstInit = ec.Elements(ns + "Connection").Any(c =>
-                c.Attribute("Source")!.Value == "PLC_Start.FIRST_INIT" &&
-                c.Attribute("Destination")!.Value == "Area.INIT");
-            Assert.True(hasFirstInit);
-
-            var hasAck = ec.Elements(ns + "Connection").Any(c =>
-                c.Attribute("Source")!.Value == "Process1.INITO" &&
-                c.Attribute("Destination")!.Value == "PLC_Start.ACK_FIRST");
-            Assert.True(hasAck);
+            Assert.DoesNotContain(ec.Elements(ns + "Connection"), c =>
+                c.Attribute("Source")!.Value.StartsWith("PLC_Start.") ||
+                c.Attribute("Destination")!.Value.StartsWith("PLC_Start."));
         }
 
         [Fact]
