@@ -795,11 +795,18 @@ namespace MapperUI.Services
             return GeneratePusherTestSyslayToPath(Path.Combine(outputFolder, "Pusher_Test.syslay"));
         }
 
-        public string GeneratePusherTestSyslayToPath(string targetSyslayPath)
+        public string GeneratePusherTestSyslayToPath(string targetSyslayPath, IoBindings? bindings = null)
+        {
+            return GeneratePusherTestSyslayToPath(targetSyslayPath, bindings, out _);
+        }
+
+        public string GeneratePusherTestSyslayToPath(string targetSyslayPath, IoBindings? bindings,
+            out BindingApplicationReport report)
         {
             if (string.IsNullOrEmpty(targetSyslayPath))
                 throw new ArgumentException("Target syslay path is required.", nameof(targetSyslayPath));
 
+            report = new BindingApplicationReport();
             var fileName = Path.GetFileName(targetSyslayPath);
             var layerId = FBIdGenerator.GenerateFBId(fileName);
             var builder = new SyslayBuilder(layerId);
@@ -822,12 +829,63 @@ namespace MapperUI.Services
                 ["faultTimeoutHome"] = SyslayBuilder.FormatTimeMs(4000),
             };
 
-            builder.AddFB(pusherId, "Pusher", "Five_State_Actuator_CAT", "Main", 1300, 2480, parameters);
+            var pusherBinding = bindings?.Actuators.GetValueOrDefault("Pusher")
+                ?? bindings?.Actuators.GetValueOrDefault("Feeder");
+            var nested = BuildActuatorNestedOverrides(pusherBinding);
+
+            if (pusherBinding != null)
+                report.Bound.Add(("Pusher", DescribeBinding(pusherBinding)));
+            else
+                report.Missing.Add("Pusher");
+
+            builder.AddFB(pusherId, "Pusher", "Five_State_Actuator_CAT", "Main", 1300, 2480, parameters, nested);
 
             var doc = builder.Build();
             doc.Save(targetSyslayPath);
             return targetSyslayPath;
         }
+
+        public class BindingApplicationReport
+        {
+            public List<(string Component, string Detail)> Bound { get; } = new();
+            public List<string> Missing { get; } = new();
+        }
+
+        private static IDictionary<string, IDictionary<string, string>>? BuildActuatorNestedOverrides(ActuatorBinding? b)
+        {
+            if (b == null) return null;
+            var nested = new Dictionary<string, IDictionary<string, string>>(StringComparer.Ordinal);
+
+            var inputs = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (!string.IsNullOrEmpty(b.AthomeTag)) inputs["NAME1"] = SyslayBuilder.FormatString(b.AthomeTag);
+            if (!string.IsNullOrEmpty(b.AtworkTag)) inputs["NAME2"] = SyslayBuilder.FormatString(b.AtworkTag);
+            if (inputs.Count > 0) nested["Inputs"] = inputs;
+
+            var outputs = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (!string.IsNullOrEmpty(b.OutputToHomeTag)) outputs["NAME1"] = SyslayBuilder.FormatString(b.OutputToHomeTag);
+            if (!string.IsNullOrEmpty(b.OutputToWorkTag)) outputs["NAME2"] = SyslayBuilder.FormatString(b.OutputToWorkTag);
+            if (outputs.Count > 0) nested["Output"] = outputs;
+
+            return nested.Count > 0 ? nested : null;
+        }
+
+        private static IDictionary<string, IDictionary<string, string>>? BuildSensorNestedOverrides(SensorBinding? b)
+        {
+            if (b == null || string.IsNullOrEmpty(b.InputTag)) return null;
+            return new Dictionary<string, IDictionary<string, string>>(StringComparer.Ordinal)
+            {
+                ["Input"] = new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["NAME1"] = SyslayBuilder.FormatString(b.InputTag)
+                }
+            };
+        }
+
+        private static string DescribeBinding(ActuatorBinding b) =>
+            $"athome={b.AthomeTag ?? "-"} atwork={b.AtworkTag ?? "-"} outputToWork={b.OutputToWorkTag ?? "-"} outputToHome={b.OutputToHomeTag ?? "-"}";
+
+        private static string DescribeBinding(SensorBinding b) =>
+            $"input={b.InputTag ?? "-"}";
 
         public string GenerateFeedStationSyslay(string controlXmlPath, string outputFolder)
         {
@@ -845,6 +903,13 @@ namespace MapperUI.Services
 
         public string GenerateFeedStationSyslayToPath(string controlXmlPath, string targetSyslayPath)
         {
+            return GenerateFeedStationSyslayToPath(controlXmlPath, targetSyslayPath, null, out _);
+        }
+
+        public string GenerateFeedStationSyslayToPath(string controlXmlPath, string targetSyslayPath,
+            IoBindings? bindings, out BindingApplicationReport report)
+        {
+            report = new BindingApplicationReport();
             if (string.IsNullOrEmpty(controlXmlPath))
                 throw new ArgumentException("Control.xml path is required.", nameof(controlXmlPath));
             if (!File.Exists(controlXmlPath))
@@ -921,15 +986,31 @@ namespace MapperUI.Services
                 var actuator = contents.Actuators[i];
                 int assignedId = actuatorIdStart + i;
                 var actParams = BuildActuatorParameters(actuator, assignedId, contents.Process);
+
+                ActuatorBinding? actBinding = null;
+                bindings?.Actuators.TryGetValue(actuator.Name, out actBinding);
+                if (actBinding != null) report.Bound.Add((actuator.Name, DescribeBinding(actBinding)));
+                else if (bindings != null) report.Missing.Add(actuator.Name);
+
+                var nestedAct = BuildActuatorNestedOverrides(actBinding);
+
                 builder.AddFB(FBIdGenerator.GenerateFBId(actuator.ComponentID),
                     actuator.Name, "Five_State_Actuator_CAT", "Main",
-                    1300 + i * 400, 2480, actParams);
+                    1300 + i * 400, 2480, actParams, nestedAct);
             }
 
             for (int i = 0; i < contents.Sensors.Count; i++)
             {
                 var sensor = contents.Sensors[i];
                 int assignedId = sensorIdStart + i;
+
+                SensorBinding? senBinding = null;
+                bindings?.Sensors.TryGetValue(sensor.Name, out senBinding);
+                if (senBinding != null) report.Bound.Add((sensor.Name, DescribeBinding(senBinding)));
+                else if (bindings != null) report.Missing.Add(sensor.Name);
+
+                var nestedSen = BuildSensorNestedOverrides(senBinding);
+
                 builder.AddFB(FBIdGenerator.GenerateFBId(sensor.ComponentID),
                     sensor.Name, "Sensor_Bool_CAT", "Main",
                     1560 + i * 400, 1480,
@@ -937,7 +1018,7 @@ namespace MapperUI.Services
                     {
                         ["name"] = SyslayBuilder.FormatString(sensor.Name),
                         ["id"] = SyslayBuilder.FormatInt(assignedId)
-                    });
+                    }, nestedSen);
             }
 
             builder.AddFB(FBIdGenerator.GenerateFBId("Stn1_Term"),
