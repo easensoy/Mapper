@@ -358,8 +358,10 @@ namespace MapperUI
             try
             {
                 var deploy = await Task.Run(() => TemplateLibraryDeployer.DeployUniversalArchitecture(Cfg()));
-                AppendActivity($"[Deploy] Registered {deploy.CATsDeployed.Count} CAT type(s) and " +
-                    $"{deploy.BasicFBsDeployed.Count} Basic type(s) into Demonstrator/IEC61499 " +
+                AppendActivity($"[Deploy] Registered {deploy.CATsDeployed.Count} CAT(s), " +
+                    $"{deploy.BasicFBsDeployed.Count} Basic(s), " +
+                    $"{deploy.CompositesDeployed.Count} Composite(s), " +
+                    $"{deploy.AdaptersDeployed.Count} Adapter(s) into Demonstrator/IEC61499 " +
                     $"({deploy.FilesExtracted} new, {deploy.FilesSkipped} skipped).");
                 foreach (var w in deploy.Warnings)
                     AppendActivity($"[Deploy][Warn] {w}");

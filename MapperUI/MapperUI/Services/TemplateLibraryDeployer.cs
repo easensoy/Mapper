@@ -122,6 +122,10 @@ namespace MapperUI.Services
             }
 
             if (isCat) result.CATsDeployed.Add(name);
+            else if (string.Equals(subfolder, "Adapter", StringComparison.OrdinalIgnoreCase))
+                result.AdaptersDeployed.Add(name);
+            else if (string.Equals(subfolder, "Composite", StringComparison.OrdinalIgnoreCase))
+                result.CompositesDeployed.Add(name);
             else if (isBasic) result.BasicFBsDeployed.Add(name);
         }
 
@@ -362,6 +366,12 @@ namespace MapperUI.Services
             foreach (var basic in result.BasicFBsDeployed)
                 DfbprojRegistrar.RegisterBasicFb(dfbproj, basic + ".fbt");
 
+            foreach (var adapter in result.AdaptersDeployed)
+                DfbprojRegistrar.RegisterBasicFb(dfbproj, adapter + ".adp", "Adapter");
+
+            foreach (var composite in result.CompositesDeployed)
+                DfbprojRegistrar.RegisterBasicFb(dfbproj, composite + ".fbt", "Composite");
+
             File.SetLastWriteTime(dfbproj, DateTime.Now);
             MapperLogger.Info($"[Deploy] dfbproj updated: {Path.GetFileName(dfbproj)}");
         }
@@ -397,6 +407,8 @@ namespace MapperUI.Services
         public bool Success { get; set; }
         public List<string> BasicFBsDeployed { get; set; } = new();
         public List<string> CATsDeployed { get; set; } = new();
+        public List<string> AdaptersDeployed { get; set; } = new();
+        public List<string> CompositesDeployed { get; set; } = new();
         public List<string> Warnings { get; set; } = new();
         public int FilesExtracted { get; set; }
         public int FilesSkipped { get; set; }
