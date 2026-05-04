@@ -20,6 +20,7 @@ namespace CodeGen.Configuration
         public string SysresPath { get; set; } = string.Empty;
         public string SyslayPath2 { get; set; } = string.Empty;
         public string SysresPath2 { get; set; } = string.Empty;
+        public string IoBindingsPath { get; set; } = "Input/SMC_Rig_IO_Bindings.xlsx";
 
         public string ActiveSyslayPath =>
             !string.IsNullOrEmpty(SyslayPath2) ? SyslayPath2 : SyslayPath;
@@ -64,6 +65,7 @@ namespace CodeGen.Configuration
             SysresPath = @"C:\Station1\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000002\00000000-0000-0000-0000-000000000000.sysres",
             SyslayPath2 = @"C:\Demonstrator\Demonstator\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000001\00000000-0000-0000-0000-000000000000.syslay",
             SysresPath2 = @"C:\Demonstrator\Demonstator\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000002\00000000-0000-0000-0000-000000000000.sysres",
+            IoBindingsPath = @"Input\SMC_Rig_IO_Bindings.xlsx",
         };
 
         private static void Save(string path, MapperConfig config)
