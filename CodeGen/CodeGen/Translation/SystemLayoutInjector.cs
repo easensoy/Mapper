@@ -901,11 +901,17 @@ namespace MapperUI.Services
 
         public string GenerateFeedStationSyslayToPath(string controlXmlPath, string targetSyslayPath)
         {
-            return GenerateFeedStationSyslayToPath(controlXmlPath, targetSyslayPath, null, out _);
+            return GenerateFeedStationSyslayToPath(controlXmlPath, targetSyslayPath, null, null, out _);
         }
 
         public string GenerateFeedStationSyslayToPath(string controlXmlPath, string targetSyslayPath,
             IoBindings? bindings, out BindingApplicationReport report)
+        {
+            return GenerateFeedStationSyslayToPath(controlXmlPath, targetSyslayPath, bindings, null, out report);
+        }
+
+        public string GenerateFeedStationSyslayToPath(string controlXmlPath, string targetSyslayPath,
+            IoBindings? bindings, MapperConfig? config, out BindingApplicationReport report)
         {
             report = new BindingApplicationReport();
             if (string.IsNullOrEmpty(controlXmlPath))
@@ -954,13 +960,9 @@ namespace MapperUI.Services
             int actuatorIdStart = contents.Sensors.Count;
             const int processId = 10;
 
-            builder.AddFB(FBIdGenerator.GenerateFBId("PLC_Start"),
-                "PLC_Start", "plcStart", "SE.AppBase", 80, 580,
-                new Dictionary<string, string>
-                {
-                    ["Prio"] = SyslayBuilder.FormatInt(35),
-                    ["Delay"] = SyslayBuilder.FormatTimeMs(0)
-                });
+            // No top-level PLC_Start FB: Area_CAT and Station_CAT each contain their own
+            // internal plcStart bootstrap, so an external one would double-bootstrap and
+            // EAE flags it as a duplicate.
 
             builder.AddFB(FBIdGenerator.GenerateFBId("Area_HMI"),
                 "Area_HMI", "Area_CAT", "Main", 240, 140);
@@ -1032,6 +1034,20 @@ namespace MapperUI.Services
 
             BuildFeedStationWiring(builder, contents);
 
+            // Rewrite the deployed ProcessRuntime_Generic_v1.fbt's initializeinit ST so
+            // Process1 boots with this Process's recipe instead of the template default.
+            if (config != null)
+            {
+                try
+                {
+                    RewriteProcessRuntimeRecipe(config, contents.Process, contents, allComponents, report);
+                }
+                catch (Exception ex)
+                {
+                    report.Missing.Add($"recipe rewrite skipped: {ex.Message}");
+                }
+            }
+
             var doc = builder.Build();
             doc.Save(fullPath);
             return fullPath;
@@ -1088,10 +1104,10 @@ namespace MapperUI.Services
             foreach (var a in contents.Actuators) initChain.Add(a.Name);
             initChain.Add("Process1");
 
-            builder.AddEventConnection("PLC_Start.FIRST_INIT", "Area.INIT");
+            // No PLC_Start bootstrap edges: Area_CAT contains its own internal plcStart
+            // which fires Area.INITO via INIT, propagating through this chain.
             for (int i = 0; i < initChain.Count - 1; i++)
                 builder.AddEventConnection($"{initChain[i]}.INITO", $"{initChain[i + 1]}.INIT");
-            builder.AddEventConnection("Process1.INITO", "PLC_Start.ACK_FIRST");
 
             builder.AddAdapterConnection("Area_HMI.AreaHMIAdptrOUT", "Area.AreaHMIAdptrIN");
             builder.AddAdapterConnection("Station1_HMI.StationHMIAdptrOUT", "Station1.StationHMIAdptrIN");
@@ -1270,6 +1286,54 @@ namespace MapperUI.Services
             return (outer, nested);
         }
 
+        /// <summary>
+        /// Locates ProcessRuntime_Generic_v1.fbt deployed under the Demonstrator's IEC61499
+        /// folder by walking up from MapperConfig.SyslayPath2 until a folder containing a
+        /// .dfbproj is found, then returning {EaeProjectDir}/IEC61499/ProcessRuntime_Generic_v1/
+        /// ProcessRuntime_Generic_v1.fbt. Returns null if anything is missing.
+        /// </summary>
+        public static string? ResolveProcessRuntimeFbtPath(MapperConfig config)
+        {
+            if (config == null || string.IsNullOrWhiteSpace(config.SyslayPath2)) return null;
+            var dir = Path.GetDirectoryName(config.SyslayPath2);
+            string? eaeRoot = null;
+            while (dir != null)
+            {
+                if (Directory.Exists(dir) && Directory.GetFiles(dir, "*.dfbproj").Any())
+                {
+                    eaeRoot = Path.GetDirectoryName(dir);
+                    break;
+                }
+                dir = Path.GetDirectoryName(dir);
+            }
+            if (eaeRoot == null) return null;
+            var fbt = Path.Combine(eaeRoot, "IEC61499",
+                "ProcessRuntime_Generic_v1", "ProcessRuntime_Generic_v1.fbt");
+            return File.Exists(fbt) ? fbt : null;
+        }
+
+        /// <summary>
+        /// Builds the recipe ST for the supplied Process and rewrites
+        /// ProcessRuntime_Generic_v1.fbt's initializeinit algorithm in place.
+        /// No-op if the .fbt is not deployed yet (returns false). Throws on rewrite failure.
+        /// Records the action in the supplied report.
+        /// </summary>
+        public bool RewriteProcessRuntimeRecipe(MapperConfig config, VueOneComponent process,
+            StationContents contents, IReadOnlyList<VueOneComponent> allComponents,
+            BindingApplicationReport report)
+        {
+            var fbtPath = ResolveProcessRuntimeFbtPath(config);
+            if (fbtPath == null)
+            {
+                report.Missing.Add("ProcessRuntime_Generic_v1.fbt (not deployed; recipe ST not rewritten)");
+                return false;
+            }
+            var st = ProcessRecipeStGenerator.GenerateInitializeInitSt(process, contents, allComponents);
+            FbtRewriter.RewriteInitializeInit(fbtPath, st);
+            report.Bound.Add(($"{process.Name} recipe", $"{process.States.Count} states -> {fbtPath}"));
+            return true;
+        }
+
         public string GenerateProcessFBSyslay(MapperConfig config, string controlXmlPath,
             string? processName, out BindingApplicationReport report)
         {
@@ -1302,7 +1366,18 @@ namespace MapperUI.Services
             builder.AddFB(FBIdGenerator.GenerateFBId(process.ComponentID),
                 process.Name, "Process1_Generic", "Main", 3360, 1460, outer, nested);
 
-            report.Bound.Add((process.Name, $"recipe arrays populated from {process.States.Count} states"));
+            // Rewrite ProcessRuntime_Generic_v1.fbt initializeinit ST so Process1 boots
+            // with this Process's recipe. Uses the smallest available grouping for context.
+            try
+            {
+                var grouping = new StationGroupingService();
+                var contents = grouping.GroupStationContents(process, allComponents);
+                RewriteProcessRuntimeRecipe(config, process, contents, allComponents, report);
+            }
+            catch (Exception ex)
+            {
+                report.Missing.Add($"recipe rewrite skipped: {ex.Message}");
+            }
 
             var doc = builder.Build();
             doc.Save(config.SyslayPath2);
@@ -1314,7 +1389,7 @@ namespace MapperUI.Services
         {
             if (string.IsNullOrEmpty(config.SyslayPath2))
                 throw new InvalidOperationException("MapperConfig.SyslayPath2 is not configured.");
-            return GenerateFeedStationSyslayToPath(controlXmlPath, config.SyslayPath2, bindings, out report);
+            return GenerateFeedStationSyslayToPath(controlXmlPath, config.SyslayPath2, bindings, config, out report);
         }
 
         public string GenerateFullSystemSyslay(MapperConfig config, string controlXmlPath,
@@ -1335,17 +1410,23 @@ namespace MapperUI.Services
             var fileName = Path.GetFileName(config.SyslayPath2);
             var layerId = FBIdGenerator.GenerateFBId(fileName + ":FullSystem");
             var builder = new SyslayBuilder(layerId);
+            var multiProcWarning = processes.Count > 1
+                ? $" WARNING: {processes.Count} Processes detected. The recipe ST in " +
+                  "ProcessRuntime_Generic_v1.fbt is shared across every Process_Generic instance, " +
+                  "so all Processes will run the FIRST Process's recipe until the runtime is " +
+                  "split into per-Process .fbt copies."
+                : string.Empty;
             builder.SetTopComment(
                 $"Button 3 / Generate All. {processes.Count} stations under one Area. " +
-                "Demonstrator was cleaned of universal-architecture instances before this generation.");
+                "Demonstrator was cleaned of universal-architecture instances before this generation." +
+                multiProcWarning);
+            if (processes.Count > 1)
+                report.Missing.Add(
+                    $"Multi-Process limitation: {processes.Count} Processes share one " +
+                    "ProcessRuntime_Generic_v1.fbt; only the first Process's recipe is loaded.");
 
-            builder.AddFB(FBIdGenerator.GenerateFBId("PLC_Start"),
-                "PLC_Start", "plcStart", "SE.AppBase", 80, 580,
-                new Dictionary<string, string>
-                {
-                    ["Prio"] = SyslayBuilder.FormatInt(35),
-                    ["Delay"] = SyslayBuilder.FormatTimeMs(0)
-                });
+            // No top-level PLC_Start FB: Area_CAT and Station_CAT each contain their own
+            // internal plcStart bootstrap.
             builder.AddFB(FBIdGenerator.GenerateFBId("Area_HMI"),
                 "Area_HMI", "Area_CAT", "Main", 240, 140);
             builder.AddFB(FBIdGenerator.GenerateFBId("Area"),
@@ -1437,6 +1518,22 @@ namespace MapperUI.Services
 
             BuildFullSystemWiring(builder, perStationContents);
 
+            // Rewrite the deployed ProcessRuntime_Generic_v1.fbt's initializeinit ST using
+            // the first Process. With multiple Processes a per-Process .fbt copy would be
+            // required (warning recorded above).
+            if (perStationContents.Count > 0)
+            {
+                try
+                {
+                    var first = perStationContents[0].Contents;
+                    RewriteProcessRuntimeRecipe(config, first.Process, first, allComponents, report);
+                }
+                catch (Exception ex)
+                {
+                    report.Missing.Add($"recipe rewrite skipped: {ex.Message}");
+                }
+            }
+
             var doc = builder.Build();
             doc.Save(config.SyslayPath2);
             return config.SyslayPath2;
@@ -1447,7 +1544,7 @@ namespace MapperUI.Services
         {
             if (stations.Count == 0) return;
 
-            builder.AddEventConnection("PLC_Start.FIRST_INIT", "Area.INIT");
+            // No PLC_Start bootstrap edge: Area_CAT contains its own internal plcStart.
 
             var initChain = new List<string> { "Area" };
             for (int s = 0; s < stations.Count; s++)
@@ -1460,7 +1557,7 @@ namespace MapperUI.Services
             }
             for (int i = 0; i < initChain.Count - 1; i++)
                 builder.AddEventConnection($"{initChain[i]}.INITO", $"{initChain[i + 1]}.INIT");
-            builder.AddEventConnection($"{initChain[^1]}.INITO", "PLC_Start.ACK_FIRST");
+            // No closing PLC_Start.ACK_FIRST edge: bootstrap is internal to Area_CAT.
 
             builder.AddAdapterConnection("Area_HMI.AreaHMIAdptrOUT", "Area.AreaHMIAdptrIN");
             for (int s = 0; s < stations.Count; s++)
