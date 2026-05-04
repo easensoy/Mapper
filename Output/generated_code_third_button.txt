@@ -1,11 +1,7 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Layer ID="181B0C22C0068E66" Name="Default" Comment="" IsDefault="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="https://www.se.com/LibraryElements">
-  <!-- Button 3 / Generate All. 3 stations under one Area. Demonstrator was cleaned of universal-architecture instances before this generation. -->
+  <!-- Button 3 / Generate All. 3 stations under one Area. Demonstrator was cleaned of universal-architecture instances before this generation. WARNING: 3 Processes detected. The recipe ST in ProcessRuntime_Generic_v1.fbt is shared across every Process_Generic instance, so all Processes will run the FIRST Process's recipe until the runtime is split into per-Process .fbt copies. -->
   <SubAppNetwork>
-    <FB ID="CD51A86105BFFF79" Name="PLC_Start" Type="plcStart" Namespace="SE.AppBase" x="80" y="580">
-      <Parameter Name="Prio" Value="35" />
-      <Parameter Name="Delay" Value="T#0ms" />
-    </FB>
     <FB ID="86119B275B332F9D" Name="Area_HMI" Type="Area_CAT" Namespace="Main" x="240" y="140" />
     <FB ID="024DC204D7BA77A8" Name="Area" Type="Area" Namespace="Main" x="400" y="580">
       <Parameter Name="AreaName" Value="'Area'" />
@@ -244,7 +240,6 @@
     </FB>
     <FB ID="B78A936D9A420446" Name="Area_Term" Type="CaSAdptrTerminator" Namespace="Main" x="8920" y="720" />
     <EventConnections>
-      <Connection Source="PLC_Start.FIRST_INIT" Destination="Area.INIT" />
       <Connection Source="Area.INITO" Destination="Station1.INIT" />
       <Connection Source="Station1.INITO" Destination="PartInHopper.INIT" />
       <Connection Source="PartInHopper.INITO" Destination="PartAtChecker.INIT" />
@@ -273,7 +268,6 @@
       <Connection Source="CoverPNP_Hr.INITO" Destination="Shaft_Vr.INIT" />
       <Connection Source="Shaft_Vr.INITO" Destination="Ejector.INIT" />
       <Connection Source="Ejector.INITO" Destination="Process3.INIT" />
-      <Connection Source="Process3.INITO" Destination="PLC_Start.ACK_FIRST" />
     </EventConnections>
     <DataConnections />
     <AdapterConnections>
