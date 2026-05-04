@@ -353,6 +353,24 @@ namespace MapperUI
             return true;
         }
 
+        async Task DeployUniversalTemplatesAsync()
+        {
+            try
+            {
+                var deploy = await Task.Run(() => TemplateLibraryDeployer.DeployUniversalArchitecture(Cfg()));
+                AppendActivity($"[Deploy] Registered {deploy.CATsDeployed.Count} CAT type(s) and " +
+                    $"{deploy.BasicFBsDeployed.Count} Basic type(s) into Demonstrator/IEC61499 " +
+                    $"({deploy.FilesExtracted} new, {deploy.FilesSkipped} skipped).");
+                foreach (var w in deploy.Warnings)
+                    AppendActivity($"[Deploy][Warn] {w}");
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"[Deploy][Error] {ex.Message}");
+                throw;
+            }
+        }
+
         void TouchDfbprojToTriggerEaeReload()
         {
             try
@@ -462,6 +480,8 @@ namespace MapperUI
                 lblStatus.Text = "Generating...";
                 AppendActivity($"[Button 1] Generating Process FB into Demonstrator at {syslayPath}...");
 
+                await DeployUniversalTemplatesAsync();
+
                 var injector = new SystemInjector();
                 var cleanup = await Task.Run(() => injector.PrepareDemonstratorForGeneration(Cfg()));
                 LogCleanup(cleanup);
@@ -497,6 +517,8 @@ namespace MapperUI
                 lblStatus.Text = "Generating...";
                 AppendActivity($"[Button 2] Generating Test Station 1 (Pusher) into Demonstrator at {syslayPath}...");
 
+                await DeployUniversalTemplatesAsync();
+
                 var injector = new SystemInjector();
                 var cleanup = await Task.Run(() => injector.PrepareDemonstratorForGeneration(Cfg()));
                 LogCleanup(cleanup);
@@ -531,6 +553,8 @@ namespace MapperUI
 
                 lblStatus.Text = "Generating...";
                 AppendActivity($"[Button 3] Generating Full System (all stations) into Demonstrator at {syslayPath}...");
+
+                await DeployUniversalTemplatesAsync();
 
                 var injector = new SystemInjector();
                 var cleanup = await Task.Run(() => injector.PrepareDemonstratorForGeneration(Cfg()));
