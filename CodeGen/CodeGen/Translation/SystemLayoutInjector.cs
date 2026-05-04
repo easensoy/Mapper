@@ -994,7 +994,7 @@ namespace MapperUI.Services
             {
                 var actuator = contents.Actuators[i];
                 int assignedId = actuatorIdStart + i;
-                var actParams = BuildActuatorParameters(actuator, assignedId, contents.Process);
+                var actParams = BuildActuatorParameters(actuator, assignedId, allComponents);
 
                 ActuatorBinding? actBinding = null;
                 bindings?.Actuators.TryGetValue(actuator.Name, out actBinding);
@@ -1053,14 +1053,30 @@ namespace MapperUI.Services
             return fullPath;
         }
 
-        private static Dictionary<string, string> BuildActuatorParameters(
-            VueOneComponent actuator, int assignedId, VueOneComponent process)
-        {
-            bool workSensorFitted = ConditionReferences(process, actuator.Name, "atWork");
-            bool homeSensorFitted = ConditionReferences(process, actuator.Name, "atHome");
+        // Default fallback timing used only when Control.xml omits or zeros out State.Time.
+        private const int DefaultMotionMs = 2000;
 
-            int toWorkMs = 2000;
-            int toHomeMs = 2000;
+        /// <summary>
+        /// Builds Five_State_Actuator_CAT parameters straight from Control.xml.
+        /// - toWorkTime / toHomeTime come from the actuator's State_Number=1 (Advancing)
+        ///   and State_Number=3 (Returning) <Time> values.
+        /// - faultTimeout is 2x the corresponding motion time (watchdog factor).
+        /// - WorkSensorFitted / HomeSensorFitted are TRUE iff any other component's
+        ///   Sequence_Condition references the actuator's atWork (StateNumber=2) or
+        ///   atHome (StateNumber=0 or 4) StateID. This replaces the old fragile
+        ///   "actuator.Name + /atWork" literal substring lookup.
+        /// </summary>
+        public static Dictionary<string, string> BuildActuatorParameters(
+            VueOneComponent actuator, int assignedId,
+            IReadOnlyList<VueOneComponent> allComponents)
+        {
+            int toWorkMs = ResolveStateTimeMs(actuator, stateNumber: 1, fallbackMs: DefaultMotionMs);
+            int toHomeMs = ResolveStateTimeMs(actuator, stateNumber: 3, fallbackMs: DefaultMotionMs);
+
+            var atWorkIds = ResolveAtWorkStateIds(actuator);
+            var atHomeIds = ResolveAtHomeStateIds(actuator);
+            bool workSensorFitted = AnyComponentReferencesStates(allComponents, actuator, atWorkIds);
+            bool homeSensorFitted = AnyComponentReferencesStates(allComponents, actuator, atHomeIds);
 
             return new Dictionary<string, string>
             {
@@ -1077,6 +1093,61 @@ namespace MapperUI.Services
             };
         }
 
+        /// <summary>Returns the actuator's <Time> for the given State_Number, or fallback.</summary>
+        public static int ResolveStateTimeMs(VueOneComponent actuator, int stateNumber, int fallbackMs)
+        {
+            var s = actuator.States.FirstOrDefault(st => st.StateNumber == stateNumber);
+            if (s == null || s.Time <= 0) return fallbackMs;
+            return s.Time;
+        }
+
+        /// <summary>atWork = the static state at the far end of motion (5-state pattern: StateNumber=2).</summary>
+        public static HashSet<string> ResolveAtWorkStateIds(VueOneComponent actuator)
+        {
+            var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var s in actuator.States.Where(st => st.StateNumber == 2 && st.StaticState))
+                ids.Add(s.StateID);
+            return ids;
+        }
+
+        /// <summary>atHome = static states at StateNumber=0 (Initial) and =4 (post-cycle latch).</summary>
+        public static HashSet<string> ResolveAtHomeStateIds(VueOneComponent actuator)
+        {
+            var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var s in actuator.States.Where(st =>
+                (st.StateNumber == 0 || st.StateNumber == 4) && st.StaticState))
+                ids.Add(s.StateID);
+            return ids;
+        }
+
+        /// <summary>
+        /// True iff any component (other than the actuator itself) has a Condition whose
+        /// referenced state ID is in the supplied set — evidence that a sensor on that
+        /// state is being read by some Process or peer state machine.
+        /// </summary>
+        public static bool AnyComponentReferencesStates(
+            IReadOnlyList<VueOneComponent> allComponents,
+            VueOneComponent actuator,
+            HashSet<string> stateIds)
+        {
+            if (stateIds.Count == 0) return false;
+            foreach (var c in allComponents)
+            {
+                if (string.Equals(c.ComponentID, actuator.ComponentID, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                foreach (var st in c.States)
+                    foreach (var t in st.Transitions)
+                        foreach (var cond in t.Conditions)
+                            if (!string.IsNullOrEmpty(cond.ID) && stateIds.Contains(cond.ID))
+                                return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Legacy literal-substring lookup. Retained for backward compatibility but no longer
+        /// used by BuildActuatorParameters (replaced by Control.xml-driven derivation above).
+        /// </summary>
         public static bool ConditionReferences(VueOneComponent process, string actuatorName, string suffix)
         {
             var pattern = $"{actuatorName}/{suffix}";
@@ -1479,7 +1550,7 @@ namespace MapperUI.Services
                 {
                     var act = contents.Actuators[i];
                     int aid = actuatorBase + i;
-                    var actParams = BuildActuatorParameters(act, aid, contents.Process);
+                    var actParams = BuildActuatorParameters(act, aid, allComponents);
 
                     ActuatorBinding? ab = null;
                     bindings?.Actuators.TryGetValue(act.Name, out ab);
