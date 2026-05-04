@@ -831,14 +831,12 @@ namespace MapperUI.Services
 
             var pusherBinding = bindings?.Actuators.GetValueOrDefault("Pusher")
                 ?? bindings?.Actuators.GetValueOrDefault("Feeder");
-            var nested = BuildActuatorNestedOverrides(pusherBinding);
-
             if (pusherBinding != null)
                 report.Bound.Add(("Pusher", DescribeBinding(pusherBinding)));
             else
                 report.Missing.Add("Pusher");
 
-            builder.AddFB(pusherId, "Pusher", "Five_State_Actuator_CAT", "Main", 1300, 2480, parameters, nested);
+            builder.AddFB(pusherId, "Pusher", "Five_State_Actuator_CAT", "Main", 1300, 2480, parameters);
 
             var doc = builder.Build();
             doc.Save(targetSyslayPath);
@@ -926,7 +924,19 @@ namespace MapperUI.Services
                     "No Process referencing a 'Feeder' actuator was found in Control.xml.");
 
             var grouping = new StationGroupingService();
-            var contents = grouping.GroupStationContents(process, allComponents);
+            var fullContents = grouping.GroupStationContents(process, allComponents);
+
+            // Button 2 scope: smallest deployable Tuesday slice — only Feeder actuator and
+            // PartInHopper sensor. Other components in the Process's reference set are out of
+            // scope for this button; Button 3 emits the full grouping.
+            var contents = new StationContents(
+                fullContents.Process,
+                fullContents.Actuators
+                    .Where(a => string.Equals(a.Name, "Feeder", StringComparison.Ordinal))
+                    .ToList(),
+                fullContents.Sensors
+                    .Where(s => string.Equals(s.Name, "PartInHopper", StringComparison.Ordinal))
+                    .ToList());
 
             var fileName = Path.GetFileName(targetSyslayPath);
             var fullPath = targetSyslayPath;
@@ -989,11 +999,9 @@ namespace MapperUI.Services
                 if (actBinding != null) report.Bound.Add((actuator.Name, DescribeBinding(actBinding)));
                 else if (bindings != null) report.Missing.Add(actuator.Name);
 
-                var nestedAct = BuildActuatorNestedOverrides(actBinding);
-
                 builder.AddFB(FBIdGenerator.GenerateFBId(actuator.ComponentID),
                     actuator.Name, "Five_State_Actuator_CAT", "Main",
-                    1300 + i * 400, 2480, actParams, nestedAct);
+                    1300 + i * 400, 2480, actParams);
             }
 
             for (int i = 0; i < contents.Sensors.Count; i++)
@@ -1006,8 +1014,6 @@ namespace MapperUI.Services
                 if (senBinding != null) report.Bound.Add((sensor.Name, DescribeBinding(senBinding)));
                 else if (bindings != null) report.Missing.Add(sensor.Name);
 
-                var nestedSen = BuildSensorNestedOverrides(senBinding);
-
                 builder.AddFB(FBIdGenerator.GenerateFBId(sensor.ComponentID),
                     sensor.Name, "Sensor_Bool_CAT", "Main",
                     1560 + i * 400, 1480,
@@ -1015,7 +1021,7 @@ namespace MapperUI.Services
                     {
                         ["name"] = SyslayBuilder.FormatString(sensor.Name),
                         ["id"] = SyslayBuilder.FormatInt(assignedId)
-                    }, nestedSen);
+                    });
             }
 
             builder.AddFB(FBIdGenerator.GenerateFBId("Stn1_Term"),
@@ -1250,27 +1256,17 @@ namespace MapperUI.Services
             BuildProcessFbParameters(VueOneComponent process, List<VueOneComponent> allComponents,
                 string processName, int processId)
         {
+            // Process1_Generic gets only outer process_name + process_id. Recipe arrays
+            // (StepType, CmdTargetName, CmdStateArr, Wait1Id, Wait1State, NextStep) live inside
+            // ProcessRuntime_Generic_v1.fbt's initialize algorithm as Structured Text and are
+            // not surfaced as Parameters in the syslay. Process1 will run with template-default
+            // (empty) recipe until that ST is hand-edited or generated as a separate .fbt.
             var outer = new Dictionary<string, string>
             {
                 ["process_name"] = SyslayBuilder.FormatString(processName),
                 ["process_id"] = SyslayBuilder.FormatInt(processId)
             };
-
-            var stepTable = ProcessStepTableGenerator.Generate(process, allComponents);
             var nested = new Dictionary<string, IDictionary<string, string>>(StringComparer.Ordinal);
-
-            if (stepTable.Success)
-            {
-                nested["ProcessRuntime_Generic_v1"] = new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    ["StepType"] = stepTable.StepType,
-                    ["CmdTargetName"] = stepTable.CmdTarget,
-                    ["CmdStateArr"] = stepTable.CmdState,
-                    ["Wait1Id"] = stepTable.WaitComp,
-                    ["Wait1State"] = stepTable.WaitState,
-                    ["NextStep"] = stepTable.NextStep
-                };
-            }
             return (outer, nested);
         }
 
@@ -1411,8 +1407,7 @@ namespace MapperUI.Services
 
                     builder.AddFB(FBIdGenerator.GenerateFBId(act.ComponentID),
                         act.Name, "Five_State_Actuator_CAT", "Main",
-                        xCol - 800 + i * 400, 2480, actParams,
-                        BuildActuatorNestedOverrides(ab));
+                        xCol - 800 + i * 400, 2480, actParams);
                 }
 
                 for (int i = 0; i < contents.Sensors.Count; i++)
@@ -1431,7 +1426,7 @@ namespace MapperUI.Services
                         {
                             ["name"] = SyslayBuilder.FormatString(sen.Name),
                             ["id"] = SyslayBuilder.FormatInt(sid)
-                        }, BuildSensorNestedOverrides(sb));
+                        });
                 }
 
                 xCol += 2200;
