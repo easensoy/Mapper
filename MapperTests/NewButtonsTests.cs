@@ -79,15 +79,17 @@ namespace MapperTests
             var doc = XDocument.Load(path);
             var ns = (XNamespace)"https://www.se.com/LibraryElements";
             var fbs = doc.Descendants(ns + "SubAppNetwork").Single().Elements(ns + "FB").ToList();
-            Assert.Equal(10, fbs.Count);
+            // Top-level PLC_Start removed (Area_CAT/Station_CAT bootstrap themselves).
+            Assert.Equal(9, fbs.Count);
 
             var expectedNames = new[]
             {
-                "PLC_Start", "Area_HMI", "Area", "Station1", "Station1_HMI",
+                "Area_HMI", "Area", "Station1", "Station1_HMI",
                 "Process1", "Feeder", "PartInHopper", "Stn1_Term", "Area_Term"
             };
             foreach (var name in expectedNames)
                 Assert.Contains(fbs, f => f.Attribute("Name")!.Value == name);
+            Assert.DoesNotContain(fbs, f => f.Attribute("Name")!.Value == "PLC_Start");
 
             foreach (var fb in fbs)
                 Assert.Empty(fb.Elements(ns + "FB"));
@@ -180,6 +182,39 @@ namespace MapperTests
             var ac = doc.Descendants(ns + "AdapterConnections").Single();
             var conns = ac.Elements(ns + "Connection").ToList();
             Assert.Contains(conns, c => c.Attribute("Source")!.Value == "Area.AreaAdptrOUT");
+        }
+
+        [Fact]
+        public void Button3HasNoTopLevelPlcStart()
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "GenAllPlc_" + Path.GetRandomFileName());
+            Directory.CreateDirectory(dir);
+            var syslay = Path.Combine(dir, "test.syslay");
+            var sysres = Path.Combine(dir, "test.sysres");
+            File.WriteAllText(syslay, "<Layer xmlns=\"https://www.se.com/LibraryElements\"><SubAppNetwork/></Layer>");
+            File.WriteAllText(sysres, "<Layer xmlns=\"https://www.se.com/LibraryElements\"><FBNetwork/></Layer>");
+            var cfg = new MapperConfig { SyslayPath2 = syslay, SysresPath2 = sysres };
+
+            IoBindingsLoader.InvalidateCache();
+            var bindings = IoBindingsLoader.LoadBindings(BindingsPath());
+            var injector = new SystemInjector();
+            injector.PrepareDemonstratorForGeneration(cfg);
+
+            SystemInjector.BindingApplicationReport report = null!;
+            var path = injector.GenerateFullSystemSyslay(cfg, FixturePath(), bindings, out report);
+
+            var doc = XDocument.Load(path);
+            var ns = (XNamespace)"https://www.se.com/LibraryElements";
+            var fbs = doc.Descendants(ns + "SubAppNetwork").Single().Elements(ns + "FB").ToList();
+            Assert.DoesNotContain(fbs, f => f.Attribute("Name")!.Value == "PLC_Start");
+
+            var ec = doc.Descendants(ns + "EventConnections").SingleOrDefault();
+            if (ec != null)
+            {
+                Assert.DoesNotContain(ec.Elements(ns + "Connection"), c =>
+                    c.Attribute("Source")!.Value.StartsWith("PLC_Start.") ||
+                    c.Attribute("Destination")!.Value.StartsWith("PLC_Start."));
+            }
         }
     }
 }
