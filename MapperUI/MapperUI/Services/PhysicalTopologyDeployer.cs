@@ -295,6 +295,65 @@ namespace MapperUI.Services
             if (added > 0) doc.Save(topologyProjPath);
             return added;
         }
+
+        /// <summary>
+        /// Deletes the JSON files this deployer would have written, plus the matching
+        /// TopologyManager.topologyproj &lt;None&gt; entries. Called when AutoEmit is OFF
+        /// so a previous Mapper run that wrote bad topology files leaves nothing
+        /// behind for EAE to choke on. Idempotent — does nothing if files are absent.
+        /// </summary>
+        public static int RemoveEmittedTopology(MapperConfig cfg)
+        {
+            int removed = 0;
+            var eaeRoot = DeriveEaeProjectRoot(cfg);
+            if (eaeRoot == null) return 0;
+            var host = cfg.WindowsSoftDpacHost ?? new WindowsSoftDpacHostConfig();
+
+            var topologyDir = Path.Combine(eaeRoot, "Topology");
+            var workstation = Path.Combine(topologyDir, "Equipment_Workstation_1.json");
+            var domain = Path.Combine(topologyDir, $"BroadcastDomain_{host.LogicalNetworkName}.json");
+
+            foreach (var f in new[] { workstation, domain })
+            {
+                if (File.Exists(f))
+                {
+                    try { File.Delete(f); removed++; } catch { /* swallow */ }
+                }
+            }
+
+            var topologyProj = Path.Combine(topologyDir, "TopologyManager.topologyproj");
+            if (File.Exists(topologyProj))
+            {
+                try
+                {
+                    var doc = XDocument.Load(topologyProj);
+                    var ns = doc.Root!.GetDefaultNamespace();
+                    var stale = new[] { Path.GetFileName(workstation), Path.GetFileName(domain) };
+                    var toRemove = doc.Descendants(ns + "None")
+                        .Where(e => stale.Contains((string?)e.Attribute("Include")))
+                        .ToList();
+                    foreach (var r in toRemove) { r.Remove(); removed++; }
+                    if (toRemove.Count > 0) doc.Save(topologyProj);
+                }
+                catch { /* swallow */ }
+            }
+
+            // Also nuke the per-device Properties.xml if we wrote it.
+            var (sysdev, _) = FindEcoRtSysdev(eaeRoot);
+            if (sysdev != null)
+            {
+                var deviceFolder = Path.Combine(
+                    Path.GetDirectoryName(sysdev)!,
+                    Path.GetFileNameWithoutExtension(sysdev));
+                var props = Path.Combine(deviceFolder, $"{SoftDpacPropertiesPluginGuid}.Properties.xml");
+                if (File.Exists(props))
+                {
+                    try { File.Delete(props); removed++; } catch { /* swallow */ }
+                }
+            }
+
+            return removed;
+        }
     }
 
     public class TopologyDeploymentResult
