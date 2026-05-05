@@ -210,6 +210,45 @@ namespace MapperTests
         }
 
         [Fact]
+        public void RemoveEmittedTopology_DeletesPreviouslyWrittenFiles()
+        {
+            var cfg = MakeFakeProject(out var eaeRoot);
+            PhysicalTopologyDeployer.Deploy(cfg);
+
+            var topology = Path.Combine(eaeRoot, "Topology");
+            var workstation = Path.Combine(topology, "Equipment_Workstation_1.json");
+            var domain = Path.Combine(topology, "BroadcastDomain_DeviceNetwork_1.json");
+            Assert.True(File.Exists(workstation));
+            Assert.True(File.Exists(domain));
+
+            int removed = PhysicalTopologyDeployer.RemoveEmittedTopology(cfg);
+
+            Assert.True(removed >= 2);
+            Assert.False(File.Exists(workstation));
+            Assert.False(File.Exists(domain));
+
+            // topologyproj should also no longer reference the deleted JSONs.
+            var doc = XDocument.Load(Path.Combine(topology, "TopologyManager.topologyproj"));
+            var ns = doc.Root!.GetDefaultNamespace();
+            var includes = doc.Descendants(ns + "None")
+                .Select(e => (string?)e.Attribute("Include"))
+                .ToHashSet();
+            Assert.DoesNotContain("Equipment_Workstation_1.json", includes);
+            Assert.DoesNotContain("BroadcastDomain_DeviceNetwork_1.json", includes);
+        }
+
+        [Fact]
+        public void RemoveEmittedTopology_IsIdempotent()
+        {
+            var cfg = MakeFakeProject(out _);
+            // Nothing to remove on a fresh project — should not throw.
+            int first = PhysicalTopologyDeployer.RemoveEmittedTopology(cfg);
+            int second = PhysicalTopologyDeployer.RemoveEmittedTopology(cfg);
+            Assert.Equal(0, first);
+            Assert.Equal(0, second);
+        }
+
+        [Fact]
         public void RuntimePort_AndArchivePort_FlowFromConfig()
         {
             var cfg = MakeFakeProject(out var eaeRoot);
