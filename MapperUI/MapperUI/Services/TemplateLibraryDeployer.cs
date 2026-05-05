@@ -103,45 +103,33 @@ namespace MapperUI.Services
 
             VerifyArraySizeConsistency(eaeProjectDir, result);
 
-            // Optional: emit the Physical Devices canvas (Workstation_1 + NIC_1 +
-            // Runtime_1 + DeviceNetwork_1) and bind EcoRT_0 to Runtime_1. Gated OFF
-            // by default — EAE's TopologyManager rejects auto-written JSONs with
-            // "Internal Server Error" until the canonical diff has identified every
-            // file (per-session .solutionData, Default Network BroadcastDomain, etc.)
-            // that the manual canvas workflow creates. Re-enable via
-            // MapperConfig.WindowsSoftDpacHost.AutoEmitPhysicalTopology = true once
-            // the schema is validated.
-            if (cfg.WindowsSoftDpacHost?.AutoEmitPhysicalTopology == true)
+            // M262 deployment target. The Soft-dPAC topology path was deleted —
+            // EcoRT_0 is now an embedded M262_dPAC device, not a Workstation runtime.
+            try
             {
-                try
-                {
-                    var topo = PhysicalTopologyDeployer.Deploy(cfg);
-                    result.TopologyFilesWritten.AddRange(topo.FilesWritten);
-                    foreach (var w in topo.Warnings)
-                        result.Warnings.Add($"Topology: {w}");
-                    MapperLogger.Info($"[Deploy] Physical topology emitted ({topo.FilesWritten.Count} files, " +
-                        $"{topo.TopologyProjEntriesAdded} topologyproj entries)");
-                }
-                catch (Exception ex)
-                {
-                    result.Warnings.Add($"Topology deployment crashed: {ex.Message}");
-                }
+                var sysdev = M262SysdevEmitter.Emit(cfg);
+                result.SysdevPath = sysdev.SysdevPath;
+                result.SystemFilePath = sysdev.SystemFilePath;
+                result.MappingsAdded = sysdev.MappingsAdded;
+                MapperLogger.Info($"[Deploy] sysdev rewritten as M262_dPAC; {sysdev.MappingsAdded} APP→RES0 mapping(s) ensured");
             }
-            else
+            catch (Exception ex)
             {
-                // Mop up after any previous run that wrote topology files while AutoEmit
-                // was on — leaving them in place gives EAE the "Internal Server Error"
-                // popup on next project open.
-                try
-                {
-                    int removed = PhysicalTopologyDeployer.RemoveEmittedTopology(cfg);
-                    MapperLogger.Info($"[Deploy] Physical topology emission skipped " +
-                        $"(AutoEmitPhysicalTopology=false); removed {removed} stale topology entries");
-                }
-                catch (Exception ex)
-                {
-                    result.Warnings.Add($"Topology cleanup crashed: {ex.Message}");
-                }
+                result.Warnings.Add($"M262 sysdev emit failed: {ex.Message}");
+            }
+
+            try
+            {
+                var hcf = M262HwConfigCopier.Copy(cfg);
+                result.HcfPath = hcf.HcfPath;
+                result.HcfParametersOverwritten.AddRange(hcf.ParametersOverwritten);
+                foreach (var w in hcf.Warnings)
+                    result.Warnings.Add($"HCF: {w}");
+                MapperLogger.Info($"[Deploy] hcf copied from baseline; {hcf.ParametersOverwritten.Count} channel parameter(s) overwritten");
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"M262 hcf copy failed: {ex.Message}");
             }
 
             result.Success = true;
@@ -587,6 +575,15 @@ namespace MapperUI.Services
             foreach (var dt in result.DataTypesDeployed)
                 DfbprojRegistrar.RegisterDataType(dfbproj, $@"DataType\{dt}.dt");
 
+            // M262 boot-scaffold types: DPAC_FULLINIT lives in SE.DPAC, plcStart in
+            // SE.AppBase. The syslay/sysres reference them by Type+Namespace; without
+            // a matching <Reference> entry in the dfbproj the compile fails with
+            // ERR_NO_SUCH_TYPE. SE.IoTMx covers BMTM3/TM262L01MDESE8T/TM3DI16_G/
+            // TM3DQ16T_G — pin the same versions used by the validated baseline.
+            DfbprojRegistrar.RegisterReference(dfbproj, "SE.DPAC",   "24.1.0.33");
+            DfbprojRegistrar.RegisterReference(dfbproj, "SE.AppBase", "24.1.0.21");
+            DfbprojRegistrar.RegisterReference(dfbproj, "SE.IoTMx",   "24.1.0.19");
+
             // Safety net: any .dt/.adp/.fbt that ended up on disk but isn't in the
             // explicit lists above (e.g. dropped manually, or from a future template
             // bundle) gets picked up here.
@@ -631,9 +628,15 @@ namespace MapperUI.Services
         public List<string> CompositesDeployed { get; set; } = new();
         public List<string> DataTypesDeployed { get; set; } = new();
         public List<string> PatchesApplied { get; set; } = new();
-        public List<string> TopologyFilesWritten { get; set; } = new();
         public List<string> Warnings { get; set; } = new();
         public int FilesExtracted { get; set; }
         public int FilesSkipped { get; set; }
+
+        public string? SysdevPath { get; set; }
+        public string? SystemFilePath { get; set; }
+        public int MappingsAdded { get; set; }
+
+        public string? HcfPath { get; set; }
+        public List<string> HcfParametersOverwritten { get; set; } = new();
     }
 }
