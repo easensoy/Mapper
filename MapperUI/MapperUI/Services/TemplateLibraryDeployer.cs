@@ -103,6 +103,25 @@ namespace MapperUI.Services
 
             VerifyArraySizeConsistency(eaeProjectDir, result);
 
+            // Last step: emit the Physical Devices canvas (Workstation_1 + NIC_1 +
+            // Runtime_1 + DeviceNetwork_1) and bind EcoRT_0 to Runtime_1, plus the
+            // device-level Properties.xml (UseEncryption + InsecureApplicationEnable).
+            // This means the user opens the project in EAE and Login -> Compile -> Deploy
+            // works without any manual canvas editing.
+            try
+            {
+                var topo = PhysicalTopologyDeployer.Deploy(cfg);
+                result.TopologyFilesWritten.AddRange(topo.FilesWritten);
+                foreach (var w in topo.Warnings)
+                    result.Warnings.Add($"Topology: {w}");
+                MapperLogger.Info($"[Deploy] Physical topology emitted ({topo.FilesWritten.Count} files, " +
+                    $"{topo.TopologyProjEntriesAdded} topologyproj entries)");
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"Topology deployment crashed: {ex.Message}");
+            }
+
             result.Success = true;
             return result;
         }
@@ -590,6 +609,7 @@ namespace MapperUI.Services
         public List<string> CompositesDeployed { get; set; } = new();
         public List<string> DataTypesDeployed { get; set; } = new();
         public List<string> PatchesApplied { get; set; } = new();
+        public List<string> TopologyFilesWritten { get; set; } = new();
         public List<string> Warnings { get; set; } = new();
         public int FilesExtracted { get; set; }
         public int FilesSkipped { get; set; }
