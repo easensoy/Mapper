@@ -114,6 +114,83 @@ namespace MapperUI.Services
         }
 
         /// <summary>
+        /// Registers the M262 .sysdev plus its sibling .hcf and Properties.xml files in
+        /// the .dfbproj as <c>&lt;None Include&gt;</c> entries with
+        /// <c>&lt;IEC61499Type&gt;SystemDevice&lt;/IEC61499Type&gt;</c> and
+        /// <c>&lt;DependentUpon&gt;</c> pointing at the .sysdev. The .sysdev itself
+        /// gets a <c>&lt;Compile Include&gt;</c> entry. Idempotent — also de-duplicates
+        /// repeated <c>IEC61499Type</c> / <c>DependentUpon</c> child elements that
+        /// previous broken deploy runs left behind on existing entries.
+        /// Returns the number of new entries added (existing-but-deduped doesn't count).
+        /// </summary>
+        public static int RegisterSystemDevice(string dfbprojPath, string eaeProjectDir, string sysdevPath)
+        {
+            if (!File.Exists(dfbprojPath)) return 0;
+            if (!File.Exists(sysdevPath)) return 0;
+
+            var iec = Path.Combine(eaeProjectDir, "IEC61499");
+            var sysdevRel = Path.GetRelativePath(iec, sysdevPath).Replace('/', '\\');
+            var sysdevFileName = Path.GetFileName(sysdevPath);
+            var sysdevFolder = Path.Combine(
+                Path.GetDirectoryName(sysdevPath)!,
+                Path.GetFileNameWithoutExtension(sysdevPath));
+
+            var xml = XDocument.Load(dfbprojPath);
+            var ns = xml.Root!.GetDefaultNamespace();
+            var (cg, ng) = Groups(xml, ns);
+            int added = 0;
+
+            // .sysdev itself goes under <Compile> with IEC61499Type=SystemDevice.
+            Add(cg, ns, "Compile", sysdevRel, ref added,
+                new XElement(ns + "IEC61499Type", "SystemDevice"));
+
+            // Sibling files (under sysdev's per-device folder) go under <None>.
+            if (Directory.Exists(sysdevFolder))
+            {
+                foreach (var sibling in Directory.EnumerateFiles(sysdevFolder, "*.*", SearchOption.TopDirectoryOnly))
+                {
+                    var rel = Path.GetRelativePath(iec, sibling).Replace('/', '\\');
+                    Add(ng, ns, "None", rel, ref added,
+                        new XElement(ns + "IEC61499Type", "SystemDevice"),
+                        new XElement(ns + "DependentUpon", sysdevFileName));
+                }
+            }
+
+            // De-dup: any existing <None>/<Compile> referencing this sysdev that has
+            // duplicate IEC61499Type or DependentUpon child elements gets cleaned up.
+            DeduplicateChildren(ng, ns, "None", sysdevFileName);
+            DeduplicateChildren(cg, ns, "Compile", sysdevFileName);
+
+            xml.Save(dfbprojPath);
+            return added;
+        }
+
+        static void DeduplicateChildren(XElement group, XNamespace ns, string tag, string sysdevFileName)
+        {
+            foreach (var entry in group.Elements(ns + tag).ToList())
+            {
+                var include = (string?)entry.Attribute("Include") ?? string.Empty;
+                // Only touch entries clearly tied to this sysdev (same file or its folder).
+                if (!include.EndsWith(sysdevFileName, StringComparison.OrdinalIgnoreCase) &&
+                    !include.Contains(Path.GetFileNameWithoutExtension(sysdevFileName),
+                        StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                CollapseDuplicateChildElements(entry, ns + "IEC61499Type");
+                CollapseDuplicateChildElements(entry, ns + "DependentUpon");
+            }
+        }
+
+        static void CollapseDuplicateChildElements(XElement parent, XName childName)
+        {
+            var children = parent.Elements(childName).ToList();
+            if (children.Count <= 1) return;
+            // Keep the first, drop the rest. EAE only honours the first anyway.
+            for (int i = 1; i < children.Count; i++)
+                children[i].Remove();
+        }
+
+        /// <summary>
         /// Sweeps the IEC61499 folder for any .dt, .adp, or .fbt file that is not yet
         /// registered in the project, and adds the appropriate &lt;Compile&gt; entry. This is the
         /// safety-net pass run after CAT/Basic/Adapter/DataType deployment so an external
