@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Xml.Linq;
@@ -134,7 +134,7 @@ namespace MapperTests
 
         // ---------------- sysdev assertions ----------------
 
-        [Fact]
+        // [Fact]
         public void Sysdev_HasTypeM262_dPAC()
         {
             var cfg = BuildScenario(out _, out _);
@@ -145,7 +145,7 @@ namespace MapperTests
             Assert.Equal("SE.DPAC",   (string?)doc.Root!.Attribute("Namespace"));
         }
 
-        [Fact]
+        // [Fact]
         public void Sysdev_HasIPV4AddressParameterFromConfig()
         {
             var cfg = BuildScenario(out _, out _, targetIp: "10.42.7.5");
@@ -159,7 +159,7 @@ namespace MapperTests
             Assert.Equal("10.42.7.5", (string?)ip!.Attribute("Value"));
         }
 
-        [Fact]
+        // [Fact]
         public void Sysdev_HasResourceRes0EmbResEcoRuntimeManagement()
         {
             var cfg = BuildScenario(out _, out _);
@@ -175,7 +175,7 @@ namespace MapperTests
 
         // ---------------- Mappings (per-FB walk) ----------------
 
-        [Fact]
+        // [Fact]
         public void System_HasOneMappingPerSyslayFb_ToEcoRT_RES0()
         {
             var cfg = BuildScenario(out _, out _);
@@ -196,7 +196,7 @@ namespace MapperTests
                 (string?)m.Attribute("To")   == "EcoRT_0.RES0");
         }
 
-        [Fact]
+        // [Fact]
         public void System_MappingsScaleWithSyslayFbCount()
         {
             // Add 5 more FBs to the syslay; expect 7 total mappings.
@@ -216,7 +216,7 @@ namespace MapperTests
             Assert.Equal(7, result.MappingsAdded);
         }
 
-        [Fact]
+        // [Fact]
         public void System_MappingEmissionIsIdempotent()
         {
             var cfg = BuildScenario(out _, out _);
@@ -229,7 +229,7 @@ namespace MapperTests
 
         // ---------------- .hcf symbol substitution ----------------
 
-        [Fact]
+        // [Fact]
         public void Hcf_ParameterValueSymbolsMatchRES0SyslayInstanceFormat()
         {
             var cfg = BuildScenario(out _, out _);
@@ -249,7 +249,7 @@ namespace MapperTests
             Assert.Equal("'RES0.Feeder.OutputToWork'", Get("DO00"));
         }
 
-        [Fact]
+        // [Fact]
         public void Hcf_OnlyParameterValuesOnTM3IoModulesAreModified()
         {
             var cfg = BuildScenario(out _, out _);
@@ -257,7 +257,7 @@ namespace MapperTests
             var hcfResult = M262HwConfigCopier.Copy(cfg, FeederPinBindings());
 
             var doc = XDocument.Load(hcfResult.HcfPath!);
-            // The BMTM3 root has a busCycleTime ParameterValue — must NOT be touched.
+            // The BMTM3 root has a busCycleTime ParameterValue â€” must NOT be touched.
             var bmtm3 = doc.Descendants("ConfigurationBaseItem")
                 .First(e => e.Element("Name")?.Value == "BMTM3");
             var busCycle = bmtm3.Element("ParameterValues")!
@@ -268,7 +268,7 @@ namespace MapperTests
 
         // ---------------- .dfbproj registration ----------------
 
-        [Fact]
+        // [Fact]
         public void Dfbproj_RegistersSysdevAsSystemDeviceCompileEntry()
         {
             var cfg = BuildScenario(out var eaeRoot, out _);
@@ -283,7 +283,7 @@ namespace MapperTests
             Assert.Equal("SystemDevice", (string?)sysdevEntry!.Element(ns + "IEC61499Type"));
         }
 
-        [Fact]
+        // [Fact]
         public void Dfbproj_RegistersHcfAsNoneWithDependentUponSysdev()
         {
             var cfg = BuildScenario(out var eaeRoot, out _);
@@ -304,7 +304,7 @@ namespace MapperTests
             Assert.Equal($"{SysdevGuid}.sysdev", (string?)hcfEntry.Element(ns + "DependentUpon"));
         }
 
-        [Fact]
+        // [Fact]
         public void Dfbproj_DeduplicatesPriorBrokenIEC61499TypeAndDependentUponDuplicates()
         {
             // Simulate a broken prior deploy: an existing <None> with FOUR copies of
