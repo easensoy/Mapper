@@ -103,23 +103,45 @@ namespace MapperUI.Services
 
             VerifyArraySizeConsistency(eaeProjectDir, result);
 
-            // Last step: emit the Physical Devices canvas (Workstation_1 + NIC_1 +
-            // Runtime_1 + DeviceNetwork_1) and bind EcoRT_0 to Runtime_1, plus the
-            // device-level Properties.xml (UseEncryption + InsecureApplicationEnable).
-            // This means the user opens the project in EAE and Login -> Compile -> Deploy
-            // works without any manual canvas editing.
-            try
+            // Optional: emit the Physical Devices canvas (Workstation_1 + NIC_1 +
+            // Runtime_1 + DeviceNetwork_1) and bind EcoRT_0 to Runtime_1. Gated OFF
+            // by default — EAE's TopologyManager rejects auto-written JSONs with
+            // "Internal Server Error" until the canonical diff has identified every
+            // file (per-session .solutionData, Default Network BroadcastDomain, etc.)
+            // that the manual canvas workflow creates. Re-enable via
+            // MapperConfig.WindowsSoftDpacHost.AutoEmitPhysicalTopology = true once
+            // the schema is validated.
+            if (cfg.WindowsSoftDpacHost?.AutoEmitPhysicalTopology == true)
             {
-                var topo = PhysicalTopologyDeployer.Deploy(cfg);
-                result.TopologyFilesWritten.AddRange(topo.FilesWritten);
-                foreach (var w in topo.Warnings)
-                    result.Warnings.Add($"Topology: {w}");
-                MapperLogger.Info($"[Deploy] Physical topology emitted ({topo.FilesWritten.Count} files, " +
-                    $"{topo.TopologyProjEntriesAdded} topologyproj entries)");
+                try
+                {
+                    var topo = PhysicalTopologyDeployer.Deploy(cfg);
+                    result.TopologyFilesWritten.AddRange(topo.FilesWritten);
+                    foreach (var w in topo.Warnings)
+                        result.Warnings.Add($"Topology: {w}");
+                    MapperLogger.Info($"[Deploy] Physical topology emitted ({topo.FilesWritten.Count} files, " +
+                        $"{topo.TopologyProjEntriesAdded} topologyproj entries)");
+                }
+                catch (Exception ex)
+                {
+                    result.Warnings.Add($"Topology deployment crashed: {ex.Message}");
+                }
             }
-            catch (Exception ex)
+            else
             {
-                result.Warnings.Add($"Topology deployment crashed: {ex.Message}");
+                // Mop up after any previous run that wrote topology files while AutoEmit
+                // was on — leaving them in place gives EAE the "Internal Server Error"
+                // popup on next project open.
+                try
+                {
+                    int removed = PhysicalTopologyDeployer.RemoveEmittedTopology(cfg);
+                    MapperLogger.Info($"[Deploy] Physical topology emission skipped " +
+                        $"(AutoEmitPhysicalTopology=false); removed {removed} stale topology entries");
+                }
+                catch (Exception ex)
+                {
+                    result.Warnings.Add($"Topology cleanup crashed: {ex.Message}");
+                }
             }
 
             result.Success = true;
