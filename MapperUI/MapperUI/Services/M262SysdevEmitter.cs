@@ -43,6 +43,13 @@ namespace MapperUI.Services
 
             RewriteSysdev(sysdevPath, cfg.M262TargetIp ?? string.Empty);
 
+            // Emit the F513CAE3-...Properties.xml file alongside the sysdev. EAE
+            // raises a "Solution Integrity" warning at project open if this file is
+            // missing — even though it's "just" the device-level deploy/boot defaults.
+            // Schema reverse-engineered from
+            // SMC_Rig_Expo .../6fe9f94f-.../F513CAE3-...Properties.xml (M262 dPAC).
+            var propsPath = WriteM262DevicePropertiesXml(sysdevPath);
+
             var systemFile = FindSystemFile(eaeRoot)
                 ?? throw new FileNotFoundException(
                     $"No .system found under {eaeRoot}\\IEC61499\\System\\");
@@ -54,9 +61,10 @@ namespace MapperUI.Services
 
             int added = EnsureMappingsPerFb(systemFile, fbInstances);
 
-            // Register the .sysdev (and matching .hcf if present) in the project's
-            // .dfbproj as <None Include> entries with IEC61499Type=SystemDevice.
-            // Idempotent — also de-duplicates broken duplicate child elements.
+            // Register the .sysdev (and matching .hcf + Properties.xml siblings) in
+            // the project's .dfbproj as <None Include> entries with
+            // IEC61499Type=SystemDevice. Idempotent — also de-duplicates broken
+            // duplicate child elements.
             var dfbproj = FindDfbproj(eaeRoot);
             int registered = 0;
             if (dfbproj != null)
@@ -69,7 +77,56 @@ namespace MapperUI.Services
                 MappingsAdded = added,
                 FbInstancesMapped = fbInstances,
                 DfbprojEntriesRegistered = registered,
+                PropertiesXmlPath = propsPath,
             };
+        }
+
+        // --- M262 device-properties XML emission ---
+
+        // Plugin GUID copied verbatim from canonical M262 dPAC Properties.xml file
+        // names in SMC_Rig_Expo + LibCustomization. EAE keys the device's deploy/boot
+        // defaults off this exact filename.
+        const string M262DevicePropertiesPluginGuid = "F513CAE3-7194-4086-936C-02912EA0B352";
+
+        /// <summary>
+        /// Writes <c>{sysdev-folder}/F513CAE3-...Properties.xml</c> with the canonical
+        /// M262 deploy/boot defaults: ClearBeforeDeploy=True, AutoStart=True, BootMode=Run.
+        /// Idempotent — only writes when the file is absent or content differs from canonical.
+        /// </summary>
+        public static string WriteM262DevicePropertiesXml(string sysdevPath)
+        {
+            // Per-device folder convention: alongside the sysdev sit a same-stem folder
+            // and the device-level Properties.xml + .hcf + Simulation.Binding.xml etc.
+            var sysdevFolder = Path.Combine(
+                Path.GetDirectoryName(sysdevPath)!,
+                Path.GetFileNameWithoutExtension(sysdevPath));
+            Directory.CreateDirectory(sysdevFolder);
+
+            var propsPath = Path.Combine(sysdevFolder,
+                $"{M262DevicePropertiesPluginGuid}.Properties.xml");
+
+            const string canonical =
+                "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
+                "<SystemDeviceProperties xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" " +
+                    "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" " +
+                    "xmlns=\"http://www.nxtControl.com/DeviceProperties\">\r\n" +
+                "  <ComplexProperty Name=\"DeployPlugin\" Expanded=\"true\">\r\n" +
+                "    <Property Name=\"ClearBeforeDeploy\" Value=\"True\" IsPassword=\"false\" />\r\n" +
+                "  </ComplexProperty>\r\n" +
+                "  <GroupProperty Name=\"Configuration\" Expanded=\"true\" Enabled=\"true\">\r\n" +
+                "    <GroupProperty Name=\"Deploy\" Expanded=\"true\" Enabled=\"true\">\r\n" +
+                "      <Property Name=\"AutoStart\" Value=\"True\" IsPassword=\"false\" />\r\n" +
+                "    </GroupProperty>\r\n" +
+                "    <GroupProperty Name=\"Boot\" Expanded=\"true\" Enabled=\"true\">\r\n" +
+                "      <Property Name=\"BootMode\" Value=\"Run\" IsPassword=\"false\" />\r\n" +
+                "    </GroupProperty>\r\n" +
+                "  </GroupProperty>\r\n" +
+                "</SystemDeviceProperties>";
+
+            if (!File.Exists(propsPath) || File.ReadAllText(propsPath) != canonical)
+                File.WriteAllText(propsPath, canonical);
+
+            return propsPath;
         }
 
         // --- file discovery ---
@@ -245,5 +302,6 @@ namespace MapperUI.Services
         public int MappingsAdded { get; set; }
         public List<string> FbInstancesMapped { get; set; } = new();
         public int DfbprojEntriesRegistered { get; set; }
+        public string PropertiesXmlPath { get; set; } = string.Empty;
     }
 }
