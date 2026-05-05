@@ -49,7 +49,15 @@ namespace MapperTests
             var syslayDir = Path.Combine(sys, sysappGuid);
             Directory.CreateDirectory(syslayDir);
             var syslayPath = Path.Combine(syslayDir, "00000000-0000-0000-0000-000000000000.syslay");
-            File.WriteAllText(syslayPath, "<Layer/>");
+            // Two FB instances inside SubAppNetwork — the emitter generalises by
+            // walking these and emitting one <Mapping From="APP1.{Name}"/> per FB.
+            File.WriteAllText(syslayPath, $@"<?xml version=""1.0"" encoding=""utf-8""?>
+<Layer xmlns=""{LibElNs}"">
+  <SubAppNetwork>
+    <FB ID=""1"" Name=""Feeder"" Type=""Five_State_Actuator_CAT"" Namespace=""Main"" />
+    <FB ID=""2"" Name=""Feed_Station"" Type=""Process1_Generic"" Namespace=""Main"" />
+  </SubAppNetwork>
+</Layer>");
 
             return new MapperConfig
             {
