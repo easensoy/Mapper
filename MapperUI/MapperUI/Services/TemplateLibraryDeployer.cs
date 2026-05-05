@@ -105,17 +105,35 @@ namespace MapperUI.Services
 
             // M262 deployment target. The Soft-dPAC topology path was deleted —
             // EcoRT_0 is now an embedded M262_dPAC device, not a Workstation runtime.
+            string sysdevId = string.Empty;
             try
             {
                 var sysdev = M262SysdevEmitter.Emit(cfg);
                 result.SysdevPath = sysdev.SysdevPath;
                 result.SystemFilePath = sysdev.SystemFilePath;
                 result.MappingsAdded = sysdev.MappingsAdded;
+                sysdevId = ReadSysdevId(sysdev.SysdevPath);
                 MapperLogger.Info($"[Deploy] sysdev rewritten as M262_dPAC; {sysdev.MappingsAdded} APP→RES0 mapping(s) ensured");
             }
             catch (Exception ex)
             {
                 result.Warnings.Add($"M262 sysdev emit failed: {ex.Message}");
+            }
+
+            // Topology JSON emission. Without this the sysdev appears in the Devices
+            // tree but the Physical Devices canvas can't render the M262 — the
+            // operator can't see / set the IP without manual canvas editing.
+            try
+            {
+                var topo = M262TopologyEmitter.Emit(cfg, sysdevId);
+                foreach (var w in topo.Warnings)
+                    result.Warnings.Add($"Topology: {w}");
+                MapperLogger.Info($"[Deploy] M262 topology emitted ({topo.FilesWritten.Count} files, " +
+                    $"{topo.TopologyProjEntriesAdded} topologyproj entries)");
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"M262 topology emit failed: {ex.Message}");
             }
 
             try
@@ -591,6 +609,22 @@ namespace MapperUI.Services
 
             File.SetLastWriteTime(dfbproj, DateTime.Now);
             MapperLogger.Info($"[Deploy] dfbproj updated: {Path.GetFileName(dfbproj)}");
+        }
+
+        /// <summary>
+        /// Returns the ID attribute on the sysdev's root Device element. Used so the
+        /// topology emitter can wire <c>logicalDeviceId</c> to the actual sysdev's GUID
+        /// instead of guessing a hardcoded one.
+        /// </summary>
+        static string ReadSysdevId(string sysdevPath)
+        {
+            if (string.IsNullOrEmpty(sysdevPath) || !File.Exists(sysdevPath)) return string.Empty;
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(sysdevPath);
+                return (string?)doc.Root?.Attribute("ID") ?? string.Empty;
+            }
+            catch { return string.Empty; }
         }
 
         static string? DeriveEaeProjectDir(MapperConfig cfg)
