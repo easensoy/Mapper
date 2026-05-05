@@ -16,11 +16,43 @@ namespace CodeGen.Translation
         string ComponentName,
         string? InputTag);
 
+    /// <summary>
+    /// One row of the (Pin -> RES0 symlink) routing table the M262 .hcf needs.
+    /// Built from optional <c>pin_di_athome</c> / <c>pin_di_atwork</c> /
+    /// <c>pin_do_outputToWork</c> columns on the Actuators sheet.
+    /// </summary>
+    public record PinAssignment(string Pin, string ComponentName, string Port);
+
     public class IoBindings
     {
         public Dictionary<string, ActuatorBinding> Actuators { get; init; } = new(StringComparer.Ordinal);
         public Dictionary<string, SensorBinding> Sensors { get; init; } = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Pin id (e.g. "DI00", "DO15") -> assignment. Populated only when the optional
+        /// pin_di_athome / pin_di_atwork / pin_do_outputToWork columns are present in
+        /// the IO bindings xlsx. Empty when the user hasn't added those columns yet —
+        /// in that case <see cref="ResolveSymbol"/> returns null for everything and
+        /// the .hcf is left with its baseline values.
+        /// </summary>
+        public Dictionary<string, PinAssignment> PinAssignments { get; init; } =
+            new(StringComparer.OrdinalIgnoreCase);
+
         public string SourcePath { get; init; } = string.Empty;
+
+        /// <summary>
+        /// For a pin id like "DI00", returns <c>'RES0.&lt;component&gt;.&lt;port&gt;'</c>
+        /// (with literal single quotes — EAE's .hcf schema requires them) if the
+        /// IO bindings xlsx maps that pin to an actuator port. Returns null if the
+        /// pin has no assignment, in which case the .hcf rewriter leaves the baseline
+        /// Value attribute untouched.
+        /// </summary>
+        public string? ResolveSymbol(string pin)
+        {
+            if (string.IsNullOrWhiteSpace(pin)) return null;
+            if (!PinAssignments.TryGetValue(pin, out var assignment)) return null;
+            return $"'RES0.{assignment.ComponentName}.{assignment.Port}'";
+        }
     }
 
     public class IoBindingsLoader
@@ -74,6 +106,14 @@ namespace CodeGen.Translation
                         $"Actuators sheet column {i} expected '{expected[i]}', got '{(i < header.Count ? header[i] : "<missing>")}'");
             }
 
+            // Optional pin columns — index by header name so the user can add them in any
+            // order to the right of the existing columns. Absent columns just mean
+            // ResolveSymbol() returns null for the corresponding pin.
+            int idxPinDiAthome     = header.FindIndex(h => string.Equals(h, "pin_di_athome",      StringComparison.OrdinalIgnoreCase));
+            int idxPinDiAtwork     = header.FindIndex(h => string.Equals(h, "pin_di_atwork",      StringComparison.OrdinalIgnoreCase));
+            int idxPinDoToWork     = header.FindIndex(h => string.Equals(h, "pin_do_outputToWork", StringComparison.OrdinalIgnoreCase));
+            int idxPinDoToHome     = header.FindIndex(h => string.Equals(h, "pin_do_outputToHome", StringComparison.OrdinalIgnoreCase));
+
             for (int r = 1; r < rows.Count; r++)
             {
                 var row = rows[r];
@@ -87,7 +127,23 @@ namespace CodeGen.Translation
                     OutputToWorkTag: NullIfEmpty(Get(row, 4)),
                     OutputToHomeTag: NullIfEmpty(Get(row, 5)));
                 bindings.Actuators[name] = binding;
+
+                AddPinIfPresent(bindings, idxPinDiAthome, row, name, "athome");
+                AddPinIfPresent(bindings, idxPinDiAtwork, row, name, "atwork");
+                AddPinIfPresent(bindings, idxPinDoToWork, row, name, "OutputToWork");
+                AddPinIfPresent(bindings, idxPinDoToHome, row, name, "OutputToHome");
             }
+        }
+
+        private static void AddPinIfPresent(IoBindings bindings, int idx,
+            List<string> row, string componentName, string port)
+        {
+            if (idx < 0) return;
+            var pin = NullIfEmpty(Get(row, idx));
+            if (pin == null) return;
+            // Last writer wins if a pin appears in two rows — EAE's hcf schema also
+            // forbids duplicates, so this matches the runtime constraint.
+            bindings.PinAssignments[pin] = new PinAssignment(pin, componentName, port);
         }
 
         private static void ParseSensorSheet(List<List<string>> rows, IoBindings bindings)
