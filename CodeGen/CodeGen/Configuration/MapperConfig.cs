@@ -103,5 +103,15 @@ namespace CodeGen.Configuration
         public bool UseEncryption { get; set; } = false;
         public bool InsecureApplicationEnable { get; set; } = true;
         public string NicIdentifier { get; set; } = "eth0";
+
+        /// <summary>
+        /// Master switch for the experimental topology emission. Defaults to FALSE
+        /// because EAE's TopologyManager subsystem rejects auto-written JSONs with
+        /// "Internal Server Error" until the per-session .solutionData and Default
+        /// Network BroadcastDomain are also in place. Flip to true once the canonical
+        /// diff (manual EAE config save vs fresh Mapper output) has been captured
+        /// and the deployer is updated to emit every file the diff identifies.
+        /// </summary>
+        public bool AutoEmitPhysicalTopology { get; set; } = false;
     }
 }
