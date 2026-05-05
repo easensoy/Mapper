@@ -26,9 +26,16 @@ namespace MapperUI.Services
     /// </summary>
     public static class M262HwConfigCopier
     {
-        const string FeederFbName = "Feeder";
+        public static HwConfigCopyResult Copy(MapperConfig cfg) => Copy(cfg, bindingsOverride: null);
 
-        public static HwConfigCopyResult Copy(MapperConfig cfg)
+        /// <summary>
+        /// Test-injection overload: passes a pre-built <see cref="IoBindings"/> (typically
+        /// with a hand-populated <see cref="IoBindings.PinAssignments"/> dict) so the
+        /// copier can be exercised without an xlsx on disk. When
+        /// <paramref name="bindingsOverride"/> is null this falls back to loading
+        /// <see cref="MapperConfig.IoBindingsPath"/>.
+        /// </summary>
+        public static HwConfigCopyResult Copy(MapperConfig cfg, IoBindings? bindingsOverride)
         {
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
 
@@ -74,32 +81,25 @@ namespace MapperUI.Services
             File.Copy(srcHcf, dstHcf, overwrite: true);
             result.HcfPath = dstHcf;
 
-            // 3. Load IoBindings and overwrite the three channel ParameterValue
-            //    strings on the copied .hcf.
-            var bindings = LoadBindings(cfg);
-            if (bindings != null && bindings.Actuators.TryGetValue(FeederFbName, out var feeder))
+            // 3. Walk every <ParameterValue Name="DIxx"|"DOxx"> on the TM3DI16_G /
+            //    TM3DQ16T_G modules and rewrite Value with the symbol IoBindings
+            //    resolves for that pin. Pin -> symbol mapping is driven entirely by the
+            //    optional pin_di_athome / pin_di_atwork / pin_do_outputToWork columns
+            //    in the IO bindings xlsx; if those columns are absent the .hcf is
+            //    left at its baseline values.
+            var bindings = bindingsOverride ?? LoadBindings(cfg);
+            if (bindings == null)
             {
-                var overwrites = new Dictionary<string, string?>
-                {
-                    ["DI00"] = feeder.AthomeTag        != null ? $"'RES0.{FeederFbName}.athome'"       : null,
-                    ["DI01"] = feeder.AtworkTag        != null ? $"'RES0.{FeederFbName}.atwork'"       : null,
-                    ["DO00"] = feeder.OutputToWorkTag  != null ? $"'RES0.{FeederFbName}.OutputToWork'" : null,
-                };
+                result.Warnings.Add("IO bindings xlsx not found — hcf channel symlinks left as baseline.");
+                return result;
+            }
 
-                int written = OverwriteParameterValues(dstHcf, overwrites, result);
-                result.ParametersOverwritten.AddRange(overwrites
-                    .Where(kv => kv.Value != null && result.ParametersOverwrittenSet.Contains(kv.Key))
-                    .Select(kv => $"{kv.Key}={kv.Value}"));
-                if (written == 0)
-                    result.Warnings.Add(
-                        "No ParameterValue elements with Name=DI00/DI01/DO00 found in copied .hcf — " +
-                        "channel symlinks not written. Verify the baseline schema.");
-            }
-            else
-            {
+            int written = OverwriteHcfParameterValues(dstHcf, bindings, result);
+            if (written == 0 && bindings.PinAssignments.Count == 0)
                 result.Warnings.Add(
-                    $"IoBindings has no actuator named '{FeederFbName}' — hcf channel symlinks left as baseline.");
-            }
+                    "IO bindings xlsx has no pin_di_athome / pin_di_atwork / " +
+                    "pin_do_outputToWork columns — add them to drive .hcf channel " +
+                    "symlinks. .hcf left at baseline values.");
 
             return result;
         }
@@ -149,30 +149,48 @@ namespace MapperUI.Services
         // --- .hcf rewrite ---
 
         /// <summary>
-        /// Walks every element in the .hcf and, for any node that names a channel
-        /// (Name="DI00" etc.) and carries a Value attribute, overwrites Value with
-        /// the supplied string. Tolerates either &lt;ParameterValue Name="DI00"
-        /// Value="..."/&gt; or other element shapes that follow the same Name/Value
-        /// attribute pattern — we don't pin the element local-name so a future
-        /// schema variant doesn't silently break the rewrite.
+        /// Walks the TM3DI16_G / TM3DQ16T_G modules in the copied .hcf, looks up each
+        /// pin's Value via <see cref="IoBindings.ResolveSymbol"/>, and rewrites Value
+        /// when the pin is bound. Element-name-agnostic on the channel container
+        /// (matches both <c>&lt;ParameterValue&gt;</c> and other shapes) but scoped
+        /// to channels under those two specific module names so unrelated pins on
+        /// the BMTM3 / TM262L01MDESE8T don't get touched.
         /// </summary>
-        static int OverwriteParameterValues(string hcfPath,
-            Dictionary<string, string?> nameToValue, HwConfigCopyResult result)
+        static int OverwriteHcfParameterValues(string hcfPath, IoBindings bindings, HwConfigCopyResult result)
         {
             var doc = XDocument.Load(hcfPath);
+            var ns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
             int written = 0;
 
-            foreach (var el in doc.Descendants())
+            // The two IO modules whose pin channels carry RES0 symlinks.
+            var ioModuleNames = new HashSet<string>(StringComparer.Ordinal)
             {
-                var nameAttr = el.Attribute("Name");
-                if (nameAttr == null) continue;
-                if (!nameToValue.TryGetValue(nameAttr.Value, out var newValue)) continue;
-                if (newValue == null) continue; // binding absent — leave baseline value
-                var valueAttr = el.Attribute("Value");
-                if (valueAttr == null) continue;
-                valueAttr.Value = newValue;
-                result.ParametersOverwrittenSet.Add(nameAttr.Value);
-                written++;
+                "TM3DI16_G", "TM3DQ16T_G"
+            };
+
+            foreach (var module in doc.Descendants().Where(e =>
+                ioModuleNames.Contains((string?)e.Element(ns + "Name")?.Value ?? string.Empty)))
+            {
+                var pvContainer = module.Element(ns + "ParameterValues");
+                if (pvContainer == null) continue;
+
+                foreach (var pv in pvContainer.Elements(ns + "ParameterValue"))
+                {
+                    var pin = (string?)pv.Attribute("Name");
+                    if (string.IsNullOrEmpty(pin)) continue;
+                    var symbol = bindings.ResolveSymbol(pin);
+                    if (symbol == null) continue; // unbound pin — leave baseline value
+
+                    var valueAttr = pv.Attribute("Value");
+                    if (valueAttr == null)
+                        pv.SetAttributeValue("Value", symbol);
+                    else
+                        valueAttr.Value = symbol;
+
+                    result.ParametersOverwrittenSet.Add(pin);
+                    result.ParametersOverwritten.Add($"{pin}={symbol}");
+                    written++;
+                }
             }
 
             if (written > 0) doc.Save(hcfPath);
