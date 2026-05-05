@@ -84,6 +84,36 @@ namespace MapperUI.Services
         }
 
         /// <summary>
+        /// Registers an SE library reference like:
+        ///   &lt;Reference Include="SE.DPAC"&gt;&lt;Version&gt;24.1.0.33&lt;/Version&gt;&lt;/Reference&gt;
+        /// SE library types (DPAC_FULLINIT in SE.DPAC, plcStart in SE.AppBase) are not local
+        /// .fbt files — the EAE compiler resolves them via these &lt;Reference&gt; entries.
+        /// Without the reference, FBs of those types fail with ERR_NO_SUCH_TYPE even though
+        /// they appear in the syslay/sysres XML correctly. Idempotent: existing reference
+        /// to the same library is left alone (Version is not overwritten so a hand-set
+        /// pinned version is preserved).
+        /// </summary>
+        public static int RegisterReference(string dfbprojPath, string libraryName, string version)
+        {
+            var xml = XDocument.Load(dfbprojPath);
+            var ns = xml.Root!.GetDefaultNamespace();
+
+            var refGroup = xml.Descendants(ns + "ItemGroup")
+                .FirstOrDefault(g => g.Elements(ns + "Reference").Any())
+                ?? AddGroup(xml, ns);
+
+            var existing = refGroup.Elements(ns + "Reference").FirstOrDefault(e =>
+                string.Equals((string?)e.Attribute("Include"), libraryName, StringComparison.OrdinalIgnoreCase));
+            if (existing != null) return 0;
+
+            refGroup.Add(new XElement(ns + "Reference",
+                new XAttribute("Include", libraryName),
+                new XElement(ns + "Version", version)));
+            xml.Save(dfbprojPath);
+            return 1;
+        }
+
+        /// <summary>
         /// Sweeps the IEC61499 folder for any .dt, .adp, or .fbt file that is not yet
         /// registered in the project, and adds the appropriate &lt;Compile&gt; entry. This is the
         /// safety-net pass run after CAT/Basic/Adapter/DataType deployment so an external
