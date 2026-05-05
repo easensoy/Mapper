@@ -349,6 +349,19 @@ namespace MapperUI.Services
                 File.WriteAllText(cfgPath, cfg);
                 result.FilesExtracted++;
                 MapperLogger.Info($"[Deploy] Generated {cat}.cfg");
+
+                // EAE expects {cat}\{cat}_HMI.meta.xml to exist (registered in .dfbproj as a
+                // <DependentUpon> of the HMI .fbt). The template zips don't ship one — EAE
+                // creates and writes it lazily — so we drop a zero-byte placeholder so EAE
+                // stops complaining "Missing Project Files" on first load. It will get
+                // populated by EAE itself the first time the HMI is edited.
+                var metaPath = Path.Combine(catDir, $"{hmi}.meta.xml");
+                if (!File.Exists(metaPath))
+                {
+                    File.WriteAllBytes(metaPath, Array.Empty<byte>());
+                    result.FilesExtracted++;
+                    MapperLogger.Info($"[Deploy] Created empty {hmi}.meta.xml placeholder");
+                }
             }
         }
 
