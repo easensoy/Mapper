@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE DataType SYSTEM "../LibraryElement.dtd">
+<DataType Namespace="Main" Name="Component_State_Msg" Comment="IEC61131-3, Table 14#5">
+  <Attribute Name="nxtDataType" Value="yuBjJmbjdzTXbTqqCuFqq4iYuyX+NOw87GLmAa8/l8g8S0GssKRBD3Bw9f3nDpbvm/lpTqhTEUa7h4d7KB7HGe8iQDf7yE6aU188Q1/TVhKl8+8xnXK+A1Gzs3cfU4syGh48GTVWHsCI3HnBvYCa8yQnZNo6nXFNfvVO9q9Uz0xt2qaQzFox1tkW5mKg51wG+x+WakaohzrGwsveTM0g1psCjHlv+ekPCoDSQwJPo7KlFYNstsj5F2FtN0SahTUX81uYuRtqfwVFIWq4PrfUTsuTILCnV4iGurFOCxoDAQRkMgNFBFqYFGnyS9mqYb002CCh6sUF63elLwNKbAgS+wEnLiu2yrMJnV5rx+f7INPAPJ1J4LyewihwDwaFV/TsCJ+jJvGYYOQnaqp9wT+6ecl2ztmR0j2S" Context="17311422985617731120" />
+  <Identification Standard="1131-3" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author=" " Date="3/17/2026" Remarks="Template" />
+  <CompilerInfo />
+  <StructuredType>
+    <VarDeclaration Name="src_id" Type="INT" />
+    <VarDeclaration Name="source_name" Type="STRING" />
+    <VarDeclaration Name="dest_name" Type="STRING" />
+    <VarDeclaration Name="state" Type="INT" />
+  </StructuredType>
+</DataType>
