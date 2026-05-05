@@ -1,0 +1,1946 @@
+Actuator_Fault_CAT.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="d667361c-6191-4381-8e77-3756ddf05a9c" Name="Actuator_Fault_CAT" Comment="Composite Function Block Type" Namespace="Main">
+  <Attribute Name="HMI.Alias" Value="" />
+  <Attribute Name="Configuration.FB.IDCounter" Value="27" />
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author=" " Date="2/24/2026" Remarks="template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="CMD_WORK" Comment="Initialization Request">
+        <With Var="EnableTimeout" />
+        <With Var="atwork" />
+        <With Var="T_Work" />
+        <With Var="FC_WorkTO" />
+      </Event>
+      <Event Name="CMD_HOME" Comment="Normal Execution Request">
+        <With Var="EnableTimeout" />
+        <With Var="athome" />
+        <With Var="T_Home" />
+        <With Var="FC_HomeTO" />
+      </Event>
+      <Event Name="RESET" />
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="FAULT" Comment="Initialization Confirm">
+        <With Var="fault_active" />
+        <With Var="fault_code" />
+      </Event>
+      <Event Name="CLEARED" Comment="Execution Confirmation">
+        <With Var="fault_active" />
+        <With Var="fault_code" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="EnableTimeout" Type="BOOL" Comment="Input event qualifier" />
+      <VarDeclaration Name="atwork" Type="BOOL" />
+      <VarDeclaration Name="athome" Type="BOOL" />
+      <VarDeclaration Name="T_Work" Type="TIME" />
+      <VarDeclaration Name="T_Home" Type="TIME" />
+      <VarDeclaration Name="FC_WorkTO" Type="INT" />
+      <VarDeclaration Name="FC_HomeTO" Type="INT" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="fault_active" Type="BOOL" Comment="Output event qualifier" />
+      <VarDeclaration Name="fault_code" Type="INT" />
+    </OutputVars>
+  </InterfaceList>
+  <FBNetwork>
+    <FB ID="13" Name="ED_Work" Type="E_DELAY" x="4240" y="639.9999" Namespace="IEC61499.Standard" />
+    <FB ID="14" Name="ED_Home" Type="E_DELAY" x="1680" y="1840" Namespace="IEC61499.Standard" />
+    <FB ID="15" Name="GateStartWork" Type="E_SWITCH" x="3660" y="620" Namespace="IEC61499.Standard" />
+    <FB ID="16" Name="GateStartHome" Type="E_SWITCH" x="1140" y="1800" Namespace="IEC61499.Standard" />
+    <FB ID="17" Name="WorkTimeoutCheck" Type="E_SWITCH" x="4920" y="639.9999" Namespace="IEC61499.Standard" />
+    <FB ID="18" Name="HomeTimeoutChceck" Type="E_SWITCH" x="2200" y="1820" Namespace="IEC61499.Standard" />
+    <FB ID="19" Name="NOT_Fault" Type="NOT_12669C4E53BA46410" x="2000" y="639.9999" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=1" />
+    </FB>
+    <FB ID="20" Name="NOT_AtWork" Type="NOT_12669C4E53BA46410" x="4920" y="1400" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=1" />
+    </FB>
+    <FB ID="21" Name="NOT_AtHome" Type="NOT_12669C4E53BA46410" x="1960" y="2680" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=1" />
+    </FB>
+    <FB ID="22" Name="AND_StartWork" Type="AND_148CCC6046D4CE74C" x="2960" y="600" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=2" />
+    </FB>
+    <FB ID="23" Name="AND_StartHome" Type="AND_148CCC6046D4CE74C" x="680" y="1800" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=2" />
+    </FB>
+    <FB ID="24" Name="Latch" Type="FaultLatch" x="920" y="520" Namespace="Main" />
+    <Input Name="CMD_WORK" x="1680" y="192" Type="Event" />
+    <Input Name="CMD_HOME" x="140" y="1812" Type="Event" />
+    <Input Name="EnableTimeout" x="1120" y="1372" Type="Data" />
+    <Input Name="atwork" x="4380" y="1612" Type="Data" />
+    <Input Name="athome" x="1320" y="2892" Type="Data" />
+    <Input Name="T_Work" x="3680" y="1132" Type="Data" />
+    <Input Name="T_Home" x="580" y="2272" Type="Data" />
+    <Input Name="FC_WorkTO" x="79.99999" y="672" Type="Data" />
+    <Input Name="FC_HomeTO" x="79.99999" y="912" Type="Data" />
+    <Input Name="RESET" x="160" y="372" Type="Event" />
+    <Frame Name="WorkTimeout" X="2660" Y="320" Width="2900" Height="1500">
+      <Parameter Name="BackgroundColor" Value="AliceBlue" />
+      <Parameter Name="TextColor" Value="Black" />
+      <Parameter Name="Font" Value="Microsoft Sans Serif, 18pt" />
+      <Parameter Name="TextAlignment" Value="TopLeft" />
+      <Parameter Name="MoveStyle" Value="AnyContained" />
+      <Parameter Name="Text" Value="WorkTimeout" />
+      <Parameter Name="NxtLayerIdentifier" Value="" />
+    </Frame>
+    <Frame Name="FRAME1" X="40" Y="1520" Width="2540" Height="1600">
+      <Parameter Name="BackgroundColor" Value="SeaShell" />
+      <Parameter Name="TextColor" Value="Black" />
+      <Parameter Name="Font" Value="Microsoft Sans Serif, 18pt" />
+      <Parameter Name="TextAlignment" Value="TopRight" />
+      <Parameter Name="MoveStyle" Value="AnyContained" />
+      <Parameter Name="Text" Value="Home Timeout" />
+      <Parameter Name="NxtLayerIdentifier" Value="" />
+    </Frame>
+    <Frame Name="FRAME2" X="40" Y="40" Width="2540" Height="1440">
+      <Parameter Name="BackgroundColor" Value="Thistle" />
+      <Parameter Name="TextColor" Value="Black" />
+      <Parameter Name="Font" Value="Microsoft Sans Serif, 18pt" />
+      <Parameter Name="TextAlignment" Value="TopLeft" />
+      <Parameter Name="MoveStyle" Value="AnyContained" />
+      <Parameter Name="Text" Value="Memory of Fault" />
+      <Parameter Name="NxtLayerIdentifier" Value="" />
+    </Frame>
+    <Output Name="FAULT" x="1680" y="91.99999" Type="Event" />
+    <Output Name="CLEARED" x="1660" y="312" Type="Event" />
+    <Output Name="fault_active" x="1800" y="1172" Type="Data" />
+    <Output Name="fault_code" x="1800" y="1072" Type="Data" />
+    <EventConnections>
+      <Connection Source="GateStartWork.EO1" Destination="ED_Work.START" dx1="49.72949" />
+      <Connection Source="WorkTimeoutCheck.EO1" Destination="Latch.SET_WORK" dx1="49.729" dx2="110" dy="-289.9999" />
+      <Connection Source="GateStartHome.EO1" Destination="ED_Home.START" dx1="49.72925" />
+      <Connection Source="Latch.FAULT" Destination="FAULT" dx1="50" />
+      <Connection Source="Latch.CLEARED" Destination="CLEARED" dx1="70" />
+      <Connection Source="RESET" Destination="Latch.RESET" dx1="79.75" />
+      <Connection Source="ED_Work.EO" Destination="NOT_AtWork.REQ" dx1="48.5" />
+      <Connection Source="NOT_AtWork.CNF" Destination="WorkTimeoutCheck.EI" dx1="50" dx2="120" dy="-240">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="CMD_WORK" Destination="NOT_Fault.REQ">
+        <Points>
+          <Points>
+            <X>525.3594</X>
+            <Y>55</Y>
+          </Points>
+          <Points>
+            <X>525</X>
+            <Y>55</Y>
+          </Points>
+          <Points>
+            <X>525</X>
+            <Y>130</Y>
+          </Points>
+          <Points>
+            <X>477.5</X>
+            <Y>130</Y>
+          </Points>
+          <Points>
+            <X>477.5</X>
+            <Y>169.999969</Y>
+          </Points>
+          <Points>
+            <X>495</X>
+            <Y>169.999969</Y>
+          </Points>
+        </Points>
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="AND_StartWork.CNF" Destination="GateStartWork.EI" dx1="67.47949" />
+      <Connection Source="NOT_Fault.CNF" Destination="AND_StartWork.REQ" dx1="50" />
+      <Connection Source="ED_Home.EO" Destination="NOT_AtHome.REQ" dx1="48.50012" dx2="50" dy="350" />
+      <Connection Source="AND_StartHome.CNF" Destination="GateStartHome.EI" />
+      <Connection Source="NOT_AtHome.CNF" Destination="HomeTimeoutChceck.EI" dx1="50" dx2="50" dy="-110" />
+      <Connection Source="HomeTimeoutChceck.EO1" Destination="Latch.SET_HOME" dx1="49.729" dx2="90" dy="-300">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="CMD_HOME" Destination="AND_StartHome.REQ" dx1="46.64581" />
+    </EventConnections>
+    <DataConnections>
+      <Connection Source="Latch.fault_active" Destination="NOT_Fault.IN1" dx1="90" />
+      <Connection Source="AND_StartWork.OUT" Destination="GateStartWork.G" dx1="47.47949" />
+      <Connection Source="T_Work" Destination="ED_Work.DT" dx1="47.75" />
+      <Connection Source="atwork" Destination="NOT_AtWork.IN1" dx1="40" />
+      <Connection Source="NOT_AtWork.OUT1" Destination="WorkTimeoutCheck.G" dx1="173.75" dx2="30" dy="-310">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="AND_StartHome.OUT" Destination="GateStartHome.G" dx1="47.47919" />
+      <Connection Source="T_Home" Destination="ED_Home.DT" dx1="433.4792" />
+      <Connection Source="athome" Destination="NOT_AtHome.IN1" />
+      <Connection Source="NOT_AtHome.OUT1" Destination="HomeTimeoutChceck.G" dx1="153.75" dx2="20" dy="-459.9998">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="Latch.fault_active" Destination="fault_active" dx1="130.375">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="Latch.fault_code" Destination="fault_code" dx1="40.375" />
+      <Connection Source="FC_WorkTO" Destination="Latch.FC_WorkTO" dx1="40" />
+      <Connection Source="FC_HomeTO" Destination="Latch.FC_HomeTO" />
+      <Connection Source="NOT_Fault.OUT1" Destination="AND_StartWork.IN1" dx1="296.875">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="EnableTimeout" Destination="AND_StartWork.IN2" dx1="1042.771">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="NOT_Fault.OUT1" Destination="AND_StartHome.IN1" dx1="43.75" dx2="70" dy="150.0001" />
+      <Connection Source="EnableTimeout" Destination="AND_StartHome.IN2" dx1="40" dx2="120" dy="50">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+    </DataConnections>
+  </FBNetwork>
+</FBType>
+*****
+
+Actuator_Fault_CAT_HMI.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="bea113ff-3946-465d-8355-2a783ea0974c" Name="Actuator_Fault_CAT_HMI" Comment="Service Interface Function Block Type" Namespace="Main">
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author=" " Date="2/24/2026" Remarks="template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event ID="480DF6B982A9F71F" Name="INIT">
+        <With Var="QI" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event ID="620EAEB489021EF" Name="INITO">
+        <With Var="QO" />
+        <With Var="STATUS" />
+      </Event>
+      <Event ID="EF7C630F73B43999" Name="CMD_WORK" />
+      <Event ID="EAA81C9C6F2C341B" Name="CMD_HOME" />
+      <Event ID="8135AB3A2EA24370" Name="RESET" />
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration ID="A2FE5819FFA10D6B" Name="QI" Type="BOOL" />
+      <VarDeclaration ID="F53091606BC8F5BE" Name="fault_active" Type="BOOL" />
+      <VarDeclaration ID="C0DAB662F737C5E2" Name="fault_code" Type="INT" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration ID="2FC81C2BA0EE7F5F" Name="QO" Type="BOOL" Comment="Event Output Qualifier" />
+      <VarDeclaration ID="CDA5A601C17F1276" Name="STATUS" Type="STRING" Comment="Service Status" />
+      <VarDeclaration ID="2EA9263159F3B6F4" Name="EnableTimeout" Type="BOOL" />
+      <VarDeclaration ID="C36F7D7ECD0BD4C1" Name="atwork" Type="BOOL" />
+      <VarDeclaration ID="1C10D82B0E982B37" Name="athome" Type="BOOL" />
+      <VarDeclaration ID="74FE06CFFFACC0A6" Name="T_Work" Type="TIME" />
+      <VarDeclaration ID="EE08DAEE604666EA" Name="T_Home" Type="TIME" />
+      <VarDeclaration ID="AF5208E55E0BF236" Name="FC_WorkTO" Type="INT" />
+      <VarDeclaration ID="7D009001AFB527FB" Name="FC_HomeTO" Type="INT" />
+      <VarDeclaration ID="90EE5A128748C154" Name="BTN_WORK" Type="BOOL" />
+      <VarDeclaration ID="A3C16190664F1E32" Name="BTN_HOME" Type="BOOL" />
+      <VarDeclaration ID="FF3F8E9872850AAD" Name="BTN_RESET" Type="BOOL" />
+    </OutputVars>
+  </InterfaceList>
+  <Service RightInterface="" LeftInterface="">
+    <ServiceSequence Name="" />
+  </Service>
+</FBType>
+*****
+
+Area_CAT.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="515faa45-b5f8-4d38-b558-813ad487e523" Name="Area_CAT" Comment="Composite Function Block Type" Namespace="Main">
+  <Attribute Name="HMI.Alias" Value="" />
+  <Attribute Name="Configuration.FB.IDCounter" Value="6" />
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author="Evans_A" Date="7/23/2025" Remarks="template" />
+  <InterfaceList>
+    <Plugs>
+      <AdapterDeclaration Name="AreaHMIAdptrOUT" Type="AreaHMIAdptr" Namespace="Main" x="3500" y="620" />
+    </Plugs>
+  </InterfaceList>
+  <FBNetwork>
+    <FB ID="1" Name="IThis" Type="Area_CAT_HMI" x="2120" y="520" Namespace="Main" />
+    <FB ID="3" Name="plcStart" Type="plcStart" x="839.9999" y="520" Namespace="SE.AppBase">
+      <Parameter Name="Prio" Value="35" />
+      <Parameter Name="Delay" Value="T#0ms" />
+    </FB>
+    <EventConnections>
+      <Connection Source="plcStart.FIRST_INIT" Destination="IThis.INIT" />
+      <Connection Source="AreaHMIAdptrOUT.SMREQ" Destination="IThis.MSTS">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="AreaHMIAdptrOUT.SCTREQ" Destination="IThis.CTSTS">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="AreaHMIAdptrOUT.LLFREQ" Destination="IThis.LLFSTS">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="AreaHMIAdptrOUT.ANREQ" Destination="IThis.INIT_NAME">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="IThis.INITO" Destination="plcStart.ACK_FIRST" dx1="48.771" dx2="49.99994" dy="-110" />
+      <Connection Source="IThis.MCNF" Destination="AreaHMIAdptrOUT.MCNF" dx1="148.771" />
+      <Connection Source="IThis.CTCNF" Destination="AreaHMIAdptrOUT.CTCNF" dx1="128.771" />
+      <Connection Source="IThis.FRCNF" Destination="AreaHMIAdptrOUT.FRCNF" dx1="108.771" />
+    </EventConnections>
+    <DataConnections>
+      <Connection Source="plcStart.Started" Destination="IThis.QI">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="AreaHMIAdptrOUT.SystemMode" Destination="IThis.System_Mode">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="AreaHMIAdptrOUT.SystemCycleType" Destination="IThis.System_Cycle_Type">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="AreaHMIAdptrOUT.LL_FaultStatus" Destination="IThis.LL_Fault_Status">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="AreaHMIAdptrOUT.AreaName" Destination="IThis.Area_Name">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="IThis.Mode" Destination="AreaHMIAdptrOUT.Mode" dx1="130" />
+      <Connection Source="IThis.CycleType" Destination="AreaHMIAdptrOUT.CycleType" dx1="150" />
+      <Connection Source="IThis.Fault_Reset" Destination="AreaHMIAdptrOUT.FaultReset" dx1="170" />
+    </DataConnections>
+  </FBNetwork>
+</FBType>
+*****
+
+Area_CAT_HMI.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="e77e9062-3b6c-40bb-ad3c-346f2b55c437" Name="Area_CAT_HMI" Comment="Service Interface Function Block Type" Namespace="Main">
+  <Attribute Name="Configuration.FB.IDCounter" Value="0" />
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author="Evans_A" Date="7/23/2025" Remarks="template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event ID="7B41061E43F655B" Name="INIT">
+        <With Var="QI" />
+      </Event>
+      <Event ID="39CB13E58ABA192D" Name="MSTS">
+        <With Var="System_Mode" />
+      </Event>
+      <Event ID="C5691FC295BDC1D2" Name="CTSTS">
+        <With Var="System_Cycle_Type" />
+      </Event>
+      <Event ID="398F0B9BE87FDB72" Name="LLFSTS">
+        <With Var="LL_Fault_Status" />
+      </Event>
+      <Event ID="7E564FF6AB4CDE89" Name="INIT_NAME">
+        <With Var="Area_Name" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event ID="7D0C17DCE1F3D4C2" Name="INITO">
+        <With Var="QO" />
+        <With Var="STATUS" />
+      </Event>
+      <Event ID="D4C5E237FDBE4B2E" Name="MCNF">
+        <With Var="Mode" />
+      </Event>
+      <Event ID="2159C82562AA0A9A" Name="CTCNF">
+        <With Var="CycleType" />
+      </Event>
+      <Event ID="C97E69364304E2F9" Name="FRCNF">
+        <With Var="Fault_Reset" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration ID="70D61BBDFF635508" Name="QI" Type="BOOL" />
+      <VarDeclaration ID="A1B0947624B6296C" Name="System_Mode" Type="INT" />
+      <VarDeclaration ID="8808DA607632E6D8" Name="System_Cycle_Type" Type="INT" />
+      <VarDeclaration ID="22621D1831577910" Name="LL_Fault_Status" Type="BOOL" />
+      <VarDeclaration ID="4CCCEF24A06F2ED5" Name="Area_Name" Type="STRING" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration ID="1DFA3EE3FCA6D46D" Name="QO" Type="BOOL" Comment="Event Output Qualifier" />
+      <VarDeclaration ID="801F796C5643CE1E" Name="STATUS" Type="STRING" Comment="Service Status" />
+      <VarDeclaration ID="38488A1E01A33DBB" Name="Mode" Type="INT" />
+      <VarDeclaration ID="666362EF723C28DA" Name="CycleType" Type="INT" />
+      <VarDeclaration ID="EDEE1022B76084D5" Name="Fault_Reset" Type="BOOL" />
+    </OutputVars>
+  </InterfaceList>
+  <Service RightInterface="" LeftInterface="">
+    <ServiceSequence Name="" />
+  </Service>
+</FBType>
+*****
+
+Five_State_Actuator_CAT.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="cd255d29-7b6a-43a0-8e33-8202e83afc82" Name="Five_State_Actuator_CAT" Comment="Composite Function Block Type" Namespace="Main">
+  <Attribute Name="HMI.Alias" Value="" />
+  <Attribute Name="Configuration.FB.IDCounter" Value="49" />
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author=" " Date="10/7/2025" Remarks="template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT" Comment="Initialization Request">
+        <With Var="actuator_name" />
+        <With Var="actuator_id" />
+        <With Var="enableToWorkFaultTimeout" />
+        <With Var="faultTimeoutWork" />
+        <With Var="faultTimeoutHome" />
+        <With Var="toHomeTime" />
+        <With Var="toWorkTime" />
+        <With Var="WorkSensorFitted" />
+        <With Var="HomeSensorFitted" />
+        <With Var="enableToHomeFaultTimeout" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO" Comment="Initialization Confirm" />
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="actuator_name" Type="STRING[15]" />
+      <VarDeclaration Name="actuator_id" Type="INT" />
+      <VarDeclaration Name="enableToWorkFaultTimeout" Type="BOOL" Comment="Input event qualifier" />
+      <VarDeclaration Name="faultTimeoutWork" Type="TIME" />
+      <VarDeclaration Name="enableToHomeFaultTimeout" Type="BOOL" Comment="Argument" />
+      <VarDeclaration Name="faultTimeoutHome" Type="TIME" />
+      <VarDeclaration Name="WorkSensorFitted" Type="BOOL" Comment="Argument" />
+      <VarDeclaration Name="toWorkTime" Type="TIME" Comment="Delay Time" />
+      <VarDeclaration Name="HomeSensorFitted" Type="BOOL" Comment="Argument" />
+      <VarDeclaration Name="toHomeTime" Type="TIME" Comment="Delay Time" />
+    </InputVars>
+    <Sockets>
+      <AdapterDeclaration Name="stationAdptr_in" Type="CaSAdptr" Namespace="Main" x="2340" y="5560" />
+      <AdapterDeclaration Name="stateRprtCmd_in" Type="stateRptCmdAdptr" Namespace="Main" x="1820" y="580" />
+    </Sockets>
+    <Plugs>
+      <AdapterDeclaration Name="stationAdptr_out" Type="CaSAdptr" Namespace="Main" x="6480" y="5560" />
+      <AdapterDeclaration Name="stateRprtCmd_out" Type="stateRptCmdAdptr" Namespace="Main" x="6632.78" y="520" />
+    </Plugs>
+  </InterfaceList>
+  <FBNetwork>
+    <FB ID="1" Name="ActuatorCore" Type="FiveStateActuator" x="4740" y="1520" Namespace="Main" />
+    <FB ID="3" Name="IThis" Type="Five_State_Actuator_CAT_HMI" x="6460" y="4000" Namespace="Main">
+      <Parameter Name="QI" Value="TRUE" />
+    </FB>
+    <FB ID="10" UID="8" Name="Inputs" Type="SYMLINKMULTIVARDST_277E97BEC1451D2C" x="1720" y="1520" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.System#I:=2;VALUE${I}:BOOL,BOOL" />
+      <Parameter Name="NAME1" Value="'$${PATH}athome'" />
+      <Parameter Name="NAME2" Value="'$${PATH}atwork'" />
+    </FB>
+    <FB ID="28" UID="9" Name="Output" Type="SYMLINKMULTIVARSRC_277E97BEC1451D2C" x="7240" y="1520" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.System#I:=2;VALUE${I}:BOOL,BOOL" />
+      <Parameter Name="NAME1" Value="'$${PATH}OutputToHome'" />
+      <Parameter Name="NAME2" Value="'$${PATH}OutputToWork'" />
+    </FB>
+    <FB ID="18" Name="StateHandling" Type="updateComponentState" x="4584.385" y="460" Namespace="Main" />
+    <FB ID="19" Name="FB1" Type="E_SPLIT" x="4240" y="1640" Namespace="IEC61499.Standard" />
+    <FB ID="20" Name="FB2" Type="E_SPLIT" x="6400" y="1580" Namespace="IEC61499.Standard" />
+    <FB ID="21" Name="FB3" Type="E_SPLIT" x="6380" y="2220" Namespace="IEC61499.Standard" />
+    <FB ID="22" Name="FB4" Type="E_SPLIT" x="3560" y="5220" Namespace="IEC61499.Standard" />
+    <FB ID="23" Name="FaultHandling" Type="faultDetection" x="4520" y="3960" Namespace="Main" />
+    <FB ID="24" Name="FB5" Type="E_SPLIT" x="5980" y="1580" Namespace="IEC61499.Standard" />
+    <FB ID="25" Name="FB6" Type="E_SPLIT" x="3560" y="5640" Namespace="IEC61499.Standard" />
+    <FB ID="26" Name="FB7" Type="E_SPLIT" x="5720" y="4020" Namespace="IEC61499.Standard" />
+    <FB ID="27" Name="FB8" Type="E_SPLIT" x="3860" y="1640" Namespace="IEC61499.Standard" />
+    <FB ID="29" Name="toWorkTimer" Type="E_DELAY" x="3100" y="2220" Namespace="IEC61499.Standard" />
+    <FB ID="30" Name="toHomeTimer" Type="E_DELAY" x="3100" y="3020" Namespace="IEC61499.Standard" />
+    <FB ID="31" Name="FB9" Type="E_SWITCH" x="2700" y="2220" Namespace="IEC61499.Standard" />
+    <FB ID="32" Name="FB10" Type="E_SWITCH" x="2700" y="3020" Namespace="IEC61499.Standard" />
+    <FB ID="33" Name="FB11" Type="AND_148CCC6046D4CE74C" x="2260" y="2220" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=2" />
+    </FB>
+    <FB ID="34" Name="FB12" Type="AND_148CCC6046D4CE74C" x="2260" y="3020" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=2" />
+    </FB>
+    <FB ID="36" Name="InputHandler" Type="No_Sensor_Handler" x="4800" y="3040" Namespace="Main" />
+    <FB ID="38" Name="FB14" Type="AND_148CCC6046D4CE74C" x="2440" y="3960" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=2" />
+    </FB>
+    <FB ID="39" Name="FB15" Type="E_MERGE" x="3120" y="3960" Namespace="IEC61499.Standard" />
+    <FB ID="41" Name="FB17" Type="AND_148CCC6046D4CE74C" x="2440" y="4440" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=2" />
+    </FB>
+    <FB ID="42" Name="FB18" Type="OR_148CCC6046D4CE74C" x="1780" y="5740" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=2" />
+    </FB>
+    <FB ID="43" Name="FB19" Type="E_MERGE" x="1340" y="5740" Namespace="IEC61499.Standard" />
+    <FB ID="44" Name="FB20" Type="E_SPLIT" x="4060" y="5400" Namespace="IEC61499.Standard" />
+    <FB ID="45" Name="FB21" Type="E_MERGE" x="1880" y="2200" Namespace="IEC61499.Standard" />
+    <FB ID="46" Name="FB22" Type="E_MERGE" x="1880" y="3000" Namespace="IEC61499.Standard" />
+    <FB ID="48" Name="FB23" Type="NOT_12669C4E53BA46410" x="1420" y="2280" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=1" />
+    </FB>
+    <FB ID="49" Name="FB24" Type="NOT_12669C4E53BA46410" x="1360" y="3080" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=1" />
+    </FB>
+    <Input Name="INIT" x="1320" y="472" Type="Event" />
+    <Input Name="actuator_name" x="1320" y="1032" Type="Data" />
+    <Input Name="actuator_id" x="1320" y="932" Type="Data" />
+    <Input Name="faultTimeoutWork" x="3440" y="4652" Type="Data" />
+    <Input Name="enableToWorkFaultTimeout" x="1300" y="4792" Type="Data" />
+    <Input Name="faultTimeoutHome" x="3440" y="4532" Type="Data" />
+    <Input Name="toWorkTime" x="1220" y="2752" Type="Data" />
+    <Input Name="toHomeTime" x="1240" y="3572" Type="Data" />
+    <Input Name="WorkSensorFitted" x="1220" y="2652" Type="Data" />
+    <Input Name="HomeSensorFitted" x="1240" y="3472" Type="Data" />
+    <Input Name="enableToHomeFaultTimeout" x="1300" y="4312" Type="Data" />
+    <Frame Name="FRAME1" X="1200" Y="5120" Width="6700" Height="1280">
+      <Parameter Name="BackgroundColor" Value="Honeydew" />
+      <Parameter Name="TextColor" Value="Black" />
+      <Parameter Name="Font" Value="Microsoft Sans Serif, 10pt" />
+      <Parameter Name="TextAlignment" Value="TopRight" />
+      <Parameter Name="MoveStyle" Value="AnyContained" />
+      <Parameter Name="Text" Value="Mode and Cycle Type Handling" />
+      <Parameter Name="NxtLayerIdentifier" Value="" />
+    </Frame>
+    <Frame Name="FRAME2" X="6220" Y="3840" Width="1680" Height="1220">
+      <Parameter Name="BackgroundColor" Value="Cornsilk" />
+      <Parameter Name="TextColor" Value="Black" />
+      <Parameter Name="Font" Value="Microsoft Sans Serif, 10pt" />
+      <Parameter Name="TextAlignment" Value="TopRight" />
+      <Parameter Name="MoveStyle" Value="AnyContained" />
+      <Parameter Name="Text" Value="HMI &amp; OPCUA Connectivity" />
+      <Parameter Name="NxtLayerIdentifier" Value="" />
+    </Frame>
+    <Frame Name="FRAME3" X="1200" Y="360" Width="6700" Height="900">
+      <Parameter Name="BackgroundColor" Value="AliceBlue" />
+      <Parameter Name="TextColor" Value="Black" />
+      <Parameter Name="Font" Value="Microsoft Sans Serif, 10pt" />
+      <Parameter Name="TextAlignment" Value="TopRight" />
+      <Parameter Name="MoveStyle" Value="AnyContained" />
+      <Parameter Name="Text" Value="State Report and Command" />
+      <Parameter Name="NxtLayerIdentifier" Value="" />
+    </Frame>
+    <Frame Name="FRAME4" X="1200" Y="1320" Width="6700" Height="2460">
+      <Parameter Name="BackgroundColor" Value="LavenderBlush" />
+      <Parameter Name="TextColor" Value="Black" />
+      <Parameter Name="Font" Value="Microsoft Sans Serif, 10pt" />
+      <Parameter Name="TextAlignment" Value="TopRight" />
+      <Parameter Name="MoveStyle" Value="AnyContained" />
+      <Parameter Name="Text" Value="Core Function and I/O" />
+      <Parameter Name="NxtLayerIdentifier" Value="" />
+    </Frame>
+    <Frame Name="FRAME5" X="1200" Y="3840" Width="4980" Height="1220">
+      <Parameter Name="BackgroundColor" Value="AliceBlue" />
+      <Parameter Name="TextColor" Value="Black" />
+      <Parameter Name="Font" Value="Microsoft Sans Serif, 10pt" />
+      <Parameter Name="TextAlignment" Value="TopRight" />
+      <Parameter Name="MoveStyle" Value="AnyContained" />
+      <Parameter Name="Text" Value="Faults" />
+      <Parameter Name="NxtLayerIdentifier" Value="" />
+    </Frame>
+    <Output Name="INITO" x="7520" y="4012" Type="Event" />
+    <EventConnections>
+      <Connection Source="FB1.EO1" Destination="ActuatorCore.input_event">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="INIT" Destination="StateHandling.INIT" dx1="1497.901">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="FB2.EO1" Destination="StateHandling.REQ" dx1="50" dx2="134.3848" dy="-169.9999" />
+      <Connection Source="StateHandling.INITO" Destination="Inputs.INIT">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="stateRprtCmd_in.CNF" Destination="StateHandling.BREQ" />
+      <Connection Source="StateHandling.BCNF" Destination="stateRprtCmd_out.CNF" />
+      <Connection Source="StateHandling.CNF" Destination="ActuatorCore.pst_event">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="stationAdptr_in.INIT" Destination="stationAdptr_out.INIT">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="FB4.EO2" Destination="stationAdptr_out.MCTRL" dx1="1234.313">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="stationAdptr_in.CTCTRL" Destination="stationAdptr_out.CTCTRL">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="stationAdptr_in.FRCTRL" Destination="FB6.EI" dx1="113.4792" />
+      <Connection Source="FB4.EO1" Destination="ActuatorCore.mode_event">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="Inputs.INITO" Destination="ActuatorCore.INIT">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="InputHandler.CNF" Destination="FB8.EI" dx1="50" dx2="30" dy="-170" />
+      <Connection Source="ActuatorCore.pst_out" Destination="FB5.EI" dx1="70" />
+      <Connection Source="ActuatorCore.output_event" Destination="FB3.EI" dx1="208.2085">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="stationAdptr_in.MCTRL" Destination="FB4.EI" dx1="73.47925" />
+      <Connection Source="FB5.EO1" Destination="FB2.EI" />
+      <Connection Source="FB5.EO2" Destination="FaultHandling.PST_EVENT">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="FB6.EO2" Destination="stationAdptr_out.FRCTRL" dx1="44.31274" />
+      <Connection Source="FB6.EO1" Destination="FB20.EI" dx1="107.1563">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="FaultHandling.FAULT_CHANGE" Destination="FB7.EI" dx1="40" />
+      <Connection Source="FB8.EO1" Destination="FB1.EI" />
+      <Connection Source="FB8.EO2" Destination="FaultHandling.INPUT_EVENT">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="ActuatorCore.INITO" Destination="Output.INIT">
+        <Points>
+          <Points>
+            <X>1417.94788</X>
+            <Y>390</Y>
+          </Points>
+          <Points>
+            <X>1427.94788</X>
+            <Y>390</Y>
+          </Points>
+          <Points>
+            <X>1427.94788</X>
+            <Y>377.5</Y>
+          </Points>
+          <Points>
+            <X>1677.5</X>
+            <Y>377.5</Y>
+          </Points>
+          <Points>
+            <X>1677.5</X>
+            <Y>390</Y>
+          </Points>
+          <Points>
+            <X>1805</X>
+            <Y>390</Y>
+          </Points>
+        </Points>
+      </Connection>
+      <Connection Source="FB3.EO1" Destination="Output.REQ" dx1="94.3125">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="FaultHandling.INITO" Destination="IThis.INIT">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="FB3.EO2" Destination="IThis.output_event" dx1="44.3125" dx2="70" dy="230" />
+      <Connection Source="FB2.EO2" Destination="IThis.pst_event" dx1="44.3125" dx2="120" dy="230">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="FB1.EO2" Destination="IThis.input_event">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="FB7.EO1" Destination="IThis.FAULT_EVENT" dx1="94.3125">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="IThis.INITO" Destination="INITO" />
+      <Connection Source="IThis.cmd_event" Destination="ActuatorCore.setup_event">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="stationAdptr_out.LLM" Destination="stationAdptr_in.LLM">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="stationAdptr_out.LLCT" Destination="stationAdptr_in.LLCT">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="FB9.EO1" Destination="toWorkTimer.START" dx1="70" />
+      <Connection Source="FB9.EO0" Destination="toWorkTimer.STOP" dx1="60" />
+      <Connection Source="FB10.EO1" Destination="toHomeTimer.START" dx1="70" />
+      <Connection Source="FB10.EO0" Destination="toHomeTimer.STOP" dx1="60" />
+      <Connection Source="ActuatorCore.output_event" Destination="FB21.EI1">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="ActuatorCore.output_event" Destination="FB22.EI1">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="FB12.CNF" Destination="FB10.EI" />
+      <Connection Source="StateHandling.INITO" Destination="InputHandler.INIT">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="Inputs.CNF" Destination="InputHandler.inputEvent" dx1="1491.625">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="toWorkTimer.EO" Destination="InputHandler.toWorkTimerEvent" dx1="138.5">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="toHomeTimer.EO" Destination="InputHandler.toHomeTimerEvent" dx1="48.5" />
+      <Connection Source="Inputs.INITO" Destination="FB14.REQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="FB14.CNF" Destination="FB15.EI1" />
+      <Connection Source="FB15.EO" Destination="FaultHandling.INIT" />
+      <Connection Source="FB17.CNF" Destination="FB15.EI2" dx1="97.47925">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="Inputs.INITO" Destination="FB17.REQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="FB11.CNF" Destination="FB9.EI" />
+      <Connection Source="FB19.EO" Destination="FB18.REQ" />
+      <Connection Source="FB18.CNF" Destination="stationAdptr_in.LLF" dx1="50" />
+      <Connection Source="FB7.EO2" Destination="FB19.EI1">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="stationAdptr_out.LLF" Destination="FB19.EI2">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="FB20.EO2" Destination="FaultHandling.RESET" dx1="134.312" dx2="140" dy="-300">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="FB20.EO1" Destination="ActuatorCore.RESET">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="FB21.EO" Destination="FB11.REQ" dx1="40.77075" />
+      <Connection Source="Inputs.INITO" Destination="FB23.REQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="FB22.EO" Destination="FB12.REQ" dx1="40.77075" />
+      <Connection Source="Inputs.INITO" Destination="FB24.REQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="FB23.CNF" Destination="FB21.EI2" dx1="51.875" />
+      <Connection Source="FB24.CNF" Destination="FB22.EI2" dx1="50" />
+    </EventConnections>
+    <DataConnections>
+      <Connection Source="InputHandler.atHomeOutput" Destination="ActuatorCore.athome" dx1="114.75" dx2="130" dy="-560">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="InputHandler.atWorkOutput" Destination="ActuatorCore.atwork" dx1="170" dx2="110" dy="-680">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="ActuatorCore.current_state_to_process" Destination="StateHandling.state_sts" dx1="168.2085" dx2="40" dy="-960">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="stateRprtCmd_in.CNFD" Destination="StateHandling.component_state_in" />
+      <Connection Source="actuator_id" Destination="StateHandling.id" dx1="1748.917">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="StateHandling.component_state_out" Destination="stateRprtCmd_out.CNFD" dx1="111.4697" />
+      <Connection Source="actuator_name" Destination="StateHandling.name" dx1="1612.021">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="StateHandling.state_cmd" Destination="ActuatorCore.state_val">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="stationAdptr_in.ModeCMD" Destination="stationAdptr_out.ModeCMD" />
+      <Connection Source="stationAdptr_in.CycleTypeCMD" Destination="stationAdptr_out.CycleTypeCMD" />
+      <Connection Source="stationAdptr_in.ParentName" Destination="stationAdptr_out.ParentName" />
+      <Connection Source="stationAdptr_in.FaultResetCMD" Destination="stationAdptr_out.FaultResetCMD" />
+      <Connection Source="stationAdptr_in.ModeCMD" Destination="ActuatorCore.mode">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="ActuatorCore.current_state_to_process" Destination="FaultHandling.actuator_state">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="faultTimeoutWork" Destination="FaultHandling.T_Work" />
+      <Connection Source="enableToWorkFaultTimeout" Destination="FB17.IN2" dx1="40" />
+      <Connection Source="faultTimeoutHome" Destination="FaultHandling.T_Home" />
+      <Connection Source="Inputs.VALUE1" Destination="FaultHandling.athome">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="Inputs.VALUE2" Destination="FaultHandling.atwork">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="stationAdptr_out.LL_Mode" Destination="stationAdptr_in.LL_Mode" dx1="40.00049" dx2="120" dy="280.0005">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="stationAdptr_out.LL_CycleType" Destination="stationAdptr_in.LL_CycleType" dx1="40.00049" dx2="60" dy="160.0005">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="ActuatorCore.outputToHome" Destination="Output.VALUE1" dx1="328.2085">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="ActuatorCore.outputToWork" Destination="IThis.toWorkPLC">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="ActuatorCore.outputToHome" Destination="IThis.toHomePLC">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="ActuatorCore.current_state_to_process" Destination="IThis.current_state_to_process">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="FaultHandling.fault_active" Destination="IThis.fault_active" dx1="370.0625">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="FaultHandling.fault_code" Destination="IThis.fault_code" dx1="47.3335" />
+      <Connection Source="IThis.toWork" Destination="ActuatorCore.toWorkSetup" dx1="90" dx2="40" dy="-1840">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="IThis.toHome" Destination="ActuatorCore.toHomeSetup" dx1="190.5835" dx2="80" dy="-2000">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="toWorkTime" Destination="toWorkTimer.DT" dx1="1276.708">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="toHomeTime" Destination="toHomeTimer.DT" dx1="1222.438">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="ActuatorCore.outputToWork" Destination="FB11.IN1">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="FB11.OUT" Destination="FB9.G" dx1="40" />
+      <Connection Source="ActuatorCore.outputToHome" Destination="FB12.IN1">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="WorkSensorFitted" Destination="FB23.IN1" dx1="120" dx2="30" dy="-62">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="FB12.OUT" Destination="FB10.G" dx1="40" />
+      <Connection Source="HomeSensorFitted" Destination="FB24.IN1" dx1="124.2917" dx2="30" dy="-62">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="InputHandler.atHomeOutput" Destination="IThis.atHome">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="InputHandler.atWorkOutput" Destination="IThis.atWork">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="enableToHomeFaultTimeout" Destination="FB14.IN2" dx1="40" />
+      <Connection Source="HomeSensorFitted" Destination="FB14.IN1">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <Points>
+          <Points>
+            <X>461.552063</X>
+            <Y>854.999939</Y>
+          </Points>
+          <Points>
+            <X>557.5</X>
+            <Y>854.999939</Y>
+          </Points>
+          <Points>
+            <X>557.5</X>
+            <Y>1050</Y>
+          </Points>
+          <Points>
+            <X>414.999969</X>
+            <Y>1050</Y>
+          </Points>
+        </Points>
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="FB14.OUT" Destination="FaultHandling.enableToHomeFaultTimeout" dx1="237.4792">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="FB17.OUT" Destination="FaultHandling.enableToWorkFaultTimeout" dx1="237.4792">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="WorkSensorFitted" Destination="FB17.IN1">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <Points>
+          <Points>
+            <X>457.984375</X>
+            <Y>700</Y>
+          </Points>
+          <Points>
+            <X>562.5</X>
+            <Y>700</Y>
+          </Points>
+          <Points>
+            <X>562.5</X>
+            <Y>1170</Y>
+          </Points>
+          <Points>
+            <X>414.999969</X>
+            <Y>1170</Y>
+          </Points>
+        </Points>
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="FaultHandling.fault_active" Destination="FB18.IN1">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="FB18.OUT" Destination="stationAdptr_in.LL_Fault" />
+      <Connection Source="stationAdptr_out.LL_Fault" Destination="FB18.IN2">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="Inputs.VALUE1" Destination="InputHandler.atHomeInput" dx1="1431.625">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="Inputs.VALUE2" Destination="InputHandler.atWorkInput" dx1="1371.625">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="ActuatorCore.outputToWork" Destination="Output.VALUE2" dx1="408.2085">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="FB23.OUT1" Destination="FB11.IN2" />
+      <Connection Source="FB24.OUT1" Destination="FB12.IN2" />
+    </DataConnections>
+  </FBNetwork>
+</FBType>
+*****
+
+Five_State_Actuator_CAT_HMI.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="1771d338-f821-4743-8069-114e1cbc7039" Name="Five_State_Actuator_CAT_HMI" Comment="Service Interface Function Block Type" Namespace="Main">
+  <Attribute Name="Configuration.FB.IDCounter" Value="0" />
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author=" " Date="10/7/2025" Remarks="template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event ID="812ABDECE5B349B1" Name="INIT">
+        <With Var="QI" />
+      </Event>
+      <Event ID="557A457210464405" Name="output_event">
+        <With Var="toWorkPLC" />
+        <With Var="toHomePLC" />
+      </Event>
+      <Event ID="AC4FEDA45511966B" Name="pst_event">
+        <With Var="current_state_to_process" />
+      </Event>
+      <Event ID="32C34DE988B38BC7" Name="input_event">
+        <With Var="atHome" />
+        <With Var="atWork" />
+      </Event>
+      <Event ID="64AC376D32E764A5" Name="FAULT_EVENT">
+        <With Var="fault_active" />
+        <With Var="fault_code" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event ID="55439FC4857F3417" Name="INITO">
+        <With Var="QO" />
+        <With Var="STATUS" />
+      </Event>
+      <Event ID="1466770D1E57FFA6" Name="cmd_event">
+        <With Var="toWork" />
+        <With Var="toHome" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration ID="D95FE5F35BE12793" Name="QI" Type="BOOL" />
+      <VarDeclaration ID="EDF06CBD5B111B9" Name="toHomePLC" Type="BOOL" />
+      <VarDeclaration ID="EEA9F25CA901862A" Name="toWorkPLC" Type="BOOL" />
+      <VarDeclaration ID="5A0130953765A4BF" Name="current_state_to_process" Type="INT" />
+      <VarDeclaration ID="ECEBFA6647C5C93E" Name="atHome" Type="BOOL" />
+      <VarDeclaration ID="14101F437AACAB3C" Name="atWork" Type="BOOL" />
+      <VarDeclaration ID="251FA560E07D0DDB" Name="fault_active" Type="BOOL" />
+      <VarDeclaration ID="9ADDF62C69234092" Name="fault_code" Type="INT" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration ID="C6CEEB1CE7E25FAD" Name="QO" Type="BOOL" Comment="Event Output Qualifier" />
+      <VarDeclaration ID="5F11DCDD5AEDC84D" Name="STATUS" Type="STRING" Comment="Service Status" />
+      <VarDeclaration ID="538851AD4DF5188F" Name="toHome" Type="BOOL" />
+      <VarDeclaration ID="97158FE1FF69536F" Name="toWork" Type="BOOL" />
+    </OutputVars>
+  </InterfaceList>
+  <Service RightInterface="" LeftInterface="">
+    <ServiceSequence Name="" />
+  </Service>
+</FBType>
+*****
+
+Process1_Generic.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="02b40928-95f4-45fe-883f-901880e94889" Name="Process1_Generic" Comment="Composite Function Block Type" Namespace="Main">
+  <Attribute Name="HMI.Alias" Value="" />
+  <Attribute Name="Configuration.FB.IDCounter" Value="37" />
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author=" " Date="9/29/2025" Remarks="template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT">
+        <With Var="process_name" />
+        <With Var="process_id" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO" />
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="process_name" Type="STRING[15]" />
+      <VarDeclaration Name="process_id" Type="INT" InitialValue="10" />
+    </InputVars>
+    <Sockets>
+      <AdapterDeclaration ID="23" Name="stateRptCmdAdptr_in" Type="stateRptCmdAdptr" Namespace="Main" x="2000" y="680" />
+      <AdapterDeclaration ID="25" Name="stationAdptr_in" Type="CaSAdptr" Namespace="Main" x="720" y="2560" />
+    </Sockets>
+    <Plugs>
+      <AdapterDeclaration Name="stateRptCmdAdptr_out" Type="stateRptCmdAdptr" Namespace="Main" x="4100" y="680" />
+      <AdapterDeclaration Name="stationAdptr_out" Type="CaSAdptr" Namespace="Main" x="4720" y="2580" />
+    </Plugs>
+  </InterfaceList>
+  <FBNetwork>
+    <FB ID="21" Name="ProcessHandler" Type="ProcessStateBusHandler" x="2780" y="1240" Namespace="Main" />
+    <FB ID="22" Name="ProcessEngine" Type="ProcessRuntime_Generic_v1" x="1240" y="1280" Namespace="Main" />
+    <FB ID="27" Name="IThis" Type="Process1_Generic_HMI" x="5340" y="1440" Namespace="Main">
+      <Parameter Name="QI" Value="TRUE" />
+    </FB>
+    <FB ID="30" Name="TSString" Type="ANY2ANY_712C23814B844B70" x="3980" y="2060" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=1;IN${CNT}:STRING(30);OUT${CNT}:STRING" />
+    </FB>
+    <FB ID="32" Name="PSString" Type="ANY2ANY_712C23814B844B70" x="3980" y="2480" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=1;IN${CNT}:STRING(30);OUT${CNT}:STRING" />
+    </FB>
+    <FB ID="34" Name="NSString" Type="ANY2ANY_712C23814B844B70" x="4000" y="2920" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=1;IN${CNT}:STRING(30);OUT${CNT}:STRING" />
+    </FB>
+    <FB ID="36" Name="ANString" Type="ANY2ANY_227EF3D2FFD8A2CBC" x="5440" y="760" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=1;IN${CNT}:STRING(150);OUT${CNT}:STRING" />
+    </FB>
+    <Input Name="INIT" x="2420" y="432" Type="Event" />
+    <Input Name="process_name" x="1740" y="2352" Type="Data" />
+    <Input Name="process_id" x="1940" y="2192" Type="Data" />
+    <Output Name="INITO" x="5640" y="1172" Type="Event" />
+    <EventConnections>
+      <Connection Source="ProcessEngine.CMDREQ" Destination="ProcessHandler.CMDREQ" dx1="40.89587" />
+      <Connection Source="ProcessHandler.BCNF" Destination="ProcessEngine.state_change" dx1="80" dx2="70" dy="-170" />
+      <Connection Source="stateRptCmdAdptr_in.CNF" Destination="ProcessHandler.BREQ" dx1="9.041748">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="INIT" Destination="ProcessHandler.INIT" dx1="41.41675" />
+      <Connection Source="ProcessHandler.INITO" Destination="ProcessEngine.INIT" dx1="100" dx2="30" dy="-110" />
+      <Connection Source="ProcessEngine.SCNF" Destination="TSString.REQ" dx1="40.89587" />
+      <Connection Source="ProcessEngine.SCNF" Destination="PSString.REQ" dx1="440.8959" />
+      <Connection Source="ProcessEngine.SCNF" Destination="NSString.REQ" dx1="440.8959" />
+      <Connection Source="ProcessEngine.SCNF" Destination="ANString.REQ">
+        <Points>
+          <Points>
+            <X>497.276031</X>
+            <Y>360</Y>
+          </Points>
+          <Points>
+            <X>519.776</X>
+            <Y>360</Y>
+          </Points>
+          <Points>
+            <X>519.776</X>
+            <Y>292.5</Y>
+          </Points>
+          <Points>
+            <X>1137.5</X>
+            <Y>292.5</Y>
+          </Points>
+          <Points>
+            <X>1137.5</X>
+            <Y>200</Y>
+          </Points>
+          <Points>
+            <X>1355</X>
+            <Y>200</Y>
+          </Points>
+        </Points>
+      </Connection>
+      <Connection Source="stationAdptr_in.MCTRL" Destination="ProcessEngine.MREQ" dx1="73.47925" dx2="30" dy="-169.9998" />
+      <Connection Source="stationAdptr_in.CTCTRL" Destination="ProcessEngine.CTREQ" dx1="93.47925" dx2="30" dy="-229.9998" />
+      <Connection Source="ProcessHandler.BCNF" Destination="stateRptCmdAdptr_out.CNF" dx1="75.85425" />
+      <Connection Source="stationAdptr_in.INIT" Destination="stationAdptr_out.INIT">
+        <Points>
+          <Points>
+            <X>359.1302</X>
+            <Y>649.999939</Y>
+          </Points>
+          <Points>
+            <X>404.1302</X>
+            <Y>649.999939</Y>
+          </Points>
+          <Points>
+            <X>404.1302</X>
+            <Y>702.5</Y>
+          </Points>
+          <Points>
+            <X>1092.5</X>
+            <Y>702.5</Y>
+          </Points>
+          <Points>
+            <X>1092.5</X>
+            <Y>655</Y>
+          </Points>
+          <Points>
+            <X>1175</X>
+            <Y>655</Y>
+          </Points>
+        </Points>
+      </Connection>
+      <Connection Source="stationAdptr_in.MCTRL" Destination="stationAdptr_out.MCTRL">
+        <Points>
+          <Points>
+            <X>359.1302</X>
+            <Y>664.999939</Y>
+          </Points>
+          <Points>
+            <X>399.1302</X>
+            <Y>664.999939</Y>
+          </Points>
+          <Points>
+            <X>399.1302</X>
+            <Y>702.5</Y>
+          </Points>
+          <Points>
+            <X>1092.5</X>
+            <Y>702.5</Y>
+          </Points>
+          <Points>
+            <X>1092.5</X>
+            <Y>670</Y>
+          </Points>
+          <Points>
+            <X>1175</X>
+            <Y>670</Y>
+          </Points>
+        </Points>
+      </Connection>
+      <Connection Source="stationAdptr_in.CTCTRL" Destination="stationAdptr_out.CTCTRL">
+        <Points>
+          <Points>
+            <X>359.1302</X>
+            <Y>679.999939</Y>
+          </Points>
+          <Points>
+            <X>394.1302</X>
+            <Y>679.999939</Y>
+          </Points>
+          <Points>
+            <X>394.1302</X>
+            <Y>702.5</Y>
+          </Points>
+          <Points>
+            <X>1092.5</X>
+            <Y>702.5</Y>
+          </Points>
+          <Points>
+            <X>1092.5</X>
+            <Y>685</Y>
+          </Points>
+          <Points>
+            <X>1175</X>
+            <Y>685</Y>
+          </Points>
+        </Points>
+      </Connection>
+      <Connection Source="stationAdptr_in.FRCTRL" Destination="stationAdptr_out.FRCTRL" dx1="120" />
+      <Connection Source="ProcessEngine.INITO" Destination="IThis.INIT">
+        <Points>
+          <Points>
+            <X>497.276031</X>
+            <Y>330</Y>
+          </Points>
+          <Points>
+            <X>507.5</X>
+            <Y>330</Y>
+          </Points>
+          <Points>
+            <X>507.5</X>
+            <Y>292.5</Y>
+          </Points>
+          <Points>
+            <X>937.5</X>
+            <Y>292.5</Y>
+          </Points>
+          <Points>
+            <X>937.5</X>
+            <Y>370</Y>
+          </Points>
+          <Points>
+            <X>1330</X>
+            <Y>370</Y>
+          </Points>
+        </Points>
+      </Connection>
+      <Connection Source="TSString.CNF" Destination="IThis.SCNF" dx1="83.75" />
+      <Connection Source="PSString.CNF" Destination="IThis.SCNF" dx1="83.75" />
+      <Connection Source="NSString.CNF" Destination="IThis.SCNF" dx1="63.75" />
+      <Connection Source="IThis.INITO" Destination="INITO" dx1="44.6875" dx2="30" dy="-110" />
+    </EventConnections>
+    <DataConnections>
+      <Connection Source="ProcessEngine.cmd_target_name" Destination="ProcessHandler.dest_name" dx1="169.9999" />
+      <Connection Source="ProcessEngine.cmd_state" Destination="ProcessHandler.cmd_state" dx1="189.9999" />
+      <Connection Source="ProcessHandler.state_table" Destination="ProcessEngine.state_table" dx1="40" dx2="170" dy="370" />
+      <Connection Source="stateRptCmdAdptr_in.CNFD" Destination="ProcessHandler.component_state_in" dx1="40" />
+      <Connection Source="process_name" Destination="ProcessHandler.name" dx1="46.79199" />
+      <Connection Source="process_id" Destination="ProcessHandler.id" dx1="43.6875" />
+      <Connection Source="ProcessEngine.ThisStepText" Destination="TSString.IN1" dx1="400.8959" />
+      <Connection Source="ProcessEngine.PreviousStepText" Destination="PSString.IN1" dx1="440.8959" />
+      <Connection Source="ProcessEngine.NextStepText" Destination="NSString.IN1" dx1="440.8959" />
+      <Connection Source="stationAdptr_in.ModeCMD" Destination="ProcessEngine.Mode" dx1="133.4792" dx2="30" dy="-489.9998" />
+      <Connection Source="stationAdptr_in.CycleTypeCMD" Destination="ProcessEngine.CycleType" dx1="153.4792" dx2="30" dy="-549.9998" />
+      <Connection Source="ProcessHandler.component_state_out" Destination="stateRptCmdAdptr_out.CNFD" dx1="95.85425" />
+      <Connection Source="stationAdptr_in.ModeCMD" Destination="stationAdptr_out.ModeCMD">
+        <Points>
+          <Points>
+            <X>359.1302</X>
+            <Y>744.999939</Y>
+          </Points>
+          <Points>
+            <X>384.1302</X>
+            <Y>744.999939</Y>
+          </Points>
+          <Points>
+            <X>384.1302</X>
+            <Y>712.5</Y>
+          </Points>
+          <Points>
+            <X>1097.5</X>
+            <Y>712.5</Y>
+          </Points>
+          <Points>
+            <X>1097.5</X>
+            <Y>750</Y>
+          </Points>
+          <Points>
+            <X>1175</X>
+            <Y>750</Y>
+          </Points>
+        </Points>
+      </Connection>
+      <Connection Source="stationAdptr_in.CycleTypeCMD" Destination="stationAdptr_out.CycleTypeCMD">
+        <Points>
+          <Points>
+            <X>359.1302</X>
+            <Y>759.999939</Y>
+          </Points>
+          <Points>
+            <X>379.1302</X>
+            <Y>759.999939</Y>
+          </Points>
+          <Points>
+            <X>379.1302</X>
+            <Y>712.5</Y>
+          </Points>
+          <Points>
+            <X>1097.5</X>
+            <Y>712.5</Y>
+          </Points>
+          <Points>
+            <X>1097.5</X>
+            <Y>765</Y>
+          </Points>
+          <Points>
+            <X>1175</X>
+            <Y>765</Y>
+          </Points>
+        </Points>
+      </Connection>
+      <Connection Source="stationAdptr_in.ParentName" Destination="stationAdptr_out.ParentName">
+        <Points>
+          <Points>
+            <X>359.1302</X>
+            <Y>774.999939</Y>
+          </Points>
+          <Points>
+            <X>374.1302</X>
+            <Y>774.999939</Y>
+          </Points>
+          <Points>
+            <X>374.1302</X>
+            <Y>812.5</Y>
+          </Points>
+          <Points>
+            <X>1097.5</X>
+            <Y>812.5</Y>
+          </Points>
+          <Points>
+            <X>1097.5</X>
+            <Y>780</Y>
+          </Points>
+          <Points>
+            <X>1175</X>
+            <Y>780</Y>
+          </Points>
+        </Points>
+      </Connection>
+      <Connection Source="stationAdptr_in.FaultResetCMD" Destination="stationAdptr_out.FaultResetCMD">
+        <Points>
+          <Points>
+            <X>359.1302</X>
+            <Y>789.999939</Y>
+          </Points>
+          <Points>
+            <X>369.1302</X>
+            <Y>789.999939</Y>
+          </Points>
+          <Points>
+            <X>369.1302</X>
+            <Y>812.5</Y>
+          </Points>
+          <Points>
+            <X>1097.5</X>
+            <Y>812.5</Y>
+          </Points>
+          <Points>
+            <X>1097.5</X>
+            <Y>795</Y>
+          </Points>
+          <Points>
+            <X>1175</X>
+            <Y>795</Y>
+          </Points>
+        </Points>
+      </Connection>
+      <Connection Source="TSString.OUT1" Destination="IThis.ThisStepText" dx1="70" />
+      <Connection Source="NSString.OUT1" Destination="IThis.NextStepText" dx1="70" />
+      <Connection Source="PSString.OUT1" Destination="IThis.PreviousStepText" dx1="70" />
+      <Connection Source="ANString.OUT1" Destination="IThis.ActuatorName" dx1="43.75" dx2="170" dy="90" />
+      <Connection Source="ProcessEngine.cmd_state" Destination="IThis.StateValue">
+        <Points>
+          <Points>
+            <X>497.276031</X>
+            <Y>500</Y>
+          </Points>
+          <Points>
+            <X>507.5</X>
+            <Y>500</Y>
+          </Points>
+          <Points>
+            <X>507.5</X>
+            <Y>512.5</Y>
+          </Points>
+          <Points>
+            <X>937.5</X>
+            <Y>512.5</Y>
+          </Points>
+          <Points>
+            <X>937.5</X>
+            <Y>497.5</Y>
+          </Points>
+          <Points>
+            <X>1092.5</X>
+            <Y>497.5</Y>
+          </Points>
+          <Points>
+            <X>1092.5</X>
+            <Y>525</Y>
+          </Points>
+          <Points>
+            <X>1330</X>
+            <Y>525</Y>
+          </Points>
+        </Points>
+      </Connection>
+    </DataConnections>
+  </FBNetwork>
+</FBType>
+*****
+
+Process1_Generic_HMI.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="562ffd35-e827-4c70-8e57-0ae8292dcc97" Name="Process1_Generic_HMI" Comment="Service Interface Function Block Type" Namespace="Main">
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author=" " Date="9/29/2025" Remarks="template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event ID="E9D94BA4A14903EE" Name="INIT">
+        <With Var="QI" />
+      </Event>
+      <Event ID="A5C1E4198BDC039" Name="stateUpdate">
+        <With Var="ActuatorName" />
+        <With Var="StateValue" />
+      </Event>
+      <Event ID="C218739911F4F87F" Name="SCNF">
+        <With Var="ThisStepText" />
+        <With Var="NextStepText" />
+        <With Var="PreviousStepText" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event ID="452EC34BAF8CDCE3" Name="INITO">
+        <With Var="QO" />
+        <With Var="STATUS" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration ID="3399A01B1C01F97F" Name="QI" Type="BOOL" />
+      <VarDeclaration ID="BABC9F833159060A" Name="ThisStepText" Type="STRING" />
+      <VarDeclaration ID="A431D65C61DE3309" Name="NextStepText" Type="STRING" />
+      <VarDeclaration ID="E3F7A02AD5B0FC46" Name="PreviousStepText" Type="STRING" />
+      <VarDeclaration ID="67D102AB1550E3BF" Name="ActuatorName" Type="STRING" />
+      <VarDeclaration ID="6FE264CB97DDCDD7" Name="StateValue" Type="INT" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration ID="F485D34897538CCD" Name="QO" Type="BOOL" Comment="Event Output Qualifier" />
+      <VarDeclaration ID="37DCBA8BF6642173" Name="STATUS" Type="STRING" Comment="Service Status" />
+    </OutputVars>
+  </InterfaceList>
+  <Service RightInterface="" LeftInterface="">
+    <ServiceSequence Name="" />
+  </Service>
+</FBType>
+*****
+
+Robot_Task_CAT.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="65cef328-d161-4394-ae5d-e7bc0ec9d5b6" Name="Robot_Task_CAT" Comment="Composite Function Block Type" Namespace="Main">
+  <Attribute Name="HMI.Alias" Value="" />
+  <Attribute Name="Configuration.FB.IDCounter" Value="9" />
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author=" " Date="10/8/2025" Remarks="template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT" Comment="Initialization Request">
+        <With Var="process_state_name" />
+        <With Var="state_val" />
+        <With Var="actuator_name" />
+      </Event>
+      <Event Name="pst_event">
+        <With Var="process_state_name" />
+        <With Var="state_val" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO" Comment="Initialization Confirm" />
+      <Event Name="pst_out">
+        <With Var="current_state_to_process" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="process_state_name" Type="STRING[150]" />
+      <VarDeclaration Name="state_val" Type="INT" />
+      <VarDeclaration Name="actuator_name" Type="STRING[150]" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="current_state_to_process" Type="INT" />
+    </OutputVars>
+  </InterfaceList>
+  <FBNetwork>
+    <FB ID="5" Name="RobotCommands" Type="SYMLINKMULTIVARSRC_1559B0FF8170C9BA0" x="4620" y="660" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.System#I:=1;VALUE${I}:BOOL" />
+      <Parameter Name="NAME1" Value="'$${PATH}RobotCommands_StartTask'" />
+      <Parameter Name="QI" Value="TRUE" />
+    </FB>
+    <FB ID="6" Name="RobotStatus" Type="SYMLINKMULTIVARDST_1559B0FF8170C9BA0" x="500" y="660" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.System#I:=1;VALUE${I}:BOOL" />
+      <Parameter Name="NAME1" Value="'$${PATH}RobotStatus_Task_Complete'" />
+      <Parameter Name="QI" Value="TRUE" />
+    </FB>
+    <FB ID="7" Name="StateMachine" Type="Robot_Task_Core" x="1980" y="660" Namespace="Main" />
+    <FB ID="8" Name="Signal_Pulse" Type="pulse" x="3460" y="779.9999" Namespace="SE.AppBase">
+      <Parameter Name="PulseTime" Value="T#5000ms" />
+    </FB>
+    <FB ID="9" Name="IThis" Type="Robot_Task_CAT_HMI" x="4660" y="1660" Namespace="Main">
+      <Parameter Name="QI" Value="TRUE" />
+    </FB>
+    <Input Name="INIT" x="60" y="672" Type="Event" />
+    <Input Name="process_state_name" x="79.99999" y="1252" Type="Data" />
+    <Input Name="state_val" x="80.00002" y="1332" Type="Data" />
+    <Input Name="pst_event" x="1360" y="791.9999" Type="Event" />
+    <Input Name="actuator_name" x="79.99999" y="1432" Type="Data" />
+    <Output Name="INITO" x="5560" y="1672" Type="Event" />
+    <Output Name="pst_out" x="5280" y="1432" Type="Event" />
+    <Output Name="current_state_to_process" x="4860" y="2152" Type="Data" />
+    <EventConnections>
+      <Connection Source="RobotStatus.INITO" Destination="StateMachine.INIT" />
+      <Connection Source="StateMachine.INITO" Destination="RobotCommands.INIT">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="RobotStatus.CNF" Destination="StateMachine.REQ" />
+      <Connection Source="StateMachine.CNF" Destination="Signal_Pulse.START" dx1="80" />
+      <Connection Source="pst_event" Destination="StateMachine.pst_event" dx1="40" />
+      <Connection Source="StateMachine.pst_out" Destination="pst_out" dx1="123.396">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="Signal_Pulse.CNF_CHANGE" Destination="RobotCommands.REQ" dx1="54.18799" />
+      <Connection Source="INIT" Destination="RobotStatus.INIT" />
+      <Connection Source="RobotCommands.INITO" Destination="IThis.INIT" dx1="40" dx2="50" dy="470" />
+      <Connection Source="StateMachine.pst_out" Destination="IThis.pst_out" dx1="123.396">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="IThis.INITO" Destination="INITO" dx1="40" />
+      <Connection Source="Signal_Pulse.CNF_CHANGE" Destination="IThis.CNF_CHANGE" dx1="60" />
+    </EventConnections>
+    <DataConnections>
+      <Connection Source="RobotStatus.VALUE1" Destination="StateMachine.task_complete" dx1="90" />
+      <Connection Source="StateMachine.current_state_to_process" Destination="current_state_to_process" dx1="40" />
+      <Connection Source="process_state_name" Destination="StateMachine.process_state_name" dx1="377.0209">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="state_val" Destination="StateMachine.state_val" dx1="969.25">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="actuator_name" Destination="StateMachine.actuator_name" dx1="788.2916">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="Signal_Pulse.PulseActive" Destination="RobotCommands.VALUE1" dx1="74.18799" />
+      <Connection Source="StateMachine.current_state_to_process" Destination="IThis.current_state_to_process" dx1="40" />
+      <Connection Source="Signal_Pulse.PulseActive" Destination="IThis.PulseActive" dx1="40" />
+    </DataConnections>
+  </FBNetwork>
+</FBType>
+*****
+
+Robot_Task_CAT_HMI.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="65269706-6e22-4c8d-ab24-a730e4e7b641" Name="Robot_Task_CAT_HMI" Comment="Service Interface Function Block Type" Namespace="Main">
+  <Attribute Name="Configuration.FB.IDCounter" Value="0" />
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author=" " Date="10/8/2025" Remarks="template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event ID="959F2046353E6F94" Name="INIT">
+        <With Var="QI" />
+      </Event>
+      <Event ID="92F1BFF097721B8D" Name="pst_out">
+        <With Var="current_state_to_process" />
+      </Event>
+      <Event ID="79CD58813EF52AE9" Name="CNF_CHANGE">
+        <With Var="PulseActive" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event ID="DD17A7BEBF980B33" Name="INITO">
+        <With Var="QO" />
+        <With Var="STATUS" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration ID="F709B444FA216077" Name="QI" Type="BOOL" />
+      <VarDeclaration ID="F0E4B21755073D3D" Name="current_state_to_process" Type="INT" />
+      <VarDeclaration ID="6FD83A23C876DAD1" Name="PulseActive" Type="BOOL" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration ID="ACECD28E6625BB31" Name="QO" Type="BOOL" Comment="Event Output Qualifier" />
+      <VarDeclaration ID="3A151F21B887B5C1" Name="STATUS" Type="STRING" Comment="Service Status" />
+    </OutputVars>
+  </InterfaceList>
+  <Service RightInterface="" LeftInterface="">
+    <ServiceSequence Name="" />
+  </Service>
+</FBType>
+*****
+
+Sensor_Bool_CAT.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="c244ab43-28b0-4442-bced-dc234c379990" Name="Sensor_Bool_CAT" Comment="Composite Function Block Type" Namespace="Main">
+  <Attribute Name="HMI.Alias" Value="" />
+  <Attribute Name="Configuration.FB.IDCounter" Value="7" />
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author=" " Date="2/2/2026" Remarks="template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT" Comment="Initialization Request">
+        <With Var="id" />
+        <With Var="name" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO" Comment="Initialization Confirm" />
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="id" Type="INT" />
+      <VarDeclaration Name="name" Type="STRING[15]" />
+    </InputVars>
+    <Sockets>
+      <AdapterDeclaration Name="stateRprtCmd_in" Type="stateRptCmdAdptr" Namespace="Main" x="140" y="340" />
+    </Sockets>
+    <Plugs>
+      <AdapterDeclaration Name="stateRprtCmd_out" Type="stateRptCmdAdptr" Namespace="Main" x="2440" y="280" />
+    </Plugs>
+  </InterfaceList>
+  <FBNetwork>
+    <FB ID="1" Name="State" Type="Sensor_Bool" x="1500" y="1220" Namespace="Main" />
+    <FB ID="3" UID="2" Name="Input" Type="SYMLINKMULTIVARDST_1559B0FF8170C9BA0" x="600" y="1220" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.System#I:=1;VALUE${I}:BOOL" />
+      <Parameter Name="NAME1" Value="'$${PATH}Input'" />
+    </FB>
+    <FB ID="7" Name="StateHandling" Type="updateComponentState_Sensor" x="1040" y="220" Namespace="Main" />
+    <Input Name="INIT" x="140" y="152" Type="Event" />
+    <Input Name="id" x="140" y="672" Type="Data" />
+    <Input Name="name" x="140" y="752" Type="Data" />
+    <Output Name="INITO" x="2120" y="1232" Type="Event" />
+    <EventConnections>
+      <Connection Source="Input.CNF" Destination="State.REQ" />
+      <Connection Source="Input.INITO" Destination="State.INIT" />
+      <Connection Source="INIT" Destination="StateHandling.INIT" dx1="251.7083">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="State.INITO" Destination="INITO" />
+      <Connection Source="stateRprtCmd_in.CNF" Destination="StateHandling.BREQ" />
+      <Connection Source="StateHandling.BCNF" Destination="stateRprtCmd_out.CNF" />
+      <Connection Source="StateHandling.INITO" Destination="Input.INIT">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="State.CNF" Destination="StateHandling.REQ" dx1="584.1459" dx2="130" dy="-170">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+    </EventConnections>
+    <DataConnections>
+      <Connection Source="Input.VALUE1" Destination="State.Input" dx1="90" />
+      <Connection Source="stateRprtCmd_in.CNFD" Destination="StateHandling.component_state_in" />
+      <Connection Source="StateHandling.component_state_out" Destination="stateRprtCmd_out.CNFD" dx1="95.85425" />
+      <Connection Source="id" Destination="StateHandling.id" dx1="156.625" />
+      <Connection Source="name" Destination="StateHandling.name" dx1="40" />
+      <Connection Source="State.Status" Destination="StateHandling.state_sts" dx1="624.1459" dx2="30" dy="-540">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+    </DataConnections>
+  </FBNetwork>
+</FBType>
+*****
+
+Sensor_Bool_CAT_HMI.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="fefd43f5-5811-47cc-9990-d5e40411571b" Name="Sensor_Bool_CAT_HMI" Comment="Service Interface Function Block Type" Namespace="Main">
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author=" " Date="2/2/2026" Remarks="template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event ID="7F8501A6843E44D2" Name="INIT">
+        <With Var="QI" />
+      </Event>
+      <Event ID="7BE06DB94EECB295" Name="REQ">
+        <With Var="State" />
+        <With Var="name" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event ID="4FADF5C144A79412" Name="INITO">
+        <With Var="QO" />
+        <With Var="STATUS" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration ID="5211E76DF7F57C5" Name="QI" Type="BOOL" />
+      <VarDeclaration ID="491CE0A8EA3FA25A" Name="State" Type="BOOL" />
+      <VarDeclaration ID="AD2FDC9C65C58570" Name="name" Type="STRING" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration ID="BA56E8A19A6A4762" Name="QO" Type="BOOL" Comment="Event Output Qualifier" />
+      <VarDeclaration ID="ED0B921B66081398" Name="STATUS" Type="STRING" Comment="Service Status" />
+    </OutputVars>
+  </InterfaceList>
+  <Service RightInterface="" LeftInterface="">
+    <ServiceSequence Name="" />
+  </Service>
+</FBType>
+*****
+
+Seven_State_Actuator_CAT.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="a8535d89-ce00-4401-844a-d25f0098649b" Name="Seven_State_Actuator_CAT" Comment="Composite Function Block Type" Namespace="Main">
+  <Attribute Name="HMI.Alias" Value="" />
+  <Attribute Name="Configuration.FB.IDCounter" Value="11" />
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author=" " Date="10/7/2025" Remarks="template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT" Comment="Initialization Request">
+        <With Var="process_state_name" />
+        <With Var="state_val" />
+        <With Var="actuator_name" />
+        <With Var="athome" />
+        <With Var="atwork1" />
+        <With Var="atwork2" />
+      </Event>
+      <Event Name="pst_event">
+        <With Var="process_state_name" />
+        <With Var="state_val" />
+      </Event>
+      <Event Name="action_event">
+        <With Var="athome" />
+        <With Var="atwork1" />
+        <With Var="atwork2" />
+      </Event>
+      <Event Name="tohome" />
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO" Comment="Initialization Confirm">
+        <With Var="current_state_to_process" />
+        <With Var="current_state1_to_plc" />
+        <With Var="current_state2_to_plc" />
+        <With Var="state" />
+      </Event>
+      <Event Name="pst_out" Comment="Initialization Confirm">
+        <With Var="current_state_to_process" />
+        <With Var="state" />
+      </Event>
+      <Event Name="plc_out">
+        <With Var="current_state1_to_plc" />
+        <With Var="current_state2_to_plc" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="process_state_name" Type="STRING[150]" />
+      <VarDeclaration Name="state_val" Type="INT" />
+      <VarDeclaration Name="actuator_name" Type="STRING[150]" />
+      <VarDeclaration Name="athome" Type="BOOL" />
+      <VarDeclaration Name="atwork1" Type="BOOL" />
+      <VarDeclaration Name="atwork2" Type="BOOL" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="current_state_to_process" Type="INT" Comment="Output event qualifier" />
+      <VarDeclaration Name="current_state1_to_plc" Type="BOOL" />
+      <VarDeclaration Name="current_state2_to_plc" Type="BOOL" />
+      <VarDeclaration Name="state" Type="STRING" />
+    </OutputVars>
+  </InterfaceList>
+  <FBNetwork>
+    <FB ID="7" Name="FB3" Type="E_DELAY" x="3500" y="2000" Namespace="IEC61499.Standard" />
+    <FB ID="8" Name="FB4" Type="SevenStateActuator2" x="2040" y="720" Namespace="Main" />
+    <FB ID="9" Name="FB2" Type="SELECT_82A43F44E4738F21" x="2540" y="2080" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=2;SELECT:USINT;IN${CNT}:TIME" />
+      <Parameter Name="IN1" Value="T#750ms" />
+      <Parameter Name="IN2" Value="T#500ms" />
+    </FB>
+    <FB ID="10" Name="FB5" Type="ANY2ANY_251AD082F33B40AA3" x="1860" y="2080" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=1;IN${CNT}:INT;OUT${CNT}:USINT" />
+    </FB>
+    <FB ID="11" Name="IThis" Type="Seven_State_Actuator_CAT_HMI" x="4360" y="720" Namespace="Main">
+      <Parameter Name="QI" Value="TRUE" />
+    </FB>
+    <Input Name="INIT" x="1020" y="712" Type="Event" />
+    <Input Name="pst_event" x="1020" y="791.9999" Type="Event" />
+    <Input Name="process_state_name" x="260" y="1272" Type="Data" />
+    <Input Name="state_val" x="1340" y="1332" Type="Data" />
+    <Input Name="actuator_name" x="1060" y="1592" Type="Data" />
+    <Input Name="athome" x="1360" y="1012" Type="Data" />
+    <Input Name="atwork1" x="1280" y="1132" Type="Data" />
+    <Input Name="action_event" x="1020" y="851.9999" Type="Event" />
+    <Input Name="atwork2" x="1440" y="1852" Type="Data" />
+    <Input Name="tohome" x="1020" y="971.9998" Type="Event" />
+    <Output Name="INITO" x="5380" y="732" Type="Event" />
+    <Output Name="state" x="4700" y="1672" Type="Data" />
+    <Output Name="current_state2_to_plc" x="4420" y="1752" Type="Data" />
+    <Output Name="plc_out" x="4580" y="432" Type="Event" />
+    <Output Name="current_state1_to_plc" x="4420" y="1592" Type="Data" />
+    <Output Name="pst_out" x="4580" y="332" Type="Event" />
+    <Output Name="current_state_to_process" x="4420" y="1512" Type="Data" />
+    <EventConnections>
+      <Connection Source="action_event" Destination="FB4.action_event" dx1="40" />
+      <Connection Source="pst_event" Destination="FB4.pst_event" dx1="40" />
+      <Connection Source="FB4.plc_out" Destination="plc_out" dx1="90" />
+      <Connection Source="FB4.pst_out" Destination="pst_out" dx1="70" />
+      <Connection Source="FB4.timer_start" Destination="FB3.START" dx1="147.6042" />
+      <Connection Source="FB3.EO" Destination="FB4.timer_end" dx1="48.5" dx2="170" dy="-210" />
+      <Connection Source="FB4.timer_stop" Destination="FB3.STOP" dx1="127.6042" />
+      <Connection Source="tohome" Destination="FB4.tohome" dx1="459.6875" />
+      <Connection Source="FB5.CNF" Destination="FB2.REQ" />
+      <Connection Source="FB4.pst_out" Destination="FB5.REQ" dx1="187.6042" dx2="50" dy="1110" />
+      <Connection Source="INIT" Destination="FB4.INIT" dx1="41.4165" />
+      <Connection Source="FB4.INITO" Destination="IThis.INIT" />
+      <Connection Source="FB4.pst_out" Destination="IThis.pst_out" />
+      <Connection Source="FB4.plc_out" Destination="IThis.plc_out" />
+      <Connection Source="IThis.INITO" Destination="INITO" />
+    </EventConnections>
+    <DataConnections>
+      <Connection Source="actuator_name" Destination="FB4.actuator_name" dx1="40" />
+      <Connection Source="state_val" Destination="FB4.state_val" dx1="40" dx2="210" dy="10" />
+      <Connection Source="process_state_name" Destination="FB4.process_state_name" dx1="647.0209" />
+      <Connection Source="atwork1" Destination="FB4.atwork1" dx1="40" />
+      <Connection Source="athome" Destination="FB4.athome" dx1="40" />
+      <Connection Source="FB4.current_state_to_pocess" Destination="current_state_to_process" dx1="107.6042" />
+      <Connection Source="FB4.current_state1_to_plc" Destination="current_state1_to_plc" dx1="87.60425" />
+      <Connection Source="FB4.current_state2_to_plc" Destination="current_state2_to_plc" dx1="67.60425" />
+      <Connection Source="atwork2" Destination="FB4.atwork2" dx1="40" />
+      <Connection Source="FB4.current_state_to_pocess" Destination="FB5.IN1" dx1="107.6042" dx2="70" dy="730" />
+      <Connection Source="FB5.OUT1" Destination="FB2.SELECT" />
+      <Connection Source="FB2.OUT" Destination="FB3.DT" dx1="40" />
+      <Connection Source="FB4.state" Destination="state" dx1="47.60425" />
+      <Connection Source="FB4.current_state_to_pocess" Destination="IThis.current_state_to_pocess" dx1="150" />
+      <Connection Source="FB4.current_state1_to_plc" Destination="IThis.current_state1_to_plc" dx1="237.6042">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="FB4.current_state2_to_plc" Destination="IThis.current_state2_to_plc" dx1="377.6042">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+    </DataConnections>
+  </FBNetwork>
+</FBType>
+*****
+
+Seven_State_Actuator_CAT_HMI.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="20c76d28-cef3-4e58-a5bb-56add65924ea" Name="Seven_State_Actuator_CAT_HMI" Comment="Service Interface Function Block Type" Namespace="Main">
+  <Attribute Name="Configuration.FB.IDCounter" Value="0" />
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author=" " Date="10/7/2025" Remarks="template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event ID="69333E5B852F0BC4" Name="INIT">
+        <With Var="QI" />
+      </Event>
+      <Event ID="A37AEDDA257B41AB" Name="pst_out">
+        <With Var="current_state_to_pocess" />
+      </Event>
+      <Event ID="5F723B9F2ED77A99" Name="plc_out">
+        <With Var="current_state1_to_plc" />
+        <With Var="current_state2_to_plc" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event ID="53EB3C0B2B0B6298" Name="INITO">
+        <With Var="QO" />
+        <With Var="STATUS" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration ID="E820B72389DF2A40" Name="QI" Type="BOOL" />
+      <VarDeclaration ID="6350143051390A81" Name="current_state_to_pocess" Type="INT" />
+      <VarDeclaration ID="E4EA2F29C16ABA40" Name="current_state1_to_plc" Type="BOOL" />
+      <VarDeclaration ID="EE9E2328D05B58EA" Name="current_state2_to_plc" Type="BOOL" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration ID="FF5D9A54D30F25F2" Name="QO" Type="BOOL" Comment="Event Output Qualifier" />
+      <VarDeclaration ID="84F39067473C3704" Name="STATUS" Type="STRING" Comment="Service Status" />
+    </OutputVars>
+  </InterfaceList>
+  <Service RightInterface="" LeftInterface="">
+    <ServiceSequence Name="" />
+  </Service>
+</FBType>
+*****
+
+Station_CAT.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="8666d157-f9b0-4046-b4da-32e9a5735ff2" Name="Station_CAT" Comment="Composite Function Block Type" Namespace="Main">
+  <Attribute Name="HMI.Alias" Value="" />
+  <Attribute Name="Configuration.FB.IDCounter" Value="5" />
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author="Evans_A" Date="7/31/2025" Remarks="template" />
+  <InterfaceList>
+    <Plugs>
+      <AdapterDeclaration Name="StationHMIAdptrOUT" Type="StationHMIAdptr" Namespace="Main" x="4020" y="200" />
+    </Plugs>
+  </InterfaceList>
+  <FBNetwork>
+    <FB ID="2" Name="IThis" Type="Station_CAT_HMI" x="2600" y="140" Namespace="Main" />
+    <FB ID="4" Name="plcStart" Type="plcStart" x="800" y="140" Namespace="SE.AppBase">
+      <Parameter Name="Prio" Value="35" />
+      <Parameter Name="Delay" Value="T#0ms" />
+    </FB>
+    <EventConnections>
+      <Connection Source="plcStart.FIRST_INIT" Destination="IThis.INIT" />
+      <Connection Source="IThis.INITO" Destination="plcStart.ACK_FIRST" dx1="40" dx2="30" dy="-110" />
+      <Connection Source="IThis.MCNF" Destination="StationHMIAdptrOUT.MCNF" />
+      <Connection Source="IThis.CTCNF" Destination="StationHMIAdptrOUT.CTCNF" />
+      <Connection Source="IThis.FRCNF" Destination="StationHMIAdptrOUT.FRCNF" />
+      <Connection Source="StationHMIAdptrOUT.SREQ" Destination="IThis.SREQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="StationHMIAdptrOUT.LMFREQ" Destination="IThis.LMREQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="StationHMIAdptrOUT.LCTREQ" Destination="IThis.LCTREQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="StationHMIAdptrOUT.LLFREQ" Destination="IThis.LLFREQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="StationHMIAdptrOUT.LLMREQ" Destination="IThis.LLMREQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="StationHMIAdptrOUT.LLCTREQ" Destination="IThis.LLCTREQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+    </EventConnections>
+    <DataConnections>
+      <Connection Source="plcStart.Started" Destination="IThis.QI" dx1="48.08337" />
+      <Connection Source="IThis.Mode" Destination="StationHMIAdptrOUT.Mode" dx1="139.396" />
+      <Connection Source="IThis.CycleType" Destination="StationHMIAdptrOUT.CycleType" dx1="159.396" />
+      <Connection Source="IThis.FaultReset" Destination="StationHMIAdptrOUT.FaultReset" dx1="179.396" />
+      <Connection Source="StationHMIAdptrOUT.StationName" Destination="IThis.StationName">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="StationHMIAdptrOUT.ParentName" Destination="IThis.ParentName">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="StationHMIAdptrOUT.LocalMode" Destination="IThis.LocalMode">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="StationHMIAdptrOUT.LocalCycleType" Destination="IThis.LocalCycleType">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="StationHMIAdptrOUT.LLFault" Destination="IThis.LL_Fault">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="StationHMIAdptrOUT.LLMode" Destination="IThis.LL_Mode">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="StationHMIAdptrOUT.LLCycleType" Destination="IThis.LL_CycleType">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+    </DataConnections>
+  </FBNetwork>
+</FBType>
+*****
+
+Station_CAT_HMI.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="a483457a-786c-49de-a521-912700da8edc" Name="Station_CAT_HMI" Comment="Service Interface Function Block Type" Namespace="Main">
+  <Attribute Name="Configuration.FB.IDCounter" Value="0" />
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author="Evans_A" Date="7/31/2025" Remarks="template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event ID="D1A7D66CB30DA325" Name="INIT">
+        <With Var="QI" />
+      </Event>
+      <Event ID="591CB7C120256668" Name="SREQ">
+        <With Var="StationName" />
+        <With Var="ParentName" />
+      </Event>
+      <Event ID="5F6F5350C313C243" Name="LMREQ">
+        <With Var="LocalMode" />
+      </Event>
+      <Event ID="58BCDE9DEA820BDE" Name="LCTREQ">
+        <With Var="LocalCycleType" />
+      </Event>
+      <Event ID="9934777FBEF02484" Name="LLFREQ">
+        <With Var="LL_Fault" />
+      </Event>
+      <Event ID="3F4108AD06B2B72A" Name="LLMREQ">
+        <With Var="LL_Mode" />
+      </Event>
+      <Event ID="5C961A2D0357AB9D" Name="LLCTREQ">
+        <With Var="LL_CycleType" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event ID="AD55511A797DF6C7" Name="INITO">
+        <With Var="QO" />
+        <With Var="STATUS" />
+      </Event>
+      <Event ID="AFC523B8F283FB4A" Name="MCNF">
+        <With Var="Mode" />
+      </Event>
+      <Event ID="28A8642B28A43989" Name="CTCNF">
+        <With Var="CycleType" />
+      </Event>
+      <Event ID="7A6FF2B9B218D8F2" Name="FRCNF">
+        <With Var="FaultReset" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration ID="8576DD38EF48062A" Name="QI" Type="BOOL" />
+      <VarDeclaration ID="379E9A8D605587D9" Name="StationName" Type="STRING" />
+      <VarDeclaration ID="61DA093F1706E361" Name="ParentName" Type="STRING" />
+      <VarDeclaration ID="6CB30BD8F8F76F45" Name="LocalMode" Type="INT" />
+      <VarDeclaration ID="21895364178EFD87" Name="LocalCycleType" Type="INT" />
+      <VarDeclaration ID="5A40CFFEF09C7C99" Name="LL_Fault" Type="BOOL" />
+      <VarDeclaration ID="423470ADE9FD10A9" Name="LL_Mode" Type="INT" />
+      <VarDeclaration ID="A86F525404A38969" Name="LL_CycleType" Type="INT" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration ID="DC5EA1EC41E0CF72" Name="QO" Type="BOOL" Comment="Event Output Qualifier" />
+      <VarDeclaration ID="7B55F7B50BB84AAF" Name="STATUS" Type="STRING" Comment="Service Status" />
+      <VarDeclaration ID="63382D747B1851F3" Name="Mode" Type="INT" />
+      <VarDeclaration ID="EB4C5CE892AD72C8" Name="CycleType" Type="INT" />
+      <VarDeclaration ID="7E749086905B7978" Name="FaultReset" Type="BOOL" />
+    </OutputVars>
+  </InterfaceList>
+  <Service RightInterface="" LeftInterface="">
+    <ServiceSequence Name="" />
+  </Service>
+</FBType>
