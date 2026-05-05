@@ -8,22 +8,26 @@ using CodeGen.Configuration;
 namespace MapperUI.Services
 {
     /// <summary>
-    /// Rewrites the EAE project's .sysdev so EcoRT_0 is declared as Type="M262_dPAC"
-    /// Namespace="SE.DPAC" with one Resource RES0 of Type="EMB_RES_ECO"
-    /// Namespace="Runtime.Management". Then patches the matching .system file's root
-    /// to ensure two &lt;Mapping&gt; entries exist binding APP1.Feeder and
-    /// APP1.Feed_Station to EcoRT_0.RES0.
+    /// Rewrites the EAE project's .sysdev so EcoRT_0 is declared as <c>Type="M262_dPAC"
+    /// Namespace="SE.DPAC"</c> with a single <c>RES0</c> resource of
+    /// <c>Type="EMB_RES_ECO" Namespace="Runtime.Management"</c>, and adds a
+    /// <c>&lt;Parameter Name="IPV4Address" Value="..."/&gt;</c> child driven by
+    /// <see cref="MapperConfig.M262TargetIp"/>.
     ///
-    /// The sysdev is the only artefact in the project that carries the "this device is
-    /// an embedded M262, not a Soft dPAC" declaration — without it, EAE's deploy step
-    /// targets the workstation runtime, the .hcf is ignored, and the controller never
-    /// receives the application. The two &lt;Mapping&gt; elements at the System root
-    /// are what tells EAE which application FBs to compile into the resource on that
-    /// device.
+    /// Then patches the .system file's <c>&lt;Mappings&gt;</c> block so every top-level
+    /// FB instance in the syslay maps to <c>EcoRT_0.RES0</c>. Generalisation walks the
+    /// syslay's <c>SubAppNetwork</c> rather than hardcoding instance names, so a future
+    /// fixture with more (or fewer) FBs needs no Mapper change.
+    ///
+    /// Without this step EAE's deploy targets the workstation runtime, the .hcf is
+    /// ignored, and the controller never receives the application.
     /// </summary>
     public static class M262SysdevEmitter
     {
         const string LibElNs = "https://www.se.com/LibraryElements";
+        const string ApplicationName = "APP1";
+        const string DeviceName = "EcoRT_0";
+        const string ResourceName = "RES0";
 
         public static SysdevEmitResult Emit(MapperConfig cfg)
         {
@@ -37,19 +41,34 @@ namespace MapperUI.Services
                 ?? throw new FileNotFoundException(
                     $"No .sysdev found under {eaeRoot}\\IEC61499\\System\\");
 
-            RewriteSysdev(sysdevPath);
+            RewriteSysdev(sysdevPath, cfg.M262TargetIp ?? string.Empty);
 
             var systemFile = FindSystemFile(eaeRoot)
                 ?? throw new FileNotFoundException(
                     $"No .system found under {eaeRoot}\\IEC61499\\System\\");
 
-            int added = EnsureMappings(systemFile);
+            var syslayPath = cfg.ActiveSyslayPath;
+            var fbInstances = string.IsNullOrWhiteSpace(syslayPath) || !File.Exists(syslayPath)
+                ? new List<string>()
+                : ReadSyslayTopLevelFbNames(syslayPath);
+
+            int added = EnsureMappingsPerFb(systemFile, fbInstances);
+
+            // Register the .sysdev (and matching .hcf if present) in the project's
+            // .dfbproj as <None Include> entries with IEC61499Type=SystemDevice.
+            // Idempotent — also de-duplicates broken duplicate child elements.
+            var dfbproj = FindDfbproj(eaeRoot);
+            int registered = 0;
+            if (dfbproj != null)
+                registered = DfbprojRegistrar.RegisterSystemDevice(dfbproj, eaeRoot, sysdevPath);
 
             return new SysdevEmitResult
             {
                 SysdevPath = sysdevPath,
                 SystemFilePath = systemFile,
                 MappingsAdded = added,
+                FbInstancesMapped = fbInstances,
+                DfbprojEntriesRegistered = registered,
             };
         }
 
@@ -85,9 +104,16 @@ namespace MapperUI.Services
                 .FirstOrDefault();
         }
 
+        static string? FindDfbproj(string eaeRoot)
+        {
+            var iec = Path.Combine(eaeRoot, "IEC61499");
+            if (!Directory.Exists(iec)) return null;
+            return Directory.EnumerateFiles(iec, "*.dfbproj").FirstOrDefault();
+        }
+
         // --- sysdev rewrite ---
 
-        static void RewriteSysdev(string sysdevPath)
+        static void RewriteSysdev(string sysdevPath, string targetIp)
         {
             var doc = XDocument.Load(sysdevPath);
             var root = doc.Root
@@ -98,9 +124,28 @@ namespace MapperUI.Services
 
             // Force device declaration. If the baseline shipped Type="Soft_dPAC" we
             // overwrite it; if the attribute is missing we add it.
-            SetAttr(root, "Name", "EcoRT_0");
+            SetAttr(root, "Name", DeviceName);
             SetAttr(root, "Type", "M262_dPAC");
             SetAttr(root, "Namespace", "SE.DPAC");
+
+            // Idempotent IPV4Address Parameter.
+            var ipParam = root.Elements(ns + "Parameter").FirstOrDefault(e =>
+                string.Equals((string?)e.Attribute("Name"), "IPV4Address", StringComparison.Ordinal));
+            if (ipParam == null)
+            {
+                ipParam = new XElement(ns + "Parameter",
+                    new XAttribute("Name", "IPV4Address"),
+                    new XAttribute("Value", targetIp));
+                // Insert as first Parameter child (before any <Resources>) so EAE
+                // parses it before trying to bind the runtime.
+                var firstNonAttr = root.Elements().FirstOrDefault();
+                if (firstNonAttr != null) firstNonAttr.AddBeforeSelf(ipParam);
+                else root.Add(ipParam);
+            }
+            else
+            {
+                SetAttr(ipParam, "Value", targetIp);
+            }
 
             // Ensure exactly one Resource RES0 of Type="EMB_RES_ECO".
             var resources = root.Element(ns + "Resources");
@@ -110,25 +155,41 @@ namespace MapperUI.Services
                 root.Add(resources);
             }
             var res0 = resources.Elements(ns + "Resource")
-                .FirstOrDefault(e => string.Equals((string?)e.Attribute("Name"), "RES0",
+                .FirstOrDefault(e => string.Equals((string?)e.Attribute("Name"), ResourceName,
                     StringComparison.OrdinalIgnoreCase));
             if (res0 == null)
             {
                 res0 = new XElement(ns + "Resource",
                     new XAttribute("ID", Guid.Empty.ToString()),
-                    new XAttribute("Name", "RES0"));
+                    new XAttribute("Name", ResourceName));
                 resources.Add(res0);
             }
-            SetAttr(res0, "Name", "RES0");
+            SetAttr(res0, "Name", ResourceName);
             SetAttr(res0, "Type", "EMB_RES_ECO");
             SetAttr(res0, "Namespace", "Runtime.Management");
 
             doc.Save(sysdevPath);
         }
 
-        // --- .system Mappings patch ---
+        // --- syslay walk: every top-level FB Name attribute under SubAppNetwork ---
 
-        static int EnsureMappings(string systemFilePath)
+        public static List<string> ReadSyslayTopLevelFbNames(string syslayPath)
+        {
+            var doc = XDocument.Load(syslayPath);
+            var root = doc.Root;
+            if (root == null) return new List<string>();
+            XNamespace ns = root.GetDefaultNamespace();
+            var net = root.Element(ns + "SubAppNetwork") ?? root.Element(ns + "FBNetwork");
+            if (net == null) return new List<string>();
+            return net.Elements(ns + "FB")
+                .Select(e => (string?)e.Attribute("Name") ?? string.Empty)
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .ToList();
+        }
+
+        // --- .system Mappings patch (idempotent, generalised) ---
+
+        static int EnsureMappingsPerFb(string systemFilePath, List<string> fbInstances)
         {
             var doc = XDocument.Load(systemFilePath);
             var root = doc.Root
@@ -144,19 +205,21 @@ namespace MapperUI.Services
                 root.Add(mappings);
             }
 
-            var required = new (string From, string To)[]
+            // Snapshot the existing edges to avoid duplicate-insertion churn on re-runs.
+            var existing = new HashSet<(string From, string To)>();
+            foreach (var m in mappings.Elements(ns + "Mapping"))
             {
-                ("APP1.Feeder",       "EcoRT_0.RES0"),
-                ("APP1.Feed_Station", "EcoRT_0.RES0"),
-            };
+                var f = (string?)m.Attribute("From") ?? string.Empty;
+                var t = (string?)m.Attribute("To")   ?? string.Empty;
+                existing.Add((f, t));
+            }
 
+            var to = $"{DeviceName}.{ResourceName}";
             int added = 0;
-            foreach (var (from, to) in required)
+            foreach (var fbName in fbInstances)
             {
-                bool exists = mappings.Elements(ns + "Mapping").Any(e =>
-                    string.Equals((string?)e.Attribute("From"), from, StringComparison.Ordinal) &&
-                    string.Equals((string?)e.Attribute("To"),   to,   StringComparison.Ordinal));
-                if (exists) continue;
+                var from = $"{ApplicationName}.{fbName}";
+                if (existing.Contains((from, to))) continue;
                 mappings.Add(new XElement(ns + "Mapping",
                     new XAttribute("From", from),
                     new XAttribute("To",   to)));
@@ -180,5 +243,7 @@ namespace MapperUI.Services
         public string SysdevPath { get; set; } = string.Empty;
         public string SystemFilePath { get; set; } = string.Empty;
         public int MappingsAdded { get; set; }
+        public List<string> FbInstancesMapped { get; set; } = new();
+        public int DfbprojEntriesRegistered { get; set; }
     }
 }
