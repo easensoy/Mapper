@@ -1,0 +1,715 @@
+Area.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="0af500dc-1020-440d-a88e-e8a0e7bcebc0" Name="Area" Comment="Composite Function Block Type" Namespace="Main">
+  <Attribute Name="Configuration.FB.IDCounter" Value="8" />
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author="Evans_A" Date="7/11/2025" Remarks="template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT" Comment="Initialization Request">
+        <With Var="AreaName" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO" Comment="Initialization Confirm" />
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="AreaName" Type="STRING" />
+    </InputVars>
+    <Sockets>
+      <AdapterDeclaration Name="AreaHMIAdptrIN" Type="AreaHMIAdptr" Namespace="Main" x="2180" y="2300" />
+    </Sockets>
+    <Plugs>
+      <AdapterDeclaration Name="AreaAdptrOUT" Type="CaSAdptr" Namespace="Main" x="2860" y="440" />
+    </Plugs>
+  </InterfaceList>
+  <FBNetwork>
+    <FB ID="2" UID="1" Name="StopOnFault" Type="DS_SELECTX_6061F3E4D7A71482" x="2140" y="900" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNTX:=3;CNTY:=1;DI${CNTX,_,CNTY}:INT" />
+      <Parameter Name="DI2_1" Value="0" />
+      <Parameter Name="DI3_1" Value="0" />
+    </FB>
+    <FB ID="5" UID="3" Name="Safety" Type="SYMLINKMULTIVARDST_1559B0FF8170C9BA0" x="580" y="939.9999" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.System#I:=1;VALUE${I}:BOOL" />
+      <Parameter Name="NAME1" Value="'$${PATH}Safety_OK'" />
+    </FB>
+    <FB ID="4" Name="FallingEdge" Type="E_F_TRIG" x="1360" y="1060" Namespace="IEC61499.Standard" />
+    <FB ID="7" UID="6" Name="Name" Type="ANY2ANY_188368D53A378F22E" x="3000" y="1640" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=1;IN${CNT}:STRING;OUT${CNT}:STRING" />
+    </FB>
+    <Input Name="INIT" x="940.0001" y="4" Type="Event" />
+    <Input Name="AreaName" x="939.9999" y="1772" Type="Data" />
+    <Output Name="INITO" x="3718.229" y="12" Type="Event" />
+    <EventConnections>
+      <Connection Source="INIT" Destination="INITO" dx1="121.4165" />
+      <Connection Source="StopOnFault.IND" Destination="AreaAdptrOUT.CTCTRL" dx1="50" />
+      <Connection Source="Safety.CNF" Destination="FallingEdge.EI" dx1="61.625" />
+      <Connection Source="FallingEdge.EO" Destination="StopOnFault.REQ2" dx1="46.47925" />
+      <Connection Source="AreaAdptrOUT.LLF" Destination="StopOnFault.REQ3">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="INIT" Destination="Name.REQ" dx1="561.4165">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="INIT" Destination="AreaAdptrOUT.INIT" dx1="121.4165">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="AreaHMIAdptrIN.MCNF" Destination="AreaAdptrOUT.MCTRL">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="AreaHMIAdptrIN.CTCNF" Destination="StopOnFault.REQ1">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="AreaHMIAdptrIN.FRCNF" Destination="AreaAdptrOUT.FRCTRL">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="AreaAdptrOUT.LLF" Destination="AreaHMIAdptrIN.LLFREQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="AreaAdptrOUT.LLM" Destination="AreaHMIAdptrIN.SMREQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="AreaAdptrOUT.LLCT" Destination="AreaHMIAdptrIN.SCTREQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="Name.CNF" Destination="AreaHMIAdptrIN.ANREQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+    </EventConnections>
+    <DataConnections>
+      <Connection Source="AreaName" Destination="AreaAdptrOUT.ParentName" dx1="1143.688">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="StopOnFault.OUT1" Destination="AreaAdptrOUT.CycleTypeCMD" dx1="90.02075">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="Safety.VALUE1" Destination="FallingEdge.QI" dx1="70" />
+      <Connection Source="AreaName" Destination="Name.IN1" dx1="40" />
+      <Connection Source="AreaHMIAdptrIN.Mode" Destination="AreaAdptrOUT.ModeCMD">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="AreaHMIAdptrIN.CycleType" Destination="StopOnFault.DI1_1">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="AreaHMIAdptrIN.FaultReset" Destination="AreaAdptrOUT.FaultResetCMD">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="AreaAdptrOUT.LL_Fault" Destination="AreaHMIAdptrIN.LL_FaultStatus">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="AreaAdptrOUT.LL_Mode" Destination="AreaHMIAdptrIN.SystemMode">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="AreaAdptrOUT.LL_CycleType" Destination="AreaHMIAdptrIN.SystemCycleType">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="Name.OUT1" Destination="AreaHMIAdptrIN.AreaName">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+    </DataConnections>
+  </FBNetwork>
+</FBType>
+*****
+
+CaSAdptrTerminator.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="917b523d-095b-46c3-81d7-5c5b2db1b63b" Name="CaSAdptrTerminator" Comment="Composite Function Block Type" Namespace="Main">
+  <Attribute Name="Configuration.FB.IDCounter" Value="1" />
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author="Evans_A" Date="7/18/2025" Remarks="template" />
+  <InterfaceList>
+    <Sockets>
+      <AdapterDeclaration ID="1" Name="CasAdptrIN" Type="CaSAdptr" Namespace="Main" x="780" y="520" />
+    </Sockets>
+  </InterfaceList>
+  <FBNetwork>
+    <EventConnections>
+      <Connection Source="CasAdptrIN.MCTRL" Destination="CasAdptrIN.LLM" dx1="40" dx2="30" dy="-170" />
+      <Connection Source="CasAdptrIN.CTCTRL" Destination="CasAdptrIN.LLCT" dx1="148.25" dx2="70" dy="-260">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+    </EventConnections>
+    <DataConnections>
+      <Connection Source="CasAdptrIN.ModeCMD" Destination="CasAdptrIN.LL_Mode" dx1="108.25" dx2="160" dy="440">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="CasAdptrIN.CycleTypeCMD" Destination="CasAdptrIN.LL_CycleType" dx1="40" dx2="110" dy="320">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+    </DataConnections>
+  </FBNetwork>
+</FBType>
+*****
+
+Station.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="db749a67-cb13-44e5-b1d2-6052e218e049" Name="Station" Comment="Composite Function Block Type" Namespace="Main">
+  <Attribute Name="Configuration.FB.IDCounter" Value="19" />
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author="Evans_A" Date="7/10/2025" Remarks="template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT" Comment="Initialization Request">
+        <With Var="StationName" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO" Comment="Initialization Confirm">
+        <With Var="Parent" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="StationName" Type="STRING" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="Parent" Type="STRING" />
+    </OutputVars>
+    <Sockets>
+      <AdapterDeclaration Name="AreaAdptrIN" Type="CaSAdptr" Namespace="Main" x="160" y="1880" />
+      <AdapterDeclaration Name="StationHMIAdptrIN" Type="StationHMIAdptr" Namespace="Main" x="1020" y="460" />
+    </Sockets>
+    <Plugs>
+      <AdapterDeclaration Name="AreaAdptrOUT" Type="CaSAdptr" Namespace="Main" x="4160" y="1900" />
+      <AdapterDeclaration ID="17" Name="StationAdaptrOUT" Type="CaSAdptr" Namespace="Main" x="4160" y="2880" />
+    </Plugs>
+  </InterfaceList>
+  <FBNetwork>
+    <FB ID="1" Name="Core" Type="Station_Core" x="1860" y="1820" Namespace="Main" />
+    <FB ID="15" Name="Faults" Type="Station_Fault" x="1940" y="2840" Namespace="Main" />
+    <FB ID="16" Name="Status" Type="Station_Status" x="1860" y="3700" Namespace="Main" />
+    <Input Name="INIT" x="1080" y="1832" Type="Event" />
+    <Input Name="StationName" x="3220" y="3388" Type="Data" />
+    <Output Name="Parent" x="4140" y="2612" Type="Data" />
+    <Output Name="INITO" x="3440" y="3712" Type="Event" />
+    <EventConnections>
+      <Connection Source="INIT" Destination="Core.INIT" dx1="40" />
+      <Connection Source="AreaAdptrIN.MCTRL" Destination="Core.AMREQ" dx1="153.4792" />
+      <Connection Source="AreaAdptrIN.CTCTRL" Destination="Core.ACTREQ" dx1="173.4792" />
+      <Connection Source="AreaAdptrIN.MCTRL" Destination="AreaAdptrOUT.MCTRL">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="AreaAdptrIN.CTCTRL" Destination="AreaAdptrOUT.CTCTRL">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="AreaAdptrOUT.LLF" Destination="Faults.SREQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="Faults.CNF" Destination="AreaAdptrIN.LLF">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="Core.INITO" Destination="Faults.INIT">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="Status.INITO" Destination="INITO" />
+      <Connection Source="Faults.INITO" Destination="Status.INIT">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="AreaAdptrOUT.LLM" Destination="Status.LLM">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="AreaAdptrOUT.LLCT" Destination="Status.LLCT">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="Status.MCNF" Destination="AreaAdptrIN.LLM">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="Status.CTCNF" Destination="AreaAdptrIN.LLCT">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="Core.MCNF" Destination="Status.MREQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="Core.CTCNF" Destination="Status.CTREQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="AreaAdptrIN.INIT" Destination="AreaAdptrOUT.INIT">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="AreaAdptrIN.FRCTRL" Destination="Faults.PFRREQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="AreaAdptrIN.FRCTRL" Destination="AreaAdptrOUT.FRCTRL">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="Status.INITO" Destination="StationAdaptrOUT.INIT">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="Core.MCNF" Destination="StationAdaptrOUT.MCTRL">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="Core.CTCNF" Destination="StationAdaptrOUT.CTCTRL">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="StationAdaptrOUT.LLF" Destination="Faults.LREQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="Faults.FRCNF" Destination="StationAdaptrOUT.FRCTRL" dx1="100" />
+      <Connection Source="StationHMIAdptrIN.MCNF" Destination="Core.SMREQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="StationHMIAdptrIN.CTCNF" Destination="Core.SCTREQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="StationHMIAdptrIN.FRCNF" Destination="Faults.LFRREQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="Faults.CNF" Destination="StationHMIAdptrIN.LLFREQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="Core.MCNF" Destination="StationHMIAdptrIN.LMFREQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="Core.CTCNF" Destination="StationHMIAdptrIN.LCTREQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="StationAdaptrOUT.LLM" Destination="StationHMIAdptrIN.LLMREQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="StationAdaptrOUT.LLCT" Destination="StationHMIAdptrIN.LLCTREQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="Status.INITO" Destination="StationHMIAdptrIN.SREQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+    </EventConnections>
+    <DataConnections>
+      <Connection Source="AreaAdptrIN.ModeCMD" Destination="Core.AreaModeCmd" />
+      <Connection Source="AreaAdptrIN.CycleTypeCMD" Destination="Core.AreaCycleTypeCmd" />
+      <Connection Source="AreaAdptrIN.ModeCMD" Destination="AreaAdptrOUT.ModeCMD">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="AreaAdptrIN.CycleTypeCMD" Destination="AreaAdptrOUT.CycleTypeCMD">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="Faults.Stn_Fault_Out" Destination="AreaAdptrIN.LL_Fault">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="AreaAdptrOUT.LL_Fault" Destination="Faults.Stn_Fault_In">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="AreaAdptrOUT.LL_Mode" Destination="Status.LLMode">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="AreaAdptrOUT.LL_CycleType" Destination="Status.LLCycleType">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="Status.SystemModeStatus" Destination="AreaAdptrIN.LL_Mode">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="Status.SystemCycleTypeStatus" Destination="AreaAdptrIN.LL_CycleType">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="Core.StationMode" Destination="Status.LocalMode">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="Core.StationCycleType" Destination="Status.LocalCycleType">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="AreaAdptrIN.ParentName" Destination="AreaAdptrOUT.ParentName">
+        <Points>
+          <Points>
+            <X>239.130188</X>
+            <Y>605</Y>
+          </Points>
+          <Points>
+            <X>219.999969</X>
+            <Y>605</Y>
+          </Points>
+          <Points>
+            <X>219.999969</X>
+            <Y>659.5</Y>
+          </Points>
+          <Points>
+            <X>955</X>
+            <Y>659.5</Y>
+          </Points>
+          <Points>
+            <X>955</X>
+            <Y>610</Y>
+          </Points>
+          <Points>
+            <X>1035</X>
+            <Y>610</Y>
+          </Points>
+        </Points>
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="AreaAdptrIN.ParentName" Destination="Parent" dx1="103.4791">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="AreaAdptrIN.FaultResetCMD" Destination="AreaAdptrOUT.FaultResetCMD">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="StationName" Destination="StationAdaptrOUT.ParentName" dx1="120" />
+      <Connection Source="Core.StationMode" Destination="StationAdaptrOUT.ModeCMD">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="Core.StationCycleType" Destination="StationAdaptrOUT.CycleTypeCMD">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="StationAdaptrOUT.LL_Fault" Destination="Faults.Local_Fault" dx1="80" dx2="170" dy="290" />
+      <Connection Source="AreaAdptrIN.FaultResetCMD" Destination="Faults.Parent_Fault_Reset" dx1="120" />
+      <Connection Source="Faults.Fault_Reset" Destination="StationAdaptrOUT.FaultResetCMD" dx1="40" />
+      <Connection Source="StationHMIAdptrIN.Mode" Destination="Core.StationModeCmd">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="StationHMIAdptrIN.CycleType" Destination="Core.StationCycleTypeCmd">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="StationHMIAdptrIN.FaultReset" Destination="Faults.Local_Fault_Reset">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="Faults.LL_Fault" Destination="StationHMIAdptrIN.LLFault">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="Core.StationMode" Destination="StationHMIAdptrIN.LocalMode">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="Core.StationCycleType" Destination="StationHMIAdptrIN.LocalCycleType">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="AreaAdptrIN.ParentName" Destination="StationHMIAdptrIN.ParentName">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="StationAdaptrOUT.LL_Mode" Destination="StationHMIAdptrIN.LLMode">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="StationAdaptrOUT.LL_CycleType" Destination="StationHMIAdptrIN.LLCycleType">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="StationName" Destination="StationHMIAdptrIN.StationName">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <Points>
+          <Points>
+            <X>964.8177</X>
+            <Y>853.999939</Y>
+          </Points>
+          <Points>
+            <X>974.8177</X>
+            <Y>853.999939</Y>
+          </Points>
+          <Points>
+            <X>974.8177</X>
+            <Y>691.499939</Y>
+          </Points>
+          <Points>
+            <X>462.5</X>
+            <Y>691.499939</Y>
+          </Points>
+          <Points>
+            <X>462.5</X>
+            <Y>451.499939</Y>
+          </Points>
+          <Points>
+            <X>222.5</X>
+            <Y>451.499939</Y>
+          </Points>
+          <Points>
+            <X>222.5</X>
+            <Y>248.999939</Y>
+          </Points>
+          <Points>
+            <X>260</X>
+            <Y>248.999939</Y>
+          </Points>
+        </Points>
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+    </DataConnections>
+  </FBNetwork>
+</FBType>
+*****
+
+faultDetection.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="8f2ed54a-c578-4cb2-8b2c-8502f4358d4a" Name="faultDetection" Comment="Composite Function Block Type" Namespace="Main">
+  <Attribute Name="Configuration.FB.IDCounter" Value="32" />
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author=" " Date="4/2/2026" Remarks="template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT">
+        <With Var="athome" />
+        <With Var="atwork" />
+        <With Var="enableToHomeFaultTimeout" />
+        <With Var="T_Home" />
+        <With Var="enableToWorkFaultTimeout" />
+        <With Var="T_Work" />
+        <With Var="actuator_state" />
+      </Event>
+      <Event Name="RESET" />
+      <Event Name="PST_EVENT" Comment="Normal Execution Request">
+        <With Var="enableToHomeFaultTimeout" />
+        <With Var="T_Home" />
+        <With Var="enableToWorkFaultTimeout" />
+        <With Var="T_Work" />
+        <With Var="actuator_state" />
+      </Event>
+      <Event Name="INPUT_EVENT">
+        <With Var="athome" />
+        <With Var="atwork" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO">
+        <With Var="fault_active" />
+        <With Var="fault_code" />
+      </Event>
+      <Event Name="FAULT_CHANGE" Comment="Initialization Confirm">
+        <With Var="fault_active" />
+        <With Var="fault_code" />
+      </Event>
+      <Event Name="CLEARED" Comment="Execution Confirmation">
+        <With Var="fault_active" />
+        <With Var="fault_code" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="athome" Type="BOOL" />
+      <VarDeclaration Name="atwork" Type="BOOL" />
+      <VarDeclaration Name="enableToHomeFaultTimeout" Type="BOOL" Comment="Argument" />
+      <VarDeclaration Name="T_Home" Type="TIME" />
+      <VarDeclaration Name="enableToWorkFaultTimeout" Type="BOOL" Comment="Input event qualifier" />
+      <VarDeclaration Name="T_Work" Type="TIME" />
+      <VarDeclaration Name="actuator_state" Type="INT" Comment="Input event qualifier" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="fault_active" Type="BOOL" Comment="Output event qualifier" />
+      <VarDeclaration Name="fault_code" Type="INT" />
+    </OutputVars>
+  </InterfaceList>
+  <FBNetwork>
+    <FB ID="14" Name="ED_Work" Type="E_DELAY" x="6260" y="1680" Namespace="IEC61499.Standard" />
+    <FB ID="15" Name="ED_Home" Type="E_DELAY" x="3700" y="3160" Namespace="IEC61499.Standard" />
+    <FB ID="16" Name="GateStartWork" Type="E_SWITCH" x="5680" y="1660" Namespace="IEC61499.Standard" />
+    <FB ID="17" Name="GateStartHome" Type="E_SWITCH" x="3160" y="3120" Namespace="IEC61499.Standard" />
+    <FB ID="18" Name="WorkTimeoutCheck" Type="E_SWITCH" x="6940" y="1680" Namespace="IEC61499.Standard" />
+    <FB ID="19" Name="HomeTimeoutChceck" Type="E_SWITCH" x="4220" y="3140" Namespace="IEC61499.Standard" />
+    <FB ID="20" Name="NOT_Fault" Type="NOT_12669C4E53BA46410" x="4140" y="1880" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=1" />
+    </FB>
+    <FB ID="21" Name="NOT_AtWork" Type="NOT_12669C4E53BA46410" x="6940" y="2440" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=1" />
+    </FB>
+    <FB ID="22" Name="NOT_AtHome" Type="NOT_12669C4E53BA46410" x="3980" y="4000" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=1" />
+    </FB>
+    <FB ID="23" Name="AND_StartWork" Type="AND_148CCC6046D4CE74C" x="4980" y="1640" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=2" />
+    </FB>
+    <FB ID="24" Name="AND_StartHome" Type="AND_148CCC6046D4CE74C" x="2700" y="3120" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=2" />
+    </FB>
+    <FB ID="25" Name="Latch" Type="FaultLatch" x="2580" y="1840" Namespace="Main">
+      <Parameter Name="FC_Sensor_Fault" Value="1003" />
+    </FB>
+    <FB ID="26" Name="StateEvents" Type="actuatorStateEvents" x="900" y="1960" Namespace="Main" />
+    <FB ID="27" Name="Work_AND_Home" Type="AND_148CCC6046D4CE74C" x="5780" y="3380" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=2" />
+    </FB>
+    <FB ID="30" Name="FB1" Type="E_SWITCH" x="6340" y="3360" Namespace="IEC61499.Standard" />
+    <FB ID="32" Name="NOT_Fault1" Type="NOT_12669C4E53BA46410" x="2200" y="3120" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=1" />
+    </FB>
+    <Input Name="enableToWorkFaultTimeout" x="4720" y="2272" Type="Data" />
+    <Input Name="atwork" x="4900" y="2652" Type="Data" />
+    <Input Name="athome" x="3340" y="4212" Type="Data" />
+    <Input Name="T_Work" x="5700" y="2172" Type="Data" />
+    <Input Name="T_Home" x="3120" y="3652" Type="Data" />
+    <Input Name="RESET" x="2120" y="2032" Type="Event" />
+    <Input Name="PST_EVENT" x="280" y="1972" Type="Event" />
+    <Input Name="actuator_state" x="274.9375" y="2232" Type="Data" />
+    <Input Name="INIT" x="300" y="1122" Type="Event" />
+    <Input Name="INPUT_EVENT" x="4920" y="3372" Type="Event" />
+    <Input Name="enableToHomeFaultTimeout" x="2160" y="4172" Type="Data" />
+    <Frame Name="WorkTimeout" X="4680" Y="1360" Width="2900" Height="1440">
+      <Parameter Name="BackgroundColor" Value="AliceBlue" />
+      <Parameter Name="TextColor" Value="Black" />
+      <Parameter Name="Font" Value="Microsoft Sans Serif, 18pt" />
+      <Parameter Name="TextAlignment" Value="TopLeft" />
+      <Parameter Name="MoveStyle" Value="AnyContained" />
+      <Parameter Name="Text" Value="WorkTimeout" />
+      <Parameter Name="NxtLayerIdentifier" Value="" />
+    </Frame>
+    <Frame Name="FRAME1" X="2060" Y="2840" Width="2540" Height="1600">
+      <Parameter Name="BackgroundColor" Value="SeaShell" />
+      <Parameter Name="TextColor" Value="Black" />
+      <Parameter Name="Font" Value="Microsoft Sans Serif, 18pt" />
+      <Parameter Name="TextAlignment" Value="TopRight" />
+      <Parameter Name="MoveStyle" Value="AnyContained" />
+      <Parameter Name="Text" Value="Home Timeout" />
+      <Parameter Name="NxtLayerIdentifier" Value="" />
+    </Frame>
+    <Frame Name="FRAME2" X="2060" Y="1360" Width="2540" Height="1440">
+      <Parameter Name="BackgroundColor" Value="Thistle" />
+      <Parameter Name="TextColor" Value="Black" />
+      <Parameter Name="Font" Value="Microsoft Sans Serif, 18pt" />
+      <Parameter Name="TextAlignment" Value="TopLeft" />
+      <Parameter Name="MoveStyle" Value="AnyContained" />
+      <Parameter Name="Text" Value="Memory of Fault" />
+      <Parameter Name="NxtLayerIdentifier" Value="" />
+    </Frame>
+    <Frame Name="FRAME3" X="4680" Y="2840" Width="2940" Height="1600">
+      <Parameter Name="BackgroundColor" Value="Azure" />
+      <Parameter Name="TextColor" Value="Black" />
+      <Parameter Name="Font" Value="Microsoft Sans Serif, 18pt" />
+      <Parameter Name="TextAlignment" Value="TopRight" />
+      <Parameter Name="MoveStyle" Value="AnyContained" />
+      <Parameter Name="Text" Value="Sensor Fault" />
+      <Parameter Name="NxtLayerIdentifier" Value="" />
+    </Frame>
+    <Output Name="FAULT_CHANGE" x="3860" y="1612" Type="Event" />
+    <Output Name="CLEARED" x="4000" y="1712" Type="Event" />
+    <Output Name="fault_active" x="3820" y="2412" Type="Data" />
+    <Output Name="fault_code" x="3820" y="2492" Type="Data" />
+    <Output Name="INITO" x="7220" y="1122" Type="Event" />
+    <EventConnections>
+      <Connection Source="GateStartWork.EO1" Destination="ED_Work.START" dx1="49.72949" />
+      <Connection Source="WorkTimeoutCheck.EO1" Destination="Latch.SET_WORK" dx1="49.729" dx2="70" dy="-209.9999" />
+      <Connection Source="GateStartHome.EO1" Destination="ED_Home.START" dx1="49.72949" />
+      <Connection Source="Latch.FAULT_CHANGE" Destination="FAULT_CHANGE" dx1="104.5417">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="Latch.CLEARED" Destination="CLEARED" dx1="124.5417">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="RESET" Destination="Latch.RESET" />
+      <Connection Source="ED_Work.EO" Destination="NOT_AtWork.REQ" dx1="48.5" />
+      <Connection Source="NOT_AtWork.CNF" Destination="WorkTimeoutCheck.EI" dx1="50" dx2="120" dy="-240">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="AND_StartWork.CNF" Destination="GateStartWork.EI" dx1="67.479" />
+      <Connection Source="NOT_Fault.CNF" Destination="AND_StartWork.REQ" dx1="50" />
+      <Connection Source="ED_Home.EO" Destination="NOT_AtHome.REQ" dx1="48.5" dx2="50" dy="330.0002" />
+      <Connection Source="AND_StartHome.CNF" Destination="GateStartHome.EI" />
+      <Connection Source="NOT_AtHome.CNF" Destination="HomeTimeoutChceck.EI" dx1="50" dx2="50" dy="-110" />
+      <Connection Source="HomeTimeoutChceck.EO1" Destination="Latch.SET_HOME" dx1="49.729" dx2="90" dy="-190" />
+      <Connection Source="StateEvents.toWork_Event" Destination="NOT_Fault.REQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="StateEvents.toHome_Event" Destination="NOT_Fault1.REQ" dx1="323.8751">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="PST_EVENT" Destination="StateEvents.pst_event" dx1="46.61456" />
+      <Connection Source="INPUT_EVENT" Destination="Work_AND_Home.REQ" dx1="48.2085" />
+      <Connection Source="Work_AND_Home.CNF" Destination="FB1.EI" dx1="50" />
+      <Connection Source="FB1.EO1" Destination="Latch.SET_SENSOR">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="INIT" Destination="Work_AND_Home.REQ" dx1="2685.708">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="INIT" Destination="StateEvents.pst_event" dx1="205.7083">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="INIT" Destination="Latch.INIT" dx1="1220.708">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="Latch.INITO" Destination="INITO" dx1="139.6042">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="NOT_Fault1.CNF" Destination="AND_StartHome.REQ" />
+    </EventConnections>
+    <DataConnections>
+      <Connection Source="Latch.fault_active" Destination="NOT_Fault.IN1" dx1="644.5417">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="AND_StartWork.OUT" Destination="GateStartWork.G" dx1="47.479" />
+      <Connection Source="T_Work" Destination="ED_Work.DT" dx1="47.75" />
+      <Connection Source="atwork" Destination="NOT_AtWork.IN1" dx1="40" />
+      <Connection Source="NOT_AtWork.OUT1" Destination="WorkTimeoutCheck.G" dx1="173.75" dx2="30" dy="-310">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="AND_StartHome.OUT" Destination="GateStartHome.G" dx1="47.47925" />
+      <Connection Source="T_Home" Destination="ED_Home.DT" dx1="40" />
+      <Connection Source="athome" Destination="NOT_AtHome.IN1" />
+      <Connection Source="NOT_AtHome.OUT1" Destination="HomeTimeoutChceck.G" dx1="153.75" dx2="20" dy="-459.9998">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="Latch.fault_active" Destination="fault_active" dx1="409.6045">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="Latch.fault_code" Destination="fault_code" dx1="40" />
+      <Connection Source="NOT_Fault.OUT1" Destination="AND_StartWork.IN1" dx1="176.875">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="enableToWorkFaultTimeout" Destination="AND_StartWork.IN2">
+        <Points>
+          <Points>
+            <X>1389.23438</X>
+            <Y>575</Y>
+          </Points>
+          <Points>
+            <X>1329.30737</X>
+            <Y>575</Y>
+          </Points>
+          <Points>
+            <X>1329.30737</X>
+            <Y>534.5</Y>
+          </Points>
+          <Points>
+            <X>1222.50012</X>
+            <Y>534.5</Y>
+          </Points>
+          <Points>
+            <X>1222.50012</X>
+            <Y>485</Y>
+          </Points>
+          <Points>
+            <X>1240</X>
+            <Y>485</Y>
+          </Points>
+        </Points>
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="actuator_state" Destination="StateEvents.actuator_state" />
+      <Connection Source="atwork" Destination="Work_AND_Home.IN1" dx1="244.5835">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="athome" Destination="Work_AND_Home.IN2" dx1="40" />
+      <Connection Source="Work_AND_Home.OUT" Destination="FB1.G" dx1="47.479" />
+      <Connection Source="enableToHomeFaultTimeout" Destination="AND_StartHome.IN2" dx1="40" dx2="30" dy="-360">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="NOT_Fault1.OUT1" Destination="AND_StartHome.IN1" />
+      <Connection Source="Latch.fault_active" Destination="NOT_Fault1.IN1" dx1="244.5417" dx2="70" dy="340">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+    </DataConnections>
+  </FBNetwork>
+</FBType>
