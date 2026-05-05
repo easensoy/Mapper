@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE DataType SYSTEM "../LibraryElement.dtd">
+<DataType Namespace="Main" Name="Component_State" Comment="IEC61131-3, Table 14#5">
+  <Attribute Name="nxtDataType" Value="yuBjJmbjdzTXbTqqCuFqqxQXJE5mK0LRrTxr6eXSk87W43s6zXXEgySxlizrayYEt1SYx1LTMSJ1NRBePvhs5dvgCqEZdX160HumpOPkI+BmhRDl9zNqgQ==" Context="12919256482240290422" />
+  <Identification Standard="1131-3" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author=" " Date="3/13/2026" Remarks="Template" />
+  <CompilerInfo />
+  <StructuredType>
+    <VarDeclaration Name="name" Type="STRING" />
+    <VarDeclaration Name="state" Type="INT" />
+  </StructuredType>
+</DataType>
