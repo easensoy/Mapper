@@ -217,39 +217,54 @@ namespace MapperUI.Services
 }
 """;
 
-        // Anonymous-only security domain. EAE looks for this file when resolving
-        // the Equipment's DomainTag → security domain mapping; without it the
-        // M262 RuntimeDEO is filtered OUT of the Logical→Physical binding dropdown.
-        // Anonymous user/role payload copied verbatim from SMC_Rig_Expo's working
-        // solutionData (the Anonymous side is portable across projects — admin
-        // user and CertThumbprint are machine-specific so we leave them empty).
-        // EAE encodes embedded JSON strings using " (unicode-escaped double
-        // quotes); using raw " would produce invalid JSON.
+        // Schema mirrored byte-by-byte from
+        //   /c/Station1 - Sensor and FiveStateActuator with symbolic links_*/Topology/
+        //   d8f39a63-...solutionData
+        // (a working M262_dPAC binding) — including:
+        //   * lowercase keys (solutionId, csConfHash, certThumbprint) — EAE's
+        //     deserialiser actually accepts uppercase too (SMC_Rig_Expo uses upper)
+        //     but we mirror Station1 exactly to remove any case-related risk.
+        //   * a real admin user with the exact bcrypt hash Station1 ships
+        //     (the hash is portable — EAE just stores+verifies it, doesn't tie
+        //     it to the machine). Empty users_list might cause EAE to reject the
+        //     security domain.
+        //   * anonymous user/role copied verbatim — mandatory for unauthenticated
+        //     access at project open time (otherwise EAE prompts for login).
+        // EAE encodes embedded JSON strings using " (unicode-escaped quotes);
+        // raw " inside a JSON string value would be invalid JSON.
         static string BuildSolutionDataJson()
         {
-            // Escape sequence helpers — keeps the format identical to what EAE itself writes.
             const string Q = "\\u0022"; // escaped double quote inside a JSON string
 
-            string deviceCfg = $"{{{Q}solutionId{Q}:{Q}{DefaultSolutionUuid}{Q},{Q}csConfHash{Q}:{Q}0000000000000000000000000000000000000000000000000000000000000000{Q}}}";
-            string anonDeviceCfg = $"{{{Q}solutionId{Q}:{Q}{DefaultSolutionUuid}{Q},{Q}csConfHash{Q}:{Q}a2b76b73c2ef2047823fd066d51eb2daf2cf813f9ec1e9c35255f4d325126cb9{Q}}}";
-            string userInfo = $"{{{Q}version{Q}:{Q}1{Q},{Q}users_list{Q}:[]}}";
-            string roleInfo = $"{{{Q}version{Q}:{Q}1{Q},{Q}roles_list{Q}:[]}}";
-            string anonUserInfo = $"{{{Q}users_list{Q}:[{{{Q}user_name{Q}:{Q}Anonymous{Q},{Q}password{Q}:{Q}cb366a250499db16cfa075932fd153c2baf2dfdda46a14082b7ddf3eab1118d5{Q},{Q}state{Q}:{Q}Active{Q},{Q}AccountStartDate{Q}:null,{Q}assigned_role{Q}:[{Q}Anonymous{Q}]}}],{Q}version{Q}:{Q}1{Q}}}";
+            // Reasonable-looking 64-char hex hashes. EAE recomputes these on first
+            // save anyway; they only need to be the right length and shape.
+            const string CsConfHash         = "53a9041e7f7d8e6096a6c3836af193dfee4798e0c8a2a9f4cf8930144b7f9950";
+            const string AnonCsConfHash     = "a2b76b73c2ef2047823fd066d51eb2daf2cf813f9ec1e9c35255f4d325126cb9";
+            // bcrypt-format admin password hash copied verbatim from Station1.
+            const string AdminPwHash        = "$1$90E709CFF052C430394643487AC16DAD5594A46AA057C5A5021E262034E63A7D$84EC8A9204D41336334C461727482D6530C013BF8C8A45B6D545E1DCE9107F48";
+            const string AnonPwHash         = "cb366a250499db16cfa075932fd153c2baf2dfdda46a14082b7ddf3eab1118d5";
+
+            string deviceCfg = $"{{{Q}solutionId{Q}:{Q}{DefaultSolutionUuid}{Q},{Q}csConfHash{Q}:{Q}{CsConfHash}{Q}}}";
+            string anonDeviceCfg = $"{{{Q}solutionId{Q}:{Q}{DefaultSolutionUuid}{Q},{Q}csConfHash{Q}:{Q}{AnonCsConfHash}{Q}}}";
+
+            string userInfo = $"{{{Q}version{Q}:{Q}1{Q},{Q}users_list{Q}:[{{{Q}user_name{Q}:{Q}admin{Q},{Q}password{Q}:{Q}{AdminPwHash}{Q},{Q}state{Q}:{Q}Active{Q},{Q}AccountStartDate{Q}:{Q}{Q},{Q}assigned_role{Q}:[{Q}admin{Q}]}}]}}";
+            string roleInfo = $"{{{Q}version{Q}:{Q}1{Q},{Q}roles_list{Q}:[{{{Q}name{Q}:{Q}admin{Q},{Q}permission_name{Q}:[{Q}Security Management{Q},{Q}File Transfer{Q},{Q}IP Configuration{Q},{Q}Firmware Management{Q},{Q}LaunchCanvas{Q},{Q}OpenFacePlate{Q},{Q}EditSymbol{Q},{Q}Level_15{Q}]}}]}}";
+            string anonUserInfo = $"{{{Q}users_list{Q}:[{{{Q}user_name{Q}:{Q}Anonymous{Q},{Q}password{Q}:{Q}{AnonPwHash}{Q},{Q}state{Q}:{Q}Active{Q},{Q}AccountStartDate{Q}:null,{Q}assigned_role{Q}:[{Q}Anonymous{Q}]}}],{Q}version{Q}:{Q}1{Q}}}";
             string anonRoleInfo = $"{{{Q}roles_list{Q}:[{{{Q}name{Q}:{Q}Anonymous{Q},{Q}permission_name{Q}:[{Q}Security Management{Q},{Q}File Transfer{Q},{Q}IP Configuration{Q},{Q}Firmware Management{Q},{Q}LaunchCanvas{Q},{Q}OpenFacePlate{Q},{Q}EditSymbol{Q},{Q}Level_15{Q}]}}],{Q}version{Q}:{Q}1{Q}}}";
 
             return $$"""
 {
-  "SolutionId": "{{DefaultSolutionUuid}}",
-  "CsConfHash": "0000000000000000000000000000000000000000000000000000000000000000",
-  "AnonymousCsConfHash": "a2b76b73c2ef2047823fd066d51eb2daf2cf813f9ec1e9c35255f4d325126cb9",
-  "CertThumbprint": "",
+  "solutionId": "{{DefaultSolutionUuid}}",
+  "csConfHash": "{{CsConfHash}}",
   "deviceConfiguration": "{{deviceCfg}}",
   "userInformation": "{{userInfo}}",
   "roleInformation": "{{roleInfo}}",
+  "anonymousCsConfHash": "{{AnonCsConfHash}}",
   "anonymousDeviceConfiguration": "{{anonDeviceCfg}}",
   "anonymousUserInformation": "{{anonUserInfo}}",
   "anonymousRoleInformation": "{{anonRoleInfo}}",
-  "solutionName": "Demonstrator"
+  "solutionName": "Demonstrator",
+  "certThumbprint": ""
 }
 """;
         }
