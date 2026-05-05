@@ -7,11 +7,6 @@ using System.Xml.Linq;
 
 namespace CodeGen.Translation
 {
-    /// <summary>
-    /// Rewrites the initializeinit Structured Text algorithm inside a Basic FB .fbt file.
-    /// Idempotent: keeps a .fbt.original backup on first run and rewrites from that baseline
-    /// on every subsequent run, so repeated calls never compound prior edits.
-    /// </summary>
     public static class FbtRewriter
     {
         public const string AlgorithmName = "initializeinit";
