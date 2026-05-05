@@ -42,13 +42,6 @@ namespace CodeGen.Configuration
         /// </summary>
         public string M262TargetIp { get; set; } = "192.168.1.10";
 
-        /// <summary>
-        /// IPV4 address of the M580 controller on the rig network. Drives the
-        /// second sysdev's Parameter so EAE shows both controllers in the System
-        /// tree pre-populated with their rig addresses.
-        /// </summary>
-        public string M580TargetIp { get; set; } = "192.168.1.20";
-
         public string ActiveSyslayPath =>
             !string.IsNullOrEmpty(SyslayPath2) ? SyslayPath2 : SyslayPath;
 
@@ -95,7 +88,6 @@ namespace CodeGen.Configuration
             IoBindingsPath = @"Input\SMC_Rig_IO_Bindings.xlsx",
             M262HardwareConfigBaselinePath = string.Empty,
             M262TargetIp = "192.168.1.10",
-            M580TargetIp = "192.168.1.20",
         };
 
         private static void Save(string path, MapperConfig config)
