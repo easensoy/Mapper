@@ -108,11 +108,13 @@ namespace CodeGen.Translation
 
             // Optional pin columns — index by header name so the user can add them in any
             // order to the right of the existing columns. Absent columns just mean
-            // ResolveSymbol() returns null for the corresponding pin.
+            // ResolveSymbol() returns null for the corresponding pin (unless the Notes
+            // column fallback below picks it up).
             int idxPinDiAthome     = header.FindIndex(h => string.Equals(h, "pin_di_athome",      StringComparison.OrdinalIgnoreCase));
             int idxPinDiAtwork     = header.FindIndex(h => string.Equals(h, "pin_di_atwork",      StringComparison.OrdinalIgnoreCase));
             int idxPinDoToWork     = header.FindIndex(h => string.Equals(h, "pin_do_outputToWork", StringComparison.OrdinalIgnoreCase));
             int idxPinDoToHome     = header.FindIndex(h => string.Equals(h, "pin_do_outputToHome", StringComparison.OrdinalIgnoreCase));
+            int idxNotes           = header.FindIndex(h => string.Equals(h, "Notes",              StringComparison.OrdinalIgnoreCase));
 
             for (int r = 1; r < rows.Count; r++)
             {
@@ -132,6 +134,19 @@ namespace CodeGen.Translation
                 AddPinIfPresent(bindings, idxPinDiAtwork, row, name, "atwork");
                 AddPinIfPresent(bindings, idxPinDoToWork, row, name, "OutputToWork");
                 AddPinIfPresent(bindings, idxPinDoToHome, row, name, "OutputToHome");
+
+                // Notes-column fallback: when the structured pin_* columns aren't
+                // populated for this row, parse the free-text Notes for tokens like
+                // "DI00=PusherAtHome" / "DO03=ExtendRejector" and match the tag back
+                // to athome/atwork/OutputToWork/OutputToHome via the binding columns.
+                // Memory rule "Never regenerate the Excel" — this lets the existing
+                // hand-crafted Notes cell drive .hcf without xlsx schema changes.
+                if (idxNotes >= 0)
+                {
+                    var notes = Get(row, idxNotes);
+                    if (!string.IsNullOrWhiteSpace(notes))
+                        ParseNotesPinAssignments(bindings, notes, binding);
+                }
             }
         }
 
@@ -144,6 +159,38 @@ namespace CodeGen.Translation
             // Last writer wins if a pin appears in two rows — EAE's hcf schema also
             // forbids duplicates, so this matches the runtime constraint.
             bindings.PinAssignments[pin] = new PinAssignment(pin, componentName, port);
+        }
+
+        // Tokens like "DI00=PusherAtHome" and "DO03=ExtendRejector" — pin id capture
+        // followed by the equals sign and the IO tag string used elsewhere on the row.
+        private static readonly System.Text.RegularExpressions.Regex NotesPinPattern =
+            new(@"\b(D[IO]\d{2})\s*=\s*([A-Za-z_][A-Za-z0-9_]*)",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        private static void ParseNotesPinAssignments(IoBindings bindings, string notes,
+            ActuatorBinding binding)
+        {
+            foreach (System.Text.RegularExpressions.Match m in NotesPinPattern.Matches(notes))
+            {
+                var pin = m.Groups[1].Value.ToUpperInvariant(); // normalise "di00" -> "DI00"
+                var tag = m.Groups[2].Value;
+
+                // Match the captured IO tag back to one of the binding's tag columns to
+                // figure out which CAT port name (athome/atwork/OutputToWork/OutputToHome)
+                // this pin should symlink to.
+                string? port = null;
+                if (string.Equals(tag, binding.AthomeTag,        StringComparison.OrdinalIgnoreCase)) port = "athome";
+                else if (string.Equals(tag, binding.AtworkTag,        StringComparison.OrdinalIgnoreCase)) port = "atwork";
+                else if (string.Equals(tag, binding.OutputToWorkTag,  StringComparison.OrdinalIgnoreCase)) port = "OutputToWork";
+                else if (string.Equals(tag, binding.OutputToHomeTag,  StringComparison.OrdinalIgnoreCase)) port = "OutputToHome";
+                if (port == null) continue; // tag doesn't belong to this row's bindings
+
+                // Don't overwrite a structured pin_* column if it already wrote this pin —
+                // the explicit column wins over Notes free-text. AddPinIfPresent has
+                // already run above so we check first.
+                if (bindings.PinAssignments.ContainsKey(pin)) continue;
+                bindings.PinAssignments[pin] = new PinAssignment(pin, binding.ComponentName, port);
+            }
         }
 
         private static void ParseSensorSheet(List<List<string>> rows, IoBindings bindings)
