@@ -29,14 +29,6 @@ namespace MapperUI.Services
         const string DeviceName = "EcoRT_0";
         const string ResourceName = "RES0";
 
-        // Stable per-device GUIDs. The M262 keeps the existing default sysdev GUID
-        // (...0002) so the rewrite is in-place; the M580 takes a sibling GUID (...0003)
-        // so EAE shows BOTH controllers in the System tree without churning the
-        // existing one. Stable across re-runs so dfbproj entries stay deduplicated.
-        const string M262SysdevGuid = "00000000-0000-0000-0000-000000000002";
-        const string M580SysdevGuid = "00000000-0000-0000-0000-000000000003";
-        const string M580DeviceName = "M580_1";
-
         public static SysdevEmitResult Emit(MapperConfig cfg)
         {
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
@@ -45,27 +37,16 @@ namespace MapperUI.Services
                 ?? throw new InvalidOperationException(
                     "Cannot derive EAE project root from MapperConfig.SyslayPath/SyslayPath2.");
 
-            // --- Device 1: M262 (existing sysdev, rewritten in place) ---
-            // EAE's solution scaffold ships exactly one sysdev (the "EcoRT_0" placeholder).
-            // We mutate that file rather than creating a sibling, so existing references
-            // (Mappings, .hcf path, Simulation.Binding.xml) keep working without churn.
-            var m262SysdevPath = FindSysdev(eaeRoot)
+            // M262-only emission. The M580 sidecar was tried but EAE's TopologyManager
+            // raises NRE on the Physical Devices canvas without a matching
+            // Topology/Equipment_M580dPAC_1.json — and we don't deploy to the M580 for
+            // tomorrow's Feeder test. Strip it: one sysdev = one device = no canvas crash.
+            var sysdevPath = FindSysdev(eaeRoot)
                 ?? throw new FileNotFoundException(
                     $"No .sysdev found under {eaeRoot}\\IEC61499\\System\\");
-            RewriteSysdev(m262SysdevPath, DeviceName, "M262_dPAC", cfg.M262TargetIp ?? string.Empty);
-            var m262PropsPath = WriteM262DevicePropertiesXml(m262SysdevPath);
+            RewriteSysdev(sysdevPath, DeviceName, "M262_dPAC", cfg.M262TargetIp ?? string.Empty);
+            var propsPath = WriteM262DevicePropertiesXml(sysdevPath);
 
-            // --- Device 2: M580 (new sysdev created next to the M262 one) ---
-            var sysFolder = Path.GetDirectoryName(m262SysdevPath)!;
-            var m580SysdevPath = Path.Combine(sysFolder, $"{M580SysdevGuid}.sysdev");
-            CreateOrUpdateSysdev(m580SysdevPath, M580SysdevGuid, M580DeviceName, "M580_dPAC",
-                cfg.M580TargetIp ?? string.Empty);
-            var m580PropsPath = WriteM262DevicePropertiesXml(m580SysdevPath);
-
-            // --- Mappings: APP1.* -> EcoRT_0.RES0 ---
-            // The Feeder cylinder physically wires through the M262 IO modules so all
-            // FB instances target the M262's RES0 by default. To distribute FBs across
-            // both controllers in a future build, swap this for a per-FB routing rule.
             var systemFile = FindSystemFile(eaeRoot)
                 ?? throw new FileNotFoundException(
                     $"No .system found under {eaeRoot}\\IEC61499\\System\\");
@@ -76,52 +57,20 @@ namespace MapperUI.Services
                 : ReadSyslayTopLevelFbNames(syslayPath);
             int added = EnsureMappingsPerFb(systemFile, fbInstances);
 
-            // --- Register both sysdevs (and their per-device sibling files) in dfbproj ---
             var dfbproj = FindDfbproj(eaeRoot);
             int registered = 0;
             if (dfbproj != null)
-            {
-                registered += DfbprojRegistrar.RegisterSystemDevice(dfbproj, eaeRoot, m262SysdevPath);
-                registered += DfbprojRegistrar.RegisterSystemDevice(dfbproj, eaeRoot, m580SysdevPath);
-            }
+                registered = DfbprojRegistrar.RegisterSystemDevice(dfbproj, eaeRoot, sysdevPath);
 
             return new SysdevEmitResult
             {
-                SysdevPath = m262SysdevPath,
+                SysdevPath = sysdevPath,
                 SystemFilePath = systemFile,
                 MappingsAdded = added,
                 FbInstancesMapped = fbInstances,
                 DfbprojEntriesRegistered = registered,
-                PropertiesXmlPath = m262PropsPath,
-                M580SysdevPath = m580SysdevPath,
-                M580PropertiesXmlPath = m580PropsPath,
+                PropertiesXmlPath = propsPath,
             };
-        }
-
-        /// <summary>
-        /// Creates a new sysdev file from scratch (used for the M580 sidecar). Also
-        /// creates the per-device folder. Idempotent: existing file gets re-set to the
-        /// canonical shape so a re-run never produces churn.
-        /// </summary>
-        static void CreateOrUpdateSysdev(string sysdevPath, string deviceId,
-            string deviceName, string deviceType, string targetIp)
-        {
-            if (!File.Exists(sysdevPath))
-            {
-                var seed = $@"<?xml version=""1.0"" encoding=""utf-8""?>
-<Device xmlns:xsi=""http://www.w3.org/2001/XMLSchema-instance"" xmlns=""{LibElNs}"" " +
-                    $@"ID=""{deviceId}"" Name=""{deviceName}"" Type=""{deviceType}"" Namespace=""SE.DPAC"" x=""1100"" y=""700"" />";
-                File.WriteAllText(sysdevPath, seed);
-            }
-            // Now apply the same rewrite the M262 sysdev gets, so IPV4Address Parameter +
-            // RES0 resource land on the M580 too.
-            RewriteSysdev(sysdevPath, deviceName, deviceType, targetIp);
-
-            // Per-device folder.
-            var folder = Path.Combine(
-                Path.GetDirectoryName(sysdevPath)!,
-                Path.GetFileNameWithoutExtension(sysdevPath));
-            Directory.CreateDirectory(folder);
         }
 
         // --- M262 device-properties XML emission ---
@@ -346,7 +295,5 @@ namespace MapperUI.Services
         public List<string> FbInstancesMapped { get; set; } = new();
         public int DfbprojEntriesRegistered { get; set; }
         public string PropertiesXmlPath { get; set; } = string.Empty;
-        public string M580SysdevPath { get; set; } = string.Empty;
-        public string M580PropertiesXmlPath { get; set; } = string.Empty;
     }
 }
