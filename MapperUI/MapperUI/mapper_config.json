@@ -17,5 +17,6 @@
   "TemplateHmiDir": "C:\\Station1\\HMI",
   "IoBindingsPath": "Input\\SMC_Rig_IO_Bindings.xlsx",
   "M262HardwareConfigBaselinePath": "C:\\SMC_Rig_Expo_20260112-165857725.sln",
-  "M262TargetIp": "172.24.61.92"
+  "M262TargetIp": "192.168.1.10",
+  "M580TargetIp": "192.168.1.20"
 }
