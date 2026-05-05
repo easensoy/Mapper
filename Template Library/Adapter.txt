@@ -1,0 +1,268 @@
+AreaHMIAdptr.adp
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE AdapterType SYSTEM "../LibraryElement.dtd">
+<AdapterType GUID="27fdc301-5994-45a9-944c-732fb2f8531b" Name="AreaHMIAdptr" Comment="Adapter Interface" Namespace="Main">
+  <Identification Standard="61499-1" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author="Evans_A" Date="8/14/2025" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="SMREQ" Comment="Request from Socket">
+        <With Var="SystemMode" />
+      </Event>
+      <Event Name="SCTREQ">
+        <With Var="SystemCycleType" />
+      </Event>
+      <Event Name="LLFREQ">
+        <With Var="LL_FaultStatus" />
+      </Event>
+      <Event Name="ANREQ">
+        <With Var="AreaName" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="MCNF" Comment="Confirmation from Plug">
+        <With Var="Mode" />
+      </Event>
+      <Event Name="CTCNF">
+        <With Var="CycleType" />
+      </Event>
+      <Event Name="FRCNF">
+        <With Var="FaultReset" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="SystemMode" Type="INT" />
+      <VarDeclaration Name="SystemCycleType" Type="INT" />
+      <VarDeclaration Name="LL_FaultStatus" Type="BOOL" />
+      <VarDeclaration Name="AreaName" Type="STRING" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="Mode" Type="INT" />
+      <VarDeclaration Name="CycleType" Type="INT" />
+      <VarDeclaration Name="FaultReset" Type="BOOL" />
+    </OutputVars>
+  </InterfaceList>
+  <Service RightInterface="PLUG" LeftInterface="SOCKET">
+    <ServiceSequence Name="request_confirm">
+      <ServiceTransaction>
+        <InputPrimitive Interface="SOCKET" Event="SMREQ" Parameters="REQD" />
+        <OutputPrimitive Interface="PLUG" Event="SMREQ" Parameters="REQD" />
+      </ServiceTransaction>
+      <ServiceTransaction>
+        <InputPrimitive Interface="PLUG" Event="MCNF" Parameters="CNFD" />
+        <OutputPrimitive Interface="SOCKET" Event="MCNF" Parameters="CNFD" />
+      </ServiceTransaction>
+    </ServiceSequence>
+    <ServiceSequence Name="indication_response">
+      <ServiceTransaction>
+        <InputPrimitive Interface="PLUG" Event="CTCNF" Parameters="INDD" />
+        <OutputPrimitive Interface="SOCKET" Event="CTCNF" Parameters="INDD" />
+      </ServiceTransaction>
+      <ServiceTransaction>
+        <InputPrimitive Interface="SOCKET" Event="SCTREQ" Parameters="RSPD" />
+        <OutputPrimitive Interface="PLUG" Event="SCTREQ" Parameters="RSPD" />
+      </ServiceTransaction>
+    </ServiceSequence>
+  </Service>
+</AdapterType>
+*****
+
+CaSAdptr.adp
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE AdapterType SYSTEM "../LibraryElement.dtd">
+<AdapterType GUID="1c7d4d04-726d-4b40-adb2-f54d42a1b654" Name="CaSAdptr" Comment="Adapter Interface" Namespace="Main">
+  <Identification Standard="61499-1" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author="Evans_A" Date="7/10/2025" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="LLF" Comment="lower level Fault Event">
+        <With Var="LL_Fault" />
+      </Event>
+      <Event Name="LLM">
+        <With Var="LL_Mode" />
+      </Event>
+      <Event Name="LLCT">
+        <With Var="LL_CycleType" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INIT">
+        <With Var="ParentName" />
+      </Event>
+      <Event Name="MCTRL" Comment="Confirmation from Plug">
+        <With Var="ModeCMD" />
+      </Event>
+      <Event Name="CTCTRL">
+        <With Var="CycleTypeCMD" />
+      </Event>
+      <Event Name="FRCTRL">
+        <With Var="FaultResetCMD" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="LL_Fault" Type="BOOL" Comment="Lower Level Fault" />
+      <VarDeclaration Name="LL_Mode" Type="INT" />
+      <VarDeclaration Name="LL_CycleType" Type="INT" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="ModeCMD" Type="INT" Comment="Confirmation Data from Plug" />
+      <VarDeclaration Name="CycleTypeCMD" Type="INT" Comment="Indication Data from Plug" />
+      <VarDeclaration Name="ParentName" Type="STRING" />
+      <VarDeclaration Name="FaultResetCMD" Type="BOOL" />
+    </OutputVars>
+  </InterfaceList>
+  <Service RightInterface="PLUG" LeftInterface="SOCKET">
+    <ServiceSequence Name="request_confirm">
+      <ServiceTransaction>
+        <InputPrimitive Interface="SOCKET" Event="MFBK" Parameters="ModeSTS_0" />
+        <OutputPrimitive Interface="PLUG" Event="MFBK" Parameters="ModeSTS_0" />
+      </ServiceTransaction>
+      <ServiceTransaction>
+        <InputPrimitive Interface="PLUG" Event="MCTRL" Parameters="ModeCMD" />
+        <OutputPrimitive Interface="SOCKET" Event="MCTRL" Parameters="ModeCMD" />
+      </ServiceTransaction>
+    </ServiceSequence>
+    <ServiceSequence Name="indication_response">
+      <ServiceTransaction>
+        <InputPrimitive Interface="PLUG" Event="IND" Parameters="CycleTypeCMD" />
+        <OutputPrimitive Interface="SOCKET" Event="IND" Parameters="CycleTypeCMD" />
+      </ServiceTransaction>
+      <ServiceTransaction>
+        <InputPrimitive Interface="SOCKET" Event="RSP" Parameters="CycleTypeSTS_0" />
+        <OutputPrimitive Interface="PLUG" Event="RSP" Parameters="CycleTypeSTS_0" />
+      </ServiceTransaction>
+    </ServiceSequence>
+  </Service>
+</AdapterType>
+*****
+
+StationHMIAdptr.adp
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE AdapterType SYSTEM "../LibraryElement.dtd">
+<AdapterType GUID="6b6c5ac2-fda1-42c7-9b1f-8102fa2fbd7a" Name="StationHMIAdptr" Comment="Adapter Interface" Namespace="Main">
+  <Identification Standard="61499-1" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author="Evans_A" Date="8/14/2025" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="SREQ" Comment="Request from Socket">
+        <With Var="StationName" />
+        <With Var="ParentName" />
+      </Event>
+      <Event Name="LMFREQ">
+        <With Var="LocalMode" />
+      </Event>
+      <Event Name="LCTREQ">
+        <With Var="LocalCycleType" />
+      </Event>
+      <Event Name="LLFREQ">
+        <With Var="LLFault" />
+      </Event>
+      <Event Name="LLMREQ">
+        <With Var="LLMode" />
+      </Event>
+      <Event Name="LLCTREQ">
+        <With Var="LLCycleType" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="MCNF" Comment="Confirmation from Plug">
+        <With Var="Mode" />
+      </Event>
+      <Event Name="CTCNF">
+        <With Var="CycleType" />
+      </Event>
+      <Event Name="FRCNF">
+        <With Var="FaultReset" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="StationName" Type="STRING" />
+      <VarDeclaration Name="ParentName" Type="STRING" />
+      <VarDeclaration Name="LocalMode" Type="INT" />
+      <VarDeclaration Name="LocalCycleType" Type="INT" />
+      <VarDeclaration Name="LLFault" Type="BOOL" />
+      <VarDeclaration Name="LLMode" Type="INT" />
+      <VarDeclaration Name="LLCycleType" Type="INT" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="Mode" Type="INT" />
+      <VarDeclaration Name="CycleType" Type="INT" />
+      <VarDeclaration Name="FaultReset" Type="BOOL" />
+    </OutputVars>
+  </InterfaceList>
+  <Service RightInterface="PLUG" LeftInterface="SOCKET">
+    <ServiceSequence Name="request_confirm">
+      <ServiceTransaction>
+        <InputPrimitive Interface="SOCKET" Event="SREQ" Parameters="REQD" />
+        <OutputPrimitive Interface="PLUG" Event="SREQ" Parameters="REQD" />
+      </ServiceTransaction>
+      <ServiceTransaction>
+        <InputPrimitive Interface="PLUG" Event="MCNF" Parameters="CNFD" />
+        <OutputPrimitive Interface="SOCKET" Event="MCNF" Parameters="CNFD" />
+      </ServiceTransaction>
+    </ServiceSequence>
+    <ServiceSequence Name="indication_response">
+      <ServiceTransaction>
+        <InputPrimitive Interface="PLUG" Event="CTCNF" Parameters="INDD" />
+        <OutputPrimitive Interface="SOCKET" Event="CTCNF" Parameters="INDD" />
+      </ServiceTransaction>
+      <ServiceTransaction>
+        <InputPrimitive Interface="SOCKET" Event="PNREQ" Parameters="RSPD" />
+        <OutputPrimitive Interface="PLUG" Event="PNREQ" Parameters="RSPD" />
+      </ServiceTransaction>
+    </ServiceSequence>
+  </Service>
+</AdapterType>
+*****
+
+stateRptCmdAdptr.adp
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE AdapterType SYSTEM "../LibraryElement.dtd">
+<AdapterType GUID="833baf56-9edc-4b11-af14-7c5c8450ba50" Comment="Adapter Interface" Name="stateRptCmdAdptr" Namespace="Main">
+  <Identification Standard="61499-1" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author=" " Date="3/17/2026" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="REQ" Comment="Request from Socket">
+        <With Var="REQD" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="CNF" Comment="Confirmation from Plug">
+        <With Var="CNFD" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="REQD" Type="Component_State_Msg" Namespace="Main" Comment="Request Data from Socket" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="CNFD" Type="Component_State_Msg" Namespace="Main" Comment="Confirmation Data from Plug" />
+    </OutputVars>
+  </InterfaceList>
+  <Service RightInterface="PLUG" LeftInterface="SOCKET">
+    <ServiceSequence Name="request_confirm">
+      <ServiceTransaction>
+        <InputPrimitive Interface="SOCKET" Event="REQ" Parameters="REQD" />
+        <OutputPrimitive Interface="PLUG" Event="REQ" Parameters="REQD" />
+      </ServiceTransaction>
+      <ServiceTransaction>
+        <InputPrimitive Interface="PLUG" Event="CNF" Parameters="CNFD" />
+        <OutputPrimitive Interface="SOCKET" Event="CNF" Parameters="CNFD" />
+      </ServiceTransaction>
+    </ServiceSequence>
+    <ServiceSequence Name="indication_response">
+      <ServiceTransaction>
+        <InputPrimitive Interface="PLUG" Event="IND" Parameters="INDD" />
+        <OutputPrimitive Interface="SOCKET" Event="IND" Parameters="INDD" />
+      </ServiceTransaction>
+      <ServiceTransaction>
+        <InputPrimitive Interface="SOCKET" Event="RSP" Parameters="RSPD" />
+        <OutputPrimitive Interface="PLUG" Event="RSP" Parameters="RSPD" />
+      </ServiceTransaction>
+    </ServiceSequence>
+  </Service>
+</AdapterType>
