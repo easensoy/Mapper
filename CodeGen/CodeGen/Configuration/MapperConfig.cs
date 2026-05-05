@@ -23,13 +23,16 @@ namespace CodeGen.Configuration
         public string IoBindingsPath { get; set; } = "Input/SMC_Rig_IO_Bindings.xlsx";
 
         /// <summary>
-        /// Network/runtime parameters for the Windows Soft dPAC host so the Mapper can
-        /// emit the Physical Devices canvas (Workstation_1 + NIC_1 + Runtime_1 +
-        /// DeviceNetwork_1) and bind EcoRT_0 to it without any manual EAE clicks.
-        /// All defaults match Warwick Wi-Fi; switch home/Wi-Fi by editing
-        /// <c>WorkstationIP</c>, <c>SubnetAddress</c>, <c>SubnetMask</c>, <c>GatewayAddress</c>.
+        /// Path to a folder containing a validated M262 hardware-configuration baseline
+        /// (an EAE project's <c>HwConfiguration/</c> folder plus the <c>.hcf</c> file
+        /// under <c>IEC61499/System/{sys-guid}/{sysdev-guid}/{sysdev-guid}.hcf</c>).
+        /// The TM3 module slot/topology layout — BMTM3 → TM262L01MDESE8T → TM3DI16_G →
+        /// TM3DQ16T_G — is fixed by the physical SMC rig wiring and therefore cannot
+        /// be synthesised from Control.xml; the deployer copies it verbatim from this
+        /// path and only overwrites the channel ParameterValue strings (DI00, DI01,
+        /// DO00) using IoBindings.
         /// </summary>
-        public WindowsSoftDpacHostConfig WindowsSoftDpacHost { get; set; } = new();
+        public string M262HardwareConfigBaselinePath { get; set; } = string.Empty;
 
         public string ActiveSyslayPath =>
             !string.IsNullOrEmpty(SyslayPath2) ? SyslayPath2 : SyslayPath;
@@ -75,6 +78,7 @@ namespace CodeGen.Configuration
             SyslayPath2 = @"C:\Demonstrator\Demonstator\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000001\00000000-0000-0000-0000-000000000000.syslay",
             SysresPath2 = @"C:\Demonstrator\Demonstator\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000002\00000000-0000-0000-0000-000000000000.sysres",
             IoBindingsPath = @"Input\SMC_Rig_IO_Bindings.xlsx",
+            M262HardwareConfigBaselinePath = string.Empty,
         };
 
         private static void Save(string path, MapperConfig config)
@@ -83,35 +87,5 @@ namespace CodeGen.Configuration
                 new JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(path, json);
         }
-    }
-
-    /// <summary>
-    /// One-stop config for the Windows Soft dPAC topology that the Mapper materialises
-    /// after generating the .syslay. A user only needs to update <c>WorkstationIP</c>
-    /// (and possibly the subnet trio) when moving between networks; everything else
-    /// is reasonable defaults.
-    /// </summary>
-    public class WindowsSoftDpacHostConfig
-    {
-        public string WorkstationIP { get; set; } = "172.24.61.92";
-        public string SubnetAddress { get; set; } = "172.24.0.0";
-        public string SubnetMask { get; set; } = "255.255.128.0";
-        public string GatewayAddress { get; set; } = "172.24.0.1";
-        public string LogicalNetworkName { get; set; } = "DeviceNetwork_1";
-        public int RuntimePort { get; set; } = 51499;
-        public int ArchivePort { get; set; } = 51496;
-        public bool UseEncryption { get; set; } = false;
-        public bool InsecureApplicationEnable { get; set; } = true;
-        public string NicIdentifier { get; set; } = "eth0";
-
-        /// <summary>
-        /// Master switch for the experimental topology emission. Defaults to FALSE
-        /// because EAE's TopologyManager subsystem rejects auto-written JSONs with
-        /// "Internal Server Error" until the per-session .solutionData and Default
-        /// Network BroadcastDomain are also in place. Flip to true once the canonical
-        /// diff (manual EAE config save vs fresh Mapper output) has been captured
-        /// and the deployer is updated to emit every file the diff identifies.
-        /// </summary>
-        public bool AutoEmitPhysicalTopology { get; set; } = false;
     }
 }
