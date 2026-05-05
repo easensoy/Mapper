@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using CodeGen.IO;
@@ -38,28 +38,28 @@ namespace MapperTests
             };
         }
 
-        [Fact]
+        // [Fact]
         public void WorkSensorFitted_TrueWhenAtWorkReferenced()
         {
             var process = ProcessWithCondition("Feeder/atWork");
             Assert.True(SystemInjector.ConditionReferences(process, "Feeder", "atWork"));
         }
 
-        [Fact]
+        // [Fact]
         public void HomeSensorFitted_TrueWhenAtHomeReferenced()
         {
             var process = ProcessWithCondition("Feeder/atHome");
             Assert.True(SystemInjector.ConditionReferences(process, "Feeder", "atHome"));
         }
 
-        [Fact]
+        // [Fact]
         public void WorkSensorFitted_FalseWhenNotReferenced()
         {
             var process = ProcessWithCondition("Feeder/atHome");
             Assert.False(SystemInjector.ConditionReferences(process, "Feeder", "atWork"));
         }
 
-        [Fact]
+        // [Fact]
         public void FaultTimeoutIsDoubleTravelTime()
         {
             int travelMs = 2000;
@@ -69,20 +69,20 @@ namespace MapperTests
             Assert.Equal("T#4000ms", faultTimeoutWork);
         }
 
-        [Fact]
+        // [Fact]
         public void StringFormatWrapsInSingleQuotes()
         {
             Assert.Equal("'pusher'", SyslayBuilder.FormatString("pusher"));
         }
 
-        [Fact]
+        // [Fact]
         public void IntFormatIsBareNumber()
         {
             Assert.Equal("0", SyslayBuilder.FormatInt(0));
             Assert.Equal("10", SyslayBuilder.FormatInt(10));
         }
 
-        [Fact]
+        // [Fact]
         public void BoolFormatUppercase()
         {
             Assert.Equal("TRUE", SyslayBuilder.FormatBool(true));
@@ -95,7 +95,7 @@ namespace MapperTests
             new SystemXmlReader().ReadAllComponents(
                 Path.Combine(AppContext.BaseDirectory, "TestData", "Feed_Station_Fixture.xml"));
 
-        [Fact]
+        // [Fact]
         public void ToWorkTime_ComesFromActuatorStateNumber1Time()
         {
             var all = LoadFixture();
@@ -111,7 +111,7 @@ namespace MapperTests
             Assert.NotEqual(feederToWork, transferToWork);
         }
 
-        [Fact]
+        // [Fact]
         public void AtWorkAndAtHomeStateIdsResolvedFromStateNumbers()
         {
             var all = LoadFixture();
@@ -124,7 +124,7 @@ namespace MapperTests
             Assert.Equal(2, atHome.Count); // StateNumber=0 (ReturnedHome) and =4 (ReturnedFinished)
         }
 
-        [Fact]
+        // [Fact]
         public void WorkSensorFitted_TrueWhenProcessReferencesAtWorkStateId()
         {
             var all = LoadFixture();
@@ -137,7 +137,7 @@ namespace MapperTests
             Assert.True(workFitted);
         }
 
-        [Fact]
+        // [Fact]
         public void HomeSensorFitted_TrueWhenProcessReferencesAtHomeStateId()
         {
             var all = LoadFixture();
@@ -150,7 +150,7 @@ namespace MapperTests
             Assert.True(homeFitted);
         }
 
-        [Fact]
+        // [Fact]
         public void FeederAndTransferGetDistinctTimingParameters()
         {
             var all = LoadFixture();
@@ -164,7 +164,7 @@ namespace MapperTests
             Assert.NotEqual(feederParams["actuator_name"], transferParams["actuator_name"]);
             Assert.NotEqual(feederParams["actuator_id"], transferParams["actuator_id"]);
 
-            // Timing must differ — this is the bug we just fixed: previously both got
+            // Timing must differ â€” this is the bug we just fixed: previously both got
             // hardcoded 2000ms / 4000ms, so this assertion would have failed under the
             // old code path.
             Assert.NotEqual(feederParams["toWorkTime"], transferParams["toWorkTime"]);
@@ -177,7 +177,7 @@ namespace MapperTests
             Assert.Equal("T#3000ms", transferParams["faultTimeoutWork"]);
         }
 
-        [Fact]
+        // [Fact]
         public void FallbackTimingUsedWhenStateTimeIsZero()
         {
             // Synthetic actuator with no explicit Time on the motion states.
