@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Xml.Linq;
@@ -10,29 +11,74 @@ namespace MapperTests
 {
     public class M262HwConfigCopierTests
     {
-        // Synthetic .hcf shaped after the canonical EAE M262 config: Device contains a
-        // chain of Module / ItemProperties / ParameterValue elements. The copier only
-        // cares about ParameterValue Name/Value pairs, so other ItemProperties are kept
-        // here just to verify the verbatim copy preserves the surrounding tree.
+        // Synthetic IoBindings with PinAssignments populated as if the xlsx had
+        // pin_di_athome="DI00", pin_di_atwork="DI01", pin_do_outputToWork="DO00"
+        // on the Feeder row. ResolveSymbol("DI00") then returns "'RES0.Feeder.athome'".
+        static IoBindings FeederBindings() => new IoBindings
+        {
+            Actuators =
+            {
+                ["Feeder"] = new ActuatorBinding("Feeder",
+                    AthomeTag: "PusherAtHome",
+                    AtworkTag: "PusherAtWork",
+                    OutputToWorkTag: "ExtendPusher",
+                    OutputToHomeTag: null),
+            },
+            PinAssignments =
+            {
+                ["DI00"] = new PinAssignment("DI00", "Feeder", "athome"),
+                ["DI01"] = new PinAssignment("DI01", "Feeder", "atwork"),
+                ["DO00"] = new PinAssignment("DO00", "Feeder", "OutputToWork"),
+            },
+        };
+
+        // Mirrors the canonical EAE M262 .hcf schema (validated against
+        // SMC_Rig_Expo .../6fe9f94f-...hcf): nested ConfigurationBaseItem chain
+        // BMTM3 -> TM262L01MDESE8T -> TM3DI16_G / TM3DQ16T_G, each module's name
+        // is a CHILD <Name> element (not an attribute), and channel symlinks live
+        // in <ParameterValues><ParameterValue Name="DI00" Value=".."/></ParameterValues>
+        // with PreviousItem pointers preserving slot order.
         const string SyntheticHcfTemplate = @"<?xml version=""1.0"" encoding=""utf-8""?>
-<DeviceHwConfigurationItems>
-  <Module Name=""BMTM3"">
-    <ItemProperties>
-      <ParameterValue Name=""busCycleTime"" Value=""T#80ms"" />
-      <ParameterValue Name=""busTolerance"" Value=""30"" />
-    </ItemProperties>
-    <Module Name=""TM262L01MDESE8T"">
-      <Module Name=""TM3DI16_G"">
-        <ParameterValue Name=""DI00"" Value=""''"" />
-        <ParameterValue Name=""DI01"" Value=""''"" />
-        <ParameterValue Name=""DI02"" Value=""''"" />
-      </Module>
-      <Module Name=""TM3DQ16T_G"">
-        <ParameterValue Name=""DO00"" Value=""''"" />
-        <ParameterValue Name=""DO01"" Value=""''"" />
-      </Module>
-    </Module>
-  </Module>
+<DeviceHwConfigurationItems xmlns:xsd=""http://www.w3.org/2001/XMLSchema"" xmlns:xsi=""http://www.w3.org/2001/XMLSchema-instance"">
+  <DeviceHwConfigurationItem ResourceId=""54EB0B3D5D16444D"">
+    <ConfigurationBaseItem>
+      <Name>BMTM3</Name>
+      <ID>9510AF594EA1EDD1</ID>
+      <ItemProperties />
+      <ParameterValues>
+        <ParameterValue Name=""busCycleTime"" Value=""T#80ms"" />
+      </ParameterValues>
+      <Items>
+        <ConfigurationBaseItem>
+          <Name>TM262L01MDESE8T</Name>
+          <ID>E2B036F9B0A5B0A4</ID>
+          <ItemProperties />
+          <ParameterValues />
+          <Items>
+            <ConfigurationBaseItem>
+              <Name>TM3DI16_G</Name>
+              <ID>52DB1E4920A80F90</ID>
+              <ItemProperties />
+              <ParameterValues>
+                <ParameterValue Name=""DI00"" Value=""''"" />
+                <ParameterValue Name=""DI01"" Value=""''"" />
+                <ParameterValue Name=""DI02"" Value=""''"" />
+              </ParameterValues>
+            </ConfigurationBaseItem>
+            <ConfigurationBaseItem>
+              <Name>TM3DQ16T_G</Name>
+              <ID>F46B871E4D88E59A</ID>
+              <ItemProperties />
+              <ParameterValues>
+                <ParameterValue Name=""DO00"" Value=""''"" />
+                <ParameterValue Name=""DO01"" Value=""''"" />
+              </ParameterValues>
+            </ConfigurationBaseItem>
+          </Items>
+        </ConfigurationBaseItem>
+      </Items>
+    </ConfigurationBaseItem>
+  </DeviceHwConfigurationItem>
 </DeviceHwConfigurationItems>";
 
         const string ActuatorsSheet =
@@ -96,7 +142,7 @@ namespace MapperTests
             IoBindingsLoader.InvalidateCache();
             var cfg = BuildScenario(out _, out var eaeRoot);
 
-            var result = M262HwConfigCopier.Copy(cfg);
+            var result = M262HwConfigCopier.Copy(cfg, FeederBindings());
             Assert.NotNull(result.HcfPath);
             Assert.True(File.Exists(result.HcfPath!));
             // Convention: {sys-guid}/{sysdev-guid}/{sysdev-guid}.hcf
@@ -112,7 +158,7 @@ namespace MapperTests
         {
             IoBindingsLoader.InvalidateCache();
             var cfg = BuildScenario(out _, out _);
-            var result = M262HwConfigCopier.Copy(cfg);
+            var result = M262HwConfigCopier.Copy(cfg, FeederBindings());
 
             var doc = XDocument.Load(result.HcfPath!);
             string Get(string name) => doc.Descendants("ParameterValue")
@@ -129,7 +175,7 @@ namespace MapperTests
         {
             IoBindingsLoader.InvalidateCache();
             var cfg = BuildScenario(out _, out _);
-            var result = M262HwConfigCopier.Copy(cfg);
+            var result = M262HwConfigCopier.Copy(cfg, FeederBindings());
 
             var doc = XDocument.Load(result.HcfPath!);
             // DI02 / DO01 are in the baseline but absent from IoBindings: their Value
@@ -146,18 +192,22 @@ namespace MapperTests
         {
             IoBindingsLoader.InvalidateCache();
             var cfg = BuildScenario(out _, out _);
-            var result = M262HwConfigCopier.Copy(cfg);
+            var result = M262HwConfigCopier.Copy(cfg, FeederBindings());
 
             var doc = XDocument.Load(result.HcfPath!);
             // Verify the copier did NOT prune/reorder the BMTM3 → TM262 → TM3DI16_G
-            // → TM3DQ16T_G chain. A module-by-name walk should still reach DO00.
-            var root = doc.Root!;
-            var bmtm3   = root.Elements("Module").Single(e => (string?)e.Attribute("Name") == "BMTM3");
-            var tm262   = bmtm3.Elements("Module").Single(e => (string?)e.Attribute("Name") == "TM262L01MDESE8T");
-            var tm3di   = tm262.Elements("Module").Single(e => (string?)e.Attribute("Name") == "TM3DI16_G");
-            var tm3dq   = tm262.Elements("Module").Single(e => (string?)e.Attribute("Name") == "TM3DQ16T_G");
-            Assert.NotNull(tm3di.Elements("ParameterValue").FirstOrDefault(e => (string?)e.Attribute("Name") == "DI00"));
-            Assert.NotNull(tm3dq.Elements("ParameterValue").FirstOrDefault(e => (string?)e.Attribute("Name") == "DO00"));
+            // → TM3DQ16T_G chain. Walks ConfigurationBaseItem nodes by their child
+            // <Name> element (the canonical EAE schema).
+            var byName = doc.Descendants("ConfigurationBaseItem")
+                .ToDictionary(e => e.Element("Name")?.Value ?? "");
+            Assert.True(byName.ContainsKey("BMTM3"));
+            Assert.True(byName.ContainsKey("TM262L01MDESE8T"));
+            Assert.True(byName.ContainsKey("TM3DI16_G"));
+            Assert.True(byName.ContainsKey("TM3DQ16T_G"));
+            Assert.NotNull(byName["TM3DI16_G"].Element("ParameterValues")
+                ?.Elements("ParameterValue").FirstOrDefault(e => (string?)e.Attribute("Name") == "DI00"));
+            Assert.NotNull(byName["TM3DQ16T_G"].Element("ParameterValues")
+                ?.Elements("ParameterValue").FirstOrDefault(e => (string?)e.Attribute("Name") == "DO00"));
         }
 
         [Fact]
@@ -176,7 +226,7 @@ namespace MapperTests
             IoBindingsLoader.InvalidateCache();
             var cfg = BuildScenario(out _, out _);
             cfg.M262HardwareConfigBaselinePath = "";
-            var result = M262HwConfigCopier.Copy(cfg);
+            var result = M262HwConfigCopier.Copy(cfg, FeederBindings());
             Assert.Null(result.HcfPath);
             Assert.Contains(result.Warnings, w => w.Contains("M262HardwareConfigBaselinePath"));
         }
