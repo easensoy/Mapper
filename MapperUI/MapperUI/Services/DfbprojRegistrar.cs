@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Xml.Linq;
 
@@ -62,6 +64,58 @@ namespace MapperUI.Services
             Add(cg, ns, "Compile", fileName, ref a, new XElement(ns + "IEC61499Type", type));
             xml.Save(dfbprojPath);
             return a;
+        }
+
+        /// <summary>
+        /// Registers a DataType (.dt) file. EAE expects:
+        ///   <Compile Include="DataType\Component_State.dt"><IEC61499Type>DataType</IEC61499Type></Compile>
+        /// Without this entry the compiler reports ERR_NO_SUCH_TYPE on every FB that
+        /// references the type, even though the .dt file is present on disk.
+        /// </summary>
+        public static int RegisterDataType(string dfbprojPath, string dtRelativePath)
+        {
+            var xml = XDocument.Load(dfbprojPath);
+            var ns = xml.Root!.GetDefaultNamespace();
+            var (cg, _) = Groups(xml, ns);
+            int a = 0;
+            Add(cg, ns, "Compile", dtRelativePath, ref a, new XElement(ns + "IEC61499Type", "DataType"));
+            xml.Save(dfbprojPath);
+            return a;
+        }
+
+        /// <summary>
+        /// Sweeps the IEC61499 folder for any .dt, .adp, or .fbt file that is not yet
+        /// registered in the project, and adds the appropriate &lt;Compile&gt; entry. This is the
+        /// safety-net pass run after CAT/Basic/Adapter/DataType deployment so an external
+        /// drop of a file is still picked up by the compiler.
+        /// </summary>
+        public static int SweepIec61499Folder(string dfbprojPath, string iec61499Dir)
+        {
+            if (!File.Exists(dfbprojPath) || !Directory.Exists(iec61499Dir)) return 0;
+            int added = 0;
+
+            // Top-level .dt files belong under the conventional DataType subfolder, but EAE
+            // also accepts them at the IEC61499 root. Pick up both.
+            foreach (var dt in Directory.EnumerateFiles(iec61499Dir, "*.dt", SearchOption.AllDirectories))
+            {
+                var rel = Path.GetRelativePath(iec61499Dir, dt).Replace('/', '\\');
+                added += RegisterDataType(dfbprojPath, rel);
+            }
+            foreach (var adp in Directory.EnumerateFiles(iec61499Dir, "*.adp", SearchOption.TopDirectoryOnly))
+            {
+                var name = Path.GetFileName(adp);
+                added += RegisterBasicFb(dfbprojPath, name, "Adapter");
+            }
+            // .fbt at root only — CAT folders are already handled by RegisterCat.
+            foreach (var fbt in Directory.EnumerateFiles(iec61499Dir, "*.fbt", SearchOption.TopDirectoryOnly))
+            {
+                var name = Path.GetFileName(fbt);
+                // Heuristic: composite if a same-stem .composite.offline.xml exists, else Basic.
+                var stem = Path.GetFileNameWithoutExtension(name);
+                bool isComposite = File.Exists(Path.Combine(iec61499Dir, stem + ".composite.offline.xml"));
+                added += RegisterBasicFb(dfbprojPath, name, isComposite ? "Composite" : "Basic");
+            }
+            return added;
         }
 
         static (XElement cg, XElement ng) Groups(XDocument xml, XNamespace ns)
