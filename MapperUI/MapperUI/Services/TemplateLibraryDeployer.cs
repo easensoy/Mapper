@@ -59,6 +59,16 @@ namespace MapperUI.Services
             "Area_CAT", "Station_CAT"
         };
 
+        // .dt files that the universal architecture references but no template zip ships.
+        // Sourced from `Template Library/DataType/` and copied to `<eaeProject>/IEC61499/DataType/`.
+        // Without these the compiler reports ERR_NO_SUCH_TYPE for Component_State on every FB
+        // (ProcessStateBusHandler, updateComponentState, stateRptCmdAdptr, ProcessRuntime_Generic_v1).
+        static readonly string[] UniversalDataTypes = new[]
+        {
+            "Component_State",
+            "Component_State_Msg"
+        };
+
         public static DeployResult DeployUniversalArchitecture(MapperConfig cfg)
         {
             var result = new DeployResult();
@@ -85,11 +95,159 @@ namespace MapperUI.Services
             foreach (var name in UniversalCats)
                 DeployArtifact(libPath, "CAT", name, eaeProjectDir, result, isBasic: false, isCat: true);
 
+            DeployDataTypes(libPath, eaeProjectDir, result);
+            PatchKnownArraySizeBugs(eaeProjectDir, result);
+
             GenerateCfgFiles(eaeProjectDir, result);
             RegisterInDfbproj(eaeProjectDir, result);
 
+            VerifyArraySizeConsistency(eaeProjectDir, result);
+
             result.Success = true;
             return result;
+        }
+
+        /// <summary>
+        /// Copies every file in `Template Library/DataType/` into the EAE project's
+        /// `IEC61499/DataType/` folder. Idempotent: skips files that already exist.
+        /// </summary>
+        static void DeployDataTypes(string libPath, string eaeProjectDir, DeployResult result)
+        {
+            var srcDir = Path.Combine(libPath, "DataType");
+            if (!Directory.Exists(srcDir))
+            {
+                result.Warnings.Add("Library DataType folder missing — Component_State*.dt won't be deployed.");
+                return;
+            }
+            var destDir = Path.Combine(eaeProjectDir, "IEC61499", "DataType");
+            Directory.CreateDirectory(destDir);
+
+            foreach (var name in UniversalDataTypes)
+            {
+                var src = Path.Combine(srcDir, name + ".dt");
+                if (!File.Exists(src))
+                {
+                    result.Warnings.Add($"DataType source missing: {name}.dt");
+                    continue;
+                }
+                var dst = Path.Combine(destDir, name + ".dt");
+                if (!File.Exists(dst) ||
+                    new FileInfo(src).Length != new FileInfo(dst).Length)
+                {
+                    File.Copy(src, dst, overwrite: true);
+                    result.FilesExtracted++;
+                }
+                result.DataTypesDeployed.Add(name);
+                MapperLogger.Info($"[Deploy] DataType: {name}");
+            }
+        }
+
+        /// <summary>
+        /// Patches known-bad ArraySize declarations in deployed .fbt files.
+        /// The canonical ProcessRuntime_Generic_v1.fbt in the Jyotsna baseline declares
+        /// state_table with ArraySize="1" but the connected ProcessStateBusHandler
+        /// declares ArraySize="20", which causes EAE's compiler to reject the connection
+        /// with "Cannot convert from type 'ARRAY[0..19] OF DINT' to type 'ARRAY[0..0] OF DINT'".
+        /// Per spec we must NOT modify the canonical baseline, so we rewrite the deployed
+        /// copy in place. Idempotent — safe to run after every deployment.
+        /// </summary>
+        static void PatchKnownArraySizeBugs(string eaeProjectDir, DeployResult result)
+        {
+            var fbtPath = Path.Combine(eaeProjectDir, "IEC61499", "ProcessRuntime_Generic_v1.fbt");
+            if (!File.Exists(fbtPath)) return;
+
+            var text = File.ReadAllText(fbtPath);
+            const string oldDecl =
+                "<VarDeclaration Name=\"state_table\" Type=\"Component_State\" Namespace=\"Main\" ArraySize=\"1\" />";
+            const string newDecl =
+                "<VarDeclaration Name=\"state_table\" Type=\"Component_State\" Namespace=\"Main\" ArraySize=\"20\" />";
+
+            if (text.Contains(newDecl)) return; // already patched, idempotent
+            if (!text.Contains(oldDecl))
+            {
+                result.Warnings.Add(
+                    "ProcessRuntime_Generic_v1.fbt: state_table declaration not found in expected " +
+                    "shape (ArraySize=\"1\"). Skipping ArraySize patch — verify by hand.");
+                return;
+            }
+            File.WriteAllText(fbtPath, text.Replace(oldDecl, newDecl));
+            result.PatchesApplied.Add("ProcessRuntime_Generic_v1.state_table ArraySize 1 -> 20");
+            MapperLogger.Info("[Deploy] Patched ProcessRuntime_Generic_v1.state_table ArraySize 1 -> 20");
+        }
+
+        /// <summary>
+        /// Walks every .fbt under IEC61499 once and, for each VarDeclaration that names a
+        /// vector that is also referenced by some other FB's connection, records its
+        /// ArraySize keyed by FB type + var name. Any disagreement between source and
+        /// destination of a Connection is reported as a warning.
+        /// This is a verification pass only — it does not auto-fix beyond the targeted
+        /// PatchKnownArraySizeBugs above. Helps catch regressions before EAE compile.
+        /// </summary>
+        static void VerifyArraySizeConsistency(string eaeProjectDir, DeployResult result)
+        {
+            try
+            {
+                var iec = Path.Combine(eaeProjectDir, "IEC61499");
+                if (!Directory.Exists(iec)) return;
+
+                // (FB type, var name) -> ArraySize text
+                var sizes = new Dictionary<(string, string), string>(
+                    EqualityComparer<(string, string)>.Default);
+
+                foreach (var fbt in Directory.EnumerateFiles(iec, "*.fbt", SearchOption.AllDirectories))
+                {
+                    System.Xml.Linq.XDocument doc;
+                    try { doc = System.Xml.Linq.XDocument.Load(fbt); }
+                    catch { continue; }
+                    var fbType = Path.GetFileNameWithoutExtension(fbt);
+                    foreach (var vd in doc.Descendants().Where(e => e.Name.LocalName == "VarDeclaration"))
+                    {
+                        var name = (string?)vd.Attribute("Name");
+                        var arr = (string?)vd.Attribute("ArraySize");
+                        if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(arr)) continue;
+                        sizes[(fbType, name)] = arr;
+                    }
+                }
+
+                // For each composite, walk Connections and compare ArraySize on each side.
+                foreach (var fbt in Directory.EnumerateFiles(iec, "*.fbt", SearchOption.AllDirectories))
+                {
+                    System.Xml.Linq.XDocument doc;
+                    try { doc = System.Xml.Linq.XDocument.Load(fbt); }
+                    catch { continue; }
+                    // Build local map of (instanceName -> fbType) for resolving Connection ports.
+                    var instances = doc.Descendants()
+                        .Where(e => e.Name.LocalName == "FB")
+                        .ToDictionary(
+                            e => (string?)e.Attribute("Name") ?? "",
+                            e => (string?)e.Attribute("Type") ?? "",
+                            StringComparer.Ordinal);
+
+                    foreach (var conn in doc.Descendants().Where(e => e.Name.LocalName == "Connection"))
+                    {
+                        var src = ((string?)conn.Attribute("Source") ?? "").Split('.', 2);
+                        var dst = ((string?)conn.Attribute("Destination") ?? "").Split('.', 2);
+                        if (src.Length != 2 || dst.Length != 2) continue;
+                        if (!instances.TryGetValue(src[0], out var srcType)) continue;
+                        if (!instances.TryGetValue(dst[0], out var dstType)) continue;
+
+                        sizes.TryGetValue((srcType, src[1]), out var srcSize);
+                        sizes.TryGetValue((dstType, dst[1]), out var dstSize);
+                        if (srcSize == null || dstSize == null) continue;
+                        if (!string.Equals(srcSize, dstSize, StringComparison.Ordinal))
+                        {
+                            var msg = $"ArraySize mismatch in {Path.GetFileName(fbt)}: " +
+                                $"{src[0]}.{src[1]} (size {srcSize}) -> {dst[0]}.{dst[1]} (size {dstSize})";
+                            result.Warnings.Add(msg);
+                            MapperLogger.Warn("[Verify] " + msg);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"ArraySize verification crashed: {ex.Message}");
+            }
         }
 
         static void DeployArtifact(string libPath, string subfolder, string name,
@@ -385,6 +543,14 @@ namespace MapperUI.Services
             foreach (var composite in result.CompositesDeployed)
                 DfbprojRegistrar.RegisterBasicFb(dfbproj, composite + ".fbt", "Composite");
 
+            foreach (var dt in result.DataTypesDeployed)
+                DfbprojRegistrar.RegisterDataType(dfbproj, $@"DataType\{dt}.dt");
+
+            // Safety net: any .dt/.adp/.fbt that ended up on disk but isn't in the
+            // explicit lists above (e.g. dropped manually, or from a future template
+            // bundle) gets picked up here.
+            DfbprojRegistrar.SweepIec61499Folder(dfbproj, iec61499Dir);
+
             File.SetLastWriteTime(dfbproj, DateTime.Now);
             MapperLogger.Info($"[Deploy] dfbproj updated: {Path.GetFileName(dfbproj)}");
         }
@@ -422,6 +588,8 @@ namespace MapperUI.Services
         public List<string> CATsDeployed { get; set; } = new();
         public List<string> AdaptersDeployed { get; set; } = new();
         public List<string> CompositesDeployed { get; set; } = new();
+        public List<string> DataTypesDeployed { get; set; } = new();
+        public List<string> PatchesApplied { get; set; } = new();
         public List<string> Warnings { get; set; } = new();
         public int FilesExtracted { get; set; }
         public int FilesSkipped { get; set; }
