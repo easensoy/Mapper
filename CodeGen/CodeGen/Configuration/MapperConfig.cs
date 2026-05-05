@@ -42,6 +42,17 @@ namespace CodeGen.Configuration
         /// </summary>
         public string M262TargetIp { get; set; } = "192.168.1.10";
 
+        /// <summary>
+        /// Subnet/network parameters used by the M262 topology emitter so the
+        /// Physical Devices canvas shows the M262 wired to a logical network with
+        /// a configured IP. Driven from the rig wiring — defaults are the SMC rig
+        /// 192.168.1.0/24.
+        /// </summary>
+        public string M262SubnetAddress { get; set; } = "192.168.1.0";
+        public string M262SubnetMask { get; set; } = "255.255.255.0";
+        public string M262Gateway { get; set; } = "192.168.1.254";
+        public string M262LogicalNetworkName { get; set; } = "DeviceNetwork_1";
+
         public string ActiveSyslayPath =>
             !string.IsNullOrEmpty(SyslayPath2) ? SyslayPath2 : SyslayPath;
 
@@ -88,6 +99,10 @@ namespace CodeGen.Configuration
             IoBindingsPath = @"Input\SMC_Rig_IO_Bindings.xlsx",
             M262HardwareConfigBaselinePath = string.Empty,
             M262TargetIp = "192.168.1.10",
+            M262SubnetAddress = "192.168.1.0",
+            M262SubnetMask = "255.255.255.0",
+            M262Gateway = "192.168.1.254",
+            M262LogicalNetworkName = "DeviceNetwork_1",
         };
 
         private static void Save(string path, MapperConfig config)
