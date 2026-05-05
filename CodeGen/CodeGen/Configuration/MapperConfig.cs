@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Text.Json;
 
@@ -21,6 +21,15 @@ namespace CodeGen.Configuration
         public string SyslayPath2 { get; set; } = string.Empty;
         public string SysresPath2 { get; set; } = string.Empty;
         public string IoBindingsPath { get; set; } = "Input/SMC_Rig_IO_Bindings.xlsx";
+
+        /// <summary>
+        /// Network/runtime parameters for the Windows Soft dPAC host so the Mapper can
+        /// emit the Physical Devices canvas (Workstation_1 + NIC_1 + Runtime_1 +
+        /// DeviceNetwork_1) and bind EcoRT_0 to it without any manual EAE clicks.
+        /// All defaults match Warwick Wi-Fi; switch home/Wi-Fi by editing
+        /// <c>WorkstationIP</c>, <c>SubnetAddress</c>, <c>SubnetMask</c>, <c>GatewayAddress</c>.
+        /// </summary>
+        public WindowsSoftDpacHostConfig WindowsSoftDpacHost { get; set; } = new();
 
         public string ActiveSyslayPath =>
             !string.IsNullOrEmpty(SyslayPath2) ? SyslayPath2 : SyslayPath;
@@ -74,5 +83,25 @@ namespace CodeGen.Configuration
                 new JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(path, json);
         }
+    }
+
+    /// <summary>
+    /// One-stop config for the Windows Soft dPAC topology that the Mapper materialises
+    /// after generating the .syslay. A user only needs to update <c>WorkstationIP</c>
+    /// (and possibly the subnet trio) when moving between networks; everything else
+    /// is reasonable defaults.
+    /// </summary>
+    public class WindowsSoftDpacHostConfig
+    {
+        public string WorkstationIP { get; set; } = "172.24.61.92";
+        public string SubnetAddress { get; set; } = "172.24.0.0";
+        public string SubnetMask { get; set; } = "255.255.128.0";
+        public string GatewayAddress { get; set; } = "172.24.0.1";
+        public string LogicalNetworkName { get; set; } = "DeviceNetwork_1";
+        public int RuntimePort { get; set; } = 51499;
+        public int ArchivePort { get; set; } = 51496;
+        public bool UseEncryption { get; set; } = false;
+        public bool InsecureApplicationEnable { get; set; } = true;
+        public string NicIdentifier { get; set; } = "eth0";
     }
 }
