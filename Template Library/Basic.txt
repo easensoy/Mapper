@@ -1,0 +1,2081 @@
+FaultLatch.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="ddb01cc5-dc3d-42a9-9239-1b45e4eba95c" Name="FaultLatch" Comment="Basic Function Block Type" Namespace="Main">
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author=" " Date="2/24/2026" Remarks="Template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT" />
+      <Event Name="SET_WORK">
+        <With Var="FC_WorkTO" />
+      </Event>
+      <Event Name="SET_HOME">
+        <With Var="FC_HomeTO" />
+      </Event>
+      <Event Name="RESET">
+        <With Var="FC_WorkTO" />
+        <With Var="FC_HomeTO" />
+        <With Var="FC_Sensor_Fault" />
+      </Event>
+      <Event Name="SET_SENSOR">
+        <With Var="FC_Sensor_Fault" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO" />
+      <Event Name="FAULT_CHANGE" Comment="Fires when fault becomes active">
+        <With Var="fault_active" />
+        <With Var="fault_code" />
+      </Event>
+      <Event Name="CLEARED">
+        <With Var="fault_active" />
+        <With Var="fault_code" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="FC_WorkTO" Type="INT" InitialValue="1001" Comment="To Work Timeout Error code" />
+      <VarDeclaration Name="FC_HomeTO" Type="INT" InitialValue="1002" Comment="To Home Timeout Error code" />
+      <VarDeclaration Name="FC_Sensor_Fault" Type="INT" InitialValue="1003" Comment="Impossible sensor input error code" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="fault_active" Type="BOOL" />
+      <VarDeclaration Name="fault_code" Type="INT" />
+    </OutputVars>
+  </InterfaceList>
+  <BasicFB>
+    <Attribute Name="FBType.Basic.Algorithm.Order" Value="AlgClear,AlgSetWork,AlgSetHome,AlgSetSensor,INIT" />
+    <ECC>
+      <ECState Name="START" Comment="Initial State" x="576.941" y="329.4117" />
+      <ECState Name="S_NOFAULT" x="1464" y="776.0001">
+        <ECAction Algorithm="AlgClear" Output="CLEARED" />
+        <ECAction Output="FAULT_CHANGE" />
+      </ECState>
+      <ECState Name="S_FAULT_WORK" x="675.9998" y="1480">
+        <ECAction Algorithm="AlgSetWork" Output="FAULT_CHANGE" />
+      </ECState>
+      <ECState Name="S_FAULT_HOME" x="2380" y="1508">
+        <ECAction Algorithm="AlgSetHome" Output="FAULT_CHANGE" />
+      </ECState>
+      <ECState Name="S_FAULT_SENSOR" x="2400" y="376">
+        <ECAction Algorithm="AlgSetSensor" Output="FAULT_CHANGE" />
+      </ECState>
+      <ECState Name="INIT" x="1188" y="296">
+        <ECAction Output="INITO" />
+      </ECState>
+      <ECTransition Source="INIT" Destination="S_NOFAULT" Condition="1" x="1375.071" y="511.1894">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="337.5194,110.1522,355.4224,141.3074" />
+      </ECTransition>
+      <ECTransition Source="S_NOFAULT" Destination="S_FAULT_WORK" Condition="SET_WORK" x="858.2372" y="1067.567">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="260.9337,196.0399,151.4617,331.698" />
+      </ECTransition>
+      <ECTransition Source="S_NOFAULT" Destination="S_FAULT_HOME" Condition="SET_HOME" x="1971.071" y="1081.868">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="461.1069,239.2682,527.0447,291.6438" />
+      </ECTransition>
+      <ECTransition Source="S_FAULT_WORK" Destination="S_NOFAULT" Condition="RESET" x="1130.403" y="1041.448">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="260.8246,278.0161,316.395,228.2824" />
+      </ECTransition>
+      <ECTransition Source="S_FAULT_HOME" Destination="S_NOFAULT" Condition="RESET" x="1934.529" y="1225.873">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="520.0121,339.6585,454.1659,287.257" />
+      </ECTransition>
+      <ECTransition Source="S_NOFAULT" Destination="S_FAULT_SENSOR" Condition="SET_SENSOR" x="1836.123" y="526.9233">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="435.1688,138.3508,483.1999,116.9314" />
+      </ECTransition>
+      <ECTransition Source="S_FAULT_SENSOR" Destination="S_NOFAULT" Condition="RESET" x="1985.435" y="646.6852">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="519.4164,155.7354,471.2469,177.5553" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="INIT" Condition="INIT" x="899.6234" y="225.857">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="209.0279,53.81017,241.4684,52.03638" />
+      </ECTransition>
+    </ECC>
+    <Algorithm Name="AlgClear">
+      <ST><![CDATA[fault_active := FALSE;
+fault_code := 0;]]></ST>
+    </Algorithm>
+    <Algorithm Name="AlgSetWork">
+      <ST><![CDATA[fault_active := TRUE;
+fault_code := FC_WorkTO;]]></ST>
+    </Algorithm>
+    <Algorithm Name="AlgSetHome">
+      <ST><![CDATA[fault_active := TRUE;
+fault_code := FC_HomeTO;]]></ST>
+    </Algorithm>
+    <Algorithm Name="AlgSetSensor">
+      <ST><![CDATA[fault_active := TRUE;
+fault_code := FC_Sensor_Fault;]]></ST>
+    </Algorithm>
+    <Algorithm Name="INIT">
+      <ST><![CDATA[;]]></ST>
+    </Algorithm>
+  </BasicFB>
+</FBType>
+*****
+
+FiveStateActuator.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="d9555c75-738d-4255-b2d9-3d008befdb9c" Name="FiveStateActuator" Comment="Basic Function Block Type" Namespace="Main">
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author="azam_w" Date="5/13/2025" Remarks="Template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT">
+        <With Var="athome" />
+        <With Var="atwork" />
+        <With Var="toWorkInterlock" />
+        <With Var="toHomeInterlock" />
+      </Event>
+      <Event Name="pst_event" Comment="Normal Execution Request">
+        <With Var="state_val" />
+      </Event>
+      <Event Name="input_event">
+        <With Var="athome" />
+        <With Var="atwork" />
+      </Event>
+      <Event Name="mode_event">
+        <With Var="mode" />
+      </Event>
+      <Event Name="setup_event">
+        <With Var="toWorkSetup" />
+        <With Var="toHomeSetup" />
+      </Event>
+      <Event Name="Ilck_event">
+        <With Var="toWorkInterlock" />
+        <With Var="toHomeInterlock" />
+      </Event>
+      <Event Name="RESET">
+        <With Var="atwork" />
+        <With Var="athome" />
+        <With Var="toWorkInterlock" />
+        <With Var="toHomeInterlock" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO" />
+      <Event Name="pst_out" Comment="Execution Confirmation">
+        <With Var="current_state_to_process" />
+        <With Var="outputToWork" />
+        <With Var="outputToHome" />
+      </Event>
+      <Event Name="output_event">
+        <With Var="current_state_to_process" />
+        <With Var="outputToWork" />
+        <With Var="outputToHome" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="athome" Type="BOOL" />
+      <VarDeclaration Name="atwork" Type="BOOL" />
+      <VarDeclaration Name="state_val" Type="INT" />
+      <VarDeclaration Name="mode" Type="INT" />
+      <VarDeclaration Name="toHomeSetup" Type="BOOL" />
+      <VarDeclaration Name="toWorkSetup" Type="BOOL" />
+      <VarDeclaration Name="toHomeInterlock" Type="BOOL" />
+      <VarDeclaration Name="toWorkInterlock" Type="BOOL" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="current_state_to_process" Type="INT" Comment="Output event qualifier" />
+      <VarDeclaration Name="outputToHome" Type="BOOL" />
+      <VarDeclaration Name="outputToWork" Type="BOOL" />
+    </OutputVars>
+  </InterfaceList>
+  <BasicFB>
+    <Attribute Name="FBType.Basic.Algorithm.Order" Value="INIT,REQ,toHome,atWork,toWork,atHomeInit,atHomeEnd,Initialise" />
+    <ECC>
+      <ECState Name="START" Comment="Initial State" x="1776.83" y="324.7454" />
+      <ECState Name="ToWork" x="1766.604" y="1913.459">
+        <ECAction Algorithm="toWork" Output="output_event" />
+        <ECAction Output="pst_out" />
+      </ECState>
+      <ECState Name="AtWork" x="1735.047" y="2428.571">
+        <ECAction Algorithm="atWork" Output="pst_out" />
+      </ECState>
+      <ECState Name="ToHome" x="1734.381" y="2946.31">
+        <ECAction Algorithm="toHome" Output="output_event" />
+        <ECAction Output="pst_out" />
+      </ECState>
+      <ECState Name="AtHome" x="1719.714" y="3469.21">
+        <ECAction Algorithm="atHomeEnd" Output="pst_out" />
+      </ECState>
+      <ECState Name="AtHomeInit" x="1777.143" y="1440">
+        <ECAction Algorithm="atHomeInit" Output="pst_out" />
+      </ECState>
+      <ECState Name="INIT" x="1800" y="800">
+        <ECAction Algorithm="Initialise" Output="INITO" />
+      </ECState>
+      <ECTransition Source="AtHomeInit" Destination="ToWork" Condition="((pst_event AND mode = 1 AND state_val = 1) &#xD;&#xA;OR &#xD;&#xA;(pst_event AND mode = 2 AND state_val = 1) &#xD;&#xA;OR &#xD;&#xA;(setup_event AND mode = 3 AND toWorkSetup))&#xD;&#xA;AND toWorkInterlock = FALSE" x="1749.696" y="1733.799">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="436.2806,422.8625,436.3531,453.5483" />
+      </ECTransition>
+      <ECTransition Source="ToWork" Destination="AtWork" Condition="atwork = TRUE" x="1824.545" y="2173.856">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="461.2461,526.5859,459.1616,560.8159" />
+      </ECTransition>
+      <ECTransition Source="AtHome" Destination="AtHomeInit" Condition="atwork = FALSE  AND athome = TRUE" x="805.1057" y="2585.615">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="226.3342,788.3066,40.75508,526.3361" />
+      </ECTransition>
+      <ECTransition Source="ToHome" Destination="AtHome" Condition="athome" x="1802.733" y="3204.71">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="455.1491,783.4536,454.6357,818.3934" />
+      </ECTransition>
+      <ECTransition Source="AtWork" Destination="ToHome" Condition="((pst_event AND mode = 1 AND state_val = 3)&#xD;&#xA;OR&#xD;&#xA;(pst_event AND mode = 2 AND state_val = 3) &#xD;&#xA;OR &#xD;&#xA;mode = 9 &#xD;&#xA;OR &#xD;&#xA;(setup_event AND mode = 3 AND toHomeSetup))&#xD;&#xA;AND toHomeInterlock = FALSE" x="1927.145" y="2698.976">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="507.2523,656.9275,477.4431,694.483" />
+      </ECTransition>
+      <ECTransition Source="ToWork" Destination="ToHome" Condition="mode = 9" x="1395.459" y="2491.51">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="249.1406,573.3728,400.8673,682.6533" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="INIT" Condition="INIT" x="1847.304" y="618.5694">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="464.5471,145.2746,465.0772,173.3762" />
+      </ECTransition>
+      <ECTransition Source="INIT" Destination="AtHomeInit" Condition="atwork = FALSE" x="1842.75" y="1169.576">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="465.7585,274.8029,461.8958,318.2476" />
+      </ECTransition>
+      <ECTransition Source="INIT" Destination="AtWork" Condition="atwork = TRUE AND athome = FALSE" x="2827.282" y="1558.122">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="858.1447,314.835,716.2418,457.0484" />
+      </ECTransition>
+      <ECTransition Source="ToHome" Destination="INIT" Condition="RESET" x="760.6744" y="1779.237">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="82.85715,514.2857,144.2857,360" />
+      </ECTransition>
+      <ECTransition Source="ToWork" Destination="INIT" Condition="RESET" x="1216.843" y="1453.468">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="257.1429,392.8571,271.4286,350" />
+      </ECTransition>
+    </ECC>
+    <Algorithm Name="INIT" Comment="Initialization algorithm">
+      <ST><![CDATA[;]]></ST>
+    </Algorithm>
+    <Algorithm Name="REQ" Comment="Normally executed algorithm">
+      <ST><![CDATA[;]]></ST>
+    </Algorithm>
+    <Algorithm Name="toHome">
+      <ST><![CDATA[;
+current_state_to_process := 3;
+outputToWork := FALSE;
+outputToHome := TRUE;]]></ST>
+    </Algorithm>
+    <Algorithm Name="atHomeInit">
+      <ST><![CDATA[current_state_to_process := 0;
+]]></ST>
+    </Algorithm>
+    <Algorithm Name="atWork">
+      <ST><![CDATA[
+current_state_to_process := 2;
+
+ ]]></ST>
+    </Algorithm>
+    <Algorithm Name="toWork">
+      <ST><![CDATA[;
+current_state_to_process := 1;
+outputToWork := TRUE;
+outputToHome := FALSE;
+ ]]></ST>
+    </Algorithm>
+    <Algorithm Name="atHomeEnd">
+      <ST><![CDATA[current_state_to_process := 4;
+]]></ST>
+    </Algorithm>
+    <Algorithm Name="Initialise">
+      <ST><![CDATA[;]]></ST>
+    </Algorithm>
+  </BasicFB>
+</FBType>
+*****
+
+No_Sensor_Handler.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="bba1c8c7-3e7e-4968-8b65-c5a431f93ef6" Name="No_Sensor_Handler" Comment="Basic Function Block Type" Namespace="Main">
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author=" " Date="4/7/2026" Remarks="Template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT" Comment="Initialization Request">
+        <With Var="atWorkInput" />
+        <With Var="atHomeInput" />
+      </Event>
+      <Event Name="inputEvent" Comment="Normal Execution Request">
+        <With Var="atWorkInput" />
+        <With Var="atHomeInput" />
+      </Event>
+      <Event Name="toWorkTimerEvent" />
+      <Event Name="toHomeTimerEvent" />
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO" Comment="Initialization Confirm">
+        <With Var="atWorkOutput" />
+        <With Var="atHomeOutput" />
+      </Event>
+      <Event Name="CNF" Comment="Execution Confirmation">
+        <With Var="atWorkOutput" />
+        <With Var="atHomeOutput" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="atHomeInput" Type="BOOL" />
+      <VarDeclaration Name="atWorkInput" Type="BOOL" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="atHomeOutput" Type="BOOL" />
+      <VarDeclaration Name="atWorkOutput" Type="BOOL" Comment="Output event qualifier" />
+    </OutputVars>
+  </InterfaceList>
+  <BasicFB>
+    <Attribute Name="FBType.Basic.Algorithm.Order" Value="INIT,AtWork,AtHome,BetweenStates" />
+    <ECC>
+      <ECState Name="START" Comment="Initial State" x="1352.941" y="429.4117" />
+      <ECState Name="INIT" Comment="Initialization" x="1723.529" y="141.1765">
+        <ECAction Algorithm="INIT" Output="INITO" />
+      </ECState>
+      <ECState Name="AtWork" x="1868" y="520">
+        <ECAction Algorithm="AtWork" Output="CNF" />
+      </ECState>
+      <ECState Name="AtHome" x="1864" y="1036">
+        <ECAction Algorithm="AtHome" Output="CNF" />
+      </ECState>
+      <ECState Name="BetweenStates" x="1048" y="1060">
+        <ECAction Algorithm="BetweenStates" Output="CNF" />
+      </ECState>
+      <ECTransition Source="START" Destination="INIT" Condition="INIT" x="1531.148" y="204.8375">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="374.7086,53.9848,394.4091,38.66225" />
+      </ECTransition>
+      <ECTransition Source="INIT" Destination="START" Condition="1" x="1597.592" y="348.3232">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="409.7576,83.39607,390.0571,98.71862" />
+      </ECTransition>
+      <ECTransition Source="AtHome" Destination="START" Condition="1" x="1600.142" y="807.636">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="419.0432,229.0808,383.9746,187.2256" />
+      </ECTransition>
+      <ECTransition Source="AtWork" Destination="START" Condition="1" x="1605.792" y="559.4374">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="413.5939,144.9888,392.4035,141.4767" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="AtWork" Condition="toWorkTimerEvent OR (inputEvent AND atWorkInput = TRUE)" x="1627.076" y="389.9014">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="395.6233,92.19204,416.3436,95.82209" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="AtHome" Condition="toHomeTimerEvent OR (inputEvent AND atHomeInput = TRUE)" x="1673.522" y="684.3456">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="403.3292,146.1308,438.6488,187.982" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="BetweenStates" Condition="inputEvent AND atHomeInput = FALSE AND atWorkInput = FALSE" x="1274.471" y="777.3632">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="333.1907,175.1363,311.9784,218.9882" />
+      </ECTransition>
+      <ECTransition Source="BetweenStates" Destination="START" Condition="1" x="1197.036" y="669.7058">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="289.5146,183.1024,310.7207,139.2505" />
+      </ECTransition>
+    </ECC>
+    <Algorithm Name="INIT" Comment="Initialization algorithm">
+      <ST><![CDATA[;]]></ST>
+    </Algorithm>
+    <Algorithm Name="AtWork">
+      <ST><![CDATA[
+atWorkOutput := TRUE;
+atHomeOutput := FALSE;]]></ST>
+    </Algorithm>
+    <Algorithm Name="AtHome">
+      <ST><![CDATA[
+atWorkOutput := FALSE;
+atHomeOutput := TRUE;]]></ST>
+    </Algorithm>
+    <Algorithm Name="BetweenStates">
+      <ST><![CDATA[atWorkOutput := FALSE;
+atHomeOutput := FALSE;]]></ST>
+    </Algorithm>
+  </BasicFB>
+</FBType>
+*****
+
+ProcessRuntime_Generic_v1.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="dbe3b38c-7d40-4fa7-9b53-c0b4acf14bd4" Name="ProcessRuntime_Generic_v1" Comment="Basic Function Block Type" Namespace="Main">
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author="azam_w" Date="5/13/2025" Remarks="Template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT">
+        <With Var="Mode" />
+        <With Var="CycleType" />
+        <With Var="nextStepCMD" />
+        <With Var="state_table" />
+      </Event>
+      <Event Name="state_change">
+        <With Var="state_table" />
+      </Event>
+      <Event Name="MREQ">
+        <With Var="Mode" />
+      </Event>
+      <Event Name="CTREQ">
+        <With Var="CycleType" />
+      </Event>
+      <Event Name="NSREQ">
+        <With Var="nextStepCMD" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO">
+        <With Var="ThisStepText" />
+      </Event>
+      <Event Name="CMDREQ" Comment="Execution Confirmation">
+        <With Var="cmd_target_name" />
+        <With Var="cmd_state" />
+      </Event>
+      <Event Name="SCNF">
+        <With Var="ThisStepText" />
+        <With Var="PreviousStepText" />
+        <With Var="NextStepText" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="Mode" Type="INT" />
+      <VarDeclaration Name="CycleType" Type="INT" />
+      <VarDeclaration Name="nextStepCMD" Type="BOOL" />
+      <VarDeclaration Name="state_table" Type="Component_State" Namespace="Main" ArraySize="1" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="ThisStepText" Type="STRING[30]" />
+      <VarDeclaration Name="PreviousStepText" Type="STRING[30]" />
+      <VarDeclaration Name="NextStepText" Type="STRING[30]" />
+      <VarDeclaration Name="cmd_target_name" Type="STRING[15]" />
+      <VarDeclaration Name="cmd_state" Type="INT" />
+    </OutputVars>
+  </InterfaceList>
+  <BasicFB>
+    <Attribute Name="FBType.Basic.Algorithm.Order" Value="initializeinit,LoadStep,IssueCmd,check_wait,AdvanceStep,EndSequence" />
+    <InternalVars>
+      <VarDeclaration Name="CurrentStep" Type="INT" Comment="This is the step number it is currently executing" />
+      <VarDeclaration Name="StepDone" Type="BOOL" />
+      <VarDeclaration Name="StepType" Type="INT" ArraySize="10" Comment="0 command, 1 wait, 2 end" />
+      <VarDeclaration Name="CmdTargetName" Type="STRING[15]" ArraySize="10" />
+      <VarDeclaration Name="CmdStateArr" Type="INT" ArraySize="10" Comment="For command steps, which state value hsould be sent" />
+      <VarDeclaration Name="Wait1Id" Type="INT" ArraySize="10" />
+      <VarDeclaration Name="Wait1State" Type="INT" ArraySize="10" />
+      <VarDeclaration Name="NextStep" Type="INT" ArraySize="10" />
+      <VarDeclaration Name="CurrentStepType" Type="INT" Comment="This tells the runtime what kind of step the current one is. 1- command, 2 - wait, 9 - end" />
+      <VarDeclaration Name="WaitSatisfied" Type="BOOL" />
+      <VarDeclaration Name="PusherID" Type="INT" />
+    </InternalVars>
+    <ECC>
+      <ECState Name="START" Comment="Initial State" x="477.3859" y="429.3015" />
+      <ECState Name="INIT" x="434.524" y="956.111">
+        <ECAction Algorithm="initializeinit" Output="INITO" />
+      </ECState>
+      <ECState Name="IDLE1" x="1352.545" y="600.0003">
+        <ECAction Algorithm="LoadStep" Output="SCNF" />
+      </ECState>
+      <ECState Name="ISSUE_CMD" x="1348.1" y="1151.111">
+        <ECAction Algorithm="IssueCmd" Output="CMDREQ" />
+      </ECState>
+      <ECState Name="WAIT_STEP" x="2472.544" y="479.9996">
+        <ECAction Algorithm="check_wait" Output="SCNF" />
+      </ECState>
+      <ECState Name="ADVANCE" x="1334.766" y="1715.555">
+        <ECAction Algorithm="AdvanceStep" Output="SCNF" />
+      </ECState>
+      <ECState Name="END" x="1983.655" y="968.8892">
+        <ECAction Algorithm="EndSequence" Output="SCNF" />
+      </ECState>
+      <ECTransition Source="START" Destination="INIT" Condition="INIT" x="526.1159" y="696.8713">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="136.8388,156.9643,134.0239,192.1655" />
+      </ECTransition>
+      <ECTransition Source="INIT" Destination="IDLE1" Condition="1" x="767.1438" y="680.0045">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="153.0228,176.9492,216.0506,150.9819" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="IDLE1" Condition="Mode = 1 AND CycleType &lt;&gt; 0" x="938.1094" y="434.045">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="208.9543,99.33229,261.4239,109.5664" />
+      </ECTransition>
+      <ECTransition Source="IDLE1" Destination="ISSUE_CMD" Condition="CurrentStepType = 1" x="1431.808" y="876.1604">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="362.7299,200.4761,362.4297,237.7049" />
+      </ECTransition>
+      <ECTransition Source="IDLE1" Destination="WAIT_STEP" Condition="CurrentStepType = 2" x="1871.199" y="472.5714">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="433.7345,118.2509,501.3824,111.2199" />
+      </ECTransition>
+      <ECTransition Source="IDLE1" Destination="END" Condition="CurrentStepType = 9" x="1722.671" y="714.1903">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="412.2174,162.3411,451.9259,185.7816" />
+      </ECTransition>
+      <ECTransition Source="ISSUE_CMD" Destination="ADVANCE" Condition="1" x="1414.695" y="1435.496">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="358.3799,339.8844,357.364,378.2244" />
+      </ECTransition>
+      <ECTransition Source="WAIT_STEP" Destination="ADVANCE" Condition="WaitSatisfied" x="2153.896" y="1306.557">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="662.172,349.7537,450.0622,338.3217" />
+      </ECTransition>
+      <ECTransition Source="ADVANCE" Destination="IDLE1" Condition="1" x="911.2888" y="1084.578">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="57.02499,307.7778,336.5853,222.3115" />
+      </ECTransition>
+      <ECTransition Source="WAIT_STEP" Destination="WAIT_STEP" Condition="state_change" x="2472.546" y="662.0857" />
+    </ECC>
+    <Algorithm Name="initializeinit" Comment="Loads test step data&#xD;&#xA;Clears outputs&#xD;&#xA;sets inital texts">
+      <ST><![CDATA[CurrentStep := 0;
+CurrentStepType := 0;
+WaitSatisfied := FALSE;
+
+PusherID := 0;
+
+StepType[0] := 1;
+CmdTargetName[0] := 'Pusher';
+CmdStateArr[0] := 1;
+NextStep[0] := 1;
+
+StepType[1] := 2;
+Wait1Id[1] := PusherID;
+Wait1State[1] := 2;
+NextStep[1] := 2;
+
+StepType[2] := 9;
+
+cmd_target_name := '';
+cmd_state := 0;
+
+PreviousStepText := '';
+ThisStepText := 'Initialised';
+NextStepText := 'Command Pusher';]]></ST>
+    </Algorithm>
+    <Algorithm Name="LoadStep">
+      <ST><![CDATA[CurrentStepType := StepType[CurrentStep];
+
+CASE CurrentStepType OF
+    1:
+        ThisStepText := 'Command step';
+    2:
+        ThisStepText := 'Wait step';
+    9:
+        ThisStepText := 'End step';
+ELSE
+    ThisStepText := 'Unknown step';
+END_CASE;]]></ST>
+    </Algorithm>
+    <Algorithm Name="IssueCmd" Comment="Reads the current command data">
+      <ST><![CDATA[cmd_target_name := CmdTargetName[CurrentStep];
+cmd_state := CmdStateArr[CurrentStep];
+
+PreviousStepText := ThisStepText;
+ThisStepText := 'Sending command';
+NextStepText := 'Waiting for feedback';]]></ST>
+    </Algorithm>
+    <Algorithm Name="check_wait">
+      <ST><![CDATA[WaitSatisfied := state_table[Wait1Id[CurrentStep]].state = Wait1Id[CurrentStep];
+
+PreviousStepText := ThisStepText;
+ThisStepText := 'Waiting for target state';
+NextStepText := 'Advance when satisfied';]]></ST>
+    </Algorithm>
+    <Algorithm Name="AdvanceStep">
+      <ST><![CDATA[CurrentStep := NextStep[CurrentStep];
+CurrentStepType := StepType[CurrentStep];
+WaitSatisfied := FALSE;
+
+PreviousStepText := ThisStepText;
+
+CASE CurrentStepType OF
+    1:
+        NextStepText := 'Next: Command';
+    2:
+        NextStepText := 'Next: Wait';
+    9:
+        NextStepText := 'Next: End';
+ELSE
+    NextStepText := '';
+END_CASE;]]></ST>
+    </Algorithm>
+    <Algorithm Name="EndSequence">
+      <ST><![CDATA[CurrentStep := NextStep[CurrentStep];
+CurrentStepType := StepType[CurrentStep];
+WaitSatisfied := FALSE;
+
+PreviousStepText := ThisStepText;
+
+CASE CurrentStepType OF
+    1:
+        NextStepText := 'Next: Command';
+    2:
+        NextStepText := 'Next: Wait';
+    9:
+        NextStepText := 'Next: End';
+ELSE
+    NextStepText := '';
+END_CASE;]]></ST>
+    </Algorithm>
+  </BasicFB>
+</FBType>
+*****
+
+ProcessStateBusHandler.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="08f01bfb-f935-4a1a-9faa-997af27ab5af" Name="ProcessStateBusHandler" Comment="Basic Function Block Type" Namespace="Main">
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author=" " Date="3/17/2026" Remarks="Template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT" Comment="Initialization Request">
+        <With Var="component_state_in" />
+        <With Var="name" />
+        <With Var="state_sts" />
+      </Event>
+      <Event Name="REQ" Comment="Normal Execution Request">
+        <With Var="id" />
+        <With Var="name" />
+        <With Var="state_sts" />
+      </Event>
+      <Event Name="BREQ">
+        <With Var="component_state_in" />
+        <With Var="id" />
+        <With Var="name" />
+      </Event>
+      <Event Name="CMDREQ">
+        <With Var="id" />
+        <With Var="name" />
+        <With Var="dest_name" />
+        <With Var="cmd_state" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO" Comment="Initialization Confirm">
+        <With Var="component_state_out" />
+      </Event>
+      <Event Name="BCNF" Comment="Execution Confirmation">
+        <With Var="component_state_out" />
+        <With Var="state_table" />
+      </Event>
+      <Event Name="CNF">
+        <With Var="state_cmd" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="component_state_in" Type="Component_State_Msg" Namespace="Main" Comment="Input event qualifier" />
+      <VarDeclaration Name="id" Type="INT" />
+      <VarDeclaration Name="name" Type="STRING[15]" />
+      <VarDeclaration Name="state_sts" Type="INT" />
+      <VarDeclaration Name="dest_name" Type="STRING[15]" />
+      <VarDeclaration Name="cmd_state" Type="INT" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="component_state_out" Type="Component_State_Msg" Namespace="Main" Comment="Output event qualifier" />
+      <VarDeclaration Name="state_table" Type="Component_State" Namespace="Main" ArraySize="20" />
+      <VarDeclaration Name="state_cmd" Type="INT" />
+    </OutputVars>
+  </InterfaceList>
+  <BasicFB>
+    <Attribute Name="FBType.Basic.Algorithm.Order" Value="INIT,REQ,BREQ,CMDREQST" />
+    <ECC>
+      <ECState Name="START" Comment="Initial State" x="552.9412" y="429.4117" />
+      <ECState Name="INIT" Comment="Initialization" x="923.5294" y="141.1765">
+        <ECAction Algorithm="INIT" Output="INITO" />
+      </ECState>
+      <ECState Name="REQ" Comment="Normal execution" x="217.647" y="752.9412">
+        <ECAction Algorithm="REQ" Output="BCNF" />
+      </ECState>
+      <ECState Name="BREQ" x="1864" y="484">
+        <ECAction Algorithm="BREQ" Output="BCNF" />
+        <ECAction Output="CNF" />
+      </ECState>
+      <ECState Name="CMDREQ_ST" x="1364" y="1140">
+        <ECAction Algorithm="CMDREQST" Output="BCNF" />
+      </ECState>
+      <ECTransition Source="START" Destination="INIT" Condition="INIT" x="731.1476" y="204.8375" />
+      <ECTransition Source="INIT" Destination="START" Condition="1" x="797.5924" y="348.3231" />
+      <ECTransition Source="START" Destination="REQ" Condition="REQ" x="447.8488" y="648.3352" />
+      <ECTransition Source="REQ" Destination="START" Condition="1" x="372.8767" y="512.7991" />
+      <ECTransition Source="START" Destination="BREQ" Condition="BREQ AND name &lt;&gt; component_state_in.source_name" x="1161.774" y="397.5871">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="250.8719,94.90436,321.2458,96.86175" />
+      </ECTransition>
+      <ECTransition Source="BREQ" Destination="START" Condition="1" x="1331.698" y="515.5707">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="377.4676,133.2486,307.9332,131.4601" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="CMDREQ_ST" Condition="CMDREQ" x="1009.886" y="726.9066">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="225.066,151.6458,282.9683,202.1743" />
+      </ECTransition>
+      <ECTransition Source="CMDREQ_ST" Destination="START" Condition="1" x="1001.882" y="879.7841">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="285.231,253.1284,226.5237,202.61" />
+      </ECTransition>
+    </ECC>
+    <Algorithm Name="INIT" Comment="Initialization algorithm">
+      <ST><![CDATA[state_cmd := 0;]]></ST>
+    </Algorithm>
+    <Algorithm Name="REQ" Comment="Normally executed algorithm">
+      <ST><![CDATA[component_state_out.src_id := id;
+component_state_out.source_name := name;
+component_state_out.state := state_sts;
+state_table[id].name := name;
+state_table[id].state := state_sts;
+]]></ST>
+    </Algorithm>
+    <Algorithm Name="BREQ">
+      <ST><![CDATA[component_state_out := component_state_in;
+state_table[component_state_in.src_id].name := component_state_in.source_name;
+state_table[component_state_in.src_id].state := component_state_in.state;
+
+IF component_state_in.dest_name = name THEN
+	state_cmd := component_state_in.state;
+END_IF;
+]]></ST>
+    </Algorithm>
+    <Algorithm Name="CMDREQST">
+      <ST><![CDATA[component_state_out.src_id := id;
+component_state_out.source_name := name;
+component_state_out.dest_name := dest_name;
+component_state_out.state := cmd_state;
+
+state_table[id].name := name;
+state_table[id].state := state_sts;]]></ST>
+    </Algorithm>
+  </BasicFB>
+</FBType>
+*****
+
+Robot_Task_Core.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="874b03d8-4114-40ae-86bd-e41b900704ad" Name="Robot_Task_Core" Comment="Basic Function Block Type" Namespace="Main">
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author="Evans_A" Date="8/21/2025" Remarks="Template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT" Comment="Initialization Request">
+        <With Var="task_complete" />
+        <With Var="actuator_name" />
+      </Event>
+      <Event Name="REQ" Comment="Normal Execution Request">
+        <With Var="task_complete" />
+      </Event>
+      <Event Name="pst_event">
+        <With Var="process_state_name" />
+        <With Var="state_val" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO" Comment="Initialization Confirm">
+        <With Var="start_task" />
+      </Event>
+      <Event Name="CNF" Comment="Execution Confirmation">
+        <With Var="start_task" />
+      </Event>
+      <Event Name="pst_out">
+        <With Var="current_state_to_process" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="task_complete" Type="BOOL" Comment="Input event qualifier" />
+      <VarDeclaration Name="process_state_name" Type="STRING[150]" />
+      <VarDeclaration Name="state_val" Type="INT" />
+      <VarDeclaration Name="actuator_name" Type="STRING[150]" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="start_task" Type="BOOL" Comment="Output event qualifier" />
+      <VarDeclaration Name="current_state_to_process" Type="INT" />
+    </OutputVars>
+  </InterfaceList>
+  <BasicFB>
+    <Attribute Name="FBType.Basic.Algorithm.Order" Value="INIT,REQ,Complete,StartTask" />
+    <ECC>
+      <ECState Name="START" Comment="Initial State" x="347.9412" y="346.9117" />
+      <ECState Name="INIT" Comment="Initialization" x="923.5294" y="141.1765">
+        <ECAction Algorithm="INIT" Output="INITO" />
+      </ECState>
+      <ECState Name="StartTask" Comment="Normal execution" x="1169.647" y="828.9412">
+        <ECAction Algorithm="StartTask" Output="CNF" />
+        <ECAction Output="pst_out" />
+      </ECState>
+      <ECState Name="Complete" x="1176" y="1260">
+        <ECAction Algorithm="Complete" Output="CNF" />
+        <ECAction Output="pst_out" />
+      </ECState>
+      <ECState Name="HomeInitial" x="1364" y="440">
+        <ECAction Algorithm="INIT" Output="pst_out" />
+      </ECState>
+      <ECTransition Source="START" Destination="INIT" Condition="INIT" x="646.6445" y="156.1928">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="148.8221,39.62531,178.3066,29.08651" />
+      </ECTransition>
+      <ECTransition Source="INIT" Destination="HomeInitial" Condition="1" x="1193.618" y="223.7301">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="288.0334,43.85626,311.9197,60.06117" />
+      </ECTransition>
+      <ECTransition Source="HomeInitial" Destination="StartTask" Condition="process_state_name = actuator_name AND state_val = 1&#xD;&#xA;" x="1335.056" y="641.9281">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="342.6572,148.9791,333.2628,173.2279" />
+      </ECTransition>
+      <ECTransition Source="StartTask" Destination="Complete" Condition="task_complete = TRUE" x="1153.498" y="1068.365">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="287.2261,255.4704,287.6273,282.6948" />
+      </ECTransition>
+      <ECTransition Source="Complete" Destination="HomeInitial" Condition="process_state_name = actuator_name AND state_val = 2" x="681.0903" y="782.7162">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="116.25,241.0474,151.25,141.0474" />
+      </ECTransition>
+    </ECC>
+    <Algorithm Name="INIT" Comment="Initialization algorithm">
+      <ST><![CDATA[start_task := FALSE;
+current_state_to_process := 0;]]></ST>
+    </Algorithm>
+    <Algorithm Name="REQ" Comment="Normally executed algorithm">
+      <ST><![CDATA[;]]></ST>
+    </Algorithm>
+    <Algorithm Name="StartTask">
+      <ST><![CDATA[start_task := TRUE;
+current_state_to_process := 1;]]></ST>
+    </Algorithm>
+    <Algorithm Name="Complete">
+      <ST><![CDATA[start_task := FALSE;
+current_state_to_process := 2;]]></ST>
+    </Algorithm>
+  </BasicFB>
+</FBType>
+*****
+
+Sensor_Bool.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="915479cc-91d9-4494-85f7-dca711fce754" Name="Sensor_Bool" Comment="Basic Function Block Type" Namespace="Main">
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author=" " Date="2/2/2026" Remarks="Template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT" Comment="Initialization Request">
+        <With Var="Input" />
+      </Event>
+      <Event Name="REQ" Comment="Normal Execution Request">
+        <With Var="Input" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO" Comment="Initialization Confirm">
+        <With Var="Status" />
+      </Event>
+      <Event Name="CNF" Comment="Execution Confirmation">
+        <With Var="Status" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="Input" Type="BOOL" Comment="Input event qualifier" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="Status" Type="INT" Comment="Output event qualifier" />
+    </OutputVars>
+  </InterfaceList>
+  <BasicFB>
+    <Attribute Name="FBType.Basic.Algorithm.Order" Value="INIT,Sensor_TRUE,Sensor_FALSE" />
+    <ECC>
+      <ECState Name="START" Comment="Initial State" x="552.9412" y="429.4117" />
+      <ECState Name="INIT" Comment="Initialization" x="923.5294" y="141.1765">
+        <ECAction Algorithm="INIT" Output="INITO" />
+      </ECState>
+      <ECState Name="Sensor_TRUE" Comment="Normal execution" x="1177.647" y="836.9412">
+        <ECAction Algorithm="Sensor_TRUE" Output="CNF" />
+      </ECState>
+      <ECState Name="Sensor_FALSE" Comment="Normal execution" x="729.6471" y="1648.941">
+        <ECAction Algorithm="Sensor_FALSE" Output="CNF" />
+      </ECState>
+      <ECTransition Source="START" Destination="INIT" Condition="INIT" x="731.1476" y="204.8375" />
+      <ECTransition Source="INIT" Destination="START" Condition="1" x="797.5924" y="348.3231" />
+      <ECTransition Source="START" Destination="Sensor_TRUE" Condition="REQ AND Input = 1" x="917.4869" y="567.7199">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="210.6194,124.7237,249.3464,149.9874" />
+      </ECTransition>
+      <ECTransition Source="Sensor_TRUE" Destination="Sensor_FALSE" Condition="REQ AND Input=0&#xD;&#xA;" x="950.9171" y="1345.723">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="256.3064,312.5898,216.0954,377.4017" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="Sensor_FALSE" Condition="REQ AND Input=0" x="712.8248" y="1026.073">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="176.4071,208.9465,189.9943,301.9059" />
+      </ECTransition>
+      <ECTransition Source="Sensor_FALSE" Destination="Sensor_TRUE" Condition="REQ AND Input=1" x="945.4842" y="1114.041">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="222.363,297.9651,253.7397,237.5723" />
+      </ECTransition>
+    </ECC>
+    <Algorithm Name="INIT" Comment="Initialization algorithm">
+      <ST><![CDATA[;]]></ST>
+    </Algorithm>
+    <Algorithm Name="Sensor_TRUE" Comment="Normally executed algorithm">
+      <ST><![CDATA[Status := 1;]]></ST>
+    </Algorithm>
+    <Algorithm Name="Sensor_FALSE">
+      <ST><![CDATA[Status:= 0;]]></ST>
+    </Algorithm>
+  </BasicFB>
+</FBType>
+*****
+
+SevenStateActuator.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="8d4ac4b8-c89e-40ec-aa48-d5006079f0fd" Name="SevenStateActuator" Comment="Basic Function Block Type" Namespace="Main">
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author="azam_w" Date="5/13/2025" Remarks="Template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="pst_event" Comment="Normal Execution Request">
+        <With Var="state_val" />
+        <With Var="process_state_name" />
+      </Event>
+      <Event Name="action_event">
+        <With Var="athome" />
+        <With Var="atwork1" />
+        <With Var="atwork2" />
+      </Event>
+      <Event Name="timer_end">
+        <With Var="atwork1" />
+        <With Var="atwork2" />
+      </Event>
+      <Event Name="tohome" />
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="pst_out" Comment="Execution Confirmation">
+        <With Var="current_state_to_pocess" />
+        <With Var="current_state1_to_plc" />
+        <With Var="current_state2_to_plc" />
+      </Event>
+      <Event Name="plc_out">
+        <With Var="current_state1_to_plc" />
+        <With Var="current_state_to_pocess" />
+        <With Var="current_state2_to_plc" />
+      </Event>
+      <Event Name="timer_start">
+        <With Var="current_state1_to_plc" />
+        <With Var="current_state2_to_plc" />
+      </Event>
+      <Event Name="timer_stop" />
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="athome" Type="BOOL" />
+      <VarDeclaration Name="atwork1" Type="BOOL" />
+      <VarDeclaration Name="process_state_name" Type="STRING[150]" />
+      <VarDeclaration Name="state_val" Type="INT" />
+      <VarDeclaration Name="actuator_name" Type="STRING[150]" />
+      <VarDeclaration Name="atwork2" Type="BOOL" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="current_state_to_pocess" Type="INT" Comment="Output event qualifier" />
+      <VarDeclaration Name="current_state1_to_plc" Type="BOOL" />
+      <VarDeclaration Name="current_state2_to_plc" Type="BOOL" />
+    </OutputVars>
+  </InterfaceList>
+  <BasicFB>
+    <Attribute Name="FBType.Basic.Algorithm.Order" Value="INIT,REQ,moving,atPick,toPlace,atPlace,toHome,atHome,timerstart,timerstop,stopAtHome,ToInitPos" />
+    <ECC>
+      <ECState Name="START" Comment="Initial State" x="2989.132" y="779.9042" />
+      <ECState Name="ToPick" x="3367.556" y="1431.555">
+        <ECAction Algorithm="moving" Output="plc_out" />
+      </ECState>
+      <ECState Name="AtPick" x="3369.333" y="1840">
+        <ECAction Algorithm="atPick" Output="pst_out" />
+      </ECState>
+      <ECState Name="ToPlace" x="3355.777" y="2244.889">
+        <ECAction Algorithm="toPlace" Output="plc_out" />
+      </ECState>
+      <ECState Name="AtPlace" x="3372" y="2594.222">
+        <ECAction Algorithm="atPlace" Output="pst_out" />
+      </ECState>
+      <ECState Name="ToHome" x="3387" y="3264.404">
+        <ECAction Algorithm="toHome" Output="plc_out" />
+      </ECState>
+      <ECState Name="handshake" x="3312.397" y="4288.054">
+        <ECAction Algorithm="atHome" Output="pst_out" />
+      </ECState>
+      <ECState Name="timerStart" x="3392.667" y="2945.822">
+        <ECAction Output="timer_start" />
+      </ECState>
+      <ECState Name="timerEnd" x="3367.167" y="3647.711">
+        <ECAction Output="timer_stop" />
+      </ECState>
+      <ECState Name="InitPos" x="2200.714" y="1230" />
+      <ECState Name="initTimer" x="1771.429" y="1645.715">
+        <ECAction Output="timer_start" />
+      </ECState>
+      <ECState Name="TimerEnd" x="1702.857" y="2371.429">
+        <ECAction Output="timer_stop" />
+      </ECState>
+      <ECState Name="atInitPos" x="1649.286" y="2855">
+        <ECAction Algorithm="stopAtHome" Output="plc_out" />
+      </ECState>
+      <ECState Name="ToInit" x="1746.667" y="1959.762">
+        <ECAction Algorithm="ToInitPos" Output="plc_out" />
+      </ECState>
+      <ECState Name="athome" x="3385" y="3965.237">
+        <ECAction Algorithm="stopAtHome" Output="plc_out" />
+      </ECState>
+      <ECTransition Source="START" Destination="ToPick" Condition="process_state_name = actuator_name AND state_val = 1" x="3135.544" y="1118.542">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="765.3235,252.9967,797.835,308.4097" />
+      </ECTransition>
+      <ECTransition Source="ToPick" Destination="AtPick" Condition="process_state_name = actuator_name AND atwork1 = TRUE AND atwork2 = FALSE" x="3322.43" y="1634.826">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="828.108,393.3144,828.7659,423.9399" />
+      </ECTransition>
+      <ECTransition Source="AtPick" Destination="ToPlace" Condition="process_state_name = actuator_name AND state_val = 2" x="3302.187" y="2044.892">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="824.2023,496.3279,821.221,526.5262" />
+      </ECTransition>
+      <ECTransition Source="ToPlace" Destination="AtPlace" Condition="process_state_name = actuator_name AND atwork2 = TRUE AND atwork1 = FALSE" x="3293.679" y="2408.447">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="819.2835,588.2385,821.7086,614.1335" />
+      </ECTransition>
+      <ECTransition Source="handshake" Destination="START" Condition="atwork1 = FALSE AND atwork2 = FALSE" x="2651.306" y="3116.588">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="722.1446,929.515,525.3169,725.8802" />
+      </ECTransition>
+      <ECTransition Source="AtPlace" Destination="timerStart" Condition="process_state_name = actuator_name AND state_val = 0" x="3304.778" y="2775.257">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="822.9579,682.131,822.7713,706.3703" />
+      </ECTransition>
+      <ECTransition Source="ToHome" Destination="timerEnd" Condition="timer_end" x="3464.252" y="3457.457">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="870.6228,852.8556,869.8058,876.1061" />
+      </ECTransition>
+      <ECTransition Source="athome" Destination="handshake" Condition="process_state_name = actuator_name AND atwork1 = FALSE AND atwork2 = FALSE" x="3432.051" y="4140.308">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="863.1403,1027.136,859.6002,1045.295" />
+      </ECTransition>
+      <ECTransition Source="InitPos" Destination="initTimer" Condition="1" x="2074.345" y="1468.904">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="533.7286,356.734,509.4598,382.8924" />
+      </ECTransition>
+      <ECTransition Source="atInitPos" Destination="START" Condition="1" x="522.9497" y="1629.061">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="-63.86103,471.6481,45.29639,314.0041" />
+      </ECTransition>
+      <ECTransition Source="TimerEnd" Destination="atInitPos" Condition="1" x="1752.029" y="2620.378">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="443.8145,639.8961,440.3066,671.4868" />
+      </ECTransition>
+      <ECTransition Source="initTimer" Destination="ToInit" Condition="1" x="1848.433" y="1789.904">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="465.3968,436.8902,466.1049,455.9224" />
+      </ECTransition>
+      <ECTransition Source="ToInit" Destination="TimerEnd" Condition="timer_end" x="1784.26" y="2209.105">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="451.4835,541.8348,445.5519,569.9692" />
+      </ECTransition>
+      <ECTransition Source="timerStart" Destination="ToHome" Condition="1" x="3464.914" y="3083.292">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="867.9937,759.3962,870.4675,778.6129" />
+      </ECTransition>
+      <ECTransition Source="timerEnd" Destination="athome" Condition="1" x="3440.13" y="3770.934">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="860.411,930.0445,864.0118,949.4992" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="InitPos" Condition="tohome" x="2641.315" y="1072.975">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="686.3589,258.5437,635.8917,287.3546" />
+      </ECTransition>
+    </ECC>
+    <Algorithm Name="INIT" Comment="Initialization algorithm">
+      <ST><![CDATA[;]]></ST>
+    </Algorithm>
+    <Algorithm Name="REQ" Comment="Normally executed algorithm">
+      <ST><![CDATA[;]]></ST>
+    </Algorithm>
+    <Algorithm Name="moving">
+      <ST><![CDATA[;
+current_state_to_pocess := 1;
+current_state1_to_plc:= TRUE;
+current_state2_to_plc:= FALSE;]]></ST>
+    </Algorithm>
+    <Algorithm Name="atPick">
+      <ST><![CDATA[;
+current_state_to_pocess := 1;
+current_state1_to_plc:= TRUE;
+current_state2_to_plc:= FALSE;]]></ST>
+    </Algorithm>
+    <Algorithm Name="toPlace">
+      <ST><![CDATA[;
+current_state_to_pocess := 2;
+current_state1_to_plc:= FALSE;
+current_state2_to_plc:= TRUE;]]></ST>
+    </Algorithm>
+    <Algorithm Name="atPlace">
+      <ST><![CDATA[;
+current_state_to_pocess := 2;
+current_state1_to_plc:= FALSE;
+current_state2_to_plc:= TRUE;]]></ST>
+    </Algorithm>
+    <Algorithm Name="toHome">
+      <ST><![CDATA[;
+ 
+
+current_state1_to_plc:= TRUE;
+current_state2_to_plc:= FALSE;
+
+
+
+ 
+]]></ST>
+    </Algorithm>
+    <Algorithm Name="atHome">
+      <ST><![CDATA[;
+current_state_to_pocess := 0;
+current_state1_to_plc:= FALSE;
+current_state2_to_plc:= FALSE;]]></ST>
+    </Algorithm>
+    <Algorithm Name="timerstart">
+      <ST><![CDATA[;
+
+]]></ST>
+    </Algorithm>
+    <Algorithm Name="timerstop">
+      <ST><![CDATA[;
+]]></ST>
+    </Algorithm>
+    <Algorithm Name="stopAtHome">
+      <ST><![CDATA[;
+current_state1_to_plc:= FALSE;
+current_state2_to_plc:= FALSE;]]></ST>
+    </Algorithm>
+    <Algorithm Name="ToInitPos">
+      <ST><![CDATA[;
+
+IF atwork1 = TRUE THEN
+	current_state1_to_plc:= FALSE;
+	current_state2_to_plc:= TRUE;
+ELSIF atwork2 = TRUE THEN
+	current_state1_to_plc:= TRUE;
+	current_state2_to_plc:= FALSE;
+END_IF;]]></ST>
+    </Algorithm>
+  </BasicFB>
+</FBType>
+*****
+
+SevenStateActuator2.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="7c968549-6126-4c50-acb3-85ea05ddb85a" Name="SevenStateActuator2" Comment="Basic Function Block Type" Namespace="Main">
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author="azam_w" Date="5/13/2025" Remarks="Template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT">
+        <With Var="athome" />
+        <With Var="atwork1" />
+        <With Var="process_state_name" />
+        <With Var="state_val" />
+        <With Var="actuator_name" />
+        <With Var="atwork2" />
+      </Event>
+      <Event Name="pst_event" Comment="Normal Execution Request">
+        <With Var="state_val" />
+        <With Var="process_state_name" />
+      </Event>
+      <Event Name="action_event">
+        <With Var="athome" />
+        <With Var="atwork1" />
+        <With Var="atwork2" />
+      </Event>
+      <Event Name="timer_end">
+        <With Var="atwork1" />
+        <With Var="atwork2" />
+      </Event>
+      <Event Name="tohome" />
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO">
+        <With Var="current_state_to_pocess" />
+        <With Var="current_state1_to_plc" />
+        <With Var="current_state2_to_plc" />
+        <With Var="state" />
+      </Event>
+      <Event Name="pst_out" Comment="Execution Confirmation">
+        <With Var="current_state_to_pocess" />
+        <With Var="current_state1_to_plc" />
+        <With Var="current_state2_to_plc" />
+        <With Var="state" />
+      </Event>
+      <Event Name="plc_out">
+        <With Var="current_state_to_pocess" />
+        <With Var="current_state1_to_plc" />
+        <With Var="current_state2_to_plc" />
+        <With Var="state" />
+      </Event>
+      <Event Name="timer_start">
+        <With Var="current_state1_to_plc" />
+        <With Var="current_state2_to_plc" />
+        <With Var="state" />
+      </Event>
+      <Event Name="timer_stop">
+        <With Var="current_state1_to_plc" />
+        <With Var="current_state2_to_plc" />
+        <With Var="state" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="athome" Type="BOOL" />
+      <VarDeclaration Name="atwork1" Type="BOOL" />
+      <VarDeclaration Name="process_state_name" Type="STRING[150]" />
+      <VarDeclaration Name="state_val" Type="INT" />
+      <VarDeclaration Name="actuator_name" Type="STRING[150]" />
+      <VarDeclaration Name="atwork2" Type="BOOL" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="current_state_to_pocess" Type="INT" Comment="Output event qualifier" />
+      <VarDeclaration Name="current_state1_to_plc" Type="BOOL" />
+      <VarDeclaration Name="current_state2_to_plc" Type="BOOL" />
+      <VarDeclaration Name="state" Type="STRING" />
+    </OutputVars>
+  </InterfaceList>
+  <BasicFB>
+    <Attribute Name="FBType.Basic.Algorithm.Order" Value="INIT,REQ,moving,atPick,toPlace,atPlace,toHome,atHome,timerstart,timerstop,stopAtHome,ToInitPos" />
+    <InternalVars>
+      <VarDeclaration Name="home_done" Type="BOOL" />
+    </InternalVars>
+    <ECC>
+      <ECState Name="START" Comment="Initial State" x="3366.275" y="699.9042" />
+      <ECState Name="ToPick" x="3367.556" y="1431.555">
+        <ECAction Algorithm="moving" Output="plc_out" />
+      </ECState>
+      <ECState Name="AtPick" x="3369.333" y="1840">
+        <ECAction Algorithm="atPick" Output="pst_out" />
+      </ECState>
+      <ECState Name="ToPlace" x="3355.777" y="2244.889">
+        <ECAction Algorithm="toPlace" Output="plc_out" />
+      </ECState>
+      <ECState Name="AtPlace" x="3372" y="2594.222">
+        <ECAction Algorithm="atPlace" Output="pst_out" />
+      </ECState>
+      <ECState Name="ToHome" x="3387" y="3264.404">
+        <ECAction Algorithm="ToInitPos" Output="plc_out" />
+      </ECState>
+      <ECState Name="handshake" x="3312.397" y="4288.054">
+        <ECAction Algorithm="atHome" Output="pst_out" />
+      </ECState>
+      <ECState Name="timerStart" x="3392.667" y="2945.822">
+        <ECAction Algorithm="timerstart" Output="timer_start" />
+      </ECState>
+      <ECState Name="timerEnd" x="3367.167" y="3647.711">
+        <ECAction Algorithm="timerstop" Output="timer_stop" />
+      </ECState>
+      <ECState Name="athome" x="3385" y="3965.237">
+        <ECAction Algorithm="stopAtHome" Output="plc_out" />
+      </ECState>
+      <ECState Name="INIT" x="4022.857" y="609.0477">
+        <ECAction Algorithm="INIT" Output="INITO" />
+      </ECState>
+      <ECTransition Source="START" Destination="ToPick" Condition="process_state_name = actuator_name AND state_val = 1" x="3326.322" y="1063.075">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="828.8198,233.6565,829.4177,297.4383" />
+      </ECTransition>
+      <ECTransition Source="ToPick" Destination="AtPick" Condition="process_state_name = actuator_name AND atwork1 = TRUE AND atwork2 = FALSE" x="3322.43" y="1634.826">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="828.108,393.3144,828.7659,423.9399" />
+      </ECTransition>
+      <ECTransition Source="AtPick" Destination="ToPlace" Condition="process_state_name = actuator_name AND state_val = 2" x="3302.187" y="2044.892">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="824.2023,496.3279,821.221,526.5262" />
+      </ECTransition>
+      <ECTransition Source="ToPlace" Destination="AtPlace" Condition="process_state_name = actuator_name AND atwork2 = TRUE AND atwork1 = FALSE" x="3327.966" y="2436.906">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="829.3376,597.7247,831.7628,623.6197" />
+      </ECTransition>
+      <ECTransition Source="handshake" Destination="START" Condition="atwork1 = FALSE AND atwork2 = FALSE" x="1711.346" y="2101.118">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="223.5723,780.5409,380.5724,208.1144" />
+      </ECTransition>
+      <ECTransition Source="AtPlace" Destination="timerStart" Condition="(process_state_name = actuator_name AND state_val = 0) OR tohome" x="3304.778" y="2775.257">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="822.9579,682.131,822.7713,706.3703" />
+      </ECTransition>
+      <ECTransition Source="ToHome" Destination="timerEnd" Condition="timer_end" x="3464.251" y="3457.457">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="870.6228,852.8556,869.8058,876.1061" />
+      </ECTransition>
+      <ECTransition Source="athome" Destination="handshake" Condition="atwork1 = FALSE AND atwork2 = FALSE" x="3432.051" y="4140.308">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="863.1403,1027.136,859.6002,1045.295" />
+      </ECTransition>
+      <ECTransition Source="timerStart" Destination="ToHome" Condition="1" x="3464.914" y="3083.292">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="867.9937,759.3962,870.4675,778.6129" />
+      </ECTransition>
+      <ECTransition Source="timerEnd" Destination="athome" Condition="1" x="3440.13" y="3770.934">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="860.411,930.0445,864.0118,949.4992" />
+      </ECTransition>
+      <ECTransition Source="AtPlace" Destination="ToPick" Condition="process_state_name = actuator_name AND state_val = 1" x="4367.992" y="1994.334">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="1213.333,577.0037,1115.556,417.0036" />
+      </ECTransition>
+      <ECTransition Source="AtPick" Destination="timerStart" Condition="(process_state_name = actuator_name AND state_val = 0) OR tohome" x="2765.869" y="2540.208">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="573.1581,593.6309,729.1581,700.6309" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="ToPlace" Condition="process_state_name = actuator_name AND state_val = 2" x="2653.445" y="1619.021">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="552.8572,329.702,675.7143,503.9877" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="timerStart" Condition="process_state_name = actuator_name AND state_val = 0 AND home_done = FALSE" x="2021.081" y="2247.285">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="342.3562,326.8525,465.7143,860" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="timerStart" Condition="tohome AND home_done = FALSE" x="2294.655" y="2179.903">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="342.8571,418.5714,645.7143,727.1429" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="INIT" Condition="INIT" x="3709.883" y="567.7631">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="910.155,140.4852,946.389,135.4712" />
+      </ECTransition>
+      <ECTransition Source="INIT" Destination="START" Condition="athome = TRUE OR (atwork1 = FALSE AND atwork2 = FALSE)" x="3723.856" y="736.7998">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="949.8159,185.2354,913.5818,190.2494" />
+      </ECTransition>
+      <ECTransition Source="INIT" Destination="timerStart" Condition="atwork1 = TRUE OR atwork2 = TRUE" x="4753.665" y="2138.876">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="1269.429,401.4286,1263.974,724.2857" />
+      </ECTransition>
+      <ECTransition Source="athome" Destination="INIT" Condition="INIT" x="5582.486" y="2825.595">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="1274,876.5592,1812,624.5592" />
+      </ECTransition>
+    </ECC>
+    <Algorithm Name="INIT" Comment="Initialization algorithm">
+      <ST><![CDATA[state := 'INIT';
+home_done := FALSE;]]></ST>
+    </Algorithm>
+    <Algorithm Name="REQ" Comment="Normally executed algorithm">
+      <ST><![CDATA[;]]></ST>
+    </Algorithm>
+    <Algorithm Name="moving">
+      <ST><![CDATA[state := 'moving';
+current_state_to_pocess := 1;
+current_state1_to_plc:= TRUE;
+current_state2_to_plc:= FALSE;
+home_done := FALSE;
+]]></ST>
+    </Algorithm>
+    <Algorithm Name="atPick">
+      <ST><![CDATA[state := 'atPick';
+current_state_to_pocess := 1;
+current_state1_to_plc:= TRUE;
+current_state2_to_plc:= FALSE;
+]]></ST>
+    </Algorithm>
+    <Algorithm Name="toPlace">
+      <ST><![CDATA[state := 'toPlace';
+current_state_to_pocess := 2;
+current_state1_to_plc:= FALSE;
+current_state2_to_plc:= TRUE;
+home_done := FALSE;
+]]></ST>
+    </Algorithm>
+    <Algorithm Name="atPlace">
+      <ST><![CDATA[state := 'atPlace';
+current_state_to_pocess := 2;
+current_state1_to_plc:= FALSE;
+current_state2_to_plc:= TRUE;
+]]></ST>
+    </Algorithm>
+    <Algorithm Name="toHome">
+      <ST><![CDATA[state := 'toHome';
+ 
+
+current_state1_to_plc:= TRUE;
+current_state2_to_plc:= FALSE;
+
+
+
+ 
+]]></ST>
+    </Algorithm>
+    <Algorithm Name="atHome">
+      <ST><![CDATA[state := 'atHome';
+current_state_to_pocess := 0;
+current_state1_to_plc:= FALSE;
+current_state2_to_plc:= FALSE;
+home_done := TRUE;
+]]></ST>
+    </Algorithm>
+    <Algorithm Name="timerstart">
+      <ST><![CDATA[;
+state := 'timerstart';
+]]></ST>
+    </Algorithm>
+    <Algorithm Name="timerstop">
+      <ST><![CDATA[;
+state := 'timerstop';]]></ST>
+    </Algorithm>
+    <Algorithm Name="stopAtHome">
+      <ST><![CDATA[state := 'stopAtHome';
+current_state1_to_plc:= FALSE;
+current_state2_to_plc:= FALSE;
+]]></ST>
+    </Algorithm>
+    <Algorithm Name="ToInitPos">
+      <ST><![CDATA[;
+state := 'ToInitPos';
+IF atwork1 = TRUE THEN
+	current_state1_to_plc:= FALSE;
+	current_state2_to_plc:= TRUE;
+ELSIF atwork2 = TRUE THEN
+	current_state1_to_plc:= TRUE;
+	current_state2_to_plc:= FALSE;
+END_IF;
+]]></ST>
+    </Algorithm>
+  </BasicFB>
+</FBType>
+*****
+
+Station_Core.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="b0bef37f-c4a6-40bb-9927-8b1fba97284f" Name="Station_Core" Comment="Basic Function Block Type" Namespace="Main">
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author="Evans_A" Date="7/10/2025" Remarks="Template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT" Comment="Initialization Request" />
+      <Event Name="AMREQ" Comment="Normal Execution Request">
+        <With Var="AreaModeCmd" />
+      </Event>
+      <Event Name="ACTREQ">
+        <With Var="AreaCycleTypeCmd" />
+      </Event>
+      <Event Name="SMREQ">
+        <With Var="StationModeCmd" />
+      </Event>
+      <Event Name="SCTREQ">
+        <With Var="StationCycleTypeCmd" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO" Comment="Initialization Confirm">
+        <With Var="StationMode" />
+        <With Var="StationCycleType" />
+      </Event>
+      <Event Name="MCNF" Comment="Execution Confirmation">
+        <With Var="StationMode" />
+      </Event>
+      <Event Name="CTCNF">
+        <With Var="StationCycleType" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="AreaModeCmd" Type="INT" Comment="Input event qualifier" />
+      <VarDeclaration Name="AreaCycleTypeCmd" Type="INT" />
+      <VarDeclaration Name="StationModeCmd" Type="INT" />
+      <VarDeclaration Name="StationCycleTypeCmd" Type="INT" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="StationMode" Type="INT" Comment="Output event qualifier" />
+      <VarDeclaration Name="StationCycleType" Type="INT" />
+    </OutputVars>
+  </InterfaceList>
+  <BasicFB>
+    <Attribute Name="FBType.Basic.Algorithm.Order" Value="INIT,REQ,Auto_Stop,Manual_Stop,Setup_Mode,Initial_Position,Continuous,Stop_At_End,Single_Cycle,Dry_Cycle,Cycle_Stop" />
+    <ECC>
+      <ECState Name="START" Comment="Initial State" x="1272.941" y="460.5228" />
+      <ECState Name="INIT" Comment="Initialization" x="1815.529" y="173.1765">
+        <ECAction Algorithm="INIT" Output="INITO" />
+      </ECState>
+      <ECState Name="AUTO" x="2831.555" y="496.8889">
+        <ECAction Algorithm="Auto_Stop" Output="MCNF" />
+        <ECAction Algorithm="Cycle_Stop" Output="CTCNF" />
+      </ECState>
+      <ECState Name="MANUAL" x="1847.111" y="2681.335">
+        <ECAction Algorithm="Manual_Stop" Output="MCNF" />
+        <ECAction Algorithm="Cycle_Stop" Output="CTCNF" />
+      </ECState>
+      <ECState Name="SETUP_MODE" x="527.9999" y="2261.333">
+        <ECAction Algorithm="Setup_Mode" Output="MCNF" />
+      </ECState>
+      <ECState Name="HOME" x="488.8889" y="848.8888">
+        <ECAction Algorithm="Initial_Position" Output="MCNF" />
+      </ECState>
+      <ECState Name="CONTINUOUS_AUTO" x="4321.778" y="1284.038">
+        <ECAction Algorithm="Continuous" Output="CTCNF" />
+      </ECState>
+      <ECState Name="STOP_AT_END_AUTO" x="3987.008" y="1685.778">
+        <ECAction Algorithm="Stop_At_End" Output="CTCNF" />
+      </ECState>
+      <ECState Name="SINGLE_CYCLE_AUTO" x="3521.231" y="2068">
+        <ECAction Algorithm="Single_Cycle" Output="CTCNF" />
+      </ECState>
+      <ECState Name="DRY_CYCLE_AUTO" x="2887.896" y="2394.667">
+        <ECAction Algorithm="Dry_Cycle" Output="CTCNF" />
+      </ECState>
+      <ECState Name="CONTINUOUS_MANUAL" x="3772.444" y="3715.557">
+        <ECAction Algorithm="Continuous" Output="CTCNF" />
+      </ECState>
+      <ECState Name="STOP_AT_END_MANUAL" x="2968.341" y="4147.112">
+        <ECAction Algorithm="Stop_At_End" Output="CTCNF" />
+      </ECState>
+      <ECState Name="SINGLE_CYCLE_MANUAL" x="2009.23" y="4469.334">
+        <ECAction Algorithm="Single_Cycle" Output="CTCNF" />
+      </ECState>
+      <ECState Name="DRY_CYCLE_MANUAL" x="753.2305" y="4112.002">
+        <ECAction Algorithm="Dry_Cycle" Output="CTCNF" />
+      </ECState>
+      <ECTransition Source="START" Destination="INIT" Condition="INIT" x="1541.572" y="234.7074">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="372.1763,61.56437,401.4837,46.0436" />
+      </ECTransition>
+      <ECTransition Source="INIT" Destination="START" Condition="1" x="1592.499" y="386.8313">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="413.1839,93.1367,383.8765,108.6575" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="AUTO" Condition="AMREQ AND AreaModeCmd=1 OR SMREQ AND StationModeCmd=1" x="1981.621" y="411.0077">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="431.0755,98.34289,546.8531,98.99751" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="MANUAL" Condition="AMREQ AND AreaModeCmd=2 OR SMREQ AND StationModeCmd=2" x="1626.514" y="1545.03">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="388.6915,295.8333,434.5491,472.3652" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="SETUP_MODE" Condition="AMREQ AND AreaModeCmd=3 OR SMREQ AND StationModeCmd=3" x="965.3394" y="1393.173">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="275.3763,280.2565,216.67,421.704" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="HOME" Condition="AMREQ AND AreaModeCmd=9 OR SMREQ AND StationModeCmd=9" x="902.6347" y="729.7361">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="251.1601,174.8022,198.4986,199.8689" />
+      </ECTransition>
+      <ECTransition Source="AUTO" Destination="MANUAL" Condition="AMREQ AND AreaModeCmd=2 OR SMREQ AND StationModeCmd=2" x="2394.285" y="1618.822">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="641.726,320.52,563.5339,493.8427" />
+      </ECTransition>
+      <ECTransition Source="MANUAL" Destination="AUTO" Condition="AMREQ AND AreaModeCmd=1 OR SMREQ AND StationModeCmd=1" x="2454.582" y="1306.082">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="584.1463,389.6569,662.598,216.2124" />
+      </ECTransition>
+      <ECTransition Source="AUTO" Destination="SETUP_MODE" Condition="AMREQ AND AreaModeCmd=3 OR SMREQ AND StationModeCmd=3" x="1660.104" y="1473.899">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="505.4822,305.8886,319.2628,446.8588" />
+      </ECTransition>
+      <ECTransition Source="SETUP_MODE" Destination="AUTO" Condition="AMREQ AND AreaModeCmd=1 OR SMREQ AND StationModeCmd=1" x="1785.561" y="1232.938">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="362.8405,366.619,549.3278,225.4882" />
+      </ECTransition>
+      <ECTransition Source="AUTO" Destination="HOME" Condition="AMREQ AND AreaModeCmd=9 OR SMREQ AND StationModeCmd=9" x="1672.798" y="731.277">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="506.3666,173.1523,331.6345,200.4409" />
+      </ECTransition>
+      <ECTransition Source="HOME" Destination="AUTO" Condition="AMREQ AND AreaModeCmd=1 OR SMREQ AND StationModeCmd=1" x="1663.997" y="612.4862">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="328.3839,161.693,503.7502,136.3979" />
+      </ECTransition>
+      <ECTransition Source="MANUAL" Destination="SETUP_MODE" Condition="AMREQ AND AreaModeCmd=3 OR SMREQ AND StationModeCmd=3" x="1135.411" y="2510.69">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="320.2417,642.707,242.3107,617.34" />
+      </ECTransition>
+      <ECTransition Source="SETUP_MODE" Destination="MANUAL" Condition="AMREQ AND AreaModeCmd=2 OR SMREQ AND StationModeCmd=2" x="1265.117" y="2436.839">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="281.5861,594.5739,354.1726,618.7695" />
+      </ECTransition>
+      <ECTransition Source="MANUAL" Destination="HOME" Condition="AMREQ AND AreaModeCmd=9 OR SMREQ AND StationModeCmd=9" x="1226.228" y="1926.946">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="368.7279,570.0898,255.3461,420.3558" />
+      </ECTransition>
+      <ECTransition Source="HOME" Destination="MANUAL" Condition="AMREQ AND AreaModeCmd=2 OR SMREQ AND StationModeCmd=2" x="1200.124" y="1699.785">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="249.2191,348.9368,354.7392,490.0681" />
+      </ECTransition>
+      <ECTransition Source="SETUP_MODE" Destination="HOME" Condition="AMREQ AND AreaModeCmd=9 OR SMREQ AND StationModeCmd=9" x="500.7269" y="1749.386">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="126.4204,508.1754,123.0617,398.8967" />
+      </ECTransition>
+      <ECTransition Source="HOME" Destination="SETUP_MODE" Condition="AMREQ AND AreaModeCmd=3 OR SMREQ AND StationModeCmd=3" x="573.802" y="1541.442">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="146.4509,329.6092,149.8325,438.8338" />
+      </ECTransition>
+      <ECTransition Source="AUTO" Destination="CONTINUOUS_AUTO" Condition="ACTREQ AND AreaCycleTypeCmd=1 OR SCTREQ AND StationCycleTypeCmd=1" x="3619.223" y="847.1021">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="853.1403,178.9379,960.1972,238.091" />
+      </ECTransition>
+      <ECTransition Source="AUTO" Destination="STOP_AT_END_AUTO" Condition="ACTREQ AND AreaCycleTypeCmd=2 OR SCTREQ AND StationCycleTypeCmd=2" x="3469.615" y="1049.882">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="827.8432,213.3729,914.2407,304.6595" />
+      </ECTransition>
+      <ECTransition Source="AUTO" Destination="SINGLE_CYCLE_AUTO" Condition="ACTREQ AND AreaCycleTypeCmd=3 OR SCTREQ AND StationCycleTypeCmd=3" x="3246.708" y="1256.554">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="790.3909,250.676,842.9749,373.286" />
+      </ECTransition>
+      <ECTransition Source="SINGLE_CYCLE_AUTO" Destination="AUTO" Condition="ACTREQ AND AreaCycleTypeCmd=0 OR SCTREQ AND StationCycleTypeCmd=0" x="3107.455" y="1308.571">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="799.1742,390.2405,744.7352,268.3994" />
+      </ECTransition>
+      <ECTransition Source="STOP_AT_END_AUTO" Destination="AUTO" Condition="ACTREQ AND AreaCycleTypeCmd=0 OR SCTREQ AND StationCycleTypeCmd=0" x="3351.056" y="1133.096">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="878.5382,331.4792,789.9698,242.0295" />
+      </ECTransition>
+      <ECTransition Source="CONTINUOUS_AUTO" Destination="AUTO" Condition="ACTREQ AND AreaCycleTypeCmd=0 OR SCTREQ AND StationCycleTypeCmd=0" x="3510.098" y="926.5438">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="926.9036,261.6755,822.335,207.6098" />
+      </ECTransition>
+      <ECTransition Source="AUTO" Destination="DRY_CYCLE_AUTO" Condition="ACTREQ AND AreaCycleTypeCmd=4 OR SCTREQ AND StationCycleTypeCmd=4" x="2936.029" y="1443.96">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="737.8204,286.1047,741.5843,435.5721" />
+      </ECTransition>
+      <ECTransition Source="DRY_CYCLE_AUTO" Destination="AUTO" Condition="ACTREQ AND AreaCycleTypeCmd=0 OR SCTREQ AND StationCycleTypeCmd=0" x="2784.329" y="1447.828">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="692.9728,436.8451,687.9365,287.4106" />
+      </ECTransition>
+      <ECTransition Source="CONTINUOUS_AUTO" Destination="STOP_AT_END_AUTO" Condition="ACTREQ AND AreaCycleTypeCmd=2 OR SCTREQ AND StationCycleTypeCmd=2" x="4242.253" y="1447.661">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="1075.206,341.6225,1056,376" />
+      </ECTransition>
+      <ECTransition Source="MANUAL" Destination="CONTINUOUS_MANUAL" Condition="ACTREQ AND AreaCycleTypeCmd=1 OR SCTREQ AND StationCycleTypeCmd=1" x="2853.347" y="3162.239">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="643.8373,748.168,786.6004,826.9172" />
+      </ECTransition>
+      <ECTransition Source="MANUAL" Destination="STOP_AT_END_MANUAL" Condition="ACTREQ AND AreaCycleTypeCmd=2 OR SCTREQ AND StationCycleTypeCmd=2" x="2466.508" y="3379.354">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="577.732,784.875,663.4002,898.9908" />
+      </ECTransition>
+      <ECTransition Source="CONTINUOUS_MANUAL" Destination="STOP_AT_END_MANUAL" Condition="ACTREQ AND AreaCycleTypeCmd=2 OR SCTREQ AND StationCycleTypeCmd=2" x="3449.774" y="3962.167">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="887.9954,979.559,840.6236,1006.663" />
+      </ECTransition>
+      <ECTransition Source="MANUAL" Destination="SINGLE_CYCLE_MANUAL" Condition="ACTREQ AND AreaCycleTypeCmd=3 OR SCTREQ AND StationCycleTypeCmd=3" x="1999.333" y="3569.938">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="499.199,821.8471,511.0097,962.2225" />
+      </ECTransition>
+      <ECTransition Source="MANUAL" Destination="DRY_CYCLE_MANUAL" Condition="ACTREQ AND AreaCycleTypeCmd=4 OR SCTREQ AND StationCycleTypeCmd=4" x="1366.652" y="3437.529">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="388.4503,807.6847,303.7195,917.8897" />
+      </ECTransition>
+      <ECTransition Source="CONTINUOUS_MANUAL" Destination="MANUAL" Condition="ACTREQ AND AreaCycleTypeCmd=0 OR SCTREQ AND StationCycleTypeCmd=0" x="2720.657" y="3211.344">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="741.0573,839.4182,607.7647,768.4036" />
+      </ECTransition>
+      <ECTransition Source="STOP_AT_END_MANUAL" Destination="MANUAL" Condition="ACTREQ AND AreaCycleTypeCmd=0 OR SCTREQ AND StationCycleTypeCmd=0" x="2351.974" y="3449.313">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="628.0896,921.6254,540.4414,808.8793" />
+      </ECTransition>
+      <ECTransition Source="SINGLE_CYCLE_MANUAL" Destination="MANUAL" Condition="ACTREQ AND AreaCycleTypeCmd=0 OR SCTREQ AND StationCycleTypeCmd=0" x="1857.161" y="3581.189">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="465.8375,965.8987,452.2225,825.6716" />
+      </ECTransition>
+      <ECTransition Source="DRY_CYCLE_MANUAL" Destination="MANUAL" Condition="ACTREQ AND AreaCycleTypeCmd=0 OR SCTREQ AND StationCycleTypeCmd=0" x="1233.426" y="3356.26">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="262.0319,891.1296,345.8023,780.2653" />
+      </ECTransition>
+    </ECC>
+    <Algorithm Name="INIT" Comment="Initialization algorithm">
+      <ST><![CDATA[StationMode := 0;
+StationCycleType :=0;]]></ST>
+    </Algorithm>
+    <Algorithm Name="REQ" Comment="Normally executed algorithm">
+      <ST><![CDATA[;]]></ST>
+    </Algorithm>
+    <Algorithm Name="Auto_Stop">
+      <ST><![CDATA[StationMode:=1;]]></ST>
+    </Algorithm>
+    <Algorithm Name="Manual_Stop">
+      <ST><![CDATA[StationMode:=2;]]></ST>
+    </Algorithm>
+    <Algorithm Name="Setup_Mode">
+      <ST><![CDATA[StationMode:=3;]]></ST>
+    </Algorithm>
+    <Algorithm Name="Initial_Position">
+      <ST><![CDATA[StationMode:=9;]]></ST>
+    </Algorithm>
+    <Algorithm Name="Continuous">
+      <ST><![CDATA[StationCycleType:=1;]]></ST>
+    </Algorithm>
+    <Algorithm Name="Stop_At_End">
+      <ST><![CDATA[StationCycleType:=2;]]></ST>
+    </Algorithm>
+    <Algorithm Name="Single_Cycle">
+      <ST><![CDATA[StationCycleType:=3;]]></ST>
+    </Algorithm>
+    <Algorithm Name="Dry_Cycle">
+      <ST><![CDATA[StationCycleType:=4;]]></ST>
+    </Algorithm>
+    <Algorithm Name="Cycle_Stop">
+      <ST><![CDATA[StationCycleType:=0;]]></ST>
+    </Algorithm>
+  </BasicFB>
+</FBType>
+*****
+
+Station_Fault.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="a5e26036-4fc5-427e-9cff-bf793e458209" Name="Station_Fault" Comment="Basic Function Block Type" Namespace="Main">
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author="Evans_A" Date="7/14/2025" Remarks="Template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT" Comment="Initialization Request">
+        <With Var="Stn_Fault_In" />
+        <With Var="Local_Fault" />
+        <With Var="Parent_Fault_Reset" />
+      </Event>
+      <Event Name="SREQ" Comment="Normal Execution Request">
+        <With Var="Stn_Fault_In" />
+      </Event>
+      <Event Name="LREQ">
+        <With Var="Local_Fault" />
+      </Event>
+      <Event Name="PFRREQ">
+        <With Var="Parent_Fault_Reset" />
+      </Event>
+      <Event Name="LFRREQ">
+        <With Var="Local_Fault_Reset" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO" Comment="Initialization Confirm">
+        <With Var="Stn_Fault_Out" />
+        <With Var="LL_Fault" />
+      </Event>
+      <Event Name="CNF" Comment="Execution Confirmation">
+        <With Var="Stn_Fault_Out" />
+        <With Var="LL_Fault" />
+      </Event>
+      <Event Name="FRCNF">
+        <With Var="Fault_Reset" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="Stn_Fault_In" Type="BOOL" Comment="Input event qualifier" />
+      <VarDeclaration Name="Local_Fault" Type="BOOL" />
+      <VarDeclaration Name="Parent_Fault_Reset" Type="BOOL" />
+      <VarDeclaration Name="Local_Fault_Reset" Type="BOOL" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="Stn_Fault_Out" Type="BOOL" Comment="Output event qualifier" />
+      <VarDeclaration Name="LL_Fault" Type="BOOL" />
+      <VarDeclaration Name="Fault_Reset" Type="BOOL" />
+    </OutputVars>
+  </InterfaceList>
+  <BasicFB>
+    <Attribute Name="FBType.Basic.Algorithm.Order" Value="INIT,REQ,PFRREQ,LFRREQ" />
+    <ECC>
+      <ECState Name="START" Comment="Initial State" x="552.9412" y="429.4117" />
+      <ECState Name="INIT" Comment="Initialization" x="923.5294" y="141.1765">
+        <ECAction Algorithm="INIT" Output="INITO" />
+      </ECState>
+      <ECState Name="REQ" Comment="Normal execution" x="1201.647" y="508.9412">
+        <ECAction Algorithm="REQ" Output="CNF" />
+      </ECState>
+      <ECState Name="RESET" x="1016" y="1044">
+        <ECAction Algorithm="PFRREQ" Output="FRCNF" />
+      </ECState>
+      <ECState Name="LFRREQ" x="336" y="1300">
+        <ECAction Algorithm="LFRREQ" Output="FRCNF" />
+      </ECState>
+      <ECTransition Source="START" Destination="INIT" Condition="INIT" x="731.1476" y="204.8375" />
+      <ECTransition Source="INIT" Destination="START" Condition="1" x="797.5924" y="348.3232" />
+      <ECTransition Source="START" Destination="REQ" Condition="SREQ OR LREQ" x="897.8032" y="372.999">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="207.6289,86.97737,241.0341,91.00755" />
+      </ECTransition>
+      <ECTransition Source="REQ" Destination="START" Condition="1" x="911.9503" y="558.9808">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="246.397,145.0931,214.2074,142.267" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="RESET" Condition="PFRREQ" x="832.0784" y="688.6503">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="196.3567,150.4013,223.5117,185.9146" />
+      </ECTransition>
+      <ECTransition Source="RESET" Destination="START" Condition="1" x="751.5186" y="796.5505">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="201.2584,222.3773,173.0206,185.8721" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="LFRREQ" Condition="LFRREQ" x="511.4873" y="888.9375">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="140.321,192.2544,123.9578,256.253" />
+      </ECTransition>
+      <ECTransition Source="LFRREQ" Destination="START" Condition="1" x="453.0331" y="744.6424">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="106.3513,208.1739,122.6078,144.1367" />
+      </ECTransition>
+    </ECC>
+    <Algorithm Name="INIT" Comment="Initialization algorithm">
+      <ST><![CDATA[Stn_Fault_Out := 0;
+LL_Fault := 0;
+Fault_Reset := 0;]]></ST>
+    </Algorithm>
+    <Algorithm Name="REQ" Comment="Normally executed algorithm">
+      <ST><![CDATA[IF Local_Fault = 1 AND Fault_Reset = 0 THEN
+	LL_Fault := 1;
+	Stn_Fault_Out := 1;	
+	Fault_Reset := 0;
+ELSIF Stn_Fault_In = 1 AND Fault_Reset = 0 THEN
+	LL_Fault := 0;
+	Stn_Fault_Out := 1;
+	Fault_Reset := 0;
+ELSE	
+	LL_Fault := 0;
+	Stn_Fault_Out := 0;
+END_IF;
+]]></ST>
+    </Algorithm>
+    <Algorithm Name="PFRREQ">
+      <ST><![CDATA[IF Parent_Fault_Reset = 1 THEN
+	Fault_Reset := 1;
+	Local_Fault := 0;
+	Stn_Fault_In := 0;
+	Stn_Fault_Out := 0;
+	LL_Fault :=0;
+ELSE
+	Fault_Reset := 0;
+END_IF;]]></ST>
+    </Algorithm>
+    <Algorithm Name="LFRREQ">
+      <ST><![CDATA[IF Local_Fault_Reset = 1 THEN
+	Fault_Reset := 1;
+	Local_Fault := 0;
+	LL_Fault :=0;
+ELSE
+	Fault_Reset := 0;
+END_IF;]]></ST>
+    </Algorithm>
+  </BasicFB>
+</FBType>
+*****
+
+Station_Status.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="8d456825-c698-4103-a438-84e6c9b4b1d1" Name="Station_Status" Comment="Basic Function Block Type" Namespace="Main">
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author="Evans_A" Date="7/18/2025" Remarks="Template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT" Comment="Initialization Request">
+        <With Var="LLMode" />
+        <With Var="LLCycleType" />
+        <With Var="LocalMode" />
+        <With Var="LocalCycleType" />
+      </Event>
+      <Event Name="LLM" Comment="Normal Execution Request">
+        <With Var="LLMode" />
+      </Event>
+      <Event Name="LLCT">
+        <With Var="LLCycleType" />
+      </Event>
+      <Event Name="MREQ">
+        <With Var="LocalMode" />
+      </Event>
+      <Event Name="CTREQ">
+        <With Var="LocalCycleType" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO" Comment="Initialization Confirm">
+        <With Var="SystemModeStatus" />
+        <With Var="SystemCycleTypeStatus" />
+      </Event>
+      <Event Name="MCNF" Comment="Execution Confirmation">
+        <With Var="SystemModeStatus" />
+      </Event>
+      <Event Name="CTCNF">
+        <With Var="SystemCycleTypeStatus" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="LLMode" Type="INT" Comment="Input event qualifier" />
+      <VarDeclaration Name="LLCycleType" Type="INT" />
+      <VarDeclaration Name="LocalMode" Type="INT" />
+      <VarDeclaration Name="LocalCycleType" Type="INT" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="SystemModeStatus" Type="INT" Comment="Output event qualifier" />
+      <VarDeclaration Name="SystemCycleTypeStatus" Type="INT" />
+    </OutputVars>
+  </InterfaceList>
+  <BasicFB>
+    <Attribute Name="FBType.Basic.Algorithm.Order" Value="INIT,Mode,CycleType" />
+    <ECC>
+      <ECState Name="START" Comment="Initial State" x="704.9412" y="401.4117" />
+      <ECState Name="INIT" Comment="Initialization" x="695.5294" y="105.1765">
+        <ECAction Algorithm="INIT" Output="INITO" />
+      </ECState>
+      <ECState Name="MODE" Comment="Normal execution" x="217.647" y="752.9412">
+        <ECAction Algorithm="Mode" Output="MCNF" />
+      </ECState>
+      <ECState Name="CYCLETYPE" x="1232" y="744">
+        <ECAction Algorithm="CycleType" Output="CTCNF" />
+      </ECState>
+      <ECTransition Source="START" Destination="INIT" Condition="INIT" x="700.3466" y="334.8169">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="175.3128,96.31814,174.8048,80.32892" />
+      </ECTransition>
+      <ECTransition Source="INIT" Destination="START" Condition="1" x="786.4442" y="250.9124">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="199.7922,54.53503,200.3002,70.52425" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="MODE" Condition="MREQ OR LLM" x="516.5503" y="641.1965">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="144.2257,154.2706,115.6738,174.8676" />
+      </ECTransition>
+      <ECTransition Source="MODE" Destination="START" Condition="1" x="450.3054" y="498.6516">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="101.0476,129.5927,129.5995,108.9956" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="CYCLETYPE" Condition="CTREQ OR LLCT" x="1031.509" y="509.4368">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="245.0888,113.7972,273.2213,132.6192" />
+      </ECTransition>
+      <ECTransition Source="CYCLETYPE" Destination="START" Condition="1" x="889.2453" y="636.2498">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="234.775,172.7628,210.6037,154.6257" />
+      </ECTransition>
+    </ECC>
+    <Algorithm Name="INIT" Comment="Initialization algorithm">
+      <ST><![CDATA[;]]></ST>
+    </Algorithm>
+    <Algorithm Name="Mode" Comment="Normally executed algorithm">
+      <ST><![CDATA[IF LLMode = LocalMode THEN
+	SystemModeStatus := LocalMode;
+ELSE
+	SystemModeStatus := 100;
+END_IF;
+]]></ST>
+    </Algorithm>
+    <Algorithm Name="CycleType">
+      <ST><![CDATA[IF LLCycleType = LocalCycleType THEN
+	SystemCycleTypeStatus := LocalCycleType;
+ELSE
+	SystemCycleTypeStatus := 100;
+END_IF;
+]]></ST>
+    </Algorithm>
+  </BasicFB>
+</FBType>
+*****
+
+actuatorStateEvents.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="27f15542-1ef6-4c1f-b5c8-54f5df85b653" Name="actuatorStateEvents" Comment="Basic Function Block Type" Namespace="Main">
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author=" " Date="4/2/2026" Remarks="Template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="pst_event" Comment="Normal Execution Request">
+        <With Var="actuator_state" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="toWork_Event" Comment="Execution Confirmation" />
+      <Event Name="toHome_Event" />
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="actuator_state" Type="INT" Comment="Input event qualifier" />
+    </InputVars>
+  </InterfaceList>
+  <BasicFB>
+    <Attribute Name="FBType.Basic.Algorithm.Order" Value="INIT,REQ" />
+    <ECC>
+      <ECState Name="START" Comment="Initial State" x="552.9412" y="429.4117" />
+      <ECState Name="ToWork" Comment="Normal execution" x="217.647" y="752.9412">
+        <ECAction Output="toWork_Event" />
+      </ECState>
+      <ECState Name="ToHome" x="1212" y="716">
+        <ECAction Output="toHome_Event" />
+      </ECState>
+      <ECTransition Source="START" Destination="ToWork" Condition="actuator_state = 1" x="452.2921" y="647.147">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="123.1467,156.6527,104.2188,174.9165" />
+      </ECTransition>
+      <ECTransition Source="ToWork" Destination="START" Condition="1" x="372.8767" y="512.7991" />
+      <ECTransition Source="START" Destination="ToHome" Condition="actuator_state = 3" x="921.5481" y="498.5501">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="213.1264,112.6576,248.0476,127.8429" />
+      </ECTransition>
+      <ECTransition Source="ToHome" Destination="START" Condition="1" x="872.3945" y="653.3313">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="238.0783,175.7691,203.1571,160.5838" />
+      </ECTransition>
+    </ECC>
+    <Algorithm Name="INIT" Comment="Initialization algorithm">
+      <ST><![CDATA[;]]></ST>
+    </Algorithm>
+    <Algorithm Name="REQ" Comment="Normally executed algorithm">
+      <ST><![CDATA[;]]></ST>
+    </Algorithm>
+  </BasicFB>
+</FBType>
+*****
+
+updateComponentState.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="f2f90358-0c5b-4b7b-8406-45436c5ef3e2" Name="updateComponentState" Comment="Basic Function Block Type" Namespace="Main">
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author=" " Date="3/17/2026" Remarks="Template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT" Comment="Initialization Request">
+        <With Var="component_state_in" />
+        <With Var="name" />
+        <With Var="state_sts" />
+      </Event>
+      <Event Name="REQ" Comment="Normal Execution Request">
+        <With Var="id" />
+        <With Var="name" />
+        <With Var="state_sts" />
+      </Event>
+      <Event Name="BREQ">
+        <With Var="component_state_in" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO" Comment="Initialization Confirm">
+        <With Var="component_state_out" />
+      </Event>
+      <Event Name="BCNF" Comment="Execution Confirmation">
+        <With Var="component_state_out" />
+        <With Var="state_table" />
+      </Event>
+      <Event Name="CNF">
+        <With Var="state_cmd" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="component_state_in" Type="Component_State_Msg" Namespace="Main" Comment="Input event qualifier" />
+      <VarDeclaration Name="id" Type="INT" />
+      <VarDeclaration Name="name" Type="STRING[15]" />
+      <VarDeclaration Name="state_sts" Type="INT" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="component_state_out" Type="Component_State_Msg" Namespace="Main" Comment="Output event qualifier" />
+      <VarDeclaration Name="state_table" Type="Component_State" Namespace="Main" ArraySize="20" />
+      <VarDeclaration Name="state_cmd" Type="INT" />
+    </OutputVars>
+  </InterfaceList>
+  <BasicFB>
+    <Attribute Name="FBType.Basic.Algorithm.Order" Value="INIT,REQ,BREQ" />
+    <ECC>
+      <ECState Name="START" Comment="Initial State" x="552.9412" y="429.4117" />
+      <ECState Name="INIT" Comment="Initialization" x="923.5294" y="141.1765">
+        <ECAction Algorithm="INIT" Output="INITO" />
+      </ECState>
+      <ECState Name="REQ" Comment="Normal execution" x="217.647" y="752.9412">
+        <ECAction Algorithm="REQ" Output="BCNF" />
+      </ECState>
+      <ECState Name="BREQ" x="1036" y="548">
+        <ECAction Algorithm="BREQ" Output="BCNF" />
+        <ECAction Output="CNF" />
+      </ECState>
+      <ECTransition Source="START" Destination="INIT" Condition="INIT" x="731.1476" y="204.8375" />
+      <ECTransition Source="INIT" Destination="START" Condition="1" x="797.5924" y="348.3231" />
+      <ECTransition Source="START" Destination="REQ" Condition="REQ" x="447.8488" y="648.3352" />
+      <ECTransition Source="REQ" Destination="START" Condition="1" x="372.8767" y="512.7991" />
+      <ECTransition Source="START" Destination="BREQ" Condition="BREQ AND name &lt;&gt; component_state_in.source_name" x="825.226" y="407.2253">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="196.221,95.84574,215.8941,100.6754" />
+      </ECTransition>
+      <ECTransition Source="BREQ" Destination="START" Condition="1" x="793.1967" y="575.1984">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="209.9337,149.9545,190.2606,145.1248" />
+      </ECTransition>
+    </ECC>
+    <Algorithm Name="INIT" Comment="Initialization algorithm">
+      <ST><![CDATA[;]]></ST>
+    </Algorithm>
+    <Algorithm Name="REQ" Comment="Normally executed algorithm">
+      <ST><![CDATA[component_state_out.src_id := id;
+component_state_out.source_name := name;
+component_state_out.state := state_sts;
+state_table[id].name := name;
+state_table[id].state := state_sts;
+]]></ST>
+    </Algorithm>
+    <Algorithm Name="BREQ">
+      <ST><![CDATA[component_state_out := component_state_in;
+state_table[component_state_in.src_id].name := component_state_in.source_name;
+state_table[component_state_in.src_id].state := component_state_in.state;
+IF component_state_in.dest_name = name THEN
+	state_cmd := component_state_in.state;
+END_IF;]]></ST>
+    </Algorithm>
+  </BasicFB>
+</FBType>
+*****
+
+updateComponentState_Sensor.fbt
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="4cbe130d-5b49-4e22-87e4-2639e5a8b93d" Name="updateComponentState_Sensor" Comment="Basic Function Block Type" Namespace="Main">
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author=" " Date="3/17/2026" Remarks="Template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT" Comment="Initialization Request">
+        <With Var="component_state_in" />
+        <With Var="id" />
+        <With Var="name" />
+        <With Var="state_sts" />
+      </Event>
+      <Event Name="REQ" Comment="Normal Execution Request">
+        <With Var="id" />
+        <With Var="name" />
+        <With Var="state_sts" />
+      </Event>
+      <Event Name="BREQ">
+        <With Var="component_state_in" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO" Comment="Initialization Confirm">
+        <With Var="component_state_out" />
+      </Event>
+      <Event Name="BCNF" Comment="Execution Confirmation">
+        <With Var="component_state_out" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="component_state_in" Type="Component_State_Msg" Namespace="Main" Comment="Input event qualifier" />
+      <VarDeclaration Name="id" Type="INT" />
+      <VarDeclaration Name="name" Type="STRING[15]" />
+      <VarDeclaration Name="state_sts" Type="INT" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="component_state_out" Type="Component_State_Msg" Namespace="Main" Comment="Output event qualifier" />
+    </OutputVars>
+  </InterfaceList>
+  <BasicFB>
+    <Attribute Name="FBType.Basic.Algorithm.Order" Value="INIT,REQ,BREQ" />
+    <ECC>
+      <ECState Name="START" Comment="Initial State" x="552.9412" y="429.4117" />
+      <ECState Name="INIT" Comment="Initialization" x="923.5294" y="141.1765">
+        <ECAction Algorithm="INIT" Output="INITO" />
+      </ECState>
+      <ECState Name="REQ" Comment="Normal execution" x="217.647" y="752.9412">
+        <ECAction Algorithm="REQ" Output="BCNF" />
+      </ECState>
+      <ECState Name="BREQ" x="1036" y="548">
+        <ECAction Algorithm="BREQ" Output="BCNF" />
+      </ECState>
+      <ECTransition Source="START" Destination="INIT" Condition="INIT" x="731.1476" y="204.8375" />
+      <ECTransition Source="INIT" Destination="START" Condition="1" x="797.5924" y="348.3231" />
+      <ECTransition Source="START" Destination="REQ" Condition="REQ" x="447.8488" y="648.3352" />
+      <ECTransition Source="REQ" Destination="START" Condition="1" x="372.8767" y="512.7991" />
+      <ECTransition Source="START" Destination="BREQ" Condition="BREQ AND name &lt;&gt; component_state_in.source_name" x="825.226" y="407.2253">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="196.221,95.84574,215.8941,100.6754" />
+      </ECTransition>
+      <ECTransition Source="BREQ" Destination="START" Condition="1" x="793.1967" y="575.1984">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="209.9337,149.9545,190.2606,145.1248" />
+      </ECTransition>
+    </ECC>
+    <Algorithm Name="INIT" Comment="Initialization algorithm">
+      <ST><![CDATA[;]]></ST>
+    </Algorithm>
+    <Algorithm Name="REQ" Comment="Normally executed algorithm">
+      <ST><![CDATA[component_state_out.src_id := id;
+component_state_out.source_name := name;
+component_state_out.state := state_sts;
+]]></ST>
+    </Algorithm>
+    <Algorithm Name="BREQ">
+      <ST><![CDATA[component_state_out := component_state_in;
+
+]]></ST>
+    </Algorithm>
+  </BasicFB>
+</FBType>
