@@ -34,6 +34,14 @@ namespace CodeGen.Configuration
         /// </summary>
         public string M262HardwareConfigBaselinePath { get; set; } = string.Empty;
 
+        /// <summary>
+        /// IPV4 address of the M262 controller on the rig network. Written into the
+        /// EcoRT_0 sysdev as <c>&lt;Parameter Name="IPV4Address" Value="..."/&gt;</c>
+        /// so EAE's Physical Devices canvas shows the controller pre-populated. Operator
+        /// can still override in EAE before deploy if the rig moves networks.
+        /// </summary>
+        public string M262TargetIp { get; set; } = "172.24.61.92";
+
         public string ActiveSyslayPath =>
             !string.IsNullOrEmpty(SyslayPath2) ? SyslayPath2 : SyslayPath;
 
@@ -79,6 +87,7 @@ namespace CodeGen.Configuration
             SysresPath2 = @"C:\Demonstrator\Demonstator\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000002\00000000-0000-0000-0000-000000000000.sysres",
             IoBindingsPath = @"Input\SMC_Rig_IO_Bindings.xlsx",
             M262HardwareConfigBaselinePath = string.Empty,
+            M262TargetIp = "172.24.61.92",
         };
 
         private static void Save(string path, MapperConfig config)
