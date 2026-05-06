@@ -373,6 +373,39 @@ namespace MapperUI
             }
         }
 
+        /// <summary>
+        /// Re-runs the M262 stack AFTER the syslay has been (re)written by
+        /// SystemInjector. This is mandatory because the upstream order is:
+        ///   1. DeployUniversalTemplatesAsync -> M262SysdevEmitter.Emit (mirrors FBs to .sysres)
+        ///   2. PrepareDemonstratorForGeneration -> CLEANS .sysres, wiping the mirror
+        ///   3. GenerateStation1TestSyslay -> writes new .syslay only
+        /// Without this re-run after step 3, .sysres ends up empty and the .hcf
+        /// pin symlinks blank, leaving every FB unmapped on the EAE canvas.
+        /// </summary>
+        async Task FinalizeM262StackAsync()
+        {
+            try
+            {
+                var sysdev = await Task.Run(() => MapperUI.Services.M262SysdevEmitter.Emit(Cfg()));
+                AppendActivity($"[M262] sysdev re-emitted; .sysres mirrored {sysdev.SysresFbsMirrored} FBs to {sysdev.SysresPath}");
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"[M262][Error] sysdev emit: {ex.Message}");
+            }
+            try
+            {
+                var hcf = await Task.Run(() => MapperUI.Services.M262HwConfigCopier.Copy(Cfg()));
+                AppendActivity($"[M262] hcf re-patched; {hcf.ParametersOverwritten.Count} channel symlink(s) written");
+                foreach (var w in hcf.Warnings)
+                    AppendActivity($"[M262][Warn] {w}");
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"[M262][Error] hcf patch: {ex.Message}");
+            }
+        }
+
         void TouchDfbprojToTriggerEaeReload()
         {
             try
@@ -493,6 +526,7 @@ namespace MapperUI
                 var path = await Task.Run(() =>
                     injector.GenerateProcessFBSyslay(Cfg(), _loadedControlXmlPath, null, out report));
                 LogBindingsReport(report);
+                await FinalizeM262StackAsync();
                 TouchDfbprojToTriggerEaeReload();
 
                 AppendActivity($"Generated: {path}");
@@ -530,6 +564,7 @@ namespace MapperUI
                 var path = await Task.Run(() =>
                     injector.GenerateStation1TestSyslay(Cfg(), _loadedControlXmlPath, bindings, out report));
                 LogBindingsReport(report);
+                await FinalizeM262StackAsync();
                 TouchDfbprojToTriggerEaeReload();
 
                 AppendActivity($"Generated: {path}");
@@ -567,6 +602,7 @@ namespace MapperUI
                 var path = await Task.Run(() =>
                     injector.GenerateFullSystemSyslay(Cfg(), _loadedControlXmlPath, bindings, out report));
                 LogBindingsReport(report);
+                await FinalizeM262StackAsync();
                 TouchDfbprojToTriggerEaeReload();
 
                 AppendActivity($"Generated: {path}");
