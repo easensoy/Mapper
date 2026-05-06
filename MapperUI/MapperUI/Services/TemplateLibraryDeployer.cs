@@ -120,20 +120,29 @@ namespace MapperUI.Services
                 result.Warnings.Add($"M262 sysdev emit failed: {ex.Message}");
             }
 
-            // Topology JSON emission. Without this the sysdev appears in the Devices
-            // tree but the Physical Devices canvas can't render the M262 — the
-            // operator can't see / set the IP without manual canvas editing.
+            // Topology JSON emission DISABLED. EAE rejects modifications to the
+            // emitted M262 with "The modified equipment doesn't belong to the
+            // active domain" — DomainTag/.solutionData chain isn't accepted as a
+            // valid security domain by EAE's TopologyManager when the project is
+            // owned by a different EAE installation.
+            //
+            // Until this is solved, the operator manually drags a Workstation /
+            // M262 onto the Physical Devices canvas (or skips that step entirely
+            // for offline-only testing). The Mapper still emits the sysdev +
+            // .sysres mirror + .hcf, which is enough for compile / deploy when
+            // the operator already has a configured topology.
+            //
+            // Safety net: scrub any leftover Topology files from a previous run
+            // so they don't trigger the "doesn't belong" error.
             try
             {
-                var topo = M262TopologyEmitter.Emit(cfg, sysdevId);
-                foreach (var w in topo.Warnings)
-                    result.Warnings.Add($"Topology: {w}");
-                MapperLogger.Info($"[Deploy] M262 topology emitted ({topo.FilesWritten.Count} files, " +
-                    $"{topo.TopologyProjEntriesAdded} topologyproj entries)");
+                int removed = M262TopologyEmitter.RemoveEmittedTopology(cfg);
+                if (removed > 0)
+                    MapperLogger.Info($"[Deploy] Removed {removed} stale M262 topology files (emission disabled)");
             }
             catch (Exception ex)
             {
-                result.Warnings.Add($"M262 topology emit failed: {ex.Message}");
+                result.Warnings.Add($"M262 topology cleanup failed: {ex.Message}");
             }
 
             try
