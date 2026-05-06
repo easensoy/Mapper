@@ -246,13 +246,18 @@ namespace MapperUI.Services
             return ReadSyslayTopLevelFbs(syslayPath).Select(fb => fb.Name).ToList();
         }
 
-        public record SyslayFb(string Id, string Name, string Type, string Namespace, string X, string Y);
+        public record SyslayFbParameter(string Name, string Value);
+        public record SyslayFb(string Id, string Name, string Type, string Namespace,
+            string X, string Y, List<SyslayFbParameter> Parameters);
 
         /// <summary>
         /// Returns each top-level FB in the syslay's SubAppNetwork as a record so the
-        /// sysres mirror can stamp <c>Mapping="&lt;syslay FB ID&gt;"</c> on each entry.
-        /// EAE binds application FBs to the resource via this attribute — without it
-        /// every FB shows as unmapped on the canvas (no green resource indicator).
+        /// sysres mirror can stamp <c>Mapping="&lt;syslay FB ID&gt;"</c> on each entry
+        /// AND copy its Parameter children verbatim. EAE's manual mapping action
+        /// (verified against a manual map of Feeder in Demonstrator) writes both the
+        /// Mapping attribute and copies all Parameters from the syslay FB into the
+        /// sysres FB — without the Parameters the runtime executes against the
+        /// resource-side defaults instead of the syslay's actual values.
         /// </summary>
         public static List<SyslayFb> ReadSyslayTopLevelFbs(string syslayPath)
         {
@@ -269,7 +274,13 @@ namespace MapperUI.Services
                     Type:      (string?)e.Attribute("Type")      ?? string.Empty,
                     Namespace: (string?)e.Attribute("Namespace") ?? "Main",
                     X:         (string?)e.Attribute("x")         ?? "0",
-                    Y:         (string?)e.Attribute("y")         ?? "0"))
+                    Y:         (string?)e.Attribute("y")         ?? "0",
+                    Parameters: e.Elements(ns + "Parameter")
+                        .Select(p => new SyslayFbParameter(
+                            (string?)p.Attribute("Name")  ?? string.Empty,
+                            (string?)p.Attribute("Value") ?? string.Empty))
+                        .Where(p => !string.IsNullOrEmpty(p.Name))
+                        .ToList()))
                 .Where(fb => !string.IsNullOrWhiteSpace(fb.Name))
                 .ToList();
         }
@@ -323,14 +334,27 @@ namespace MapperUI.Services
                 // same instance. Falls back to a Guid-derived 16-hex if the syslay ID
                 // is empty or shorter than 16 chars.
                 var mirrorId = ComputeMirrorId(fb.Id);
-                network.Add(new XElement(ns + "FB",
+                var fbElement = new XElement(ns + "FB",
                     new XAttribute("ID",        mirrorId),
                     new XAttribute("Name",      fb.Name),
                     new XAttribute("Type",      fb.Type),
                     new XAttribute("Namespace", fb.Namespace),
                     new XAttribute("Mapping",   fb.Id),
                     new XAttribute("x",         fb.X),
-                    new XAttribute("y",         fb.Y)));
+                    new XAttribute("y",         fb.Y));
+
+                // Copy every Parameter from the syslay FB — EAE's manual mapping
+                // action (Mapping → EcoRT_0.RES0 in the right-click menu) does this
+                // verbatim. Without these the runtime falls back to type defaults
+                // and the actuator's actual values (toWorkTime=1000ms etc.) get lost.
+                foreach (var p in fb.Parameters)
+                {
+                    fbElement.Add(new XElement(ns + "Parameter",
+                        new XAttribute("Name",  p.Name),
+                        new XAttribute("Value", p.Value)));
+                }
+
+                network.Add(fbElement);
                 added++;
             }
 
