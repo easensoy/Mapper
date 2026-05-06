@@ -114,7 +114,15 @@ namespace MapperUI.Services
                 return result;
             }
 
-            int written = OverwriteHcfParameterValues(dstHcf, bindings, result);
+            // Read the syslay's top-level FB instances so we know which symbols are
+            // actually resolvable. Any pin whose IoBindings PinAssignment points at
+            // a Component that isn't in the syslay gets blanked (Value="''") rather
+            // than left at the baseline string — otherwise EAE shows bare 'athome'
+            // / 'OutputToWork' on those pins (the $${PATH} prefix can't resolve to
+            // a non-existent FB instance) and they collide across modules.
+            var syslayFbNames = ReadSyslayFbNames(cfg);
+
+            int written = OverwriteHcfParameterValues(dstHcf, bindings, syslayFbNames, result);
             if (written == 0 && bindings.PinAssignments.Count == 0)
                 result.Warnings.Add(
                     "IO bindings xlsx has no pin_di_athome / pin_di_atwork / " +
@@ -219,17 +227,25 @@ namespace MapperUI.Services
         /// to channels under those two specific module names so unrelated pins on
         /// the BMTM3 / TM262L01MDESE8T don't get touched.
         /// </summary>
-        static int OverwriteHcfParameterValues(string hcfPath, IoBindings bindings, HwConfigCopyResult result)
+        static int OverwriteHcfParameterValues(string hcfPath, IoBindings bindings,
+            HashSet<string> syslayFbNames, HwConfigCopyResult result)
         {
             var doc = XDocument.Load(hcfPath);
             var ns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
             int written = 0;
 
-            // The two IO modules whose pin channels carry RES0 symlinks.
+            // The two IO modules whose pin channels carry RES0 symlinks. The
+            // BMTM3 / TM262L01MDESE8T modules don't get touched.
             var ioModuleNames = new HashSet<string>(StringComparer.Ordinal)
             {
                 "TM3DI16_G", "TM3DQ16T_G"
             };
+
+            // Empty value placeholder for pins not bound to any in-syslay FB. Two
+            // single quotes (the EAE schema's "no symlink" marker) — different from
+            // a missing Value attribute, which EAE treats as "leave at deploy time
+            // default" and would not clear a baseline value.
+            const string EmptyPinValue = "''";
 
             foreach (var module in doc.Descendants().Where(e =>
                 ioModuleNames.Contains((string?)e.Element(ns + "Name")?.Value ?? string.Empty)))
@@ -241,23 +257,67 @@ namespace MapperUI.Services
                 {
                     var pin = (string?)pv.Attribute("Name");
                     if (string.IsNullOrEmpty(pin)) continue;
+
+                    string targetValue = EmptyPinValue;
                     var symbol = bindings.ResolveSymbol(pin);
-                    if (symbol == null) continue; // unbound pin — leave baseline value
+                    if (symbol != null)
+                    {
+                        // Confirm the pin's owning Component is actually in the syslay.
+                        // If it isn't, the symbol's $${PATH} can't resolve so EAE shows
+                        // the bare suffix and we get cross-actuator collisions.
+                        bindings.PinAssignments.TryGetValue(pin, out var pa);
+                        var owner = pa?.ComponentName ?? string.Empty;
+                        if (syslayFbNames.Contains(owner)) targetValue = symbol;
+                    }
 
                     var valueAttr = pv.Attribute("Value");
-                    if (valueAttr == null)
-                        pv.SetAttributeValue("Value", symbol);
-                    else
-                        valueAttr.Value = symbol;
+                    var current = valueAttr?.Value ?? string.Empty;
+                    if (string.Equals(current, targetValue, StringComparison.Ordinal)) continue;
 
-                    result.ParametersOverwrittenSet.Add(pin);
-                    result.ParametersOverwritten.Add($"{pin}={symbol}");
+                    if (valueAttr == null)
+                        pv.SetAttributeValue("Value", targetValue);
+                    else
+                        valueAttr.Value = targetValue;
+
+                    if (targetValue != EmptyPinValue)
+                    {
+                        result.ParametersOverwrittenSet.Add(pin);
+                        result.ParametersOverwritten.Add($"{pin}={targetValue}");
+                    }
                     written++;
                 }
             }
 
             if (written > 0) doc.Save(hcfPath);
             return written;
+        }
+
+        /// <summary>
+        /// Reads the syslay's top-level FB Names so the .hcf rewrite can blank any
+        /// pin whose owning Component isn't in the running syslay (avoids cross-
+        /// actuator collisions like DI03='athome' from a Checker that doesn't exist).
+        /// </summary>
+        static HashSet<string> ReadSyslayFbNames(MapperConfig cfg)
+        {
+            var set = new HashSet<string>(StringComparer.Ordinal);
+            var path = cfg.ActiveSyslayPath;
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return set;
+            try
+            {
+                var doc = XDocument.Load(path);
+                var root = doc.Root;
+                if (root == null) return set;
+                XNamespace ns = root.GetDefaultNamespace();
+                var net = root.Element(ns + "SubAppNetwork") ?? root.Element(ns + "FBNetwork");
+                if (net == null) return set;
+                foreach (var fb in net.Elements(ns + "FB"))
+                {
+                    var name = (string?)fb.Attribute("Name");
+                    if (!string.IsNullOrWhiteSpace(name)) set.Add(name);
+                }
+            }
+            catch { /* fall through with empty set — every pin gets blanked */ }
+            return set;
         }
 
         // --- file copy helper ---
