@@ -66,9 +66,11 @@ namespace MapperUI.Services
             if (sysresPath != null && fbInstances.Count > 0)
                 sysresMirrorCount = MirrorFbsIntoSysres(sysresPath, fbInstances);
 
-            // Keep emitting the .system Mappings too (no-op safety net — empty in
-            // canonical projects but harmless if EAE ever decides to read them).
-            int systemMappingsAdded = EnsureMappingsPerFb(systemFile, fbInstances.Select(f => f.Name).ToList());
+            // Replace the .system root's <Mappings> block with one fresh
+            // <Mapping From="APP1.<FB>" To="EcoRT_0.RES0"/> per current syslay FB.
+            // This wipes stale baseline entries (Checker/Transfer/etc. from earlier
+            // full-rig runs) so EAE's binding doesn't see them as unresolved.
+            int systemMappingsAdded = ReplaceMappingsBlock(systemFile, fbInstances.Select(f => f.Name).ToList());
 
             var dfbproj = FindDfbproj(eaeRoot);
             int registered = 0;
@@ -364,7 +366,16 @@ namespace MapperUI.Services
 
         // --- .system Mappings patch (idempotent, generalised) ---
 
-        static int EnsureMappingsPerFb(string systemFilePath, List<string> fbInstances)
+        /// <summary>
+        /// REPLACES the .system root's <c>&lt;Mappings&gt;</c> block — drops any existing
+        /// element entirely and writes one <c>&lt;Mapping From="APP1.&lt;FBName&gt;"
+        /// To="EcoRT_0.RES0"/&gt;</c> line per top-level FB in the current syslay.
+        ///
+        /// Replace (rather than append) is mandatory: any baseline Mappings that
+        /// reference FBs no longer in the syslay (e.g. Checker / Transfer from a
+        /// previous full-rig run) become stale and confuse EAE's binding.
+        /// </summary>
+        static int ReplaceMappingsBlock(string systemFilePath, List<string> fbInstances)
         {
             var doc = XDocument.Load(systemFilePath);
             var root = doc.Root
@@ -373,36 +384,27 @@ namespace MapperUI.Services
                 ? root.GetDefaultNamespace()
                 : LibElNs;
 
-            var mappings = root.Element(ns + "Mappings");
-            if (mappings == null)
-            {
-                mappings = new XElement(ns + "Mappings");
-                root.Add(mappings);
-            }
+            // Remove every existing <Mappings> element (defensive — EAE's schema
+            // expects exactly one but a corrupted baseline could have duplicates).
+            foreach (var stale in root.Elements(ns + "Mappings").ToList())
+                stale.Remove();
 
-            // Snapshot the existing edges to avoid duplicate-insertion churn on re-runs.
-            var existing = new HashSet<(string From, string To)>();
-            foreach (var m in mappings.Elements(ns + "Mapping"))
-            {
-                var f = (string?)m.Attribute("From") ?? string.Empty;
-                var t = (string?)m.Attribute("To")   ?? string.Empty;
-                existing.Add((f, t));
-            }
-
+            // Build the fresh block and append after <Device>/<Application> siblings
+            // (XML element ordering inside <System> doesn't matter to EAE but appending
+            // at the end keeps the diff minimal).
+            var mappings = new XElement(ns + "Mappings");
             var to = $"{DeviceName}.{ResourceName}";
-            int added = 0;
             foreach (var fbName in fbInstances)
             {
-                var from = $"{ApplicationName}.{fbName}";
-                if (existing.Contains((from, to))) continue;
+                if (string.IsNullOrWhiteSpace(fbName)) continue;
                 mappings.Add(new XElement(ns + "Mapping",
-                    new XAttribute("From", from),
+                    new XAttribute("From", $"{ApplicationName}.{fbName}"),
                     new XAttribute("To",   to)));
-                added++;
             }
+            root.Add(mappings);
 
-            if (added > 0) doc.Save(systemFilePath);
-            return added;
+            doc.Save(systemFilePath);
+            return mappings.Elements(ns + "Mapping").Count();
         }
 
         static void SetAttr(XElement el, string name, string value)
