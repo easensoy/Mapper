@@ -292,6 +292,51 @@ namespace MapperUI.Services
             if (added > 0) doc.Save(topologyProjPath);
             return added;
         }
+
+        /// <summary>
+        /// Removes any topology files this emitter previously wrote (and de-registers
+        /// them from TopologyManager.topologyproj). Used when M262 topology emission
+        /// is disabled — EAE rejects the auto-emitted M262 with "doesn't belong to
+        /// the active domain", so leftover files from prior runs need to be scrubbed.
+        /// Returns the number of disk + topologyproj entries removed. Idempotent.
+        /// </summary>
+        public static int RemoveEmittedTopology(MapperConfig cfg)
+        {
+            int removed = 0;
+            var eaeRoot = M262SysdevEmitter.DeriveEaeProjectRoot(cfg);
+            if (eaeRoot == null) return 0;
+            var topologyDir = Path.Combine(eaeRoot, "Topology");
+            if (!Directory.Exists(topologyDir)) return 0;
+
+            var files = new[]
+            {
+                Path.Combine(topologyDir, "Equipment_M262dPAC_1.json"),
+                Path.Combine(topologyDir, $"BroadcastDomain_{cfg.M262LogicalNetworkName}.json"),
+                Path.Combine(topologyDir, $"{DefaultSolutionUuid}.solutionData"),
+            };
+            foreach (var f in files)
+            {
+                if (File.Exists(f)) { try { File.Delete(f); removed++; } catch { } }
+            }
+
+            var topologyProj = Path.Combine(topologyDir, "TopologyManager.topologyproj");
+            if (File.Exists(topologyProj))
+            {
+                try
+                {
+                    var doc = XDocument.Load(topologyProj);
+                    var ns = doc.Root!.GetDefaultNamespace();
+                    var stale = new HashSet<string>(files.Select(Path.GetFileName)!, StringComparer.OrdinalIgnoreCase);
+                    var nodesToRemove = doc.Descendants(ns + "None")
+                        .Where(e => stale.Contains((string?)e.Attribute("Include") ?? ""))
+                        .ToList();
+                    foreach (var node in nodesToRemove) { node.Remove(); removed++; }
+                    if (nodesToRemove.Count > 0) doc.Save(topologyProj);
+                }
+                catch { }
+            }
+            return removed;
+        }
     }
 
     public class TopologyEmitResult
