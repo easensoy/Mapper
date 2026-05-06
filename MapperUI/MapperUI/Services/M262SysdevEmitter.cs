@@ -53,9 +53,22 @@ namespace MapperUI.Services
 
             var syslayPath = cfg.ActiveSyslayPath;
             var fbInstances = string.IsNullOrWhiteSpace(syslayPath) || !File.Exists(syslayPath)
-                ? new List<string>()
-                : ReadSyslayTopLevelFbNames(syslayPath);
-            int added = EnsureMappingsPerFb(systemFile, fbInstances);
+                ? new List<SyslayFb>()
+                : ReadSyslayTopLevelFbs(syslayPath);
+
+            // Mirror each top-level syslay FB into the .sysres FBNetwork with
+            // Mapping="<syslay FB ID>". This is the actual binding mechanism EAE
+            // reads — the .system <Mapping From=.. To=..> elements that we used
+            // to write are ignored by EAE for the canvas-resource binding (they
+            // appear empty in SMC_Rig_Expo's working setup too).
+            var sysresPath = FindSysresFor(sysdevPath);
+            int sysresMirrorCount = 0;
+            if (sysresPath != null && fbInstances.Count > 0)
+                sysresMirrorCount = MirrorFbsIntoSysres(sysresPath, fbInstances);
+
+            // Keep emitting the .system Mappings too (no-op safety net — empty in
+            // canonical projects but harmless if EAE ever decides to read them).
+            int systemMappingsAdded = EnsureMappingsPerFb(systemFile, fbInstances.Select(f => f.Name).ToList());
 
             var dfbproj = FindDfbproj(eaeRoot);
             int registered = 0;
@@ -66,10 +79,12 @@ namespace MapperUI.Services
             {
                 SysdevPath = sysdevPath,
                 SystemFilePath = systemFile,
-                MappingsAdded = added,
-                FbInstancesMapped = fbInstances,
+                MappingsAdded = systemMappingsAdded,
+                FbInstancesMapped = fbInstances.Select(f => f.Name).ToList(),
                 DfbprojEntriesRegistered = registered,
                 PropertiesXmlPath = propsPath,
+                SysresPath = sysresPath ?? string.Empty,
+                SysresFbsMirrored = sysresMirrorCount,
             };
         }
 
@@ -224,16 +239,127 @@ namespace MapperUI.Services
 
         public static List<string> ReadSyslayTopLevelFbNames(string syslayPath)
         {
+            return ReadSyslayTopLevelFbs(syslayPath).Select(fb => fb.Name).ToList();
+        }
+
+        public record SyslayFb(string Id, string Name, string Type, string Namespace, string X, string Y);
+
+        /// <summary>
+        /// Returns each top-level FB in the syslay's SubAppNetwork as a record so the
+        /// sysres mirror can stamp <c>Mapping="&lt;syslay FB ID&gt;"</c> on each entry.
+        /// EAE binds application FBs to the resource via this attribute — without it
+        /// every FB shows as unmapped on the canvas (no green resource indicator).
+        /// </summary>
+        public static List<SyslayFb> ReadSyslayTopLevelFbs(string syslayPath)
+        {
             var doc = XDocument.Load(syslayPath);
             var root = doc.Root;
-            if (root == null) return new List<string>();
+            if (root == null) return new List<SyslayFb>();
             XNamespace ns = root.GetDefaultNamespace();
             var net = root.Element(ns + "SubAppNetwork") ?? root.Element(ns + "FBNetwork");
-            if (net == null) return new List<string>();
+            if (net == null) return new List<SyslayFb>();
             return net.Elements(ns + "FB")
-                .Select(e => (string?)e.Attribute("Name") ?? string.Empty)
-                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .Select(e => new SyslayFb(
+                    Id:        (string?)e.Attribute("ID")        ?? string.Empty,
+                    Name:      (string?)e.Attribute("Name")      ?? string.Empty,
+                    Type:      (string?)e.Attribute("Type")      ?? string.Empty,
+                    Namespace: (string?)e.Attribute("Namespace") ?? "Main",
+                    X:         (string?)e.Attribute("x")         ?? "0",
+                    Y:         (string?)e.Attribute("y")         ?? "0"))
+                .Where(fb => !string.IsNullOrWhiteSpace(fb.Name))
                 .ToList();
+        }
+
+        /// <summary>
+        /// Mirrors every top-level syslay FB into the sysres's <c>&lt;FBNetwork&gt;</c>
+        /// with a <c>Mapping="&lt;syslay FB ID&gt;"</c> attribute. EAE keys the
+        /// FB-to-resource binding off this attribute (verified against
+        /// SMC_Rig_Expo's working M262 binding — see e.g. Feeder there has
+        /// .syslay ID=51FCB3CF8F9F350B and .sysres entry has Mapping=51FCB3CF8F9F350B).
+        ///
+        /// Idempotent: existing entries with the same Mapping target are left alone.
+        /// Non-mirror FBs already in the sysres (DPAC_FULLINIT, plcStart, etc.) are
+        /// preserved untouched.
+        ///
+        /// The sysres mirror's own ID is derived from the syslay ID via a simple hash
+        /// so re-runs produce stable IDs (no version-control churn). Without the
+        /// resource-side mirror EAE leaves FBs unmapped, $${PATH} resolves to empty,
+        /// and the .hcf channel symlinks come out as bare port names like 'athome'.
+        /// </summary>
+        public static int MirrorFbsIntoSysres(string sysresPath, List<SyslayFb> syslayFbs)
+        {
+            if (!File.Exists(sysresPath)) return 0;
+            var doc = XDocument.Load(sysresPath);
+            var root = doc.Root
+                ?? throw new InvalidDataException($"Empty sysres: {sysresPath}");
+            XNamespace ns = root.GetDefaultNamespace().NamespaceName.Length > 0
+                ? root.GetDefaultNamespace()
+                : LibElNs;
+
+            var network = root.Element(ns + "FBNetwork");
+            if (network == null)
+            {
+                network = new XElement(ns + "FBNetwork");
+                root.Add(network);
+            }
+
+            // Snapshot Mapping attrs already in the sysres so we don't double-add.
+            var existingMappings = new HashSet<string>(
+                network.Elements(ns + "FB")
+                    .Select(e => (string?)e.Attribute("Mapping") ?? string.Empty)
+                    .Where(s => !string.IsNullOrEmpty(s)),
+                StringComparer.Ordinal);
+
+            int added = 0;
+            foreach (var fb in syslayFbs)
+            {
+                if (string.IsNullOrEmpty(fb.Id) || existingMappings.Contains(fb.Id)) continue;
+                // Mirror ID is the syslay ID with the high nibble flipped — stable but
+                // distinct from the syslay's own ID so EAE doesn't see them as the
+                // same instance. Falls back to a Guid-derived 16-hex if the syslay ID
+                // is empty or shorter than 16 chars.
+                var mirrorId = ComputeMirrorId(fb.Id);
+                network.Add(new XElement(ns + "FB",
+                    new XAttribute("ID",        mirrorId),
+                    new XAttribute("Name",      fb.Name),
+                    new XAttribute("Type",      fb.Type),
+                    new XAttribute("Namespace", fb.Namespace),
+                    new XAttribute("Mapping",   fb.Id),
+                    new XAttribute("x",         fb.X),
+                    new XAttribute("y",         fb.Y)));
+                added++;
+            }
+
+            if (added > 0) doc.Save(sysresPath);
+            return added;
+        }
+
+        // Locates the .sysres file paired with the sysdev (same per-device folder).
+        public static string? FindSysresFor(string sysdevPath)
+        {
+            var sysdevFolder = Path.Combine(
+                Path.GetDirectoryName(sysdevPath)!,
+                Path.GetFileNameWithoutExtension(sysdevPath));
+            if (!Directory.Exists(sysdevFolder)) return null;
+            return Directory.EnumerateFiles(sysdevFolder, "*.sysres", SearchOption.TopDirectoryOnly)
+                .FirstOrDefault();
+        }
+
+        static string ComputeMirrorId(string syslayId)
+        {
+            if (syslayId.Length >= 16)
+            {
+                // XOR the first character's hex value with 8 to flip the high bit —
+                // stable, deterministic, distinct from the input.
+                var first = syslayId[0];
+                int v = Convert.ToInt32(first.ToString(), 16);
+                var flipped = (v ^ 0x8).ToString("X");
+                return flipped + syslayId.Substring(1, 15);
+            }
+            // Fallback: hash the syslay ID into 16 hex chars.
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            var bytes = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes("mirror:" + syslayId));
+            return Convert.ToHexString(bytes).Substring(0, 16);
         }
 
         // --- .system Mappings patch (idempotent, generalised) ---
@@ -295,5 +421,7 @@ namespace MapperUI.Services
         public List<string> FbInstancesMapped { get; set; } = new();
         public int DfbprojEntriesRegistered { get; set; }
         public string PropertiesXmlPath { get; set; } = string.Empty;
+        public string SysresPath { get; set; } = string.Empty;
+        public int SysresFbsMirrored { get; set; }
     }
 }
