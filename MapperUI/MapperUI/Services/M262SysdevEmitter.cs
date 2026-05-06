@@ -318,17 +318,28 @@ namespace MapperUI.Services
                 root.Add(network);
             }
 
-            // Snapshot Mapping attrs already in the sysres so we don't double-add.
+            // Snapshot existing FB entries to avoid duplicate mirrors on re-runs.
+            // Dedup by Mapping target (matches our generated mirror) AND by Name
+            // (matches an EAE-written entry which may have a different Mapping value
+            // assigned by EAE itself when the user clicked Mapping → EcoRT_0.RES0
+            // in the right-click menu).
             var existingMappings = new HashSet<string>(
                 network.Elements(ns + "FB")
                     .Select(e => (string?)e.Attribute("Mapping") ?? string.Empty)
+                    .Where(s => !string.IsNullOrEmpty(s)),
+                StringComparer.Ordinal);
+            var existingNames = new HashSet<string>(
+                network.Elements(ns + "FB")
+                    .Select(e => (string?)e.Attribute("Name") ?? string.Empty)
                     .Where(s => !string.IsNullOrEmpty(s)),
                 StringComparer.Ordinal);
 
             int added = 0;
             foreach (var fb in syslayFbs)
             {
-                if (string.IsNullOrEmpty(fb.Id) || existingMappings.Contains(fb.Id)) continue;
+                if (string.IsNullOrEmpty(fb.Id)) continue;
+                if (existingMappings.Contains(fb.Id)) continue;
+                if (existingNames.Contains(fb.Name)) continue;
                 // Mirror ID is the syslay ID with the high nibble flipped — stable but
                 // distinct from the syslay's own ID so EAE doesn't see them as the
                 // same instance. Falls back to a Guid-derived 16-hex if the syslay ID
