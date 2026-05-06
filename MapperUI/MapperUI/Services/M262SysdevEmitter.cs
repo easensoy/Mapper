@@ -66,11 +66,13 @@ namespace MapperUI.Services
             if (sysresPath != null && fbInstances.Count > 0)
                 sysresMirrorCount = MirrorFbsIntoSysres(sysresPath, fbInstances);
 
-            // Replace the .system root's <Mappings> block with one fresh
-            // <Mapping From="APP1.<FB>" To="EcoRT_0.RES0"/> per current syslay FB.
-            // This wipes stale baseline entries (Checker/Transfer/etc. from earlier
-            // full-rig runs) so EAE's binding doesn't see them as unresolved.
-            int systemMappingsAdded = ReplaceMappingsBlock(systemFile, fbInstances.Select(f => f.Name).ToList());
+            // Do NOT touch .system. EAE's binding mechanism is the per-FB
+            // Mapping="<syslay-FB-ID>" attribute inside .sysres's FBNetwork (handled
+            // above by MirrorFbsIntoSysres). Verified against Station1 + SMC_Rig_Expo
+            // working M262 references — both have an empty .system (root + VersionInfo
+            // only) and full FB mirrors in .sysres. Writing <Mapping> elements to
+            // .system pollutes the file and is ignored by EAE's binding resolver.
+            int systemMappingsAdded = 0;
 
             var dfbproj = FindDfbproj(eaeRoot);
             int registered = 0;
@@ -365,47 +367,6 @@ namespace MapperUI.Services
         }
 
         // --- .system Mappings patch (idempotent, generalised) ---
-
-        /// <summary>
-        /// REPLACES the .system root's <c>&lt;Mappings&gt;</c> block — drops any existing
-        /// element entirely and writes one <c>&lt;Mapping From="APP1.&lt;FBName&gt;"
-        /// To="EcoRT_0.RES0"/&gt;</c> line per top-level FB in the current syslay.
-        ///
-        /// Replace (rather than append) is mandatory: any baseline Mappings that
-        /// reference FBs no longer in the syslay (e.g. Checker / Transfer from a
-        /// previous full-rig run) become stale and confuse EAE's binding.
-        /// </summary>
-        static int ReplaceMappingsBlock(string systemFilePath, List<string> fbInstances)
-        {
-            var doc = XDocument.Load(systemFilePath);
-            var root = doc.Root
-                ?? throw new InvalidDataException($"Empty .system: {systemFilePath}");
-            XNamespace ns = root.GetDefaultNamespace().NamespaceName.Length > 0
-                ? root.GetDefaultNamespace()
-                : LibElNs;
-
-            // Remove every existing <Mappings> element (defensive — EAE's schema
-            // expects exactly one but a corrupted baseline could have duplicates).
-            foreach (var stale in root.Elements(ns + "Mappings").ToList())
-                stale.Remove();
-
-            // Build the fresh block and append after <Device>/<Application> siblings
-            // (XML element ordering inside <System> doesn't matter to EAE but appending
-            // at the end keeps the diff minimal).
-            var mappings = new XElement(ns + "Mappings");
-            var to = $"{DeviceName}.{ResourceName}";
-            foreach (var fbName in fbInstances)
-            {
-                if (string.IsNullOrWhiteSpace(fbName)) continue;
-                mappings.Add(new XElement(ns + "Mapping",
-                    new XAttribute("From", $"{ApplicationName}.{fbName}"),
-                    new XAttribute("To",   to)));
-            }
-            root.Add(mappings);
-
-            doc.Save(systemFilePath);
-            return mappings.Elements(ns + "Mapping").Count();
-        }
 
         static void SetAttr(XElement el, string name, string value)
         {
