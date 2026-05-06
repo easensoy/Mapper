@@ -81,6 +81,26 @@ namespace MapperUI.Services
             File.Copy(srcHcf, dstHcf, overwrite: true);
             result.HcfPath = dstHcf;
 
+            // 2b. Patch the .hcf's ResourceId attribute to match the target's .sysres
+            //     ID. The baseline .hcf carries its source project's ResourceId
+            //     (54EB0B3D5D16444D for SMC_Rig_Expo) which won't match Demonstrator's
+            //     .sysres ID (00000000-0000-0000-0000-000000000000). Without this
+            //     patch EAE silently fails to bind .hcf to .sysres and the IO
+            //     Mapping table stays empty even though both files exist on disk.
+            var sysresId = ReadTargetSysresId(eaeRoot);
+            if (!string.IsNullOrEmpty(sysresId))
+            {
+                int rewritten = PatchHcfResourceId(dstHcf, sysresId);
+                if (rewritten > 0)
+                    result.Warnings.Add($"Patched .hcf ResourceId to {sysresId} (was baseline's value)");
+            }
+            else
+            {
+                result.Warnings.Add(
+                    "Could not read target .sysres ID — .hcf left with baseline ResourceId. " +
+                    "EAE IO Mapping table will be empty until ResourceId matches the resource.");
+            }
+
             // 3. Walk every <ParameterValue Name="DIxx"|"DOxx"> on the TM3DI16_G /
             //    TM3DQ16T_G modules and rewrite Value with the symbol IoBindings
             //    resolves for that pin. Pin -> symbol mapping is driven entirely by the
@@ -132,6 +152,49 @@ namespace MapperUI.Services
             // Convention: {sys-guid}/{sysdev-guid}.sysdev paired with
             //             {sys-guid}/{sysdev-guid}/{sysdev-guid}.hcf
             return Path.Combine(sysdevDir, stem, stem + ".hcf");
+        }
+
+        /// <summary>
+        /// Reads the target sysdev's per-device folder for a .sysres file and returns
+        /// its root Resource ID attribute. The .hcf's ResourceId attribute must equal
+        /// this string for EAE to bind the hardware config to the resource. Returns
+        /// empty if no .sysres found.
+        /// </summary>
+        public static string ReadTargetSysresId(string eaeRoot)
+        {
+            var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
+            if (!Directory.Exists(systemDir)) return string.Empty;
+            var sysres = Directory.EnumerateFiles(systemDir, "*.sysres", SearchOption.AllDirectories)
+                .FirstOrDefault();
+            if (sysres == null) return string.Empty;
+            try
+            {
+                var doc = XDocument.Load(sysres);
+                return (string?)doc.Root?.Attribute("ID") ?? string.Empty;
+            }
+            catch { return string.Empty; }
+        }
+
+        /// <summary>
+        /// Rewrites the .hcf's <c>DeviceHwConfigurationItem ResourceId="..."</c>
+        /// attribute to <paramref name="newResourceId"/>. Idempotent — returns 0 if
+        /// the attribute already matches. Without this rewrite the .hcf points at
+        /// the source baseline's ResourceId (e.g. SMC_Rig_Expo's
+        /// <c>54EB0B3D5D16444D</c>) which doesn't exist in the target project, so
+        /// EAE silently drops the binding and the IO Mapping table stays empty.
+        /// </summary>
+        public static int PatchHcfResourceId(string hcfPath, string newResourceId)
+        {
+            if (!File.Exists(hcfPath) || string.IsNullOrWhiteSpace(newResourceId)) return 0;
+            var doc = XDocument.Load(hcfPath);
+            var item = doc.Descendants()
+                .FirstOrDefault(e => e.Name.LocalName == "DeviceHwConfigurationItem");
+            if (item == null) return 0;
+            var attr = item.Attribute("ResourceId");
+            if (attr != null && string.Equals(attr.Value, newResourceId, StringComparison.Ordinal)) return 0;
+            item.SetAttributeValue("ResourceId", newResourceId);
+            doc.Save(hcfPath);
+            return 1;
         }
 
         // --- IoBindings ---
