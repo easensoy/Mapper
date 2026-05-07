@@ -66,16 +66,14 @@ namespace MapperUI.Services
             if (sysresPath != null && fbInstances.Count > 0)
                 sysresMirrorCount = MirrorFbsIntoSysres(sysresPath, fbInstances);
 
-            // Replace the .system root's <Mappings> block with one fresh
-            // <Mapping From="APP1.<FB>" To="EcoRT_0.RES0"/> per current syslay FB.
-            // Per Alex's slide showing the canonical SMC rig convention: the .system
-            // Mappings element is the explicit application-to-resource binding that
-            // EAE's $${PATH} resolution depends on inside each CAT's SYMLINK FB.
-            // Without it, $${PATH} resolves to nothing and .hcf channel symlinks
-            // bind to nothing. Replace (not append) to wipe any stale baseline
-            // entries from prior runs.
-            int systemMappingsAdded = ReplaceMappingsBlock(systemFile,
-                fbInstances.Select(f => f.Name).ToList());
+            // Do NOT touch .system. EAE's binding mechanism is the per-FB
+            // Mapping="<syslay-FB-ID>" attribute inside .sysres's FBNetwork
+            // (handled above by MirrorFbsIntoSysres). Verified by diffing what
+            // EAE writes when the user manually maps an FB to a resource: only
+            // .sysres is mutated. Station1 + SMC_Rig_Expo working M262 references
+            // also have empty .system files. Writing <Mapping> elements to
+            // .system pollutes the file and is ignored by EAE's binding resolver.
+            int systemMappingsAdded = 0;
 
             var dfbproj = FindDfbproj(eaeRoot);
             int registered = 0;
