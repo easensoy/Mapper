@@ -120,29 +120,29 @@ namespace MapperUI.Services
                 result.Warnings.Add($"M262 sysdev emit failed: {ex.Message}");
             }
 
-            // Topology JSON emission DISABLED. EAE rejects modifications to the
-            // emitted M262 with "The modified equipment doesn't belong to the
-            // active domain" — DomainTag/.solutionData chain isn't accepted as a
-            // valid security domain by EAE's TopologyManager when the project is
-            // owned by a different EAE installation.
-            //
-            // Until this is solved, the operator manually drags a Workstation /
-            // M262 onto the Physical Devices canvas (or skips that step entirely
-            // for offline-only testing). The Mapper still emits the sysdev +
-            // .sysres mirror + .hcf, which is enough for compile / deploy when
-            // the operator already has a configured topology.
-            //
-            // Safety net: scrub any leftover Topology files from a previous run
-            // so they don't trigger the "doesn't belong" error.
+            // Topology JSON emission RE-ENABLED. The previous "doesn't belong to
+            // the active domain" failure was caused by our solutionData carrying a
+            // freshly-minted SolutionId that had no trust_<id> cert in the Windows
+            // cert store. M262TopologyEmitter now writes its solutionData under
+            // SMC_Rig_Expo's SolutionId (ec877ac8-…) — the user's machine already
+            // has the matching trust cert chain from opening SMC_Rig_Expo, so EAE
+            // accepts the security domain and renders the M262 dPAC tile on the
+            // Physical Devices canvas with the IP from MapperConfig. This is the
+            // mechanism SMC_Rig_Expo uses to pass the device + IP to EAE: the
+            // sysdev stays minimal, the Topology Equipment JSON carries
+            // logicalDeviceId → sysdev UUID + interfaces[].endpoints[].ipAddress.
             try
             {
-                int removed = M262TopologyEmitter.RemoveEmittedTopology(cfg);
-                if (removed > 0)
-                    MapperLogger.Info($"[Deploy] Removed {removed} stale M262 topology files (emission disabled)");
+                var topo = M262TopologyEmitter.Emit(cfg, sysdevId);
+                MapperLogger.Info(
+                    $"[Deploy] Topology emitted: {topo.FilesWritten.Count} files, " +
+                    $"{topo.TopologyProjEntriesAdded} topologyproj entries added");
+                foreach (var w in topo.Warnings)
+                    result.Warnings.Add($"Topology: {w}");
             }
             catch (Exception ex)
             {
-                result.Warnings.Add($"M262 topology cleanup failed: {ex.Message}");
+                result.Warnings.Add($"M262 topology emit failed: {ex.Message}");
             }
 
             try
