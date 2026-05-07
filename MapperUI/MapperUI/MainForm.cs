@@ -618,6 +618,60 @@ namespace MapperUI
             }
         }
 
+        async void btnCleanDemonstrator_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                lblStatus.Text = "Cleaning Demonstrator...";
+                AppendActivity("[Clean] Resetting Demonstrator working tree (preserving *.lock_sln so EAE can stay open)...");
+
+                var demoRepo = @"C:\Demonstrator";
+                if (!Directory.Exists(Path.Combine(demoRepo, ".git")))
+                {
+                    ShowError($"Not a git repo: {demoRepo}");
+                    lblStatus.Text = "Ready";
+                    return;
+                }
+
+                // git reset --hard, then git clean -fd preserving *.lock_sln so EAE stays attached
+                var (resetCode, resetOut) = await Task.Run(() => RunGit(demoRepo, "reset --hard"));
+                AppendActivity($"[Clean] git reset --hard -> exit {resetCode}");
+                if (!string.IsNullOrWhiteSpace(resetOut)) AppendActivity(resetOut.Trim());
+
+                var (cleanCode, cleanOut) = await Task.Run(() => RunGit(demoRepo, "clean -fd -e *.lock_sln"));
+                AppendActivity($"[Clean] git clean -fd -e *.lock_sln -> exit {cleanCode}");
+                if (!string.IsNullOrWhiteSpace(cleanOut)) AppendActivity(cleanOut.Trim());
+
+                lblStatus.Text = "Demonstrator cleaned";
+                AppendActivity("[Clean] Demonstrator restored to last commit. EAE lock files preserved.");
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"[Error] {ex}");
+                lblStatus.Text = "Ready";
+                ShowError(ex.Message);
+            }
+        }
+
+        static (int exitCode, string output) RunGit(string workingDir, string args)
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "git",
+                Arguments = args,
+                WorkingDirectory = workingDir,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+            using var p = Process.Start(psi)!;
+            var stdout = p.StandardOutput.ReadToEnd();
+            var stderr = p.StandardError.ReadToEnd();
+            p.WaitForExit();
+            return (p.ExitCode, string.IsNullOrEmpty(stderr) ? stdout : stdout + stderr);
+        }
+
         async void btnGeneratePusherTest_Click(object sender, EventArgs e)
         {
             try
