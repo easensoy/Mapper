@@ -40,7 +40,17 @@ namespace MapperUI.Services
         //   BroadcastDomain   — network (Topology/BroadcastDomain_*.json UUID).
         //                       Equipment endpoints reference it via `domain` field.
         //   M262Uuid/RuntimeUuid — equipment + runtime instance IDs (just identity).
-        const string DefaultSolutionUuid       = "11111111-2222-3333-4444-000000000040";
+        //
+        // DefaultSolutionUuid is reused from SMC_Rig_Expo (ec877ac8-…) because the
+        // user's machine already has a trust_ec877ac8 cert installed in the Windows
+        // cert store from opening SMC_Rig_Expo. Using a fresh UUID would force EAE
+        // to surface a "doesn't belong to active domain" error against our generated
+        // .solutionData (no matching trust cert chain) — exactly the failure that
+        // got topology emission disabled in the first place. Sharing the security
+        // domain across SMC_Rig_Expo and Demonstrator is intentional: Demonstrator
+        // is a Mapper-output sibling of SMC_Rig_Expo and is meant to authenticate
+        // with the same ASG!/Asg2025! credentials.
+        const string DefaultSolutionUuid       = "ec877ac8-b1b4-4f0b-be4b-3e8e8887784b";
         const string DefaultM262Uuid           = "11111111-2222-3333-4444-000000000010";
         const string DefaultDomainUuid         = "11111111-2222-3333-4444-000000000020";
         const string DefaultRuntimeUuid        = "11111111-2222-3333-4444-000000000030";
@@ -217,17 +227,20 @@ namespace MapperUI.Services
 }
 """;
 
-        // Schema mirrored byte-by-byte from
-        //   /c/Station1 - Sensor and FiveStateActuator with symbolic links_*/Topology/
-        //   d8f39a63-...solutionData
-        // (a working M262_dPAC binding) — including:
-        //   * lowercase keys (solutionId, csConfHash, certThumbprint) — EAE's
-        //     deserialiser actually accepts uppercase too (SMC_Rig_Expo uses upper)
-        //     but we mirror Station1 exactly to remove any case-related risk.
-        //   * a real admin user with the exact bcrypt hash Station1 ships
-        //     (the hash is portable — EAE just stores+verifies it, doesn't tie
-        //     it to the machine). Empty users_list might cause EAE to reject the
-        //     security domain.
+        // Schema mirrored byte-by-byte from SMC_Rig_Expo's working solutionData
+        //   /c/SMC_Rig_Expo_*.sln/Topology/ec877ac8-b1b4-4f0b-be4b-3e8e8887784b.solutionData
+        // — including:
+        //   * PascalCase keys (SolutionId, CsConfHash, CertThumbprint) — EAE's
+        //     deserialiser is case-sensitive against the SMC_Rig_Expo schema, and
+        //     this is the schema the user's installed EAE is known to accept.
+        //   * The full SMC_Rig_Expo CertThumbprint chain (10 thumbprints, ; -separated)
+        //     — these reference certs already installed in the user's Windows cert
+        //     store. An empty CertThumbprint causes EAE to reject the security
+        //     domain and surface "doesn't belong to active domain" errors against
+        //     any Topology Equipment carrying our DomainTag.
+        //   * The exact ASG! user/role with bcrypt hash copied from SMC_Rig_Expo
+        //     — same credentials the user already uses to authenticate against
+        //     the M262 (ASG!/Asg2025!).
         //   * anonymous user/role copied verbatim — mandatory for unauthenticated
         //     access at project open time (otherwise EAE prompts for login).
         // EAE encodes embedded JSON strings using " (unicode-escaped quotes);
@@ -236,35 +249,49 @@ namespace MapperUI.Services
         {
             const string Q = "\\u0022"; // escaped double quote inside a JSON string
 
-            // Reasonable-looking 64-char hex hashes. EAE recomputes these on first
-            // save anyway; they only need to be the right length and shape.
-            const string CsConfHash         = "53a9041e7f7d8e6096a6c3836af193dfee4798e0c8a2a9f4cf8930144b7f9950";
+            // Hashes + thumbprint chain copied verbatim from SMC_Rig_Expo's
+            // ec877ac8-…solutionData. EAE recomputes CsConfHash on first save once
+            // it owns the project, but the value must be a syntactically-valid
+            // 64-char hex string at write time.
+            const string CsConfHash         = "f0916269882ea2879f122ff1d3066e32efbf54856420312a16cbebab4a6a3b83";
             const string AnonCsConfHash     = "a2b76b73c2ef2047823fd066d51eb2daf2cf813f9ec1e9c35255f4d325126cb9";
-            // bcrypt-format admin password hash copied verbatim from Station1.
-            const string AdminPwHash        = "$1$90E709CFF052C430394643487AC16DAD5594A46AA057C5A5021E262034E63A7D$84EC8A9204D41336334C461727482D6530C013BF8C8A45B6D545E1DCE9107F48";
+            const string CertThumbprintChain =
+                "8449F2BD01B8FD9456C76774479DC419867161C5;" +
+                "6772E25CF62EF2011DFC22AD268BC9BD8DC690EA;" +
+                "E1136C66DBA76781956DE186296D4A45C5F2C2C4;" +
+                "93D07395A2FC29498BBBE6BD54FF7BB7EDBCB90C;" +
+                "A7F7DE0AF53A55B277C978EE08917BC31DDD3767;" +
+                "F640A64FFBC94A70FA30359207FA2D1746078BF8;" +
+                "04C57C9F793980D4B647D3E3BD39E0BF206292DF;" +
+                "04C57C9F793980D4B647D3E3BD39E0BF206292DF;" +
+                "494A5814A9A24A02B06F1AC8D3D3850F349308B8;" +
+                "93D07395A2FC29498BBBE6BD54FF7BB7EDBCB90C;";
+            // bcrypt-format ASG! password hash copied verbatim from SMC_Rig_Expo
+            // (== ASG!/Asg2025! that the M262 currently authenticates against).
+            const string AsgPwHash          = "$1$A1C337A6652A9ABCCE903AD7FD5F8F3559FC4544100BC4A17291866BB80258E9$DFD5A7DEA0BD092D78E99A4B2BDDB03A1D30F1192D6745A807AB8F4E4D5F0AD4";
             const string AnonPwHash         = "cb366a250499db16cfa075932fd153c2baf2dfdda46a14082b7ddf3eab1118d5";
 
             string deviceCfg = $"{{{Q}solutionId{Q}:{Q}{DefaultSolutionUuid}{Q},{Q}csConfHash{Q}:{Q}{CsConfHash}{Q}}}";
             string anonDeviceCfg = $"{{{Q}solutionId{Q}:{Q}{DefaultSolutionUuid}{Q},{Q}csConfHash{Q}:{Q}{AnonCsConfHash}{Q}}}";
 
-            string userInfo = $"{{{Q}version{Q}:{Q}1{Q},{Q}users_list{Q}:[{{{Q}user_name{Q}:{Q}admin{Q},{Q}password{Q}:{Q}{AdminPwHash}{Q},{Q}state{Q}:{Q}Active{Q},{Q}AccountStartDate{Q}:{Q}{Q},{Q}assigned_role{Q}:[{Q}admin{Q}]}}]}}";
-            string roleInfo = $"{{{Q}version{Q}:{Q}1{Q},{Q}roles_list{Q}:[{{{Q}name{Q}:{Q}admin{Q},{Q}permission_name{Q}:[{Q}Security Management{Q},{Q}File Transfer{Q},{Q}IP Configuration{Q},{Q}Firmware Management{Q},{Q}LaunchCanvas{Q},{Q}OpenFacePlate{Q},{Q}EditSymbol{Q},{Q}Level_15{Q}]}}]}}";
+            string userInfo = $"{{{Q}version{Q}:{Q}1{Q},{Q}users_list{Q}:[{{{Q}user_name{Q}:{Q}ASG!{Q},{Q}password{Q}:{Q}{AsgPwHash}{Q},{Q}state{Q}:{Q}Active{Q},{Q}AccountStartDate{Q}:{Q}{Q},{Q}assigned_role{Q}:[{Q}ASG!{Q}]}}]}}";
+            string roleInfo = $"{{{Q}version{Q}:{Q}1{Q},{Q}roles_list{Q}:[{{{Q}name{Q}:{Q}ASG!{Q},{Q}permission_name{Q}:[{Q}Security Management{Q},{Q}File Transfer{Q},{Q}IP Configuration{Q},{Q}Firmware Management{Q},{Q}LaunchCanvas{Q},{Q}OpenFacePlate{Q},{Q}EditSymbol{Q},{Q}Level_15{Q}]}}]}}";
             string anonUserInfo = $"{{{Q}users_list{Q}:[{{{Q}user_name{Q}:{Q}Anonymous{Q},{Q}password{Q}:{Q}{AnonPwHash}{Q},{Q}state{Q}:{Q}Active{Q},{Q}AccountStartDate{Q}:null,{Q}assigned_role{Q}:[{Q}Anonymous{Q}]}}],{Q}version{Q}:{Q}1{Q}}}";
             string anonRoleInfo = $"{{{Q}roles_list{Q}:[{{{Q}name{Q}:{Q}Anonymous{Q},{Q}permission_name{Q}:[{Q}Security Management{Q},{Q}File Transfer{Q},{Q}IP Configuration{Q},{Q}Firmware Management{Q},{Q}LaunchCanvas{Q},{Q}OpenFacePlate{Q},{Q}EditSymbol{Q},{Q}Level_15{Q}]}}],{Q}version{Q}:{Q}1{Q}}}";
 
             return $$"""
 {
-  "solutionId": "{{DefaultSolutionUuid}}",
-  "csConfHash": "{{CsConfHash}}",
+  "SolutionId": "{{DefaultSolutionUuid}}",
+  "CsConfHash": "{{CsConfHash}}",
+  "AnonymousCsConfHash": "{{AnonCsConfHash}}",
+  "CertThumbprint": "{{CertThumbprintChain}}",
   "deviceConfiguration": "{{deviceCfg}}",
   "userInformation": "{{userInfo}}",
   "roleInformation": "{{roleInfo}}",
-  "anonymousCsConfHash": "{{AnonCsConfHash}}",
   "anonymousDeviceConfiguration": "{{anonDeviceCfg}}",
   "anonymousUserInformation": "{{anonUserInfo}}",
   "anonymousRoleInformation": "{{anonRoleInfo}}",
-  "solutionName": "Demonstrator",
-  "certThumbprint": ""
+  "solutionName": "Demonstrator"
 }
 """;
         }
