@@ -41,16 +41,13 @@ namespace MapperUI.Services
         //                       Equipment endpoints reference it via `domain` field.
         //   M262Uuid/RuntimeUuid — equipment + runtime instance IDs (just identity).
         //
-        // DefaultSolutionUuid is reused from SMC_Rig_Expo (ec877ac8-…) because the
-        // user's machine already has a trust_ec877ac8 cert installed in the Windows
-        // cert store from opening SMC_Rig_Expo. Using a fresh UUID would force EAE
-        // to surface a "doesn't belong to active domain" error against our generated
-        // .solutionData (no matching trust cert chain) — exactly the failure that
-        // got topology emission disabled in the first place. Sharing the security
-        // domain across SMC_Rig_Expo and Demonstrator is intentional: Demonstrator
-        // is a Mapper-output sibling of SMC_Rig_Expo and is meant to authenticate
-        // with the same ASG!/Asg2025! credentials.
-        const string DefaultSolutionUuid       = "ec877ac8-b1b4-4f0b-be4b-3e8e8887784b";
+        // The SolutionId / DomainTag MUST equal the Demonstrator project's own
+        // Guid (read at runtime from General/ProjectInfo.xml — Guid attribute,
+        // lowercased without braces) for EAE to recognise our solutionData as the
+        // active security domain. Using SMC_Rig_Expo's UUID (or any other foreign
+        // UUID) makes EAE throw "The modified equipment doesn't belong to the
+        // active domain" the moment the user touches the M262 tile.
+        const string FallbackSolutionUuid      = "00000000-0000-0000-0000-000000000000";
         const string DefaultM262Uuid           = "11111111-2222-3333-4444-000000000010";
         const string DefaultDomainUuid         = "11111111-2222-3333-4444-000000000020";
         const string DefaultRuntimeUuid        = "11111111-2222-3333-4444-000000000030";
@@ -71,21 +68,44 @@ namespace MapperUI.Services
                 return result;
             }
 
+            // Resolve the project's own security-domain Guid from
+            // General/ProjectInfo.xml. Falls back to FallbackSolutionUuid only when
+            // ProjectInfo.xml is missing or malformed (which would itself break
+            // EAE — so the warning is informational, not actionable).
+            string solutionId = ReadProjectGuid(eaeRoot)
+                ?? FallbackSolutionUuid;
+            if (solutionId == FallbackSolutionUuid)
+                result.Warnings.Add(
+                    "Could not read project Guid from General/ProjectInfo.xml; using zero UUID. " +
+                    "EAE will reject the security domain unless ProjectInfo.xml is restored.");
+
             var topologyDir = Path.Combine(eaeRoot, "Topology");
             Directory.CreateDirectory(topologyDir);
+
+            // Scrub any leftover .solutionData files from prior emit runs that used
+            // a foreign SolutionId (e.g. SMC_Rig_Expo's ec877ac8-…). Multiple
+            // .solutionData files in Topology/ make EAE pick the wrong one as the
+            // active domain.
+            int scrubbed = 0;
+            foreach (var stale in Directory.EnumerateFiles(topologyDir, "*.solutionData"))
+            {
+                var keepName = solutionId + ".solutionData";
+                if (!string.Equals(Path.GetFileName(stale), keepName, StringComparison.OrdinalIgnoreCase))
+                {
+                    try { File.Delete(stale); scrubbed++; } catch { }
+                }
+            }
+            if (scrubbed > 0)
+                result.Warnings.Add($"Removed {scrubbed} stale .solutionData file(s) with foreign SolutionId.");
 
             var equipmentFile     = Path.Combine(topologyDir, "Equipment_M262dPAC_1.json");
             var domainFile        = Path.Combine(topologyDir,
                 $"BroadcastDomain_{cfg.M262LogicalNetworkName}.json");
-            // .solutionData lives at <SolutionId>.solutionData. Without it EAE
-            // filters the M262 RuntimeDEO out of the Logical→Physical binding
-            // dropdown because it can't resolve the Equipment's DomainTag to a
-            // known security domain.
-            var solutionDataFile  = Path.Combine(topologyDir, $"{DefaultSolutionUuid}.solutionData");
+            var solutionDataFile  = Path.Combine(topologyDir, $"{solutionId}.solutionData");
 
-            File.WriteAllText(equipmentFile,    BuildEquipmentJson(cfg, sysdevId));
+            File.WriteAllText(equipmentFile,    BuildEquipmentJson(cfg, sysdevId, solutionId));
             File.WriteAllText(domainFile,       BuildBroadcastDomainJson(cfg));
-            File.WriteAllText(solutionDataFile, BuildSolutionDataJson());
+            File.WriteAllText(solutionDataFile, BuildSolutionDataJson(solutionId));
             result.FilesWritten.Add(Path.GetFileName(equipmentFile));
             result.FilesWritten.Add(Path.GetFileName(domainFile));
             result.FilesWritten.Add(Path.GetFileName(solutionDataFile));
@@ -116,7 +136,29 @@ namespace MapperUI.Services
         // is sensitive to property order and JSON formatting (indentation, spacing).
         // Letting JsonSerializer reorder keys would diff against EAE's own writer
         // and cause noise the next time the user saves the project.
-        static string BuildEquipmentJson(MapperConfig cfg, string sysdevId) => $$"""
+        /// <summary>
+        /// Reads the project's security-domain Guid from
+        /// <c>{eaeRoot}/General/ProjectInfo.xml</c> — the <c>Guid</c> attribute on
+        /// the <c>&lt;ProjectInfo&gt;</c> root, lowercased, without braces. EAE
+        /// uses this as the authoritative active domain id; any foreign UUID in
+        /// our solutionData/Equipment DomainTag triggers "doesn't belong to the
+        /// active domain" the moment the user touches the topology.
+        /// </summary>
+        static string? ReadProjectGuid(string eaeRoot)
+        {
+            var path = Path.Combine(eaeRoot, "General", "ProjectInfo.xml");
+            if (!File.Exists(path)) return null;
+            try
+            {
+                var doc = XDocument.Load(path);
+                var raw = (string?)doc.Root?.Attribute("Guid");
+                if (string.IsNullOrWhiteSpace(raw)) return null;
+                return raw.Trim().Trim('{', '}').ToLowerInvariant();
+            }
+            catch { return null; }
+        }
+
+        static string BuildEquipmentJson(MapperConfig cfg, string sysdevId, string solutionId) => $$"""
 {
   "catalogReference": "M060_V01.00_01.00",
   "uuid": "{{DefaultM262Uuid}}",
@@ -130,7 +172,7 @@ namespace MapperUI.Services
     },
     {
       "propertyName": "DomainTag",
-      "propertyValue": "{{DefaultSolutionUuid}}"
+      "propertyValue": "{{solutionId}}"
     }
   ],
   "references": [
@@ -245,7 +287,7 @@ namespace MapperUI.Services
         //     access at project open time (otherwise EAE prompts for login).
         // EAE encodes embedded JSON strings using " (unicode-escaped quotes);
         // raw " inside a JSON string value would be invalid JSON.
-        static string BuildSolutionDataJson()
+        static string BuildSolutionDataJson(string solutionId)
         {
             const string Q = "\\u0022"; // escaped double quote inside a JSON string
 
@@ -271,8 +313,8 @@ namespace MapperUI.Services
             const string AsgPwHash          = "$1$A1C337A6652A9ABCCE903AD7FD5F8F3559FC4544100BC4A17291866BB80258E9$DFD5A7DEA0BD092D78E99A4B2BDDB03A1D30F1192D6745A807AB8F4E4D5F0AD4";
             const string AnonPwHash         = "cb366a250499db16cfa075932fd153c2baf2dfdda46a14082b7ddf3eab1118d5";
 
-            string deviceCfg = $"{{{Q}solutionId{Q}:{Q}{DefaultSolutionUuid}{Q},{Q}csConfHash{Q}:{Q}{CsConfHash}{Q}}}";
-            string anonDeviceCfg = $"{{{Q}solutionId{Q}:{Q}{DefaultSolutionUuid}{Q},{Q}csConfHash{Q}:{Q}{AnonCsConfHash}{Q}}}";
+            string deviceCfg = $"{{{Q}solutionId{Q}:{Q}{solutionId}{Q},{Q}csConfHash{Q}:{Q}{CsConfHash}{Q}}}";
+            string anonDeviceCfg = $"{{{Q}solutionId{Q}:{Q}{solutionId}{Q},{Q}csConfHash{Q}:{Q}{AnonCsConfHash}{Q}}}";
 
             string userInfo = $"{{{Q}version{Q}:{Q}1{Q},{Q}users_list{Q}:[{{{Q}user_name{Q}:{Q}ASG!{Q},{Q}password{Q}:{Q}{AsgPwHash}{Q},{Q}state{Q}:{Q}Active{Q},{Q}AccountStartDate{Q}:{Q}{Q},{Q}assigned_role{Q}:[{Q}ASG!{Q}]}}]}}";
             string roleInfo = $"{{{Q}version{Q}:{Q}1{Q},{Q}roles_list{Q}:[{{{Q}name{Q}:{Q}ASG!{Q},{Q}permission_name{Q}:[{Q}Security Management{Q},{Q}File Transfer{Q},{Q}IP Configuration{Q},{Q}Firmware Management{Q},{Q}LaunchCanvas{Q},{Q}OpenFacePlate{Q},{Q}EditSymbol{Q},{Q}Level_15{Q}]}}]}}";
@@ -281,7 +323,7 @@ namespace MapperUI.Services
 
             return $$"""
 {
-  "SolutionId": "{{DefaultSolutionUuid}}",
+  "SolutionId": "{{solutionId}}",
   "CsConfHash": "{{CsConfHash}}",
   "AnonymousCsConfHash": "{{AnonCsConfHash}}",
   "CertThumbprint": "{{CertThumbprintChain}}",
@@ -335,12 +377,16 @@ namespace MapperUI.Services
             var topologyDir = Path.Combine(eaeRoot, "Topology");
             if (!Directory.Exists(topologyDir)) return 0;
 
-            var files = new[]
+            var fileList = new List<string>
             {
                 Path.Combine(topologyDir, "Equipment_M262dPAC_1.json"),
                 Path.Combine(topologyDir, $"BroadcastDomain_{cfg.M262LogicalNetworkName}.json"),
-                Path.Combine(topologyDir, $"{DefaultSolutionUuid}.solutionData"),
             };
+            // Treat every *.solutionData in Topology/ as removable — covers any
+            // stale UUID our emitter might have written previously (SMC_Rig_Expo's,
+            // a fallback zero UUID, or a hand-edited variant).
+            fileList.AddRange(Directory.EnumerateFiles(topologyDir, "*.solutionData"));
+            var files = fileList.ToArray();
             foreach (var f in files)
             {
                 if (File.Exists(f)) { try { File.Delete(f); removed++; } catch { } }
