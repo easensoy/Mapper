@@ -63,6 +63,7 @@
             this.btnProcessFB = new System.Windows.Forms.Button();
             this.btnTestStation1 = new System.Windows.Forms.Button();
             this.btnGenerateAll = new System.Windows.Forms.Button();
+            this.btnCleanDemonstrator = new System.Windows.Forms.Button();
             this.statusStrip = new System.Windows.Forms.StatusStrip();
             this.lblStatus = new System.Windows.Forms.ToolStripStatusLabel();
 
@@ -164,6 +165,18 @@
             this.btnGenerateAll.Text = "3. Generate All";
             this.btnGenerateAll.UseVisualStyleBackColor = false;
             this.btnGenerateAll.Click += new System.EventHandler(this.btnGenerateAll_Click);
+
+            this.btnCleanDemonstrator.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
+            this.btnCleanDemonstrator.BackColor = System.Drawing.Color.FromArgb(64, 64, 64);
+            this.btnCleanDemonstrator.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnCleanDemonstrator.FlatAppearance.BorderSize = 0;
+            this.btnCleanDemonstrator.Font = new System.Drawing.Font("Segoe UI", 8.5F, System.Drawing.FontStyle.Bold);
+            this.btnCleanDemonstrator.ForeColor = System.Drawing.Color.White;
+            this.btnCleanDemonstrator.Location = new System.Drawing.Point(1263, 28);
+            this.btnCleanDemonstrator.Size = new System.Drawing.Size(140, 25);
+            this.btnCleanDemonstrator.Text = "Clean Demonstrator";
+            this.btnCleanDemonstrator.UseVisualStyleBackColor = false;
+            this.btnCleanDemonstrator.Click += new System.EventHandler(this.btnCleanDemonstrator_Click);
 
             this.btnGenerateCode.Visible = false;
             this.btnGenerateCode.Click += new System.EventHandler(this.btnGenerateCode_Click);
@@ -342,6 +355,7 @@
             this.Controls.Add(this.btnProcessFB);
             this.Controls.Add(this.btnTestStation1);
             this.Controls.Add(this.btnGenerateAll);
+            this.Controls.Add(this.btnCleanDemonstrator);
             this.Controls.Add(this.btnBrowse);
             this.Controls.Add(this.lblLoadedFile);
             this.Controls.Add(this.btnMappingRules);
@@ -437,6 +451,7 @@
         private System.Windows.Forms.Button btnProcessFB;
         private System.Windows.Forms.Button btnTestStation1;
         private System.Windows.Forms.Button btnGenerateAll;
+        private System.Windows.Forms.Button btnCleanDemonstrator;
         private System.Windows.Forms.Label lblLoadedFile;
         private System.Windows.Forms.StatusStrip statusStrip;
         private System.Windows.Forms.ToolStripStatusLabel lblStatus;
