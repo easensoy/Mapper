@@ -351,6 +351,19 @@ namespace MapperUI.Services
         /// resource-side mirror EAE leaves FBs unmapped, $${PATH} resolves to empty,
         /// and the .hcf channel symlinks come out as bare port names like 'athome'.
         /// </summary>
+        // Stable IDs for the three system FBs we plant in every .sysres so the
+        // .hcf has something to bind its <ResourceId>.<FBId>.<symbol> path against.
+        // Hard-coded so the .hcf rewriter can use the same constants without
+        // round-tripping through the .sysres again.
+        public const string M262IoFbId        = "E786D6371CF444F9";  // PLC_RW_M262 instance "M262IO"
+        public const string DpacFullInitFbId  = "593A8F4FDEA0A668";  // DPAC_FULLINIT FB1
+        public const string PlcStartFbId      = "3DB1FB0F578E5F1E";  // plcStart FB2
+
+        // Mapping IDs are XOR-flipped variants — opaque to EAE but distinct from
+        // the FB IDs so EAE doesn't think the FB and its mapping target are the
+        // same instance. SMC_Rig_Expo's M262IO uses Mapping="821ED9470CFCA0D6"
+        // — a different 16-hex string from its FB ID. We just reuse our XOR
+        // helper to produce a deterministic distinct value.
         public static int MirrorFbsIntoSysres(string sysresPath, List<SyslayFb> syslayFbs)
         {
             if (!File.Exists(sysresPath)) return 0;
@@ -367,6 +380,31 @@ namespace MapperUI.Services
                 network = new XElement(ns + "FBNetwork");
                 root.Add(network);
             }
+
+            // Plant the three system FBs SMC_Rig_Expo's working .sysres has — without
+            // them the .hcf has nothing to resolve <ResourceId>.<FBId>.<symbol>
+            // against and EAE drops the entire BMTM3 binding (the bus disappears
+            // from the IO Mapping pane, not just the symbols).
+            //
+            //   M262IO  (PLC_RW_M262)   — exposes the SYMLINKMULTIVAR variables
+            //                              (PusherAtHome, ExtendPusher, Hopper, …)
+            //                              that the .hcf pin Values reference.
+            //   FB1     (DPAC_FULLINIT) — runtime bootstrap, marker that this
+            //                              resource hosts an M262 dPAC runtime.
+            //   FB2     (plcStart)      — startup trigger.
+            EnsureSystemFb(network, ns,
+                id: M262IoFbId, name: "M262IO", type: "PLC_RW_M262", nsAttr: "Main",
+                mapping: ComputeMirrorId(M262IoFbId), x: 3760, y: 1020,
+                loaded: false);
+            EnsureSystemFb(network, ns,
+                id: DpacFullInitFbId, name: "FB1", type: "DPAC_FULLINIT", nsAttr: "SE.DPAC",
+                mapping: null, x: 1900, y: 140,
+                loaded: true);
+            EnsureSystemFb(network, ns,
+                id: PlcStartFbId, name: "FB2", type: "plcStart", nsAttr: "SE.AppBase",
+                mapping: null, x: 820, y: 660,
+                loaded: true,
+                parameters: new[] { ("Prio", "10"), ("Delay", "T#1000ms") });
 
             // Snapshot existing FB entries to avoid duplicate mirrors on re-runs.
             // Dedup by Mapping target (matches our generated mirror) AND by Name
@@ -421,6 +459,47 @@ namespace MapperUI.Services
 
             if (added > 0) doc.Save(sysresPath);
             return added;
+        }
+
+        /// <summary>
+        /// Inserts (or refreshes) one of the three SMC_Rig_Expo-style system FBs
+        /// into the .sysres FBNetwork. Idempotent — keyed on FB ID so re-running
+        /// the emitter doesn't duplicate the entry.
+        /// </summary>
+        static void EnsureSystemFb(XElement network, XNamespace ns,
+            string id, string name, string type, string nsAttr,
+            string? mapping, int x, int y, bool loaded,
+            (string Name, string Value)[]? parameters = null)
+        {
+            // Remove any prior entry for this exact ID so attribute updates land.
+            foreach (var stale in network.Elements(ns + "FB")
+                .Where(e => string.Equals((string?)e.Attribute("ID"), id, StringComparison.OrdinalIgnoreCase))
+                .ToList())
+            {
+                stale.Remove();
+            }
+
+            var fb = new XElement(ns + "FB",
+                new XAttribute("ID",        id),
+                new XAttribute("Name",      name),
+                new XAttribute("Type",      type),
+                new XAttribute("Namespace", nsAttr));
+            if (!string.IsNullOrEmpty(mapping)) fb.SetAttributeValue("Mapping", mapping);
+            fb.SetAttributeValue("x", x);
+            fb.SetAttributeValue("y", y);
+            if (loaded) fb.SetAttributeValue("Loaded", "true");
+
+            if (parameters != null)
+            {
+                foreach (var (pn, pv) in parameters)
+                {
+                    fb.Add(new XElement(ns + "Parameter",
+                        new XAttribute("Name",  pn),
+                        new XAttribute("Value", pv)));
+                }
+            }
+
+            network.Add(fb);
         }
 
         // Locates the .sysres file paired with the sysdev (same per-device folder).
