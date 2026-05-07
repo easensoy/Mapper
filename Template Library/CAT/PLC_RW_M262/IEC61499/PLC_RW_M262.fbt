@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="250eb87d-2371-42f2-9317-09bb725e1db1" Name="PLC_RW_M262" Comment="Composite Function Block Type" Namespace="Main">
+  <Attribute Name="Configuration.FB.IDCounter" Value="13" />
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author="azam_w" Date="6/30/2025" Remarks="template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT">
+        <With Var="ExtendTransfer" />
+        <With Var="ExtendChecker" />
+        <With Var="ExtendPusher" />
+      </Event>
+      <Event Name="INIT_INT_BOOL">
+        <With Var="ExtendPusher" />
+        <With Var="ExtendTransfer" />
+        <With Var="ExtendChecker" />
+        <With Var="ExtendRejector" />
+      </Event>
+      <Event Name="REQ_INT_BOOL">
+        <With Var="ExtendPusher" />
+        <With Var="ExtendTransfer" />
+        <With Var="ExtendChecker" />
+        <With Var="ExtendRejector" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="PLC_EVENT">
+        <With Var="PusherAtWork" />
+        <With Var="PusherAtHome" />
+        <With Var="TransferAtWork" />
+        <With Var="TransferAtHome" />
+        <With Var="checkerUp" />
+        <With Var="chekcerDown" />
+        <With Var="Hopper" />
+      </Event>
+      <Event Name="HopperEvent">
+        <With Var="Hopper" />
+      </Event>
+      <Event Name="PusherEvent">
+        <With Var="PusherAtWork" />
+        <With Var="PusherAtHome" />
+      </Event>
+      <Event Name="CheckerEvent">
+        <With Var="checkerUp" />
+        <With Var="chekcerDown" />
+      </Event>
+      <Event Name="TransferEvent">
+        <With Var="TransferAtWork" />
+        <With Var="TransferAtHome" />
+      </Event>
+      <Event Name="PartAtAssemblyEvent">
+        <With Var="PartAtAssembly" />
+      </Event>
+      <Event Name="PartAtExitEvent">
+        <With Var="PartAtExit" />
+      </Event>
+      <Event Name="PartAtCheckerEvent">
+        <With Var="PartAtChecker" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="ExtendPusher" Type="BOOL" />
+      <VarDeclaration Name="ExtendTransfer" Type="BOOL" />
+      <VarDeclaration Name="ExtendChecker" Type="BOOL" />
+      <VarDeclaration Name="ExtendRejector" Type="BOOL" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="PusherAtWork" Type="BOOL" />
+      <VarDeclaration Name="PusherAtHome" Type="BOOL" />
+      <VarDeclaration Name="TransferAtWork" Type="BOOL" />
+      <VarDeclaration Name="TransferAtHome" Type="BOOL" />
+      <VarDeclaration Name="checkerUp" Type="BOOL" />
+      <VarDeclaration Name="chekcerDown" Type="BOOL" />
+      <VarDeclaration Name="Hopper" Type="BOOL" />
+      <VarDeclaration Name="PartAtAssembly" Type="BOOL" />
+      <VarDeclaration Name="PartAtExit" Type="BOOL" />
+      <VarDeclaration Name="PartAtChecker" Type="BOOL" />
+    </OutputVars>
+  </InterfaceList>
+  <FBNetwork>
+    <FB ID="12" UID="1" Name="input" Type="SYMLINKMULTIVARDST_2183AAEC3B58E76C9" x="2220" y="1580" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.System#I:=10;VALUE${I}:BOOL,BOOL,BOOL,BOOL,BOOL,BOOL,BOOL,BOOL,BOOL,BOOL" />
+      <Parameter Name="QI" Value="TRUE" />
+      <Parameter Name="NAME1" Value="'$${PATH}PusherAtWork'" />
+      <Parameter Name="NAME2" Value="'$${PATH}PusherAtHome'" />
+      <Parameter Name="NAME3" Value="'$${PATH}CheckerUp'" />
+      <Parameter Name="NAME4" Value="'$${PATH}CheckerDown'" />
+      <Parameter Name="NAME5" Value="'$${PATH}TransferAtWork'" />
+      <Parameter Name="NAME6" Value="'$${PATH}TransferAtHome'" />
+      <Parameter Name="NAME7" Value="'$${PATH}Hopper'" />
+      <Parameter Name="NAME8" Value="'$${PATH}PartAtAssembly'" />
+      <Parameter Name="NAME9" Value="'$${PATH}PartAtExit'" />
+      <Parameter Name="NAME10" Value="'$${PATH}PartAtChecker'" />
+    </FB>
+    <FB ID="13" UID="2" Name="output" Type="SYMLINKMULTIVARSRC_19628BFC3C74F1AB1" x="5100" y="340" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.System#I:=4;VALUE${I}:BOOL,BOOL,BOOL,BOOL" />
+      <Parameter Name="QI" Value="TRUE" />
+      <Parameter Name="NAME1" Value="'$${PATH}ExtendPusher'" />
+      <Parameter Name="NAME2" Value="'$${PATH}ExtendTransfer'" />
+      <Parameter Name="NAME3" Value="'$${PATH}ExtendChecker'" />
+      <Parameter Name="NAME4" Value="'$${PATH}ExtendRejector'" />
+    </FB>
+    <FB ID="11" Name="FB2" Type="changeEventProcess1" x="3020" y="3020" Namespace="Main" />
+    <Input Name="ExtendPusher" x="3800" y="752" Type="Data" />
+    <Input Name="ExtendTransfer" x="3840" y="832" Type="Data" />
+    <Input Name="ExtendChecker" x="3740" y="972" Type="Data" />
+    <Input Name="INIT" x="1380" y="192" Type="Event" />
+    <Input Name="INIT_INT_BOOL" x="3200" y="432" Type="Event" />
+    <Input Name="REQ_INT_BOOL" x="3480" y="572" Type="Event" />
+    <Input Name="ExtendRejector" x="4040" y="1452" Type="Data" />
+    <Output Name="PartAtCheckerEvent" x="4040" y="3792" Type="Event" />
+    <Output Name="PartAtChecker" x="3060" y="2792" Type="Data" />
+    <Output Name="PartAtAssembly" x="3640" y="2632" Type="Data" />
+    <Output Name="PartAtExit" x="3580" y="2732" Type="Data" />
+    <Output Name="PartAtAssemblyEvent" x="4200" y="3432" Type="Event" />
+    <Output Name="PartAtExitEvent" x="4220" y="3572" Type="Event" />
+    <Output Name="PusherAtWork" x="3840" y="1872" Type="Data" />
+    <Output Name="PusherAtHome" x="3820" y="1952" Type="Data" />
+    <Output Name="TransferAtWork" x="3860" y="2312" Type="Data" />
+    <Output Name="TransferAtHome" x="3840" y="2412" Type="Data" />
+    <Output Name="checkerUp" x="3880" y="2072" Type="Data" />
+    <Output Name="chekcerDown" x="3840" y="2152" Type="Data" />
+    <Output Name="Hopper" x="3960" y="2532" Type="Data" />
+    <Output Name="PLC_EVENT" x="4080" y="2852" Type="Event" />
+    <Output Name="HopperEvent" x="4000" y="2972" Type="Event" />
+    <Output Name="PusherEvent" x="4060" y="3092" Type="Event" />
+    <Output Name="CheckerEvent" x="4240" y="3312" Type="Event" />
+    <Output Name="TransferEvent" x="4040" y="3212" Type="Event" />
+    <EventConnections>
+      <Connection Source="FB2.Checker_Event" Destination="CheckerEvent" dx1="100.625" />
+      <Connection Source="FB2.Pusher_Event" Destination="PusherEvent" dx1="90" />
+      <Connection Source="FB2.Hopper_Event" Destination="HopperEvent" dx1="70" />
+      <Connection Source="FB2.Transfer_Event" Destination="TransferEvent" />
+      <Connection Source="FB2.PartAtExit_Event" Destination="PartAtExitEvent" dx1="60.625" />
+      <Connection Source="FB2.PartAtAssembly_Event" Destination="PartAtAssemblyEvent" dx1="80.625" />
+      <Connection Source="FB2.INITO" Destination="PLC_EVENT" dx1="50" />
+      <Connection Source="INIT" Destination="input.INIT" dx1="221.4166" />
+      <Connection Source="INIT" Destination="input.REQ" dx1="221.4166" />
+      <Connection Source="input.INITO" Destination="FB2.Scan_Event" dx1="181.625" />
+      <Connection Source="input.CNF" Destination="FB2.Scan_Event" dx1="181.625" />
+      <Connection Source="FB2.PartAtCheckerEvent" Destination="PartAtCheckerEvent" dx1="40.625" />
+      <Connection Source="INIT" Destination="output.INIT" dx1="1181.417" />
+      <Connection Source="INIT_INT_BOOL" Destination="output.REQ" dx1="47.04175" />
+      <Connection Source="REQ_INT_BOOL" Destination="output.REQ" dx1="40" />
+    </EventConnections>
+    <DataConnections>
+      <Connection Source="input.VALUE1" Destination="PusherAtWork" dx1="90" />
+      <Connection Source="input.VALUE1" Destination="FB2.PusherAtWork" dx1="141.625" />
+      <Connection Source="input.VALUE2" Destination="PusherAtHome" dx1="110" />
+      <Connection Source="input.VALUE2" Destination="FB2.PusherAtHome" dx1="121.625" />
+      <Connection Source="input.VALUE3" Destination="checkerUp" dx1="130" />
+      <Connection Source="input.VALUE3" Destination="FB2.CheckerUp" dx1="81.625" />
+      <Connection Source="input.VALUE4" Destination="chekcerDown" />
+      <Connection Source="input.VALUE4" Destination="FB2.CheckerDown" dx1="101.625" />
+      <Connection Source="input.VALUE5" Destination="TransferAtWork" dx1="141.625" />
+      <Connection Source="input.VALUE5" Destination="FB2.TransferAtWork" dx1="61.625" />
+      <Connection Source="input.VALUE6" Destination="TransferAtHome" dx1="121.625" />
+      <Connection Source="input.VALUE6" Destination="FB2.TransferAtHome" dx1="41.625" />
+      <Connection Source="input.VALUE7" Destination="Hopper" dx1="101.625" />
+      <Connection Source="input.VALUE7" Destination="FB2.Hopper" dx1="101.625" />
+      <Connection Source="input.VALUE8" Destination="PartAtAssembly" dx1="81.625" />
+      <Connection Source="input.VALUE8" Destination="FB2.PartAtAssembly" dx1="81.625" dx2="230" dy="210" />
+      <Connection Source="input.VALUE9" Destination="PartAtExit" dx1="61.625" />
+      <Connection Source="input.VALUE9" Destination="FB2.PartAtExit" dx1="61.625" dx2="210" dy="150" />
+      <Connection Source="input.VALUE10" Destination="PartAtChecker" dx1="41.625" />
+      <Connection Source="input.VALUE10" Destination="FB2.PartAtChecker" dx1="41.625" dx2="250" dy="90" />
+      <Connection Source="ExtendPusher" Destination="output.VALUE1" dx1="40" />
+      <Connection Source="ExtendTransfer" Destination="output.VALUE2" dx1="48.5625" />
+      <Connection Source="ExtendChecker" Destination="output.VALUE3" />
+      <Connection Source="ExtendRejector" Destination="output.VALUE4" dx1="48.29102" />
+    </DataConnections>
+  </FBNetwork>
+</FBType>
