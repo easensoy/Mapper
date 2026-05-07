@@ -66,13 +66,16 @@ namespace MapperUI.Services
             if (sysresPath != null && fbInstances.Count > 0)
                 sysresMirrorCount = MirrorFbsIntoSysres(sysresPath, fbInstances);
 
-            // Do NOT touch .system. EAE's binding mechanism is the per-FB
-            // Mapping="<syslay-FB-ID>" attribute inside .sysres's FBNetwork (handled
-            // above by MirrorFbsIntoSysres). Verified against Station1 + SMC_Rig_Expo
-            // working M262 references — both have an empty .system (root + VersionInfo
-            // only) and full FB mirrors in .sysres. Writing <Mapping> elements to
-            // .system pollutes the file and is ignored by EAE's binding resolver.
-            int systemMappingsAdded = 0;
+            // Replace the .system root's <Mappings> block with one fresh
+            // <Mapping From="APP1.<FB>" To="EcoRT_0.RES0"/> per current syslay FB.
+            // Per Alex's slide showing the canonical SMC rig convention: the .system
+            // Mappings element is the explicit application-to-resource binding that
+            // EAE's $${PATH} resolution depends on inside each CAT's SYMLINK FB.
+            // Without it, $${PATH} resolves to nothing and .hcf channel symlinks
+            // bind to nothing. Replace (not append) to wipe any stale baseline
+            // entries from prior runs.
+            int systemMappingsAdded = ReplaceMappingsBlock(systemFile,
+                fbInstances.Select(f => f.Name).ToList());
 
             var dfbproj = FindDfbproj(eaeRoot);
             int registered = 0;
@@ -237,6 +240,48 @@ namespace MapperUI.Services
             SetAttr(res0, "Namespace", "Runtime.Management");
 
             doc.Save(sysdevPath);
+        }
+
+        // --- .system Mappings (replace block, one Mapping per syslay FB) ---
+
+        /// <summary>
+        /// REPLACES the .system root's <c>&lt;Mappings&gt;</c> block — drops any existing
+        /// element entirely and writes one <c>&lt;Mapping From="APP1.&lt;FBName&gt;"
+        /// To="EcoRT_0.RES0"/&gt;</c> per top-level FB in the current syslay.
+        /// EAE's <c>$${PATH}</c> resolver inside each CAT's SYMLINK FB walks these
+        /// Mappings to figure out which resource owns each application FB; without
+        /// them <c>$${PATH}</c> resolves to empty string and .hcf channel symlinks
+        /// silently bind to nothing.
+        /// Replace (rather than append) is mandatory — stale baseline Mappings
+        /// referencing FBs no longer in the syslay (e.g. Checker / Transfer from
+        /// a previous full-rig run) confuse EAE's binding.
+        /// </summary>
+        static int ReplaceMappingsBlock(string systemFilePath, List<string> fbInstances)
+        {
+            var doc = XDocument.Load(systemFilePath);
+            var root = doc.Root
+                ?? throw new InvalidDataException($"Empty .system: {systemFilePath}");
+            XNamespace ns = root.GetDefaultNamespace().NamespaceName.Length > 0
+                ? root.GetDefaultNamespace()
+                : LibElNs;
+
+            // Defensive: remove every existing <Mappings> element in case the baseline
+            // somehow has duplicates.
+            foreach (var stale in root.Elements(ns + "Mappings").ToList())
+                stale.Remove();
+
+            var mappings = new XElement(ns + "Mappings");
+            var to = $"{DeviceName}.{ResourceName}";
+            foreach (var fbName in fbInstances)
+            {
+                if (string.IsNullOrWhiteSpace(fbName)) continue;
+                mappings.Add(new XElement(ns + "Mapping",
+                    new XAttribute("From", $"{ApplicationName}.{fbName}"),
+                    new XAttribute("To",   to)));
+            }
+            root.Add(mappings);
+            doc.Save(systemFilePath);
+            return mappings.Elements(ns + "Mapping").Count();
         }
 
         // --- syslay walk: every top-level FB Name attribute under SubAppNetwork ---
