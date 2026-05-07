@@ -138,7 +138,8 @@ namespace MapperUI.Services
                 // a non-existent FB instance) and they collide across modules.
                 var syslayFbNames = ReadSyslayFbNames(cfg);
                 paramsWritten = OverwriteHcfParameterValuesInMemory(
-                    hcfDoc, bindings, syslayFbNames, result);
+                    hcfDoc, bindings, syslayFbNames, result,
+                    resourceId: string.IsNullOrEmpty(sysresId) ? "00000000-0000-0000-0000-000000000000" : sysresId);
                 if (paramsWritten == 0 && bindings.PinAssignments.Count == 0)
                     result.Warnings.Add(
                         "IO bindings xlsx has no pin_di_athome / pin_di_atwork / " +
@@ -235,12 +236,64 @@ namespace MapperUI.Services
         }
 
         /// <summary>
+        /// (Component, Port) -> PLC_RW_M262 variable name. Mirrors the SMC_Rig_Expo
+        /// physical layout: the BMTM3 pins on the rig are wired to specific
+        /// SYMLINKMULTIVAR variables declared inside PLC_RW_M262.fbt — one variable
+        /// per actuator/sensor port, with hardcoded names like PusherAtHome and
+        /// ExtendPusher. The IoBindings xlsx says e.g. (Feeder, athome); the
+        /// PLC_RW_M262 type calls that same wire "PusherAtHome". This dict is the
+        /// translation layer, applied when the .hcf rewriter wants the
+        /// SMC_Rig_Expo-style ID-based pin Value.
+        ///
+        /// Keys are case-insensitive. Both component and port match. Ports use
+        /// the IoBindings convention (athome/atwork/OutputToWork/OutputToHome).
+        /// </summary>
+        static readonly Dictionary<(string Component, string Port), string> M262IoVariableMap =
+            new(new ComponentPortComparer())
+            {
+                [("Feeder",        "athome")]       = "PusherAtHome",
+                [("Feeder",        "atwork")]       = "PusherAtWork",
+                [("Feeder",        "OutputToWork")] = "ExtendPusher",
+                [("Checker",       "athome")]       = "CheckerUp",
+                [("Checker",       "atwork")]       = "CheckerDown",
+                [("Checker",       "OutputToWork")] = "ExtendChecker",
+                [("Transfer",      "athome")]       = "TransferAtHome",
+                [("Transfer",      "atwork")]       = "TransferAtWork",
+                [("Transfer",      "OutputToWork")] = "ExtendTransfer",
+                [("Rejector",      "OutputToWork")] = "ExtendRejector",
+                [("Rejecter",      "OutputToWork")] = "ExtendRejector", // xlsx spelling
+                [("PartInHopper",  "Input")]        = "Hopper",
+                [("PartAtChecker", "Input")]        = "PartAtChecker",
+                [("PartAtAssembly","Input")]        = "PartAtAssembly",
+                [("PartAtExit",    "Input")]        = "PartAtExit",
+            };
+
+        sealed class ComponentPortComparer : IEqualityComparer<(string Component, string Port)>
+        {
+            public bool Equals((string Component, string Port) a, (string Component, string Port) b) =>
+                StringComparer.OrdinalIgnoreCase.Equals(a.Component, b.Component) &&
+                StringComparer.OrdinalIgnoreCase.Equals(a.Port,      b.Port);
+            public int GetHashCode((string Component, string Port) obj) =>
+                HashCode.Combine(
+                    StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Component),
+                    StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Port));
+        }
+
+        /// <summary>
         /// In-memory variant of <see cref="OverwriteHcfParameterValues"/> — mutates
-        /// <paramref name="doc"/> instead of saving to disk. Returns the number of
-        /// ParameterValue elements modified.
+        /// <paramref name="doc"/> instead of saving to disk. Emits .hcf pin Values
+        /// in SMC_Rig_Expo's ID-based format <c>&lt;ResourceId&gt;.&lt;M262IO-FB-ID&gt;.&lt;PLC_RW_M262-Variable&gt;</c>.
+        /// EAE resolves this by:
+        ///   1. matching ResourceId to the per-device .sysres file,
+        ///   2. looking up the FB by ID inside that .sysres,
+        ///   3. matching the variable name against the FB type's
+        ///      SYMLINKMULTIVAR declarations (PLC_RW_M262 has them).
+        /// Without M262IO present in the .sysres (planted by
+        /// <see cref="M262SysdevEmitter.MirrorFbsIntoSysres"/>) the entire BMTM3
+        /// binding fails and the IO Mapping pane shows nothing.
         /// </summary>
         static int OverwriteHcfParameterValuesInMemory(XDocument doc, IoBindings bindings,
-            HashSet<string> syslayFbNames, HwConfigCopyResult result)
+            HashSet<string> syslayFbNames, HwConfigCopyResult result, string resourceId)
         {
             var ns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
             int written = 0;
@@ -248,7 +301,16 @@ namespace MapperUI.Services
             {
                 "TM3DI16_G", "TM3DQ16T_G"
             };
-            const string EmptyPinValue = "''";
+
+            // Empty Value string (no quotes) — matches SMC_Rig_Expo's format for
+            // unbound pins. The previous "''" placeholder was the symbolic-format
+            // marker; ID-based format uses bare empty strings.
+            const string EmptyPinValue = "";
+
+            // The M262IO FB ID is the constant planted by M262SysdevEmitter. The
+            // .hcf and the .sysres MUST agree on this exact value, otherwise
+            // EAE's resolver treats every pin Value as orphaned.
+            string m262IoFbId = M262SysdevEmitter.M262IoFbId;
 
             foreach (var module in doc.Descendants().Where(e =>
                 ioModuleNames.Contains((string?)e.Element(ns + "Name")?.Value ?? string.Empty)))
@@ -262,12 +324,17 @@ namespace MapperUI.Services
                     if (string.IsNullOrEmpty(pin)) continue;
 
                     string targetValue = EmptyPinValue;
-                    var symbol = bindings.ResolveSymbol(pin);
-                    if (symbol != null)
+                    if (bindings.PinAssignments.TryGetValue(pin, out var pa))
                     {
-                        bindings.PinAssignments.TryGetValue(pin, out var pa);
-                        var owner = pa?.ComponentName ?? string.Empty;
-                        if (syslayFbNames.Contains(owner)) targetValue = symbol;
+                        // Only emit a non-empty value when the pin's owner is in
+                        // the running syslay AND we have a PLC_RW_M262 variable
+                        // mapped for (Component, Port). Otherwise leave blank so
+                        // EAE doesn't surface stale red bindings.
+                        if (syslayFbNames.Contains(pa.ComponentName) &&
+                            M262IoVariableMap.TryGetValue((pa.ComponentName, pa.Port), out var varName))
+                        {
+                            targetValue = $"{resourceId}.{m262IoFbId}.{varName}";
+                        }
                     }
 
                     var valueAttr = pv.Attribute("Value");
@@ -277,7 +344,7 @@ namespace MapperUI.Services
                     if (valueAttr == null) pv.SetAttributeValue("Value", targetValue);
                     else valueAttr.Value = targetValue;
 
-                    if (targetValue != EmptyPinValue)
+                    if (targetValue.Length > 0)
                     {
                         result.ParametersOverwrittenSet.Add(pin);
                         result.ParametersOverwritten.Add($"{pin}={targetValue}");
