@@ -31,7 +31,13 @@ namespace MapperUI.Services
 
         static readonly string[] UniversalCats = new[]
         {
-            "Five_State_Actuator_CAT", "Sensor_Bool_CAT", "Process1_Generic"
+            "Five_State_Actuator_CAT", "Sensor_Bool_CAT", "Process1_Generic",
+            // PLC_RW_M262 — the SMC_Rig_Expo IO bridge type. Holds SYMLINKMULTIVAR
+            // declarations (PusherAtHome, Hopper, ExtendPusher, …) that the .hcf
+            // pin Values reference via <ResourceId>.<FBId>.<VariableName>. Without
+            // this CAT deployed + an instance in .sysres, every .hcf pin resolves
+            // red and BMTM3 drops out of EAE's IO Mapping pane entirely.
+            "PLC_RW_M262"
         };
 
         static readonly string[] UniversalComposites = new[]
