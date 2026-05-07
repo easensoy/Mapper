@@ -191,51 +191,40 @@ namespace MapperUI.Services
                 ? root.GetDefaultNamespace()
                 : LibElNs;
 
-            // Force device declaration. If the baseline shipped a different Type we
-            // overwrite it; if attributes are missing we add them.
+            // Match the SMC_Rig_Expo M262 sysdev format exactly:
+            //   <Device Name="..." Type="M262_dPAC" Namespace="SE.DPAC" Locked="false" x=".." y=".." ...>
+            //     <FBNetwork />
+            //   </Device>
+            //
+            // The previous emit added <Parameter Name="IPV4Address"/> and a
+            // <Resources><Resource RES0/></Resources> block. Neither appears in the
+            // working SMC_Rig_Expo M262 sysdev. EAE's IO Mapping resolver appears
+            // to walk the sysdev's <Resources> block when present and treats the
+            // separate .sysres file as authoritative only when the inline block
+            // is absent — so writing both made every FB.symlink resolve red even
+            // though the .sysres FBNetwork mirror was correct. Strip both.
             SetAttr(root, "Name", deviceName);
             SetAttr(root, "Type", deviceType);
             SetAttr(root, "Namespace", "SE.DPAC");
+            SetAttr(root, "Locked", "false");
 
-            // Idempotent IPV4Address Parameter.
-            var ipParam = root.Elements(ns + "Parameter").FirstOrDefault(e =>
-                string.Equals((string?)e.Attribute("Name"), "IPV4Address", StringComparison.Ordinal));
-            if (ipParam == null)
-            {
-                ipParam = new XElement(ns + "Parameter",
-                    new XAttribute("Name", "IPV4Address"),
-                    new XAttribute("Value", targetIp));
-                // Insert as first Parameter child (before any <Resources>) so EAE
-                // parses it before trying to bind the runtime.
-                var firstNonAttr = root.Elements().FirstOrDefault();
-                if (firstNonAttr != null) firstNonAttr.AddBeforeSelf(ipParam);
-                else root.Add(ipParam);
-            }
-            else
-            {
-                SetAttr(ipParam, "Value", targetIp);
-            }
+            // Drop any <Parameter> children (legacy IPV4Address). EAE stores the
+            // M262 IP via the Properties.xml plugin chain / the user's Connect
+            // dialog, not in the sysdev itself.
+            foreach (var p in root.Elements(ns + "Parameter").ToList()) p.Remove();
 
-            // Ensure exactly one Resource RES0 of Type="EMB_RES_ECO".
-            var resources = root.Element(ns + "Resources");
-            if (resources == null)
-            {
-                resources = new XElement(ns + "Resources");
-                root.Add(resources);
-            }
-            var res0 = resources.Elements(ns + "Resource")
-                .FirstOrDefault(e => string.Equals((string?)e.Attribute("Name"), ResourceName,
-                    StringComparison.OrdinalIgnoreCase));
-            if (res0 == null)
-            {
-                res0 = new XElement(ns + "Resource",
-                    new XAttribute("ID", Guid.Empty.ToString()),
-                    new XAttribute("Name", ResourceName));
-                resources.Add(res0);
-            }
-            SetAttr(res0, "Name", ResourceName);
-            SetAttr(res0, "Type", "EMB_RES_ECO");
-            SetAttr(res0, "Namespace", "Runtime.Management");
+            // Drop any <Resources> block — the .sysres file in {sysdev-stem}/ is
+            // EAE's source of truth for resources, and a stale inline block here
+            // shadows it (EAE walks the inline tree first and finds zero FBs in
+            // RES0, so every Mapping="..." in the .sysres FBNetwork is treated
+            // as orphaned).
+            foreach (var r in root.Elements(ns + "Resources").ToList()) r.Remove();
+
+            // Ensure an empty <FBNetwork /> element exists (matches SMC_Rig_Expo
+            // M262/M580/HMI sysdevs — EAE expects this even when there are no
+            // device-level FBs).
+            if (root.Element(ns + "FBNetwork") == null)
+                root.Add(new XElement(ns + "FBNetwork"));
 
             doc.Save(sysdevPath);
         }
