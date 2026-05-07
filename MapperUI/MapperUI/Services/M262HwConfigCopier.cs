@@ -67,9 +67,18 @@ namespace MapperUI.Services
                 result.Warnings.Add($"Baseline HwConfiguration/ folder missing under {baseline}");
             }
 
-            // 2. Find the baseline .hcf and copy it to the matching sysdev folder
-            //    in the target EAE project. The .hcf path under IEC61499/System mirrors
-            //    {sys-guid}/{sysdev-guid}/{sysdev-guid}.hcf.
+            // 2. Build the target .hcf entirely in memory by:
+            //      a) loading the baseline .hcf (BMTM3 backplane + TM3 modules),
+            //      b) patching ResourceId to match the target .sysres,
+            //      c) overwriting channel ParameterValues from IoBindings,
+            //    then writing it atomically with retry-on-lock. Doing all three
+            //    edits in memory and writing once is critical because EAE acquires
+            //    a FileShare.Read lock on the .hcf as soon as the project is open.
+            //    The previous "File.Copy → doc.Save → doc.Save" sequence raced EAE:
+            //    File.Copy succeeded, the first Save sometimes succeeded, but the
+            //    second Save lost the race and threw IOException — leaving the
+            //    .hcf in whatever half-patched state EAE happened to lock at.
+            //    A single atomic write closes the race window.
             var srcHcf = FindBaselineHcf(baseline)
                 ?? throw new FileNotFoundException(
                     $"No .hcf found under {baseline}\\IEC61499\\System\\");
@@ -78,8 +87,19 @@ namespace MapperUI.Services
                     "Cannot resolve target .hcf path — no .sysdev under target IEC61499/System tree.");
 
             Directory.CreateDirectory(Path.GetDirectoryName(dstHcf)!);
-            File.Copy(srcHcf, dstHcf, overwrite: true);
             result.HcfPath = dstHcf;
+
+            // 2a. Load the baseline .hcf into memory.
+            XDocument hcfDoc;
+            try
+            {
+                hcfDoc = XDocument.Load(srcHcf);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to load baseline .hcf '{srcHcf}': {ex.Message}", ex);
+            }
 
             // 2b. Patch the .hcf's ResourceId attribute to match the target's .sysres
             //     ID. The baseline .hcf carries its source project's ResourceId
@@ -90,8 +110,7 @@ namespace MapperUI.Services
             var sysresId = ReadTargetSysresId(eaeRoot);
             if (!string.IsNullOrEmpty(sysresId))
             {
-                int rewritten = PatchHcfResourceId(dstHcf, sysresId);
-                if (rewritten > 0)
+                if (PatchHcfResourceIdInMemory(hcfDoc, sysresId))
                     result.Warnings.Add($"Patched .hcf ResourceId to {sysresId} (was baseline's value)");
             }
             else
@@ -101,35 +120,172 @@ namespace MapperUI.Services
                     "EAE IO Mapping table will be empty until ResourceId matches the resource.");
             }
 
-            // 3. Walk every <ParameterValue Name="DIxx"|"DOxx"> on the TM3DI16_G /
-            //    TM3DQ16T_G modules and rewrite Value with the symbol IoBindings
-            //    resolves for that pin. Pin -> symbol mapping is driven entirely by the
-            //    optional pin_di_athome / pin_di_atwork / pin_do_outputToWork columns
-            //    in the IO bindings xlsx; if those columns are absent the .hcf is
-            //    left at its baseline values.
+            // 2c. Walk every <ParameterValue Name="DIxx"|"DOxx"> on the TM3DI16_G /
+            //     TM3DQ16T_G modules and rewrite Value with the symbol IoBindings
+            //     resolves for that pin. Pin -> symbol mapping is driven entirely by the
+            //     optional pin_di_athome / pin_di_atwork / pin_do_outputToWork columns
+            //     in the IO bindings xlsx; if those columns are absent the .hcf is
+            //     left at its baseline values.
             var bindings = bindingsOverride ?? LoadBindings(cfg);
-            if (bindings == null)
+            int paramsWritten = 0;
+            if (bindings != null)
             {
-                result.Warnings.Add("IO bindings xlsx not found — hcf channel symlinks left as baseline.");
-                return result;
+                // Read the syslay's top-level FB instances so we know which symbols are
+                // actually resolvable. Any pin whose IoBindings PinAssignment points at
+                // a Component that isn't in the syslay gets blanked (Value="''") rather
+                // than left at the baseline string — otherwise EAE shows bare 'athome'
+                // / 'OutputToWork' on those pins (the $${PATH} prefix can't resolve to
+                // a non-existent FB instance) and they collide across modules.
+                var syslayFbNames = ReadSyslayFbNames(cfg);
+                paramsWritten = OverwriteHcfParameterValuesInMemory(
+                    hcfDoc, bindings, syslayFbNames, result);
+                if (paramsWritten == 0 && bindings.PinAssignments.Count == 0)
+                    result.Warnings.Add(
+                        "IO bindings xlsx has no pin_di_athome / pin_di_atwork / " +
+                        "pin_do_outputToWork columns — add them to drive .hcf channel " +
+                        "symlinks. .hcf left at baseline values.");
+            }
+            else
+            {
+                result.Warnings.Add(
+                    "IO bindings xlsx not found — hcf channel symlinks left as baseline.");
             }
 
-            // Read the syslay's top-level FB instances so we know which symbols are
-            // actually resolvable. Any pin whose IoBindings PinAssignment points at
-            // a Component that isn't in the syslay gets blanked (Value="''") rather
-            // than left at the baseline string — otherwise EAE shows bare 'athome'
-            // / 'OutputToWork' on those pins (the $${PATH} prefix can't resolve to
-            // a non-existent FB instance) and they collide across modules.
-            var syslayFbNames = ReadSyslayFbNames(cfg);
-
-            int written = OverwriteHcfParameterValues(dstHcf, bindings, syslayFbNames, result);
-            if (written == 0 && bindings.PinAssignments.Count == 0)
-                result.Warnings.Add(
-                    "IO bindings xlsx has no pin_di_athome / pin_di_atwork / " +
-                    "pin_do_outputToWork columns — add them to drive .hcf channel " +
-                    "symlinks. .hcf left at baseline values.");
+            // 2d. Write the fully-patched .hcf atomically with retry. EAE may hold a
+            //     FileShare.Read lock on the existing file; the retry-with-backoff
+            //     gives EAE a chance to release the lock between attempts.
+            WriteHcfWithRetry(hcfDoc, dstHcf, result);
 
             return result;
+        }
+
+        /// <summary>
+        /// Writes the patched .hcf XDocument to <paramref name="dstHcf"/> with
+        /// retry-on-IOException, since EAE often holds a read lock on the .hcf
+        /// while the project is open. Up to 8 retries with exponential backoff
+        /// (50ms → 6.4s, ~12s total). Surfaces the final failure as a warning so
+        /// the caller can prompt the user to close/reopen the EAE project.
+        /// </summary>
+        static void WriteHcfWithRetry(XDocument doc, string dstHcf, HwConfigCopyResult result)
+        {
+            var settings = new System.Xml.XmlWriterSettings
+            {
+                Indent = true,
+                Encoding = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true),
+            };
+
+            const int MaxAttempts = 8;
+            int delayMs = 50;
+            for (int attempt = 1; attempt <= MaxAttempts; attempt++)
+            {
+                try
+                {
+                    // FileShare.Read so EAE can keep its handle for read while we
+                    // write — File.Open with default sharing was the original race.
+                    using var fs = new FileStream(dstHcf,
+                        FileMode.Create,
+                        FileAccess.Write,
+                        FileShare.Read);
+                    using var w = System.Xml.XmlWriter.Create(fs, settings);
+                    doc.Save(w);
+                    if (attempt > 1)
+                        result.Warnings.Add(
+                            $".hcf write succeeded on attempt {attempt} (EAE briefly held a lock).");
+                    return;
+                }
+                catch (IOException) when (attempt < MaxAttempts)
+                {
+                    System.Threading.Thread.Sleep(delayMs);
+                    delayMs *= 2;
+                }
+                catch (UnauthorizedAccessException) when (attempt < MaxAttempts)
+                {
+                    System.Threading.Thread.Sleep(delayMs);
+                    delayMs *= 2;
+                }
+            }
+
+            // Final attempt — let exception propagate so the caller logs and the
+            // user knows EAE has the file locked. Do NOT silently swallow.
+            using (var fs = new FileStream(dstHcf,
+                FileMode.Create,
+                FileAccess.Write,
+                FileShare.Read))
+            using (var w = System.Xml.XmlWriter.Create(fs, settings))
+            {
+                doc.Save(w);
+            }
+        }
+
+        /// <summary>
+        /// In-memory variant of <see cref="PatchHcfResourceId"/> — mutates
+        /// <paramref name="doc"/> instead of saving to disk. Returns true if the
+        /// ResourceId attribute was actually changed.
+        /// </summary>
+        static bool PatchHcfResourceIdInMemory(XDocument doc, string newResourceId)
+        {
+            if (string.IsNullOrWhiteSpace(newResourceId)) return false;
+            var item = doc.Descendants()
+                .FirstOrDefault(e => e.Name.LocalName == "DeviceHwConfigurationItem");
+            if (item == null) return false;
+            var attr = item.Attribute("ResourceId");
+            if (attr != null && string.Equals(attr.Value, newResourceId, StringComparison.Ordinal)) return false;
+            item.SetAttributeValue("ResourceId", newResourceId);
+            return true;
+        }
+
+        /// <summary>
+        /// In-memory variant of <see cref="OverwriteHcfParameterValues"/> — mutates
+        /// <paramref name="doc"/> instead of saving to disk. Returns the number of
+        /// ParameterValue elements modified.
+        /// </summary>
+        static int OverwriteHcfParameterValuesInMemory(XDocument doc, IoBindings bindings,
+            HashSet<string> syslayFbNames, HwConfigCopyResult result)
+        {
+            var ns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
+            int written = 0;
+            var ioModuleNames = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "TM3DI16_G", "TM3DQ16T_G"
+            };
+            const string EmptyPinValue = "''";
+
+            foreach (var module in doc.Descendants().Where(e =>
+                ioModuleNames.Contains((string?)e.Element(ns + "Name")?.Value ?? string.Empty)))
+            {
+                var pvContainer = module.Element(ns + "ParameterValues");
+                if (pvContainer == null) continue;
+
+                foreach (var pv in pvContainer.Elements(ns + "ParameterValue"))
+                {
+                    var pin = (string?)pv.Attribute("Name");
+                    if (string.IsNullOrEmpty(pin)) continue;
+
+                    string targetValue = EmptyPinValue;
+                    var symbol = bindings.ResolveSymbol(pin);
+                    if (symbol != null)
+                    {
+                        bindings.PinAssignments.TryGetValue(pin, out var pa);
+                        var owner = pa?.ComponentName ?? string.Empty;
+                        if (syslayFbNames.Contains(owner)) targetValue = symbol;
+                    }
+
+                    var valueAttr = pv.Attribute("Value");
+                    var current = valueAttr?.Value ?? string.Empty;
+                    if (string.Equals(current, targetValue, StringComparison.Ordinal)) continue;
+
+                    if (valueAttr == null) pv.SetAttributeValue("Value", targetValue);
+                    else valueAttr.Value = targetValue;
+
+                    if (targetValue != EmptyPinValue)
+                    {
+                        result.ParametersOverwrittenSet.Add(pin);
+                        result.ParametersOverwritten.Add($"{pin}={targetValue}");
+                    }
+                    written++;
+                }
+            }
+            return written;
         }
 
         // --- baseline discovery ---
@@ -330,9 +486,29 @@ namespace MapperUI.Services
                 var rel = Path.GetRelativePath(src, f);
                 var target = Path.Combine(dst, rel);
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-                File.Copy(f, target, overwrite: true);
-                result.FilesCopied++;
+                // Skip files EAE has open (e.g. .hwconfigproj.lock) rather than aborting
+                // the whole copy. Anything we fail to copy gets surfaced as a warning.
+                if (!TryCopyWithRetry(f, target))
+                    result.Warnings.Add($"Could not copy '{rel}' (file locked) — skipped.");
+                else
+                    result.FilesCopied++;
             }
+        }
+
+        static bool TryCopyWithRetry(string src, string dst)
+        {
+            const int MaxAttempts = 5;
+            int delayMs = 50;
+            for (int attempt = 1; attempt <= MaxAttempts; attempt++)
+            {
+                try { File.Copy(src, dst, overwrite: true); return true; }
+                catch (IOException) when (attempt < MaxAttempts)
+                { System.Threading.Thread.Sleep(delayMs); delayMs *= 2; }
+                catch (UnauthorizedAccessException) when (attempt < MaxAttempts)
+                { System.Threading.Thread.Sleep(delayMs); delayMs *= 2; }
+                catch { return false; }
+            }
+            return false;
         }
     }
 
