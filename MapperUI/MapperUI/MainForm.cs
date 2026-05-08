@@ -395,14 +395,6 @@ namespace MapperUI
             {
                 AppendActivity($"[M262][Error] sysdev emit: {ex.Message}");
             }
-            // Topology Equipment JSON re-emit. Without this on every button press,
-            // re-running Test Station 1 / Process FB / Generate All would leave the
-            // Physical Devices canvas tile out of sync with the freshly-emitted
-            // sysdev (e.g. logicalDeviceId mismatch if the sysdev is regenerated
-            // with a new ID, or stale IP after a MapperConfig.M262TargetIp change).
-            // SMC_Rig_Expo passes the M262 dPAC to EAE entirely through this JSON
-            // — sysdev stays minimal — so this is the file that materialises the
-            // device + IP in the System Topology view.
             try
             {
                 if (!string.IsNullOrEmpty(sysdevId))
@@ -667,7 +659,6 @@ namespace MapperUI
                     return;
                 }
 
-                // git reset --hard, then git clean -fd preserving *.lock_sln so EAE stays attached
                 var (resetCode, resetOut) = await Task.Run(() => RunGit(demoRepo, "reset --hard"));
                 AppendActivity($"[Clean] git reset --hard -> exit {resetCode}");
                 if (!string.IsNullOrWhiteSpace(resetOut)) AppendActivity(resetOut.Trim());
