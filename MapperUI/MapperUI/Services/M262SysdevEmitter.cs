@@ -7,21 +7,6 @@ using CodeGen.Configuration;
 
 namespace MapperUI.Services
 {
-    /// <summary>
-    /// Rewrites the EAE project's .sysdev so EcoRT_0 is declared as <c>Type="M262_dPAC"
-    /// Namespace="SE.DPAC"</c> with a single <c>RES0</c> resource of
-    /// <c>Type="EMB_RES_ECO" Namespace="Runtime.Management"</c>, and adds a
-    /// <c>&lt;Parameter Name="IPV4Address" Value="..."/&gt;</c> child driven by
-    /// <see cref="MapperConfig.M262TargetIp"/>.
-    ///
-    /// Then patches the .system file's <c>&lt;Mappings&gt;</c> block so every top-level
-    /// FB instance in the syslay maps to <c>EcoRT_0.RES0</c>. Generalisation walks the
-    /// syslay's <c>SubAppNetwork</c> rather than hardcoding instance names, so a future
-    /// fixture with more (or fewer) FBs needs no Mapper change.
-    ///
-    /// Without this step EAE's deploy targets the workstation runtime, the .hcf is
-    /// ignored, and the controller never receives the application.
-    /// </summary>
     public static class M262SysdevEmitter
     {
         const string LibElNs = "https://www.se.com/LibraryElements";
@@ -37,10 +22,6 @@ namespace MapperUI.Services
                 ?? throw new InvalidOperationException(
                     "Cannot derive EAE project root from MapperConfig.SyslayPath/SyslayPath2.");
 
-            // M262-only emission. The M580 sidecar was tried but EAE's TopologyManager
-            // raises NRE on the Physical Devices canvas without a matching
-            // Topology/Equipment_M580dPAC_1.json — and we don't deploy to the M580 for
-            // tomorrow's Feeder test. Strip it: one sysdev = one device = no canvas crash.
             var sysdevPath = FindSysdev(eaeRoot)
                 ?? throw new FileNotFoundException(
                     $"No .sysdev found under {eaeRoot}\\IEC61499\\System\\");
@@ -56,23 +37,11 @@ namespace MapperUI.Services
                 ? new List<SyslayFb>()
                 : ReadSyslayTopLevelFbs(syslayPath);
 
-            // Mirror each top-level syslay FB into the .sysres FBNetwork with
-            // Mapping="<syslay FB ID>". This is the actual binding mechanism EAE
-            // reads — the .system <Mapping From=.. To=..> elements that we used
-            // to write are ignored by EAE for the canvas-resource binding (they
-            // appear empty in SMC_Rig_Expo's working setup too).
             var sysresPath = FindSysresFor(sysdevPath);
             int sysresMirrorCount = 0;
             if (sysresPath != null && fbInstances.Count > 0)
                 sysresMirrorCount = MirrorFbsIntoSysres(sysresPath, fbInstances);
 
-            // Do NOT touch .system. EAE's binding mechanism is the per-FB
-            // Mapping="<syslay-FB-ID>" attribute inside .sysres's FBNetwork
-            // (handled above by MirrorFbsIntoSysres). Verified by diffing what
-            // EAE writes when the user manually maps an FB to a resource: only
-            // .sysres is mutated. Station1 + SMC_Rig_Expo working M262 references
-            // also have empty .system files. Writing <Mapping> elements to
-            // .system pollutes the file and is ignored by EAE's binding resolver.
             int systemMappingsAdded = 0;
 
             var dfbproj = FindDfbproj(eaeRoot);
@@ -93,22 +62,10 @@ namespace MapperUI.Services
             };
         }
 
-        // --- M262 device-properties XML emission ---
-
-        // Plugin GUID copied verbatim from canonical M262 dPAC Properties.xml file
-        // names in SMC_Rig_Expo + LibCustomization. EAE keys the device's deploy/boot
-        // defaults off this exact filename.
         const string M262DevicePropertiesPluginGuid = "F513CAE3-7194-4086-936C-02912EA0B352";
 
-        /// <summary>
-        /// Writes <c>{sysdev-folder}/F513CAE3-...Properties.xml</c> with the canonical
-        /// M262 deploy/boot defaults: ClearBeforeDeploy=True, AutoStart=True, BootMode=Run.
-        /// Idempotent — only writes when the file is absent or content differs from canonical.
-        /// </summary>
         public static string WriteM262DevicePropertiesXml(string sysdevPath)
         {
-            // Per-device folder convention: alongside the sysdev sit a same-stem folder
-            // and the device-level Properties.xml + .hcf + Simulation.Binding.xml etc.
             var sysdevFolder = Path.Combine(
                 Path.GetDirectoryName(sysdevPath)!,
                 Path.GetFileNameWithoutExtension(sysdevPath));
@@ -140,8 +97,6 @@ namespace MapperUI.Services
 
             return propsPath;
         }
-
-        // --- file discovery ---
 
         public static string? DeriveEaeProjectRoot(MapperConfig cfg)
         {
@@ -180,8 +135,6 @@ namespace MapperUI.Services
             return Directory.EnumerateFiles(iec, "*.dfbproj").FirstOrDefault();
         }
 
-        // --- sysdev rewrite ---
-
         static void RewriteSysdev(string sysdevPath, string deviceName, string deviceType, string targetIp)
         {
             var doc = XDocument.Load(sysdevPath);
@@ -191,19 +144,11 @@ namespace MapperUI.Services
                 ? root.GetDefaultNamespace()
                 : LibElNs;
 
-            // Force device declaration. If the baseline shipped a different Type
-            // (Soft_dPAC) we overwrite it; if attributes are missing we add them.
             SetAttr(root, "Name", deviceName);
             SetAttr(root, "Type", deviceType);
             SetAttr(root, "Namespace", "SE.DPAC");
             SetAttr(root, "Locked", "false");
 
-            // Idempotent IPV4Address Parameter — required for the M262 plugin to
-            // pick up the deploy target. Removing this killed BMTM3 visibility in
-            // EAE's IO Mapping view; SMC_Rig_Expo gets the IP from a sidecar
-            // Properties.xml, but our flow drives it from MapperConfig and the
-            // sysdev <Parameter> is the path EAE accepts when there's no manual
-            // Connect dialog round-trip.
             var ipParam = root.Elements(ns + "Parameter").FirstOrDefault(e =>
                 string.Equals((string?)e.Attribute("Name"), "IPV4Address", StringComparison.Ordinal));
             if (ipParam == null)
@@ -220,10 +165,6 @@ namespace MapperUI.Services
                 SetAttr(ipParam, "Value", targetIp);
             }
 
-            // Ensure exactly one <Resource Name="RES0" Type="EMB_RES_ECO" .../>
-            // inside <Resources>. EAE walks this inline block to enumerate the
-            // resource list under the device — without it the IO Mapping pane
-            // shows nothing under EcoRT_0 (the BMTM3 view goes blank).
             var resources = root.Element(ns + "Resources");
             if (resources == null)
             {
@@ -247,20 +188,6 @@ namespace MapperUI.Services
             doc.Save(sysdevPath);
         }
 
-        // --- .system Mappings (replace block, one Mapping per syslay FB) ---
-
-        /// <summary>
-        /// REPLACES the .system root's <c>&lt;Mappings&gt;</c> block — drops any existing
-        /// element entirely and writes one <c>&lt;Mapping From="APP1.&lt;FBName&gt;"
-        /// To="EcoRT_0.RES0"/&gt;</c> per top-level FB in the current syslay.
-        /// EAE's <c>$${PATH}</c> resolver inside each CAT's SYMLINK FB walks these
-        /// Mappings to figure out which resource owns each application FB; without
-        /// them <c>$${PATH}</c> resolves to empty string and .hcf channel symlinks
-        /// silently bind to nothing.
-        /// Replace (rather than append) is mandatory — stale baseline Mappings
-        /// referencing FBs no longer in the syslay (e.g. Checker / Transfer from
-        /// a previous full-rig run) confuse EAE's binding.
-        /// </summary>
         static int ReplaceMappingsBlock(string systemFilePath, List<string> fbInstances)
         {
             var doc = XDocument.Load(systemFilePath);
@@ -270,8 +197,6 @@ namespace MapperUI.Services
                 ? root.GetDefaultNamespace()
                 : LibElNs;
 
-            // Defensive: remove every existing <Mappings> element in case the baseline
-            // somehow has duplicates.
             foreach (var stale in root.Elements(ns + "Mappings").ToList())
                 stale.Remove();
 
@@ -289,8 +214,6 @@ namespace MapperUI.Services
             return mappings.Elements(ns + "Mapping").Count();
         }
 
-        // --- syslay walk: every top-level FB Name attribute under SubAppNetwork ---
-
         public static List<string> ReadSyslayTopLevelFbNames(string syslayPath)
         {
             return ReadSyslayTopLevelFbs(syslayPath).Select(fb => fb.Name).ToList();
@@ -300,15 +223,6 @@ namespace MapperUI.Services
         public record SyslayFb(string Id, string Name, string Type, string Namespace,
             string X, string Y, List<SyslayFbParameter> Parameters);
 
-        /// <summary>
-        /// Returns each top-level FB in the syslay's SubAppNetwork as a record so the
-        /// sysres mirror can stamp <c>Mapping="&lt;syslay FB ID&gt;"</c> on each entry
-        /// AND copy its Parameter children verbatim. EAE's manual mapping action
-        /// (verified against a manual map of Feeder in Demonstrator) writes both the
-        /// Mapping attribute and copies all Parameters from the syslay FB into the
-        /// sysres FB — without the Parameters the runtime executes against the
-        /// resource-side defaults instead of the syslay's actual values.
-        /// </summary>
         public static List<SyslayFb> ReadSyslayTopLevelFbs(string syslayPath)
         {
             var doc = XDocument.Load(syslayPath);
@@ -335,35 +249,10 @@ namespace MapperUI.Services
                 .ToList();
         }
 
-        /// <summary>
-        /// Mirrors every top-level syslay FB into the sysres's <c>&lt;FBNetwork&gt;</c>
-        /// with a <c>Mapping="&lt;syslay FB ID&gt;"</c> attribute. EAE keys the
-        /// FB-to-resource binding off this attribute (verified against
-        /// SMC_Rig_Expo's working M262 binding — see e.g. Feeder there has
-        /// .syslay ID=51FCB3CF8F9F350B and .sysres entry has Mapping=51FCB3CF8F9F350B).
-        ///
-        /// Idempotent: existing entries with the same Mapping target are left alone.
-        /// Non-mirror FBs already in the sysres (DPAC_FULLINIT, plcStart, etc.) are
-        /// preserved untouched.
-        ///
-        /// The sysres mirror's own ID is derived from the syslay ID via a simple hash
-        /// so re-runs produce stable IDs (no version-control churn). Without the
-        /// resource-side mirror EAE leaves FBs unmapped, $${PATH} resolves to empty,
-        /// and the .hcf channel symlinks come out as bare port names like 'athome'.
-        /// </summary>
-        // Stable IDs for the three system FBs we plant in every .sysres so the
-        // .hcf has something to bind its <ResourceId>.<FBId>.<symbol> path against.
-        // Hard-coded so the .hcf rewriter can use the same constants without
-        // round-tripping through the .sysres again.
-        public const string M262IoFbId        = "E786D6371CF444F9";  // PLC_RW_M262 instance "M262IO"
-        public const string DpacFullInitFbId  = "593A8F4FDEA0A668";  // DPAC_FULLINIT FB1
-        public const string PlcStartFbId      = "3DB1FB0F578E5F1E";  // plcStart FB2
+        public const string M262IoFbId        = "E786D6371CF444F9";
+        public const string DpacFullInitFbId  = "593A8F4FDEA0A668";
+        public const string PlcStartFbId      = "3DB1FB0F578E5F1E";
 
-        // Mapping IDs are XOR-flipped variants — opaque to EAE but distinct from
-        // the FB IDs so EAE doesn't think the FB and its mapping target are the
-        // same instance. SMC_Rig_Expo's M262IO uses Mapping="821ED9470CFCA0D6"
-        // — a different 16-hex string from its FB ID. We just reuse our XOR
-        // helper to produce a deterministic distinct value.
         public static int MirrorFbsIntoSysres(string sysresPath, List<SyslayFb> syslayFbs)
         {
             if (!File.Exists(sysresPath)) return 0;
@@ -381,17 +270,6 @@ namespace MapperUI.Services
                 root.Add(network);
             }
 
-            // Plant the three system FBs SMC_Rig_Expo's working .sysres has — without
-            // them the .hcf has nothing to resolve <ResourceId>.<FBId>.<symbol>
-            // against and EAE drops the entire BMTM3 binding (the bus disappears
-            // from the IO Mapping pane, not just the symbols).
-            //
-            //   M262IO  (PLC_RW_M262)   — exposes the SYMLINKMULTIVAR variables
-            //                              (PusherAtHome, ExtendPusher, Hopper, …)
-            //                              that the .hcf pin Values reference.
-            //   FB1     (DPAC_FULLINIT) — runtime bootstrap, marker that this
-            //                              resource hosts an M262 dPAC runtime.
-            //   FB2     (plcStart)      — startup trigger.
             EnsureSystemFb(network, ns,
                 id: M262IoFbId, name: "M262IO", type: "PLC_RW_M262", nsAttr: "Main",
                 mapping: ComputeMirrorId(M262IoFbId), x: 3760, y: 1020,
@@ -406,11 +284,6 @@ namespace MapperUI.Services
                 loaded: true,
                 parameters: new[] { ("Prio", "10"), ("Delay", "T#1000ms") });
 
-            // Snapshot existing FB entries to avoid duplicate mirrors on re-runs.
-            // Dedup by Mapping target (matches our generated mirror) AND by Name
-            // (matches an EAE-written entry which may have a different Mapping value
-            // assigned by EAE itself when the user clicked Mapping → EcoRT_0.RES0
-            // in the right-click menu).
             var existingMappings = new HashSet<string>(
                 network.Elements(ns + "FB")
                     .Select(e => (string?)e.Attribute("Mapping") ?? string.Empty)
@@ -428,10 +301,6 @@ namespace MapperUI.Services
                 if (string.IsNullOrEmpty(fb.Id)) continue;
                 if (existingMappings.Contains(fb.Id)) continue;
                 if (existingNames.Contains(fb.Name)) continue;
-                // Mirror ID is the syslay ID with the high nibble flipped — stable but
-                // distinct from the syslay's own ID so EAE doesn't see them as the
-                // same instance. Falls back to a Guid-derived 16-hex if the syslay ID
-                // is empty or shorter than 16 chars.
                 var mirrorId = ComputeMirrorId(fb.Id);
                 var fbElement = new XElement(ns + "FB",
                     new XAttribute("ID",        mirrorId),
@@ -442,10 +311,6 @@ namespace MapperUI.Services
                     new XAttribute("x",         fb.X),
                     new XAttribute("y",         fb.Y));
 
-                // Copy every Parameter from the syslay FB — EAE's manual mapping
-                // action (Mapping → EcoRT_0.RES0 in the right-click menu) does this
-                // verbatim. Without these the runtime falls back to type defaults
-                // and the actuator's actual values (toWorkTime=1000ms etc.) get lost.
                 foreach (var p in fb.Parameters)
                 {
                     fbElement.Add(new XElement(ns + "Parameter",
@@ -461,17 +326,11 @@ namespace MapperUI.Services
             return added;
         }
 
-        /// <summary>
-        /// Inserts (or refreshes) one of the three SMC_Rig_Expo-style system FBs
-        /// into the .sysres FBNetwork. Idempotent — keyed on FB ID so re-running
-        /// the emitter doesn't duplicate the entry.
-        /// </summary>
         static void EnsureSystemFb(XElement network, XNamespace ns,
             string id, string name, string type, string nsAttr,
             string? mapping, int x, int y, bool loaded,
             (string Name, string Value)[]? parameters = null)
         {
-            // Remove any prior entry for this exact ID so attribute updates land.
             foreach (var stale in network.Elements(ns + "FB")
                 .Where(e => string.Equals((string?)e.Attribute("ID"), id, StringComparison.OrdinalIgnoreCase))
                 .ToList())
@@ -502,7 +361,6 @@ namespace MapperUI.Services
             network.Add(fb);
         }
 
-        // Locates the .sysres file paired with the sysdev (same per-device folder).
         public static string? FindSysresFor(string sysdevPath)
         {
             var sysdevFolder = Path.Combine(
@@ -517,20 +375,15 @@ namespace MapperUI.Services
         {
             if (syslayId.Length >= 16)
             {
-                // XOR the first character's hex value with 8 to flip the high bit —
-                // stable, deterministic, distinct from the input.
                 var first = syslayId[0];
                 int v = Convert.ToInt32(first.ToString(), 16);
                 var flipped = (v ^ 0x8).ToString("X");
                 return flipped + syslayId.Substring(1, 15);
             }
-            // Fallback: hash the syslay ID into 16 hex chars.
             using var sha = System.Security.Cryptography.SHA256.Create();
             var bytes = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes("mirror:" + syslayId));
             return Convert.ToHexString(bytes).Substring(0, 16);
         }
-
-        // --- .system Mappings patch (idempotent, generalised) ---
 
         static void SetAttr(XElement el, string name, string value)
         {
