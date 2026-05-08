@@ -8,33 +8,10 @@ using CodeGen.Translation;
 
 namespace MapperUI.Services
 {
-    /// <summary>
-    /// Materialises the M262 hardware-configuration .hcf inside the EAE project.
-    ///
-    /// The slot/module topology — BMTM3 → TM262L01MDESE8T → TM3DI16_G → TM3DQ16T_G —
-    /// is fixed by the physical SMC rig wiring and cannot be synthesised from
-    /// Control.xml; we copy it verbatim from <see cref="MapperConfig.M262HardwareConfigBaselinePath"/>
-    /// so all ItemProperties, IDs, and channel filters survive untouched. After the
-    /// copy we open the .hcf in-place and overwrite only the channel-symlink
-    /// ParameterValue strings (DI00, DI01, DO00) with values derived from the
-    /// IoBindings xlsx, so the controller wires its physical pins to the correct
-    /// resource symlinks.
-    ///
-    /// Symlink format is <c>'RES0.{FB-instance-name}.{tag}'</c> with the FB instance
-    /// name preserved from the syslay (case-sensitive — the .hcf strings reference
-    /// the exact Name attribute on the syslay FB so EAE's symlink resolver can match).
-    /// </summary>
     public static class M262HwConfigCopier
     {
         public static HwConfigCopyResult Copy(MapperConfig cfg) => Copy(cfg, bindingsOverride: null);
 
-        /// <summary>
-        /// Test-injection overload: passes a pre-built <see cref="IoBindings"/> (typically
-        /// with a hand-populated <see cref="IoBindings.PinAssignments"/> dict) so the
-        /// copier can be exercised without an xlsx on disk. When
-        /// <paramref name="bindingsOverride"/> is null this falls back to loading
-        /// <see cref="MapperConfig.IoBindingsPath"/>.
-        /// </summary>
         public static HwConfigCopyResult Copy(MapperConfig cfg, IoBindings? bindingsOverride)
         {
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
@@ -54,8 +31,6 @@ namespace MapperUI.Services
                 ?? throw new InvalidOperationException(
                     "Cannot derive EAE project root from MapperConfig.SyslayPath/SyslayPath2.");
 
-            // 1. Verbatim copy of the baseline HwConfiguration/ folder (carries the
-            //    M262 backplane definition, pinned versions, project metadata).
             var srcHwDir = Path.Combine(baseline, "HwConfiguration");
             if (Directory.Exists(srcHwDir))
             {
@@ -67,18 +42,6 @@ namespace MapperUI.Services
                 result.Warnings.Add($"Baseline HwConfiguration/ folder missing under {baseline}");
             }
 
-            // 2. Build the target .hcf entirely in memory by:
-            //      a) loading the baseline .hcf (BMTM3 backplane + TM3 modules),
-            //      b) patching ResourceId to match the target .sysres,
-            //      c) overwriting channel ParameterValues from IoBindings,
-            //    then writing it atomically with retry-on-lock. Doing all three
-            //    edits in memory and writing once is critical because EAE acquires
-            //    a FileShare.Read lock on the .hcf as soon as the project is open.
-            //    The previous "File.Copy → doc.Save → doc.Save" sequence raced EAE:
-            //    File.Copy succeeded, the first Save sometimes succeeded, but the
-            //    second Save lost the race and threw IOException — leaving the
-            //    .hcf in whatever half-patched state EAE happened to lock at.
-            //    A single atomic write closes the race window.
             var srcHcf = FindBaselineHcf(baseline)
                 ?? throw new FileNotFoundException(
                     $"No .hcf found under {baseline}\\IEC61499\\System\\");
@@ -89,7 +52,6 @@ namespace MapperUI.Services
             Directory.CreateDirectory(Path.GetDirectoryName(dstHcf)!);
             result.HcfPath = dstHcf;
 
-            // 2a. Load the baseline .hcf into memory.
             XDocument hcfDoc;
             try
             {
@@ -101,12 +63,6 @@ namespace MapperUI.Services
                     $"Failed to load baseline .hcf '{srcHcf}': {ex.Message}", ex);
             }
 
-            // 2b. Patch the .hcf's ResourceId attribute to match the target's .sysres
-            //     ID. The baseline .hcf carries its source project's ResourceId
-            //     (54EB0B3D5D16444D for SMC_Rig_Expo) which won't match Demonstrator's
-            //     .sysres ID (00000000-0000-0000-0000-000000000000). Without this
-            //     patch EAE silently fails to bind .hcf to .sysres and the IO
-            //     Mapping table stays empty even though both files exist on disk.
             var sysresId = ReadTargetSysresId(eaeRoot);
             if (!string.IsNullOrEmpty(sysresId))
             {
@@ -120,22 +76,10 @@ namespace MapperUI.Services
                     "EAE IO Mapping table will be empty until ResourceId matches the resource.");
             }
 
-            // 2c. Walk every <ParameterValue Name="DIxx"|"DOxx"> on the TM3DI16_G /
-            //     TM3DQ16T_G modules and rewrite Value with the symbol IoBindings
-            //     resolves for that pin. Pin -> symbol mapping is driven entirely by the
-            //     optional pin_di_athome / pin_di_atwork / pin_do_outputToWork columns
-            //     in the IO bindings xlsx; if those columns are absent the .hcf is
-            //     left at its baseline values.
             var bindings = bindingsOverride ?? LoadBindings(cfg);
             int paramsWritten = 0;
             if (bindings != null)
             {
-                // Read the syslay's top-level FB instances so we know which symbols are
-                // actually resolvable. Any pin whose IoBindings PinAssignment points at
-                // a Component that isn't in the syslay gets blanked (Value="''") rather
-                // than left at the baseline string — otherwise EAE shows bare 'athome'
-                // / 'OutputToWork' on those pins (the $${PATH} prefix can't resolve to
-                // a non-existent FB instance) and they collide across modules.
                 var syslayFbNames = ReadSyslayFbNames(cfg);
                 paramsWritten = OverwriteHcfParameterValuesInMemory(
                     hcfDoc, bindings, syslayFbNames, result,
@@ -152,21 +96,11 @@ namespace MapperUI.Services
                     "IO bindings xlsx not found — hcf channel symlinks left as baseline.");
             }
 
-            // 2d. Write the fully-patched .hcf atomically with retry. EAE may hold a
-            //     FileShare.Read lock on the existing file; the retry-with-backoff
-            //     gives EAE a chance to release the lock between attempts.
             WriteHcfWithRetry(hcfDoc, dstHcf, result);
 
             return result;
         }
 
-        /// <summary>
-        /// Writes the patched .hcf XDocument to <paramref name="dstHcf"/> with
-        /// retry-on-IOException, since EAE often holds a read lock on the .hcf
-        /// while the project is open. Up to 8 retries with exponential backoff
-        /// (50ms → 6.4s, ~12s total). Surfaces the final failure as a warning so
-        /// the caller can prompt the user to close/reopen the EAE project.
-        /// </summary>
         static void WriteHcfWithRetry(XDocument doc, string dstHcf, HwConfigCopyResult result)
         {
             var settings = new System.Xml.XmlWriterSettings
@@ -181,8 +115,6 @@ namespace MapperUI.Services
             {
                 try
                 {
-                    // FileShare.Read so EAE can keep its handle for read while we
-                    // write — File.Open with default sharing was the original race.
                     using var fs = new FileStream(dstHcf,
                         FileMode.Create,
                         FileAccess.Write,
@@ -206,8 +138,6 @@ namespace MapperUI.Services
                 }
             }
 
-            // Final attempt — let exception propagate so the caller logs and the
-            // user knows EAE has the file locked. Do NOT silently swallow.
             using (var fs = new FileStream(dstHcf,
                 FileMode.Create,
                 FileAccess.Write,
@@ -218,11 +148,6 @@ namespace MapperUI.Services
             }
         }
 
-        /// <summary>
-        /// In-memory variant of <see cref="PatchHcfResourceId"/> — mutates
-        /// <paramref name="doc"/> instead of saving to disk. Returns true if the
-        /// ResourceId attribute was actually changed.
-        /// </summary>
         static bool PatchHcfResourceIdInMemory(XDocument doc, string newResourceId)
         {
             if (string.IsNullOrWhiteSpace(newResourceId)) return false;
@@ -235,19 +160,6 @@ namespace MapperUI.Services
             return true;
         }
 
-        /// <summary>
-        /// (Component, Port) -> PLC_RW_M262 variable name. Mirrors the SMC_Rig_Expo
-        /// physical layout: the BMTM3 pins on the rig are wired to specific
-        /// SYMLINKMULTIVAR variables declared inside PLC_RW_M262.fbt — one variable
-        /// per actuator/sensor port, with hardcoded names like PusherAtHome and
-        /// ExtendPusher. The IoBindings xlsx says e.g. (Feeder, athome); the
-        /// PLC_RW_M262 type calls that same wire "PusherAtHome". This dict is the
-        /// translation layer, applied when the .hcf rewriter wants the
-        /// SMC_Rig_Expo-style ID-based pin Value.
-        ///
-        /// Keys are case-insensitive. Both component and port match. Ports use
-        /// the IoBindings convention (athome/atwork/OutputToWork/OutputToHome).
-        /// </summary>
         static readonly Dictionary<(string Component, string Port), string> M262IoVariableMap =
             new(new ComponentPortComparer())
             {
@@ -261,7 +173,7 @@ namespace MapperUI.Services
                 [("Transfer",      "atwork")]       = "TransferAtWork",
                 [("Transfer",      "OutputToWork")] = "ExtendTransfer",
                 [("Rejector",      "OutputToWork")] = "ExtendRejector",
-                [("Rejecter",      "OutputToWork")] = "ExtendRejector", // xlsx spelling
+                [("Rejecter",      "OutputToWork")] = "ExtendRejector",
                 [("PartInHopper",  "Input")]        = "Hopper",
                 [("PartAtChecker", "Input")]        = "PartAtChecker",
                 [("PartAtAssembly","Input")]        = "PartAtAssembly",
@@ -279,19 +191,6 @@ namespace MapperUI.Services
                     StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Port));
         }
 
-        /// <summary>
-        /// In-memory variant of <see cref="OverwriteHcfParameterValues"/> — mutates
-        /// <paramref name="doc"/> instead of saving to disk. Emits .hcf pin Values
-        /// in SMC_Rig_Expo's ID-based format <c>&lt;ResourceId&gt;.&lt;M262IO-FB-ID&gt;.&lt;PLC_RW_M262-Variable&gt;</c>.
-        /// EAE resolves this by:
-        ///   1. matching ResourceId to the per-device .sysres file,
-        ///   2. looking up the FB by ID inside that .sysres,
-        ///   3. matching the variable name against the FB type's
-        ///      SYMLINKMULTIVAR declarations (PLC_RW_M262 has them).
-        /// Without M262IO present in the .sysres (planted by
-        /// <see cref="M262SysdevEmitter.MirrorFbsIntoSysres"/>) the entire BMTM3
-        /// binding fails and the IO Mapping pane shows nothing.
-        /// </summary>
         static int OverwriteHcfParameterValuesInMemory(XDocument doc, IoBindings bindings,
             HashSet<string> syslayFbNames, HwConfigCopyResult result, string resourceId)
         {
@@ -302,14 +201,8 @@ namespace MapperUI.Services
                 "TM3DI16_G", "TM3DQ16T_G"
             };
 
-            // Empty Value string (no quotes) — matches SMC_Rig_Expo's format for
-            // unbound pins. The previous "''" placeholder was the symbolic-format
-            // marker; ID-based format uses bare empty strings.
             const string EmptyPinValue = "";
 
-            // The M262IO FB ID is the constant planted by M262SysdevEmitter. The
-            // .hcf and the .sysres MUST agree on this exact value, otherwise
-            // EAE's resolver treats every pin Value as orphaned.
             string m262IoFbId = M262SysdevEmitter.M262IoFbId;
 
             foreach (var module in doc.Descendants().Where(e =>
@@ -326,10 +219,6 @@ namespace MapperUI.Services
                     string targetValue = EmptyPinValue;
                     if (bindings.PinAssignments.TryGetValue(pin, out var pa))
                     {
-                        // Only emit a non-empty value when the pin's owner is in
-                        // the running syslay AND we have a PLC_RW_M262 variable
-                        // mapped for (Component, Port). Otherwise leave blank so
-                        // EAE doesn't surface stale red bindings.
                         if (syslayFbNames.Contains(pa.ComponentName) &&
                             M262IoVariableMap.TryGetValue((pa.ComponentName, pa.Port), out var varName))
                         {
@@ -355,8 +244,6 @@ namespace MapperUI.Services
             return written;
         }
 
-        // --- baseline discovery ---
-
         public static string? FindBaselineHcf(string baselineRoot)
         {
             var systemDir = Path.Combine(baselineRoot, "IEC61499", "System");
@@ -366,7 +253,6 @@ namespace MapperUI.Services
                     .FirstOrDefault();
                 if (hit != null) return hit;
             }
-            // Fallback: search the whole baseline root.
             return Directory.EnumerateFiles(baselineRoot, "*.hcf", SearchOption.AllDirectories)
                 .FirstOrDefault();
         }
@@ -380,17 +266,9 @@ namespace MapperUI.Services
             if (sysdev == null) return null;
             var sysdevDir = Path.GetDirectoryName(sysdev)!;
             var stem = Path.GetFileNameWithoutExtension(sysdev);
-            // Convention: {sys-guid}/{sysdev-guid}.sysdev paired with
-            //             {sys-guid}/{sysdev-guid}/{sysdev-guid}.hcf
             return Path.Combine(sysdevDir, stem, stem + ".hcf");
         }
 
-        /// <summary>
-        /// Reads the target sysdev's per-device folder for a .sysres file and returns
-        /// its root Resource ID attribute. The .hcf's ResourceId attribute must equal
-        /// this string for EAE to bind the hardware config to the resource. Returns
-        /// empty if no .sysres found.
-        /// </summary>
         public static string ReadTargetSysresId(string eaeRoot)
         {
             var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
@@ -406,14 +284,6 @@ namespace MapperUI.Services
             catch { return string.Empty; }
         }
 
-        /// <summary>
-        /// Rewrites the .hcf's <c>DeviceHwConfigurationItem ResourceId="..."</c>
-        /// attribute to <paramref name="newResourceId"/>. Idempotent — returns 0 if
-        /// the attribute already matches. Without this rewrite the .hcf points at
-        /// the source baseline's ResourceId (e.g. SMC_Rig_Expo's
-        /// <c>54EB0B3D5D16444D</c>) which doesn't exist in the target project, so
-        /// EAE silently drops the binding and the IO Mapping table stays empty.
-        /// </summary>
         public static int PatchHcfResourceId(string hcfPath, string newResourceId)
         {
             if (!File.Exists(hcfPath) || string.IsNullOrWhiteSpace(newResourceId)) return 0;
@@ -428,8 +298,6 @@ namespace MapperUI.Services
             return 1;
         }
 
-        // --- IoBindings ---
-
         static IoBindings? LoadBindings(MapperConfig cfg)
         {
             var path = cfg.IoBindingsPath;
@@ -440,16 +308,6 @@ namespace MapperUI.Services
             return IoBindingsLoader.LoadBindings(path);
         }
 
-        // --- .hcf rewrite ---
-
-        /// <summary>
-        /// Walks the TM3DI16_G / TM3DQ16T_G modules in the copied .hcf, looks up each
-        /// pin's Value via <see cref="IoBindings.ResolveSymbol"/>, and rewrites Value
-        /// when the pin is bound. Element-name-agnostic on the channel container
-        /// (matches both <c>&lt;ParameterValue&gt;</c> and other shapes) but scoped
-        /// to channels under those two specific module names so unrelated pins on
-        /// the BMTM3 / TM262L01MDESE8T don't get touched.
-        /// </summary>
         static int OverwriteHcfParameterValues(string hcfPath, IoBindings bindings,
             HashSet<string> syslayFbNames, HwConfigCopyResult result)
         {
@@ -457,17 +315,11 @@ namespace MapperUI.Services
             var ns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
             int written = 0;
 
-            // The two IO modules whose pin channels carry RES0 symlinks. The
-            // BMTM3 / TM262L01MDESE8T modules don't get touched.
             var ioModuleNames = new HashSet<string>(StringComparer.Ordinal)
             {
                 "TM3DI16_G", "TM3DQ16T_G"
             };
 
-            // Empty value placeholder for pins not bound to any in-syslay FB. Two
-            // single quotes (the EAE schema's "no symlink" marker) — different from
-            // a missing Value attribute, which EAE treats as "leave at deploy time
-            // default" and would not clear a baseline value.
             const string EmptyPinValue = "''";
 
             foreach (var module in doc.Descendants().Where(e =>
@@ -485,9 +337,6 @@ namespace MapperUI.Services
                     var symbol = bindings.ResolveSymbol(pin);
                     if (symbol != null)
                     {
-                        // Confirm the pin's owning Component is actually in the syslay.
-                        // If it isn't, the symbol's $${PATH} can't resolve so EAE shows
-                        // the bare suffix and we get cross-actuator collisions.
                         bindings.PinAssignments.TryGetValue(pin, out var pa);
                         var owner = pa?.ComponentName ?? string.Empty;
                         if (syslayFbNames.Contains(owner)) targetValue = symbol;
@@ -515,11 +364,6 @@ namespace MapperUI.Services
             return written;
         }
 
-        /// <summary>
-        /// Reads the syslay's top-level FB Names so the .hcf rewrite can blank any
-        /// pin whose owning Component isn't in the running syslay (avoids cross-
-        /// actuator collisions like DI03='athome' from a Checker that doesn't exist).
-        /// </summary>
         static HashSet<string> ReadSyslayFbNames(MapperConfig cfg)
         {
             var set = new HashSet<string>(StringComparer.Ordinal);
@@ -539,11 +383,9 @@ namespace MapperUI.Services
                     if (!string.IsNullOrWhiteSpace(name)) set.Add(name);
                 }
             }
-            catch { /* fall through with empty set — every pin gets blanked */ }
+            catch { }
             return set;
         }
-
-        // --- file copy helper ---
 
         static void CopyDirRecursive(string src, string dst, HwConfigCopyResult result)
         {
@@ -553,8 +395,6 @@ namespace MapperUI.Services
                 var rel = Path.GetRelativePath(src, f);
                 var target = Path.Combine(dst, rel);
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-                // Skip files EAE has open (e.g. .hwconfigproj.lock) rather than aborting
-                // the whole copy. Anything we fail to copy gets surfaced as a warning.
                 if (!TryCopyWithRetry(f, target))
                     result.Warnings.Add($"Could not copy '{rel}' (file locked) — skipped.");
                 else
