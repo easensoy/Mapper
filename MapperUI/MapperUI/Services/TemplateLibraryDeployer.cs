@@ -32,11 +32,6 @@ namespace MapperUI.Services
         static readonly string[] UniversalCats = new[]
         {
             "Five_State_Actuator_CAT", "Sensor_Bool_CAT", "Process1_Generic",
-            // PLC_RW_M262 — the SMC_Rig_Expo IO bridge type. Holds SYMLINKMULTIVAR
-            // declarations (PusherAtHome, Hopper, ExtendPusher, …) that the .hcf
-            // pin Values reference via <ResourceId>.<FBId>.<VariableName>. Without
-            // this CAT deployed + an instance in .sysres, every .hcf pin resolves
-            // red and BMTM3 drops out of EAE's IO Mapping pane entirely.
             "PLC_RW_M262"
         };
 
@@ -65,10 +60,6 @@ namespace MapperUI.Services
             "Area_CAT", "Station_CAT"
         };
 
-        // .dt files that the universal architecture references but no template zip ships.
-        // Sourced from `Template Library/DataType/` and copied to `<eaeProject>/IEC61499/DataType/`.
-        // Without these the compiler reports ERR_NO_SUCH_TYPE for Component_State on every FB
-        // (ProcessStateBusHandler, updateComponentState, stateRptCmdAdptr, ProcessRuntime_Generic_v1).
         static readonly string[] UniversalDataTypes = new[]
         {
             "Component_State",
@@ -109,8 +100,6 @@ namespace MapperUI.Services
 
             VerifyArraySizeConsistency(eaeProjectDir, result);
 
-            // M262 deployment target. The Soft-dPAC topology path was deleted —
-            // EcoRT_0 is now an embedded M262_dPAC device, not a Workstation runtime.
             string sysdevId = string.Empty;
             try
             {
@@ -126,17 +115,6 @@ namespace MapperUI.Services
                 result.Warnings.Add($"M262 sysdev emit failed: {ex.Message}");
             }
 
-            // Topology JSON emission RE-ENABLED. The previous "doesn't belong to
-            // the active domain" failure was caused by our solutionData carrying a
-            // freshly-minted SolutionId that had no trust_<id> cert in the Windows
-            // cert store. M262TopologyEmitter now writes its solutionData under
-            // SMC_Rig_Expo's SolutionId (ec877ac8-…) — the user's machine already
-            // has the matching trust cert chain from opening SMC_Rig_Expo, so EAE
-            // accepts the security domain and renders the M262 dPAC tile on the
-            // Physical Devices canvas with the IP from MapperConfig. This is the
-            // mechanism SMC_Rig_Expo uses to pass the device + IP to EAE: the
-            // sysdev stays minimal, the Topology Equipment JSON carries
-            // logicalDeviceId → sysdev UUID + interfaces[].endpoints[].ipAddress.
             try
             {
                 var topo = M262TopologyEmitter.Emit(cfg, sysdevId);
@@ -169,10 +147,6 @@ namespace MapperUI.Services
             return result;
         }
 
-        /// <summary>
-        /// Copies every file in `Template Library/DataType/` into the EAE project's
-        /// `IEC61499/DataType/` folder. Idempotent: skips files that already exist.
-        /// </summary>
         static void DeployDataTypes(string libPath, string eaeProjectDir, DeployResult result)
         {
             var srcDir = Path.Combine(libPath, "DataType");
@@ -204,15 +178,6 @@ namespace MapperUI.Services
             }
         }
 
-        /// <summary>
-        /// Patches known-bad ArraySize declarations in deployed .fbt files.
-        /// The canonical ProcessRuntime_Generic_v1.fbt in the Jyotsna baseline declares
-        /// state_table with ArraySize="1" but the connected ProcessStateBusHandler
-        /// declares ArraySize="20", which causes EAE's compiler to reject the connection
-        /// with "Cannot convert from type 'ARRAY[0..19] OF DINT' to type 'ARRAY[0..0] OF DINT'".
-        /// Per spec we must NOT modify the canonical baseline, so we rewrite the deployed
-        /// copy in place. Idempotent — safe to run after every deployment.
-        /// </summary>
         static void PatchKnownArraySizeBugs(string eaeProjectDir, DeployResult result)
         {
             var fbtPath = Path.Combine(eaeProjectDir, "IEC61499", "ProcessRuntime_Generic_v1.fbt");
@@ -224,7 +189,7 @@ namespace MapperUI.Services
             const string newDecl =
                 "<VarDeclaration Name=\"state_table\" Type=\"Component_State\" Namespace=\"Main\" ArraySize=\"20\" />";
 
-            if (text.Contains(newDecl)) return; // already patched, idempotent
+            if (text.Contains(newDecl)) return;
             if (!text.Contains(oldDecl))
             {
                 result.Warnings.Add(
@@ -237,14 +202,6 @@ namespace MapperUI.Services
             MapperLogger.Info("[Deploy] Patched ProcessRuntime_Generic_v1.state_table ArraySize 1 -> 20");
         }
 
-        /// <summary>
-        /// Walks every .fbt under IEC61499 once and, for each VarDeclaration that names a
-        /// vector that is also referenced by some other FB's connection, records its
-        /// ArraySize keyed by FB type + var name. Any disagreement between source and
-        /// destination of a Connection is reported as a warning.
-        /// This is a verification pass only — it does not auto-fix beyond the targeted
-        /// PatchKnownArraySizeBugs above. Helps catch regressions before EAE compile.
-        /// </summary>
         static void VerifyArraySizeConsistency(string eaeProjectDir, DeployResult result)
         {
             try
@@ -252,7 +209,6 @@ namespace MapperUI.Services
                 var iec = Path.Combine(eaeProjectDir, "IEC61499");
                 if (!Directory.Exists(iec)) return;
 
-                // (FB type, var name) -> ArraySize text
                 var sizes = new Dictionary<(string, string), string>(
                     EqualityComparer<(string, string)>.Default);
 
@@ -271,13 +227,11 @@ namespace MapperUI.Services
                     }
                 }
 
-                // For each composite, walk Connections and compare ArraySize on each side.
                 foreach (var fbt in Directory.EnumerateFiles(iec, "*.fbt", SearchOption.AllDirectories))
                 {
                     System.Xml.Linq.XDocument doc;
                     try { doc = System.Xml.Linq.XDocument.Load(fbt); }
                     catch { continue; }
-                    // Build local map of (instanceName -> fbType) for resolving Connection ports.
                     var instances = doc.Descendants()
                         .Where(e => e.Name.LocalName == "FB")
                         .ToDictionary(
@@ -570,11 +524,6 @@ namespace MapperUI.Services
                 result.FilesExtracted++;
                 MapperLogger.Info($"[Deploy] Generated {cat}.cfg");
 
-                // EAE expects {cat}\{cat}_HMI.meta.xml to exist (registered in .dfbproj as a
-                // <DependentUpon> of the HMI .fbt). The template zips don't ship one — EAE
-                // creates and writes it lazily — so we drop a zero-byte placeholder so EAE
-                // stops complaining "Missing Project Files" on first load. It will get
-                // populated by EAE itself the first time the HMI is edited.
                 var metaPath = Path.Combine(catDir, $"{hmi}.meta.xml");
                 if (!File.Exists(metaPath))
                 {
@@ -608,29 +557,16 @@ namespace MapperUI.Services
             foreach (var dt in result.DataTypesDeployed)
                 DfbprojRegistrar.RegisterDataType(dfbproj, $@"DataType\{dt}.dt");
 
-            // M262 boot-scaffold types: DPAC_FULLINIT lives in SE.DPAC, plcStart in
-            // SE.AppBase. The syslay/sysres reference them by Type+Namespace; without
-            // a matching <Reference> entry in the dfbproj the compile fails with
-            // ERR_NO_SUCH_TYPE. SE.IoTMx covers BMTM3/TM262L01MDESE8T/TM3DI16_G/
-            // TM3DQ16T_G — pin the same versions used by the validated baseline.
             DfbprojRegistrar.RegisterReference(dfbproj, "SE.DPAC",   "24.1.0.33");
             DfbprojRegistrar.RegisterReference(dfbproj, "SE.AppBase", "24.1.0.21");
             DfbprojRegistrar.RegisterReference(dfbproj, "SE.IoTMx",   "24.1.0.19");
 
-            // Safety net: any .dt/.adp/.fbt that ended up on disk but isn't in the
-            // explicit lists above (e.g. dropped manually, or from a future template
-            // bundle) gets picked up here.
             DfbprojRegistrar.SweepIec61499Folder(dfbproj, iec61499Dir);
 
             File.SetLastWriteTime(dfbproj, DateTime.Now);
             MapperLogger.Info($"[Deploy] dfbproj updated: {Path.GetFileName(dfbproj)}");
         }
 
-        /// <summary>
-        /// Returns the ID attribute on the sysdev's root Device element. Used so the
-        /// topology emitter can wire <c>logicalDeviceId</c> to the actual sysdev's GUID
-        /// instead of guessing a hardcoded one.
-        /// </summary>
         static string ReadSysdevId(string sysdevPath)
         {
             if (string.IsNullOrEmpty(sysdevPath) || !File.Exists(sysdevPath)) return string.Empty;
