@@ -7,53 +7,12 @@ using CodeGen.Configuration;
 
 namespace MapperUI.Services
 {
-    /// <summary>
-    /// Materialises the EAE Physical Devices canvas for an M262_dPAC controller by
-    /// writing the Topology folder JSONs that EAE's TopologyManager renders into the
-    /// canvas tile and IP banner. Without these the sysdev exists in the Solution
-    /// Explorer Devices tree but the Physical Devices canvas crashes (NRE) when
-    /// trying to render the controller — and the operator can't see / set the IP
-    /// without dragging a Workstation onto the canvas manually.
-    ///
-    /// Files written, all relative to the EAE project root:
-    ///   Topology\Equipment_M262dPAC_1.json    M262 catalog ref + NIC + IP +
-    ///                                          RuntimeDEO bound to the EcoRT_0 sysdev
-    ///   Topology\BroadcastDomain_{LogicalNetworkName}.json
-    ///                                          Subnet/mask/gateway. Equipment endpoint
-    ///                                          references this via the `domain` UUID
-    ///   Topology\TopologyManager.topologyproj  &lt;None Include&gt; entry per JSON
-    ///
-    /// Schema reverse-engineered from
-    ///   /c/Station1 - Sensor and FiveStateActuator with symbolic links_*.sln/Topology/
-    /// (also cross-checked against /c/SMC_Rig_Expo_*.sln/Topology/Equipment_M262dPAC_1.json).
-    /// Stable UUIDs derived from a fixed seed so re-runs are idempotent and dfbproj
-    /// entries don't churn.
-    /// </summary>
     public static class M262TopologyEmitter
     {
-        // Stable UUIDs — fixed so re-running the deployer overwrites the same
-        // equipment instead of creating duplicates each time.
-        // Three SEPARATE concepts, all UUIDs:
-        //   DomainTag         — security domain (matches a .solutionData SolutionId).
-        //                       EAE filters runtime binding candidates by checking
-        //                       this resolves to a known security domain on disk.
-        //   BroadcastDomain   — network (Topology/BroadcastDomain_*.json UUID).
-        //                       Equipment endpoints reference it via `domain` field.
-        //   M262Uuid/RuntimeUuid — equipment + runtime instance IDs (just identity).
-        //
-        // The SolutionId / DomainTag MUST equal the Demonstrator project's own
-        // Guid (read at runtime from General/ProjectInfo.xml — Guid attribute,
-        // lowercased without braces) for EAE to recognise our solutionData as the
-        // active security domain. Using SMC_Rig_Expo's UUID (or any other foreign
-        // UUID) makes EAE throw "The modified equipment doesn't belong to the
-        // active domain" the moment the user touches the M262 tile.
         const string FallbackSolutionUuid      = "00000000-0000-0000-0000-000000000000";
         const string DefaultM262Uuid           = "11111111-2222-3333-4444-000000000010";
         const string DefaultDomainUuid         = "11111111-2222-3333-4444-000000000020";
         const string DefaultRuntimeUuid        = "11111111-2222-3333-4444-000000000030";
-        // typeId for the RuntimeDEO component — copied verbatim from the Station1
-        // reference's Equipment_M262dPAC_1.json. EAE keys the runtime renderer off
-        // this id; changing it produces a "no runtime" marker on the canvas tile.
         const string RuntimeDeoTypeId          = "b0723d05-50bb-4c15-94a4-d8b5981bcb56";
 
         public static TopologyEmitResult Emit(MapperConfig cfg, string sysdevId)
@@ -68,10 +27,6 @@ namespace MapperUI.Services
                 return result;
             }
 
-            // Resolve the project's own security-domain Guid from
-            // General/ProjectInfo.xml. Falls back to FallbackSolutionUuid only when
-            // ProjectInfo.xml is missing or malformed (which would itself break
-            // EAE — so the warning is informational, not actionable).
             string solutionId = ReadProjectGuid(eaeRoot)
                 ?? FallbackSolutionUuid;
             if (solutionId == FallbackSolutionUuid)
@@ -82,10 +37,6 @@ namespace MapperUI.Services
             var topologyDir = Path.Combine(eaeRoot, "Topology");
             Directory.CreateDirectory(topologyDir);
 
-            // Scrub any leftover .solutionData files from prior emit runs that used
-            // a foreign SolutionId (e.g. SMC_Rig_Expo's ec877ac8-…). Multiple
-            // .solutionData files in Topology/ make EAE pick the wrong one as the
-            // active domain.
             int scrubbed = 0;
             foreach (var stale in Directory.EnumerateFiles(topologyDir, "*.solutionData"))
             {
@@ -130,20 +81,6 @@ namespace MapperUI.Services
             return result;
         }
 
-        // --- Equipment JSON ---
-
-        // Hand-rolled string instead of System.Text.Json because EAE's TopologyManager
-        // is sensitive to property order and JSON formatting (indentation, spacing).
-        // Letting JsonSerializer reorder keys would diff against EAE's own writer
-        // and cause noise the next time the user saves the project.
-        /// <summary>
-        /// Reads the project's security-domain Guid from
-        /// <c>{eaeRoot}/General/ProjectInfo.xml</c> — the <c>Guid</c> attribute on
-        /// the <c>&lt;ProjectInfo&gt;</c> root, lowercased, without braces. EAE
-        /// uses this as the authoritative active domain id; any foreign UUID in
-        /// our solutionData/Equipment DomainTag triggers "doesn't belong to the
-        /// active domain" the moment the user touches the topology.
-        /// </summary>
         static string? ReadProjectGuid(string eaeRoot)
         {
             var path = Path.Combine(eaeRoot, "General", "ProjectInfo.xml");
@@ -269,32 +206,10 @@ namespace MapperUI.Services
 }
 """;
 
-        // Schema mirrored byte-by-byte from SMC_Rig_Expo's working solutionData
-        //   /c/SMC_Rig_Expo_*.sln/Topology/ec877ac8-b1b4-4f0b-be4b-3e8e8887784b.solutionData
-        // — including:
-        //   * PascalCase keys (SolutionId, CsConfHash, CertThumbprint) — EAE's
-        //     deserialiser is case-sensitive against the SMC_Rig_Expo schema, and
-        //     this is the schema the user's installed EAE is known to accept.
-        //   * The full SMC_Rig_Expo CertThumbprint chain (10 thumbprints, ; -separated)
-        //     — these reference certs already installed in the user's Windows cert
-        //     store. An empty CertThumbprint causes EAE to reject the security
-        //     domain and surface "doesn't belong to active domain" errors against
-        //     any Topology Equipment carrying our DomainTag.
-        //   * The exact ASG! user/role with bcrypt hash copied from SMC_Rig_Expo
-        //     — same credentials the user already uses to authenticate against
-        //     the M262 (ASG!/Asg2025!).
-        //   * anonymous user/role copied verbatim — mandatory for unauthenticated
-        //     access at project open time (otherwise EAE prompts for login).
-        // EAE encodes embedded JSON strings using " (unicode-escaped quotes);
-        // raw " inside a JSON string value would be invalid JSON.
         static string BuildSolutionDataJson(string solutionId)
         {
-            const string Q = "\\u0022"; // escaped double quote inside a JSON string
+            const string Q = "\\u0022";
 
-            // Hashes + thumbprint chain copied verbatim from SMC_Rig_Expo's
-            // ec877ac8-…solutionData. EAE recomputes CsConfHash on first save once
-            // it owns the project, but the value must be a syntactically-valid
-            // 64-char hex string at write time.
             const string CsConfHash         = "f0916269882ea2879f122ff1d3066e32efbf54856420312a16cbebab4a6a3b83";
             const string AnonCsConfHash     = "a2b76b73c2ef2047823fd066d51eb2daf2cf813f9ec1e9c35255f4d325126cb9";
             const string CertThumbprintChain =
@@ -308,8 +223,6 @@ namespace MapperUI.Services
                 "04C57C9F793980D4B647D3E3BD39E0BF206292DF;" +
                 "494A5814A9A24A02B06F1AC8D3D3850F349308B8;" +
                 "93D07395A2FC29498BBBE6BD54FF7BB7EDBCB90C;";
-            // bcrypt-format ASG! password hash copied verbatim from SMC_Rig_Expo
-            // (== ASG!/Asg2025! that the M262 currently authenticates against).
             const string AsgPwHash          = "$1$A1C337A6652A9ABCCE903AD7FD5F8F3559FC4544100BC4A17291866BB80258E9$DFD5A7DEA0BD092D78E99A4B2BDDB03A1D30F1192D6745A807AB8F4E4D5F0AD4";
             const string AnonPwHash         = "cb366a250499db16cfa075932fd153c2baf2dfdda46a14082b7ddf3eab1118d5";
 
@@ -338,8 +251,6 @@ namespace MapperUI.Services
 """;
         }
 
-        // --- TopologyManager.topologyproj registration ---
-
         public static int RegisterInTopologyProj(string topologyProjPath, IEnumerable<string> jsonFileNames)
         {
             var doc = XDocument.Load(topologyProjPath);
@@ -362,13 +273,6 @@ namespace MapperUI.Services
             return added;
         }
 
-        /// <summary>
-        /// Removes any topology files this emitter previously wrote (and de-registers
-        /// them from TopologyManager.topologyproj). Used when M262 topology emission
-        /// is disabled — EAE rejects the auto-emitted M262 with "doesn't belong to
-        /// the active domain", so leftover files from prior runs need to be scrubbed.
-        /// Returns the number of disk + topologyproj entries removed. Idempotent.
-        /// </summary>
         public static int RemoveEmittedTopology(MapperConfig cfg)
         {
             int removed = 0;
@@ -382,9 +286,6 @@ namespace MapperUI.Services
                 Path.Combine(topologyDir, "Equipment_M262dPAC_1.json"),
                 Path.Combine(topologyDir, $"BroadcastDomain_{cfg.M262LogicalNetworkName}.json"),
             };
-            // Treat every *.solutionData in Topology/ as removable — covers any
-            // stale UUID our emitter might have written previously (SMC_Rig_Expo's,
-            // a fallback zero UUID, or a hand-edited variant).
             fileList.AddRange(Directory.EnumerateFiles(topologyDir, "*.solutionData"));
             var files = fileList.ToArray();
             foreach (var f in files)
