@@ -20,7 +20,7 @@ namespace MapperTests
             return (XDocument.Load(path), path);
         }
 
-        // [Fact]
+        [Fact]
         public void GeneratesNineFBs()
         {
             var (doc, _) = Generate();
@@ -30,7 +30,7 @@ namespace MapperTests
             Assert.Equal(9, fbs.Count);
         }
 
-        // [Fact]
+        [Fact]
         public void ContainsTuesdaySliceTopLevelInstances()
         {
             var (doc, _) = Generate();
@@ -53,7 +53,7 @@ namespace MapperTests
             Assert.DoesNotContain("Transfer", names);
         }
 
-        // [Fact]
+        [Fact]
         public void InitChainHasFourConnections()
         {
             var (doc, _) = Generate();
@@ -65,7 +65,7 @@ namespace MapperTests
             Assert.Equal(4, connections.Count);
         }
 
-        // [Fact]
+        [Fact]
         public void NoPlcStartBootstrapEdges()
         {
             var (doc, _) = Generate();
@@ -81,7 +81,7 @@ namespace MapperTests
                 c.Attribute("Destination")!.Value.StartsWith("PLC_Start."));
         }
 
-        // [Fact]
+        [Fact]
         public void AreaTerminatorDaisyChainTest()
         {
             var (doc, _) = Generate();
@@ -95,17 +95,25 @@ namespace MapperTests
             Assert.DoesNotContain(conns, c => c.Source == "Area.AreaAdptrOUT" && c.Dest == "Area_Term.CasAdptrIN");
         }
 
-        // [Fact]
+        [Fact]
         public void V1LimitationCommentNearTop()
         {
             var (doc, _) = Generate();
             Assert.NotNull(doc.Root);
             var firstNode = doc.Root!.FirstNode;
             Assert.IsType<XComment>(firstNode);
-            Assert.Contains("v1 limitations", ((XComment)firstNode!).Value);
+            // Phase 1 changed the top-comment from "v1 limitations: …" to
+            // "Phase 1: …" when recipe arrays moved from FBT-internal ST to
+            // syslay Parameter values. The assertion is intentionally weakened
+            // to "any limitations/caveats note exists" rather than a literal match.
+            var commentText = ((XComment)firstNode!).Value;
+            Assert.True(
+                commentText.Contains("Phase 1", System.StringComparison.OrdinalIgnoreCase) ||
+                commentText.Contains("v1 limitations", System.StringComparison.OrdinalIgnoreCase),
+                $"top comment should be a limitations/phase note; got: {commentText}");
         }
 
-        // [Fact]
+        [Fact]
         public void StateRptCmdAdptrRingClosesBackToFirst()
         {
             var (doc, _) = Generate();
@@ -123,7 +131,7 @@ namespace MapperTests
             Assert.Contains("stateR", lastConnection.Dest);
         }
 
-        // [Fact]
+        [Fact]
         public void DataConnectionsEmptyForV1()
         {
             var (doc, _) = Generate();
