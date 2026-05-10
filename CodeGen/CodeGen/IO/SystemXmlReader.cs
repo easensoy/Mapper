@@ -119,11 +119,16 @@ namespace CodeGen.IO
 
         private VueOneState ParseState(XElement elem, bool isSystemFile)
         {
-            var nameTag = isSystemFile ? "n" : "Name";
+            // VueOne mixes <n> (compact form) and <Name> (long form) within the same
+            // System-type file. Mirror the same try-both fallback ParseComponent uses
+            // (line 96–97) so state.Name is populated regardless of the spelling.
+            var stateName = GetElementValue(elem, isSystemFile ? "n" : "Name");
+            if (string.IsNullOrEmpty(stateName))
+                stateName = GetElementValue(elem, isSystemFile ? "Name" : "n");
             var state = new VueOneState
             {
                 StateID = GetElementValue(elem, "StateID"),
-                Name = GetElementValue(elem, nameTag),
+                Name = stateName,
                 StateNumber = GetIntValue(elem, "State_Number"),
                 InitialState = GetBoolValue(elem, "Initial_State"),
                 Time = GetIntValue(elem, "Time"),
