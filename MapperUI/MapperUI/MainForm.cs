@@ -648,8 +648,8 @@ namespace MapperUI
         {
             try
             {
-                lblStatus.Text = "Cleaning Demonstrator...";
-                AppendActivity("[Clean] Resetting Demonstrator working tree (preserving *.lock_sln so EAE can stay open)...");
+                lblStatus.Text = "Cleaning Demonstrator (deep wipe)...";
+                AppendActivity("[Clean] Deep wipe — produces a brand-new-EAE-project state.");
 
                 var demoRepo = @"C:\Demonstrator";
                 if (!Directory.Exists(Path.Combine(demoRepo, ".git")))
@@ -659,6 +659,11 @@ namespace MapperUI
                     return;
                 }
 
+                // EAE is intentionally NOT killed. If it has files open, individual
+                // file operations may fail with sharing-violation warnings — those are
+                // surfaced in the activity log; everything that can be wiped, is.
+
+                // Step 1 — git reset (tracked → HEAD) + git clean (drop untracked).
                 var (resetCode, resetOut) = await Task.Run(() => RunGit(demoRepo, "reset --hard"));
                 AppendActivity($"[Clean] git reset --hard -> exit {resetCode}");
                 if (!string.IsNullOrWhiteSpace(resetOut)) AppendActivity(resetOut.Trim());
@@ -667,8 +672,19 @@ namespace MapperUI
                 AppendActivity($"[Clean] git clean -fd -e *.lock_sln -> exit {cleanCode}");
                 if (!string.IsNullOrWhiteSpace(cleanOut)) AppendActivity(cleanOut.Trim());
 
-                lblStatus.Text = "Demonstrator cleaned";
-                AppendActivity("[Clean] Demonstrator restored to last commit. EAE lock files preserved.");
+                // Step 2 — deep wipe of FB types + canvas contents (HEAD has FBs in it; reset alone
+                // doesn't give us a fresh-project state). Topology/, General/, HMI/ are NOT touched.
+                var report = await Task.Run(() => CodeGen.Services.DemonstratorWiper.Wipe(demoRepo));
+                foreach (var step in report.Steps) AppendActivity($"[Clean] {step}");
+                foreach (var w in report.Warnings) AppendActivity($"[Clean][!] {w}");
+                AppendActivity(
+                    $"[Clean] summary: {report.FilesEmptied} canvas(es) emptied, " +
+                    $"{report.FilesDeleted} FB-type file(s) deleted, " +
+                    $"{report.FoldersDeleted} type folder(s) removed, " +
+                    $"{report.DfbprojEntriesRemoved} dfbproj entry/entries stripped.");
+
+                lblStatus.Text = "Demonstrator wiped";
+                AppendActivity("[Clean] Demonstrator now resembles a brand-new EAE project. Topology preserved.");
             }
             catch (Exception ex)
             {
@@ -677,6 +693,7 @@ namespace MapperUI
                 ShowError(ex.Message);
             }
         }
+
 
         static (int exitCode, string output) RunGit(string workingDir, string args)
         {
