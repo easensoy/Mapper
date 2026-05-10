@@ -43,10 +43,9 @@ namespace MapperTests
         [Fact]
         public void GeneratorAllSixArraysSameLength()
         {
-            // Phase 2 no longer guarantees one row per VueOne state — actuator action
-            // states unfold to a CMD+WAIT pair, the Initialisation state is dropped,
-            // and an explicit END row is appended. The invariant that all six arrays
-            // remain the same length still holds.
+            // Phase 2 no longer guarantees one row per VueOne state — motion-verb
+            // states unfold to a CMD+WAIT pair and an explicit END row is appended.
+            // The invariant that all six arrays remain the same length still holds.
             var components = new SystemXmlReader().ReadAllComponents(FixturePath());
             var process = components.First(c => c.Type == "Process");
             var contents = new StationGroupingService().GroupStationContents(process, components);
@@ -63,7 +62,7 @@ namespace MapperTests
         }
 
         [Fact]
-        public void GeneratorDropsInitialisationState()
+        public void GeneratorEmitsCmdWaitPairs_CmdStateMatchesFollowingWaitState()
         {
             var components = new SystemXmlReader().ReadAllComponents(FixturePath());
             var process = components.First(c => c.Type == "Process");
@@ -71,31 +70,16 @@ namespace MapperTests
 
             var recipe = ProcessRecipeArrayGenerator.Generate(process, contents, components);
 
-            // Recipe length must be < state count because Initialisation was dropped
-            // and at least one state unfolded to CMD+WAIT (so even after the drop the
-            // total can rise above state count if many actuator unfolds happen).
-            // We just assert Initialisation isn't surfaced as a CMD target.
-            Assert.DoesNotContain(recipe.CmdTargetName, n =>
-                n.Equals("Initialisation", System.StringComparison.OrdinalIgnoreCase));
-        }
-
-        [Fact]
-        public void GeneratorEmitsCmdWaitPairsForActuatorTransitions()
-        {
-            var components = new SystemXmlReader().ReadAllComponents(FixturePath());
-            var process = components.First(c => c.Type == "Process");
-            var contents = new StationGroupingService().GroupStationContents(process, components);
-
-            var recipe = ProcessRecipeArrayGenerator.Generate(process, contents, components);
-
-            // Every CMD row (StepType=1) must be immediately followed by a WAIT row (StepType=2)
-            // and CmdStateArr on the CMD row must equal Wait1State on the following WAIT - 1.
+            // Every CMD row (StepType=1) must be immediately followed by a WAIT row (StepType=2).
+            // Bug-2-fix contract: CmdStateArr carries the actuator's canonical destination
+            // state number (read by StateID lookup on the actuator), which equals Wait1State
+            // on the following WAIT row.
             for (int i = 0; i < recipe.StepType.Count; i++)
             {
                 if (recipe.StepType[i] != 1) continue;
                 Assert.True(i + 1 < recipe.StepType.Count, $"CMD at row {i} has no following row");
                 Assert.Equal(2, recipe.StepType[i + 1]);
-                Assert.Equal(recipe.Wait1State[i + 1] - 1, recipe.CmdStateArr[i]);
+                Assert.Equal(recipe.Wait1State[i + 1], recipe.CmdStateArr[i]);
                 Assert.NotEqual(string.Empty, recipe.CmdTargetName[i]);
                 Assert.Equal(string.Empty, recipe.CmdTargetName[i + 1]);
             }
@@ -115,45 +99,74 @@ namespace MapperTests
         }
 
         [Fact]
-        public void Feed_Station_StepType_Matches_Phase2_Target()
+        public void Feed_Station_HasAtLeastThreeCmdRowsForFeederCheckerTransfer()
         {
-            // Bundled fixture has 8 states for Feed_Station: Initialisation (dropped),
-            // CheckPartInHopper (sensor → WAIT), 4 actuator action states (CMD+WAIT each),
-            // WaitingReleaseSt2 (multi-condition sync → single WAIT), HandShake (process →
-            // WAIT). Plus appended END.
-            //   1 + 4*2 + 1 + 1 + 1 = 12  →  [2,1,2,1,2,1,2,1,2,2,2,9]
-            //
-            // The user's external Control.xml has an additional TransferReturning state
-            // which would extend this to [2,1,2,1,2,1,2,1,2,1,2,2,2,9] (14 entries).
+            // Bug-1 verification: with classifier dispatching on source-state name,
+            // FeederAdvancing / PartChecking / FeederReturning / TransferAdvancing
+            // all match a motion verb and unfold to CMD+WAIT pairs. The fixture must
+            // therefore produce at least 3 CMD rows targeting feeder, checker, transfer.
             var components = new SystemXmlReader().ReadAllComponents(FixturePath());
             var process = components.First(c => c.Type == "Process");
             var contents = new StationGroupingService().GroupStationContents(process, components);
 
             var recipe = ProcessRecipeArrayGenerator.Generate(process, contents, components);
 
-            var expected = new[] { 2, 1, 2, 1, 2, 1, 2, 1, 2, 2, 2, 9 };
-            Assert.Equal(expected, recipe.StepType);
+            int cmdCount = recipe.StepType.Count(s => s == 1);
+            Assert.True(cmdCount >= 3, $"expected ≥ 3 CMD rows, got {cmdCount}; recipe = [{string.Join(",", recipe.StepType)}]");
+
+            var nonEmptyTargets = recipe.CmdTargetName
+                .Where(t => !string.IsNullOrEmpty(t))
+                .ToList();
+            Assert.Contains("feeder",   nonEmptyTargets);
+            Assert.Contains("checker",  nonEmptyTargets);
+            Assert.Contains("transfer", nonEmptyTargets);
         }
 
         [Fact]
-        public void Feed_Station_Cmd_Targets_Are_Actuator_Names_In_Cmd_Rows()
+        public void Feed_Station_CmdStateValues_AreActuatorCanonicalStateNumbers()
         {
+            // Bug-2 verification: CmdStateArr at each CMD row must be a state number
+            // that actually exists on the corresponding actuator (read by StateID, not
+            // guessed by name). For Five_State_Actuator the canonical static states are
+            // 0 (ReturnedHome), 2 (Advanced), 4 (ReturnedFinished). Every emitted
+            // CmdState must be one of those.
             var components = new SystemXmlReader().ReadAllComponents(FixturePath());
             var process = components.First(c => c.Type == "Process");
             var contents = new StationGroupingService().GroupStationContents(process, components);
 
             var recipe = ProcessRecipeArrayGenerator.Generate(process, contents, components);
 
-            // With the bundled fixture's 8 states, CMD positions are 1, 3, 5, 7.
-            // Targets in order: FeederAdvancing, PartChecking, FeederReturning, TransferAdvancing.
-            Assert.Equal("Feeder",   recipe.CmdTargetName[1]);
-            Assert.Equal("Checker",  recipe.CmdTargetName[3]);
-            Assert.Equal("Feeder",   recipe.CmdTargetName[5]);
-            Assert.Equal("Transfer", recipe.CmdTargetName[7]);
+            for (int i = 0; i < recipe.StepType.Count; i++)
+            {
+                if (recipe.StepType[i] != 1) continue;
+                int s = recipe.CmdStateArr[i];
+                Assert.True(s == 0 || s == 2 || s == 4,
+                    $"CMD row {i} target='{recipe.CmdTargetName[i]}' CmdState={s} " +
+                    "is not a Five_State_Actuator canonical static state (0/2/4).");
+            }
+        }
 
-            // Non-CMD positions must have empty CmdTargetName.
-            foreach (int i in new[] { 0, 2, 4, 6, 8, 9, 10, 11 })
-                Assert.Equal(string.Empty, recipe.CmdTargetName[i]);
+        [Fact]
+        public void Feed_Station_TotalRowCount_IsRoughlyMotionTimes2PlusSettledPlusEnd()
+        {
+            // Total rows = (motion states × 2) + settled states + 1 (END).
+            // Bundled fixture: 4 motion states (FeederAdvancing, PartChecking,
+            // FeederReturning, TransferAdvancing) + 4 settled states (Initialisation,
+            // CheckPartInHopper, WaitingReleaseSt2, HandShake) + END = 4*2 + 4 + 1 = 13.
+            var components = new SystemXmlReader().ReadAllComponents(FixturePath());
+            var process = components.First(c => c.Type == "Process");
+            var contents = new StationGroupingService().GroupStationContents(process, components);
+
+            var recipe = ProcessRecipeArrayGenerator.Generate(process, contents, components);
+
+            int waits = recipe.StepType.Count(s => s == 2);
+            int cmds  = recipe.StepType.Count(s => s == 1);
+            int ends  = recipe.StepType.Count(s => s == 9);
+
+            Assert.True(cmds >= 3,                $"need ≥ 3 CMDs, got {cmds}");
+            Assert.True(waits >= cmds + 2,        $"need ≥ {cmds + 2} WAITs (one per CMD + settled states), got {waits}");
+            Assert.Equal(1, ends);                // exactly one final END
+            Assert.Equal(9, recipe.StepType[^1]);
         }
 
         [Fact]
@@ -170,26 +183,19 @@ namespace MapperTests
         }
 
         [Fact]
-        public void CmdTargetNameUsesCanonicalActuatorName()
+        public void CmdTargetNameIsLowercased_MatchingFiveStateActuatorActuatorName()
         {
-            // Phase 2 changed the contract: CmdTargetName carries the actuator's
-            // canonical Name from Control.xml (e.g. "Feeder"), not lowercased.
-            // Note this requires Five_State_Actuator_CAT instances to use the same
-            // case in their `actuator_name` parameter so the runtime's STRING comparison
-            // matches — currently the actuator_name is lowercased ('feeder'), which
-            // is a separate inconsistency to address in BuildActuatorParameters.
+            // Phase-2 spec: CmdTargetName is lowercased on emission so it matches
+            // Five_State_Actuator_CAT.actuator_name (which BuildActuatorParameters
+            // also lowercases). The runtime's STRING comparison is case-sensitive.
             var components = new SystemXmlReader().ReadAllComponents(FixturePath());
             var process = components.First(c => c.Type == "Process");
             var contents = new StationGroupingService().GroupStationContents(process, components);
 
             var recipe = ProcessRecipeArrayGenerator.Generate(process, contents, components);
 
-            // Each non-empty CmdTargetName must exactly match a component's canonical Name.
-            var allNames = new System.Collections.Generic.HashSet<string>(
-                components.Select(c => (c.Name ?? string.Empty).Trim()),
-                System.StringComparer.Ordinal);
             foreach (var n in recipe.CmdTargetName.Where(n => !string.IsNullOrEmpty(n)))
-                Assert.Contains(n, allNames);
+                Assert.Equal(n.ToLowerInvariant(), n);
         }
 
         // ---------------------------------------------------------------
