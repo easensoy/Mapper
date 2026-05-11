@@ -120,28 +120,39 @@ namespace CodeGen.Translation
             foreach (var state in states)
                 classifications.Add(ClassifyState(state, allComponents, arrays, scopedRegistry));
 
-            // 3. Pass-1 row layout: build StateID -> first-row-index map AFTER skips.
-            //    Each state contributes RowCount rows in order; the appended final END
-            //    sits at the index immediately after the last source state's rows.
+            // 3. Pass-1 row layout. Skipped states contribute RowCount=0; the
+            //    StateID-to-firstRowIndex map is built ONLY over surviving states.
+            //    The appended final-END row sits at finalEndIndex (after the last
+            //    surviving row). NextStep destinations that reference a SKIPPED
+            //    state's StateID fall forward to the next surviving row via
+            //    stateIdToFallForwardRow (built next).
             var stateIdToFirstRow = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             int rowIndex = 0;
             for (int i = 0; i < states.Count; i++)
             {
                 var s = states[i];
-                if (!string.IsNullOrEmpty(s.StateID))
+                if (classifications[i].RowCount > 0 && !string.IsNullOrEmpty(s.StateID))
                     stateIdToFirstRow[s.StateID] = rowIndex;
                 rowIndex += classifications[i].RowCount;
             }
             int finalEndIndex = rowIndex;
 
-            // 4. Pass-2 emit. NextStep on each row resolves against stateIdToFirstRow.
+            // Fall-forward map: for any state (surviving or not), the row index
+            // where execution should land if a NextStep aimed at it. For surviving
+            // states this is their own firstRowIndex. For skipped states it's the
+            // next surviving state's firstRowIndex (or finalEndIndex if none).
+            var stateIdToFallForwardRow = BuildFallForwardMap(states, classifications,
+                stateIdToFirstRow, finalEndIndex);
+
+            // 4. Pass-2 emit. NextStep on each row resolves against the fall-forward map.
             for (int i = 0; i < states.Count; i++)
             {
                 var state = states[i];
                 var c = classifications[i];
+                if (c.RowCount == 0) continue;   // skipped — no row at all
 
                 int nextRowOnTransition = ResolveDestRow(
-                    state, classifications, i, stateIdToFirstRow, finalEndIndex);
+                    state, i, classifications, stateIdToFallForwardRow, finalEndIndex);
 
                 switch (c.Kind)
                 {
@@ -171,10 +182,10 @@ namespace CodeGen.Translation
                         break;
 
                     case ClassKind.End:
-                    case ClassKind.SkippedAllOutOfScope:
-                    default:
-                        // For the all-out-of-scope case we emit an END row so the
-                        // engine doesn't run off the end of the arrays at runtime.
+                        // Genuine end-of-process state from Control.xml (no transition).
+                        // Becomes part of the recipe but the appended final END below is
+                        // what the engine actually halts on. (We could fold this into the
+                        // appended END but kept distinct for fixture-fidelity.)
                         arrays.StepType.Add(9);
                         arrays.CmdTargetName.Add(string.Empty);
                         arrays.CmdStateArr.Add(0);
@@ -185,30 +196,105 @@ namespace CodeGen.Translation
                 }
             }
 
-            // 5. Always append a final END row whose NextStep loops back to row 0.
+            // Degenerate case — every source state was skipped. Emit a single
+            // StepType=9 at index 0 so the engine has a recipe to halt on (rather
+            // than empty arrays which would crash bounds checks).
+            if (arrays.StepType.Count == 0)
+            {
+                arrays.Warnings.Add(
+                    "Every source state was skipped or unsatisfiable — collapsing the recipe " +
+                    "to a single END row at index 0. Engine will halt immediately.");
+                arrays.StepType.Add(9);
+                arrays.CmdTargetName.Add(string.Empty);
+                arrays.CmdStateArr.Add(0);
+                arrays.Wait1Id.Add(0);
+                arrays.Wait1State.Add(0);
+                arrays.NextStep.Add(0);
+                ValidateProcessIdInvariant(arrays, processId);
+                return arrays;
+            }
+
+            // 5. Append the single final END row at the highest index.
+            //    StepType=9 must appear ONLY here in the array.
             arrays.StepType.Add(9);
             arrays.CmdTargetName.Add(string.Empty);
             arrays.CmdStateArr.Add(0);
             arrays.Wait1Id.Add(0);
             arrays.Wait1State.Add(0);
-            arrays.NextStep.Add(0);
+            arrays.NextStep.Add(0);   // engine never reads NextStep after StepType=9
 
-            // 6. Defensive assertion: process_id must NEVER appear in Wait1Id.
-            //    Process is not on the ring; any equality is a scoping bug.
+            ValidateProcessIdInvariant(arrays, processId);
+            ValidateSingleEndMarker(arrays);
+            return arrays;
+        }
+
+        private static void ValidateProcessIdInvariant(RecipeArrays arrays, int processId)
+        {
             for (int i = 0; i < arrays.Wait1Id.Count; i++)
             {
                 if (arrays.Wait1Id[i] == processId)
-                {
                     throw new InvalidOperationException(
                         $"Recipe generator emitted Wait1Id[{i}]={processId} which equals " +
                         $"the Process FB's process_id ({processId}). Process is not a ring " +
                         "participant and cannot publish its own wait state. Likely cause: " +
                         "a stray ComponentID in Control.xml conditions landed on the process_id " +
                         "value via the registry. Inspect ComponentRegistry / SkippedConditions.");
-                }
             }
+        }
 
-            return arrays;
+        private static void ValidateSingleEndMarker(RecipeArrays arrays)
+        {
+            // StepType=9 must appear EXACTLY once and ONLY at the final row.
+            // Anywhere else and the runtime ECC halts at that index instead of
+            // executing subsequent rows (the bug this whole revision fixes).
+            int n = arrays.StepType.Count;
+            if (n == 0)
+                throw new InvalidOperationException("Recipe generator produced an empty StepType array.");
+
+            for (int i = 0; i < n - 1; i++)
+            {
+                if (arrays.StepType[i] == 9)
+                    throw new InvalidOperationException(
+                        $"Recipe generator emitted StepType[{i}]=9 (END) before the final row. " +
+                        $"Array length={n}; END must appear only at index {n - 1}. Likely cause: " +
+                        "an out-of-scope-skip path is still emitting placeholder END rows.");
+            }
+            if (arrays.StepType[n - 1] != 9)
+                throw new InvalidOperationException(
+                    $"Recipe generator did not append a final END row — StepType[{n - 1}]=" +
+                    $"{arrays.StepType[n - 1]}, expected 9.");
+        }
+
+        private static Dictionary<string, int> BuildFallForwardMap(
+            List<VueOneState> states,
+            List<StateClassification> classifications,
+            Dictionary<string, int> stateIdToFirstRow,
+            int finalEndIndex)
+        {
+            var fallForward = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < states.Count; i++)
+            {
+                var s = states[i];
+                if (string.IsNullOrEmpty(s.StateID)) continue;
+                if (classifications[i].RowCount > 0)
+                {
+                    fallForward[s.StateID] = stateIdToFirstRow[s.StateID];
+                    continue;
+                }
+                // Skipped — walk forward looking for the next surviving state.
+                int target = finalEndIndex;
+                for (int j = i + 1; j < states.Count; j++)
+                {
+                    var s2 = states[j];
+                    if (classifications[j].RowCount > 0 && !string.IsNullOrEmpty(s2.StateID))
+                    {
+                        target = stateIdToFirstRow[s2.StateID];
+                        break;
+                    }
+                }
+                fallForward[s.StateID] = target;
+            }
+            return fallForward;
         }
 
         // ----------------------------------------------------------------------
@@ -217,10 +303,10 @@ namespace CodeGen.Translation
 
         private enum ClassKind
         {
-            MotionPair,
-            SettledWait,
-            End,
-            SkippedAllOutOfScope,   // emits an END row to keep the engine from running off
+            MotionPair,             // RowCount=2 (CMD then WAIT)
+            SettledWait,            // RowCount=1 (single WAIT)
+            End,                    // RowCount=1 (genuine end-of-process state from Control.xml)
+            Skipped,                // RowCount=0 — every condition out of scope; row dropped entirely
         }
 
         private sealed class StateClassification
@@ -266,16 +352,23 @@ namespace CodeGen.Translation
 
             if (cond == null)
             {
-                // Every condition on this transition was out of scope (or there were no
-                // conditions). Emit an END row so the engine has somewhere to land —
-                // running off the end of the arrays would deadlock the runtime ECC.
+                // Every condition on this transition was out of scope. Drop the row
+                // ENTIRELY (RowCount=0). The fall-forward map below ensures any
+                // NextStep that pointed at this state lands on the next surviving
+                // state's first row instead.
+                //
+                // Important: emitting a placeholder StepType=9 here would halt the
+                // engine on the first tick (StepType=9 means END to the runtime ECC),
+                // which is the bug this whole revision fixes. Skipped means SKIPPED.
                 if (allConds.Any())
                 {
                     arrays.SkippedConditions.Add(
                         $"state '{state.Name}': all transition conditions out of scope — " +
-                        "emitting END row in their place.");
-                    return new StateClassification { Kind = ClassKind.SkippedAllOutOfScope, RowCount = 1 };
+                        "row dropped from recipe; downstream NextStep pointers will skip past it.");
+                    return new StateClassification { Kind = ClassKind.Skipped, RowCount = 0 };
                 }
+                // Genuine no-transition state. Truly the end of this Process — emit
+                // a real END row.
                 return new StateClassification { Kind = ClassKind.End, RowCount = 1 };
             }
 
@@ -330,22 +423,32 @@ namespace CodeGen.Translation
         // ----------------------------------------------------------------------
 
         private static int ResolveDestRow(VueOneState state,
-            List<StateClassification> classifications, int srcIndex,
-            Dictionary<string, int> stateIdToFirstRow, int finalEndIndex)
+            int srcIndex,
+            List<StateClassification> classifications,
+            Dictionary<string, int> stateIdToFallForwardRow,
+            int finalEndIndex)
         {
             var trans = state.Transitions.FirstOrDefault();
+            // Primary path: trans.DestinationStateID resolves via the fall-forward map
+            // — if that destination state was skipped, the map already points us at
+            // the next surviving row (or the final END if none).
             if (trans != null &&
                 !string.IsNullOrEmpty(trans.DestinationStateID) &&
-                stateIdToFirstRow.TryGetValue(trans.DestinationStateID, out var dst))
+                stateIdToFallForwardRow.TryGetValue(trans.DestinationStateID, out var dst))
             {
                 return dst;
             }
-            int nextSrc = srcIndex + 1;
-            if (nextSrc < classifications.Count)
+            // Fallback when DestinationStateID is empty or points outside this Process:
+            // walk forward through declaration-order siblings to find the next surviving
+            // row, or return finalEndIndex if there isn't one.
+            for (int j = srcIndex + 1; j < classifications.Count; j++)
             {
-                int idx = 0;
-                for (int i = 0; i < nextSrc; i++) idx += classifications[i].RowCount;
-                return idx;
+                if (classifications[j].RowCount > 0)
+                {
+                    int idx = 0;
+                    for (int i = 0; i < j; i++) idx += classifications[i].RowCount;
+                    return idx;
+                }
             }
             return finalEndIndex;
         }
