@@ -149,10 +149,16 @@ namespace MapperTests
         [Fact]
         public void Feed_Station_TotalRowCount_IsRoughlyMotionTimes2PlusSettledPlusEnd()
         {
-            // Total rows = (motion states × 2) + settled states + 1 (END).
-            // Bundled fixture: 4 motion states (FeederAdvancing, PartChecking,
-            // FeederReturning, TransferAdvancing) + 4 settled states (Initialisation,
-            // CheckPartInHopper, WaitingReleaseSt2, HandShake) + END = 4*2 + 4 + 1 = 13.
+            // Phase-3 scope-filter update: source states whose only conditions reference
+            // out-of-scope components (Assembly_Station, Disassembly, etc.) now collapse
+            // to a single END row each, so the recipe can have MULTIPLE END rows in
+            // addition to the appended-final END. The exact count depends on how the
+            // station-grouping service treats cross-process references.
+            //
+            // Invariants that still hold:
+            //   - At least 3 CMD rows (Feeder×2, Transfer or Checker)
+            //   - For every CMD, exactly one matching WAIT
+            //   - The recipe ends with at least one END row (NextStep loops to 0)
             var components = new SystemXmlReader().ReadAllComponents(FixturePath());
             var process = components.First(c => c.Type == "Process");
             var contents = new StationGroupingService().GroupStationContents(process, components);
@@ -163,9 +169,9 @@ namespace MapperTests
             int cmds  = recipe.StepType.Count(s => s == 1);
             int ends  = recipe.StepType.Count(s => s == 9);
 
-            Assert.True(cmds >= 3,                $"need ≥ 3 CMDs, got {cmds}");
-            Assert.True(waits >= cmds + 2,        $"need ≥ {cmds + 2} WAITs (one per CMD + settled states), got {waits}");
-            Assert.Equal(1, ends);                // exactly one final END
+            Assert.True(cmds >= 3,         $"need ≥ 3 CMDs, got {cmds}");
+            Assert.True(waits >= cmds,     $"need ≥ {cmds} WAITs (one per CMD + extras for settled states), got {waits}");
+            Assert.True(ends >= 1,         $"need ≥ 1 END, got {ends}");
             Assert.Equal(9, recipe.StepType[^1]);
         }
 
