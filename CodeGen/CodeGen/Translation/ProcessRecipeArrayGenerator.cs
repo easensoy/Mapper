@@ -323,6 +323,23 @@ namespace CodeGen.Translation
             IReadOnlyList<VueOneComponent> allComponents, RecipeArrays arrays,
             Dictionary<string, int> scopedRegistry)
         {
+            // Initialisation is structurally special in VueOne — it asserts the
+            // expected world AT BOOT (typically every actuator at ReturnedHome),
+            // not a step in the work cycle. Even when its conditions reference
+            // in-scope components (e.g. live SMC VC_1's first cond is
+            // Feeder/ReturnedHome which IS in scope), the resulting WAIT row is
+            // either a tautology (actuator already at its initial state) or a
+            // boot-time precondition the runtime engine does nothing with anyway.
+            // Drop it from the recipe entirely so the recipe starts with the
+            // first real work step.
+            if (IsInitialisationState(state))
+            {
+                arrays.SkippedConditions.Add(
+                    $"state '{state.Name}': dropped — Initialisation asserts boot " +
+                    "conditions, not a work-cycle step.");
+                return new StateClassification { Kind = ClassKind.Skipped, RowCount = 0 };
+            }
+
             var trans = state.Transitions.FirstOrDefault();
             var allConds = trans?.Conditions ?? new List<VueOneCondition>();
 
@@ -502,6 +519,21 @@ namespace CodeGen.Translation
 
         private static bool NameEquals(string? a, string b) =>
             string.Equals((a ?? string.Empty).Trim(), b, StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// True if the state is the VueOne Initialisation boot-assertion state.
+        /// Detected via InitialState=true OR Name matching "Initialisation"/
+        /// "Initialization" (case-insensitive). Used to drop the state from the
+        /// recipe regardless of whether its first condition resolves in scope —
+        /// Initialisation is a boot precondition, not a work-cycle step.
+        /// </summary>
+        private static bool IsInitialisationState(VueOneState s)
+        {
+            if (s.InitialState) return true;
+            var n = (s.Name ?? string.Empty).Trim();
+            return n.Equals("Initialisation", StringComparison.OrdinalIgnoreCase) ||
+                   n.Equals("Initialization", StringComparison.OrdinalIgnoreCase);
+        }
 
         /// <summary>
         /// Resolve the transient (motion command) state number for a CMD row by
