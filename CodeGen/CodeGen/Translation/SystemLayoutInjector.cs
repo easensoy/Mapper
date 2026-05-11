@@ -950,9 +950,10 @@ namespace MapperUI.Services
             var layerId = FBIdGenerator.GenerateFBId(fileName);
             var builder = new SyslayBuilder(layerId);
             builder.SetTopComment(
-                "v1 limitations: Process1 recipe arrays are default-empty; sensor-to-process " +
-                "DataConnections not generated; manual recipe loading required in " +
-                "ProcessRuntime_Generic_v1.initialize before Process1 will sequence. " +
+                "Phase 1: Process1 recipe arrays are emitted as syslay Parameter values on the " +
+                "Process1 instance (StepType, CmdTargetName, CmdStateArr, Wait1Id, Wait1State, NextStep). " +
+                "Scope filter still trims to Feeder + PartInHopper; out-of-scope component waits " +
+                "fall back to (0,0). Sensor-to-process DataConnections still not generated. " +
                 "Demonstrator was cleaned of universal-architecture instances before this generation; " +
                 "restore via 'git checkout' on the Demonstrator repo to revert.");
 
@@ -984,10 +985,18 @@ namespace MapperUI.Services
             builder.AddFB(FBIdGenerator.GenerateFBId("Station1_HMI"),
                 "Station1_HMI", "Station_CAT", "Main", 2220, 100);
 
+            // Use the Process component's canonical name from Control.xml as the FB
+            // instance name (e.g. "Feed_Station"), matching how actuator/sensor instances
+            // already use their canonical Names. Falls back to "Process1" only if the
+            // Control.xml component had no Name (defensive — should not happen in practice).
+            var processInstanceName = !string.IsNullOrWhiteSpace(contents.Process.Name)
+                ? contents.Process.Name
+                : "Process1";
+
             var (processOuter, processNested) = BuildProcessFbParameters(
-                contents.Process, allComponents, "Process1", processId);
+                contents.Process, allComponents, processInstanceName, processId, contents);
             builder.AddFB(FBIdGenerator.GenerateFBId(contents.Process.ComponentID),
-                "Process1", "Process1_Generic", "Main", 3360, 1460,
+                processInstanceName, "Process1_Generic", "Main", 3360, 1460,
                 processOuter, processNested);
 
             for (int i = 0; i < contents.Actuators.Count; i++)
@@ -1034,19 +1043,11 @@ namespace MapperUI.Services
 
             BuildFeedStationWiring(builder, contents);
 
-            // Rewrite the deployed ProcessRuntime_Generic_v1.fbt's initializeinit ST so
-            // Process1 boots with this Process's recipe instead of the template default.
-            if (config != null)
-            {
-                try
-                {
-                    RewriteProcessRuntimeRecipe(config, contents.Process, contents, allComponents, report);
-                }
-                catch (Exception ex)
-                {
-                    report.Missing.Add($"recipe rewrite skipped: {ex.Message}");
-                }
-            }
+            // Phase 1: recipe arrays now ride on the Process1 syslay Parameter values written
+            // by BuildProcessFbParameters above. The deployed ProcessRuntime_Generic_v1.fbt is
+            // no longer mutated at generation time. The MapperConfig parameter is retained for
+            // call-site compatibility but unused here.
+            _ = config;
 
             var doc = builder.Build();
             doc.Save(fullPath);
@@ -1168,12 +1169,19 @@ namespace MapperUI.Services
 
         private static void BuildFeedStationWiring(SyslayBuilder builder, StationContents contents)
         {
+            // Process FB instance name comes from Control.xml (e.g. "Feed_Station")
+            // — the FB-emission step above uses the same name, so wire endpoints
+            // here must match. Fallback "Process1" only if the component had no Name.
+            var processInstanceName = !string.IsNullOrWhiteSpace(contents.Process.Name)
+                ? contents.Process.Name
+                : "Process1";
+
             var initChain = new List<string>();
             initChain.Add("Area");
             initChain.Add("Station1");
             foreach (var s in contents.Sensors) initChain.Add(s.Name);
             foreach (var a in contents.Actuators) initChain.Add(a.Name);
-            initChain.Add("Process1");
+            initChain.Add(processInstanceName);
 
             // No PLC_Start bootstrap edges: Area_CAT contains its own internal plcStart
             // which fires Area.INITO via INIT, propagating through this chain.
@@ -1186,11 +1194,11 @@ namespace MapperUI.Services
             builder.AddAdapterConnection("Station1.AreaAdptrOUT", "Area_Term.CasAdptrIN");
 
             // v1-assumption: Sensor_Bool_CAT lacks stationAdptr ports per .fbt verification.
-            // CaSBus chain skips sensors and includes only actuators + Process1.
+            // CaSBus chain skips sensors and includes only actuators + the Process instance.
             var stationChain = new List<(string Name, string Type)>();
             foreach (var a in contents.Actuators)
                 stationChain.Add((a.Name, "Five_State_Actuator_CAT"));
-            stationChain.Add(("Process1", "Process1_Generic"));
+            stationChain.Add((processInstanceName, "Process1_Generic"));
 
             if (stationChain.Count > 0)
             {
@@ -1210,7 +1218,7 @@ namespace MapperUI.Services
                 ringComponents.Add((s.Name, "Sensor_Bool_CAT"));
             foreach (var a in contents.Actuators)
                 ringComponents.Add((a.Name, "Five_State_Actuator_CAT"));
-            ringComponents.Add(("Process1", "Process1_Generic"));
+            ringComponents.Add((processInstanceName, "Process1_Generic"));
 
             if (ringComponents.Count > 1)
             {
@@ -1341,69 +1349,41 @@ namespace MapperUI.Services
 
         public static (Dictionary<string, string> Outer, IDictionary<string, IDictionary<string, string>> Nested)
             BuildProcessFbParameters(VueOneComponent process, List<VueOneComponent> allComponents,
-                string processName, int processId)
+                string processName, int processId,
+                StationContents? contents = null)
         {
-            // Process1_Generic gets only outer process_name + process_id. Recipe arrays
-            // (StepType, CmdTargetName, CmdStateArr, Wait1Id, Wait1State, NextStep) live inside
-            // ProcessRuntime_Generic_v1.fbt's initialize algorithm as Structured Text and are
-            // not surfaced as Parameters in the syslay. Process1 will run with template-default
-            // (empty) recipe until that ST is hand-edited or generated as a separate .fbt.
+            // Phase 1: recipe arrays now travel as syslay Parameter values on the Process1_Generic
+            // instance. Process1_Generic.fbt exposes 8 InputVars (process_name, process_id, plus
+            // 6 array inputs); the ProcessEngine inside it receives the arrays via DataConnections.
+            // ProcessRuntime_Generic_v1.fbt's initializeinit no longer populates the arrays.
+            //
+            // If `contents` is null (defensive — caller should always pass it now) we emit only the
+            // two scalar parameters and let the FBT default (empty arrays) take over. The recipe
+            // is then a no-op and Process1 will sit in END from step 0.
             var outer = new Dictionary<string, string>
             {
                 ["process_name"] = SyslayBuilder.FormatString(processName),
                 ["process_id"] = SyslayBuilder.FormatInt(processId)
             };
+
+            if (contents != null)
+            {
+                var recipe = ProcessRecipeArrayGenerator.Generate(process, contents, allComponents);
+                outer["StepType"]      = SyslayBuilder.FormatIntArray(recipe.StepType);
+                outer["CmdTargetName"] = SyslayBuilder.FormatStringArray(recipe.CmdTargetName);
+                outer["CmdStateArr"]   = SyslayBuilder.FormatIntArray(recipe.CmdStateArr);
+                outer["Wait1Id"]       = SyslayBuilder.FormatIntArray(recipe.Wait1Id);
+                outer["Wait1State"]    = SyslayBuilder.FormatIntArray(recipe.Wait1State);
+                outer["NextStep"]      = SyslayBuilder.FormatIntArray(recipe.NextStep);
+            }
+
             var nested = new Dictionary<string, IDictionary<string, string>>(StringComparer.Ordinal);
             return (outer, nested);
         }
 
-        /// <summary>
-        /// Locates ProcessRuntime_Generic_v1.fbt deployed under the Demonstrator's IEC61499
-        /// folder by walking up from MapperConfig.SyslayPath2 until a folder containing a
-        /// .dfbproj is found, then returning {EaeProjectDir}/IEC61499/ProcessRuntime_Generic_v1/
-        /// ProcessRuntime_Generic_v1.fbt. Returns null if anything is missing.
-        /// </summary>
-        public static string? ResolveProcessRuntimeFbtPath(MapperConfig config)
-        {
-            if (config == null || string.IsNullOrWhiteSpace(config.SyslayPath2)) return null;
-            var dir = Path.GetDirectoryName(config.SyslayPath2);
-            string? eaeRoot = null;
-            while (dir != null)
-            {
-                if (Directory.Exists(dir) && Directory.GetFiles(dir, "*.dfbproj").Any())
-                {
-                    eaeRoot = Path.GetDirectoryName(dir);
-                    break;
-                }
-                dir = Path.GetDirectoryName(dir);
-            }
-            if (eaeRoot == null) return null;
-            var fbt = Path.Combine(eaeRoot, "IEC61499",
-                "ProcessRuntime_Generic_v1", "ProcessRuntime_Generic_v1.fbt");
-            return File.Exists(fbt) ? fbt : null;
-        }
-
-        /// <summary>
-        /// Builds the recipe ST for the supplied Process and rewrites
-        /// ProcessRuntime_Generic_v1.fbt's initializeinit algorithm in place.
-        /// No-op if the .fbt is not deployed yet (returns false). Throws on rewrite failure.
-        /// Records the action in the supplied report.
-        /// </summary>
-        public bool RewriteProcessRuntimeRecipe(MapperConfig config, VueOneComponent process,
-            StationContents contents, IReadOnlyList<VueOneComponent> allComponents,
-            BindingApplicationReport report)
-        {
-            var fbtPath = ResolveProcessRuntimeFbtPath(config);
-            if (fbtPath == null)
-            {
-                report.Missing.Add("ProcessRuntime_Generic_v1.fbt (not deployed; recipe ST not rewritten)");
-                return false;
-            }
-            var st = ProcessRecipeStGenerator.GenerateInitializeInitSt(process, contents, allComponents);
-            FbtRewriter.RewriteInitializeInit(fbtPath, st);
-            report.Bound.Add(($"{process.Name} recipe", $"{process.States.Count} states -> {fbtPath}"));
-            return true;
-        }
+        // Phase 1: ResolveProcessRuntimeFbtPath / RewriteProcessRuntimeRecipe deleted.
+        // Recipes now ride on syslay Parameter values (see BuildProcessFbParameters above).
+        // FbtRewriter remains in the codebase but is no longer invoked from the recipe path.
 
         public string GenerateProcessFBSyslay(MapperConfig config, string controlXmlPath,
             string? processName, out BindingApplicationReport report)
@@ -1433,22 +1413,21 @@ namespace MapperUI.Services
                 $"Button 1 / Process FB only. Process: {process.Name}. " +
                 "Demonstrator was cleaned of universal-architecture instances before this generation.");
 
-            var (outer, nested) = BuildProcessFbParameters(process, allComponents, process.Name, 10);
-            builder.AddFB(FBIdGenerator.GenerateFBId(process.ComponentID),
-                process.Name, "Process1_Generic", "Main", 3360, 1460, outer, nested);
-
-            // Rewrite ProcessRuntime_Generic_v1.fbt initializeinit ST so Process1 boots
-            // with this Process's recipe. Uses the smallest available grouping for context.
+            // Phase 1: recipe arrays travel as syslay Parameter values. Compute the station
+            // grouping up-front so BuildProcessFbParameters can serialise the recipe.
+            StationContents? contents = null;
             try
             {
-                var grouping = new StationGroupingService();
-                var contents = grouping.GroupStationContents(process, allComponents);
-                RewriteProcessRuntimeRecipe(config, process, contents, allComponents, report);
+                contents = new StationGroupingService().GroupStationContents(process, allComponents);
             }
             catch (Exception ex)
             {
-                report.Missing.Add($"recipe rewrite skipped: {ex.Message}");
+                report.Missing.Add($"station grouping skipped: {ex.Message}");
             }
+
+            var (outer, nested) = BuildProcessFbParameters(process, allComponents, process.Name, 10, contents);
+            builder.AddFB(FBIdGenerator.GenerateFBId(process.ComponentID),
+                process.Name, "Process1_Generic", "Main", 3360, 1460, outer, nested);
 
             var doc = builder.Build();
             doc.Save(config.SyslayPath2);
@@ -1538,7 +1517,7 @@ namespace MapperUI.Services
                 builder.AddFB(FBIdGenerator.GenerateFBId(hmiName),
                     hmiName, "Station_CAT", "Main", xCol + 100, 100);
 
-                var (outer, nested) = BuildProcessFbParameters(proc, allComponents, proc.Name, 10 + stationIndex);
+                var (outer, nested) = BuildProcessFbParameters(proc, allComponents, proc.Name, 10 + stationIndex, contents);
                 var processInstanceName = $"Process{stationIndex}";
                 builder.AddFB(FBIdGenerator.GenerateFBId(proc.ComponentID),
                     processInstanceName, "Process1_Generic", "Main", xCol + 1240, 1460, outer, nested);
@@ -1589,21 +1568,10 @@ namespace MapperUI.Services
 
             BuildFullSystemWiring(builder, perStationContents);
 
-            // Rewrite the deployed ProcessRuntime_Generic_v1.fbt's initializeinit ST using
-            // the first Process. With multiple Processes a per-Process .fbt copy would be
-            // required (warning recorded above).
-            if (perStationContents.Count > 0)
-            {
-                try
-                {
-                    var first = perStationContents[0].Contents;
-                    RewriteProcessRuntimeRecipe(config, first.Process, first, allComponents, report);
-                }
-                catch (Exception ex)
-                {
-                    report.Missing.Add($"recipe rewrite skipped: {ex.Message}");
-                }
-            }
+            // Phase 1: recipe arrays now travel as syslay Parameter values per Process FB
+            // instance. The deployed ProcessRuntime_Generic_v1.fbt is no longer mutated.
+            // (Previously this rewrote the FBT once using the first Process's recipe, which
+            // did not generalise to multi-Process projects anyway.)
 
             var doc = builder.Build();
             doc.Save(config.SyslayPath2);
