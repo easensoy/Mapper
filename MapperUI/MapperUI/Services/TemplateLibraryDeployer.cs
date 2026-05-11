@@ -31,9 +31,16 @@ namespace MapperUI.Services
 
         static readonly string[] UniversalCats = new[]
         {
-            "Five_State_Actuator_CAT", "Sensor_Bool_CAT", "Process1_Generic",
-            "PLC_RW_M262"
+            "Five_State_Actuator_CAT", "Sensor_Bool_CAT", "Process1_Generic"
         };
+
+        // PLC_RW_M262 is a pure I/O bridge basic FB (no HMI faceplate, no _HMI sub-FB),
+        // so it deploys as a top-level .fbt rather than a CAT folder structure. Listing
+        // it as a CAT made RegisterInDfbproj write '<None Include="PLC_RW_M262\PLC_RW_M262.cfg">'
+        // — a folder path that never exists — which broke EAE on project open with
+        // "Could not find a part of the path 'PLC_RW_M262\PLC_RW_M262.cfg'".
+        // Treated as a Basic from now on; its .fbt is registered flat in dfbproj.
+        static readonly string[] UniversalIoFbs = new[] { "PLC_RW_M262" };
 
         static readonly string[] UniversalComposites = new[]
         {
@@ -92,8 +99,15 @@ namespace MapperUI.Services
             foreach (var name in UniversalCats)
                 DeployArtifact(libPath, "CAT", name, eaeProjectDir, result, isBasic: false, isCat: true);
 
+            // I/O-bridge basics live under Template Library/CAT/<name>/ for historical reasons
+            // but deploy as flat top-level .fbt files (no HMI sibling, no .cfg, no folder).
+            // Tagged as basic so RegisterInDfbproj uses RegisterBasicFb (flat), not RegisterCat.
+            foreach (var name in UniversalIoFbs)
+                DeployArtifact(libPath, "CAT", name, eaeProjectDir, result, isBasic: true);
+
             DeployDataTypes(libPath, eaeProjectDir, result);
             PatchKnownArraySizeBugs(eaeProjectDir, result);
+            PatchProcessFbsForRecipeAsInputVars(eaeProjectDir, result);
 
             GenerateCfgFiles(eaeProjectDir, result);
             RegisterInDfbproj(eaeProjectDir, result);
@@ -200,6 +214,240 @@ namespace MapperUI.Services
             File.WriteAllText(fbtPath, text.Replace(oldDecl, newDecl));
             result.PatchesApplied.Add("ProcessRuntime_Generic_v1.state_table ArraySize 1 -> 20");
             MapperLogger.Info("[Deploy] Patched ProcessRuntime_Generic_v1.state_table ArraySize 1 -> 20");
+
+            // Schneider template-side typo in check_wait: the right-hand-side reads
+            // Wait1Id where it should read Wait1State. As shipped, no recipe of any
+            // shape can ever satisfy a wait — the comparison checks state equals the
+            // component's registry id, never the desired wait state. Patch to the
+            // semantically correct comparison every deploy.
+            const string brokenCheckWait =
+                "WaitSatisfied := state_table[Wait1Id[CurrentStep]].state = Wait1Id[CurrentStep];";
+            const string fixedCheckWait =
+                "WaitSatisfied := state_table[Wait1Id[CurrentStep]].state = Wait1State[CurrentStep];";
+            text = File.ReadAllText(fbtPath);
+            if (text.Contains(brokenCheckWait))
+            {
+                File.WriteAllText(fbtPath, text.Replace(brokenCheckWait, fixedCheckWait));
+                result.PatchesApplied.Add("ProcessRuntime_Generic_v1.check_wait typo Wait1Id -> Wait1State");
+                MapperLogger.Info("[Deploy] Patched ProcessRuntime_Generic_v1.check_wait typo (Wait1Id -> Wait1State on RHS)");
+            }
+        }
+
+        /// <summary>
+        /// Phase 1 recipe-arrays-as-InputVars patch. Mutates the deployed
+        /// ProcessRuntime_Generic_v1.fbt and Process1_Generic.fbt so the recipe arrays
+        /// (StepType, CmdTargetName, CmdStateArr, Wait1Id, Wait1State, NextStep) are
+        /// exposed as InputVars on both the engine FB and its outer composite, and the
+        /// engine's initialize algorithm no longer hardcodes the 3-step Pusher demo
+        /// recipe. The Mapper then writes the per-Process recipe as syslay Parameter
+        /// values on the Process1 instance via SystemLayoutInjector.BuildProcessFbParameters.
+        ///
+        /// Idempotent: re-deploying skips files that already declare the array InputVars.
+        /// </summary>
+        static void PatchProcessFbsForRecipeAsInputVars(string eaeProjectDir, DeployResult result)
+        {
+            var iec = Path.Combine(eaeProjectDir, "IEC61499");
+            var enginePath = Path.Combine(iec, "ProcessRuntime_Generic_v1.fbt");
+            var compositePath = Path.Combine(iec, "Process1_Generic", "Process1_Generic.fbt");
+
+            try
+            {
+                if (File.Exists(enginePath))
+                    PatchProcessRuntimeEngine(enginePath, result);
+                else
+                    result.Warnings.Add("ProcessRuntime_Generic_v1.fbt not deployed; recipe-as-input patch skipped.");
+
+                if (File.Exists(compositePath))
+                    PatchProcess1GenericComposite(compositePath, result);
+                else
+                    result.Warnings.Add("Process1_Generic.fbt not deployed; recipe-as-input patch skipped.");
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"Recipe-as-input FBT patch failed: {ex.Message}");
+            }
+        }
+
+        static readonly (string Name, string Type, string ArraySize, string? Comment)[] RecipeArrayDecls = new[]
+        {
+            ("StepType",      "INT",         "64", "Phase 1: recipe arrays now external. 1=command, 2=wait, 9=end. Mapper writes literal at instance level via Process1_Generic."),
+            ("CmdTargetName", "STRING[15]",  "64", (string?)null),
+            ("CmdStateArr",   "INT",         "64", (string?)null),
+            ("Wait1Id",       "INT",         "64", (string?)null),
+            ("Wait1State",    "INT",         "64", (string?)null),
+            ("NextStep",      "INT",         "64", (string?)null),
+        };
+
+        static void PatchProcessRuntimeEngine(string fbtPath, DeployResult result)
+        {
+            var doc = System.Xml.Linq.XDocument.Load(fbtPath, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+            var root = doc.Root!;
+            System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+
+            var initEvent = root.Descendants(ns + "Event")
+                .FirstOrDefault(e => (string?)e.Attribute("Name") == "INIT");
+            var inputVars = root.Descendants(ns + "InputVars").FirstOrDefault();
+            var internalVars = root.Descendants(ns + "InternalVars").FirstOrDefault();
+            var initAlgo = root.Descendants(ns + "Algorithm")
+                .FirstOrDefault(a => (string?)a.Attribute("Name") == "initializeinit");
+
+            if (initEvent == null || inputVars == null || initAlgo == null)
+            {
+                result.Warnings.Add("ProcessRuntime_Generic_v1.fbt: expected INIT event / InputVars / initializeinit not found; recipe-as-input patch skipped.");
+                return;
+            }
+
+            var existingInputVarNames = new HashSet<string>(
+                inputVars.Elements(ns + "VarDeclaration")
+                    .Select(v => (string?)v.Attribute("Name") ?? string.Empty),
+                StringComparer.Ordinal);
+
+            // Idempotency check: if every recipe array is already an InputVar, this FBT was patched before.
+            if (RecipeArrayDecls.All(d => existingInputVarNames.Contains(d.Name)))
+                return;
+
+            // 1. Promote recipe arrays from InternalVars to InputVars (move if present, else add fresh).
+            foreach (var decl in RecipeArrayDecls)
+            {
+                var existingInternal = internalVars?
+                    .Elements(ns + "VarDeclaration")
+                    .FirstOrDefault(v => (string?)v.Attribute("Name") == decl.Name);
+                existingInternal?.Remove();
+
+                if (!existingInputVarNames.Contains(decl.Name))
+                {
+                    var newDecl = new System.Xml.Linq.XElement(ns + "VarDeclaration",
+                        new System.Xml.Linq.XAttribute("Name", decl.Name),
+                        new System.Xml.Linq.XAttribute("Type", decl.Type),
+                        new System.Xml.Linq.XAttribute("ArraySize", decl.ArraySize));
+                    if (decl.Comment != null)
+                        newDecl.Add(new System.Xml.Linq.XAttribute("Comment", decl.Comment));
+                    inputVars.Add(newDecl);
+                }
+            }
+
+            // 2. Add <With Var=...> entries on INIT for the new arrays (skip duplicates).
+            var existingWithVars = new HashSet<string>(
+                initEvent.Elements(ns + "With")
+                    .Select(w => (string?)w.Attribute("Var") ?? string.Empty),
+                StringComparer.Ordinal);
+            foreach (var decl in RecipeArrayDecls)
+            {
+                if (existingWithVars.Contains(decl.Name)) continue;
+                initEvent.Add(new System.Xml.Linq.XElement(ns + "With",
+                    new System.Xml.Linq.XAttribute("Var", decl.Name)));
+            }
+
+            // 3. Strip the recipe-population block from initializeinit. The replacement only
+            //    initialises engine state — recipe values now arrive via InputVars.
+            var stElement = initAlgo.Descendants(ns + "ST").FirstOrDefault();
+            if (stElement != null)
+            {
+                stElement.RemoveNodes();
+                stElement.Add(new System.Xml.Linq.XCData(
+                    "CurrentStep := 0;\n" +
+                    "CurrentStepType := 0;\n" +
+                    "WaitSatisfied := FALSE;\n" +
+                    "PusherID := 0;\n\n" +
+                    "cmd_target_name := '';\n" +
+                    "cmd_state := 0;\n\n" +
+                    "PreviousStepText := '';\n" +
+                    "ThisStepText := 'Initialised';\n" +
+                    "NextStepText := '';"));
+            }
+
+            doc.Save(fbtPath);
+            result.PatchesApplied.Add("ProcessRuntime_Generic_v1: recipe arrays InternalVars->InputVars; INIT With clauses added; initializeinit stripped of recipe ST");
+            MapperLogger.Info("[Deploy] Patched ProcessRuntime_Generic_v1.fbt for recipe-as-input architecture");
+        }
+
+        static void PatchProcess1GenericComposite(string fbtPath, DeployResult result)
+        {
+            var doc = System.Xml.Linq.XDocument.Load(fbtPath, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+            var root = doc.Root!;
+            System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+
+            var initEvent = root.Descendants(ns + "Event")
+                .FirstOrDefault(e => (string?)e.Attribute("Name") == "INIT");
+            var inputVars = root.Descendants(ns + "InputVars").FirstOrDefault();
+            var fbNetwork = root.Descendants(ns + "FBNetwork").FirstOrDefault();
+            var dataConnections = fbNetwork?.Descendants(ns + "DataConnections").FirstOrDefault();
+
+            if (initEvent == null || inputVars == null || fbNetwork == null || dataConnections == null)
+            {
+                result.Warnings.Add("Process1_Generic.fbt: expected INIT event / InputVars / FBNetwork / DataConnections not found; recipe-as-input patch skipped.");
+                return;
+            }
+
+            var existingInputVarNames = new HashSet<string>(
+                inputVars.Elements(ns + "VarDeclaration")
+                    .Select(v => (string?)v.Attribute("Name") ?? string.Empty),
+                StringComparer.Ordinal);
+
+            // Idempotency check.
+            if (RecipeArrayDecls.All(d => existingInputVarNames.Contains(d.Name)))
+                return;
+
+            // 1. Add 6 InputVars on the outer composite.
+            foreach (var decl in RecipeArrayDecls)
+            {
+                if (existingInputVarNames.Contains(decl.Name)) continue;
+                var newDecl = new System.Xml.Linq.XElement(ns + "VarDeclaration",
+                    new System.Xml.Linq.XAttribute("Name", decl.Name),
+                    new System.Xml.Linq.XAttribute("Type", decl.Type),
+                    new System.Xml.Linq.XAttribute("ArraySize", decl.ArraySize));
+                if (decl.Comment != null)
+                    newDecl.Add(new System.Xml.Linq.XAttribute("Comment", decl.Comment));
+                inputVars.Add(newDecl);
+            }
+
+            // 2. <With Var=...> on INIT.
+            var existingWithVars = new HashSet<string>(
+                initEvent.Elements(ns + "With")
+                    .Select(w => (string?)w.Attribute("Var") ?? string.Empty),
+                StringComparer.Ordinal);
+            foreach (var decl in RecipeArrayDecls)
+            {
+                if (existingWithVars.Contains(decl.Name)) continue;
+                initEvent.Add(new System.Xml.Linq.XElement(ns + "With",
+                    new System.Xml.Linq.XAttribute("Var", decl.Name)));
+            }
+
+            // 3. Graphic <Input Name="..." Type="Data"/> stubs inside FBNetwork (sibling of FBs and connections).
+            var existingInputStubs = new HashSet<string>(
+                fbNetwork.Elements(ns + "Input")
+                    .Select(i => (string?)i.Attribute("Name") ?? string.Empty),
+                StringComparer.Ordinal);
+            int stubY = 3200;
+            foreach (var decl in RecipeArrayDecls)
+            {
+                if (existingInputStubs.Contains(decl.Name)) { stubY += 100; continue; }
+                fbNetwork.Add(new System.Xml.Linq.XElement(ns + "Input",
+                    new System.Xml.Linq.XAttribute("Name", decl.Name),
+                    new System.Xml.Linq.XAttribute("x", "200"),
+                    new System.Xml.Linq.XAttribute("y", stubY.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+                    new System.Xml.Linq.XAttribute("Type", "Data")));
+                stubY += 100;
+            }
+
+            // 4. DataConnections: outer-input -> ProcessEngine.<input>.
+            var existingDataConns = new HashSet<(string, string)>(
+                dataConnections.Elements(ns + "Connection")
+                    .Select(c => ((string?)c.Attribute("Source") ?? string.Empty,
+                                  (string?)c.Attribute("Destination") ?? string.Empty)));
+            foreach (var decl in RecipeArrayDecls)
+            {
+                var src = decl.Name;
+                var dst = "ProcessEngine." + decl.Name;
+                if (existingDataConns.Contains((src, dst))) continue;
+                dataConnections.Add(new System.Xml.Linq.XElement(ns + "Connection",
+                    new System.Xml.Linq.XAttribute("Source", src),
+                    new System.Xml.Linq.XAttribute("Destination", dst)));
+            }
+
+            doc.Save(fbtPath);
+            result.PatchesApplied.Add("Process1_Generic: 6 array InputVars + INIT With clauses + Input stubs + DataConnections to ProcessEngine");
+            MapperLogger.Info("[Deploy] Patched Process1_Generic.fbt for recipe-as-input architecture");
         }
 
         static void VerifyArraySizeConsistency(string eaeProjectDir, DeployResult result)
