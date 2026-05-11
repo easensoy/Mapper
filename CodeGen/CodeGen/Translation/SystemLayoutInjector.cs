@@ -998,11 +998,27 @@ namespace MapperUI.Services
                 overrides.ByComponentId, overrides.ByVueOneName);
             if (string.IsNullOrWhiteSpace(processInstanceName)) processInstanceName = "Process1";
 
-            var (processOuter, processNested) = BuildProcessFbParameters(
+            var (processOuter, processNested, processRecipe) = BuildProcessFbParameters(
                 contents.Process, allComponents, processInstanceName, processId, contents);
             builder.AddFB(FBIdGenerator.GenerateFBId(contents.Process.ComponentID),
                 processInstanceName, "Process1_Generic", "Main", 3360, 1460,
                 processOuter, processNested);
+
+            // Surface every out-of-scope condition the recipe generator dropped so the
+            // .syslay file self-documents what's missing. Without this, an operator
+            // reading the syslay has no clue that Checker / Transfer / Assembly_Station
+            // references in Control.xml were silently filtered out by Button 2's scope.
+            if (processRecipe != null && processRecipe.SkippedConditions.Count > 0)
+            {
+                var prefix = $" Recipe scope: {processRecipe.SkippedConditions.Count} " +
+                             "Control.xml condition(s) were dropped because they reference " +
+                             "components not present in this syslay (Button 2 filters to " +
+                             $"Feeder + PartInHopper). Skipped:\n  - " +
+                             string.Join("\n  - ", processRecipe.SkippedConditions);
+                builder.AppendTopComment(prefix);
+                foreach (var skip in processRecipe.SkippedConditions)
+                    report.Missing.Add($"recipe: {skip}");
+            }
 
             for (int i = 0; i < contents.Actuators.Count; i++)
             {
@@ -1354,28 +1370,34 @@ namespace MapperUI.Services
                         string.Equals(cond.ComponentID, feeder.ComponentID, StringComparison.OrdinalIgnoreCase)))));
         }
 
-        public static (Dictionary<string, string> Outer, IDictionary<string, IDictionary<string, string>> Nested)
+        public static (Dictionary<string, string> Outer,
+                       IDictionary<string, IDictionary<string, string>> Nested,
+                       RecipeArrays? Recipe)
             BuildProcessFbParameters(VueOneComponent process, List<VueOneComponent> allComponents,
                 string processName, int processId,
                 StationContents? contents = null)
         {
-            // Phase 1: recipe arrays now travel as syslay Parameter values on the Process1_Generic
-            // instance. Process1_Generic.fbt exposes 8 InputVars (process_name, process_id, plus
-            // 6 array inputs); the ProcessEngine inside it receives the arrays via DataConnections.
-            // ProcessRuntime_Generic_v1.fbt's initializeinit no longer populates the arrays.
+            // Phase 1+: recipe arrays travel as syslay Parameter values on the
+            // Process1_Generic instance; Process1_Generic.fbt exposes 8 InputVars
+            // (process_name, process_id, plus the 6 array inputs).
             //
-            // If `contents` is null (defensive — caller should always pass it now) we emit only the
-            // two scalar parameters and let the FBT default (empty arrays) take over. The recipe
-            // is then a no-op and Process1 will sit in END from step 0.
+            // The Recipe return slot exposes the in-scope ComponentRegistry,
+            // SkippedConditions and Warnings so the caller (typically
+            // GenerateFeedStationSyslayToPath) can surface them in the .syslay
+            // top comment for self-documentation.
+            //
+            // If `contents` is null (defensive — caller should always pass it now)
+            // we emit only the two scalar parameters and Recipe comes back null.
             var outer = new Dictionary<string, string>
             {
                 ["process_name"] = SyslayBuilder.FormatString(processName),
                 ["process_id"] = SyslayBuilder.FormatInt(processId)
             };
 
+            RecipeArrays? recipe = null;
             if (contents != null)
             {
-                var recipe = ProcessRecipeArrayGenerator.Generate(process, contents, allComponents);
+                recipe = ProcessRecipeArrayGenerator.Generate(process, contents, allComponents, processId);
                 outer["StepType"]      = SyslayBuilder.FormatIntArray(recipe.StepType);
                 outer["CmdTargetName"] = SyslayBuilder.FormatStringArray(recipe.CmdTargetName);
                 outer["CmdStateArr"]   = SyslayBuilder.FormatIntArray(recipe.CmdStateArr);
@@ -1385,7 +1407,7 @@ namespace MapperUI.Services
             }
 
             var nested = new Dictionary<string, IDictionary<string, string>>(StringComparer.Ordinal);
-            return (outer, nested);
+            return (outer, nested, recipe);
         }
 
         // Phase 1: ResolveProcessRuntimeFbtPath / RewriteProcessRuntimeRecipe deleted.
@@ -1432,7 +1454,7 @@ namespace MapperUI.Services
                 report.Missing.Add($"station grouping skipped: {ex.Message}");
             }
 
-            var (outer, nested) = BuildProcessFbParameters(process, allComponents, process.Name, 10, contents);
+            var (outer, nested, _) = BuildProcessFbParameters(process, allComponents, process.Name, 10, contents);
             builder.AddFB(FBIdGenerator.GenerateFBId(process.ComponentID),
                 process.Name, "Process1_Generic", "Main", 3360, 1460, outer, nested);
 
@@ -1524,7 +1546,7 @@ namespace MapperUI.Services
                 builder.AddFB(FBIdGenerator.GenerateFBId(hmiName),
                     hmiName, "Station_CAT", "Main", xCol + 100, 100);
 
-                var (outer, nested) = BuildProcessFbParameters(proc, allComponents, proc.Name, 10 + stationIndex, contents);
+                var (outer, nested, _) = BuildProcessFbParameters(proc, allComponents, proc.Name, 10 + stationIndex, contents);
                 var processInstanceName = $"Process{stationIndex}";
                 builder.AddFB(FBIdGenerator.GenerateFBId(proc.ComponentID),
                     processInstanceName, "Process1_Generic", "Main", xCol + 1240, 1460, outer, nested);
