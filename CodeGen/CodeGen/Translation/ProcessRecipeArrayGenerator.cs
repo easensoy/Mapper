@@ -6,49 +6,28 @@ using CodeGen.Models;
 namespace CodeGen.Translation
 {
     /// <summary>
-    /// Phase 2 (revised): emits six parallel arrays (StepType, CmdTargetName,
-    /// CmdStateArr, Wait1Id, Wait1State, NextStep) consumed by
+    /// Phase 2 (revised again): emits six parallel arrays consumed by
     /// ProcessRuntime_Generic_v1's ECC.
     ///
     /// Encoding: 1 = CMD, 2 = WAIT, 9 = END.
     ///
-    /// Bug-1 fix — dispatch on source state name, not transition target type.
-    ///     Conditions like "Feeder/Advanced" name an actuator but semantically
-    ///     mean "wait FOR that actuator to finish", not "command it". The right
-    ///     signal that we should command something is the source state's own
-    ///     name describing motion in progress (e.g. "FeederAdvancing").
+    /// CRITICAL SCOPING INVARIANT (this revision):
+    /// The component id space (Wait1Id values) MUST be derived from the SAME
+    /// sensors + actuators that SystemLayoutInjector emits as FB instances on
+    /// the canvas. Conditions in Control.xml that reference an out-of-scope
+    /// component (Checker / Transfer / Assembly_Station / etc. when Button 2's
+    /// scope filter strips them) are SKIPPED entirely — they cannot be satisfied
+    /// at runtime because no FB on the stateRprtCmd ring publishes their state.
     ///
-    /// Bug-2 fix — ResolveStateNumber is now StateID-only; on miss it logs a
-    ///     warning to <see cref="RecipeArrays.Warnings"/> and returns 0 rather
-    ///     than name-pattern guessing. The previous InferStateNumberFromName
-    ///     fallback was unreliable and produced numbers that didn't match what
-    ///     Five_State_Actuator_CAT actually publishes on the ring.
+    /// Skipped conditions are accumulated in <see cref="RecipeArrays.SkippedConditions"/>
+    /// and surfaced upstream so the .syslay top comment can list every reference
+    /// that was dropped (so the file self-documents what's missing).
     ///
-    /// Classification rules:
-    ///   * Source-state name (lowercase) contains a motion-in-progress verb
-    ///     (advancing, rising, returning, descending, towork, tohome, gotowork,
-    ///     gotohome, checking) -> two rows: CMD then WAIT.
-    ///       CMD:  StepType=1
-    ///             CmdTargetName = wait condition's target component name (lowercased)
-    ///             CmdStateArr   = actuator's canonical state number for the
-    ///                             motion target (looked up from the wait condition's
-    ///                             StateID on the target component — same number that
-    ///                             becomes Wait1State on the following WAIT row)
-    ///             Wait1Id/Wait1State = 0
-    ///       WAIT: StepType=2
-    ///             Wait1Id    = registry id of wait condition's target component
-    ///             Wait1State = canonical state number from the StateID lookup
-    ///             CmdTargetName / CmdStateArr = empty/0
-    ///   * Source-state name does NOT match a motion verb (e.g. AtWork, AtHome,
-    ///     Initialisation, PartChecking, WaitingReleaseSt2, HandShake) ->
-    ///     a single WAIT row using the transition condition.
-    ///   * No transition or no condition -> single END row.
-    ///   * A final END row is always appended; its NextStep loops back to 0.
-    ///
-    /// Two-pass NextStep: pass 1 counts rows per source state and builds a
-    /// StateID -> first-row-index map. Pass 2 emits rows and resolves each row's
-    /// NextStep against that map (so transition destinations land on the right
-    /// row index even when motion states unfolded into 2 rows).
+    /// Process_id (the FB instance's process_id parameter) is NEVER in the
+    /// component map — it's not a ring participant. An assertion at the end of
+    /// generation throws InvalidOperationException if any Wait1Id value happens
+    /// to equal process_id, catching future regressions where a stray registry
+    /// id collides with the process id.
     /// </summary>
     public sealed class RecipeArrays
     {
@@ -59,14 +38,18 @@ namespace CodeGen.Translation
         public List<int> Wait1State     { get; } = new();
         public List<int> NextStep       { get; } = new();
 
-        /// <summary>Diagnostic registry: ComponentID → local id. Useful for tests
-        /// to verify Wait1Id values point at the right component.</summary>
+        /// <summary>ComponentID → local id (sensors first, actuators next).
+        /// Process is NOT in this map. Out-of-scope components are NOT in this map.</summary>
         public Dictionary<string, int> ComponentRegistry { get; } =
             new(StringComparer.OrdinalIgnoreCase);
 
-        /// <summary>Warnings emitted during generation. Surfaced by Bug-2 fix —
-        /// every StateID lookup miss adds a warning here so the operator can see
-        /// which Control.xml condition didn't resolve.</summary>
+        /// <summary>Per-condition warnings emitted during generation —
+        /// every reference to an out-of-scope ComponentID lands here as
+        /// "state Name X references out-of-scope component ComponentID Y (type Z)".
+        /// Surfaced into the .syslay top comment by SystemLayoutInjector.</summary>
+        public List<string> SkippedConditions { get; } = new();
+
+        /// <summary>Generic generator warnings (lookup misses on StateID etc.).</summary>
         public List<string> Warnings { get; } = new();
 
         public int PusherId { get; set; }
@@ -75,9 +58,9 @@ namespace CodeGen.Translation
 
     public static class ProcessRecipeArrayGenerator
     {
-        // Motion-in-progress verbs per the Phase-2 spec. "checking" is included
+        // Motion-in-progress verbs per the Phase-2 spec. "checking" included
         // pragmatically because PartChecking represents Checker descending in
-        // the SMC rig and the verification test asserts a CMD row for Checker.
+        // the SMC rig.
         private static readonly string[] MotionVerbs = new[]
         {
             "advancing", "rising", "returning", "descending",
@@ -85,39 +68,73 @@ namespace CodeGen.Translation
             "checking",
         };
 
+        /// <summary>
+        /// Build the scoped component-id map from the sensors and actuators that
+        /// SystemLayoutInjector emits as FB instances. Sensors first (ids 0..N-1),
+        /// actuators next (ids N..N+M-1). Process is NOT in the map — the recipe
+        /// never waits on its own process_id.
+        /// </summary>
+        public static Dictionary<string, int> BuildScopedComponentMap(
+            IReadOnlyList<VueOneComponent> allowedSensors,
+            IReadOnlyList<VueOneComponent> allowedActuators)
+        {
+            var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            int next = 0;
+            foreach (var s in allowedSensors)
+            {
+                if (string.IsNullOrEmpty(s.ComponentID)) continue;
+                map[s.ComponentID.Trim()] = next++;
+            }
+            foreach (var a in allowedActuators)
+            {
+                if (string.IsNullOrEmpty(a.ComponentID)) continue;
+                map[a.ComponentID.Trim()] = next++;
+            }
+            return map;
+        }
+
+        // Legacy delegation — kept so any caller that still passes StationContents works,
+        // and so older test code links cleanly. Sensors-then-actuators is the same scheme.
         public static StationComponentMap BuildComponentMap(StationContents contents)
             => ProcessRecipeStGenerator.BuildComponentMap(contents);
 
         public static RecipeArrays Generate(VueOneComponent process,
-            StationContents stationContents, IReadOnlyList<VueOneComponent> allComponents)
+            StationContents stationContents, IReadOnlyList<VueOneComponent> allComponents,
+            int processId = 10)
         {
             var arrays = new RecipeArrays();
             var states = process.States.OrderBy(s => s.StateNumber).ToList();
 
-            // Build component registry from this process's union of conditions.
-            BuildExtendedRegistry(process, arrays.ComponentRegistry);
+            // 1. Build scoped registry from the in-scope sensors + actuators ONLY.
+            var scopedRegistry = BuildScopedComponentMap(stationContents.Sensors, stationContents.Actuators);
+            foreach (var kv in scopedRegistry) arrays.ComponentRegistry[kv.Key] = kv.Value;
 
+            // Diagnostic PusherId — not part of the recipe semantics, useful for tests.
             arrays.PusherId =
                 arrays.ComponentRegistry.FirstOrDefault(kv =>
                     LookupComponent(kv.Key, allComponents) is { } c &&
                     (NameEquals(c.Name, "Feeder") || NameEquals(c.Name, "Pusher"))).Value;
 
-            // Pass 1 — classify each source state and count its rows; build
-            // the StateID -> first-row-index map used for NextStep resolution.
+            // 2. Pass-1 classify: for each source state, decide if rows are emit/skip.
             var classifications = new List<StateClassification>(states.Count);
+            foreach (var state in states)
+                classifications.Add(ClassifyState(state, allComponents, arrays, scopedRegistry));
+
+            // 3. Pass-1 row layout: build StateID -> first-row-index map AFTER skips.
+            //    Each state contributes RowCount rows in order; the appended final END
+            //    sits at the index immediately after the last source state's rows.
             var stateIdToFirstRow = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             int rowIndex = 0;
-            foreach (var state in states)
+            for (int i = 0; i < states.Count; i++)
             {
-                var c = ClassifyState(state, allComponents, arrays);
-                classifications.Add(c);
-                if (!string.IsNullOrEmpty(state.StateID))
-                    stateIdToFirstRow[state.StateID] = rowIndex;
-                rowIndex += c.RowCount;
+                var s = states[i];
+                if (!string.IsNullOrEmpty(s.StateID))
+                    stateIdToFirstRow[s.StateID] = rowIndex;
+                rowIndex += classifications[i].RowCount;
             }
-            int finalEndIndex = rowIndex;   // appended END row sits at this index
+            int finalEndIndex = rowIndex;
 
-            // Pass 2 — emit rows; resolve NextStep against the map.
+            // 4. Pass-2 emit. NextStep on each row resolves against stateIdToFirstRow.
             for (int i = 0; i < states.Count; i++)
             {
                 var state = states[i];
@@ -129,15 +146,13 @@ namespace CodeGen.Translation
                 switch (c.Kind)
                 {
                     case ClassKind.MotionPair:
-                        // CMD row
                         arrays.StepType.Add(1);
                         arrays.CmdTargetName.Add(c.CmdTargetName);
                         arrays.CmdStateArr.Add(c.CmdState);
                         arrays.Wait1Id.Add(0);
                         arrays.Wait1State.Add(0);
-                        arrays.NextStep.Add(arrays.StepType.Count);   // -> our own WAIT row
+                        arrays.NextStep.Add(arrays.StepType.Count);   // → our own WAIT row
 
-                        // WAIT row
                         arrays.StepType.Add(2);
                         arrays.CmdTargetName.Add(string.Empty);
                         arrays.CmdStateArr.Add(0);
@@ -156,7 +171,10 @@ namespace CodeGen.Translation
                         break;
 
                     case ClassKind.End:
+                    case ClassKind.SkippedAllOutOfScope:
                     default:
+                        // For the all-out-of-scope case we emit an END row so the
+                        // engine doesn't run off the end of the arrays at runtime.
                         arrays.StepType.Add(9);
                         arrays.CmdTargetName.Add(string.Empty);
                         arrays.CmdStateArr.Add(0);
@@ -167,13 +185,28 @@ namespace CodeGen.Translation
                 }
             }
 
-            // Always append a final END row whose NextStep loops back to row 0.
+            // 5. Always append a final END row whose NextStep loops back to row 0.
             arrays.StepType.Add(9);
             arrays.CmdTargetName.Add(string.Empty);
             arrays.CmdStateArr.Add(0);
             arrays.Wait1Id.Add(0);
             arrays.Wait1State.Add(0);
             arrays.NextStep.Add(0);
+
+            // 6. Defensive assertion: process_id must NEVER appear in Wait1Id.
+            //    Process is not on the ring; any equality is a scoping bug.
+            for (int i = 0; i < arrays.Wait1Id.Count; i++)
+            {
+                if (arrays.Wait1Id[i] == processId)
+                {
+                    throw new InvalidOperationException(
+                        $"Recipe generator emitted Wait1Id[{i}]={processId} which equals " +
+                        $"the Process FB's process_id ({processId}). Process is not a ring " +
+                        "participant and cannot publish its own wait state. Likely cause: " +
+                        "a stray ComponentID in Control.xml conditions landed on the process_id " +
+                        "value via the registry. Inspect ComponentRegistry / SkippedConditions.");
+                }
+            }
 
             return arrays;
         }
@@ -182,7 +215,13 @@ namespace CodeGen.Translation
         // Pass-1 classification
         // ----------------------------------------------------------------------
 
-        private enum ClassKind { MotionPair, SettledWait, End }
+        private enum ClassKind
+        {
+            MotionPair,
+            SettledWait,
+            End,
+            SkippedAllOutOfScope,   // emits an END row to keep the engine from running off
+        }
 
         private sealed class StateClassification
         {
@@ -195,39 +234,71 @@ namespace CodeGen.Translation
         }
 
         private static StateClassification ClassifyState(VueOneState state,
-            IReadOnlyList<VueOneComponent> allComponents, RecipeArrays arrays)
+            IReadOnlyList<VueOneComponent> allComponents, RecipeArrays arrays,
+            Dictionary<string, int> scopedRegistry)
         {
             var trans = state.Transitions.FirstOrDefault();
-            var cond  = trans?.Conditions.FirstOrDefault(c => !string.IsNullOrEmpty(c.ComponentID));
+            var allConds = trans?.Conditions ?? new List<VueOneCondition>();
 
-            // No transition or no usable condition → END row.
-            if (trans == null || cond == null)
+            // No transition → END row.
+            if (trans == null)
                 return new StateClassification { Kind = ClassKind.End, RowCount = 1 };
 
-            var target = LookupComponent(cond.ComponentID, allComponents);
-            if (target == null)
+            // Find the FIRST condition whose ComponentID is in the scoped registry.
+            // Conditions on out-of-scope components are recorded in SkippedConditions
+            // and effectively dropped from the recipe.
+            VueOneCondition? cond = null;
+            foreach (var c in allConds)
+            {
+                if (string.IsNullOrEmpty(c.ComponentID)) continue;
+                if (scopedRegistry.ContainsKey(c.ComponentID.Trim()))
+                {
+                    cond = c;
+                    break;
+                }
+                // Out-of-scope reference → record for the syslay top comment.
+                var target = LookupComponent(c.ComponentID, allComponents);
+                arrays.SkippedConditions.Add(
+                    $"state '{state.Name}' references out-of-scope component " +
+                    $"ComponentID={c.ComponentID} " +
+                    $"(name={(target?.Name ?? "?")}, type={(target?.Type ?? "?")})");
+            }
+
+            if (cond == null)
+            {
+                // Every condition on this transition was out of scope (or there were no
+                // conditions). Emit an END row so the engine has somewhere to land —
+                // running off the end of the arrays would deadlock the runtime ECC.
+                if (allConds.Any())
+                {
+                    arrays.SkippedConditions.Add(
+                        $"state '{state.Name}': all transition conditions out of scope — " +
+                        "emitting END row in their place.");
+                    return new StateClassification { Kind = ClassKind.SkippedAllOutOfScope, RowCount = 1 };
+                }
+                return new StateClassification { Kind = ClassKind.End, RowCount = 1 };
+            }
+
+            var inScopeTarget = LookupComponent(cond.ComponentID, allComponents);
+            if (inScopeTarget == null)
             {
                 arrays.Warnings.Add(
-                    $"State '{state.Name}' (StateID={state.StateID}): condition references " +
-                    $"ComponentID '{cond.ComponentID}' which was not found in allComponents. " +
-                    "Emitting WAIT with id=0.");
+                    $"State '{state.Name}': in-scope ComponentID '{cond.ComponentID}' could not " +
+                    "be resolved to a VueOneComponent in allComponents. Emitting WAIT id=0.");
                 return new StateClassification { Kind = ClassKind.SettledWait, RowCount = 1 };
             }
 
-            int waitId    = arrays.ComponentRegistry.TryGetValue(cond.ComponentID, out var rid) ? rid : 0;
-            int waitState = ResolveStateNumber(cond, target, arrays);
+            int waitId    = scopedRegistry[cond.ComponentID.Trim()];
+            int waitState = ResolveStateNumber(cond, inScopeTarget, arrays);
 
-            // Bug-1 fix: dispatch on the source state's name, NOT the target's component type.
+            // Bug-1 dispatch (kept from previous Phase 2): on source-state name, not target type.
             if (StateNameSuggestsMotion(state.Name))
             {
                 return new StateClassification
                 {
                     Kind = ClassKind.MotionPair,
                     RowCount = 2,
-                    CmdTargetName = (target.Name ?? string.Empty).Trim().ToLowerInvariant(),
-                    // Per the Phase-2 spec the CMD row carries the actuator's canonical
-                    // destination state number, which is exactly what the StateID lookup
-                    // on the wait condition resolves to. Same as Wait1State.
+                    CmdTargetName = (inScopeTarget.Name ?? string.Empty).Trim().ToLowerInvariant(),
                     CmdState = waitState,
                     WaitId = waitId,
                     WaitState = waitState,
@@ -262,8 +333,6 @@ namespace CodeGen.Translation
             List<StateClassification> classifications, int srcIndex,
             Dictionary<string, int> stateIdToFirstRow, int finalEndIndex)
         {
-            // Use the destination StateID from the transition; fall back to the
-            // next state in declaration order; final fallback is the final END row.
             var trans = state.Transitions.FirstOrDefault();
             if (trans != null &&
                 !string.IsNullOrEmpty(trans.DestinationStateID) &&
@@ -271,8 +340,6 @@ namespace CodeGen.Translation
             {
                 return dst;
             }
-            // No explicit destination — point at the next source state's first row,
-            // or wrap to the final END if we're already at the last source state.
             int nextSrc = srcIndex + 1;
             if (nextSrc < classifications.Count)
             {
@@ -297,7 +364,6 @@ namespace CodeGen.Translation
                     StringComparison.OrdinalIgnoreCase));
         }
 
-        // Bug-2 fix: StateID lookup ONLY. No name-pattern fallback. Miss → warning + 0.
         private static int ResolveStateNumber(VueOneCondition cond, VueOneComponent target,
             RecipeArrays arrays)
         {
@@ -319,21 +385,6 @@ namespace CodeGen.Translation
                 return 0;
             }
             return refState.StateNumber;
-        }
-
-        private static void BuildExtendedRegistry(VueOneComponent process,
-            Dictionary<string, int> registry)
-        {
-            int next = 0;
-            foreach (var s in process.States.OrderBy(x => x.StateNumber))
-                foreach (var t in s.Transitions)
-                    foreach (var c in t.Conditions)
-                    {
-                        if (string.IsNullOrEmpty(c.ComponentID)) continue;
-                        var key = c.ComponentID.Trim();
-                        if (registry.ContainsKey(key)) continue;
-                        registry[key] = next++;
-                    }
         }
 
         private static bool NameEquals(string? a, string b) =>
