@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Xml.Linq;
 
 namespace CodeGen.Translation
@@ -99,6 +100,21 @@ namespace CodeGen.Translation
             return this;
         }
 
+        /// <summary>
+        /// Append additional text to the top comment (joined with two newlines for
+        /// readability). Useful for callers that want to layer auxiliary notes —
+        /// e.g. recipe-skipped-conditions — on top of the main top-comment that
+        /// SystemLayoutInjector sets up.
+        /// </summary>
+        public SyslayBuilder AppendTopComment(string additionalText)
+        {
+            if (string.IsNullOrEmpty(additionalText)) return this;
+            _topComment = string.IsNullOrEmpty(_topComment)
+                ? additionalText
+                : _topComment + "\n\n" + additionalText;
+            return this;
+        }
+
         public XDocument Build()
         {
             if (_eventConnections.HasElements && _eventConnections.Parent == null)
@@ -118,5 +134,30 @@ namespace CodeGen.Translation
         public static string FormatInt(int value) => value.ToString(System.Globalization.CultureInfo.InvariantCulture);
         public static string FormatBool(bool value) => value ? "TRUE" : "FALSE";
         public static string FormatTimeMs(int ms) => $"T#{ms.ToString(System.Globalization.CultureInfo.InvariantCulture)}ms";
+
+        /// <summary>
+        /// Formats an INT array as an EAE square-bracket literal, e.g. [1, 2, 9].
+        /// IEC 61131-3 partial initialisation: trailing array slots default to the
+        /// element type's initial value (0 for INT). Caller may pass an empty list to
+        /// emit "[]".
+        /// </summary>
+        public static string FormatIntArray(IEnumerable<int> values)
+        {
+            var formatted = string.Join(", ",
+                values.Select(v => v.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            return $"[{formatted}]";
+        }
+
+        /// <summary>
+        /// Formats a STRING array as an EAE square-bracket literal of single-quoted entries,
+        /// e.g. ['Feeder', '', 'PartInHopper']. Single quotes inside an entry are doubled
+        /// (IEC 61131-3 STRING escaping).
+        /// </summary>
+        public static string FormatStringArray(IEnumerable<string> values)
+        {
+            var formatted = string.Join(", ",
+                values.Select(v => "'" + (v ?? string.Empty).Replace("'", "''") + "'"));
+            return $"[{formatted}]";
+        }
     }
 }
