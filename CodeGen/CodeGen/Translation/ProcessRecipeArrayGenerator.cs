@@ -387,12 +387,22 @@ namespace CodeGen.Translation
             // Bug-1 dispatch (kept from previous Phase 2): on source-state name, not target type.
             if (StateNameSuggestsMotion(state.Name))
             {
+                // CmdState is the TRANSIENT state number the actuator's own ECC
+                // recognises as a motion command (Five_State_Actuator_CAT triggers
+                // AtHomeInit→ToWork on state_val=1 and AtWork→ToHome on state_val=3).
+                // We DERIVE this number from the actuator's own State elements in
+                // Control.xml — looking up the State whose Name matches the motion
+                // direction in the source-state Name (e.g. "FeederAdvancing" -> the
+                // actuator's "Advancing" state). This stays generic across CAT
+                // templates (Seven_State_Actuator_CAT, future custom CATs).
+                int cmdState = ResolveTransientCmdState(state.Name, inScopeTarget, waitState, arrays);
+
                 return new StateClassification
                 {
                     Kind = ClassKind.MotionPair,
                     RowCount = 2,
                     CmdTargetName = (inScopeTarget.Name ?? string.Empty).Trim().ToLowerInvariant(),
-                    CmdState = waitState,
+                    CmdState = cmdState,
                     WaitId = waitId,
                     WaitState = waitState,
                 };
@@ -492,5 +502,81 @@ namespace CodeGen.Translation
 
         private static bool NameEquals(string? a, string b) =>
             string.Equals((a ?? string.Empty).Trim(), b, StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Resolve the transient (motion command) state number for a CMD row by
+        /// looking it up on the actuator's OWN State elements — not by arithmetic
+        /// on the wait state.
+        ///
+        /// Algorithm:
+        ///   1. Extract the motion-direction token from the source state name
+        ///      ("FeederAdvancing" -> "Advancing"; "TransferReturning" -> "Returning").
+        ///   2. Find the actuator State whose Name equals (or contains) that token.
+        ///   3. Return its State_Number.
+        ///
+        /// Falls back to (settledWaitState - 1) with a warning if no match is found —
+        /// this matches Five_State_Actuator's settled-1=transient convention but flags
+        /// it explicitly so non-Five_State CATs get visibility into the heuristic.
+        ///
+        /// Examples on Five_State_Actuator (per Feed_Station_Fixture):
+        ///   FeederAdvancing  -> Feeder.Advancing  (State_Number=1)
+        ///   FeederReturning  -> Feeder.Returning  (State_Number=3)
+        /// </summary>
+        private static int ResolveTransientCmdState(string? sourceStateName,
+            VueOneComponent actuator, int settledWaitState, RecipeArrays arrays)
+        {
+            string sourceLower = (sourceStateName ?? string.Empty).Trim().ToLowerInvariant();
+            if (sourceLower.Length > 0)
+            {
+                // Try direct verb match: actuator State whose Name appears as a
+                // substring of the source state Name (e.g. "Advancing").
+                foreach (var s in actuator.States)
+                {
+                    var sn = (s.Name ?? string.Empty).Trim();
+                    if (sn.Length == 0) continue;
+                    if (sourceLower.Contains(sn.ToLowerInvariant(), StringComparison.Ordinal))
+                        return s.StateNumber;
+                }
+                // Try motion-verb mapping: source contains a motion verb -> map to
+                // an actuator State by canonical synonyms.
+                foreach (var (verb, synonyms) in MotionVerbToStateNames)
+                {
+                    if (!sourceLower.Contains(verb, StringComparison.Ordinal)) continue;
+                    foreach (var syn in synonyms)
+                    {
+                        var match = actuator.States.FirstOrDefault(s =>
+                            string.Equals((s.Name ?? string.Empty).Trim(), syn,
+                                StringComparison.OrdinalIgnoreCase));
+                        if (match != null) return match.StateNumber;
+                    }
+                }
+            }
+
+            // Fallback — Five_State convention. Surface as a warning so non-Five_State
+            // CATs get visibility into the inference.
+            int fallback = System.Math.Max(settledWaitState - 1, 0);
+            arrays.Warnings.Add(
+                $"State '{sourceStateName}': could not match a transient State name on " +
+                $"actuator '{actuator.Name}'; falling back to (settledWaitState-1)={fallback}. " +
+                "If this actuator's CAT does not follow the Five_State convention " +
+                "(transient = settled - 1), add explicit synonyms to MotionVerbToStateNames.");
+            return fallback;
+        }
+
+        // Maps source-state-name motion verbs to candidate actuator State Names.
+        // Used as a soft fallback when direct substring match doesn't find an
+        // actuator State. Extend as new CAT templates are added.
+        private static readonly (string verb, string[] synonyms)[] MotionVerbToStateNames =
+        {
+            ("advancing",  new[] { "Advancing", "ToWork",   "Extending", "GoToWork" }),
+            ("returning",  new[] { "Returning", "ToHome",   "Retracting","GoToHome" }),
+            ("rising",     new[] { "Rising",    "GoUp" }),
+            ("descending", new[] { "Descending","Lowering", "GoDown" }),
+            ("checking",   new[] { "Lowering",  "Descending","Checking" }),
+            ("towork",     new[] { "ToWork",    "Advancing" }),
+            ("tohome",     new[] { "ToHome",    "Returning" }),
+            ("gotowork",   new[] { "GoToWork",  "ToWork", "Advancing" }),
+            ("gotohome",   new[] { "GoToHome",  "ToHome", "Returning" }),
+        };
     }
 }
