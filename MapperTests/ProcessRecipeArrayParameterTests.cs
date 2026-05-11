@@ -71,15 +71,18 @@ namespace MapperTests
             var recipe = ProcessRecipeArrayGenerator.Generate(process, contents, components);
 
             // Every CMD row (StepType=1) must be immediately followed by a WAIT row (StepType=2).
-            // Bug-2-fix contract: CmdStateArr carries the actuator's canonical destination
-            // state number (read by StateID lookup on the actuator), which equals Wait1State
-            // on the following WAIT row.
+            // Phase-3 architectural truth (verified against the actuator's ECC):
+            //   CmdStateArr   = TRANSIENT motion state (what the actuator's ECC fires on)
+            //   Wait1State    = SETTLED state (what the actuator publishes after motion)
+            // For Five_State_Actuator: CmdStateArr=Wait1State-1 (1↔2 extend, 3↔4 retract).
+            // We assert the asymmetry — CmdStateArr is NOT equal to the following Wait1State.
             for (int i = 0; i < recipe.StepType.Count; i++)
             {
                 if (recipe.StepType[i] != 1) continue;
                 Assert.True(i + 1 < recipe.StepType.Count, $"CMD at row {i} has no following row");
                 Assert.Equal(2, recipe.StepType[i + 1]);
-                Assert.Equal(recipe.Wait1State[i + 1], recipe.CmdStateArr[i]);
+                // CMD is the transient (1 or 3); WAIT is the settled (2 or 4) — never equal.
+                Assert.NotEqual(recipe.Wait1State[i + 1], recipe.CmdStateArr[i]);
                 Assert.NotEqual(string.Empty, recipe.CmdTargetName[i]);
                 Assert.Equal(string.Empty, recipe.CmdTargetName[i + 1]);
             }
@@ -123,13 +126,15 @@ namespace MapperTests
         }
 
         [Fact]
-        public void Feed_Station_CmdStateValues_AreActuatorCanonicalStateNumbers()
+        public void Feed_Station_CmdStateValues_AreActuatorTransientStateNumbers()
         {
-            // Bug-2 verification: CmdStateArr at each CMD row must be a state number
-            // that actually exists on the corresponding actuator (read by StateID, not
-            // guessed by name). For Five_State_Actuator the canonical static states are
-            // 0 (ReturnedHome), 2 (Advanced), 4 (ReturnedFinished). Every emitted
-            // CmdState must be one of those.
+            // Phase-3 fix (verified against FiveStateActuator.fbt's ECC):
+            // CmdStateArr carries the TRANSIENT motion state number that the
+            // receiving actuator's ECC reacts to (state_val=1 fires
+            // AtHomeInit -> ToWork; state_val=3 fires AtWork -> ToHome).
+            // Static settled states (0/2/4) are what the actuator PUBLISHES on
+            // the ring after motion completes — they belong in Wait1State, NOT
+            // CmdStateArr.
             var components = new SystemXmlReader().ReadAllComponents(FixturePath());
             var process = components.First(c => c.Type == "Process");
             var contents = new StationGroupingService().GroupStationContents(process, components);
@@ -140,9 +145,9 @@ namespace MapperTests
             {
                 if (recipe.StepType[i] != 1) continue;
                 int s = recipe.CmdStateArr[i];
-                Assert.True(s == 0 || s == 2 || s == 4,
+                Assert.True(s == 1 || s == 3,
                     $"CMD row {i} target='{recipe.CmdTargetName[i]}' CmdState={s} " +
-                    "is not a Five_State_Actuator canonical static state (0/2/4).");
+                    "is not a Five_State_Actuator transient command (1=extend, 3=retract).");
             }
         }
 
