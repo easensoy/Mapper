@@ -131,6 +131,43 @@ namespace MapperTests
         }
 
         [Fact]
+        public void StepType_HasExactlyOneEndMarker_AtFinalIndex()
+        {
+            // Phase-3 revision: skipped out-of-scope rows are DROPPED ENTIRELY
+            // (they used to emit a placeholder StepType=9 which halted the
+            // engine). The recipe's StepType array must therefore contain
+            // exactly one 9, and only at the last index.
+            var components = new SystemXmlReader().ReadAllComponents(FixturePath());
+            var contents = Button2Scope(components);
+            var recipe = ProcessRecipeArrayGenerator.Generate(
+                contents.Process, contents, components, processId: 10);
+
+            int endCount = recipe.StepType.Count(s => s == 9);
+            Assert.Equal(1, endCount);
+            Assert.Equal(9, recipe.StepType[^1]);
+
+            for (int i = 0; i < recipe.StepType.Count - 1; i++)
+                Assert.NotEqual(9, recipe.StepType[i]);
+        }
+
+        [Fact]
+        public void Index0_IsTheFirstSurvivingRealRow_NotEndMarker()
+        {
+            // Bug being prevented: previously the recipe started with [9, 2, 1, 2, 9, ...]
+            // — the index-0 END halted the engine before any meaningful row ran.
+            // For Feed_Station Button-2 scope, the first surviving state is
+            // CheckPartInHopper (settled WAIT on PartInHopper), so index 0 must be 2 (WAIT).
+            var components = new SystemXmlReader().ReadAllComponents(FixturePath());
+            var contents = Button2Scope(components);
+            var recipe = ProcessRecipeArrayGenerator.Generate(
+                contents.Process, contents, components, processId: 10);
+
+            Assert.NotEqual(9, recipe.StepType[0]);
+            Assert.True(recipe.StepType[0] == 1 || recipe.StepType[0] == 2,
+                $"index 0 should be a real CMD or WAIT row; got StepType={recipe.StepType[0]}");
+        }
+
+        [Fact]
         public void SkippedConditions_ContainsOutOfScope_References()
         {
             var components = new SystemXmlReader().ReadAllComponents(FixturePath());
