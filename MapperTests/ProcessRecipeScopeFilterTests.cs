@@ -175,11 +175,14 @@ namespace MapperTests
             var recipe = ProcessRecipeArrayGenerator.Generate(
                 contents.Process, contents, components, processId: 10);
 
-            // The Feed_Station fixture references Assembly_Station, Checker, Transfer,
-            // and Disassembly in various transition conditions. Button 2's scope strips
-            // them, so each of those names should appear at least once in the skipped list.
+            // The Feed_Station fixture references Checker, Transfer, and Disassembly
+            // in various transition conditions across states OTHER than Initialisation.
+            // Button 2's scope strips them, so each appears in the skipped list.
+            // (Assembly_Station only appeared in Initialisation, which is now dropped
+            // wholesale as a boot-assertion state before its conditions are scanned —
+            // we instead assert the Initialisation-drop entry itself.)
             string skippedDump = string.Join("\n", recipe.SkippedConditions);
-            foreach (var expected in new[] { "Assembly_Station", "Checker", "Transfer", "Disassembly" })
+            foreach (var expected in new[] { "Checker", "Transfer", "Disassembly", "Initialisation" })
                 Assert.Contains(expected, skippedDump);
         }
 
