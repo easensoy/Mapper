@@ -34,7 +34,7 @@ namespace MapperTests
 
         static XElement GetProcessFb(XDocument doc) =>
             doc.Descendants(LibElNs + "FB")
-                .Single(fb => (string?)fb.Attribute("Name") == "Process1");
+                .Single(fb => (string?)fb.Attribute("Type") == "Process1_Generic");
 
         // ---------------------------------------------------------------
         // Direct generator tests — independent of the syslay path.
@@ -276,7 +276,10 @@ namespace MapperTests
                 .Single(p => (string?)p.Attribute("Name") == name)
                 .Attribute("Value")!.Value;
 
-            Assert.Equal("'Process1'", ValueOf("process_name"));
+            // Phase 2 update: process_name now derives from the Control.xml process
+            // component's canonical Name (e.g. "Feed_Station") rather than a hardcoded
+            // "Process1". Matches the FB instance Name on the canvas.
+            Assert.Equal("'Feed_Station'", ValueOf("process_name"));
             Assert.Equal("10", ValueOf("process_id"));
         }
 
