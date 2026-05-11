@@ -1,6 +1,17 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<Layer ID="C8703AB5D97FF851" Name="Default" Comment="" IsDefault="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="https://www.se.com/LibraryElements">
-  <!-- v1 limitations: Process1 recipe arrays are default-empty; sensor-to-process DataConnections not generated; manual recipe loading required in ProcessRuntime_Generic_v1.initialize before Process1 will sequence. Demonstrator was cleaned of universal-architecture instances before this generation; restore via 'git checkout' on the Demonstrator repo to revert. -->
+<Layer ID="FA7543729DBF1F2E" Name="Default" Comment="" IsDefault="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="https://www.se.com/LibraryElements">
+  <!-- Phase 1: Process1 recipe arrays are emitted as syslay Parameter values on the Process1 instance (StepType, CmdTargetName, CmdStateArr, Wait1Id, Wait1State, NextStep). Scope filter still trims to Feeder + PartInHopper; out-of-scope component waits fall back to (0,0). Sensor-to-process DataConnections still not generated. Demonstrator was cleaned of universal-architecture instances before this generation; restore via 'git checkout' on the Demonstrator repo to revert.
+
+ Recipe scope: 9 Control.xml condition(s) were dropped because they reference components not present in this syslay (Button 2 filters to Feeder + PartInHopper). Skipped:
+  - state 'Initialisation' references out-of-scope component ComponentID=C-b455b9c6-47f7-4172-a1c1-4c43fc03b55e (name=Assembly_Station, type=Process)
+  - state 'Initialisation': all transition conditions out of scope — emitting END row in their place.
+  - state 'PartChecking' references out-of-scope component ComponentID=C-21a332b3-e2fd-4a5b-850e-c4197abf62c3 (name=Checker, type=Actuator)
+  - state 'PartChecking': all transition conditions out of scope — emitting END row in their place.
+  - state 'TransferAdvancing' references out-of-scope component ComponentID=C-c9b8c68c-5030-4d93-91ca-06310726ddc5 (name=Transfer, type=Actuator)
+  - state 'TransferAdvancing': all transition conditions out of scope — emitting END row in their place.
+  - state 'HandShake' references out-of-scope component ComponentID=C-4376f4d7-210e-4f18-a2ae-16492012db4f (name=Disassembly, type=Process)
+  - state 'HandShake' references out-of-scope component ComponentID=C-0c804da8-b3b6-4119-abbe-12fbb268a847 (name=Feed_Station, type=Process)
+  - state 'HandShake': all transition conditions out of scope — emitting END row in their place. -->
   <SubAppNetwork>
     <FB ID="86119B275B332F9D" Name="Area_HMI" Type="Area_CAT" Namespace="Main" x="240" y="140" />
     <FB ID="024DC204D7BA77A8" Name="Area" Type="Area" Namespace="Main" x="400" y="580">
@@ -10,9 +21,15 @@
       <Parameter Name="StationName" Value="'Station1'" />
     </FB>
     <FB ID="A1D4FECE65B60B9D" Name="Station1_HMI" Type="Station_CAT" Namespace="Main" x="2220" y="100" />
-    <FB ID="F8DBD8A29CB500EC" Name="Process1" Type="Process1_Generic" Namespace="Main" x="3360" y="1460">
-      <Parameter Name="process_name" Value="'Process1'" />
+    <FB ID="F8DBD8A29CB500EC" Name="Feed_Station" Type="Process1_Generic" Namespace="Main" x="3360" y="1460">
+      <Parameter Name="process_name" Value="'Feed_Station'" />
       <Parameter Name="process_id" Value="10" />
+      <Parameter Name="StepType" Value="[9, 2, 1, 2, 9, 1, 2, 9, 2, 9, 9]" />
+      <Parameter Name="CmdTargetName" Value="['', '', 'feeder', '', '', 'feeder', '', '', '', '', '']" />
+      <Parameter Name="CmdStateArr" Value="[0, 0, 2, 0, 0, 4, 0, 0, 0, 0, 0]" />
+      <Parameter Name="Wait1Id" Value="[0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0]" />
+      <Parameter Name="Wait1State" Value="[0, 1, 0, 2, 0, 0, 4, 0, 4, 0, 0]" />
+      <Parameter Name="NextStep" Value="[0, 2, 3, 4, 0, 6, 7, 0, 9, 0, 0]" />
     </FB>
     <FB ID="E0AEF2679BD52F88" Name="Feeder" Type="Five_State_Actuator_CAT" Namespace="Main" x="1300" y="2480">
       <Parameter Name="actuator_name" Value="'feeder'" />
@@ -36,7 +53,7 @@
       <Connection Source="Area.INITO" Destination="Station1.INIT" />
       <Connection Source="Station1.INITO" Destination="PartInHopper.INIT" />
       <Connection Source="PartInHopper.INITO" Destination="Feeder.INIT" />
-      <Connection Source="Feeder.INITO" Destination="Process1.INIT" />
+      <Connection Source="Feeder.INITO" Destination="Feed_Station.INIT" />
     </EventConnections>
     <DataConnections />
     <AdapterConnections>
@@ -45,11 +62,11 @@
       <Connection Source="Area.AreaAdptrOUT" Destination="Station1.AreaAdptrIN" />
       <Connection Source="Station1.AreaAdptrOUT" Destination="Area_Term.CasAdptrIN" />
       <Connection Source="Station1.StationAdaptrOUT" Destination="Feeder.stationAdptr_in" />
-      <Connection Source="Feeder.stationAdptr_out" Destination="Process1.stationAdptr_in" />
-      <Connection Source="Process1.stationAdptr_out" Destination="Stn1_Term.CasAdptrIN" />
+      <Connection Source="Feeder.stationAdptr_out" Destination="Feed_Station.stationAdptr_in" />
+      <Connection Source="Feed_Station.stationAdptr_out" Destination="Stn1_Term.CasAdptrIN" />
       <Connection Source="PartInHopper.stateRprtCmd_out" Destination="Feeder.stateRprtCmd_in" />
-      <Connection Source="Feeder.stateRprtCmd_out" Destination="Process1.stateRptCmdAdptr_in" />
-      <Connection Source="Process1.stateRptCmdAdptr_out" Destination="PartInHopper.stateRprtCmd_in" />
+      <Connection Source="Feeder.stateRprtCmd_out" Destination="Feed_Station.stateRptCmdAdptr_in" />
+      <Connection Source="Feed_Station.stateRptCmdAdptr_out" Destination="PartInHopper.stateRprtCmd_in" />
     </AdapterConnections>
   </SubAppNetwork>
 </Layer>
