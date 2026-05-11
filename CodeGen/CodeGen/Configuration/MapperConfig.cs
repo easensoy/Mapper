@@ -53,6 +53,15 @@ namespace CodeGen.Configuration
         public string M262Gateway { get; set; } = "192.168.1.254";
         public string M262LogicalNetworkName { get; set; } = "DeviceNetwork_1";
 
+        /// <summary>
+        /// Resource name written into the .sysres root and the .sysdev's
+        /// &lt;Resource&gt; entry. Schneider's default is "RES0" (the first runtime
+        /// resource). Renamed to "M262_RES" so the EAE Deploy &amp; Diagnostic tree
+        /// reads "EcoRT_0.M262_RES" rather than "EcoRT_0.RES0", which makes the
+        /// device-target binding self-evident in multi-runtime projects.
+        /// </summary>
+        public string ResourceName { get; set; } = "M262_RES";
+
         public string ActiveSyslayPath =>
             !string.IsNullOrEmpty(SyslayPath2) ? SyslayPath2 : SyslayPath;
 
@@ -105,6 +114,7 @@ namespace CodeGen.Configuration
             M262SubnetMask = "255.255.255.0",
             M262Gateway = "192.168.1.254",
             M262LogicalNetworkName = "DeviceNetwork_1",
+            ResourceName = "M262_RES",
         };
 
         private static void Save(string path, MapperConfig config)
