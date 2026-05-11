@@ -4,14 +4,14 @@
 
  Recipe scope: 9 Control.xml condition(s) were dropped because they reference components not present in this syslay (Button 2 filters to Feeder + PartInHopper). Skipped:
   - state 'Initialisation' references out-of-scope component ComponentID=C-b455b9c6-47f7-4172-a1c1-4c43fc03b55e (name=Assembly_Station, type=Process)
-  - state 'Initialisation': all transition conditions out of scope — emitting END row in their place.
+  - state 'Initialisation': all transition conditions out of scope — row dropped from recipe; downstream NextStep pointers will skip past it.
   - state 'PartChecking' references out-of-scope component ComponentID=C-21a332b3-e2fd-4a5b-850e-c4197abf62c3 (name=Checker, type=Actuator)
-  - state 'PartChecking': all transition conditions out of scope — emitting END row in their place.
+  - state 'PartChecking': all transition conditions out of scope — row dropped from recipe; downstream NextStep pointers will skip past it.
   - state 'TransferAdvancing' references out-of-scope component ComponentID=C-c9b8c68c-5030-4d93-91ca-06310726ddc5 (name=Transfer, type=Actuator)
-  - state 'TransferAdvancing': all transition conditions out of scope — emitting END row in their place.
+  - state 'TransferAdvancing': all transition conditions out of scope — row dropped from recipe; downstream NextStep pointers will skip past it.
   - state 'HandShake' references out-of-scope component ComponentID=C-4376f4d7-210e-4f18-a2ae-16492012db4f (name=Disassembly, type=Process)
   - state 'HandShake' references out-of-scope component ComponentID=C-0c804da8-b3b6-4119-abbe-12fbb268a847 (name=Feed_Station, type=Process)
-  - state 'HandShake': all transition conditions out of scope — emitting END row in their place. -->
+  - state 'HandShake': all transition conditions out of scope — row dropped from recipe; downstream NextStep pointers will skip past it. -->
   <SubAppNetwork>
     <FB ID="86119B275B332F9D" Name="Area_HMI" Type="Area_CAT" Namespace="Main" x="240" y="140" />
     <FB ID="024DC204D7BA77A8" Name="Area" Type="Area" Namespace="Main" x="400" y="580">
@@ -24,12 +24,12 @@
     <FB ID="F8DBD8A29CB500EC" Name="Feed_Station" Type="Process1_Generic" Namespace="Main" x="3360" y="1460">
       <Parameter Name="process_name" Value="'Feed_Station'" />
       <Parameter Name="process_id" Value="10" />
-      <Parameter Name="StepType" Value="[9, 2, 1, 2, 9, 1, 2, 9, 2, 9, 9]" />
-      <Parameter Name="CmdTargetName" Value="['', '', 'feeder', '', '', 'feeder', '', '', '', '', '']" />
-      <Parameter Name="CmdStateArr" Value="[0, 0, 2, 0, 0, 4, 0, 0, 0, 0, 0]" />
-      <Parameter Name="Wait1Id" Value="[0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0]" />
-      <Parameter Name="Wait1State" Value="[0, 1, 0, 2, 0, 0, 4, 0, 4, 0, 0]" />
-      <Parameter Name="NextStep" Value="[0, 2, 3, 4, 0, 6, 7, 0, 9, 0, 0]" />
+      <Parameter Name="StepType" Value="[2, 1, 2, 1, 2, 2, 9]" />
+      <Parameter Name="CmdTargetName" Value="['', 'feeder', '', 'feeder', '', '', '']" />
+      <Parameter Name="CmdStateArr" Value="[0, 2, 0, 4, 0, 0, 0]" />
+      <Parameter Name="Wait1Id" Value="[0, 0, 1, 0, 1, 1, 0]" />
+      <Parameter Name="Wait1State" Value="[1, 0, 2, 0, 4, 4, 0]" />
+      <Parameter Name="NextStep" Value="[1, 2, 3, 4, 5, 6, 0]" />
     </FB>
     <FB ID="E0AEF2679BD52F88" Name="Feeder" Type="Five_State_Actuator_CAT" Namespace="Main" x="1300" y="2480">
       <Parameter Name="actuator_name" Value="'feeder'" />
