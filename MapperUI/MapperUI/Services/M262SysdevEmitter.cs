@@ -12,7 +12,9 @@ namespace MapperUI.Services
         const string LibElNs = "https://www.se.com/LibraryElements";
         const string ApplicationName = "APP1";
         const string DeviceName = "EcoRT_0";
-        const string ResourceName = "RES0";
+        // Default kept for back-compat with the unused ReplaceMappingsBlock helper;
+        // the live Emit path now reads cfg.ResourceName and passes it through.
+        const string DefaultResourceName = "M262_RES";
 
         public static SysdevEmitResult Emit(MapperConfig cfg)
         {
@@ -25,7 +27,15 @@ namespace MapperUI.Services
             var sysdevPath = FindSysdev(eaeRoot)
                 ?? throw new FileNotFoundException(
                     $"No .sysdev found under {eaeRoot}\\IEC61499\\System\\");
-            RewriteSysdev(sysdevPath, DeviceName, "M262_dPAC", cfg.M262TargetIp ?? string.Empty);
+            var resourceName = string.IsNullOrWhiteSpace(cfg.ResourceName)
+                ? DefaultResourceName
+                : cfg.ResourceName;
+            RewriteSysdev(sysdevPath, DeviceName, "M262_dPAC", cfg.M262TargetIp ?? string.Empty,
+                resourceName);
+            // While we have the EAE root, keep the .sysres root's Name attribute in sync
+            // so EAE's Deploy & Diagnostic tree doesn't show RES0 + M262_RES at the same time.
+            var sysresPathForRename = FindSysresFor(sysdevPath);
+            if (sysresPathForRename != null) RenameSysresName(sysresPathForRename, resourceName);
             var propsPath = WriteM262DevicePropertiesXml(sysdevPath);
 
             var systemFile = FindSystemFile(eaeRoot)
@@ -135,7 +145,8 @@ namespace MapperUI.Services
             return Directory.EnumerateFiles(iec, "*.dfbproj").FirstOrDefault();
         }
 
-        static void RewriteSysdev(string sysdevPath, string deviceName, string deviceType, string targetIp)
+        static void RewriteSysdev(string sysdevPath, string deviceName, string deviceType, string targetIp,
+            string resourceName)
         {
             var doc = XDocument.Load(sysdevPath);
             var root = doc.Root
@@ -171,21 +182,45 @@ namespace MapperUI.Services
                 resources = new XElement(ns + "Resources");
                 root.Add(resources);
             }
+            // Find the existing Resource entry by Name OR by being the only Resource child;
+            // tolerates either RES0 (legacy) or the new resourceName already in place.
             var res0 = resources.Elements(ns + "Resource")
-                .FirstOrDefault(e => string.Equals((string?)e.Attribute("Name"), ResourceName,
-                    StringComparison.OrdinalIgnoreCase));
+                .FirstOrDefault(e => string.Equals((string?)e.Attribute("Name"), resourceName,
+                    StringComparison.OrdinalIgnoreCase))
+                ?? resources.Elements(ns + "Resource").FirstOrDefault();
             if (res0 == null)
             {
                 res0 = new XElement(ns + "Resource",
                     new XAttribute("ID", Guid.Empty.ToString()),
-                    new XAttribute("Name", ResourceName));
+                    new XAttribute("Name", resourceName));
                 resources.Add(res0);
             }
-            SetAttr(res0, "Name", ResourceName);
+            SetAttr(res0, "Name", resourceName);
             SetAttr(res0, "Type", "EMB_RES_ECO");
             SetAttr(res0, "Namespace", "Runtime.Management");
 
             doc.Save(sysdevPath);
+        }
+
+        /// <summary>
+        /// Renames the .sysres root's <c>Name</c> attribute to <paramref name="resourceName"/>
+        /// (e.g. "M262_RES"). EAE Deploy &amp; Diagnostic shows this name in the runtime
+        /// tree, so it must match what the .sysdev's &lt;Resource&gt; entry says or EAE
+        /// flags the project as inconsistent. Idempotent — safe to re-run.
+        /// </summary>
+        static void RenameSysresName(string sysresPath, string resourceName)
+        {
+            try
+            {
+                var doc = XDocument.Load(sysresPath);
+                var root = doc.Root;
+                if (root == null) return;
+                var current = (string?)root.Attribute("Name");
+                if (string.Equals(current, resourceName, StringComparison.Ordinal)) return;
+                SetAttr(root, "Name", resourceName);
+                doc.Save(sysresPath);
+            }
+            catch { /* best-effort — emit pipeline continues even if sysres write fails */ }
         }
 
         static int ReplaceMappingsBlock(string systemFilePath, List<string> fbInstances)
@@ -201,7 +236,7 @@ namespace MapperUI.Services
                 stale.Remove();
 
             var mappings = new XElement(ns + "Mappings");
-            var to = $"{DeviceName}.{ResourceName}";
+            var to = $"{DeviceName}.{DefaultResourceName}";
             foreach (var fbName in fbInstances)
             {
                 if (string.IsNullOrWhiteSpace(fbName)) continue;
