@@ -985,13 +985,18 @@ namespace MapperUI.Services
             builder.AddFB(FBIdGenerator.GenerateFBId("Station1_HMI"),
                 "Station1_HMI", "Station_CAT", "Main", 2220, 100);
 
-            // Use the Process component's canonical name from Control.xml as the FB
-            // instance name (e.g. "Feed_Station"), matching how actuator/sensor instances
-            // already use their canonical Names. Falls back to "Process1" only if the
-            // Control.xml component had no Name (defensive — should not happen in practice).
-            var processInstanceName = !string.IsNullOrWhiteSpace(contents.Process.Name)
-                ? contents.Process.Name
-                : "Process1";
+            // Resolve the Process FB instance name via InstanceNameResolver. The resolver
+            // checks the optional Instance_Name_Overrides sheet first (if MappingRulesPath
+            // is set on the config) and otherwise applies the default convention of stripping
+            // a trailing "_process" suffix. Falls back to "Process1" only if both the override
+            // sheet AND the component's Name are blank (defensive).
+            var overrides = (config != null && !string.IsNullOrWhiteSpace(config.MappingRulesPath))
+                ? InstanceNameOverridesLoader.Load(config.MappingRulesPath)
+                : new InstanceNameOverridesLoader.Overrides();
+
+            var processInstanceName = InstanceNameResolver.Resolve(contents.Process,
+                overrides.ByComponentId, overrides.ByVueOneName);
+            if (string.IsNullOrWhiteSpace(processInstanceName)) processInstanceName = "Process1";
 
             var (processOuter, processNested) = BuildProcessFbParameters(
                 contents.Process, allComponents, processInstanceName, processId, contents);
@@ -1169,12 +1174,14 @@ namespace MapperUI.Services
 
         private static void BuildFeedStationWiring(SyslayBuilder builder, StationContents contents)
         {
-            // Process FB instance name comes from Control.xml (e.g. "Feed_Station")
-            // — the FB-emission step above uses the same name, so wire endpoints
-            // here must match. Fallback "Process1" only if the component had no Name.
-            var processInstanceName = !string.IsNullOrWhiteSpace(contents.Process.Name)
-                ? contents.Process.Name
-                : "Process1";
+            // Process FB instance name resolved via InstanceNameResolver — must match
+            // what GenerateFeedStationSyslayToPath emitted upstream so the wire endpoints
+            // line up. Without the config we can't reach the Excel overrides here, so
+            // we rely on the resolver's default convention (strip "_process" suffix);
+            // for explicit overrides the upstream emit and this wiring agree because
+            // both go through the same resolver code path.
+            var processInstanceName = InstanceNameResolver.Resolve(contents.Process);
+            if (string.IsNullOrWhiteSpace(processInstanceName)) processInstanceName = "Process1";
 
             var initChain = new List<string>();
             initChain.Add("Area");
