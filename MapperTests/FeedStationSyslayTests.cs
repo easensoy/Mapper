@@ -44,7 +44,9 @@ namespace MapperTests
             Assert.Contains("Area", names);
             Assert.Contains("Station1", names);
             Assert.Contains("Station1_HMI", names);
-            Assert.Contains("Process1", names);
+            // Phase 2: Process FB instance now uses the canonical Control.xml name
+            // ("Feed_Station") instead of the hardcoded "Process1".
+            Assert.Contains("Feed_Station", names);
             Assert.Contains("Stn1_Term", names);
             Assert.Contains("Area_Term", names);
             Assert.Contains("Feeder", names);
