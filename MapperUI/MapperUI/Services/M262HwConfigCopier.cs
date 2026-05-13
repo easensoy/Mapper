@@ -191,8 +191,18 @@ namespace MapperUI.Services
                     StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Port));
         }
 
+        // Internal overload — uses M262SysdevEmitter.M262IoFbId as the default FB ID.
+        // Existing baseline-replay Copy() workflow keeps this convenience.
         static int OverwriteHcfParameterValuesInMemory(XDocument doc, IoBindings bindings,
             HashSet<string> syslayFbNames, HwConfigCopyResult result, string resourceId)
+            => OverwriteHcfParameterValuesInMemory(doc, bindings, syslayFbNames, result,
+                resourceId, M262SysdevEmitter.M262IoFbId);
+
+        // Caller-supplies the m262IoFbId. Used by M262HcfDocument so the GUID can
+        // come from the syslay's M262IO instance rather than a hardcoded constant.
+        internal static int OverwriteHcfParameterValuesInMemory(XDocument doc, IoBindings bindings,
+            HashSet<string> syslayFbNames, HwConfigCopyResult result, string resourceId,
+            string m262IoFbId)
         {
             var ns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
             int written = 0;
@@ -202,8 +212,6 @@ namespace MapperUI.Services
             };
 
             const string EmptyPinValue = "";
-
-            string m262IoFbId = M262SysdevEmitter.M262IoFbId;
 
             foreach (var module in doc.Descendants().Where(e =>
                 ioModuleNames.Contains((string?)e.Element(ns + "Name")?.Value ?? string.Empty)))
