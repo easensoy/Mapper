@@ -96,6 +96,7 @@ namespace MapperUI.Services
                 var sysdevGuid = Path.GetFileName(sysdevDir);
                 var hcfPath = Path.Combine(sysdevDir, sysdevGuid + ".hcf");
 
+                report.Missing.Add($"[Hcf] resource_guid={resourceId} m262io_fb_guid={m262IoFbId}");
                 report.Missing.Add($"[Hcf] writing → {hcfPath}");
 
                 foreach (var stale in Directory.EnumerateFiles(sysdevDir, "*.hcf"))
@@ -223,8 +224,12 @@ namespace MapperUI.Services
                     if (type != "M262_dPAC" || nspace != "SE.DPAC") continue;
                     XNamespace ns = root.GetDefaultNamespace();
                     var resources = root.Element(ns + "Resources");
-                    var m262Res = resources?.Elements(ns + "Resource")
-                        .FirstOrDefault(e => (string?)e.Attribute("Name") == "M262_RES");
+                    // Take whichever Resource lives inside the M262 sysdev —
+                    // M262SysdevEmitter renames it per cfg.ResourceName (RES0
+                    // by default, but historically also M262_RES / EcoRT_0).
+                    // Filtering by name brittle; the M262 device always has
+                    // exactly one resource child.
+                    var m262Res = resources?.Elements(ns + "Resource").FirstOrDefault();
                     if (m262Res == null) continue;
                     var resourceId = (string?)m262Res.Attribute("ID") ?? string.Empty;
                     if (string.IsNullOrWhiteSpace(resourceId)) continue;
