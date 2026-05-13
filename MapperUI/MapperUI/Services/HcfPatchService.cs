@@ -88,10 +88,16 @@ namespace MapperUI.Services
                     return;
                 }
 
-                // 3. Write the .hcf at {sysdevDir}/{resourceId}.hcf, verbatim
-                //    template with both GUIDs substituted. Overwrite any
-                //    existing .hcf in that folder.
-                var hcfPath = Path.Combine(sysdevDir, resourceId + ".hcf");
+                // 3. Target file: {Demonstrator}/IEC61499/System/{system-guid}/
+                //    {sysdev-guid}/{sysdev-guid}.hcf — file STEM = sysdev guid
+                //    (folder name), NOT the resource guid. EAE locates the
+                //    .hcf by sysdev folder convention; the ResourceId attribute
+                //    INSIDE the XML is the resource guid (different value).
+                var sysdevGuid = Path.GetFileName(sysdevDir);
+                var hcfPath = Path.Combine(sysdevDir, sysdevGuid + ".hcf");
+
+                report.Missing.Add($"[Hcf] writing → {hcfPath}");
+
                 foreach (var stale in Directory.EnumerateFiles(sysdevDir, "*.hcf"))
                 {
                     if (!string.Equals(stale, hcfPath, StringComparison.OrdinalIgnoreCase))
@@ -102,12 +108,11 @@ namespace MapperUI.Services
                 var xml = BuildHcfXml(resourceId, m262IoFbId);
                 File.WriteAllText(hcfPath, xml, new System.Text.UTF8Encoding(false));
 
+                report.Missing.Add($"[Hcf] wrote   ← {hcfPath} (ResourceId={resourceId}, M262IO={m262IoFbId})");
+
                 // 4. Surface the rewritten pin lines into the Activity panel.
                 foreach (var pin in EnumeratePinLines(resourceId, m262IoFbId))
                     report.HcfPinAssignments.Add(pin);
-
-                report.Missing.Add(
-                    $"[Hcf] wrote {Path.GetFileName(hcfPath)} (ResourceId={resourceId}, M262IO={m262IoFbId})");
             }
             catch (Exception ex)
             {
