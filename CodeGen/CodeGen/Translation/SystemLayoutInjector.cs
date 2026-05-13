@@ -847,6 +847,10 @@ namespace MapperUI.Services
         {
             public List<(string Component, string Detail)> Bound { get; } = new();
             public List<string> Missing { get; } = new();
+            /// <summary>Each <c>(Pin, Value)</c> entry rewritten in the .hcf —
+            /// e.g. <c>("DI00", "RES0.M262IO.PusherAtHome")</c>. Surfaced into
+            /// the Activity panel as one <c>[Hcf]</c> line per pin.</summary>
+            public List<(string Pin, string Value)> HcfPinAssignments { get; } = new();
         }
 
         // M262IO scope is applied in the .hcf by M262HwConfigCopier.OverwriteHcfParameterValuesInMemory,
@@ -1074,6 +1078,12 @@ namespace MapperUI.Services
 
             var doc = builder.Build();
             doc.Save(fullPath);
+
+            // .hcf patching lives in the MapperUI layer (HcfPatchService) — CodeGen.dll
+            // does not reference MapperUI.dll so we can't load M262HcfDocument here.
+            // MainForm.btnTestStation1_Click calls HcfPatchService.PatchDeployed(...) after
+            // GenerateStation1TestSyslay returns and consumes report.HcfPinAssignments.
+
             return fullPath;
         }
 
