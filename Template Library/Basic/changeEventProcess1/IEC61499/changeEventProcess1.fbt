@@ -1,0 +1,222 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="2a166ee0-1289-48fc-b010-011556e71f9d" Name="changeEventProcess1" Comment="Basic Function Block Type" Namespace="Main">
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author="azam_w" Date="5/23/2025" Remarks="Template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="Scan_Event">
+        <With Var="Hopper" />
+        <With Var="PusherAtWork" />
+        <With Var="PusherAtHome" />
+        <With Var="CheckerDown" />
+        <With Var="CheckerUp" />
+        <With Var="TransferAtWork" />
+        <With Var="TransferAtHome" />
+        <With Var="PartAtExit" />
+        <With Var="PartAtAssembly" />
+        <With Var="PartAtChecker" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO" Comment="Initialization Confirm" />
+      <Event Name="Hopper_Event" Comment="Execution Confirmation">
+        <With Var="Out" />
+      </Event>
+      <Event Name="Pusher_Event">
+        <With Var="Out" />
+      </Event>
+      <Event Name="Transfer_Event">
+        <With Var="Out" />
+      </Event>
+      <Event Name="Checker_Event">
+        <With Var="Out" />
+      </Event>
+      <Event Name="PartAtAssembly_Event">
+        <With Var="Out" />
+      </Event>
+      <Event Name="PartAtExit_Event">
+        <With Var="Out" />
+      </Event>
+      <Event Name="PartAtCheckerEvent">
+        <With Var="Out" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="Hopper" Type="BOOL" Comment="Output event qualifier" />
+      <VarDeclaration Name="PusherAtWork" Type="BOOL" />
+      <VarDeclaration Name="PusherAtHome" Type="BOOL" />
+      <VarDeclaration Name="CheckerDown" Type="BOOL" />
+      <VarDeclaration Name="CheckerUp" Type="BOOL" />
+      <VarDeclaration Name="TransferAtWork" Type="BOOL" />
+      <VarDeclaration Name="TransferAtHome" Type="BOOL" />
+      <VarDeclaration Name="PartAtExit" Type="BOOL" />
+      <VarDeclaration Name="PartAtAssembly" Type="BOOL" />
+      <VarDeclaration Name="PartAtChecker" Type="BOOL" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="Out" Type="BOOL" />
+    </OutputVars>
+  </InterfaceList>
+  <BasicFB>
+    <Attribute Name="FBType.Basic.Algorithm.Order" Value="INIT,REQ,pusher_change,Transfer_Change,Checker_Change,PartAtAssembly,PartAtExit,PartAtChecker" />
+    <InternalVars>
+      <VarDeclaration Name="Hopper_PrevVAl" Type="BOOL" InitialValue="FALSE" />
+      <VarDeclaration Name="PusherAtWork_PrevVal" Type="BOOL" InitialValue="FALSE" />
+      <VarDeclaration Name="PusherAtHome_PrevVal" Type="BOOL" InitialValue="FALSE" />
+      <VarDeclaration Name="TransferAtWork_PrevVal" Type="BOOL" InitialValue="FALSE" />
+      <VarDeclaration Name="TransferAtHome_PrevVal" Type="BOOL" InitialValue="FALSE" />
+      <VarDeclaration Name="CheckerDown_PrevVal" Type="BOOL" InitialValue="FALSE" />
+      <VarDeclaration Name="CheckerUp_PrevVal" Type="BOOL" />
+      <VarDeclaration Name="PartAtAssembly_PreVal" Type="BOOL" />
+      <VarDeclaration Name="PartAtExit_PreVal" Type="BOOL" />
+      <VarDeclaration Name="PartAtChecker_PreVal" Type="BOOL" />
+    </InternalVars>
+    <ECC>
+      <ECState Name="START" Comment="Initial State" x="2358.719" y="716.5227" />
+      <ECState Name="HopperEvent" Comment="Normal execution" x="2802.98" y="1612.052">
+        <ECAction Algorithm="INIT" Output="Hopper_Event" />
+      </ECState>
+      <ECState Name="PusherEvent" x="1376" y="1304">
+        <ECAction Algorithm="pusher_change" Output="Pusher_Event" />
+      </ECState>
+      <ECState Name="TransferEvent" x="2992" y="436">
+        <ECAction Algorithm="Transfer_Change" Output="Transfer_Event" />
+      </ECState>
+      <ECState Name="CheckerEVent" x="1320" y="308">
+        <ECAction Algorithm="Checker_Change" Output="Checker_Event" />
+      </ECState>
+      <ECState Name="PartAtAssemblyEvent" Comment="Normal execution" x="4140.758" y="852.0521">
+        <ECAction Algorithm="PartAtAssembly" Output="PartAtAssembly_Event" />
+      </ECState>
+      <ECState Name="PartAtExitEvent" Comment="Normal execution" x="3514.092" y="1367.608">
+        <ECAction Algorithm="PartAtExit" Output="PartAtExit_Event" />
+      </ECState>
+      <ECState Name="PartAtExitEvent1" Comment="Normal execution" x="538.0922" y="751.6081">
+        <ECAction Algorithm="PartAtChecker" Output="PartAtCheckerEvent" />
+      </ECState>
+      <ECTransition Source="START" Destination="HopperEvent" Condition="Hopper &lt;&gt; Hopper_PrevVAl" x="2513.256" y="1133.558">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="605.9301,247.8742,641.301,313.7834" />
+      </ECTransition>
+      <ECTransition Source="HopperEvent" Destination="START" Condition="1" x="2461.1" y="1258.953">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="624.1209,357.2138,593.5899,288.04" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="PusherEvent" Condition="PusherAtHome &lt;&gt; PusherAtHome_PrevVal OR (PusherAtWork &lt;&gt; PusherAtWork_PrevVal)" x="1683.688" y="1080.186">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="456.0531,254.758,360.4039,296.9893" />
+      </ECTransition>
+      <ECTransition Source="PusherEvent" Destination="START" Condition="1" x="1837.394" y="913.7553">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="421.5383,242.208,498.9245,200.4058" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="TransferEvent" Condition="TransferAtHome &lt;&gt; TransferAtHome_PrevVal OR TransferAtWork &lt;&gt; TransferAtWork_PrevVal" x="2509.129" y="532.2672">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="598.6271,139.9268,644.6961,121.167" />
+      </ECTransition>
+      <ECTransition Source="TransferEvent" Destination="START" Condition="1" x="2530.626" y="655.5854">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="644.8498,160.3428,605.0773,176.3221" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="CheckerEVent" Condition="CheckerDown &lt;&gt; CheckerDown_PrevVal OR CheckerUp &lt;&gt; CheckerUp_PrevVal" x="1815.725" y="603.4667">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="493.6024,169.9315,415.5281,143.6868" />
+      </ECTransition>
+      <ECTransition Source="CheckerEVent" Destination="START" Condition="1" x="1608.305" y="443.7781">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="336.8051,91.3008,437.5528,119.0826" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="PartAtAssemblyEvent" Condition="PartAtAssembly &lt;&gt; PartAtAssembly_PreVal" x="2986.229" y="698.4533">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="674.4667,165.486,788.9487,175.0274" />
+      </ECTransition>
+      <ECTransition Source="PartAtAssemblyEvent" Destination="START" Condition="1" x="3085.957" y="856.2328">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="830.3021,220.6569,699.598,214.9986" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="PartAtExitEvent" Condition="PartAtExit &lt;&gt; PartAtExit_PreVal" x="2818.497" y="977.5577">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="653.7491,218.4026,736.272,259.625" />
+      </ECTransition>
+      <ECTransition Source="PartAtExitEvent" Destination="START" Condition="1" x="2831.943" y="1117.362">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="748.1725,308.8058,663.6532,262.4247" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="PartAtExitEvent1" Condition="PartAtChecker &lt;&gt; PartAtChecker_PreVal" x="1297.493" y="914.6173">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="297,272,317.0677,209.5681" />
+      </ECTransition>
+      <ECTransition Source="PartAtExitEvent1" Destination="START" Condition="1" x="1505.567" y="651.1251">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="316.0798,159.4032,436.7037,157.0787" />
+      </ECTransition>
+    </ECC>
+    <Algorithm Name="INIT" Comment="Initialization algorithm">
+      <ST><![CDATA[;
+IF Hopper <> Hopper_PrevVAl THEN
+	Hopper_PrevVAl := Hopper;
+	Out := Hopper;
+END_IF;
+
+ 
+ ]]></ST>
+    </Algorithm>
+    <Algorithm Name="REQ" Comment="Normally executed algorithm">
+      <ST><![CDATA[;
+ 
+IF Hopper <> Hopper_PrevVAl THEN
+	Hopper_PrevVAl := Hopper;
+    Out := Hopper;
+END_IF;]]></ST>
+    </Algorithm>
+    <Algorithm Name="pusher_change">
+      <ST><![CDATA[;
+
+IF PusherAtWork <> PusherAtWork_PrevVal THEN
+	PusherAtWork_PrevVal := PusherAtWork;
+	Out := PusherAtWork;
+END_IF;
+
+IF PusherAtHome <> PusherAtHome_PrevVal THEN
+	PusherAtHome_PrevVal := PusherAtHome;
+	Out := PusherAtHome;
+END_IF;
+]]></ST>
+    </Algorithm>
+    <Algorithm Name="Transfer_Change">
+      <ST><![CDATA[;
+
+IF TransferAtHome <> TransferAtHome_PrevVal THEN
+	TransferAtHome_PrevVal := TransferAtHome;
+	Out := TransferAtHome;
+END_IF;
+
+IF TransferAtWork <> TransferAtWork_PrevVal THEN
+	TransferAtWork_PrevVal := TransferAtWork;
+	Out := TransferAtWork;
+END_IF;]]></ST>
+    </Algorithm>
+    <Algorithm Name="Checker_Change">
+      <ST><![CDATA[;
+
+IF CheckerDown <> CheckerDown_PrevVal THEN
+	CheckerDown_PrevVal := CheckerDown;
+	Out := CheckerDown;
+END_IF;
+
+IF CheckerUp <> CheckerUp_PrevVal THEN
+	CheckerUp_PrevVal := CheckerUp;
+	Out := CheckerUp;
+END_IF;
+]]></ST>
+    </Algorithm>
+    <Algorithm Name="PartAtAssembly">
+      <ST><![CDATA[;
+IF PartAtAssembly <> PartAtAssembly_PreVal THEN
+	PartAtAssembly_PreVal := PartAtAssembly;
+	Out := PartAtAssembly;
+END_IF;]]></ST>
+    </Algorithm>
+    <Algorithm Name="PartAtExit">
+      <ST><![CDATA[;
+ IF PartAtExit <> PartAtExit_PreVal THEN
+	PartAtExit_PreVal := PartAtExit;
+	Out := PartAtExit;
+END_IF;]]></ST>
+    </Algorithm>
+    <Algorithm Name="PartAtChecker">
+      <ST><![CDATA[;
+ IF PartAtChecker <> PartAtChecker_PreVal THEN
+	PartAtChecker_PreVal := PartAtChecker;
+	Out := PartAtChecker;
+END_IF;]]></ST>
+    </Algorithm>
+  </BasicFB>
+</FBType>
