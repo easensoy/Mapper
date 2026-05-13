@@ -591,6 +591,19 @@ namespace MapperUI
                     injector.GenerateStation1TestSyslay(Cfg(), _loadedControlXmlPath, bindings, out report));
                 LogBindingsReport(report);
                 await FinalizeM262StackAsync();
+
+                // Patch the deployed M262 .hcf so EAE picks up the symbolic-link
+                // bindings on reload. Each rewritten pin lands in
+                // report.HcfPinAssignments which we mirror to the Activity panel
+                // as one '[Hcf] <pin> <- <value>' line. Skip reasons are already
+                // in report.Missing (logged by LogBindingsReport above) but we
+                // refresh the missing-tail here to surface the [Hcf] entries
+                // added by the patch itself.
+                await Task.Run(() => MapperUI.Services.HcfPatchService.PatchDeployed(
+                    Cfg(), path, bindings, report));
+                foreach (var (pin, value) in report.HcfPinAssignments)
+                    AppendActivity($"[Hcf] {pin} ← {value}");
+
                 TouchDfbprojToTriggerEaeReload();
 
                 AppendActivity($"Generated: {path}");
