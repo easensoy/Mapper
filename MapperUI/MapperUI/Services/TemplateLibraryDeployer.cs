@@ -102,11 +102,14 @@ namespace MapperUI.Services
             foreach (var name in UniversalCats)
                 DeployArtifact(libPath, "CAT", name, eaeProjectDir, result, isBasic: false, isCat: true);
 
-            // I/O-bridge basics live under Template Library/CAT/<name>/ for historical reasons
-            // but deploy as flat top-level .fbt files (no HMI sibling, no .cfg, no folder).
-            // Tagged as basic so RegisterInDfbproj uses RegisterBasicFb (flat), not RegisterCat.
+            // I/O-bridge basics now live under Template Library/Basic/<name>/IEC61499/
+            // (was CAT/ historically; the folder moved to Basic/ to match its
+            // declared type). Source path was wrong → DeployArtifact warned
+            // "Artifact not found: CAT/PLC_RW_M262", the .fbt never landed in
+            // the .dfbproj on a clean deploy, and every symbolic link inside
+            // PLC_RW_M262 rendered red in EAE's Hardware Configurator.
             foreach (var name in UniversalIoFbs)
-                DeployArtifact(libPath, "CAT", name, eaeProjectDir, result, isBasic: true);
+                DeployArtifact(libPath, "Basic", name, eaeProjectDir, result, isBasic: true);
 
             DeployDataTypes(libPath, eaeProjectDir, result);
             PatchKnownArraySizeBugs(eaeProjectDir, result);
