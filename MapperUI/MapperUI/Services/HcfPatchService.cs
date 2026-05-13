@@ -49,11 +49,6 @@ namespace MapperUI.Services
             IoBindings? bindings,
             SystemInjector.BindingApplicationReport report)
         {
-            if (bindings == null || bindings.PinAssignments.Count == 0)
-            {
-                report.Missing.Add("[Hcf] skipped, no bindings");
-                return;
-            }
             if (config == null)
             {
                 report.Missing.Add("[Hcf] skipped, no MapperConfig available");
@@ -68,41 +63,51 @@ namespace MapperUI.Services
                     report.Missing.Add("[Hcf] skipped, could not derive EAE project root");
                     return;
                 }
-                var hcfPath = M262HwConfigCopier.ResolveTargetHcfPath(eaeRoot);
-                if (hcfPath == null || !File.Exists(hcfPath))
+
+                // 1. Walk Demonstrator System tree, find the M262 sysdev
+                //    (root Device with Type="M262_dPAC" Namespace="SE.DPAC")
+                //    and read the embedded M262_RES resource GUID from
+                //    <Resources><Resource Name="M262_RES" ID="..."/></Resources>.
+                var loc = LocateM262SysdevAndResource(eaeRoot);
+                if (loc == null)
                 {
-                    report.Missing.Add("[Hcf] skipped, deployed .hcf not found under sysdev");
+                    report.Missing.Add(
+                        "[Hcf] skipped, no SE.DPAC.M262_dPAC sysdev with M262_RES resource found");
+                    return;
+                }
+                var (sysdevDir, resourceId, sysresPath) = loc.Value;
+
+                // 2. Ensure the .sysres FBNetwork carries an M262IO PLC_RW_M262
+                //    FB. Inject one with a deterministic short-hex ID if missing
+                //    — without this, EAE has no symlink target and the Hardware
+                //    Configurator view stays blank.
+                var m262IoFbId = EnsureM262IoFb(sysresPath, resourceId, report);
+                if (string.IsNullOrEmpty(m262IoFbId))
+                {
+                    report.Missing.Add("[Hcf] skipped, M262IO FB ID not resolvable on .sysres");
                     return;
                 }
 
-                // Resolve resourceId + m262IoFbId from the deployed M262 sysres —
-                // not from hardcoded constants. The sysres root carries the
-                // Resource GUID; the M262IO PLC_RW_M262 FB inside the FBNetwork
-                // carries the FB GUID.
-                var (resourceId, m262IoFbId) = ReadSysresIds(eaeRoot);
-                if (string.IsNullOrEmpty(resourceId) || string.IsNullOrEmpty(m262IoFbId))
+                // 3. Write the .hcf at {sysdevDir}/{resourceId}.hcf, verbatim
+                //    template with both GUIDs substituted. Overwrite any
+                //    existing .hcf in that folder.
+                var hcfPath = Path.Combine(sysdevDir, resourceId + ".hcf");
+                foreach (var stale in Directory.EnumerateFiles(sysdevDir, "*.hcf"))
                 {
-                    report.Missing.Add("[Hcf] skipped, sysres / M262IO FB IDs not resolvable");
-                    return;
+                    if (!string.Equals(stale, hcfPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        try { File.Delete(stale); } catch { /* best-effort */ }
+                    }
                 }
+                var xml = BuildHcfXml(resourceId, m262IoFbId);
+                File.WriteAllText(hcfPath, xml, new System.Text.UTF8Encoding(false));
 
-                // Self-heal: if the deployed .hcf is the empty
-                // <DeviceHwConfigurationItems /> shell (DemonstratorWiper output,
-                // or M262HwConfigCopier.Copy silently failed in
-                // FinalizeM262StackAsync), reseed it from the baseline so EAE
-                // gets the TM3 module skeleton. Without this, there are no
-                // ParameterValue elements to overwrite and Symbolic Links view
-                // stays blank.
-                EnsureDeployedHcfPopulated(hcfPath, config, eaeRoot, report);
+                // 4. Surface the rewritten pin lines into the Activity panel.
+                foreach (var pin in EnumeratePinLines(resourceId, m262IoFbId))
+                    report.HcfPinAssignments.Add(pin);
 
-                var hcf = M262HcfDocument.Load(hcfPath);
-                hcf.OverwriteHcfParameterValuesInMemory(bindings, resourceId, m262IoFbId, syslayFbNames);
-                hcf.WriteHcfToDisk(hcfPath);
-
-                foreach (var (pin, value) in hcf.EnumerateOverwrittenPins())
-                    report.HcfPinAssignments.Add((pin, value));
-                foreach (var w in hcf.LastResult.Warnings)
-                    report.Missing.Add($"[Hcf][Warn] {w}");
+                report.Missing.Add(
+                    $"[Hcf] wrote {Path.GetFileName(hcfPath)} (ResourceId={resourceId}, M262IO={m262IoFbId})");
             }
             catch (Exception ex)
             {
@@ -188,6 +193,237 @@ namespace MapperUI.Services
             return best;
         }
 
+        /// <summary>
+        /// Walk <c>{eaeRoot}/IEC61499/System/</c> for a <c>.sysdev</c> whose
+        /// root <c>Device</c> element has <c>Type="M262_dPAC"</c> and
+        /// <c>Namespace="SE.DPAC"</c>, find the embedded
+        /// <c>&lt;Resource Name="M262_RES"&gt;</c>, and return the sysdev
+        /// folder, the resource's GUID, plus the sibling <c>.sysres</c> file
+        /// path (named <c>{resourceId}.sysres</c>). Returns <c>null</c> if
+        /// nothing matches.
+        /// </summary>
+        private static (string sysdevDir, string resourceId, string sysresPath)? LocateM262SysdevAndResource(string eaeRoot)
+        {
+            var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
+            if (!Directory.Exists(systemDir)) return null;
+            foreach (var sysdev in Directory.EnumerateFiles(systemDir, "*.sysdev", SearchOption.AllDirectories))
+            {
+                try
+                {
+                    var doc = XDocument.Load(sysdev);
+                    var root = doc.Root;
+                    if (root == null || root.Name.LocalName != "Device") continue;
+                    var type = (string?)root.Attribute("Type") ?? string.Empty;
+                    var nspace = (string?)root.Attribute("Namespace") ?? string.Empty;
+                    if (type != "M262_dPAC" || nspace != "SE.DPAC") continue;
+                    XNamespace ns = root.GetDefaultNamespace();
+                    var resources = root.Element(ns + "Resources");
+                    var m262Res = resources?.Elements(ns + "Resource")
+                        .FirstOrDefault(e => (string?)e.Attribute("Name") == "M262_RES");
+                    if (m262Res == null) continue;
+                    var resourceId = (string?)m262Res.Attribute("ID") ?? string.Empty;
+                    if (string.IsNullOrWhiteSpace(resourceId)) continue;
+                    // Sysdev sits at {sys-guid}/{sysdev-guid}.sysdev; the .hcf
+                    // and .sysres live one level deeper under {sysdev-guid}/.
+                    var sysdevStem = Path.GetFileNameWithoutExtension(sysdev);
+                    var sysdevDir = Path.Combine(Path.GetDirectoryName(sysdev)!, sysdevStem);
+                    Directory.CreateDirectory(sysdevDir);
+                    var sysresPath = Path.Combine(sysdevDir, resourceId + ".sysres");
+                    if (!File.Exists(sysresPath))
+                    {
+                        // Fall back to any .sysres under the sysdev folder
+                        var any = Directory.EnumerateFiles(sysdevDir, "*.sysres").FirstOrDefault();
+                        if (any != null) sysresPath = any;
+                    }
+                    return (sysdevDir, resourceId, sysresPath);
+                }
+                catch { /* skip malformed */ }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Ensure the .sysres FBNetwork has an <c>M262IO</c> PLC_RW_M262 FB.
+        /// Inject one with a deterministic 16-hex ID if missing, persist the
+        /// .sysres, and return the FB ID. Returns empty on failure.
+        /// </summary>
+        private static string EnsureM262IoFb(string sysresPath, string resourceId,
+            SystemInjector.BindingApplicationReport report)
+        {
+            try
+            {
+                if (!File.Exists(sysresPath)) return string.Empty;
+                var doc = XDocument.Load(sysresPath, LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return string.Empty;
+                XNamespace ns = root.GetDefaultNamespace();
+                var fbNet = root.Element(ns + "FBNetwork");
+                bool dirty = false;
+                if (fbNet == null)
+                {
+                    fbNet = new XElement(ns + "FBNetwork");
+                    root.Add(fbNet);
+                    dirty = true;
+                }
+                var m262Io = fbNet.Elements(ns + "FB")
+                    .FirstOrDefault(e => (string?)e.Attribute("Name") == "M262IO" &&
+                                         (string?)e.Attribute("Type") == "PLC_RW_M262");
+                string fbId;
+                if (m262Io == null)
+                {
+                    fbId = NewShortHexId("M262IO|" + resourceId);
+                    var mappingId = NewShortHexId("M262IO_MAP|" + resourceId);
+                    m262Io = new XElement(ns + "FB",
+                        new XAttribute("ID", fbId),
+                        new XAttribute("Name", "M262IO"),
+                        new XAttribute("Type", "PLC_RW_M262"),
+                        new XAttribute("Namespace", "Main"),
+                        new XAttribute("Mapping", mappingId),
+                        new XAttribute("x", "3760"),
+                        new XAttribute("y", "1020"));
+                    fbNet.Add(m262Io);
+                    dirty = true;
+                    report.Missing.Add($"[Hcf] sysres had no M262IO FB — injected with ID {fbId}");
+                }
+                else
+                {
+                    fbId = (string?)m262Io.Attribute("ID") ?? string.Empty;
+                    if (IsZeroOrEmptyId(fbId))
+                    {
+                        fbId = NewShortHexId("M262IO|" + resourceId);
+                        m262Io.SetAttributeValue("ID", fbId);
+                        dirty = true;
+                    }
+                }
+                if (dirty)
+                {
+                    var settings = new System.Xml.XmlWriterSettings
+                    {
+                        OmitXmlDeclaration = false,
+                        Indent = true,
+                        Encoding = new System.Text.UTF8Encoding(false),
+                    };
+                    using var fs = new FileStream(sysresPath, FileMode.Create, FileAccess.Write, FileShare.Read);
+                    using var w = System.Xml.XmlWriter.Create(fs, settings);
+                    doc.Save(w);
+                }
+                return fbId;
+            }
+            catch (Exception ex)
+            {
+                report.Missing.Add($"[Hcf] EnsureM262IoFb failed: {ex.GetType().Name}: {ex.Message}");
+                return string.Empty;
+            }
+        }
+
+        /// <summary>
+        /// Build the verbatim .hcf XML — BMTM3 master + TM262L01MDESE8T CPU
+        /// + TM3DI16_G (16 channels, Latch=32/Filter=4) + TM3DQ16T_G — with
+        /// <paramref name="resourceId"/> and <paramref name="m262IoFbId"/>
+        /// substituted into every ParameterValue.
+        /// </summary>
+        private static string BuildHcfXml(string resourceId, string m262IoFbId)
+        {
+            string Sym(string tag) => $"{resourceId}.{m262IoFbId}.{tag}";
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
+            sb.AppendLine("<DeviceHwConfigurationItems xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">");
+            sb.AppendLine($"  <DeviceHwConfigurationItem ResourceId=\"{resourceId}\">");
+            sb.AppendLine("    <ConfigurationBaseItem>");
+            sb.AppendLine("      <Name>BMTM3</Name>");
+            sb.AppendLine("      <ID>9510AF594EA1EDD1</ID>");
+            sb.AppendLine("      <Type><Name>BMTM3</Name><Namespace>SE.IoTMx</Namespace></Type>");
+            sb.AppendLine("      <ItemProperties>");
+            sb.AppendLine("        <ItemProperty><Name>busid</Name><Value xsi:type=\"xsd:string\">TM3Config</Value><HWParameters><string>BUS_ID</string></HWParameters></ItemProperty>");
+            sb.AppendLine("        <ItemProperty><Name>powerConsumption</Name><Value xsi:type=\"xsd:unsignedByte\">0</Value></ItemProperty>");
+            sb.AppendLine("        <ItemProperty><Name>buscycletime</Name><Value xsi:type=\"xsd:string\">T#80ms</Value><HWParameters><string>busCycleTime</string></HWParameters></ItemProperty>");
+            sb.AppendLine("        <ItemProperty><Name>buscycletolerance</Name><Value xsi:type=\"xsd:string\">30</Value><HWParameters><string>busCycleTolerance</string></HWParameters></ItemProperty>");
+            sb.AppendLine("        <ItemProperty><Name>buscycleactionwhenmissed</Name><Value xsi:type=\"xsd:string\">1</Value><HWParameters><string>busCycleActionWhenMissed</string></HWParameters></ItemProperty>");
+            sb.AppendLine("        <ItemProperty><Name>enableSymlinkOC</Name><Value xsi:type=\"xsd:string\">TRUE</Value><HWParameters><string>enableSymlinkOC</string></HWParameters></ItemProperty>");
+            sb.AppendLine("      </ItemProperties>");
+            sb.AppendLine("      <ParameterValues>");
+            sb.AppendLine("        <ParameterValue Name=\"busId\" Value=\"'BMTM3'\" />");
+            sb.AppendLine("        <ParameterValue Name=\"enableSymlinkOC\" Value=\"TRUE\" />");
+            sb.AppendLine("        <ParameterValue Name=\"phase\" Value=\"T#0ms\" />");
+            sb.AppendLine("        <ParameterValue Name=\"busCycleTime\" Value=\"T#80ms\" />");
+            sb.AppendLine("        <ParameterValue Name=\"busCycleTolerance\" Value=\"30\" />");
+            sb.AppendLine("        <ParameterValue Name=\"busCycleActionWhenMissed\" Value=\"1\" />");
+            sb.AppendLine("        <ParameterValue Name=\"busStatusSymlink\" Value=\"\" />");
+            sb.AppendLine("      </ParameterValues>");
+            sb.AppendLine("      <MasterConfigFileName>${ProjectDir}\\${SystemName}\\RuntimeData\\${DeviceName}\\boot\\${busid}.xml</MasterConfigFileName>");
+            sb.AppendLine("      <Items>");
+            sb.AppendLine("        <ConfigurationBaseItem>");
+            sb.AppendLine("          <Name>TM262L01MDESE8T</Name>");
+            sb.AppendLine("          <ID>E2B036F9B0A5B0A4</ID>");
+            sb.AppendLine("          <Type><Name>TM262L01MDESE8T</Name><Namespace>SE.IoTMx</Namespace></Type>");
+            sb.AppendLine("          <ItemProperties /><ParameterValues />");
+            sb.AppendLine("          <PreviousItem><Name>BMTM3</Name><PortName>BusOut</PortName></PreviousItem>");
+            sb.AppendLine("          <Items />");
+            sb.AppendLine("        </ConfigurationBaseItem>");
+            // TM3DI16_G
+            sb.AppendLine("        <ConfigurationBaseItem>");
+            sb.AppendLine("          <Name>TM3DI16_G</Name>");
+            sb.AppendLine("          <ID>52DB1E4920A80F90</ID>");
+            sb.AppendLine("          <Type><Name>TM3DI16_G</Name><Namespace>SE.IoTMx</Namespace></Type>");
+            sb.AppendLine("          <ItemProperties>");
+            sb.AppendLine("            <ItemProperty><Name>OptionalModule</Name><Value xsi:type=\"xsd:unsignedByte\">0</Value></ItemProperty>");
+            for (int ch = 0; ch < 16; ch++)
+            {
+                sb.AppendLine($"            <ItemProperty><Name>Channel_{ch}.Latch</Name><Value xsi:type=\"xsd:unsignedByte\">32</Value></ItemProperty>");
+                sb.AppendLine($"            <ItemProperty><Name>Channel_{ch}.Filter</Name><Value xsi:type=\"xsd:unsignedByte\">4</Value></ItemProperty>");
+            }
+            sb.AppendLine("          </ItemProperties>");
+            sb.AppendLine("          <ParameterValues>");
+            string[] diTags = { "PusherAtHome","PusherAtWork","Hopper","CheckerUp","CheckerDown",
+                                "PartAtChecker","TransferAtHome","TransferAtWork","PartAtAssembly","PartAtExit" };
+            for (int i = 0; i < 16; i++)
+            {
+                var v = i < diTags.Length ? Sym(diTags[i]) : string.Empty;
+                sb.AppendLine($"            <ParameterValue Name=\"DI{i:D2}\" Value=\"{v}\" />");
+            }
+            sb.AppendLine("          </ParameterValues>");
+            sb.AppendLine("          <PreviousItem><Name>TM262L01MDESE8T</Name><PortName>BusOut</PortName></PreviousItem>");
+            sb.AppendLine("          <Items />");
+            sb.AppendLine("        </ConfigurationBaseItem>");
+            // TM3DQ16T_G
+            sb.AppendLine("        <ConfigurationBaseItem>");
+            sb.AppendLine("          <Name>TM3DQ16T_G</Name>");
+            sb.AppendLine("          <ID>1256CB09958B4E27</ID>");
+            sb.AppendLine("          <Type><Name>TM3DQ16T_G</Name><Namespace>SE.IoTMx</Namespace></Type>");
+            sb.AppendLine("          <ItemProperties>");
+            sb.AppendLine("            <ItemProperty><Name>OptionalModule</Name><Value xsi:type=\"xsd:unsignedByte\">0</Value></ItemProperty>");
+            sb.AppendLine("          </ItemProperties>");
+            sb.AppendLine("          <ParameterValues>");
+            string[] doTags = { "ExtendPusher","ExtendChecker","ExtendTransfer","ExtendRejector" };
+            for (int i = 0; i < 16; i++)
+            {
+                var v = i < doTags.Length ? Sym(doTags[i]) : string.Empty;
+                sb.AppendLine($"            <ParameterValue Name=\"DO{i:D2}\" Value=\"{v}\" />");
+            }
+            sb.AppendLine("          </ParameterValues>");
+            sb.AppendLine("          <PreviousItem><Name>TM3DI16_G</Name><PortName>BusOut</PortName></PreviousItem>");
+            sb.AppendLine("          <Items />");
+            sb.AppendLine("        </ConfigurationBaseItem>");
+            sb.AppendLine("      </Items>");
+            sb.AppendLine("    </ConfigurationBaseItem>");
+            sb.AppendLine("  </DeviceHwConfigurationItem>");
+            sb.AppendLine("</DeviceHwConfigurationItems>");
+            return sb.ToString();
+        }
+
+        /// <summary>Yields one <c>(pin, value)</c> tuple per non-empty
+        /// ParameterValue so MainForm can render <c>[Hcf] DI00 ← …</c>
+        /// Activity lines without re-parsing the .hcf.</summary>
+        private static IEnumerable<(string Pin, string Value)> EnumeratePinLines(string resourceId, string m262IoFbId)
+        {
+            string Sym(string tag) => $"{resourceId}.{m262IoFbId}.{tag}";
+            string[] di = { "PusherAtHome","PusherAtWork","Hopper","CheckerUp","CheckerDown",
+                            "PartAtChecker","TransferAtHome","TransferAtWork","PartAtAssembly","PartAtExit" };
+            for (int i = 0; i < di.Length; i++) yield return ($"DI{i:D2}", Sym(di[i]));
+            string[] dq = { "ExtendPusher","ExtendChecker","ExtendTransfer","ExtendRejector" };
+            for (int i = 0; i < dq.Length; i++) yield return ($"DO{i:D2}", Sym(dq[i]));
+        }
+
         /// <summary>Reads &lt;FB Name="..." /&gt; values from a syslay file's
         /// &lt;SubAppNetwork&gt; root. Returns an empty set if the file can't
         /// be parsed.</summary>
@@ -213,7 +449,8 @@ namespace MapperUI.Services
         /// the <c>M262IO</c> FB's <c>ID</c> attribute. Returns blanks if anything
         /// is missing — caller treats blanks as a skip signal.
         /// </summary>
-        private static (string resourceId, string m262IoFbId) ReadSysresIds(string eaeRoot)
+        private static (string resourceId, string m262IoFbId) EnsureSysresAndM262IoIds(
+            string eaeRoot, SystemInjector.BindingApplicationReport report)
         {
             try
             {
@@ -225,19 +462,108 @@ namespace MapperUI.Services
                     .FirstOrDefault();
                 if (sysresPath == null) return (string.Empty, string.Empty);
 
-                var doc = XDocument.Load(sysresPath);
+                var doc = XDocument.Load(sysresPath, LoadOptions.PreserveWhitespace);
                 var root = doc.Root;
                 if (root == null) return (string.Empty, string.Empty);
+                XNamespace ns = root.GetDefaultNamespace();
 
-                var resourceId = (string?)root.Attribute("ID") ?? string.Empty;
-                var m262Io = root.Descendants()
-                    .FirstOrDefault(e => e.Name.LocalName == "FB" &&
-                                         (string?)e.Attribute("Name") == "M262IO" &&
+                bool dirty = false;
+
+                // 1. Ensure resource has a non-zero short-hex ID. EAE accepts both
+                //    long GUIDs and 16-char hex; baselines use the latter.
+                var rawId = (string?)root.Attribute("ID") ?? string.Empty;
+                if (IsZeroOrEmptyId(rawId))
+                {
+                    rawId = NewShortHexId("RES0|" + sysresPath);
+                    root.SetAttributeValue("ID", rawId);
+                    dirty = true;
+                    report.Missing.Add($"[Hcf] sysres ID was zero — assigned {rawId}");
+                }
+
+                // 2. Ensure FBNetwork exists and contains an M262IO FB instance.
+                //    Without it, .hcf ParameterValues cannot resolve and the EAE
+                //    Symbolic Links view stays blank.
+                var fbNetwork = root.Element(ns + "FBNetwork");
+                if (fbNetwork == null)
+                {
+                    fbNetwork = new XElement(ns + "FBNetwork");
+                    root.Add(fbNetwork);
+                    dirty = true;
+                }
+                var m262Io = fbNetwork.Elements(ns + "FB")
+                    .FirstOrDefault(e => (string?)e.Attribute("Name") == "M262IO" &&
                                          (string?)e.Attribute("Type") == "PLC_RW_M262");
-                var m262IoFbId = (string?)m262Io?.Attribute("ID") ?? string.Empty;
-                return (resourceId, m262IoFbId);
+                string m262IoFbId;
+                if (m262Io == null)
+                {
+                    m262IoFbId = NewShortHexId("M262IO|" + rawId);
+                    var mappingId = NewShortHexId("M262IO_MAP|" + rawId);
+                    m262Io = new XElement(ns + "FB",
+                        new XAttribute("ID", m262IoFbId),
+                        new XAttribute("Name", "M262IO"),
+                        new XAttribute("Type", "PLC_RW_M262"),
+                        new XAttribute("Namespace", "Main"),
+                        new XAttribute("Mapping", mappingId),
+                        new XAttribute("x", "3760"),
+                        new XAttribute("y", "1020"));
+                    fbNetwork.Add(m262Io);
+                    dirty = true;
+                    report.Missing.Add(
+                        $"[Hcf] sysres had no M262IO FB — injected with ID {m262IoFbId}");
+                }
+                else
+                {
+                    m262IoFbId = (string?)m262Io.Attribute("ID") ?? string.Empty;
+                    if (IsZeroOrEmptyId(m262IoFbId))
+                    {
+                        m262IoFbId = NewShortHexId("M262IO|" + rawId);
+                        m262Io.SetAttributeValue("ID", m262IoFbId);
+                        dirty = true;
+                    }
+                }
+
+                if (dirty)
+                {
+                    var settings = new System.Xml.XmlWriterSettings
+                    {
+                        OmitXmlDeclaration = false,
+                        Indent = true,
+                        Encoding = new System.Text.UTF8Encoding(false),
+                    };
+                    using var fs = new FileStream(sysresPath, FileMode.Create, FileAccess.Write, FileShare.Read);
+                    using var w = System.Xml.XmlWriter.Create(fs, settings);
+                    doc.Save(w);
+                }
+
+                return (rawId, m262IoFbId);
             }
-            catch { return (string.Empty, string.Empty); }
+            catch (Exception ex)
+            {
+                report.Missing.Add($"[Hcf] EnsureSysres failed: {ex.GetType().Name}: {ex.Message}");
+                return (string.Empty, string.Empty);
+            }
+        }
+
+        private static bool IsZeroOrEmptyId(string id)
+        {
+            if (string.IsNullOrWhiteSpace(id)) return true;
+            foreach (var c in id) if (c != '0' && c != '-') return false;
+            return true;
+        }
+
+        /// <summary>
+        /// Deterministic 16-char uppercase hex ID derived from a seed string,
+        /// matching the format EAE writes into baseline .sysres / .hcf files
+        /// (e.g. <c>54EB0B3D5D16444D</c>). Same input → same ID across runs,
+        /// so the .hcf ResourceId stays stable between Button-2 invocations.
+        /// </summary>
+        private static string NewShortHexId(string seed)
+        {
+            using var sha = System.Security.Cryptography.SHA1.Create();
+            var hash = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(seed));
+            var sb = new System.Text.StringBuilder(16);
+            for (int i = 0; i < 8; i++) sb.Append(hash[i].ToString("X2"));
+            return sb.ToString();
         }
     }
 }
