@@ -599,6 +599,18 @@ namespace MapperUI
                 // in report.Missing (logged by LogBindingsReport above) but we
                 // refresh the missing-tail here to surface the [Hcf] entries
                 // added by the patch itself.
+                // Emit the canonical event + data wires into the M262 sysres
+                // FBNetwork (init chain + adapter wires + Pusher I/O bindings).
+                // Without these, EAE deploys but nothing initialises and the
+                // pusher never moves.
+                int wireCountBefore = report.Missing.Count;
+                await Task.Run(() => MapperUI.Services.M262SysresWireEmitter.Emit(Cfg(), report));
+                for (int i = wireCountBefore; i < report.Missing.Count; i++)
+                {
+                    var line = report.Missing[i];
+                    if (line.StartsWith("[Wire]")) AppendActivity(line);
+                }
+
                 await Task.Run(() => MapperUI.Services.HcfPatchService.PatchDeployed(
                     Cfg(), path, bindings, report));
                 foreach (var (pin, value) in report.HcfPinAssignments)
