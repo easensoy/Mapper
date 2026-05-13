@@ -1,0 +1,276 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="588327e7-d693-43b7-b405-7d75b397125b" Name="changeEventProcess2" Comment="Basic Function Block Type" Namespace="Main">
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author="azam_w" Date="5/23/2025" Remarks="Template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT">
+        <With Var="PartPresent" />
+        <With Var="SwivelArmAtPick" />
+        <With Var="SwivelArmAtHome" />
+        <With Var="SwivelArmAtPlace" />
+        <With Var="SwivelGripperOpened" />
+        <With Var="SwivelGripperClosed" />
+        <With Var="ShaftPnpHrAtWork" />
+        <With Var="ShaftPnpHrAtHome" />
+        <With Var="ShaftPnpVrAtWork" />
+        <With Var="ShaftPnpVrAtHome" />
+        <With Var="ShaftPnpGripperOpened" />
+        <With Var="ShaftPnpGripperClosed" />
+        <With Var="ShaftPnpSensor" />
+        <With Var="BearingSensor" />
+      </Event>
+      <Event Name="Scan_Event">
+        <With Var="PartPresent" />
+        <With Var="SwivelArmAtPick" />
+        <With Var="SwivelArmAtHome" />
+        <With Var="SwivelArmAtPlace" />
+        <With Var="SwivelGripperOpened" />
+        <With Var="SwivelGripperClosed" />
+        <With Var="ShaftPnpHrAtWork" />
+        <With Var="ShaftPnpHrAtHome" />
+        <With Var="ShaftPnpVrAtWork" />
+        <With Var="ShaftPnpVrAtHome" />
+        <With Var="ShaftPnpGripperOpened" />
+        <With Var="ShaftPnpGripperClosed" />
+        <With Var="ShaftPnpSensor" />
+        <With Var="BearingSensor" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO" Comment="Initialization Confirm">
+        <With Var="Out" />
+      </Event>
+      <Event Name="SwivelArm_Event" Comment="Execution Confirmation">
+        <With Var="Out" />
+      </Event>
+      <Event Name="SwivelGripperEvent">
+        <With Var="Out" />
+      </Event>
+      <Event Name="ShaftPnpHrEvent">
+        <With Var="Out" />
+      </Event>
+      <Event Name="ShaftPnpVrEvent">
+        <With Var="Out" />
+      </Event>
+      <Event Name="ShaftPnpGripperEvent">
+        <With Var="Out" />
+      </Event>
+      <Event Name="ShaftPnpSensorEvent">
+        <With Var="Out" />
+      </Event>
+      <Event Name="BearingSensorEvent">
+        <With Var="Out" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="PartPresent" Type="BOOL" Comment="Output event qualifier" />
+      <VarDeclaration Name="SwivelArmAtPick" Type="BOOL" />
+      <VarDeclaration Name="SwivelArmAtHome" Type="BOOL" />
+      <VarDeclaration Name="SwivelArmAtPlace" Type="BOOL" />
+      <VarDeclaration Name="SwivelGripperOpened" Type="BOOL" />
+      <VarDeclaration Name="SwivelGripperClosed" Type="BOOL" />
+      <VarDeclaration Name="ShaftPnpHrAtWork" Type="BOOL" />
+      <VarDeclaration Name="ShaftPnpHrAtHome" Type="BOOL" />
+      <VarDeclaration Name="ShaftPnpVrAtWork" Type="BOOL" />
+      <VarDeclaration Name="ShaftPnpVrAtHome" Type="BOOL" />
+      <VarDeclaration Name="ShaftPnpGripperOpened" Type="BOOL" />
+      <VarDeclaration Name="ShaftPnpGripperClosed" Type="BOOL" />
+      <VarDeclaration Name="ShaftPnpSensor" Type="BOOL" />
+      <VarDeclaration Name="BearingSensor" Type="BOOL" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="Out" Type="BOOL" />
+    </OutputVars>
+  </InterfaceList>
+  <BasicFB>
+    <Attribute Name="FBType.Basic.Algorithm.Order" Value="INIT,Swivel_Change,SwivelGripper_Change,ShaftPnpHrEvent,ShaftPnpVrEvent,ShaftPnpGripperEvent,shaftPnpSensorEvent,BearingSensorEvent,Initialise" />
+    <InternalVars>
+      <VarDeclaration Name="PartPresent_PrevVAl" Type="BOOL" InitialValue="FALSE" />
+      <VarDeclaration Name="SwivelArmAtPick_PrevVal" Type="BOOL" InitialValue="FALSE" />
+      <VarDeclaration Name="SwivelArmAtHome_PrevVal" Type="BOOL" InitialValue="FALSE" />
+      <VarDeclaration Name="SwivelArmAtPlace_PrevVal" Type="BOOL" InitialValue="FALSE" />
+      <VarDeclaration Name="SwivelGripperClosed_PrevVal" Type="BOOL" />
+      <VarDeclaration Name="SwivelGripperOpened_PrevVal" Type="BOOL" />
+      <VarDeclaration Name="ShaftPnpHrAtWork_PrevVal" Type="BOOL" />
+      <VarDeclaration Name="ShaftPnpHrAtHome_PrevVal" Type="BOOL" />
+      <VarDeclaration Name="ShaftPnpVrAtWork_PrevVal" Type="BOOL" />
+      <VarDeclaration Name="ShaftPnpVrAtHome_PrevVal" Type="BOOL" />
+      <VarDeclaration Name="ShaftPnpGripperClosed_PrevVal" Type="BOOL" />
+      <VarDeclaration Name="ShaftPnpGripperOpened_PrevVal" Type="BOOL" />
+      <VarDeclaration Name="ShaftPnpSensor_PreVal" Type="BOOL" />
+      <VarDeclaration Name="BearingSensor_PreVal" Type="BOOL" />
+    </InternalVars>
+    <ECC>
+      <ECState Name="START" Comment="Initial State" x="3396.941" y="1655.126" />
+      <ECState Name="PartPresentEvent" Comment="Normal execution" x="5527.933" y="1917.512">
+        <ECAction Algorithm="INIT" />
+      </ECState>
+      <ECState Name="SwivelArmEvent" x="5096" y="1412">
+        <ECAction Algorithm="Swivel_Change" Output="SwivelArm_Event" />
+      </ECState>
+      <ECState Name="SwivelGripperEvent" x="4864" y="2436">
+        <ECAction Algorithm="SwivelGripper_Change" Output="SwivelGripperEvent" />
+      </ECState>
+      <ECState Name="ShaftPnpHrEvent" x="3384" y="2272">
+        <ECAction Algorithm="ShaftPnpHrEvent" Output="ShaftPnpHrEvent" />
+      </ECState>
+      <ECState Name="ShaftPnpVrEvent" x="1446.857" y="1967.429">
+        <ECAction Algorithm="ShaftPnpVrEvent" Output="ShaftPnpVrEvent" />
+      </ECState>
+      <ECState Name="ShaftPnpGripperEvent" x="2088" y="1224">
+        <ECAction Algorithm="ShaftPnpGripperEvent" Output="ShaftPnpGripperEvent" />
+      </ECState>
+      <ECState Name="ShaftPnpSensorEvent" x="4093.714" y="906.2859">
+        <ECAction Algorithm="shaftPnpSensorEvent" Output="ShaftPnpSensorEvent" />
+      </ECState>
+      <ECState Name="BearingSensorEvent" x="2925.714" y="378.286">
+        <ECAction Algorithm="BearingSensorEvent" Output="BearingSensorEvent" />
+      </ECState>
+      <ECState Name="INIT" x="2451.333" y="2451.429">
+        <ECAction Algorithm="Initialise" Output="INITO" />
+        <ECAction Output="SwivelArm_Event" />
+        <ECAction Output="SwivelGripperEvent" />
+        <ECAction Output="ShaftPnpHrEvent" />
+        <ECAction Output="ShaftPnpVrEvent" />
+        <ECAction Output="ShaftPnpGripperEvent" />
+        <ECAction Output="ShaftPnpSensorEvent" />
+        <ECAction Output="BearingSensorEvent" />
+      </ECState>
+      <ECTransition Source="START" Destination="PartPresentEvent" Condition="PartPresent &lt;&gt; PartPresent_PrevVAl" x="4414.354" y="1704.901">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="1028.543,412.9193,1177.938,430.3622" />
+      </ECTransition>
+      <ECTransition Source="PartPresentEvent" Destination="START" Condition="1" x="4559.817" y="1858.401">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="1229.461,478.6078,1076.81,460.4984" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="SwivelArmEvent" Condition="SwivelArmAtPick &lt;&gt; SwivelArmAtPick_PrevVal OR SwivelArmAtHome &lt;&gt; SwivelArmAtHome_PrevVal OR SwivelArmAtPlace &lt;&gt; SwivelArmAtPlace_PrevVal" x="4083.216" y="1486.62">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="959.0879,377.5112,1064.23,360.8029" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="SwivelGripperEvent" Condition="SwivelGripperClosed &lt;&gt; SwivelGripperClosed_PrevVal OR SwivelGripperOpened &lt;&gt; SwivelGripperOpened" x="4223.625" y="2013.256">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="1007.322,471.1837,1114.836,530.4924" />
+      </ECTransition>
+      <ECTransition Source="SwivelGripperEvent" Destination="START" Condition="1" x="4009.99" y="2052.418">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="1045.248,541.0988,944.8641,486.2526" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="ShaftPnpHrEvent" Condition="ShaftPnpHrAtHome &lt;&gt; ShaftPnpHrAtHome_PrevVal OR ShaftPnpHrAtWork &lt;&gt; ShaftPnpHrAtWork_PrevVal" x="3448.771" y="1982.607">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="867.1478,476.2734,864.1249,518.2041" />
+      </ECTransition>
+      <ECTransition Source="ShaftPnpHrEvent" Destination="START" Condition="1" x="3321.201" y="1927.251">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="825.7413,496.8996,826.6481,460.6737" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="ShaftPnpVrEvent" Condition="ShaftPnpVrAtHome &lt;&gt; ShaftPnpVrAtHome_PrevVal OR ShaftPnpVrAtWork &lt;&gt; ShaftPnpVrAtHome_PrevVal" x="2489.636" y="1878.644">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="688.8173,463.582,557.5266,484.402" />
+      </ECTransition>
+      <ECTransition Source="ShaftPnpVrEvent" Destination="START" Condition="1" x="2466.145" y="1726.555">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="551.9067,437.3874,684.1401,415.9751" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="ShaftPnpGripperEvent" Condition="ShaftPnpGripperClosed &lt;&gt; ShaftPnpGripperClosed_PrevVal OR ShaftPnpGripperOpened &lt;&gt; ShaftPnpGripperOpened_PrevVal" x="2774.137" y="1526.292">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="737.0574,400.3296,657.4391,374.2162" />
+      </ECTransition>
+      <ECTransition Source="ShaftPnpGripperEvent" Destination="START" Condition="1" x="2813.886" y="1379.211">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="659.1973,326.4785,741.6689,353.5739" />
+      </ECTransition>
+      <ECTransition Source="SwivelArmEvent" Destination="START" Condition="1" x="4184.555" y="1622.598">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="1095.682,403.5435,990.8333,417.9303" />
+      </ECTransition>
+      <ECTransition Source="ShaftPnpSensorEvent" Destination="START" Condition="1" x="3813.173" y="1327.881">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="981.2825,309.1202,931.8051,362.6831" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="ShaftPnpSensorEvent" Condition="ShaftPnpSensor &lt;&gt; ShaftPnpSensor_PreVal" x="3762.642" y="1208.776">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="918.4631,322.9817,968.0486,269.4181" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="BearingSensorEvent" Condition="BearingSensor &lt;&gt; BearingSensor_PreVal" x="3138.709" y="1095.058">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="801.6482,329.2651,765.308,231.3223" />
+      </ECTransition>
+      <ECTransition Source="BearingSensorEvent" Destination="START" Condition="1" x="3228.758" y="985.1746">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="793.5452,194.7094,830.0627,292.6227" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="INIT" Condition="INIT" x="2979.065" y="2111.217">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="781.3741,503.6114,712.9011,561.2729" />
+      </ECTransition>
+      <ECTransition Source="INIT" Destination="START" Condition="1" x="2917.877" y="1978.278">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="696.7977,517.1501,765.2707,459.4886" />
+      </ECTransition>
+    </ECC>
+    <Algorithm Name="INIT" Comment="Initialization algorithm">
+      <ST><![CDATA[;
+IF PartPresent <> PartPresent_PrevVAl THEN
+	PartPresent_PrevVAl := PartPresent;
+	Out := PartPresent;
+END_IF;
+
+ 
+ ]]></ST>
+    </Algorithm>
+    <Algorithm Name="Swivel_Change">
+      <ST><![CDATA[;
+IF SwivelArmAtPick <> SwivelArmAtPick_PrevVal THEN
+	SwivelArmAtPick_PrevVal := SwivelArmAtPick;
+	Out := SwivelArmAtPick;
+END_IF;
+
+IF SwivelArmAtHome <> SwivelArmAtHome_PrevVal THEN
+	SwivelArmAtHome_PrevVal := SwivelArmAtHome;
+	Out := SwivelArmAtHome;
+END_IF;
+
+IF SwivelArmAtPlace <> SwivelArmAtPlace_PrevVal THEN
+	SwivelArmAtPlace_PrevVal := SwivelArmAtPlace;
+	Out := SwivelArmAtPlace;
+END_IF;
+]]></ST>
+    </Algorithm>
+    <Algorithm Name="SwivelGripper_Change">
+      <ST><![CDATA[;
+
+IF SwivelGripperOpened <> SwivelGripperOpened_PrevVal THEN
+	SwivelGripperOpened_PrevVal := SwivelGripperOpened;
+	Out := SwivelGripperOpened;
+END_IF;
+
+IF SwivelGripperClosed <> SwivelGripperClosed_PrevVal THEN
+	SwivelGripperClosed_PrevVal := SwivelGripperClosed;
+	Out := SwivelGripperClosed;
+END_IF;
+
+ ]]></ST>
+    </Algorithm>
+    <Algorithm Name="ShaftPnpHrEvent">
+      <ST><![CDATA[;
+IF ShaftPnpHrAtHome <> ShaftPnpHrAtHome_PrevVal THEN
+	ShaftPnpHrAtHome_PrevVal := ShaftPnpHrAtHome;
+	Out := ShaftPnpHrAtHome;
+END_IF;
+
+IF ShaftPnpHrAtWork <> ShaftPnpHrAtWork_PrevVal THEN
+	ShaftPnpHrAtWork_PrevVal := ShaftPnpHrAtWork;
+	Out := ShaftPnpHrAtWork;
+END_IF;
+]]></ST>
+    </Algorithm>
+    <Algorithm Name="ShaftPnpVrEvent">
+      <ST><![CDATA[;]]></ST>
+    </Algorithm>
+    <Algorithm Name="ShaftPnpGripperEvent">
+      <ST><![CDATA[;]]></ST>
+    </Algorithm>
+    <Algorithm Name="shaftPnpSensorEvent">
+      <ST><![CDATA[;
+IF ShaftPnpSensor <> ShaftPnpSensor_PreVal THEN
+	ShaftPnpSensor_PreVal := ShaftPnpSensor;
+	Out := ShaftPnpSensor;
+END_IF;]]></ST>
+    </Algorithm>
+    <Algorithm Name="BearingSensorEvent">
+      <ST><![CDATA[;
+IF BearingSensor <> BearingSensor_PreVal THEN
+	BearingSensor_PreVal := BearingSensor;
+	Out := BearingSensor;
+END_IF;]]></ST>
+    </Algorithm>
+    <Algorithm Name="Initialise">
+      <ST><![CDATA[Out := TRUE;]]></ST>
+    </Algorithm>
+  </BasicFB>
+</FBType>
