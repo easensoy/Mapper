@@ -46,19 +46,19 @@ namespace MapperUI.Services
             new("Station1_HMI.StationHMIAdptrOUT","Station1.StationHMIAdptrIN"),
             new("Station1.AreaAdptrOUT",          "Area_Term.CaSAdptrIN"),
             new("Station1.StationAdptrOUT",       "Feed_Station.stationAdptr_in"),
-            new("Feed_Station.stateRptCmdAdptr_out","Feeder.stateRptCmd_in"),
+            new("Feed_Station.stateRptCmdAdptr_out","Feeder.stateRprtCmd_in"),
             new("Feed_Station.stationAdptr_out",  "Stn1_Term.CaSAdptrIN"),
-            new("Feeder.stateRptCmd_out",         "PartInHopper.stateRptCmd_in"),
+            new("Feeder.stateRprtCmd_out",        "PartInHopper.stateRprtCmd_in"),
         };
 
-        // Pusher data wires from SMC_Rig_IO_Bindings.xlsx.
-        private static readonly Wire[] DataWires =
-        {
-            new("M262IO.PusherAtHome", "Feeder.athome"),
-            new("M262IO.PusherAtWork", "Feeder.atwork"),
-            new("Feeder.OutputToWork", "M262IO.ExtendPusher"),
-            new("M262IO.Hopper",       "PartInHopper.Input"),
-        };
+        // No top-level data wires. The Feeder / PartInHopper instances
+        // expose `athome`/`atwork`/`OutputToWork`/`Input` only as SYMLINK
+        // parameter names INSIDE their CAT bodies, not as outer FB data
+        // ports. Wiring them at the sysres level fails the build with
+        // "port not found". The .hcf ParameterValue rewrite already binds
+        // these names to the M262 TM3 channels via PLC_RW_M262 symlinks —
+        // no sysres-level DataConnection is needed.
+        private static readonly Wire[] DataWires = Array.Empty<Wire>();
 
         public static void Emit(MapperConfig cfg,
             SystemInjector.BindingApplicationReport report)
@@ -155,15 +155,14 @@ namespace MapperUI.Services
                             new XAttribute("Destination", d)));
                     fbNet.Add(ec);
                 }
-                if (emittedData.Count > 0)
-                {
-                    var dc = new XElement(ns + "DataConnections");
-                    foreach (var (s, d) in emittedData)
-                        dc.Add(new XElement(ns + "Connection",
-                            new XAttribute("Source", s),
-                            new XAttribute("Destination", d)));
-                    fbNet.Add(dc);
-                }
+                // Always emit <DataConnections />, even empty, so EAE sees an
+                // explicit "no data wires" rather than a missing block.
+                var dc = new XElement(ns + "DataConnections");
+                foreach (var (s, d) in emittedData)
+                    dc.Add(new XElement(ns + "Connection",
+                        new XAttribute("Source", s),
+                        new XAttribute("Destination", d)));
+                fbNet.Add(dc);
 
                 var settings = new XmlWriterSettings
                 {
