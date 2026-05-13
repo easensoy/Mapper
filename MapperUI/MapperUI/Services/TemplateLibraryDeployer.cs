@@ -59,7 +59,10 @@ namespace MapperUI.Services
             "ProcessRuntime_Generic_v1", "ProcessStateBusHandler",
             "FaultLatch", "actuatorStateEvents",
             "updateComponentState", "updateComponentState_Sensor",
-            "No_Sensor_Handler"
+            "No_Sensor_Handler",
+            // Event-change handlers referenced by PLC_RW_M262's internal FB2/FB3
+            // instances. Sourced from C:\SMC_Rig_Expo_20260112-165857725.sln\IEC61499.
+            "changeEventProcess1", "changeEventProcess2",
         };
 
         static readonly string[] UniversalHmiCats = new[]
