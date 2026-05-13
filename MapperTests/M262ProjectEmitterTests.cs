@@ -68,7 +68,7 @@ namespace MapperTests
 
         // Builds a synthetic EAE project layout matching the Feed_Station + Feeder
         // fixture: syslay has Feeder + Feed_Station as top-level FBs, sysdev exists
-        // for EcoRT_0, .system file is empty (no Mappings yet), dfbproj is empty,
+        // for M262, .system file is empty (no Mappings yet), dfbproj is empty,
         // baseline .hcf folder is on the side. Returns a wired MapperConfig.
         static MapperConfig BuildScenario(out string eaeRoot, out string baselineRoot,
             string targetIp = "172.24.61.92")
@@ -83,7 +83,7 @@ namespace MapperTests
             File.WriteAllText(Path.Combine(iec, "IEC61499.dfbproj"),
                 "<Project xmlns=\"http://schemas.microsoft.com/developer/msbuild/2003\"><ItemGroup /></Project>");
             File.WriteAllText(Path.Combine(sys, $"{SysdevGuid}.sysdev"),
-                $"<Device xmlns=\"{LibElNs}\" ID=\"{SysdevGuid}\" Name=\"EcoRT_0\" Type=\"Soft_dPAC\" Namespace=\"SE.DPAC\" />");
+                $"<Device xmlns=\"{LibElNs}\" ID=\"{SysdevGuid}\" Name=\"M262\" Type=\"Soft_dPAC\" Namespace=\"SE.DPAC\" />");
             File.WriteAllText(Path.Combine(sys, $"{SysappGuid}.sysapp"),
                 $"<Application xmlns=\"{LibElNs}\" Name=\"APP1\" ID=\"{SysappGuid}\" />");
             File.WriteAllText(Path.Combine(iec, "System", $"{SysGuid}.system"),
@@ -190,10 +190,10 @@ namespace MapperTests
             Assert.Equal(2, mappings.Count);
             Assert.Contains(mappings, m =>
                 (string?)m.Attribute("From") == "APP1.Feeder" &&
-                (string?)m.Attribute("To")   == "EcoRT_0.RES0");
+                (string?)m.Attribute("To")   == "M262.RES0");
             Assert.Contains(mappings, m =>
                 (string?)m.Attribute("From") == "APP1.Feed_Station" &&
-                (string?)m.Attribute("To")   == "EcoRT_0.RES0");
+                (string?)m.Attribute("To")   == "M262.RES0");
         }
 
         // [Fact]

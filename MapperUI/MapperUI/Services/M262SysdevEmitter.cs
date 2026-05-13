@@ -11,10 +11,10 @@ namespace MapperUI.Services
     {
         const string LibElNs = "https://www.se.com/LibraryElements";
         const string ApplicationName = "APP1";
-        const string DeviceName = "EcoRT_0";
+        const string DeviceName = "M262";
         // Default kept for back-compat with the unused ReplaceMappingsBlock helper;
         // the live Emit path now reads cfg.ResourceName and passes it through.
-        const string DefaultResourceName = "M262_RES";
+        const string DefaultResourceName = "RES0";
 
         public static SysdevEmitResult Emit(MapperConfig cfg)
         {
@@ -33,7 +33,7 @@ namespace MapperUI.Services
             RewriteSysdev(sysdevPath, DeviceName, "M262_dPAC", cfg.M262TargetIp ?? string.Empty,
                 resourceName);
             // While we have the EAE root, keep the .sysres root's Name attribute in sync
-            // so EAE's Deploy & Diagnostic tree doesn't show RES0 + M262_RES at the same time.
+            // so EAE's Deploy & Diagnostic tree doesn't show RES0 + RES0 at the same time.
             var sysresPathForRename = FindSysresFor(sysdevPath);
             if (sysresPathForRename != null) RenameSysresName(sysresPathForRename, resourceName);
             var propsPath = WriteM262DevicePropertiesXml(sysdevPath);
@@ -204,7 +204,7 @@ namespace MapperUI.Services
 
         /// <summary>
         /// Renames the .sysres root's <c>Name</c> attribute to <paramref name="resourceName"/>
-        /// (e.g. "M262_RES"). EAE Deploy &amp; Diagnostic shows this name in the runtime
+        /// (e.g. "RES0"). EAE Deploy &amp; Diagnostic shows this name in the runtime
         /// tree, so it must match what the .sysdev's &lt;Resource&gt; entry says or EAE
         /// flags the project as inconsistent. Idempotent — safe to re-run.
         /// </summary>

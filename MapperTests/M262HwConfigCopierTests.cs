@@ -115,7 +115,7 @@ namespace MapperTests
             File.WriteAllText(Path.Combine(iec, "IEC61499.dfbproj"),
                 "<Project xmlns=\"http://schemas.microsoft.com/developer/msbuild/2003\"/>");
             File.WriteAllText(Path.Combine(tSys, "00000000-0000-0000-0000-000000000002.sysdev"),
-                "<Device xmlns=\"https://www.se.com/LibraryElements\" Name=\"EcoRT_0\"/>");
+                "<Device xmlns=\"https://www.se.com/LibraryElements\" Name=\"M262\"/>");
             var syslayDir = Path.Combine(tSys, "00000000-0000-0000-0000-000000000001");
             Directory.CreateDirectory(syslayDir);
             var syslayPath = Path.Combine(syslayDir, "00000000-0000-0000-0000-000000000000.syslay");

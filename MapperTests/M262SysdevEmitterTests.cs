@@ -34,7 +34,7 @@ namespace MapperTests
 ";
             File.WriteAllText(Path.Combine(sys, sysdevGuid + ".sysdev"),
                 $@"<?xml version=""1.0"" encoding=""utf-8""?>
-<Device xmlns=""{LibElNs}"" ID=""{sysdevGuid}"" Name=""EcoRT_0"" Type=""{sysdevType}"" Namespace=""SE.DPAC"">
+<Device xmlns=""{LibElNs}"" ID=""{sysdevGuid}"" Name=""M262"" Type=""{sysdevType}"" Namespace=""SE.DPAC"">
 {resourcesXml}</Device>");
 
             File.WriteAllText(Path.Combine(sys, sysappGuid + ".sysapp"),
@@ -74,7 +74,7 @@ namespace MapperTests
 
             var doc = XDocument.Load(result.SysdevPath);
             var root = doc.Root!;
-            Assert.Equal("EcoRT_0",  (string?)root.Attribute("Name"));
+            Assert.Equal("M262",  (string?)root.Attribute("Name"));
             Assert.Equal("M262_dPAC", (string?)root.Attribute("Type"));
             Assert.Equal("SE.DPAC",   (string?)root.Attribute("Namespace"));
         }
@@ -118,10 +118,10 @@ namespace MapperTests
             var mappings = doc.Descendants(ns + "Mapping").ToList();
             Assert.Contains(mappings, m =>
                 (string?)m.Attribute("From") == "APP1.Feeder" &&
-                (string?)m.Attribute("To")   == "EcoRT_0.RES0");
+                (string?)m.Attribute("To")   == "M262.RES0");
             Assert.Contains(mappings, m =>
                 (string?)m.Attribute("From") == "APP1.Feed_Station" &&
-                (string?)m.Attribute("To")   == "EcoRT_0.RES0");
+                (string?)m.Attribute("To")   == "M262.RES0");
         }
 
         // [Fact]
@@ -145,7 +145,7 @@ namespace MapperTests
             var systemBody = $@"<?xml version=""1.0"" encoding=""utf-8""?>
 <System xmlns=""{LibElNs}"" Name=""System"" ID=""00000000-0000-0000-0000-000000000000"">
   <Mappings>
-    <Mapping From=""APP1.Feeder"" To=""EcoRT_0.RES0"" />
+    <Mapping From=""APP1.Feeder"" To=""M262.RES0"" />
   </Mappings>
 </System>";
             var cfg = BuildFakeProject(out _, systemBody: systemBody);

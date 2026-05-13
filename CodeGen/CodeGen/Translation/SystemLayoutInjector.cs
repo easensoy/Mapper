@@ -849,6 +849,8 @@ namespace MapperUI.Services
             public List<string> Missing { get; } = new();
         }
 
+        // M262IO scope is applied in the .hcf by M262HwConfigCopier.OverwriteHcfParameterValuesInMemory,
+        // not here. SyslayBuilder.AddFB discards nested FB overrides anyway.
         private static IDictionary<string, IDictionary<string, string>>? BuildActuatorNestedOverrides(ActuatorBinding? b)
         {
             if (b == null) return null;

@@ -18,5 +18,5 @@
   "IoBindingsPath": "Input\\SMC_Rig_IO_Bindings.xlsx",
   "M262HardwareConfigBaselinePath": "C:\\SMC_Rig_Expo_20260112-165857725.sln",
   "M262TargetIp": "192.168.1.10",
-  "ResourceName": "M262_RES"
+  "ResourceName": "RES0"
 }
