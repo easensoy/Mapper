@@ -86,6 +86,15 @@ namespace MapperUI.Services
                     return;
                 }
 
+                // Self-heal: if the deployed .hcf is the empty
+                // <DeviceHwConfigurationItems /> shell (DemonstratorWiper output,
+                // or M262HwConfigCopier.Copy silently failed in
+                // FinalizeM262StackAsync), reseed it from the baseline so EAE
+                // gets the TM3 module skeleton. Without this, there are no
+                // ParameterValue elements to overwrite and Symbolic Links view
+                // stays blank.
+                EnsureDeployedHcfPopulated(hcfPath, config, eaeRoot, report);
+
                 var hcf = M262HcfDocument.Load(hcfPath);
                 hcf.OverwriteHcfParameterValuesInMemory(bindings, resourceId, m262IoFbId, syslayFbNames);
                 hcf.WriteHcfToDisk(hcfPath);
@@ -99,6 +108,84 @@ namespace MapperUI.Services
             {
                 report.Missing.Add($"[Hcf] failed: {ex.GetType().Name}: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// If the deployed <c>.hcf</c> has no TM3 modules (e.g. empty shell left by
+        /// DemonstratorWiper), pick the richest <c>.hcf</c> from the baseline —
+        /// the one with the most <c>TM3DI16_G</c>/<c>TM3DQ16T_G</c> module
+        /// entries — and copy it over the deployed path. Sets the
+        /// <c>ResourceId</c> attribute to match the deployed sysres so EAE's
+        /// IO Mapping table resolves. Best-effort; logs to <c>report.Missing</c>.
+        /// </summary>
+        private static void EnsureDeployedHcfPopulated(string hcfPath, MapperConfig config,
+            string eaeRoot, SystemInjector.BindingApplicationReport report)
+        {
+            try
+            {
+                var doc = XDocument.Load(hcfPath);
+                int tmCount = doc.Descendants()
+                    .Count(e => e.Name.LocalName == "Name" &&
+                                (e.Value == "TM3DI16_G" || e.Value == "TM3DQ16T_G"));
+                if (tmCount > 0) return; // already populated
+
+                var baseline = config.M262HardwareConfigBaselinePath;
+                if (string.IsNullOrWhiteSpace(baseline) || !Directory.Exists(baseline))
+                {
+                    report.Missing.Add(
+                        "[Hcf] deployed .hcf is empty and M262HardwareConfigBaselinePath is not set — " +
+                        "cannot reseed. EAE Hardware Configurator will stay empty.");
+                    return;
+                }
+
+                var srcHcf = PickRichestBaselineHcf(baseline);
+                if (srcHcf == null)
+                {
+                    report.Missing.Add("[Hcf] deployed .hcf is empty and no usable baseline .hcf found.");
+                    return;
+                }
+
+                var seed = XDocument.Load(srcHcf);
+                var sysresId = M262HwConfigCopier.ReadTargetSysresId(eaeRoot);
+                if (!string.IsNullOrEmpty(sysresId))
+                {
+                    var item = seed.Descendants()
+                        .FirstOrDefault(e => e.Name.LocalName == "DeviceHwConfigurationItem");
+                    item?.SetAttributeValue("ResourceId", sysresId);
+                }
+                seed.Save(hcfPath);
+                report.Missing.Add(
+                    $"[Hcf] deployed .hcf was empty — reseeded from baseline '{Path.GetFileName(srcHcf)}'.");
+            }
+            catch (Exception ex)
+            {
+                report.Missing.Add($"[Hcf] reseed failed: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Scan every <c>.hcf</c> under the baseline tree, count
+        /// TM3DI16_G/TM3DQ16T_G module names, and return the file with the
+        /// highest count. Avoids picking a sibling .hcf that belongs to a
+        /// different (non-M262) device.
+        /// </summary>
+        private static string? PickRichestBaselineHcf(string baselineRoot)
+        {
+            string? best = null;
+            int bestCount = 0;
+            foreach (var path in Directory.EnumerateFiles(baselineRoot, "*.hcf", SearchOption.AllDirectories))
+            {
+                try
+                {
+                    var doc = XDocument.Load(path);
+                    int count = doc.Descendants()
+                        .Count(e => e.Name.LocalName == "Name" &&
+                                    (e.Value == "TM3DI16_G" || e.Value == "TM3DQ16T_G"));
+                    if (count > bestCount) { bestCount = count; best = path; }
+                }
+                catch { /* skip malformed */ }
+            }
+            return best;
         }
 
         /// <summary>Reads &lt;FB Name="..." /&gt; values from a syslay file's
