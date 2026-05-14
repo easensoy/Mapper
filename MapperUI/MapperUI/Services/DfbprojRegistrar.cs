@@ -222,6 +222,30 @@ namespace MapperUI.Services
                 bool isComposite = File.Exists(Path.Combine(iec61499Dir, stem + ".composite.offline.xml"));
                 added += RegisterBasicFb(dfbprojPath, name, isComposite ? "Composite" : "Basic");
             }
+
+            // Register flat sibling files at IEC61499 root as <None> entries
+            // (composite layout files, doc.xml, opcua.xml, meta.xml). EAE
+            // bundles these into the project artefact and reads them when
+            // opening the FB editor — the .fbt registration alone won't
+            // import them, and Composite FBs in particular fail to resolve
+            // their child FB type without the .composite.offline.xml present
+            // in the dfbproj.
+            string[] siblingPatterns = {
+                "*.composite.offline.xml",
+                "*.doc.xml",
+                "*.opcua.xml",
+                "*.meta.xml",
+            };
+            var sxml = XDocument.Load(dfbprojPath);
+            var sns = sxml.Root!.GetDefaultNamespace();
+            var (_, sng) = Groups(sxml, sns);
+            int siblingsAdded = 0;
+            foreach (var pat in siblingPatterns)
+                foreach (var f in Directory.EnumerateFiles(iec61499Dir, pat, SearchOption.TopDirectoryOnly))
+                    Add(sng, sns, "None", Path.GetFileName(f), ref siblingsAdded);
+            if (siblingsAdded > 0) sxml.Save(dfbprojPath);
+            added += siblingsAdded;
+
             return added;
         }
 
