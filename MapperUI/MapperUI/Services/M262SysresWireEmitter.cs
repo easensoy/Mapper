@@ -49,9 +49,13 @@ namespace MapperUI.Services
             new("FB1.INITO",           "M262IO.INIT"),
             new("FB1.INITO",           "Area.INIT"),
             new("FB1.INITO",           "Feed_Station.INIT"),
-            new("FB1.INITO",           "Feeder.INIT"),
-            new("FB1.INITO",           "PartInHopper.INIT"),
             new("Area.INITO",          "Station1.INIT"),
+            // Sequential init through the CaSBus order: Process inits its
+            // actuators, each actuator inits its sensor. Replaces the prior
+            // FB1.INITO → Feeder/PartInHopper parallel fan-out which broke
+            // the OSDA component-init handshake.
+            new("Feed_Station.INITO",  "Feeder.INIT"),
+            new("Feeder.INITO",        "PartInHopper.INIT"),
         };
 
         // Adapter ring: HMI → Area/Station chain → Feed_Station → Feeder
@@ -129,6 +133,12 @@ namespace MapperUI.Services
                     if (!string.IsNullOrEmpty(n)) byName[n] = fb;
                     if (!string.IsNullOrEmpty(t) && !byType.ContainsKey(t)) byType[t] = fb;
                 }
+
+                // Apply the canonical sysres canvas layout: hardware top
+                // strip (y=200), HMI row (y=800), structural row (y=1400),
+                // components row (y=2200). Reads top-down, runtime → init
+                // → application → components, mirroring the syslay layout.
+                ApplyCanonicalLayout(byName, report);
 
                 // Cache loaded .fbt port lookups so we don't re-parse per wire.
                 var portsByType = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
@@ -257,6 +267,44 @@ namespace MapperUI.Services
             {
                 report.Missing.Add($"[Wire] failed: {ex.GetType().Name}: {ex.Message}");
             }
+        }
+
+        // Canonical sysres canvas layout. START is the resource's built-in
+        // restart FB (auto-instantiated, expected at x=80,y=80, NOT emitted
+        // here). Every other entry overrides whatever x/y the upstream
+        // mirror code generated.
+        private static readonly Dictionary<string, (int X, int Y)> CanonicalLayout = new(StringComparer.Ordinal)
+        {
+            // Hardware row (top strip)
+            { "FB2",          (400,  200) },   // plcStart
+            { "FB1",          (900,  200) },   // DPAC_FULLINIT
+            { "M262IO",       (1400, 200) },
+            { "Area_Term",    (1900, 200) },
+            { "Stn1_Term",    (2400, 200) },
+            // Application row 1 (HMI CATs)
+            { "Area_HMI",     (400,  800) },
+            { "Station1_HMI", (1100, 800) },
+            // Application row 2 (structural)
+            { "Area",         (400,  1400) },
+            { "Station1",     (1100, 1400) },
+            { "Feed_Station", (1800, 1400) },
+            // Application row 3 (components)
+            { "Feeder",       (400,  2200) },
+            { "PartInHopper", (1100, 2200) },
+        };
+
+        private static void ApplyCanonicalLayout(Dictionary<string, XElement> byName,
+            SystemInjector.BindingApplicationReport report)
+        {
+            int placed = 0;
+            foreach (var kv in CanonicalLayout)
+            {
+                if (!byName.TryGetValue(kv.Key, out var fb)) continue;
+                fb.SetAttributeValue("x", kv.Value.X.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                fb.SetAttributeValue("y", kv.Value.Y.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                placed++;
+            }
+            report.Missing.Add($"[Sysres layout] hardware row + 3 application rows ({placed}/{CanonicalLayout.Count} FBs placed)");
         }
 
         private static string? LocateM262Sysres(string eaeRoot)
