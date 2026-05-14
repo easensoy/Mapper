@@ -800,7 +800,17 @@ namespace MapperUI.Services
                 DfbprojRegistrar.RegisterCat(dfbproj, cat);
 
             foreach (var basic in result.BasicFBsDeployed)
-                DfbprojRegistrar.RegisterBasicFb(dfbproj, basic + ".fbt");
+            {
+                // PLC_RW_M262 is wired as a basic in UniversalIoFbs (so the
+                // .fbt deploys flat, no .cfg sibling), but its .fbt body
+                // contains an internal FBNetwork (FB2 = changeEventProcess1)
+                // — that makes it a Composite to EAE's compiler. Registering
+                // it as Basic produces "Type 'Main.PLC_RW_M262' is undefined"
+                // because the dfbproj entry has the wrong IEC61499Type.
+                var iecType = string.Equals(basic, "PLC_RW_M262", StringComparison.Ordinal)
+                    ? "Composite" : "Basic";
+                DfbprojRegistrar.RegisterBasicFb(dfbproj, basic + ".fbt", iecType);
+            }
 
             foreach (var adapter in result.AdaptersDeployed)
                 DfbprojRegistrar.RegisterBasicFb(dfbproj, adapter + ".adp", "Adapter");
