@@ -282,25 +282,29 @@ namespace MapperUI.Services
         // emitted here). Every other entry overrides whatever x/y the
         // upstream mirror code generated; previous coordinates are NOT
         // preserved.
+        // Coordinates scaled to EAE's actual FB-body width (~1500 units) so
+        // adjacent FBs don't overlap. Pitch is ~2000 units horizontal,
+        // ~800-1000 units vertical. Matches the proportions of Alex's
+        // baseline SMC_Rig_Expo sysres canvas (FBs at x=3760/9760, etc.).
         private static readonly Dictionary<string, (int X, int Y)> CanonicalLayout = new(StringComparer.Ordinal)
         {
-            // Runtime row
-            { "FB2",          (400,  200) },   // plcStart
-            { "FB1",          (1800, 200) },   // DPAC_FULLINIT
-            { "M262IO",       (3400, 200) },
-            // HMI row
-            { "Area_HMI",     (1500, 900) },
-            { "Station1_HMI", (3500, 900) },
-            // Control row
-            { "Area",         (1500, 1500) },
-            { "Station1",     (3500, 1500) },
-            { "Area_Term",    (5300, 1500) },
-            // Process + sensor row
-            { "Feed_Station", (4500, 2300) },
-            { "PartInHopper", (2800, 2300) },
-            // Component + terminator row
-            { "Feeder",       (2500, 3300) },
-            { "Stn1_Term",    (6200, 3300) },
+            // Runtime row (y=400)
+            { "FB2",          (800,  400) },   // plcStart
+            { "FB1",          (3000, 400) },   // DPAC_FULLINIT
+            { "M262IO",       (5800, 400) },
+            // HMI row (y=1600)
+            { "Area_HMI",     (3000, 1600) },
+            { "Station1_HMI", (5800, 1600) },
+            // Control row (y=2700)
+            { "Area",         (3000, 2700) },
+            { "Station1",     (5800, 2700) },
+            { "Area_Term",    (8800, 2700) },
+            // Process + sensor row (y=4000)
+            { "Feed_Station", (7000, 4000) },
+            { "PartInHopper", (4500, 4000) },
+            // Component + terminator row (y=5400)
+            { "Feeder",       (3800, 5400) },
+            { "Stn1_Term",    (10000, 5400) },
         };
 
         /// <summary>
