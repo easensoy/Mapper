@@ -677,25 +677,29 @@ namespace MapperUI
                 AppendActivity("[Clean] Deep wipe — produces a brand-new-EAE-project state.");
 
                 var demoRepo = @"C:\Demonstrator";
-                if (!Directory.Exists(Path.Combine(demoRepo, ".git")))
-                {
-                    ShowError($"Not a git repo: {demoRepo}");
-                    lblStatus.Text = "Ready";
-                    return;
-                }
 
                 // EAE is intentionally NOT killed. If it has files open, individual
                 // file operations may fail with sharing-violation warnings — those are
                 // surfaced in the activity log; everything that can be wiped, is.
 
                 // Step 1 — git reset (tracked → HEAD) + git clean (drop untracked).
-                var (resetCode, resetOut) = await Task.Run(() => RunGit(demoRepo, "reset --hard"));
-                AppendActivity($"[Clean] git reset --hard -> exit {resetCode}");
-                if (!string.IsNullOrWhiteSpace(resetOut)) AppendActivity(resetOut.Trim());
+                // Only runs if the demonstrator dir is a git repo. Recreated EAE
+                // projects often aren't tracked under git — in that case skip
+                // the reset/clean and rely on DemonstratorWiper alone.
+                if (Directory.Exists(Path.Combine(demoRepo, ".git")))
+                {
+                    var (resetCode, resetOut) = await Task.Run(() => RunGit(demoRepo, "reset --hard"));
+                    AppendActivity($"[Clean] git reset --hard -> exit {resetCode}");
+                    if (!string.IsNullOrWhiteSpace(resetOut)) AppendActivity(resetOut.Trim());
 
-                var (cleanCode, cleanOut) = await Task.Run(() => RunGit(demoRepo, "clean -fd -e *.lock_sln"));
-                AppendActivity($"[Clean] git clean -fd -e *.lock_sln -> exit {cleanCode}");
-                if (!string.IsNullOrWhiteSpace(cleanOut)) AppendActivity(cleanOut.Trim());
+                    var (cleanCode, cleanOut) = await Task.Run(() => RunGit(demoRepo, "clean -fd -e *.lock_sln"));
+                    AppendActivity($"[Clean] git clean -fd -e *.lock_sln -> exit {cleanCode}");
+                    if (!string.IsNullOrWhiteSpace(cleanOut)) AppendActivity(cleanOut.Trim());
+                }
+                else
+                {
+                    AppendActivity($"[Clean] {demoRepo} is not a git repo — skipping git reset/clean. Wiper still runs.");
+                }
 
                 // Step 2 — deep wipe of FB types + canvas contents (HEAD has FBs in it; reset alone
                 // doesn't give us a fresh-project state). Topology/, General/, HMI/ are NOT touched.
