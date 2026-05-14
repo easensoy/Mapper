@@ -384,31 +384,60 @@ namespace MapperUI
         /// </summary>
         async Task FinalizeM262StackAsync()
         {
+            // Trust-preservation guard. Evaluated once up-front so both the
+            // sysdev and topology branches see the same decision even if the
+            // sysdev gets touched mid-flow.
+            bool m262DeviceExists = await Task.Run(() =>
+                MapperUI.Services.M262SysdevEmitter.M262SysdevAlreadyExists(Cfg()));
+
             string sysdevId = string.Empty;
             try
             {
                 var sysdev = await Task.Run(() => MapperUI.Services.M262SysdevEmitter.Emit(Cfg()));
-                AppendActivity($"[M262] sysdev re-emitted; .sysres mirrored {sysdev.SysresFbsMirrored} FBs to {sysdev.SysresPath}");
+                if (sysdev.DevicePreserved)
+                {
+                    AppendActivity(
+                        "[Device] M262 sysdev exists, skipping device creation and " +
+                        "config writes to preserve trust binding");
+                    AppendActivity(
+                        $"[M262] .sysres mirrored {sysdev.SysresFbsMirrored} FB(s) to {sysdev.SysresPath} (application-layer only)");
+                }
+                else
+                {
+                    AppendActivity(
+                        $"[M262] sysdev re-emitted; .sysres mirrored {sysdev.SysresFbsMirrored} FBs to {sysdev.SysresPath}");
+                }
                 sysdevId = ReadSysdevId(sysdev.SysdevPath);
             }
             catch (Exception ex)
             {
                 AppendActivity($"[M262][Error] sysdev emit: {ex.Message}");
             }
-            try
+            if (m262DeviceExists)
             {
-                if (!string.IsNullOrEmpty(sysdevId))
+                AppendActivity(
+                    "[Device] M262 sysdev exists, skipping Topology Equipment JSON " +
+                    "and network-profile writes to preserve trust binding");
+            }
+            else
+            {
+                try
                 {
-                    var topo = await Task.Run(() => MapperUI.Services.M262TopologyEmitter.Emit(Cfg(), sysdevId));
-                    AppendActivity($"[M262] topology re-emitted: {topo.FilesWritten.Count} JSON file(s), {topo.TopologyProjEntriesAdded} topologyproj entries added");
-                    foreach (var w in topo.Warnings)
-                        AppendActivity($"[M262][Warn] topology: {w}");
+                    if (!string.IsNullOrEmpty(sysdevId))
+                    {
+                        var topo = await Task.Run(() => MapperUI.Services.M262TopologyEmitter.Emit(Cfg(), sysdevId));
+                        AppendActivity($"[M262] topology re-emitted: {topo.FilesWritten.Count} JSON file(s), {topo.TopologyProjEntriesAdded} topologyproj entries added");
+                        foreach (var w in topo.Warnings)
+                            AppendActivity($"[M262][Warn] topology: {w}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AppendActivity($"[M262][Error] topology emit: {ex.Message}");
                 }
             }
-            catch (Exception ex)
-            {
-                AppendActivity($"[M262][Error] topology emit: {ex.Message}");
-            }
+            if (m262DeviceExists)
+                AppendActivity("[Device] M262 sysdev preserved (trust binding intact)");
             try
             {
                 var hcf = await Task.Run(() => MapperUI.Services.M262HwConfigCopier.Copy(Cfg()));
@@ -420,6 +449,37 @@ namespace MapperUI
             {
                 AppendActivity($"[M262][Error] hcf patch: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Pre-flight gate for Button 2. Mapper no longer creates the M262
+        /// device — when the .sysdev with <c>Type="M262_dPAC"</c> /
+        /// <c>Namespace="SE.DPAC"</c> is missing under the Demonstrator's
+        /// <c>IEC61499/System/</c> tree, abort with a friendly message and
+        /// the required log line so the user knows to add the device in
+        /// EAE first.
+        /// </summary>
+        bool EnsureM262SysdevExistsOrAbort()
+        {
+            try
+            {
+                if (MapperUI.Services.M262SysdevEmitter.M262SysdevAlreadyExists(Cfg()))
+                    return true;
+            }
+            catch
+            {
+                // Treat any lookup failure as "not found" — caller still aborts.
+            }
+            AppendActivity(
+                "[Device] M262 sysdev not found, user must add the device " +
+                "manually in EAE before running Mapper");
+            ShowError(
+                "M262 device not found in the Demonstrator.\n\n" +
+                "Add the M262 dPAC device manually in EAE (Devices view) " +
+                "and establish the controller trust binding before running " +
+                "this button. Mapper will not create or modify the device " +
+                "file because doing so would invalidate the existing trust.");
+            return false;
         }
 
         static string ReadSysdevId(string sysdevPath)
@@ -459,6 +519,7 @@ namespace MapperUI
             foreach (var name in report.RemovedFbs) AppendActivity($"  - {name}");
             AppendActivity($"[Cleanup] Preserved {report.PreservedFbs.Count} non-universal FB(s)");
             foreach (var name in report.PreservedFbs) AppendActivity($"  + {name}");
+            foreach (var line in report.DeviceCleanupLog) AppendActivity(line);
         }
 
         CodeGen.Translation.IoBindings? TryLoadBindings()
@@ -575,6 +636,7 @@ namespace MapperUI
                 if (string.IsNullOrEmpty(_loadedControlXmlPath) || !File.Exists(_loadedControlXmlPath))
                 { ShowError("Load a Control.xml first via Browse."); return; }
                 if (!TryResolveDemonstratorPath(out var syslayPath)) return;
+                if (!EnsureM262SysdevExistsOrAbort()) return;
 
                 lblStatus.Text = "Generating...";
                 AppendActivity($"[Button 2] Generating Test Station 1 (Pusher) into Demonstrator at {syslayPath}...");
@@ -611,14 +673,20 @@ namespace MapperUI
                 for (int i = wireCountBefore; i < report.Missing.Count; i++)
                 {
                     var line = report.Missing[i];
-                    if (line.StartsWith("[Wire]") || line.StartsWith("[Sysres"))
+                    if (line.StartsWith("[Wire]") || line.StartsWith("[Sysres") ||
+                        line.StartsWith("[Stage1]"))
                         AppendActivity(line);
                 }
 
+                int hcfCountBefore = report.Missing.Count;
                 await Task.Run(() => MapperUI.Services.HcfPatchService.PatchDeployed(
                     Cfg(), path, bindings, report));
-                foreach (var (pin, value) in report.HcfPinAssignments)
-                    AppendActivity($"[Hcf] {pin} = {value}");
+                for (int i = hcfCountBefore; i < report.Missing.Count; i++)
+                {
+                    var line = report.Missing[i];
+                    if (line.StartsWith("[Hcf]"))
+                        AppendActivity(line);
+                }
 
                 TouchDfbprojToTriggerEaeReload();
 
@@ -714,10 +782,30 @@ namespace MapperUI
                     $"[Clean] summary: {report.FilesEmptied} canvas(es) emptied, " +
                     $"{report.FilesDeleted} FB-type file(s) deleted, " +
                     $"{report.FoldersDeleted} type folder(s) removed, " +
-                    $"{report.DfbprojEntriesRemoved} dfbproj entry/entries stripped.");
+                    $"{report.DfbprojEntriesRemoved} dfbproj entry/entries stripped, " +
+                    $"{report.HwConfigFilesDeleted} HwConfiguration file(s) cleared.");
+
+                // After the wipe, run the syslay/sysres cleanup + M262 sysdev
+                // Resource-dedup step. The dedup lives in SystemInjector so the
+                // same [CleanDevice] logic runs on Button 1/2 — wiring it here
+                // means Clean Demonstrator gets it too without duplicating code.
+                try
+                {
+                    var injector = new SystemInjector();
+                    var cleanup = await Task.Run(() => injector.PrepareDemonstratorForGeneration(Cfg()));
+                    LogCleanup(cleanup);
+                }
+                catch (Exception ex)
+                {
+                    AppendActivity($"[Clean][!] Post-wipe Prepare failed: {ex.Message}");
+                }
 
                 lblStatus.Text = "Demonstrator wiped";
-                AppendActivity("[Clean] Demonstrator now resembles a brand-new EAE project. Topology preserved.");
+                AppendActivity(
+                    "[Clean] Demonstrator now resembles a brand-new EAE project. " +
+                    "Topology preserved; HwConfiguration cleared and the M262 .sysdev " +
+                    "Resources block dedup'd — EAE's Devices tree will no longer show " +
+                    "duplicate M262_RES nodes.");
             }
             catch (Exception ex)
             {
