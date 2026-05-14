@@ -84,7 +84,7 @@ namespace MapperUI.Services
                 var m262IoFbId = EnsureM262IoFb(sysresPath, resourceId, report);
                 if (string.IsNullOrEmpty(m262IoFbId))
                 {
-                    report.Missing.Add("[Hcf] skipped, M262IO FB ID not resolvable on .sysres");
+                    report.Missing.Add("[Hcf] ERROR: PLC_RW_M262 FB not found on sysres");
                     return;
                 }
 
@@ -263,9 +263,12 @@ namespace MapperUI.Services
         }
 
         /// <summary>
-        /// Ensure the .sysres FBNetwork has an <c>M262IO</c> PLC_RW_M262 FB.
-        /// Inject one with a deterministic 16-hex ID if missing, persist the
-        /// .sysres, and return the FB ID. Returns empty on failure.
+        /// Look up the M262IO FB by <c>Type="PLC_RW_M262"</c> on the sysres
+        /// FBNetwork (there is exactly one) and return its <c>ID</c>. Does
+        /// NOT inject — if the FB is missing, returns empty so the caller
+        /// can abort the .hcf write with a hard error log. Filtering by Type
+        /// (not Name) avoids ever picking up an actuator/sensor FB ID by
+        /// accident even if someone renamed the M262IO instance.
         /// </summary>
         private static string EnsureM262IoFb(string sysresPath, string resourceId,
             SystemInjector.BindingApplicationReport report)
@@ -278,54 +281,18 @@ namespace MapperUI.Services
                 if (root == null) return string.Empty;
                 XNamespace ns = root.GetDefaultNamespace();
                 var fbNet = root.Element(ns + "FBNetwork");
-                bool dirty = false;
-                if (fbNet == null)
-                {
-                    fbNet = new XElement(ns + "FBNetwork");
-                    root.Add(fbNet);
-                    dirty = true;
-                }
+                if (fbNet == null) return string.Empty;
+
                 var m262Io = fbNet.Elements(ns + "FB")
-                    .FirstOrDefault(e => (string?)e.Attribute("Name") == "M262IO" &&
-                                         (string?)e.Attribute("Type") == "PLC_RW_M262");
-                string fbId;
-                if (m262Io == null)
+                    .FirstOrDefault(e => (string?)e.Attribute("Type") == "PLC_RW_M262");
+                if (m262Io == null) return string.Empty;
+
+                var fbId = (string?)m262Io.Attribute("ID") ?? string.Empty;
+                if (IsZeroOrEmptyId(fbId))
                 {
                     fbId = NewShortHexId("M262IO|" + resourceId);
-                    var mappingId = NewShortHexId("M262IO_MAP|" + resourceId);
-                    m262Io = new XElement(ns + "FB",
-                        new XAttribute("ID", fbId),
-                        new XAttribute("Name", "M262IO"),
-                        new XAttribute("Type", "PLC_RW_M262"),
-                        new XAttribute("Namespace", "Main"),
-                        new XAttribute("Mapping", mappingId),
-                        new XAttribute("x", "3760"),
-                        new XAttribute("y", "1020"));
-                    fbNet.Add(m262Io);
-                    dirty = true;
-                    report.Missing.Add($"[Hcf] sysres had no M262IO FB — injected with ID {fbId}");
-                }
-                else
-                {
-                    fbId = (string?)m262Io.Attribute("ID") ?? string.Empty;
-                    if (IsZeroOrEmptyId(fbId))
-                    {
-                        fbId = NewShortHexId("M262IO|" + resourceId);
-                        m262Io.SetAttributeValue("ID", fbId);
-                        dirty = true;
-                    }
-                }
-                if (dirty)
-                {
-                    var settings = new System.Xml.XmlWriterSettings
-                    {
-                        OmitXmlDeclaration = false,
-                        Indent = true,
-                        Encoding = new System.Text.UTF8Encoding(false),
-                    };
-                    using var fs = new FileStream(sysresPath, FileMode.Create, FileAccess.Write, FileShare.Read);
-                    using var w = System.Xml.XmlWriter.Create(fs, settings);
-                    doc.Save(w);
+                    m262Io.SetAttributeValue("ID", fbId);
+                    SaveXml(doc, sysresPath);
                 }
                 return fbId;
             }
