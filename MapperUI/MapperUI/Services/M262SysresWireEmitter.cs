@@ -31,24 +31,15 @@ namespace MapperUI.Services
     {
         public sealed record Wire(string Source, string Destination);
 
-        // Event/adapter wires per the Station 1 init+adapter chain.
-        // Adapter connections live in EventConnections per the spec.
+        // Minimal init chain — just enough to bring M262IO online so the
+        // pusher cylinder can be force-toggled from EAE's Watch list. Area /
+        // Station / Process / HMI / Terminator wiring is deferred until each
+        // adapter port has been validated against its CAT .fbt — emitting
+        // unverified ports caused EAE compile failures.
         private static readonly Wire[] EventWires =
         {
-            new("plcStart.FIRST_INIT",            "DPAC_FULLINIT.INIT"),
-            new("DPAC_FULLINIT.INITO",            "Area.INIT"),
-            new("Area.INITO",                     "Station1.INIT"),
-            new("Station1.INITO",                 "PartInHopper.INIT"),
-            new("PartInHopper.INITO",             "Feeder.INIT"),
-            new("Feeder.INITO",                   "M262IO.INIT"),
-            new("M262IO.PLC_EVENT",               "Feed_Station.state_change"),
-            new("Area_HMI.AreaHMIAdptrOUT",       "Area.AreaHMIAdptrIN"),
-            new("Station1_HMI.StationHMIAdptrOUT","Station1.StationHMIAdptrIN"),
-            new("Station1.AreaAdptrOUT",          "Area_Term.CaSAdptrIN"),
-            new("Station1.StationAdptrOUT",       "Feed_Station.stationAdptr_in"),
-            new("Feed_Station.stateRptCmdAdptr_out","Feeder.stateRprtCmd_in"),
-            new("Feed_Station.stationAdptr_out",  "Stn1_Term.CaSAdptrIN"),
-            new("Feeder.stateRprtCmd_out",        "PartInHopper.stateRprtCmd_in"),
+            new("plcStart.FIRST_INIT", "DPAC_FULLINIT.INIT"),
+            new("DPAC_FULLINIT.INITO", "M262IO.INIT"),
         };
 
         // No top-level data wires. The Feeder / PartInHopper instances
