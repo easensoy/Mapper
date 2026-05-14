@@ -231,19 +231,29 @@ namespace MapperUI.Services
                     // exactly one resource child.
                     var m262Res = resources?.Elements(ns + "Resource").FirstOrDefault();
                     if (m262Res == null) continue;
-                    var resourceId = (string?)m262Res.Attribute("ID") ?? string.Empty;
-                    if (string.IsNullOrWhiteSpace(resourceId)) continue;
+
                     // Sysdev sits at {sys-guid}/{sysdev-guid}.sysdev; the .hcf
                     // and .sysres live one level deeper under {sysdev-guid}/.
                     var sysdevStem = Path.GetFileNameWithoutExtension(sysdev);
                     var sysdevDir = Path.Combine(Path.GetDirectoryName(sysdev)!, sysdevStem);
                     Directory.CreateDirectory(sysdevDir);
-                    var sysresPath = Path.Combine(sysdevDir, resourceId + ".sysres");
-                    if (!File.Exists(sysresPath))
+                    var sysresPath = Directory.EnumerateFiles(sysdevDir, "*.sysres").FirstOrDefault()
+                        ?? Path.Combine(sysdevDir, "RES0.sysres");
+
+                    // The sysdev's <Resource ID> ships as zeros (or as a
+                    // long-dashed GUID). EAE's .hcf ResourceId convention is
+                    // a 16-char hex value matching the sysres root ID. If the
+                    // sysdev's ID is zero/empty, mint a deterministic short
+                    // hex from the sysdev path and persist it to BOTH the
+                    // sysdev <Resource> and the sysres root <Resource ID="">
+                    // so all three carry the same non-zero GUID.
+                    var resourceId = (string?)m262Res.Attribute("ID") ?? string.Empty;
+                    if (IsZeroOrEmptyId(resourceId))
                     {
-                        // Fall back to any .sysres under the sysdev folder
-                        var any = Directory.EnumerateFiles(sysdevDir, "*.sysres").FirstOrDefault();
-                        if (any != null) sysresPath = any;
+                        resourceId = NewShortHexId("RES0|" + sysdev);
+                        m262Res.SetAttributeValue("ID", resourceId);
+                        SaveXml(doc, sysdev);
+                        PropagateResourceIdToSysres(sysresPath, resourceId);
                     }
                     return (sysdevDir, resourceId, sysresPath);
                 }
@@ -552,6 +562,40 @@ namespace MapperUI.Services
                 report.Missing.Add($"[Hcf] EnsureSysres failed: {ex.GetType().Name}: {ex.Message}");
                 return (string.Empty, string.Empty);
             }
+        }
+
+        private static void SaveXml(XDocument doc, string path)
+        {
+            var settings = new System.Xml.XmlWriterSettings
+            {
+                OmitXmlDeclaration = false,
+                Indent = true,
+                Encoding = new System.Text.UTF8Encoding(false),
+            };
+            using var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
+            using var w = System.Xml.XmlWriter.Create(fs, settings);
+            doc.Save(w);
+        }
+
+        /// <summary>Rewrite the .sysres root <c>ID</c> attribute so it matches
+        /// the resource GUID we just minted on the sysdev. EAE resolves
+        /// symlinks by ID equality across sysdev → sysres → .hcf; if any of
+        /// the three carries zeros while the others don't, the lookup fails
+        /// and the Symbolic Links view goes red.</summary>
+        private static void PropagateResourceIdToSysres(string sysresPath, string newId)
+        {
+            try
+            {
+                if (!File.Exists(sysresPath)) return;
+                var doc = XDocument.Load(sysresPath, LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                var current = (string?)root.Attribute("ID") ?? string.Empty;
+                if (string.Equals(current, newId, StringComparison.Ordinal)) return;
+                root.SetAttributeValue("ID", newId);
+                SaveXml(doc, sysresPath);
+            }
+            catch { /* best-effort */ }
         }
 
         private static bool IsZeroOrEmptyId(string id)
