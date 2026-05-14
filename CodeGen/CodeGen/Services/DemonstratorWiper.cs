@@ -78,15 +78,15 @@ namespace CodeGen.Services
             }
             report.Steps.Add($"Target: {iec}");
 
-            // 1. (skipped) Canvas-empty pass removed per user request: Clean
-            //    must touch only Mapper-generated artefacts, never the EAE
-            //    skeleton (.syslay/.sysres/.hcf/.sysapp). Button 2's
-            //    PrepareDemonstratorForGeneration already strips just the
-            //    Mapper-universal FBs from the canvases on the next
-            //    generation pass — so leaving the canvas state intact here
-            //    preserves any user-added wires/FBs while still letting the
-            //    next Button 2 run land cleanly.
-            report.Steps.Add("Skipped canvas wipe (preserving EAE skeleton).");
+            // 1. Empty all canvases (.syslay, .sysres, .hcf, .sysapp) back
+            //    to their EAE-skeleton state — empty <SubAppNetwork/> and
+            //    <FBNetwork/> shells. This wipes Mapper-emitted FB
+            //    instances + connections (Area, Area_HMI, Station1,
+            //    PartInHopper, M262IO, FB1/FB2, all wires) while leaving
+            //    the canvas FILE itself intact for EAE to keep referencing.
+            //    The .sysdev/.system/dfbproj/Topology/General/HMI ARE the
+            //    skeleton and stay untouched.
+            EmptyAllCanvases(iec, report);
 
             // 2. Delete Mapper-deployed FB type files (.fbt, .adp, .dt, etc.) at IEC61499/ root.
             DeleteFlatTypeFiles(iec, report);
