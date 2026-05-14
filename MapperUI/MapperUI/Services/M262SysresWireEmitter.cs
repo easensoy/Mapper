@@ -38,8 +38,21 @@ namespace MapperUI.Services
         // unverified ports caused EAE compile failures.
         private static readonly Wire[] EventWires =
         {
+            // Bridge the resource's built-in E_RESTART FB into plcStart so
+            // the init chain actually fires on COLD or WARM start. E_RESTART
+            // is auto-instantiated by every EMB_RES_ECO resource canvas — do
+            // NOT emit it into <FBNetwork>; reference it by literal name only.
+            new("E_RESTART.COLD",      "plcStart.ACK_FIRST"),
+            new("E_RESTART.WARM",      "plcStart.ACK_FIRST"),
             new("plcStart.FIRST_INIT", "DPAC_FULLINIT.INIT"),
             new("DPAC_FULLINIT.INITO", "M262IO.INIT"),
+        };
+
+        // Endpoints whose LHS is one of these built-in FBs are emitted with
+        // the literal name (no FBNetwork lookup, no port validation).
+        private static readonly HashSet<string> BuiltInRuntimeFbs = new(StringComparer.Ordinal)
+        {
+            "E_RESTART",
         };
 
         // No top-level data wires. The Feeder / PartInHopper instances
@@ -104,21 +117,54 @@ namespace MapperUI.Services
                 var emittedEvents = new List<(string s, string d)>();
                 var emittedData = new List<(string s, string d)>();
 
+                bool TryEndpoint(string endpoint, out string name, out string port,
+                    out bool builtIn, out string type)
+                {
+                    name = port = type = string.Empty;
+                    builtIn = false;
+                    var dot = endpoint.IndexOf('.');
+                    if (dot <= 0) return false;
+                    var lhs = endpoint.Substring(0, dot);
+                    port = endpoint.Substring(dot + 1);
+                    if (BuiltInRuntimeFbs.Contains(lhs))
+                    {
+                        // Built-in runtime FBs (E_RESTART, etc.) are not in
+                        // <FBNetwork>; emit literal name and skip port
+                        // validation since they have no .fbt in the lib.
+                        name = lhs;
+                        builtIn = true;
+                        return true;
+                    }
+                    if (byName.TryGetValue(lhs, out var fb) || byType.TryGetValue(lhs, out fb))
+                    {
+                        name = (string?)fb.Attribute("Name") ?? string.Empty;
+                        type = (string?)fb.Attribute("Type") ?? string.Empty;
+                        return !string.IsNullOrEmpty(name);
+                    }
+                    return false;
+                }
+
                 void Process(Wire w, List<(string, string)> sink, string label)
                 {
-                    if (!TryResolve(w.Source, byName, byType, out var srcName, out var srcType, out var srcPort) ||
-                        !TryResolve(w.Destination, byName, byType, out var dstName, out var dstType, out var dstPort))
+                    if (!TryEndpoint(w.Source, out var srcName, out var srcPort, out var srcBuiltIn, out var srcType) ||
+                        !TryEndpoint(w.Destination, out var dstName, out var dstPort, out var dstBuiltIn, out var dstType))
                     {
-                        report.Missing.Add(
-                            $"[Wire] FB instance not found for {w.Source} → {w.Destination}");
+                        // Special case the E_RESTART → plcStart bridge so the
+                        // user sees the explicit init-chain failure message.
+                        bool isInitBridge = w.Source.StartsWith("E_RESTART.", StringComparison.Ordinal)
+                            && w.Destination.StartsWith("plcStart.", StringComparison.Ordinal);
+                        if (isInitBridge)
+                            report.Missing.Add("[Sysres] E_RESTART or plcStart not found, init chain will not fire");
+                        else
+                            report.Missing.Add($"[Wire] FB instance not found for {w.Source} → {w.Destination}");
                         return;
                     }
-                    if (!PortExists(PortsFor(srcType), srcPort))
+                    if (!srcBuiltIn && !PortExists(PortsFor(srcType), srcPort))
                     {
                         report.Missing.Add($"[Wire] port not found: {srcType}.{srcPort}");
                         return;
                     }
-                    if (!PortExists(PortsFor(dstType), dstPort))
+                    if (!dstBuiltIn && !PortExists(PortsFor(dstType), dstPort))
                     {
                         report.Missing.Add($"[Wire] port not found: {dstType}.{dstPort}");
                         return;
