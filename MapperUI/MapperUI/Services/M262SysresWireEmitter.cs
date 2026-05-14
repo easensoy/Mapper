@@ -221,6 +221,28 @@ namespace MapperUI.Services
                 foreach (var w in DataWires)    Process(w, emittedData,     "data");
                 foreach (var w in AdapterWires) Process(w, emittedAdapters, "adapter");
 
+                // Optional fast path: M262IO.HopperEvent / PusherEvent →
+                // Feed_Station.state_change duplicate the stateRprtCmd ring
+                // notifications. Mirrors Alex's working pattern but is
+                // valid only if Process1_Generic exposes state_change as a
+                // top-level EventInput. Per OSDA spec it currently doesn't
+                // (only INIT/INITO are top-level), so we check first and
+                // skip both wires with the explicit explanatory log when
+                // the port is absent — runtime state still flows through
+                // the stateRprtCmd ring.
+                var processPorts = PortsFor("Process1_Generic");
+                if (processPorts.Count > 0 && !processPorts.Contains("state_change"))
+                {
+                    report.Missing.Add(
+                        "[Sysres] Process1_Generic has no state_change event input, " +
+                        "skipping M262IO -> Process1 direct wires, state flows through stateRprtCmd ring only");
+                }
+                else
+                {
+                    Process(new Wire("M262IO.HopperEvent", "Feed_Station.state_change"), emittedEvents, "event");
+                    Process(new Wire("M262IO.PusherEvent", "Feed_Station.state_change"), emittedEvents, "event");
+                }
+
                 // Replace all three existing connection blocks with the
                 // freshly-emitted set. Adapter wires now live in their own
                 // <AdapterConnections> sibling, not folded into events.
