@@ -120,6 +120,14 @@ namespace MapperUI.Services
 
             VerifyArraySizeConsistency(eaeProjectDir, result);
 
+            // Trust-preservation guard. When an M262 sysdev already exists,
+            // every device-layer write (sysdev rewrite, sysres resource-decl
+            // rename, Topology Equipment JSON, network profiles) is skipped
+            // to keep the controller-side trust binding intact. Application
+            // content — sysres FBNetwork mirror, dfbproj registrations,
+            // .hcf — still runs.
+            bool m262DeviceExists = M262SysdevEmitter.M262SysdevAlreadyExists(cfg);
+
             string sysdevId = string.Empty;
             try
             {
@@ -128,25 +136,45 @@ namespace MapperUI.Services
                 result.SystemFilePath = sysdev.SystemFilePath;
                 result.MappingsAdded = sysdev.MappingsAdded;
                 sysdevId = ReadSysdevId(sysdev.SysdevPath);
-                MapperLogger.Info($"[Deploy] sysdev rewritten as M262_dPAC; {sysdev.MappingsAdded} APP→RES0 mapping(s) ensured");
+                if (sysdev.DevicePreserved)
+                {
+                    MapperLogger.Info(
+                        "[Device] M262 sysdev exists, skipping device creation and " +
+                        "config writes to preserve trust binding");
+                    MapperLogger.Info("[Device] M262 sysdev preserved (trust binding intact)");
+                }
+                else
+                {
+                    MapperLogger.Info(
+                        $"[Deploy] sysdev rewritten as M262_dPAC; {sysdev.MappingsAdded} APP→RES0 mapping(s) ensured");
+                }
             }
             catch (Exception ex)
             {
                 result.Warnings.Add($"M262 sysdev emit failed: {ex.Message}");
             }
 
-            try
+            if (m262DeviceExists)
             {
-                var topo = M262TopologyEmitter.Emit(cfg, sysdevId);
                 MapperLogger.Info(
-                    $"[Deploy] Topology emitted: {topo.FilesWritten.Count} files, " +
-                    $"{topo.TopologyProjEntriesAdded} topologyproj entries added");
-                foreach (var w in topo.Warnings)
-                    result.Warnings.Add($"Topology: {w}");
+                    "[Device] M262 sysdev exists, skipping Topology Equipment JSON " +
+                    "and network-profile writes to preserve trust binding");
             }
-            catch (Exception ex)
+            else
             {
-                result.Warnings.Add($"M262 topology emit failed: {ex.Message}");
+                try
+                {
+                    var topo = M262TopologyEmitter.Emit(cfg, sysdevId);
+                    MapperLogger.Info(
+                        $"[Deploy] Topology emitted: {topo.FilesWritten.Count} files, " +
+                        $"{topo.TopologyProjEntriesAdded} topologyproj entries added");
+                    foreach (var w in topo.Warnings)
+                        result.Warnings.Add($"Topology: {w}");
+                }
+                catch (Exception ex)
+                {
+                    result.Warnings.Add($"M262 topology emit failed: {ex.Message}");
+                }
             }
 
             try
