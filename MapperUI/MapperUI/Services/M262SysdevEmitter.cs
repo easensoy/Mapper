@@ -330,12 +330,25 @@ namespace MapperUI.Services
                     .Where(s => !string.IsNullOrEmpty(s)),
                 StringComparer.Ordinal);
 
+            // Reduced sysres: keep only FBs whose Type compiles cleanly
+            // without unverified adapter wires. Area / Station / Process
+            // composites and HMI CATs are deferred until their adapter ports
+            // are validated. Drop everything else from the syslay-mirrored
+            // set; the M262IO/DPAC_FULLINIT/plcStart trio above handles init.
+            var keepTypes = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "Five_State_Actuator_CAT",
+                "Sensor_Bool_CAT",
+                "PLC_RW_M262",
+            };
+
             int added = 0;
             foreach (var fb in syslayFbs)
             {
                 if (string.IsNullOrEmpty(fb.Id)) continue;
                 if (existingMappings.Contains(fb.Id)) continue;
                 if (existingNames.Contains(fb.Name)) continue;
+                if (!keepTypes.Contains(fb.Type)) continue;
                 var mirrorId = ComputeMirrorId(fb.Id);
                 var fbElement = new XElement(ns + "FB",
                     new XAttribute("ID",        mirrorId),
