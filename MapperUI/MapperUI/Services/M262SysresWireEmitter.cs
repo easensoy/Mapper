@@ -36,22 +36,48 @@ namespace MapperUI.Services
         // Station / Process / HMI / Terminator wiring is deferred until each
         // adapter port has been validated against its CAT .fbt — emitting
         // unverified ports caused EAE compile failures.
+        // Full event chain per Alex's SMC_Rig_Expo sysres adapted to
+        // Mapper's Process1_Generic + adapter-ring design. START is the
+        // resource's built-in restart FB (EMB_RES_ECO canvas auto-instance).
+        // FB1=DPAC_FULLINIT, FB2=plcStart, Feed_Station=Process1_Generic.
         private static readonly Wire[] EventWires =
         {
-            // Bridge the resource's built-in E_RESTART FB into plcStart so
-            // the init chain actually fires on COLD or WARM start. E_RESTART
-            // is auto-instantiated by every EMB_RES_ECO resource canvas — do
-            // NOT emit it into <FBNetwork>; reference it by literal name only.
-            new("E_RESTART.COLD",      "plcStart.ACK_FIRST"),
-            new("E_RESTART.WARM",      "plcStart.ACK_FIRST"),
-            new("plcStart.FIRST_INIT", "DPAC_FULLINIT.INIT"),
-            new("DPAC_FULLINIT.INITO", "M262IO.INIT"),
+            new("START.COLD",          "FB1.INIT"),
+            new("START.WARM",          "FB1.INIT"),
+            new("START.ONLINECHANGE",  "FB1.OC_RETRIGGER"),
+            new("FB2.FIRST_INIT",      "FB2.ACK_FIRST"),
+            new("FB1.INITO",           "M262IO.INIT"),
+            new("FB1.INITO",           "Area.INIT"),
+            new("FB1.INITO",           "Feed_Station.INIT"),
+            new("FB1.INITO",           "Feeder.INIT"),
+            new("FB1.INITO",           "PartInHopper.INIT"),
+            new("Area.INITO",          "Station1.INIT"),
+        };
+
+        // Adapter ring: HMI → Area/Station chain → Feed_Station → Feeder
+        // → PartInHopper → Stn1_Term, plus the stateRprtCmd report ring
+        // closing back to Process1.
+        private static readonly Wire[] AdapterWires =
+        {
+            new("Area_HMI.AreaHMIAdptrOUT",        "Area.AreaHMIAdptrIN"),
+            new("Station1_HMI.StationHMIAdptrOUT", "Station1.StationHMIAdptrIN"),
+            new("Area.AreaAdptrOUT",               "Station1.AreaAdptrIN"),
+            new("Station1.StationAdaptrOUT",       "Feed_Station.stationAdptr_in"),
+            new("Feed_Station.stationAdptr_out",   "Feeder.stationAdptr_in"),
+            new("Feeder.stationAdptr_out",         "PartInHopper.stationAdptr_in"),
+            new("PartInHopper.stationAdptr_out",   "Stn1_Term.CaSAdptrIN"),
+            new("Feed_Station.stateRprtCmd_out",   "Feeder.stateRprtCmd_in"),
+            new("Feeder.stateRprtCmd_out",         "PartInHopper.stateRprtCmd_in"),
+            new("PartInHopper.stateRprtCmd_out",   "Feed_Station.stateRprtCmd_in"),
         };
 
         // Endpoints whose LHS is one of these built-in FBs are emitted with
-        // the literal name (no FBNetwork lookup, no port validation).
+        // the literal name (no FBNetwork lookup, no port validation). Both
+        // START and E_RESTART are accepted — EAE exposes one or the other
+        // depending on the EMB_RES_ECO resource canvas variant.
         private static readonly HashSet<string> BuiltInRuntimeFbs = new(StringComparer.Ordinal)
         {
+            "START",
             "E_RESTART",
         };
 
@@ -116,6 +142,7 @@ namespace MapperUI.Services
 
                 var emittedEvents = new List<(string s, string d)>();
                 var emittedData = new List<(string s, string d)>();
+                var emittedAdapters = new List<(string s, string d)>();
 
                 bool TryEndpoint(string endpoint, out string name, out string port,
                     out bool builtIn, out string type)
@@ -161,27 +188,28 @@ namespace MapperUI.Services
                     }
                     if (!srcBuiltIn && !PortExists(PortsFor(srcType), srcPort))
                     {
-                        report.Missing.Add($"[Wire] port not found: {srcType}.{srcPort}");
+                        report.Missing.Add($"[Sysres] port not found: {srcName}.{srcPort}, skipping wire");
                         return;
                     }
                     if (!dstBuiltIn && !PortExists(PortsFor(dstType), dstPort))
                     {
-                        report.Missing.Add($"[Wire] port not found: {dstType}.{dstPort}");
+                        report.Missing.Add($"[Sysres] port not found: {dstName}.{dstPort}, skipping wire");
                         return;
                     }
                     sink.Add(($"{srcName}.{srcPort}", $"{dstName}.{dstPort}"));
-                    report.Missing.Add($"[Wire] {srcName}.{srcPort} → {dstName}.{dstPort}");
+                    report.Missing.Add($"[Sysres] {srcName}.{srcPort} -> {dstName}.{dstPort}");
                 }
 
-                foreach (var w in EventWires) Process(w, emittedEvents, "event");
-                foreach (var w in DataWires)  Process(w, emittedData,  "data");
+                foreach (var w in EventWires)   Process(w, emittedEvents,   "event");
+                foreach (var w in DataWires)    Process(w, emittedData,     "data");
+                foreach (var w in AdapterWires) Process(w, emittedAdapters, "adapter");
 
-                // Replace any existing connection blocks. EAE accepts either
-                // EventConnections or AdapterConnections as a sibling under
-                // FBNetwork; we follow the spec and put adapter wires inside
-                // EventConnections.
+                // Replace all three existing connection blocks with the
+                // freshly-emitted set. Adapter wires now live in their own
+                // <AdapterConnections> sibling, not folded into events.
                 fbNet.Elements(ns + "EventConnections").Remove();
                 fbNet.Elements(ns + "DataConnections").Remove();
+                fbNet.Elements(ns + "AdapterConnections").Remove();
 
                 if (emittedEvents.Count > 0)
                 {
@@ -201,6 +229,16 @@ namespace MapperUI.Services
                         new XAttribute("Destination", d)));
                 fbNet.Add(dc);
 
+                if (emittedAdapters.Count > 0)
+                {
+                    var ac = new XElement(ns + "AdapterConnections");
+                    foreach (var (s, d) in emittedAdapters)
+                        ac.Add(new XElement(ns + "Connection",
+                            new XAttribute("Source", s),
+                            new XAttribute("Destination", d)));
+                    fbNet.Add(ac);
+                }
+
                 var settings = new XmlWriterSettings
                 {
                     OmitXmlDeclaration = false,
@@ -212,8 +250,8 @@ namespace MapperUI.Services
                 doc.Save(w2);
 
                 report.Missing.Add(
-                    $"[Wire] wrote {emittedEvents.Count} event + {emittedData.Count} data connection(s) " +
-                    $"to {Path.GetFileName(sysresPath)}");
+                    $"[Sysres] wrote {emittedEvents.Count} event + {emittedData.Count} data + " +
+                    $"{emittedAdapters.Count} adapter connection(s) to {Path.GetFileName(sysresPath)}");
             }
             catch (Exception ex)
             {
