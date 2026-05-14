@@ -56,6 +56,13 @@ namespace MapperUI.Services
             // the OSDA component-init handshake.
             new("Feed_Station.INITO",  "Feeder.INIT"),
             new("Feeder.INITO",        "PartInHopper.INIT"),
+            // Runtime I/O event ring. Without these the .hcf TM3 binding
+            // is wired but never fires: M262IO's changeEventProcess1 emits
+            // PusherEvent on a pin transition → Feeder.action_event runs
+            // its state machine → Feeder.plc_out signals back to M262IO's
+            // REQ_INT_BOOL so the runtime pushes the new BOOL out to DQ.
+            new("M262IO.PusherEvent",  "Feeder.action_event"),
+            new("Feeder.plc_out",      "M262IO.REQ_INT_BOOL"),
         };
 
         // Adapter ring: HMI → Area/Station chain → Feed_Station → Feeder
@@ -308,9 +315,12 @@ namespace MapperUI.Services
             foreach (var kv in CanonicalLayout)
             {
                 if (!byName.TryGetValue(kv.Key, out var fb)) continue;
+                var oldX = (string?)fb.Attribute("x") ?? "?";
+                var oldY = (string?)fb.Attribute("y") ?? "?";
                 fb.SetAttributeValue("x", kv.Value.X.ToString(System.Globalization.CultureInfo.InvariantCulture));
                 fb.SetAttributeValue("y", kv.Value.Y.ToString(System.Globalization.CultureInfo.InvariantCulture));
-                report.Missing.Add($"[Layout] {kv.Key} -> x={kv.Value.X}, y={kv.Value.Y}");
+                report.Missing.Add(
+                    $"[{source} layout] {kv.Key}: ({oldX},{oldY}) -> ({kv.Value.X},{kv.Value.Y})");
                 placed++;
             }
             report.Missing.Add($"[{source} layout] {placed}/{CanonicalLayout.Count} FBs placed");
