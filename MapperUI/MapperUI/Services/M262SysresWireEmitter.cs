@@ -307,11 +307,13 @@ namespace MapperUI.Services
                     $"[Sysres] wrote {emittedEvents.Count} event + {emittedData.Count} data + " +
                     $"{emittedAdapters.Count} adapter connection(s) to {Path.GetFileName(sysresPath)}");
 
-                // Stage-1 expected runtime behaviour. These three lines tell
+                // Stage-1 expected runtime behaviour. These four lines tell
                 // the operator what to look for at the controller end before
                 // suspecting a wiring bug.
                 report.Missing.Add(
-                    "[Stage1] ConstantPusherWriter emits publish of M262IO.ExtendPusher = TRUE on boot");
+                    "[Stage1] ConstantPusherWriter emits publish of Feeder.OutputToWork = TRUE on boot");
+                report.Missing.Add(
+                    "[Stage1] DQ00 subscribes to this symbol per .hcf binding");
                 report.Missing.Add(
                     "[Stage1] Expected: cylinder extends and stays extended after Deploy + Start");
                 report.Missing.Add(
@@ -377,7 +379,10 @@ namespace MapperUI.Services
                 report.Missing.Add($"[Stage1]   Namespace = {outNs}");
                 report.Missing.Add(
                     "[Stage1] $${PATH}ExtendPusher resolves to 'M262IO.ExtendPusher' " +
-                    "(sysres instance of PLC_RW_M262 is named M262IO)");
+                    "(sysres instance of PLC_RW_M262 is named M262IO) — but DQ00 in the " +
+                    ".hcf does NOT subscribe to that symbol; it subscribes to " +
+                    "'Feeder.OutputToWork' (the symbol Feeder's internal SYMLINKMULTIVARSRC " +
+                    "publishes via $${PATH}OutputToWork)");
             }
             catch (Exception ex)
             {
@@ -391,10 +396,12 @@ namespace MapperUI.Services
         /// sysres FBNetwork. Type matches the generic SYMLINKMULTIVARSRC
         /// variant used inside PLC_RW_M262 but configured for a single
         /// VALUE1 channel. NAME1 is the literal symbol
-        /// <c>'M262IO.ExtendPusher'</c> (NOT <c>$${PATH}</c>, because
-        /// $${PATH} at sysres top level expands to the publisher's own
-        /// instance name, which would publish to the wrong symbol).
-        /// VALUE1 = TRUE means the publish drives DO00 high once at boot.
+        /// <c>'Feeder.OutputToWork'</c> — that's the symbol the .hcf
+        /// binding for DQ00 subscribes to (verified in EAE's Symbolic
+        /// Links view: Feeder.OutputToWork shows Connected to
+        /// M262_RES.TM3DQ16T_G.DO00, while PLC_RW_M262's outward
+        /// M262IO.ExtendPusher has no subscriber). VALUE1 = TRUE means
+        /// the publish drives DQ00 high once at boot.
         /// </summary>
         private static void EnsureConstantPusherWriter(XElement fbNet, XNamespace ns,
             SystemInjector.BindingApplicationReport report)
@@ -404,7 +411,7 @@ namespace MapperUI.Services
             const string FbId       = "F1A5E5C0AB1D5701"; // deterministic 16-char hex
             const string FbNs       = "Main";
             const string IfaceParams = "Runtime.System#I:=1;VALUE${I}:BOOL";
-            const string Symbol     = "'M262IO.ExtendPusher'";
+            const string Symbol     = "'Feeder.OutputToWork'";
 
             var existing = fbNet.Elements(ns + "FB")
                 .FirstOrDefault(e => string.Equals(
