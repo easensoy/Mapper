@@ -605,13 +605,13 @@ namespace MapperUI
                 // pusher never moves.
                 int wireCountBefore = report.Missing.Count;
                 await Task.Run(() => MapperUI.Services.M262SysresWireEmitter.Emit(Cfg(), report));
-                // Mirror the canonical layout onto the syslay so syslay and
-                // sysres canvases line up visually (same FB at same x/y).
-                await Task.Run(() => MapperUI.Services.M262SysresWireEmitter.ApplyLayoutToSyslay(path, report));
+                // Layout grid is sysres-only — syslay coordinates left
+                // untouched so the user can lay out the application canvas
+                // freely without Mapper overwriting on every Button 2.
                 for (int i = wireCountBefore; i < report.Missing.Count; i++)
                 {
                     var line = report.Missing[i];
-                    if (line.StartsWith("[Wire]") || line.StartsWith("[Sysres") || line.StartsWith("[Layout"))
+                    if (line.StartsWith("[Wire]") || line.StartsWith("[Sysres"))
                         AppendActivity(line);
                 }
 
