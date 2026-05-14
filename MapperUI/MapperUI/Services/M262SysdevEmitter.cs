@@ -36,6 +36,12 @@ namespace MapperUI.Services
             // so EAE's Deploy & Diagnostic tree doesn't show RES0 + RES0 at the same time.
             var sysresPathForRename = FindSysresFor(sysdevPath);
             if (sysresPathForRename != null) RenameSysresName(sysresPathForRename, resourceName);
+            // Force every Ethernet interface on the M262 Topology equipment
+            // record to NOCONF (IP 0.0.0.0, zero domain). EAE's device card
+            // shows "Logical network: NOCONF" and "IPV4 Address: 0.0.0.0"
+            // on both ETH1 and ETH2. User wires the network manually after
+            // deploy — Mapper never bakes a default IP into Topology.
+            SetTopologyEquipmentToNoConf(eaeRoot);
             var propsPath = WriteM262DevicePropertiesXml(sysdevPath);
 
             var systemFile = FindSystemFile(eaeRoot)
@@ -415,6 +421,46 @@ namespace MapperUI.Services
             if (!Directory.Exists(sysdevFolder)) return null;
             return Directory.EnumerateFiles(sysdevFolder, "*.sysres", SearchOption.TopDirectoryOnly)
                 .FirstOrDefault();
+        }
+
+        /// <summary>
+        /// Walk <c>{eaeRoot}/Topology/</c> for any <c>Equipment_*.json</c>
+        /// describing the M262 dPAC and force every Ethernet endpoint to
+        /// <c>"ipAddress": "0.0.0.0"</c> + <c>"domain":
+        /// "00000000-0000-0000-0000-000000000000"</c>. EAE then renders the
+        /// Logical network field as NOCONF on every interface card.
+        /// Best-effort: silently skips files that can't be parsed; never
+        /// fails the run.
+        /// </summary>
+        static void SetTopologyEquipmentToNoConf(string eaeRoot)
+        {
+            try
+            {
+                var topoDir = Path.Combine(eaeRoot, "Topology");
+                if (!Directory.Exists(topoDir)) return;
+                const string ZeroDomain = "00000000-0000-0000-0000-000000000000";
+                foreach (var path in Directory.EnumerateFiles(topoDir, "Equipment_*.json"))
+                {
+                    try
+                    {
+                        var text = File.ReadAllText(path);
+                        // Lightweight regex rewrite — JSON layout from EAE is
+                        // stable enough to skip a full deserialise/round-trip.
+                        var rewritten = System.Text.RegularExpressions.Regex.Replace(
+                            text,
+                            "\"ipAddress\"\\s*:\\s*\"[^\"]*\"",
+                            "\"ipAddress\": \"0.0.0.0\"");
+                        rewritten = System.Text.RegularExpressions.Regex.Replace(
+                            rewritten,
+                            "\"domain\"\\s*:\\s*\"[^\"]*\"",
+                            $"\"domain\": \"{ZeroDomain}\"");
+                        if (!string.Equals(rewritten, text, StringComparison.Ordinal))
+                            File.WriteAllText(path, rewritten);
+                    }
+                    catch { /* skip malformed */ }
+                }
+            }
+            catch { /* topology dir absent or locked — non-fatal */ }
         }
 
         static string ComputeMirrorId(string syslayId)
