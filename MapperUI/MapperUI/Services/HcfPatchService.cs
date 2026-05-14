@@ -81,22 +81,28 @@ namespace MapperUI.Services
                 //    FB. Inject one with a deterministic short-hex ID if missing
                 //    — without this, EAE has no symlink target and the Hardware
                 //    Configurator view stays blank.
-                var m262IoFbId = EnsureM262IoFb(sysresPath, resourceId, report);
-                if (string.IsNullOrEmpty(m262IoFbId))
+                // 2. Build a {component-name → fb-id} map from the M262 sysres
+                //    FBNetwork. Option A: each TM3 channel publishes its
+                //    symlink directly to the consumer's FB instance (e.g.
+                //    "Feeder.athome", "PartInHopper.Input"), matching the
+                //    actuator/sensor CATs' SYMLINKMULTIVARDST $${PATH}<port>
+                //    expansion. The M262IO FB ID is no longer in the
+                //    ParameterValue — it's a passive bridge.
+                var fbIdByName = ReadFbIdByName(sysresPath);
+                if (fbIdByName.Count == 0)
                 {
-                    report.Missing.Add("[Hcf] ERROR: PLC_RW_M262 FB not found on sysres");
+                    report.Missing.Add(
+                        "[Hcf] ERROR: sysres FBNetwork has no FB instances — cannot resolve component IDs");
                     return;
                 }
 
                 // 3. Target file: {Demonstrator}/IEC61499/System/{system-guid}/
                 //    {sysdev-guid}/{sysdev-guid}.hcf — file STEM = sysdev guid
-                //    (folder name), NOT the resource guid. EAE locates the
-                //    .hcf by sysdev folder convention; the ResourceId attribute
-                //    INSIDE the XML is the resource guid (different value).
+                //    (folder name), NOT the resource guid.
                 var sysdevGuid = Path.GetFileName(sysdevDir);
                 var hcfPath = Path.Combine(sysdevDir, sysdevGuid + ".hcf");
 
-                report.Missing.Add($"[Hcf] resource_guid={resourceId} m262io_fb_guid={m262IoFbId}");
+                report.Missing.Add($"[Hcf] resource_guid={resourceId} components={fbIdByName.Count}");
                 report.Missing.Add($"[Hcf] writing → {hcfPath}");
 
                 foreach (var stale in Directory.EnumerateFiles(sysdevDir, "*.hcf"))
@@ -106,14 +112,10 @@ namespace MapperUI.Services
                         try { File.Delete(stale); } catch { /* best-effort */ }
                     }
                 }
-                var xml = BuildHcfXml(resourceId, m262IoFbId);
+                var xml = BuildHcfXml(resourceId, bindings, fbIdByName, report);
                 File.WriteAllText(hcfPath, xml, new System.Text.UTF8Encoding(false));
 
-                report.Missing.Add($"[Hcf] wrote   ← {hcfPath} (ResourceId={resourceId}, M262IO={m262IoFbId})");
-
-                // 4. Surface the rewritten pin lines into the Activity panel.
-                foreach (var pin in EnumeratePinLines(resourceId, m262IoFbId))
-                    report.HcfPinAssignments.Add(pin);
+                report.Missing.Add($"[Hcf] wrote   ← {hcfPath}");
             }
             catch (Exception ex)
             {
@@ -304,14 +306,32 @@ namespace MapperUI.Services
         }
 
         /// <summary>
-        /// Build the verbatim .hcf XML — BMTM3 master + TM262L01MDESE8T CPU
-        /// + TM3DI16_G (16 channels, Latch=32/Filter=4) + TM3DQ16T_G — with
-        /// <paramref name="resourceId"/> and <paramref name="m262IoFbId"/>
-        /// substituted into every ParameterValue.
+        /// Build the .hcf XML — BMTM3 + TM262L01MDESE8T + TM3DI16_G (all 16
+        /// channels with Latch=32/Filter=4) + TM3DQ16T_G. ParameterValues use
+        /// the <strong>component-style</strong> symlink convention
+        /// <c>{resourceId}.{componentFbId}.{port}</c> so each TM3 channel
+        /// publishes directly to the consuming actuator/sensor CAT's
+        /// <c>SYMLINKMULTIVARDST $${PATH}&lt;port&gt;</c> declaration
+        /// (resolves to <c>RES0.Feeder.athome</c>, etc.). The M262IO FB is a
+        /// passive bridge — its ID is not in the .hcf at all.
         /// </summary>
-        private static string BuildHcfXml(string resourceId, string m262IoFbId)
+        private static string BuildHcfXml(string resourceId, IoBindings? bindings,
+            Dictionary<string, string> fbIdByName, SystemInjector.BindingApplicationReport report)
         {
-            string Sym(string tag) => $"{resourceId}.{m262IoFbId}.{tag}";
+            string Sym(string pin)
+            {
+                if (bindings == null) return string.Empty;
+                if (!bindings.PinAssignments.TryGetValue(pin, out var pa)) return string.Empty;
+                if (!fbIdByName.TryGetValue(pa.ComponentName, out var compFbId))
+                {
+                    report.Missing.Add(
+                        $"[Hcf] {pin} skipped: component '{pa.ComponentName}' not on sysres FBNetwork");
+                    return string.Empty;
+                }
+                var value = $"{resourceId}.{compFbId}.{pa.Port}";
+                report.HcfPinAssignments.Add((pin, value));
+                return value;
+            }
             var sb = new System.Text.StringBuilder();
             sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
             sb.AppendLine("<DeviceHwConfigurationItems xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">");
@@ -361,11 +381,9 @@ namespace MapperUI.Services
             }
             sb.AppendLine("          </ItemProperties>");
             sb.AppendLine("          <ParameterValues>");
-            string[] diTags = { "PusherAtHome","PusherAtWork","Hopper","CheckerUp","CheckerDown",
-                                "PartAtChecker","TransferAtHome","TransferAtWork","PartAtAssembly","PartAtExit" };
             for (int i = 0; i < 16; i++)
             {
-                var v = i < diTags.Length ? Sym(diTags[i]) : string.Empty;
+                var v = Sym($"DI{i:D2}");
                 sb.AppendLine($"            <ParameterValue Name=\"DI{i:D2}\" Value=\"{v}\" />");
             }
             sb.AppendLine("          </ParameterValues>");
@@ -381,10 +399,9 @@ namespace MapperUI.Services
             sb.AppendLine("            <ItemProperty><Name>OptionalModule</Name><Value xsi:type=\"xsd:unsignedByte\">0</Value></ItemProperty>");
             sb.AppendLine("          </ItemProperties>");
             sb.AppendLine("          <ParameterValues>");
-            string[] doTags = { "ExtendPusher","ExtendChecker","ExtendTransfer","ExtendRejector" };
             for (int i = 0; i < 16; i++)
             {
-                var v = i < doTags.Length ? Sym(doTags[i]) : string.Empty;
+                var v = Sym($"DO{i:D2}");
                 sb.AppendLine($"            <ParameterValue Name=\"DO{i:D2}\" Value=\"{v}\" />");
             }
             sb.AppendLine("          </ParameterValues>");
@@ -398,17 +415,33 @@ namespace MapperUI.Services
             return sb.ToString();
         }
 
-        /// <summary>Yields one <c>(pin, value)</c> tuple per non-empty
-        /// ParameterValue so MainForm can render <c>[Hcf] DI00 ← …</c>
-        /// Activity lines without re-parsing the .hcf.</summary>
-        private static IEnumerable<(string Pin, string Value)> EnumeratePinLines(string resourceId, string m262IoFbId)
+        /// <summary>
+        /// Read every <c>&lt;FB Name="..." ID="..."/&gt;</c> on the sysres
+        /// FBNetwork into a Name → ID map so .hcf ParameterValues can resolve
+        /// component instance IDs (Feeder, PartInHopper, …) by name.
+        /// </summary>
+        private static Dictionary<string, string> ReadFbIdByName(string sysresPath)
         {
-            string Sym(string tag) => $"{resourceId}.{m262IoFbId}.{tag}";
-            string[] di = { "PusherAtHome","PusherAtWork","Hopper","CheckerUp","CheckerDown",
-                            "PartAtChecker","TransferAtHome","TransferAtWork","PartAtAssembly","PartAtExit" };
-            for (int i = 0; i < di.Length; i++) yield return ($"DI{i:D2}", Sym(di[i]));
-            string[] dq = { "ExtendPusher","ExtendChecker","ExtendTransfer","ExtendRejector" };
-            for (int i = 0; i < dq.Length; i++) yield return ($"DO{i:D2}", Sym(dq[i]));
+            var map = new Dictionary<string, string>(StringComparer.Ordinal);
+            try
+            {
+                if (!File.Exists(sysresPath)) return map;
+                var doc = XDocument.Load(sysresPath);
+                var root = doc.Root;
+                if (root == null) return map;
+                XNamespace ns = root.GetDefaultNamespace();
+                var fbNet = root.Element(ns + "FBNetwork");
+                if (fbNet == null) return map;
+                foreach (var fb in fbNet.Elements(ns + "FB"))
+                {
+                    var n = (string?)fb.Attribute("Name") ?? string.Empty;
+                    var id = (string?)fb.Attribute("ID") ?? string.Empty;
+                    if (!string.IsNullOrEmpty(n) && !string.IsNullOrEmpty(id))
+                        map[n] = id;
+                }
+            }
+            catch { /* best-effort */ }
+            return map;
         }
 
         /// <summary>Reads &lt;FB Name="..." /&gt; values from a syslay file's
