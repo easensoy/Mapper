@@ -112,8 +112,7 @@ namespace MapperUI.Services
                         try { File.Delete(stale); } catch { /* best-effort */ }
                     }
                 }
-                var xml = BuildHcfXml(resourceId, bindings, fbIdByName, report);
-                File.WriteAllText(hcfPath, xml, new System.Text.UTF8Encoding(false));
+                WriteHcfMerged(hcfPath, resourceId, bindings, fbIdByName, report);
 
                 report.Missing.Add($"[Hcf] wrote   ← {hcfPath}");
             }
@@ -305,18 +304,22 @@ namespace MapperUI.Services
             }
         }
 
+        private static readonly XNamespace XsiNs = "http://www.w3.org/2001/XMLSchema-instance";
+
         /// <summary>
-        /// Build the .hcf XML — BMTM3 + TM262L01MDESE8T + TM3DI16_G (all 16
-        /// channels with Latch=32/Filter=4) + TM3DQ16T_G. ParameterValues use
-        /// the <strong>component-style</strong> symlink convention
-        /// <c>{resourceId}.{componentFbId}.{port}</c> so each TM3 channel
-        /// publishes directly to the consuming actuator/sensor CAT's
-        /// <c>SYMLINKMULTIVARDST $${PATH}&lt;port&gt;</c> declaration
-        /// (resolves to <c>RES0.Feeder.athome</c>, etc.). The M262IO FB is a
-        /// passive bridge — its ID is not in the .hcf at all.
+        /// Idempotent merge into the deployed .hcf — BMTM3 + TM262L01MDESE8T +
+        /// TM3DI16_G (all 16 channels with Latch=32/Filter=4) + TM3DQ16T_G.
+        /// Each top-level <c>ConfigurationBaseItem</c> block is replaced
+        /// in-place if it already exists, appended once if not. Inside
+        /// TM3DI16_G/TM3DQ16T_G, each <c>ParameterValue</c> (DI00..DI15,
+        /// DO00..DO15) is removed by Name attribute before being re-added so
+        /// running Button-2 twice yields a byte-identical .hcf. ParameterValue
+        /// targets use the component-style symlink convention
+        /// <c>{resourceId}.{componentFbId}.{port}</c>.
         /// </summary>
-        private static string BuildHcfXml(string resourceId, IoBindings? bindings,
-            Dictionary<string, string> fbIdByName, SystemInjector.BindingApplicationReport report)
+        private static void WriteHcfMerged(string hcfPath, string resourceId,
+            IoBindings? bindings, Dictionary<string, string> fbIdByName,
+            SystemInjector.BindingApplicationReport report)
         {
             string Sym(string pin)
             {
@@ -332,87 +335,350 @@ namespace MapperUI.Services
                 report.HcfPinAssignments.Add((pin, value));
                 return value;
             }
-            var sb = new System.Text.StringBuilder();
-            sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
-            sb.AppendLine("<DeviceHwConfigurationItems xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">");
-            sb.AppendLine($"  <DeviceHwConfigurationItem ResourceId=\"{resourceId}\">");
-            sb.AppendLine("    <ConfigurationBaseItem>");
-            sb.AppendLine("      <Name>BMTM3</Name>");
-            sb.AppendLine("      <ID>9510AF594EA1EDD1</ID>");
-            sb.AppendLine("      <Type><Name>BMTM3</Name><Namespace>SE.IoTMx</Namespace></Type>");
-            sb.AppendLine("      <ItemProperties>");
-            sb.AppendLine("        <ItemProperty><Name>busid</Name><Value xsi:type=\"xsd:string\">TM3Config</Value><HWParameters><string>BUS_ID</string></HWParameters></ItemProperty>");
-            sb.AppendLine("        <ItemProperty><Name>powerConsumption</Name><Value xsi:type=\"xsd:unsignedByte\">0</Value></ItemProperty>");
-            sb.AppendLine("        <ItemProperty><Name>buscycletime</Name><Value xsi:type=\"xsd:string\">T#80ms</Value><HWParameters><string>busCycleTime</string></HWParameters></ItemProperty>");
-            sb.AppendLine("        <ItemProperty><Name>buscycletolerance</Name><Value xsi:type=\"xsd:string\">30</Value><HWParameters><string>busCycleTolerance</string></HWParameters></ItemProperty>");
-            sb.AppendLine("        <ItemProperty><Name>buscycleactionwhenmissed</Name><Value xsi:type=\"xsd:string\">1</Value><HWParameters><string>busCycleActionWhenMissed</string></HWParameters></ItemProperty>");
-            sb.AppendLine("        <ItemProperty><Name>enableSymlinkOC</Name><Value xsi:type=\"xsd:string\">TRUE</Value><HWParameters><string>enableSymlinkOC</string></HWParameters></ItemProperty>");
-            sb.AppendLine("      </ItemProperties>");
-            sb.AppendLine("      <ParameterValues>");
-            sb.AppendLine("        <ParameterValue Name=\"busId\" Value=\"'BMTM3'\" />");
-            sb.AppendLine("        <ParameterValue Name=\"enableSymlinkOC\" Value=\"TRUE\" />");
-            sb.AppendLine("        <ParameterValue Name=\"phase\" Value=\"T#0ms\" />");
-            sb.AppendLine("        <ParameterValue Name=\"busCycleTime\" Value=\"T#80ms\" />");
-            sb.AppendLine("        <ParameterValue Name=\"busCycleTolerance\" Value=\"30\" />");
-            sb.AppendLine("        <ParameterValue Name=\"busCycleActionWhenMissed\" Value=\"1\" />");
-            sb.AppendLine("        <ParameterValue Name=\"busStatusSymlink\" Value=\"\" />");
-            sb.AppendLine("      </ParameterValues>");
-            sb.AppendLine("      <MasterConfigFileName>${ProjectDir}\\${SystemName}\\RuntimeData\\${DeviceName}\\boot\\${busid}.xml</MasterConfigFileName>");
-            sb.AppendLine("      <Items>");
-            sb.AppendLine("        <ConfigurationBaseItem>");
-            sb.AppendLine("          <Name>TM262L01MDESE8T</Name>");
-            sb.AppendLine("          <ID>E2B036F9B0A5B0A4</ID>");
-            sb.AppendLine("          <Type><Name>TM262L01MDESE8T</Name><Namespace>SE.IoTMx</Namespace></Type>");
-            sb.AppendLine("          <ItemProperties /><ParameterValues />");
-            sb.AppendLine("          <PreviousItem><Name>BMTM3</Name><PortName>BusOut</PortName></PreviousItem>");
-            sb.AppendLine("          <Items />");
-            sb.AppendLine("        </ConfigurationBaseItem>");
-            // TM3DI16_G
-            sb.AppendLine("        <ConfigurationBaseItem>");
-            sb.AppendLine("          <Name>TM3DI16_G</Name>");
-            sb.AppendLine("          <ID>52DB1E4920A80F90</ID>");
-            sb.AppendLine("          <Type><Name>TM3DI16_G</Name><Namespace>SE.IoTMx</Namespace></Type>");
-            sb.AppendLine("          <ItemProperties>");
-            sb.AppendLine("            <ItemProperty><Name>OptionalModule</Name><Value xsi:type=\"xsd:unsignedByte\">0</Value></ItemProperty>");
+
+            var doc = LoadOrCreateHcf(hcfPath);
+            var root = doc.Root!;
+
+            // DeviceHwConfigurationItem is the single child of the root that
+            // carries the ResourceId attribute every nested ParameterValue
+            // symlink ultimately resolves against.
+            var devItem = root.Elements()
+                .FirstOrDefault(e => e.Name.LocalName == "DeviceHwConfigurationItem");
+            if (devItem == null)
+            {
+                devItem = new XElement("DeviceHwConfigurationItem",
+                    new XAttribute("ResourceId", resourceId));
+                root.Add(devItem);
+            }
+            else
+            {
+                devItem.SetAttributeValue("ResourceId", resourceId);
+            }
+
+            // BMTM3 (outer ConfigurationBaseItem). Replace-or-append, then
+            // re-locate the live element so its <Items/> child can host the
+            // three nested blocks.
+            UpsertConfigurationBaseItem(devItem, "BMTM3", BuildBmtm3Shell(), report);
+            var bmtm3 = FindChildBlock(devItem, "BMTM3")!;
+            var items = bmtm3.Elements().FirstOrDefault(e => e.Name.LocalName == "Items");
+            if (items == null)
+            {
+                items = new XElement("Items");
+                bmtm3.Add(items);
+            }
+
+            // TM262L01MDESE8T — wholesale replace-or-append, no per-pin pass.
+            UpsertConfigurationBaseItem(items, "TM262L01MDESE8T", BuildTm262Block(), report);
+
+            // TM3 modules: replace-or-append the shell, then upsert the 16
+            // DI/DO ParameterValues per the user's per-pin spec.
+            UpsertModuleWithPins(items, "TM3DI16_G", BuildTm3Di16Shell, "DI", Sym, report);
+            UpsertModuleWithPins(items, "TM3DQ16T_G", BuildTm3Dq16Shell, "DO", Sym, report);
+
+            SaveHcfWithRetry(doc, hcfPath, report);
+        }
+
+        /// <summary>
+        /// Load the existing .hcf, or mint a fresh skeleton with the
+        /// xmlns:xsd / xmlns:xsi prefix declarations EAE expects on the root.
+        /// Also patches the root if either prefix decl is missing on a loaded
+        /// file so subsequent <c>xsi:type</c> attributes serialise cleanly.
+        /// </summary>
+        private static XDocument LoadOrCreateHcf(string hcfPath)
+        {
+            XDocument? doc = null;
+            if (File.Exists(hcfPath))
+            {
+                try
+                {
+                    doc = XDocument.Load(hcfPath);
+                    if (doc.Root?.Name.LocalName != "DeviceHwConfigurationItems")
+                        doc = null;
+                }
+                catch { doc = null; }
+            }
+            if (doc == null)
+            {
+                doc = new XDocument(
+                    new XDeclaration("1.0", "utf-8", null),
+                    new XElement("DeviceHwConfigurationItems",
+                        new XAttribute(XNamespace.Xmlns + "xsd",
+                            "http://www.w3.org/2001/XMLSchema"),
+                        new XAttribute(XNamespace.Xmlns + "xsi",
+                            "http://www.w3.org/2001/XMLSchema-instance")));
+            }
+            var root = doc.Root!;
+            if (root.Attribute(XNamespace.Xmlns + "xsd") == null)
+                root.SetAttributeValue(XNamespace.Xmlns + "xsd",
+                    "http://www.w3.org/2001/XMLSchema");
+            if (root.Attribute(XNamespace.Xmlns + "xsi") == null)
+                root.SetAttributeValue(XNamespace.Xmlns + "xsi",
+                    "http://www.w3.org/2001/XMLSchema-instance");
+            return doc;
+        }
+
+        /// <summary>
+        /// Find the immediate <c>ConfigurationBaseItem</c> child of
+        /// <paramref name="parent"/> whose child <c>&lt;Name&gt;</c> equals
+        /// <paramref name="blockName"/>. If present, replace it in place via
+        /// <see cref="XElement.ReplaceWith(object)"/>; otherwise append the
+        /// fresh element once. Logs <c>[Hcf] replaced existing X block</c> or
+        /// <c>[Hcf] appended new X block</c> to <paramref name="report"/>.
+        /// </summary>
+        private static void UpsertConfigurationBaseItem(XElement parent, string blockName,
+            XElement freshBlock, SystemInjector.BindingApplicationReport report)
+        {
+            var existing = parent.Elements().FirstOrDefault(e =>
+                e.Name.LocalName == "ConfigurationBaseItem" &&
+                e.Elements().Any(c =>
+                    c.Name.LocalName == "Name" &&
+                    (c.Value ?? string.Empty).Trim() == blockName));
+            if (existing != null)
+            {
+                existing.ReplaceWith(freshBlock);
+                report.Missing.Add($"[Hcf] replaced existing {blockName} block");
+            }
+            else
+            {
+                parent.Add(freshBlock);
+                report.Missing.Add($"[Hcf] appended new {blockName} block");
+            }
+        }
+
+        private static XElement? FindChildBlock(XElement parent, string blockName) =>
+            parent.Elements().FirstOrDefault(e =>
+                e.Name.LocalName == "ConfigurationBaseItem" &&
+                e.Elements().Any(c =>
+                    c.Name.LocalName == "Name" &&
+                    (c.Value ?? string.Empty).Trim() == blockName));
+
+        /// <summary>
+        /// Replace-or-append the TM3 module block, then for each pin
+        /// (DI00..DI15 or DO00..DO15) remove any existing same-Name
+        /// <c>ParameterValue</c> from the block's <c>ParameterValues</c>
+        /// container before adding the fresh entry. The "replaced" vs "new"
+        /// classification in the log line is computed from a snapshot of the
+        /// PRE-replace pin set so the user can see which pins were already
+        /// configured on disk.
+        /// </summary>
+        private static void UpsertModuleWithPins(XElement items, string blockName,
+            Func<XElement> shellFactory, string pinPrefix,
+            Func<string, string> sym, SystemInjector.BindingApplicationReport report)
+        {
+            var existingPins = new HashSet<string>(StringComparer.Ordinal);
+            var existing = items.Elements().FirstOrDefault(e =>
+                e.Name.LocalName == "ConfigurationBaseItem" &&
+                e.Elements().Any(c =>
+                    c.Name.LocalName == "Name" &&
+                    (c.Value ?? string.Empty).Trim() == blockName));
+            if (existing != null)
+            {
+                var oldPv = existing.Elements()
+                    .FirstOrDefault(e => e.Name.LocalName == "ParameterValues");
+                if (oldPv != null)
+                {
+                    foreach (var pv in oldPv.Elements()
+                        .Where(e => e.Name.LocalName == "ParameterValue"))
+                    {
+                        var n = (string?)pv.Attribute("Name");
+                        if (!string.IsNullOrEmpty(n)) existingPins.Add(n);
+                    }
+                }
+            }
+
+            var fresh = shellFactory();
+            if (existing != null)
+            {
+                existing.ReplaceWith(fresh);
+                report.Missing.Add($"[Hcf] replaced existing {blockName} block");
+            }
+            else
+            {
+                items.Add(fresh);
+                report.Missing.Add($"[Hcf] appended new {blockName} block");
+            }
+
+            // Locate the freshly-inserted block's <ParameterValues> container
+            // (shellFactory always emits an empty one between ItemProperties
+            // and PreviousItem so insertion order is canonical).
+            var freshPv = fresh.Elements()
+                .FirstOrDefault(e => e.Name.LocalName == "ParameterValues");
+            if (freshPv == null)
+            {
+                freshPv = new XElement("ParameterValues");
+                var anchor = fresh.Elements()
+                    .FirstOrDefault(e => e.Name.LocalName == "ItemProperties");
+                if (anchor != null) anchor.AddAfterSelf(freshPv);
+                else fresh.Add(freshPv);
+            }
+
+            for (int i = 0; i < 16; i++)
+            {
+                var pin = $"{pinPrefix}{i:D2}";
+                var value = sym(pin);
+
+                // Per the Bug 2 spec: defensively remove any same-Name
+                // ParameterValue from this container before adding the fresh
+                // entry. The freshly-built shell is empty on the first run,
+                // so this is a no-op then — but it guarantees idempotency
+                // even if a future caller starts from a pre-populated shell.
+                freshPv.Elements()
+                    .Where(e => e.Name.LocalName == "ParameterValue" &&
+                                (string?)e.Attribute("Name") == pin)
+                    .Remove();
+
+                freshPv.Add(new XElement("ParameterValue",
+                    new XAttribute("Name", pin),
+                    new XAttribute("Value", value)));
+
+                var status = existingPins.Contains(pin) ? "replaced" : "new";
+                report.Missing.Add($"[Hcf] {pin} = {value} ({status})");
+            }
+        }
+
+        // ---- Block builders. Each returns a fresh detached XElement matching
+        //      the canonical Alex-shaped .hcf template that EAE accepts. ----
+
+        private static XElement BuildBmtm3Shell() => new XElement("ConfigurationBaseItem",
+            new XElement("Name", "BMTM3"),
+            new XElement("ID", "9510AF594EA1EDD1"),
+            new XElement("Type",
+                new XElement("Name", "BMTM3"),
+                new XElement("Namespace", "SE.IoTMx")),
+            new XElement("ItemProperties",
+                ItemPropertyStr("busid", "TM3Config", "BUS_ID"),
+                ItemPropertyByte("powerConsumption", "0", null),
+                ItemPropertyStr("buscycletime", "T#80ms", "busCycleTime"),
+                ItemPropertyStr("buscycletolerance", "30", "busCycleTolerance"),
+                ItemPropertyStr("buscycleactionwhenmissed", "1", "busCycleActionWhenMissed"),
+                ItemPropertyStr("enableSymlinkOC", "TRUE", "enableSymlinkOC")),
+            new XElement("ParameterValues",
+                new XElement("ParameterValue",
+                    new XAttribute("Name", "busId"), new XAttribute("Value", "'BMTM3'")),
+                new XElement("ParameterValue",
+                    new XAttribute("Name", "enableSymlinkOC"), new XAttribute("Value", "TRUE")),
+                new XElement("ParameterValue",
+                    new XAttribute("Name", "phase"), new XAttribute("Value", "T#0ms")),
+                new XElement("ParameterValue",
+                    new XAttribute("Name", "busCycleTime"), new XAttribute("Value", "T#80ms")),
+                new XElement("ParameterValue",
+                    new XAttribute("Name", "busCycleTolerance"), new XAttribute("Value", "30")),
+                new XElement("ParameterValue",
+                    new XAttribute("Name", "busCycleActionWhenMissed"), new XAttribute("Value", "1")),
+                new XElement("ParameterValue",
+                    new XAttribute("Name", "busStatusSymlink"), new XAttribute("Value", ""))),
+            new XElement("MasterConfigFileName",
+                @"${ProjectDir}\${SystemName}\RuntimeData\${DeviceName}\boot\${busid}.xml"),
+            new XElement("Items"));
+
+        private static XElement BuildTm262Block() => new XElement("ConfigurationBaseItem",
+            new XElement("Name", "TM262L01MDESE8T"),
+            new XElement("ID", "E2B036F9B0A5B0A4"),
+            new XElement("Type",
+                new XElement("Name", "TM262L01MDESE8T"),
+                new XElement("Namespace", "SE.IoTMx")),
+            new XElement("ItemProperties"),
+            new XElement("ParameterValues"),
+            new XElement("PreviousItem",
+                new XElement("Name", "BMTM3"),
+                new XElement("PortName", "BusOut")),
+            new XElement("Items"));
+
+        private static XElement BuildTm3Di16Shell()
+        {
+            var itemProps = new XElement("ItemProperties",
+                ItemPropertyByte("OptionalModule", "0", null));
             for (int ch = 0; ch < 16; ch++)
             {
-                sb.AppendLine($"            <ItemProperty><Name>Channel_{ch}.Latch</Name><Value xsi:type=\"xsd:unsignedByte\">32</Value></ItemProperty>");
-                sb.AppendLine($"            <ItemProperty><Name>Channel_{ch}.Filter</Name><Value xsi:type=\"xsd:unsignedByte\">4</Value></ItemProperty>");
+                itemProps.Add(ItemPropertyByte($"Channel_{ch}.Latch", "32", null));
+                itemProps.Add(ItemPropertyByte($"Channel_{ch}.Filter", "4", null));
             }
-            sb.AppendLine("          </ItemProperties>");
-            sb.AppendLine("          <ParameterValues>");
-            for (int i = 0; i < 16; i++)
+            return new XElement("ConfigurationBaseItem",
+                new XElement("Name", "TM3DI16_G"),
+                new XElement("ID", "52DB1E4920A80F90"),
+                new XElement("Type",
+                    new XElement("Name", "TM3DI16_G"),
+                    new XElement("Namespace", "SE.IoTMx")),
+                itemProps,
+                new XElement("ParameterValues"),
+                new XElement("PreviousItem",
+                    new XElement("Name", "TM262L01MDESE8T"),
+                    new XElement("PortName", "BusOut")),
+                new XElement("Items"));
+        }
+
+        private static XElement BuildTm3Dq16Shell() => new XElement("ConfigurationBaseItem",
+            new XElement("Name", "TM3DQ16T_G"),
+            new XElement("ID", "1256CB09958B4E27"),
+            new XElement("Type",
+                new XElement("Name", "TM3DQ16T_G"),
+                new XElement("Namespace", "SE.IoTMx")),
+            new XElement("ItemProperties",
+                ItemPropertyByte("OptionalModule", "0", null)),
+            new XElement("ParameterValues"),
+            new XElement("PreviousItem",
+                new XElement("Name", "TM3DI16_G"),
+                new XElement("PortName", "BusOut")),
+            new XElement("Items"));
+
+        private static XElement ItemPropertyStr(string name, string value, string? hwParam)
+        {
+            var el = new XElement("ItemProperty",
+                new XElement("Name", name),
+                new XElement("Value",
+                    new XAttribute(XsiNs + "type", "xsd:string"), value));
+            if (hwParam != null)
+                el.Add(new XElement("HWParameters", new XElement("string", hwParam)));
+            return el;
+        }
+
+        private static XElement ItemPropertyByte(string name, string value, string? hwParam)
+        {
+            var el = new XElement("ItemProperty",
+                new XElement("Name", name),
+                new XElement("Value",
+                    new XAttribute(XsiNs + "type", "xsd:unsignedByte"), value));
+            if (hwParam != null)
+                el.Add(new XElement("HWParameters", new XElement("string", hwParam)));
+            return el;
+        }
+
+        /// <summary>
+        /// Save with EAE-friendly settings (UTF-8 no BOM, 2-space indent) and
+        /// retry up to 8 times if EAE briefly holds a write lock.
+        /// </summary>
+        private static void SaveHcfWithRetry(XDocument doc, string hcfPath,
+            SystemInjector.BindingApplicationReport report)
+        {
+            var settings = new System.Xml.XmlWriterSettings
             {
-                var v = Sym($"DI{i:D2}");
-                sb.AppendLine($"            <ParameterValue Name=\"DI{i:D2}\" Value=\"{v}\" />");
-            }
-            sb.AppendLine("          </ParameterValues>");
-            sb.AppendLine("          <PreviousItem><Name>TM262L01MDESE8T</Name><PortName>BusOut</PortName></PreviousItem>");
-            sb.AppendLine("          <Items />");
-            sb.AppendLine("        </ConfigurationBaseItem>");
-            // TM3DQ16T_G
-            sb.AppendLine("        <ConfigurationBaseItem>");
-            sb.AppendLine("          <Name>TM3DQ16T_G</Name>");
-            sb.AppendLine("          <ID>1256CB09958B4E27</ID>");
-            sb.AppendLine("          <Type><Name>TM3DQ16T_G</Name><Namespace>SE.IoTMx</Namespace></Type>");
-            sb.AppendLine("          <ItemProperties>");
-            sb.AppendLine("            <ItemProperty><Name>OptionalModule</Name><Value xsi:type=\"xsd:unsignedByte\">0</Value></ItemProperty>");
-            sb.AppendLine("          </ItemProperties>");
-            sb.AppendLine("          <ParameterValues>");
-            for (int i = 0; i < 16; i++)
+                OmitXmlDeclaration = false,
+                Indent = true,
+                Encoding = new System.Text.UTF8Encoding(false),
+                NewLineHandling = System.Xml.NewLineHandling.Replace,
+            };
+
+            const int MaxAttempts = 8;
+            int delayMs = 50;
+            for (int attempt = 1; attempt <= MaxAttempts; attempt++)
             {
-                var v = Sym($"DO{i:D2}");
-                sb.AppendLine($"            <ParameterValue Name=\"DO{i:D2}\" Value=\"{v}\" />");
+                try
+                {
+                    using var fs = new FileStream(hcfPath,
+                        FileMode.Create, FileAccess.Write, FileShare.Read);
+                    using var w = System.Xml.XmlWriter.Create(fs, settings);
+                    doc.Save(w);
+                    if (attempt > 1)
+                        report.Missing.Add(
+                            $"[Hcf] write succeeded on attempt {attempt} (EAE briefly held a lock).");
+                    return;
+                }
+                catch (IOException) when (attempt < MaxAttempts)
+                {
+                    System.Threading.Thread.Sleep(delayMs);
+                    delayMs = Math.Min(delayMs * 2, 800);
+                }
             }
-            sb.AppendLine("          </ParameterValues>");
-            sb.AppendLine("          <PreviousItem><Name>TM3DI16_G</Name><PortName>BusOut</PortName></PreviousItem>");
-            sb.AppendLine("          <Items />");
-            sb.AppendLine("        </ConfigurationBaseItem>");
-            sb.AppendLine("      </Items>");
-            sb.AppendLine("    </ConfigurationBaseItem>");
-            sb.AppendLine("  </DeviceHwConfigurationItem>");
-            sb.AppendLine("</DeviceHwConfigurationItems>");
-            return sb.ToString();
         }
 
         /// <summary>
