@@ -14,14 +14,24 @@ namespace CodeGen.Services
     /// definitions deployed by Mapper (those are tracked too).
     ///
     /// This wiper takes the project to a brand-new-EAE-project state:
-    ///   * IEC61499/  — only the dfbproj shell + System/ folder
-    ///   * System/    — sysdev/sysapp/sysres shells with empty FBNetwork
-    ///   * .syslay    — empty SubAppNetwork
-    ///   * .hcf       — empty DeviceHwConfigurationItems
-    ///   * dfbproj    — stripped of CAT/Basic/Adapter entries (System refs kept)
-    ///   * Topology/  — UNTOUCHED (per standing instruction; topology is hand-curated)
-    ///   * General/   — UNTOUCHED (project metadata)
-    ///   * HMI/, HwConfiguration/, AvevaOMI/ — UNTOUCHED (other project sections)
+    ///   * IEC61499/        — only the dfbproj shell + System/ folder
+    ///   * System/          — sysdev/sysapp/sysres shells with empty FBNetwork
+    ///   * .syslay          — empty SubAppNetwork
+    ///   * .hcf             — empty DeviceHwConfigurationItems
+    ///   * dfbproj          — stripped of CAT/Basic/Adapter entries (System refs kept)
+    ///   * HwConfiguration/ — DELETED (TM3 module + M262 hardware-config snapshots
+    ///                       that M262HwConfigCopier replays every Button 2; without
+    ///                       wiping it, baseline entries stack on top of the
+    ///                       previously-deployed copy and EAE's Deploy &amp;
+    ///                       Diagnostic tree shows duplicate M262_RES nodes)
+    ///   * Topology/        — UNTOUCHED (per standing instruction; topology is hand-curated)
+    ///   * General/         — UNTOUCHED (project metadata)
+    ///   * HMI/, AvevaOMI/  — UNTOUCHED (other project sections)
+    ///
+    /// Sysdev <Resource> dedup is intentionally NOT done here — it lives in
+    /// SystemInjector.PrepareDemonstratorForGeneration (logged as
+    /// [CleanDevice] ...) so the same logic runs whether the user clicks
+    /// Clean Demonstrator (wires Prepare after this Wipe) or Button 1/2.
     ///
     /// Every step is best-effort (tries to swallow individual file errors) so the
     /// caller gets a complete summary of what succeeded vs failed.
@@ -36,6 +46,9 @@ namespace CodeGen.Services
             public int FilesDeleted { get; set; }
             public int FoldersDeleted { get; set; }
             public int DfbprojEntriesRemoved { get; set; }
+            /// <summary>Files removed from the project's HwConfiguration/ folder
+            /// (TM3 module snapshots + M262 hardware-config exports).</summary>
+            public int HwConfigFilesDeleted { get; set; }
         }
 
         // Folder names directly under IEC61499/ that get nuked entirely (everything
@@ -99,6 +112,23 @@ namespace CodeGen.Services
 
             // 5. Delete top-level export/scratch files in the repo root that EAE/Mapper leave behind.
             DeleteRepoRootScratch(demonstratorRepoRoot, report);
+
+            // 6. Wipe HwConfiguration/ — the TM3 module + M262 hardware-config
+            //    snapshots that M262HwConfigCopier.Copy replays from baseline
+            //    every Button 2. Leaving this folder populated stacks fresh
+            //    baseline entries on top of stale deployed ones, which EAE
+            //    surfaces as duplicate M262_RES nodes under Devices > M262.
+            //    M262HwConfigCopier recreates the folder on the next run when
+            //    cfg.M262HardwareConfigBaselinePath points at a baseline; if
+            //    it doesn't, EAE just shows an empty Hardware Configurator
+            //    until the user wires one up — strictly better than carrying
+            //    duplicated resource entries forward.
+            DeleteHwConfiguration(demonstratorRepoRoot, report);
+
+            // Sysdev <Resource> dedup lives in
+            // SystemInjector.PrepareDemonstratorForGeneration — see the
+            // [CleanDevice] block there. The Clean Demonstrator button calls
+            // both this Wipe and Prepare so the dedup runs alongside.
 
             return report;
         }
@@ -315,6 +345,51 @@ namespace CodeGen.Services
             // CAT-folder paths or top-level FB type files (Area_CAT\…, *.fbt, *.adp, *.cfg) —
             // we just deleted them all, so drop the entries.
             return false;
+        }
+
+        /// <summary>
+        /// Recursively deletes the project's <c>HwConfiguration/</c> folder
+        /// (typo-preserving "Demonstator" path takes precedence, with the
+        /// canonical "Demonstrator" spelling as fallback). Best-effort —
+        /// per-file failures are logged as warnings but never abort the wipe.
+        /// On the next Button 2 run, <c>M262HwConfigCopier.Copy</c> recreates
+        /// the folder from <c>cfg.M262HardwareConfigBaselinePath</c>.
+        /// </summary>
+        static void DeleteHwConfiguration(string repoRoot, WipeReport report)
+        {
+            string? found = null;
+            foreach (var candidate in new[]
+            {
+                Path.Combine(repoRoot, "Demonstator", "HwConfiguration"),
+                Path.Combine(repoRoot, "Demonstrator", "HwConfiguration"),
+            })
+            {
+                if (Directory.Exists(candidate)) { found = candidate; break; }
+            }
+            if (found == null)
+            {
+                report.Steps.Add("HwConfiguration/ not present — nothing to clean.");
+                return;
+            }
+
+            int fileCount = 0;
+            try { fileCount = Directory.GetFiles(found, "*", SearchOption.AllDirectories).Length; }
+            catch { /* count is best-effort */ }
+
+            try
+            {
+                Directory.Delete(found, recursive: true);
+                report.HwConfigFilesDeleted = fileCount;
+                report.Steps.Add(
+                    $"Deleted HwConfiguration/ ({fileCount} file(s)) — Button 2 will " +
+                    "recopy fresh from the configured baseline.");
+            }
+            catch (Exception ex)
+            {
+                report.Warnings.Add(
+                    $"Could not delete HwConfiguration/ at {found}: {ex.Message}. " +
+                    "Stale entries will continue to surface as duplicate M262_RES nodes in EAE.");
+            }
         }
 
         static void DeleteRepoRootScratch(string repoRoot, WipeReport report)
