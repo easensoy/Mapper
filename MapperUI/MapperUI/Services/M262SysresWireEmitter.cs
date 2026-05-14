@@ -63,6 +63,13 @@ namespace MapperUI.Services
             // REQ_INT_BOOL so the runtime pushes the new BOOL out to DQ.
             new("M262IO.PusherEvent",  "Feeder.action_event"),
             new("Feeder.plc_out",      "M262IO.REQ_INT_BOOL"),
+            // Stage-1 auto-extend: ConstantPusherWriter publishes
+            // 'M262IO.ExtendPusher' = TRUE once at boot via FB1.INITO so
+            // the cylinder extends without the recipe driving Feeder. INIT
+            // must precede REQ — declaration order is preserved by EAE's
+            // event scheduler so this two-wire fan-out is safe.
+            new("FB1.INITO",           "ConstantPusherWriter.INIT"),
+            new("FB1.INITO",           "ConstantPusherWriter.REQ"),
         };
 
         // Adapter ring: HMI → Area/Station chain → Feed_Station → Feeder
@@ -128,6 +135,14 @@ namespace MapperUI.Services
                     report.Missing.Add("[Wire] skipped, no FBNetwork on sysres");
                     return;
                 }
+
+                // Stage-1: discover the publisher symbol used by PLC_RW_M262's
+                // internal output FB, then inject a peer SYMLINKMULTIVARSRC at
+                // sysres top level that publishes 'M262IO.ExtendPusher' = TRUE.
+                // Wires for it are declared in EventWires above; this just
+                // makes sure the FB element exists before validation runs.
+                LogPublisherSymbolDiscovery(cfg, report);
+                EnsureConstantPusherWriter(fbNet, ns, report);
 
                 // Build (Name → element) and (Type → element) maps so endpoint
                 // references can be either an instance name or a type token.
@@ -291,11 +306,137 @@ namespace MapperUI.Services
                 report.Missing.Add(
                     $"[Sysres] wrote {emittedEvents.Count} event + {emittedData.Count} data + " +
                     $"{emittedAdapters.Count} adapter connection(s) to {Path.GetFileName(sysresPath)}");
+
+                // Stage-1 expected runtime behaviour. These three lines tell
+                // the operator what to look for at the controller end before
+                // suspecting a wiring bug.
+                report.Missing.Add(
+                    "[Stage1] ConstantPusherWriter emits publish of M262IO.ExtendPusher = TRUE on boot");
+                report.Missing.Add(
+                    "[Stage1] Expected: cylinder extends and stays extended after Deploy + Start");
+                report.Missing.Add(
+                    "[Stage1] If cylinder does not extend, check DQ00 LED on TM3 module");
             }
             catch (Exception ex)
             {
                 report.Missing.Add($"[Wire] failed: {ex.GetType().Name}: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Stage-1 discovery: read the project's PLC_RW_M262.fbt and surface
+        /// every NAME parameter on its internal SYMLINKMULTIVARSRC (the FB
+        /// named "output"). Pattern is <c>'$${PATH}ExtendPusher'</c> etc.,
+        /// where <c>$${PATH}</c> resolves to the sysres instance name
+        /// (<c>M262IO</c>) — so the actual published symbol at runtime is
+        /// <c>M262IO.ExtendPusher</c>. Best-effort; silently skips logging
+        /// if the .fbt is missing or malformed.
+        /// </summary>
+        private static void LogPublisherSymbolDiscovery(MapperConfig cfg,
+            SystemInjector.BindingApplicationReport report)
+        {
+            try
+            {
+                var libRoot = cfg.TemplateLibraryPath;
+                if (string.IsNullOrWhiteSpace(libRoot))
+                {
+                    report.Missing.Add("[Stage1] TemplateLibraryPath empty, skipping PLC_RW_M262.fbt inspection");
+                    return;
+                }
+                var fbtPath = Path.Combine(
+                    libRoot, "CAT", "PLC_RW_M262", "IEC61499", "PLC_RW_M262.fbt");
+                if (!File.Exists(fbtPath))
+                {
+                    report.Missing.Add($"[Stage1] PLC_RW_M262.fbt not found at {fbtPath}");
+                    return;
+                }
+                var doc = XDocument.Load(fbtPath);
+                var outputFb = doc.Descendants().FirstOrDefault(e =>
+                    e.Name.LocalName == "FB" &&
+                    string.Equals((string?)e.Attribute("Name"), "output", StringComparison.Ordinal));
+                if (outputFb == null)
+                {
+                    report.Missing.Add(
+                        "[Stage1] PLC_RW_M262.fbt has no internal FB named 'output' — " +
+                        "ABORT: unrecognised NAME pattern, need manual inspection");
+                    return;
+                }
+                var outType = (string?)outputFb.Attribute("Type") ?? string.Empty;
+                var outNs   = (string?)outputFb.Attribute("Namespace") ?? string.Empty;
+
+                report.Missing.Add("[Stage1] PLC_RW_M262 internal Output FB NAMEs:");
+                foreach (var p in outputFb.Elements())
+                {
+                    if (p.Name.LocalName != "Parameter") continue;
+                    var pn = (string?)p.Attribute("Name") ?? string.Empty;
+                    if (!pn.StartsWith("NAME", StringComparison.Ordinal)) continue;
+                    var pv = (string?)p.Attribute("Value") ?? string.Empty;
+                    report.Missing.Add($"[Stage1]   {pn} = {pv}");
+                }
+                report.Missing.Add($"[Stage1]   Type = {outType}");
+                report.Missing.Add($"[Stage1]   Namespace = {outNs}");
+                report.Missing.Add(
+                    "[Stage1] $${PATH}ExtendPusher resolves to 'M262IO.ExtendPusher' " +
+                    "(sysres instance of PLC_RW_M262 is named M262IO)");
+            }
+            catch (Exception ex)
+            {
+                report.Missing.Add(
+                    $"[Stage1] failed to inspect PLC_RW_M262.fbt: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Idempotently inject a <c>ConstantPusherWriter</c> FB into the
+        /// sysres FBNetwork. Type matches the generic SYMLINKMULTIVARSRC
+        /// variant used inside PLC_RW_M262 but configured for a single
+        /// VALUE1 channel. NAME1 is the literal symbol
+        /// <c>'M262IO.ExtendPusher'</c> (NOT <c>$${PATH}</c>, because
+        /// $${PATH} at sysres top level expands to the publisher's own
+        /// instance name, which would publish to the wrong symbol).
+        /// VALUE1 = TRUE means the publish drives DO00 high once at boot.
+        /// </summary>
+        private static void EnsureConstantPusherWriter(XElement fbNet, XNamespace ns,
+            SystemInjector.BindingApplicationReport report)
+        {
+            const string FbName     = "ConstantPusherWriter";
+            const string FbType     = "SYMLINKMULTIVARSRC_19628BFC3C74F1AB1";
+            const string FbId       = "F1A5E5C0AB1D5701"; // deterministic 16-char hex
+            const string FbNs       = "Main";
+            const string IfaceParams = "Runtime.System#I:=1;VALUE${I}:BOOL";
+            const string Symbol     = "'M262IO.ExtendPusher'";
+
+            var existing = fbNet.Elements(ns + "FB")
+                .FirstOrDefault(e => string.Equals(
+                    (string?)e.Attribute("Name"), FbName, StringComparison.Ordinal));
+            if (existing != null)
+            {
+                report.Missing.Add(
+                    $"[Stage1] {FbName} already on sysres, leaving FB element as-is");
+                return;
+            }
+
+            var fb = new XElement(ns + "FB",
+                new XAttribute("ID",        FbId),
+                new XAttribute("Name",      FbName),
+                new XAttribute("Type",      FbType),
+                new XAttribute("Namespace", FbNs),
+                new XAttribute("x",         "8000"),
+                new XAttribute("y",         "400"));
+            fb.Add(new XElement(ns + "Attribute",
+                new XAttribute("Name",  "Configuration.GenericFBType.InterfaceParams"),
+                new XAttribute("Value", IfaceParams)));
+            fb.Add(new XElement(ns + "Parameter",
+                new XAttribute("Name", "QI"),    new XAttribute("Value", "TRUE")));
+            fb.Add(new XElement(ns + "Parameter",
+                new XAttribute("Name", "NAME1"), new XAttribute("Value", Symbol)));
+            fb.Add(new XElement(ns + "Parameter",
+                new XAttribute("Name", "VALUE1"), new XAttribute("Value", "TRUE")));
+            fbNet.Add(fb);
+
+            report.Missing.Add(
+                $"[Stage1] injected {FbName} (Type={FbType}, Namespace={FbNs}) " +
+                $"with NAME1={Symbol}, VALUE1=TRUE");
         }
 
         // Canonical canvas layout — applied verbatim to every FB on both the
@@ -314,6 +455,8 @@ namespace MapperUI.Services
             { "FB2",          (800,  400) },   // plcStart
             { "FB1",          (3000, 400) },   // DPAC_FULLINIT
             { "M262IO",       (5800, 400) },
+            // Stage-1 auto-extend writer, parked right of M262IO
+            { "ConstantPusherWriter", (8000, 400) },
             // HMI row (y=1600)
             { "Area_HMI",     (3000, 1600) },
             { "Station1_HMI", (5800, 1600) },
