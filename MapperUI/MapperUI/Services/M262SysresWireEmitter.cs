@@ -138,7 +138,7 @@ namespace MapperUI.Services
                 // strip (y=200), HMI row (y=800), structural row (y=1400),
                 // components row (y=2200). Reads top-down, runtime → init
                 // → application → components, mirroring the syslay layout.
-                ApplyCanonicalLayout(byName, report);
+                ApplyCanonicalLayout(byName, report, "Sysres");
 
                 // Cache loaded .fbt port lookups so we don't re-parse per wire.
                 var portsByType = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
@@ -269,32 +269,40 @@ namespace MapperUI.Services
             }
         }
 
-        // Canonical sysres canvas layout. START is the resource's built-in
-        // restart FB (auto-instantiated, expected at x=80,y=80, NOT emitted
-        // here). Every other entry overrides whatever x/y the upstream
-        // mirror code generated.
+        // Canonical canvas layout — applied verbatim to every FB on both the
+        // sysres and the syslay so the two mirror visually. START is the
+        // resource's built-in restart FB (auto-instantiated by EAE, NOT
+        // emitted here). Every other entry overrides whatever x/y the
+        // upstream mirror code generated; previous coordinates are NOT
+        // preserved.
         private static readonly Dictionary<string, (int X, int Y)> CanonicalLayout = new(StringComparer.Ordinal)
         {
-            // Hardware row (top strip)
+            // Runtime row
             { "FB2",          (400,  200) },   // plcStart
-            { "FB1",          (900,  200) },   // DPAC_FULLINIT
-            { "M262IO",       (1400, 200) },
-            { "Area_Term",    (1900, 200) },
-            { "Stn1_Term",    (2400, 200) },
-            // Application row 1 (HMI CATs)
-            { "Area_HMI",     (400,  800) },
-            { "Station1_HMI", (1100, 800) },
-            // Application row 2 (structural)
-            { "Area",         (400,  1400) },
-            { "Station1",     (1100, 1400) },
-            { "Feed_Station", (1800, 1400) },
-            // Application row 3 (components)
-            { "Feeder",       (400,  2200) },
-            { "PartInHopper", (1100, 2200) },
+            { "FB1",          (1800, 200) },   // DPAC_FULLINIT
+            { "M262IO",       (3400, 200) },
+            // HMI row
+            { "Area_HMI",     (1500, 900) },
+            { "Station1_HMI", (3500, 900) },
+            // Control row
+            { "Area",         (1500, 1500) },
+            { "Station1",     (3500, 1500) },
+            { "Area_Term",    (5300, 1500) },
+            // Process + sensor row
+            { "Feed_Station", (4500, 2300) },
+            { "PartInHopper", (2800, 2300) },
+            // Component + terminator row
+            { "Feeder",       (2500, 3300) },
+            { "Stn1_Term",    (6200, 3300) },
         };
 
+        /// <summary>
+        /// Force every FB element in <paramref name="byName"/> matching a
+        /// CanonicalLayout entry to the spec coordinates, then emit one
+        /// <c>[Layout] {Name} -> x=…, y=…</c> line per placed FB.
+        /// </summary>
         private static void ApplyCanonicalLayout(Dictionary<string, XElement> byName,
-            SystemInjector.BindingApplicationReport report)
+            SystemInjector.BindingApplicationReport report, string source)
         {
             int placed = 0;
             foreach (var kv in CanonicalLayout)
@@ -302,9 +310,51 @@ namespace MapperUI.Services
                 if (!byName.TryGetValue(kv.Key, out var fb)) continue;
                 fb.SetAttributeValue("x", kv.Value.X.ToString(System.Globalization.CultureInfo.InvariantCulture));
                 fb.SetAttributeValue("y", kv.Value.Y.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                report.Missing.Add($"[Layout] {kv.Key} -> x={kv.Value.X}, y={kv.Value.Y}");
                 placed++;
             }
-            report.Missing.Add($"[Sysres layout] hardware row + 3 application rows ({placed}/{CanonicalLayout.Count} FBs placed)");
+            report.Missing.Add($"[{source} layout] {placed}/{CanonicalLayout.Count} FBs placed");
+        }
+
+        /// <summary>
+        /// Open the syslay at <paramref name="syslayPath"/>, apply the same
+        /// CanonicalLayout coordinates to every matching FB inside
+        /// <c>SubAppNetwork</c>/<c>FBNetwork</c>, and persist. Best-effort —
+        /// silently skips if the file or root is missing.
+        /// </summary>
+        public static void ApplyLayoutToSyslay(string syslayPath,
+            SystemInjector.BindingApplicationReport report)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(syslayPath) || !File.Exists(syslayPath)) return;
+                var doc = XDocument.Load(syslayPath, LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                XNamespace ns = root.GetDefaultNamespace();
+                var net = root.Element(ns + "SubAppNetwork") ?? root.Element(ns + "FBNetwork");
+                if (net == null) return;
+                var byName = new Dictionary<string, XElement>(StringComparer.Ordinal);
+                foreach (var fb in net.Elements(ns + "FB"))
+                {
+                    var n = (string?)fb.Attribute("Name") ?? string.Empty;
+                    if (!string.IsNullOrEmpty(n)) byName[n] = fb;
+                }
+                ApplyCanonicalLayout(byName, report, "Syslay");
+                var settings = new XmlWriterSettings
+                {
+                    OmitXmlDeclaration = false,
+                    Indent = true,
+                    Encoding = new UTF8Encoding(false),
+                };
+                using var fs = new FileStream(syslayPath, FileMode.Create, FileAccess.Write, FileShare.Read);
+                using var w = XmlWriter.Create(fs, settings);
+                doc.Save(w);
+            }
+            catch (Exception ex)
+            {
+                report.Missing.Add($"[Layout] syslay write failed: {ex.GetType().Name}: {ex.Message}");
+            }
         }
 
         private static string? LocateM262Sysres(string eaeRoot)
