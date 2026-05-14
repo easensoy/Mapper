@@ -614,7 +614,7 @@ namespace MapperUI
                 await Task.Run(() => MapperUI.Services.HcfPatchService.PatchDeployed(
                     Cfg(), path, bindings, report));
                 foreach (var (pin, value) in report.HcfPinAssignments)
-                    AppendActivity($"[Hcf] {pin} ← {value}");
+                    AppendActivity($"[Hcf] {pin} = {value}");
 
                 TouchDfbprojToTriggerEaeReload();
 
