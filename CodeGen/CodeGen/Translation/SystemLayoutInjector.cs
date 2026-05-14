@@ -1296,6 +1296,10 @@ namespace MapperUI.Services
             public List<string> PreservedFbs { get; } = new();
             public List<string> Unmatched { get; } = new();
             public int RemovedConnections { get; set; }
+            /// <summary>Per-action [CleanDevice] log lines emitted by the
+            /// M262 sysdev Resource-dedup step. Mirrored to the Activity panel
+            /// by callers — see MainForm.LogCleanup.</summary>
+            public List<string> DeviceCleanupLog { get; } = new();
         }
 
         public CleanupReport PrepareDemonstratorForGeneration(MapperConfig config)
@@ -1311,7 +1315,192 @@ namespace MapperUI.Services
             if (!string.IsNullOrEmpty(config.SysresPath2) && File.Exists(config.SysresPath2))
                 CleanFile(config.SysresPath2, "FBNetwork", report);
 
+            CleanM262SysdevResources(config, report);
+
             return report;
+        }
+
+        /// <summary>
+        /// Detect and remove duplicate <c>&lt;Resource&gt;</c> entries from the
+        /// M262 sysdev so EAE's Devices tree only renders one M262_RES /
+        /// RES0 row under the device. The FIRST Resource in document order is
+        /// the survivor — its attributes are left untouched. Every removed
+        /// Resource also has its sibling <c>{resourceId}.sysres</c> file
+        /// deleted from the sysdev folder. The <c>.hcf</c>, BMTM3
+        /// declarations, network profiles and IP addresses, and the kept
+        /// Resource's FBNetwork contents are all left alone.
+        /// </summary>
+        private static void CleanM262SysdevResources(MapperConfig config, CleanupReport report)
+        {
+            void Log(string line) => report.DeviceCleanupLog.Add($"[CleanDevice] {line}");
+
+            string? eaeRoot = DeriveDemonstratorEaeRoot(config);
+            if (string.IsNullOrEmpty(eaeRoot))
+            {
+                Log("could not derive EAE project root from MapperConfig.SyslayPath2; sysdev dedup skipped");
+                return;
+            }
+
+            var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
+            if (!Directory.Exists(systemDir))
+            {
+                Log($"IEC61499/System not found under {eaeRoot}; sysdev dedup skipped");
+                return;
+            }
+
+            string? sysdevPath = null;
+            foreach (var candidate in Directory.EnumerateFiles(
+                systemDir, "*.sysdev", SearchOption.AllDirectories))
+            {
+                try
+                {
+                    var doc = XDocument.Load(candidate);
+                    var root = doc.Root;
+                    if (root == null) continue;
+                    var type  = (string?)root.Attribute("Type")      ?? string.Empty;
+                    var nspac = (string?)root.Attribute("Namespace") ?? string.Empty;
+                    if (string.Equals(type,  "M262_dPAC", StringComparison.Ordinal) &&
+                        string.Equals(nspac, "SE.DPAC",   StringComparison.Ordinal))
+                    {
+                        sysdevPath = candidate;
+                        break;
+                    }
+                }
+                catch { /* skip malformed; keep scanning */ }
+            }
+            if (sysdevPath == null)
+            {
+                Log($"no M262 sysdev found under {systemDir}; nothing to dedupe");
+                return;
+            }
+
+            Log($"reading sysdev at {sysdevPath}");
+
+            XDocument sysdevDoc;
+            try { sysdevDoc = XDocument.Load(sysdevPath); }
+            catch (Exception ex)
+            {
+                Log($"failed to load sysdev {sysdevPath}: {ex.Message}");
+                return;
+            }
+            var sysdevRoot = sysdevDoc.Root;
+            if (sysdevRoot == null)
+            {
+                Log($"sysdev {sysdevPath} has no root element; nothing to dedupe");
+                return;
+            }
+
+            XNamespace ns = sysdevRoot.GetDefaultNamespace();
+            var resourcesEl = sysdevRoot.Element(ns + "Resources");
+            var resources = resourcesEl?.Elements(ns + "Resource").ToList()
+                ?? new List<XElement>();
+            int count = resources.Count;
+
+            Log($"found {count} resources");
+
+            // Sysdev folder layout: {sysdev-folder}/{sysdev-stem}/ holds the
+            // .sysres + .hcf siblings. We touch .sysres only — .hcf is left
+            // alone per spec (it carries the IO bindings).
+            var sysdevStem = Path.GetFileNameWithoutExtension(sysdevPath);
+            var sysdevDir  = Path.Combine(
+                Path.GetDirectoryName(sysdevPath)!, sysdevStem);
+            int sysresCount = 0;
+            if (Directory.Exists(sysdevDir))
+                sysresCount = Directory.GetFiles(
+                    sysdevDir, "*.sysres", SearchOption.TopDirectoryOnly).Length;
+
+            // Fast-path guard: exactly one Resource AND exactly one .sysres
+            // file = canonical clean state, log + return.
+            if (count == 1 && sysresCount == 1)
+            {
+                Log("M262 sysdev clean, no duplicates");
+                return;
+            }
+
+            if (count <= 1)
+            {
+                Log($"M262 sysdev has {count} resource(s), nothing to dedupe");
+                return;
+            }
+
+            // 2+ Resources — keep the first in document order, drop the rest
+            // and their backing .sysres files.
+            var keep = resources[0];
+            var firstResourceId = (string?)keep.Attribute("ID")
+                ?? (string?)keep.Attribute("Name")
+                ?? "(unknown)";
+
+            int removed = 0;
+            for (int i = 1; i < resources.Count; i++)
+            {
+                var dup = resources[i];
+                var dupId   = (string?)dup.Attribute("ID")   ?? string.Empty;
+                var dupName = (string?)dup.Attribute("Name") ?? string.Empty;
+                var dupIdent = !string.IsNullOrEmpty(dupId) ? dupId : dupName;
+
+                // Delete the sibling .sysres file. The .hcf is explicitly
+                // NOT touched even when this Resource is removed — per spec
+                // the .hcf carries the IO bindings.
+                string deletedSysresPath = string.Empty;
+                if (!string.IsNullOrEmpty(dupId) && Directory.Exists(sysdevDir))
+                {
+                    var candidate = Path.Combine(sysdevDir, dupId + ".sysres");
+                    if (File.Exists(candidate))
+                    {
+                        try
+                        {
+                            File.Delete(candidate);
+                            deletedSysresPath = candidate;
+                        }
+                        catch (Exception ex)
+                        {
+                            Log($"failed to delete sysres {candidate}: {ex.Message}");
+                        }
+                    }
+                }
+
+                dup.Remove();
+                removed++;
+
+                if (deletedSysresPath.Length > 0)
+                    Log($"removed duplicate resource {dupIdent}, deleted sysres file {deletedSysresPath}");
+                else
+                    Log($"removed duplicate resource {dupIdent} (no matching .sysres file on disk)");
+            }
+
+            try
+            {
+                sysdevDoc.Save(sysdevPath);
+            }
+            catch (Exception ex)
+            {
+                Log($"failed to save sysdev {sysdevPath} after dedup: {ex.Message}");
+                return;
+            }
+
+            Log($"removed {removed} duplicate Resource entries, kept {firstResourceId}");
+            Log($"kept resource {firstResourceId}");
+        }
+
+        /// <summary>
+        /// Walks up from <c>config.SyslayPath2</c> looking for the folder
+        /// whose immediate parent contains a <c>.dfbproj</c> — same
+        /// derivation M262SysdevEmitter.DeriveEaeProjectRoot uses, kept
+        /// local here so CodeGen.dll doesn't take a back-reference on
+        /// MapperUI.dll.
+        /// </summary>
+        private static string? DeriveDemonstratorEaeRoot(MapperConfig config)
+        {
+            var path = config?.SyslayPath2;
+            if (string.IsNullOrWhiteSpace(path)) return null;
+            var dir = Path.GetDirectoryName(path);
+            while (!string.IsNullOrEmpty(dir))
+            {
+                if (Directory.Exists(dir) && Directory.GetFiles(dir, "*.dfbproj").Length > 0)
+                    return Path.GetDirectoryName(dir);
+                dir = Path.GetDirectoryName(dir);
+            }
+            return null;
         }
 
         private static void CleanFile(string path, string netTag, CleanupReport report)
