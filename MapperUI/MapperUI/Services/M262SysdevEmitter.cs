@@ -16,6 +16,57 @@ namespace MapperUI.Services
         // the live Emit path now reads cfg.ResourceName and passes it through.
         const string DefaultResourceName = "RES0";
 
+        /// <summary>
+        /// When true, the Mapper treats the M262 sysdev as user-managed: the
+        /// device file, its resource declaration, the Topology Equipment
+        /// JSON, and the SystemDeviceProperties XML are all left as-is
+        /// whenever an M262 sysdev already exists under
+        /// <c>IEC61499/System/</c>. Only application-layer content
+        /// (.sysres FBNetwork, .syslay, .hcf, dfbproj registrations) is
+        /// written. The flag preserves the trust binding EAE establishes
+        /// on first connect to the controller.
+        /// </summary>
+        public const bool PreserveExistingM262Device = true;
+
+        /// <summary>
+        /// Walks <c>{eaeRoot}/IEC61499/System/</c> and returns true if any
+        /// .sysdev declares an M262 dPAC device
+        /// (<c>Type="M262_dPAC" Namespace="SE.DPAC"</c> on the root). The
+        /// trust-preservation guard branches on this — when true, the
+        /// device-layer writes (sysdev rewrite, sysres root rename, Topology
+        /// Equipment JSON, SystemDeviceProperties XML, network profile
+        /// writes) are skipped.
+        /// </summary>
+        public static bool M262SysdevAlreadyExists(MapperConfig cfg)
+        {
+            if (cfg == null) return false;
+            var eaeRoot = DeriveEaeProjectRoot(cfg);
+            if (string.IsNullOrEmpty(eaeRoot)) return false;
+            var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
+            if (!Directory.Exists(systemDir)) return false;
+            foreach (var sysdev in Directory.EnumerateFiles(
+                systemDir, "*.sysdev", SearchOption.AllDirectories))
+            {
+                if (IsM262SysdevFile(sysdev)) return true;
+            }
+            return false;
+        }
+
+        static bool IsM262SysdevFile(string sysdevPath)
+        {
+            try
+            {
+                var doc = XDocument.Load(sysdevPath);
+                var root = doc.Root;
+                if (root == null) return false;
+                var type  = (string?)root.Attribute("Type")      ?? string.Empty;
+                var nspac = (string?)root.Attribute("Namespace") ?? string.Empty;
+                return string.Equals(type, "M262_dPAC", StringComparison.Ordinal) &&
+                       string.Equals(nspac, "SE.DPAC", StringComparison.Ordinal);
+            }
+            catch { return false; }
+        }
+
         public static SysdevEmitResult Emit(MapperConfig cfg)
         {
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
@@ -30,19 +81,39 @@ namespace MapperUI.Services
             var resourceName = string.IsNullOrWhiteSpace(cfg.ResourceName)
                 ? DefaultResourceName
                 : cfg.ResourceName;
-            RewriteSysdev(sysdevPath, DeviceName, "M262_dPAC", cfg.M262TargetIp ?? string.Empty,
-                resourceName);
-            // While we have the EAE root, keep the .sysres root's Name attribute in sync
-            // so EAE's Deploy & Diagnostic tree doesn't show RES0 + RES0 at the same time.
-            var sysresPathForRename = FindSysresFor(sysdevPath);
-            if (sysresPathForRename != null) RenameSysresName(sysresPathForRename, resourceName);
-            // Force every Ethernet interface on the M262 Topology equipment
-            // record to NOCONF (IP 0.0.0.0, zero domain). EAE's device card
-            // shows "Logical network: NOCONF" and "IPV4 Address: 0.0.0.0"
-            // on both ETH1 and ETH2. User wires the network manually after
-            // deploy — Mapper never bakes a default IP into Topology.
-            SetTopologyEquipmentToNoConf(eaeRoot);
-            var propsPath = WriteM262DevicePropertiesXml(sysdevPath);
+
+            // Trust-preservation guard. If the sysdev on disk is already an
+            // M262, every device-layer write below is skipped to keep EAE's
+            // trust binding with the controller intact. Only the .sysres
+            // FBNetwork mirror and dfbproj registration (both application
+            // content, per spec) still run further down.
+            bool preserveDevice =
+                PreserveExistingM262Device && IsM262SysdevFile(sysdevPath);
+
+            string propsPath = string.Empty;
+            if (!preserveDevice)
+            {
+                RewriteSysdev(sysdevPath, DeviceName, "M262_dPAC",
+                    cfg.M262TargetIp ?? string.Empty, resourceName);
+                // While we have the EAE root, keep the .sysres root's Name
+                // attribute in sync so EAE's Deploy & Diagnostic tree doesn't
+                // show RES0 + RES0 at the same time. (Skipped when the
+                // device is preserved — the resource declaration is part of
+                // the trust-bound device record.)
+                var sysresPathForRename = FindSysresFor(sysdevPath);
+                if (sysresPathForRename != null)
+                    RenameSysresName(sysresPathForRename, resourceName);
+                // Force every Ethernet interface on the M262 Topology
+                // equipment record to NOCONF (IP 0.0.0.0, zero domain). EAE's
+                // device card shows "Logical network: NOCONF" and
+                // "IPV4 Address: 0.0.0.0" on both ETH1 and ETH2. User wires
+                // the network manually after deploy — Mapper never bakes a
+                // default IP into Topology. Skipped under preserveDevice
+                // because re-writing IPs invalidates the controller-side
+                // trust certificate.
+                SetTopologyEquipmentToNoConf(eaeRoot);
+                propsPath = WriteM262DevicePropertiesXml(sysdevPath);
+            }
 
             var systemFile = FindSystemFile(eaeRoot)
                 ?? throw new FileNotFoundException(
@@ -75,6 +146,7 @@ namespace MapperUI.Services
                 PropertiesXmlPath = propsPath,
                 SysresPath = sysresPath ?? string.Empty,
                 SysresFbsMirrored = sysresMirrorCount,
+                DevicePreserved = preserveDevice,
             };
         }
 
@@ -503,5 +575,11 @@ namespace MapperUI.Services
         public string PropertiesXmlPath { get; set; } = string.Empty;
         public string SysresPath { get; set; } = string.Empty;
         public int SysresFbsMirrored { get; set; }
+        /// <summary>True when the trust-preservation guard skipped every
+        /// device-layer write (sysdev rewrite, sysres root rename, Topology
+        /// Equipment JSON, SystemDeviceProperties XML). Application content
+        /// — .sysres FBNetwork mirror, dfbproj registrations — still
+        /// ran.</summary>
+        public bool DevicePreserved { get; set; }
     }
 }
