@@ -334,16 +334,24 @@ namespace MapperUI.Services
                     .Where(s => !string.IsNullOrEmpty(s)),
                 StringComparer.Ordinal);
 
-            // Reduced sysres: keep only FBs whose Type compiles cleanly
-            // without unverified adapter wires. Area / Station / Process
-            // composites and HMI CATs are deferred until their adapter ports
-            // are validated. Drop everything else from the syslay-mirrored
-            // set; the M262IO/DPAC_FULLINIT/plcStart trio above handles init.
+            // Mirror every CAT/composite/HMI type that EAE expects to see
+            // mapped to M262.M262_RES. Each mirrored FB carries a Mapping
+            // attribute pointing back at the syslay FB, which is how EAE
+            // shows it under Devices > M262 > M262_RES > Local.
             var keepTypes = new HashSet<string>(StringComparer.Ordinal)
             {
                 "Five_State_Actuator_CAT",
+                "Five_State_Actuator_No_Sensors_CAT",
+                "Seven_State_Actuator_CAT",
                 "Sensor_Bool_CAT",
                 "PLC_RW_M262",
+                "Area",
+                "Area_CAT",
+                "Station",
+                "Station_CAT",
+                "Process1_Generic",
+                "CaSAdptrTerminator",
+                "Robot_Task_CAT",
             };
 
             int added = 0;
