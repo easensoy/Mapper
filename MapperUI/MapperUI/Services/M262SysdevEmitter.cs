@@ -160,21 +160,19 @@ namespace MapperUI.Services
             SetAttr(root, "Namespace", "SE.DPAC");
             SetAttr(root, "Locked", "false");
 
-            var ipParam = root.Elements(ns + "Parameter").FirstOrDefault(e =>
-                string.Equals((string?)e.Attribute("Name"), "IPV4Address", StringComparison.Ordinal));
-            if (ipParam == null)
+            // Strip any IPV4Address parameter. Emitting one makes EAE flag the
+            // device as DefaultNetwork; we want NoCONF (no preset network) so
+            // the user can wire it manually after deploy. Leaves a baseline
+            // IPV4Address in place if present in the source — but our
+            // post-Wiper sysdev never has one, so result is NoCONF.
+            foreach (var ipParam in root.Elements(ns + "Parameter")
+                .Where(e => string.Equals((string?)e.Attribute("Name"),
+                    "IPV4Address", StringComparison.Ordinal)).ToList())
             {
-                ipParam = new XElement(ns + "Parameter",
-                    new XAttribute("Name", "IPV4Address"),
-                    new XAttribute("Value", targetIp));
-                var firstChild = root.Elements().FirstOrDefault();
-                if (firstChild != null) firstChild.AddBeforeSelf(ipParam);
-                else root.Add(ipParam);
+                ipParam.Remove();
             }
-            else
-            {
-                SetAttr(ipParam, "Value", targetIp);
-            }
+            // targetIp arg kept for signature compatibility but no longer used.
+            _ = targetIp;
 
             var resources = root.Element(ns + "Resources");
             if (resources == null)
