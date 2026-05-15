@@ -381,10 +381,15 @@ namespace MapperUI.Services
                 root.Add(network);
             }
 
-            EnsureSystemFb(network, ns,
-                id: M262IoFbId, name: "M262IO", type: "PLC_RW_M262", nsAttr: "Main",
-                mapping: ComputeMirrorId(M262IoFbId), x: 3760, y: 1020,
-                loaded: false);
+            // M262IO (PLC_RW_M262) is NOT emitted onto the sysres. Under the
+            // Option-A .hcf binding the TM3 channels publish symlinks directly
+            // to the consumer FB instances (Feeder.athome, PartInHopper.Input,
+            // …) — M262IO is no longer the routing bridge, so a top-level
+            // M262IO instance plus its INIT / PusherEvent / REQ_INT_BOOL
+            // event wires are dead weight that EAE flags. Removing the
+            // EnsureSystemFb(M262IO …) call here is what actually makes
+            // M262IO disappear from the generated .sysres; the cleanup pass
+            // in PrepareDemonstratorForGeneration only clears stale copies.
             EnsureSystemFb(network, ns,
                 id: DpacFullInitFbId, name: "FB1", type: "DPAC_FULLINIT", nsAttr: "SE.DPAC",
                 mapping: null, x: 1900, y: 140,
