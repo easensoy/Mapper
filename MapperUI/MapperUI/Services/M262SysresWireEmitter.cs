@@ -83,7 +83,7 @@ namespace MapperUI.Services
             // "stationAdptr_{in,out}" for every type.
             new("Station1.StationAdaptrOUT",       "Feeder.stationAdptr_in"),
             new("Feeder.stationAdptr_out",         "Feed_Station.stationAdptr_in"),
-            new("Feed_Station.stationAdptr_out",   "Stn1_Term.CaSAdptrIN"),
+            new("Feed_Station.stationAdptr_out",   "Stn1_Term." + CodeGen.Translation.PortNameValidator.CaSAdptrTerminatorInPort),
 
             // stateRprtCmd report ring — sensors + actuators + process,
             // closing back to the process. Process1_Generic exposes the
