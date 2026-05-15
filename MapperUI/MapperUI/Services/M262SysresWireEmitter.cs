@@ -13,8 +13,9 @@ namespace MapperUI.Services
     /// <summary>
     /// Emits the canonical event + data wires into the deployed M262 sysres
     /// FBNetwork so EAE actually initialises the application chain
-    /// (plcStart → DPAC_FULLINIT → Area → Station → … → Feeder → M262IO)
-    /// and wires the Pusher I/O bindings (PusherAtHome → Feeder.athome, etc.).
+    /// (plcStart → DPAC_FULLINIT → Area → Station → … → Feeder → Process).
+    /// No M262IO broker: Sensor/Actuator CATs read/write the M262 pins
+    /// directly via their own internal SYMLINK FBs ($${PATH} macros).
     ///
     /// Always overwrites any existing &lt;EventConnections&gt; /
     /// &lt;DataConnections&gt; blocks. Endpoint references use the FB
@@ -31,15 +32,10 @@ namespace MapperUI.Services
     {
         public sealed record Wire(string Source, string Destination);
 
-        // Minimal init chain — just enough to bring M262IO online so the
-        // pusher cylinder can be force-toggled from EAE's Watch list. Area /
-        // Station / Process / HMI / Terminator wiring is deferred until each
-        // adapter port has been validated against its CAT .fbt — emitting
-        // unverified ports caused EAE compile failures.
-        // Full event chain per Alex's SMC_Rig_Expo sysres adapted to
-        // Mapper's Process1_Generic + adapter-ring design. START is the
-        // resource's built-in restart FB (EMB_RES_ECO canvas auto-instance).
-        // FB1=DPAC_FULLINIT, FB2=plcStart, Feed_Station=Process1_Generic.
+        // Full event chain adapted to Mapper's Process1_Generic +
+        // adapter-ring design. START is the resource's built-in restart FB
+        // (EMB_RES_ECO canvas auto-instance). FB1=DPAC_FULLINIT,
+        // FB2=plcStart, Feed_Station=Process1_Generic. No M262IO.
         private static readonly Wire[] EventWires =
         {
             new("START.COLD",          "FB1.INIT"),
@@ -47,27 +43,27 @@ namespace MapperUI.Services
             new("START.ONLINECHANGE",  "FB1.OC_RETRIGGER"),
             new("FB2.FIRST_INIT",      "FB2.ACK_FIRST"),
             // Init chain identical in ORDER to the syslay's BuildFullSystem
-            // /Feed-station wiring: FB1.INITO is the only entry point, fanning
-            // to the I/O bridge (M262IO) and the application root (Area). From
+            // /Feed-station wiring: FB1.INITO is the only entry point. From
             // Area the chain is strictly sequential —
             //   Area → Station1 → PartInHopper → Feeder → Feed_Station
             // matching SystemLayoutInjector's initChain
             // (Area → Station → sensors → actuators → Process). No parallel
-            // FB1.INITO fan-out to Feed_Station/Feeder and no dangling
-            // Station1.INITO (P4 fix).
-            new("FB1.INITO",           "M262IO.INIT"),
+            // FB1.INITO fan-out and no dangling Station1.INITO (P4 fix).
+            //
+            // M262IO is intentionally NOT wired. Under Option-A binding the
+            // Sensor/Actuator CATs read/write the M262 pins directly via
+            // their own internal SYMLINKMULTIVARDST/SRC ($${PATH} macros) —
+            // there is no PLC_RW_M262 broker. The former
+            //   FB1.INITO → M262IO.INIT
+            //   M262IO.PusherEvent → Feeder.action_event
+            //   Feeder.plc_out → M262IO.REQ_INT_BOOL
+            // wires are deleted: M262IO no longer exists on the sysres and
+            // these phantom events confuse the data-driven Process FB.
             new("FB1.INITO",           "Area.INIT"),
             new("Area.INITO",          "Station1.INIT"),
             new("Station1.INITO",      "PartInHopper.INIT"),
             new("PartInHopper.INITO",  "Feeder.INIT"),
             new("Feeder.INITO",        "Feed_Station.INIT"),
-            // Runtime I/O event ring. Without these the .hcf TM3 binding
-            // is wired but never fires: M262IO's changeEventProcess1 emits
-            // PusherEvent on a pin transition → Feeder.action_event runs
-            // its state machine → Feeder.plc_out signals back to M262IO's
-            // REQ_INT_BOOL so the runtime pushes the new BOOL out to DQ.
-            new("M262IO.PusherEvent",  "Feeder.action_event"),
-            new("Feeder.plc_out",      "M262IO.REQ_INT_BOOL"),
         };
 
         // Adapter ring: HMI → Area/Station chain → Feed_Station → Feeder
@@ -238,27 +234,10 @@ namespace MapperUI.Services
                 foreach (var w in DataWires)    Process(w, emittedData,     "data");
                 foreach (var w in AdapterWires) Process(w, emittedAdapters, "adapter");
 
-                // Optional fast path: M262IO.HopperEvent / PusherEvent →
-                // Feed_Station.state_change duplicate the stateRprtCmd ring
-                // notifications. Mirrors Alex's working pattern but is
-                // valid only if Process1_Generic exposes state_change as a
-                // top-level EventInput. Per OSDA spec it currently doesn't
-                // (only INIT/INITO are top-level), so we check first and
-                // skip both wires with the explicit explanatory log when
-                // the port is absent — runtime state still flows through
-                // the stateRprtCmd ring.
-                var processPorts = PortsFor("Process1_Generic");
-                if (processPorts.Count > 0 && !processPorts.Contains("state_change"))
-                {
-                    report.Missing.Add(
-                        "[Sysres] Process1_Generic has no state_change event input, " +
-                        "skipping M262IO -> Process1 direct wires, state flows through stateRprtCmd ring only");
-                }
-                else
-                {
-                    Process(new Wire("M262IO.HopperEvent", "Feed_Station.state_change"), emittedEvents, "event");
-                    Process(new Wire("M262IO.PusherEvent", "Feed_Station.state_change"), emittedEvents, "event");
-                }
+                // (Removed) The optional M262IO.HopperEvent / PusherEvent →
+                // Feed_Station.state_change fast path is gone with M262IO.
+                // Component state reaches the Process exclusively through
+                // the stateRprtCmd adapter ring now.
 
                 // Replace all three existing connection blocks with the
                 // freshly-emitted set. Adapter wires now live in their own
@@ -330,7 +309,6 @@ namespace MapperUI.Services
             // Runtime row (y=400)
             { "FB2",          (800,  400) },   // plcStart
             { "FB1",          (3000, 400) },   // DPAC_FULLINIT
-            { "M262IO",       (5800, 400) },
             // HMI row (y=1600)
             { "Area_HMI",     (3000, 1600) },
             { "Station1_HMI", (5800, 1600) },
