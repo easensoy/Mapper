@@ -16,11 +16,20 @@ namespace CodeGen.Translation
 
     public static class PortNameValidator
     {
+        /// <summary>
+        /// The single inbound adapter port on <c>CaSAdptrTerminator</c>.
+        /// Note the casing: <c>Cas</c> (lowercase 's'), NOT <c>CaS</c> — the
+        /// FB *type* is "CaSAdptrTerminator" with a capital S but the *port*
+        /// is "CasAdptrIN". Defined once here so every emitter references the
+        /// same literal and the capitalisation can't drift again.
+        /// </summary>
+        public const string CaSAdptrTerminatorInPort = "CasAdptrIN";
+
         private static readonly Dictionary<string, string[]> ExpectedPorts = new(StringComparer.Ordinal)
         {
             ["Station"] = new[] { "AreaAdptrIN", "StationHMIAdptrIN", "AreaAdptrOUT", "StationAdaptrOUT" },
             ["Area"] = new[] { "AreaHMIAdptrIN", "AreaAdptrOUT" },
-            ["CaSAdptrTerminator"] = new[] { "CasAdptrIN" },
+            ["CaSAdptrTerminator"] = new[] { CaSAdptrTerminatorInPort },
             ["Five_State_Actuator_CAT"] = new[] { "stationAdptr_in", "stateRprtCmd_in", "stationAdptr_out", "stateRprtCmd_out" },
             ["Sensor_Bool_CAT"] = new[] { "stateRprtCmd_in", "stateRprtCmd_out" },
             ["Process1_Generic"] = new[] { "stateRptCmdAdptr_in", "stationAdptr_in", "stateRptCmdAdptr_out", "stationAdptr_out" },
