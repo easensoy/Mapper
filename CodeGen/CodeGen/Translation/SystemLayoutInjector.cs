@@ -1325,12 +1325,37 @@ namespace MapperUI.Services
 
             CleanFile(config.SyslayPath2, "SubAppNetwork", report);
 
-            if (!string.IsNullOrEmpty(config.SysresPath2) && File.Exists(config.SysresPath2))
-                CleanFile(config.SysresPath2, "FBNetwork", report);
+            // The configured SysresPath2 holds the *pre-rename* filename
+            // (zero-GUID stem). EAE renames the .sysres on its side to the
+            // short-hex resource ID (e.g. 1459BCD12760907D.sysres), so a
+            // bare File.Exists(config.SysresPath2) check is almost always
+            // false and the FBNetwork cleanup silently never ran — leaving
+            // a stale M262IO (and every other FB) on the sysres. Resolve
+            // the ACTUAL .sysres by globbing the sysdev folder and clean
+            // every one found.
+            foreach (var sysresPath in ResolveActualSysresPaths(config))
+                CleanFile(sysresPath, "FBNetwork", report);
 
             CleanM262SysdevResources(config, report);
 
             return report;
+        }
+
+        /// <summary>
+        /// Return every <c>.sysres</c> that actually exists under the M262
+        /// sysdev folder. Prefers the directory of
+        /// <see cref="MapperConfig.SysresPath2"/>; if that exact file is
+        /// present it is included, plus any sibling <c>.sysres</c> EAE may
+        /// have renamed it to. Empty if the folder can't be resolved.
+        /// </summary>
+        private static IEnumerable<string> ResolveActualSysresPaths(MapperConfig config)
+        {
+            if (string.IsNullOrEmpty(config.SysresPath2)) yield break;
+            var dir = Path.GetDirectoryName(config.SysresPath2);
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) yield break;
+            foreach (var f in Directory.EnumerateFiles(dir, "*.sysres",
+                         SearchOption.TopDirectoryOnly))
+                yield return f;
         }
 
         /// <summary>
