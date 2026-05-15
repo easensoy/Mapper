@@ -46,16 +46,21 @@ namespace MapperUI.Services
             new("START.WARM",          "FB1.INIT"),
             new("START.ONLINECHANGE",  "FB1.OC_RETRIGGER"),
             new("FB2.FIRST_INIT",      "FB2.ACK_FIRST"),
+            // Init chain identical in ORDER to the syslay's BuildFullSystem
+            // /Feed-station wiring: FB1.INITO is the only entry point, fanning
+            // to the I/O bridge (M262IO) and the application root (Area). From
+            // Area the chain is strictly sequential —
+            //   Area → Station1 → PartInHopper → Feeder → Feed_Station
+            // matching SystemLayoutInjector's initChain
+            // (Area → Station → sensors → actuators → Process). No parallel
+            // FB1.INITO fan-out to Feed_Station/Feeder and no dangling
+            // Station1.INITO (P4 fix).
             new("FB1.INITO",           "M262IO.INIT"),
             new("FB1.INITO",           "Area.INIT"),
-            new("FB1.INITO",           "Feed_Station.INIT"),
             new("Area.INITO",          "Station1.INIT"),
-            // Sequential init through the CaSBus order: Process inits its
-            // actuators, each actuator inits its sensor. Replaces the prior
-            // FB1.INITO → Feeder/PartInHopper parallel fan-out which broke
-            // the OSDA component-init handshake.
-            new("Feed_Station.INITO",  "Feeder.INIT"),
-            new("Feeder.INITO",        "PartInHopper.INIT"),
+            new("Station1.INITO",      "PartInHopper.INIT"),
+            new("PartInHopper.INITO",  "Feeder.INIT"),
+            new("Feeder.INITO",        "Feed_Station.INIT"),
             // Runtime I/O event ring. Without these the .hcf TM3 binding
             // is wired but never fires: M262IO's changeEventProcess1 emits
             // PusherEvent on a pin transition → Feeder.action_event runs
@@ -80,13 +85,25 @@ namespace MapperUI.Services
             new("Area_HMI.AreaHMIAdptrOUT",        "Area.AreaHMIAdptrIN"),
             new("Station1_HMI.StationHMIAdptrOUT", "Station1.StationHMIAdptrIN"),
             new("Area.AreaAdptrOUT",               "Station1.AreaAdptrIN"),
-            new("Station1.StationAdaptrOUT",       "Feed_Station.stationAdptr_in"),
-            new("Feed_Station.stationAdptr_out",   "Feeder.stationAdptr_in"),
-            new("Feeder.stationAdptr_out",         "PartInHopper.stationAdptr_in"),
-            new("PartInHopper.stationAdptr_out",   "Stn1_Term.CaSAdptrIN"),
-            new("Feed_Station.stateRprtCmd_out",   "Feeder.stateRprtCmd_in"),
-            new("Feeder.stateRprtCmd_out",         "PartInHopper.stateRprtCmd_in"),
-            new("PartInHopper.stateRprtCmd_out",   "Feed_Station.stateRprtCmd_in"),
+
+            // CaSBus station chain — actuators + process ONLY, never the
+            // sensor. Sensor_Bool_CAT has no stationAdptr_in/out ports, so
+            // PartInHopper is skipped (P2 fix). Mirrors the syslay
+            // stationChain = [actuators…, process], closed to Stn1_Term.
+            // SystemLayoutInjector.StationAdptr{In,Out} both resolve to
+            // "stationAdptr_{in,out}" for every type.
+            new("Station1.StationAdaptrOUT",       "Feeder.stationAdptr_in"),
+            new("Feeder.stationAdptr_out",         "Feed_Station.stationAdptr_in"),
+            new("Feed_Station.stationAdptr_out",   "Stn1_Term.CaSAdptrIN"),
+
+            // stateRprtCmd report ring — sensors + actuators + process,
+            // closing back to the process. Process1_Generic exposes the
+            // ports as stateRptCmdAdptr_{in,out} (Adptr suffix per
+            // SystemLayoutInjector.StateRprt{In,Out}("Process1_Generic"));
+            // Sensor/Actuator CATs use stateRprtCmd_{in,out} (P3 fix).
+            new("PartInHopper.stateRprtCmd_out",   "Feeder.stateRprtCmd_in"),
+            new("Feeder.stateRprtCmd_out",         "Feed_Station.stateRptCmdAdptr_in"),
+            new("Feed_Station.stateRptCmdAdptr_out","PartInHopper.stateRprtCmd_in"),
         };
 
         // Endpoints whose LHS is one of these built-in FBs are emitted with
