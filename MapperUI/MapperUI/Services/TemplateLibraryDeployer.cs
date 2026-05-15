@@ -287,7 +287,10 @@ namespace MapperUI.Services
             try
             {
                 if (File.Exists(enginePath))
+                {
                     PatchProcessRuntimeEngine(enginePath, result);
+                    PatchProcessRuntimeEccDeadEnd(enginePath, result);
+                }
                 else
                     result.Warnings.Add("ProcessRuntime_Generic_v1.fbt not deployed; recipe-as-input patch skipped.");
 
@@ -311,6 +314,66 @@ namespace MapperUI.Services
             ("Wait1State",    "INT",         "64", (string?)null),
             ("NextStep",      "INT",         "64", (string?)null),
         };
+
+        /// <summary>
+        /// Silence EAE's WRN_ECC_DEAD_END on the <c>END</c> state of
+        /// ProcessRuntime_Generic_v1 by adding a self-transition
+        /// <c>END → END</c> with <c>Condition="1"</c> — the same shape EAE
+        /// itself uses for the existing <c>WAIT_STEP → WAIT_STEP</c> loop.
+        /// Runtime behaviour is unchanged (END already terminates the
+        /// sequence; this just makes the dead-end explicit so the compiler
+        /// stops warning). Idempotent: skips if an END→END transition is
+        /// already present. Runs outside PatchProcessRuntimeEngine's
+        /// recipe-array idempotency gate so it applies even on FBTs that
+        /// were already recipe-patched.
+        /// </summary>
+        static void PatchProcessRuntimeEccDeadEnd(string fbtPath, DeployResult result)
+        {
+            var doc = System.Xml.Linq.XDocument.Load(fbtPath, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+            var root = doc.Root!;
+            System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+
+            var ecc = root.Descendants(ns + "ECC").FirstOrDefault();
+            if (ecc == null)
+            {
+                result.Warnings.Add("ProcessRuntime_Generic_v1.fbt: <ECC> not found; END dead-end patch skipped.");
+                return;
+            }
+
+            bool hasEndState = ecc.Elements(ns + "ECState")
+                .Any(s => (string?)s.Attribute("Name") == "END");
+            if (!hasEndState)
+            {
+                result.Warnings.Add("ProcessRuntime_Generic_v1.fbt: ECState END not found; dead-end patch skipped.");
+                return;
+            }
+
+            // Idempotency: already has an END self-transition?
+            bool alreadyLooped = ecc.Elements(ns + "ECTransition").Any(t =>
+                (string?)t.Attribute("Source") == "END" &&
+                (string?)t.Attribute("Destination") == "END");
+            if (alreadyLooped) return;
+
+            // Append after the last ECTransition, mirroring the self-closed
+            // WAIT_STEP→WAIT_STEP shape (no Attribute child, has x/y).
+            var lastTrans = ecc.Elements(ns + "ECTransition").LastOrDefault();
+            var endState = ecc.Elements(ns + "ECState")
+                .First(s => (string?)s.Attribute("Name") == "END");
+            var ex = (string?)endState.Attribute("x") ?? "1983.655";
+            var ey = (string?)endState.Attribute("y") ?? "968.8892";
+            var loop = new System.Xml.Linq.XElement(ns + "ECTransition",
+                new System.Xml.Linq.XAttribute("Source", "END"),
+                new System.Xml.Linq.XAttribute("Destination", "END"),
+                new System.Xml.Linq.XAttribute("Condition", "1"),
+                new System.Xml.Linq.XAttribute("x", ex),
+                new System.Xml.Linq.XAttribute("y", ey));
+            if (lastTrans != null) lastTrans.AddAfterSelf(loop);
+            else ecc.Add(loop);
+
+            doc.Save(fbtPath);
+            result.PatchesApplied.Add("ProcessRuntime_Generic_v1: added END->END self-transition (WRN_ECC_DEAD_END fix)");
+            MapperLogger.Info("[Deploy] Patched ProcessRuntime_Generic_v1.fbt END dead-end (added END->END Condition=1)");
+        }
 
         static void PatchProcessRuntimeEngine(string fbtPath, DeployResult result)
         {
