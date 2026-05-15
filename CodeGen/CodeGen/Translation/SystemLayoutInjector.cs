@@ -1543,10 +1543,16 @@ namespace MapperUI.Services
 
         private static void CleanFile(string path, string netTag, CleanupReport report)
         {
+            report.DeviceCleanupLog.Add($"[Clean] file={path} root=<{netTag}>");
+
             XNamespace ns = "https://www.se.com/LibraryElements";
             var doc = XDocument.Load(path);
             var net = doc.Root?.Element(ns + netTag);
-            if (net == null) return;
+            if (net == null)
+            {
+                report.DeviceCleanupLog.Add($"[Clean] <{netTag}> not found in {Path.GetFileName(path)} — nothing to clean");
+                return;
+            }
 
             var fbsToRemove = new List<XElement>();
             var namesToRemove = new HashSet<string>(StringComparer.Ordinal);
@@ -1566,15 +1572,18 @@ namespace MapperUI.Services
                     fbsToRemove.Add(fb);
                     namesToRemove.Add(fbName);
                     report.RemovedFbs.Add($"{fbName} ({fbType})");
+                    report.DeviceCleanupLog.Add($"[Clean]   FB {fbName} type={fbType} -> REMOVE");
                 }
                 else
                 {
                     report.PreservedFbs.Add($"{fbName} ({fbType})");
+                    report.DeviceCleanupLog.Add($"[Clean]   FB {fbName} type={fbType} -> PRESERVE");
                 }
             }
 
             foreach (var fb in fbsToRemove) fb.Remove();
 
+            int connRemovedHere = 0;
             foreach (var section in new[] { "EventConnections", "DataConnections", "AdapterConnections" })
             {
                 var s = net.Element(ns + section);
@@ -1589,9 +1598,14 @@ namespace MapperUI.Services
                     {
                         conn.Remove();
                         report.RemovedConnections++;
+                        connRemovedHere++;
                     }
                 }
             }
+
+            report.DeviceCleanupLog.Add(
+                $"[Clean] {Path.GetFileName(path)}: removed {fbsToRemove.Count} FB(s), " +
+                $"{connRemovedHere} connection(s)");
 
             doc.Save(path);
         }
