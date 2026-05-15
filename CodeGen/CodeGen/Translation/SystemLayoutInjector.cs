@@ -1290,6 +1290,19 @@ namespace MapperUI.Services
             "Station_CAT", "Area_CAT", "CaSAdptrTerminator", "Station", "Area"
         };
 
+        /// <summary>
+        /// I/O-bridge FB types that must also be stripped on the demonstrator
+        /// cleanup pass. PLC_RW_M262 (instance "M262IO") is re-emitted fresh
+        /// every run by M262SysdevEmitter.EnsureSystemFb, so leaving a stale
+        /// instance behind double-declares it on the sysres FBNetwork. Not in
+        /// UniversalCatTypes because it is not a CAT and is owned by the
+        /// device layer, but it still has to clear on regeneration.
+        /// </summary>
+        private static readonly HashSet<string> LegacyIoBridgeTypes = new(StringComparer.Ordinal)
+        {
+            "PLC_RW_M262"
+        };
+
         public class CleanupReport
         {
             public List<string> RemovedFbs { get; } = new();
@@ -1520,6 +1533,7 @@ namespace MapperUI.Services
                 var fbNs = fb.Attribute("Namespace")?.Value ?? string.Empty;
 
                 bool isUniversal = UniversalCatTypes.Contains(fbType) ||
+                    LegacyIoBridgeTypes.Contains(fbType) ||
                     (fbType == "plcStart" && fbNs == "SE.AppBase");
 
                 if (isUniversal)
