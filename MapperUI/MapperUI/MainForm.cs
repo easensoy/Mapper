@@ -673,8 +673,7 @@ namespace MapperUI
                 for (int i = wireCountBefore; i < report.Missing.Count; i++)
                 {
                     var line = report.Missing[i];
-                    if (line.StartsWith("[Wire]") || line.StartsWith("[Sysres") ||
-                        line.StartsWith("[Stage1]"))
+                    if (line.StartsWith("[Wire]") || line.StartsWith("[Sysres"))
                         AppendActivity(line);
                 }
 
