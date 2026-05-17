@@ -63,6 +63,7 @@
             this.btnProcessFB = new System.Windows.Forms.Button();
             this.btnTestStation1 = new System.Windows.Forms.Button();
             this.btnGenerateAll = new System.Windows.Forms.Button();
+            this.btnGenerateFullSystemSimulator = new System.Windows.Forms.Button();
             this.btnCleanDemonstrator = new System.Windows.Forms.Button();
             this.statusStrip = new System.Windows.Forms.StatusStrip();
             this.lblStatus = new System.Windows.Forms.ToolStripStatusLabel();
@@ -108,6 +109,11 @@
             this.lblLoadedFile = new System.Windows.Forms.Label();
             this.lblLoadedFile.Visible = false;
 
+            // QRM slide layout: scaled-up h=28 buttons, consistent Segoe UI 9pt Bold,
+            // single primary action (Generate Code) replaces the three numbered buttons.
+            // Restored post-QRM: original 6-button layout (Mapping Rules, Browse,
+            // 3 numbered Generate actions, Clean Demonstrator). Generate Code
+            // placeholder hidden.
             this.btnMappingRules.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
             this.btnMappingRules.Location = new System.Drawing.Point(668, 28);
             this.btnMappingRules.Size = new System.Drawing.Size(95, 25);
@@ -166,6 +172,19 @@
             this.btnGenerateAll.UseVisualStyleBackColor = false;
             this.btnGenerateAll.Click += new System.EventHandler(this.btnGenerateAll_Click);
 
+            this.btnGenerateFullSystemSimulator.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
+            this.btnGenerateFullSystemSimulator.BackColor = System.Drawing.Color.FromArgb(0, 120, 153);
+            this.btnGenerateFullSystemSimulator.Enabled = false;
+            this.btnGenerateFullSystemSimulator.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnGenerateFullSystemSimulator.FlatAppearance.BorderSize = 0;
+            this.btnGenerateFullSystemSimulator.Font = new System.Drawing.Font("Segoe UI", 8.5F, System.Drawing.FontStyle.Bold);
+            this.btnGenerateFullSystemSimulator.ForeColor = System.Drawing.Color.White;
+            this.btnGenerateFullSystemSimulator.Location = new System.Drawing.Point(1137, 56);
+            this.btnGenerateFullSystemSimulator.Size = new System.Drawing.Size(180, 25);
+            this.btnGenerateFullSystemSimulator.Text = "Test Station 1 Pusher-Simulator";
+            this.btnGenerateFullSystemSimulator.UseVisualStyleBackColor = false;
+            this.btnGenerateFullSystemSimulator.Click += new System.EventHandler(this.btnGenerateFullSystemSimulator_Click);
+
             this.btnCleanDemonstrator.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
             this.btnCleanDemonstrator.BackColor = System.Drawing.Color.FromArgb(64, 64, 64);
             this.btnCleanDemonstrator.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
@@ -178,6 +197,8 @@
             this.btnCleanDemonstrator.UseVisualStyleBackColor = false;
             this.btnCleanDemonstrator.Click += new System.EventHandler(this.btnCleanDemonstrator_Click);
 
+            // Generate Code placeholder hidden again post-QRM. Kept in code so
+            // the future "single primary action" UI is a one-line flip away.
             this.btnGenerateCode.Visible = false;
             this.btnGenerateCode.Click += new System.EventHandler(this.btnGenerateCode_Click);
 
@@ -355,6 +376,7 @@
             this.Controls.Add(this.btnProcessFB);
             this.Controls.Add(this.btnTestStation1);
             this.Controls.Add(this.btnGenerateAll);
+            this.Controls.Add(this.btnGenerateFullSystemSimulator);
             this.Controls.Add(this.btnCleanDemonstrator);
             this.Controls.Add(this.btnBrowse);
             this.Controls.Add(this.lblLoadedFile);
@@ -451,6 +473,7 @@
         private System.Windows.Forms.Button btnProcessFB;
         private System.Windows.Forms.Button btnTestStation1;
         private System.Windows.Forms.Button btnGenerateAll;
+        private System.Windows.Forms.Button btnGenerateFullSystemSimulator;
         private System.Windows.Forms.Button btnCleanDemonstrator;
         private System.Windows.Forms.Label lblLoadedFile;
         private System.Windows.Forms.StatusStrip statusStrip;
