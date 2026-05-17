@@ -20,6 +20,18 @@ namespace CodeGen.Configuration
         public string SysresPath { get; set; } = string.Empty;
         public string SyslayPath2 { get; set; } = string.Empty;
         public string SysresPath2 { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Simulator-target syslay/sysres paths, mirroring the Demonstrator
+        /// folder tree under C:\DemonstratorSim. Used only by the
+        /// "Test Station 1 Pusher-Simulator" button — the full unchanged
+        /// generation pipeline runs against these instead of SyslayPath2/
+        /// SysresPath2, then the sim .sysres Resource Type is flipped
+        /// EMB_RES_ECO → SIM_RES for EAE's software simulation runtime.
+        /// </summary>
+        public string SyslayPathSim { get; set; } = string.Empty;
+        public string SysresPathSim { get; set; } = string.Empty;
+
         public string IoBindingsPath { get; set; } = "Input/SMC_Rig_IO_Bindings.xlsx";
 
         /// <summary>
@@ -107,6 +119,8 @@ namespace CodeGen.Configuration
             SysresPath = @"C:\Station1\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000002\00000000-0000-0000-0000-000000000000.sysres",
             SyslayPath2 = @"C:\Demonstrator\Demonstator\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000001\00000000-0000-0000-0000-000000000000.syslay",
             SysresPath2 = @"C:\Demonstrator\Demonstator\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000002\00000000-0000-0000-0000-000000000000.sysres",
+            SyslayPathSim = @"C:\DemonstratorSim\Demonstator\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000001\00000000-0000-0000-0000-000000000000.syslay",
+            SysresPathSim = @"C:\DemonstratorSim\Demonstator\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000002\00000000-0000-0000-0000-000000000000.sysres",
             IoBindingsPath = @"Input\SMC_Rig_IO_Bindings.xlsx",
             M262HardwareConfigBaselinePath = string.Empty,
             M262TargetIp = "192.168.1.10",
