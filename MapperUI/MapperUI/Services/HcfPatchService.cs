@@ -112,7 +112,8 @@ namespace MapperUI.Services
                         try { File.Delete(stale); } catch { /* best-effort */ }
                     }
                 }
-                WriteHcfMerged(hcfPath, resourceId, bindings, fbIdByName, report);
+                var sensorNames = ReadSensorNames(sysresPath);
+                WriteHcfMerged(hcfPath, resourceId, bindings, fbIdByName, sensorNames, report);
 
                 report.Missing.Add($"[Hcf] wrote   ← {hcfPath}");
             }
@@ -319,16 +320,55 @@ namespace MapperUI.Services
         /// </summary>
         private static void WriteHcfMerged(string hcfPath, string resourceId,
             IoBindings? bindings, Dictionary<string, string> fbIdByName,
+            List<string> sensorNames,
             SystemInjector.BindingApplicationReport report)
         {
+            // Effective pin -> (component, port) map. Seed from the xlsx
+            // actuator PinAssignments, then auto-assign every Sensor_Bool_CAT
+            // instance's "Input" port to the next free DI channel. The xlsx
+            // has no sensor pin column, so without this sensors (e.g.
+            // PartInHopper.Input) never reach the .hcf and show unconnected
+            // in EAE's Symbolic Links. Deterministic: sensors fill the
+            // lowest-numbered free DI slots in name order.
+            var effective = new Dictionary<string, (string Comp, string Port)>(StringComparer.OrdinalIgnoreCase);
+            var usedDi = new HashSet<int>();
+            if (bindings != null)
+            {
+                foreach (var kv in bindings.PinAssignments)
+                {
+                    effective[kv.Key] = (kv.Value.ComponentName, kv.Value.Port);
+                    if (kv.Key.StartsWith("DI", StringComparison.OrdinalIgnoreCase) &&
+                        int.TryParse(kv.Key.Substring(2), out var di)) usedDi.Add(di);
+                }
+            }
+            var alreadyBoundSensors = new HashSet<string>(
+                effective.Values
+                    .Where(v => string.Equals(v.Port, "Input", StringComparison.OrdinalIgnoreCase))
+                    .Select(v => v.Comp), StringComparer.Ordinal);
+            int nextDi = 0;
+            foreach (var sensor in sensorNames)
+            {
+                if (alreadyBoundSensors.Contains(sensor)) continue;
+                if (!fbIdByName.ContainsKey(sensor)) continue;       // not on sysres → skip
+                while (nextDi < 16 && usedDi.Contains(nextDi)) nextDi++;
+                if (nextDi >= 16)
+                {
+                    report.Missing.Add($"[Hcf] no free DI channel for sensor '{sensor}.Input' — TM3DI16 full");
+                    break;
+                }
+                var pin = $"DI{nextDi:D2}";
+                effective[pin] = (sensor, "Input");
+                usedDi.Add(nextDi);
+                report.Missing.Add($"[Hcf] auto-bound {pin} = {sensor}.Input (sensor not in xlsx pin columns)");
+            }
+
             string Sym(string pin)
             {
-                if (bindings == null) return string.Empty;
-                if (!bindings.PinAssignments.TryGetValue(pin, out var pa)) return string.Empty;
-                if (!fbIdByName.TryGetValue(pa.ComponentName, out var compFbId))
+                if (!effective.TryGetValue(pin, out var pa)) return string.Empty;
+                if (!fbIdByName.TryGetValue(pa.Comp, out var compFbId))
                 {
                     report.Missing.Add(
-                        $"[Hcf] {pin} skipped: component '{pa.ComponentName}' not on sysres FBNetwork");
+                        $"[Hcf] {pin} skipped: component '{pa.Comp}' not on sysres FBNetwork");
                     return string.Empty;
                 }
                 var value = $"{resourceId}.{compFbId}.{pa.Port}";
@@ -708,6 +748,41 @@ namespace MapperUI.Services
             }
             catch { /* best-effort */ }
             return map;
+        }
+
+        /// <summary>
+        /// FB instance names on the sysres whose Type is a Sensor_Bool_CAT.
+        /// Sensors expose their physical pin as the <c>Input</c> port but the
+        /// IO-bindings xlsx only carries actuator pin columns
+        /// (pin_di_athome/atwork/outputToWork), so sensors never get a
+        /// PinAssignment and were left off the .hcf entirely — the
+        /// <c>{res}.PartInHopper.Input</c> symlink had no TM3 channel and
+        /// showed unconnected in EAE's Symbolic Links. WriteHcfMerged
+        /// auto-binds each of these to the next free DI channel.
+        /// </summary>
+        private static List<string> ReadSensorNames(string sysresPath)
+        {
+            var list = new List<string>();
+            try
+            {
+                if (!File.Exists(sysresPath)) return list;
+                var doc = XDocument.Load(sysresPath);
+                var root = doc.Root;
+                if (root == null) return list;
+                XNamespace ns = root.GetDefaultNamespace();
+                var fbNet = root.Element(ns + "FBNetwork");
+                if (fbNet == null) return list;
+                foreach (var fb in fbNet.Elements(ns + "FB"))
+                {
+                    var t = (string?)fb.Attribute("Type") ?? string.Empty;
+                    var n = (string?)fb.Attribute("Name") ?? string.Empty;
+                    if (!string.IsNullOrEmpty(n) &&
+                        t.StartsWith("Sensor_Bool_CAT", StringComparison.Ordinal))
+                        list.Add(n);
+                }
+            }
+            catch { /* best-effort */ }
+            return list;
         }
 
         /// <summary>Reads &lt;FB Name="..." /&gt; values from a syslay file's
