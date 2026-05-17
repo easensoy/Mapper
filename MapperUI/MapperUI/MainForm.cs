@@ -881,17 +881,31 @@ namespace MapperUI
                         new System.Xml.Linq.XAttribute("Namespace", "Main"));
                     if (forSysres)
                         fb.Add(new System.Xml.Linq.XAttribute("Mapping", syslayFbId));
-                    fb.Add(new System.Xml.Linq.XAttribute("x", forSysres ? "800" : "500"),
-                           new System.Xml.Linq.XAttribute("y", forSysres ? "6500" : "3000"));
+                    // Park clear of the application FBs (Feeder at 3800,5400
+                    // etc.) so it doesn't overlap on the canvas.
+                    fb.Add(new System.Xml.Linq.XAttribute("x", "500"),
+                           new System.Xml.Linq.XAttribute("y", "900"));
+                    // Use the EXACT 2-channel SRC variant the Feeder's own
+                    // Output FB uses (SYMLINKMULTIVARSRC_277E97BEC1451D2C ↔
+                    // I:=2;VALUE${I}:BOOL,BOOL). The type-name suffix is a
+                    // hash of the interface signature, so the params MUST
+                    // match the variant compiled in this project — a 1-ch
+                    // signature against this type name is unresolvable (red
+                    // X). Channel 1 publishes the hopper force; channel 2 is
+                    // parked on an unused symbol (no subscriber → inert).
                     fb.Add(new System.Xml.Linq.XElement(ns + "Attribute",
                         new System.Xml.Linq.XAttribute("Name", "Configuration.GenericFBType.InterfaceParams"),
-                        new System.Xml.Linq.XAttribute("Value", "Runtime.System#I:=1;VALUE${I}:BOOL")));
+                        new System.Xml.Linq.XAttribute("Value", "Runtime.System#I:=2;VALUE${I}:BOOL,BOOL")));
                     fb.Add(new System.Xml.Linq.XElement(ns + "Parameter",
                         new System.Xml.Linq.XAttribute("Name", "QI"), new System.Xml.Linq.XAttribute("Value", "TRUE")));
                     fb.Add(new System.Xml.Linq.XElement(ns + "Parameter",
                         new System.Xml.Linq.XAttribute("Name", "NAME1"), new System.Xml.Linq.XAttribute("Value", "'PartInHopper.Input'")));
                     fb.Add(new System.Xml.Linq.XElement(ns + "Parameter",
                         new System.Xml.Linq.XAttribute("Name", "VALUE1"), new System.Xml.Linq.XAttribute("Value", "TRUE")));
+                    fb.Add(new System.Xml.Linq.XElement(ns + "Parameter",
+                        new System.Xml.Linq.XAttribute("Name", "NAME2"), new System.Xml.Linq.XAttribute("Value", "'SimHopperForce.Spare'")));
+                    fb.Add(new System.Xml.Linq.XElement(ns + "Parameter",
+                        new System.Xml.Linq.XAttribute("Name", "VALUE2"), new System.Xml.Linq.XAttribute("Value", "FALSE")));
                     return fb;
                 }
 
