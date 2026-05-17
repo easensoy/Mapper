@@ -793,30 +793,29 @@ namespace MapperUI
                         AppendActivity(line);
                 }
 
-                // THE ONLY DIFFERENCE vs Button 2: flip the deployed M262
-                // .sysres Resource Type EMB_RES_ECO -> SIM_RES so EAE runs
-                // the application on the software simulator.
-                int flipped = FlipSimSysresResourceType(Cfg().SysresPath2);
-                if (flipped > 0)
-                    AppendActivity($"[Simulator] .sysres Resource Type EMB_RES_ECO -> SIM_RES ({flipped} element)");
-                else
-                    AppendActivity("[Simulator][Warn] No Resource element with Type=\"EMB_RES_ECO\" found to flip — sysres left as-is.");
-
+                // No .sysres Resource Type flip. EAE has no SIM_RES type
+                // (verified: ERR_NO_SUCH_TYPE on Runtime.Management.SIM_RES).
+                // The resource stays EMB_RES_ECO for BOTH hardware and
+                // simulation — EAE selects the software simulator via the
+                // Active Network Profile ("Local Test"), an operator choice
+                // in EAE, not a file change. So the generated artefacts are
+                // byte-identical to Button 2; "simulator mode" is purely the
+                // EAE-side profile the operator picks below.
                 TouchDfbprojToTriggerEaeReload();
 
                 AppendActivity($"Generated (Simulator): {path}");
+                AppendActivity("[Simulator] Resource stays EMB_RES_ECO — EAE has no SIM_RES type. " +
+                    "Simulator mode = the \"Local Test\" Active Network Profile, selected in EAE.");
                 AppendActivity("[Simulator] In EAE: Reload Solution, set Active Network Profile to \"Local Test\", Deploy. " +
                     "In Watch force Mode=1, CycleType=1, state_table[0].state=1; observe ProcessEngine CurrentStep / cmd_target_name / cmd_state / CMDREQ.");
-                AppendActivity("[Simulator][Note] SIM_RES is an UNVERIFIED assumption (no reference EAE sim export). " +
-                    "If EAE rejects on Deploy, send the error message and we'll adjust the Resource shape.");
                 lblStatus.Text = $"Ready (Simulator)  |  {path}  |  {report.Bound.Count} bound, {report.Missing.Count} unbound";
                 MessageBox.Show(
-                    $"Generated Test Station 1 into Demonstrator in SIMULATOR mode:\n{path}\n\n" +
+                    $"Generated Test Station 1 into Demonstrator (Simulator):\n{path}\n\n" +
                     $"{report.Bound.Count} bound, {report.Missing.Count} unbound.\n\n" +
+                    "Artefacts are identical to Button 2 — EAE has no SIM_RES resource type, " +
+                    "so simulator mode is the \"Local Test\" Active Network Profile you pick in EAE.\n\n" +
                     "In EAE: Reload Solution, set Active Network Profile to \"Local Test\", Deploy, " +
-                    "then in Watch force Mode=1, CycleType=1, state_table[0].state=1.\n\n" +
-                    "Re-run Button 2 (Test Station 1 Pusher) to return the project to hardware mode.\n\n" +
-                    "NOTE: SIM_RES is an unverified assumption — if EAE rejects on Deploy, share the error.",
+                    "then in Watch force Mode=1, CycleType=1, state_table[0].state=1.",
                     "Test Station 1 Pusher-Simulator", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
@@ -827,47 +826,6 @@ namespace MapperUI
             }
         }
 
-        /// <summary>
-        /// Load the deployed M262 .sysres, find the &lt;Resource&gt;
-        /// element, change its Type attribute from EMB_RES_ECO to SIM_RES,
-        /// save. Every other attribute (Namespace, ID, Name, position) and
-        /// the entire FBNetwork are left byte-for-byte untouched. Returns the
-        /// number of Resource elements flipped (0 or 1).
-        /// </summary>
-        static int FlipSimSysresResourceType(string simSysresPath)
-        {
-            // The configured sim path holds the pre-rename filename; EAE/
-            // Mapper may have written the actual file under a sibling name,
-            // so flip every .sysres in that folder (there is exactly one).
-            var dir = Path.GetDirectoryName(simSysresPath);
-            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return 0;
-
-            int flipped = 0;
-            foreach (var path in Directory.EnumerateFiles(dir, "*.sysres", SearchOption.TopDirectoryOnly))
-            {
-                try
-                {
-                    var doc = System.Xml.Linq.XDocument.Load(path, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                    var res = doc.Root;
-                    if (res == null || res.Name.LocalName != "Resource") continue;
-                    var typeAttr = res.Attribute("Type");
-                    if (typeAttr == null || typeAttr.Value != "EMB_RES_ECO") continue;
-                    typeAttr.Value = "SIM_RES";
-                    var settings = new System.Xml.XmlWriterSettings
-                    {
-                        OmitXmlDeclaration = false,
-                        Indent = true,
-                        Encoding = new System.Text.UTF8Encoding(false),
-                    };
-                    using (var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read))
-                    using (var w = System.Xml.XmlWriter.Create(fs, settings))
-                        doc.Save(w);
-                    flipped++;
-                }
-                catch { /* leave that file as-is on any parse/write error */ }
-            }
-            return flipped;
-        }
 
         async void btnCleanDemonstrator_Click(object sender, EventArgs e)
         {
