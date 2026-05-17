@@ -331,6 +331,7 @@ namespace MapperUI
             btnProcessFB.Enabled = true;
             btnTestStation1.Enabled = true;
             btnGenerateAll.Enabled = true;
+            btnGenerateFullSystemSimulator.Enabled = true;
             await LoadAndValidateAsync(dlg.FileName);
         }
 
@@ -738,6 +739,189 @@ namespace MapperUI
                 lblStatus.Text = "Ready";
                 ShowError(ex.Message);
             }
+        }
+
+        // ── Test Station 1 Pusher-Simulator (purely additive) ───────────────
+        // Runs the SAME unchanged generation pipeline as btnGenerateAll but
+        // against the simulator paths, then flips the sim .sysres Resource
+        // Type EMB_RES_ECO -> SIM_RES. btnGenerateAll_Click is async void
+        // (un-awaitable) so we can't call it and safely restore the cached
+        // config afterwards; instead we invoke the identical existing
+        // pipeline methods (none modified) under swapped paths and restore
+        // in finally. Zero changes to any existing code path.
+        async void btnGenerateFullSystemSimulator_Click(object sender, EventArgs e)
+        {
+            var cfg = Cfg();
+            var origSyslay2 = cfg.SyslayPath2;
+            var origSysres2 = cfg.SysresPath2;
+            try
+            {
+                if (string.IsNullOrEmpty(_loadedControlXmlPath) || !File.Exists(_loadedControlXmlPath))
+                { ShowError("Load a Control.xml first via Browse."); return; }
+
+                if (string.IsNullOrWhiteSpace(cfg.SyslayPathSim) || string.IsNullOrWhiteSpace(cfg.SysresPathSim))
+                {
+                    ShowError("SyslayPathSim / SysresPathSim not configured in mapper_config.json.");
+                    return;
+                }
+
+                // Ensure the DemonstratorSim project tree exists by mirroring
+                // the live Demonstrator project (the generation pipeline
+                // expects an existing EAE skeleton at the target — it cleans
+                // and rewrites existing .syslay/.sysres in place).
+                EnsureSimProjectTree(origSyslay2, cfg.SyslayPathSim);
+
+                // Swap the cached config to the sim target paths.
+                cfg.SyslayPath2 = cfg.SyslayPathSim;
+                cfg.SysresPath2 = cfg.SysresPathSim;
+
+                lblStatus.Text = "Generating (Simulator)...";
+                AppendActivity("[Simulator] Generating Full System into DemonstratorSim:");
+                AppendActivity($"[Simulator]   syslay -> {cfg.SyslayPath2}");
+                AppendActivity($"[Simulator]   sysres -> {cfg.SysresPath2}");
+
+                await DeployUniversalTemplatesAsync();
+
+                var injector = new SystemInjector();
+                var cleanup = await Task.Run(() => injector.PrepareDemonstratorForGeneration(Cfg()));
+                LogCleanup(cleanup);
+
+                var bindings = TryLoadBindings();
+                SystemInjector.BindingApplicationReport report = null!;
+                var path = await Task.Run(() =>
+                    injector.GenerateFullSystemSyslay(Cfg(), _loadedControlXmlPath, bindings, out report));
+                LogBindingsReport(report);
+                await FinalizeM262StackAsync();
+
+                int flipped = FlipSimSysresResourceType(cfg.SysresPath2);
+                if (flipped > 0)
+                    AppendActivity($"[Simulator] .sysres Resource Type EMB_RES_ECO -> SIM_RES ({flipped} element)");
+                else
+                    AppendActivity("[Simulator][Warn] No Resource element with Type=\"EMB_RES_ECO\" found to flip — sysres left as-is.");
+
+                TouchDfbprojToTriggerEaeReload();
+
+                AppendActivity($"[Simulator] Generated: {path}");
+                AppendActivity("[Simulator] NEXT STEPS:");
+                AppendActivity("[Simulator]   1. Open the DemonstratorSim project in EAE");
+                AppendActivity("[Simulator]   2. Set Active Network Profile to \"Local Test\"");
+                AppendActivity("[Simulator]   3. Click Deploy");
+                AppendActivity("[Simulator]   4. In Watch: force Mode=1, CycleType=1, state_table[0].state=1");
+                AppendActivity("[Simulator]   5. Observe ProcessEngine: CurrentStep, cmd_target_name, cmd_state, CMDREQ");
+                AppendActivity("[Simulator][Note] SIM_RES is an UNVERIFIED assumption (no reference EAE sim export). " +
+                    "If EAE rejects on Deploy, send the error message and we'll adjust the Resource shape.");
+                lblStatus.Text = $"Ready (Simulator)  |  {path}";
+                MessageBox.Show(
+                    $"Generated Full System into DemonstratorSim:\n{path}\n\n" +
+                    "Open the DemonstratorSim project in EAE, set Active Network Profile to " +
+                    "\"Local Test\", Deploy, then in Watch force Mode=1, CycleType=1, " +
+                    "state_table[0].state=1 and observe ProcessEngine CurrentStep / " +
+                    "cmd_target_name / cmd_state / CMDREQ.\n\n" +
+                    "NOTE: SIM_RES is an unverified assumption — if EAE rejects on Deploy, " +
+                    "share the error and we'll adjust.",
+                    "Test Station 1 Pusher-Simulator", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"[Simulator][Error] {ex}");
+                lblStatus.Text = "Ready";
+                ShowError(ex.Message);
+            }
+            finally
+            {
+                // Always restore the cached config so subsequent normal
+                // Button-2/Button-3 runs target the real Demonstrator.
+                cfg.SyslayPath2 = origSyslay2;
+                cfg.SysresPath2 = origSysres2;
+            }
+        }
+
+        /// <summary>
+        /// Mirror the live Demonstrator EAE project tree into DemonstratorSim
+        /// if the sim syslay does not yet exist. The generation pipeline
+        /// cleans+rewrites existing canvas files in place, so the target
+        /// needs the full EAE skeleton (.dfbproj, System tree, General/,
+        /// Topology/, etc.) present first. Idempotent — skips the copy once
+        /// the sim project exists.
+        /// </summary>
+        void EnsureSimProjectTree(string demoSyslayPath, string simSyslayPath)
+        {
+            if (File.Exists(simSyslayPath)) return;
+
+            // Walk up from the syslay to the EAE project root (the folder
+            // containing IEC61499/). demoSyslay = {root}\IEC61499\System\...
+            string? DeriveRoot(string syslay)
+            {
+                var dir = Path.GetDirectoryName(syslay);
+                while (dir != null)
+                {
+                    if (string.Equals(Path.GetFileName(dir), "IEC61499", StringComparison.OrdinalIgnoreCase))
+                        return Path.GetDirectoryName(dir);
+                    dir = Path.GetDirectoryName(dir);
+                }
+                return null;
+            }
+
+            var srcRoot = DeriveRoot(demoSyslayPath);
+            var dstRoot = DeriveRoot(simSyslayPath);
+            if (srcRoot == null || dstRoot == null || !Directory.Exists(srcRoot))
+            {
+                AppendActivity($"[Simulator][Warn] Could not derive project roots to mirror " +
+                    $"({srcRoot} -> {dstRoot}); ensure DemonstratorSim exists manually.");
+                return;
+            }
+
+            AppendActivity($"[Simulator] DemonstratorSim not found — mirroring {srcRoot} -> {dstRoot}");
+            foreach (var dir in Directory.GetDirectories(srcRoot, "*", SearchOption.AllDirectories))
+                Directory.CreateDirectory(dir.Replace(srcRoot, dstRoot));
+            foreach (var f in Directory.GetFiles(srcRoot, "*", SearchOption.AllDirectories))
+            {
+                var target = f.Replace(srcRoot, dstRoot);
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                File.Copy(f, target, overwrite: true);
+            }
+        }
+
+        /// <summary>
+        /// Load the just-written sim .sysres, find the &lt;Resource&gt;
+        /// element, change its Type attribute from EMB_RES_ECO to SIM_RES,
+        /// save. Every other attribute (Namespace, ID, Name, position) and
+        /// the entire FBNetwork are left byte-for-byte untouched. Returns the
+        /// number of Resource elements flipped (0 or 1).
+        /// </summary>
+        static int FlipSimSysresResourceType(string simSysresPath)
+        {
+            // The configured sim path holds the pre-rename filename; EAE/
+            // Mapper may have written the actual file under a sibling name,
+            // so flip every .sysres in that folder (there is exactly one).
+            var dir = Path.GetDirectoryName(simSysresPath);
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return 0;
+
+            int flipped = 0;
+            foreach (var path in Directory.EnumerateFiles(dir, "*.sysres", SearchOption.TopDirectoryOnly))
+            {
+                try
+                {
+                    var doc = System.Xml.Linq.XDocument.Load(path, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                    var res = doc.Root;
+                    if (res == null || res.Name.LocalName != "Resource") continue;
+                    var typeAttr = res.Attribute("Type");
+                    if (typeAttr == null || typeAttr.Value != "EMB_RES_ECO") continue;
+                    typeAttr.Value = "SIM_RES";
+                    var settings = new System.Xml.XmlWriterSettings
+                    {
+                        OmitXmlDeclaration = false,
+                        Indent = true,
+                        Encoding = new System.Text.UTF8Encoding(false),
+                    };
+                    using (var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read))
+                    using (var w = System.Xml.XmlWriter.Create(fs, settings))
+                        doc.Save(w);
+                    flipped++;
+                }
+                catch { /* leave that file as-is on any parse/write error */ }
+            }
+            return flipped;
         }
 
         async void btnCleanDemonstrator_Click(object sender, EventArgs e)
