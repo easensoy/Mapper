@@ -114,6 +114,7 @@ namespace MapperUI.Services
             DeployDataTypes(libPath, eaeProjectDir, result);
             PatchKnownArraySizeBugs(eaeProjectDir, result);
             PatchProcessFbsForRecipeAsInputVars(eaeProjectDir, result);
+            PatchSensorBoolCatDstQi(eaeProjectDir, result);
 
             GenerateCfgFiles(eaeProjectDir, result);
             RegisterInDfbproj(eaeProjectDir, result);
@@ -223,6 +224,84 @@ namespace MapperUI.Services
                 }
                 result.DataTypesDeployed.Add(name);
                 MapperLogger.Info($"[Deploy] DataType: {name}");
+            }
+        }
+
+        /// <summary>
+        /// Ensure the internal SYMLINKMULTIVARDST (FB2) inside the deployed
+        /// Sensor_Bool_CAT.fbt carries Parameter QI=TRUE. Without QI the DST
+        /// defaults QI=FALSE, which disables it as a live subscriber so every
+        /// publish to '$${PATH}Input' is silently dropped — the sensor never
+        /// registers state on the ring (runtime-confirmed root cause). The
+        /// template zip already ships QI=TRUE; this is an idempotent
+        /// deploy-time guard so a future zip re-swap that loses QI can't
+        /// silently reintroduce the bug. Adds the parameter only when the
+        /// SYMLINKMULTIVARDST FB lacks it; no-op once present. Touches only
+        /// Sensor_Bool_CAT.fbt — no event/ECC/NAME1 changes.
+        /// </summary>
+        static void PatchSensorBoolCatDstQi(string eaeProjectDir, DeployResult result)
+        {
+            // Sensor_Bool_CAT deploys flat-ish under IEC61499/Sensor_Bool_CAT/.
+            var fbt = Path.Combine(eaeProjectDir, "IEC61499", "Sensor_Bool_CAT", "Sensor_Bool_CAT.fbt");
+            if (!File.Exists(fbt))
+            {
+                fbt = Directory.EnumerateFiles(
+                        Path.Combine(eaeProjectDir, "IEC61499"),
+                        "Sensor_Bool_CAT.fbt", SearchOption.AllDirectories)
+                    .FirstOrDefault() ?? string.Empty;
+                if (string.IsNullOrEmpty(fbt)) return;
+            }
+
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+
+                var dst = root.Descendants(ns + "FB").FirstOrDefault(f =>
+                    ((string?)f.Attribute("Type") ?? string.Empty)
+                        .StartsWith("SYMLINKMULTIVARDST", StringComparison.Ordinal));
+                if (dst == null)
+                {
+                    result.Warnings.Add("Sensor_Bool_CAT.fbt: no SYMLINKMULTIVARDST FB found; QI guard skipped.");
+                    return;
+                }
+
+                bool hasQi = dst.Elements(ns + "Parameter").Any(p =>
+                    (string?)p.Attribute("Name") == "QI");
+                if (hasQi)
+                {
+                    // Already present (idempotent no-op) — but force the value
+                    // to TRUE in case a swap shipped QI=FALSE.
+                    foreach (var p in dst.Elements(ns + "Parameter")
+                                 .Where(p => (string?)p.Attribute("Name") == "QI"))
+                        p.SetAttributeValue("Value", "TRUE");
+                }
+                else
+                {
+                    // Insert QI=TRUE right after the NAME1 parameter so it
+                    // sits alongside it, matching the shipped template shape.
+                    var name1 = dst.Elements(ns + "Parameter")
+                        .FirstOrDefault(p => (string?)p.Attribute("Name") == "NAME1");
+                    var qi = new System.Xml.Linq.XElement(ns + "Parameter",
+                        new System.Xml.Linq.XAttribute("Name", "QI"),
+                        new System.Xml.Linq.XAttribute("Value", "TRUE"));
+                    if (name1 != null) name1.AddAfterSelf(qi);
+                    else dst.Add(qi);
+                }
+
+                doc.Save(fbt);
+                result.PatchesApplied.Add(
+                    $"Sensor_Bool_CAT: ensured {(string?)dst.Attribute("Name")} " +
+                    $"({(string?)dst.Attribute("Type")}) QI=TRUE");
+                MapperLogger.Info(
+                    "[Deploy] Sensor_Bool_CAT.fbt: SYMLINKMULTIVARDST QI=TRUE ensured " +
+                    "(live subscriber enabled — publishes no longer dropped)");
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"Sensor_Bool_CAT.fbt QI guard failed: {ex.Message}");
             }
         }
 
