@@ -805,7 +805,11 @@ namespace MapperUI
                 // syslay + sysres only, simulator button only.
                 int simFb = InjectSimHopperForce(path, Cfg());
                 if (simFb > 0)
+                {
                     AppendActivity("Simulator hopper forced TRUE via SimHopperForce SYMLINKMULTIVARSRC");
+                    AppendActivity("[Simulator][InitSeq] FB1.INITO -> SimHopperForce.INIT -> .REQ -> .CNF -> Area.INIT " +
+                        "(SimHopperForce sequenced BEFORE the application init chain so PartInHopper reads TRUE on its one-shot INIT)");
+                }
                 else
                     AppendActivity("[Simulator][Warn] SimHopperForce not injected (already present or canvas not resolvable).");
 
@@ -939,21 +943,51 @@ namespace MapperUI
                     return fb;
                 }
 
+                // Sequence SimHopperForce FULLY before the application init
+                // chain so the M262_RES.PartInHopper.Input symbol already
+                // holds TRUE by the time PartInHopper does its one-shot read
+                // on INIT. The shared M262SysresWireEmitter already wrote
+                // FB1.INITO -> Area.INIT; here (sim-only post-process) we
+                // re-route it: FB1.INITO -> SimHopperForce.INIT ->
+                // SimHopperForce.REQ -> SimHopperForce.CNF -> Area.INIT.
+                // Idempotent: stale/prior-approach wires are removed first,
+                // each target wire added only if absent. Hardware path never
+                // calls this method, so its FB1.INITO -> Area.INIT stays.
                 void AddEventConns(System.Xml.Linq.XElement net)
                 {
                     var ec = net.Element(ns + "EventConnections");
                     if (ec == null) { ec = new System.Xml.Linq.XElement(ns + "EventConnections"); net.Add(ec); }
-                    bool Has(string d) => ec.Elements(ns + "Connection").Any(c =>
-                        (string?)c.Attribute("Source") == "Area.INITO" &&
+
+                    void Remove(string s, string d)
+                    {
+                        foreach (var c in ec.Elements(ns + "Connection").Where(c =>
+                            (string?)c.Attribute("Source") == s &&
+                            (string?)c.Attribute("Destination") == d).ToList())
+                            c.Remove();
+                    }
+
+                    bool Has(string s, string d) => ec.Elements(ns + "Connection").Any(c =>
+                        (string?)c.Attribute("Source") == s &&
                         (string?)c.Attribute("Destination") == d);
-                    if (!Has("SimHopperForce.INIT"))
-                        ec.Add(new System.Xml.Linq.XElement(ns + "Connection",
-                            new System.Xml.Linq.XAttribute("Source", "Area.INITO"),
-                            new System.Xml.Linq.XAttribute("Destination", "SimHopperForce.INIT")));
-                    if (!Has("SimHopperForce.REQ"))
-                        ec.Add(new System.Xml.Linq.XElement(ns + "Connection",
-                            new System.Xml.Linq.XAttribute("Source", "Area.INITO"),
-                            new System.Xml.Linq.XAttribute("Destination", "SimHopperForce.REQ")));
+
+                    void Add(string s, string d)
+                    {
+                        if (!Has(s, d))
+                            ec.Add(new System.Xml.Linq.XElement(ns + "Connection",
+                                new System.Xml.Linq.XAttribute("Source", s),
+                                new System.Xml.Linq.XAttribute("Destination", d)));
+                    }
+
+                    // Drop the prior-approach Area-gated wires + the shared
+                    // emitter's direct FB1.INITO -> Area.INIT bridge.
+                    Remove("Area.INITO", "SimHopperForce.INIT");
+                    Remove("Area.INITO", "SimHopperForce.REQ");
+                    Remove("FB1.INITO", "Area.INIT");
+
+                    // SimHopperForce runs to completion, THEN the app chain.
+                    Add("FB1.INITO", "SimHopperForce.INIT");
+                    Add("SimHopperForce.INITO", "SimHopperForce.REQ");
+                    Add("SimHopperForce.CNF", "Area.INIT");
                 }
 
                 void Save(System.Xml.Linq.XDocument doc, string p)
