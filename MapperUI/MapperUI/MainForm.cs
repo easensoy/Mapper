@@ -800,6 +800,7 @@ namespace MapperUI
                     AppendActivity("[Simulator][Warn] No Resource element with Type=\"EMB_RES_ECO\" found to flip — sysres left as-is.");
 
                 TouchDfbprojToTriggerEaeReload();
+                OpenSimSolutionInEae(cfg.SyslayPath2);
 
                 AppendActivity($"[Simulator] Generated: {path}");
                 AppendActivity("[Simulator] NEXT STEPS:");
@@ -879,6 +880,54 @@ namespace MapperUI
                 var target = f.Replace(srcRoot, dstRoot);
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                 File.Copy(f, target, overwrite: true);
+            }
+        }
+
+        /// <summary>
+        /// Open the DemonstratorSim EAE solution so the freshly-generated
+        /// artefacts actually reach EAE. The dfbproj touch only reloads a
+        /// solution EAE already has open — EAE has the real Demonstrator
+        /// open, not DemonstratorSim, so the touch alone is a no-op for the
+        /// sim project. Walk up from the sim syslay to the project root
+        /// (folder containing IEC61499/), find the .sln, and shell-open it
+        /// (EAE is the registered .sln handler — same as double-clicking).
+        /// Best-effort: logs and continues on any failure.
+        /// </summary>
+        void OpenSimSolutionInEae(string simSyslayPath)
+        {
+            try
+            {
+                var dir = Path.GetDirectoryName(simSyslayPath);
+                string? root = null;
+                while (dir != null)
+                {
+                    if (string.Equals(Path.GetFileName(dir), "IEC61499", StringComparison.OrdinalIgnoreCase))
+                    { root = Path.GetDirectoryName(dir); break; }
+                    dir = Path.GetDirectoryName(dir);
+                }
+                if (root == null || !Directory.Exists(root))
+                {
+                    AppendActivity("[Simulator][EAE] Could not derive sim project root to open the .sln.");
+                    return;
+                }
+                var sln = Directory.EnumerateFiles(root, "*.sln", SearchOption.TopDirectoryOnly)
+                    .FirstOrDefault();
+                if (sln == null)
+                {
+                    AppendActivity($"[Simulator][EAE] No .sln found under {root}; open the DemonstratorSim solution manually in EAE.");
+                    return;
+                }
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = sln,
+                    UseShellExecute = true
+                });
+                AppendActivity($"[Simulator][EAE] Opening sim solution in EAE: {sln}");
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"[Simulator][EAE] Failed to open sim .sln ({ex.GetType().Name}: {ex.Message}); " +
+                    "open the DemonstratorSim solution manually in EAE.");
             }
         }
 
