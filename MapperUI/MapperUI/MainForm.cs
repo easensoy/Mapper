@@ -872,6 +872,36 @@ namespace MapperUI
                 var syslayFbId = Hex16("SimHopperForce|syslay|" + syslayPath);
                 var sysresFbId = Hex16("SimHopperForce|sysres|" + syslayPath);
 
+                // Resolve the resource Name from the deployed sysres root.
+                // PartInHopper's internal SYMLINKMULTIVARDST subscribes to
+                // '$${PATH}Input'; $${PATH} expands relative to the FB
+                // instance scope under the resource, so for a top-level
+                // PartInHopper the absolute symbol is
+                // '{ResourceName}.PartInHopper.Input' (this project's
+                // symbolic-link namespace is resource-qualified — cf. the
+                // Symbolic Links view showing M262_RES.Feeder.athome). A
+                // bare 'PartInHopper.Input' (no resource prefix) does NOT
+                // match what the subscriber resolves, so the publish is lost.
+                string resourceName = "M262_RES";
+                try
+                {
+                    var rdir0 = Path.GetDirectoryName(cfg.SysresPath2);
+                    if (!string.IsNullOrEmpty(rdir0) && Directory.Exists(rdir0))
+                    {
+                        var rf0 = Directory.EnumerateFiles(rdir0, "*.sysres",
+                            SearchOption.TopDirectoryOnly).FirstOrDefault();
+                        if (rf0 != null)
+                        {
+                            var rn = (string?)System.Xml.Linq.XDocument.Load(rf0)
+                                .Root?.Attribute("Name");
+                            if (!string.IsNullOrWhiteSpace(rn)) resourceName = rn!;
+                        }
+                    }
+                }
+                catch { /* fall back to M262_RES */ }
+                var hopperSymbol = $"'{resourceName}.PartInHopper.Input'";
+                var expectedExpansion = $"'{resourceName}.PartInHopper.Input'"; // $${PATH}Input @ PartInHopper
+
                 System.Xml.Linq.XElement BuildFb(bool forSysres)
                 {
                     var fb = new System.Xml.Linq.XElement(ns + "FB",
@@ -899,7 +929,7 @@ namespace MapperUI
                     fb.Add(new System.Xml.Linq.XElement(ns + "Parameter",
                         new System.Xml.Linq.XAttribute("Name", "QI"), new System.Xml.Linq.XAttribute("Value", "TRUE")));
                     fb.Add(new System.Xml.Linq.XElement(ns + "Parameter",
-                        new System.Xml.Linq.XAttribute("Name", "NAME1"), new System.Xml.Linq.XAttribute("Value", "'PartInHopper.Input'")));
+                        new System.Xml.Linq.XAttribute("Name", "NAME1"), new System.Xml.Linq.XAttribute("Value", hopperSymbol)));
                     fb.Add(new System.Xml.Linq.XElement(ns + "Parameter",
                         new System.Xml.Linq.XAttribute("Name", "VALUE1"), new System.Xml.Linq.XAttribute("Value", "TRUE")));
                     fb.Add(new System.Xml.Linq.XElement(ns + "Parameter",
@@ -980,6 +1010,18 @@ namespace MapperUI
                         }
                     }
                 }
+
+                // Verification: SimHopperForce.NAME1 (publisher) must equal
+                // the absolute symbol PartInHopper's internal
+                // SYMLINKMULTIVARDST '$${PATH}Input' resolves to. Surface
+                // both so any future scope/prefix drift is obvious in the
+                // Activity panel on the very next deploy.
+                bool symbolMatch = string.Equals(hopperSymbol, expectedExpansion, StringComparison.Ordinal);
+                AppendActivity(
+                    $"[Simulator][SymCheck] SimHopperForce.NAME1={hopperSymbol} ; " +
+                    $"PartInHopper '$${{PATH}}Input' expands to {expectedExpansion} ; " +
+                    (symbolMatch ? "MATCH" : "MISMATCH — hopper force will NOT reach PartInHopper, fix resource prefix"));
+
                 return 1;
             }
             catch (Exception ex)
