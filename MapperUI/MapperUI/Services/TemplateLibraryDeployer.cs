@@ -290,6 +290,7 @@ namespace MapperUI.Services
                 {
                     PatchProcessRuntimeEngine(enginePath, result);
                     PatchProcessRuntimeEccDeadEnd(enginePath, result);
+                    PatchProcessRuntimeStartBypass(enginePath, result);
                 }
                 else
                     result.Warnings.Add("ProcessRuntime_Generic_v1.fbt not deployed; recipe-as-input patch skipped.");
@@ -373,6 +374,82 @@ namespace MapperUI.Services
             doc.Save(fbtPath);
             result.PatchesApplied.Add("ProcessRuntime_Generic_v1: added END->END self-transition (WRN_ECC_DEAD_END fix)");
             MapperLogger.Info("[Deploy] Patched ProcessRuntime_Generic_v1.fbt END dead-end (added END->END Condition=1)");
+        }
+
+        /// <summary>
+        /// Remove the START -> IDLE1 bypass transition whose Condition is
+        /// "Mode = 1 AND CycleType &lt;&gt; 0". Mode/CycleType both default
+        /// to InitialValue=1, so that guard is TRUE at power-up and the ECC
+        /// walks START -> IDLE1 directly, skipping the INIT state — so
+        /// initializeinit never runs and the WITH-sampled recipe arrays are
+        /// never sampled before LoadStep executes (Audit 1 root cause).
+        /// After this patch the only outgoing transition from START is
+        /// START -> INIT (Condition "INIT"). Idempotent: matches the
+        /// Destination + Condition rather than a fixed element, and is a
+        /// no-op once the transition is gone. Runs outside
+        /// PatchProcessRuntimeEngine's recipe-array idempotency gate so it
+        /// applies even to already-recipe-patched FBTs.
+        /// </summary>
+        static void PatchProcessRuntimeStartBypass(string fbtPath, DeployResult result)
+        {
+            var doc = System.Xml.Linq.XDocument.Load(fbtPath, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+            var root = doc.Root!;
+            System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+
+            var ecc = root.Descendants(ns + "ECC").FirstOrDefault();
+            if (ecc == null)
+            {
+                result.Warnings.Add("ProcessRuntime_Generic_v1.fbt: <ECC> not found; START-bypass patch skipped.");
+                return;
+            }
+
+            // Normalise whitespace/entity differences: EAE writes the XML
+            // text as Condition="Mode = 1 AND CycleType &lt;&gt; 0"; once
+            // parsed the attribute value is the literal
+            //   Mode = 1 AND CycleType <> 0
+            // Match on Source=START, Destination=IDLE1 and a Condition that,
+            // with all spaces stripped, contains "CycleType<>0" — robust to
+            // spacing variants.
+            var bypass = ecc.Elements(ns + "ECTransition").Where(t =>
+                (string?)t.Attribute("Source") == "START" &&
+                (string?)t.Attribute("Destination") == "IDLE1" &&
+                ((string?)t.Attribute("Condition") ?? string.Empty)
+                    .Replace(" ", string.Empty)
+                    .Contains("CycleType<>0", StringComparison.Ordinal)).ToList();
+
+            int startOutgoing = ecc.Elements(ns + "ECTransition")
+                .Count(t => (string?)t.Attribute("Source") == "START");
+
+            if (bypass.Count == 0)
+            {
+                // Already removed (idempotent no-op). Still emit the
+                // verification line so a regression is visible at deploy.
+                result.PatchesApplied.Add(
+                    $"ProcessRuntime_Generic_v1: START-bypass already absent; " +
+                    $"START has {startOutgoing} outgoing transition(s)");
+                MapperLogger.Info(
+                    $"[Deploy] ProcessRuntime_Generic_v1.fbt: START-bypass not present; " +
+                    $"START outgoing transitions = {startOutgoing}");
+                return;
+            }
+
+            foreach (var t in bypass) t.Remove();
+            doc.Save(fbtPath);
+
+            int startOutgoingAfter = ecc.Elements(ns + "ECTransition")
+                .Count(t => (string?)t.Attribute("Source") == "START");
+            var remaining = ecc.Elements(ns + "ECTransition")
+                .Where(t => (string?)t.Attribute("Source") == "START")
+                .Select(t => $"START->{(string?)t.Attribute("Destination")} [{(string?)t.Attribute("Condition")}]")
+                .ToList();
+
+            result.PatchesApplied.Add(
+                $"ProcessRuntime_Generic_v1: removed {bypass.Count} START->IDLE1 bypass " +
+                $"transition(s); START now has {startOutgoingAfter} outgoing: " +
+                string.Join(" ; ", remaining));
+            MapperLogger.Info(
+                $"[Deploy] ProcessRuntime_Generic_v1.fbt: removed START->IDLE1 'Mode=1 AND CycleType<>0' " +
+                $"bypass; START outgoing transitions now = {startOutgoingAfter} ({string.Join(" ; ", remaining)})");
         }
 
         static void PatchProcessRuntimeEngine(string fbtPath, DeployResult result)
