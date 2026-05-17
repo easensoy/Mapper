@@ -741,44 +741,25 @@ namespace MapperUI
             }
         }
 
-        // ── Test Station 1 Pusher-Simulator (purely additive) ───────────────
-        // Runs the SAME unchanged generation pipeline as btnGenerateAll but
-        // against the simulator paths, then flips the sim .sysres Resource
-        // Type EMB_RES_ECO -> SIM_RES. btnGenerateAll_Click is async void
-        // (un-awaitable) so we can't call it and safely restore the cached
-        // config afterwards; instead we invoke the identical existing
-        // pipeline methods (none modified) under swapped paths and restore
-        // in finally. Zero changes to any existing code path.
+        // ── Test Station 1 Pusher-Simulator ─────────────────────────────────
+        // Identical to btnTestStation1_Click (Button 2): SAME Demonstrator
+        // project, SAME artefacts, SAME pipeline. The ONLY difference is one
+        // post-step — flip the deployed .sysres Resource Type
+        // EMB_RES_ECO -> SIM_RES so EAE runs it on the software simulator
+        // instead of the M262 hardware runtime. No separate DemonstratorSim
+        // folder, no path swap, no .sln launching. Re-run Button 2 to return
+        // the project to hardware mode.
         async void btnGenerateFullSystemSimulator_Click(object sender, EventArgs e)
         {
-            var cfg = Cfg();
-            var origSyslay2 = cfg.SyslayPath2;
-            var origSysres2 = cfg.SysresPath2;
             try
             {
                 if (string.IsNullOrEmpty(_loadedControlXmlPath) || !File.Exists(_loadedControlXmlPath))
                 { ShowError("Load a Control.xml first via Browse."); return; }
-
-                if (string.IsNullOrWhiteSpace(cfg.SyslayPathSim) || string.IsNullOrWhiteSpace(cfg.SysresPathSim))
-                {
-                    ShowError("SyslayPathSim / SysresPathSim not configured in mapper_config.json.");
-                    return;
-                }
-
-                // Ensure the DemonstratorSim project tree exists by mirroring
-                // the live Demonstrator project (the generation pipeline
-                // expects an existing EAE skeleton at the target — it cleans
-                // and rewrites existing .syslay/.sysres in place).
-                EnsureSimProjectTree(origSyslay2, cfg.SyslayPathSim);
-
-                // Swap the cached config to the sim target paths.
-                cfg.SyslayPath2 = cfg.SyslayPathSim;
-                cfg.SysresPath2 = cfg.SysresPathSim;
+                if (!TryResolveDemonstratorPath(out var syslayPath)) return;
+                if (!EnsureM262SysdevExistsOrAbort()) return;
 
                 lblStatus.Text = "Generating (Simulator)...";
-                AppendActivity("[Simulator] Generating Full System into DemonstratorSim:");
-                AppendActivity($"[Simulator]   syslay -> {cfg.SyslayPath2}");
-                AppendActivity($"[Simulator]   sysres -> {cfg.SysresPath2}");
+                AppendActivity($"[Simulator] Generating Test Station 1 (Pusher) into Demonstrator at {syslayPath} — SIMULATOR mode...");
 
                 await DeployUniversalTemplatesAsync();
 
@@ -789,37 +770,53 @@ namespace MapperUI
                 var bindings = TryLoadBindings();
                 SystemInjector.BindingApplicationReport report = null!;
                 var path = await Task.Run(() =>
-                    injector.GenerateFullSystemSyslay(Cfg(), _loadedControlXmlPath, bindings, out report));
+                    injector.GenerateStation1TestSyslay(Cfg(), _loadedControlXmlPath, bindings, out report));
                 LogBindingsReport(report);
                 await FinalizeM262StackAsync();
 
-                int flipped = FlipSimSysresResourceType(cfg.SysresPath2);
+                int wireCountBefore = report.Missing.Count;
+                await Task.Run(() => MapperUI.Services.M262SysresWireEmitter.Emit(Cfg(), report));
+                for (int i = wireCountBefore; i < report.Missing.Count; i++)
+                {
+                    var line = report.Missing[i];
+                    if (line.StartsWith("[Wire]") || line.StartsWith("[Sysres"))
+                        AppendActivity(line);
+                }
+
+                int hcfCountBefore = report.Missing.Count;
+                await Task.Run(() => MapperUI.Services.HcfPatchService.PatchDeployed(
+                    Cfg(), path, bindings, report));
+                for (int i = hcfCountBefore; i < report.Missing.Count; i++)
+                {
+                    var line = report.Missing[i];
+                    if (line.StartsWith("[Hcf]"))
+                        AppendActivity(line);
+                }
+
+                // THE ONLY DIFFERENCE vs Button 2: flip the deployed M262
+                // .sysres Resource Type EMB_RES_ECO -> SIM_RES so EAE runs
+                // the application on the software simulator.
+                int flipped = FlipSimSysresResourceType(Cfg().SysresPath2);
                 if (flipped > 0)
                     AppendActivity($"[Simulator] .sysres Resource Type EMB_RES_ECO -> SIM_RES ({flipped} element)");
                 else
                     AppendActivity("[Simulator][Warn] No Resource element with Type=\"EMB_RES_ECO\" found to flip — sysres left as-is.");
 
                 TouchDfbprojToTriggerEaeReload();
-                OpenSimSolutionInEae(cfg.SyslayPath2);
 
-                AppendActivity($"[Simulator] Generated: {path}");
-                AppendActivity("[Simulator] NEXT STEPS:");
-                AppendActivity("[Simulator]   1. Open the DemonstratorSim project in EAE");
-                AppendActivity("[Simulator]   2. Set Active Network Profile to \"Local Test\"");
-                AppendActivity("[Simulator]   3. Click Deploy");
-                AppendActivity("[Simulator]   4. In Watch: force Mode=1, CycleType=1, state_table[0].state=1");
-                AppendActivity("[Simulator]   5. Observe ProcessEngine: CurrentStep, cmd_target_name, cmd_state, CMDREQ");
+                AppendActivity($"Generated (Simulator): {path}");
+                AppendActivity("[Simulator] In EAE: Reload Solution, set Active Network Profile to \"Local Test\", Deploy. " +
+                    "In Watch force Mode=1, CycleType=1, state_table[0].state=1; observe ProcessEngine CurrentStep / cmd_target_name / cmd_state / CMDREQ.");
                 AppendActivity("[Simulator][Note] SIM_RES is an UNVERIFIED assumption (no reference EAE sim export). " +
                     "If EAE rejects on Deploy, send the error message and we'll adjust the Resource shape.");
-                lblStatus.Text = $"Ready (Simulator)  |  {path}";
+                lblStatus.Text = $"Ready (Simulator)  |  {path}  |  {report.Bound.Count} bound, {report.Missing.Count} unbound";
                 MessageBox.Show(
-                    $"Generated Full System into DemonstratorSim:\n{path}\n\n" +
-                    "Open the DemonstratorSim project in EAE, set Active Network Profile to " +
-                    "\"Local Test\", Deploy, then in Watch force Mode=1, CycleType=1, " +
-                    "state_table[0].state=1 and observe ProcessEngine CurrentStep / " +
-                    "cmd_target_name / cmd_state / CMDREQ.\n\n" +
-                    "NOTE: SIM_RES is an unverified assumption — if EAE rejects on Deploy, " +
-                    "share the error and we'll adjust.",
+                    $"Generated Test Station 1 into Demonstrator in SIMULATOR mode:\n{path}\n\n" +
+                    $"{report.Bound.Count} bound, {report.Missing.Count} unbound.\n\n" +
+                    "In EAE: Reload Solution, set Active Network Profile to \"Local Test\", Deploy, " +
+                    "then in Watch force Mode=1, CycleType=1, state_table[0].state=1.\n\n" +
+                    "Re-run Button 2 (Test Station 1 Pusher) to return the project to hardware mode.\n\n" +
+                    "NOTE: SIM_RES is an unverified assumption — if EAE rejects on Deploy, share the error.",
                     "Test Station 1 Pusher-Simulator", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
@@ -828,111 +825,10 @@ namespace MapperUI
                 lblStatus.Text = "Ready";
                 ShowError(ex.Message);
             }
-            finally
-            {
-                // Always restore the cached config so subsequent normal
-                // Button-2/Button-3 runs target the real Demonstrator.
-                cfg.SyslayPath2 = origSyslay2;
-                cfg.SysresPath2 = origSysres2;
-            }
         }
 
         /// <summary>
-        /// Mirror the live Demonstrator EAE project tree into DemonstratorSim
-        /// if the sim syslay does not yet exist. The generation pipeline
-        /// cleans+rewrites existing canvas files in place, so the target
-        /// needs the full EAE skeleton (.dfbproj, System tree, General/,
-        /// Topology/, etc.) present first. Idempotent — skips the copy once
-        /// the sim project exists.
-        /// </summary>
-        void EnsureSimProjectTree(string demoSyslayPath, string simSyslayPath)
-        {
-            if (File.Exists(simSyslayPath)) return;
-
-            // Walk up from the syslay to the EAE project root (the folder
-            // containing IEC61499/). demoSyslay = {root}\IEC61499\System\...
-            string? DeriveRoot(string syslay)
-            {
-                var dir = Path.GetDirectoryName(syslay);
-                while (dir != null)
-                {
-                    if (string.Equals(Path.GetFileName(dir), "IEC61499", StringComparison.OrdinalIgnoreCase))
-                        return Path.GetDirectoryName(dir);
-                    dir = Path.GetDirectoryName(dir);
-                }
-                return null;
-            }
-
-            var srcRoot = DeriveRoot(demoSyslayPath);
-            var dstRoot = DeriveRoot(simSyslayPath);
-            if (srcRoot == null || dstRoot == null || !Directory.Exists(srcRoot))
-            {
-                AppendActivity($"[Simulator][Warn] Could not derive project roots to mirror " +
-                    $"({srcRoot} -> {dstRoot}); ensure DemonstratorSim exists manually.");
-                return;
-            }
-
-            AppendActivity($"[Simulator] DemonstratorSim not found — mirroring {srcRoot} -> {dstRoot}");
-            foreach (var dir in Directory.GetDirectories(srcRoot, "*", SearchOption.AllDirectories))
-                Directory.CreateDirectory(dir.Replace(srcRoot, dstRoot));
-            foreach (var f in Directory.GetFiles(srcRoot, "*", SearchOption.AllDirectories))
-            {
-                var target = f.Replace(srcRoot, dstRoot);
-                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-                File.Copy(f, target, overwrite: true);
-            }
-        }
-
-        /// <summary>
-        /// Open the DemonstratorSim EAE solution so the freshly-generated
-        /// artefacts actually reach EAE. The dfbproj touch only reloads a
-        /// solution EAE already has open — EAE has the real Demonstrator
-        /// open, not DemonstratorSim, so the touch alone is a no-op for the
-        /// sim project. Walk up from the sim syslay to the project root
-        /// (folder containing IEC61499/), find the .sln, and shell-open it
-        /// (EAE is the registered .sln handler — same as double-clicking).
-        /// Best-effort: logs and continues on any failure.
-        /// </summary>
-        void OpenSimSolutionInEae(string simSyslayPath)
-        {
-            try
-            {
-                var dir = Path.GetDirectoryName(simSyslayPath);
-                string? root = null;
-                while (dir != null)
-                {
-                    if (string.Equals(Path.GetFileName(dir), "IEC61499", StringComparison.OrdinalIgnoreCase))
-                    { root = Path.GetDirectoryName(dir); break; }
-                    dir = Path.GetDirectoryName(dir);
-                }
-                if (root == null || !Directory.Exists(root))
-                {
-                    AppendActivity("[Simulator][EAE] Could not derive sim project root to open the .sln.");
-                    return;
-                }
-                var sln = Directory.EnumerateFiles(root, "*.sln", SearchOption.TopDirectoryOnly)
-                    .FirstOrDefault();
-                if (sln == null)
-                {
-                    AppendActivity($"[Simulator][EAE] No .sln found under {root}; open the DemonstratorSim solution manually in EAE.");
-                    return;
-                }
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = sln,
-                    UseShellExecute = true
-                });
-                AppendActivity($"[Simulator][EAE] Opening sim solution in EAE: {sln}");
-            }
-            catch (Exception ex)
-            {
-                AppendActivity($"[Simulator][EAE] Failed to open sim .sln ({ex.GetType().Name}: {ex.Message}); " +
-                    "open the DemonstratorSim solution manually in EAE.");
-            }
-        }
-
-        /// <summary>
-        /// Load the just-written sim .sysres, find the &lt;Resource&gt;
+        /// Load the deployed M262 .sysres, find the &lt;Resource&gt;
         /// element, change its Type attribute from EMB_RES_ECO to SIM_RES,
         /// save. Every other attribute (Namespace, ID, Name, position) and
         /// the entire FBNetwork are left byte-for-byte untouched. Returns the
