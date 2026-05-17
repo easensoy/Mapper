@@ -1023,15 +1023,20 @@ namespace MapperUI
                 var sdoc = System.Xml.Linq.XDocument.Load(syslayPath, System.Xml.Linq.LoadOptions.PreserveWhitespace);
                 var snet = sdoc.Root?.Element(ns + "SubAppNetwork") ?? sdoc.Root?.Element(ns + "FBNetwork");
                 if (snet == null) return 0;
-                bool already = snet.Elements(ns + "FB")
-                    .Any(f => (string?)f.Attribute("Name") == "SimHopperForce");
-                if (already) return 0;
-                // Insert FB before the first connection block to keep FBs grouped.
-                var firstConn = snet.Element(ns + "EventConnections")
-                    ?? snet.Element(ns + "DataConnections")
-                    ?? snet.Element(ns + "AdapterConnections");
-                if (firstConn != null) firstConn.AddBeforeSelf(BuildFb(false));
-                else snet.Add(BuildFb(false));
+                // Add the FB only if absent, but ALWAYS (idempotently)
+                // ensure the wires — SimHopperForce is not in CleanFile's
+                // removal lists so the FB can persist across regens; gating
+                // the wire emission behind "FB absent" left the FB present
+                // but unwired. AddEventConns removes stale wires and adds the
+                // two chain-end wires only if missing, so re-running is safe.
+                if (!snet.Elements(ns + "FB").Any(f => (string?)f.Attribute("Name") == "SimHopperForce"))
+                {
+                    var firstConn = snet.Element(ns + "EventConnections")
+                        ?? snet.Element(ns + "DataConnections")
+                        ?? snet.Element(ns + "AdapterConnections");
+                    if (firstConn != null) firstConn.AddBeforeSelf(BuildFb(false));
+                    else snet.Add(BuildFb(false));
+                }
                 AddEventConns(snet);
                 Save(sdoc, syslayPath);
 
@@ -1046,14 +1051,20 @@ namespace MapperUI
                     {
                         var rdoc = System.Xml.Linq.XDocument.Load(sysresFile, System.Xml.Linq.LoadOptions.PreserveWhitespace);
                         var rnet = rdoc.Root?.Element(ns + "FBNetwork");
-                        if (rnet != null &&
-                            !rnet.Elements(ns + "FB").Any(f => (string?)f.Attribute("Name") == "SimHopperForce"))
+                        if (rnet != null)
                         {
-                            var firstR = rnet.Element(ns + "EventConnections")
-                                ?? rnet.Element(ns + "DataConnections")
-                                ?? rnet.Element(ns + "AdapterConnections");
-                            if (firstR != null) firstR.AddBeforeSelf(BuildFb(true));
-                            else rnet.Add(BuildFb(true));
+                            // FB only if absent; wires ALWAYS (idempotent).
+                            // The previous "skip everything if FB present"
+                            // gate is exactly why the sysres ended up with
+                            // the FB but zero SimHopperForce EventConnections.
+                            if (!rnet.Elements(ns + "FB").Any(f => (string?)f.Attribute("Name") == "SimHopperForce"))
+                            {
+                                var firstR = rnet.Element(ns + "EventConnections")
+                                    ?? rnet.Element(ns + "DataConnections")
+                                    ?? rnet.Element(ns + "AdapterConnections");
+                                if (firstR != null) firstR.AddBeforeSelf(BuildFb(true));
+                                else rnet.Add(BuildFb(true));
+                            }
                             AddEventConns(rnet);
                             Save(rdoc, sysresFile);
                         }
