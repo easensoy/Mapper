@@ -179,8 +179,8 @@
             this.btnGenerateFullSystemSimulator.FlatAppearance.BorderSize = 0;
             this.btnGenerateFullSystemSimulator.Font = new System.Drawing.Font("Segoe UI", 8.5F, System.Drawing.FontStyle.Bold);
             this.btnGenerateFullSystemSimulator.ForeColor = System.Drawing.Color.White;
-            this.btnGenerateFullSystemSimulator.Location = new System.Drawing.Point(1137, 56);
-            this.btnGenerateFullSystemSimulator.Size = new System.Drawing.Size(180, 25);
+            this.btnGenerateFullSystemSimulator.Location = new System.Drawing.Point(1409, 28);
+            this.btnGenerateFullSystemSimulator.Size = new System.Drawing.Size(210, 25);
             this.btnGenerateFullSystemSimulator.Text = "Test Station 1 Pusher-Simulator";
             this.btnGenerateFullSystemSimulator.UseVisualStyleBackColor = false;
             this.btnGenerateFullSystemSimulator.Click += new System.EventHandler(this.btnGenerateFullSystemSimulator_Click);
@@ -365,7 +365,7 @@
 
             this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 15F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(1400, 792);
+            this.ClientSize = new System.Drawing.Size(1632, 792);
             this.Controls.Add(this.grpMappingInfo);
             this.Controls.Add(this.grpValidation);
             this.Controls.Add(this.btnGenerateCode);
