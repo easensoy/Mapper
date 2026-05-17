@@ -807,9 +807,9 @@ namespace MapperUI
                 if (simFb > 0)
                 {
                     AppendActivity("Simulator hopper forced TRUE via SimHopperForce SYMLINKMULTIVARSRC");
-                    AppendActivity("[Simulator][InitSeq] FB1.INITO -> Area.INIT -> Station1 -> PartInHopper -> Feeder -> " +
-                        "Feed_Station.INITO -> SimHopperForce.INIT -> SimHopperForce.REQ (CNF terminates) " +
-                        "— SimHopperForce fires at the END of the init chain, AFTER PartInHopper's FB2 has registered its subscription");
+                    AppendActivity("[Simulator][InitSeq] FB1.INITO -> SimHopperForce.INIT -> SimHopperForce.REQ -> " +
+                        "SimHopperForce.CNF -> Area.INIT -> Station1 -> PartInHopper -> Feeder -> Feed_Station " +
+                        "— SimHopperForce publishes BEFORE the app chain so FB2 reads the symbol TRUE on its INIT");
                 }
                 else
                     AppendActivity("[Simulator][Warn] SimHopperForce not injected (already present or canvas not resolvable).");
@@ -986,23 +986,20 @@ namespace MapperUI
                                 new System.Xml.Linq.XAttribute("Destination", d)));
                     }
 
-                    // Clean every prior-approach SimHopperForce wire:
-                    //  - very old: Area.INITO -> SimHopperForce.INIT/REQ
-                    //  - last round: FB1.INITO -> SimHopperForce.INIT
-                    //  - last round: SimHopperForce.CNF -> Area.INIT
-                    // Do NOT remove FB1.INITO -> Area.INIT — that is the
-                    // shared M262SysresWireEmitter wire and must survive
-                    // (this restores it for the sim path).
-                    Remove("Area.INITO", "SimHopperForce.INIT");
-                    Remove("Area.INITO", "SimHopperForce.REQ");
-                    Remove("FB1.INITO", "SimHopperForce.INIT");
-                    Remove("SimHopperForce.CNF", "Area.INIT");
+                    // Sequence SimHopperForce BEFORE the application init
+                    // chain so the symbol holds TRUE before FB2 reads it on
+                    // INIT. SimHopperForce.CNF (a valid SYMLINKMULTIVARSRC
+                    // event output) gates Area.INIT, replacing the shared
+                    // emitter's FB1.INITO -> Area.INIT. Clean stale/wrong-
+                    // position wires first, then add. Idempotent.
+                    Remove("Area.INITO", "SimHopperForce.INIT");      // very old
+                    Remove("Area.INITO", "SimHopperForce.REQ");       // very old
+                    Remove("Feed_Station.INITO", "SimHopperForce.INIT"); // chain-end (prev round)
+                    Remove("FB1.INITO", "Area.INIT");                 // shared emitter bridge -> replaced by SimHopperForce.CNF
 
-                    // SimHopperForce fires only AFTER the full app init
-                    // chain (…Feeder.INITO->Feed_Station.INIT already wired
-                    // by M262SysresWireEmitter). Terminator: CNF unwired.
-                    Add("Feed_Station.INITO", "SimHopperForce.INIT");
+                    Add("FB1.INITO", "SimHopperForce.INIT");
                     Add("SimHopperForce.INITO", "SimHopperForce.REQ");
+                    Add("SimHopperForce.CNF", "Area.INIT");
                 }
 
                 void Save(System.Xml.Linq.XDocument doc, string p)
