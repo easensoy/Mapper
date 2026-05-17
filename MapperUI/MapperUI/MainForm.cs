@@ -795,27 +795,41 @@ namespace MapperUI
 
                 // No .sysres Resource Type flip. EAE has no SIM_RES type
                 // (verified: ERR_NO_SUCH_TYPE on Runtime.Management.SIM_RES).
-                // The resource stays EMB_RES_ECO for BOTH hardware and
-                // simulation — EAE selects the software simulator via the
-                // Active Network Profile ("Local Test"), an operator choice
-                // in EAE, not a file change. So the generated artefacts are
-                // byte-identical to Button 2; "simulator mode" is purely the
-                // EAE-side profile the operator picks below.
+                // Resource stays EMB_RES_ECO; simulator mode = the
+                // "Local Test" Active Network Profile picked in EAE.
+                //
+                // Simulator-only post-process: inject a SimHopperForce
+                // SYMLINKMULTIVARSRC that publishes 'PartInHopper.Input' =
+                // TRUE on Area.INITO, so the hopper sensor reads TRUE at
+                // startup and the recipe ring advances without physical I/O.
+                // syslay + sysres only, simulator button only.
+                int simFb = InjectSimHopperForce(path, Cfg());
+                if (simFb > 0)
+                    AppendActivity("Simulator hopper forced TRUE via SimHopperForce SYMLINKMULTIVARSRC");
+                else
+                    AppendActivity("[Simulator][Warn] SimHopperForce not injected (already present or canvas not resolvable).");
+
                 TouchDfbprojToTriggerEaeReload();
 
                 AppendActivity($"Generated (Simulator): {path}");
                 AppendActivity("[Simulator] Resource stays EMB_RES_ECO — EAE has no SIM_RES type. " +
                     "Simulator mode = the \"Local Test\" Active Network Profile, selected in EAE.");
                 AppendActivity("[Simulator] In EAE: Reload Solution, set Active Network Profile to \"Local Test\", Deploy. " +
-                    "In Watch force Mode=1, CycleType=1, state_table[0].state=1; observe ProcessEngine CurrentStep / cmd_target_name / cmd_state / CMDREQ.");
+                    "After deploy, login and Watch Feed_Station.ProcessEngine CurrentStep / cmd_target_name / cmd_state / CMDREQ. " +
+                    "Hopper is forced TRUE on INIT → PartInHopper fires CNF → StateHandling publishes state=1 id=0 on the ring " +
+                    "→ ProcessHandler writes state_table[0]=1 → ProcessEngine leaves WAIT_STEP and fires CMDREQ " +
+                    "cmd_target_name='feeder' cmd_state=1, proving the recipe arrays end to end.");
                 lblStatus.Text = $"Ready (Simulator)  |  {path}  |  {report.Bound.Count} bound, {report.Missing.Count} unbound";
                 MessageBox.Show(
                     $"Generated Test Station 1 into Demonstrator (Simulator):\n{path}\n\n" +
                     $"{report.Bound.Count} bound, {report.Missing.Count} unbound.\n\n" +
-                    "Artefacts are identical to Button 2 — EAE has no SIM_RES resource type, " +
-                    "so simulator mode is the \"Local Test\" Active Network Profile you pick in EAE.\n\n" +
-                    "In EAE: Reload Solution, set Active Network Profile to \"Local Test\", Deploy, " +
-                    "then in Watch force Mode=1, CycleType=1, state_table[0].state=1.",
+                    "Hopper input is forced TRUE at startup via the injected SimHopperForce " +
+                    "SYMLINKMULTIVARSRC (syslay + sysres). Resource stays EMB_RES_ECO — " +
+                    "simulator mode is the \"Local Test\" Active Network Profile you pick in EAE.\n\n" +
+                    "In EAE: Reload Solution, set Active Network Profile to \"Local Test\", Deploy. " +
+                    "After deploy, login and Watch Feed_Station.ProcessEngine CurrentStep / " +
+                    "cmd_target_name / cmd_state / CMDREQ — expect cmd_target_name='feeder', " +
+                    "cmd_state=1 once the ring advances.",
                     "Test Station 1 Pusher-Simulator", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
@@ -823,6 +837,141 @@ namespace MapperUI
                 AppendActivity($"[Simulator][Error] {ex}");
                 lblStatus.Text = "Ready";
                 ShowError(ex.Message);
+            }
+        }
+
+        // SYMLINKMULTIVARSRC type used by Five_State_Actuator_CAT's Output FB.
+        const string SimSymlinkSrcType = "SYMLINKMULTIVARSRC_277E97BEC1451D2C";
+
+        /// <summary>
+        /// Simulator-only: inject one <c>SimHopperForce</c>
+        /// SYMLINKMULTIVARSRC into the syslay SubAppNetwork and mirror it
+        /// into the deployed sysres FBNetwork. It publishes
+        /// <c>'PartInHopper.Input' = TRUE</c> once on <c>Area.INITO</c>
+        /// (INIT + REQ) and holds it — no E_DELAY/E_CYCLE needed. So the
+        /// hopper sensor reads TRUE at startup and the recipe ring advances
+        /// without physical I/O. Idempotent (skips if SimHopperForce already
+        /// present). Returns 1 if injected, 0 if skipped/unresolvable.
+        /// syslay + sysres only — hardware path untouched.
+        /// </summary>
+        int InjectSimHopperForce(string syslayPath, MapperConfig cfg)
+        {
+            try
+            {
+                System.Xml.Linq.XNamespace ns = "https://www.se.com/LibraryElements";
+
+                // Deterministic 16-hex IDs (stable across re-runs).
+                static string Hex16(string seed)
+                {
+                    using var sha = System.Security.Cryptography.SHA1.Create();
+                    var b = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(seed));
+                    var sb = new System.Text.StringBuilder(16);
+                    for (int i = 0; i < 8; i++) sb.Append(b[i].ToString("X2"));
+                    return sb.ToString();
+                }
+                var syslayFbId = Hex16("SimHopperForce|syslay|" + syslayPath);
+                var sysresFbId = Hex16("SimHopperForce|sysres|" + syslayPath);
+
+                System.Xml.Linq.XElement BuildFb(bool forSysres)
+                {
+                    var fb = new System.Xml.Linq.XElement(ns + "FB",
+                        new System.Xml.Linq.XAttribute("ID", forSysres ? sysresFbId : syslayFbId),
+                        new System.Xml.Linq.XAttribute("Name", "SimHopperForce"),
+                        new System.Xml.Linq.XAttribute("Type", SimSymlinkSrcType),
+                        new System.Xml.Linq.XAttribute("Namespace", "Main"));
+                    if (forSysres)
+                        fb.Add(new System.Xml.Linq.XAttribute("Mapping", syslayFbId));
+                    fb.Add(new System.Xml.Linq.XAttribute("x", forSysres ? "800" : "500"),
+                           new System.Xml.Linq.XAttribute("y", forSysres ? "6500" : "3000"));
+                    fb.Add(new System.Xml.Linq.XElement(ns + "Attribute",
+                        new System.Xml.Linq.XAttribute("Name", "Configuration.GenericFBType.InterfaceParams"),
+                        new System.Xml.Linq.XAttribute("Value", "Runtime.System#I:=1;VALUE${I}:BOOL")));
+                    fb.Add(new System.Xml.Linq.XElement(ns + "Parameter",
+                        new System.Xml.Linq.XAttribute("Name", "QI"), new System.Xml.Linq.XAttribute("Value", "TRUE")));
+                    fb.Add(new System.Xml.Linq.XElement(ns + "Parameter",
+                        new System.Xml.Linq.XAttribute("Name", "NAME1"), new System.Xml.Linq.XAttribute("Value", "'PartInHopper.Input'")));
+                    fb.Add(new System.Xml.Linq.XElement(ns + "Parameter",
+                        new System.Xml.Linq.XAttribute("Name", "VALUE1"), new System.Xml.Linq.XAttribute("Value", "TRUE")));
+                    return fb;
+                }
+
+                void AddEventConns(System.Xml.Linq.XElement net)
+                {
+                    var ec = net.Element(ns + "EventConnections");
+                    if (ec == null) { ec = new System.Xml.Linq.XElement(ns + "EventConnections"); net.Add(ec); }
+                    bool Has(string d) => ec.Elements(ns + "Connection").Any(c =>
+                        (string?)c.Attribute("Source") == "Area.INITO" &&
+                        (string?)c.Attribute("Destination") == d);
+                    if (!Has("SimHopperForce.INIT"))
+                        ec.Add(new System.Xml.Linq.XElement(ns + "Connection",
+                            new System.Xml.Linq.XAttribute("Source", "Area.INITO"),
+                            new System.Xml.Linq.XAttribute("Destination", "SimHopperForce.INIT")));
+                    if (!Has("SimHopperForce.REQ"))
+                        ec.Add(new System.Xml.Linq.XElement(ns + "Connection",
+                            new System.Xml.Linq.XAttribute("Source", "Area.INITO"),
+                            new System.Xml.Linq.XAttribute("Destination", "SimHopperForce.REQ")));
+                }
+
+                void Save(System.Xml.Linq.XDocument doc, string p)
+                {
+                    var settings = new System.Xml.XmlWriterSettings
+                    {
+                        OmitXmlDeclaration = false,
+                        Indent = true,
+                        Encoding = new System.Text.UTF8Encoding(false),
+                    };
+                    using var fs = new FileStream(p, FileMode.Create, FileAccess.Write, FileShare.Read);
+                    using var w = System.Xml.XmlWriter.Create(fs, settings);
+                    doc.Save(w);
+                }
+
+                // ── syslay ──────────────────────────────────────────────
+                if (string.IsNullOrEmpty(syslayPath) || !File.Exists(syslayPath)) return 0;
+                var sdoc = System.Xml.Linq.XDocument.Load(syslayPath, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var snet = sdoc.Root?.Element(ns + "SubAppNetwork") ?? sdoc.Root?.Element(ns + "FBNetwork");
+                if (snet == null) return 0;
+                bool already = snet.Elements(ns + "FB")
+                    .Any(f => (string?)f.Attribute("Name") == "SimHopperForce");
+                if (already) return 0;
+                // Insert FB before the first connection block to keep FBs grouped.
+                var firstConn = snet.Element(ns + "EventConnections")
+                    ?? snet.Element(ns + "DataConnections")
+                    ?? snet.Element(ns + "AdapterConnections");
+                if (firstConn != null) firstConn.AddBeforeSelf(BuildFb(false));
+                else snet.Add(BuildFb(false));
+                AddEventConns(snet);
+                Save(sdoc, syslayPath);
+
+                // ── sysres (the actual deployed file, EAE may have renamed) ─
+                var sysresDir = Path.GetDirectoryName(cfg.SysresPath2);
+                if (!string.IsNullOrEmpty(sysresDir) && Directory.Exists(sysresDir))
+                {
+                    var sysresFile = Directory
+                        .EnumerateFiles(sysresDir, "*.sysres", SearchOption.TopDirectoryOnly)
+                        .FirstOrDefault();
+                    if (sysresFile != null)
+                    {
+                        var rdoc = System.Xml.Linq.XDocument.Load(sysresFile, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                        var rnet = rdoc.Root?.Element(ns + "FBNetwork");
+                        if (rnet != null &&
+                            !rnet.Elements(ns + "FB").Any(f => (string?)f.Attribute("Name") == "SimHopperForce"))
+                        {
+                            var firstR = rnet.Element(ns + "EventConnections")
+                                ?? rnet.Element(ns + "DataConnections")
+                                ?? rnet.Element(ns + "AdapterConnections");
+                            if (firstR != null) firstR.AddBeforeSelf(BuildFb(true));
+                            else rnet.Add(BuildFb(true));
+                            AddEventConns(rnet);
+                            Save(rdoc, sysresFile);
+                        }
+                    }
+                }
+                return 1;
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"[Simulator][Warn] SimHopperForce inject failed: {ex.GetType().Name}: {ex.Message}");
+                return 0;
             }
         }
 
