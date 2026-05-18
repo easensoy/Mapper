@@ -300,28 +300,32 @@ namespace MapperUI.Services
         // emitted here). Every other entry overrides whatever x/y the
         // upstream mirror code generated; previous coordinates are NOT
         // preserved.
-        // Coordinates scaled to EAE's actual FB-body width (~1500 units) so
-        // adjacent FBs don't overlap. Pitch is ~2000 units horizontal,
-        // ~800-1000 units vertical. Matches the proportions of Alex's
-        // baseline SMC_Rig_Expo sysres canvas (FBs at x=3760/9760, etc.).
+        // Tight 2-3 column grid, ordered by the init/data flow so wires are
+        // short and the canvas reads top-to-bottom without the big empty
+        // voids the old scattered spread (x reached 10000) produced.
+        // Horizontal pitch 2000 clears EAE's widest composite body (~1500-
+        // 1800 incl. pin labels) with ≥200 margin; vertical pitch 1300
+        // clears FB height + pin-label stack (~900-1100) with ≥200 margin.
+        // No overlap. Applied verbatim every Button-2 / sim run so Mapper
+        // always emits this compact layout.
         private static readonly Dictionary<string, (int X, int Y)> CanonicalLayout = new(StringComparer.Ordinal)
         {
-            // Runtime row (y=400)
-            { "FB2",          (800,  400) },   // plcStart
-            { "FB1",          (3000, 400) },   // DPAC_FULLINIT
-            // HMI row (y=1600)
-            { "Area_HMI",     (3000, 1600) },
-            { "Station1_HMI", (5800, 1600) },
-            // Control row (y=2700)
-            { "Area",         (3000, 2700) },
-            { "Station1",     (5800, 2700) },
-            { "Area_Term",    (8800, 2700) },
-            // Process + sensor row (y=4000)
-            { "Feed_Station", (7000, 4000) },
-            { "PartInHopper", (4500, 4000) },
-            // Component + terminator row (y=5400)
-            { "Feeder",       (3800, 5400) },
-            { "Stn1_Term",    (10000, 5400) },
+            // Runtime bootstrap (row y=200)
+            { "FB2",          (200,  200) },   // plcStart
+            { "FB1",          (2200, 200) },   // DPAC_FULLINIT
+            // HMI (row y=1500)
+            { "Area_HMI",     (200,  1500) },
+            { "Station1_HMI", (2200, 1500) },
+            // Structural (row y=2800)
+            { "Area",         (200,  2800) },
+            { "Station1",     (2200, 2800) },
+            { "Area_Term",    (4200, 2800) },
+            // Process + sensor (row y=4100)
+            { "PartInHopper", (200,  4100) },
+            { "Feed_Station", (2200, 4100) },
+            // Components + terminator (row y=5400)
+            { "Feeder",       (200,  5400) },
+            { "Stn1_Term",    (2200, 5400) },
         };
 
         /// <summary>
