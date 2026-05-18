@@ -116,6 +116,7 @@ namespace MapperUI.Services
             PatchProcessFbsForRecipeAsInputVars(eaeProjectDir, result);
             PatchSensorBoolCatDstQi(eaeProjectDir, result);
             PatchFiveStateActuatorCatQi(eaeProjectDir, result);
+            PatchFiveStateActuatorModeInitialValue(eaeProjectDir, result);
 
             GenerateCfgFiles(eaeProjectDir, result);
             RegisterInDfbproj(eaeProjectDir, result);
@@ -388,6 +389,67 @@ namespace MapperUI.Services
             catch (Exception ex)
             {
                 result.Warnings.Add($"Five_State_Actuator_CAT.fbt QI guard failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Same Mode=0-by-default class of bug as ProcessRuntime_Generic_v1's
+        /// Mode/CycleType (fixed via InitialValue=1). The FiveStateActuator
+        /// basic FB's "mode" InputVar has no InitialValue, so it powers up 0.
+        /// Every AtHomeInit/AtWork exit ECTransition requires mode = 1/2/3
+        /// (auto/cycle/setup); no mode_event fires at boot, so with mode=0
+        /// the actuator ECC is stuck in AtHomeInit forever (rig-confirmed).
+        /// Force the mode InputVar's InitialValue=1 so every actuator
+        /// instance powers up in auto mode. Idempotent deploy-time guard
+        /// (insert the attribute if absent, set to 1 if present). Runs every
+        /// deploy so a future zip re-swap losing it is auto-fixed.
+        /// FiveStateActuator basic FB only — no CAT/ECC/recipe changes.
+        /// </summary>
+        static void PatchFiveStateActuatorModeInitialValue(string eaeProjectDir, DeployResult result)
+        {
+            var fbt = Path.Combine(eaeProjectDir, "IEC61499", "FiveStateActuator.fbt");
+            if (!File.Exists(fbt))
+            {
+                fbt = Directory.EnumerateFiles(
+                        Path.Combine(eaeProjectDir, "IEC61499"),
+                        "FiveStateActuator.fbt", SearchOption.AllDirectories)
+                    .FirstOrDefault() ?? string.Empty;
+                if (string.IsNullOrEmpty(fbt)) return;
+            }
+
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+
+                // The "mode" VarDeclaration inside <InputVars>.
+                var inputVars = root.Descendants(ns + "InputVars").FirstOrDefault();
+                var modeVar = inputVars?
+                    .Elements(ns + "VarDeclaration")
+                    .FirstOrDefault(v => (string?)v.Attribute("Name") == "mode");
+                if (modeVar == null)
+                {
+                    result.Warnings.Add(
+                        "FiveStateActuator.fbt: no 'mode' InputVar found; Mode-default guard skipped.");
+                    return;
+                }
+
+                var iv = (string?)modeVar.Attribute("InitialValue");
+                if (iv == "1") return; // already correct — idempotent no-op
+                modeVar.SetAttributeValue("InitialValue", "1");
+                doc.Save(fbt);
+
+                result.PatchesApplied.Add(
+                    "FiveStateActuator: forced mode InputVar InitialValue=1 (powers up in auto mode)");
+                MapperLogger.Info(
+                    "[Deploy] FiveStateActuator.fbt: mode InputVar InitialValue=1 " +
+                    "(actuator ECC no longer stuck in AtHomeInit at boot)");
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"FiveStateActuator.fbt Mode-default guard failed: {ex.Message}");
             }
         }
 
