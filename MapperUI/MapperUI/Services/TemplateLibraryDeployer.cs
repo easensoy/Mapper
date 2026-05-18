@@ -115,6 +115,7 @@ namespace MapperUI.Services
             PatchKnownArraySizeBugs(eaeProjectDir, result);
             PatchProcessFbsForRecipeAsInputVars(eaeProjectDir, result);
             PatchSensorBoolCatDstQi(eaeProjectDir, result);
+            PatchFiveStateActuatorCatQi(eaeProjectDir, result);
 
             GenerateCfgFiles(eaeProjectDir, result);
             RegisterInDfbproj(eaeProjectDir, result);
@@ -302,6 +303,91 @@ namespace MapperUI.Services
             catch (Exception ex)
             {
                 result.Warnings.Add($"Sensor_Bool_CAT.fbt QI guard failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Same QI=FALSE-by-default bug as Sensor_Bool_CAT, in
+        /// Five_State_Actuator_CAT. Its internal SYMLINKMULTIVARDST
+        /// (Name "Inputs", subscribes $${PATH}athome/atwork) and
+        /// SYMLINKMULTIVARSRC (Name "Output", publishes
+        /// $${PATH}OutputToHome/OutputToWork) both default QI=FALSE — the
+        /// DST rejects every TM3DI16 publish so the actuator never sees its
+        /// sensors, and the SRC never writes TM3DQ16 so the solenoid stays
+        /// cold even when the ECC commands it (rig-confirmed). Force QI=TRUE
+        /// on BOTH: insert after NAME1 if absent, flip FALSE→TRUE if present.
+        /// Idempotent deploy-time guard against a future zip re-swap losing
+        /// QI. Runs on hardware AND sim paths. Five_State_Actuator_CAT only —
+        /// no event/ECC/NAME1 changes; Sensor_Bool_CAT untouched here.
+        /// </summary>
+        static void PatchFiveStateActuatorCatQi(string eaeProjectDir, DeployResult result)
+        {
+            var fbt = Path.Combine(eaeProjectDir, "IEC61499",
+                "Five_State_Actuator_CAT", "Five_State_Actuator_CAT.fbt");
+            if (!File.Exists(fbt))
+            {
+                fbt = Directory.EnumerateFiles(
+                        Path.Combine(eaeProjectDir, "IEC61499"),
+                        "Five_State_Actuator_CAT.fbt", SearchOption.AllDirectories)
+                    .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
+                    ?? string.Empty;
+                if (string.IsNullOrEmpty(fbt)) return;
+            }
+
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+
+                var targets = root.Descendants(ns + "FB").Where(f =>
+                {
+                    var t = (string?)f.Attribute("Type") ?? string.Empty;
+                    return t.StartsWith("SYMLINKMULTIVARDST", StringComparison.Ordinal)
+                        || t.StartsWith("SYMLINKMULTIVARSRC", StringComparison.Ordinal);
+                }).ToList();
+
+                if (targets.Count == 0)
+                {
+                    result.Warnings.Add(
+                        "Five_State_Actuator_CAT.fbt: no SYMLINKMULTIVARDST/SRC FB found; QI guard skipped.");
+                    return;
+                }
+
+                foreach (var fb in targets)
+                {
+                    bool hasQi = fb.Elements(ns + "Parameter").Any(p =>
+                        (string?)p.Attribute("Name") == "QI");
+                    if (hasQi)
+                    {
+                        foreach (var p in fb.Elements(ns + "Parameter")
+                                     .Where(p => (string?)p.Attribute("Name") == "QI"))
+                            p.SetAttributeValue("Value", "TRUE");
+                    }
+                    else
+                    {
+                        var name1 = fb.Elements(ns + "Parameter")
+                            .FirstOrDefault(p => (string?)p.Attribute("Name") == "NAME1");
+                        var qi = new System.Xml.Linq.XElement(ns + "Parameter",
+                            new System.Xml.Linq.XAttribute("Name", "QI"),
+                            new System.Xml.Linq.XAttribute("Value", "TRUE"));
+                        if (name1 != null) name1.AddAfterSelf(qi);
+                        else fb.Add(qi);
+                    }
+                    result.PatchesApplied.Add(
+                        $"Five_State_Actuator_CAT: ensured {(string?)fb.Attribute("Name")} " +
+                        $"({(string?)fb.Attribute("Type")}) QI=TRUE");
+                }
+
+                doc.Save(fbt);
+                MapperLogger.Info(
+                    $"[Deploy] Five_State_Actuator_CAT.fbt: QI=TRUE ensured on " +
+                    $"{targets.Count} SYMLINKMULTIVAR FB(s) (DST subscriber + SRC publisher enabled)");
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"Five_State_Actuator_CAT.fbt QI guard failed: {ex.Message}");
             }
         }
 
