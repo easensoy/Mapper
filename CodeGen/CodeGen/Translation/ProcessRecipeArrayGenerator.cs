@@ -214,6 +214,86 @@ namespace CodeGen.Translation
                 return arrays;
             }
 
+            // 4b. AUTO-RETRACT (safety). Every actuator commanded to a
+            //     transient work state (CmdState=1) MUST be commanded home
+            //     (CmdState=3) before the cycle ends. Yesterday's recipe
+            //     advanced checker (cmd=1) but never retracted it — checker
+            //     stayed atwork forever and the rig needed its air supply
+            //     killed to recover. Walk the emitted CMD rows; any actuator
+            //     advanced but never retracted gets an explicit retract CMD +
+            //     wait-athome pair appended BEFORE the final END, in REVERSE
+            //     order of advance (LIFO: last advanced retracts first).
+            //
+            //     Index math: at this point arrays.Count == finalEndIndex, so
+            //     every existing NextStep that meant "go to END" already ==
+            //     finalEndIndex == the index of the FIRST retract row we
+            //     append — those paths now flow into the retract chain for
+            //     free. Each retract WAIT is then chained to the next retract
+            //     CMD, and the LAST retract WAIT to the (new) END index.
+            {
+                var actuatorNameToId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                foreach (var a in stationContents.Actuators)
+                    if (!string.IsNullOrEmpty(a.ComponentID) &&
+                        scopedRegistry.TryGetValue(a.ComponentID.Trim(), out var aid))
+                        actuatorNameToId[(a.Name ?? string.Empty).Trim().ToLowerInvariant()] = aid;
+
+                var advancedOrder = new List<string>();
+                var advanced = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var retracted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < arrays.StepType.Count; i++)
+                {
+                    if (arrays.StepType[i] != 1) continue;             // CMD rows only
+                    var tgt = (arrays.CmdTargetName[i] ?? string.Empty).Trim();
+                    if (tgt.Length == 0) continue;
+                    if (arrays.CmdStateArr[i] == 1)                    // toWork
+                    {
+                        if (advanced.Add(tgt)) advancedOrder.Add(tgt);
+                    }
+                    else if (arrays.CmdStateArr[i] == 3)               // toHome
+                    {
+                        retracted.Add(tgt);
+                    }
+                }
+
+                var stranded = advancedOrder.Where(a => !retracted.Contains(a)).ToList();
+                stranded.Reverse();                                   // LIFO
+
+                if (stranded.Count > 0)
+                {
+                    int firstRetractRow = arrays.StepType.Count;      // == finalEndIndex
+                    foreach (var act in stranded)
+                    {
+                        actuatorNameToId.TryGetValue(act, out var actId);
+                        int waitRow = arrays.StepType.Count + 1;
+                        // retract CMD (toHome)
+                        arrays.StepType.Add(1);
+                        arrays.CmdTargetName.Add(act);
+                        arrays.CmdStateArr.Add(3);
+                        arrays.Wait1Id.Add(0);
+                        arrays.Wait1State.Add(0);
+                        arrays.NextStep.Add(waitRow);
+                        // wait athome (TargetHomeState = 4)
+                        arrays.StepType.Add(2);
+                        arrays.CmdTargetName.Add(string.Empty);
+                        arrays.CmdStateArr.Add(0);
+                        arrays.Wait1Id.Add(actId);
+                        arrays.Wait1State.Add(4);
+                        arrays.NextStep.Add(0);                       // patched below
+                    }
+                    int endIdx = arrays.StepType.Count;               // where final END lands
+                    for (int k = 0; k < stranded.Count; k++)
+                    {
+                        int waitIdx = firstRetractRow + 1 + 2 * k;
+                        arrays.NextStep[waitIdx] =
+                            (k < stranded.Count - 1) ? waitIdx + 1 : endIdx;
+                    }
+                    arrays.Warnings.Add(
+                        "[Recipe] auto-retract inserted for actuator(s) left atwork: " +
+                        string.Join(", ", stranded) +
+                        " (reverse-of-advance order, before END).");
+                }
+            }
+
             // 5. Append the single final END row at the highest index.
             //    StepType=9 must appear ONLY here in the array.
             arrays.StepType.Add(9);
