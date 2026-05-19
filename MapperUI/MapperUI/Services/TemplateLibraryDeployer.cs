@@ -59,6 +59,12 @@ namespace MapperUI.Services
             "FaultLatch", "actuatorStateEvents",
             "updateComponentState", "updateComponentState_Sensor",
             "No_Sensor_Handler",
+            // Embedded by Jyotsna's new Five_State_Actuator_CAT as its
+            // "InterlockManager" sub-FB (Type=Main:CommonInterlockEvaluator,
+            // a true Basic FB). Must be deployed or EAE fails to open the
+            // project: "type or namespace 'Main:CommonInterlockEvaluator'
+            // does not exist".
+            "CommonInterlockEvaluator",
             // Event-change handlers referenced by PLC_RW_M262's internal FB2/FB3
             // instances. Sourced from C:\SMC_Rig_Expo_20260112-165857725.sln\IEC61499.
             "changeEventProcess1", "changeEventProcess2",
