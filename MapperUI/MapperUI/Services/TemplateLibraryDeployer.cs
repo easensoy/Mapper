@@ -944,7 +944,25 @@ namespace MapperUI.Services
 
         static string? FindArtifactZip(string folder, string name)
         {
-            foreach (var f in Directory.GetFiles(folder, "*.zip"))
+            // ".subcats.zip" files are wrapper bundles (a zip whose only entry
+            // is the real .cat.zip) — NEVER a directly-deployable artifact.
+            // Extracting one leaves the CAT folder uncreated while the dfbproj
+            // still registers <name>\<name>.cfg, so EAE dies with
+            // "Could not find a part of the path …\<name>.cfg". Exclude them.
+            //
+            // Then order candidates by filename DESCENDING so that when
+            // several dated versions coexist (e.g. right after a template
+            // library update) the NEWEST is chosen deterministically instead
+            // of relying on Directory.GetFiles' filesystem/alphabetical order
+            // (which silently picked the wrong zip after the old .cat.zip was
+            // moved aside).
+            var zips = Directory.GetFiles(folder, "*.zip")
+                .Where(f => !Path.GetFileName(f)
+                    .Contains(".subcats.", StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(f => Path.GetFileName(f), StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            foreach (var f in zips)
             {
                 var fn = Path.GetFileName(f);
                 if (fn.StartsWith(name + ".", StringComparison.OrdinalIgnoreCase) ||
@@ -952,7 +970,7 @@ namespace MapperUI.Services
                     string.Equals(fn, name + ".zip", StringComparison.OrdinalIgnoreCase))
                     return f;
             }
-            foreach (var f in Directory.GetFiles(folder, "*.zip"))
+            foreach (var f in zips)
             {
                 if (Path.GetFileName(f).Contains(name + ".", StringComparison.OrdinalIgnoreCase))
                     return f;
