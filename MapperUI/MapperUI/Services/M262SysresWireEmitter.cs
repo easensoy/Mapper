@@ -294,38 +294,40 @@ namespace MapperUI.Services
             }
         }
 
-        // Canonical canvas layout — applied verbatim to every FB on both the
-        // sysres and the syslay so the two mirror visually. START is the
-        // resource's built-in restart FB (auto-instantiated by EAE, NOT
-        // emitted here). Every other entry overrides whatever x/y the
-        // upstream mirror code generated; previous coordinates are NOT
-        // preserved.
-        // Tight 2-3 column grid, ordered by the init/data flow so wires are
-        // short and the canvas reads top-to-bottom without the big empty
-        // voids the old scattered spread (x reached 10000) produced.
-        // Horizontal pitch 2000 clears EAE's widest composite body (~1500-
-        // 1800 incl. pin labels) with ≥200 margin; vertical pitch 1300
-        // clears FB height + pin-label stack (~900-1100) with ≥200 margin.
-        // No overlap. Applied verbatim every Button-2 / sim run so Mapper
-        // always emits this compact layout.
+        // Canonical canvas layout — sysres ONLY (the Button-2 pipeline calls
+        // Emit() and deliberately leaves the syslay untouched, see MainForm
+        // "Layout grid is sysres-only"). So the rule is simple: make the
+        // sysres look exactly like the hand-laid syslay.
+        //
+        // The 9 application FBs use the syslay's own (x,y) verbatim, shifted
+        // down by a uniform +1800 in Y. A uniform translation preserves the
+        // syslay's exact shape/spacing (zero overlap — it's the user's
+        // hand-crafted reference) while clearing a band at the top for the
+        // runtime bootstrap FBs.
+        //
+        // Bootstrap (top band, arranged like the reference image): START is
+        // EAE's built-in E_RESTART auto-instance at the top-left — NOT in the
+        // FBNetwork, so we can't move it, only avoid it. FB2 (200,200) was
+        // landing on top of START (the overlap); x=800 is the known-clear
+        // column (pre-session layout never overlapped there) and y=1100 sits
+        // it below START's footprint. FB1 (DPAC_FULLINIT) goes top-right.
+        // Net: START top-left, FB1 top-right, FB2 below START, then the
+        // syslay cluster below all of it. No overlap anywhere.
         private static readonly Dictionary<string, (int X, int Y)> CanonicalLayout = new(StringComparer.Ordinal)
         {
-            // Runtime bootstrap (row y=200)
-            { "FB2",          (200,  200) },   // plcStart
-            { "FB1",          (2200, 200) },   // DPAC_FULLINIT
-            // HMI (row y=1500)
-            { "Area_HMI",     (200,  1500) },
-            { "Station1_HMI", (2200, 1500) },
-            // Structural (row y=2800)
-            { "Area",         (200,  2800) },
-            { "Station1",     (2200, 2800) },
-            { "Area_Term",    (4200, 2800) },
-            // Process + sensor (row y=4100)
-            { "PartInHopper", (200,  4100) },
-            { "Feed_Station", (2200, 4100) },
-            // Components + terminator (row y=5400)
-            { "Feeder",       (200,  5400) },
-            { "Stn1_Term",    (2200, 5400) },
+            // Runtime bootstrap — top band (START is EAE-auto, top-left)
+            { "FB1",          (3000, 400)  },   // DPAC_FULLINIT — top-right
+            { "FB2",          (800,  1100) },   // plcStart — below START
+            // Application FBs — syslay coords verbatim, Y + 1800
+            { "Station1_HMI", (2220, 1900) },   // syslay (2220,100)
+            { "Area_HMI",     (240,  1940) },   // syslay (240,140)
+            { "Area",         (400,  2380) },   // syslay (400,580)
+            { "Station1",     (2120, 2400) },   // syslay (2120,600)
+            { "Area_Term",    (3760, 2520) },   // syslay (3760,720)
+            { "Feed_Station", (3360, 3260) },   // syslay (3360,1460)
+            { "PartInHopper", (1560, 3280) },   // syslay (1560,1480)
+            { "Stn1_Term",    (4780, 4160) },   // syslay (4780,2360)
+            { "Feeder",       (1300, 4280) },   // syslay (1300,2480)
         };
 
         /// <summary>
