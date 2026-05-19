@@ -1029,6 +1029,46 @@ namespace MapperUI.Services
 
             var (processOuter, processNested, processRecipe) = BuildProcessFbParameters(
                 contents.Process, allComponents, processInstanceName, processId, contents);
+
+            // Change 4: deploy-time recipe-completeness validation (SAFETY).
+            // Refuse to emit a syslay that strands an actuator atwork — every
+            // actuator with a work command (CmdState=1) must also have a
+            // return-to-home command (CmdState=3). Change 2's auto-retract
+            // makes this hold in normal operation; this is the hard backstop
+            // (the strict test: we never deploy code that leaves a cylinder
+            // out, which on the rig required killing air to recover).
+            if (processRecipe != null)
+            {
+                var adv = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var ret = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < processRecipe.StepType.Count; i++)
+                {
+                    if (processRecipe.StepType[i] != 1) continue;
+                    var t = (processRecipe.CmdTargetName[i] ?? string.Empty).Trim();
+                    if (t.Length == 0) continue;
+                    if (processRecipe.CmdStateArr[i] == 1) adv.Add(t);
+                    else if (processRecipe.CmdStateArr[i] == 3) ret.Add(t);
+                }
+                var strandedAct = adv.Where(a => !ret.Contains(a)).ToList();
+                if (strandedAct.Count > 0)
+                    throw new InvalidOperationException(
+                        $"[Recipe] Actuator '{strandedAct[0]}' has no return-to-home cmd step" +
+                        (strandedAct.Count > 1
+                            ? $" ({strandedAct.Count} affected: {string.Join(", ", strandedAct)})"
+                            : string.Empty) +
+                        " — refusing to generate code that strands an actuator at work. " +
+                        "(auto-retract should have inserted it; this is a recipe-generator bug.)");
+
+                // Interlock-rule validation is deferred this run: Mapper emits
+                // RuleCount=0 by design (interlock emission is the documented
+                // follow-up), so a hard 'RuleCount>0' abort would block ALL
+                // generation. Surface as a non-fatal TODO instead of aborting.
+                report.Missing.Add(
+                    "[Recipe] interlock rule arrays emitted empty (RuleCount=0) — " +
+                    "InterlockManager runs pass-through. TODO: translate Control.xml " +
+                    "interlock conditions to Rule* arrays (tracked follow-up).");
+            }
+
             builder.AddFB(FBIdGenerator.GenerateFBId(contents.Process.ComponentID),
                 processInstanceName, "Process1_Generic", "Main", 3360, 1460,
                 processOuter, processNested);
@@ -1146,7 +1186,31 @@ namespace MapperUI.Services
                 ["faultTimeoutWork"] = SyslayBuilder.FormatTimeMs(toWorkMs * 2),
                 ["faultTimeoutHome"] = SyslayBuilder.FormatTimeMs(toHomeMs * 2),
                 ["enableToWorkFaultTimeout"] = SyslayBuilder.FormatBool(workSensorFitted),
-                ["enableToHomeFaultTimeout"] = SyslayBuilder.FormatBool(homeSensorFitted)
+                ["enableToHomeFaultTimeout"] = SyslayBuilder.FormatBool(homeSensorFitted),
+
+                // InterlockManager (CommonInterlockEvaluator) InputVars — the
+                // new Five_State_Actuator_CAT embeds an InterlockManager FB
+                // that needs these wired on every instance. TargetWork1State/
+                // TargetHomeState follow the OSDA / Five_State convention and
+                // match the recipe's Wait1State semantics (2 = atwork, 4 =
+                // athome).
+                ["TargetWork1State"] = SyslayBuilder.FormatInt(2),
+                ["TargetHomeState"] = SyslayBuilder.FormatInt(4),
+                // TODO(interlock-rule-emission): translating Control.xml
+                // interlock conditions (e.g. Feeder/Advancing "NOT Checker/Down
+                // AND NOT Transfer/Advanced") into RuleCount / RuleFromState /
+                // RuleToState / RuleSourceID / RuleBlockedState is an explicit
+                // follow-up (out of scope this run). Emit empty rule arrays
+                // (RuleCount=0, ten zeros each) so the InterlockManager runs
+                // pass-through and nothing is blocked. RuleSourceID, when
+                // populated later, MUST use the same sensors-first state_table
+                // ids as the recipe's Wait1Id (PartInHopper=0, PartAtChecker=1,
+                // Feeder=2, Checker=3, Transfer=4) or the safety guard desyncs.
+                ["RuleCount"] = SyslayBuilder.FormatInt(0),
+                ["RuleFromState"] = SyslayBuilder.FormatIntArray(new int[10]),
+                ["RuleToState"] = SyslayBuilder.FormatIntArray(new int[10]),
+                ["RuleSourceID"] = SyslayBuilder.FormatIntArray(new int[10]),
+                ["RuleBlockedState"] = SyslayBuilder.FormatIntArray(new int[10])
             };
         }
 
