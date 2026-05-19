@@ -59,11 +59,17 @@ namespace MapperUI.Services
             //   Feeder.plc_out → M262IO.REQ_INT_BOOL
             // wires are deleted: M262IO no longer exists on the sysres and
             // these phantom events confuse the data-driven Process FB.
-            new("FB1.INITO",           "Area.INIT"),
-            new("Area.INITO",          "Station1.INIT"),
-            new("Station1.INITO",      "PartInHopper.INIT"),
-            new("PartInHopper.INITO",  "Feeder.INIT"),
-            new("Feeder.INITO",        "Feed_Station.INIT"),
+            // Mirrors SystemLayoutInjector.BuildFeedStationWiring initChain for
+            // the widened Button 2 scope (Area → Station1 → sensors → actuators
+            // → Process), contents = {Sensors:[PartInHopper, PartAtChecker],
+            // Actuators:[Feeder, Checker]}.
+            new("FB1.INITO",            "Area.INIT"),
+            new("Area.INITO",           "Station1.INIT"),
+            new("Station1.INITO",       "PartInHopper.INIT"),
+            new("PartInHopper.INITO",   "PartAtChecker.INIT"),
+            new("PartAtChecker.INITO",  "Feeder.INIT"),
+            new("Feeder.INITO",         "Checker.INIT"),
+            new("Checker.INITO",        "Feed_Station.INIT"),
         };
 
         // Adapter ring: HMI → Area/Station chain → Feed_Station → Feeder
@@ -81,8 +87,12 @@ namespace MapperUI.Services
             // stationChain = [actuators…, process], closed to Stn1_Term.
             // SystemLayoutInjector.StationAdptr{In,Out} both resolve to
             // "stationAdptr_{in,out}" for every type.
+            // Widened Button 2 scope: actuators are [Feeder, Checker] (sensors
+            // still skipped — Sensor_Bool_CAT has no stationAdptr ports).
+            // Mirrors syslay stationChain = [Feeder, Checker, Process] → Stn1_Term.
             new("Station1.StationAdaptrOUT",       "Feeder.stationAdptr_in"),
-            new("Feeder.stationAdptr_out",         "Feed_Station.stationAdptr_in"),
+            new("Feeder.stationAdptr_out",         "Checker.stationAdptr_in"),
+            new("Checker.stationAdptr_out",        "Feed_Station.stationAdptr_in"),
             new("Feed_Station.stationAdptr_out",   "Stn1_Term." + CodeGen.Translation.PortNameValidator.CaSAdptrTerminatorInPort),
 
             // stateRprtCmd report ring — sensors + actuators + process,
@@ -90,8 +100,12 @@ namespace MapperUI.Services
             // ports as stateRptCmdAdptr_{in,out} (Adptr suffix per
             // SystemLayoutInjector.StateRprt{In,Out}("Process1_Generic"));
             // Sensor/Actuator CATs use stateRprtCmd_{in,out} (P3 fix).
-            new("PartInHopper.stateRprtCmd_out",   "Feeder.stateRprtCmd_in"),
-            new("Feeder.stateRprtCmd_out",         "Feed_Station.stateRptCmdAdptr_in"),
+            // Mirrors syslay ringComponents = [PartInHopper, PartAtChecker,
+            // Feeder, Checker, Process] closed back to PartInHopper.
+            new("PartInHopper.stateRprtCmd_out",    "PartAtChecker.stateRprtCmd_in"),
+            new("PartAtChecker.stateRprtCmd_out",   "Feeder.stateRprtCmd_in"),
+            new("Feeder.stateRprtCmd_out",          "Checker.stateRprtCmd_in"),
+            new("Checker.stateRprtCmd_out",         "Feed_Station.stateRptCmdAdptr_in"),
             new("Feed_Station.stateRptCmdAdptr_out","PartInHopper.stateRprtCmd_in"),
         };
 
@@ -325,9 +339,11 @@ namespace MapperUI.Services
             { "Station1",     (2120, 2400) },   // syslay (2120,600)
             { "Area_Term",    (3760, 2520) },   // syslay (3760,720)
             { "Feed_Station", (3360, 3260) },   // syslay (3360,1460)
-            { "PartInHopper", (1560, 3280) },   // syslay (1560,1480)
+            { "PartInHopper", (1560, 3280) },   // syslay sensor i=0 (1560,1480)
+            { "PartAtChecker",(1960, 3280) },   // syslay sensor i=1 (1960,1480)
             { "Stn1_Term",    (4780, 4160) },   // syslay (4780,2360)
-            { "Feeder",       (1300, 4280) },   // syslay (1300,2480)
+            { "Feeder",       (1300, 4280) },   // syslay actuator i=0 (1300,2480)
+            { "Checker",      (1700, 4280) },   // syslay actuator i=1 (1700,2480)
         };
 
         /// <summary>
