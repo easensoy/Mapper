@@ -34,13 +34,12 @@ namespace MapperUI.Services
             "Five_State_Actuator_CAT", "Sensor_Bool_CAT", "Process1_Generic"
         };
 
-        // PLC_RW_M262 is a pure I/O bridge basic FB (no HMI faceplate, no _HMI sub-FB),
-        // so it deploys as a top-level .fbt rather than a CAT folder structure. Listing
-        // it as a CAT made RegisterInDfbproj write '<None Include="PLC_RW_M262\PLC_RW_M262.cfg">'
-        // — a folder path that never exists — which broke EAE on project open with
-        // "Could not find a part of the path 'PLC_RW_M262\PLC_RW_M262.cfg'".
-        // Treated as a Basic from now on; its .fbt is registered flat in dfbproj.
-        static readonly string[] UniversalIoFbs = new[] { "PLC_RW_M262" };
+        // No I/O-bridge FB is deployed. PLC_RW_M262 (the old "M262IO" broker)
+        // is retired: Sensor_Bool_CAT / Five_State_Actuator_CAT do direct
+        // symlink I/O to the TM3 channels via their own $${PATH} macros, so
+        // nothing ever instantiates PLC_RW_M262. Shipping its orphan .fbt only
+        // added an unreferenced type + a dfbproj entry, so Mapper no longer
+        // deploys it.
 
         static readonly string[] UniversalComposites = new[]
         {
@@ -101,15 +100,6 @@ namespace MapperUI.Services
 
             foreach (var name in UniversalCats)
                 DeployArtifact(libPath, "CAT", name, eaeProjectDir, result, isBasic: false, isCat: true);
-
-            // I/O-bridge basics now live under Template Library/Basic/<name>/IEC61499/
-            // (was CAT/ historically; the folder moved to Basic/ to match its
-            // declared type). Source path was wrong → DeployArtifact warned
-            // "Artifact not found: CAT/PLC_RW_M262", the .fbt never landed in
-            // the .dfbproj on a clean deploy, and every symbolic link inside
-            // PLC_RW_M262 rendered red in EAE's Hardware Configurator.
-            foreach (var name in UniversalIoFbs)
-                DeployArtifact(libPath, "Basic", name, eaeProjectDir, result, isBasic: true);
 
             DeployDataTypes(libPath, eaeProjectDir, result);
             PatchKnownArraySizeBugs(eaeProjectDir, result);
@@ -1195,17 +1185,7 @@ namespace MapperUI.Services
                 DfbprojRegistrar.RegisterCat(dfbproj, cat);
 
             foreach (var basic in result.BasicFBsDeployed)
-            {
-                // PLC_RW_M262 is wired as a basic in UniversalIoFbs (so the
-                // .fbt deploys flat, no .cfg sibling), but its .fbt body
-                // contains an internal FBNetwork (FB2 = changeEventProcess1)
-                // — that makes it a Composite to EAE's compiler. Registering
-                // it as Basic produces "Type 'Main.PLC_RW_M262' is undefined"
-                // because the dfbproj entry has the wrong IEC61499Type.
-                var iecType = string.Equals(basic, "PLC_RW_M262", StringComparison.Ordinal)
-                    ? "Composite" : "Basic";
-                DfbprojRegistrar.RegisterBasicFb(dfbproj, basic + ".fbt", iecType);
-            }
+                DfbprojRegistrar.RegisterBasicFb(dfbproj, basic + ".fbt", "Basic");
 
             foreach (var adapter in result.AdaptersDeployed)
                 DfbprojRegistrar.RegisterBasicFb(dfbproj, adapter + ".adp", "Adapter");
