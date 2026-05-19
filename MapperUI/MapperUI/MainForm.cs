@@ -798,6 +798,20 @@ namespace MapperUI
                 // Resource stays EMB_RES_ECO; simulator mode = the
                 // "Local Test" Active Network Profile picked in EAE.
                 //
+                // Simulator-only post-process: in pure sim there is no
+                // physical cylinder/sensor, so force WorkSensorFitted=FALSE
+                // and HomeSensorFitted=FALSE on every Five_State_Actuator_CAT
+                // instance — the actuator's internal No_Sensor_Handler timer
+                // path then self-advances the ECC (1->2 after toWorkTime, 3->4
+                // after toHomeTime) with no external sensor. Button 2
+                // (hardware) NEVER calls this; the rig's real sensors close
+                // the loop with the Control.xml-derived TRUE values.
+                int simNoSensor = OverrideSimActuatorsNoSensor(path, Cfg());
+                AppendActivity(simNoSensor > 0
+                    ? $"[Simulator] No-sensor mode: WorkSensorFitted/HomeSensorFitted forced FALSE on {simNoSensor} " +
+                      "Five_State_Actuator_CAT instance(s) (Feeder/Checker/Transfer) — ECC self-advances via timer"
+                    : "[Simulator][Warn] No-sensor override touched 0 actuators (none found or sim syslay missing).");
+
                 // Simulator-only post-process: inject a SimHopperForce
                 // SYMLINKMULTIVARSRC that publishes 'PartInHopper.Input' =
                 // TRUE on Area.INITO, so the hopper sensor reads TRUE at
@@ -1093,6 +1107,108 @@ namespace MapperUI
             catch (Exception ex)
             {
                 AppendActivity($"[Simulator][Warn] SimHopperForce inject failed: {ex.GetType().Name}: {ex.Message}");
+                return 0;
+            }
+        }
+
+        /// <summary>
+        /// Simulator-only (Button 4) override: force WorkSensorFitted=FALSE
+        /// and HomeSensorFitted=FALSE on every Five_State_Actuator_CAT
+        /// instance in the deployed sim syslay AND sysres. In pure simulation
+        /// there is no physical cylinder/sensor, so the actuator's internal
+        /// No_Sensor_Handler timer path must drive the ECC (state 1->2 after
+        /// toWorkTime, 3->4 after toHomeTime) instead of waiting forever on an
+        /// atwork/athome sensor that never closes. Applies to Feeder, Checker,
+        /// Transfer. Button 2 (hardware) NEVER calls this — the rig's real
+        /// sensors must close the loop, so BuildActuatorParameters'
+        /// Control.xml-derived TRUE values stand untouched. Post-process only:
+        /// shared recipe/param generator, templates and InterlockManager
+        /// wiring are not touched. Idempotent — sets the existing Parameter
+        /// Value to FALSE and de-dupes any doubled entry, so re-running
+        /// Button 4 emits the same FALSE cleanly. Returns the count overridden.
+        /// </summary>
+        int OverrideSimActuatorsNoSensor(string syslayPath, MapperConfig cfg)
+        {
+            try
+            {
+                System.Xml.Linq.XNamespace ns = "https://www.se.com/LibraryElements";
+
+                int ForceNoSensor(System.Xml.Linq.XElement net)
+                {
+                    int n = 0;
+                    foreach (var fb in net.Elements(ns + "FB")
+                        .Where(f => (string?)f.Attribute("Type") == "Five_State_Actuator_CAT"))
+                    {
+                        foreach (var pname in new[] { "WorkSensorFitted", "HomeSensorFitted" })
+                        {
+                            var ps = fb.Elements(ns + "Parameter")
+                                .Where(p => (string?)p.Attribute("Name") == pname).ToList();
+                            if (ps.Count == 0)
+                            {
+                                fb.Add(new System.Xml.Linq.XElement(ns + "Parameter",
+                                    new System.Xml.Linq.XAttribute("Name", pname),
+                                    new System.Xml.Linq.XAttribute("Value", "FALSE")));
+                            }
+                            else
+                            {
+                                ps[0].SetAttributeValue("Value", "FALSE");
+                                for (int i = 1; i < ps.Count; i++) ps[i].Remove(); // de-dupe → idempotent
+                            }
+                        }
+                        n++;
+                    }
+                    return n;
+                }
+
+                void Save(System.Xml.Linq.XDocument doc, string p)
+                {
+                    var settings = new System.Xml.XmlWriterSettings
+                    {
+                        OmitXmlDeclaration = false,
+                        Indent = true,
+                        Encoding = new System.Text.UTF8Encoding(false),
+                    };
+                    using var fs = new FileStream(p, FileMode.Create, FileAccess.Write, FileShare.Read);
+                    using var w = System.Xml.XmlWriter.Create(fs, settings);
+                    doc.Save(w);
+                }
+
+                int total = 0;
+
+                // ── syslay ──────────────────────────────────────────────
+                if (string.IsNullOrEmpty(syslayPath) || !File.Exists(syslayPath)) return 0;
+                var sdoc = System.Xml.Linq.XDocument.Load(syslayPath, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var snet = sdoc.Root?.Element(ns + "SubAppNetwork") ?? sdoc.Root?.Element(ns + "FBNetwork");
+                if (snet != null)
+                {
+                    total = ForceNoSensor(snet);
+                    Save(sdoc, syslayPath);
+                }
+
+                // ── sysres (the actual runtime artefact EAE compiles) ───
+                var sysresDir = Path.GetDirectoryName(cfg.SysresPath2);
+                if (!string.IsNullOrEmpty(sysresDir) && Directory.Exists(sysresDir))
+                {
+                    var sysresFile = Directory
+                        .EnumerateFiles(sysresDir, "*.sysres", SearchOption.TopDirectoryOnly)
+                        .FirstOrDefault();
+                    if (sysresFile != null)
+                    {
+                        var rdoc = System.Xml.Linq.XDocument.Load(sysresFile, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                        var rnet = rdoc.Root?.Element(ns + "FBNetwork");
+                        if (rnet != null)
+                        {
+                            ForceNoSensor(rnet);
+                            Save(rdoc, sysresFile);
+                        }
+                    }
+                }
+
+                return total;
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"[Simulator][Warn] No-sensor override failed: {ex.GetType().Name}: {ex.Message}");
                 return 0;
             }
         }
