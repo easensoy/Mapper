@@ -140,6 +140,28 @@ namespace CodeGen.IO
             foreach (var transElem in elem.Elements().Where(e => e.Name.LocalName == "Transition"))
                 state.Transitions.Add(ParseTransition(transElem));
 
+            // VueOne stores actuator interlocks in a STATE-level
+            // <Interlock_Condition><ConditionValue><ConditionGroup>
+            // <Condition .../></...> block (NOT the transition's
+            // Sequence_Condition). Capture every <Condition> descendant so
+            // SystemInjector.BuildInterlockRules can translate them.
+            var ilk = elem.Elements()
+                .FirstOrDefault(e => e.Name.LocalName == "Interlock_Condition");
+            if (ilk != null)
+            {
+                foreach (var cond in ilk.Descendants()
+                    .Where(e => e.Name.LocalName == "Condition"))
+                {
+                    state.InterlockConditions.Add(new VueOneCondition
+                    {
+                        ID = cond.Attribute("ID")?.Value ?? string.Empty,
+                        Name = cond.Attribute("Name")?.Value ?? string.Empty,
+                        ComponentID = cond.Attribute("ComponentID")?.Value ?? string.Empty,
+                        Operator = cond.Attribute("Operator")?.Value ?? string.Empty
+                    });
+                }
+            }
+
             return state;
         }
 
