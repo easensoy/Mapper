@@ -155,7 +155,7 @@
             this.btnTestStation1.ForeColor = System.Drawing.Color.White;
             this.btnTestStation1.Location = new System.Drawing.Point(961, 28);
             this.btnTestStation1.Size = new System.Drawing.Size(170, 25);
-            this.btnTestStation1.Text = "2. Test Station 1 (Pusher)";
+            this.btnTestStation1.Text = "2. Test Feed Station";
             this.btnTestStation1.UseVisualStyleBackColor = false;
             this.btnTestStation1.Click += new System.EventHandler(this.btnTestStation1_Click);
 
