@@ -58,7 +58,7 @@ namespace MapperUI.Services
         // how many components the syslay emitted (N-component safe).
         private static readonly string[] CaSBusOrder =
         {
-            "PartInHopper", "Feeder", "Checker", "PartAtChecker",
+            "PartInHopper", "Feeder", "Checker", "Transfer", "PartAtChecker",
         };
 
         private static readonly HashSet<string> SensorCatTypes =
@@ -138,10 +138,10 @@ namespace MapperUI.Services
                     if (!string.IsNullOrEmpty(t) && !byType.ContainsKey(t)) byType[t] = fb;
                 }
 
-                // Apply the canonical sysres canvas layout: hardware top
-                // strip (y=200), HMI row (y=800), structural row (y=1400),
-                // components row (y=2200). Reads top-down, runtime → init
-                // → application → components, mirroring the syslay layout.
+                // Apply the canonical sysres canvas layout (2500 H pitch,
+                // top-down: bootstrap → HMI → structural → sensors+process →
+                // actuators; no overlap). The same dictionary is mirrored onto
+                // the syslay via ApplyLayoutToSyslay at the end of Emit().
                 ApplyCanonicalLayout(byName, report, "Sysres");
 
                 // Cache loaded .fbt port lookups so we don't re-parse per wire.
@@ -335,6 +335,14 @@ namespace MapperUI.Services
                 report.Missing.Add(
                     $"[Sysres] wrote {emittedEvents.Count} event + {emittedData.Count} data + " +
                     $"{emittedAdapters.Count} adapter connection(s) to {Path.GetFileName(sysresPath)}");
+
+                // Mirror the SAME CanonicalLayout onto the deployed syslay so
+                // the EAE application canvas reads cleanly too. Previously the
+                // syslay kept its generator-time coords and overlapped badly
+                // with ≥3 components. Best-effort: ApplyLayoutToSyslay silently
+                // skips if the file/root is missing. Button 2 writes its syslay
+                // to cfg.SyslayPath2 (== ActiveSyslayPath for this path).
+                ApplyLayoutToSyslay(cfg.ActiveSyslayPath, report);
             }
             catch (Exception ex)
             {
@@ -342,42 +350,45 @@ namespace MapperUI.Services
             }
         }
 
-        // Canonical canvas layout — sysres ONLY (the Button-2 pipeline calls
-        // Emit() and deliberately leaves the syslay untouched, see MainForm
-        // "Layout grid is sysres-only"). So the rule is simple: make the
-        // sysres look exactly like the hand-laid syslay.
+        // Canonical canvas layout — applied to BOTH the sysres
+        // (ApplyCanonicalLayout in Emit) and the deployed syslay
+        // (ApplyLayoutToSyslay, now invoked at the end of Emit). Single source
+        // of truth so the two canvases read identically and never overlap.
         //
-        // The 9 application FBs use the syslay's own (x,y) verbatim, shifted
-        // down by a uniform +1800 in Y. A uniform translation preserves the
-        // syslay's exact shape/spacing (zero overlap — it's the user's
-        // hand-crafted reference) while clearing a band at the top for the
-        // runtime bootstrap FBs.
-        //
-        // Bootstrap (top band, arranged like the reference image): START is
-        // EAE's built-in E_RESTART auto-instance at the top-left — NOT in the
-        // FBNetwork, so we can't move it, only avoid it. FB2 (200,200) was
-        // landing on top of START (the overlap); x=800 is the known-clear
-        // column (pre-session layout never overlapped there) and y=1100 sits
-        // it below START's footprint. FB1 (DPAC_FULLINIT) goes top-right.
-        // Net: START top-left, FB1 top-right, FB2 below START, then the
-        // syslay cluster below all of it. No overlap anywhere.
+        // Grid: 2500-unit horizontal pitch (≥2000; clears EAE's widest
+        // composite body ~1500-1800 with margin — fixes Feeder/Checker which
+        // were only 400 apart and overlapped) and ~700-1400 vertical pitch.
+        // Top-down flow: bootstrap → HMI → structural → sensors+process →
+        // actuators. START is EAE's built-in E_RESTART auto-instance at the
+        // top-left (NOT in the FBNetwork — can't move it, only avoid it):
+        // FB2 sits at x=800 (known-clear column) y=1100 (below START's
+        // footprint); FB1 (DPAC_FULLINIT) top-right. Feed_Station is pushed
+        // right of the sensor row so the stateRprtCmd adapter wires don't
+        // cross. M262IO is listed for completeness but is a no-op (the
+        // PLC_RW_M262 broker was retired — no such FB is ever instantiated).
         private static readonly Dictionary<string, (int X, int Y)> CanonicalLayout = new(StringComparer.Ordinal)
         {
-            // Runtime bootstrap — top band (START is EAE-auto, top-left)
+            // Runtime bootstrap (START is EAE-auto, top-left)
             { "FB1",          (3000, 400)  },   // DPAC_FULLINIT — top-right
             { "FB2",          (800,  1100) },   // plcStart — below START
-            // Application FBs — syslay coords verbatim, Y + 1800
-            { "Station1_HMI", (2220, 1900) },   // syslay (2220,100)
-            { "Area_HMI",     (240,  1940) },   // syslay (240,140)
-            { "Area",         (400,  2380) },   // syslay (400,580)
-            { "Station1",     (2120, 2400) },   // syslay (2120,600)
-            { "Area_Term",    (3760, 2520) },   // syslay (3760,720)
-            { "Feed_Station", (3360, 3260) },   // syslay (3360,1460)
-            { "PartInHopper", (1560, 3280) },   // syslay sensor i=0 (1560,1480)
-            { "PartAtChecker",(1960, 3280) },   // syslay sensor i=1 (1960,1480)
-            { "Stn1_Term",    (4780, 4160) },   // syslay (4780,2360)
-            { "Feeder",       (1300, 4280) },   // syslay actuator i=0 (1300,2480)
-            { "Checker",      (1700, 4280) },   // syslay actuator i=1 (1700,2480)
+            // HMI row (y=2000)
+            { "Area_HMI",     (2000, 2000) },
+            { "Station1_HMI", (4500, 2000) },
+            // Structural row (y=2900)
+            { "Area",         (2000, 2900) },
+            { "Station1",     (4500, 2900) },
+            { "Area_Term",    (7000, 2900) },
+            // Sensors + process row (y=4000) — Feed_Station right of sensors
+            { "PartInHopper", (2000, 4000) },
+            { "PartAtChecker",(4500, 4000) },
+            { "Feed_Station", (7000, 4000) },
+            // Actuator row (y=5400) — 2500 pitch, terminator far right
+            { "Feeder",       (2000, 5400) },
+            { "Checker",      (4500, 5400) },
+            { "Transfer",     (7000, 5400) },
+            { "Stn1_Term",    (9500, 5400) },
+            // No-op (M262IO/PLC_RW_M262 retired — never instantiated)
+            { "M262IO",       (9500, 400)  },
         };
 
         /// <summary>
