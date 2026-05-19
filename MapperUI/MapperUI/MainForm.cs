@@ -798,19 +798,16 @@ namespace MapperUI
                 // Resource stays EMB_RES_ECO; simulator mode = the
                 // "Local Test" Active Network Profile picked in EAE.
                 //
-                // Simulator-only post-process: in pure sim there is no
-                // physical cylinder/sensor, so force WorkSensorFitted=FALSE
-                // and HomeSensorFitted=FALSE on every Five_State_Actuator_CAT
-                // instance — the actuator's internal No_Sensor_Handler timer
-                // path then self-advances the ECC (1->2 after toWorkTime, 3->4
-                // after toHomeTime) with no external sensor. Button 2
-                // (hardware) NEVER calls this; the rig's real sensors close
-                // the loop with the Control.xml-derived TRUE values.
-                int simNoSensor = OverrideSimActuatorsNoSensor(path, Cfg());
-                AppendActivity(simNoSensor > 0
-                    ? $"[Simulator] No-sensor mode: WorkSensorFitted/HomeSensorFitted forced FALSE on {simNoSensor} " +
-                      "Five_State_Actuator_CAT instance(s) (Feeder/Checker/Transfer) — ECC self-advances via timer"
-                    : "[Simulator][Warn] No-sensor override touched 0 actuators (none found or sim syslay missing).");
+                // ORDER IS LOAD-BEARING (Defect 1 fix). InjectSimHopperForce
+                // re-loads and re-saves BOTH the syslay and the sysres to add
+                // the SimHopperForce FB + wires. When the no-sensor override
+                // ran BEFORE it, that second save round-tripped the file and
+                // EAE Watch came up with WorkSensorFitted=TRUE again (the
+                // on-disk syslay still read FALSE, but the sysres EAE compiles
+                // had been re-emitted from a pre-override state). The override
+                // MUST be the LAST writer of the syslay + sysres so nothing
+                // can overwrite it. So: SimHopperForce first, no-sensor
+                // override last, then a post-write re-read assertion.
 
                 // Simulator-only post-process: inject a SimHopperForce
                 // SYMLINKMULTIVARSRC that publishes 'PartInHopper.Input' =
@@ -828,6 +825,33 @@ namespace MapperUI
                 }
                 else
                     AppendActivity("[Simulator][Warn] SimHopperForce not injected (already present or canvas not resolvable).");
+
+                // Simulator-only post-process, LAST writer: in pure sim there
+                // is no physical cylinder/sensor, so force WorkSensorFitted=
+                // FALSE and HomeSensorFitted=FALSE on every Five_State_
+                // Actuator_CAT instance — the actuator's internal
+                // No_Sensor_Handler timer path then self-advances the ECC
+                // (1->2 after toWorkTime, 3->4 after toHomeTime) with no
+                // external sensor. Button 2 (hardware) NEVER calls this; the
+                // rig's real sensors close the loop with the Control.xml-
+                // derived TRUE values. Runs AFTER InjectSimHopperForce so it
+                // is the final write of the syslay + sysres.
+                int simNoSensor = OverrideSimActuatorsNoSensor(path, Cfg());
+                AppendActivity(simNoSensor > 0
+                    ? $"[Simulator] No-sensor mode: WorkSensorFitted/HomeSensorFitted forced FALSE on {simNoSensor} " +
+                      "Five_State_Actuator_CAT instance(s) (Feeder/Checker/Transfer) — ECC self-advances via timer"
+                    : "[Simulator][Warn] No-sensor override touched 0 actuators (none found or sim syslay missing).");
+
+                // Post-write verification (Defect 1). Re-read the on-disk
+                // syslay AND sysres AFTER every generator step has run and
+                // assert WorkSensorFitted="FALSE" / HomeSensorFitted="FALSE"
+                // on every Five_State_Actuator_CAT instance. The sysres is the
+                // artefact EAE actually compiles, so a TRUE there is exactly
+                // the "syslay shows FALSE but EAE Watch shows TRUE" symptom.
+                // Any violation throws — the deploy aborts loudly rather than
+                // shipping a sim build that stalls on a sensor that never
+                // closes.
+                VerifySimActuatorsNoSensorOrAbort(path, Cfg());
 
                 TouchDfbprojToTriggerEaeReload();
 
@@ -1211,6 +1235,125 @@ namespace MapperUI
                 AppendActivity($"[Simulator][Warn] No-sensor override failed: {ex.GetType().Name}: {ex.Message}");
                 return 0;
             }
+        }
+
+        /// <summary>
+        /// Defect 1 post-write assertion. Re-reads the on-disk syslay AND the
+        /// deployed sysres AFTER every generator step (including the no-sensor
+        /// override, which is now the LAST writer) and asserts every
+        /// Five_State_Actuator_CAT instance has WorkSensorFitted="FALSE" and
+        /// HomeSensorFitted="FALSE". The sysres is the artefact EAE compiles,
+        /// so a stale TRUE there — even when the syslay reads FALSE — is
+        /// exactly the "syslay shows FALSE but EAE Watch shows TRUE" failure.
+        /// On ANY violation (missing param, wrong value, or no actuators found
+        /// at all) this logs a loud Activity-panel error and throws, aborting
+        /// the simulator deploy rather than shipping a build that stalls on a
+        /// sensor that never closes. Simulator path only — Button 2 never
+        /// calls this.
+        /// </summary>
+        void VerifySimActuatorsNoSensorOrAbort(string syslayPath, MapperConfig cfg)
+        {
+            System.Xml.Linq.XNamespace ns = "https://www.se.com/LibraryElements";
+            var violations = new List<string>();
+
+            // (artefact-label, file-path) pairs. The sysres path is resolved
+            // the same way OverrideSimActuatorsNoSensor / InjectSimHopperForce
+            // resolve it (EAE may have renamed the *.sysres in that dir).
+            var targets = new List<(string label, string file)>();
+            if (!string.IsNullOrEmpty(syslayPath) && File.Exists(syslayPath))
+                targets.Add(("syslay", syslayPath));
+            else
+                violations.Add($"syslay not found on disk at '{syslayPath}' — cannot verify the no-sensor override.");
+
+            string? sysresFile = null;
+            var sysresDir = Path.GetDirectoryName(cfg.SysresPath2);
+            if (!string.IsNullOrEmpty(sysresDir) && Directory.Exists(sysresDir))
+                sysresFile = Directory
+                    .EnumerateFiles(sysresDir, "*.sysres", SearchOption.TopDirectoryOnly)
+                    .FirstOrDefault();
+            if (sysresFile != null)
+                targets.Add(("sysres", sysresFile));
+            else
+                violations.Add(
+                    "deployed .sysres not found — cannot verify the no-sensor override on the " +
+                    "artefact EAE actually compiles (this is the file EAE Watch reflects).");
+
+            int actuatorsChecked = 0;
+            foreach (var (label, file) in targets)
+            {
+                System.Xml.Linq.XDocument doc;
+                try { doc = System.Xml.Linq.XDocument.Load(file); }
+                catch (Exception ex)
+                {
+                    violations.Add($"{label} '{Path.GetFileName(file)}' could not be re-read: {ex.Message}");
+                    continue;
+                }
+                var net = doc.Root?.Element(ns + "SubAppNetwork")
+                          ?? doc.Root?.Element(ns + "FBNetwork");
+                if (net == null)
+                {
+                    violations.Add($"{label} '{Path.GetFileName(file)}' has no SubAppNetwork/FBNetwork.");
+                    continue;
+                }
+
+                var actuators = net.Elements(ns + "FB")
+                    .Where(f => (string?)f.Attribute("Type") == "Five_State_Actuator_CAT")
+                    .ToList();
+                if (actuators.Count == 0)
+                    violations.Add(
+                        $"{label} '{Path.GetFileName(file)}' contains ZERO Five_State_Actuator_CAT " +
+                        "instances — the simulator recipe must drive Feeder/Checker/Transfer; an " +
+                        "empty actuator set means the generator did not emit the actuators.");
+
+                foreach (var fb in actuators)
+                {
+                    actuatorsChecked++;
+                    var fbName = (string?)fb.Attribute("Name") ?? "(unnamed)";
+                    foreach (var pname in new[] { "WorkSensorFitted", "HomeSensorFitted" })
+                    {
+                        var ps = fb.Elements(ns + "Parameter")
+                            .Where(p => (string?)p.Attribute("Name") == pname).ToList();
+                        if (ps.Count == 0)
+                        {
+                            violations.Add($"{label}: {fbName}.{pname} parameter is MISSING (expected FALSE).");
+                            continue;
+                        }
+                        if (ps.Count > 1)
+                            violations.Add(
+                                $"{label}: {fbName}.{pname} has {ps.Count} duplicate Parameter entries " +
+                                "(override de-dupe did not run last).");
+                        foreach (var p in ps)
+                        {
+                            var v = ((string?)p.Attribute("Value") ?? string.Empty).Trim();
+                            if (!string.Equals(v, "FALSE", StringComparison.OrdinalIgnoreCase))
+                                violations.Add(
+                                    $"{label}: {fbName}.{pname}=\"{v}\" — expected \"FALSE\". A later " +
+                                    "pipeline step overwrote the no-sensor override.");
+                        }
+                    }
+                }
+            }
+
+            if (violations.Count > 0)
+            {
+                AppendActivity(
+                    "[Simulator][ABORT] No-sensor override verification FAILED — the simulator " +
+                    "build would stall on a sensor that never closes. The override must be the " +
+                    "LAST writer of the syslay + sysres. Violations:");
+                foreach (var v in violations)
+                    AppendActivity($"  ✗ {v}");
+                throw new InvalidOperationException(
+                    "Simulator no-sensor override verification failed (" + violations.Count +
+                    " violation(s)); see Activity log. WorkSensorFitted/HomeSensorFitted must be " +
+                    "FALSE on every Five_State_Actuator_CAT in both the syslay and the deployed " +
+                    "sysres. Deploy aborted.");
+            }
+
+            AppendActivity(
+                $"[Simulator][Verify] No-sensor override CONFIRMED on disk: WorkSensorFitted=FALSE " +
+                $"& HomeSensorFitted=FALSE on all {actuatorsChecked} Five_State_Actuator_CAT " +
+                $"instance(s) across {targets.Count} artefact(s) (syslay + sysres). Override is the " +
+                "last writer; EAE Watch will read FALSE.");
         }
 
 
