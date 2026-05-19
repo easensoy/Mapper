@@ -113,6 +113,7 @@ namespace MapperUI.Services
             PatchSensorBoolCatDstQi(eaeProjectDir, result);
             PatchFiveStateActuatorCatQi(eaeProjectDir, result);
             PatchFiveStateActuatorModeInitialValue(eaeProjectDir, result);
+            PatchProcess1RecipeArraySize(eaeProjectDir, result);
 
             GenerateCfgFiles(eaeProjectDir, result);
             RegisterInDfbproj(eaeProjectDir, result);
@@ -301,6 +302,78 @@ namespace MapperUI.Services
             {
                 result.Warnings.Add($"Sensor_Bool_CAT.fbt QI guard failed: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// The recipe-array InputVars (StepType, CmdTargetName, CmdStateArr,
+        /// Wait1Id, Wait1State, NextStep) ship at ArraySize="10" in the
+        /// Process1_Generic.fbt and ProcessRuntime_Generic_v1.fbt templates,
+        /// but Mapper now emits up to 20 entries (Transfer widening +
+        /// auto-retract). EAE silently truncates the over-long array literal
+        /// so ProcessEngine receives a partial recipe and stalls on
+        /// StepType=0 (Unknown step). Force ArraySize="20" on all six in BOTH
+        /// deployed FBTs to match the existing state_table ArraySize=20
+        /// convention. Idempotent: SetAttributeValue replaces if present,
+        /// inserts if absent; no-op once at 20. Runs on hardware AND sim
+        /// paths. (PatchProcessRuntimeEngine's RecipeArrayDecls path is gated
+        /// off because the new template already ships the arrays as InputVars,
+        /// so this unconditional guard is the only thing that fixes the size.)
+        /// </summary>
+        static void PatchProcess1RecipeArraySize(string eaeProjectDir, DeployResult result)
+        {
+            string[] recipeArrays =
+            {
+                "StepType", "CmdTargetName", "CmdStateArr",
+                "Wait1Id", "Wait1State", "NextStep",
+            };
+
+            void PatchOne(string fbtPath, string label)
+            {
+                if (!File.Exists(fbtPath))
+                {
+                    fbtPath = Directory.EnumerateFiles(
+                            Path.Combine(eaeProjectDir, "IEC61499"),
+                            Path.GetFileName(fbtPath), SearchOption.AllDirectories)
+                        .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
+                        ?? string.Empty;
+                    if (string.IsNullOrEmpty(fbtPath)) return;
+                }
+                try
+                {
+                    var doc = System.Xml.Linq.XDocument.Load(
+                        fbtPath, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                    var root = doc.Root;
+                    if (root == null) return;
+                    System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+
+                    int changed = 0;
+                    foreach (var vd in root.Descendants(ns + "VarDeclaration"))
+                    {
+                        var nm = (string?)vd.Attribute("Name") ?? string.Empty;
+                        if (Array.IndexOf(recipeArrays, nm) < 0) continue;
+                        if ((string?)vd.Attribute("ArraySize") == "20") continue;
+                        vd.SetAttributeValue("ArraySize", "20");
+                        changed++;
+                    }
+                    if (changed > 0)
+                    {
+                        doc.Save(fbtPath);
+                        result.PatchesApplied.Add(
+                            $"{label}: forced ArraySize=20 on {changed} recipe array InputVar(s)");
+                        MapperLogger.Info(
+                            $"[Deploy] {label}: recipe arrays ArraySize -> 20 ({changed} changed)");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    result.Warnings.Add($"{label} recipe ArraySize guard failed: {ex.Message}");
+                }
+            }
+
+            PatchOne(Path.Combine(eaeProjectDir, "IEC61499", "Process1_Generic",
+                "Process1_Generic.fbt"), "Process1_Generic.fbt");
+            PatchOne(Path.Combine(eaeProjectDir, "IEC61499",
+                "ProcessRuntime_Generic_v1.fbt"), "ProcessRuntime_Generic_v1.fbt");
         }
 
         /// <summary>
