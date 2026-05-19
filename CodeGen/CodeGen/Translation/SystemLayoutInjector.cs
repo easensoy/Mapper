@@ -1085,6 +1085,22 @@ namespace MapperUI.Services
                     report.Missing.Add($"recipe: {skip}");
             }
 
+            // Defect 3: self-document the FINAL serialised recipe ordering so
+            // the collision-safe sequence (each actuator returns home before
+            // any subsequent actuator advances — Transfer never advances while
+            // Checker/Feeder is atwork) is verifiable straight from the syslay
+            // comment, without hand-decoding the six parallel arrays.
+            if (processRecipe != null &&
+                !string.IsNullOrWhiteSpace(processRecipe.OrderingSummary))
+            {
+                builder.AppendTopComment(
+                    " Recipe step ordering (serialised — collision-safe; each actuator " +
+                    "returns home before any subsequent actuator advances; auto-retract " +
+                    "is nested in place, not batched at the end): " +
+                    processRecipe.OrderingSummary);
+                report.Missing.Add($"recipe ordering: {processRecipe.OrderingSummary}");
+            }
+
             // Sensors-first state_table id map (PartInHopper=0, PartAtChecker=1,
             // Feeder=2, Checker=3, Transfer=4) — identical to the recipe's
             // Wait1Id scheme so InterlockManager.RuleSourceID and the engine
