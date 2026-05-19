@@ -52,6 +52,16 @@ namespace CodeGen.Translation
         /// <summary>Generic generator warnings (lookup misses on StateID etc.).</summary>
         public List<string> Warnings { get; } = new();
 
+        /// <summary>
+        /// Human-readable one-line rendering of the FINAL emitted recipe
+        /// (every CMD/WAIT row in execution order, e.g. "feeder advance →
+        /// feeder atwork → checker advance → … → END"). Surfaced verbatim
+        /// into the .syslay top comment by SystemLayoutInjector so the
+        /// serialised collision-safe ordering (Defect 3) is self-documenting
+        /// and operator-verifiable without decoding the parallel arrays.
+        /// </summary>
+        public string OrderingSummary { get; set; } = string.Empty;
+
         public int PusherId { get; set; }
         public int Count => StepType.Count;
     }
@@ -210,26 +220,28 @@ namespace CodeGen.Translation
                 arrays.Wait1Id.Add(0);
                 arrays.Wait1State.Add(0);
                 arrays.NextStep.Add(0);
+                arrays.OrderingSummary =
+                    "END (every source state skipped — engine halts immediately)";
                 ValidateProcessIdInvariant(arrays, processId);
                 return arrays;
             }
 
-            // 4b. AUTO-RETRACT (safety). Every actuator commanded to a
-            //     transient work state (CmdState=1) MUST be commanded home
-            //     (CmdState=3) before the cycle ends. Yesterday's recipe
-            //     advanced checker (cmd=1) but never retracted it — checker
-            //     stayed atwork forever and the rig needed its air supply
-            //     killed to recover. Walk the emitted CMD rows; any actuator
-            //     advanced but never retracted gets an explicit retract CMD +
-            //     wait-athome pair appended BEFORE the final END, in REVERSE
-            //     order of advance (LIFO: last advanced retracts first).
-            //
-            //     Index math: at this point arrays.Count == finalEndIndex, so
-            //     every existing NextStep that meant "go to END" already ==
-            //     finalEndIndex == the index of the FIRST retract row we
-            //     append — those paths now flow into the retract chain for
-            //     free. Each retract WAIT is then chained to the next retract
-            //     CMD, and the LAST retract WAIT to the (new) END index.
+            // 4b. AUTO-RETRACT (safety + collision ordering — Defect 3).
+            //     Every actuator commanded to a transient work state
+            //     (CmdState=1) MUST be commanded home (CmdState=3) before the
+            //     cycle ends. An early recipe advanced checker (cmd=1) but
+            //     never retracted it — checker stayed atwork forever and the
+            //     rig needed its air supply killed to recover. Walk the
+            //     emitted CMD rows; any actuator advanced but never retracted
+            //     gets an explicit retract CMD + wait-athome pair inserted
+            //     IMMEDIATELY AFTER its own atwork-confirmation WAIT row (not
+            //     batched at the end), so it pulses advance → atwork → retract
+            //     → athome before the recipe proceeds. This serialises the
+            //     recipe: no subsequent actuator advances while a forgotten-
+            //     retract actuator is still atwork (the previous batch-at-end
+            //     LIFO let Transfer fully cycle while Checker was atwork —
+            //     a rig collision). Index discipline is handled per-insertion
+            //     (NextStep values >= the insert point are rebased by +2).
             {
                 var actuatorNameToId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
                 foreach (var a in stationContents.Actuators)
@@ -256,41 +268,108 @@ namespace CodeGen.Translation
                 }
 
                 var stranded = advancedOrder.Where(a => !retracted.Contains(a)).ToList();
-                stranded.Reverse();                                   // LIFO
 
                 if (stranded.Count > 0)
                 {
-                    int firstRetractRow = arrays.StepType.Count;      // == finalEndIndex
-                    foreach (var act in stranded)
+                    // SERIALISED AUTO-RETRACT (Defect 3 — collision ordering).
+                    // The old logic batched EVERY forgotten retract at the very
+                    // END in LIFO order. That let a later actuator fully cycle
+                    // while an earlier one stayed atwork — concretely Transfer
+                    // advanced and retracted while Checker was still atwork,
+                    // colliding on the rig (Checker only retracted after the
+                    // whole Transfer cycle). The fix: insert each stranded
+                    // actuator's "retract + wait-athome" pair IMMEDIATELY after
+                    // its OWN atwork-confirmation WAIT row, so the actuator
+                    // pulses advance → atwork → retract → athome before the
+                    // recipe proceeds to anything else. No subsequent actuator
+                    // advances while a forgotten-retract actuator is still
+                    // atwork. For the Feed Station (only Checker is stranded;
+                    // Feeder + Transfer retract in Control.xml) this yields the
+                    // required order:
+                    //   feeder advance, feeder atwork,
+                    //   checker advance, checker atwork, checker retract, checker athome,
+                    //   feeder retract, feeder athome,
+                    //   transfer advance, transfer atwork, transfer retract, transfer athome,
+                    //   END
+                    //
+                    // Index discipline: inserting 2 rows at position p shifts
+                    // every row at index >= p down by 2, so every NextStep
+                    // VALUE >= p is rebased by +2 before the physical insert.
+                    // The arrays are re-scanned per stranded actuator so a
+                    // prior insertion's shift is already baked in (n <= 20, so
+                    // the re-scan cost is irrelevant).
+                    foreach (var act in stranded)               // advance order
                     {
                         actuatorNameToId.TryGetValue(act, out var actId);
-                        int waitRow = arrays.StepType.Count + 1;
-                        // retract CMD (toHome)
-                        arrays.StepType.Add(1);
-                        arrays.CmdTargetName.Add(act);
-                        arrays.CmdStateArr.Add(3);
-                        arrays.Wait1Id.Add(0);
-                        arrays.Wait1State.Add(0);
-                        arrays.NextStep.Add(waitRow);
-                        // wait athome (TargetHomeState = 4)
-                        arrays.StepType.Add(2);
-                        arrays.CmdTargetName.Add(string.Empty);
-                        arrays.CmdStateArr.Add(0);
-                        arrays.Wait1Id.Add(actId);
-                        arrays.Wait1State.Add(4);
-                        arrays.NextStep.Add(0);                       // patched below
+
+                        // This actuator's advance CMD (CmdState=1). Take the
+                        // last one if Control.xml advanced it more than once;
+                        // its atwork WAIT is the CMD row's NextStep target.
+                        int advCmdIdx = -1;
+                        for (int i = 0; i < arrays.StepType.Count; i++)
+                            if (arrays.StepType[i] == 1 &&
+                                arrays.CmdStateArr[i] == 1 &&
+                                string.Equals(
+                                    (arrays.CmdTargetName[i] ?? string.Empty).Trim(),
+                                    act, StringComparison.OrdinalIgnoreCase))
+                                advCmdIdx = i;                  // keep last
+
+                        int atworkWaitIdx = -1;
+                        if (advCmdIdx >= 0)
+                        {
+                            int w = arrays.NextStep[advCmdIdx];
+                            if (w >= 0 && w < arrays.StepType.Count &&
+                                arrays.StepType[w] == 2)
+                                atworkWaitIdx = w;
+                        }
+
+                        if (atworkWaitIdx < 0)
+                        {
+                            // Shape not recognised — fall back to appending the
+                            // retract at the end so the actuator is STILL
+                            // guaranteed home (safety preserved; ordering may
+                            // not be optimally serialised for this odd input).
+                            atworkWaitIdx = arrays.StepType.Count - 1;
+                            arrays.Warnings.Add(
+                                $"[Recipe] auto-retract for '{act}': atwork WAIT not " +
+                                "locatable via advance-CMD NextStep; appended retract " +
+                                "at end (safe; ordering not serialised for this input).");
+                        }
+
+                        int insertAt = atworkWaitIdx + 1;
+                        int origTarget = arrays.NextStep[atworkWaitIdx];   // pre-shift
+
+                        // Rebase every forward NextStep for the 2 inserted rows.
+                        for (int i = 0; i < arrays.NextStep.Count; i++)
+                            if (arrays.NextStep[i] >= insertAt)
+                                arrays.NextStep[i] += 2;
+                        if (origTarget >= insertAt) origTarget += 2;
+
+                        // retract CMD (toHome) → its own wait-athome
+                        arrays.StepType.Insert(insertAt, 1);
+                        arrays.CmdTargetName.Insert(insertAt, act);
+                        arrays.CmdStateArr.Insert(insertAt, 3);
+                        arrays.Wait1Id.Insert(insertAt, 0);
+                        arrays.Wait1State.Insert(insertAt, 0);
+                        arrays.NextStep.Insert(insertAt, insertAt + 1);
+
+                        // wait athome (TargetHomeState = 4) → resume orig flow
+                        arrays.StepType.Insert(insertAt + 1, 2);
+                        arrays.CmdTargetName.Insert(insertAt + 1, string.Empty);
+                        arrays.CmdStateArr.Insert(insertAt + 1, 0);
+                        arrays.Wait1Id.Insert(insertAt + 1, actId);
+                        arrays.Wait1State.Insert(insertAt + 1, 4);
+                        arrays.NextStep.Insert(insertAt + 1, origTarget);
+
+                        // Re-point the atwork WAIT into the new retract chain.
+                        arrays.NextStep[atworkWaitIdx] = insertAt;
                     }
-                    int endIdx = arrays.StepType.Count;               // where final END lands
-                    for (int k = 0; k < stranded.Count; k++)
-                    {
-                        int waitIdx = firstRetractRow + 1 + 2 * k;
-                        arrays.NextStep[waitIdx] =
-                            (k < stranded.Count - 1) ? waitIdx + 1 : endIdx;
-                    }
+
                     arrays.Warnings.Add(
-                        "[Recipe] auto-retract inserted for actuator(s) left atwork: " +
-                        string.Join(", ", stranded) +
-                        " (reverse-of-advance order, before END).");
+                        "[Recipe] auto-retract serialised (each forgotten-retract " +
+                        "actuator returns home before the recipe proceeds — no " +
+                        "subsequent actuator advances while it is atwork) for: " +
+                        string.Join(", ", stranded) + ".");
                 }
             }
 
@@ -317,7 +396,78 @@ namespace CodeGen.Translation
                     "ArraySize 20, bump ArraySize in both Process1_Generic.fbt and " +
                     "ProcessRuntime_Generic_v1.fbt");
 
+            // Render the FINAL serialised recipe as a one-line narrative for
+            // the .syslay top comment (Defect 3: operator-verifiable ordering).
+            arrays.OrderingSummary = BuildOrderingNarrative(arrays, allComponents);
+
             return arrays;
+        }
+
+        /// <summary>
+        /// Walk the FINAL emitted recipe in row order and render it as one
+        /// human-readable line, e.g. "WAIT PartInHopper on → feeder advance →
+        /// feeder atwork → checker advance → checker atwork → checker retract
+        /// → checker athome → feeder retract → feeder athome → transfer
+        /// advance → transfer atwork → transfer retract → transfer athome →
+        /// END". CMD rows render as "{target} advance|retract"; WAIT rows
+        /// resolve Wait1Id back through the scoped registry to the component
+        /// name and map Wait1State (2=atwork, 4=athome, 1=on) to a phrase.
+        /// This makes the collision-safe serialisation self-documenting in the
+        /// syslay without decoding six parallel arrays by hand.
+        /// </summary>
+        private static string BuildOrderingNarrative(RecipeArrays arrays,
+            IReadOnlyList<VueOneComponent> allComponents)
+        {
+            // id → component display name (sensors first, actuators next —
+            // exactly the recipe Wait1Id scheme in arrays.ComponentRegistry).
+            var idToName = new Dictionary<int, string>();
+            foreach (var kv in arrays.ComponentRegistry)
+            {
+                var comp = allComponents.FirstOrDefault(c =>
+                    string.Equals((c.ComponentID ?? string.Empty).Trim(), kv.Key,
+                        StringComparison.OrdinalIgnoreCase));
+                idToName[kv.Value] =
+                    (comp?.Name ?? $"id{kv.Value}").Trim();
+            }
+
+            var parts = new List<string>(arrays.StepType.Count);
+            for (int i = 0; i < arrays.StepType.Count; i++)
+            {
+                switch (arrays.StepType[i])
+                {
+                    case 9:
+                        parts.Add("END");
+                        break;
+                    case 1:
+                        var tgt = (arrays.CmdTargetName[i] ?? string.Empty).Trim();
+                        if (tgt.Length == 0) tgt = "?";
+                        var verb = arrays.CmdStateArr[i] switch
+                        {
+                            1 => "advance",
+                            3 => "retract",
+                            _ => $"cmd{arrays.CmdStateArr[i]}",
+                        };
+                        parts.Add($"{tgt} {verb}");
+                        break;
+                    case 2:
+                        int wid = arrays.Wait1Id[i];
+                        var nm = idToName.TryGetValue(wid, out var n) ? n : $"id{wid}";
+                        var phase = arrays.Wait1State[i] switch
+                        {
+                            2 => "atwork",
+                            4 => "athome",
+                            1 => "on",
+                            0 => "settled",
+                            _ => $"state{arrays.Wait1State[i]}",
+                        };
+                        parts.Add($"WAIT {nm} {phase}");
+                        break;
+                    default:
+                        parts.Add($"step{arrays.StepType[i]}");
+                        break;
+                }
+            }
+            return string.Join(" → ", parts);
         }
 
         private static void ValidateProcessIdInvariant(RecipeArrays arrays, int processId)
