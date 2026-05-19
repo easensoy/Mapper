@@ -759,7 +759,7 @@ namespace MapperUI
                 if (!EnsureM262SysdevExistsOrAbort()) return;
 
                 lblStatus.Text = "Generating (Simulator)...";
-                AppendActivity($"[Simulator] Generating Test Station 1 (Pusher) into Demonstrator at {syslayPath} — SIMULATOR mode...");
+                AppendActivity($"[Test Feed Station Simulator] Generating into Demonstrator at {syslayPath} — SIMULATOR mode...");
 
                 await DeployUniversalTemplatesAsync();
 
@@ -826,7 +826,7 @@ namespace MapperUI
                     "cmd_target_name='feeder' cmd_state=1, proving the recipe arrays end to end.");
                 lblStatus.Text = $"Ready (Simulator)  |  {path}  |  {report.Bound.Count} bound, {report.Missing.Count} unbound";
                 MessageBox.Show(
-                    $"Generated Test Station 1 into Demonstrator (Simulator):\n{path}\n\n" +
+                    $"Generated Test Feed Station Simulator into Demonstrator:\n{path}\n\n" +
                     $"{report.Bound.Count} bound, {report.Missing.Count} unbound.\n\n" +
                     "Hopper input is forced TRUE at startup via the injected SimHopperForce " +
                     "SYMLINKMULTIVARSRC (syslay + sysres). Resource stays EMB_RES_ECO — " +
@@ -835,7 +835,7 @@ namespace MapperUI
                     "After deploy, login and Watch Feed_Station.ProcessEngine CurrentStep / " +
                     "cmd_target_name / cmd_state / CMDREQ — expect cmd_target_name='feeder', " +
                     "cmd_state=1 once the ring advances.",
-                    "Test Station 1 Pusher-Simulator", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    "Test Feed Station Simulator", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
