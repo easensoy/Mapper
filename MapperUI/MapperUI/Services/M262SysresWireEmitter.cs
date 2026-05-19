@@ -32,81 +32,51 @@ namespace MapperUI.Services
     {
         public sealed record Wire(string Source, string Destination);
 
-        // Full event chain adapted to Mapper's Process1_Generic +
-        // adapter-ring design. START is the resource's built-in restart FB
-        // (EMB_RES_ECO canvas auto-instance). FB1=DPAC_FULLINIT,
-        // FB2=plcStart, Feed_Station=Process1_Generic. No M262IO.
-        private static readonly Wire[] EventWires =
+        // Component-independent bootstrap event wires. START is the
+        // resource's built-in restart FB (EMB_RES_ECO canvas auto-instance).
+        // FB1=DPAC_FULLINIT, FB2=plcStart. The init CHAIN
+        // (FB1.INITO→Area→Station1→components…→Feed_Station) is built
+        // dynamically in Emit() from the components actually present in the
+        // sysres — see BuildChainWires — so a missing component never severs
+        // the chain (the bug a hardcoded N=2/N=4 list caused). M262IO is
+        // intentionally NOT wired: Sensor/Actuator CATs do direct $${PATH}
+        // symlink I/O, there is no PLC_RW_M262 broker.
+        private static readonly Wire[] BootstrapEventWires =
         {
             new("START.COLD",          "FB1.INIT"),
             new("START.WARM",          "FB1.INIT"),
             new("START.ONLINECHANGE",  "FB1.OC_RETRIGGER"),
             new("FB2.FIRST_INIT",      "FB2.ACK_FIRST"),
-            // Init chain identical in ORDER to the syslay's BuildFullSystem
-            // /Feed-station wiring: FB1.INITO is the only entry point. From
-            // Area the chain is strictly sequential —
-            //   Area → Station1 → PartInHopper → Feeder → Feed_Station
-            // matching SystemLayoutInjector's initChain
-            // (Area → Station → sensors → actuators → Process). No parallel
-            // FB1.INITO fan-out and no dangling Station1.INITO (P4 fix).
-            //
-            // M262IO is intentionally NOT wired. Under Option-A binding the
-            // Sensor/Actuator CATs read/write the M262 pins directly via
-            // their own internal SYMLINKMULTIVARDST/SRC ($${PATH} macros) —
-            // there is no PLC_RW_M262 broker. The former
-            //   FB1.INITO → M262IO.INIT
-            //   M262IO.PusherEvent → Feeder.action_event
-            //   Feeder.plc_out → M262IO.REQ_INT_BOOL
-            // wires are deleted: M262IO no longer exists on the sysres and
-            // these phantom events confuse the data-driven Process FB.
-            // Mirrors SystemLayoutInjector.BuildFeedStationWiring initChain for
-            // the widened Button 2 scope (Area → Station1 → sensors → actuators
-            // → Process), contents = {Sensors:[PartInHopper, PartAtChecker],
-            // Actuators:[Feeder, Checker]}.
-            new("FB1.INITO",            "Area.INIT"),
-            new("Area.INITO",           "Station1.INIT"),
-            new("Station1.INITO",       "PartInHopper.INIT"),
-            new("PartInHopper.INITO",   "PartAtChecker.INIT"),
-            new("PartAtChecker.INITO",  "Feeder.INIT"),
-            new("Feeder.INITO",         "Checker.INIT"),
-            new("Checker.INITO",        "Feed_Station.INIT"),
         };
 
-        // Adapter ring: HMI → Area/Station chain → Feed_Station → Feeder
-        // → PartInHopper → Stn1_Term, plus the stateRprtCmd report ring
-        // closing back to Process1.
-        private static readonly Wire[] AdapterWires =
+        // Canonical CaSBus daisy-chain order for the Feed Station slice
+        // (OSDA convention: sensors and actuators interleave in the physical
+        // ring). Emit() iterates the components ACTUALLY present in the
+        // sysres in this order, then appends any other Sensor/Actuator CAT
+        // instance present but unlisted (FBNetwork declaration order) so the
+        // init chain and state-report ring are NEVER severed regardless of
+        // how many components the syslay emitted (N-component safe).
+        private static readonly string[] CaSBusOrder =
+        {
+            "PartInHopper", "Feeder", "Checker", "PartAtChecker",
+        };
+
+        private static readonly HashSet<string> SensorCatTypes =
+            new(StringComparer.Ordinal) { "Sensor_Bool_CAT" };
+        private static readonly HashSet<string> ActuatorCatTypes =
+            new(StringComparer.Ordinal) { "Five_State_Actuator_CAT" };
+
+        // Component-independent adapter wires (HMI faceplates + Area/Station
+        // structural ring). The CaSBus station chain (Station1→actuators→
+        // Feed_Station→Stn1_Term) and the stateRprtCmd report ring
+        // (components→Feed_Station→back to first component, closed) are built
+        // dynamically in Emit()/BuildChainWires from the components actually
+        // present, so they cover N components and the ring is always closed.
+        private static readonly Wire[] HmiAdapterWires =
         {
             new("Area_HMI.AreaHMIAdptrOUT",        "Area.AreaHMIAdptrIN"),
             new("Station1_HMI.StationHMIAdptrOUT", "Station1.StationHMIAdptrIN"),
             new("Area.AreaAdptrOUT",               "Station1.AreaAdptrIN"),
-
-            // CaSBus station chain — actuators + process ONLY, never the
-            // sensor. Sensor_Bool_CAT has no stationAdptr_in/out ports, so
-            // PartInHopper is skipped (P2 fix). Mirrors the syslay
-            // stationChain = [actuators…, process], closed to Stn1_Term.
-            // SystemLayoutInjector.StationAdptr{In,Out} both resolve to
-            // "stationAdptr_{in,out}" for every type.
-            // Widened Button 2 scope: actuators are [Feeder, Checker] (sensors
-            // still skipped — Sensor_Bool_CAT has no stationAdptr ports).
-            // Mirrors syslay stationChain = [Feeder, Checker, Process] → Stn1_Term.
-            new("Station1.StationAdaptrOUT",       "Feeder.stationAdptr_in"),
-            new("Feeder.stationAdptr_out",         "Checker.stationAdptr_in"),
-            new("Checker.stationAdptr_out",        "Feed_Station.stationAdptr_in"),
-            new("Feed_Station.stationAdptr_out",   "Stn1_Term." + CodeGen.Translation.PortNameValidator.CaSAdptrTerminatorInPort),
-
-            // stateRprtCmd report ring — sensors + actuators + process,
-            // closing back to the process. Process1_Generic exposes the
-            // ports as stateRptCmdAdptr_{in,out} (Adptr suffix per
-            // SystemLayoutInjector.StateRprt{In,Out}("Process1_Generic"));
-            // Sensor/Actuator CATs use stateRprtCmd_{in,out} (P3 fix).
-            // Mirrors syslay ringComponents = [PartInHopper, PartAtChecker,
-            // Feeder, Checker, Process] closed back to PartInHopper.
-            new("PartInHopper.stateRprtCmd_out",    "PartAtChecker.stateRprtCmd_in"),
-            new("PartAtChecker.stateRprtCmd_out",   "Feeder.stateRprtCmd_in"),
-            new("Feeder.stateRprtCmd_out",          "Checker.stateRprtCmd_in"),
-            new("Checker.stateRprtCmd_out",         "Feed_Station.stateRptCmdAdptr_in"),
-            new("Feed_Station.stateRptCmdAdptr_out","PartInHopper.stateRprtCmd_in"),
         };
 
         // Endpoints whose LHS is one of these built-in FBs are emitted with
@@ -244,9 +214,73 @@ namespace MapperUI.Services
                     report.Missing.Add($"[Sysres] {srcName}.{srcPort} -> {dstName}.{dstPort}");
                 }
 
-                foreach (var w in EventWires)   Process(w, emittedEvents,   "event");
+                // ── Component-driven init chain + CaSBus station chain +
+                //    stateRprtCmd report ring. Built from the components
+                //    ACTUALLY present (CaSBus order, then any extra CATs) so
+                //    a missing component never severs the chain/ring — the
+                //    bug a hardcoded N=2/N=4 wire list caused. ────────────
+                bool IsSensor(XElement fb) =>
+                    SensorCatTypes.Contains((string?)fb.Attribute("Type") ?? string.Empty);
+                bool IsActuator(XElement fb) =>
+                    ActuatorCatTypes.Contains((string?)fb.Attribute("Type") ?? string.Empty);
+
+                var orderedComps = new List<XElement>();
+                var seenComp = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var nm in CaSBusOrder)
+                    if (byName.TryGetValue(nm, out var cfb) &&
+                        (IsSensor(cfb) || IsActuator(cfb)) && seenComp.Add(nm))
+                        orderedComps.Add(cfb);
+                foreach (var fb in fbNet.Elements(ns + "FB"))
+                {
+                    var nm = (string?)fb.Attribute("Name") ?? string.Empty;
+                    if (nm.Length > 0 && (IsSensor(fb) || IsActuator(fb)) && seenComp.Add(nm))
+                        orderedComps.Add(fb);
+                }
+                string Nm(XElement fb) => (string?)fb.Attribute("Name") ?? string.Empty;
+                var compNames = orderedComps.Select(Nm).Where(s => s.Length > 0).ToList();
+                var actNames = orderedComps.Where(IsActuator).Select(Nm)
+                    .Where(s => s.Length > 0).ToList();
+
+                // Init chain: FB1.INITO→Area→Station1→components…→Feed_Station,
+                // wiring INITO(N)→INIT(N+1) so every node is reached.
+                var eventWires = new List<Wire>(BootstrapEventWires);
+                var initChain = new List<string> { "FB1", "Area", "Station1" };
+                initChain.AddRange(compNames);
+                initChain.Add("Feed_Station");
+                for (int i = 0; i < initChain.Count - 1; i++)
+                    eventWires.Add(new Wire($"{initChain[i]}.INITO", $"{initChain[i + 1]}.INIT"));
+
+                var adapterWires = new List<Wire>(HmiAdapterWires);
+                // CaSBus station chain — actuators + process ONLY (Sensor_Bool_CAT
+                // has no stationAdptr ports): Station1→actuators…→Feed_Station,
+                // Feed_Station closed to Stn1_Term.
+                var stationChain = new List<string>(actNames) { "Feed_Station" };
+                adapterWires.Add(new Wire("Station1.StationAdaptrOUT",
+                    $"{stationChain[0]}.stationAdptr_in"));
+                for (int i = 0; i < stationChain.Count - 1; i++)
+                    adapterWires.Add(new Wire($"{stationChain[i]}.stationAdptr_out",
+                        $"{stationChain[i + 1]}.stationAdptr_in"));
+                adapterWires.Add(new Wire($"{stationChain[^1]}.stationAdptr_out",
+                    "Stn1_Term." + CodeGen.Translation.PortNameValidator.CaSAdptrTerminatorInPort));
+
+                // stateRprtCmd report ring — EVERY component + process, CLOSED:
+                // comp(N).out→comp(N+1).in; last→Feed_Station.stateRptCmdAdptr_in;
+                // Feed_Station.stateRptCmdAdptr_out→comp(0).in. Process1_Generic
+                // uses the *Adptr suffix; Sensor/Actuator CATs use stateRprtCmd_*.
+                if (compNames.Count > 0)
+                {
+                    for (int i = 0; i < compNames.Count - 1; i++)
+                        adapterWires.Add(new Wire($"{compNames[i]}.stateRprtCmd_out",
+                            $"{compNames[i + 1]}.stateRprtCmd_in"));
+                    adapterWires.Add(new Wire($"{compNames[^1]}.stateRprtCmd_out",
+                        "Feed_Station.stateRptCmdAdptr_in"));
+                    adapterWires.Add(new Wire("Feed_Station.stateRptCmdAdptr_out",
+                        $"{compNames[0]}.stateRprtCmd_in"));
+                }
+
+                foreach (var w in eventWires)   Process(w, emittedEvents,   "event");
                 foreach (var w in DataWires)    Process(w, emittedData,     "data");
-                foreach (var w in AdapterWires) Process(w, emittedAdapters, "adapter");
+                foreach (var w in adapterWires) Process(w, emittedAdapters, "adapter");
 
                 // (Removed) The optional M262IO.HopperEvent / PusherEvent →
                 // Feed_Station.state_change fast path is gone with M262IO.
