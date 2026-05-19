@@ -938,22 +938,28 @@ namespace MapperUI.Services
             var grouping = new StationGroupingService();
             var fullContents = grouping.GroupStationContents(process, allComponents);
 
-            // Button 2 scope: the Feed Station slice — Feeder + Checker actuators
-            // and PartInHopper + PartAtChecker sensors. Other components in the
-            // Process's reference set (Transfer, Assembly_Station, …) remain out
-            // of scope for this button; Button 3 emits the full grouping.
+            // Button 2 scope: the Feed Station slice — Feeder + Checker +
+            // Transfer actuators and PartInHopper + PartAtChecker sensors.
+            // Transfer moves a part Station1→Station2; its Control.xml wait
+            // conditions (TransferAdvancing/Returning/Returned) reference only
+            // the Transfer actuator itself, so no extra sensor is required to
+            // unlock those recipe rows. Process/Assembly_Station references
+            // (WaitingReleaseSt2, HandShake) stay out of scope; Button 3 emits
+            // the full grouping.
             //
             // Order is FIXED by these arrays (sensors: PartInHopper then
-            // PartAtChecker; actuators: Feeder then Checker) — not by Control.xml
-            // appearance order — so the combined sensors-first component map is
-            // deterministic: PartInHopper=0, PartAtChecker=1, Feeder=2, Checker=3.
-            // The FB instance id/actuator_id params (sensorIdStart=0,
-            // actuatorIdStart=Sensors.Count) and the recipe's Wait1Id
-            // (ProcessRecipeArrayGenerator.BuildScopedComponentMap) both derive
-            // from this same ordered list, so they stay in lock-step with the
-            // runtime state_table. Components absent from Control.xml are skipped
-            // gracefully (falls back to whatever subset is present).
-            var allowedActuators = new[] { "Feeder", "Checker" };
+            // PartAtChecker; actuators: Feeder, Checker, Transfer) — not by
+            // Control.xml appearance order — so the combined sensors-first
+            // component map is deterministic. With PartAtChecker present:
+            // PartInHopper=0, PartAtChecker=1, Feeder=2, Checker=3, Transfer=4;
+            // without it (today's rig build): PartInHopper=0, Feeder=1,
+            // Checker=2, Transfer=3. The FB id/actuator_id params
+            // (sensorIdStart=0, actuatorIdStart=Sensors.Count) and the recipe's
+            // Wait1Id (ProcessRecipeArrayGenerator.BuildScopedComponentMap)
+            // both derive from this same ordered list, so they stay in
+            // lock-step with the runtime state_table. Components absent from
+            // Control.xml are skipped gracefully (whatever subset is present).
+            var allowedActuators = new[] { "Feeder", "Checker", "Transfer" };
             var allowedSensors = new[] { "PartInHopper", "PartAtChecker" };
             var contents = new StationContents(
                 fullContents.Process,
