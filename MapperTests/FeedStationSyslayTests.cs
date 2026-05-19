@@ -21,17 +21,17 @@ namespace MapperTests
         }
 
         [Fact]
-        public void GeneratesElevenFBs()
+        public void GeneratesTwelveFBs()
         {
             var (doc, _) = Generate();
             var ns = (XNamespace)"https://www.se.com/LibraryElements";
             var fbs = doc.Descendants(ns + "SubAppNetwork").Single().Elements(ns + "FB").ToList();
             // Widened Feed Station scope: 4 structural (Area_HMI/Area/Station1/
             // Station1_HMI) + Feed_Station + 2 terminators (Stn1_Term/Area_Term)
-            // + Feeder + Checker actuators + PartInHopper + PartAtChecker sensors
-            // = 11. Transfer stays out of scope. Top-level PLC_Start removed;
+            // + Feeder + Checker + Transfer actuators + PartInHopper +
+            // PartAtChecker sensors = 12. Top-level PLC_Start removed;
             // Area_CAT/Station_CAT bootstrap themselves.
-            Assert.Equal(11, fbs.Count);
+            Assert.Equal(12, fbs.Count);
         }
 
         [Fact]
@@ -55,16 +55,16 @@ namespace MapperTests
             Assert.Contains("Area_Term", names);
             Assert.Contains("Feeder", names);
             Assert.Contains("PartInHopper", names);
-            // Widened Feed Station scope now includes the Checker actuator and
-            // the PartAtChecker sensor (needed for the PartChecking recipe step).
+            // Widened Feed Station scope now includes the Checker + Transfer
+            // actuators and the PartAtChecker sensor (Checker/PartAtChecker for
+            // the PartChecking step; Transfer for the Station1→Station2 move).
             Assert.Contains("Checker", names);
             Assert.Contains("PartAtChecker", names);
-            // Transfer remains out of scope (not in the Feed Station allow-list).
-            Assert.DoesNotContain("Transfer", names);
+            Assert.Contains("Transfer", names);
         }
 
         [Fact]
-        public void InitChainHasSixConnections()
+        public void InitChainHasSevenConnections()
         {
             var (doc, _) = Generate();
             var ns = (XNamespace)"https://www.se.com/LibraryElements";
@@ -73,9 +73,9 @@ namespace MapperTests
             // Widened Feed Station scope, syslay component-driven order
             // (sensors then actuators): Area->Station1, Station1->PartInHopper,
             // PartInHopper->PartAtChecker, PartAtChecker->Feeder,
-            // Feeder->Checker, Checker->Feed_Station = 6 connections.
-            // Bootstrap edges to/from PLC_Start removed.
-            Assert.Equal(6, connections.Count);
+            // Feeder->Checker, Checker->Transfer, Transfer->Feed_Station = 7
+            // connections. Bootstrap edges to/from PLC_Start removed.
+            Assert.Equal(7, connections.Count);
         }
 
         [Fact]
