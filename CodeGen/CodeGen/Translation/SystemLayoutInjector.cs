@@ -1059,14 +1059,10 @@ namespace MapperUI.Services
                         " — refusing to generate code that strands an actuator at work. " +
                         "(auto-retract should have inserted it; this is a recipe-generator bug.)");
 
-                // Interlock-rule validation is deferred this run: Mapper emits
-                // RuleCount=0 by design (interlock emission is the documented
-                // follow-up), so a hard 'RuleCount>0' abort would block ALL
-                // generation. Surface as a non-fatal TODO instead of aborting.
-                report.Missing.Add(
-                    "[Recipe] interlock rule arrays emitted empty (RuleCount=0) — " +
-                    "InterlockManager runs pass-through. TODO: translate Control.xml " +
-                    "interlock conditions to Rule* arrays (tracked follow-up).");
+                // Interlock-rule validation is now a HARD per-actuator check
+                // in the actuator loop below (abort if an actuator has an
+                // in-scope Control.xml interlock but RuleCount=0). No longer a
+                // deferred TODO — interlock rules are emitted from Control.xml.
             }
 
             builder.AddFB(FBIdGenerator.GenerateFBId(contents.Process.ComponentID),
@@ -1089,11 +1085,35 @@ namespace MapperUI.Services
                     report.Missing.Add($"recipe: {skip}");
             }
 
+            // Sensors-first state_table id map (PartInHopper=0, PartAtChecker=1,
+            // Feeder=2, Checker=3, Transfer=4) — identical to the recipe's
+            // Wait1Id scheme so InterlockManager.RuleSourceID and the engine
+            // read the same state_table slots.
+            var scopedIds = ProcessRecipeArrayGenerator.BuildScopedComponentMap(
+                contents.Sensors, contents.Actuators);
+
             for (int i = 0; i < contents.Actuators.Count; i++)
             {
                 var actuator = contents.Actuators[i];
                 int assignedId = actuatorIdStart + i;
-                var actParams = BuildActuatorParameters(actuator, assignedId, allComponents);
+                var actParams = BuildActuatorParameters(actuator, assignedId, allComponents, scopedIds);
+
+                // Change 2 validation (SAFETY): if Control.xml gives this
+                // actuator an in-scope interlock (a NOT-condition referencing
+                // an in-scope component) but no rule was emitted, the safety
+                // net would be silently theoretical — refuse to generate.
+                int inScopeInterlocks = CountInScopeInterlockConds(actuator, scopedIds);
+                int emittedRuleCount = int.Parse(actParams["RuleCount"],
+                    System.Globalization.CultureInfo.InvariantCulture);
+                if (inScopeInterlocks > 0 && emittedRuleCount == 0)
+                    throw new InvalidOperationException(
+                        $"[Recipe] Actuator '{actuator.Name}' has {inScopeInterlocks} in-scope " +
+                        "Control.xml interlock condition(s) but emitted RuleCount=0 — refusing to " +
+                        "generate code whose InterlockManager passes everything through (false " +
+                        "safety net). Interlock rule translation failed for this actuator.");
+                if (emittedRuleCount > 0)
+                    report.Bound.Add((actuator.Name,
+                        $"interlock RuleCount={emittedRuleCount}"));
 
                 ActuatorBinding? actBinding = null;
                 bindings?.Actuators.TryGetValue(actuator.Name, out actBinding);
@@ -1165,7 +1185,8 @@ namespace MapperUI.Services
         /// </summary>
         public static Dictionary<string, string> BuildActuatorParameters(
             VueOneComponent actuator, int assignedId,
-            IReadOnlyList<VueOneComponent> allComponents)
+            IReadOnlyList<VueOneComponent> allComponents,
+            IReadOnlyDictionary<string, int>? scopedIds = null)
         {
             int toWorkMs = ResolveStateTimeMs(actuator, stateNumber: 1, fallbackMs: DefaultMotionMs);
             int toHomeMs = ResolveStateTimeMs(actuator, stateNumber: 3, fallbackMs: DefaultMotionMs);
@@ -1174,6 +1195,16 @@ namespace MapperUI.Services
             var atHomeIds = ResolveAtHomeStateIds(actuator);
             bool workSensorFitted = AnyComponentReferencesStates(allComponents, actuator, atWorkIds);
             bool homeSensorFitted = AnyComponentReferencesStates(allComponents, actuator, atHomeIds);
+
+            // InterlockManager rule arrays from this actuator's own Control.xml
+            // NOT-conditions. scopedIds==null only for legacy/test callers →
+            // pass-through (RuleCount=0). The real Button 2 / Button 4 path
+            // passes the sensors-first map so RuleSourceID matches the recipe's
+            // Wait1Id state_table indices.
+            var (ruleCount, ruleFrom, ruleTo, ruleSrc, ruleBlk) =
+                scopedIds != null
+                    ? BuildInterlockRules(actuator, allComponents, scopedIds)
+                    : (0, new int[10], new int[10], new int[10], new int[10]);
 
             return new Dictionary<string, string>
             {
@@ -1196,22 +1227,116 @@ namespace MapperUI.Services
                 // athome).
                 ["TargetWork1State"] = SyslayBuilder.FormatInt(2),
                 ["TargetHomeState"] = SyslayBuilder.FormatInt(4),
-                // TODO(interlock-rule-emission): translating Control.xml
-                // interlock conditions (e.g. Feeder/Advancing "NOT Checker/Down
-                // AND NOT Transfer/Advanced") into RuleCount / RuleFromState /
-                // RuleToState / RuleSourceID / RuleBlockedState is an explicit
-                // follow-up (out of scope this run). Emit empty rule arrays
-                // (RuleCount=0, ten zeros each) so the InterlockManager runs
-                // pass-through and nothing is blocked. RuleSourceID, when
-                // populated later, MUST use the same sensors-first state_table
-                // ids as the recipe's Wait1Id (PartInHopper=0, PartAtChecker=1,
-                // Feeder=2, Checker=3, Transfer=4) or the safety guard desyncs.
-                ["RuleCount"] = SyslayBuilder.FormatInt(0),
-                ["RuleFromState"] = SyslayBuilder.FormatIntArray(new int[10]),
-                ["RuleToState"] = SyslayBuilder.FormatIntArray(new int[10]),
-                ["RuleSourceID"] = SyslayBuilder.FormatIntArray(new int[10]),
-                ["RuleBlockedState"] = SyslayBuilder.FormatIntArray(new int[10])
+                // InterlockManager rule arrays — Control.xml NOT-conditions on
+                // this actuator's transitions. RuleSourceID is the sensors-
+                // first state_table index (same scheme as the recipe Wait1Id).
+                ["RuleCount"] = SyslayBuilder.FormatInt(ruleCount),
+                ["RuleFromState"] = SyslayBuilder.FormatIntArray(ruleFrom),
+                ["RuleToState"] = SyslayBuilder.FormatIntArray(ruleTo),
+                ["RuleSourceID"] = SyslayBuilder.FormatIntArray(ruleSrc),
+                ["RuleBlockedState"] = SyslayBuilder.FormatIntArray(ruleBlk)
             };
+        }
+
+        // Rule* InputVars are ArraySize=10 in Five_State_Actuator_CAT.fbt.
+        private const int InterlockRuleCap = 10;
+
+        /// <summary>
+        /// Translate an actuator's Control.xml interlock conditions into the
+        /// InterlockManager rule arrays. VueOne stores these in a STATE-level
+        /// <c>&lt;Interlock_Condition&gt;</c> element (parsed into
+        /// <see cref="VueOneState.InterlockConditions"/>) — NOT in the
+        /// transition's Sequence_Condition. Each listed condition on a state
+        /// becomes one rule: the state's transition (FromState = the state's
+        /// State_Number; ToState = its &lt;Destination_State&gt; State_Number,
+        /// e.g. Advancing#1 → Advanced#2) is blocked while component
+        /// <c>cond.ComponentID</c> sits in the state whose StateID == cond.ID
+        /// (e.g. "NOT Checker/Down"). RuleSourceID uses the sensors-first
+        /// scoped map (== recipe Wait1Id scheme) so the runtime
+        /// InterlockManager reads the same state_table slot the recipe waits
+        /// on. Conditions referencing an OUT-of-scope component are skipped
+        /// (no state_table slot exists — same invariant as the recipe's
+        /// Wait1Id scope filter). Capped at 10.
+        /// </summary>
+        public static (int Count, int[] From, int[] To, int[] Src, int[] Blocked)
+            BuildInterlockRules(VueOneComponent actuator,
+                IReadOnlyList<VueOneComponent> allComponents,
+                IReadOnlyDictionary<string, int> scopedIds)
+        {
+            var from = new int[InterlockRuleCap];
+            var to = new int[InterlockRuleCap];
+            var src = new int[InterlockRuleCap];
+            var blk = new int[InterlockRuleCap];
+            int n = 0;
+
+            foreach (var st in actuator.States)
+            {
+                if (st.InterlockConditions.Count == 0) continue;
+
+                // ToState = where this state's transition leads (the
+                // <Interlock_Condition> blocks THAT transition, e.g.
+                // Advancing#1 -> Advanced#2 via <Destination_State>).
+                int toState = -1;
+                foreach (var tr in st.Transitions)
+                {
+                    var dest = (tr.DestinationStateID ?? string.Empty).Trim();
+                    if (dest.Length == 0) continue;
+                    var ds = actuator.States.FirstOrDefault(s =>
+                        string.Equals((s.StateID ?? string.Empty).Trim(), dest,
+                            StringComparison.OrdinalIgnoreCase));
+                    if (ds != null) { toState = ds.StateNumber; break; }
+                }
+
+                foreach (var c in st.InterlockConditions)
+                {
+                    var key = (c.ComponentID ?? string.Empty).Trim();
+                    if (key.Length == 0) continue;
+                    // Out-of-scope blocker → no state_table slot; cannot emit a
+                    // valid rule (same scoping invariant as recipe Wait1Id).
+                    if (!scopedIds.TryGetValue(key, out var srcId)) continue;
+
+                    var srcComp = allComponents.FirstOrDefault(x =>
+                        string.Equals((x.ComponentID ?? string.Empty).Trim(), key,
+                            StringComparison.OrdinalIgnoreCase));
+                    int blockedState = srcComp?.States.FirstOrDefault(s =>
+                        string.Equals((s.StateID ?? string.Empty).Trim(),
+                            (c.ID ?? string.Empty).Trim(),
+                            StringComparison.OrdinalIgnoreCase))?.StateNumber ?? -1;
+
+                    // Skip rather than emit a wrong safety rule if either end
+                    // is unresolved.
+                    if (toState < 0 || blockedState < 0) continue;
+                    if (n >= InterlockRuleCap) break;
+
+                    from[n] = st.StateNumber;
+                    to[n] = toState;
+                    src[n] = srcId;
+                    blk[n] = blockedState;
+                    n++;
+                }
+            }
+            return (n, from, to, src, blk);
+        }
+
+        /// <summary>
+        /// Count of in-scope Control.xml interlock conditions on this
+        /// actuator's STATE &lt;Interlock_Condition&gt; elements (blocking
+        /// component present in the sensors-first scoped map). Used by the
+        /// deploy-time validation: if this is &gt; 0 but the emitted
+        /// RuleCount is 0, the safety net would be silently theoretical and
+        /// generation must abort.
+        /// </summary>
+        public static int CountInScopeInterlockConds(VueOneComponent actuator,
+            IReadOnlyDictionary<string, int> scopedIds)
+        {
+            int n = 0;
+            foreach (var st in actuator.States)
+            foreach (var c in st.InterlockConditions)
+            {
+                var key = (c.ComponentID ?? string.Empty).Trim();
+                if (key.Length > 0 && scopedIds.ContainsKey(key)) n++;
+            }
+            return n;
         }
 
         /// <summary>Returns the actuator's <Time> for the given State_Number, or fallback.</summary>
