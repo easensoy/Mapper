@@ -305,6 +305,18 @@ namespace CodeGen.Translation
 
             ValidateProcessIdInvariant(arrays, processId);
             ValidateSingleEndMarker(arrays);
+
+            // Recipe-length guard. The Process1_Generic.fbt / ProcessRuntime_
+            // Generic_v1.fbt recipe-array InputVars are ArraySize=20. EAE
+            // silently truncates an over-long array literal, so ProcessEngine
+            // would receive a partial recipe and stall on StepType=0 (Unknown
+            // step). Refuse to emit rather than ship a truncated recipe.
+            if (arrays.StepType.Count > 20)
+                throw new InvalidOperationException(
+                    $"[Recipe] Recipe length {arrays.StepType.Count} exceeds template " +
+                    "ArraySize 20, bump ArraySize in both Process1_Generic.fbt and " +
+                    "ProcessRuntime_Generic_v1.fbt");
+
             return arrays;
         }
 
