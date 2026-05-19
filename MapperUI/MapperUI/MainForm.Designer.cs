@@ -181,7 +181,7 @@
             this.btnGenerateFullSystemSimulator.ForeColor = System.Drawing.Color.White;
             this.btnGenerateFullSystemSimulator.Location = new System.Drawing.Point(1409, 28);
             this.btnGenerateFullSystemSimulator.Size = new System.Drawing.Size(210, 25);
-            this.btnGenerateFullSystemSimulator.Text = "Test Station 1 Pusher-Simulator";
+            this.btnGenerateFullSystemSimulator.Text = "4. Test Feed Station Simulator";
             this.btnGenerateFullSystemSimulator.UseVisualStyleBackColor = false;
             this.btnGenerateFullSystemSimulator.Click += new System.EventHandler(this.btnGenerateFullSystemSimulator_Click);
 
