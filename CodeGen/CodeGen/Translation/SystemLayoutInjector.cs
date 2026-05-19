@@ -938,17 +938,33 @@ namespace MapperUI.Services
             var grouping = new StationGroupingService();
             var fullContents = grouping.GroupStationContents(process, allComponents);
 
-            // Button 2 scope: smallest deployable Tuesday slice — only Feeder actuator and
-            // PartInHopper sensor. Other components in the Process's reference set are out of
-            // scope for this button; Button 3 emits the full grouping.
+            // Button 2 scope: the Feed Station slice — Feeder + Checker actuators
+            // and PartInHopper + PartAtChecker sensors. Other components in the
+            // Process's reference set (Transfer, Assembly_Station, …) remain out
+            // of scope for this button; Button 3 emits the full grouping.
+            //
+            // Order is FIXED by these arrays (sensors: PartInHopper then
+            // PartAtChecker; actuators: Feeder then Checker) — not by Control.xml
+            // appearance order — so the combined sensors-first component map is
+            // deterministic: PartInHopper=0, PartAtChecker=1, Feeder=2, Checker=3.
+            // The FB instance id/actuator_id params (sensorIdStart=0,
+            // actuatorIdStart=Sensors.Count) and the recipe's Wait1Id
+            // (ProcessRecipeArrayGenerator.BuildScopedComponentMap) both derive
+            // from this same ordered list, so they stay in lock-step with the
+            // runtime state_table. Components absent from Control.xml are skipped
+            // gracefully (falls back to whatever subset is present).
+            var allowedActuators = new[] { "Feeder", "Checker" };
+            var allowedSensors = new[] { "PartInHopper", "PartAtChecker" };
             var contents = new StationContents(
                 fullContents.Process,
-                fullContents.Actuators
-                    .Where(a => string.Equals(a.Name, "Feeder", StringComparison.Ordinal))
-                    .ToList(),
-                fullContents.Sensors
-                    .Where(s => string.Equals(s.Name, "PartInHopper", StringComparison.Ordinal))
-                    .ToList());
+                allowedActuators
+                    .Select(n => fullContents.Actuators.FirstOrDefault(
+                        a => string.Equals(a.Name, n, StringComparison.Ordinal)))
+                    .Where(a => a != null).Select(a => a!).ToList(),
+                allowedSensors
+                    .Select(n => fullContents.Sensors.FirstOrDefault(
+                        s => string.Equals(s.Name, n, StringComparison.Ordinal)))
+                    .Where(s => s != null).Select(s => s!).ToList());
 
             var fileName = Path.GetFileName(targetSyslayPath);
             var fullPath = targetSyslayPath;
@@ -958,7 +974,8 @@ namespace MapperUI.Services
             builder.SetTopComment(
                 "Phase 1: Process1 recipe arrays are emitted as syslay Parameter values on the " +
                 "Process1 instance (StepType, CmdTargetName, CmdStateArr, Wait1Id, Wait1State, NextStep). " +
-                "Scope filter still trims to Feeder + PartInHopper; out-of-scope component waits " +
+                "Scope filter trims to the Feed Station slice — Feeder + Checker actuators, " +
+                "PartInHopper + PartAtChecker sensors; out-of-scope component waits " +
                 "fall back to (0,0). Sensor-to-process DataConnections still not generated. " +
                 "Demonstrator was cleaned of universal-architecture instances before this generation; " +
                 "restore via 'git checkout' on the Demonstrator repo to revert.");
@@ -1019,7 +1036,7 @@ namespace MapperUI.Services
                 var prefix = $" Recipe scope: {processRecipe.SkippedConditions.Count} " +
                              "Control.xml condition(s) were dropped because they reference " +
                              "components not present in this syslay (Button 2 filters to " +
-                             $"Feeder + PartInHopper). Skipped:\n  - " +
+                             $"Feeder + Checker + PartInHopper + PartAtChecker). Skipped:\n  - " +
                              string.Join("\n  - ", processRecipe.SkippedConditions);
                 builder.AppendTopComment(prefix);
                 foreach (var skip in processRecipe.SkippedConditions)
