@@ -807,9 +807,10 @@ namespace MapperUI
                 if (simFb > 0)
                 {
                     AppendActivity("Simulator hopper forced TRUE via SimHopperForce SYMLINKMULTIVARSRC");
-                    AppendActivity("[Simulator][InitSeq] FB1.INITO -> SimHopperForce.INIT -> SimHopperForce.REQ -> " +
-                        "SimHopperForce.CNF -> Area.INIT -> Station1 -> PartInHopper -> Feeder -> Feed_Station " +
-                        "— SimHopperForce publishes BEFORE the app chain so FB2 reads the symbol TRUE on its INIT");
+                    AppendActivity("[Simulator][InitSeq] FB1.INITO -> SimHopperForce.INIT -> Area.INIT -> Station1 " +
+                        "-> PartInHopper.INIT (FB2 subscribes) -> PartInHopper.INITO -> { Feeder.INIT (chain) + " +
+                        "SimHopperForce.REQ (one-shot publish) } — publish lands AFTER FB2 subscribed; FB2.CNF fires, " +
+                        "state_table[0]=PartInHopper");
                 }
                 else
                     AppendActivity("[Simulator][Warn] SimHopperForce not injected (already present or canvas not resolvable).");
@@ -944,23 +945,21 @@ namespace MapperUI
                     return fb;
                 }
 
-                // Sequence SimHopperForce at the STRICT END of the
-                // application init chain. Audit 2: PartInHopper's internal
-                // SYMLINKMULTIVARDST (FB2) only registers as subscriber on
-                // its own INIT/REQ pulse, and FB2.CNF only fires for a
-                // publish that arrives AFTER it has registered. So the
-                // publisher must fire only once the whole chain (incl.
-                // PartInHopper.INIT) has completed:
-                //   …Feeder.INITO -> Feed_Station.INIT,
-                //   Feed_Station.INITO -> SimHopperForce.INIT,
-                //   SimHopperForce.INITO -> SimHopperForce.REQ.
-                // SimHopperForce.CNF is the chain terminator (no further
-                // destination). The shared M262SysresWireEmitter's
-                // FB1.INITO -> Area.INIT and Feeder.INITO -> Feed_Station.INIT
-                // are LEFT INTACT (not removed) — only the prior-round
-                // SimHopperForce-specific wires are cleaned. Idempotent:
-                // stale wires removed first, targets added only if absent.
-                // Hardware path never calls this method.
+                // SimHopperForce publish-AFTER-subscribe wiring (simulator
+                // path only; hardware never calls this — there is no
+                // SimHopperForce on the rig, the TM3 driver publishes the
+                // symbol continuously). The SYMLINKMULTIVARDST inside
+                // PartInHopper (FB2) only subscribes on its own INIT and only
+                // confirms a publish that arrives AFTER it has subscribed
+                // (Audit-confirmed: the prior "publish before the chain"
+                // wiring lost the one-shot value). So: the SRC inits early
+                // (symbol registered), the app chain runs and
+                // PartInHopper.INIT subscribes FB2, then PartInHopper.INITO
+                // fires the SRC's one-shot REQ publish — landing on an
+                // already-subscribed FB2. AddEventConns rebuilds these wires
+                // defensively (every prior SimHopperForce wire stripped first)
+                // so re-running the button never duplicates. Hardware path
+                // never calls this method.
                 void AddEventConns(System.Xml.Linq.XElement net)
                 {
                     var ec = net.Element(ns + "EventConnections");
@@ -986,20 +985,30 @@ namespace MapperUI
                                 new System.Xml.Linq.XAttribute("Destination", d)));
                     }
 
-                    // Sequence SimHopperForce BEFORE the application init
-                    // chain so the symbol holds TRUE before FB2 reads it on
-                    // INIT. SimHopperForce.CNF (a valid SYMLINKMULTIVARSRC
-                    // event output) gates Area.INIT, replacing the shared
-                    // emitter's FB1.INITO -> Area.INIT. Clean stale/wrong-
-                    // position wires first, then add. Idempotent.
-                    Remove("Area.INITO", "SimHopperForce.INIT");      // very old
-                    Remove("Area.INITO", "SimHopperForce.REQ");       // very old
-                    Remove("Feed_Station.INITO", "SimHopperForce.INIT"); // chain-end (prev round)
-                    Remove("FB1.INITO", "Area.INIT");                 // shared emitter bridge -> replaced by SimHopperForce.CNF
+                    // Defensive idempotent rebuild: strip EVERY existing
+                    // SimHopperForce-related connection (any prior round /
+                    // topology) plus the shared emitter's FB1.INITO ->
+                    // Area.INIT bridge, then emit the publish-after-subscribe
+                    // wiring from scratch — re-running the button never
+                    // duplicates.
+                    //   FB1.INITO            -> SimHopperForce.INIT  (SRC inits early; symbol registered)
+                    //   SimHopperForce.INITO -> Area.INIT            (app chain proceeds after SRC init)
+                    //   PartInHopper.INITO   -> SimHopperForce.REQ   (one-shot publish AFTER FB2 subscribed)
+                    // The shared emitter's PartInHopper.INITO -> Feeder.INIT
+                    // is left intact (parallel fan-out from the same event
+                    // source is valid in EAE). The old self-fire
+                    // SimHopperForce.INITO -> SimHopperForce.REQ and the
+                    // SimHopperForce.CNF -> Area.INIT gate are gone.
+                    foreach (var c in ec.Elements(ns + "Connection").Where(c =>
+                        (((string?)c.Attribute("Source")) ?? string.Empty).Contains("SimHopperForce") ||
+                        (((string?)c.Attribute("Destination")) ?? string.Empty).Contains("SimHopperForce"))
+                        .ToList())
+                        c.Remove();
+                    Remove("FB1.INITO", "Area.INIT"); // shared emitter bridge -> rerouted via SimHopperForce.INIT
 
                     Add("FB1.INITO", "SimHopperForce.INIT");
-                    Add("SimHopperForce.INITO", "SimHopperForce.REQ");
-                    Add("SimHopperForce.CNF", "Area.INIT");
+                    Add("SimHopperForce.INITO", "Area.INIT");
+                    Add("PartInHopper.INITO", "SimHopperForce.REQ");
                 }
 
                 void Save(System.Xml.Linq.XDocument doc, string p)
