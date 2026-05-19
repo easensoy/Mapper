@@ -640,7 +640,7 @@ namespace MapperUI
                 if (!EnsureM262SysdevExistsOrAbort()) return;
 
                 lblStatus.Text = "Generating...";
-                AppendActivity($"[Button 2] Generating Test Station 1 (Pusher) into Demonstrator at {syslayPath}...");
+                AppendActivity($"[Test Feed Station] Generating into Demonstrator at {syslayPath}...");
 
                 await DeployUniversalTemplatesAsync();
 
@@ -692,8 +692,8 @@ namespace MapperUI
 
                 AppendActivity($"Generated: {path}");
                 lblStatus.Text = $"Ready  |  {path}  |  {report.Bound.Count} bound, {report.Missing.Count} unbound";
-                MessageBox.Show($"Generated Test Station 1 into Demonstrator:\n{path}\n\n{report.Bound.Count} bound, {report.Missing.Count} unbound.",
-                    "Test Station 1", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show($"Generated Test Feed Station into Demonstrator:\n{path}\n\n{report.Bound.Count} bound, {report.Missing.Count} unbound.",
+                    "Test Feed Station", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
