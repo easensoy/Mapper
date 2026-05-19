@@ -24,6 +24,15 @@ namespace CodeGen.Models
         public bool StaticState { get; set; }
 
         public List<VueOneTransition> Transitions { get; set; } = new();
+
+        /// <summary>
+        /// State-level &lt;Interlock_Condition&gt; entries (VueOne stores
+        /// actuator interlocks here, NOT in the transition Sequence_Condition).
+        /// Each is a "block this state's transition while &lt;ComponentID&gt;
+        /// is in state &lt;ID&gt;" guard, translated to InterlockManager
+        /// Rule* arrays by SystemInjector.BuildInterlockRules.
+        /// </summary>
+        public List<VueOneCondition> InterlockConditions { get; set; } = new();
     }
 
     public class VueOneTransition
