@@ -77,17 +77,12 @@ namespace MapperUI.Services
                 }
                 var (sysdevDir, resourceId, sysresPath) = loc.Value;
 
-                // 2. Ensure the .sysres FBNetwork carries an M262IO PLC_RW_M262
-                //    FB. Inject one with a deterministic short-hex ID if missing
-                //    — without this, EAE has no symlink target and the Hardware
-                //    Configurator view stays blank.
                 // 2. Build a {component-name → fb-id} map from the M262 sysres
-                //    FBNetwork. Option A: each TM3 channel publishes its
-                //    symlink directly to the consumer's FB instance (e.g.
-                //    "Feeder.athome", "PartInHopper.Input"), matching the
-                //    actuator/sensor CATs' SYMLINKMULTIVARDST $${PATH}<port>
-                //    expansion. The M262IO FB ID is no longer in the
-                //    ParameterValue — it's a passive bridge.
+                //    FBNetwork. Each TM3 channel publishes its symlink directly
+                //    to the consumer's FB instance (e.g. "Feeder.athome",
+                //    "PartInHopper.Input"), matching the actuator/sensor CATs'
+                //    SYMLINKMULTIVARDST $${PATH}<port> expansion. There is no
+                //    M262IO / PLC_RW_M262 broker FB — the CATs are the I/O.
                 var fbIdByName = ReadFbIdByName(sysresPath);
                 if (fbIdByName.Count == 0)
                 {
@@ -803,106 +798,6 @@ namespace MapperUI.Services
             }
             catch { /* best-effort */ }
             return names;
-        }
-
-        /// <summary>
-        /// Reads the M262 sysres root's <c>ID</c> attribute (resource GUID) and
-        /// the <c>M262IO</c> FB's <c>ID</c> attribute. Returns blanks if anything
-        /// is missing — caller treats blanks as a skip signal.
-        /// </summary>
-        private static (string resourceId, string m262IoFbId) EnsureSysresAndM262IoIds(
-            string eaeRoot, SystemInjector.BindingApplicationReport report)
-        {
-            try
-            {
-                var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
-                if (!Directory.Exists(systemDir)) return (string.Empty, string.Empty);
-
-                var sysresPath = Directory
-                    .EnumerateFiles(systemDir, "*.sysres", SearchOption.AllDirectories)
-                    .FirstOrDefault();
-                if (sysresPath == null) return (string.Empty, string.Empty);
-
-                var doc = XDocument.Load(sysresPath, LoadOptions.PreserveWhitespace);
-                var root = doc.Root;
-                if (root == null) return (string.Empty, string.Empty);
-                XNamespace ns = root.GetDefaultNamespace();
-
-                bool dirty = false;
-
-                // 1. Ensure resource has a non-zero short-hex ID. EAE accepts both
-                //    long GUIDs and 16-char hex; baselines use the latter.
-                var rawId = (string?)root.Attribute("ID") ?? string.Empty;
-                if (IsZeroOrEmptyId(rawId))
-                {
-                    rawId = NewShortHexId("RES0|" + sysresPath);
-                    root.SetAttributeValue("ID", rawId);
-                    dirty = true;
-                    report.Missing.Add($"[Hcf] sysres ID was zero — assigned {rawId}");
-                }
-
-                // 2. Ensure FBNetwork exists and contains an M262IO FB instance.
-                //    Without it, .hcf ParameterValues cannot resolve and the EAE
-                //    Symbolic Links view stays blank.
-                var fbNetwork = root.Element(ns + "FBNetwork");
-                if (fbNetwork == null)
-                {
-                    fbNetwork = new XElement(ns + "FBNetwork");
-                    root.Add(fbNetwork);
-                    dirty = true;
-                }
-                var m262Io = fbNetwork.Elements(ns + "FB")
-                    .FirstOrDefault(e => (string?)e.Attribute("Name") == "M262IO" &&
-                                         (string?)e.Attribute("Type") == "PLC_RW_M262");
-                string m262IoFbId;
-                if (m262Io == null)
-                {
-                    m262IoFbId = NewShortHexId("M262IO|" + rawId);
-                    var mappingId = NewShortHexId("M262IO_MAP|" + rawId);
-                    m262Io = new XElement(ns + "FB",
-                        new XAttribute("ID", m262IoFbId),
-                        new XAttribute("Name", "M262IO"),
-                        new XAttribute("Type", "PLC_RW_M262"),
-                        new XAttribute("Namespace", "Main"),
-                        new XAttribute("Mapping", mappingId),
-                        new XAttribute("x", "3760"),
-                        new XAttribute("y", "1020"));
-                    fbNetwork.Add(m262Io);
-                    dirty = true;
-                    report.Missing.Add(
-                        $"[Hcf] sysres had no M262IO FB — injected with ID {m262IoFbId}");
-                }
-                else
-                {
-                    m262IoFbId = (string?)m262Io.Attribute("ID") ?? string.Empty;
-                    if (IsZeroOrEmptyId(m262IoFbId))
-                    {
-                        m262IoFbId = NewShortHexId("M262IO|" + rawId);
-                        m262Io.SetAttributeValue("ID", m262IoFbId);
-                        dirty = true;
-                    }
-                }
-
-                if (dirty)
-                {
-                    var settings = new System.Xml.XmlWriterSettings
-                    {
-                        OmitXmlDeclaration = false,
-                        Indent = true,
-                        Encoding = new System.Text.UTF8Encoding(false),
-                    };
-                    using var fs = new FileStream(sysresPath, FileMode.Create, FileAccess.Write, FileShare.Read);
-                    using var w = System.Xml.XmlWriter.Create(fs, settings);
-                    doc.Save(w);
-                }
-
-                return (rawId, m262IoFbId);
-            }
-            catch (Exception ex)
-            {
-                report.Missing.Add($"[Hcf] EnsureSysres failed: {ex.GetType().Name}: {ex.Message}");
-                return (string.Empty, string.Empty);
-            }
         }
 
         private static void SaveXml(XDocument doc, string path)
