@@ -20,5 +20,9 @@
   "IoBindingsPath": "Input\\SMC_Rig_IO_Bindings.xlsx",
   "M262HardwareConfigBaselinePath": "C:\\SMC_Rig_Expo_20260112-165857725.sln",
   "M262TargetIp": "192.168.1.10",
-  "ResourceName": "RES0"
+  "ResourceName": "RES0",
+  "IoFolderPath": "C:\\VueOneMapper\\IO",
+  "M262HcfTemplatePath": "C:\\VueOneMapper\\IO\\M262IO.hcf",
+  "M580HcfTemplatePath": "C:\\VueOneMapper\\IO\\M580IO.hcf",
+  "BX1HcfTemplatePath": "C:\\VueOneMapper\\IO\\BX1IO.hcf"
 }
