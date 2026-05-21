@@ -57,10 +57,28 @@ namespace CodeGen.Translation
             {
                 return StripSuffix(name, "_process") ?? StripSuffix(name, "_Process") ?? name;
             }
-            // Actuator / Sensor / Robot pass through unchanged.
+
+            // 4. Rig-canonical hardware aliases. VueOne uses logical names
+            //    ("Feeder"); the physical SMC rig + HCF channel bindings + HMI
+            //    faceplate captions all use hardware names ("Pusher"). These
+            //    fallbacks only apply when no xlsx override is supplied —
+            //    add a row to Instance_Name_Overrides to change this.
+            if (RigAliases.TryGetValue(name, out var hardwareName))
+                return hardwareName;
 
             return name;
         }
+
+        /// <summary>
+        /// Rig-canonical name aliases used when the xlsx Instance_Name_Overrides
+        /// sheet does not provide one. Keep this small — anything project-specific
+        /// belongs in the xlsx so it stays version-controlled with the rig wiring.
+        /// </summary>
+        private static readonly Dictionary<string, string> RigAliases =
+            new(StringComparer.OrdinalIgnoreCase)
+            {
+                { "Feeder", "Pusher" },
+            };
 
         private static string? StripSuffix(string s, string suffix)
         {
