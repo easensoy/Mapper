@@ -501,6 +501,30 @@ namespace MapperUI
             {
                 AppendActivity($"[M262][Error] hcf patch: {ex.Message}");
             }
+
+            // M580 HCF — runs AFTER Station2DeviceEmitter has copied the
+            // IO-folder template into the M580 sysdev folder. Rewrites the
+            // 'RES0.M580IO.…' export-time prefix to 'M580_RES.M580IO.…' so
+            // EAE's IO Mapping resolver finds the runtime resource, AND
+            // clears pins whose owning component is absent from the syslay.
+            try
+            {
+                var hcf = await Task.Run(() => MapperUI.Services.M580HwConfigCopier.Copy(Cfg()));
+                AppendActivity($"[M580] hcf re-patched; {hcf.ParametersOverwritten.Count} channel symlink(s) written");
+                foreach (var w in hcf.Warnings)
+                    AppendActivity($"[M580][Warn] {w}");
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"[M580][Error] hcf patch: {ex.Message}");
+            }
+
+            // BX1: no per-pin .hcf rewriting. The TM3 modules behind the
+            // EIPSCANNER2 coupler map their entire 16-bit input/output words
+            // to single VTQWORD symlinks (RES0.BX1_IO.EIP_Input_Word_1 /
+            // EIP_Output_Word_1); bit decoding lives inside the BX1_IO SIFB,
+            // not in the .hcf. Station2DeviceEmitter's verbatim copy is the
+            // only sensible action — there's nothing per-pin to refine.
         }
 
         /// <summary>
