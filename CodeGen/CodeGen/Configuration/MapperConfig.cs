@@ -74,6 +74,39 @@ namespace CodeGen.Configuration
         /// </summary>
         public string ResourceName { get; set; } = "RES0";
 
+        /// <summary>
+        /// Folder holding per-PLC HCF (Hardware Configuration File) templates exported
+        /// from EAE. Each .hcf carries the TM3/X80 slot layout plus DI/DO channel
+        /// ParameterValue bindings to symbolic names (e.g. 'RES0.M262IO.PusherAtHome').
+        /// Mapper copies these templates verbatim into the deployed project and
+        /// rewrites only the symbol bindings from IoBindings.xlsx. Bus topology is
+        /// fixed by physical rig wiring and never synthesised from Control.xml.
+        /// </summary>
+        public string IoFolderPath { get; set; } = string.Empty;
+
+        /// <summary>
+        /// HCF template for the M262 PLC (Station 1 — BMTM3 bus + TM262L01MDESE8T CPU
+        /// + TM3DI16_G + TM3DQ16T_G modules). Holds the Feed_Station IO bindings:
+        /// Pusher/Checker/Transfer atHome/atWork sensors and Extend* output coils.
+        /// </summary>
+        public string M262HcfTemplatePath { get; set; } = string.Empty;
+
+        /// <summary>
+        /// HCF template for the M580 PLC (Station 2 — BMXBUS + BMEXBP0400 rack +
+        /// BMED581020 CPU + BMXDDM16025 modules). Holds the Assembly_Station IO
+        /// bindings: SwivelArm AtPick/AtPlace/AtHome sensors, Bearing_Gripper,
+        /// Shaft_Vr/Shaft_Hr atHome/atWork, Shaft_Gripper, Clamp.
+        /// </summary>
+        public string M580HcfTemplatePath { get; set; } = string.Empty;
+
+        /// <summary>
+        /// HCF template for the BX1 PLC (secondary IO island — Cover PnP + Ejector +
+        /// CoverGripper + TopCoverSensor bindings). Currently exists only as a wiring
+        /// reference (BX1 IO.png in the IO folder) and no .hcf file has been exported
+        /// yet; the path is reserved so Mapper can pick it up once available.
+        /// </summary>
+        public string BX1HcfTemplatePath { get; set; } = string.Empty;
+
         public string ActiveSyslayPath =>
             !string.IsNullOrEmpty(SyslayPath2) ? SyslayPath2 : SyslayPath;
 
