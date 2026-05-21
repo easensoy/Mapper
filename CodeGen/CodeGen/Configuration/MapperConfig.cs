@@ -107,6 +107,32 @@ namespace CodeGen.Configuration
         /// </summary>
         public string BX1HcfTemplatePath { get; set; } = string.Empty;
 
+        /// <summary>
+        /// When TRUE, the simulator pipeline collapses the entire SMC rig
+        /// (Feed_Station + Assembly_Station + Disassembly + Robot orchestrator)
+        /// into a SINGLE resource (one SIM device, one sysres, one syslay).
+        /// All 4 Processes, all 13 actuators and all 4 sensors live on one
+        /// flat FBNetwork with a single CaSBus init chain and a single
+        /// stateRptCmd ring. No cross-device SIFB channels, no M580/BX1
+        /// sysdev/hcf, no commdesc.xml. Cross-process handshakes that the
+        /// hardware path drops (because Feed_Station/HandShake waits on
+        /// Disassembly/handshake which lives on a different PLC) are
+        /// preserved here by wiring Process[i].state_update directly into
+        /// Process[j].state_change on the shared canvas.
+        ///
+        /// <para>The hardware path (Button 2 / btnTestStation1) ignores this
+        /// flag — the Feed Station slice must regenerate byte-identical to
+        /// today's working output. Only the "Test Simulator" button flips
+        /// this on before running the pipeline. Default FALSE so a fresh
+        /// MapperConfig keeps the hardware path stable.</para>
+        ///
+        /// <para>Bearing_PnP (a 13-state branched actuator) is stubbed with
+        /// Five_State_Actuator_CAT when this flag is on, with an activity
+        /// warning that the assembly/disassembly branch selection is
+        /// approximated — the rest of the system still generates and runs.</para>
+        /// </summary>
+        public bool SimulatorFullSystem { get; set; } = false;
+
         public string ActiveSyslayPath =>
             !string.IsNullOrEmpty(SyslayPath2) ? SyslayPath2 : SyslayPath;
 
