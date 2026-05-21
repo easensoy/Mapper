@@ -16,13 +16,15 @@ namespace MapperUI.Services
             { "Sensor_Bool_CAT",         new[] { "Sensor_Bool" } },
             { "Actuator_Fault_CAT",      new[] { "FaultLatch" } },
             { "Robot_Task_CAT",          new[] { "Robot_Task_Core" } },
-            // Seven_State_Actuator_CAT (and its SevenStateActuator2 basic) intentionally
-            // removed 2026-05-21. The data-driven patch path kept generating syntax / type
-            // resolution errors (']' ERR_SYNTAX, missing SevenStateActuator2.gfbt, etc.)
-            // because the reference CAT was string-driven and grafting Rule*/Target*
-            // InputVars onto its outer InterfaceList without rewiring the inner
-            // FBNetwork left EAE unable to compile a coherent type. Bearing_PnP is
-            // dropped from scope until a clean Seven_State path is reintroduced.
+            // Seven_State_Actuator_CAT re-added per user request 2026-05-21
+            // for Bearing_PnP routing (Mapper Validator was failing the
+            // PARALLEL+ALTERNATIVE-branched 13-state actuator with "No template
+            // found"). SevenStateActuator2 is its internal "InterlockManager"
+            // sub-FB analogue (same role as CommonInterlockEvaluator for
+            // Five_State). The previous removal was driven by data-driven
+            // patch failures; with Bearing_PnP routed to the verbatim CAT
+            // (no runtime parameter graft) those failures no longer apply.
+            { "Seven_State_Actuator_CAT", new[] { "SevenStateActuator", "SevenStateActuator2" } },
             { "Station_CAT",             new[] { "Station_Core", "Station_Fault", "Station_Status" } },
             { "Process1_Generic",        new[] { "ProcessRuntime_Generic_v1", "ProcessStateBusHandler" } },
         };
@@ -30,7 +32,7 @@ namespace MapperUI.Services
         static readonly Dictionary<string, string> ComponentTypeToCat = new(StringComparer.OrdinalIgnoreCase)
         {
             { "Actuator_5",  "Five_State_Actuator_CAT" },
-            // Actuator_7 removed with Seven_State_Actuator_CAT — re-add when the CAT returns.
+            { "Actuator_7",  "Seven_State_Actuator_CAT" },
             { "Sensor_2",    "Sensor_Bool_CAT" },
             { "Process_Any", "Process1_Generic" },
         };
@@ -38,9 +40,10 @@ namespace MapperUI.Services
         static readonly string[] UniversalCats = new[]
         {
             "Five_State_Actuator_CAT", "Sensor_Bool_CAT", "Process1_Generic",
-            // Seven_State_Actuator_CAT removed 2026-05-21 — see comment in
-            // CatToBasics (above) for rationale. Bearing_PnP is dropped from
-            // scope; add the CAT back here when a clean implementation lands.
+            // Seven_State_Actuator_CAT restored for Bearing_PnP (13-state
+            // PARALLEL+ALTERNATIVE branched). Deployed verbatim from the
+            // Template Library — no runtime data-driven patching.
+            "Seven_State_Actuator_CAT",
         };
 
         // No I/O-bridge FB is deployed. PLC_RW_M262 (the old "M262IO" broker)
@@ -77,8 +80,12 @@ namespace MapperUI.Services
             // Event-change handlers referenced by PLC_RW_M262's internal FB2/FB3
             // instances. Sourced from C:\SMC_Rig_Expo_20260112-165857725.sln\IEC61499.
             "changeEventProcess1", "changeEventProcess2",
-            // SevenStateActuator2 removed 2026-05-21 — its only consumer was
-            // Seven_State_Actuator_CAT, which is no longer deployed.
+            // SevenStateActuator + SevenStateActuator2 — Basic FBs embedded by
+            // Seven_State_Actuator_CAT. Both must be deployed when the CAT is in
+            // scope or EAE fails with "type or namespace SevenStateActuator2
+            // does not exist". Restored 2026-05-21 alongside the CAT for
+            // Bearing_PnP routing.
+            "SevenStateActuator", "SevenStateActuator2",
         };
 
         static readonly string[] UniversalHmiCats = new[]
