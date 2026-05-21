@@ -973,8 +973,8 @@ namespace MapperUI.Services
             {
                 // Station 1 (M262)
                 "Feeder", "Checker", "Transfer",
-                // Station 2 (M580)
-                "Bearing_PnP", "Bearing_Gripper",
+                // Station 2 (M580) — Bearing_PnP removed with Seven_State_Actuator_CAT
+                "Bearing_Gripper",
                 "Shaft_Hr", "Shaft_Vr", "Shaft_Gripper",
                 "Clamp",
                 // Station 2 (BX1)
@@ -1455,18 +1455,8 @@ namespace MapperUI.Services
             if (actuator == null) return "Five_State_Actuator_CAT";
             var name = actuator.Name ?? string.Empty;
             if (VacuumGripperNames.Contains(name)) return "Vacuum_Gripper_CAT";
-
-            bool isBranched = actuator.States.Any(st =>
-            {
-                bool hasParallel = st.Transitions.Any(t =>
-                    string.Equals(t.TransitionType, "PARALLEL", StringComparison.OrdinalIgnoreCase));
-                bool hasAlternative = st.Transitions.Any(t =>
-                    string.Equals(t.TransitionType, "ALTERNATIVE", StringComparison.OrdinalIgnoreCase));
-                return hasParallel && hasAlternative;
-            });
-            if (isBranched) return "Seven_State_Actuator_CAT";
-
-            if (actuator.States.Count == 7) return "Seven_State_Actuator_CAT";
+            // Seven_State_Actuator_CAT routing (7-state + PARALLEL+ALTERNATIVE branched)
+            // removed 2026-05-21 — see TemplateLibraryDeployer CatToBasics comment.
             if (actuator.States.Count == 4) return "Five_State_Actuator_No_Sensors_CAT";
             return "Five_State_Actuator_CAT";
         }
@@ -1488,28 +1478,10 @@ namespace MapperUI.Services
                 ["actuator_name"] = SyslayBuilder.FormatString(actuator.Name.ToLowerInvariant()),
                 ["actuator_id"]   = SyslayBuilder.FormatInt(assignedId),
             };
-            // Seven_State accepts the data-driven block after our deploy patch.
-            // Emit RuleCount=0 + zero-filled arrays sized to the FBT's
-            // declared ArraySize=10. An EMPTY-array literal "[]" is a hard
-            // ERR_SYNTAX in EAE's structured-text parser ("']' is not correct
-            // structured text syntax"), even when RuleCount=0 — so the array
-            // initializer must enumerate ten zeros and let the runtime
-            // ignore them via RuleCount=0. The Five_State path already
-            // does this naturally by building from a new int[10] inside
-            // BuildInterlockRules; the minimal path used to emit "[]"
-            // here and crashed the compile 4× (one per Rule* array).
-            if (string.Equals(fbType, "Seven_State_Actuator_CAT", StringComparison.Ordinal))
-            {
-                var zeros = new int[InterlockRuleCap];   // ArraySize on the FBT
-                dict["RuleCount"]        = SyslayBuilder.FormatInt(0);
-                dict["RuleFromState"]    = SyslayBuilder.FormatIntArray(zeros);
-                dict["RuleToState"]      = SyslayBuilder.FormatIntArray(zeros);
-                dict["RuleSourceID"]     = SyslayBuilder.FormatIntArray(zeros);
-                dict["RuleBlockedState"] = SyslayBuilder.FormatIntArray(zeros);
-                dict["TargetWork1State"] = SyslayBuilder.FormatInt(2);
-                dict["TargetWork2State"] = SyslayBuilder.FormatInt(4);
-                dict["TargetHomeState"]  = SyslayBuilder.FormatInt(6);
-            }
+            // Seven_State_Actuator_CAT-specific block removed 2026-05-21.
+            // Vacuum_Gripper_CAT + Five_State_Actuator_No_Sensors_CAT (the other
+            // non-5-state cases that still route through this minimal path)
+            // only need the scalar actuator_name + actuator_id pair declared above.
             return dict;
         }
 
