@@ -1,4 +1,4 @@
-﻿namespace MapperUI
+namespace MapperUI
 {
     partial class MainForm
     {
@@ -60,9 +60,7 @@
             this.btnGenerateProcessFB = new System.Windows.Forms.Button();
             this.btnGeneratePusherTest = new System.Windows.Forms.Button();
             this.btnGenerateFeedStation = new System.Windows.Forms.Button();
-            this.btnProcessFB = new System.Windows.Forms.Button();
             this.btnTestStation1 = new System.Windows.Forms.Button();
-            this.btnGenerateAll = new System.Windows.Forms.Button();
             this.btnGenerateFullSystemSimulator = new System.Windows.Forms.Button();
             this.btnCleanDemonstrator = new System.Windows.Forms.Button();
             this.statusStrip = new System.Windows.Forms.StatusStrip();
@@ -133,18 +131,6 @@
             this.btnGenerateProcessFB.Visible = false;
             this.btnGenerateFeedStation.Visible = false;
 
-            this.btnProcessFB.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
-            this.btnProcessFB.BackColor = System.Drawing.Color.FromArgb(0, 122, 204);
-            this.btnProcessFB.Enabled = false;
-            this.btnProcessFB.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-            this.btnProcessFB.FlatAppearance.BorderSize = 0;
-            this.btnProcessFB.Font = new System.Drawing.Font("Segoe UI", 8.5F, System.Drawing.FontStyle.Bold);
-            this.btnProcessFB.ForeColor = System.Drawing.Color.White;
-            this.btnProcessFB.Location = new System.Drawing.Point(835, 28);
-            this.btnProcessFB.Size = new System.Drawing.Size(120, 25);
-            this.btnProcessFB.Text = "1. Process FB";
-            this.btnProcessFB.UseVisualStyleBackColor = false;
-            this.btnProcessFB.Click += new System.EventHandler(this.btnProcessFB_Click);
 
             this.btnTestStation1.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
             this.btnTestStation1.BackColor = System.Drawing.Color.FromArgb(255, 140, 0);
@@ -153,24 +139,12 @@
             this.btnTestStation1.FlatAppearance.BorderSize = 0;
             this.btnTestStation1.Font = new System.Drawing.Font("Segoe UI", 8.5F, System.Drawing.FontStyle.Bold);
             this.btnTestStation1.ForeColor = System.Drawing.Color.White;
-            this.btnTestStation1.Location = new System.Drawing.Point(961, 28);
+            this.btnTestStation1.Location = new System.Drawing.Point(1083, 28);
             this.btnTestStation1.Size = new System.Drawing.Size(170, 25);
-            this.btnTestStation1.Text = "2. Test Feed Station";
+            this.btnTestStation1.Text = "Test Runtime";
             this.btnTestStation1.UseVisualStyleBackColor = false;
             this.btnTestStation1.Click += new System.EventHandler(this.btnTestStation1_Click);
 
-            this.btnGenerateAll.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
-            this.btnGenerateAll.BackColor = System.Drawing.Color.FromArgb(0, 153, 76);
-            this.btnGenerateAll.Enabled = false;
-            this.btnGenerateAll.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-            this.btnGenerateAll.FlatAppearance.BorderSize = 0;
-            this.btnGenerateAll.Font = new System.Drawing.Font("Segoe UI", 8.5F, System.Drawing.FontStyle.Bold);
-            this.btnGenerateAll.ForeColor = System.Drawing.Color.White;
-            this.btnGenerateAll.Location = new System.Drawing.Point(1137, 28);
-            this.btnGenerateAll.Size = new System.Drawing.Size(120, 25);
-            this.btnGenerateAll.Text = "3. Generate All";
-            this.btnGenerateAll.UseVisualStyleBackColor = false;
-            this.btnGenerateAll.Click += new System.EventHandler(this.btnGenerateAll_Click);
 
             this.btnGenerateFullSystemSimulator.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
             this.btnGenerateFullSystemSimulator.BackColor = System.Drawing.Color.FromArgb(0, 120, 153);
@@ -181,7 +155,7 @@
             this.btnGenerateFullSystemSimulator.ForeColor = System.Drawing.Color.White;
             this.btnGenerateFullSystemSimulator.Location = new System.Drawing.Point(1409, 28);
             this.btnGenerateFullSystemSimulator.Size = new System.Drawing.Size(210, 25);
-            this.btnGenerateFullSystemSimulator.Text = "4. Test Feed Station Simulator";
+            this.btnGenerateFullSystemSimulator.Text = "Test Simulator";
             this.btnGenerateFullSystemSimulator.UseVisualStyleBackColor = false;
             this.btnGenerateFullSystemSimulator.Click += new System.EventHandler(this.btnGenerateFullSystemSimulator_Click);
 
@@ -191,7 +165,7 @@
             this.btnCleanDemonstrator.FlatAppearance.BorderSize = 0;
             this.btnCleanDemonstrator.Font = new System.Drawing.Font("Segoe UI", 8.5F, System.Drawing.FontStyle.Bold);
             this.btnCleanDemonstrator.ForeColor = System.Drawing.Color.White;
-            this.btnCleanDemonstrator.Location = new System.Drawing.Point(1263, 28);
+            this.btnCleanDemonstrator.Location = new System.Drawing.Point(1261, 28);
             this.btnCleanDemonstrator.Size = new System.Drawing.Size(140, 25);
             this.btnCleanDemonstrator.Text = "Clean Demonstrator";
             this.btnCleanDemonstrator.UseVisualStyleBackColor = false;
@@ -373,9 +347,7 @@
             this.Controls.Add(this.btnGenerateProcessFB);
             this.Controls.Add(this.btnGeneratePusherTest);
             this.Controls.Add(this.btnGenerateFeedStation);
-            this.Controls.Add(this.btnProcessFB);
             this.Controls.Add(this.btnTestStation1);
-            this.Controls.Add(this.btnGenerateAll);
             this.Controls.Add(this.btnGenerateFullSystemSimulator);
             this.Controls.Add(this.btnCleanDemonstrator);
             this.Controls.Add(this.btnBrowse);
@@ -470,9 +442,7 @@
         private System.Windows.Forms.Button btnGenerateProcessFB;
         private System.Windows.Forms.Button btnGeneratePusherTest;
         private System.Windows.Forms.Button btnGenerateFeedStation;
-        private System.Windows.Forms.Button btnProcessFB;
         private System.Windows.Forms.Button btnTestStation1;
-        private System.Windows.Forms.Button btnGenerateAll;
         private System.Windows.Forms.Button btnGenerateFullSystemSimulator;
         private System.Windows.Forms.Button btnCleanDemonstrator;
         private System.Windows.Forms.Label lblLoadedFile;
