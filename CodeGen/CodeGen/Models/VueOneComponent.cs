@@ -42,6 +42,16 @@ namespace CodeGen.Models
         public string DestinationStateID { get; set; } = string.Empty;
         public int Priority { get; set; }
         public List<VueOneCondition> Conditions { get; set; } = new();
+
+        /// <summary>
+        /// VueOne's &lt;Type&gt; on a transition: SINGLE (default), PARALLEL,
+        /// or ALTERNATIVE. A resting state with both PARALLEL and ALTERNATIVE
+        /// outgoing transitions is a branched actuator (e.g. Bearing_PnP's
+        /// 7+6 swivel — PARALLEL → Assembly branch, ALTERNATIVE → Disassembly
+        /// branch). Used by validators to assign Seven_State_Actuator_CAT.fbt
+        /// to 13-state branched actuators.
+        /// </summary>
+        public string TransitionType { get; set; } = "SINGLE";
     }
 
     public class VueOneCondition
