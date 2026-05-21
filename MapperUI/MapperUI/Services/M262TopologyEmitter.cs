@@ -11,9 +11,17 @@ namespace MapperUI.Services
     {
         const string FallbackSolutionUuid      = "00000000-0000-0000-0000-000000000000";
         const string DefaultM262Uuid           = "11111111-2222-3333-4444-000000000010";
-        const string DefaultDomainUuid         = "11111111-2222-3333-4444-000000000020";
         const string DefaultRuntimeUuid        = "11111111-2222-3333-4444-000000000030";
         const string RuntimeDeoTypeId          = "b0723d05-50bb-4c15-94a4-d8b5981bcb56";
+
+        /// <summary>
+        /// Zero UUID flag used by EAE Topology to mean "NOCONF" — the device's
+        /// IP endpoint is statically bound but not associated with any
+        /// BroadcastDomain. Both Ethernet endpoints (ETH1 + ETH2) point at
+        /// this UUID so the M262dPAC appears in Physical Views with its IP
+        /// but no DefaultNetwork / DeviceNetwork_1 association.
+        /// </summary>
+        const string NoConfDomainUuid          = "00000000-0000-0000-0000-000000000000";
 
         public static TopologyEmitResult Emit(MapperConfig cfg, string sysdevId)
         {
@@ -50,16 +58,31 @@ namespace MapperUI.Services
                 result.Warnings.Add($"Removed {scrubbed} stale .solutionData file(s) with foreign SolutionId.");
 
             var equipmentFile     = Path.Combine(topologyDir, "Equipment_M262dPAC_1.json");
-            var domainFile        = Path.Combine(topologyDir,
-                $"BroadcastDomain_{cfg.M262LogicalNetworkName}.json");
             var solutionDataFile  = Path.Combine(topologyDir, $"{solutionId}.solutionData");
 
-            File.WriteAllText(equipmentFile,    BuildEquipmentJson(cfg, sysdevId, solutionId));
-            File.WriteAllText(domainFile,       BuildBroadcastDomainJson(cfg));
-            File.WriteAllText(solutionDataFile, BuildSolutionDataJson(solutionId));
+            // Equipment JSON is the visual device placement on Physical Views.
+            // It carries no security/trust information so it is safe (and
+            // necessary) to (re)write every Test Runtime — otherwise the M262
+            // never appears on the canvas after the Demonstrator wipe.
+            File.WriteAllText(equipmentFile, BuildEquipmentJson(cfg, sysdevId, solutionId));
             result.FilesWritten.Add(Path.GetFileName(equipmentFile));
-            result.FilesWritten.Add(Path.GetFileName(domainFile));
-            result.FilesWritten.Add(Path.GetFileName(solutionDataFile));
+
+            // solutionData carries the CsConfHash + CertThumbprint chain which
+            // is the actual security trust binding to the runtime. If a valid
+            // one already exists, preserve it byte-for-byte — overwriting
+            // would invalidate the trust on the next deploy.
+            if (!File.Exists(solutionDataFile))
+            {
+                File.WriteAllText(solutionDataFile, BuildSolutionDataJson(solutionId));
+                result.FilesWritten.Add(Path.GetFileName(solutionDataFile));
+            }
+
+            // NOCONF mode: the M262dPAC sits in Physical Views with its
+            // static IP (cfg.M262TargetIp) but is NOT associated with any
+            // BroadcastDomain. So no BroadcastDomain_*.json is written and
+            // any pre-existing emitted broadcast domain is removed from
+            // disk + de-registered from topologyproj.
+            DeleteEmittedBroadcastDomain(topologyDir, cfg);
 
             var topologyProj = Path.Combine(topologyDir, "TopologyManager.topologyproj");
             if (File.Exists(topologyProj))
@@ -67,21 +90,56 @@ namespace MapperUI.Services
                 result.TopologyProjEntriesAdded = RegisterInTopologyProj(topologyProj, new[]
                 {
                     Path.GetFileName(equipmentFile),
-                    Path.GetFileName(domainFile),
                     Path.GetFileName(solutionDataFile),
                 });
+
+                // Strip any stale BroadcastDomain_*.json registrations that an
+                // earlier (pre-NOCONF) Mapper run added.
+                UnregisterBroadcastDomainFromTopologyProj(topologyProj, cfg);
             }
             else
             {
                 result.Warnings.Add(
-                    "Topology\\TopologyManager.topologyproj missing — Equipment JSONs " +
+                    "Topology\\TopologyManager.topologyproj missing — Equipment JSON " +
                     "written but not registered with TopologyManager build target.");
             }
 
             return result;
         }
 
-        static string? ReadProjectGuid(string eaeRoot)
+        static void DeleteEmittedBroadcastDomain(string topologyDir, MapperConfig cfg)
+        {
+            try
+            {
+                var domainFile = Path.Combine(topologyDir,
+                    $"BroadcastDomain_{cfg.M262LogicalNetworkName}.json");
+                if (File.Exists(domainFile)) File.Delete(domainFile);
+            }
+            catch { /* file lock; harmless — EAE will see the topologyproj has no reference */ }
+        }
+
+        static void UnregisterBroadcastDomainFromTopologyProj(string topologyProjPath, MapperConfig cfg)
+        {
+            try
+            {
+                var doc = XDocument.Load(topologyProjPath);
+                var ns = doc.Root!.GetDefaultNamespace();
+                var staleName = $"BroadcastDomain_{cfg.M262LogicalNetworkName}.json";
+                var nodesToRemove = doc.Descendants(ns + "None")
+                    .Where(e =>
+                    {
+                        var inc = (string?)e.Attribute("Include") ?? string.Empty;
+                        return inc.StartsWith("BroadcastDomain_", StringComparison.OrdinalIgnoreCase);
+                    })
+                    .ToList();
+                if (nodesToRemove.Count == 0) return;
+                foreach (var node in nodesToRemove) node.Remove();
+                doc.Save(topologyProjPath);
+            }
+            catch { /* topologyproj malformed; not fatal */ }
+        }
+
+        public static string? ReadProjectGuid(string eaeRoot)
         {
             var path = Path.Combine(eaeRoot, "General", "ProjectInfo.xml");
             if (!File.Exists(path)) return null;
@@ -96,115 +154,110 @@ namespace MapperUI.Services
         }
 
         static string BuildEquipmentJson(MapperConfig cfg, string sysdevId, string solutionId) => $$"""
-{
-  "catalogReference": "M060_V01.00_01.00",
-  "uuid": "{{DefaultM262Uuid}}",
-  "identifier": "M262dPAC_1",
-  "path": "Topology",
-  "partNumber": "TM262L01MDESE8T",
-  "properties": [
-    {
-      "propertyName": "IsUnderConstruction",
-      "propertyValue": "False"
-    },
-    {
-      "propertyName": "DomainTag",
-      "propertyValue": "{{solutionId}}"
-    }
-  ],
-  "references": [
-    {
-      "diagramPath": "Physical Views",
-      "x": -195,
-      "y": -193
-    }
-  ],
-  "components": [
-    {
-      "interfaces": [
-        {
-          "identifier": "MDESE_ETH1",
-          "disabled": false,
-          "physicalAddress": "",
-          "endpoints": [
             {
-              "identifier": "IP Address",
-              "isReadOnly": false,
-              "domainReadOnly": false,
-              "ipAddress": "{{cfg.M262TargetIp}}",
-              "domain": "{{DefaultDomainUuid}}"
+              "catalogReference": "M060_V01.00_01.00",
+              "uuid": "{{DefaultM262Uuid}}",
+              "identifier": "M262dPAC_1",
+              "path": "Topology",
+              "partNumber": "TM262L01MDESE8T",
+              "properties": [
+                {
+                  "propertyName": "IsUnderConstruction",
+                  "propertyValue": "False"
+                },
+                {
+                  "propertyName": "DomainTag",
+                  "propertyValue": "{{solutionId}}"
+                }
+              ],
+              "references": [
+                {
+                  "diagramPath": "Physical Views",
+                  "x": -195,
+                  "y": -193
+                }
+              ],
+              "components": [
+                {
+                  "interfaces": [
+                    {
+                      "identifier": "MDESE_ETH1",
+                      "disabled": false,
+                      "physicalAddress": "",
+                      "endpoints": [
+                        {
+                          "identifier": "IP Address",
+                          "isReadOnly": false,
+                          "domainReadOnly": false,
+                          "ipAddress": "{{cfg.M262TargetIp}}",
+                          "domain": "{{NoConfDomainUuid}}"
+                        }
+                      ]
+                    },
+                    {
+                      "identifier": "MDESE_ETH2",
+                      "disabled": false,
+                      "physicalAddress": "",
+                      "endpoints": [
+                        {
+                          "identifier": "IP Address",
+                          "isReadOnly": false,
+                          "domainReadOnly": false,
+                          "ipAddress": "0.0.0.0",
+                          "domain": "00000000-0000-0000-0000-000000000000"
+                        }
+                      ]
+                    }
+                  ],
+                  "ports": [
+                    { "identifier": "Ethernet1",   "side": "Default" },
+                    { "identifier": "Ethernet2_1", "side": "Default" },
+                    { "identifier": "Ethernet2_2", "side": "Default" }
+                  ],
+                  "componentType": "EthernetDEO"
+                },
+                {
+                  "bridgePriority": 0,
+                  "serviceEnabled": false,
+                  "componentType": "RstpDEO"
+                },
+                {
+                  "endpoint": "MDESE_ETH1\\IP Address",
+                  "connectionTypes": "None",
+                  "componentType": "EthernetMasterDEO"
+                },
+                {
+                  "enabled": false,
+                  "securityMode": 0,
+                  "componentType": "SysLogClientDEO"
+                },
+                {
+                  "mode": 0,
+                  "componentType": "CyberSecurityDEO"
+                },
+                {
+                  "uuid": "{{DefaultRuntimeUuid}}",
+                  "typeId": "{{RuntimeDeoTypeId}}",
+                  "logicalDeviceId": "{{sysdevId}}",
+                  "runtimeServices": [
+                    {
+                      "identifier": "Deployment"
+                    },
+                    {
+                      "identifier": "Archive Service",
+                      "logicalPortSecured": "0"
+                    }
+                  ],
+                  "componentType": "RuntimeDEO"
+                }
+              ]
             }
-          ]
-        },
-        {
-          "identifier": "MDESE_ETH2",
-          "disabled": false,
-          "physicalAddress": "",
-          "endpoints": [
-            {
-              "identifier": "IP Address",
-              "isReadOnly": false,
-              "domainReadOnly": false,
-              "ipAddress": "0.0.0.0",
-              "domain": "00000000-0000-0000-0000-000000000000"
-            }
-          ]
-        }
-      ],
-      "ports": [
-        { "identifier": "Ethernet1",   "side": "Default" },
-        { "identifier": "Ethernet2_1", "side": "Default" },
-        { "identifier": "Ethernet2_2", "side": "Default" }
-      ],
-      "componentType": "EthernetDEO"
-    },
-    {
-      "bridgePriority": 0,
-      "serviceEnabled": false,
-      "componentType": "RstpDEO"
-    },
-    {
-      "endpoint": "MDESE_ETH1\\IP Address",
-      "connectionTypes": "None",
-      "componentType": "EthernetMasterDEO"
-    },
-    {
-      "enabled": false,
-      "securityMode": 0,
-      "componentType": "SysLogClientDEO"
-    },
-    {
-      "mode": 0,
-      "componentType": "CyberSecurityDEO"
-    },
-    {
-      "uuid": "{{DefaultRuntimeUuid}}",
-      "typeId": "{{RuntimeDeoTypeId}}",
-      "logicalDeviceId": "{{sysdevId}}",
-      "runtimeServices": [
-        {
-          "identifier": "Deployment"
-        },
-        {
-          "identifier": "Archive Service",
-          "logicalPortSecured": "0"
-        }
-      ],
-      "componentType": "RuntimeDEO"
-    }
-  ]
-}
-""";
+            """;
 
-        static string BuildBroadcastDomainJson(MapperConfig cfg) => $$"""
-{
-  "uuid": "{{DefaultDomainUuid}}",
-  "identifier": "{{cfg.M262LogicalNetworkName}}",
-  "ipV4Address": "{{cfg.M262SubnetAddress}}",
-  "ipV4Mask": "{{cfg.M262SubnetMask}}",
-  "ipV4Gateway": "{{cfg.M262Gateway}}"
-}
-""";
+        // BuildBroadcastDomainJson removed: NOCONF mode does not emit
+        // BroadcastDomain_*.json. The MapperConfig subnet/mask/gateway/
+        // network-name fields are kept for any future non-NOCONF override
+        // but are not consumed by the current emit path.
 
         static string BuildSolutionDataJson(string solutionId)
         {
