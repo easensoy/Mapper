@@ -77,6 +77,22 @@ namespace MapperUI.Services
             result.HcfPath = dstHcf;
             result.ParametersOverwritten.Add(
                 $"VERBATIM {Path.GetFileName(srcHcf)} -> {Path.GetRelativePath(eaeRoot, dstHcf)}");
+
+            // PNConfiguratorBuildTask compatibility — IO-folder exports use the
+            // newer <HwConfigExportedConfiguration> root, but EAE 24.1's build
+            // task XmlSerializer expects the legacy <DeviceHwConfigurationItems>
+            // form. Re-root the file in place (idempotent — no-op if already
+            // legacy form). Channel bindings inside are untouched.
+            var sysdevFolder = Path.GetDirectoryName(dstHcf)!;
+            var rewrite = HcfRootRewriter.RewriteIfNeededDeriveId(dstHcf, sysdevFolder);
+            if (rewrite.Rewrote)
+                result.ParametersOverwritten.Add(
+                    $"REROOTED HwConfigExportedConfiguration -> DeviceHwConfigurationItems " +
+                    $"({rewrite.ChildrenWrapped} child(ren) wrapped)");
+            else if (!string.IsNullOrEmpty(rewrite.Skipped))
+                result.Warnings.Add($"HCF re-root skipped: {rewrite.Skipped}");
+            foreach (var w in rewrite.Warnings) result.Warnings.Add(w);
+
             return result;
         }
 
