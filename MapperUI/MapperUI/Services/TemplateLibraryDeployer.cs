@@ -16,7 +16,13 @@ namespace MapperUI.Services
             { "Sensor_Bool_CAT",         new[] { "Sensor_Bool" } },
             { "Actuator_Fault_CAT",      new[] { "FaultLatch" } },
             { "Robot_Task_CAT",          new[] { "Robot_Task_Core" } },
-            { "Seven_State_Actuator_CAT",new[] { "SevenStateActuator2" } },
+            // Seven_State_Actuator_CAT (and its SevenStateActuator2 basic) intentionally
+            // removed 2026-05-21. The data-driven patch path kept generating syntax / type
+            // resolution errors (']' ERR_SYNTAX, missing SevenStateActuator2.gfbt, etc.)
+            // because the reference CAT was string-driven and grafting Rule*/Target*
+            // InputVars onto its outer InterfaceList without rewiring the inner
+            // FBNetwork left EAE unable to compile a coherent type. Bearing_PnP is
+            // dropped from scope until a clean Seven_State path is reintroduced.
             { "Station_CAT",             new[] { "Station_Core", "Station_Fault", "Station_Status" } },
             { "Process1_Generic",        new[] { "ProcessRuntime_Generic_v1", "ProcessStateBusHandler" } },
         };
@@ -24,7 +30,7 @@ namespace MapperUI.Services
         static readonly Dictionary<string, string> ComponentTypeToCat = new(StringComparer.OrdinalIgnoreCase)
         {
             { "Actuator_5",  "Five_State_Actuator_CAT" },
-            { "Actuator_7",  "Seven_State_Actuator_CAT" },
+            // Actuator_7 removed with Seven_State_Actuator_CAT — re-add when the CAT returns.
             { "Sensor_2",    "Sensor_Bool_CAT" },
             { "Process_Any", "Process1_Generic" },
         };
@@ -32,12 +38,9 @@ namespace MapperUI.Services
         static readonly string[] UniversalCats = new[]
         {
             "Five_State_Actuator_CAT", "Sensor_Bool_CAT", "Process1_Generic",
-            // Phase 3 (Assembly Station): Seven_State_Actuator_CAT is the
-            // template for the swivel-arm Bearing_PnP. Shipped zip carries
-            // the legacy string-driven interface; PatchSevenStateActuatorDataDriven
-            // (below) augments it post-deploy with the data-driven
-            // Target/Rule/Interlock InputVars that mirror Five_State.
-            "Seven_State_Actuator_CAT",
+            // Seven_State_Actuator_CAT removed 2026-05-21 — see comment in
+            // CatToBasics (above) for rationale. Bearing_PnP is dropped from
+            // scope; add the CAT back here when a clean implementation lands.
         };
 
         // No I/O-bridge FB is deployed. PLC_RW_M262 (the old "M262IO" broker)
@@ -74,17 +77,8 @@ namespace MapperUI.Services
             // Event-change handlers referenced by PLC_RW_M262's internal FB2/FB3
             // instances. Sourced from C:\SMC_Rig_Expo_20260112-165857725.sln\IEC61499.
             "changeEventProcess1", "changeEventProcess2",
-            // Embedded by Seven_State_Actuator_CAT as its core state-machine
-            // basic FB (FB ID=8, Type="SevenStateActuator2", Namespace="Main").
-            // Without this, EAE compile fails with:
-            //   "Could not find file '…\obj\fbt\gfbt\SevenStateActuator2.gfbt'"
-            // because the CAT's FBNetwork references a basic-FB type the
-            // project doesn't carry. Bearing_PnP (and any other 7-state or
-            // PARALLEL+ALTERNATIVE-branched actuator routed through
-            // Seven_State_Actuator_CAT by Mapper's validator) depends on it.
-            // The older "SevenStateActuator" basic is also shipped in the
-            // template library but is unused by the current CAT.
-            "SevenStateActuator2",
+            // SevenStateActuator2 removed 2026-05-21 — its only consumer was
+            // Seven_State_Actuator_CAT, which is no longer deployed.
         };
 
         static readonly string[] UniversalHmiCats = new[]
@@ -131,7 +125,7 @@ namespace MapperUI.Services
             PatchFiveStateActuatorCatQi(eaeProjectDir, result);
             PatchFiveStateActuatorModeInitialValue(eaeProjectDir, result);
             PatchProcess1RecipeArraySize(eaeProjectDir, result);
-            PatchSevenStateActuatorDataDriven(eaeProjectDir, result);
+            // PatchSevenStateActuatorDataDriven removed — see CatToBasics comment.
 
             GenerateCfgFiles(eaeProjectDir, result);
             RegisterInDfbproj(eaeProjectDir, result);
@@ -540,158 +534,7 @@ namespace MapperUI.Services
             }
         }
 
-        /// <summary>
-        /// Patches the deployed Seven_State_Actuator_CAT.fbt to add the
-        /// data-driven InputVars + INIT With clauses that mirror our
-        /// Five_State_Actuator_CAT data-driven contract. The shipped zip
-        /// carries Schneider's legacy STRING-driven interface
-        /// (process_state_name + state_val); without this patch any FB
-        /// instance Mapper emits with Target* / Rule* / *Interlock parameters
-        /// raises ERR_MEMBER_VAR_NOTFOUND at EAE compile.
-        ///
-        /// This is a SURFACE patch only: it augments the outer InterfaceList
-        /// so the FB type accepts the new parameters and emits the right
-        /// FBNetwork signature. Internal wiring (so the FB actually consumes
-        /// Target*/Rule*/Interlock semantics) is Phase 3b — until then the
-        /// internal FBNetwork keeps using the legacy string-driven path and
-        /// Mapper's emitted Rule/Target values are inert. Important for
-        /// EAE compile-clean Assembly Station before the recipe-generation
-        /// step lands.
-        ///
-        /// Added InputVars (mirror Five_State + an extra Work2 axis for the
-        /// swivel arm's two work positions):
-        ///   actuator_id       (INT)
-        ///   TargetWork1State  (INT)            — Pick position state number
-        ///   TargetWork2State  (INT)            — Place position state number (NEW vs Five_State)
-        ///   TargetHomeState   (INT)
-        ///   RuleCount         (INT)
-        ///   RuleFromState     (INT ArraySize=10)
-        ///   RuleToState       (INT ArraySize=10)
-        ///   RuleSourceID      (INT ArraySize=10)
-        ///   RuleBlockedState  (INT ArraySize=10)
-        ///   Work1Interlock    (BOOL)
-        ///   Work2Interlock    (BOOL)
-        ///   HomeInterlock     (BOOL)
-        ///
-        /// Each is appended to &lt;InputVars&gt; AND mirrored as a &lt;With Var=…/&gt;
-        /// child of the existing &lt;Event Name="INIT"&gt;.
-        /// </summary>
-        static void PatchSevenStateActuatorDataDriven(string eaeProjectDir, DeployResult result)
-        {
-            var fbt = Path.Combine(eaeProjectDir, "IEC61499",
-                "Seven_State_Actuator_CAT", "Seven_State_Actuator_CAT.fbt");
-            if (!File.Exists(fbt))
-            {
-                fbt = Directory.EnumerateFiles(
-                        Path.Combine(eaeProjectDir, "IEC61499"),
-                        "Seven_State_Actuator_CAT.fbt", SearchOption.AllDirectories)
-                    .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
-                    ?? string.Empty;
-                if (string.IsNullOrEmpty(fbt))
-                {
-                    result.Warnings.Add(
-                        "Seven_State_Actuator_CAT.fbt not deployed; data-driven patch skipped.");
-                    return;
-                }
-            }
-
-            try
-            {
-                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                var root = doc.Root;
-                if (root == null) return;
-                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
-
-                var interfaceList = root.Element(ns + "InterfaceList");
-                if (interfaceList == null)
-                {
-                    result.Warnings.Add(
-                        "Seven_State_Actuator_CAT.fbt: <InterfaceList> not found; patch aborted.");
-                    return;
-                }
-                var inputVars = interfaceList.Element(ns + "InputVars");
-                if (inputVars == null)
-                {
-                    result.Warnings.Add(
-                        "Seven_State_Actuator_CAT.fbt: <InputVars> not found; patch aborted.");
-                    return;
-                }
-
-                // (varName, type, arraySize) — arraySize null for scalars.
-                var toAdd = new (string Name, string Type, string? ArraySize)[]
-                {
-                    ("actuator_id",      "INT",  null),
-                    ("TargetWork1State", "INT",  null),
-                    ("TargetWork2State", "INT",  null),
-                    ("TargetHomeState",  "INT",  null),
-                    ("RuleCount",        "INT",  null),
-                    ("RuleFromState",    "INT",  "10"),
-                    ("RuleToState",      "INT",  "10"),
-                    ("RuleSourceID",     "INT",  "10"),
-                    ("RuleBlockedState", "INT",  "10"),
-                    ("Work1Interlock",   "BOOL", null),
-                    ("Work2Interlock",   "BOOL", null),
-                    ("HomeInterlock",    "BOOL", null),
-                };
-
-                int varsAdded = 0;
-                foreach (var (varName, varType, varArraySize) in toAdd)
-                {
-                    bool already = inputVars.Elements(ns + "VarDeclaration").Any(v =>
-                        string.Equals((string?)v.Attribute("Name"), varName, StringComparison.Ordinal));
-                    if (already) continue;
-                    var newVar = new System.Xml.Linq.XElement(ns + "VarDeclaration",
-                        new System.Xml.Linq.XAttribute("Name", varName),
-                        new System.Xml.Linq.XAttribute("Type", varType));
-                    if (varArraySize != null)
-                        newVar.SetAttributeValue("ArraySize", varArraySize);
-                    inputVars.Add(newVar);
-                    varsAdded++;
-                }
-
-                // Mirror onto the INIT event With list so the new inputs are
-                // sampled when INIT fires (matches Five_State_Actuator_CAT
-                // convention — all data-driven inputs are With-listed on INIT).
-                var eventInputs = interfaceList.Element(ns + "EventInputs");
-                var initEvent = eventInputs?.Elements(ns + "Event")
-                    .FirstOrDefault(e => string.Equals(
-                        (string?)e.Attribute("Name"), "INIT", StringComparison.Ordinal));
-                int withsAdded = 0;
-                if (initEvent != null)
-                {
-                    foreach (var (varName, _, _) in toAdd)
-                    {
-                        bool already = initEvent.Elements(ns + "With").Any(w =>
-                            string.Equals((string?)w.Attribute("Var"), varName, StringComparison.Ordinal));
-                        if (already) continue;
-                        initEvent.Add(new System.Xml.Linq.XElement(ns + "With",
-                            new System.Xml.Linq.XAttribute("Var", varName)));
-                        withsAdded++;
-                    }
-                }
-                else
-                {
-                    result.Warnings.Add(
-                        "Seven_State_Actuator_CAT.fbt: <Event Name=\"INIT\"> not found; " +
-                        "With clauses not added.");
-                }
-
-                if (varsAdded > 0 || withsAdded > 0)
-                {
-                    doc.Save(fbt);
-                    result.PatchesApplied.Add(
-                        $"Seven_State_Actuator_CAT: data-driven InterfaceList patch " +
-                        $"({varsAdded} InputVar(s), {withsAdded} INIT With clause(s) added)");
-                    MapperLogger.Info(
-                        $"[Deploy] Seven_State_Actuator_CAT.fbt: data-driven patch — " +
-                        $"+{varsAdded} InputVars, +{withsAdded} INIT With");
-                }
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"Seven_State_Actuator_CAT data-driven patch failed: {ex.Message}");
-            }
-        }
+        // Seven_State_Actuator_CAT data-driven patch removed 2026-05-21.
 
         static void PatchKnownArraySizeBugs(string eaeProjectDir, DeployResult result)
         {
