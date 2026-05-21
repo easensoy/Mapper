@@ -1150,25 +1150,146 @@ namespace MapperUI.Services
             var assemblyStationProc = allComponents.FirstOrDefault(c =>
                 string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(c.Name, "Assembly_Station", StringComparison.Ordinal));
+            // Track the Process FB instance names we emit so we can wire
+            // cross-process state_update → state_change events below.
+            var crossProcInstances = new List<string> { processInstanceName };
             if (assemblyStationProc != null)
             {
                 var assemblyName = InstanceNameResolver.Resolve(assemblyStationProc,
                     overrides.ByComponentId, overrides.ByVueOneName);
-                var (aOuter, aNested, _) = BuildProcessFbParameters(
+
+                // Simulator full-system mode: build a proper recipe for
+                // Assembly_Station instead of the empty-shell placeholder.
+                // StationGroupingService walks the Process's transitions and
+                // collects the actuators/sensors it commands; in single-resource
+                // sim that registry covers the M580+BX1 components that share
+                // the canvas. Hardware path stays on the empty-recipe placeholder
+                // because Feed_Station (M262) cannot wait on M580 components
+                // across a SIFB gateway that the simulator skips.
+                StationContents? aContents = null;
+                if (config != null && config.SimulatorFullSystem)
+                {
+                    try
+                    {
+                        aContents = new StationGroupingService()
+                            .GroupStationContents(assemblyStationProc, allComponents);
+                    }
+                    catch (Exception ex)
+                    {
+                        report.Missing.Add(
+                            $"[Sim] Assembly_Station grouping failed: {ex.Message} — emitting empty recipe.");
+                    }
+                }
+
+                var (aOuter, aNested, aRecipe) = BuildProcessFbParameters(
                     assemblyStationProc, allComponents, assemblyName, processId + 1,
-                    contents: null);   // null → empty recipe; only scalars emitted
+                    contents: aContents);   // sim → real recipe; hardware → null/empty
                 builder.AddFB(FBIdGenerator.GenerateFBId(assemblyStationProc.ComponentID),
                     assemblyName, "Process1_Generic", "Main", 12200, 1460,
                     aOuter, aNested);
-                report.Missing.Add(
-                    $"[Phase 7] {assemblyName} Process FB emitted with empty recipe — " +
-                    "Assembly_Station recipe-array generator pending.");
+                crossProcInstances.Add(assemblyName);
+                if (aRecipe != null && aRecipe.StepType.Count > 0)
+                    report.Missing.Add(
+                        $"[Sim] {assemblyName} Process FB emitted with {aRecipe.StepType.Count}-row recipe " +
+                        $"({aRecipe.SkippedConditions.Count} condition(s) skipped).");
+                else
+                    report.Missing.Add(
+                        $"[Phase 7] {assemblyName} Process FB emitted with empty recipe — " +
+                        "(hardware path; sim mode would emit a proper recipe).");
             }
             else
             {
                 report.Missing.Add(
                     "[Phase 7] Assembly_Station Process not found in Control.xml — " +
                     "Station 2 frame will have actuators but no Process FB.");
+            }
+
+            // Simulator full-system mode also emits the Disassembly Process FB.
+            // Same FBType (Process1_Generic) with its own recipe arrays. Sits
+            // in a third X column under the BX1 zone so the three Process FBs
+            // form a left→right Station1/Station2/Station3 row at y=1460.
+            // The hardware path skips this branch entirely so Feed Station's
+            // existing two-Process layout is unchanged.
+            if (config != null && config.SimulatorFullSystem)
+            {
+                var disassyProc = allComponents.FirstOrDefault(c =>
+                    string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase) &&
+                    (string.Equals(c.Name, "Disassembly", StringComparison.Ordinal)
+                     || string.Equals(c.Name, "Disassembly_Station", StringComparison.Ordinal)));
+                if (disassyProc != null)
+                {
+                    var disassyName = InstanceNameResolver.Resolve(disassyProc,
+                        overrides.ByComponentId, overrides.ByVueOneName);
+                    StationContents? dContents = null;
+                    try
+                    {
+                        dContents = new StationGroupingService()
+                            .GroupStationContents(disassyProc, allComponents);
+                    }
+                    catch (Exception ex)
+                    {
+                        report.Missing.Add(
+                            $"[Sim] Disassembly grouping failed: {ex.Message} — emitting empty recipe.");
+                    }
+                    var (dOuter, dNested, dRecipe) = BuildProcessFbParameters(
+                        disassyProc, allComponents, disassyName, processId + 2,
+                        contents: dContents);
+                    builder.AddFB(FBIdGenerator.GenerateFBId(disassyProc.ComponentID),
+                        disassyName, "Process1_Generic", "Main", 20800, 1460,
+                        dOuter, dNested);
+                    crossProcInstances.Add(disassyName);
+                    if (dRecipe != null && dRecipe.StepType.Count > 0)
+                        report.Missing.Add(
+                            $"[Sim] {disassyName} Process FB emitted with {dRecipe.StepType.Count}-row recipe " +
+                            $"({dRecipe.SkippedConditions.Count} condition(s) skipped).");
+                }
+                else
+                {
+                    report.Missing.Add(
+                        "[Sim] Disassembly Process not found in Control.xml — " +
+                        "BX1 zone will have actuators but no Process FB.");
+                }
+
+                // Cross-process synchronisation. In the reference SMC_Rig
+                // (audit E.2: M580 sysres lines 363, 419) Process2 and Process3
+                // exchange state changes through direct event wires
+                //   Process[i].state_update → Process[j].state_change
+                // bypassing the stateRptCmd ring entirely (because Process FBs
+                // are not ring participants — they're the consumers). We
+                // mirror that pattern here so the 8 cross-process handshake
+                // conditions catalogued in the audit (Feed/Initialisation ↔
+                // Assembly/Initialisation, Feed/HandShake ↔ Disassembly/handshake,
+                // Assembly/HandShaking ↔ Disassembly/handshake, …) fire from
+                // the canvas instead of stalling on a dropped Wait1Id row.
+                // Fully connected directed graph between every Process pair.
+                for (int i = 0; i < crossProcInstances.Count; i++)
+                {
+                    for (int j = 0; j < crossProcInstances.Count; j++)
+                    {
+                        if (i == j) continue;
+                        builder.AddEventConnection(
+                            $"{crossProcInstances[i]}.state_update",
+                            $"{crossProcInstances[j]}.state_change");
+                    }
+                }
+                if (crossProcInstances.Count >= 2)
+                    report.Missing.Add(
+                        $"[Sim] Cross-process event wires: {crossProcInstances.Count * (crossProcInstances.Count - 1)} " +
+                        $"state_update→state_change edges across {crossProcInstances.Count} Process FB(s).");
+
+                // Bearing_PnP routing. Restored 2026-05-21: routes to
+                // Seven_State_Actuator_CAT (deployed verbatim from Template
+                // Library; SevenStateActuator + SevenStateActuator2 basic
+                // FBs ship alongside). The 13-state PARALLEL+ALTERNATIVE
+                // pattern collapses onto Seven_State's 7-state ECC because
+                // the physical actuator has 3 positions + 2 work coils.
+                var bearingPnp = allComponents.FirstOrDefault(c =>
+                    string.Equals(c.Type, "Actuator", StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(c.Name, "Bearing_PnP", StringComparison.Ordinal));
+                if (bearingPnp != null)
+                    report.Missing.Add(
+                        $"[Sim] Bearing_PnP ({bearingPnp.States.Count} states / " +
+                        $"PARALLEL+ALTERNATIVE branched) routed to Seven_State_Actuator_CAT.");
             }
 
             // Surface every out-of-scope condition the recipe generator dropped so the
@@ -1421,6 +1542,13 @@ namespace MapperUI.Services
             var doc = builder.Build();
             doc.Save(fullPath);
 
+            // EAE Solution Integrity check requires an opcua.xml inside a
+            // folder named after the syslay file's stem. Emit a minimal one
+            // (no OPCUAAttribute entries — they're only needed when specific
+            // FB attributes are exposed to OPC UA; for a regular project the
+            // root-only file passes the integrity check).
+            EnsureOpcuaXmlBesideArtefact(fullPath);
+
             // .hcf patching lives in the MapperUI layer (HcfPatchService) — CodeGen.dll
             // does not reference MapperUI.dll so we can't load M262HcfDocument here.
             // MainForm.btnTestStation1_Click calls HcfPatchService.PatchDeployed(...) after
@@ -1455,10 +1583,47 @@ namespace MapperUI.Services
             if (actuator == null) return "Five_State_Actuator_CAT";
             var name = actuator.Name ?? string.Empty;
             if (VacuumGripperNames.Contains(name)) return "Vacuum_Gripper_CAT";
-            // Seven_State_Actuator_CAT routing (7-state + PARALLEL+ALTERNATIVE branched)
-            // removed 2026-05-21 — see TemplateLibraryDeployer CatToBasics comment.
+            // Seven_State_Actuator_CAT routing restored 2026-05-21 for
+            // Bearing_PnP. Two detection paths:
+            //   1. States.Count == 7 — the simple "seven-state actuator"
+            //      (turn-pick / pick / turn-place / place / turn-home / home).
+            //   2. PARALLEL+ALTERNATIVE branched (Bearing_PnP's 13-state
+            //      pattern: assembly path leaves the resting state via PARALLEL,
+            //      disassembly path leaves the same state via ALTERNATIVE).
+            //      The physical actuator has 3 positions + 2 coils so it
+            //      collapses onto Seven_State's ECC regardless of how many
+            //      logical Control.xml states it carries.
+            if (actuator.States.Count == 7 || IsBranchedSevenState(actuator))
+                return "Seven_State_Actuator_CAT";
             if (actuator.States.Count == 4) return "Five_State_Actuator_No_Sensors_CAT";
             return "Five_State_Actuator_CAT";
+        }
+
+        /// <summary>
+        /// Mirrors <c>MainForm.IsBranchedSevenStateActuator</c> — detects the
+        /// 13-state "branched swivel" pattern where the resting state has at
+        /// least one outgoing PARALLEL transition AND at least one outgoing
+        /// ALTERNATIVE transition. Bearing_PnP fits this pattern. The CAT
+        /// itself runs as a 7-state ECC; the additional Control.xml states
+        /// are absorbed into the same physical motion vocabulary.
+        /// </summary>
+        private static bool IsBranchedSevenState(VueOneComponent comp)
+        {
+            if (comp?.States == null) return false;
+            foreach (var st in comp.States)
+            {
+                bool hasParallel = false;
+                bool hasAlternative = false;
+                foreach (var tr in st.Transitions)
+                {
+                    if (string.Equals(tr.TransitionType, "PARALLEL", StringComparison.OrdinalIgnoreCase))
+                        hasParallel = true;
+                    else if (string.Equals(tr.TransitionType, "ALTERNATIVE", StringComparison.OrdinalIgnoreCase))
+                        hasAlternative = true;
+                }
+                if (hasParallel && hasAlternative) return true;
+            }
+            return false;
         }
 
         /// <summary>
@@ -2556,6 +2721,60 @@ namespace MapperUI.Services
             foreach (var c in Path.GetInvalidFileNameChars())
                 name = name.Replace(c, '_');
             return name;
+        }
+
+        /// <summary>
+        /// Ensures EAE's Solution Integrity check passes by creating an
+        /// <c>opcua.xml</c> stub inside a folder named after the syslay (or
+        /// sysres) file's stem. EAE expects every artefact at
+        /// <c>IEC61499/System/{sysGuid}/{containerGuid}/{stem}.syslay</c> to
+        /// have a sibling folder <c>{stem}/</c> containing an
+        /// <c>opcua.xml</c> — the same convention the reference
+        /// <c>SMC_Rig_Expo_withClamp</c> project uses for every sysres + the
+        /// syslay. The file's <c>UID</c> attribute equals the parent folder
+        /// GUID (i.e. <c>{containerGuid}</c>), matching the reference's
+        /// pattern. The file body lists OPCUAAttribute entries only when
+        /// specific FB attributes are exposed via OPC UA; for a regular
+        /// Mapper-emitted artefact the root-only file is sufficient and
+        /// passes integrity. Idempotent — overwrites any existing file.
+        /// </summary>
+        public static void EnsureOpcuaXmlBesideArtefact(string artefactPath)
+        {
+            if (string.IsNullOrWhiteSpace(artefactPath)) return;
+            var parentDir = Path.GetDirectoryName(artefactPath);
+            if (string.IsNullOrEmpty(parentDir)) return;
+            var stem = Path.GetFileNameWithoutExtension(artefactPath);
+            if (string.IsNullOrEmpty(stem)) return;
+
+            // Folder named after the artefact's stem — opcua.xml lives inside.
+            var opcuaDir = Path.Combine(parentDir, stem);
+            try { Directory.CreateDirectory(opcuaDir); }
+            catch { return; }
+
+            // UID = parent folder name (the syslay/sysres container GUID).
+            // Reference project uses the immediate parent's GUID as the UID.
+            var uid = Path.GetFileName(parentDir);
+
+            var opcuaPath = Path.Combine(opcuaDir, "opcua.xml");
+            var content =
+                "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
+                "<OPCUAComplexObject xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" " +
+                "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n" +
+                $"  <OPCUAComplexObject UID=\"{uid}\" />\r\n" +
+                "</OPCUAComplexObject>";
+
+            // Best-effort write — EAE re-checks Solution Integrity at open
+            // time, so a transient lock isn't fatal. The next regen retries.
+            for (int attempt = 0; attempt < 4; attempt++)
+            {
+                try
+                {
+                    File.WriteAllText(opcuaPath, content);
+                    return;
+                }
+                catch (IOException) { System.Threading.Thread.Sleep(50 * (attempt + 1)); }
+                catch (UnauthorizedAccessException) { System.Threading.Thread.Sleep(50 * (attempt + 1)); }
+            }
         }
     }
 }
