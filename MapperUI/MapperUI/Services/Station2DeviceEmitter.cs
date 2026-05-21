@@ -85,6 +85,22 @@ namespace MapperUI.Services
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
             var result = new EmitResult();
 
+            // Simulator full-system mode collapses every PLC into ONE SIM
+            // resource on a single sysdev. The M580 + BX1 sysdev/sysres/HCF/
+            // Topology Equipment JSON files have no place in that world —
+            // they would only confuse EAE into spinning up extra runtimes
+            // for devices the simulator pipeline never targets. Bail out
+            // early so a sim deploy never leaves orphan M580/BX1 artefacts
+            // behind. Hardware path (cfg.SimulatorFullSystem == false) is
+            // unchanged.
+            if (cfg.SimulatorFullSystem)
+            {
+                result.Warnings.Add(
+                    "[Station2DeviceEmitter] Skipped (cfg.SimulatorFullSystem=true) — " +
+                    "all components collapse into one SIM resource, no M580/BX1 device emission.");
+                return result;
+            }
+
             var eaeRoot = M262SysdevEmitter.DeriveEaeProjectRoot(cfg);
             if (string.IsNullOrEmpty(eaeRoot))
             {
