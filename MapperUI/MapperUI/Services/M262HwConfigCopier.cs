@@ -16,12 +16,26 @@ namespace MapperUI.Services
         {
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
 
+            // NEW PATH (2026-05-21): if cfg.M262HcfTemplatePath points at the
+            // IO-folder export (the fresh HwConfigExportedConfiguration-format
+            // .hcf with 'RES0.M262IO.…' quoted symbols), use it directly —
+            // same mechanism Station2DeviceEmitter + M580HwConfigCopier use
+            // for the other two PLCs. Avoids the legacy GUID-dotted-baseline
+            // path entirely, which was emitting a 169-byte
+            // <DeviceHwConfigurationItems /> shell after the baseline folder
+            // disappeared, breaking the EAE Hardware Configuration view.
+            if (!string.IsNullOrWhiteSpace(cfg.M262HcfTemplatePath) &&
+                File.Exists(cfg.M262HcfTemplatePath))
+                return CopyFromIoTemplate(cfg);
+
             var result = new HwConfigCopyResult();
             var baseline = cfg.M262HardwareConfigBaselinePath;
             if (string.IsNullOrWhiteSpace(baseline))
             {
                 result.Warnings.Add(
-                    "MapperConfig.M262HardwareConfigBaselinePath is empty — skipping hcf copy.");
+                    "MapperConfig.M262HcfTemplatePath AND M262HardwareConfigBaselinePath " +
+                    "both empty — skipping hcf copy. Set IoFolderPath + M262HcfTemplatePath " +
+                    "in mapper_config.json to point at C:\\VueOneMapper\\IO\\M262IO.hcf.");
                 return result;
             }
             if (!Directory.Exists(baseline))
@@ -100,6 +114,194 @@ namespace MapperUI.Services
 
             return result;
         }
+
+        /// <summary>
+        /// New unified IO-template path. Reads the user's exported
+        /// <c>M262IO.hcf</c> from the IO folder (the same source
+        /// <see cref="Station2DeviceEmitter"/> uses for M580/BX1), rewrites
+        /// the export-time <c>'RES0.M262IO.…'</c> prefix to the deployed
+        /// sysres name (<c>cfg.ResourceName</c>, typically <c>M262_RES</c>),
+        /// clears symlinks whose owning component is absent from the syslay,
+        /// and writes the result to the M262 sysdev's <c>.hcf</c> with the
+        /// same retry semantics as the legacy baseline path.
+        ///
+        /// All three PLCs (M262, M580, BX1) now follow this same pattern:
+        /// verbatim-copy from IO folder, then a post-copy rewrite pass per
+        /// PLC namespace + module conventions.
+        /// </summary>
+        static HwConfigCopyResult CopyFromIoTemplate(MapperConfig cfg)
+        {
+            var result = new HwConfigCopyResult();
+            var srcHcf = cfg.M262HcfTemplatePath;
+
+            var eaeRoot = M262SysdevEmitter.DeriveEaeProjectRoot(cfg)
+                ?? throw new InvalidOperationException(
+                    "Cannot derive EAE project root from MapperConfig.SyslayPath/SyslayPath2.");
+
+            var dstHcf = ResolveTargetHcfPath(eaeRoot)
+                ?? throw new InvalidOperationException(
+                    "Cannot resolve target M262 .hcf path — no .sysdev under target IEC61499/System tree.");
+            Directory.CreateDirectory(Path.GetDirectoryName(dstHcf)!);
+            result.HcfPath = dstHcf;
+
+            XDocument hcfDoc;
+            try
+            {
+                hcfDoc = XDocument.Load(srcHcf);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to load M262 .hcf template '{srcHcf}': {ex.Message}", ex);
+            }
+
+            var resourceName = string.IsNullOrWhiteSpace(cfg.ResourceName)
+                ? "M262_RES" : cfg.ResourceName;
+            var syslayFbNames = ReadSyslayFbNames(cfg);
+
+            int rewritten = RewriteM262TemplateInMemory(hcfDoc, resourceName, syslayFbNames, result);
+            if (rewritten == 0)
+                result.Warnings.Add(
+                    "M262 .hcf walked, no ParameterValues touched. Either the template " +
+                    "already matched the deployed sysres name, no TM3 modules were found, " +
+                    "or every signal's owning component is absent from the syslay.");
+
+            WriteHcfWithRetry(hcfDoc, dstHcf, result);
+            return result;
+        }
+
+        /// <summary>
+        /// Walks every <c>TM3DI16_G</c> + <c>TM3DQ16T_G</c> module under the
+        /// <c>HwConfigExportedConfiguration</c> root, rewriting each
+        /// <c>DI##</c> / <c>DO##</c> channel's <c>Value</c> attribute:
+        /// <list type="number">
+        ///   <item>Pin already <c>''</c> empty → leave alone.</item>
+        ///   <item>Signal in <see cref="M262SignalToComponent"/> AND owning
+        ///         component is in the syslay → rewrite quoted prefix from
+        ///         <c>RES0</c> to <paramref name="resourceName"/>.</item>
+        ///   <item>Otherwise → clear to <c>''</c>.</item>
+        /// </list>
+        /// Same shape M580HwConfigCopier uses for BMXDDM16025 modules —
+        /// only the module-name set + signal-to-component map differ.
+        /// </summary>
+        static int RewriteM262TemplateInMemory(XDocument doc, string resourceName,
+            HashSet<string> syslayFbNames, HwConfigCopyResult result)
+        {
+            const string EmptyPin = "''";
+            const string IoFbName = "M262IO";
+            var ns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
+            var ioModules = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "TM3DI16_G", "TM3DQ16T_G",
+            };
+            int rewritten = 0;
+
+            var modules = doc.Descendants(ns + "ConfigurationBaseItem")
+                .Where(e =>
+                {
+                    var typeName = (string?)e.Element(ns + "Type")?
+                        .Element(ns + "Name") ?? string.Empty;
+                    return ioModules.Contains(typeName);
+                })
+                .ToList();
+
+            foreach (var module in modules)
+            {
+                var pvContainer = module.Element(ns + "ParameterValues");
+                if (pvContainer == null) continue;
+
+                foreach (var pv in pvContainer.Elements(ns + "ParameterValue"))
+                {
+                    var pin = (string?)pv.Attribute("Name") ?? string.Empty;
+                    if (string.IsNullOrEmpty(pin)) continue;
+                    if (pin.Length < 4) continue;
+                    if (!(pin[0] == 'D' && (pin[1] == 'I' || pin[1] == 'O'))) continue;
+                    // Skip non-numeric tails (e.g. status/setup pins) — same guard M580 uses.
+                    bool allDigits = true;
+                    for (int i = 2; i < pin.Length; i++)
+                        if (pin[i] < '0' || pin[i] > '9') { allDigits = false; break; }
+                    if (!allDigits) continue;
+
+                    var valueAttr = pv.Attribute("Value");
+                    var current = valueAttr?.Value ?? string.Empty;
+                    if (current == EmptyPin || current.Length == 0) continue;
+
+                    // Pull the trailing signal name from 'A.B.Signal'.
+                    string? signal = null;
+                    var trimmed = current.Trim();
+                    if (trimmed.Length >= 2 && trimmed[0] == '\'' && trimmed[^1] == '\'')
+                    {
+                        var inner = trimmed.Substring(1, trimmed.Length - 2);
+                        var lastDot = inner.LastIndexOf('.');
+                        if (lastDot > 0 && lastDot < inner.Length - 1)
+                            signal = inner.Substring(lastDot + 1);
+                    }
+                    if (signal == null)
+                    {
+                        result.Warnings.Add(
+                            $"M262 .hcf pin {pin} has non-standard Value {current} — left as-is.");
+                        continue;
+                    }
+
+                    string newValue;
+                    if (M262SignalToComponent.TryGetValue(signal, out var owner)
+                        && syslayFbNames.Contains(owner))
+                    {
+                        newValue = $"'{resourceName}.{IoFbName}.{signal}'";
+                    }
+                    else
+                    {
+                        newValue = EmptyPin;
+                        result.Warnings.Add(
+                            $"M262 .hcf pin {pin} signal '{signal}' " +
+                            (M262SignalToComponent.ContainsKey(signal)
+                                ? $"owner '{owner ?? "?"}' not in syslay → cleared."
+                                : "not in M262 signal map → cleared."));
+                    }
+                    if (string.Equals(current, newValue, StringComparison.Ordinal)) continue;
+
+                    if (valueAttr == null) pv.SetAttributeValue("Value", newValue);
+                    else valueAttr.Value = newValue;
+
+                    if (newValue != EmptyPin)
+                    {
+                        result.ParametersOverwrittenSet.Add(pin);
+                        result.ParametersOverwritten.Add($"{pin}={newValue}");
+                    }
+                    rewritten++;
+                }
+            }
+            return rewritten;
+        }
+
+        /// <summary>
+        /// Signal name → owning component for the M262 IO-folder template.
+        /// Mirrors the reverse direction of <see cref="M262IoVariableMap"/>
+        /// so the rewriter can filter symlinks against the syslay's FB list
+        /// the same way <see cref="M580HwConfigCopier"/> does for the
+        /// BMXDDM16025 modules. Pusher = the rig-canonical hardware name
+        /// for VueOne's "Feeder" (per InstanceNameResolver.RigAliases).
+        /// </summary>
+        static readonly Dictionary<string, string> M262SignalToComponent =
+            new(StringComparer.OrdinalIgnoreCase)
+            {
+                ["PusherAtHome"]   = "Pusher",
+                ["PusherAtWork"]   = "Pusher",
+                ["ExtendPusher"]   = "Pusher",
+                ["CheckerUp"]      = "Checker",
+                ["CheckerDown"]    = "Checker",
+                ["ExtendChecker"]  = "Checker",
+                ["TransferAtHome"] = "Transfer",
+                ["TransferAtWork"] = "Transfer",
+                ["ExtendTransfer"] = "Transfer",
+                ["ExtendRejector"] = "Ejector",
+                ["Hopper"]         = "PartInHopper",
+                ["PartAtChecker"]  = "PartAtChecker",
+                ["PartAtAssembly"] = "PartAtAssembly",
+                ["PartAtExit"]     = "PartAtExit",
+                ["RobotStatus_Task_Complete"] = "Robot",
+                ["RobotCommands_StartTask"]   = "Robot",
+            };
 
         static void WriteHcfWithRetry(XDocument doc, string dstHcf, HwConfigCopyResult result)
         {
