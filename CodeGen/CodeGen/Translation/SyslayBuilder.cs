@@ -70,6 +70,46 @@ namespace CodeGen.Translation
             return this;
         }
 
+        /// <summary>
+        /// Adds a coloured rectangular Frame to the SubAppNetwork. EAE uses
+        /// these to visually group FB instances on the syslay canvas (one per
+        /// Station, one per PLC, etc.). Matches the Frame XML shape the
+        /// hardcoded reference SMC_Rig_Expo_withClamp.syslay uses for its
+        /// Station 1 (LavenderBlush) and Station 2 (AliceBlue) frames plus
+        /// the nested PLC frames (Honeydew). BackgroundColor accepts any
+        /// .NET KnownColor name (LightYellow, Plum, AliceBlue etc.).
+        /// </summary>
+        public SyslayBuilder AddFrame(string name, double x, double y,
+            double width, double height,
+            string backgroundColor, string text,
+            string textAlignment = "TopCenter",
+            string font = "Microsoft Sans Serif, 36pt, style=Bold")
+        {
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            var frame = new XElement(Ns + "Frame",
+                new XAttribute("Name", name),
+                new XAttribute("X", x.ToString(inv)),
+                new XAttribute("Y", y.ToString(inv)),
+                new XAttribute("Width", width.ToString(inv)),
+                new XAttribute("Height", height.ToString(inv)),
+                new XAttribute("IsComment", "false"));
+
+            void AddParam(string n, string v) =>
+                frame.Add(new XElement(Ns + "Parameter",
+                    new XAttribute("Name", n), new XAttribute("Value", v)));
+
+            AddParam("BackgroundColor", backgroundColor);
+            AddParam("TextColor", "Black");
+            AddParam("Font", font);
+            AddParam("TextAlignment", textAlignment);
+            AddParam("MoveStyle", "AnyContained");
+            AddParam("Text", text);
+            AddParam("NxtLayerIdentifier", string.Empty);
+
+            _subAppNetwork.Add(frame);
+            return this;
+        }
+
         public SyslayBuilder AddEventConnection(string source, string destination)
         {
             _eventConnections.Add(new XElement(Ns + "Connection",
