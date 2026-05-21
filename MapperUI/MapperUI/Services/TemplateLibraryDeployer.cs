@@ -31,7 +31,13 @@ namespace MapperUI.Services
 
         static readonly string[] UniversalCats = new[]
         {
-            "Five_State_Actuator_CAT", "Sensor_Bool_CAT", "Process1_Generic"
+            "Five_State_Actuator_CAT", "Sensor_Bool_CAT", "Process1_Generic",
+            // Phase 3 (Assembly Station): Seven_State_Actuator_CAT is the
+            // template for the swivel-arm Bearing_PnP. Shipped zip carries
+            // the legacy string-driven interface; PatchSevenStateActuatorDataDriven
+            // (below) augments it post-deploy with the data-driven
+            // Target/Rule/Interlock InputVars that mirror Five_State.
+            "Seven_State_Actuator_CAT",
         };
 
         // No I/O-bridge FB is deployed. PLC_RW_M262 (the old "M262IO" broker)
@@ -114,6 +120,7 @@ namespace MapperUI.Services
             PatchFiveStateActuatorCatQi(eaeProjectDir, result);
             PatchFiveStateActuatorModeInitialValue(eaeProjectDir, result);
             PatchProcess1RecipeArraySize(eaeProjectDir, result);
+            PatchSevenStateActuatorDataDriven(eaeProjectDir, result);
 
             GenerateCfgFiles(eaeProjectDir, result);
             RegisterInDfbproj(eaeProjectDir, result);
@@ -522,6 +529,159 @@ namespace MapperUI.Services
             }
         }
 
+        /// <summary>
+        /// Patches the deployed Seven_State_Actuator_CAT.fbt to add the
+        /// data-driven InputVars + INIT With clauses that mirror our
+        /// Five_State_Actuator_CAT data-driven contract. The shipped zip
+        /// carries Schneider's legacy STRING-driven interface
+        /// (process_state_name + state_val); without this patch any FB
+        /// instance Mapper emits with Target* / Rule* / *Interlock parameters
+        /// raises ERR_MEMBER_VAR_NOTFOUND at EAE compile.
+        ///
+        /// This is a SURFACE patch only: it augments the outer InterfaceList
+        /// so the FB type accepts the new parameters and emits the right
+        /// FBNetwork signature. Internal wiring (so the FB actually consumes
+        /// Target*/Rule*/Interlock semantics) is Phase 3b — until then the
+        /// internal FBNetwork keeps using the legacy string-driven path and
+        /// Mapper's emitted Rule/Target values are inert. Important for
+        /// EAE compile-clean Assembly Station before the recipe-generation
+        /// step lands.
+        ///
+        /// Added InputVars (mirror Five_State + an extra Work2 axis for the
+        /// swivel arm's two work positions):
+        ///   actuator_id       (INT)
+        ///   TargetWork1State  (INT)            — Pick position state number
+        ///   TargetWork2State  (INT)            — Place position state number (NEW vs Five_State)
+        ///   TargetHomeState   (INT)
+        ///   RuleCount         (INT)
+        ///   RuleFromState     (INT ArraySize=10)
+        ///   RuleToState       (INT ArraySize=10)
+        ///   RuleSourceID      (INT ArraySize=10)
+        ///   RuleBlockedState  (INT ArraySize=10)
+        ///   Work1Interlock    (BOOL)
+        ///   Work2Interlock    (BOOL)
+        ///   HomeInterlock     (BOOL)
+        ///
+        /// Each is appended to &lt;InputVars&gt; AND mirrored as a &lt;With Var=…/&gt;
+        /// child of the existing &lt;Event Name="INIT"&gt;.
+        /// </summary>
+        static void PatchSevenStateActuatorDataDriven(string eaeProjectDir, DeployResult result)
+        {
+            var fbt = Path.Combine(eaeProjectDir, "IEC61499",
+                "Seven_State_Actuator_CAT", "Seven_State_Actuator_CAT.fbt");
+            if (!File.Exists(fbt))
+            {
+                fbt = Directory.EnumerateFiles(
+                        Path.Combine(eaeProjectDir, "IEC61499"),
+                        "Seven_State_Actuator_CAT.fbt", SearchOption.AllDirectories)
+                    .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
+                    ?? string.Empty;
+                if (string.IsNullOrEmpty(fbt))
+                {
+                    result.Warnings.Add(
+                        "Seven_State_Actuator_CAT.fbt not deployed; data-driven patch skipped.");
+                    return;
+                }
+            }
+
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+
+                var interfaceList = root.Element(ns + "InterfaceList");
+                if (interfaceList == null)
+                {
+                    result.Warnings.Add(
+                        "Seven_State_Actuator_CAT.fbt: <InterfaceList> not found; patch aborted.");
+                    return;
+                }
+                var inputVars = interfaceList.Element(ns + "InputVars");
+                if (inputVars == null)
+                {
+                    result.Warnings.Add(
+                        "Seven_State_Actuator_CAT.fbt: <InputVars> not found; patch aborted.");
+                    return;
+                }
+
+                // (varName, type, arraySize) — arraySize null for scalars.
+                var toAdd = new (string Name, string Type, string? ArraySize)[]
+                {
+                    ("actuator_id",      "INT",  null),
+                    ("TargetWork1State", "INT",  null),
+                    ("TargetWork2State", "INT",  null),
+                    ("TargetHomeState",  "INT",  null),
+                    ("RuleCount",        "INT",  null),
+                    ("RuleFromState",    "INT",  "10"),
+                    ("RuleToState",      "INT",  "10"),
+                    ("RuleSourceID",     "INT",  "10"),
+                    ("RuleBlockedState", "INT",  "10"),
+                    ("Work1Interlock",   "BOOL", null),
+                    ("Work2Interlock",   "BOOL", null),
+                    ("HomeInterlock",    "BOOL", null),
+                };
+
+                int varsAdded = 0;
+                foreach (var (varName, varType, varArraySize) in toAdd)
+                {
+                    bool already = inputVars.Elements(ns + "VarDeclaration").Any(v =>
+                        string.Equals((string?)v.Attribute("Name"), varName, StringComparison.Ordinal));
+                    if (already) continue;
+                    var newVar = new System.Xml.Linq.XElement(ns + "VarDeclaration",
+                        new System.Xml.Linq.XAttribute("Name", varName),
+                        new System.Xml.Linq.XAttribute("Type", varType));
+                    if (varArraySize != null)
+                        newVar.SetAttributeValue("ArraySize", varArraySize);
+                    inputVars.Add(newVar);
+                    varsAdded++;
+                }
+
+                // Mirror onto the INIT event With list so the new inputs are
+                // sampled when INIT fires (matches Five_State_Actuator_CAT
+                // convention — all data-driven inputs are With-listed on INIT).
+                var eventInputs = interfaceList.Element(ns + "EventInputs");
+                var initEvent = eventInputs?.Elements(ns + "Event")
+                    .FirstOrDefault(e => string.Equals(
+                        (string?)e.Attribute("Name"), "INIT", StringComparison.Ordinal));
+                int withsAdded = 0;
+                if (initEvent != null)
+                {
+                    foreach (var (varName, _, _) in toAdd)
+                    {
+                        bool already = initEvent.Elements(ns + "With").Any(w =>
+                            string.Equals((string?)w.Attribute("Var"), varName, StringComparison.Ordinal));
+                        if (already) continue;
+                        initEvent.Add(new System.Xml.Linq.XElement(ns + "With",
+                            new System.Xml.Linq.XAttribute("Var", varName)));
+                        withsAdded++;
+                    }
+                }
+                else
+                {
+                    result.Warnings.Add(
+                        "Seven_State_Actuator_CAT.fbt: <Event Name=\"INIT\"> not found; " +
+                        "With clauses not added.");
+                }
+
+                if (varsAdded > 0 || withsAdded > 0)
+                {
+                    doc.Save(fbt);
+                    result.PatchesApplied.Add(
+                        $"Seven_State_Actuator_CAT: data-driven InterfaceList patch " +
+                        $"({varsAdded} InputVar(s), {withsAdded} INIT With clause(s) added)");
+                    MapperLogger.Info(
+                        $"[Deploy] Seven_State_Actuator_CAT.fbt: data-driven patch — " +
+                        $"+{varsAdded} InputVars, +{withsAdded} INIT With");
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"Seven_State_Actuator_CAT data-driven patch failed: {ex.Message}");
+            }
+        }
+
         static void PatchKnownArraySizeBugs(string eaeProjectDir, DeployResult result)
         {
             var fbtPath = Path.Combine(eaeProjectDir, "IEC61499", "ProcessRuntime_Generic_v1.fbt");
@@ -587,6 +747,7 @@ namespace MapperUI.Services
                     PatchProcessRuntimeEngine(enginePath, result);
                     PatchProcessRuntimeEccDeadEnd(enginePath, result);
                     PatchProcessRuntimeStartBypass(enginePath, result);
+                    PatchProcessRuntimeEndSequenceNoOp(enginePath, result);
                 }
                 else
                     result.Warnings.Add("ProcessRuntime_Generic_v1.fbt not deployed; recipe-as-input patch skipped.");
@@ -746,6 +907,72 @@ namespace MapperUI.Services
             MapperLogger.Info(
                 $"[Deploy] ProcessRuntime_Generic_v1.fbt: removed START->IDLE1 'Mode=1 AND CycleType<>0' " +
                 $"bypass; START outgoing transitions now = {startOutgoingAfter} ({string.Join(" ; ", remaining)})");
+        }
+
+        /// <summary>
+        /// Pin CurrentStep at the END row's index by making EndSequence a
+        /// no-op on the step pointer. The shipped EndSequence is implemented
+        /// identically to AdvanceStep — it executes
+        ///   CurrentStep := NextStep[CurrentStep];
+        ///   CurrentStepType := StepType[CurrentStep];
+        /// which, combined with the END -> END dead-end self-loop we add in
+        /// PatchProcessRuntimeEccDeadEnd, walks CurrentStep through the
+        /// recipe forever once END is reached (the END row's NextStep is 0,
+        /// so the first re-entry wraps CurrentStep back to 0 and every
+        /// subsequent state_change tick advances it again). The Watch then
+        /// shows CurrentStep cycling and CurrentStepType flipping between
+        /// recipe values even though no command is reissued (END has no
+        /// transition back to ISSUE_CMD). Replacing the EndSequence body
+        /// with a no-op preserves CurrentStep and CurrentStepType so END
+        /// renders as a stable resting state in the Watch. Idempotent via
+        /// a marker comment; emits the patch as a CDATA section so it
+        /// matches the surrounding Algorithm bodies in the FBT.
+        /// </summary>
+        static void PatchProcessRuntimeEndSequenceNoOp(string fbtPath, DeployResult result)
+        {
+            var doc = System.Xml.Linq.XDocument.Load(fbtPath, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+            var root = doc.Root!;
+            System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+
+            var alg = root.Descendants(ns + "Algorithm")
+                .FirstOrDefault(a => (string?)a.Attribute("Name") == "EndSequence");
+            if (alg == null)
+            {
+                result.Warnings.Add(
+                    "ProcessRuntime_Generic_v1.fbt: Algorithm EndSequence not found; END no-op patch skipped.");
+                return;
+            }
+
+            var st = alg.Element(ns + "ST");
+            if (st == null)
+            {
+                result.Warnings.Add(
+                    "ProcessRuntime_Generic_v1.fbt: EndSequence has no <ST>; END no-op patch skipped.");
+                return;
+            }
+
+            const string noOpMarker = "(* END no-op: CurrentStep pinned *)";
+            if ((st.Value ?? string.Empty).Contains(noOpMarker, StringComparison.Ordinal))
+            {
+                // Already patched — idempotent no-op.
+                result.PatchesApplied.Add(
+                    "ProcessRuntime_Generic_v1: EndSequence no-op already in place (CurrentStep pinned)");
+                return;
+            }
+
+            string noOpBody =
+                noOpMarker + "\r\n" +
+                "PreviousStepText := ThisStepText;\r\n" +
+                "ThisStepText := 'Resting in END';\r\n" +
+                "NextStepText := 'Recipe complete';";
+
+            st.ReplaceNodes(new System.Xml.Linq.XCData(noOpBody));
+
+            doc.Save(fbtPath);
+            result.PatchesApplied.Add(
+                "ProcessRuntime_Generic_v1: EndSequence replaced with no-op (CurrentStep pinned at END row, stops Watch cycling)");
+            MapperLogger.Info(
+                "[Deploy] Patched ProcessRuntime_Generic_v1.fbt EndSequence (no-op so CurrentStep stays at the END row once reached)");
         }
 
         static void PatchProcessRuntimeEngine(string fbtPath, DeployResult result)
