@@ -125,6 +125,7 @@ namespace MapperUI.Services
             PatchFiveStateActuatorCatQi(eaeProjectDir, result);
             PatchFiveStateActuatorModeInitialValue(eaeProjectDir, result);
             PatchProcess1RecipeArraySize(eaeProjectDir, result);
+            PatchProcessNameStringSize(eaeProjectDir, result);
             // PatchSevenStateActuatorDataDriven removed — see CatToBasics comment.
 
             GenerateCfgFiles(eaeProjectDir, result);
@@ -331,6 +332,83 @@ namespace MapperUI.Services
         /// off because the new template already ships the arrays as InputVars,
         /// so this unconditional guard is the only thing that fixes the size.)
         /// </summary>
+        /// <summary>
+        /// Expands the <c>process_name</c> InputVar inside
+        /// <c>Process1_Generic.fbt</c> from the shipped <c>STRING[15]</c> to
+        /// <c>STRING[150]</c> (the size the reference <c>Process2_CAT</c>
+        /// uses for the same field). Without this, any Process FB instance
+        /// whose name exceeds 15 characters — e.g. <c>Assembly_Station</c>
+        /// (16 chars), <c>Disassembly_Station</c> (19 chars) — fails to wire
+        /// at deploy time with EAE's runtime CreateResource:
+        /// <code>
+        /// Unable to deploy: Deploy Full Command: Error while parsing the application
+        /// CreateResource: Cannot connect parameter to data input process_name
+        /// </code>
+        /// because the string literal Mapper emits in the syslay Parameter
+        /// (<c>Value="'Assembly_Station'"</c>) overflows the InputVar's
+        /// declared size.
+        ///
+        /// <para>Idempotent — only touches the one VarDeclaration; channel
+        /// rewrites, recipe arrays, and everything else stay untouched.
+        /// Runs on hardware AND sim paths.</para>
+        /// </summary>
+        static void PatchProcessNameStringSize(string eaeProjectDir, DeployResult result)
+        {
+            var candidates = new[]
+            {
+                Path.Combine(eaeProjectDir, "IEC61499",
+                    "Process1_Generic", "Process1_Generic.fbt"),
+                Path.Combine(eaeProjectDir, "IEC61499",
+                    "ProcessRuntime_Generic_v1.fbt"),
+            };
+            foreach (var fbtPath in candidates)
+            {
+                if (!File.Exists(fbtPath)) continue;
+                try
+                {
+                    var doc = System.Xml.Linq.XDocument.Load(fbtPath,
+                        System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                    var root = doc.Root;
+                    if (root == null) continue;
+                    System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+
+                    var processName = root.Descendants(ns + "VarDeclaration")
+                        .FirstOrDefault(v =>
+                            string.Equals((string?)v.Attribute("Name"),
+                                "process_name", StringComparison.Ordinal));
+                    if (processName == null) continue;
+
+                    var typeAttr = processName.Attribute("Type");
+                    var current = typeAttr?.Value ?? string.Empty;
+                    // Already wide enough? STRING[150] / STRING[100] / etc.
+                    if (current.StartsWith("STRING[", StringComparison.Ordinal))
+                    {
+                        // Extract the inner number.
+                        int lb = current.IndexOf('[');
+                        int rb = current.IndexOf(']', lb + 1);
+                        if (rb > lb &&
+                            int.TryParse(current.Substring(lb + 1, rb - lb - 1),
+                                out var size) && size >= 150)
+                        {
+                            continue;   // already fine
+                        }
+                    }
+                    processName.SetAttributeValue("Type", "STRING[150]");
+                    doc.Save(fbtPath);
+                    result.PatchesApplied.Add(
+                        $"{Path.GetFileName(fbtPath)}: process_name {current} -> STRING[150] " +
+                        "(supports long Process names like Assembly_Station)");
+                    MapperLogger.Info(
+                        $"[Deploy] {Path.GetFileName(fbtPath)}: process_name expanded to STRING[150].");
+                }
+                catch (Exception ex)
+                {
+                    result.Warnings.Add(
+                        $"process_name STRING-size patch failed on {Path.GetFileName(fbtPath)}: {ex.Message}");
+                }
+            }
+        }
+
         static void PatchProcess1RecipeArraySize(string eaeProjectDir, DeployResult result)
         {
             string[] recipeArrays =
