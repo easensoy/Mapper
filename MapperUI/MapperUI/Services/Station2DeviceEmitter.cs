@@ -179,14 +179,24 @@ namespace MapperUI.Services
                 result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, sysresPath));
             }
 
-            // 3. HCF — copy verbatim from IO folder. If the template is missing
-            //    or empty, skip the copy and emit a warning; the device still
-            //    appears in Physical Views, just without channel bindings.
+            // 3. HCF — copy verbatim from IO folder, then re-root the XML if
+            //    it uses the newer <HwConfigExportedConfiguration> form so
+            //    EAE's PNConfiguratorBuildTask (which expects the legacy
+            //    <DeviceHwConfigurationItems>) accepts it. Channel bindings
+            //    inside are untouched.
             if (!string.IsNullOrWhiteSpace(hcfTemplatePath) && File.Exists(hcfTemplatePath))
             {
                 var hcfDest = Path.Combine(sysdevFolder, $"{sysdevId}.hcf");
                 File.Copy(hcfTemplatePath, hcfDest, overwrite: true);
                 result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, hcfDest));
+
+                var rewrite = HcfRootRewriter.RewriteIfNeeded(hcfDest, resourceId);
+                if (rewrite.Rewrote)
+                    result.FilesWritten.Add(
+                        $"{Path.GetRelativePath(eaeRoot, hcfDest)} (re-rooted to DeviceHwConfigurationItems)");
+                else if (!string.IsNullOrEmpty(rewrite.Skipped) &&
+                         rewrite.Skipped != "already DeviceHwConfigurationItems")
+                    result.Warnings.Add($"{deviceName} HCF re-root skipped: {rewrite.Skipped}");
             }
             else
             {
