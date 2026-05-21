@@ -81,7 +81,11 @@ namespace MapperUI.Services
             {
                 "Five_State_Actuator_CAT",
                 "Five_State_Actuator_No_Sensors_CAT",
-                // Seven_State_Actuator_CAT removed 2026-05-21.
+                // Seven_State_Actuator_CAT restored 2026-05-21 — Bearing_PnP
+                // (13-state PARALLEL+ALTERNATIVE branched) routes here. The
+                // wire emitter treats it the same as Five_State for the
+                // CaSBus + stateRprtCmd ring (same adapter port names).
+                "Seven_State_Actuator_CAT",
                 "Vacuum_Gripper_CAT",
             };
 
