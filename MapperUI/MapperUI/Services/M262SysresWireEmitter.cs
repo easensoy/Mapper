@@ -58,13 +58,27 @@ namespace MapperUI.Services
         // how many components the syslay emitted (N-component safe).
         private static readonly string[] CaSBusOrder =
         {
-            "PartInHopper", "Feeder", "Checker", "Transfer", "PartAtChecker",
+            // Station 1 (M262)
+            "PartInHopper", "PartAtChecker", "Pusher", "Checker", "Transfer",
+            // Station 2 (M580) — Assembly_Station components in PLC-bus order
+            "BearingSensor", "ShaftSensor",
+            "Bearing_PnP", "Bearing_Gripper",
+            "Shaft_Hr", "Shaft_Vr", "Shaft_Gripper", "Clamp",
+            // Station 2 (BX1) — Cover pick-and-place
+            "TopCoverSenosr",
+            "CoverPNP_Hr", "CoverPNP_Vr", "CoverPnp_Gripper",
         };
 
         private static readonly HashSet<string> SensorCatTypes =
             new(StringComparer.Ordinal) { "Sensor_Bool_CAT" };
         private static readonly HashSet<string> ActuatorCatTypes =
-            new(StringComparer.Ordinal) { "Five_State_Actuator_CAT" };
+            new(StringComparer.Ordinal)
+            {
+                "Five_State_Actuator_CAT",
+                "Five_State_Actuator_No_Sensors_CAT",
+                "Seven_State_Actuator_CAT",
+                "Vacuum_Gripper_CAT",
+            };
 
         // Component-independent adapter wires (HMI faceplates + Area/Station
         // structural ring). The CaSBus station chain (Station1→actuators→
@@ -383,10 +397,42 @@ namespace MapperUI.Services
             { "PartAtChecker",(4500, 4000) },
             { "Feed_Station", (7000, 4000) },
             // Actuator row (y=5400) — 2500 pitch, terminator far right
-            { "Feeder",       (2000, 5400) },
+            // VueOne component "Feeder" is emitted as FB instance "Pusher" by
+            // ResolveActuatorDisplayName, matching the rig hardware alias used
+            // in the HCF channel bindings (DI00 'PusherAtHome', DI01 'PusherAtWork'
+            // etc.). The CanonicalLayout key MUST be "Pusher" — the post-syslay
+            // rewrite walks by FB Name= attribute.
+            { "Pusher",       (2000, 5400) },
             { "Checker",      (4500, 5400) },
             { "Transfer",     (7000, 5400) },
             { "Stn1_Term",    (9500, 5400) },
+            // M580 zone (Station 2 — purple frame). Tidied layout to mirror
+            // SMC_Rig_Expo_withClamp's reference:
+            //   y=2000: Station2_HMI
+            //   y=2900: Station2 + Stn2_Term
+            //   y=4000: Assembly_Station Process FB + sensors row
+            //   y=5400: Actuator row 1 (Bearing_PnP, Bearing_Gripper, Shaft_Hr, Shaft_Vr)
+            //   y=6500: Actuator row 2 (Shaft_Gripper, Clamp)
+            // FRAME_M580 spans 12000..20300; all coordinates inside that band.
+            { "Station2_HMI",    (14000, 2000) },
+            { "Station2",        (14000, 2900) },
+            { "Stn2_Term",       (19500, 2900) },
+            { "Assembly_Station",(12200, 4000) },
+            { "BearingSensor",   (15000, 4000) },
+            { "ShaftSensor",     (17500, 4000) },
+            { "Bearing_PnP",     (12200, 5400) },
+            { "Bearing_Gripper", (14700, 5400) },
+            { "Shaft_Hr",        (17200, 5400) },
+            { "Shaft_Vr",        (19700, 5400) },
+            { "Shaft_Gripper",   (12200, 6500) },
+            { "Clamp",           (14700, 6500) },
+            // BX1 zone (Station 2 — green frame). Sensors at y=4000, actuators
+            // at y=5400, columns at 2500 pitch starting at x=20600 to land
+            // inside FRAME_BX1 (20400..27200).
+            { "TopCoverSenosr",  (20600, 4000) },
+            { "CoverPNP_Hr",     (20600, 5400) },
+            { "CoverPNP_Vr",     (23100, 5400) },
+            { "CoverPnp_Gripper",(25600, 5400) },
             // No-op (M262IO/PLC_RW_M262 retired — never instantiated)
             { "M262IO",       (9500, 400)  },
         };
