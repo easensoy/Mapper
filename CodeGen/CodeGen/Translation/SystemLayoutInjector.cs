@@ -959,17 +959,58 @@ namespace MapperUI.Services
             // both derive from this same ordered list, so they stay in
             // lock-step with the runtime state_table. Components absent from
             // Control.xml are skipped gracefully (whatever subset is present).
-            var allowedActuators = new[] { "Feeder", "Checker", "Transfer" };
-            var allowedSensors = new[] { "PartInHopper", "PartAtChecker" };
+            // Scope for the Test Runtime button — Feed Station (M262) +
+            // Assembly Station (M580 + BX1). Ordering matters: this list
+            // dictates state_table[] index allocation (sensors first, then
+            // actuators), the FB id parameter, and the recipe Wait1Id lookup.
+            // Disassembly Process is intentionally NOT scoped yet.
+            //
+            // Station 1 (M262): Feeder, Checker, Transfer + PartInHopper, PartAtChecker
+            // Station 2 (M580): Bearing_PnP, Bearing_Gripper, Shaft_Hr, Shaft_Vr,
+            //                   Shaft_Gripper, Clamp + BearingSensor, ShaftSensor
+            // Station 2 (BX1):  CoverPNP_Hr, CoverPNP_Vr, CoverPnp_Gripper + TopCoverSenosr
+            var allowedActuators = new[]
+            {
+                // Station 1 (M262)
+                "Feeder", "Checker", "Transfer",
+                // Station 2 (M580)
+                "Bearing_PnP", "Bearing_Gripper",
+                "Shaft_Hr", "Shaft_Vr", "Shaft_Gripper",
+                "Clamp",
+                // Station 2 (BX1)
+                "CoverPNP_Hr", "CoverPNP_Vr",
+                "CoverPnp_Gripper",
+            };
+            var allowedSensors = new[]
+            {
+                "PartInHopper", "PartAtChecker",
+                "BearingSensor", "ShaftSensor",
+                "TopCoverSenosr",
+            };
+            // BUG-FIX 2026-05-21: previous code drew from
+            // fullContents.Actuators / fullContents.Sensors, which
+            // StationGroupingService populates from ONLY the Feed_Station
+            // Process's own transition conditions. Station 2 actuators
+            // (Bearing_PnP, Shaft_Hr/Vr, grippers, Clamp) are referenced by
+            // Assembly_Station's transitions, so they were silently dropped
+            // and the purple M580 / green BX1 frames came out empty.
+            //
+            // Source the allowed components from `allComponents` (the full
+            // Control.xml) instead. Feed_Station Process itself stays
+            // Feed_Station — we're only widening the COMPONENT scope, not
+            // the Process scope. Assembly_Station's recipe lives in its own
+            // Process FB instance which is emitted by a later phase.
             var contents = new StationContents(
                 fullContents.Process,
                 allowedActuators
-                    .Select(n => fullContents.Actuators.FirstOrDefault(
-                        a => string.Equals(a.Name, n, StringComparison.Ordinal)))
+                    .Select(n => allComponents.FirstOrDefault(c =>
+                        string.Equals(c.Type, "Actuator", StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(c.Name, n, StringComparison.Ordinal)))
                     .Where(a => a != null).Select(a => a!).ToList(),
                 allowedSensors
-                    .Select(n => fullContents.Sensors.FirstOrDefault(
-                        s => string.Equals(s.Name, n, StringComparison.Ordinal)))
+                    .Select(n => allComponents.FirstOrDefault(c =>
+                        string.Equals(c.Type, "Sensor", StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(c.Name, n, StringComparison.Ordinal)))
                     .Where(s => s != null).Select(s => s!).ToList());
 
             var fileName = Path.GetFileName(targetSyslayPath);
@@ -1014,6 +1055,22 @@ namespace MapperUI.Services
             builder.AddFB(FBIdGenerator.GenerateFBId("Station1_HMI"),
                 "Station1_HMI", "Station_CAT", "Main", 2220, 100);
 
+            // Station 2 structural stack — same shape as Station 1, parented
+            // under the same Area FB. Mirrors SMC_Rig_Expo_withClamp's reference
+            // layout (Station + Station_HMI + Station_Term per station). The
+            // post-syslay CanonicalLayout pass rewrites coordinates; the
+            // values here just need to be unique so two FBs don't share an
+            // initial position. M580 frame holds Station2 graphically.
+            builder.AddFB(FBIdGenerator.GenerateFBId("Station2"),
+                "Station2", "Station", "Main", 12000, 600,
+                new Dictionary<string, string>
+                {
+                    ["StationName"] = SyslayBuilder.FormatString("Station2")
+                });
+
+            builder.AddFB(FBIdGenerator.GenerateFBId("Station2_HMI"),
+                "Station2_HMI", "Station_CAT", "Main", 12100, 100);
+
             // Resolve the Process FB instance name via InstanceNameResolver. The resolver
             // checks the optional Instance_Name_Overrides sheet first (if MappingRulesPath
             // is set on the config) and otherwise applies the default convention of stripping
@@ -1029,6 +1086,14 @@ namespace MapperUI.Services
 
             var (processOuter, processNested, processRecipe) = BuildProcessFbParameters(
                 contents.Process, allComponents, processInstanceName, processId, contents);
+
+            // (Removed: processOuter["BackgroundColor"] = "PaleGreen" — EAE's
+            // FB-type compiler rejects any Parameter Name that is not declared
+            // as an InputVar on the FBType. BackgroundColor is not an InputVar
+            // on Process1_Generic, so emitting it raises ERR_MEMBER_VAR_NOTFOUND
+            // at compile time. Confirmed via Schneider's nxtLibraryElement.dtd
+            // and the renderer binary EngineeringEditors.dll — FB colouring is
+            // not exposed via syslay parameters.)
 
             // Change 4: deploy-time recipe-completeness validation (SAFETY).
             // Refuse to emit a syslay that strands an actuator atwork — every
@@ -1069,6 +1134,43 @@ namespace MapperUI.Services
                 processInstanceName, "Process1_Generic", "Main", 3360, 1460,
                 processOuter, processNested);
 
+            // Station 2 — Assembly_Station Process FB. Same FBType
+            // (Process1_Generic) as Feed_Station; the FBT is data-driven so
+            // multiple instances with different recipe arrays run independent
+            // recipes. NO separate Process2_CAT FBType is needed — that's
+            // what "data-driven" buys us. The reference SMC_Rig_Expo_withClamp
+            // uses bespoke Process1_CAT / Process2_CAT / Process3_CAT because
+            // it's hand-wired; our Mapper architecture keeps a single FBT.
+            //
+            // For this phase the Assembly_Station recipe is emitted EMPTY
+            // (process_name + process_id only — no StepType/CmdTargetName
+            // etc.). The Assembly_Station recipe vocabulary (Bearing_PnP
+            // dual-target, gripper grasp/release, Clamp) needs a recipe
+            // generator extension which lands in a follow-up phase.
+            var assemblyStationProc = allComponents.FirstOrDefault(c =>
+                string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(c.Name, "Assembly_Station", StringComparison.Ordinal));
+            if (assemblyStationProc != null)
+            {
+                var assemblyName = InstanceNameResolver.Resolve(assemblyStationProc,
+                    overrides.ByComponentId, overrides.ByVueOneName);
+                var (aOuter, aNested, _) = BuildProcessFbParameters(
+                    assemblyStationProc, allComponents, assemblyName, processId + 1,
+                    contents: null);   // null → empty recipe; only scalars emitted
+                builder.AddFB(FBIdGenerator.GenerateFBId(assemblyStationProc.ComponentID),
+                    assemblyName, "Process1_Generic", "Main", 12200, 1460,
+                    aOuter, aNested);
+                report.Missing.Add(
+                    $"[Phase 7] {assemblyName} Process FB emitted with empty recipe — " +
+                    "Assembly_Station recipe-array generator pending.");
+            }
+            else
+            {
+                report.Missing.Add(
+                    "[Phase 7] Assembly_Station Process not found in Control.xml — " +
+                    "Station 2 frame will have actuators but no Process FB.");
+            }
+
             // Surface every out-of-scope condition the recipe generator dropped so the
             // .syslay file self-documents what's missing. Without this, an operator
             // reading the syslay has no clue that Checker / Transfer / Assembly_Station
@@ -1108,38 +1210,115 @@ namespace MapperUI.Services
             var scopedIds = ProcessRecipeArrayGenerator.BuildScopedComponentMap(
                 contents.Sensors, contents.Actuators);
 
+            // PLC partitioning index — used to position Station 2 components in
+            // the purple M580 / green BX1 zones while leaving Station 1 (M262)
+            // components untouched in the existing yellow zone. Falls back to
+            // a name-based guess when MapperConfig is null (legacy callers).
+            var plcIndex = config != null
+                ? HcfSymbolIndex.Build(config)
+                : new HcfSymbolIndex();
+            // Per-PLC counters used for column index within each zone.
+            var perPlcCount = new Dictionary<PlcAssignment, int>
+            {
+                [PlcAssignment.M262] = 0,
+                [PlcAssignment.M580] = 0,
+                [PlcAssignment.BX1]  = 0,
+                [PlcAssignment.Unknown] = 0,
+            };
+
             for (int i = 0; i < contents.Actuators.Count; i++)
             {
                 var actuator = contents.Actuators[i];
                 int assignedId = actuatorIdStart + i;
-                var actParams = BuildActuatorParameters(actuator, assignedId, allComponents, scopedIds);
+                var fbType = ResolveActuatorFBType(actuator);
+                // Resolve FB instance name via the same path Process FB names use:
+                //   1. Instance_Name_Overrides xlsx sheet (ComponentID, then VueOne Name)
+                //   2. Default convention (suffix stripping)
+                //   3. Component's raw Name as the final fallback.
+                // This is the data-driven Feeder → Pusher rename — add a row to
+                // the xlsx (VueOne Name="Feeder", IEC Instance Name="Pusher") and
+                // it lands here. No hardcoded aliases.
+                var displayName = InstanceNameResolver.Resolve(actuator,
+                    overrides.ByComponentId, overrides.ByVueOneName);
+                var actPlc = plcIndex.ResolveComponent(actuator.Name, bindings);
 
-                // Change 2 validation (SAFETY): if Control.xml gives this
-                // actuator an in-scope interlock (a NOT-condition referencing
-                // an in-scope component) but no rule was emitted, the safety
-                // net would be silently theoretical — refuse to generate.
-                int inScopeInterlocks = CountInScopeInterlockConds(actuator, scopedIds);
-                int emittedRuleCount = int.Parse(actParams["RuleCount"],
-                    System.Globalization.CultureInfo.InvariantCulture);
-                if (inScopeInterlocks > 0 && emittedRuleCount == 0)
-                    throw new InvalidOperationException(
-                        $"[Recipe] Actuator '{actuator.Name}' has {inScopeInterlocks} in-scope " +
-                        "Control.xml interlock condition(s) but emitted RuleCount=0 — refusing to " +
-                        "generate code whose InterlockManager passes everything through (false " +
-                        "safety net). Interlock rule translation failed for this actuator.");
-                if (emittedRuleCount > 0)
-                    report.Bound.Add((actuator.Name,
-                        $"interlock RuleCount={emittedRuleCount}"));
+                // Five-state actuators (Feeder/Checker/Transfer + Shaft/Cover
+                // single-acting cylinders + Clamp + mechanical grippers) take
+                // the full data-driven parameter block built from Control.xml.
+                // Non-5-state actuators (Bearing_PnP's branched 7+6, the
+                // vacuum gripper, Ejector's 4-state no-sensor cylinder) carry
+                // only the minimal name+id pair — their data-driven inputs
+                // (Target* / Rule* / Interlock*) will be wired in a later
+                // phase once the per-type recipe vocabulary lands.
+                Dictionary<string, string> actParams;
+                if (fbType == "Five_State_Actuator_CAT")
+                {
+                    actParams = BuildActuatorParameters(actuator, assignedId, allComponents, scopedIds);
+                    // Override actuator_name so the runtime broadcast key uses
+                    // the resolved instance name (Pusher), not the Control.xml
+                    // raw name (Feeder). Without this, state_table.source_name
+                    // would be 'feeder' while the FB instance is 'Pusher' and
+                    // cross-FB lookups (interlock, recipe wait) would silently miss.
+                    actParams["actuator_name"] = SyslayBuilder.FormatString(
+                        displayName.ToLowerInvariant());
+
+                    // Change 2 validation (SAFETY): if Control.xml gives this
+                    // actuator an in-scope interlock (a NOT-condition referencing
+                    // an in-scope component) but no rule was emitted, the safety
+                    // net would be silently theoretical — refuse to generate.
+                    int inScopeInterlocks = CountInScopeInterlockConds(actuator, scopedIds);
+                    int emittedRuleCount = int.Parse(actParams["RuleCount"],
+                        System.Globalization.CultureInfo.InvariantCulture);
+                    if (inScopeInterlocks > 0 && emittedRuleCount == 0)
+                        throw new InvalidOperationException(
+                            $"[Recipe] Actuator '{actuator.Name}' has {inScopeInterlocks} in-scope " +
+                            "Control.xml interlock condition(s) but emitted RuleCount=0 — refusing to " +
+                            "generate code whose InterlockManager passes everything through (false " +
+                            "safety net). Interlock rule translation failed for this actuator.");
+                    if (emittedRuleCount > 0)
+                        report.Bound.Add((actuator.Name,
+                            $"interlock RuleCount={emittedRuleCount}"));
+                }
+                else
+                {
+                    actParams = BuildMinimalActuatorParameters(actuator, assignedId, fbType);
+                    actParams["actuator_name"] = SyslayBuilder.FormatString(
+                        displayName.ToLowerInvariant());
+                    report.Missing.Add(
+                        $"[Phase 6] {actuator.Name} ({fbType}): minimal params only — " +
+                        "data-driven Target*/Rule*/Interlock* wiring deferred to recipe phase");
+                }
 
                 ActuatorBinding? actBinding = null;
                 bindings?.Actuators.TryGetValue(actuator.Name, out actBinding);
                 if (actBinding != null) report.Bound.Add((actuator.Name, DescribeBinding(actBinding)));
                 else if (bindings != null) report.Missing.Add(actuator.Name);
 
+                // Position the FB inside its PLC zone. The post-syslay
+                // CanonicalLayout pass (M262SysresWireEmitter) will override
+                // these coordinates for known names; the initial values here
+                // just need to be inside-frame so a misnamed entry doesn't
+                // float into negative-X territory before the rewrite.
+                int colInPlc = perPlcCount[actPlc]++;
+                var (zoneX, zoneY) = PlcZoneActuatorPosition(actPlc, colInPlc);
+
                 builder.AddFB(FBIdGenerator.GenerateFBId(actuator.ComponentID),
-                    actuator.Name, "Five_State_Actuator_CAT", "Main",
-                    1300 + i * 400, 2480, actParams);
+                    displayName, fbType, "Main",
+                    zoneX, zoneY, actParams);
+
+                if (!string.Equals(displayName, actuator.Name, StringComparison.Ordinal))
+                    report.Missing.Add(
+                        $"[Layout] '{actuator.Name}' emitted as FB instance '{displayName}' " +
+                        "(rename from Instance_Name_Overrides xlsx sheet)");
             }
+
+            var perPlcSensorCount = new Dictionary<PlcAssignment, int>
+            {
+                [PlcAssignment.M262] = 0,
+                [PlcAssignment.M580] = 0,
+                [PlcAssignment.BX1]  = 0,
+                [PlcAssignment.Unknown] = 0,
+            };
 
             for (int i = 0; i < contents.Sensors.Count; i++)
             {
@@ -1151,18 +1330,40 @@ namespace MapperUI.Services
                 if (senBinding != null) report.Bound.Add((sensor.Name, DescribeBinding(senBinding)));
                 else if (bindings != null) report.Missing.Add(sensor.Name);
 
+                var senPlc = plcIndex.ResolveComponent(sensor.Name, bindings);
+                int senCol = perPlcSensorCount[senPlc]++;
+                var (sX, sY) = PlcZoneSensorPosition(senPlc, senCol);
+
+                var senDisplayName = InstanceNameResolver.Resolve(sensor,
+                    overrides.ByComponentId, overrides.ByVueOneName);
+
                 builder.AddFB(FBIdGenerator.GenerateFBId(sensor.ComponentID),
-                    sensor.Name, "Sensor_Bool_CAT", "Main",
-                    1560 + i * 400, 1480,
+                    senDisplayName, "Sensor_Bool_CAT", "Main",
+                    sX, sY,
                     new Dictionary<string, string>
                     {
-                        ["name"] = SyslayBuilder.FormatString(sensor.Name),
-                        ["id"] = SyslayBuilder.FormatInt(assignedId)
+                        // 'name' Parameter mirrors the resolved instance name so
+                        // the runtime broadcast (state_table.source_name) uses the
+                        // same identifier as the FB instance — keeps the rename
+                        // end-to-end consistent.
+                        ["name"] = SyslayBuilder.FormatString(senDisplayName),
+                        ["id"] = SyslayBuilder.FormatInt(assignedId),
+                        // (Removed: ["BackgroundColor"] = "LightSteelBlue" —
+                        // EAE compiler rejects with ERR_MEMBER_VAR_NOTFOUND
+                        // because BackgroundColor is not an InputVar on
+                        // Sensor_Bool_CAT. FB colouring is not exposed via
+                        // syslay parameters in EAE 24.1.)
                     });
             }
 
             builder.AddFB(FBIdGenerator.GenerateFBId("Stn1_Term"),
                 "Stn1_Term", "CaSAdptrTerminator", "Main", 4780, 2360);
+
+            // Station 2 chain terminator — mirrors Stn1_Term but sits inside
+            // the M580 frame at the right edge of the Station 2 row. The
+            // post-syslay CanonicalLayout rewrite places it at (19500, 2900).
+            builder.AddFB(FBIdGenerator.GenerateFBId("Stn2_Term"),
+                "Stn2_Term", "CaSAdptrTerminator", "Main", 14000, 2360);
 
             builder.AddFB(FBIdGenerator.GenerateFBId("Area_Term"),
                 "Area_Term", "CaSAdptrTerminator", "Main", 3760, 720);
@@ -1174,6 +1375,48 @@ namespace MapperUI.Services
             // no longer mutated at generation time. The MapperConfig parameter is retained for
             // call-site compatibility but unused here.
             _ = config;
+
+            // Visual organisation. Two nested frames:
+            //   1. FRAME_Station1 (white outer) — full canvas envelope.
+            //   2. FRAME_M262   (light-yellow)  — PLC partition inside Station 1.
+            // Frame bounds enclose the actual FB bounding box emitted above:
+            //   HMI row at Y=2000, Area/Station1/Area_Term row at Y=2900,
+            //   Sensors + Process at Y=4000, Actuators + Stn1_Term at Y=5400
+            //   (visible bottom edge ~Y=6000 with default FB body height).
+            //   X spans 2000..9500 (Stn1_Term right edge ~10000 with default FB width).
+            // Outer  bounds (1800,1700)→(10200,6800), H=5100.
+            // Inner  bounds (1880,1880)→(10120,6720), H=4840 — inset 80 on
+            //   left/right/bottom, 180 on top to leave room for the Station 1
+            //   36pt title above the M262 18pt title.
+            // NOTE: EAE's FB type-label strip (the blue band that shows the
+            // type name on each FB) is rendered by EAE's library renderer and
+            // is NOT controllable via syslay parameters. The Schneider
+            // reference syslays (SMC_Rig_Expo_withClamp) confirm this — they
+            // set BackgroundColor only on <Frame>, never on <FB>. So we do not
+            // attempt to recolour the type strip here.
+            // Frame layout — three independent station frames, no combined
+            // outer envelope. Each PLC zone is self-titled and self-coloured.
+            //   Station 1 (M262)  — yellow,    holds Feed_Station logic
+            //   Station 2 (M580)  — purple,    holds swivel-arm + shaft column
+            //   Station 2 (BX1)   — green,     holds cover pick-and-place
+            // The two "Station 2" frames are visually distinct rather than
+            // wrapped in a single outer, matching the SMC_Rig_Expo_withClamp
+            // reference which colour-codes per PLC.
+            builder.AddFrame("FRAME_Station1", 1800, 1700, 8400, 5100,
+                "LightYellow", "Station 1   —   PLC M262", "TopCenter",
+                "Microsoft Sans Serif, 36pt, style=Bold");
+            builder.AddFrame("FRAME_Station2_M580", 12000, 1700, 8300, 5100,
+                "MediumPurple", "Station 2   —   PLC M580", "TopCenter",
+                "Microsoft Sans Serif, 36pt, style=Bold");
+            builder.AddFrame("FRAME_Station2_BX1", 20400, 1700, 6800, 5100,
+                "LightGreen", "Station 2   —   PLC BX1", "TopCenter",
+                "Microsoft Sans Serif, 36pt, style=Bold");
+            // Empirical observation 2026-05-21: EAE always renders <FB> z-order
+            // above <Frame> z-order, regardless of XML document order. Verified
+            // by writing TYPE_STRIP Frames at the exact (FB.x, FB.y, 580, 50)
+            // coordinates and observing the FB still painted on top. So Frames
+            // can only colour areas not covered by an FB body — they cannot
+            // recolour the EAE-rendered blue type-name strip.
 
             var doc = builder.Build();
             doc.Save(fullPath);
@@ -1188,6 +1431,115 @@ namespace MapperUI.Services
 
         // Default fallback timing used only when Control.xml omits or zeros out State.Time.
         private const int DefaultMotionMs = 2000;
+
+        /// <summary>
+        /// Vacuum-driven gripper instance names (suction cup, single coil, no
+        /// athome/atwork sensor pair). Drives FB type dispatch in
+        /// <see cref="ResolveActuatorFBType"/>. Mirrors MainForm's
+        /// _vacuumGripperNames so the syslay emit and the Mapping Information
+        /// grid agree on which gripper is vacuum vs mechanical.
+        /// </summary>
+        private static readonly HashSet<string> VacuumGripperNames =
+            new(StringComparer.OrdinalIgnoreCase) { "CoverPnp_Gripper" };
+
+        /// <summary>
+        /// Maps a Control.xml &lt;Component&gt; to the FB Type= attribute the
+        /// syslay should emit. Same logic as MainForm.Validate: 7-state and
+        /// PARALLEL+ALTERNATIVE-branched actuators go to Seven_State, vacuum
+        /// gripper instance names go to Vacuum_Gripper_CAT, 4-state
+        /// no-sensors (Ejector) goes to Five_State_Actuator_No_Sensors_CAT,
+        /// everything else falls through to Five_State_Actuator_CAT.
+        /// </summary>
+        private static string ResolveActuatorFBType(VueOneComponent actuator)
+        {
+            if (actuator == null) return "Five_State_Actuator_CAT";
+            var name = actuator.Name ?? string.Empty;
+            if (VacuumGripperNames.Contains(name)) return "Vacuum_Gripper_CAT";
+
+            bool isBranched = actuator.States.Any(st =>
+            {
+                bool hasParallel = st.Transitions.Any(t =>
+                    string.Equals(t.TransitionType, "PARALLEL", StringComparison.OrdinalIgnoreCase));
+                bool hasAlternative = st.Transitions.Any(t =>
+                    string.Equals(t.TransitionType, "ALTERNATIVE", StringComparison.OrdinalIgnoreCase));
+                return hasParallel && hasAlternative;
+            });
+            if (isBranched) return "Seven_State_Actuator_CAT";
+
+            if (actuator.States.Count == 7) return "Seven_State_Actuator_CAT";
+            if (actuator.States.Count == 4) return "Five_State_Actuator_No_Sensors_CAT";
+            return "Five_State_Actuator_CAT";
+        }
+
+        /// <summary>
+        /// Returns minimal Parameter values for actuators that are NOT plain
+        /// 5-state cylinders — they only need actuator_name + actuator_id at
+        /// this phase. Their Target* / Rule* / Interlock* inputs will be
+        /// populated by a per-process recipe generator later. Without this,
+        /// the Seven_State / Vacuum_Gripper / NoSensors FBs would either
+        /// trip BuildActuatorParameters' state-number assumptions or emit
+        /// stale 5-state parameters that the new FBType rejects.
+        /// </summary>
+        private static Dictionary<string, string> BuildMinimalActuatorParameters(
+            VueOneComponent actuator, int assignedId, string fbType)
+        {
+            var dict = new Dictionary<string, string>
+            {
+                ["actuator_name"] = SyslayBuilder.FormatString(actuator.Name.ToLowerInvariant()),
+                ["actuator_id"]   = SyslayBuilder.FormatInt(assignedId),
+            };
+            // Seven_State accepts the data-driven block after our deploy patch.
+            // Emit RuleCount=0 + zero-filled arrays so EAE compile is clean
+            // and an interlock RuleCount > 0 isn't accidentally inherited.
+            if (string.Equals(fbType, "Seven_State_Actuator_CAT", StringComparison.Ordinal))
+            {
+                dict["RuleCount"]        = SyslayBuilder.FormatInt(0);
+                dict["RuleFromState"]    = SyslayBuilder.FormatIntArray(System.Linq.Enumerable.Empty<int>());
+                dict["RuleToState"]      = SyslayBuilder.FormatIntArray(System.Linq.Enumerable.Empty<int>());
+                dict["RuleSourceID"]     = SyslayBuilder.FormatIntArray(System.Linq.Enumerable.Empty<int>());
+                dict["RuleBlockedState"] = SyslayBuilder.FormatIntArray(System.Linq.Enumerable.Empty<int>());
+                dict["TargetWork1State"] = SyslayBuilder.FormatInt(2);
+                dict["TargetWork2State"] = SyslayBuilder.FormatInt(4);
+                dict["TargetHomeState"]  = SyslayBuilder.FormatInt(6);
+            }
+            return dict;
+        }
+
+        /// <summary>
+        /// PLC zone X/Y for actuator FB initial placement. The post-syslay
+        /// CanonicalLayout rewrite (M262SysresWireEmitter) overrides these
+        /// for known names; the initial coordinates here only need to land
+        /// inside the right colored frame so an unrecognised name still
+        /// renders visibly.
+        /// Column pitch 2500 dxa, base X chosen so the column sits inside
+        /// the matching coloured frame (FRAME_M262 ends at X=10120;
+        /// FRAME_M580 spans 12000..20300; FRAME_BX1 spans 20400..27200).
+        /// Actuators land at Y=5400 (the existing convention).
+        /// </summary>
+        private static (int X, int Y) PlcZoneActuatorPosition(PlcAssignment plc, int colIndexInPlc)
+        {
+            const int Y = 5400;
+            int baseX = plc switch
+            {
+                PlcAssignment.M580 => 12200,
+                PlcAssignment.BX1  => 20600,
+                _ /* M262 / Unknown */ => 2000,
+            };
+            return (baseX + colIndexInPlc * 2500, Y);
+        }
+
+        /// <summary>Sensor counterpart of <see cref="PlcZoneActuatorPosition"/>.</summary>
+        private static (int X, int Y) PlcZoneSensorPosition(PlcAssignment plc, int colIndexInPlc)
+        {
+            const int Y = 4000;
+            int baseX = plc switch
+            {
+                PlcAssignment.M580 => 12200,
+                PlcAssignment.BX1  => 20600,
+                _ /* M262 / Unknown */ => 2000,
+            };
+            return (baseX + colIndexInPlc * 2500, Y);
+        }
 
         /// <summary>
         /// Builds Five_State_Actuator_CAT parameters straight from Control.xml.
@@ -1250,7 +1602,14 @@ namespace MapperUI.Services
                 ["RuleFromState"] = SyslayBuilder.FormatIntArray(ruleFrom),
                 ["RuleToState"] = SyslayBuilder.FormatIntArray(ruleTo),
                 ["RuleSourceID"] = SyslayBuilder.FormatIntArray(ruleSrc),
-                ["RuleBlockedState"] = SyslayBuilder.FormatIntArray(ruleBlk)
+                ["RuleBlockedState"] = SyslayBuilder.FormatIntArray(ruleBlk),
+
+                // (Removed: ["BackgroundColor"] = "Plum" — EAE's FB-type
+                // compiler rejects any <Parameter Name="..."> whose name is
+                // not declared as an InputVar on the FBType. BackgroundColor
+                // is not an InputVar on Five_State_Actuator_CAT, so emitting
+                // it raises ERR_MEMBER_VAR_NOTFOUND at compile time. FB
+                // colouring is not controllable via syslay in EAE 24.1.)
             };
         }
 
@@ -1324,10 +1683,60 @@ namespace MapperUI.Services
                     if (toState < 0 || blockedState < 0) continue;
                     if (n >= InterlockRuleCap) break;
 
-                    from[n] = st.StateNumber;
+                    // RuleFromState (root-cause fix for the inert safety net).
+                    // Per the CommonInterlockEvaluator Mapper Guide, a rule
+                    // matches ONLY when CurrentRawState == RuleFromState AND
+                    // the requested target == RuleToState. At REQ_WORK1 /
+                    // REQ_HOME time the actuator is at its RESTING state
+                    // (CurrentRawState=0 AtHomeInit before an advance,
+                    // CurrentRawState=2 AtWork before a retract), NOT the
+                    // in-transit owning state number (1 Advancing, 3
+                    // Returning). The earlier code emitted FromState=
+                    // st.StateNumber which made every rule inert because
+                    // 0 never equals 1. Walk the actuator's own state
+                    // machine to find the predecessor state (the one whose
+                    // transition Destination is this owning state); that
+                    // predecessor's State_Number is the resting value the
+                    // FB will see. If no predecessor exists (owning state
+                    // is itself the start of the chain) fall back to its
+                    // own number.
+                    var ownStateId = (st.StateID ?? string.Empty).Trim();
+                    int fromState = st.StateNumber;
+                    if (ownStateId.Length > 0)
+                    {
+                        var predecessor = actuator.States.FirstOrDefault(p =>
+                            p.Transitions.Any(t =>
+                                string.Equals(
+                                    (t.DestinationStateID ?? string.Empty).Trim(),
+                                    ownStateId, StringComparison.OrdinalIgnoreCase)));
+                        if (predecessor != null)
+                            fromState = predecessor.StateNumber;
+                    }
+
+                    // RuleBlockedState: the value the SOURCE component
+                    // actually publishes on the ring. A Five_State actuator
+                    // stably holds AtHomeInit=0 and AtWork=2; AtHomeEnd=4
+                    // is the momentary publish during the ToHome ->
+                    // AtHomeInit ECC arc (data-only guard, fires in the
+                    // same run-to-stable tick), so the InterlockManager
+                    // never sees state_table[srcId].state == 4 at any
+                    // useful moment. A Control.xml reference to a home-
+                    // finished family state on an actuator (State_Number
+                    // 4: ReturnedFinished / RisingFinished etc.) must remap
+                    // to 0 to fire reliably. Sensors are unchanged because
+                    // Sensor_Bool publishes its Control.xml number.
+                    int blockedStateRuntime = blockedState;
+                    if (blockedState == 4 && srcComp != null &&
+                        string.Equals(srcComp.Type, "Actuator",
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        blockedStateRuntime = 0;
+                    }
+
+                    from[n] = fromState;
                     to[n] = toState;
                     src[n] = srcId;
-                    blk[n] = blockedState;
+                    blk[n] = blockedStateRuntime;
                     n++;
                 }
             }
