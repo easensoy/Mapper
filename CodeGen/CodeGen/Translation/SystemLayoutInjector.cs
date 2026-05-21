@@ -1489,15 +1489,23 @@ namespace MapperUI.Services
                 ["actuator_id"]   = SyslayBuilder.FormatInt(assignedId),
             };
             // Seven_State accepts the data-driven block after our deploy patch.
-            // Emit RuleCount=0 + zero-filled arrays so EAE compile is clean
-            // and an interlock RuleCount > 0 isn't accidentally inherited.
+            // Emit RuleCount=0 + zero-filled arrays sized to the FBT's
+            // declared ArraySize=10. An EMPTY-array literal "[]" is a hard
+            // ERR_SYNTAX in EAE's structured-text parser ("']' is not correct
+            // structured text syntax"), even when RuleCount=0 — so the array
+            // initializer must enumerate ten zeros and let the runtime
+            // ignore them via RuleCount=0. The Five_State path already
+            // does this naturally by building from a new int[10] inside
+            // BuildInterlockRules; the minimal path used to emit "[]"
+            // here and crashed the compile 4× (one per Rule* array).
             if (string.Equals(fbType, "Seven_State_Actuator_CAT", StringComparison.Ordinal))
             {
+                var zeros = new int[InterlockRuleCap];   // ArraySize on the FBT
                 dict["RuleCount"]        = SyslayBuilder.FormatInt(0);
-                dict["RuleFromState"]    = SyslayBuilder.FormatIntArray(System.Linq.Enumerable.Empty<int>());
-                dict["RuleToState"]      = SyslayBuilder.FormatIntArray(System.Linq.Enumerable.Empty<int>());
-                dict["RuleSourceID"]     = SyslayBuilder.FormatIntArray(System.Linq.Enumerable.Empty<int>());
-                dict["RuleBlockedState"] = SyslayBuilder.FormatIntArray(System.Linq.Enumerable.Empty<int>());
+                dict["RuleFromState"]    = SyslayBuilder.FormatIntArray(zeros);
+                dict["RuleToState"]      = SyslayBuilder.FormatIntArray(zeros);
+                dict["RuleSourceID"]     = SyslayBuilder.FormatIntArray(zeros);
+                dict["RuleBlockedState"] = SyslayBuilder.FormatIntArray(zeros);
                 dict["TargetWork1State"] = SyslayBuilder.FormatInt(2);
                 dict["TargetWork2State"] = SyslayBuilder.FormatInt(4);
                 dict["TargetHomeState"]  = SyslayBuilder.FormatInt(6);
