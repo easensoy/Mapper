@@ -353,12 +353,19 @@ namespace CodeGen.Translation
                         arrays.Wait1State.Insert(insertAt, 0);
                         arrays.NextStep.Insert(insertAt, insertAt + 1);
 
-                        // wait athome (TargetHomeState = 4) → resume orig flow
+                        // wait athome-resting (AtHomeInit=0, the value the
+                        // actuator stably holds). AtHomeEnd=4 is transient —
+                        // the FiveStateActuator ECC takes AtHome -> AtHomeInit
+                        // on a data-only guard (atwork=FALSE AND athome=TRUE)
+                        // in the same run-to-stable tick as the AtHome entry,
+                        // so by the time the engine re-samples state_table the
+                        // 4 has already been overwritten to 0. Waiting on 4
+                        // misses the transient and parks the engine forever.
                         arrays.StepType.Insert(insertAt + 1, 2);
                         arrays.CmdTargetName.Insert(insertAt + 1, string.Empty);
                         arrays.CmdStateArr.Insert(insertAt + 1, 0);
                         arrays.Wait1Id.Insert(insertAt + 1, actId);
-                        arrays.Wait1State.Insert(insertAt + 1, 4);
+                        arrays.Wait1State.Insert(insertAt + 1, 0);
                         arrays.NextStep.Insert(insertAt + 1, origTarget);
 
                         // Re-point the atwork WAIT into the new retract chain.
@@ -656,6 +663,41 @@ namespace CodeGen.Translation
                 // templates (Seven_State_Actuator_CAT, future custom CATs).
                 int cmdState = ResolveTransientCmdState(state.Name, inScopeTarget, waitState, arrays);
 
+                // RUNTIME-SETTLED WAIT STATE (root-cause fix for the recipe
+                // stalling mid-cycle). The engine compares Wait1State against
+                // what the actuator PUBLISHES on the stateRptCmd ring, which is
+                // the Five_State ECC's current_state_to_process encoding
+                // (AtHomeInit=0, ToWork=1, AtWork=2, ToHome=3, AtHomeEnd=4) —
+                // NOT the raw Control.xml <State_Number>. After a to-work
+                // command the actuator STABLY HOLDS AtWork=2. After a to-home
+                // command it transitions ToHome -> AtHomeEnd (publishes 4
+                // momentarily) -> AtHomeInit (publishes 0, where it stably
+                // rests) because the AtHome -> AtHomeInit ECC arc is
+                // data-conditioned (atwork=FALSE AND athome=TRUE) and fires
+                // in the same run-to-stable tick as the AtHome entry. The
+                // engine's check_wait re-samples state_table on each
+                // state_change, and by the time it evaluates a Wait1State=4,
+                // state_table has already been overwritten 4 -> 0. So athome
+                // waits MUST target the stably-held AtHomeInit=0, not the
+                // transient AtHomeEnd=4. Emitting the Control.xml StateNumber
+                // only matched by accident for components numbering their
+                // advanced state 2; Checker's RisingFinished is 4, unreachable
+                // from a single ToWork command. Map by command direction so
+                // every Five_State actuator wait targets the value the
+                // actuator stably holds: AtWork=2 after ToWork, AtHomeInit=0
+                // after ToHome.
+                int settledWait =
+                    cmdState == 1 ? 2 :          // ToWork -> actuator stably holds AtWork
+                    cmdState == 3 ? 0 :          // ToHome -> actuator settles at AtHomeInit
+                    waitState;                   // non-Five_State CAT: keep the Control.xml number
+                if (settledWait != waitState)
+                    arrays.Warnings.Add(
+                        $"[Recipe] '{state.Name}': WAIT on '{inScopeTarget.Name}' remapped " +
+                        $"Control.xml State_Number {waitState} -> runtime ECC state {settledWait} " +
+                        $"(cmd {cmdState}). The actuator stably holds AtWork=2 or AtHomeInit=0; " +
+                        "AtHomeEnd=4 is transient (overwritten 4 -> 0 in the same run-to-stable " +
+                        "tick) and the engine misses it, so athome waits must target 0.");
+
                 return new StateClassification
                 {
                     Kind = ClassKind.MotionPair,
@@ -663,8 +705,37 @@ namespace CodeGen.Translation
                     CmdTargetName = (inScopeTarget.Name ?? string.Empty).Trim().ToLowerInvariant(),
                     CmdState = cmdState,
                     WaitId = waitId,
-                    WaitState = waitState,
+                    WaitState = settledWait,
                 };
+            }
+
+            // SETTLED WAIT runtime encoding (complementary to the MotionPair
+            // fix above). A settled wait on a Five_State actuator must target
+            // the value the actuator STABLY HOLDS, not the transient
+            // Control.xml State_Number. The actuator only stably holds
+            // AtHomeInit (runtime 0) and AtWork (runtime 2). AtHomeEnd
+            // (runtime 4) is the momentary publish during the ToHome ->
+            // AtHomeInit transition, so any settled wait reached after the
+            // return completes sees 0, not 4. Concretely, Feed_Station's
+            // WaitingReleaseSt2 waits on Feeder/ReturnedFinished
+            // (State_Number 4); by the time it is reached feeder has long
+            // settled to AtHomeInit 0 and the ==4 wait would park forever.
+            // Remap actuator settled waits on the home-finished family
+            // (State_Number 4) to the resting AtHomeInit (0). Sensors are
+            // untouched (Sensor_Bool_CAT publishes the Control.xml number).
+            int settledStateWait = waitState;
+            if (string.Equals(inScopeTarget.Type, "Actuator",
+                    StringComparison.OrdinalIgnoreCase) &&
+                waitState == 4)
+            {
+                settledStateWait = 0;
+                arrays.Warnings.Add(
+                    $"[Recipe] '{state.Name}': SETTLED WAIT on " +
+                    $"'{inScopeTarget.Name}' remapped Control.xml State_Number 4 " +
+                    "(home-finished family) -> runtime AtHomeInit 0. The actuator " +
+                    "only stably holds 0 home or 2 atwork; AtHomeEnd 4 is " +
+                    "transient and missed by a wait reached after the return " +
+                    "has already completed.");
             }
 
             return new StateClassification
@@ -672,7 +743,7 @@ namespace CodeGen.Translation
                 Kind = ClassKind.SettledWait,
                 RowCount = 1,
                 WaitId = waitId,
-                WaitState = waitState,
+                WaitState = settledStateWait,
             };
         }
 
