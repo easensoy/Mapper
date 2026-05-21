@@ -74,6 +74,17 @@ namespace MapperUI.Services
             // Event-change handlers referenced by PLC_RW_M262's internal FB2/FB3
             // instances. Sourced from C:\SMC_Rig_Expo_20260112-165857725.sln\IEC61499.
             "changeEventProcess1", "changeEventProcess2",
+            // Embedded by Seven_State_Actuator_CAT as its core state-machine
+            // basic FB (FB ID=8, Type="SevenStateActuator2", Namespace="Main").
+            // Without this, EAE compile fails with:
+            //   "Could not find file '…\obj\fbt\gfbt\SevenStateActuator2.gfbt'"
+            // because the CAT's FBNetwork references a basic-FB type the
+            // project doesn't carry. Bearing_PnP (and any other 7-state or
+            // PARALLEL+ALTERNATIVE-branched actuator routed through
+            // Seven_State_Actuator_CAT by Mapper's validator) depends on it.
+            // The older "SevenStateActuator" basic is also shipped in the
+            // template library but is unused by the current CAT.
+            "SevenStateActuator2",
         };
 
         static readonly string[] UniversalHmiCats = new[]
