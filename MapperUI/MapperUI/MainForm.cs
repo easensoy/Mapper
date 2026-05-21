@@ -46,8 +46,11 @@ namespace MapperUI
             "PartInHopper", "PartAtChecker",
 
             // Station 2 (M580) — Assembly_Station core
-            // Bearing_PnP removed 2026-05-21 (relied on Seven_State_Actuator_CAT
-            // which was retired; re-add when a clean CAT lands).
+            // Bearing_PnP restored 2026-05-21 alongside Seven_State_Actuator_CAT
+            // — Mapper Validator now passes Control.xml for the 13-state
+            // PARALLEL+ALTERNATIVE branched actuator (assembly + disassembly
+            // sweep). Routed via ResolveActuatorFBType / validator below.
+            "Bearing_PnP",
             "Bearing_Gripper",
             "Shaft_Hr", "Shaft_Vr", "Shaft_Gripper",
             "Clamp",
@@ -1088,18 +1091,25 @@ namespace MapperUI
                         return Pass(comp, "Five_State_Actuator_CAT.fbt");
                     if (comp.States.Count == 7)
                         return Pass(comp, "Robot_Task_CAT.fbt");
-                    // Seven_State_Actuator_CAT routing removed 2026-05-21.
                     return Fail(comp, "No template found",
                         $"Robot '{comp.Name}' has {comp.States.Count} states — expected 5 (gripper) or 7 (task arm)");
                 case "actuator":
-                    // Seven_State_Actuator_CAT routing removed 2026-05-21 — 7-state and
-                    // branched actuators (e.g. Bearing_PnP) now fall through to the
-                    // "No template found" error until a clean Seven_State path lands.
+                    // Seven_State_Actuator_CAT routing restored 2026-05-21 for
+                    // Bearing_PnP. The branched 13-state pattern (assembly path
+                    // PARALLEL out of ReturnedHome + disassembly path ALTERNATIVE
+                    // out of the same state) collapses onto Seven_State's 7-state
+                    // ECC because the physical actuator has only three positions
+                    // (Pick, Place, Home) plus two work coils. Detection is by
+                    // IsBranchedSevenStateActuator (PARALLEL ∧ ALTERNATIVE on the
+                    // resting state) so the rule is name-agnostic — any future
+                    // 7+ state branched actuator routes the same way.
+                    if (comp.States.Count == 7 || IsBranchedSevenStateActuator(comp))
+                        return Pass(comp, "Seven_State_Actuator_CAT.fbt");
                     if (comp.States.Count == 4)
                         return Pass(comp, "Five_State_Actuator_No_Sensors_CAT.fbt");
                     if (comp.States.Count != 5)
                         return Fail(comp, "No template found",
-                            $"{comp.States.Count} states — only 4 or 5 supported");
+                            $"{comp.States.Count} states — only 4, 5, or 7 (incl. PARALLEL+ALTERNATIVE branched) supported");
                     break;
                 case "sensor":
                     if (comp.States.Count != 2)
