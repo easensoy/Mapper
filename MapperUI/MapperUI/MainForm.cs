@@ -35,11 +35,39 @@ namespace MapperUI
             Timeout = TimeSpan.FromMinutes(10),
         };
 
+        // Components in scope for the Test Runtime button. Feed Station
+        // (M262) + Assembly Station (M580 + BX1). Disassembly Process is
+        // intentionally NOT in scope yet — Phase 2 will add the Robot +
+        // Ejector + Disassembly recipe later.
         static readonly HashSet<string> _allowedInstances = new(StringComparer.OrdinalIgnoreCase)
         {
-            "Checker", "Transfer", "Feeder", "Ejector",
+            // Station 1 (M262) — Feed_Station Process
+            "Feeder", "Checker", "Transfer",
             "PartInHopper", "PartAtChecker",
-            "Bearing_PnP"
+
+            // Station 2 (M580) — Assembly_Station core
+            "Bearing_PnP", "Bearing_Gripper",
+            "Shaft_Hr", "Shaft_Vr", "Shaft_Gripper",
+            "Clamp",
+            "BearingSensor", "ShaftSensor",
+
+            // Station 2 (BX1) — Cover Pick-and-Place
+            "CoverPNP_Hr", "CoverPNP_Vr",
+            "CoverPnp_Gripper",
+            "TopCoverSenosr",
+        };
+
+        /// <summary>
+        /// Vacuum-driven gripper instances (suction cups, single coil, no
+        /// athome/atwork sensor pair). Reference SMC_Rig_Expo_withClamp maps
+        /// CoverGripper to Vacuum_Gripper_CAT.fbt; bearing/shaft grippers are
+        /// mechanical fingers and use Five_State_Actuator_CAT instead.
+        /// Detection is by exact name since Control.xml Type=Robot does not
+        /// distinguish vacuum from mechanical.
+        /// </summary>
+        static readonly HashSet<string> _vacuumGripperNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "CoverPnp_Gripper",
         };
 
         sealed class ComponentValidationRow
@@ -328,9 +356,7 @@ namespace MapperUI
             if (dlg.ShowDialog() != DialogResult.OK) return;
             txtModelPath.Text = dlg.FileName;
             _loadedControlXmlPath = dlg.FileName;
-            btnProcessFB.Enabled = true;
             btnTestStation1.Enabled = true;
-            btnGenerateAll.Enabled = true;
             btnGenerateFullSystemSimulator.Enabled = true;
             await LoadAndValidateAsync(dlg.FileName);
         }
@@ -414,31 +440,56 @@ namespace MapperUI
             {
                 AppendActivity($"[M262][Error] sysdev emit: {ex.Message}");
             }
-            if (m262DeviceExists)
+            // Topology emit always runs. The trust binding lives in
+            // solutionData (CsConfHash + CertThumbprint), which the emitter
+            // now preserves byte-for-byte if already present. Equipment JSON
+            // carries only visual device placement on Physical Views and
+            // MUST be (re)written every run, otherwise the M262dPAC never
+            // appears on the canvas after a Demonstrator wipe — even if a
+            // .sysdev with the right GUID is already on disk.
+            try
             {
-                AppendActivity(
-                    "[Device] M262 sysdev exists, skipping Topology Equipment JSON " +
-                    "and network-profile writes to preserve trust binding");
+                if (!string.IsNullOrEmpty(sysdevId))
+                {
+                    var topo = await Task.Run(() => MapperUI.Services.M262TopologyEmitter.Emit(Cfg(), sysdevId));
+                    AppendActivity($"[M262] topology emitted: {topo.FilesWritten.Count} JSON file(s), {topo.TopologyProjEntriesAdded} topologyproj entries added");
+                    if (m262DeviceExists)
+                        AppendActivity("[Device] solutionData preserved (existing trust binding kept intact)");
+                    foreach (var w in topo.Warnings)
+                        AppendActivity($"[M262][Warn] topology: {w}");
+                }
+                else
+                {
+                    AppendActivity("[M262][Warn] topology emit skipped — sysdevId was empty");
+                }
             }
-            else
+            catch (Exception ex)
             {
-                try
-                {
-                    if (!string.IsNullOrEmpty(sysdevId))
-                    {
-                        var topo = await Task.Run(() => MapperUI.Services.M262TopologyEmitter.Emit(Cfg(), sysdevId));
-                        AppendActivity($"[M262] topology re-emitted: {topo.FilesWritten.Count} JSON file(s), {topo.TopologyProjEntriesAdded} topologyproj entries added");
-                        foreach (var w in topo.Warnings)
-                            AppendActivity($"[M262][Warn] topology: {w}");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    AppendActivity($"[M262][Error] topology emit: {ex.Message}");
-                }
+                AppendActivity($"[M262][Error] topology emit: {ex.Message}");
             }
             if (m262DeviceExists)
                 AppendActivity("[Device] M262 sysdev preserved (trust binding intact)");
+
+            // Station 2 — M580 + BX1 sysdev + sysres + HCF copy + Topology
+            // Equipment JSON. New per-PLC artefacts modelled on
+            // SMC_Rig_Expo_withClamp's reference layout. Idempotent re-runs.
+            try
+            {
+                var stn2 = await Task.Run(() => MapperUI.Services.Station2DeviceEmitter.EmitAll(Cfg()));
+                AppendActivity(
+                    $"[Stn2] {stn2.FilesWritten.Count} file(s) written, " +
+                    $"{stn2.TopologyProjEntriesAdded} topologyproj entries, " +
+                    $"{stn2.DfbprojEntriesAdded} dfbproj entries");
+                foreach (var f in stn2.FilesWritten)
+                    AppendActivity($"[Stn2]   {f}");
+                foreach (var w in stn2.Warnings)
+                    AppendActivity($"[Stn2][Warn] {w}");
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"[Stn2][Error] Station 2 emit: {ex.Message}");
+            }
+
             try
             {
                 var hcf = await Task.Run(() => MapperUI.Services.M262HwConfigCopier.Copy(Cfg()));
@@ -592,44 +643,6 @@ namespace MapperUI
             }
         }
 
-        async void btnProcessFB_Click(object sender, EventArgs e)
-        {
-            try
-            {
-                if (string.IsNullOrEmpty(_loadedControlXmlPath) || !File.Exists(_loadedControlXmlPath))
-                { ShowError("Load a Control.xml first via Browse."); return; }
-                if (!TryResolveDemonstratorPath(out var syslayPath)) return;
-
-                lblStatus.Text = "Generating...";
-                AppendActivity($"[Button 1] Generating Process FB into Demonstrator at {syslayPath}...");
-
-                await DeployUniversalTemplatesAsync();
-
-                var injector = new SystemInjector();
-                var cleanup = await Task.Run(() => injector.PrepareDemonstratorForGeneration(Cfg()));
-                LogCleanup(cleanup);
-
-                AppendActivity("[IoBindings] skipped, Process FB has no symlinks");
-                SystemInjector.BindingApplicationReport report = null!;
-                var path = await Task.Run(() =>
-                    injector.GenerateProcessFBSyslay(Cfg(), _loadedControlXmlPath, null, out report));
-                LogBindingsReport(report);
-                await FinalizeM262StackAsync();
-                TouchDfbprojToTriggerEaeReload();
-
-                AppendActivity($"Generated: {path}");
-                lblStatus.Text = $"Ready  |  {path}  |  Process FB only";
-                MessageBox.Show($"Generated Process FB into Demonstrator:\n{path}",
-                    "Process FB", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-            catch (Exception ex)
-            {
-                AppendActivity($"[Error] {ex}");
-                lblStatus.Text = "Ready";
-                ShowError(ex.Message);
-            }
-        }
-
         async void btnTestStation1_Click(object sender, EventArgs e)
         {
             try
@@ -702,660 +715,6 @@ namespace MapperUI
                 ShowError(ex.Message);
             }
         }
-
-        async void btnGenerateAll_Click(object sender, EventArgs e)
-        {
-            try
-            {
-                if (string.IsNullOrEmpty(_loadedControlXmlPath) || !File.Exists(_loadedControlXmlPath))
-                { ShowError("Load a Control.xml first via Browse."); return; }
-                if (!TryResolveDemonstratorPath(out var syslayPath)) return;
-
-                lblStatus.Text = "Generating...";
-                AppendActivity($"[Button 3] Generating Full System (all stations) into Demonstrator at {syslayPath}...");
-
-                await DeployUniversalTemplatesAsync();
-
-                var injector = new SystemInjector();
-                var cleanup = await Task.Run(() => injector.PrepareDemonstratorForGeneration(Cfg()));
-                LogCleanup(cleanup);
-
-                var bindings = TryLoadBindings();
-                SystemInjector.BindingApplicationReport report = null!;
-                var path = await Task.Run(() =>
-                    injector.GenerateFullSystemSyslay(Cfg(), _loadedControlXmlPath, bindings, out report));
-                LogBindingsReport(report);
-                await FinalizeM262StackAsync();
-                TouchDfbprojToTriggerEaeReload();
-
-                AppendActivity($"Generated: {path}");
-                lblStatus.Text = $"Ready  |  {path}  |  {report.Bound.Count} bound, {report.Missing.Count} unbound";
-                MessageBox.Show($"Generated Full System into Demonstrator:\n{path}\n\n{report.Bound.Count} bound, {report.Missing.Count} unbound.",
-                    "Generate All", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-            catch (Exception ex)
-            {
-                AppendActivity($"[Error] {ex}");
-                lblStatus.Text = "Ready";
-                ShowError(ex.Message);
-            }
-        }
-
-        // ── Test Station 1 Pusher-Simulator ─────────────────────────────────
-        // Identical to btnTestStation1_Click (Button 2): SAME Demonstrator
-        // project, SAME artefacts, SAME pipeline. The ONLY difference is one
-        // post-step — flip the deployed .sysres Resource Type
-        // EMB_RES_ECO -> SIM_RES so EAE runs it on the software simulator
-        // instead of the M262 hardware runtime. No separate DemonstratorSim
-        // folder, no path swap, no .sln launching. Re-run Button 2 to return
-        // the project to hardware mode.
-        async void btnGenerateFullSystemSimulator_Click(object sender, EventArgs e)
-        {
-            try
-            {
-                if (string.IsNullOrEmpty(_loadedControlXmlPath) || !File.Exists(_loadedControlXmlPath))
-                { ShowError("Load a Control.xml first via Browse."); return; }
-                if (!TryResolveDemonstratorPath(out var syslayPath)) return;
-                if (!EnsureM262SysdevExistsOrAbort()) return;
-
-                lblStatus.Text = "Generating (Simulator)...";
-                AppendActivity($"[Test Feed Station Simulator] Generating into Demonstrator at {syslayPath} — SIMULATOR mode...");
-
-                await DeployUniversalTemplatesAsync();
-
-                var injector = new SystemInjector();
-                var cleanup = await Task.Run(() => injector.PrepareDemonstratorForGeneration(Cfg()));
-                LogCleanup(cleanup);
-
-                var bindings = TryLoadBindings();
-                SystemInjector.BindingApplicationReport report = null!;
-                var path = await Task.Run(() =>
-                    injector.GenerateStation1TestSyslay(Cfg(), _loadedControlXmlPath, bindings, out report));
-                LogBindingsReport(report);
-                await FinalizeM262StackAsync();
-
-                int wireCountBefore = report.Missing.Count;
-                await Task.Run(() => MapperUI.Services.M262SysresWireEmitter.Emit(Cfg(), report));
-                for (int i = wireCountBefore; i < report.Missing.Count; i++)
-                {
-                    var line = report.Missing[i];
-                    if (line.StartsWith("[Wire]") || line.StartsWith("[Sysres"))
-                        AppendActivity(line);
-                }
-
-                int hcfCountBefore = report.Missing.Count;
-                await Task.Run(() => MapperUI.Services.HcfPatchService.PatchDeployed(
-                    Cfg(), path, bindings, report));
-                for (int i = hcfCountBefore; i < report.Missing.Count; i++)
-                {
-                    var line = report.Missing[i];
-                    if (line.StartsWith("[Hcf]"))
-                        AppendActivity(line);
-                }
-
-                // No .sysres Resource Type flip. EAE has no SIM_RES type
-                // (verified: ERR_NO_SUCH_TYPE on Runtime.Management.SIM_RES).
-                // Resource stays EMB_RES_ECO; simulator mode = the
-                // "Local Test" Active Network Profile picked in EAE.
-                //
-                // ORDER IS LOAD-BEARING (Defect 1 fix). InjectSimHopperForce
-                // re-loads and re-saves BOTH the syslay and the sysres to add
-                // the SimHopperForce FB + wires. When the no-sensor override
-                // ran BEFORE it, that second save round-tripped the file and
-                // EAE Watch came up with WorkSensorFitted=TRUE again (the
-                // on-disk syslay still read FALSE, but the sysres EAE compiles
-                // had been re-emitted from a pre-override state). The override
-                // MUST be the LAST writer of the syslay + sysres so nothing
-                // can overwrite it. So: SimHopperForce first, no-sensor
-                // override last, then a post-write re-read assertion.
-
-                // Simulator-only post-process: inject a SimHopperForce
-                // SYMLINKMULTIVARSRC that publishes 'PartInHopper.Input' =
-                // TRUE on Area.INITO, so the hopper sensor reads TRUE at
-                // startup and the recipe ring advances without physical I/O.
-                // syslay + sysres only, simulator button only.
-                int simFb = InjectSimHopperForce(path, Cfg());
-                if (simFb > 0)
-                {
-                    AppendActivity("Simulator hopper forced TRUE via SimHopperForce SYMLINKMULTIVARSRC");
-                    AppendActivity("[Simulator][InitSeq] FB1.INITO -> SimHopperForce.INIT -> Area.INIT -> Station1 " +
-                        "-> PartInHopper.INIT (FB2 subscribes) -> PartInHopper.INITO -> { Feeder.INIT (chain) + " +
-                        "SimHopperForce.REQ (one-shot publish) } — publish lands AFTER FB2 subscribed; FB2.CNF fires, " +
-                        "state_table[0]=PartInHopper");
-                }
-                else
-                    AppendActivity("[Simulator][Warn] SimHopperForce not injected (already present or canvas not resolvable).");
-
-                // Simulator-only post-process, LAST writer: in pure sim there
-                // is no physical cylinder/sensor, so force WorkSensorFitted=
-                // FALSE and HomeSensorFitted=FALSE on every Five_State_
-                // Actuator_CAT instance — the actuator's internal
-                // No_Sensor_Handler timer path then self-advances the ECC
-                // (1->2 after toWorkTime, 3->4 after toHomeTime) with no
-                // external sensor. Button 2 (hardware) NEVER calls this; the
-                // rig's real sensors close the loop with the Control.xml-
-                // derived TRUE values. Runs AFTER InjectSimHopperForce so it
-                // is the final write of the syslay + sysres.
-                int simNoSensor = OverrideSimActuatorsNoSensor(path, Cfg());
-                AppendActivity(simNoSensor > 0
-                    ? $"[Simulator] No-sensor mode: WorkSensorFitted/HomeSensorFitted forced FALSE on {simNoSensor} " +
-                      "Five_State_Actuator_CAT instance(s) (Feeder/Checker/Transfer) — ECC self-advances via timer"
-                    : "[Simulator][Warn] No-sensor override touched 0 actuators (none found or sim syslay missing).");
-
-                // Post-write verification (Defect 1). Re-read the on-disk
-                // syslay AND sysres AFTER every generator step has run and
-                // assert WorkSensorFitted="FALSE" / HomeSensorFitted="FALSE"
-                // on every Five_State_Actuator_CAT instance. The sysres is the
-                // artefact EAE actually compiles, so a TRUE there is exactly
-                // the "syslay shows FALSE but EAE Watch shows TRUE" symptom.
-                // Any violation throws — the deploy aborts loudly rather than
-                // shipping a sim build that stalls on a sensor that never
-                // closes.
-                VerifySimActuatorsNoSensorOrAbort(path, Cfg());
-
-                TouchDfbprojToTriggerEaeReload();
-
-                AppendActivity($"Generated (Simulator): {path}");
-                AppendActivity("[Simulator] Resource stays EMB_RES_ECO — EAE has no SIM_RES type. " +
-                    "Simulator mode = the \"Local Test\" Active Network Profile, selected in EAE.");
-                AppendActivity("[Simulator] In EAE: Reload Solution, set Active Network Profile to \"Local Test\", Deploy. " +
-                    "After deploy, login and Watch Feed_Station.ProcessEngine CurrentStep / cmd_target_name / cmd_state / CMDREQ. " +
-                    "Hopper is forced TRUE on INIT → PartInHopper fires CNF → StateHandling publishes state=1 id=0 on the ring " +
-                    "→ ProcessHandler writes state_table[0]=1 → ProcessEngine leaves WAIT_STEP and fires CMDREQ " +
-                    "cmd_target_name='feeder' cmd_state=1, proving the recipe arrays end to end.");
-                lblStatus.Text = $"Ready (Simulator)  |  {path}  |  {report.Bound.Count} bound, {report.Missing.Count} unbound";
-                MessageBox.Show(
-                    $"Generated Test Feed Station Simulator into Demonstrator:\n{path}\n\n" +
-                    $"{report.Bound.Count} bound, {report.Missing.Count} unbound.\n\n" +
-                    "Hopper input is forced TRUE at startup via the injected SimHopperForce " +
-                    "SYMLINKMULTIVARSRC (syslay + sysres). Resource stays EMB_RES_ECO — " +
-                    "simulator mode is the \"Local Test\" Active Network Profile you pick in EAE.\n\n" +
-                    "In EAE: Reload Solution, set Active Network Profile to \"Local Test\", Deploy. " +
-                    "After deploy, login and Watch Feed_Station.ProcessEngine CurrentStep / " +
-                    "cmd_target_name / cmd_state / CMDREQ — expect cmd_target_name='feeder', " +
-                    "cmd_state=1 once the ring advances.",
-                    "Test Feed Station Simulator", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-            catch (Exception ex)
-            {
-                AppendActivity($"[Simulator][Error] {ex}");
-                lblStatus.Text = "Ready";
-                ShowError(ex.Message);
-            }
-        }
-
-        // SYMLINKMULTIVARSRC type used by Five_State_Actuator_CAT's Output FB.
-        const string SimSymlinkSrcType = "SYMLINKMULTIVARSRC_277E97BEC1451D2C";
-
-        /// <summary>
-        /// Simulator-only: inject one <c>SimHopperForce</c>
-        /// SYMLINKMULTIVARSRC into the syslay SubAppNetwork and mirror it
-        /// into the deployed sysres FBNetwork. It publishes
-        /// <c>'PartInHopper.Input' = TRUE</c> once on <c>Area.INITO</c>
-        /// (INIT + REQ) and holds it — no E_DELAY/E_CYCLE needed. So the
-        /// hopper sensor reads TRUE at startup and the recipe ring advances
-        /// without physical I/O. Idempotent (skips if SimHopperForce already
-        /// present). Returns 1 if injected, 0 if skipped/unresolvable.
-        /// syslay + sysres only — hardware path untouched.
-        /// </summary>
-        int InjectSimHopperForce(string syslayPath, MapperConfig cfg)
-        {
-            try
-            {
-                System.Xml.Linq.XNamespace ns = "https://www.se.com/LibraryElements";
-
-                // Deterministic 16-hex IDs (stable across re-runs).
-                static string Hex16(string seed)
-                {
-                    using var sha = System.Security.Cryptography.SHA1.Create();
-                    var b = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(seed));
-                    var sb = new System.Text.StringBuilder(16);
-                    for (int i = 0; i < 8; i++) sb.Append(b[i].ToString("X2"));
-                    return sb.ToString();
-                }
-                var syslayFbId = Hex16("SimHopperForce|syslay|" + syslayPath);
-                var sysresFbId = Hex16("SimHopperForce|sysres|" + syslayPath);
-
-                // Resolve the resource Name from the deployed sysres root.
-                // PartInHopper's internal SYMLINKMULTIVARDST subscribes to
-                // '$${PATH}Input'; $${PATH} expands relative to the FB
-                // instance scope under the resource, so for a top-level
-                // PartInHopper the absolute symbol is
-                // '{ResourceName}.PartInHopper.Input' (this project's
-                // symbolic-link namespace is resource-qualified — cf. the
-                // Symbolic Links view showing M262_RES.Feeder.athome). A
-                // bare 'PartInHopper.Input' (no resource prefix) does NOT
-                // match what the subscriber resolves, so the publish is lost.
-                string resourceName = "M262_RES";
-                try
-                {
-                    var rdir0 = Path.GetDirectoryName(cfg.SysresPath2);
-                    if (!string.IsNullOrEmpty(rdir0) && Directory.Exists(rdir0))
-                    {
-                        var rf0 = Directory.EnumerateFiles(rdir0, "*.sysres",
-                            SearchOption.TopDirectoryOnly).FirstOrDefault();
-                        if (rf0 != null)
-                        {
-                            var rn = (string?)System.Xml.Linq.XDocument.Load(rf0)
-                                .Root?.Attribute("Name");
-                            if (!string.IsNullOrWhiteSpace(rn)) resourceName = rn!;
-                        }
-                    }
-                }
-                catch { /* fall back to M262_RES */ }
-                var hopperSymbol = $"'{resourceName}.PartInHopper.Input'";
-                var expectedExpansion = $"'{resourceName}.PartInHopper.Input'"; // $${PATH}Input @ PartInHopper
-
-                System.Xml.Linq.XElement BuildFb(bool forSysres)
-                {
-                    var fb = new System.Xml.Linq.XElement(ns + "FB",
-                        new System.Xml.Linq.XAttribute("ID", forSysres ? sysresFbId : syslayFbId),
-                        new System.Xml.Linq.XAttribute("Name", "SimHopperForce"),
-                        new System.Xml.Linq.XAttribute("Type", SimSymlinkSrcType),
-                        new System.Xml.Linq.XAttribute("Namespace", "Main"));
-                    if (forSysres)
-                        fb.Add(new System.Xml.Linq.XAttribute("Mapping", syslayFbId));
-                    // Park clear of the application FBs (Feeder at 3800,5400
-                    // etc.) so it doesn't overlap on the canvas.
-                    fb.Add(new System.Xml.Linq.XAttribute("x", "500"),
-                           new System.Xml.Linq.XAttribute("y", "900"));
-                    // Use the EXACT 2-channel SRC variant the Feeder's own
-                    // Output FB uses (SYMLINKMULTIVARSRC_277E97BEC1451D2C ↔
-                    // I:=2;VALUE${I}:BOOL,BOOL). The type-name suffix is a
-                    // hash of the interface signature, so the params MUST
-                    // match the variant compiled in this project — a 1-ch
-                    // signature against this type name is unresolvable (red
-                    // X). Channel 1 publishes the hopper force; channel 2 is
-                    // parked on an unused symbol (no subscriber → inert).
-                    fb.Add(new System.Xml.Linq.XElement(ns + "Attribute",
-                        new System.Xml.Linq.XAttribute("Name", "Configuration.GenericFBType.InterfaceParams"),
-                        new System.Xml.Linq.XAttribute("Value", "Runtime.System#I:=2;VALUE${I}:BOOL,BOOL")));
-                    fb.Add(new System.Xml.Linq.XElement(ns + "Parameter",
-                        new System.Xml.Linq.XAttribute("Name", "QI"), new System.Xml.Linq.XAttribute("Value", "TRUE")));
-                    fb.Add(new System.Xml.Linq.XElement(ns + "Parameter",
-                        new System.Xml.Linq.XAttribute("Name", "NAME1"), new System.Xml.Linq.XAttribute("Value", hopperSymbol)));
-                    fb.Add(new System.Xml.Linq.XElement(ns + "Parameter",
-                        new System.Xml.Linq.XAttribute("Name", "VALUE1"), new System.Xml.Linq.XAttribute("Value", "TRUE")));
-                    fb.Add(new System.Xml.Linq.XElement(ns + "Parameter",
-                        new System.Xml.Linq.XAttribute("Name", "NAME2"), new System.Xml.Linq.XAttribute("Value", "'SimHopperForce.Spare'")));
-                    fb.Add(new System.Xml.Linq.XElement(ns + "Parameter",
-                        new System.Xml.Linq.XAttribute("Name", "VALUE2"), new System.Xml.Linq.XAttribute("Value", "FALSE")));
-                    return fb;
-                }
-
-                // SimHopperForce publish-AFTER-subscribe wiring (simulator
-                // path only; hardware never calls this — there is no
-                // SimHopperForce on the rig, the TM3 driver publishes the
-                // symbol continuously). The SYMLINKMULTIVARDST inside
-                // PartInHopper (FB2) only subscribes on its own INIT and only
-                // confirms a publish that arrives AFTER it has subscribed
-                // (Audit-confirmed: the prior "publish before the chain"
-                // wiring lost the one-shot value). So: the SRC inits early
-                // (symbol registered), the app chain runs and
-                // PartInHopper.INIT subscribes FB2, then PartInHopper.INITO
-                // fires the SRC's one-shot REQ publish — landing on an
-                // already-subscribed FB2. AddEventConns rebuilds these wires
-                // defensively (every prior SimHopperForce wire stripped first)
-                // so re-running the button never duplicates. Hardware path
-                // never calls this method.
-                void AddEventConns(System.Xml.Linq.XElement net)
-                {
-                    var ec = net.Element(ns + "EventConnections");
-                    if (ec == null) { ec = new System.Xml.Linq.XElement(ns + "EventConnections"); net.Add(ec); }
-
-                    void Remove(string s, string d)
-                    {
-                        foreach (var c in ec.Elements(ns + "Connection").Where(c =>
-                            (string?)c.Attribute("Source") == s &&
-                            (string?)c.Attribute("Destination") == d).ToList())
-                            c.Remove();
-                    }
-
-                    bool Has(string s, string d) => ec.Elements(ns + "Connection").Any(c =>
-                        (string?)c.Attribute("Source") == s &&
-                        (string?)c.Attribute("Destination") == d);
-
-                    void Add(string s, string d)
-                    {
-                        if (!Has(s, d))
-                            ec.Add(new System.Xml.Linq.XElement(ns + "Connection",
-                                new System.Xml.Linq.XAttribute("Source", s),
-                                new System.Xml.Linq.XAttribute("Destination", d)));
-                    }
-
-                    // Defensive idempotent rebuild: strip EVERY existing
-                    // SimHopperForce-related connection (any prior round /
-                    // topology) plus the shared emitter's FB1.INITO ->
-                    // Area.INIT bridge, then emit the publish-after-subscribe
-                    // wiring from scratch — re-running the button never
-                    // duplicates.
-                    //   FB1.INITO            -> SimHopperForce.INIT  (SRC inits early; symbol registered)
-                    //   SimHopperForce.INITO -> Area.INIT            (app chain proceeds after SRC init)
-                    //   PartInHopper.INITO   -> SimHopperForce.REQ   (one-shot publish AFTER FB2 subscribed)
-                    // The shared emitter's PartInHopper.INITO -> Feeder.INIT
-                    // is left intact (parallel fan-out from the same event
-                    // source is valid in EAE). The old self-fire
-                    // SimHopperForce.INITO -> SimHopperForce.REQ and the
-                    // SimHopperForce.CNF -> Area.INIT gate are gone.
-                    foreach (var c in ec.Elements(ns + "Connection").Where(c =>
-                        (((string?)c.Attribute("Source")) ?? string.Empty).Contains("SimHopperForce") ||
-                        (((string?)c.Attribute("Destination")) ?? string.Empty).Contains("SimHopperForce"))
-                        .ToList())
-                        c.Remove();
-                    Remove("FB1.INITO", "Area.INIT"); // shared emitter bridge -> rerouted via SimHopperForce.INIT
-
-                    Add("FB1.INITO", "SimHopperForce.INIT");
-                    Add("SimHopperForce.INITO", "Area.INIT");
-                    Add("PartInHopper.INITO", "SimHopperForce.REQ");
-                }
-
-                void Save(System.Xml.Linq.XDocument doc, string p)
-                {
-                    var settings = new System.Xml.XmlWriterSettings
-                    {
-                        OmitXmlDeclaration = false,
-                        Indent = true,
-                        Encoding = new System.Text.UTF8Encoding(false),
-                    };
-                    using var fs = new FileStream(p, FileMode.Create, FileAccess.Write, FileShare.Read);
-                    using var w = System.Xml.XmlWriter.Create(fs, settings);
-                    doc.Save(w);
-                }
-
-                // ── syslay ──────────────────────────────────────────────
-                if (string.IsNullOrEmpty(syslayPath) || !File.Exists(syslayPath)) return 0;
-                var sdoc = System.Xml.Linq.XDocument.Load(syslayPath, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                var snet = sdoc.Root?.Element(ns + "SubAppNetwork") ?? sdoc.Root?.Element(ns + "FBNetwork");
-                if (snet == null) return 0;
-                // Add the FB only if absent, but ALWAYS (idempotently)
-                // ensure the wires — SimHopperForce is not in CleanFile's
-                // removal lists so the FB can persist across regens; gating
-                // the wire emission behind "FB absent" left the FB present
-                // but unwired. AddEventConns removes stale wires and adds the
-                // two chain-end wires only if missing, so re-running is safe.
-                if (!snet.Elements(ns + "FB").Any(f => (string?)f.Attribute("Name") == "SimHopperForce"))
-                {
-                    var firstConn = snet.Element(ns + "EventConnections")
-                        ?? snet.Element(ns + "DataConnections")
-                        ?? snet.Element(ns + "AdapterConnections");
-                    if (firstConn != null) firstConn.AddBeforeSelf(BuildFb(false));
-                    else snet.Add(BuildFb(false));
-                }
-                AddEventConns(snet);
-                Save(sdoc, syslayPath);
-
-                // ── sysres (the actual deployed file, EAE may have renamed) ─
-                var sysresDir = Path.GetDirectoryName(cfg.SysresPath2);
-                if (!string.IsNullOrEmpty(sysresDir) && Directory.Exists(sysresDir))
-                {
-                    var sysresFile = Directory
-                        .EnumerateFiles(sysresDir, "*.sysres", SearchOption.TopDirectoryOnly)
-                        .FirstOrDefault();
-                    if (sysresFile != null)
-                    {
-                        var rdoc = System.Xml.Linq.XDocument.Load(sysresFile, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                        var rnet = rdoc.Root?.Element(ns + "FBNetwork");
-                        if (rnet != null)
-                        {
-                            // FB only if absent; wires ALWAYS (idempotent).
-                            // The previous "skip everything if FB present"
-                            // gate is exactly why the sysres ended up with
-                            // the FB but zero SimHopperForce EventConnections.
-                            if (!rnet.Elements(ns + "FB").Any(f => (string?)f.Attribute("Name") == "SimHopperForce"))
-                            {
-                                var firstR = rnet.Element(ns + "EventConnections")
-                                    ?? rnet.Element(ns + "DataConnections")
-                                    ?? rnet.Element(ns + "AdapterConnections");
-                                if (firstR != null) firstR.AddBeforeSelf(BuildFb(true));
-                                else rnet.Add(BuildFb(true));
-                            }
-                            AddEventConns(rnet);
-                            Save(rdoc, sysresFile);
-                        }
-                    }
-                }
-
-                // Verification: SimHopperForce.NAME1 (publisher) must equal
-                // the absolute symbol PartInHopper's internal
-                // SYMLINKMULTIVARDST '$${PATH}Input' resolves to. Surface
-                // both so any future scope/prefix drift is obvious in the
-                // Activity panel on the very next deploy.
-                bool symbolMatch = string.Equals(hopperSymbol, expectedExpansion, StringComparison.Ordinal);
-                AppendActivity(
-                    $"[Simulator][SymCheck] SimHopperForce.NAME1={hopperSymbol} ; " +
-                    $"PartInHopper '$${{PATH}}Input' expands to {expectedExpansion} ; " +
-                    (symbolMatch ? "MATCH" : "MISMATCH — hopper force will NOT reach PartInHopper, fix resource prefix"));
-
-                return 1;
-            }
-            catch (Exception ex)
-            {
-                AppendActivity($"[Simulator][Warn] SimHopperForce inject failed: {ex.GetType().Name}: {ex.Message}");
-                return 0;
-            }
-        }
-
-        /// <summary>
-        /// Simulator-only (Button 4) override: force WorkSensorFitted=FALSE
-        /// and HomeSensorFitted=FALSE on every Five_State_Actuator_CAT
-        /// instance in the deployed sim syslay AND sysres. In pure simulation
-        /// there is no physical cylinder/sensor, so the actuator's internal
-        /// No_Sensor_Handler timer path must drive the ECC (state 1->2 after
-        /// toWorkTime, 3->4 after toHomeTime) instead of waiting forever on an
-        /// atwork/athome sensor that never closes. Applies to Feeder, Checker,
-        /// Transfer. Button 2 (hardware) NEVER calls this — the rig's real
-        /// sensors must close the loop, so BuildActuatorParameters'
-        /// Control.xml-derived TRUE values stand untouched. Post-process only:
-        /// shared recipe/param generator, templates and InterlockManager
-        /// wiring are not touched. Idempotent — sets the existing Parameter
-        /// Value to FALSE and de-dupes any doubled entry, so re-running
-        /// Button 4 emits the same FALSE cleanly. Returns the count overridden.
-        /// </summary>
-        int OverrideSimActuatorsNoSensor(string syslayPath, MapperConfig cfg)
-        {
-            try
-            {
-                System.Xml.Linq.XNamespace ns = "https://www.se.com/LibraryElements";
-
-                int ForceNoSensor(System.Xml.Linq.XElement net)
-                {
-                    int n = 0;
-                    foreach (var fb in net.Elements(ns + "FB")
-                        .Where(f => (string?)f.Attribute("Type") == "Five_State_Actuator_CAT"))
-                    {
-                        foreach (var pname in new[] { "WorkSensorFitted", "HomeSensorFitted" })
-                        {
-                            var ps = fb.Elements(ns + "Parameter")
-                                .Where(p => (string?)p.Attribute("Name") == pname).ToList();
-                            if (ps.Count == 0)
-                            {
-                                fb.Add(new System.Xml.Linq.XElement(ns + "Parameter",
-                                    new System.Xml.Linq.XAttribute("Name", pname),
-                                    new System.Xml.Linq.XAttribute("Value", "FALSE")));
-                            }
-                            else
-                            {
-                                ps[0].SetAttributeValue("Value", "FALSE");
-                                for (int i = 1; i < ps.Count; i++) ps[i].Remove(); // de-dupe → idempotent
-                            }
-                        }
-                        n++;
-                    }
-                    return n;
-                }
-
-                void Save(System.Xml.Linq.XDocument doc, string p)
-                {
-                    var settings = new System.Xml.XmlWriterSettings
-                    {
-                        OmitXmlDeclaration = false,
-                        Indent = true,
-                        Encoding = new System.Text.UTF8Encoding(false),
-                    };
-                    using var fs = new FileStream(p, FileMode.Create, FileAccess.Write, FileShare.Read);
-                    using var w = System.Xml.XmlWriter.Create(fs, settings);
-                    doc.Save(w);
-                }
-
-                int total = 0;
-
-                // ── syslay ──────────────────────────────────────────────
-                if (string.IsNullOrEmpty(syslayPath) || !File.Exists(syslayPath)) return 0;
-                var sdoc = System.Xml.Linq.XDocument.Load(syslayPath, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                var snet = sdoc.Root?.Element(ns + "SubAppNetwork") ?? sdoc.Root?.Element(ns + "FBNetwork");
-                if (snet != null)
-                {
-                    total = ForceNoSensor(snet);
-                    Save(sdoc, syslayPath);
-                }
-
-                // ── sysres (the actual runtime artefact EAE compiles) ───
-                var sysresDir = Path.GetDirectoryName(cfg.SysresPath2);
-                if (!string.IsNullOrEmpty(sysresDir) && Directory.Exists(sysresDir))
-                {
-                    var sysresFile = Directory
-                        .EnumerateFiles(sysresDir, "*.sysres", SearchOption.TopDirectoryOnly)
-                        .FirstOrDefault();
-                    if (sysresFile != null)
-                    {
-                        var rdoc = System.Xml.Linq.XDocument.Load(sysresFile, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                        var rnet = rdoc.Root?.Element(ns + "FBNetwork");
-                        if (rnet != null)
-                        {
-                            ForceNoSensor(rnet);
-                            Save(rdoc, sysresFile);
-                        }
-                    }
-                }
-
-                return total;
-            }
-            catch (Exception ex)
-            {
-                AppendActivity($"[Simulator][Warn] No-sensor override failed: {ex.GetType().Name}: {ex.Message}");
-                return 0;
-            }
-        }
-
-        /// <summary>
-        /// Defect 1 post-write assertion. Re-reads the on-disk syslay AND the
-        /// deployed sysres AFTER every generator step (including the no-sensor
-        /// override, which is now the LAST writer) and asserts every
-        /// Five_State_Actuator_CAT instance has WorkSensorFitted="FALSE" and
-        /// HomeSensorFitted="FALSE". The sysres is the artefact EAE compiles,
-        /// so a stale TRUE there — even when the syslay reads FALSE — is
-        /// exactly the "syslay shows FALSE but EAE Watch shows TRUE" failure.
-        /// On ANY violation (missing param, wrong value, or no actuators found
-        /// at all) this logs a loud Activity-panel error and throws, aborting
-        /// the simulator deploy rather than shipping a build that stalls on a
-        /// sensor that never closes. Simulator path only — Button 2 never
-        /// calls this.
-        /// </summary>
-        void VerifySimActuatorsNoSensorOrAbort(string syslayPath, MapperConfig cfg)
-        {
-            System.Xml.Linq.XNamespace ns = "https://www.se.com/LibraryElements";
-            var violations = new List<string>();
-
-            // (artefact-label, file-path) pairs. The sysres path is resolved
-            // the same way OverrideSimActuatorsNoSensor / InjectSimHopperForce
-            // resolve it (EAE may have renamed the *.sysres in that dir).
-            var targets = new List<(string label, string file)>();
-            if (!string.IsNullOrEmpty(syslayPath) && File.Exists(syslayPath))
-                targets.Add(("syslay", syslayPath));
-            else
-                violations.Add($"syslay not found on disk at '{syslayPath}' — cannot verify the no-sensor override.");
-
-            string? sysresFile = null;
-            var sysresDir = Path.GetDirectoryName(cfg.SysresPath2);
-            if (!string.IsNullOrEmpty(sysresDir) && Directory.Exists(sysresDir))
-                sysresFile = Directory
-                    .EnumerateFiles(sysresDir, "*.sysres", SearchOption.TopDirectoryOnly)
-                    .FirstOrDefault();
-            if (sysresFile != null)
-                targets.Add(("sysres", sysresFile));
-            else
-                violations.Add(
-                    "deployed .sysres not found — cannot verify the no-sensor override on the " +
-                    "artefact EAE actually compiles (this is the file EAE Watch reflects).");
-
-            int actuatorsChecked = 0;
-            foreach (var (label, file) in targets)
-            {
-                System.Xml.Linq.XDocument doc;
-                try { doc = System.Xml.Linq.XDocument.Load(file); }
-                catch (Exception ex)
-                {
-                    violations.Add($"{label} '{Path.GetFileName(file)}' could not be re-read: {ex.Message}");
-                    continue;
-                }
-                var net = doc.Root?.Element(ns + "SubAppNetwork")
-                          ?? doc.Root?.Element(ns + "FBNetwork");
-                if (net == null)
-                {
-                    violations.Add($"{label} '{Path.GetFileName(file)}' has no SubAppNetwork/FBNetwork.");
-                    continue;
-                }
-
-                var actuators = net.Elements(ns + "FB")
-                    .Where(f => (string?)f.Attribute("Type") == "Five_State_Actuator_CAT")
-                    .ToList();
-                if (actuators.Count == 0)
-                    violations.Add(
-                        $"{label} '{Path.GetFileName(file)}' contains ZERO Five_State_Actuator_CAT " +
-                        "instances — the simulator recipe must drive Feeder/Checker/Transfer; an " +
-                        "empty actuator set means the generator did not emit the actuators.");
-
-                foreach (var fb in actuators)
-                {
-                    actuatorsChecked++;
-                    var fbName = (string?)fb.Attribute("Name") ?? "(unnamed)";
-                    foreach (var pname in new[] { "WorkSensorFitted", "HomeSensorFitted" })
-                    {
-                        var ps = fb.Elements(ns + "Parameter")
-                            .Where(p => (string?)p.Attribute("Name") == pname).ToList();
-                        if (ps.Count == 0)
-                        {
-                            violations.Add($"{label}: {fbName}.{pname} parameter is MISSING (expected FALSE).");
-                            continue;
-                        }
-                        if (ps.Count > 1)
-                            violations.Add(
-                                $"{label}: {fbName}.{pname} has {ps.Count} duplicate Parameter entries " +
-                                "(override de-dupe did not run last).");
-                        foreach (var p in ps)
-                        {
-                            var v = ((string?)p.Attribute("Value") ?? string.Empty).Trim();
-                            if (!string.Equals(v, "FALSE", StringComparison.OrdinalIgnoreCase))
-                                violations.Add(
-                                    $"{label}: {fbName}.{pname}=\"{v}\" — expected \"FALSE\". A later " +
-                                    "pipeline step overwrote the no-sensor override.");
-                        }
-                    }
-                }
-            }
-
-            if (violations.Count > 0)
-            {
-                AppendActivity(
-                    "[Simulator][ABORT] No-sensor override verification FAILED — the simulator " +
-                    "build would stall on a sensor that never closes. The override must be the " +
-                    "LAST writer of the syslay + sysres. Violations:");
-                foreach (var v in violations)
-                    AppendActivity($"  ✗ {v}");
-                throw new InvalidOperationException(
-                    "Simulator no-sensor override verification failed (" + violations.Count +
-                    " violation(s)); see Activity log. WorkSensorFitted/HomeSensorFitted must be " +
-                    "FALSE on every Five_State_Actuator_CAT in both the syslay and the deployed " +
-                    "sysres. Deploy aborted.");
-            }
-
-            AppendActivity(
-                $"[Simulator][Verify] No-sensor override CONFIRMED on disk: WorkSensorFitted=FALSE " +
-                $"& HomeSensorFitted=FALSE on all {actuatorsChecked} Five_State_Actuator_CAT " +
-                $"instance(s) across {targets.Count} artefact(s) (syslay + sysres). Override is the " +
-                "last writer; EAE Watch will read FALSE.");
-        }
-
 
         async void btnCleanDemonstrator_Click(object sender, EventArgs e)
         {
@@ -1692,15 +1051,31 @@ namespace MapperUI
             {
                 case "process": return Pass(comp, tName);
                 case "robot":
-                    return string.IsNullOrWhiteSpace(cfg.RobotTemplatePath)
-                        ? Fail(comp, tName, "RobotTemplatePath not set")
-                        : Pass(comp, tName);
+                    // Type=Robot is Control.xml's *category* (manipulator), not a
+                    // template choice. Reference SMC_Rig_Expo_withClamp maps:
+                    //   CoverGripper            -> Vacuum_Gripper_CAT.fbt (suction)
+                    //   Bearing_Gripper / Shaft -> Five_State_Actuator_CAT.fbt (fingers)
+                    //   Robot_Pick_And_Place1   -> Robot_Task_CAT.fbt (full arm, 7 states)
+                    if (_vacuumGripperNames.Contains(comp.Name))
+                        return Pass(comp, "Vacuum_Gripper_CAT.fbt");
+                    if (comp.States.Count == 5)
+                        return Pass(comp, "Five_State_Actuator_CAT.fbt");
+                    if (comp.States.Count == 7)
+                        return Pass(comp, "Robot_Task_CAT.fbt");
+                    if (IsBranchedSevenStateActuator(comp))
+                        return Pass(comp, "Robot_Task_CAT.fbt");
+                    return Fail(comp, "No template found",
+                        $"Robot '{comp.Name}' has {comp.States.Count} states — expected 5 (gripper) or 7 (task arm)");
                 case "actuator":
                     if (comp.States.Count == 7)
                         return Pass(comp, "Seven_State_Actuator_CAT.fbt");
+                    if (IsBranchedSevenStateActuator(comp))
+                        return Pass(comp, "Seven_State_Actuator_CAT.fbt");
+                    if (comp.States.Count == 4)
+                        return Pass(comp, "Five_State_Actuator_No_Sensors_CAT.fbt");
                     if (comp.States.Count != 5)
                         return Fail(comp, "No template found",
-                            $"{comp.States.Count} states — not 5 or 7");
+                            $"{comp.States.Count} states — not 4, 5 or 7");
                     break;
                 case "sensor":
                     if (comp.States.Count != 2)
@@ -1730,6 +1105,38 @@ namespace MapperUI
 
         static ComponentValidationRow Fail(VueOneComponent c, string t, string r) =>
             new() { Component = c, TemplateName = t, IsValid = false, FailReason = r };
+
+        /// <summary>
+        /// Detects the 13-state "branched swivel" pattern used by Bearing_PnP:
+        /// the resting state (typically ReturnedHome) has at least one outgoing
+        /// PARALLEL transition AND at least one outgoing ALTERNATIVE transition,
+        /// each gated by a different Process condition. The PARALLEL chain runs
+        /// 7 main states (assembly: ReturnedHome → TurningPick → AtPick →
+        /// TurningPlace → Place → TurningHome → AtHome); the ALTERNATIVE chain
+        /// runs 6 reversed states (disassembly: TurningPick2 → AtPick2 →
+        /// TurningPlace2 → AtPlace2 → TurningHome2 → AtHome2). The physical
+        /// actuator has only three positions (Pick, Place, Home) plus two work
+        /// coils, so it fits Seven_State_Actuator_CAT regardless of how many
+        /// logical Control.xml states it carries.
+        /// </summary>
+        static bool IsBranchedSevenStateActuator(VueOneComponent comp)
+        {
+            foreach (var st in comp.States)
+            {
+                bool hasParallel = false;
+                bool hasAlternative = false;
+                foreach (var tr in st.Transitions)
+                {
+                    if (string.Equals(tr.TransitionType, "PARALLEL", StringComparison.OrdinalIgnoreCase))
+                        hasParallel = true;
+                    else if (string.Equals(tr.TransitionType, "ALTERNATIVE", StringComparison.OrdinalIgnoreCase))
+                        hasAlternative = true;
+                }
+                if (hasParallel && hasAlternative)
+                    return true;
+            }
+            return false;
+        }
 
 
         async void btnGenerateCode_Click(object sender, EventArgs e)
