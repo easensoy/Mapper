@@ -1,0 +1,571 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Xml.Linq;
+using CodeGen.Configuration;
+
+namespace MapperUI.Services
+{
+    /// <summary>
+    /// Emits Station 2 device + resource artefacts (the M580 X80 PLC and the
+    /// BX1 software dPAC) into the EAE project, mirroring exactly the layout
+    /// of <c>SMC_Rig_Expo_withClamp</c>'s reference project.
+    ///
+    /// Per PLC, this writes:
+    ///   1. <c>IEC61499/System/{sys-guid}/{sysdev-guid}.sysdev</c>
+    ///         — &lt;Device Type="M580_dPAC"/&gt; or "Soft_dPAC", Namespace="SE.DPAC"
+    ///   2. <c>IEC61499/System/{sys-guid}/{sysdev-guid}/{resource-id}.sysres</c>
+    ///         — &lt;Resource Name="M580_RES"/&gt; or "BX1_RES", Type="EMB_RES_ECO"
+    ///   3. <c>IEC61499/System/{sys-guid}/{sysdev-guid}/{sysdev-guid}.hcf</c>
+    ///         — copied verbatim from <c>cfg.M580HcfTemplatePath</c> /
+    ///           <c>cfg.BX1HcfTemplatePath</c> (the IO folder under
+    ///           <c>C:\VueOneMapper\IO</c>)
+    ///   4. <c>Topology/Equipment_M580dPAC_1.json</c> or
+    ///      <c>Topology/Equipment_Soft_dPAC_BX1.json</c>
+    ///         — Physical Views device with logicalDeviceId pointing at (1)
+    ///   5. Registration into <c>TopologyManager.topologyproj</c> and the
+    ///      project <c>dfbproj</c> so EAE's project tree shows them.
+    ///
+    /// Stable GUIDs are picked so re-running is idempotent.
+    /// </summary>
+    public static class Station2DeviceEmitter
+    {
+        const string LibElNs = "https://www.se.com/LibraryElements";
+
+        // Stable per-project IDs. Picked to avoid collision with M262
+        // (00..0001 = Application, 00..0002 = M262 sysdev) and to be
+        // semantically obvious if you ever read the deployed files.
+        const string M580SysdevId    = "00000000-0000-0000-0000-000000000003";
+        const string BX1SysdevId     = "00000000-0000-0000-0000-000000000004";
+        // Sysres IDs are 16-hex chars (EAE convention). Stable, deterministic.
+        const string M580ResourceId  = "3E5C2B7F1A4D6C8E";
+        const string BX1ResourceId   = "C9F2A4B7E1D3F5A8";
+        // Resource names per the user's spec ("M580_RES" and "BX1_RES").
+        const string M580ResourceName = "M580_RES";
+        const string BX1ResourceName  = "BX1_RES";
+
+        // Topology Equipment UUIDs — stable so the JSON Equipment entries
+        // don't churn between Test Runtime clicks (which would invalidate
+        // any user-drawn wires on the Physical Views canvas).
+        const string M580EquipmentUuid   = "11111111-2222-3333-4444-000000000040";
+        const string M580RuntimeUuid     = "11111111-2222-3333-4444-000000000041";
+        const string M580RackUuid        = "11111111-2222-3333-4444-000000000042";
+        const string M580CpsUuid         = "11111111-2222-3333-4444-000000000043";
+        const string M580CpuUuid         = "11111111-2222-3333-4444-000000000044";
+        const string BX1EquipmentUuid    = "11111111-2222-3333-4444-000000000050";
+        const string BX1ContainerUuid    = "11111111-2222-3333-4444-000000000051";
+        const string BX1RuntimeUuid      = "11111111-2222-3333-4444-000000000052";
+
+        // Schneider EAE TypeIds for RuntimeDEO per device class — same values
+        // the reference SMC_Rig_Expo_withClamp uses, verified by inspection.
+        const string M580RuntimeTypeId = "7fd313c7-1da3-4618-9a5d-9ff3596aff7f";
+        const string SoftDpacTypeId    = "29797a55-a6b8-47c4-9c06-e8a42b1a38b5";
+
+        // NOCONF sentinel (also used by M262TopologyEmitter). No broadcast
+        // domain binding — user wires manually on Physical Views post-deploy.
+        const string NoConfDomainUuid = "00000000-0000-0000-0000-000000000000";
+
+        // Fallback SolutionId used only when General/ProjectInfo.xml is missing.
+        // EAE rejects an Equipment JSON whose DomainTag is the zero UUID with
+        // "Unable to import topology / Object reference not set" — DomainTag
+        // MUST equal the live SolutionId.
+        const string FallbackSolutionUuid = "00000000-0000-0000-0000-000000000000";
+
+        public sealed class EmitResult
+        {
+            public List<string> FilesWritten { get; } = new();
+            public List<string> Warnings { get; } = new();
+            public int TopologyProjEntriesAdded { get; set; }
+            public int DfbprojEntriesAdded { get; set; }
+        }
+
+        public static EmitResult EmitAll(MapperConfig cfg)
+        {
+            if (cfg == null) throw new ArgumentNullException(nameof(cfg));
+            var result = new EmitResult();
+
+            var eaeRoot = M262SysdevEmitter.DeriveEaeProjectRoot(cfg);
+            if (string.IsNullOrEmpty(eaeRoot))
+            {
+                result.Warnings.Add("Cannot derive EAE project root — Station 2 emit skipped.");
+                return result;
+            }
+
+            // System GUID is fixed; M262 emit already established it.
+            var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
+            var systemGuidDir = Directory.Exists(systemDir)
+                ? Directory.EnumerateDirectories(systemDir)
+                    .FirstOrDefault(d =>
+                    {
+                        var name = Path.GetFileName(d);
+                        return Guid.TryParse(name, out _) && !name.StartsWith(".");
+                    })
+                : null;
+            if (systemGuidDir == null)
+            {
+                result.Warnings.Add(
+                    $"No System GUID folder under {systemDir} — run Test Runtime once " +
+                    "so M262 emit creates it, then re-run.");
+                return result;
+            }
+
+            // SolutionId — must be a real GUID matching General/ProjectInfo.xml.
+            // EAE uses DomainTag=SolutionId to scope each equipment to the
+            // current project; the zero UUID fails import with
+            // "Object reference not set to an instance of an object" /
+            // "Unable to import topology".
+            string solutionId = M262TopologyEmitter.ReadProjectGuid(eaeRoot)
+                ?? FallbackSolutionUuid;
+            if (solutionId == FallbackSolutionUuid)
+                result.Warnings.Add(
+                    "ProjectInfo.xml Guid not readable — Station 2 Topology emitted " +
+                    "with zero SolutionId; EAE may reject the import. Restore General/ProjectInfo.xml.");
+
+            // Clean up Topology JSONs that earlier Mapper builds wrote with
+            // wrong catalog references / zero DomainTag. EAE keeps complaining
+            // on import as long as these are present in topologyproj.
+            CleanupStaleTopologyJson(eaeRoot, "Equipment_Soft_dPAC_BX1.json", result);
+
+            EmitOnePlc(cfg, eaeRoot, systemGuidDir, result,
+                sysdevId: M580SysdevId,
+                deviceName: "M580",
+                deviceType: "M580_dPAC",
+                resourceId: M580ResourceId,
+                resourceName: M580ResourceName,
+                hcfTemplatePath: cfg.M580HcfTemplatePath,
+                equipmentJsonName: "Equipment_M580dPAC_1.json",
+                equipmentBuilder: () => BuildM580EquipmentJson(M580SysdevId, solutionId),
+                deployPluginPropertiesXml: BuildStandardDeployPluginPropertiesXml(),
+                simulationBindingDeployPort: 51500,
+                simulationBindingArchivePort: 51497);
+
+            EmitOnePlc(cfg, eaeRoot, systemGuidDir, result,
+                sysdevId: BX1SysdevId,
+                deviceName: "BX1",
+                deviceType: "Soft_dPAC",
+                resourceId: BX1ResourceId,
+                resourceName: BX1ResourceName,
+                hcfTemplatePath: cfg.BX1HcfTemplatePath,
+                equipmentJsonName: "Equipment_Workstation_BX1.json",
+                equipmentBuilder: () => BuildBX1WorkstationEquipmentJson(BX1SysdevId, solutionId),
+                deployPluginPropertiesXml: BuildSoftDpacDeployPluginPropertiesXml(),
+                simulationBindingDeployPort: 51501,
+                simulationBindingArchivePort: 51498);
+
+            return result;
+        }
+
+        static void EmitOnePlc(MapperConfig cfg, string eaeRoot, string systemGuidDir,
+            EmitResult result, string sysdevId, string deviceName, string deviceType,
+            string resourceId, string resourceName, string? hcfTemplatePath,
+            string equipmentJsonName, Func<string> equipmentBuilder,
+            string deployPluginPropertiesXml,
+            int simulationBindingDeployPort, int simulationBindingArchivePort)
+        {
+            // 1. sysdev — always (re)written; the device declaration carries no
+            //    trust binding by itself, just the Name + Type + GUID.
+            var sysdevPath = Path.Combine(systemGuidDir, $"{sysdevId}.sysdev");
+            File.WriteAllText(sysdevPath, BuildSysdevXml(sysdevId, deviceName, deviceType));
+            result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, sysdevPath));
+
+            // 2. sysres — Resource declaration inside the sysdev folder.
+            var sysdevFolder = Path.Combine(systemGuidDir, sysdevId);
+            Directory.CreateDirectory(sysdevFolder);
+            var sysresPath = Path.Combine(sysdevFolder, $"{resourceId}.sysres");
+            if (!File.Exists(sysresPath))
+            {
+                File.WriteAllText(sysresPath, BuildSysresXml(resourceId, resourceName));
+                result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, sysresPath));
+            }
+
+            // 3. HCF — copy verbatim from IO folder. If the template is missing
+            //    or empty, skip the copy and emit a warning; the device still
+            //    appears in Physical Views, just without channel bindings.
+            if (!string.IsNullOrWhiteSpace(hcfTemplatePath) && File.Exists(hcfTemplatePath))
+            {
+                var hcfDest = Path.Combine(sysdevFolder, $"{sysdevId}.hcf");
+                File.Copy(hcfTemplatePath, hcfDest, overwrite: true);
+                result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, hcfDest));
+            }
+            else
+            {
+                result.Warnings.Add(
+                    $"{deviceName}: HCF template not found at {hcfTemplatePath ?? "<unset>"} " +
+                    "— device emitted without hardware-config file.");
+            }
+
+            // 3b. DeployPlugin Properties XML — without this file, EAE's
+            //     Hardware Configuration tab doesn't register the .hcf with the
+            //     device card. M262 has it auto-written by M262SysdevEmitter;
+            //     M580 + BX1 need the equivalent.
+            var deployPluginPath = Path.Combine(sysdevFolder,
+                "F513CAE3-7194-4086-936C-02912EA0B352.Properties.xml");
+            File.WriteAllText(deployPluginPath, deployPluginPropertiesXml);
+            result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, deployPluginPath));
+
+            // 3c. SystemDeviceProperties (E0601B81) — empty default. EAE creates
+            //     this when first opening a device; ship it pre-empty so the
+            //     project compiles cold (no "Properties XML not found" warning).
+            var sysDevPropsPath = Path.Combine(sysdevFolder,
+                "E0601B81-4A3A-4A96-B6C2-007BDC680D59.Properties.xml");
+            if (!File.Exists(sysDevPropsPath))
+            {
+                File.WriteAllText(sysDevPropsPath,
+                    "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
+                    "<SystemDeviceProperties xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" " +
+                    "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" " +
+                    "xmlns=\"http://www.nxtControl.com/DeviceProperties\" />");
+                result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, sysDevPropsPath));
+            }
+
+            // 3d. Simulation.Binding.xml — declares the LogicalDevice's
+            //     deployment + archive service ports. Reference uses
+            //       service F7C90C9D-… = Deployment      (M262=51499, M580=51500, BX1=51501)
+            //       service 32B24F96-… = Archive Service (M262=51496, M580=51497, BX1=51498)
+            //     Without this, EAE's deploy & diagnostic panel can't find the
+            //     device and the Hardware Configuration tree leaves the HCF hidden.
+            var simBindPath = Path.Combine(sysdevFolder, $"{sysdevId}.Simulation.Binding.xml");
+            File.WriteAllText(simBindPath, BuildSimulationBindingXml(sysdevId,
+                simulationBindingDeployPort, simulationBindingArchivePort));
+            result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, simBindPath));
+
+            // 4. Topology Equipment JSON.
+            var topologyDir = Path.Combine(eaeRoot, "Topology");
+            Directory.CreateDirectory(topologyDir);
+            var equipmentPath = Path.Combine(topologyDir, equipmentJsonName);
+            File.WriteAllText(equipmentPath, equipmentBuilder());
+            result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, equipmentPath));
+
+            // 5. Register Equipment JSON in TopologyManager.topologyproj.
+            var topologyProj = Path.Combine(topologyDir, "TopologyManager.topologyproj");
+            if (File.Exists(topologyProj))
+            {
+                result.TopologyProjEntriesAdded += M262TopologyEmitter.RegisterInTopologyProj(
+                    topologyProj, new[] { equipmentJsonName });
+            }
+            else
+            {
+                result.Warnings.Add(
+                    $"{deviceName}: TopologyManager.topologyproj missing — Equipment JSON " +
+                    "written but not registered with TopologyManager build target.");
+            }
+
+            // 6. Register sysdev in dfbproj so EAE's project tree picks it up.
+            var dfbproj = FindDfbproj(eaeRoot);
+            if (dfbproj != null)
+            {
+                try
+                {
+                    int added = DfbprojRegistrar.RegisterSystemDevice(dfbproj, eaeRoot, sysdevPath);
+                    result.DfbprojEntriesAdded += added;
+                }
+                catch (Exception ex)
+                {
+                    result.Warnings.Add(
+                        $"{deviceName}: dfbproj registration failed ({ex.Message}).");
+                }
+            }
+        }
+
+        /// <summary>
+        /// DeployPlugin Properties XML — same content the reference uses for
+        /// M262 + M580. EAE's Hardware Configuration plugin reads this file
+        /// (plugin GUID F513CAE3-7194-4086-936C-02912EA0B352) to register the
+        /// device's .hcf with the Hardware Configuration tree. Missing file =
+        /// device card appears in Solution Explorer but no Hardware Config tab.
+        /// </summary>
+        static string BuildStandardDeployPluginPropertiesXml() =>
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
+            "<SystemDeviceProperties xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns=\"http://www.nxtControl.com/DeviceProperties\">\r\n" +
+            "  <ComplexProperty Name=\"DeployPlugin\" Expanded=\"true\">\r\n" +
+            "    <Property Name=\"ClearBeforeDeploy\" Value=\"True\" IsPassword=\"false\" />\r\n" +
+            "  </ComplexProperty>\r\n" +
+            "  <GroupProperty Name=\"Configuration\" Expanded=\"true\" Enabled=\"true\">\r\n" +
+            "    <GroupProperty Name=\"Deploy\" Expanded=\"true\" Enabled=\"true\">\r\n" +
+            "      <Property Name=\"AutoStart\" Value=\"True\" IsPassword=\"false\" />\r\n" +
+            "    </GroupProperty>\r\n" +
+            "    <GroupProperty Name=\"Boot\" Expanded=\"true\" Enabled=\"true\">\r\n" +
+            "      <Property Name=\"BootMode\" Value=\"Run\" IsPassword=\"false\" />\r\n" +
+            "    </GroupProperty>\r\n" +
+            "  </GroupProperty>\r\n" +
+            "</SystemDeviceProperties>";
+
+        /// <summary>
+        /// Soft_dPAC variant of the DeployPlugin Properties — adds the
+        /// SetActiveProjectAsABootProject property the reference's BX1 uses.
+        /// Required for the BX1 softdpac container to flip the deployed
+        /// project into "boot" mode on next container start.
+        /// </summary>
+        static string BuildSoftDpacDeployPluginPropertiesXml() =>
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
+            "<SystemDeviceProperties xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns=\"http://www.nxtControl.com/DeviceProperties\">\r\n" +
+            "  <ComplexProperty Name=\"DeployPlugin\" Expanded=\"true\">\r\n" +
+            "    <Property Name=\"ClearBeforeDeploy\" Value=\"True\" IsPassword=\"false\" />\r\n" +
+            "    <Property Name=\"SetActiveProjectAsABootProject\" Value=\"True\" IsPassword=\"false\" />\r\n" +
+            "  </ComplexProperty>\r\n" +
+            "  <GroupProperty Name=\"Configuration\" Expanded=\"true\" Enabled=\"true\">\r\n" +
+            "    <GroupProperty Name=\"Deploy\" Expanded=\"true\" Enabled=\"true\">\r\n" +
+            "      <Property Name=\"AutoStart\" Value=\"True\" IsPassword=\"false\" />\r\n" +
+            "    </GroupProperty>\r\n" +
+            "    <GroupProperty Name=\"Boot\" Expanded=\"true\" Enabled=\"true\">\r\n" +
+            "      <Property Name=\"BootMode\" Value=\"Run\" IsPassword=\"false\" />\r\n" +
+            "    </GroupProperty>\r\n" +
+            "  </GroupProperty>\r\n" +
+            "</SystemDeviceProperties>";
+
+        /// <summary>
+        /// LogicalDevice service-port binding XML. Two services every dPAC needs:
+        /// Deployment (F7C90C9D-…) and Archive Service (32B24F96-…). EAE's
+        /// Deploy &amp; Diagnostic panel + Hardware Configuration tab both look
+        /// up the .hcf via these LogicalDevice service registrations.
+        /// </summary>
+        static string BuildSimulationBindingXml(string logicalDeviceId, int deployPort, int archivePort) =>
+            "<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"yes\"?>\r\n" +
+            "<Bindings>\r\n" +
+            $"  <LogicalDeviceBinding LogicalDeviceId=\"{logicalDeviceId}\">\r\n" +
+            $"    <LogicalDeviceService ServiceId=\"F7C90C9D-BD8B-4D0B-B8DE-C659AF6EABCC\" LogicalPort=\"{deployPort}\" />\r\n" +
+            $"    <LogicalDeviceService ServiceId=\"32B24F96-50F3-429E-9586-58A14DEB5DD5\" LogicalPort=\"{archivePort}\" />\r\n" +
+            "  </LogicalDeviceBinding>\r\n" +
+            "</Bindings>";
+
+        static string BuildSysdevXml(string sysdevId, string name, string type) =>
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
+            $"<Device xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" ID=\"{sysdevId}\" Name=\"{name}\" Type=\"{type}\" Namespace=\"SE.DPAC\" Locked=\"false\" xmlns=\"{LibElNs}\">\r\n" +
+            "  <FBNetwork />\r\n" +
+            "</Device>\r\n";
+
+        static string BuildSysresXml(string resourceId, string name) =>
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
+            $"<Resource xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" ID=\"{resourceId}\" Name=\"{name}\" Type=\"EMB_RES_ECO\" Namespace=\"Runtime.Management\" xmlns=\"{LibElNs}\">\r\n" +
+            "  <FBNetwork>\r\n" +
+            "  </FBNetwork>\r\n" +
+            "</Resource>\r\n";
+
+        /// <summary>
+        /// M580 dPAC equipment JSON — modelled on
+        /// <c>SMC_Rig_Expo_withClamp/Topology/Equipment_M580dPAC_1.json</c>.
+        /// X80 4-slot rack + BMX CPS 4002 PSU + BME D58 1020 CPU with ETH0/1/2/3
+        /// ports. IP set to 0.0.0.0 / NOCONF (user binds on Physical Views after deploy).
+        /// </summary>
+        static string BuildM580EquipmentJson(string sysdevId, string solutionId)
+        {
+            return $$"""
+            {
+              "catalogReference": "M080_V01.00_01.00",
+              "uuid": "{{M580EquipmentUuid}}",
+              "identifier": "M580dPAC_1",
+              "path": "Topology",
+              "properties": [
+                { "propertyName": "IsUnderConstruction", "propertyValue": "False" },
+                { "propertyName": "DomainTag",            "propertyValue": "{{solutionId}}" }
+              ],
+              "references": [
+                { "diagramPath": "Physical Views", "x": -80, "y": -380 }
+              ],
+              "equipments": [
+                {
+                  "catalogReference": "BMEXBP0400_V01.00_01.00",
+                  "uuid": "{{M580RackUuid}}",
+                  "identifier": "BME XBP 0400 #0",
+                  "path": "M580dPAC_1\\BME XBP 0400 #0",
+                  "partNumber": "BME XBP 0400",
+                  "equipments": [
+                    {
+                      "catalogReference": "BMXCPS2010_V01.00_01.00",
+                      "uuid": "{{M580CpsUuid}}",
+                      "identifier": "BMX CPS 2010 #P",
+                      "path": "M580dPAC_1\\BME XBP 0400 #0\\BMX CPS 2010 #P",
+                      "partNumber": "BMX CPS 2010"
+                    },
+                    {
+                      "catalogReference": "BMED581020_V01.00_01.00",
+                      "uuid": "{{M580CpuUuid}}",
+                      "identifier": "BME D58 1020 #0",
+                      "path": "M580dPAC_1\\BME XBP 0400 #0\\BME D58 1020 #0",
+                      "partNumber": "BME D58 1020",
+                      "components": [
+                        {
+                          "interfaces": [
+                            {
+                              "identifier": "seGmac0",
+                              "disabled": false,
+                              "physicalAddress": "",
+                              "endpoints": [
+                                {
+                                  "identifier": "IP Address",
+                                  "isReadOnly": false,
+                                  "domainReadOnly": false,
+                                  "ipAddress": "0.0.0.0",
+                                  "domain": "{{NoConfDomainUuid}}"
+                                }
+                              ]
+                            }
+                          ],
+                          "ports": [
+                            { "identifier": "BKP",  "side": "Default" },
+                            { "identifier": "ETH1", "side": "Default" },
+                            { "identifier": "ETH2", "side": "Default" },
+                            { "identifier": "ETH3", "side": "Default" }
+                          ],
+                          "componentType": "EthernetDEO"
+                        },
+                        {
+                          "endpoint": "seGmac0\\IP Address",
+                          "connectionTypes": "None",
+                          "componentType": "EthernetMasterDEO"
+                        },
+                        { "enabled": false, "securityMode": 0, "componentType": "SysLogClientDEO" },
+                        { "mode": 0, "componentType": "CyberSecurityDEO" },
+                        {
+                          "uuid": "{{M580RuntimeUuid}}",
+                          "typeId": "{{M580RuntimeTypeId}}",
+                          "logicalDeviceId": "{{sysdevId}}",
+                          "runtimeServices": [
+                            { "identifier": "Deployment" },
+                            { "identifier": "Archive Service", "logicalPortSecured": "0" }
+                          ],
+                          "componentType": "RuntimeDEO"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+            """;
+        }
+
+        /// <summary>
+        /// BX1 equipment JSON — modelled on the reference
+        /// <c>SMC_Rig_Expo_withClamp/Topology/Equipment_Workstation_1.json</c>.
+        /// BX1 is a Soft_dPAC software runtime; the matching Physical Views
+        /// catalog entry is <c>Workstation_V01.00_01.00</c> with a nested
+        /// NIC card. The earlier <c>Softdpac_V01.00_01.00</c> attempt failed
+        /// with "Unable to import topology" because that catalog reference
+        /// only exists nested inside an HMIB1X container in EAE 24.1, never
+        /// standalone. Workstation is the right top-level catalog for any
+        /// PC-hosted softdpac runtime.
+        /// </summary>
+        static string BuildBX1WorkstationEquipmentJson(string sysdevId, string solutionId)
+        {
+            // typeId used by Workstation_1's RuntimeDEO in the reference —
+            // distinct from SoftDpacTypeId (which is for the HMIB1X-nested case).
+            const string WorkstationRuntimeTypeId = "422ee926-a34a-4ab5-9e8f-dce0782579f0";
+            const string BX1NicUuid = "11111111-2222-3333-4444-000000000053";
+
+            return $$"""
+            {
+              "catalogReference": "Workstation_V01.00_01.00",
+              "uuid": "{{BX1EquipmentUuid}}",
+              "identifier": "BX1",
+              "path": "Topology",
+              "properties": [
+                { "propertyName": "IsUnderConstruction", "propertyValue": "False" },
+                { "propertyName": "CommCardReference",   "propertyValue": "" },
+                { "propertyName": "DomainTag",            "propertyValue": "{{solutionId}}" }
+              ],
+              "references": [
+                { "diagramPath": "Physical Views", "x": 320, "y": -380 }
+              ],
+              "equipments": [
+                {
+                  "catalogReference": "NIC_EAE_V01.00_01.00",
+                  "uuid": "{{BX1NicUuid}}",
+                  "identifier": "NIC_1",
+                  "path": "BX1\\NIC_1",
+                  "components": [
+                    {
+                      "interfaces": [
+                        {
+                          "identifier": "eno1",
+                          "disabled": false,
+                          "physicalAddress": "",
+                          "endpoints": [
+                            {
+                              "identifier": "IP Address",
+                              "isReadOnly": false,
+                              "domainReadOnly": false,
+                              "ipAddress": "0.0.0.0",
+                              "domain": "{{NoConfDomainUuid}}"
+                            }
+                          ]
+                        }
+                      ],
+                      "ports": [
+                        { "identifier": "Port1", "side": "Default" }
+                      ],
+                      "componentType": "EthernetDEO"
+                    }
+                  ]
+                }
+              ],
+              "components": [
+                {
+                  "uuid": "{{BX1RuntimeUuid}}",
+                  "typeId": "{{WorkstationRuntimeTypeId}}",
+                  "logicalDeviceId": "{{sysdevId}}",
+                  "identifier": "Runtime_1",
+                  "runtimeServices": [
+                    {
+                      "identifier": "Deployment",
+                      "endpoint": "NIC_1\\eno1\\IP Address",
+                      "logicalPort": "61999",
+                      "logicalPortSecured": "51443"
+                    }
+                  ],
+                  "componentType": "RuntimeDEO"
+                }
+              ]
+            }
+            """;
+        }
+
+        /// <summary>
+        /// Deletes a stale Topology Equipment JSON from disk and removes its
+        /// <c>&lt;None Include=...&gt;</c> registration from
+        /// <c>TopologyManager.topologyproj</c>. Idempotent — silently
+        /// no-ops when the file or registration is already absent.
+        /// </summary>
+        static void CleanupStaleTopologyJson(string eaeRoot, string jsonName, EmitResult result)
+        {
+            try
+            {
+                var topologyDir = Path.Combine(eaeRoot, "Topology");
+                var jsonPath = Path.Combine(topologyDir, jsonName);
+                if (File.Exists(jsonPath))
+                {
+                    File.Delete(jsonPath);
+                    result.Warnings.Add($"Deleted stale Topology JSON: {jsonName}");
+                }
+                var topologyProj = Path.Combine(topologyDir, "TopologyManager.topologyproj");
+                if (File.Exists(topologyProj))
+                {
+                    var doc = XDocument.Load(topologyProj);
+                    var ns = doc.Root!.GetDefaultNamespace();
+                    var staleNodes = doc.Descendants(ns + "None")
+                        .Where(e => string.Equals(
+                            (string?)e.Attribute("Include"), jsonName, StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+                    foreach (var n in staleNodes) n.Remove();
+                    if (staleNodes.Count > 0) doc.Save(topologyProj);
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"Cleanup of {jsonName} failed: {ex.Message}");
+            }
+        }
+
+        static string? FindDfbproj(string eaeRoot)
+        {
+            try
+            {
+                var iec = Path.Combine(eaeRoot, "IEC61499");
+                if (!Directory.Exists(iec)) return null;
+                return Directory.EnumerateFiles(iec, "*.dfbproj").FirstOrDefault();
+            }
+            catch { return null; }
+        }
+    }
+}
