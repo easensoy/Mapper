@@ -58,8 +58,12 @@ namespace MapperUI.Services
         // how many components the syslay emitted (N-component safe).
         private static readonly string[] CaSBusOrder =
         {
-            // Station 1 (M262)
-            "PartInHopper", "PartAtChecker", "Pusher", "Checker", "Transfer",
+            // Station 1 (M262) — FB instance names from Control.xml, NOT
+            // hardware-side aliases. The CAT SYMLINKMULTIVARDST/SRC macros
+            // expand $${PATH} to the FB instance name; if we order/rename
+            // here to "Pusher" but the FB instance is "Feeder", the init
+            // chain is severed and symlink PATHs lose their bindings.
+            "PartInHopper", "PartAtChecker", "Feeder", "Checker", "Transfer",
             // Station 2 (M580) — Assembly_Station components in PLC-bus order
             "BearingSensor", "ShaftSensor",
             "Bearing_PnP", "Bearing_Gripper",
@@ -396,13 +400,14 @@ namespace MapperUI.Services
             { "PartInHopper", (2000, 4000) },
             { "PartAtChecker",(4500, 4000) },
             { "Feed_Station", (7000, 4000) },
-            // Actuator row (y=5400) — 2500 pitch, terminator far right
-            // VueOne component "Feeder" is emitted as FB instance "Pusher" by
-            // ResolveActuatorDisplayName, matching the rig hardware alias used
-            // in the HCF channel bindings (DI00 'PusherAtHome', DI01 'PusherAtWork'
-            // etc.). The CanonicalLayout key MUST be "Pusher" — the post-syslay
-            // rewrite walks by FB Name= attribute.
-            { "Pusher",       (2000, 5400) },
+            // Actuator row (y=5400) — 2500 pitch, terminator far right.
+            // Use the Control.xml component name "Feeder" as the FB Name
+            // attribute; the previous "Pusher" alias broke symbolic-link
+            // PATH expansion (CAT SYMLINKMULTIVARDST $${PATH} macros
+            // resolved to Pusher.athome instead of Feeder.athome and lost
+            // their channel bindings). Hardware-side hardware names
+            // (PusherAtHome, ExtendPusher) stay inside the .hcf only.
+            { "Feeder",       (2000, 5400) },
             { "Checker",      (4500, 5400) },
             { "Transfer",     (7000, 5400) },
             { "Stn1_Term",    (9500, 5400) },
