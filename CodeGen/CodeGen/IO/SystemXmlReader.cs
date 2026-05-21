@@ -1,6 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Text;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using CodeGen.Models;
 
@@ -21,7 +24,7 @@ namespace CodeGen.IO
 
             try
             {
-                var doc = XDocument.Load(xmlFilePath);
+                var doc = LoadXmlTolerant(xmlFilePath);
                 var root = doc.Root;
 
                 if (root == null)
@@ -46,6 +49,73 @@ namespace CodeGen.IO
             }
 
             return components;
+        }
+
+        /// <summary>
+        /// Loads a VueOne Control.xml in a way that survives the declaration-
+        /// vs-actual-encoding mismatch VueOne sometimes emits. Some VueOne
+        /// builds write <c>&lt;?xml version="1.0" encoding="utf-16"?&gt;</c> at
+        /// the top of the file even when the body bytes are plain ASCII / UTF-8
+        /// (no BOM, single-byte chars). <see cref="XDocument.Load(string)"/>
+        /// trusts the declaration, tries to decode the ASCII bytes as UTF-16,
+        /// produces garbage, and silently yields an empty document — surfaced
+        /// as "No components found." in the UI.
+        ///
+        /// This loader sniffs the BOM first, falls back to UTF-8 (safe
+        /// superset for ASCII), then rewrites a lying encoding declaration to
+        /// match the bytes actually read. Pure UTF-16 files (BOM present) are
+        /// untouched.
+        /// </summary>
+        private static XDocument LoadXmlTolerant(string xmlFilePath)
+        {
+            var bytes = File.ReadAllBytes(xmlFilePath);
+            string content;
+            bool wasUtf16 = false;
+
+            if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
+            {
+                // UTF-16 LE with BOM — real binary UTF-16.
+                content = Encoding.Unicode.GetString(bytes, 2, bytes.Length - 2);
+                wasUtf16 = true;
+            }
+            else if (bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF)
+            {
+                // UTF-16 BE with BOM.
+                content = Encoding.BigEndianUnicode.GetString(bytes, 2, bytes.Length - 2);
+                wasUtf16 = true;
+            }
+            else if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
+            {
+                // UTF-8 with BOM.
+                content = Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
+            }
+            else
+            {
+                // No BOM. Treat as UTF-8 (which is byte-identical to ASCII for
+                // single-byte characters). The VueOne case lands here even when
+                // the declaration claims utf-16 — actual bytes are ASCII.
+                content = Encoding.UTF8.GetString(bytes);
+            }
+
+            // Strip stray BOM character that survived the decode (UTF-16 BOM
+            // sometimes appears as the first char of the resulting string).
+            if (content.Length > 0 && content[0] == '﻿')
+                content = content.Substring(1);
+
+            // If the byte stream is NOT actually UTF-16 but the declaration
+            // claims it is, rewrite the declaration to match — otherwise
+            // XDocument.Parse will reject the document on the encoding
+            // mismatch and the user sees "No components found".
+            if (!wasUtf16)
+            {
+                content = Regex.Replace(
+                    content,
+                    @"encoding\s*=\s*[""']utf-16[""']",
+                    @"encoding=""utf-8""",
+                    RegexOptions.IgnoreCase);
+            }
+
+            return XDocument.Parse(content);
         }
 
         private void ReadSystemFile(XElement root, List<VueOneComponent> components)
@@ -167,12 +237,14 @@ namespace CodeGen.IO
 
         private VueOneTransition ParseTransition(XElement elem)
         {
+            var rawType = GetElementValue(elem, "Type");
             var trans = new VueOneTransition
             {
                 TransitionID = GetElementValue(elem, "TransitionID"),
                 OriginStateID = GetElementValue(elem, "Origin_State"),
                 DestinationStateID = GetElementValue(elem, "Destination_State"),
-                Priority = GetIntValue(elem, "Priority")
+                Priority = GetIntValue(elem, "Priority"),
+                TransitionType = string.IsNullOrWhiteSpace(rawType) ? "SINGLE" : rawType.ToUpperInvariant()
             };
 
             var seq = elem.Elements().FirstOrDefault(e => e.Name.LocalName == "Sequence_Condition");
