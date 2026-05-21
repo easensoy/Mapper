@@ -65,8 +65,9 @@ namespace MapperUI.Services
             // chain is severed and symlink PATHs lose their bindings.
             "PartInHopper", "PartAtChecker", "Feeder", "Checker", "Transfer",
             // Station 2 (M580) — Assembly_Station components in PLC-bus order
+            // (Bearing_PnP removed 2026-05-21 with Seven_State_Actuator_CAT.)
             "BearingSensor", "ShaftSensor",
-            "Bearing_PnP", "Bearing_Gripper",
+            "Bearing_Gripper",
             "Shaft_Hr", "Shaft_Vr", "Shaft_Gripper", "Clamp",
             // Station 2 (BX1) — Cover pick-and-place
             "TopCoverSenosr",
@@ -80,7 +81,7 @@ namespace MapperUI.Services
             {
                 "Five_State_Actuator_CAT",
                 "Five_State_Actuator_No_Sensors_CAT",
-                "Seven_State_Actuator_CAT",
+                // Seven_State_Actuator_CAT removed 2026-05-21.
                 "Vacuum_Gripper_CAT",
             };
 
@@ -425,12 +426,12 @@ namespace MapperUI.Services
             { "Assembly_Station",(12200, 4000) },
             { "BearingSensor",   (15000, 4000) },
             { "ShaftSensor",     (17500, 4000) },
-            { "Bearing_PnP",     (12200, 5400) },
-            { "Bearing_Gripper", (14700, 5400) },
-            { "Shaft_Hr",        (17200, 5400) },
-            { "Shaft_Vr",        (19700, 5400) },
-            { "Shaft_Gripper",   (12200, 6500) },
-            { "Clamp",           (14700, 6500) },
+            // Bearing_PnP removed 2026-05-21 with Seven_State_Actuator_CAT.
+            { "Bearing_Gripper", (12200, 5400) },
+            { "Shaft_Hr",        (14700, 5400) },
+            { "Shaft_Vr",        (17200, 5400) },
+            { "Shaft_Gripper",   (19700, 5400) },
+            { "Clamp",           (12200, 6500) },
             // BX1 zone (Station 2 — green frame). Sensors at y=4000, actuators
             // at y=5400, columns at 2500 pitch starting at x=20600 to land
             // inside FRAME_BX1 (20400..27200).
