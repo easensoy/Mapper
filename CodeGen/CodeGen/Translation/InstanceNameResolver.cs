@@ -71,14 +71,28 @@ namespace CodeGen.Translation
 
         /// <summary>
         /// Rig-canonical name aliases used when the xlsx Instance_Name_Overrides
-        /// sheet does not provide one. Keep this small — anything project-specific
-        /// belongs in the xlsx so it stays version-controlled with the rig wiring.
+        /// sheet does not provide one. Intentionally EMPTY today.
+        ///
+        /// <para>The Feeder → Pusher alias was removed on 2026-05-21 because
+        /// renaming the FB instance broke the symbolic-link PATH expansion:
+        /// every CAT's <c>SYMLINKMULTIVARDST/SRC</c> uses
+        /// <c>$${PATH}athome</c> / <c>$${PATH}atwork</c> / <c>$${PATH}OutputToWork</c>
+        /// macros that resolve to <c>{ResourceName}.{InstancePath}.{Pin}</c>
+        /// at deploy time. With the FB instance renamed to Pusher the macros
+        /// expanded to <c>Pusher.athome</c> etc. — but the IO bindings xlsx
+        /// + the deployed .hcf channel symlinks still reference the
+        /// VueOne Control.xml component name <c>Feeder</c>. Renaming
+        /// the FB stranded every channel symlink. Keep the FB instance
+        /// name = Control.xml component name.</para>
+        ///
+        /// <para>If you need an alias for a SPECIFIC component, add a row to
+        /// the xlsx <c>Instance_Name_Overrides</c> sheet (ComponentID or
+        /// VueOne Name → IEC Instance Name) — that path also rewrites the
+        /// IO bindings + .hcf in lockstep, which the hard-coded RigAliases
+        /// fallback never did.</para>
         /// </summary>
         private static readonly Dictionary<string, string> RigAliases =
-            new(StringComparer.OrdinalIgnoreCase)
-            {
-                { "Feeder", "Pusher" },
-            };
+            new(StringComparer.OrdinalIgnoreCase);
 
         private static string? StripSuffix(string s, string suffix)
         {
