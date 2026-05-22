@@ -1489,6 +1489,40 @@ namespace MapperUI.Services
             builder.AddFB(FBIdGenerator.GenerateFBId("Area_Term"),
                 "Area_Term", "CaSAdptrTerminator", "Main", 3760, 720);
 
+            // MQTT event-buffer: inject the ONE shared MQTT_CONNECTION when
+            // enabled. Every embedded MQTT_PUBLISH (patched into the CATs by
+            // TemplateLibraryDeployer) binds to it by matching ConnectionID
+            // value — no wire between them. INIT then CONNECT fire at startup
+            // so the link is up before the first publish; the connection's
+            // QueueDepth buffers messages while the broker is unreachable.
+            // Gated by MqttPublishEnabled so the hardware/sim output is
+            // unchanged when MQTT is off.
+            if (config != null && config.MqttPublishEnabled)
+            {
+                var mqttParams = new Dictionary<string, string>
+                {
+                    ["QI"] = SyslayBuilder.FormatBool(true),
+                    ["ConnectionID"] = SyslayBuilder.FormatInt(config.MqttConnectionId),
+                    ["URL"] = SyslayBuilder.FormatString(config.MqttBrokerUrl),
+                    ["ClientIdentifier"] = SyslayBuilder.FormatString(config.MqttClientId),
+                    ["CleanSession"] = SyslayBuilder.FormatBool(config.MqttCleanSession),
+                    ["KeepAlive"] = SyslayBuilder.FormatInt(60),
+                    ["QueueDepth"] = SyslayBuilder.FormatInt(config.MqttQueueDepth),
+                    ["ConnectionRetryCount"] = SyslayBuilder.FormatInt(0),     // 0 = retry forever
+                    ["ConnectionRetryTime"] = SyslayBuilder.FormatInt(5000),   // ms
+                };
+                builder.AddFB(FBIdGenerator.GenerateFBId("MqttConn"),
+                    "MqttConn", "MQTT_CONNECTION", "Runtime.NetConnectivity", 3760, 200, mqttParams);
+                // Bring the link up at startup: INIT (off the Area init) then
+                // CONNECT (off its own INITO). CONN_STATE_IND/retry keep it up.
+                builder.AddEventConnection("Area.INITO", "MqttConn.INIT");
+                builder.AddEventConnection("MqttConn.INITO", "MqttConn.CONNECT");
+                report.Missing.Add(
+                    $"[MQTT] MqttConn (MQTT_CONNECTION) injected at app scope — " +
+                    $"ConnectionID={config.MqttConnectionId}, URL={config.MqttBrokerUrl}, " +
+                    $"QueueDepth={config.MqttQueueDepth}. Embedded MqttPub FBs bind by ConnectionID.");
+            }
+
             BuildFeedStationWiring(builder, contents);
 
             // Phase 1: recipe arrays now ride on the Process1 syslay Parameter values written
