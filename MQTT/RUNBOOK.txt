@@ -1,0 +1,99 @@
+============================================================
+SMC MQTT no-loss state stream - RUNBOOK
+============================================================
+Goal: capture EVERY actuator/sensor state transition (0,1,2,3,4)
+with zero sampling loss, into a flat JSONL file. No database.
+
+WHY MQTT FIXES THE LOSS
+- OPC UA / WebSocket sit DOWNSTREAM of the runtime sampler (200 ms
+  M262/BX1, 100 ms M580). A brief AtWork=2 shorter than the sample
+  is aliased out before either ever sees it (your Data Access View
+  showed 0 -> 3, missing 1/2/4).
+- MQTT_PUBLISH is a function block INSIDE the scan. It fires on
+  pst_out the same scan the state changes, BEFORE any sampler.
+  Nothing is aliased.
+
+------------------------------------------------------------
+STEP 1 - START THE BROKER (on the broker machine = 192.168.1.50)
+------------------------------------------------------------
+  "C:\Program Files\Mosquitto\mosquitto.exe" -v -c C:\VueOneMapper\MQTT\mosquitto.conf
+
+Leave it running; -v prints every connect/subscribe/publish.
+
+If "actively refused" persists from a remote host:
+  - confirm 192.168.1.50 is THIS machine's IP        ->  ipconfig
+  - open inbound TCP 1883 in Windows Defender Firewall:
+      netsh advfirewall firewall add rule name="Mosquitto 1883" ^
+        dir=in action=allow protocol=TCP localport=1883
+
+------------------------------------------------------------
+STEP 2 - PROVE THE BROKER (no PLC yet)
+------------------------------------------------------------
+On the broker box (localhost):
+  "C:\Program Files\Mosquitto\mosquitto_sub.exe" -h localhost -t test/x -v
+In a 2nd window:
+  "C:\Program Files\Mosquitto\mosquitto_pub.exe" -h localhost -t test/x -m hi
+You should see:  test/x hi
+
+From your PC (remote):
+  "C:\Program Files\Mosquitto\mosquitto_sub.exe" -h 192.168.1.50 -t test/x -v
+Until this stays connected, the PLC cannot publish either.
+
+------------------------------------------------------------
+STEP 3 - START THE DURABLE LOGGER (the sink)
+------------------------------------------------------------
+  C:\VueOneMapper\MQTT\smc_logger.cmd
+
+Appends one JSON object per line to  C:\VueOneMapper\MQTT\smc_log.jsonl
+Durable (-i smc_logger -c -q 1): the broker queues for it while it's
+down and redelivers on restart. Start it BEFORE cycling actuators.
+
+Quick plain-text alternative (no durability):
+  "C:\Program Files\Mosquitto\mosquitto_sub.exe" -h 192.168.1.50 -t "smc/#" -F "%I  %t  %p"
+
+------------------------------------------------------------
+STEP 4 - JITTER GATE (HARD GATE before trusting MQTT on the rig)
+------------------------------------------------------------
+Run with ONE actuator's publish wired (Feeder). Watch ActuatorCore
+scan time in EAE. Two parts - it must stay FLAT in BOTH:
+
+  4a. DEAD broker: point MQTT_CONNECTION.URL at an IP with nothing
+      listening. Cycle Feeder. If scan time moves -> PUBLISH blocks
+      on connect/timeout -> STOP.
+  4b. SLOW broker: reachable but high-latency broker (e.g. add
+      artificial delay / throttle). Cycle Feeder continuously. If
+      scan time moves -> PUBLISH does a synchronous send on the
+      scan -> STOP.
+
+Flat in both = publish is async (enqueues to MQTT_CONNECTION, its
+own thread drains it) = safe to extend to Checker + Transfer and to
+rely on the stream. QueueDepth queuing under a dead broker is
+exactly what 4a stresses.
+
+OPC UA stays intact throughout, so a failed gate just means "don't
+rely on MQTT yet", never a broken rig.
+
+------------------------------------------------------------
+STEP 5 - VERIFY NO LOSS
+------------------------------------------------------------
+Cycle Feeder/Checker/Transfer. In smc_log.jsonl you should see every
+0 -> 1 -> 2 -> 3 -> 4 with no gaps - the exact opposite of the OPC
+UA Data Access View.
+
+------------------------------------------------------------
+TOPIC SCHEME
+------------------------------------------------------------
+  smc/<actuator-or-sensor>/state      payload = state integer as text
+e.g. smc/feeder/state = "2"
+(With RootPath='$${PATH}' in the CAT, EAE resolves the per-instance
+path automatically. If $${PATH} does NOT resolve inside an MQTT
+parameter, the Mapper stamps the resolved topic per instance instead
+- see CAT edit notes.)
+
+BUFFER (event-buffer) SETTINGS - already in the design
+  PLC side  : MQTT_PUBLISH.QoS1=1 ; MQTT_CONNECTION.CleanSession=FALSE,
+              QueueDepth=100, ConnectionRetryCount/Time set.
+  Broker    : persistence true (mosquitto.conf).
+  Logger    : -q 1 -i smc_logger -c (durable session).
+=> no loss to sampling (event-driven) AND no loss to a broker blip
+   (queue + QoS1 at every hop).
