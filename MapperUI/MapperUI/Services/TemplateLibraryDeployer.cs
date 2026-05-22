@@ -160,8 +160,13 @@ namespace MapperUI.Services
 
             GenerateCfgFiles(eaeProjectDir, result);
             RegisterInDfbproj(eaeProjectDir, result);
-            if (cfg.MqttPublishEnabled)
-                RegisterMqttRuntimeReference(eaeProjectDir, result);
+            // NOTE: MQTT_PUBLISH / MQTT_CONNECTION resolve via the already-
+            // referenced Runtime.Base library (the deployed runtime DLL is
+            // Runtime.Base and contains Runtime.NetConnectivity#MQTT_*).
+            // Confirmed: EAE Projects\TrainingIIoT uses MQTT_CONNECTION with
+            // ONLY a Runtime.Base reference, no separate Runtime.NetConnectivity.
+            // A separate reference is a PHANTOM library ("Missing Referenced
+            // Libraries: Runtime.NetConnectivity,24.1.0.22") so we do NOT add one.
 
             VerifyArraySizeConsistency(eaeProjectDir, result);
 
@@ -686,12 +691,28 @@ namespace MapperUI.Services
                     new System.Xml.Linq.XAttribute("x", "8600"),
                     new System.Xml.Linq.XAttribute("y", "2580"),
                     new System.Xml.Linq.XAttribute("Namespace", "Runtime.NetConnectivity"));
+                // MQTT_PUBLISH is a GENERIC multi-channel FB. Its numbered
+                // channel ports (Topic1/Payload1/QoS1/Retain1 + event PUBLISH1)
+                // do NOT exist until the channel count is set via this
+                // InterfaceParams attribute — exactly like the SYMLINKMULTIVAR
+                // FBs already in this CAT. CNTX:=1 = one publish channel.
+                // Confirmed against working MQTT_SUBSCRIBE / MQTT_CONNECTION
+                // instances in EAE Projects\TrainingIIoT
+                // (Configuration.GenericFBType.InterfaceParams =
+                // "Runtime.NetConnectivity#CNTX:=1"). Omitting it is what
+                // produced "Port 'MqttPub.Topic1' does not exist".
+                pubFb.Add(new System.Xml.Linq.XElement(ns + "Attribute",
+                    new System.Xml.Linq.XAttribute("Name", "Configuration.GenericFBType.InterfaceParams"),
+                    new System.Xml.Linq.XAttribute("Value", "Runtime.NetConnectivity#CNTX:=1")));
                 void P(System.Xml.Linq.XElement fb, string n, string v) =>
                     fb.Add(new System.Xml.Linq.XElement(ns + "Parameter",
                         new System.Xml.Linq.XAttribute("Name", n),
                         new System.Xml.Linq.XAttribute("Value", v)));
                 P(pubFb, "QI", "TRUE");
-                P(pubFb, "ConnectionID", cfg.MqttConnectionId.ToString());
+                // ConnectionID is a STRING (the working MQTT_CONNECTION/SUBSCRIBE
+                // use $ConnectionID='SoftdPAC'); both the connection and every
+                // publisher must carry the SAME string to bind.
+                P(pubFb, "ConnectionID", Q(cfg.MqttConnectionId.ToString()));
                 P(pubFb, "RootPath", Q("$${PATH}"));   // EAE resolves per-instance; falls back to Mapper-stamped topic if unresolved
                 P(pubFb, "Topic1", Q("state"));
                 P(pubFb, "QoS1", cfg.MqttQoS.ToString());
