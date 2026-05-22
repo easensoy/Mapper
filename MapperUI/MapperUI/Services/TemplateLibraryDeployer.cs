@@ -135,8 +135,33 @@ namespace MapperUI.Services
             PatchProcessNameStringSize(eaeProjectDir, result);
             // PatchSevenStateActuatorDataDriven removed — see CatToBasics comment.
 
+            // MQTT event-driven state publishing (no-loss fix). Deploy-time,
+            // additive, gated by cfg.MqttPublishEnabled so the stock template
+            // library .cat.zip stays pristine and the hardware/sim paths are
+            // untouched when MQTT is off. When on: drop the MqttStateFormatter
+            // basic FB, then patch each CAT to fan an MQTT_PUBLISH off the
+            // post-update state-change event (ActuatorCore.pst_out for the
+            // actuator — fires on entry to all 5 states; FB1.CNF for the
+            // sensor). The single shared MQTT_CONNECTION is injected into the
+            // syslay by SystemLayoutInjector; PUBLISH binds to it by matching
+            // ConnectionID value (no wire). See RUNBOOK.txt + the jitter gate.
+            if (cfg.MqttPublishEnabled)
+            {
+                DeployMqttFormatter(eaeProjectDir, result);
+                PatchCatMqttPublish(eaeProjectDir, "Five_State_Actuator_CAT",
+                    stateEventSource: "ActuatorCore.pst_out",
+                    stateDataSource: "ActuatorCore.current_state_to_process",
+                    initSource: "StateHandling.INITO", cfg, result);
+                PatchCatMqttPublish(eaeProjectDir, "Sensor_Bool_CAT",
+                    stateEventSource: "FB1.CNF",
+                    stateDataSource: "FB1.Status",
+                    initSource: "StateHandling.INITO", cfg, result);
+            }
+
             GenerateCfgFiles(eaeProjectDir, result);
             RegisterInDfbproj(eaeProjectDir, result);
+            if (cfg.MqttPublishEnabled)
+                RegisterMqttRuntimeReference(eaeProjectDir, result);
 
             VerifyArraySizeConsistency(eaeProjectDir, result);
 
@@ -557,6 +582,241 @@ namespace MapperUI.Services
                 result.Warnings.Add($"Five_State_Actuator_CAT.fbt QI guard failed: {ex.Message}");
             }
         }
+
+        // ============================================================
+        // MQTT event-driven state publishing — deploy-time injection.
+        // All three methods below are no-ops unless cfg.MqttPublishEnabled
+        // (the caller already gates them). Strictly additive to the CAT
+        // FB-network; idempotent (skip if MqttPub already present).
+        // ============================================================
+
+        /// <summary>
+        /// Drops the <c>MqttStateFormatter</c> basic FB (INT state → STRING
+        /// payload via <c>INT_TO_STRING</c>) into the deployed
+        /// <c>IEC61499/</c> folder if absent. The CAT patch wires this FB
+        /// between the actuator/sensor state output and MQTT_PUBLISH.Payload1.
+        /// Idempotent.
+        /// </summary>
+        static void DeployMqttFormatter(string eaeProjectDir, DeployResult result)
+        {
+            try
+            {
+                var dst = Path.Combine(eaeProjectDir, "IEC61499", "MqttStateFormatter.fbt");
+                if (File.Exists(dst)) { result.PatchesApplied.Add("MqttStateFormatter.fbt already present"); return; }
+                File.WriteAllText(dst, MqttStateFormatterFbt);
+                result.PatchesApplied.Add("MqttStateFormatter.fbt deployed (INT→STRING payload)");
+                MapperLogger.Info("[Deploy][MQTT] MqttStateFormatter.fbt written to IEC61499/");
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"MqttStateFormatter deploy failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Additive deploy-time patch: fan an <c>MQTT_PUBLISH</c> off the
+        /// CAT's POST-UPDATE state-change event so every transition is
+        /// published the same scan it happens — before any OPC UA / WebSocket
+        /// sampler runs (those sit downstream of the 200/100 ms sampling floor
+        /// and alias brief states out; this does not). Nothing existing is
+        /// removed: the state event keeps all its current targets and we only
+        /// add one fan-out (EAE allows multi-fan-out from an event output).
+        /// </summary>
+        /// <param name="stateEventSource">Post-update event that carries the new
+        /// state. Actuator: <c>ActuatorCore.pst_out</c> (fires on entry to all
+        /// five states, after the algorithm writes current_state_to_process).
+        /// Sensor: <c>FB1.CNF</c> (fires after Status is written).</param>
+        /// <param name="stateDataSource">INT state value to publish
+        /// (<c>ActuatorCore.current_state_to_process</c> / <c>FB1.Status</c>).</param>
+        /// <param name="initSource">Existing INITO event to seed MqttFmt/MqttPub INIT.</param>
+        static void PatchCatMqttPublish(string eaeProjectDir, string catName,
+            string stateEventSource, string stateDataSource, string initSource,
+            MapperConfig cfg, DeployResult result)
+        {
+            var fbt = Directory.EnumerateFiles(
+                    Path.Combine(eaeProjectDir, "IEC61499"),
+                    catName + ".fbt", SearchOption.AllDirectories)
+                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
+                ?? string.Empty;
+            if (string.IsNullOrEmpty(fbt))
+            {
+                result.Warnings.Add($"{catName}.fbt not found; MQTT publish patch skipped.");
+                return;
+            }
+
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+
+                var net = root.Element(ns + "FBNetwork");
+                if (net == null) { result.Warnings.Add($"{catName}.fbt: no FBNetwork; MQTT patch skipped."); return; }
+
+                // Idempotent: skip if already patched.
+                if (net.Elements(ns + "FB").Any(f => (string?)f.Attribute("Name") == "MqttPub"))
+                {
+                    result.PatchesApplied.Add($"{catName}: MQTT publish already present (skipped)");
+                    return;
+                }
+
+                // Bump the FB IDCounter so the two new FBs get unique IDs.
+                var idAttr = root.Elements(ns + "Attribute")
+                    .FirstOrDefault(a => (string?)a.Attribute("Name") == "Configuration.FB.IDCounter");
+                int idc = 1000;
+                if (idAttr != null && int.TryParse((string?)idAttr.Attribute("Value"), out var parsed)) idc = parsed;
+                int fmtId = idc, pubId = idc + 1;
+                if (idAttr != null) idAttr.SetAttributeValue("Value", (idc + 2).ToString());
+
+                string Q(string s) => "'" + s + "'";   // ST string literal
+
+                var fmtFb = new System.Xml.Linq.XElement(ns + "FB",
+                    new System.Xml.Linq.XAttribute("ID", fmtId),
+                    new System.Xml.Linq.XAttribute("Name", "MqttFmt"),
+                    new System.Xml.Linq.XAttribute("Type", "MqttStateFormatter"),
+                    new System.Xml.Linq.XAttribute("x", "8000"),
+                    new System.Xml.Linq.XAttribute("y", "2580"),
+                    new System.Xml.Linq.XAttribute("Namespace", "Main"));
+
+                var pubFb = new System.Xml.Linq.XElement(ns + "FB",
+                    new System.Xml.Linq.XAttribute("ID", pubId),
+                    new System.Xml.Linq.XAttribute("Name", "MqttPub"),
+                    new System.Xml.Linq.XAttribute("Type", "MQTT_PUBLISH"),
+                    new System.Xml.Linq.XAttribute("x", "8600"),
+                    new System.Xml.Linq.XAttribute("y", "2580"),
+                    new System.Xml.Linq.XAttribute("Namespace", "Runtime.NetConnectivity"));
+                void P(System.Xml.Linq.XElement fb, string n, string v) =>
+                    fb.Add(new System.Xml.Linq.XElement(ns + "Parameter",
+                        new System.Xml.Linq.XAttribute("Name", n),
+                        new System.Xml.Linq.XAttribute("Value", v)));
+                P(pubFb, "QI", "TRUE");
+                P(pubFb, "ConnectionID", cfg.MqttConnectionId.ToString());
+                P(pubFb, "RootPath", Q("$${PATH}"));   // EAE resolves per-instance; falls back to Mapper-stamped topic if unresolved
+                P(pubFb, "Topic1", Q("state"));
+                P(pubFb, "QoS1", cfg.MqttQoS.ToString());
+                P(pubFb, "Retain1", cfg.MqttRetain ? "TRUE" : "FALSE");
+
+                // Insert the two FBs after the last existing <FB>.
+                var lastFb = net.Elements(ns + "FB").LastOrDefault();
+                if (lastFb != null) { lastFb.AddAfterSelf(pubFb); lastFb.AddAfterSelf(fmtFb); }
+                else { net.Add(fmtFb); net.Add(pubFb); }
+
+                // Ensure connection containers exist.
+                var ec = net.Element(ns + "EventConnections");
+                if (ec == null) { ec = new System.Xml.Linq.XElement(ns + "EventConnections"); net.Add(ec); }
+                var dc = net.Element(ns + "DataConnections");
+                if (dc == null) { dc = new System.Xml.Linq.XElement(ns + "DataConnections"); net.Add(dc); }
+
+                void Conn(System.Xml.Linq.XElement parent, string s, string d) =>
+                    parent.Add(new System.Xml.Linq.XElement(ns + "Connection",
+                        new System.Xml.Linq.XAttribute("Source", s),
+                        new System.Xml.Linq.XAttribute("Destination", d)));
+
+                // Events (additive fan-out — stateEventSource keeps its targets).
+                Conn(ec, stateEventSource, "MqttFmt.REQ");
+                Conn(ec, "MqttFmt.CNF", "MqttPub.PUBLISH1");
+                Conn(ec, initSource, "MqttFmt.INIT");
+                Conn(ec, initSource, "MqttPub.INIT");
+                // Data.
+                Conn(dc, stateDataSource, "MqttFmt.state");
+                Conn(dc, "MqttFmt.payload", "MqttPub.Payload1");
+
+                doc.Save(fbt);
+                result.PatchesApplied.Add(
+                    $"{catName}: MQTT publish injected (fan {stateEventSource} → MqttFmt → MqttPub.PUBLISH1, " +
+                    $"ConnectionID={cfg.MqttConnectionId}, Topic=$${{PATH}}state)");
+                MapperLogger.Info($"[Deploy][MQTT] {catName}.fbt: MQTT_PUBLISH wired off {stateEventSource}");
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"{catName} MQTT publish patch failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Adds a <c>&lt;Reference Include="Runtime.NetConnectivity"&gt;</c> entry
+        /// to the project .dfbproj so the EAE compiler resolves MQTT_PUBLISH /
+        /// MQTT_CONNECTION (builtin runtime types — same resolution path as
+        /// SE.DPAC / SE.AppBase). Idempotent. If MQTT FBs still report
+        /// ERR_NO_SUCH_TYPE after this, the version below needs to match the
+        /// installed runtime (confirm against an EAE project that already uses MQTT).
+        /// </summary>
+        static void RegisterMqttRuntimeReference(string eaeProjectDir, DeployResult result)
+        {
+            try
+            {
+                var dfbproj = Directory.EnumerateFiles(
+                        Path.Combine(eaeProjectDir, "IEC61499"), "*.dfbproj",
+                        SearchOption.TopDirectoryOnly).FirstOrDefault();
+                if (dfbproj == null) { result.Warnings.Add("No .dfbproj; Runtime.NetConnectivity reference skipped."); return; }
+
+                var doc = System.Xml.Linq.XDocument.Load(dfbproj, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+
+                bool present = root.Descendants(ns + "Reference").Any(r =>
+                    (string?)r.Attribute("Include") == "Runtime.NetConnectivity");
+                if (present) { result.PatchesApplied.Add("Runtime.NetConnectivity reference already present"); return; }
+
+                // Add to the same ItemGroup that holds the other SE references.
+                var refGroup = root.Elements(ns + "ItemGroup")
+                    .FirstOrDefault(g => g.Elements(ns + "Reference").Any());
+                if (refGroup == null) { refGroup = new System.Xml.Linq.XElement(ns + "ItemGroup"); root.Add(refGroup); }
+
+                refGroup.Add(new System.Xml.Linq.XElement(ns + "Reference",
+                    new System.Xml.Linq.XAttribute("Include", "Runtime.NetConnectivity"),
+                    new System.Xml.Linq.XElement(ns + "Version", "24.1.0.22")));   // CONFIRM: match installed runtime
+                doc.Save(dfbproj);
+                result.PatchesApplied.Add("Runtime.NetConnectivity reference added to .dfbproj (CONFIRM version)");
+                MapperLogger.Info("[Deploy][MQTT] Runtime.NetConnectivity reference added to .dfbproj");
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"Runtime.NetConnectivity reference failed: {ex.Message}");
+            }
+        }
+
+        // Embedded MqttStateFormatter basic FB (v1: bare INT state → STRING).
+        // v1.1 extends the Fmt algorithm to JSON {actuator,state,ts}.
+        const string MqttStateFormatterFbt =
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
+            "<!DOCTYPE FBType SYSTEM \"../LibraryElement.dtd\">\r\n" +
+            "<FBType GUID=\"f0a1b2c3-d4e5-4f60-8a1b-2c3d4e5f6071\" Name=\"MqttStateFormatter\" Comment=\"Basic FB - INT state to STRING payload for MQTT publish\" Namespace=\"Main\">\r\n" +
+            "  <Identification Standard=\"61499-2\" />\r\n" +
+            "  <VersionInfo Organization=\"WMG\" Version=\"0.1\" Author=\"easensoy\" Date=\"5/22/2026\" Remarks=\"v1 bare state-to-string\" />\r\n" +
+            "  <InterfaceList>\r\n" +
+            "    <EventInputs>\r\n" +
+            "      <Event Name=\"INIT\" Comment=\"Initialization Request\"><With Var=\"state\" /></Event>\r\n" +
+            "      <Event Name=\"REQ\" Comment=\"Format on state change\"><With Var=\"state\" /></Event>\r\n" +
+            "    </EventInputs>\r\n" +
+            "    <EventOutputs>\r\n" +
+            "      <Event Name=\"INITO\" Comment=\"Initialization Confirm\"><With Var=\"payload\" /></Event>\r\n" +
+            "      <Event Name=\"CNF\" Comment=\"Payload ready\"><With Var=\"payload\" /></Event>\r\n" +
+            "    </EventOutputs>\r\n" +
+            "    <InputVars>\r\n" +
+            "      <VarDeclaration Name=\"state\" Type=\"INT\" Comment=\"current_state_to_process\" />\r\n" +
+            "    </InputVars>\r\n" +
+            "    <OutputVars>\r\n" +
+            "      <VarDeclaration Name=\"payload\" Type=\"STRING\" Comment=\"MQTT payload (state as text)\" />\r\n" +
+            "    </OutputVars>\r\n" +
+            "  </InterfaceList>\r\n" +
+            "  <BasicFB>\r\n" +
+            "    <Attribute Name=\"FBType.Basic.Algorithm.Order\" Value=\"INIT,Fmt\" />\r\n" +
+            "    <ECC>\r\n" +
+            "      <ECState Name=\"START\" Comment=\"Initial State\" x=\"300\" y=\"300\" />\r\n" +
+            "      <ECState Name=\"INIT\" x=\"700\" y=\"120\"><ECAction Algorithm=\"Fmt\" Output=\"INITO\" /></ECState>\r\n" +
+            "      <ECState Name=\"Format\" x=\"700\" y=\"520\"><ECAction Algorithm=\"Fmt\" Output=\"CNF\" /></ECState>\r\n" +
+            "      <ECTransition Source=\"START\" Destination=\"INIT\" Condition=\"INIT\" x=\"450\" y=\"200\" />\r\n" +
+            "      <ECTransition Source=\"INIT\" Destination=\"START\" Condition=\"1\" x=\"500\" y=\"300\" />\r\n" +
+            "      <ECTransition Source=\"START\" Destination=\"Format\" Condition=\"REQ\" x=\"450\" y=\"420\" />\r\n" +
+            "      <ECTransition Source=\"Format\" Destination=\"START\" Condition=\"1\" x=\"500\" y=\"520\" />\r\n" +
+            "    </ECC>\r\n" +
+            "    <Algorithm Name=\"INIT\" Comment=\"Initialization algorithm\"><ST><![CDATA[;]]></ST></Algorithm>\r\n" +
+            "    <Algorithm Name=\"Fmt\" Comment=\"INT state to STRING payload\"><ST><![CDATA[payload := INT_TO_STRING(state);]]></ST></Algorithm>\r\n" +
+            "  </BasicFB>\r\n" +
+            "</FBType>\r\n";
 
         /// <summary>
         /// Same Mode=0-by-default class of bug as ProcessRuntime_Generic_v1's
