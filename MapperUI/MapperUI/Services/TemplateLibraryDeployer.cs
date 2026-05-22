@@ -684,13 +684,24 @@ namespace MapperUI.Services
                     new System.Xml.Linq.XAttribute("y", "2580"),
                     new System.Xml.Linq.XAttribute("Namespace", "Main"));
 
+                // EAE stores a configured GENERIC FB as a HASHED VARIANT in
+                // namespace "Main" — confirmed by the working MQTT_SUBSCRIBE in
+                // TrainingIIoT: Type="MQTT_SUBSCRIBE_115480E69E664F878"
+                // Namespace="Main" + InterfaceParams="Runtime.NetConnectivity#CNTX:=1".
+                // The hash 115480E69E664F878 is derived from the InterfaceParams
+                // (CNTX:=1) and is identical for PUBLISH (EAE itself looked for
+                // MQTT_PUBLISH_115480E69E664F878.gfbt). Emitting the plain base
+                // type name in namespace Runtime.NetConnectivity is what caused
+                // ERR_NO_SUCH_TYPE. NOTE: if channel count ever changes from 1,
+                // this hash changes too.
+                const string MqttPublishVariant = "MQTT_PUBLISH_115480E69E664F878";
                 var pubFb = new System.Xml.Linq.XElement(ns + "FB",
                     new System.Xml.Linq.XAttribute("ID", pubId),
                     new System.Xml.Linq.XAttribute("Name", "MqttPub"),
-                    new System.Xml.Linq.XAttribute("Type", "MQTT_PUBLISH"),
+                    new System.Xml.Linq.XAttribute("Type", MqttPublishVariant),
                     new System.Xml.Linq.XAttribute("x", "8600"),
                     new System.Xml.Linq.XAttribute("y", "2580"),
-                    new System.Xml.Linq.XAttribute("Namespace", "Runtime.NetConnectivity"));
+                    new System.Xml.Linq.XAttribute("Namespace", "Main"));
                 // MQTT_PUBLISH is a GENERIC multi-channel FB. Its numbered
                 // channel ports (Topic1/Payload1/QoS1/Retain1 + event PUBLISH1)
                 // do NOT exist until the channel count is set via this

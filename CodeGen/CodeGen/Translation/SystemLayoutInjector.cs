@@ -1509,10 +1509,14 @@ namespace MapperUI.Services
                     ["URL"] = SyslayBuilder.FormatString(config.MqttBrokerUrl),
                     ["ClientIdentifier"] = SyslayBuilder.FormatString(config.MqttClientId),
                     ["CleanSession"] = SyslayBuilder.FormatBool(config.MqttCleanSession),
-                    ["KeepAlive"] = SyslayBuilder.FormatInt(60),
                     ["QueueDepth"] = SyslayBuilder.FormatInt(config.MqttQueueDepth),
-                    ["ConnectionRetryCount"] = SyslayBuilder.FormatInt(0),     // 0 = retry forever
-                    ["ConnectionRetryTime"] = SyslayBuilder.FormatInt(5000),   // ms
+                    // KeepAlive / ConnectionRetryTime are TIME-typed ports on
+                    // MQTT_CONNECTION — giving them integers caused
+                    // ERR_CAST_CONSTANT (ANY_INT -> TIME). The working
+                    // TrainingIIoT connection sets none of these, so we leave
+                    // KeepAlive / ConnectionRetryCount / ConnectionRetryTime at
+                    // EAE defaults. QueueDepth (INT) + CleanSession (BOOL) stay
+                    // — they are the offline-buffer essentials and are not TIME.
                 };
                 builder.AddFB(FBIdGenerator.GenerateFBId("MqttConn"),
                     "MqttConn", "MQTT_CONNECTION", "Runtime.NetConnectivity", 3760, 200, mqttParams);
