@@ -133,6 +133,74 @@ namespace CodeGen.Configuration
         /// </summary>
         public bool SimulatorFullSystem { get; set; } = false;
 
+        // ============================================================
+        // MQTT event-driven state publishing (no-loss fix)
+        // ------------------------------------------------------------
+        // The OPC UA / WebSocket HMI paths sit downstream of the runtime
+        // sampler (200 ms M262/BX1, 100 ms M580), so brief states (ToWork=1,
+        // AtWork=2, ToHome=3, AtHomeEnd=4) shorter than the sample interval
+        // are aliased out and never reach the client. MQTT_PUBLISH is a
+        // function block inside the scan: it fires on the actuator's pst_out
+        // the same scan the state changes, before any sampler, so nothing is
+        // lost. These fields drive the single shared MQTT_CONNECTION the
+        // Mapper injects; every embedded MQTT_PUBLISH binds to it by matching
+        // ConnectionID value (no wire between them).
+        // ============================================================
+
+        /// <summary>
+        /// Master opt-in. When FALSE (default) the Mapper emits exactly what
+        /// it does today — no MQTT_CONNECTION injected, no ConnectionID
+        /// stamped — so the hardware/sim paths stay byte-stable and backward
+        /// safe. Flip TRUE only after the two-part jitter gate passes on the
+        /// rig (dead broker + slow broker, ActuatorCore scan stays flat).
+        /// </summary>
+        public bool MqttPublishEnabled { get; set; } = false;
+
+        /// <summary>Broker endpoint for MQTT_CONNECTION.URL (e.g. tcp://192.168.1.50:1883).</summary>
+        public string MqttBrokerUrl { get; set; } = "tcp://192.168.1.50:1883";
+
+        /// <summary>MQTT_CONNECTION.ClientIdentifier — one per runtime/resource.</summary>
+        public string MqttClientId { get; set; } = "SMC_M262";
+
+        /// <summary>
+        /// MQTT_CONNECTION.ConnectionID — the registry key. The single
+        /// injected connection sets this, and every embedded MQTT_PUBLISH
+        /// carries the same value so they bind. Default 1.
+        /// </summary>
+        public int MqttConnectionId { get; set; } = 1;
+
+        /// <summary>
+        /// MQTT_CONNECTION.QueueDepth — offline buffer depth. When the broker
+        /// is unreachable the connection queues up to this many messages in
+        /// PLC memory and redelivers on reconnect (the PLC half of the
+        /// end-to-end no-loss buffer). Default 100.
+        /// </summary>
+        public int MqttQueueDepth { get; set; } = 100;
+
+        /// <summary>MQTT_PUBLISH.QoS1 — 1 = at-least-once (broker acks). Default 1.</summary>
+        public int MqttQoS { get; set; } = 1;
+
+        /// <summary>
+        /// MQTT_CONNECTION.CleanSession — FALSE keeps the broker session
+        /// across drops so QoS1 messages are not lost on a reconnect. Default false.
+        /// </summary>
+        public bool MqttCleanSession { get; set; } = false;
+
+        /// <summary>
+        /// MQTT_PUBLISH.Retain1 — FALSE for an event stream (every transition
+        /// is a discrete message the logger captures). Default false.
+        /// </summary>
+        public bool MqttRetain { get; set; } = false;
+
+        /// <summary>
+        /// Topic root. The per-instance topic is built as
+        /// <c>{MqttTopicRoot}/{instance}/state</c>. When the CAT's
+        /// RootPath='$${PATH}' macro resolves inside the MQTT parameter this
+        /// is informational; if it does NOT resolve, the Mapper stamps the
+        /// resolved RootPath per instance using this prefix. Default "smc".
+        /// </summary>
+        public string MqttTopicRoot { get; set; } = "smc";
+
         public string ActiveSyslayPath =>
             !string.IsNullOrEmpty(SyslayPath2) ? SyslayPath2 : SyslayPath;
 
