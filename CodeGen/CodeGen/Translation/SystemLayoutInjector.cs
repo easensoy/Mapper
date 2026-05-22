@@ -1502,7 +1502,10 @@ namespace MapperUI.Services
                 var mqttParams = new Dictionary<string, string>
                 {
                     ["QI"] = SyslayBuilder.FormatBool(true),
-                    ["ConnectionID"] = SyslayBuilder.FormatInt(config.MqttConnectionId),
+                    // ConnectionID is a STRING (working MQTT_CONNECTION uses
+                    // $ConnectionID='SoftdPAC'); the embedded MqttPub FBs carry
+                    // the SAME string to bind. Quote the configured value.
+                    ["ConnectionID"] = SyslayBuilder.FormatString(config.MqttConnectionId.ToString()),
                     ["URL"] = SyslayBuilder.FormatString(config.MqttBrokerUrl),
                     ["ClientIdentifier"] = SyslayBuilder.FormatString(config.MqttClientId),
                     ["CleanSession"] = SyslayBuilder.FormatBool(config.MqttCleanSession),
