@@ -24,5 +24,14 @@
   "IoFolderPath": "C:\\VueOneMapper\\IO",
   "M262HcfTemplatePath": "C:\\VueOneMapper\\IO\\M262IO.hcf",
   "M580HcfTemplatePath": "C:\\VueOneMapper\\IO\\M580IO.hcf",
-  "BX1HcfTemplatePath": "C:\\VueOneMapper\\IO\\BX1IO.hcf"
+  "BX1HcfTemplatePath": "C:\\VueOneMapper\\IO\\BX1IO.hcf",
+  "MqttPublishEnabled": true,
+  "MqttBrokerUrl": "tcp://192.168.1.50:1883",
+  "MqttClientId": "SMC_M262",
+  "MqttConnectionId": 1,
+  "MqttQueueDepth": 100,
+  "MqttQoS": 1,
+  "MqttCleanSession": false,
+  "MqttRetain": false,
+  "MqttTopicRoot": "smc"
 }
