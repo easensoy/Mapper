@@ -1775,50 +1775,6 @@ namespace MapperUI.Services
             }
         }
 
-        /// <summary>
-        /// Adds a <c>&lt;Reference Include="Runtime.NetConnectivity"&gt;</c> entry
-        /// to the project .dfbproj so the EAE compiler resolves MQTT_PUBLISH /
-        /// MQTT_CONNECTION (builtin runtime types — same resolution path as
-        /// SE.DPAC / SE.AppBase). Idempotent. If MQTT FBs still report
-        /// ERR_NO_SUCH_TYPE after this, the version below needs to match the
-        /// installed runtime (confirm against an EAE project that already uses MQTT).
-        /// </summary>
-        static void RegisterMqttRuntimeReference(string eaeProjectDir, DeployResult result)
-        {
-            try
-            {
-                var dfbproj = Directory.EnumerateFiles(
-                        Path.Combine(eaeProjectDir, "IEC61499"), "*.dfbproj",
-                        SearchOption.TopDirectoryOnly).FirstOrDefault();
-                if (dfbproj == null) { result.Warnings.Add("No .dfbproj; Runtime.NetConnectivity reference skipped."); return; }
-
-                var doc = System.Xml.Linq.XDocument.Load(dfbproj, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                var root = doc.Root;
-                if (root == null) return;
-                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
-
-                bool present = root.Descendants(ns + "Reference").Any(r =>
-                    (string?)r.Attribute("Include") == "Runtime.NetConnectivity");
-                if (present) { result.PatchesApplied.Add("Runtime.NetConnectivity reference already present"); return; }
-
-                // Add to the same ItemGroup that holds the other SE references.
-                var refGroup = root.Elements(ns + "ItemGroup")
-                    .FirstOrDefault(g => g.Elements(ns + "Reference").Any());
-                if (refGroup == null) { refGroup = new System.Xml.Linq.XElement(ns + "ItemGroup"); root.Add(refGroup); }
-
-                refGroup.Add(new System.Xml.Linq.XElement(ns + "Reference",
-                    new System.Xml.Linq.XAttribute("Include", "Runtime.NetConnectivity"),
-                    new System.Xml.Linq.XElement(ns + "Version", "24.1.0.22")));   // CONFIRM: match installed runtime
-                doc.Save(dfbproj);
-                result.PatchesApplied.Add("Runtime.NetConnectivity reference added to .dfbproj (CONFIRM version)");
-                MapperLogger.Info("[Deploy][MQTT] Runtime.NetConnectivity reference added to .dfbproj");
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"Runtime.NetConnectivity reference failed: {ex.Message}");
-            }
-        }
-
         // Embedded MqttStateFormatter basic FB (v1: bare INT state → STRING).
         // v1.1 extends the Fmt algorithm to JSON {actuator,state,ts}.
         const string MqttStateFormatterFbt =
