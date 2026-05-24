@@ -54,34 +54,6 @@ namespace MapperUI.Services
         private SystemInjectionResult? _currentResult;
 
 
-        public DiffReport PreviewDiff(MapperConfig config, List<VueOneComponent> components,
-            string? controlXmlPath = null)
-        {
-            var report = new DiffReport();
-            if (!File.Exists(config.SyslayPath))
-            {
-                report.Unsupported.Add($"syslay not found: {config.SyslayPath}");
-                return report;
-            }
-
-            if (controlXmlPath != null && File.Exists(controlXmlPath))
-                PatchProcessNames(components, controlXmlPath);
-
-            var net = LoadNet(config.SyslayPath, "SubAppNetwork");
-            if (net == null) { report.Unsupported.Add("SubAppNetwork not found"); return report; }
-
-            Classify(net, ActuatorCatType, Actuators(components), report);
-            Classify(net, SevenStateActuatorCatType, SevenStateActuators(components), report);
-            Classify(net, SensorCatType, Sensors(components), report);
-            Classify(net, ProcessCatType, Processes(components), report);
-            Classify(net, RobotCatType, Robots(components, config), report);
-
-            foreach (var c in Unsupported(components, config))
-                report.Unsupported.Add($"{c.Name} {c.Type}/{c.States.Count} states: no template this phase");
-
-            return report;
-        }
-
         public SystemInjectionResult Inject(MapperConfig config, List<VueOneComponent> components,
             string? controlXmlPath = null, string? mappingRulesPath = null,
             List<VueOneComponent>? crossReferenceComponents = null)
@@ -702,31 +674,6 @@ namespace MapperUI.Services
             return "[" + string.Join(",", names) + "]";
         }
 
-
-        private static void Classify(XElement net, string catType,
-            List<VueOneComponent> group, DiffReport report)
-        {
-            var existing = FbsOfType(net, catType)
-                .Select(fb => fb.Attribute("Name")?.Value ?? "")
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-            var wanted = group.Select(c => c.Name)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var n in wanted)
-                (existing.Contains(n) ? report.AlreadyPresent : report.ToBeInjected).Add(n);
-
-            foreach (var n in existing.Where(e => !wanted.Contains(e)))
-                report.Spare.Add(n);
-        }
-
-        public class DiffReport
-        {
-            public List<string> AlreadyPresent { get; } = new();
-            public List<string> ToBeInjected { get; } = new();
-            public List<string> Spare { get; } = new();
-            public List<string> Unsupported { get; } = new();
-        }
 
         private static void PatchProcessNames(List<VueOneComponent> components, string controlXmlPath)
         {
@@ -2554,9 +2501,9 @@ namespace MapperUI.Services
             return (outer, nested, recipe);
         }
 
-        // Phase 1: ResolveProcessRuntimeFbtPath / RewriteProcessRuntimeRecipe deleted.
-        // Recipes now ride on syslay Parameter values (see BuildProcessFbParameters above).
-        // FbtRewriter remains in the codebase but is no longer invoked from the recipe path.
+        // Phase 1: ResolveProcessRuntimeFbtPath / RewriteProcessRuntimeRecipe / FbtRewriter
+        // were all deleted. Recipes now ride on syslay Parameter values (see
+        // BuildProcessFbParameters above).
 
         public string GenerateProcessFBSyslay(MapperConfig config, string controlXmlPath,
             string? processName, out BindingApplicationReport report)
