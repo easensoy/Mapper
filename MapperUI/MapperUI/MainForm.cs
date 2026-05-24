@@ -1376,28 +1376,7 @@ namespace MapperUI
             finally { btnGenerateProcessFB.Enabled = true; }
         }
 
-        async void btnGeneratePusherFB_Click(object sender, EventArgs e)
-        {
-            try
-            {
-                var cfg = Cfg();
-                var dfbproj = FindDfbproj(cfg.ActiveSyslayPath);
-                if (dfbproj == null) { ShowError("Cannot find .dfbproj."); return; }
-                if (!File.Exists(cfg.ActiveSyslayPath)) { ShowError("syslay not found."); return; }
-
-                var result = await Task.Run(() => PusherFBGenerator.Generate(cfg, _loadedComponents));
-                MessageBox.Show(result, "FBs Generated", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-            catch (Exception ex) { ShowError(ex.Message); }
-        }
-
         void dgvComponents_SelectionChanged(object sender, EventArgs e) { }
-
-        void btnIO_Click(object sender, EventArgs e) { }
-
-        void btnGenerateTemplate_Click(object sender, EventArgs e) { }
-
-        void btnADP_Click(object sender, EventArgs e) { }
 
         void UpdateDetectedInfo()
         {
