@@ -1085,7 +1085,8 @@ namespace MapperUI.Services
             if (string.IsNullOrWhiteSpace(processInstanceName)) processInstanceName = "Process1";
 
             var (processOuter, processNested, processRecipe) = BuildProcessFbParameters(
-                contents.Process, allComponents, processInstanceName, processId, contents);
+                contents.Process, allComponents, processInstanceName, processId, contents,
+                useRecipeStruct: config != null && config.SimulatorFullSystem);
 
             // (Removed: processOuter["BackgroundColor"] = "PaleGreen" — EAE's
             // FB-type compiler rejects any Parameter Name that is not declared
@@ -1183,7 +1184,8 @@ namespace MapperUI.Services
 
                 var (aOuter, aNested, aRecipe) = BuildProcessFbParameters(
                     assemblyStationProc, allComponents, assemblyName, processId + 1,
-                    contents: aContents);   // sim → real recipe; hardware → null/empty
+                    contents: aContents,   // sim → real recipe; hardware → null/empty
+                    useRecipeStruct: config != null && config.SimulatorFullSystem);
                 builder.AddFB(FBIdGenerator.GenerateFBId(assemblyStationProc.ComponentID),
                     assemblyName, "Process1_Generic", "Main", 12200, 1460,
                     aOuter, aNested);
@@ -1233,7 +1235,8 @@ namespace MapperUI.Services
                     }
                     var (dOuter, dNested, dRecipe) = BuildProcessFbParameters(
                         disassyProc, allComponents, disassyName, processId + 2,
-                        contents: dContents);
+                        contents: dContents,
+                        useRecipeStruct: config != null && config.SimulatorFullSystem);
                     builder.AddFB(FBIdGenerator.GenerateFBId(disassyProc.ComponentID),
                         disassyName, "Process1_Generic", "Main", 20800, 1460,
                         dOuter, dNested);
@@ -1374,7 +1377,8 @@ namespace MapperUI.Services
                 Dictionary<string, string> actParams;
                 if (fbType == "Five_State_Actuator_CAT")
                 {
-                    actParams = BuildActuatorParameters(actuator, assignedId, allComponents, scopedIds);
+                    actParams = BuildActuatorParameters(actuator, assignedId, allComponents, scopedIds,
+                        dropInterlockConstants: config != null && config.SimulatorFullSystem);
                     // Override actuator_name so the runtime broadcast key uses
                     // the resolved instance name (Pusher), not the Control.xml
                     // raw name (Feeder). Without this, state_table.source_name
@@ -1740,7 +1744,8 @@ namespace MapperUI.Services
         public static Dictionary<string, string> BuildActuatorParameters(
             VueOneComponent actuator, int assignedId,
             IReadOnlyList<VueOneComponent> allComponents,
-            IReadOnlyDictionary<string, int>? scopedIds = null)
+            IReadOnlyDictionary<string, int>? scopedIds = null,
+            bool dropInterlockConstants = false)
         {
             int toWorkMs = ResolveStateTimeMs(actuator, stateNumber: 1, fallbackMs: DefaultMotionMs);
             int toHomeMs = ResolveStateTimeMs(actuator, stateNumber: 3, fallbackMs: DefaultMotionMs);
@@ -1760,7 +1765,7 @@ namespace MapperUI.Services
                     ? BuildInterlockRules(actuator, allComponents, scopedIds)
                     : (0, new int[10], new int[10], new int[10], new int[10]);
 
-            return new Dictionary<string, string>
+            var actuatorParams = new Dictionary<string, string>
             {
                 ["actuator_name"] = SyslayBuilder.FormatString(actuator.Name.ToLowerInvariant()),
                 ["actuator_id"] = SyslayBuilder.FormatInt(assignedId),
@@ -1797,6 +1802,53 @@ namespace MapperUI.Services
                 // it raises ERR_MEMBER_VAR_NOTFOUND at compile time. FB
                 // colouring is not controllable via syslay in EAE 24.1.)
             };
+
+            // Simulator-only interface reduction (Test Simulator button). When
+            // SimulatorFullSystem is on, TemplateLibraryDeployer
+            // .NormalizeFiveStateInterlockConstants bakes TargetWork1State (=2)
+            // and TargetHomeState (=4) directly onto the embedded
+            // InterlockManager FB inside the CAT type and DELETES the two
+            // boundary InputVars. An instance <Parameter> for a var the type no
+            // longer declares raises ERR_MEMBER_VAR_NOTFOUND, so drop the two
+            // keys here. The exact same flag drives both halves (the deployer
+            // reshapes the type, this reshapes the instance) so they can never
+            // disagree. Hardware (Test Runtime, flag off) keeps emitting them.
+            if (dropInterlockConstants)
+            {
+                actuatorParams.Remove("TargetWork1State");
+                actuatorParams.Remove("TargetHomeState");
+
+                // Simulator interface reduction: collapse the 4 parallel Rule
+                // arrays into one InterlockRule[10] (RuleTable). The CAT and the
+                // CommonInterlockEvaluator are reshaped to a single RuleTable
+                // input by TemplateLibraryDeployer's normalizers under this same
+                // flag, so the instance must emit RuleTable — emitting a
+                // now-removed array input would raise ERR_MEMBER_VAR_NOTFOUND.
+                // RuleCount stays separate (it's the Evaluate loop bound). The
+                // named-field literal syntax was verified by the StructLiteralProbe
+                // spike. Logic identical: the same numbers reach
+                // InterlockManager.Evaluate, just packaged as struct fields.
+                actuatorParams.Remove("RuleFromState");
+                actuatorParams.Remove("RuleToState");
+                actuatorParams.Remove("RuleSourceID");
+                actuatorParams.Remove("RuleBlockedState");
+                actuatorParams["RuleTable"] = SyslayBuilder.FormatRuleTable(
+                    ruleFrom, ruleTo, ruleSrc, ruleBlk, ruleCount);
+
+                // Derived fault-enable flags. The Mapper always sets
+                // enableToWorkFaultTimeout = WorkSensorFitted and
+                // enableToHomeFaultTimeout = HomeSensorFitted. Inside the CAT,
+                // FB17/FB14 already AND the enable with the same sensor-fitted
+                // input, so AND(fitted, fitted) = fitted. The simulator
+                // normalizer re-points FB17.IN2/FB14.IN2 at the sensor-fitted
+                // lines and drops these two boundary inputs, so the instance
+                // must not emit them (emitting a removed InputVar would raise
+                // ERR_MEMBER_VAR_NOTFOUND). Value and behaviour are identical.
+                actuatorParams.Remove("enableToWorkFaultTimeout");
+                actuatorParams.Remove("enableToHomeFaultTimeout");
+            }
+
+            return actuatorParams;
         }
 
         // Rule* InputVars are ArraySize=10 in Five_State_Actuator_CAT.fbt.
@@ -2452,7 +2504,7 @@ namespace MapperUI.Services
                        RecipeArrays? Recipe)
             BuildProcessFbParameters(VueOneComponent process, List<VueOneComponent> allComponents,
                 string processName, int processId,
-                StationContents? contents = null)
+                StationContents? contents = null, bool useRecipeStruct = false)
         {
             // Phase 1+: recipe arrays travel as syslay Parameter values on the
             // Process1_Generic instance; Process1_Generic.fbt exposes 8 InputVars
@@ -2475,12 +2527,27 @@ namespace MapperUI.Services
             if (contents != null)
             {
                 recipe = ProcessRecipeArrayGenerator.Generate(process, contents, allComponents, processId);
-                outer["StepType"]      = SyslayBuilder.FormatIntArray(recipe.StepType);
-                outer["CmdTargetName"] = SyslayBuilder.FormatStringArray(recipe.CmdTargetName);
-                outer["CmdStateArr"]   = SyslayBuilder.FormatIntArray(recipe.CmdStateArr);
-                outer["Wait1Id"]       = SyslayBuilder.FormatIntArray(recipe.Wait1Id);
-                outer["Wait1State"]    = SyslayBuilder.FormatIntArray(recipe.Wait1State);
-                outer["NextStep"]      = SyslayBuilder.FormatIntArray(recipe.NextStep);
+                if (useRecipeStruct)
+                {
+                    // Simulator interface reduction: the 6 parallel recipe arrays
+                    // collapse into one Recipe : ARRAY OF RecipeStep. The deployer
+                    // normalizers reshape Process1_Generic + ProcessRuntime to a
+                    // single Recipe input under the same flag, so the instance must
+                    // emit Recipe (emitting a removed array input -> ERR_MEMBER_VAR_
+                    // NOTFOUND). Same values, one struct field per array column.
+                    outer["Recipe"] = SyslayBuilder.FormatRecipeTable(
+                        recipe.StepType, recipe.CmdTargetName, recipe.CmdStateArr,
+                        recipe.Wait1Id, recipe.Wait1State, recipe.NextStep);
+                }
+                else
+                {
+                    outer["StepType"]      = SyslayBuilder.FormatIntArray(recipe.StepType);
+                    outer["CmdTargetName"] = SyslayBuilder.FormatStringArray(recipe.CmdTargetName);
+                    outer["CmdStateArr"]   = SyslayBuilder.FormatIntArray(recipe.CmdStateArr);
+                    outer["Wait1Id"]       = SyslayBuilder.FormatIntArray(recipe.Wait1Id);
+                    outer["Wait1State"]    = SyslayBuilder.FormatIntArray(recipe.Wait1State);
+                    outer["NextStep"]      = SyslayBuilder.FormatIntArray(recipe.NextStep);
+                }
             }
 
             var nested = new Dictionary<string, IDictionary<string, string>>(StringComparer.Ordinal);
@@ -2531,7 +2598,8 @@ namespace MapperUI.Services
                 report.Missing.Add($"station grouping skipped: {ex.Message}");
             }
 
-            var (outer, nested, _) = BuildProcessFbParameters(process, allComponents, process.Name, 10, contents);
+            var (outer, nested, _) = BuildProcessFbParameters(process, allComponents, process.Name, 10, contents,
+                useRecipeStruct: config.SimulatorFullSystem);
             builder.AddFB(FBIdGenerator.GenerateFBId(process.ComponentID),
                 process.Name, "Process1_Generic", "Main", 3360, 1460, outer, nested);
 
@@ -2623,7 +2691,8 @@ namespace MapperUI.Services
                 builder.AddFB(FBIdGenerator.GenerateFBId(hmiName),
                     hmiName, "Station_CAT", "Main", xCol + 100, 100);
 
-                var (outer, nested, _) = BuildProcessFbParameters(proc, allComponents, proc.Name, 10 + stationIndex, contents);
+                var (outer, nested, _) = BuildProcessFbParameters(proc, allComponents, proc.Name, 10 + stationIndex, contents,
+                    useRecipeStruct: config.SimulatorFullSystem);
                 var processInstanceName = $"Process{stationIndex}";
                 builder.AddFB(FBIdGenerator.GenerateFBId(proc.ComponentID),
                     processInstanceName, "Process1_Generic", "Main", xCol + 1240, 1460, outer, nested);
@@ -2635,7 +2704,8 @@ namespace MapperUI.Services
                 {
                     var act = contents.Actuators[i];
                     int aid = actuatorBase + i;
-                    var actParams = BuildActuatorParameters(act, aid, allComponents);
+                    var actParams = BuildActuatorParameters(act, aid, allComponents,
+                        dropInterlockConstants: config.SimulatorFullSystem);
 
                     ActuatorBinding? ab = null;
                     bindings?.Actuators.TryGetValue(act.Name, out ab);
