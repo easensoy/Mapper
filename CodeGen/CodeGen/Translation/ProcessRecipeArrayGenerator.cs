@@ -68,6 +68,25 @@ namespace CodeGen.Translation
 
     public static class ProcessRecipeArrayGenerator
     {
+        // Recipe-array capacity — SINGLE SOURCE OF TRUTH. Process1_Generic.fbt
+        // and ProcessRuntime_Generic_v1.fbt declare the six recipe arrays
+        // (StepType/CmdTargetName/CmdStateArr/Wait1Id/Wait1State/NextStep) at
+        // this ArraySize; TemplateLibraryDeployer.PatchProcess1RecipeArraySize
+        // forces the deployed .fbt ArraySize to exactly this value, and the
+        // length guard in Generate() refuses any recipe longer than this — so
+        // the declared capacity and the guard can never drift apart. The runtime
+        // ECC indexes the arrays via NextStep navigation (StepType[CurrentStep]),
+        // not a fixed FOR loop, so a larger bound needs no ST change.
+        //
+        // Raised 20 -> 50 for the full-system simulator: a collapsed multi-Process
+        // recipe runs to ~21+ rows, whereas 20 was sized for a single hardware
+        // station. SAFE for the byte-identical hardware slice — FormatIntArray
+        // emits ONLY the rows actually present (e.g. [1, 2, 9]), never padded to
+        // ArraySize, so no instance .syslay changes; only the shared TYPE's
+        // declared array bound grows (and that .fbt is already deploy-patched on
+        // both paths). ~26 bytes/row, so 20->50 adds <1 KB per Process instance.
+        public const int RecipeArraySize = 50;
+
         // Motion-in-progress verbs per the Phase-2 spec. "checking" included
         // pragmatically because PartChecking represents Checker descending in
         // the SMC rig.
@@ -192,16 +211,13 @@ namespace CodeGen.Translation
                         break;
 
                     case ClassKind.End:
-                        // Genuine end-of-process state from Control.xml (no transition).
-                        // Becomes part of the recipe but the appended final END below is
-                        // what the engine actually halts on. (We could fold this into the
-                        // appended END but kept distinct for fixture-fidelity.)
-                        arrays.StepType.Add(9);
-                        arrays.CmdTargetName.Add(string.Empty);
-                        arrays.CmdStateArr.Add(0);
-                        arrays.Wait1Id.Add(0);
-                        arrays.Wait1State.Add(0);
-                        arrays.NextStep.Add(0);
+                        // Unreachable: terminal states are now RowCount=0 (see
+                        // ClassifyState) and skipped by the `c.RowCount == 0`
+                        // guard above, so no in-loop END is ever emitted. The
+                        // single END lives only at the appended final row;
+                        // terminals route to it via the fall-forward map.
+                        // (Previously this emitted StepType=9 mid-array, which
+                        // ValidateSingleEndMarker rejects.)
                         break;
                 }
             }
@@ -393,15 +409,16 @@ namespace CodeGen.Translation
             ValidateSingleEndMarker(arrays);
 
             // Recipe-length guard. The Process1_Generic.fbt / ProcessRuntime_
-            // Generic_v1.fbt recipe-array InputVars are ArraySize=20. EAE
-            // silently truncates an over-long array literal, so ProcessEngine
+            // Generic_v1.fbt recipe-array InputVars are ArraySize=RecipeArraySize.
+            // EAE silently truncates an over-long array literal, so ProcessEngine
             // would receive a partial recipe and stall on StepType=0 (Unknown
             // step). Refuse to emit rather than ship a truncated recipe.
-            if (arrays.StepType.Count > 20)
+            if (arrays.StepType.Count > RecipeArraySize)
                 throw new InvalidOperationException(
                     $"[Recipe] Recipe length {arrays.StepType.Count} exceeds template " +
-                    "ArraySize 20, bump ArraySize in both Process1_Generic.fbt and " +
-                    "ProcessRuntime_Generic_v1.fbt");
+                    $"ArraySize {RecipeArraySize}. Raise ProcessRecipeArrayGenerator" +
+                    ".RecipeArraySize — it drives both Process1_Generic.fbt and " +
+                    "ProcessRuntime_Generic_v1.fbt via PatchProcess1RecipeArraySize.");
 
             // Render the FINAL serialised recipe as a one-line narrative for
             // the .syslay top comment (Defect 3: operator-verifiable ordering).
@@ -530,6 +547,16 @@ namespace CodeGen.Translation
                     fallForward[s.StateID] = stateIdToFirstRow[s.StateID];
                     continue;
                 }
+                // Terminal (End) state — route straight to the single appended
+                // final END so execution HALTS here, preserving the original
+                // in-loop-END "halt at terminal" semantics now that END is
+                // centralised at finalEndIndex. (Distinct from an out-of-scope
+                // skip, which falls forward to the next surviving row below.)
+                if (classifications[i].Kind == ClassKind.End)
+                {
+                    fallForward[s.StateID] = finalEndIndex;
+                    continue;
+                }
                 // Skipped — walk forward looking for the next surviving state.
                 int target = finalEndIndex;
                 for (int j = i + 1; j < states.Count; j++)
@@ -554,7 +581,7 @@ namespace CodeGen.Translation
         {
             MotionPair,             // RowCount=2 (CMD then WAIT)
             SettledWait,            // RowCount=1 (single WAIT)
-            End,                    // RowCount=1 (genuine end-of-process state from Control.xml)
+            End,                    // RowCount=0 (terminal state — emits NO in-loop END; routes to the single appended final END)
             Skipped,                // RowCount=0 — every condition out of scope; row dropped entirely
         }
 
@@ -592,9 +619,14 @@ namespace CodeGen.Translation
             var trans = state.Transitions.FirstOrDefault();
             var allConds = trans?.Conditions ?? new List<VueOneCondition>();
 
-            // No transition → END row.
+            // No transition → terminal state. RowCount=0: emit NO in-loop END
+            // row. Centralised-END design (ValidateSingleEndMarker) allows
+            // StepType=9 ONLY at the single appended final row; a terminal's
+            // predecessors are routed to that final END via the fall-forward map
+            // (see BuildFallForwardMap), preserving "halt at terminal" without a
+            // mid-array END.
             if (trans == null)
-                return new StateClassification { Kind = ClassKind.End, RowCount = 1 };
+                return new StateClassification { Kind = ClassKind.End, RowCount = 0 };
 
             // Find the FIRST condition whose ComponentID is in the scoped registry.
             // Conditions on out-of-scope components are recorded in SkippedConditions
@@ -633,9 +665,11 @@ namespace CodeGen.Translation
                         "row dropped from recipe; downstream NextStep pointers will skip past it.");
                     return new StateClassification { Kind = ClassKind.Skipped, RowCount = 0 };
                 }
-                // Genuine no-transition state. Truly the end of this Process — emit
-                // a real END row.
-                return new StateClassification { Kind = ClassKind.End, RowCount = 1 };
+                // Genuine no-transition state. Truly the end of this Process.
+                // RowCount=0: no in-loop END — predecessors route to the single
+                // appended final END via the fall-forward map (centralised-END
+                // invariant; see the trans==null branch above).
+                return new StateClassification { Kind = ClassKind.End, RowCount = 0 };
             }
 
             var inScopeTarget = LookupComponent(cond.ComponentID, allComponents);
