@@ -321,13 +321,10 @@ namespace MapperUI
 
 
             this.btnIO.Visible = false;
-            this.btnIO.Click += new System.EventHandler(this.btnIO_Click);
 
             this.btnGenerateTemplate.Visible = false;
-            this.btnGenerateTemplate.Click += new System.EventHandler(this.btnGenerateTemplate_Click);
 
             this.btnADP.Visible = false;
-            this.btnADP.Click += new System.EventHandler(this.btnADP_Click);
 
             this.btnGenerate.Visible = false;
             this.btnGenerate.Click += new System.EventHandler(this.btnGenerate_Click);
