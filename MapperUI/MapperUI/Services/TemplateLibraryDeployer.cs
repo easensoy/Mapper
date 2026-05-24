@@ -131,6 +131,15 @@ namespace MapperUI.Services
             PatchSensorBoolCatDstQi(eaeProjectDir, result);
             PatchFiveStateActuatorCatQi(eaeProjectDir, result);
             PatchFiveStateActuatorModeInitialValue(eaeProjectDir, result);
+            // Simulator-only interface reduction. Bidirectional normalizer:
+            // when SimulatorFullSystem is on it bakes the two constant interlock
+            // targets onto the embedded InterlockManager FB and removes their
+            // wired boundary inputs (17→15); when off it restores the wired
+            // inputs. MUST run every deploy because ExtractToEae/CopyDirToEae are
+            // copy-if-absent, so the deployed CAT persists across runs and both
+            // buttons share it. Pairs with BuildActuatorParameters'
+            // dropInterlockConstants gate (same cfg.SimulatorFullSystem flag).
+            NormalizeFiveStateInterlockConstants(eaeProjectDir, cfg.SimulatorFullSystem, result);
             PatchProcess1RecipeArraySize(eaeProjectDir, result);
             PatchProcessNameStringSize(eaeProjectDir, result);
             // PatchSevenStateActuatorDataDriven removed — see CatToBasics comment.
@@ -157,6 +166,29 @@ namespace MapperUI.Services
                     stateDataSource: "FB1.Status",
                     initSource: "StateHandling.INITO", cfg, result);
             }
+
+            // Simulator interface reduction (the 4 Rule arrays -> 1 RuleTable).
+            // The struct-literal capability was proven by the StructLiteralProbe
+            // spike (now removed). Deploy the InterlockRule datatype on the sim
+            // path, then run the two bidirectional normalizers that reshape the
+            // CAT and the CommonInterlockEvaluator Basic FB: reduce==true (sim)
+            // collapses the 4 arrays to one RuleTable; reduce==false (hardware)
+            // restores the 4 arrays — so the byte-identical hardware slice is
+            // untouched. Same cfg.SimulatorFullSystem flag drives the Mapper's
+            // RuleTable emission (BuildActuatorParameters.dropInterlockConstants).
+            if (cfg.SimulatorFullSystem)
+                DeployInterlockRuleDatatype(eaeProjectDir, result);
+            NormalizeFiveStateRuleArrays(eaeProjectDir, cfg.SimulatorFullSystem, result);
+            NormalizeCommonInterlockEvaluatorRules(eaeProjectDir, cfg.SimulatorFullSystem, result);
+            NormalizeFiveStateFaultEnables(eaeProjectDir, cfg.SimulatorFullSystem, result);
+            // Process FB recipe struct: collapse the 6 overlapping recipe arrays
+            // into one Recipe : ARRAY OF RecipeStep on Process1_Generic + the
+            // ProcessRuntime engine (datatype, NOT a new FB). Same flag, same
+            // bidirectional pattern as RuleTable; hardware keeps the 6 arrays.
+            if (cfg.SimulatorFullSystem)
+                DeployRecipeStepDatatype(eaeProjectDir, result);
+            NormalizeProcess1RecipeArrays(eaeProjectDir, cfg.SimulatorFullSystem, result);
+            NormalizeProcessRuntimeRecipeArrays(eaeProjectDir, cfg.SimulatorFullSystem, result);
 
             GenerateCfgFiles(eaeProjectDir, result);
             RegisterInDfbproj(eaeProjectDir, result);
@@ -473,22 +505,28 @@ namespace MapperUI.Services
                     if (root == null) return;
                     System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
 
+                    // Single source of truth for the recipe-array capacity lives
+                    // in CodeGen so the deployed .fbt ArraySize and the recipe-
+                    // length guard in ProcessRecipeArrayGenerator.Generate() can
+                    // never drift apart.
+                    var target = CodeGen.Translation.ProcessRecipeArrayGenerator
+                        .RecipeArraySize.ToString();
                     int changed = 0;
                     foreach (var vd in root.Descendants(ns + "VarDeclaration"))
                     {
                         var nm = (string?)vd.Attribute("Name") ?? string.Empty;
                         if (Array.IndexOf(recipeArrays, nm) < 0) continue;
-                        if ((string?)vd.Attribute("ArraySize") == "20") continue;
-                        vd.SetAttributeValue("ArraySize", "20");
+                        if ((string?)vd.Attribute("ArraySize") == target) continue;
+                        vd.SetAttributeValue("ArraySize", target);
                         changed++;
                     }
                     if (changed > 0)
                     {
                         doc.Save(fbtPath);
                         result.PatchesApplied.Add(
-                            $"{label}: forced ArraySize=20 on {changed} recipe array InputVar(s)");
+                            $"{label}: forced ArraySize={target} on {changed} recipe array InputVar(s)");
                         MapperLogger.Info(
-                            $"[Deploy] {label}: recipe arrays ArraySize -> 20 ({changed} changed)");
+                            $"[Deploy] {label}: recipe arrays ArraySize -> {target} ({changed} changed)");
                     }
                 }
                 catch (Exception ex)
@@ -615,6 +653,792 @@ namespace MapperUI.Services
             catch (Exception ex)
             {
                 result.Warnings.Add($"MqttStateFormatter deploy failed: {ex.Message}");
+            }
+        }
+
+        // Embedded InterlockRule datatype (4 INT fields) for the simulator
+        // interface reduction — the 4 parallel Rule arrays collapse to one
+        // RuleTable : InterlockRule[10]. Hand-authored WITHOUT EAE's nxtDataType
+        // signature; verified accepted by the StructLiteralProbe spike (EAE
+        // regenerates the signature on load).
+        const string InterlockRuleDt =
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
+            "<!DOCTYPE DataType SYSTEM \"../LibraryElement.dtd\">\r\n" +
+            "<DataType Namespace=\"Main\" Name=\"InterlockRule\" Comment=\"One interlock rule as a struct: FromState/ToState/SourceID/BlockedState\">\r\n" +
+            "  <Identification Standard=\"1131-3\" />\r\n" +
+            "  <VersionInfo Organization=\"WMG\" Version=\"0.1\" Author=\"easensoy\" Date=\"5/24/2026\" Remarks=\"array-of-struct packaging of the 4 Rule arrays\" />\r\n" +
+            "  <CompilerInfo />\r\n" +
+            "  <StructuredType>\r\n" +
+            "    <VarDeclaration Name=\"FromState\" Type=\"INT\" />\r\n" +
+            "    <VarDeclaration Name=\"ToState\" Type=\"INT\" />\r\n" +
+            "    <VarDeclaration Name=\"SourceID\" Type=\"INT\" />\r\n" +
+            "    <VarDeclaration Name=\"BlockedState\" Type=\"INT\" />\r\n" +
+            "  </StructuredType>\r\n" +
+            "</DataType>";
+
+        /// <summary>
+        /// Deploy the InterlockRule datatype (simulator path only) and register
+        /// it, so EAE resolves the <c>RuleTable : InterlockRule[10]</c> inputs the
+        /// normalizers add to Five_State_Actuator_CAT and CommonInterlockEvaluator.
+        /// Idempotent (copy-if-absent + dedup registration).
+        /// </summary>
+        static void DeployInterlockRuleDatatype(string eaeProjectDir, DeployResult result)
+        {
+            try
+            {
+                var dtDir = Path.Combine(eaeProjectDir, "IEC61499", "DataType");
+                Directory.CreateDirectory(dtDir);
+                var dtPath = Path.Combine(dtDir, "InterlockRule.dt");
+                if (!File.Exists(dtPath)) File.WriteAllText(dtPath, InterlockRuleDt);
+                if (!result.DataTypesDeployed.Contains("InterlockRule"))
+                    result.DataTypesDeployed.Add("InterlockRule");
+                result.PatchesApplied.Add("InterlockRule.dt deployed + registered (sim RuleTable struct)");
+                MapperLogger.Info("[Deploy] InterlockRule.dt written + registered");
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"InterlockRule.dt deploy failed: {ex.Message}");
+            }
+        }
+
+        // The four parallel interlock-rule arrays that collapse into one
+        // RuleTable : InterlockRule[10]. Order matches struct field order.
+        static readonly string[] RuleArrayNames =
+            { "RuleFromState", "RuleToState", "RuleSourceID", "RuleBlockedState" };
+        static readonly Dictionary<string, string> RuleArrayToField = new()
+        {
+            ["RuleFromState"] = "FromState",
+            ["RuleToState"] = "ToState",
+            ["RuleSourceID"] = "SourceID",
+            ["RuleBlockedState"] = "BlockedState",
+        };
+
+        // Remove matching elements via instance Remove() (no
+        // IEnumerable<XElement>.Remove() extension — this file has no
+        // `using System.Xml.Linq`). Returns true if anything was removed.
+        static bool RemoveElems(IEnumerable<System.Xml.Linq.XElement>? src,
+            Func<System.Xml.Linq.XElement, bool> pred)
+        {
+            if (src == null) return false;
+            var hits = src.Where(pred).ToList();
+            foreach (var h in hits) h.Remove();
+            return hits.Count > 0;
+        }
+
+        /// <summary>
+        /// Simulator interface reduction on Five_State_Actuator_CAT: collapse the
+        /// four parallel Rule arrays (face InputVar + INIT With + boundary Input +
+        /// DataConnection to InterlockManager) into a single
+        /// RuleTable : InterlockRule[10]. Bidirectional + idempotent like
+        /// NormalizeFiveStateInterlockConstants (deployer is copy-if-absent, so the
+        /// .fbt persists and must be reshaped to match the flag each deploy).
+        /// reduce==true collapses to RuleTable; reduce==false restores the four
+        /// arrays so the byte-identical hardware slice is untouched.
+        /// </summary>
+        static void NormalizeFiveStateRuleArrays(
+            string eaeProjectDir, bool reduce, DeployResult result)
+        {
+            var fbt = Directory.EnumerateFiles(
+                    Path.Combine(eaeProjectDir, "IEC61499"),
+                    "Five_State_Actuator_CAT.fbt", SearchOption.AllDirectories)
+                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
+                ?? string.Empty;
+            if (string.IsNullOrEmpty(fbt))
+            {
+                result.Warnings.Add("Five_State_Actuator_CAT.fbt not found; RuleTable normalize skipped.");
+                return;
+            }
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+
+                var iface = root.Element(ns + "InterfaceList");
+                var net = root.Element(ns + "FBNetwork");
+                if (iface == null || net == null)
+                {
+                    result.Warnings.Add("Five_State_Actuator_CAT.fbt: missing InterfaceList/FBNetwork; RuleTable normalize skipped.");
+                    return;
+                }
+                var inputVars = iface.Element(ns + "InputVars");
+                var initEvent = iface.Element(ns + "EventInputs")?.Elements(ns + "Event")
+                    .FirstOrDefault(e => (string?)e.Attribute("Name") == "INIT");
+                var dataConns = net.Element(ns + "DataConnections");
+
+                bool changed = false;
+
+                if (reduce)
+                {
+                    foreach (var a in RuleArrayNames)
+                    {
+                        changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == a);
+                        changed |= RemoveElems(initEvent?.Elements(ns + "With"), w => (string?)w.Attribute("Var") == a);
+                        changed |= RemoveElems(net.Elements(ns + "Input"), i => (string?)i.Attribute("Name") == a);
+                        changed |= RemoveElems(dataConns?.Elements(ns + "Connection"), c => (string?)c.Attribute("Source") == a);
+                    }
+                    if (inputVars != null && !inputVars.Elements(ns + "VarDeclaration").Any(v => (string?)v.Attribute("Name") == "RuleTable"))
+                    {
+                        var rc = inputVars.Elements(ns + "VarDeclaration").FirstOrDefault(v => (string?)v.Attribute("Name") == "RuleCount");
+                        var rt = new System.Xml.Linq.XElement(ns + "VarDeclaration",
+                            new System.Xml.Linq.XAttribute("Name", "RuleTable"),
+                            new System.Xml.Linq.XAttribute("Type", "InterlockRule"),
+                            new System.Xml.Linq.XAttribute("ArraySize", "10"),
+                            new System.Xml.Linq.XAttribute("Namespace", "Main"));
+                        if (rc != null) rc.AddBeforeSelf(rt); else inputVars.Add(rt);
+                        changed = true;
+                    }
+                    if (initEvent != null && !initEvent.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == "RuleTable"))
+                    {
+                        initEvent.Add(new System.Xml.Linq.XElement(ns + "With", new System.Xml.Linq.XAttribute("Var", "RuleTable")));
+                        changed = true;
+                    }
+                    if (!net.Elements(ns + "Input").Any(i => (string?)i.Attribute("Name") == "RuleTable"))
+                    {
+                        var pin = new System.Xml.Linq.XElement(ns + "Input",
+                            new System.Xml.Linq.XAttribute("Name", "RuleTable"),
+                            new System.Xml.Linq.XAttribute("x", "1320"),
+                            new System.Xml.Linq.XAttribute("y", "1852"),
+                            new System.Xml.Linq.XAttribute("Type", "Data"));
+                        var lastInput = net.Elements(ns + "Input").LastOrDefault();
+                        if (lastInput != null) lastInput.AddAfterSelf(pin); else net.Add(pin);
+                        changed = true;
+                    }
+                    if (dataConns != null && !dataConns.Elements(ns + "Connection").Any(c => (string?)c.Attribute("Source") == "RuleTable"))
+                    {
+                        dataConns.Add(new System.Xml.Linq.XElement(ns + "Connection",
+                            new System.Xml.Linq.XAttribute("Source", "RuleTable"),
+                            new System.Xml.Linq.XAttribute("Destination", "InterlockManager.RuleTable")));
+                        changed = true;
+                    }
+                }
+                else
+                {
+                    changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == "RuleTable");
+                    changed |= RemoveElems(initEvent?.Elements(ns + "With"), w => (string?)w.Attribute("Var") == "RuleTable");
+                    changed |= RemoveElems(net.Elements(ns + "Input"), i => (string?)i.Attribute("Name") == "RuleTable");
+                    changed |= RemoveElems(dataConns?.Elements(ns + "Connection"), c => (string?)c.Attribute("Source") == "RuleTable");
+
+                    var coords = new Dictionary<string, (string X, string Y)>
+                    {
+                        ["RuleFromState"] = ("1320", "2052"),
+                        ["RuleToState"] = ("1320", "1752"),
+                        ["RuleSourceID"] = ("1300", "1852"),
+                        ["RuleBlockedState"] = ("1320", "1952"),
+                    };
+                    foreach (var a in RuleArrayNames)
+                    {
+                        if (inputVars != null && !inputVars.Elements(ns + "VarDeclaration").Any(v => (string?)v.Attribute("Name") == a))
+                        {
+                            inputVars.Add(new System.Xml.Linq.XElement(ns + "VarDeclaration",
+                                new System.Xml.Linq.XAttribute("Name", a),
+                                new System.Xml.Linq.XAttribute("Type", "INT"),
+                                new System.Xml.Linq.XAttribute("ArraySize", "10")));
+                            changed = true;
+                        }
+                        if (initEvent != null && !initEvent.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == a))
+                        {
+                            initEvent.Add(new System.Xml.Linq.XElement(ns + "With", new System.Xml.Linq.XAttribute("Var", a)));
+                            changed = true;
+                        }
+                        if (!net.Elements(ns + "Input").Any(i => (string?)i.Attribute("Name") == a))
+                        {
+                            var (x, y) = coords[a];
+                            var pin = new System.Xml.Linq.XElement(ns + "Input",
+                                new System.Xml.Linq.XAttribute("Name", a),
+                                new System.Xml.Linq.XAttribute("x", x),
+                                new System.Xml.Linq.XAttribute("y", y),
+                                new System.Xml.Linq.XAttribute("Type", "Data"));
+                            var lastInput = net.Elements(ns + "Input").LastOrDefault();
+                            if (lastInput != null) lastInput.AddAfterSelf(pin); else net.Add(pin);
+                            changed = true;
+                        }
+                        if (dataConns != null && !dataConns.Elements(ns + "Connection").Any(c => (string?)c.Attribute("Source") == a))
+                        {
+                            dataConns.Add(new System.Xml.Linq.XElement(ns + "Connection",
+                                new System.Xml.Linq.XAttribute("Source", a),
+                                new System.Xml.Linq.XAttribute("Destination", "InterlockManager." + a)));
+                            changed = true;
+                        }
+                    }
+                }
+
+                if (changed)
+                {
+                    doc.Save(fbt);
+                    result.PatchesApplied.Add(reduce
+                        ? "Five_State_Actuator_CAT: 4 Rule arrays -> RuleTable (sim interface reduced)"
+                        : "Five_State_Actuator_CAT: RuleTable -> 4 Rule arrays (hardware interface)");
+                    MapperLogger.Info($"[Deploy] Five_State_Actuator_CAT RuleTable normalize: reduce={reduce}");
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"Five_State_Actuator_CAT RuleTable normalize failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Simulator interface reduction on the CommonInterlockEvaluator Basic FB:
+        /// collapse the four Rule arrays into RuleTable : InterlockRule[10] across
+        /// the InputVars, the three event &lt;With&gt; lists (REQ_WORK1/WORK2/HOME),
+        /// AND the Evaluate ST (RuleFromState[i] -> RuleTable[i].FromState, etc).
+        /// Bidirectional + idempotent. reduce==false restores the four arrays so
+        /// hardware is byte-identical. Logic is unchanged either way — the same
+        /// numbers feed the Evaluate loop, just read as struct fields.
+        /// </summary>
+        static void NormalizeCommonInterlockEvaluatorRules(
+            string eaeProjectDir, bool reduce, DeployResult result)
+        {
+            var fbt = Directory.EnumerateFiles(
+                    Path.Combine(eaeProjectDir, "IEC61499"),
+                    "CommonInterlockEvaluator.fbt", SearchOption.AllDirectories)
+                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
+                ?? string.Empty;
+            if (string.IsNullOrEmpty(fbt))
+            {
+                result.Warnings.Add("CommonInterlockEvaluator.fbt not found; RuleTable normalize skipped.");
+                return;
+            }
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+
+                var iface = root.Element(ns + "InterfaceList");
+                var basic = root.Element(ns + "BasicFB");
+                if (iface == null || basic == null)
+                {
+                    result.Warnings.Add("CommonInterlockEvaluator.fbt: missing InterfaceList/BasicFB; RuleTable normalize skipped.");
+                    return;
+                }
+                var inputVars = iface.Element(ns + "InputVars");
+                var eventInputs = iface.Element(ns + "EventInputs");
+
+                bool changed = false;
+
+                if (reduce)
+                {
+                    foreach (var a in RuleArrayNames)
+                        changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == a);
+                    if (inputVars != null && !inputVars.Elements(ns + "VarDeclaration").Any(v => (string?)v.Attribute("Name") == "RuleTable"))
+                    {
+                        var rc = inputVars.Elements(ns + "VarDeclaration").FirstOrDefault(v => (string?)v.Attribute("Name") == "RuleCount");
+                        var rt = new System.Xml.Linq.XElement(ns + "VarDeclaration",
+                            new System.Xml.Linq.XAttribute("Name", "RuleTable"),
+                            new System.Xml.Linq.XAttribute("Type", "InterlockRule"),
+                            new System.Xml.Linq.XAttribute("ArraySize", "10"),
+                            new System.Xml.Linq.XAttribute("Namespace", "Main"));
+                        if (rc != null) rc.AddAfterSelf(rt); else inputVars.Add(rt);
+                        changed = true;
+                    }
+                    foreach (var ev in eventInputs?.Elements(ns + "Event") ?? Enumerable.Empty<System.Xml.Linq.XElement>())
+                    {
+                        if (!ev.Elements(ns + "With").Any(w => RuleArrayNames.Contains((string?)w.Attribute("Var")))) continue;
+                        foreach (var a in RuleArrayNames)
+                            changed |= RemoveElems(ev.Elements(ns + "With"), w => (string?)w.Attribute("Var") == a);
+                        if (!ev.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == "RuleTable"))
+                        {
+                            var rcWith = ev.Elements(ns + "With").FirstOrDefault(w => (string?)w.Attribute("Var") == "RuleCount");
+                            var rtWith = new System.Xml.Linq.XElement(ns + "With", new System.Xml.Linq.XAttribute("Var", "RuleTable"));
+                            if (rcWith != null) rcWith.AddAfterSelf(rtWith); else ev.Add(rtWith);
+                            changed = true;
+                        }
+                    }
+                }
+                else
+                {
+                    changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == "RuleTable");
+                    if (inputVars != null)
+                        foreach (var a in RuleArrayNames)
+                            if (!inputVars.Elements(ns + "VarDeclaration").Any(v => (string?)v.Attribute("Name") == a))
+                            {
+                                inputVars.Add(new System.Xml.Linq.XElement(ns + "VarDeclaration",
+                                    new System.Xml.Linq.XAttribute("ArraySize", "10"),
+                                    new System.Xml.Linq.XAttribute("Name", a),
+                                    new System.Xml.Linq.XAttribute("Type", "INT")));
+                                changed = true;
+                            }
+                    foreach (var ev in eventInputs?.Elements(ns + "Event") ?? Enumerable.Empty<System.Xml.Linq.XElement>())
+                    {
+                        if (!ev.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == "RuleTable")) continue;
+                        changed |= RemoveElems(ev.Elements(ns + "With"), w => (string?)w.Attribute("Var") == "RuleTable");
+                        foreach (var a in RuleArrayNames)
+                            if (!ev.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == a))
+                            {
+                                ev.Add(new System.Xml.Linq.XElement(ns + "With", new System.Xml.Linq.XAttribute("Var", a)));
+                                changed = true;
+                            }
+                    }
+                }
+
+                // Evaluate ST: swap array indexing <-> struct member access.
+                var stEl = basic.Elements(ns + "Algorithm")
+                    .FirstOrDefault(a => (string?)a.Attribute("Name") == "Evaluate")?
+                    .Element(ns + "ST");
+                if (stEl != null)
+                {
+                    var st = stEl.Value;
+                    var before = st;
+                    foreach (var a in RuleArrayNames)
+                    {
+                        var arr = a + "[i]";
+                        var str = "RuleTable[i]." + RuleArrayToField[a];
+                        st = reduce ? st.Replace(arr, str) : st.Replace(str, arr);
+                    }
+                    if (st != before)
+                    {
+                        stEl.ReplaceNodes(new System.Xml.Linq.XCData(st));
+                        changed = true;
+                    }
+                }
+
+                if (changed)
+                {
+                    doc.Save(fbt);
+                    result.PatchesApplied.Add(reduce
+                        ? "CommonInterlockEvaluator: 4 Rule arrays -> RuleTable + Evaluate ST rewritten (sim)"
+                        : "CommonInterlockEvaluator: RuleTable -> 4 Rule arrays + Evaluate ST restored (hardware)");
+                    MapperLogger.Info($"[Deploy] CommonInterlockEvaluator RuleTable normalize: reduce={reduce}");
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"CommonInterlockEvaluator RuleTable normalize failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Simulator interface reduction on Five_State_Actuator_CAT: drop the two
+        /// derived fault-enable inputs (enableToWorkFaultTimeout /
+        /// enableToHomeFaultTimeout). The Mapper always sets each equal to its
+        /// sensor-fitted flag, and the CAT's FB17/FB14 already AND the enable with
+        /// the SAME sensor-fitted input — so re-pointing FB17.IN2/FB14.IN2 at the
+        /// sensor-fitted lines gives AND(fitted, fitted) = fitted: identical
+        /// behaviour, two fewer pins, no new FB and no event-timing change.
+        /// Bidirectional + idempotent. reduce==false restores the inputs so the
+        /// hardware path is byte-identical.
+        /// </summary>
+        static void NormalizeFiveStateFaultEnables(
+            string eaeProjectDir, bool reduce, DeployResult result)
+        {
+            var map = new[]
+            {
+                new { Enable = "enableToWorkFaultTimeout", Dest = "FB17.IN2", Fitted = "WorkSensorFitted", X = "1280", Y = "5772" },
+                new { Enable = "enableToHomeFaultTimeout", Dest = "FB14.IN2", Fitted = "HomeSensorFitted", X = "1260", Y = "5292" },
+            };
+
+            var fbt = Directory.EnumerateFiles(
+                    Path.Combine(eaeProjectDir, "IEC61499"),
+                    "Five_State_Actuator_CAT.fbt", SearchOption.AllDirectories)
+                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
+                ?? string.Empty;
+            if (string.IsNullOrEmpty(fbt))
+            {
+                result.Warnings.Add("Five_State_Actuator_CAT.fbt not found; fault-enable normalize skipped.");
+                return;
+            }
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+
+                var iface = root.Element(ns + "InterfaceList");
+                var net = root.Element(ns + "FBNetwork");
+                if (iface == null || net == null)
+                {
+                    result.Warnings.Add("Five_State_Actuator_CAT.fbt: missing InterfaceList/FBNetwork; fault-enable normalize skipped.");
+                    return;
+                }
+                var inputVars = iface.Element(ns + "InputVars");
+                var initEvent = iface.Element(ns + "EventInputs")?.Elements(ns + "Event")
+                    .FirstOrDefault(e => (string?)e.Attribute("Name") == "INIT");
+                var dataConns = net.Element(ns + "DataConnections");
+
+                bool changed = false;
+
+                foreach (var m in map)
+                {
+                    // Re-point the AND-gate IN2: reduce -> sensor-fitted, restore -> enable input.
+                    var wanted = reduce ? m.Fitted : m.Enable;
+                    var conn = dataConns?.Elements(ns + "Connection")
+                        .FirstOrDefault(c => (string?)c.Attribute("Destination") == m.Dest);
+                    if (conn != null && (string?)conn.Attribute("Source") != wanted)
+                    {
+                        conn.SetAttributeValue("Source", wanted);
+                        changed = true;
+                    }
+
+                    if (reduce)
+                    {
+                        changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"),
+                            v => (string?)v.Attribute("Name") == m.Enable);
+                        changed |= RemoveElems(initEvent?.Elements(ns + "With"),
+                            w => (string?)w.Attribute("Var") == m.Enable);
+                        changed |= RemoveElems(net.Elements(ns + "Input"),
+                            i => (string?)i.Attribute("Name") == m.Enable);
+                    }
+                    else
+                    {
+                        if (inputVars != null &&
+                            !inputVars.Elements(ns + "VarDeclaration").Any(v => (string?)v.Attribute("Name") == m.Enable))
+                        {
+                            inputVars.Add(new System.Xml.Linq.XElement(ns + "VarDeclaration",
+                                new System.Xml.Linq.XAttribute("Name", m.Enable),
+                                new System.Xml.Linq.XAttribute("Type", "BOOL")));
+                            changed = true;
+                        }
+                        if (initEvent != null &&
+                            !initEvent.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == m.Enable))
+                        {
+                            initEvent.Add(new System.Xml.Linq.XElement(ns + "With",
+                                new System.Xml.Linq.XAttribute("Var", m.Enable)));
+                            changed = true;
+                        }
+                        if (!net.Elements(ns + "Input").Any(i => (string?)i.Attribute("Name") == m.Enable))
+                        {
+                            var pin = new System.Xml.Linq.XElement(ns + "Input",
+                                new System.Xml.Linq.XAttribute("Name", m.Enable),
+                                new System.Xml.Linq.XAttribute("x", m.X),
+                                new System.Xml.Linq.XAttribute("y", m.Y),
+                                new System.Xml.Linq.XAttribute("Type", "Data"));
+                            var lastInput = net.Elements(ns + "Input").LastOrDefault();
+                            if (lastInput != null) lastInput.AddAfterSelf(pin); else net.Add(pin);
+                            changed = true;
+                        }
+                    }
+                }
+
+                if (changed)
+                {
+                    doc.Save(fbt);
+                    result.PatchesApplied.Add(reduce
+                        ? "Five_State_Actuator_CAT: fault-enable inputs derived from sensor-fitted (sim — 2 inputs removed)"
+                        : "Five_State_Actuator_CAT: fault-enable inputs restored as wired inputs (hardware)");
+                    MapperLogger.Info($"[Deploy] Five_State_Actuator_CAT fault-enable normalize: reduce={reduce}");
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"Five_State_Actuator_CAT fault-enable normalize failed: {ex.Message}");
+            }
+        }
+
+        // The six parallel recipe arrays that collapse into one Recipe : ARRAY OF
+        // RecipeStep. Struct field name == array name so the engine ST rewrite is
+        // a clean 1:1 ("StepType[CurrentStep]" -> "Recipe[CurrentStep].StepType").
+        static readonly (string Name, string Type)[] RecipeArrays = new[]
+        {
+            ("StepType", "INT"),
+            ("CmdTargetName", "STRING[15]"),
+            ("CmdStateArr", "INT"),
+            ("Wait1Id", "INT"),
+            ("Wait1State", "INT"),
+            ("NextStep", "INT"),
+        };
+
+        // Embedded RecipeStep datatype (one recipe row as a struct; mixed INT +
+        // STRING[15]). Hand-authored without nxtDataType — EAE regenerates it.
+        const string RecipeStepDt =
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
+            "<!DOCTYPE DataType SYSTEM \"../LibraryElement.dtd\">\r\n" +
+            "<DataType Namespace=\"Main\" Name=\"RecipeStep\" Comment=\"One recipe step as a struct: StepType/CmdTargetName/CmdStateArr/Wait1Id/Wait1State/NextStep\">\r\n" +
+            "  <Identification Standard=\"1131-3\" />\r\n" +
+            "  <VersionInfo Organization=\"WMG\" Version=\"0.1\" Author=\"easensoy\" Date=\"5/24/2026\" Remarks=\"array-of-struct packaging of the 6 recipe arrays\" />\r\n" +
+            "  <CompilerInfo />\r\n" +
+            "  <StructuredType>\r\n" +
+            "    <VarDeclaration Name=\"StepType\" Type=\"INT\" />\r\n" +
+            "    <VarDeclaration Name=\"CmdTargetName\" Type=\"STRING[15]\" />\r\n" +
+            "    <VarDeclaration Name=\"CmdStateArr\" Type=\"INT\" />\r\n" +
+            "    <VarDeclaration Name=\"Wait1Id\" Type=\"INT\" />\r\n" +
+            "    <VarDeclaration Name=\"Wait1State\" Type=\"INT\" />\r\n" +
+            "    <VarDeclaration Name=\"NextStep\" Type=\"INT\" />\r\n" +
+            "  </StructuredType>\r\n" +
+            "</DataType>";
+
+        /// <summary>
+        /// Deploy the RecipeStep datatype (simulator path) + register it, so EAE
+        /// resolves the Recipe : RecipeStep[] inputs the recipe normalizers add to
+        /// Process1_Generic and ProcessRuntime_Generic_v1. Idempotent.
+        /// </summary>
+        static void DeployRecipeStepDatatype(string eaeProjectDir, DeployResult result)
+        {
+            try
+            {
+                var dtDir = Path.Combine(eaeProjectDir, "IEC61499", "DataType");
+                Directory.CreateDirectory(dtDir);
+                var dtPath = Path.Combine(dtDir, "RecipeStep.dt");
+                if (!File.Exists(dtPath)) File.WriteAllText(dtPath, RecipeStepDt);
+                if (!result.DataTypesDeployed.Contains("RecipeStep"))
+                    result.DataTypesDeployed.Add("RecipeStep");
+                result.PatchesApplied.Add("RecipeStep.dt deployed + registered (sim Recipe struct)");
+                MapperLogger.Info("[Deploy] RecipeStep.dt written + registered");
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"RecipeStep.dt deploy failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Simulator interface reduction on Process1_Generic (composite): collapse
+        /// the 6 recipe arrays (face InputVar + INIT With + boundary Input +
+        /// DataConnection to ProcessEngine) into one Recipe : RecipeStep[].
+        /// Bidirectional + idempotent; reduce==false restores the 6 arrays.
+        /// </summary>
+        static void NormalizeProcess1RecipeArrays(
+            string eaeProjectDir, bool reduce, DeployResult result)
+        {
+            var fbt = Directory.EnumerateFiles(
+                    Path.Combine(eaeProjectDir, "IEC61499"),
+                    "Process1_Generic.fbt", SearchOption.AllDirectories)
+                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
+                ?? string.Empty;
+            if (string.IsNullOrEmpty(fbt))
+            {
+                result.Warnings.Add("Process1_Generic.fbt not found; recipe-struct normalize skipped.");
+                return;
+            }
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+
+                var iface = root.Element(ns + "InterfaceList");
+                var net = root.Element(ns + "FBNetwork");
+                if (iface == null || net == null)
+                {
+                    result.Warnings.Add("Process1_Generic.fbt: missing InterfaceList/FBNetwork; recipe normalize skipped.");
+                    return;
+                }
+                var inputVars = iface.Element(ns + "InputVars");
+                var initEvent = iface.Element(ns + "EventInputs")?.Elements(ns + "Event")
+                    .FirstOrDefault(e => (string?)e.Attribute("Name") == "INIT");
+                var dataConns = net.Element(ns + "DataConnections");
+                var size = CodeGen.Translation.ProcessRecipeArrayGenerator.RecipeArraySize.ToString();
+
+                bool changed = false;
+
+                if (reduce)
+                {
+                    foreach (var (nm, _) in RecipeArrays)
+                    {
+                        changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == nm);
+                        changed |= RemoveElems(initEvent?.Elements(ns + "With"), w => (string?)w.Attribute("Var") == nm);
+                        changed |= RemoveElems(net.Elements(ns + "Input"), i => (string?)i.Attribute("Name") == nm);
+                        changed |= RemoveElems(dataConns?.Elements(ns + "Connection"), c => (string?)c.Attribute("Source") == nm);
+                    }
+                    if (inputVars != null && !inputVars.Elements(ns + "VarDeclaration").Any(v => (string?)v.Attribute("Name") == "Recipe"))
+                    {
+                        inputVars.Add(new System.Xml.Linq.XElement(ns + "VarDeclaration",
+                            new System.Xml.Linq.XAttribute("Name", "Recipe"),
+                            new System.Xml.Linq.XAttribute("Type", "RecipeStep"),
+                            new System.Xml.Linq.XAttribute("ArraySize", size),
+                            new System.Xml.Linq.XAttribute("Namespace", "Main")));
+                        changed = true;
+                    }
+                    if (initEvent != null && !initEvent.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == "Recipe"))
+                    { initEvent.Add(new System.Xml.Linq.XElement(ns + "With", new System.Xml.Linq.XAttribute("Var", "Recipe"))); changed = true; }
+                    if (!net.Elements(ns + "Input").Any(i => (string?)i.Attribute("Name") == "Recipe"))
+                    {
+                        var pin = new System.Xml.Linq.XElement(ns + "Input",
+                            new System.Xml.Linq.XAttribute("Name", "Recipe"),
+                            new System.Xml.Linq.XAttribute("x", "300"),
+                            new System.Xml.Linq.XAttribute("y", "1300"),
+                            new System.Xml.Linq.XAttribute("Type", "Data"));
+                        var last = net.Elements(ns + "Input").LastOrDefault();
+                        if (last != null) last.AddAfterSelf(pin); else net.Add(pin);
+                        changed = true;
+                    }
+                    if (dataConns != null && !dataConns.Elements(ns + "Connection").Any(c => (string?)c.Attribute("Source") == "Recipe"))
+                    {
+                        dataConns.Add(new System.Xml.Linq.XElement(ns + "Connection",
+                            new System.Xml.Linq.XAttribute("Source", "Recipe"),
+                            new System.Xml.Linq.XAttribute("Destination", "ProcessEngine.Recipe")));
+                        changed = true;
+                    }
+                }
+                else
+                {
+                    changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == "Recipe");
+                    changed |= RemoveElems(initEvent?.Elements(ns + "With"), w => (string?)w.Attribute("Var") == "Recipe");
+                    changed |= RemoveElems(net.Elements(ns + "Input"), i => (string?)i.Attribute("Name") == "Recipe");
+                    changed |= RemoveElems(dataConns?.Elements(ns + "Connection"), c => (string?)c.Attribute("Source") == "Recipe");
+                    var coords = new Dictionary<string, (string X, string Y)>
+                    {
+                        ["StepType"] = ("300", "1300"), ["CmdTargetName"] = ("300", "1750"),
+                        ["CmdStateArr"] = ("300", "2200"), ["Wait1Id"] = ("300", "2650"),
+                        ["Wait1State"] = ("300", "3100"), ["NextStep"] = ("300", "3550"),
+                    };
+                    foreach (var (nm, ty) in RecipeArrays)
+                    {
+                        if (inputVars != null && !inputVars.Elements(ns + "VarDeclaration").Any(v => (string?)v.Attribute("Name") == nm))
+                        {
+                            inputVars.Add(new System.Xml.Linq.XElement(ns + "VarDeclaration",
+                                new System.Xml.Linq.XAttribute("Name", nm),
+                                new System.Xml.Linq.XAttribute("Type", ty),
+                                new System.Xml.Linq.XAttribute("ArraySize", size)));
+                            changed = true;
+                        }
+                        if (initEvent != null && !initEvent.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == nm))
+                        { initEvent.Add(new System.Xml.Linq.XElement(ns + "With", new System.Xml.Linq.XAttribute("Var", nm))); changed = true; }
+                        if (!net.Elements(ns + "Input").Any(i => (string?)i.Attribute("Name") == nm))
+                        {
+                            var (x, y) = coords[nm];
+                            var pin = new System.Xml.Linq.XElement(ns + "Input",
+                                new System.Xml.Linq.XAttribute("Name", nm),
+                                new System.Xml.Linq.XAttribute("x", x),
+                                new System.Xml.Linq.XAttribute("y", y),
+                                new System.Xml.Linq.XAttribute("Type", "Data"));
+                            var last = net.Elements(ns + "Input").LastOrDefault();
+                            if (last != null) last.AddAfterSelf(pin); else net.Add(pin);
+                            changed = true;
+                        }
+                        if (dataConns != null && !dataConns.Elements(ns + "Connection").Any(c => (string?)c.Attribute("Source") == nm))
+                        {
+                            dataConns.Add(new System.Xml.Linq.XElement(ns + "Connection",
+                                new System.Xml.Linq.XAttribute("Source", nm),
+                                new System.Xml.Linq.XAttribute("Destination", "ProcessEngine." + nm)));
+                            changed = true;
+                        }
+                    }
+                }
+
+                if (changed)
+                {
+                    doc.Save(fbt);
+                    result.PatchesApplied.Add(reduce
+                        ? "Process1_Generic: 6 recipe arrays -> Recipe struct (sim)"
+                        : "Process1_Generic: Recipe struct -> 6 recipe arrays (hardware)");
+                    MapperLogger.Info($"[Deploy] Process1_Generic recipe normalize: reduce={reduce}");
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"Process1_Generic recipe-struct normalize failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Simulator interface reduction on ProcessRuntime_Generic_v1 (Basic FB):
+        /// collapse the 6 recipe arrays across InputVars, the INIT event Withs, AND
+        /// every algorithm's ST ("StepType[CurrentStep]" ->
+        /// "Recipe[CurrentStep].StepType", etc.). Bidirectional + idempotent;
+        /// reduce==false restores the 6 arrays. Logic unchanged.
+        /// </summary>
+        static void NormalizeProcessRuntimeRecipeArrays(
+            string eaeProjectDir, bool reduce, DeployResult result)
+        {
+            var fbt = Directory.EnumerateFiles(
+                    Path.Combine(eaeProjectDir, "IEC61499"),
+                    "ProcessRuntime_Generic_v1.fbt", SearchOption.AllDirectories)
+                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
+                ?? string.Empty;
+            if (string.IsNullOrEmpty(fbt))
+            {
+                result.Warnings.Add("ProcessRuntime_Generic_v1.fbt not found; recipe-struct normalize skipped.");
+                return;
+            }
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+
+                var iface = root.Element(ns + "InterfaceList");
+                var basic = root.Element(ns + "BasicFB");
+                if (iface == null || basic == null)
+                {
+                    result.Warnings.Add("ProcessRuntime_Generic_v1.fbt: missing InterfaceList/BasicFB; recipe normalize skipped.");
+                    return;
+                }
+                var inputVars = iface.Element(ns + "InputVars");
+                var eventInputs = iface.Element(ns + "EventInputs");
+                var size = CodeGen.Translation.ProcessRecipeArrayGenerator.RecipeArraySize.ToString();
+
+                bool changed = false;
+
+                if (reduce)
+                {
+                    foreach (var (nm, _) in RecipeArrays)
+                        changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == nm);
+                    if (inputVars != null && !inputVars.Elements(ns + "VarDeclaration").Any(v => (string?)v.Attribute("Name") == "Recipe"))
+                    {
+                        inputVars.Add(new System.Xml.Linq.XElement(ns + "VarDeclaration",
+                            new System.Xml.Linq.XAttribute("Name", "Recipe"),
+                            new System.Xml.Linq.XAttribute("Type", "RecipeStep"),
+                            new System.Xml.Linq.XAttribute("ArraySize", size),
+                            new System.Xml.Linq.XAttribute("Namespace", "Main")));
+                        changed = true;
+                    }
+                    foreach (var ev in eventInputs?.Elements(ns + "Event") ?? Enumerable.Empty<System.Xml.Linq.XElement>())
+                    {
+                        if (!ev.Elements(ns + "With").Any(w => RecipeArrays.Any(a => a.Name == (string?)w.Attribute("Var")))) continue;
+                        foreach (var (nm, _) in RecipeArrays)
+                            changed |= RemoveElems(ev.Elements(ns + "With"), w => (string?)w.Attribute("Var") == nm);
+                        if (!ev.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == "Recipe"))
+                        { ev.Add(new System.Xml.Linq.XElement(ns + "With", new System.Xml.Linq.XAttribute("Var", "Recipe"))); changed = true; }
+                    }
+                }
+                else
+                {
+                    changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == "Recipe");
+                    if (inputVars != null)
+                        foreach (var (nm, ty) in RecipeArrays)
+                            if (!inputVars.Elements(ns + "VarDeclaration").Any(v => (string?)v.Attribute("Name") == nm))
+                            {
+                                inputVars.Add(new System.Xml.Linq.XElement(ns + "VarDeclaration",
+                                    new System.Xml.Linq.XAttribute("Name", nm),
+                                    new System.Xml.Linq.XAttribute("Type", ty),
+                                    new System.Xml.Linq.XAttribute("ArraySize", size)));
+                                changed = true;
+                            }
+                    foreach (var ev in eventInputs?.Elements(ns + "Event") ?? Enumerable.Empty<System.Xml.Linq.XElement>())
+                    {
+                        if (!ev.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == "Recipe")) continue;
+                        changed |= RemoveElems(ev.Elements(ns + "With"), w => (string?)w.Attribute("Var") == "Recipe");
+                        foreach (var (nm, _) in RecipeArrays)
+                            if (!ev.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == nm))
+                            { ev.Add(new System.Xml.Linq.XElement(ns + "With", new System.Xml.Linq.XAttribute("Var", nm))); changed = true; }
+                    }
+                }
+
+                // ST rewrite across every algorithm.
+                foreach (var alg in basic.Elements(ns + "Algorithm"))
+                {
+                    var stEl = alg.Element(ns + "ST");
+                    if (stEl == null) continue;
+                    var st = stEl.Value;
+                    var before = st;
+                    foreach (var (nm, _) in RecipeArrays)
+                    {
+                        var arr = nm + "[CurrentStep]";
+                        var str = "Recipe[CurrentStep]." + nm;
+                        st = reduce ? st.Replace(arr, str) : st.Replace(str, arr);
+                    }
+                    if (st != before) { stEl.ReplaceNodes(new System.Xml.Linq.XCData(st)); changed = true; }
+                }
+
+                if (changed)
+                {
+                    doc.Save(fbt);
+                    result.PatchesApplied.Add(reduce
+                        ? "ProcessRuntime_Generic_v1: 6 recipe arrays -> Recipe struct + ST rewritten (sim)"
+                        : "ProcessRuntime_Generic_v1: Recipe struct -> 6 recipe arrays + ST restored (hardware)");
+                    MapperLogger.Info($"[Deploy] ProcessRuntime_Generic_v1 recipe normalize: reduce={reduce}");
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"ProcessRuntime_Generic_v1 recipe-struct normalize failed: {ex.Message}");
             }
         }
 
@@ -763,6 +1587,191 @@ namespace MapperUI.Services
             catch (Exception ex)
             {
                 result.Warnings.Add($"{catName} MQTT publish patch failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Simulator-only interface reduction for Five_State_Actuator_CAT. The
+        /// InterlockManager constants TargetWork1State (=2, AtWork) and
+        /// TargetHomeState (=4, AtHome end-of-cycle latch) are IDENTICAL on every
+        /// actuator instance — <c>BuildActuatorParameters</c> hardcodes them. On
+        /// the simulator path we delete those two boundary inputs from the CAT
+        /// and bake the constants straight onto the embedded InterlockManager FB
+        /// as <c>&lt;Parameter&gt;</c>, shrinking the wired instance interface
+        /// from 17 to 15 WITHOUT changing any runtime value.
+        ///
+        /// This is a BIDIRECTIONAL NORMALIZER, not a one-way strip, because the
+        /// template deployer copies artefacts only when absent
+        /// (ExtractToEae/CopyDirToEae are copy-if-missing). The deployed CAT is
+        /// therefore a single persistent file shared by BOTH the Test Simulator
+        /// and Test Runtime buttons. <paramref name="reduce"/>==true strips and
+        /// bakes; ==false restores the wired inputs and removes the baked params.
+        /// Call it on every deploy with reduce = cfg.SimulatorFullSystem so the
+        /// CAT shape always matches the <c>&lt;Parameter&gt;</c> set
+        /// BuildActuatorParameters emits for the same flag. Idempotent both ways.
+        /// </summary>
+        static void NormalizeFiveStateInterlockConstants(
+            string eaeProjectDir, bool reduce, DeployResult result)
+        {
+            // Values mirror BuildActuatorParameters EXACTLY (2 = AtWork settled,
+            // 4 = AtHome end-of-cycle latch) so the reduction changes the
+            // interface only, never behaviour. Re-add coordinates mirror the
+            // stock template (EAE recomputes layout on load regardless).
+            var consts = new[]
+            {
+                new { Name = "TargetWork1State", Value = "2", X = "1380", Y = "2092" },
+                new { Name = "TargetHomeState",  Value = "4", X = "1380", Y = "2192" },
+            };
+
+            var fbt = Directory.EnumerateFiles(
+                    Path.Combine(eaeProjectDir, "IEC61499"),
+                    "Five_State_Actuator_CAT.fbt", SearchOption.AllDirectories)
+                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
+                ?? string.Empty;
+            if (string.IsNullOrEmpty(fbt))
+            {
+                result.Warnings.Add(
+                    "Five_State_Actuator_CAT.fbt not found; interlock-constant normalize skipped.");
+                return;
+            }
+
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(
+                    fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+
+                var iface = root.Element(ns + "InterfaceList");
+                var net = root.Element(ns + "FBNetwork");
+                if (iface == null || net == null)
+                {
+                    result.Warnings.Add(
+                        "Five_State_Actuator_CAT.fbt: missing InterfaceList/FBNetwork; normalize skipped.");
+                    return;
+                }
+
+                var inputVars = iface.Element(ns + "InputVars");
+                var initEvent = iface.Element(ns + "EventInputs")?
+                    .Elements(ns + "Event")
+                    .FirstOrDefault(e => (string?)e.Attribute("Name") == "INIT");
+                var dataConns = net.Element(ns + "DataConnections");
+                var interlock = net.Elements(ns + "FB")
+                    .FirstOrDefault(f => (string?)f.Attribute("Name") == "InterlockManager");
+                if (interlock == null)
+                {
+                    result.Warnings.Add(
+                        "Five_State_Actuator_CAT.fbt: InterlockManager FB not found; normalize skipped.");
+                    return;
+                }
+
+                // Remove matching elements via instance Remove() (no
+                // IEnumerable<XElement>.Remove() extension — this file has no
+                // `using System.Xml.Linq`). Returns true if anything was removed.
+                bool RemoveWhere(IEnumerable<System.Xml.Linq.XElement>? src,
+                    Func<System.Xml.Linq.XElement, bool> pred)
+                {
+                    if (src == null) return false;
+                    var hits = src.Where(pred).ToList();
+                    foreach (var h in hits) h.Remove();
+                    return hits.Count > 0;
+                }
+
+                bool changed = false;
+
+                foreach (var c in consts)
+                {
+                    if (reduce)
+                    {
+                        changed |= RemoveWhere(inputVars?.Elements(ns + "VarDeclaration"),
+                            v => (string?)v.Attribute("Name") == c.Name);
+                        changed |= RemoveWhere(initEvent?.Elements(ns + "With"),
+                            w => (string?)w.Attribute("Var") == c.Name);
+                        changed |= RemoveWhere(net.Elements(ns + "Input"),
+                            i => (string?)i.Attribute("Name") == c.Name);
+                        changed |= RemoveWhere(dataConns?.Elements(ns + "Connection"),
+                            x => (string?)x.Attribute("Source") == c.Name);
+
+                        bool hasParam = interlock.Elements(ns + "Parameter")
+                            .Any(p => (string?)p.Attribute("Name") == c.Name);
+                        if (!hasParam)
+                        {
+                            interlock.Add(new System.Xml.Linq.XElement(ns + "Parameter",
+                                new System.Xml.Linq.XAttribute("Name", c.Name),
+                                new System.Xml.Linq.XAttribute("Value", c.Value)));
+                            changed = true;
+                        }
+                    }
+                    else
+                    {
+                        // Restore the wired interface (hardware / Button 3).
+                        changed |= RemoveWhere(interlock.Elements(ns + "Parameter"),
+                            p => (string?)p.Attribute("Name") == c.Name);
+
+                        if (inputVars != null &&
+                            !inputVars.Elements(ns + "VarDeclaration")
+                                .Any(v => (string?)v.Attribute("Name") == c.Name))
+                        {
+                            inputVars.Add(new System.Xml.Linq.XElement(ns + "VarDeclaration",
+                                new System.Xml.Linq.XAttribute("Name", c.Name),
+                                new System.Xml.Linq.XAttribute("Type", "INT")));
+                            changed = true;
+                        }
+                        if (initEvent != null &&
+                            !initEvent.Elements(ns + "With")
+                                .Any(w => (string?)w.Attribute("Var") == c.Name))
+                        {
+                            initEvent.Add(new System.Xml.Linq.XElement(ns + "With",
+                                new System.Xml.Linq.XAttribute("Var", c.Name)));
+                            changed = true;
+                        }
+                        if (!net.Elements(ns + "Input")
+                                .Any(i => (string?)i.Attribute("Name") == c.Name))
+                        {
+                            var pin = new System.Xml.Linq.XElement(ns + "Input",
+                                new System.Xml.Linq.XAttribute("Name", c.Name),
+                                new System.Xml.Linq.XAttribute("x", c.X),
+                                new System.Xml.Linq.XAttribute("y", c.Y),
+                                new System.Xml.Linq.XAttribute("Type", "Data"));
+                            var lastInput = net.Elements(ns + "Input").LastOrDefault();
+                            if (lastInput != null) lastInput.AddAfterSelf(pin);
+                            else net.Add(pin);
+                            changed = true;
+                        }
+                        if (dataConns != null &&
+                            !dataConns.Elements(ns + "Connection")
+                                .Any(x => (string?)x.Attribute("Source") == c.Name))
+                        {
+                            dataConns.Add(new System.Xml.Linq.XElement(ns + "Connection",
+                                new System.Xml.Linq.XAttribute("Source", c.Name),
+                                new System.Xml.Linq.XAttribute("Destination",
+                                    "InterlockManager." + c.Name)));
+                            changed = true;
+                        }
+                    }
+                }
+
+                if (changed)
+                {
+                    doc.Save(fbt);
+                    result.PatchesApplied.Add(reduce
+                        ? "Five_State_Actuator_CAT: interlock constants baked onto InterlockManager " +
+                          "(sim interface reduced — TargetWork1State=2, TargetHomeState=4)"
+                        : "Five_State_Actuator_CAT: interlock constants restored as wired inputs (hardware interface)");
+                    MapperLogger.Info(
+                        $"[Deploy] Five_State_Actuator_CAT interlock-constant normalize: reduce={reduce}");
+                }
+                else
+                {
+                    result.PatchesApplied.Add(
+                        $"Five_State_Actuator_CAT: interlock interface already {(reduce ? "reduced" : "wired")} (no change)");
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add(
+                    $"Five_State_Actuator_CAT interlock-constant normalize failed: {ex.Message}");
             }
         }
 
