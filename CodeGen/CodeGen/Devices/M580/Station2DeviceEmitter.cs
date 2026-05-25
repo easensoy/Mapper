@@ -4,8 +4,10 @@ using System.IO;
 using System.Linq;
 using System.Xml.Linq;
 using CodeGen.Configuration;
+using CodeGen.Devices.M262;
+using CodeGen.Devices.Shared;
 
-namespace MapperUI.Services
+namespace CodeGen.Devices.M580
 {
     /// <summary>
     /// Emits Station 2 device + resource artefacts (the M580 X80 PLC and the
@@ -16,7 +18,10 @@ namespace MapperUI.Services
     ///   1. <c>IEC61499/System/{sys-guid}/{sysdev-guid}.sysdev</c>
     ///         — &lt;Device Type="M580_dPAC"/&gt; or "Soft_dPAC", Namespace="SE.DPAC"
     ///   2. <c>IEC61499/System/{sys-guid}/{sysdev-guid}/{resource-id}.sysres</c>
-    ///         — &lt;Resource Name="M580_RES"/&gt; or "BX1_RES", Type="EMB_RES_ECO"
+    ///         — &lt;Resource Type="EMB_RES_ECO"/&gt;. Resource identity is aligned
+    ///           to what the authored .hcf expects (M580 name "RES0" from its
+    ///           name-scoped symlinks; BX1 ID from its DeviceHwConfigurationItem
+    ///           ResourceId) so EAE binds the .hcf to the resource.
     ///   3. <c>IEC61499/System/{sys-guid}/{sysdev-guid}/{sysdev-guid}.hcf</c>
     ///         — copied verbatim from <c>cfg.M580HcfTemplatePath</c> /
     ///           <c>cfg.BX1HcfTemplatePath</c> (the IO folder under
@@ -143,12 +148,39 @@ namespace MapperUI.Services
             // on import as long as these are present in topologyproj.
             CleanupStaleTopologyJson(eaeRoot, "Equipment_Soft_dPAC_BX1.json", result);
 
+            // Resource-identity alignment. The M580/BX1 .hcf files are authored
+            // in EAE and carry their own resource scoping; the emitted sysres
+            // must adopt it or EAE cannot bind the .hcf to the resource:
+            //   • M580 (X80 export) is NAME-scoped — its symlinks read
+            //     'RES0.M580IO.<sym>', so the resource must be named "RES0".
+            //   • BX1 (EtherNet/IP export) is GUID-scoped — its
+            //     DeviceHwConfigurationItem/@ResourceId + EIP-word symlinks read
+            //     a fixed GUID, so the sysres ID must equal it.
+            // Both are read from the .hcf (self-healing if the user re-exports);
+            // fall back to the stable constants / cfg.ResourceName when absent.
+            // NOTE: this only binds the .hcf to the resource SHELL — the symlink
+            // targets (the M580IO variable group / the BX1 EIP-word FB) still
+            // need the FB-side work before the bindings resolve at runtime.
+            var m580Ident = ReadHcfResourceIdentity(cfg.M580HcfTemplatePath);
+            var bx1Ident  = ReadHcfResourceIdentity(cfg.BX1HcfTemplatePath);
+
+            var m580ResourceName = m580Ident.Name
+                ?? (string.IsNullOrWhiteSpace(cfg.ResourceName) ? M580ResourceName : cfg.ResourceName);
+            var bx1ResourceId = bx1Ident.GuidId ?? BX1ResourceId;
+
+            if (!string.Equals(m580ResourceName, M580ResourceName, StringComparison.Ordinal))
+                result.Warnings.Add(
+                    $"[M580] resource name aligned to '{m580ResourceName}' from the M580 .hcf symlinks (default was '{M580ResourceName}').");
+            if (!string.Equals(bx1ResourceId, BX1ResourceId, StringComparison.Ordinal))
+                result.Warnings.Add(
+                    $"[BX1] sysres ID aligned to '{bx1ResourceId}' from the BX1 .hcf ResourceId (default was '{BX1ResourceId}').");
+
             EmitOnePlc(cfg, eaeRoot, systemGuidDir, result,
                 sysdevId: M580SysdevId,
                 deviceName: "M580",
                 deviceType: "M580_dPAC",
                 resourceId: M580ResourceId,
-                resourceName: M580ResourceName,
+                resourceName: m580ResourceName,
                 hcfTemplatePath: cfg.M580HcfTemplatePath,
                 equipmentJsonName: "Equipment_M580dPAC_1.json",
                 equipmentBuilder: () => BuildM580EquipmentJson(M580SysdevId, solutionId),
@@ -160,7 +192,7 @@ namespace MapperUI.Services
                 sysdevId: BX1SysdevId,
                 deviceName: "BX1",
                 deviceType: "Soft_dPAC",
-                resourceId: BX1ResourceId,
+                resourceId: bx1ResourceId,
                 resourceName: BX1ResourceName,
                 hcfTemplatePath: cfg.BX1HcfTemplatePath,
                 equipmentJsonName: "Equipment_Workstation_BX1.json",
@@ -189,6 +221,21 @@ namespace MapperUI.Services
             var sysdevFolder = Path.Combine(systemGuidDir, sysdevId);
             Directory.CreateDirectory(sysdevFolder);
             var sysresPath = Path.Combine(sysdevFolder, $"{resourceId}.sysres");
+            // Drop any sysres left by a previous deploy under a different
+            // resource ID (e.g. before the .hcf-driven ID alignment) so EAE
+            // never sees two resources inside one device folder.
+            foreach (var staleSysres in Directory.EnumerateFiles(sysdevFolder, "*.sysres"))
+            {
+                if (string.Equals(staleSysres, sysresPath, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                try
+                {
+                    File.Delete(staleSysres);
+                    result.Warnings.Add(
+                        $"{deviceName}: removed stale sysres {Path.GetFileName(staleSysres)} (resource ID changed).");
+                }
+                catch { /* best-effort */ }
+            }
             if (!File.Exists(sysresPath))
             {
                 File.WriteAllText(sysresPath, BuildSysresXml(resourceId, resourceName));
@@ -592,6 +639,60 @@ namespace MapperUI.Services
                 return Directory.EnumerateFiles(iec, "*.dfbproj").FirstOrDefault();
             }
             catch { return null; }
+        }
+
+        /// <summary>
+        /// Reads the resource identity an authored <c>.hcf</c> expects, so the
+        /// emitted sysres can adopt it (otherwise EAE cannot bind the .hcf to a
+        /// resource). Two scoping conventions appear in the SMC exports:
+        /// <list type="bullet">
+        ///   <item><b>GUID-scoped</b> (BX1's EtherNet/IP export): the
+        ///   <c>&lt;DeviceHwConfigurationItem ResourceId="…"/&gt;</c> attribute
+        ///   (also the head of its <c>{guid}.{fb}.EIP_*_Word_1</c> symlinks).
+        ///   Returned as <c>GuidId</c>.</item>
+        ///   <item><b>Name-scoped</b> (M580's X80 export): per-bit symlinks
+        ///   <c>'RES0.M580IO.&lt;sym&gt;'</c> whose leading segment is the
+        ///   resource NAME. Returned as <c>Name</c>.</item>
+        /// </list>
+        /// Either, both, or neither may be present; <c>null</c> where absent.
+        /// Best-effort — never throws.
+        /// </summary>
+        static (string? GuidId, string? Name) ReadHcfResourceIdentity(string? hcfPath)
+        {
+            if (string.IsNullOrWhiteSpace(hcfPath) || !File.Exists(hcfPath))
+                return (null, null);
+            try
+            {
+                var doc = XDocument.Load(hcfPath);
+
+                // GUID form: <DeviceHwConfigurationItem ResourceId="...">.
+                var guid = doc.Descendants()
+                    .FirstOrDefault(e => e.Name.LocalName == "DeviceHwConfigurationItem")
+                    ?.Attribute("ResourceId")?.Value;
+                if (string.IsNullOrWhiteSpace(guid)) guid = null;
+
+                // Name form: first quoted symlink 'NAME.GROUP.symbol' whose head
+                // is a symbolic resource name (a 16-hex head is the GUID/EIP case
+                // captured by the attribute above, so it is skipped here).
+                string? name = null;
+                foreach (var pv in doc.Descendants()
+                    .Where(e => e.Name.LocalName == "ParameterValue"))
+                {
+                    var raw = (string?)pv.Attribute("Value");
+                    if (string.IsNullOrWhiteSpace(raw)) continue;
+                    var t = raw.Trim().Trim('\'');
+                    var firstDot = t.IndexOf('.');
+                    if (firstDot <= 0) continue;
+                    var head = t.Substring(0, firstDot);
+                    var rest = t.Substring(firstDot + 1);
+                    if (!rest.Contains('.')) continue;                       // need NAME.GROUP.sym
+                    if (head.Length == 16 && head.All(Uri.IsHexDigit)) continue; // GUID head → skip
+                    name = head;
+                    break;
+                }
+                return (guid, name);
+            }
+            catch { return (null, null); }
         }
     }
 }
