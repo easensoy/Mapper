@@ -556,36 +556,43 @@ namespace CodeGen.Devices.M262
             { "Checker",      (4500, 5400) },
             { "Transfer",     (7000, 5400) },
             { "Stn1_Term",    (9500, 5400) },
-            // M580 zone (Station 2 — purple frame). Tidied layout to mirror
-            // SMC_Rig_Expo_withClamp's reference:
-            //   y=2000: Station2_HMI
-            //   y=2900: Station2 + Stn2_Term
-            //   y=4000: Assembly_Station Process FB + sensors row
-            //   y=5400: Actuator row 1 (Bearing_PnP, Bearing_Gripper, Shaft_Hr, Shaft_Vr)
-            //   y=6500: Actuator row 2 (Shaft_Gripper, Clamp)
-            // FRAME_M580 spans 12000..20300; all coordinates inside that band.
-            { "Station2_HMI",    (14000, 2000) },
-            { "Station2",        (14000, 2900) },
-            { "Stn2_Term",       (19500, 2900) },
-            { "Assembly_Station",(12200, 4000) },
-            { "BearingSensor",   (15000, 4000) },
-            { "ShaftSensor",     (17500, 4000) },
-            // Bearing_PnP (Seven_State_Actuator_CAT) is the live Station-2
-            // swivel/bearing actuator; coordinates match the deployed M580
-            // sysres. Bearing_Gripper kept for back-compat with older syslays.
-            { "Bearing_PnP",     (12200, 5400) },
-            { "Bearing_Gripper", (12200, 5400) },
-            { "Shaft_Hr",        (14700, 5400) },
-            { "Shaft_Vr",        (17200, 5400) },
-            { "Shaft_Gripper",   (19700, 5400) },
-            { "Clamp",           (12200, 6500) },
-            // BX1 zone (Station 2 — green frame). Sensors at y=4000, actuators
-            // at y=5400, columns at 2500 pitch starting at x=20600 to land
-            // inside FRAME_BX1 (20400..27200).
-            { "TopCoverSenosr",  (20600, 4000) },
-            { "CoverPNP_Hr",     (20600, 5400) },
-            { "CoverPNP_Vr",     (23100, 5400) },
-            { "CoverPnp_Gripper",(25600, 5400) },
+            // M580 zone (Station 2 — purple frame). Reference-style columns
+            // (SMC_Rig_Expo_withClamp stacks its 8 M580 actuators in ONE vertical
+            // column at constant x with ~1060 row pitch, processes in a separate
+            // column to the right). We mirror that:
+            //   x=12300  actuator column  (6 actuators, 1300 pitch)
+            //   x=14800  sensor column    (2 sensors)
+            //   x=17300  process column   (Assembly_Station, Disassembly — tall,
+            //                               3000 pitch so the Process bodies clear)
+            //   y=2000   structural row   (Station2_HMI, Station2, Stn2_Term)
+            // No two FBs share a slot (the old layout stacked Bearing_PnP and
+            // Bearing_Gripper on the SAME (12200,5400) point, and put the tall
+            // Assembly Process directly above an actuator). FRAME sizing is now
+            // dynamic (ResizeFramesToFitFbs) so the purple frame grows to enclose
+            // whatever lands here — no overflow regardless of FB count.
+            { "Station2_HMI",    (12300, 2000) },
+            { "Station2",        (14800, 2000) },
+            { "Stn2_Term",       (17300, 2000) },
+            // actuator column (x=12300)
+            { "Bearing_PnP",     (12300, 3400) },
+            { "Bearing_Gripper", (12300, 4700) },
+            { "Shaft_Hr",        (12300, 6000) },
+            { "Shaft_Vr",        (12300, 7300) },
+            { "Shaft_Gripper",   (12300, 8600) },
+            { "Clamp",           (12300, 9900) },
+            // sensor column (x=14800)
+            { "BearingSensor",   (14800, 3400) },
+            { "ShaftSensor",     (14800, 4700) },
+            // process column (x=17300) — Process1_Generic bodies are tall
+            { "Assembly_Station",(17300, 3400) },
+            { "Disassembly",     (17300, 6400) },
+            // BX1 zone (Station 2 — green frame). Actuator column at x=20700
+            // (1300 pitch) with the top-cover sensor beside it; mirrors the M580
+            // column style. Dynamic frame sizing encloses them.
+            { "TopCoverSenosr",  (23200, 3400) },
+            { "CoverPNP_Hr",     (20700, 3400) },
+            { "CoverPNP_Vr",     (20700, 4700) },
+            { "CoverPnp_Gripper",(20700, 6000) },
             // No-op (M262IO/PLC_RW_M262 retired — never instantiated)
             { "M262IO",       (9500, 400)  },
         };
@@ -638,6 +645,10 @@ namespace CodeGen.Devices.M262
                     if (!string.IsNullOrEmpty(n)) byName[n] = fb;
                 }
                 ApplyCanonicalLayout(byName, report, "Syslay");
+                // Grow each coloured zone frame to fully enclose its FBs so
+                // nothing overflows the frame edges (the user's "positioning is
+                // terrible / overflow" report). Runs AFTER the FBs are placed.
+                ResizeFramesToFitFbs(net, ns, report);
                 var settings = new XmlWriterSettings
                 {
                     OmitXmlDeclaration = false,
@@ -651,6 +662,92 @@ namespace CodeGen.Devices.M262
             catch (Exception ex)
             {
                 report.Missing.Add($"[Layout] syslay write failed: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+
+        // Each coloured zone <Frame> wraps the FBs that BucketFor() routes to its
+        // PLC. (BucketFor lives in M262SysdevEmitter — same partitioning the FB
+        // mirror uses, so the frame membership and the resource mirror agree.)
+        private static readonly Dictionary<string, PlcAssignment> FrameBucket = new(StringComparer.Ordinal)
+        {
+            { "FRAME_Station1",      PlcAssignment.M262 },
+            { "FRAME_Station2_M580", PlcAssignment.M580 },
+            { "FRAME_Station2_BX1",  PlcAssignment.BX1  },
+        };
+
+        // EAE computes an FB body's rendered height from its port count (the size
+        // is NOT in the file), so to size enclosing frames we estimate height per
+        // Type. Width is ~uniform. These only drive frame bounds — generous is fine.
+        private const int FbEstWidth = 720;
+        private static int FbEstHeight(string type) => type switch
+        {
+            "Process1_Generic"                   => 2600,
+            "Seven_State_Actuator_CAT"           => 1500,
+            "Five_State_Actuator_CAT"            => 1300,
+            "Five_State_Actuator_No_Sensors_CAT" => 1300,
+            "Vacuum_Gripper_CAT"                 => 1300,
+            "Sensor_Bool_CAT"                    => 900,
+            "Area" or "Area_CAT"                 => 1200,
+            "Station" or "Station_CAT"           => 1200,
+            "CaSAdptrTerminator"                 => 700,
+            "PLC_RW_M580" or "PLC_RW_BX1" or "PLC_RW_M262" => 1800,
+            "DPAC_FULLINIT" or "plcStart"        => 700,
+            "MQTT_CONNECTION"                    => 900,
+            _                                     => 1300,
+        };
+
+        /// <summary>
+        /// Resize each coloured zone &lt;Frame&gt; so it fully ENCLOSES the FBs
+        /// that belong to its PLC (<see cref="M262SysdevEmitter.BucketFor"/>), with
+        /// padding and a per-Type rendered-height allowance below the lowest FB.
+        /// Fixes the overflow where tall Process/actuator bodies and out-of-dict
+        /// FBs (Disassembly) spilled past the fixed frame bounds — mirrors how the
+        /// SMC_Rig reference sizes each frame to wrap its contents. Frame origins
+        /// are clamped to ≥0 so a high FB (MqttConn at y=200) can't push a frame
+        /// off-canvas. Best-effort: a frame with no FBs in its bucket is left as-is.
+        /// </summary>
+        private static void ResizeFramesToFitFbs(XElement net, XNamespace ns,
+            SystemInjector.BindingApplicationReport report)
+        {
+            const int padLeft = 420, padTop = 600, padRight = 460, padBottom = 520;
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+
+            var fbs = new List<(string Name, double X, double Y, string Type)>();
+            foreach (var fb in net.Elements(ns + "FB"))
+            {
+                var name = (string?)fb.Attribute("Name") ?? string.Empty;
+                if (name.Length == 0) continue;
+                double.TryParse((string?)fb.Attribute("x"), System.Globalization.NumberStyles.Any, inv, out var x);
+                double.TryParse((string?)fb.Attribute("y"), System.Globalization.NumberStyles.Any, inv, out var y);
+                fbs.Add((name, x, y, (string?)fb.Attribute("Type") ?? string.Empty));
+            }
+
+            foreach (var frame in net.Elements(ns + "Frame").ToList())
+            {
+                var fname = (string?)frame.Attribute("Name") ?? string.Empty;
+                if (!FrameBucket.TryGetValue(fname, out var bucket)) continue;
+                var inZone = fbs.Where(f => M262SysdevEmitter.BucketFor(f.Name) == bucket).ToList();
+                if (inZone.Count == 0) continue;
+
+                double minX = inZone.Min(f => f.X);
+                double minY = inZone.Min(f => f.Y);
+                double maxX = inZone.Max(f => f.X + FbEstWidth);
+                double maxY = inZone.Max(f => f.Y + FbEstHeight(f.Type));
+
+                // Compute edges, clamp origin to >=0, derive W/H from edges so the
+                // clamp never shrinks the bottom/right coverage.
+                double fx = Math.Max(0, minX - padLeft);
+                double fy = Math.Max(0, minY - padTop);
+                double fw = (maxX + padRight) - fx;
+                double fh = (maxY + padBottom) - fy;
+
+                frame.SetAttributeValue("X", fx.ToString(inv));
+                frame.SetAttributeValue("Y", fy.ToString(inv));
+                frame.SetAttributeValue("Width", fw.ToString(inv));
+                frame.SetAttributeValue("Height", fh.ToString(inv));
+                report.Missing.Add(
+                    $"[Layout] frame {fname} ({bucket}) -> X={fx:0} Y={fy:0} W={fw:0} H={fh:0} " +
+                    $"encloses {inZone.Count} FB(s)");
             }
         }
 
