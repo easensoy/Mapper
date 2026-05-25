@@ -771,6 +771,33 @@ namespace MapperUI
                         AppendActivity(line);
                 }
 
+                // Station 2 — wire the M580 + BX1 sysres FBNetworks with the
+                // same proven topology (init chain + CaS station chain + state
+                // report ring) using each PLC's own structural FBs. Additive:
+                // does NOT touch the M262 sysres or the shared syslay, so the
+                // M262 Feed-Station wiring above stays byte-identical. The M580
+                // gets the full chain (Station2/Assembly_Station/Stn2_Term); the
+                // BX1 has no Station FB this increment so it gets only the INIT
+                // fan-out + report ring among its cover actuators.
+                try
+                {
+                    int s2WireBefore = report.Missing.Count;
+                    await Task.Run(() =>
+                        M262SysresWireEmitter.EmitStation2Resources(Cfg(), report));
+                    for (int i = s2WireBefore; i < report.Missing.Count; i++)
+                    {
+                        var line = report.Missing[i];
+                        if (line.StartsWith("[Wire][M580]") || line.StartsWith("[M580]") ||
+                            line.StartsWith("[Wire][BX1]") || line.StartsWith("[BX1]") ||
+                            line.StartsWith("[Wire][Stn2]"))
+                            AppendActivity(line);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AppendActivity($"[Wire][Stn2][Error] {ex.Message}");
+                }
+
                 int hcfCountBefore = report.Missing.Count;
                 await Task.Run(() => HcfPatchService.PatchDeployed(
                     Cfg(), path, bindings, report));
