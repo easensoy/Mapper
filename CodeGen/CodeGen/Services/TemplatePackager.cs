@@ -1,6 +1,6 @@
 using System.IO;
 
-namespace MapperUI.Services
+namespace CodeGen.Services
 {
     public static class TemplatePackager
     {
