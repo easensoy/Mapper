@@ -1,7 +1,7 @@
 using System;
 using CodeGen.Configuration;
 using CodeGen.Devices.M262;
-using CodeGen.Devices.Shared;
+using CodeGen.Devices.Core;
 
 namespace CodeGen.Devices.M580
 {
@@ -19,7 +19,7 @@ namespace CodeGen.Devices.M580
         public static HwConfigCopyResult Copy(MapperConfig cfg)
         {
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
-            var eaeRoot = M262SysdevEmitter.DeriveEaeProjectRoot(cfg);
+            var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
             var template = HwConfigVerbatimCopier.ResolveTemplatePath(
                 cfg.M580HcfTemplatePath, cfg.IoFolderPath, "M580IO.hcf");
             return HwConfigVerbatimCopier.Deploy(eaeRoot, "M580_dPAC", "SE.DPAC", template);

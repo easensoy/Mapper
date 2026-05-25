@@ -508,7 +508,7 @@ namespace MapperUI
             // Integrity reports "Repair Instances" / "Missing Project Files".
             try
             {
-                var s2 = await Task.Run(() => M262SysdevEmitter.EmitStation2Sysres(Cfg()));
+                var s2 = await Task.Run(() => Station2SysresMirror.EmitStation2Sysres(Cfg()));
                 AppendActivity($"[Stn2] mirrored FBs → M580:{s2.M580} BX1:{s2.BX1}");
             }
             catch (Exception ex)
@@ -521,7 +521,7 @@ namespace MapperUI
             // Non-destructive sweep; only fills files that are missing.
             try
             {
-                var eae = CodeGen.Devices.M262.M262SysdevEmitter.DeriveEaeProjectRoot(Cfg());
+                var eae = CodeGen.Devices.Core.EaeProjectLayout.DeriveEaeProjectRoot(Cfg());
                 if (!string.IsNullOrEmpty(eae))
                 {
                     int n = CodeGen.Artefacts.OpcuaCompanionEmitter.EnsureOpcuaInAllResourceFolders(eae);
@@ -783,7 +783,7 @@ namespace MapperUI
                 {
                     int s2WireBefore = report.Missing.Count;
                     await Task.Run(() =>
-                        M262SysresWireEmitter.EmitStation2Resources(Cfg(), report));
+                        Station2WireEmitter.EmitStation2Resources(Cfg(), report));
                     for (int i = s2WireBefore; i < report.Missing.Count; i++)
                     {
                         var line = report.Missing[i];
@@ -825,8 +825,8 @@ namespace MapperUI
                     int bindBefore = report.Missing.Count;
                     await Task.Run(() =>
                     {
-                        CodeGen.Devices.Shared.HcfSymbolBinder.BindM580(Cfg(), report);
-                        CodeGen.Devices.Shared.HcfSymbolBinder.BindBX1(Cfg(), report);
+                        CodeGen.Devices.Core.HcfSymbolBinder.BindM580(Cfg(), report);
+                        CodeGen.Devices.Core.HcfSymbolBinder.BindBX1(Cfg(), report);
                     });
                     for (int i = bindBefore; i < report.Missing.Count; i++)
                     {

@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Xml.Linq;
 using CodeGen.Configuration;
+using CodeGen.Devices.Core;
 using CodeGen.Translation;
 
 namespace CodeGen.Devices.M262
@@ -57,7 +58,7 @@ namespace CodeGen.Devices.M262
 
             try
             {
-                var eaeRoot = M262SysdevEmitter.DeriveEaeProjectRoot(config);
+                var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(config);
                 if (eaeRoot == null)
                 {
                     report.Missing.Add("[Hcf] skipped, could not derive EAE project root");

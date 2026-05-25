@@ -6,7 +6,7 @@ using System.Text;
 using System.Xml;
 using System.Xml.Linq;
 using CodeGen.Translation;
-using CodeGen.Devices.Shared;
+using CodeGen.Devices.Core;
 
 namespace CodeGen.Devices.M262
 {

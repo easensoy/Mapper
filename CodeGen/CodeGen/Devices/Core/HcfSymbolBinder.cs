@@ -7,7 +7,7 @@ using CodeGen.Configuration;
 using CodeGen.Devices.M262;
 using CodeGen.Translation;
 
-namespace CodeGen.Devices.Shared
+namespace CodeGen.Devices.Core
 {
     /// <summary>
     /// Binds the deployed Station-2 <c>.hcf</c> hardware-config channel symlinks so
@@ -98,7 +98,7 @@ namespace CodeGen.Devices.Shared
 
             try
             {
-                var eaeRoot = M262SysdevEmitter.DeriveEaeProjectRoot(config);
+                var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(config);
                 if (string.IsNullOrEmpty(eaeRoot)) { Log("skipped, could not derive EAE project root"); return; }
 
                 var sysdevFile = FindSysdevByType(eaeRoot, "M580_dPAC", "SE.DPAC");

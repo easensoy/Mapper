@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace CodeGen.Devices.Shared
+namespace CodeGen.Devices.Core
 {
     public class HwConfigCopyResult
     {

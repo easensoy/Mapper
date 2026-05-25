@@ -3,7 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Xml.Linq;
 
-namespace CodeGen.Devices.Shared
+namespace CodeGen.Devices.Core
 {
     /// <summary>
     /// Authoritative, pure-verbatim <c>.hcf</c> deployer for the secondary PLCs

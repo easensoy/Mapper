@@ -6,7 +6,7 @@ using System.Linq;
 using CodeGen.Configuration;
 using CodeGen.Models;
 using CodeGen.Devices.M262;
-using CodeGen.Devices.Shared;
+using CodeGen.Devices.Core;
 
 namespace CodeGen.Services
 {

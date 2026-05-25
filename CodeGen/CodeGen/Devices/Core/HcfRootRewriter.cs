@@ -4,7 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Xml.Linq;
 
-namespace CodeGen.Devices.Shared
+namespace CodeGen.Devices.Core
 {
     /// <summary>
     /// Transforms a newly-exported <c>.hcf</c> from Schneider's

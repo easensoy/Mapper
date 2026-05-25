@@ -4,7 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Xml.Linq;
 using CodeGen.Configuration;
-using CodeGen.Devices.Shared;
+using CodeGen.Devices.Core;
 using CodeGen.Translation;
 
 namespace CodeGen.Devices.M262
@@ -42,7 +42,7 @@ namespace CodeGen.Devices.M262
         public static bool M262SysdevAlreadyExists(MapperConfig cfg)
         {
             if (cfg == null) return false;
-            var eaeRoot = DeriveEaeProjectRoot(cfg);
+            var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
             if (string.IsNullOrEmpty(eaeRoot)) return false;
             var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
             if (!Directory.Exists(systemDir)) return false;
@@ -73,7 +73,7 @@ namespace CodeGen.Devices.M262
         {
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
 
-            var eaeRoot = DeriveEaeProjectRoot(cfg)
+            var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg)
                 ?? throw new InvalidOperationException(
                     "Cannot derive EAE project root from MapperConfig.SyslayPath/SyslayPath2.");
 
@@ -102,7 +102,7 @@ namespace CodeGen.Devices.M262
                 // show RES0 + RES0 at the same time. (Skipped when the
                 // device is preserved — the resource declaration is part of
                 // the trust-bound device record.)
-                var sysresPathForRename = FindSysresFor(sysdevPath);
+                var sysresPathForRename = EaeProjectLayout.FindSysresFor(sysdevPath);
                 if (sysresPathForRename != null)
                     RenameSysresName(sysresPathForRename, resourceName);
                 // Force every Ethernet interface on the M262 Topology
@@ -123,10 +123,10 @@ namespace CodeGen.Devices.M262
 
             var syslayPath = cfg.ActiveSyslayPath;
             var fbInstances = string.IsNullOrWhiteSpace(syslayPath) || !File.Exists(syslayPath)
-                ? new List<SyslayFb>()
-                : ReadSyslayTopLevelFbs(syslayPath);
+                ? new List<SysresFbMirror.SyslayFb>()
+                : SysresFbMirror.ReadSyslayTopLevelFbs(syslayPath);
 
-            var sysresPath = FindSysresFor(sysdevPath);
+            var sysresPath = EaeProjectLayout.FindSysresFor(sysdevPath);
             int sysresMirrorCount = 0;
             if (sysresPath != null && fbInstances.Count > 0)
                 // Mirror only the FBs that belong on the M262 (Feed Station).
@@ -136,9 +136,9 @@ namespace CodeGen.Devices.M262
                 // they were left in this bucket too they would be mapped onto
                 // BOTH the M262 and a Station-2 PLC, which EAE flags as a
                 // duplicate instance mapping in Solution Integrity.
-                sysresMirrorCount = MirrorFbsIntoSysres(
+                sysresMirrorCount = SysresFbMirror.MirrorFbsIntoSysres(
                     sysresPath,
-                    fbInstances.Where(f => BucketFor(f.Name) == PlcAssignment.M262).ToList());
+                    fbInstances.Where(f => SysresFbMirror.BucketFor(f.Name) == PlcAssignment.M262).ToList());
 
             int systemMappingsAdded = 0;
 
@@ -195,20 +195,6 @@ namespace CodeGen.Devices.M262
                 File.WriteAllText(propsPath, canonical);
 
             return propsPath;
-        }
-
-        public static string? DeriveEaeProjectRoot(MapperConfig cfg)
-        {
-            var path = cfg.ActiveSyslayPath;
-            if (string.IsNullOrWhiteSpace(path)) return null;
-            var dir = Path.GetDirectoryName(path);
-            while (dir != null)
-            {
-                if (Directory.Exists(dir) && Directory.GetFiles(dir, "*.dfbproj").Any())
-                    return Path.GetDirectoryName(dir);
-                dir = Path.GetDirectoryName(dir);
-            }
-            return null;
         }
 
         static string? FindSysdev(string eaeRoot)
@@ -336,300 +322,6 @@ namespace CodeGen.Devices.M262
             return mappings.Elements(ns + "Mapping").Count();
         }
 
-        public static List<string> ReadSyslayTopLevelFbNames(string syslayPath)
-        {
-            return ReadSyslayTopLevelFbs(syslayPath).Select(fb => fb.Name).ToList();
-        }
-
-        public record SyslayFbParameter(string Name, string Value);
-        public record SyslayFb(string Id, string Name, string Type, string Namespace,
-            string X, string Y, List<SyslayFbParameter> Parameters);
-
-        public static List<SyslayFb> ReadSyslayTopLevelFbs(string syslayPath)
-        {
-            var doc = XDocument.Load(syslayPath);
-            var root = doc.Root;
-            if (root == null) return new List<SyslayFb>();
-            XNamespace ns = root.GetDefaultNamespace();
-            var net = root.Element(ns + "SubAppNetwork") ?? root.Element(ns + "FBNetwork");
-            if (net == null) return new List<SyslayFb>();
-            return net.Elements(ns + "FB")
-                .Select(e => new SyslayFb(
-                    Id:        (string?)e.Attribute("ID")        ?? string.Empty,
-                    Name:      (string?)e.Attribute("Name")      ?? string.Empty,
-                    Type:      (string?)e.Attribute("Type")      ?? string.Empty,
-                    Namespace: (string?)e.Attribute("Namespace") ?? "Main",
-                    X:         (string?)e.Attribute("x")         ?? "0",
-                    Y:         (string?)e.Attribute("y")         ?? "0",
-                    Parameters: e.Elements(ns + "Parameter")
-                        .Select(p => new SyslayFbParameter(
-                            (string?)p.Attribute("Name")  ?? string.Empty,
-                            (string?)p.Attribute("Value") ?? string.Empty))
-                        .Where(p => !string.IsNullOrEmpty(p.Name))
-                        .ToList()))
-                .Where(fb => !string.IsNullOrWhiteSpace(fb.Name))
-                .ToList();
-        }
-
-        public const string M262IoFbId        = "E786D6371CF444F9";
-        public const string DpacFullInitFbId  = "593A8F4FDEA0A668";
-        public const string PlcStartFbId      = "3DB1FB0F578E5F1E";
-
-        public static int MirrorFbsIntoSysres(string sysresPath, List<SyslayFb> syslayFbs) =>
-            MirrorFbsIntoSysres(sysresPath, syslayFbs, DpacFullInitFbId, PlcStartFbId);
-
-        /// <summary>
-        /// Boot-ID-parameterized mirror so each PLC resource (M262 / M580 / BX1)
-        /// gets its OWN DPAC_FULLINIT + plcStart instance with a distinct ID
-        /// (EAE FB IDs must be unique across resources).
-        /// </summary>
-        public static int MirrorFbsIntoSysres(string sysresPath, List<SyslayFb> syslayFbs,
-            string dpacFullInitId, string plcStartId)
-        {
-            if (!File.Exists(sysresPath)) return 0;
-            var doc = XDocument.Load(sysresPath);
-            var root = doc.Root
-                ?? throw new InvalidDataException($"Empty sysres: {sysresPath}");
-            XNamespace ns = root.GetDefaultNamespace().NamespaceName.Length > 0
-                ? root.GetDefaultNamespace()
-                : LibElNs;
-
-            var network = root.Element(ns + "FBNetwork");
-            if (network == null)
-            {
-                network = new XElement(ns + "FBNetwork");
-                root.Add(network);
-            }
-
-            // M262IO (PLC_RW_M262) is NOT emitted onto the sysres. Under the
-            // Option-A .hcf binding the TM3 channels publish symlinks directly
-            // to the consumer FB instances (Feeder.athome, PartInHopper.Input,
-            // …) — M262IO is no longer the routing bridge, so a top-level
-            // M262IO instance plus its INIT / PusherEvent / REQ_INT_BOOL
-            // event wires are dead weight that EAE flags. Removing the
-            // EnsureSystemFb(M262IO …) call here is what actually makes
-            // M262IO disappear from the generated .sysres; the cleanup pass
-            // in PrepareDemonstratorForGeneration only clears stale copies.
-            EnsureSystemFb(network, ns,
-                id: dpacFullInitId, name: "FB1", type: "DPAC_FULLINIT", nsAttr: "SE.DPAC",
-                mapping: null, x: 1900, y: 140,
-                loaded: true);
-            EnsureSystemFb(network, ns,
-                id: plcStartId, name: "FB2", type: "plcStart", nsAttr: "SE.AppBase",
-                mapping: null, x: 820, y: 660,
-                loaded: true,
-                parameters: new[] { ("Prio", "10"), ("Delay", "T#1000ms") });
-
-            var existingMappings = new HashSet<string>(
-                network.Elements(ns + "FB")
-                    .Select(e => (string?)e.Attribute("Mapping") ?? string.Empty)
-                    .Where(s => !string.IsNullOrEmpty(s)),
-                StringComparer.Ordinal);
-            var existingNames = new HashSet<string>(
-                network.Elements(ns + "FB")
-                    .Select(e => (string?)e.Attribute("Name") ?? string.Empty)
-                    .Where(s => !string.IsNullOrEmpty(s)),
-                StringComparer.Ordinal);
-
-            // Mirror every CAT/composite/HMI type that EAE expects to see
-            // mapped to M262.M262_RES. Each mirrored FB carries a Mapping
-            // attribute pointing back at the syslay FB, which is how EAE
-            // shows it under Devices > M262 > M262_RES > Local.
-            var keepTypes = new HashSet<string>(StringComparer.Ordinal)
-            {
-                "Five_State_Actuator_CAT",
-                "Five_State_Actuator_No_Sensors_CAT",
-                "Seven_State_Actuator_CAT",
-                "Sensor_Bool_CAT",
-                "PLC_RW_M262",
-                "Area",
-                "Area_CAT",
-                "Station",
-                "Station_CAT",
-                "Process1_Generic",
-                "CaSAdptrTerminator",
-                "Robot_Task_CAT",
-            };
-
-            int added = 0;
-            foreach (var fb in syslayFbs)
-            {
-                if (string.IsNullOrEmpty(fb.Id)) continue;
-                if (existingMappings.Contains(fb.Id)) continue;
-                if (existingNames.Contains(fb.Name)) continue;
-                if (!keepTypes.Contains(fb.Type)) continue;
-                var mirrorId = ComputeMirrorId(fb.Id);
-                var fbElement = new XElement(ns + "FB",
-                    new XAttribute("ID",        mirrorId),
-                    new XAttribute("Name",      fb.Name),
-                    new XAttribute("Type",      fb.Type),
-                    new XAttribute("Namespace", fb.Namespace),
-                    new XAttribute("Mapping",   fb.Id),
-                    new XAttribute("x",         fb.X),
-                    new XAttribute("y",         fb.Y));
-
-                foreach (var p in fb.Parameters)
-                {
-                    fbElement.Add(new XElement(ns + "Parameter",
-                        new XAttribute("Name",  p.Name),
-                        new XAttribute("Value", p.Value)));
-                }
-
-                network.Add(fbElement);
-                added++;
-            }
-
-            if (added > 0) doc.Save(sysresPath);
-            return added;
-        }
-
-        static void EnsureSystemFb(XElement network, XNamespace ns,
-            string id, string name, string type, string nsAttr,
-            string? mapping, int x, int y, bool loaded,
-            (string Name, string Value)[]? parameters = null)
-        {
-            foreach (var stale in network.Elements(ns + "FB")
-                .Where(e => string.Equals((string?)e.Attribute("ID"), id, StringComparison.OrdinalIgnoreCase))
-                .ToList())
-            {
-                stale.Remove();
-            }
-
-            var fb = new XElement(ns + "FB",
-                new XAttribute("ID",        id),
-                new XAttribute("Name",      name),
-                new XAttribute("Type",      type),
-                new XAttribute("Namespace", nsAttr));
-            if (!string.IsNullOrEmpty(mapping)) fb.SetAttributeValue("Mapping", mapping);
-            fb.SetAttributeValue("x", x);
-            fb.SetAttributeValue("y", y);
-            if (loaded) fb.SetAttributeValue("Loaded", "true");
-
-            if (parameters != null)
-            {
-                foreach (var (pn, pv) in parameters)
-                {
-                    fb.Add(new XElement(ns + "Parameter",
-                        new XAttribute("Name",  pn),
-                        new XAttribute("Value", pv)));
-                }
-            }
-
-            network.Add(fb);
-        }
-
-        public static string? FindSysresFor(string sysdevPath)
-        {
-            var sysdevFolder = Path.Combine(
-                Path.GetDirectoryName(sysdevPath)!,
-                Path.GetFileNameWithoutExtension(sysdevPath));
-            if (!Directory.Exists(sysdevFolder)) return null;
-            return Directory.EnumerateFiles(sysdevFolder, "*.sysres", SearchOption.TopDirectoryOnly)
-                .FirstOrDefault();
-        }
-
-        /// <summary>
-        /// Decides which PLC resource a syslay FB belongs on. Component FBs use
-        /// <see cref="HcfSymbolIndex.NameBasedPlcGuess"/>; the Station-2 structural
-        /// FBs (which have no IO bindings) are hard-routed to M580. Anything the
-        /// name guess can't place falls back to M262 so nothing is ever dropped.
-        /// </summary>
-        public static PlcAssignment BucketFor(string fbName)
-        {
-            switch (fbName)
-            {
-                case "Station2":
-                case "Station2_HMI":
-                case "Assembly_Station":
-                case "Disassembly":
-                case "Disassembly_Station":
-                case "Stn2_Term":
-                    return PlcAssignment.M580;
-            }
-            var p = HcfSymbolIndex.NameBasedPlcGuess(fbName);
-            return p == PlcAssignment.Unknown ? PlcAssignment.M262 : p;
-        }
-
-        /// <summary>
-        /// Mirrors the Station-2 FBs from the syslay onto the M580 and BX1
-        /// resources (each bucketed by <see cref="BucketFor"/>), so those PLCs
-        /// carry their own actuators/sensors/station/process FBs instead of empty
-        /// shells. Runs AFTER <c>Station2DeviceEmitter.EmitAll</c> has written the
-        /// sysdev/sysres shells. Each resource gets its own DPAC_FULLINIT/plcStart
-        /// boot pair with a distinct ID. Returns (M580 count, BX1 count).
-        /// </summary>
-        public static (int M580, int BX1) EmitStation2Sysres(MapperConfig cfg)
-        {
-            if (cfg == null) throw new ArgumentNullException(nameof(cfg));
-            var eaeRoot = DeriveEaeProjectRoot(cfg);
-            if (string.IsNullOrEmpty(eaeRoot)) return (0, 0);
-
-            var syslayPath = cfg.ActiveSyslayPath;
-            var all = (string.IsNullOrWhiteSpace(syslayPath) || !File.Exists(syslayPath))
-                ? new List<SyslayFb>()
-                : ReadSyslayTopLevelFbs(syslayPath);
-            if (all.Count == 0) return (0, 0);
-
-            int m580 = MirrorBucket(eaeRoot, "M580_dPAC",
-                all.Where(f => BucketFor(f.Name) == PlcAssignment.M580).ToList(),
-                dpacFullInitId: "66C40EEF3F39D969", plcStartId: "ACED009B79DFCE69");
-            int bx1 = MirrorBucket(eaeRoot, "Soft_dPAC",
-                all.Where(f => BucketFor(f.Name) == PlcAssignment.BX1).ToList(),
-                dpacFullInitId: "0FE5E1B2C3D4A5B6", plcStartId: "1A2B3C4D5E6F7081");
-            return (m580, bx1);
-        }
-
-        static int MirrorBucket(string eaeRoot, string deviceType, List<SyslayFb> bucket,
-            string dpacFullInitId, string plcStartId)
-        {
-            if (bucket.Count == 0) return 0;
-            var sysdev = FindSysdevByDeviceType(eaeRoot, deviceType);
-            if (sysdev == null) return 0;
-            var sysres = FindSysresFor(sysdev);
-            if (sysres == null) return 0;
-            var added = MirrorFbsIntoSysres(sysres, bucket, dpacFullInitId, plcStartId);
-
-            // EAE Solution Integrity requires every deployed resource to have a
-            // sibling "{resId}/" metadata folder containing at minimum an
-            // opcua.xml whose UID equals the parent sysdev-folder GUID. The
-            // M262 Feed-Station path gets this via the same helper (the M262
-            // deployed "{resId}/" folder carries opcua.xml + EAE-generated
-            // offline.xml/opcuaclient.xml; only opcua.xml is Mapper-written).
-            // The M580/BX1 resources previously skipped it — exactly the gap
-            // that made the prior mirror attempt fail integrity with "Missing
-            // Project Files". Reuse the M262 helper so the folder name (sysres
-            // stem) and the UID convention match the working M262 output. The
-            // sister files offline.xml/opcuaclient.xml/symlink.xml are left for
-            // EAE to generate on open, mirroring the M262 behaviour.
-            SystemInjector.EnsureOpcuaXmlBesideArtefact(sysres);
-
-            return added;
-        }
-
-        /// <summary>
-        /// Locates the deployed sysdev whose root &lt;Device&gt; has the given
-        /// <paramref name="deviceType"/> (e.g. "M580_dPAC", "Soft_dPAC") in the
-        /// SE.DPAC namespace. Returns null if none match.
-        /// </summary>
-        static string? FindSysdevByDeviceType(string eaeRoot, string deviceType)
-        {
-            var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
-            if (!Directory.Exists(systemDir)) return null;
-            foreach (var sd in Directory.EnumerateFiles(systemDir, "*.sysdev", SearchOption.AllDirectories))
-            {
-                try
-                {
-                    var root = XDocument.Load(sd).Root;
-                    if (root == null || root.Name.LocalName != "Device") continue;
-                    if (string.Equals((string?)root.Attribute("Type"), deviceType, StringComparison.Ordinal) &&
-                        string.Equals((string?)root.Attribute("Namespace"), "SE.DPAC", StringComparison.Ordinal))
-                        return sd;
-                }
-                catch { /* skip malformed */ }
-            }
-            return null;
-        }
-
         /// <summary>
         /// Walk <c>{eaeRoot}/Topology/</c> for any <c>Equipment_*.json</c>
         /// describing the M262 dPAC and force every Ethernet endpoint to
@@ -668,20 +360,6 @@ namespace CodeGen.Devices.M262
                 }
             }
             catch { /* topology dir absent or locked — non-fatal */ }
-        }
-
-        static string ComputeMirrorId(string syslayId)
-        {
-            if (syslayId.Length >= 16)
-            {
-                var first = syslayId[0];
-                int v = Convert.ToInt32(first.ToString(), 16);
-                var flipped = (v ^ 0x8).ToString("X");
-                return flipped + syslayId.Substring(1, 15);
-            }
-            using var sha = System.Security.Cryptography.SHA256.Create();
-            var bytes = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes("mirror:" + syslayId));
-            return Convert.ToHexString(bytes).Substring(0, 16);
         }
 
         static void SetAttr(XElement el, string name, string value)

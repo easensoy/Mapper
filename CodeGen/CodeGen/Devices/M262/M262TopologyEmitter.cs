@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Xml.Linq;
 using CodeGen.Configuration;
+using CodeGen.Devices.Core;
 
 namespace CodeGen.Devices.M262
 {
@@ -28,7 +29,7 @@ namespace CodeGen.Devices.M262
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
             var result = new TopologyEmitResult();
 
-            var eaeRoot = M262SysdevEmitter.DeriveEaeProjectRoot(cfg);
+            var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
             if (eaeRoot == null)
             {
                 result.Warnings.Add("Cannot derive EAE project root — topology not emitted.");
@@ -329,7 +330,7 @@ namespace CodeGen.Devices.M262
         public static int RemoveEmittedTopology(MapperConfig cfg)
         {
             int removed = 0;
-            var eaeRoot = M262SysdevEmitter.DeriveEaeProjectRoot(cfg);
+            var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
             if (eaeRoot == null) return 0;
             var topologyDir = Path.Combine(eaeRoot, "Topology");
             if (!Directory.Exists(topologyDir)) return 0;

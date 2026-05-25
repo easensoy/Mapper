@@ -5,7 +5,7 @@ using System.Linq;
 using System.Xml.Linq;
 using CodeGen.Configuration;
 using CodeGen.Translation;
-using CodeGen.Devices.Shared;
+using CodeGen.Devices.Core;
 
 namespace CodeGen.Devices.M262
 {
@@ -56,7 +56,7 @@ namespace CodeGen.Devices.M262
                 return result;
             }
 
-            var eaeRoot = M262SysdevEmitter.DeriveEaeProjectRoot(cfg);
+            var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
             if (string.IsNullOrEmpty(eaeRoot))
             {
                 result.Warnings.Add(

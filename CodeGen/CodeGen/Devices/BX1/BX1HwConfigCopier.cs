@@ -1,7 +1,7 @@
 using System;
 using CodeGen.Configuration;
 using CodeGen.Devices.M262;
-using CodeGen.Devices.Shared;
+using CodeGen.Devices.Core;
 
 namespace CodeGen.Devices.BX1
 {
@@ -19,7 +19,7 @@ namespace CodeGen.Devices.BX1
         public static HwConfigCopyResult Copy(MapperConfig cfg)
         {
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
-            var eaeRoot = M262SysdevEmitter.DeriveEaeProjectRoot(cfg);
+            var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
             var template = HwConfigVerbatimCopier.ResolveTemplatePath(
                 cfg.BX1HcfTemplatePath, cfg.IoFolderPath, "BX1IO.hcf");
             return HwConfigVerbatimCopier.Deploy(eaeRoot, "Soft_dPAC", "SE.DPAC", template);

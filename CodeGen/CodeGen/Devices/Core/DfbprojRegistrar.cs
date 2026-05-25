@@ -4,7 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Xml.Linq;
 
-namespace CodeGen.Devices.Shared
+namespace CodeGen.Devices.Core
 {
     public static class DfbprojRegistrar
     {
