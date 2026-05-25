@@ -8,8 +8,9 @@ using System.Xml.Linq;
 using CodeGen.Configuration;
 using CodeGen.Models;
 using CodeGen.Translation;
+using CodeGen.Translation.Process;
 
-namespace MapperUI.Services
+namespace CodeGen.Translation
 {
     public class SystemInjector
     {
@@ -920,7 +921,8 @@ namespace MapperUI.Services
             {
                 // Station 1 (M262)
                 "Feeder", "Checker", "Transfer",
-                // Station 2 (M580) — Bearing_PnP removed with Seven_State_Actuator_CAT
+                // Station 2 (M580)
+                "Bearing_PnP",
                 "Bearing_Gripper",
                 "Shaft_Hr", "Shaft_Vr", "Shaft_Gripper",
                 "Clamp",
@@ -1559,8 +1561,10 @@ namespace MapperUI.Services
         /// _vacuumGripperNames so the syslay emit and the Mapping Information
         /// grid agree on which gripper is vacuum vs mechanical.
         /// </summary>
+        // Vacuum_Gripper_CAT is not in the Template Library yet; CoverPnp_Gripper
+        // falls through to Five_State_Actuator_CAT until that CAT is deployed.
         private static readonly HashSet<string> VacuumGripperNames =
-            new(StringComparer.OrdinalIgnoreCase) { "CoverPnp_Gripper" };
+            new(StringComparer.OrdinalIgnoreCase) { };
 
         /// <summary>
         /// Maps a Control.xml &lt;Component&gt; to the FB Type= attribute the
@@ -2797,42 +2801,6 @@ namespace MapperUI.Services
         /// passes integrity. Idempotent — overwrites any existing file.
         /// </summary>
         public static void EnsureOpcuaXmlBesideArtefact(string artefactPath)
-        {
-            if (string.IsNullOrWhiteSpace(artefactPath)) return;
-            var parentDir = Path.GetDirectoryName(artefactPath);
-            if (string.IsNullOrEmpty(parentDir)) return;
-            var stem = Path.GetFileNameWithoutExtension(artefactPath);
-            if (string.IsNullOrEmpty(stem)) return;
-
-            // Folder named after the artefact's stem — opcua.xml lives inside.
-            var opcuaDir = Path.Combine(parentDir, stem);
-            try { Directory.CreateDirectory(opcuaDir); }
-            catch { return; }
-
-            // UID = parent folder name (the syslay/sysres container GUID).
-            // Reference project uses the immediate parent's GUID as the UID.
-            var uid = Path.GetFileName(parentDir);
-
-            var opcuaPath = Path.Combine(opcuaDir, "opcua.xml");
-            var content =
-                "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
-                "<OPCUAComplexObject xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" " +
-                "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n" +
-                $"  <OPCUAComplexObject UID=\"{uid}\" />\r\n" +
-                "</OPCUAComplexObject>";
-
-            // Best-effort write — EAE re-checks Solution Integrity at open
-            // time, so a transient lock isn't fatal. The next regen retries.
-            for (int attempt = 0; attempt < 4; attempt++)
-            {
-                try
-                {
-                    File.WriteAllText(opcuaPath, content);
-                    return;
-                }
-                catch (IOException) { System.Threading.Thread.Sleep(50 * (attempt + 1)); }
-                catch (UnauthorizedAccessException) { System.Threading.Thread.Sleep(50 * (attempt + 1)); }
-            }
-        }
+            => CodeGen.Artefacts.OpcuaCompanionEmitter.EmitForArtefact(artefactPath);
     }
 }
