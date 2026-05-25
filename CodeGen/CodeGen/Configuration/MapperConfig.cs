@@ -250,6 +250,14 @@ namespace CodeGen.Configuration
             SysresPathSim = @"C:\DemonstratorSim\Demonstrator\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000002\00000000-0000-0000-0000-000000000000.sysres",
             IoBindingsPath = @"Input\SMC_Rig_IO_Bindings.xlsx",
             M262HardwareConfigBaselinePath = string.Empty,
+            // IO authoring folder + per-PLC .hcf exports. Defaulted so a fresh
+            // config (e.g. launched from a working dir without a saved
+            // mapper_config.json) still finds the hardware-config files instead
+            // of silently skipping the .hcf copy and leaving M580/BX1 empty.
+            IoFolderPath = @"C:\VueOneMapper\IO",
+            M262HcfTemplatePath = @"C:\VueOneMapper\IO\M262IO.hcf",
+            M580HcfTemplatePath = @"C:\VueOneMapper\IO\M580IO.hcf",
+            BX1HcfTemplatePath = @"C:\VueOneMapper\IO\BX1IO.hcf",
             M262TargetIp = "192.168.1.10",
             M262SubnetAddress = "192.168.1.0",
             M262SubnetMask = "255.255.255.0",
