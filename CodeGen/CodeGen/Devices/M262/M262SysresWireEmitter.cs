@@ -32,6 +32,29 @@ namespace CodeGen.Devices.M262
     {
         public sealed record Wire(string Source, string Destination);
 
+        /// <summary>
+        /// Per-resource structural anchor set. Everything component-driven
+        /// (the init chain body, the CaSBus station chain, the stateRprtCmd
+        /// report ring) is built from the Sensor/Actuator CATs ACTUALLY present
+        /// in the target sysres — see <see cref="EmitForResource"/> — so only
+        /// the fixed structural FB names differ between PLCs. This record
+        /// carries those names so the proven M262 wiring core can target the
+        /// M580 (Station2/Assembly_Station/Stn2_Term) and the BX1 (no Station
+        /// FB at all in this increment) without forking the logic.
+        ///
+        /// A resource with no Station/Process/Terminator (BX1) leaves
+        /// <see cref="StationFb"/>/<see cref="ProcessFb"/>/<see cref="TerminatorFb"/>
+        /// null and the CaS station chain + report ring are skipped gracefully;
+        /// the init fan-out still runs so its actuators initialise.
+        /// </summary>
+        public sealed record ResourceAnchors(
+            string Label,                 // log tag, e.g. "Sysres", "M580", "BX1"
+            string? AreaFb,               // Area structural FB (null on M580/BX1)
+            string? StationFb,            // Station structural FB (null on BX1)
+            string? ProcessFb,            // Process1_Generic FB (null on BX1)
+            string? TerminatorFb,         // CaSAdptrTerminator FB (null on BX1)
+            IReadOnlyList<Wire> HmiAdapterWires);
+
         // Component-independent bootstrap event wires. START is the
         // resource's built-in restart FB (EMB_RES_ECO canvas auto-instance).
         // FB1=DPAC_FULLINIT, FB2=plcStart. The init CHAIN
@@ -64,10 +87,11 @@ namespace CodeGen.Devices.M262
             // here to "Pusher" but the FB instance is "Feeder", the init
             // chain is severed and symlink PATHs lose their bindings.
             "PartInHopper", "PartAtChecker", "Feeder", "Checker", "Transfer",
-            // Station 2 (M580) — Assembly_Station components in PLC-bus order
-            // (Bearing_PnP removed 2026-05-21 with Seven_State_Actuator_CAT.)
+            // Station 2 (M580) — Assembly_Station components in PLC-bus order.
+            // Bearing_PnP (Seven_State_Actuator_CAT) is the live swivel/bearing
+            // actuator; Bearing_Gripper kept for back-compat with older syslays.
             "BearingSensor", "ShaftSensor",
-            "Bearing_Gripper",
+            "Bearing_PnP", "Bearing_Gripper",
             "Shaft_Hr", "Shaft_Vr", "Shaft_Gripper", "Clamp",
             // Station 2 (BX1) — Cover pick-and-place
             "TopCoverSenosr",
@@ -81,13 +105,26 @@ namespace CodeGen.Devices.M262
             {
                 "Five_State_Actuator_CAT",
                 "Five_State_Actuator_No_Sensors_CAT",
-                // Seven_State_Actuator_CAT restored 2026-05-21 — Bearing_PnP
-                // (13-state PARALLEL+ALTERNATIVE branched) routes here. The
-                // wire emitter treats it the same as Five_State for the
-                // CaSBus + stateRprtCmd ring (same adapter port names).
+                // Seven_State_Actuator_CAT — Bearing_PnP (13-state PARALLEL+
+                // ALTERNATIVE branched) routes here. It is INIT-chained like
+                // any actuator BUT, unlike Five_State, its .fbt declares NO CaS
+                // adapter ports (no stationAdptr_*/stateRprtCmd_*), so it is
+                // excluded from the station chain + report ring via
+                // NoCaSAdapterTypes below. (The prior "same adapter port names"
+                // claim was stale — verified against the zipped .fbt.)
                 "Seven_State_Actuator_CAT",
                 "Vacuum_Gripper_CAT",
             };
+
+        // CAT types whose .fbt declares NO CaS adapter ports
+        // (stationAdptr_in/out, stateRprtCmd_in/out). These are still INIT-
+        // chained (they expose INIT/INITO) but are excluded from the CaSBus
+        // station chain and the stateRprtCmd report ring, otherwise the emitter
+        // would write dangling adapter wires to ports that don't exist (EAE
+        // flags them on import). Seven_State_Actuator_CAT (Bearing_PnP) is the
+        // only such type present in the rig; verified against the zipped .fbt.
+        private static readonly HashSet<string> NoCaSAdapterTypes =
+            new(StringComparer.Ordinal) { "Seven_State_Actuator_CAT" };
 
         // Component-independent adapter wires (HMI faceplates + Area/Station
         // structural ring). The CaSBus station chain (Station1→actuators→
@@ -121,31 +158,89 @@ namespace CodeGen.Devices.M262
         // no sysres-level DataConnection is needed.
         private static readonly Wire[] DataWires = Array.Empty<Wire>();
 
+        // ── M262 Feed-Station structural anchors. These are the ONLY
+        //    M262-specific names; everything component-driven is built from
+        //    the CATs present in the sysres. Passed to EmitForResource so the
+        //    same wiring core serves the M580/BX1 with their own anchors. The
+        //    label "Sysres" is preserved so the M262 activity-log lines and
+        //    file output stay byte-identical to the pre-generalisation path.
+        private static readonly ResourceAnchors M262Anchors = new(
+            Label:        "Sysres",
+            AreaFb:       "Area",
+            StationFb:    "Station1",
+            ProcessFb:    "Feed_Station",
+            TerminatorFb: "Stn1_Term",
+            HmiAdapterWires: HmiAdapterWires);
+
+        /// <summary>
+        /// M262 Feed-Station entry point. UNCHANGED behaviour: locates the
+        /// M262 sysres by device Type, wires it with the M262 anchors, and
+        /// mirrors the canonical layout onto the deployed syslay. The wiring
+        /// inputs (sysres path, anchors, layout) are identical to the
+        /// pre-generalisation code path, so the emitted bytes are unchanged.
+        /// </summary>
         public static void Emit(MapperConfig cfg,
             SystemInjector.BindingApplicationReport report)
         {
+            var eaeRoot = M262SysdevEmitter.DeriveEaeProjectRoot(cfg);
+            if (eaeRoot == null)
+            {
+                report.Missing.Add("[Wire] skipped, EAE project root not derivable");
+                return;
+            }
+            var sysresPath = LocateM262Sysres(eaeRoot);
+            if (sysresPath == null)
+            {
+                report.Missing.Add("[Wire] skipped, M262 sysres not found");
+                return;
+            }
+            EmitForResource(cfg, sysresPath, M262Anchors, report);
+
+            // Mirror the SAME CanonicalLayout onto the deployed syslay so the
+            // EAE application canvas reads cleanly too. Best-effort:
+            // ApplyLayoutToSyslay silently skips if the file/root is missing.
+            // syslay-only; the M580/BX1 share this single application canvas so
+            // EmitForResource intentionally does NOT touch it (only the M262
+            // path mirrors layout to keep that output unchanged).
+            ApplyLayoutToSyslay(cfg.ActiveSyslayPath, report);
+        }
+
+        /// <summary>
+        /// Wires one deployed sysres FBNetwork using the proven M262 topology,
+        /// parameterised by <paramref name="anchors"/>:
+        ///   • bootstrap event wires (START→FB1→…)
+        ///   • init chain FB1.INITO→[Area]→[Station]→components…→[Process]
+        ///     (every present node reached; missing anchors collapse out)
+        ///   • CaSBus station chain [Station]→actuators…→[Process]→[Terminator]
+        ///   • closed stateRprtCmd report ring among all components + [Process]
+        ///   • the resource's HMI/structural adapter wires.
+        /// Components (Sensor/Actuator CATs) are discovered from the sysres
+        /// itself in <see cref="CaSBusOrder"/> then declaration order, so the
+        /// chains/ring are N-component-safe and never severed.
+        ///
+        /// A resource with no Station/Process/Terminator (BX1) gets ONLY the
+        /// init fan-out + the report ring among its own components; the CaS
+        /// station chain is skipped gracefully (no Station/Process anchor).
+        /// </summary>
+        public static void EmitForResource(MapperConfig cfg, string sysresPath,
+            ResourceAnchors anchors, SystemInjector.BindingApplicationReport report)
+        {
             try
             {
-                var eaeRoot = M262SysdevEmitter.DeriveEaeProjectRoot(cfg);
-                if (eaeRoot == null)
+                var tag = anchors.Label;
+                if (!File.Exists(sysresPath))
                 {
-                    report.Missing.Add("[Wire] skipped, EAE project root not derivable");
-                    return;
-                }
-                var sysresPath = LocateM262Sysres(eaeRoot);
-                if (sysresPath == null)
-                {
-                    report.Missing.Add("[Wire] skipped, M262 sysres not found");
+                    report.Missing.Add($"[Wire][{tag}] skipped, sysres not found: {sysresPath}");
                     return;
                 }
                 var doc = XDocument.Load(sysresPath, LoadOptions.PreserveWhitespace);
                 var root = doc.Root;
-                if (root == null) { report.Missing.Add("[Wire] skipped, sysres root null"); return; }
+                if (root == null) { report.Missing.Add($"[Wire][{tag}] skipped, sysres root null"); return; }
                 XNamespace ns = root.GetDefaultNamespace();
                 var fbNet = root.Element(ns + "FBNetwork");
                 if (fbNet == null)
                 {
-                    report.Missing.Add("[Wire] skipped, no FBNetwork on sysres");
+                    report.Missing.Add($"[Wire][{tag}] skipped, no FBNetwork on sysres");
                     return;
                 }
 
@@ -161,11 +256,10 @@ namespace CodeGen.Devices.M262
                     if (!string.IsNullOrEmpty(t) && !byType.ContainsKey(t)) byType[t] = fb;
                 }
 
-                // Apply the canonical sysres canvas layout (2500 H pitch,
-                // top-down: bootstrap → HMI → structural → sensors+process →
-                // actuators; no overlap). The same dictionary is mirrored onto
-                // the syslay via ApplyLayoutToSyslay at the end of Emit().
-                ApplyCanonicalLayout(byName, report, "Sysres");
+                // Apply the canonical sysres canvas layout (single source of
+                // truth dict holds all M262 + M580 + BX1 coordinates; only the
+                // FBs present on THIS resource are moved).
+                ApplyCanonicalLayout(byName, report, tag);
 
                 // Cache loaded .fbt port lookups so we don't re-parse per wire.
                 var portsByType = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
@@ -218,23 +312,23 @@ namespace CodeGen.Devices.M262
                         bool isInitBridge = w.Source.StartsWith("E_RESTART.", StringComparison.Ordinal)
                             && w.Destination.StartsWith("plcStart.", StringComparison.Ordinal);
                         if (isInitBridge)
-                            report.Missing.Add("[Sysres] E_RESTART or plcStart not found, init chain will not fire");
+                            report.Missing.Add($"[{tag}] E_RESTART or plcStart not found, init chain will not fire");
                         else
                             report.Missing.Add($"[Wire] FB instance not found for {w.Source} → {w.Destination}");
                         return;
                     }
                     if (!srcBuiltIn && !PortExists(PortsFor(srcType), srcPort))
                     {
-                        report.Missing.Add($"[Sysres] port not found: {srcName}.{srcPort}, skipping wire");
+                        report.Missing.Add($"[{tag}] port not found: {srcName}.{srcPort}, skipping wire");
                         return;
                     }
                     if (!dstBuiltIn && !PortExists(PortsFor(dstType), dstPort))
                     {
-                        report.Missing.Add($"[Sysres] port not found: {dstName}.{dstPort}, skipping wire");
+                        report.Missing.Add($"[{tag}] port not found: {dstName}.{dstPort}, skipping wire");
                         return;
                     }
                     sink.Add(($"{srcName}.{srcPort}", $"{dstName}.{dstPort}"));
-                    report.Missing.Add($"[Sysres] {srcName}.{srcPort} -> {dstName}.{dstPort}");
+                    report.Missing.Add($"[{tag}] {srcName}.{srcPort} -> {dstName}.{dstPort}");
                 }
 
                 // ── Component-driven init chain + CaSBus station chain +
@@ -246,6 +340,14 @@ namespace CodeGen.Devices.M262
                     SensorCatTypes.Contains((string?)fb.Attribute("Type") ?? string.Empty);
                 bool IsActuator(XElement fb) =>
                     ActuatorCatTypes.Contains((string?)fb.Attribute("Type") ?? string.Empty);
+                // True when the FB's type exposes the CaS adapter ports
+                // (stationAdptr_*/stateRprtCmd_*). Seven_State_Actuator_CAT does
+                // NOT, so it is INIT-chained but kept out of the station chain
+                // and report ring. (M262's components are all Sensor/Five_State,
+                // which DO have the ports — so this filters nothing on M262 and
+                // its output is unchanged.)
+                bool HasCaSAdapter(XElement fb) =>
+                    !NoCaSAdapterTypes.Contains((string?)fb.Attribute("Type") ?? string.Empty);
 
                 var orderedComps = new List<XElement>();
                 var seenComp = new HashSet<string>(StringComparer.Ordinal);
@@ -260,55 +362,93 @@ namespace CodeGen.Devices.M262
                         orderedComps.Add(fb);
                 }
                 string Nm(XElement fb) => (string?)fb.Attribute("Name") ?? string.Empty;
-                var compNames = orderedComps.Select(Nm).Where(s => s.Length > 0).ToList();
-                var actNames = orderedComps.Where(IsActuator).Select(Nm)
+                // initNames — every component, in CaSBus order, for the INIT
+                // chain (all CATs expose INIT/INITO).
+                var initNames = orderedComps.Select(Nm).Where(s => s.Length > 0).ToList();
+                // ringNames — components that expose the stateRprtCmd adapter
+                // (excludes Seven_State); used for the report ring.
+                var ringNames = orderedComps.Where(HasCaSAdapter).Select(Nm)
                     .Where(s => s.Length > 0).ToList();
+                // actNames — actuators that expose the stationAdptr adapter
+                // (excludes Seven_State); used for the CaS station chain.
+                var actNames = orderedComps.Where(c => IsActuator(c) && HasCaSAdapter(c))
+                    .Select(Nm).Where(s => s.Length > 0).ToList();
 
-                // Init chain: FB1.INITO→Area→Station1→components…→Feed_Station,
-                // wiring INITO(N)→INIT(N+1) so every node is reached.
+                // Init chain: FB1.INITO→[Area]→[Station]→components…→[Process],
+                // wiring INITO(N)→INIT(N+1) so every node is reached. Anchors
+                // that are null/absent on this resource (e.g. BX1 has no Area /
+                // Station / Process) collapse out, leaving FB1.INITO fanning
+                // straight into the first component so actuators still init.
                 var eventWires = new List<Wire>(BootstrapEventWires);
-                var initChain = new List<string> { "FB1", "Area", "Station1" };
-                initChain.AddRange(compNames);
-                initChain.Add("Feed_Station");
+                var initChain = new List<string> { "FB1" };
+                if (Present(anchors.AreaFb, byName)) initChain.Add(anchors.AreaFb!);
+                if (Present(anchors.StationFb, byName)) initChain.Add(anchors.StationFb!);
+                initChain.AddRange(initNames);
+                if (Present(anchors.ProcessFb, byName)) initChain.Add(anchors.ProcessFb!);
                 for (int i = 0; i < initChain.Count - 1; i++)
                     eventWires.Add(new Wire($"{initChain[i]}.INITO", $"{initChain[i + 1]}.INIT"));
 
-                var adapterWires = new List<Wire>(HmiAdapterWires);
-                // CaSBus station chain — actuators + process ONLY (Sensor_Bool_CAT
-                // has no stationAdptr ports): Station1→actuators…→Feed_Station,
-                // Feed_Station closed to Stn1_Term.
-                var stationChain = new List<string>(actNames) { "Feed_Station" };
-                adapterWires.Add(new Wire("Station1.StationAdaptrOUT",
-                    $"{stationChain[0]}.stationAdptr_in"));
-                for (int i = 0; i < stationChain.Count - 1; i++)
-                    adapterWires.Add(new Wire($"{stationChain[i]}.stationAdptr_out",
-                        $"{stationChain[i + 1]}.stationAdptr_in"));
-                adapterWires.Add(new Wire($"{stationChain[^1]}.stationAdptr_out",
-                    "Stn1_Term." + CodeGen.Translation.PortNameValidator.CaSAdptrTerminatorInPort));
+                var adapterWires = new List<Wire>(anchors.HmiAdapterWires);
 
-                // stateRprtCmd report ring — EVERY component + process, CLOSED:
-                // comp(N).out→comp(N+1).in; last→Feed_Station.stateRptCmdAdptr_in;
-                // Feed_Station.stateRptCmdAdptr_out→comp(0).in. Process1_Generic
-                // uses the *Adptr suffix; Sensor/Actuator CATs use stateRprtCmd_*.
-                if (compNames.Count > 0)
+                // CaSBus station chain — actuators + process ONLY (Sensor_Bool_CAT
+                // has no stationAdptr ports): [Station]→actuators…→[Process],
+                // [Process] closed to [Terminator]. Requires BOTH a Station
+                // anchor (chain source) and a Process anchor (chain tail). BX1
+                // has neither, so this whole block is skipped — its actuators
+                // still initialise via the fan-out above and report via the
+                // ring below.
+                bool haveStation = Present(anchors.StationFb, byName);
+                bool haveProcess = Present(anchors.ProcessFb, byName);
+                if (haveStation && haveProcess)
                 {
-                    for (int i = 0; i < compNames.Count - 1; i++)
-                        adapterWires.Add(new Wire($"{compNames[i]}.stateRprtCmd_out",
-                            $"{compNames[i + 1]}.stateRprtCmd_in"));
-                    adapterWires.Add(new Wire($"{compNames[^1]}.stateRprtCmd_out",
-                        "Feed_Station.stateRptCmdAdptr_in"));
-                    adapterWires.Add(new Wire("Feed_Station.stateRptCmdAdptr_out",
-                        $"{compNames[0]}.stateRprtCmd_in"));
+                    var stationChain = new List<string>(actNames) { anchors.ProcessFb! };
+                    adapterWires.Add(new Wire($"{anchors.StationFb}.StationAdaptrOUT",
+                        $"{stationChain[0]}.stationAdptr_in"));
+                    for (int i = 0; i < stationChain.Count - 1; i++)
+                        adapterWires.Add(new Wire($"{stationChain[i]}.stationAdptr_out",
+                            $"{stationChain[i + 1]}.stationAdptr_in"));
+                    if (Present(anchors.TerminatorFb, byName))
+                        adapterWires.Add(new Wire($"{stationChain[^1]}.stationAdptr_out",
+                            $"{anchors.TerminatorFb}." +
+                            CodeGen.Translation.PortNameValidator.CaSAdptrTerminatorInPort));
+                }
+                else
+                {
+                    report.Missing.Add(
+                        $"[{tag}] no Station/Process FB on this resource, " +
+                        "skipping CaS station chain (init fan-out + report ring still wired)");
+                }
+
+                // stateRprtCmd report ring — every adapter-capable component
+                // (ringNames excludes Seven_State, which lacks the port) plus
+                // [Process] if present, CLOSED: comp(N).out→comp(N+1).in. With a
+                // Process anchor the ring closes through it (last→Process.in,
+                // Process.out→comp0.in); without one (BX1) the ring closes
+                // directly comp(last)→comp(0) so the components still gossip
+                // state among themselves. Process1_Generic uses the *Adptr
+                // suffix; Sensor/Actuator CATs use stateRprtCmd_*.
+                if (ringNames.Count > 0)
+                {
+                    for (int i = 0; i < ringNames.Count - 1; i++)
+                        adapterWires.Add(new Wire($"{ringNames[i]}.stateRprtCmd_out",
+                            $"{ringNames[i + 1]}.stateRprtCmd_in"));
+                    if (haveProcess)
+                    {
+                        adapterWires.Add(new Wire($"{ringNames[^1]}.stateRprtCmd_out",
+                            $"{anchors.ProcessFb}.stateRptCmdAdptr_in"));
+                        adapterWires.Add(new Wire($"{anchors.ProcessFb}.stateRptCmdAdptr_out",
+                            $"{ringNames[0]}.stateRprtCmd_in"));
+                    }
+                    else if (ringNames.Count > 1)
+                    {
+                        adapterWires.Add(new Wire($"{ringNames[^1]}.stateRprtCmd_out",
+                            $"{ringNames[0]}.stateRprtCmd_in"));
+                    }
                 }
 
                 foreach (var w in eventWires)   Process(w, emittedEvents,   "event");
                 foreach (var w in DataWires)    Process(w, emittedData,     "data");
                 foreach (var w in adapterWires) Process(w, emittedAdapters, "adapter");
-
-                // (Removed) The optional M262IO.HopperEvent / PusherEvent →
-                // Feed_Station.state_change fast path is gone with M262IO.
-                // Component state reaches the Process exclusively through
-                // the stateRprtCmd adapter ring now.
 
                 // Replace all three existing connection blocks with the
                 // freshly-emitted set. Adapter wires now live in their own
@@ -356,22 +496,22 @@ namespace CodeGen.Devices.M262
                 doc.Save(w2);
 
                 report.Missing.Add(
-                    $"[Sysres] wrote {emittedEvents.Count} event + {emittedData.Count} data + " +
+                    $"[{tag}] wrote {emittedEvents.Count} event + {emittedData.Count} data + " +
                     $"{emittedAdapters.Count} adapter connection(s) to {Path.GetFileName(sysresPath)}");
-
-                // Mirror the SAME CanonicalLayout onto the deployed syslay so
-                // the EAE application canvas reads cleanly too. Previously the
-                // syslay kept its generator-time coords and overlapped badly
-                // with ≥3 components. Best-effort: ApplyLayoutToSyslay silently
-                // skips if the file/root is missing. Button 2 writes its syslay
-                // to cfg.SyslayPath2 (== ActiveSyslayPath for this path).
-                ApplyLayoutToSyslay(cfg.ActiveSyslayPath, report);
             }
             catch (Exception ex)
             {
-                report.Missing.Add($"[Wire] failed: {ex.GetType().Name}: {ex.Message}");
+                report.Missing.Add($"[Wire][{anchors.Label}] failed: {ex.GetType().Name}: {ex.Message}");
             }
         }
+
+        /// <summary>True when <paramref name="name"/> is non-null and an FB
+        /// with that instance name exists on the resource. Used so structural
+        /// anchors absent on a given PLC (e.g. BX1 has no Area/Station/Process)
+        /// collapse out of the init chain / station chain rather than emitting
+        /// dangling wires that fail port validation.</summary>
+        private static bool Present(string? name, Dictionary<string, XElement> byName)
+            => !string.IsNullOrEmpty(name) && byName.ContainsKey(name);
 
         // Canonical canvas layout — applied to BOTH the sysres
         // (ApplyCanonicalLayout in Emit) and the deployed syslay
@@ -430,7 +570,10 @@ namespace CodeGen.Devices.M262
             { "Assembly_Station",(12200, 4000) },
             { "BearingSensor",   (15000, 4000) },
             { "ShaftSensor",     (17500, 4000) },
-            // Bearing_PnP removed 2026-05-21 with Seven_State_Actuator_CAT.
+            // Bearing_PnP (Seven_State_Actuator_CAT) is the live Station-2
+            // swivel/bearing actuator; coordinates match the deployed M580
+            // sysres. Bearing_Gripper kept for back-compat with older syslays.
+            { "Bearing_PnP",     (12200, 5400) },
             { "Bearing_Gripper", (12200, 5400) },
             { "Shaft_Hr",        (14700, 5400) },
             { "Shaft_Vr",        (17200, 5400) },
@@ -512,12 +655,22 @@ namespace CodeGen.Devices.M262
         }
 
         private static string? LocateM262Sysres(string eaeRoot)
+            => LocateSysresByDeviceType(eaeRoot, "M262_dPAC");
+
+        /// <summary>
+        /// Locates the deployed .sysres beside the .sysdev whose root
+        /// <c>&lt;Device&gt;</c> has the given <paramref name="deviceType"/>
+        /// (e.g. "M262_dPAC", "M580_dPAC", "Soft_dPAC") in the SE.DPAC
+        /// namespace. Mirrors <c>M262SysdevEmitter.FindSysdevByDeviceType</c>
+        /// + <c>FindSysresFor</c> but returns the .sysres path directly.
+        /// </summary>
+        private static string? LocateSysresByDeviceType(string eaeRoot, string deviceType)
         {
             var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
             if (!Directory.Exists(systemDir)) return null;
-            // The M262 sysres sits next to the M262 sysdev. Pick the .sysres
+            // The sysres sits next to the matching sysdev. Pick the .sysres
             // whose enclosing folder is named after a .sysdev whose root
-            // Device has Type="M262_dPAC".
+            // Device has the requested Type in SE.DPAC.
             foreach (var sysdev in Directory.EnumerateFiles(systemDir, "*.sysdev", SearchOption.AllDirectories))
             {
                 try
@@ -527,7 +680,7 @@ namespace CodeGen.Devices.M262
                     if (root == null) continue;
                     var type = (string?)root.Attribute("Type") ?? string.Empty;
                     var nspace = (string?)root.Attribute("Namespace") ?? string.Empty;
-                    if (type != "M262_dPAC" || nspace != "SE.DPAC") continue;
+                    if (type != deviceType || nspace != "SE.DPAC") continue;
                     var sysdevDir = Path.Combine(
                         Path.GetDirectoryName(sysdev)!,
                         Path.GetFileNameWithoutExtension(sysdev));
@@ -537,6 +690,60 @@ namespace CodeGen.Devices.M262
                 catch { /* skip */ }
             }
             return null;
+        }
+
+        // ── Station-2 structural anchors. The M580 carries the full
+        //    Assembly_Station slice (Station + Process + Terminator); the BX1
+        //    carries only the cover pick-and-place actuators + sensor with NO
+        //    Station/Process/Terminator of its own in this increment, so its
+        //    anchors are all null and EmitForResource gives it just the INIT
+        //    fan-out + the report ring among the BX1 components.
+        private static readonly ResourceAnchors M580Anchors = new(
+            Label:        "M580",
+            AreaFb:       null,                 // Area lives on the M262 only
+            StationFb:    "Station2",
+            ProcessFb:    "Assembly_Station",
+            TerminatorFb: "Stn2_Term",
+            HmiAdapterWires: new[]
+            {
+                // Station2 faceplate; no Area on this resource so no Area ring.
+                new Wire("Station2_HMI.StationHMIAdptrOUT", "Station2.StationHMIAdptrIN"),
+            });
+
+        private static readonly ResourceAnchors BX1Anchors = new(
+            Label:        "BX1",
+            AreaFb:       null,
+            StationFb:    null,                 // no Station FB on BX1 (graceful skip)
+            ProcessFb:    null,                 // no Process FB on BX1
+            TerminatorFb: null,
+            HmiAdapterWires: Array.Empty<Wire>());
+
+        /// <summary>
+        /// Wires the deployed M580 + BX1 sysres FBNetworks (each located by
+        /// device Type) with the SAME proven topology core as the M262, using
+        /// each PLC's own structural anchors. Additive — does NOT touch the
+        /// M262 sysres or the shared application syslay. The M580 gets the full
+        /// init chain + CaS station chain + report ring; the BX1 (no Station FB)
+        /// gets the init fan-out + report ring only. Returns true if at least
+        /// one resource was located and wired.
+        /// </summary>
+        public static void EmitStation2Resources(MapperConfig cfg,
+            SystemInjector.BindingApplicationReport report)
+        {
+            var eaeRoot = M262SysdevEmitter.DeriveEaeProjectRoot(cfg);
+            if (eaeRoot == null)
+            {
+                report.Missing.Add("[Wire][Stn2] skipped, EAE project root not derivable");
+                return;
+            }
+
+            var m580 = LocateSysresByDeviceType(eaeRoot, "M580_dPAC");
+            if (m580 != null) EmitForResource(cfg, m580, M580Anchors, report);
+            else report.Missing.Add("[Wire][M580] skipped, M580 sysres not found");
+
+            var bx1 = LocateSysresByDeviceType(eaeRoot, "Soft_dPAC");
+            if (bx1 != null) EmitForResource(cfg, bx1, BX1Anchors, report);
+            else report.Missing.Add("[Wire][BX1] skipped, BX1 sysres not found");
         }
 
         private static bool TryResolve(string endpoint,
