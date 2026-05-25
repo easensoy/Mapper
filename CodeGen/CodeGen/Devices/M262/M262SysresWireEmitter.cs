@@ -374,6 +374,24 @@ namespace CodeGen.Devices.M262
                 var actNames = orderedComps.Where(c => IsActuator(c) && HasCaSAdapter(c))
                     .Select(Nm).Where(s => s.Length > 0).ToList();
 
+                // processNames — EVERY Process1_Generic on this resource, anchor
+                // first then any others. M580 carries BOTH Assembly_Station and
+                // Disassembly; the init chain, CaS station chain and report ring
+                // below thread through every one (so a second process is never left
+                // unwired), and they get cross-process state_update->state_change
+                // wires too. M262 has only Feed_Station, so this is a single-element
+                // list and its output is byte-identical to before.
+                var processNames = new List<string>();
+                if (Present(anchors.ProcessFb, byName)) processNames.Add(anchors.ProcessFb!);
+                foreach (var fb in fbNet.Elements(ns + "FB"))
+                {
+                    var nm = (string?)fb.Attribute("Name") ?? string.Empty;
+                    if (nm.Length == 0 || processNames.Contains(nm)) continue;
+                    if ((string?)fb.Attribute("Type") == "Process1_Generic")
+                        processNames.Add(nm);
+                }
+                bool haveProcess = processNames.Count > 0;
+
                 // Init chain: FB1.INITO→[Area]→[Station]→components…→[Process],
                 // wiring INITO(N)→INIT(N+1) so every node is reached. Anchors
                 // that are null/absent on this resource (e.g. BX1 has no Area /
@@ -384,9 +402,21 @@ namespace CodeGen.Devices.M262
                 if (Present(anchors.AreaFb, byName)) initChain.Add(anchors.AreaFb!);
                 if (Present(anchors.StationFb, byName)) initChain.Add(anchors.StationFb!);
                 initChain.AddRange(initNames);
-                if (Present(anchors.ProcessFb, byName)) initChain.Add(anchors.ProcessFb!);
+                initChain.AddRange(processNames);   // every process is INIT-chained
                 for (int i = 0; i < initChain.Count - 1; i++)
                     eventWires.Add(new Wire($"{initChain[i]}.INITO", $"{initChain[i + 1]}.INIT"));
+
+                // Cross-process synchronisation on THIS resource: every Process FB
+                // signals every other when its state changes, so the HandShake
+                // conditions (dropped from each recipe as out-of-scope Process refs)
+                // fire here instead of stalling. Same fully-connected pattern the
+                // syslay uses. On M580 this links Assembly_Station <-> Disassembly;
+                // single-process resources (M262) add nothing.
+                for (int i = 0; i < processNames.Count; i++)
+                    for (int j = 0; j < processNames.Count; j++)
+                        if (i != j)
+                            eventWires.Add(new Wire($"{processNames[i]}.state_update",
+                                $"{processNames[j]}.state_change"));
 
                 var adapterWires = new List<Wire>(anchors.HmiAdapterWires);
 
@@ -398,10 +428,10 @@ namespace CodeGen.Devices.M262
                 // still initialise via the fan-out above and report via the
                 // ring below.
                 bool haveStation = Present(anchors.StationFb, byName);
-                bool haveProcess = Present(anchors.ProcessFb, byName);
                 if (haveStation && haveProcess)
                 {
-                    var stationChain = new List<string>(actNames) { anchors.ProcessFb! };
+                    var stationChain = new List<string>(actNames);
+                    stationChain.AddRange(processNames);   // actuators…→Process(es)→Terminator
                     adapterWires.Add(new Wire($"{anchors.StationFb}.StationAdaptrOUT",
                         $"{stationChain[0]}.stationAdptr_in"));
                     for (int i = 0; i < stationChain.Count - 1; i++)
@@ -434,9 +464,15 @@ namespace CodeGen.Devices.M262
                             $"{ringNames[i + 1]}.stateRprtCmd_in"));
                     if (haveProcess)
                     {
+                        // Close the ring THROUGH every process in turn:
+                        //   compN → P0 → P1 → … → comp0
+                        // so each Process FB reads the whole component state ring.
                         adapterWires.Add(new Wire($"{ringNames[^1]}.stateRprtCmd_out",
-                            $"{anchors.ProcessFb}.stateRptCmdAdptr_in"));
-                        adapterWires.Add(new Wire($"{anchors.ProcessFb}.stateRptCmdAdptr_out",
+                            $"{processNames[0]}.stateRptCmdAdptr_in"));
+                        for (int i = 0; i < processNames.Count - 1; i++)
+                            adapterWires.Add(new Wire($"{processNames[i]}.stateRptCmdAdptr_out",
+                                $"{processNames[i + 1]}.stateRptCmdAdptr_in"));
+                        adapterWires.Add(new Wire($"{processNames[^1]}.stateRptCmdAdptr_out",
                             $"{ringNames[0]}.stateRprtCmd_in"));
                     }
                     else if (ringNames.Count > 1)
