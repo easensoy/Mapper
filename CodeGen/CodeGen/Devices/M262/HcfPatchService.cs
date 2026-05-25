@@ -6,7 +6,7 @@ using System.Xml.Linq;
 using CodeGen.Configuration;
 using CodeGen.Translation;
 
-namespace MapperUI.Services
+namespace CodeGen.Devices.M262
 {
     /// <summary>
     /// Patches the deployed M262 <c>.hcf</c> after Button-2 / Generate so EAE
@@ -18,8 +18,8 @@ namespace MapperUI.Services
     /// sysres, rewrites the TM3 module ParameterValues against the in-scope
     /// syslay FB names + IO bindings, and saves.
     ///
-    /// Lives in MapperUI.Services because it cross-references M262HcfDocument /
-    /// M262HwConfigCopier / M262SysdevEmitter, none of which CodeGen.dll can see.
+    /// Lives in CodeGen.Devices.M262 alongside M262HcfDocument /
+    /// M262HwConfigCopier / M262SysdevEmitter, which it cross-references.
     /// </summary>
     public static class HcfPatchService
     {
