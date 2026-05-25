@@ -5,7 +5,7 @@ using System.Linq;
 using System.Xml.Linq;
 using CodeGen.Configuration;
 
-namespace MapperUI.Services
+namespace CodeGen.Devices.M262
 {
     public static class M262TopologyEmitter
     {
