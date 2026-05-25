@@ -21,7 +21,9 @@
 using CodeGen.Configuration;
 using CodeGen.IO;
 using CodeGen.Models;
-using MapperUI.Services;
+using CodeGen.Devices.M262;
+using CodeGen.Devices.M580;
+using CodeGen.Translation;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -89,7 +91,7 @@ namespace MapperUI
                 await FinalizeM262StackAsync();
 
                 int wireCountBefore = report.Missing.Count;
-                await Task.Run(() => MapperUI.Services.M262SysresWireEmitter.Emit(Cfg(), report));
+                await Task.Run(() => M262SysresWireEmitter.Emit(Cfg(), report));
                 for (int i = wireCountBefore; i < report.Missing.Count; i++)
                 {
                     var line = report.Missing[i];
@@ -98,7 +100,7 @@ namespace MapperUI
                 }
 
                 int hcfCountBefore = report.Missing.Count;
-                await Task.Run(() => MapperUI.Services.HcfPatchService.PatchDeployed(
+                await Task.Run(() => HcfPatchService.PatchDeployed(
                     Cfg(), path, bindings, report));
                 for (int i = hcfCountBefore; i < report.Missing.Count; i++)
                 {
@@ -184,7 +186,7 @@ namespace MapperUI
                             .FirstOrDefault();
                         if (sysresFileOpcua != null)
                         {
-                            MapperUI.Services.SystemInjector
+                            SystemInjector
                                 .EnsureOpcuaXmlBesideArtefact(sysresFileOpcua);
                             AppendActivity(
                                 $"[Simulator][OPCUA] Emitted opcua.xml stubs beside syslay + sysres " +
