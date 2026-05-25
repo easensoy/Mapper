@@ -556,43 +556,45 @@ namespace CodeGen.Devices.M262
             { "Checker",      (4500, 5400) },
             { "Transfer",     (7000, 5400) },
             { "Stn1_Term",    (9500, 5400) },
-            // M580 zone (Station 2 — purple frame). Reference-style columns
-            // (SMC_Rig_Expo_withClamp stacks its 8 M580 actuators in ONE vertical
-            // column at constant x with ~1060 row pitch, processes in a separate
-            // column to the right). We mirror that:
-            //   x=12300  actuator column  (6 actuators, 1300 pitch)
-            //   x=14800  sensor column    (2 sensors)
-            //   x=17300  process column   (Assembly_Station, Disassembly — tall,
-            //                               3000 pitch so the Process bodies clear)
-            //   y=2000   structural row   (Station2_HMI, Station2, Stn2_Term)
-            // No two FBs share a slot (the old layout stacked Bearing_PnP and
-            // Bearing_Gripper on the SAME (12200,5400) point, and put the tall
-            // Assembly Process directly above an actuator). FRAME sizing is now
-            // dynamic (ResizeFramesToFitFbs) so the purple frame grows to enclose
-            // whatever lands here — no overflow regardless of FB count.
-            { "Station2_HMI",    (12300, 2000) },
-            { "Station2",        (14800, 2000) },
-            { "Stn2_Term",       (17300, 2000) },
-            // actuator column (x=12300)
-            { "Bearing_PnP",     (12300, 3400) },
-            { "Bearing_Gripper", (12300, 4700) },
-            { "Shaft_Hr",        (12300, 6000) },
-            { "Shaft_Vr",        (12300, 7300) },
-            { "Shaft_Gripper",   (12300, 8600) },
-            { "Clamp",           (12300, 9900) },
-            // sensor column (x=14800)
-            { "BearingSensor",   (14800, 3400) },
-            { "ShaftSensor",     (14800, 4700) },
-            // process column (x=17300) — Process1_Generic bodies are tall
-            { "Assembly_Station",(17300, 3400) },
-            { "Disassembly",     (17300, 6400) },
-            // BX1 zone (Station 2 — green frame). Actuator column at x=20700
-            // (1300 pitch) with the top-cover sensor beside it; mirrors the M580
-            // column style. Dynamic frame sizing encloses them.
-            { "TopCoverSenosr",  (23200, 3400) },
-            { "CoverPNP_Hr",     (20700, 3400) },
-            { "CoverPNP_Vr",     (20700, 4700) },
-            { "CoverPnp_Gripper",(20700, 6000) },
+            // M580 zone (Station 2 — purple). Laid out the SAME WAY as Station 1
+            // (M262 above): horizontal rows, 2500 x-pitch, 1500 y-pitch.
+            //   y=2000  structural : Station2_HMI, Station2, Stn2_Term
+            //   y=3500  sensors+proc: Assembly_Station, Disassembly, BearingSensor,
+            //                         ShaftSensor
+            //   y=5000  actuator row 1: Bearing_PnP, Bearing_Gripper, Shaft_Hr,
+            //                           Shaft_Vr
+            //   y=6500  actuator row 2: Shaft_Gripper, Clamp   (6 actuators won't
+            //                           fit one tidy row, so the last two wrap —
+            //                           still rows, like Station 1, never columns)
+            // Every FB has a unique slot (no more Bearing_PnP/Bearing_Gripper on
+            // the same point, no Process stacked on an actuator). The purple frame
+            // is then grown to enclose all of it by ResizeFramesToFitFbs, so the
+            // bottom row can't hang out the frame.
+            { "Station2_HMI",    (12200, 2000) },   // mirrors Station1_HMI (y=2000)
+            { "Station2",        (12200, 2900) },   // mirrors Station1     (y=2900)
+            // sensors + process row (y=4000), mirrors PartInHopper/…/Feed_Station
+            { "Assembly_Station",(12200, 4000) },
+            { "Disassembly",     (14700, 4000) },
+            { "BearingSensor",   (17200, 4000) },
+            { "ShaftSensor",     (19700, 4000) },
+            // single actuator row (y=5400), mirrors Feeder/Checker/Transfer/Stn1_Term;
+            // 6 actuators + terminator march left→right at 2500 pitch. One row only
+            // => no actuator-below-actuator stacking; the only vertical neighbour is
+            // the sensor/process row 1400 above, exactly as Station 1.
+            { "Bearing_PnP",     (12200, 5400) },
+            { "Bearing_Gripper", (14700, 5400) },
+            { "Shaft_Hr",        (17200, 5400) },
+            { "Shaft_Vr",        (19700, 5400) },
+            { "Shaft_Gripper",   (22200, 5400) },
+            { "Clamp",           (24700, 5400) },
+            { "Stn2_Term",       (27200, 5400) },
+            // BX1 zone (Station 2 — green). Same row scheme, to the right of the
+            // M580 actuator row (which ends at Stn2_Term x=27200, +body+pad ~28400),
+            // so BX1 starts at 29000 and the green frame stays clear of the purple.
+            { "TopCoverSenosr",  (29000, 4000) },
+            { "CoverPNP_Hr",     (29000, 5400) },
+            { "CoverPNP_Vr",     (31500, 5400) },
+            { "CoverPnp_Gripper",(34000, 5400) },
             // No-op (M262IO/PLC_RW_M262 retired — never instantiated)
             { "M262IO",       (9500, 400)  },
         };
@@ -681,19 +683,22 @@ namespace CodeGen.Devices.M262
         private const int FbEstWidth = 720;
         private static int FbEstHeight(string type) => type switch
         {
+            // The data-driven actuator CATs render tall (many recipe/rule/target
+            // ports), so budget generously below them — better a slightly tall
+            // frame than a body hanging out the bottom.
             "Process1_Generic"                   => 2600,
-            "Seven_State_Actuator_CAT"           => 1500,
-            "Five_State_Actuator_CAT"            => 1300,
-            "Five_State_Actuator_No_Sensors_CAT" => 1300,
-            "Vacuum_Gripper_CAT"                 => 1300,
-            "Sensor_Bool_CAT"                    => 900,
-            "Area" or "Area_CAT"                 => 1200,
-            "Station" or "Station_CAT"           => 1200,
-            "CaSAdptrTerminator"                 => 700,
+            "Seven_State_Actuator_CAT"           => 2200,
+            "Five_State_Actuator_CAT"            => 2200,
+            "Five_State_Actuator_No_Sensors_CAT" => 2000,
+            "Vacuum_Gripper_CAT"                 => 2000,
+            "Sensor_Bool_CAT"                    => 1000,
+            "Area" or "Area_CAT"                 => 1300,
+            "Station" or "Station_CAT"           => 1300,
+            "CaSAdptrTerminator"                 => 800,
             "PLC_RW_M580" or "PLC_RW_BX1" or "PLC_RW_M262" => 1800,
-            "DPAC_FULLINIT" or "plcStart"        => 700,
-            "MQTT_CONNECTION"                    => 900,
-            _                                     => 1300,
+            "DPAC_FULLINIT" or "plcStart"        => 800,
+            "MQTT_CONNECTION"                    => 1000,
+            _                                     => 1600,
         };
 
         /// <summary>
