@@ -2,7 +2,11 @@ using CodeGen.Configuration;
 using CodeGen.IO;
 using CodeGen.Models;
 using CodeGen.Validation;
-using MapperUI.Services;
+using CodeGen.Devices.M262;
+using CodeGen.Devices.M580;
+using CodeGen.Devices.BX1;
+using CodeGen.Services;
+using CodeGen.Translation;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -420,12 +424,12 @@ namespace MapperUI
             // sysdev and topology branches see the same decision even if the
             // sysdev gets touched mid-flow.
             bool m262DeviceExists = await Task.Run(() =>
-                MapperUI.Services.M262SysdevEmitter.M262SysdevAlreadyExists(Cfg()));
+                M262SysdevEmitter.M262SysdevAlreadyExists(Cfg()));
 
             string sysdevId = string.Empty;
             try
             {
-                var sysdev = await Task.Run(() => MapperUI.Services.M262SysdevEmitter.Emit(Cfg()));
+                var sysdev = await Task.Run(() => M262SysdevEmitter.Emit(Cfg()));
                 if (sysdev.DevicePreserved)
                 {
                     AppendActivity(
@@ -456,7 +460,7 @@ namespace MapperUI
             {
                 if (!string.IsNullOrEmpty(sysdevId))
                 {
-                    var topo = await Task.Run(() => MapperUI.Services.M262TopologyEmitter.Emit(Cfg(), sysdevId));
+                    var topo = await Task.Run(() => M262TopologyEmitter.Emit(Cfg(), sysdevId));
                     AppendActivity($"[M262] topology emitted: {topo.FilesWritten.Count} JSON file(s), {topo.TopologyProjEntriesAdded} topologyproj entries added");
                     if (m262DeviceExists)
                         AppendActivity("[Device] solutionData preserved (existing trust binding kept intact)");
@@ -480,7 +484,7 @@ namespace MapperUI
             // SMC_Rig_Expo_withClamp's reference layout. Idempotent re-runs.
             try
             {
-                var stn2 = await Task.Run(() => MapperUI.Services.Station2DeviceEmitter.EmitAll(Cfg()));
+                var stn2 = await Task.Run(() => Station2DeviceEmitter.EmitAll(Cfg()));
                 AppendActivity(
                     $"[Stn2] {stn2.FilesWritten.Count} file(s) written, " +
                     $"{stn2.TopologyProjEntriesAdded} topologyproj entries, " +
@@ -495,9 +499,43 @@ namespace MapperUI
                 AppendActivity($"[Stn2][Error] Station 2 emit: {ex.Message}");
             }
 
+            // Station 2 — mirror the Station-2 FBs from the .syslay onto the
+            // M580/BX1 resources (each bucketed by M262SysdevEmitter.BucketFor)
+            // and emit the per-resource opcua.xml metadata folder beside each
+            // sysres. Runs AFTER Station2DeviceEmitter.EmitAll has written the
+            // sysdev/sysres shells. Without this the M580/BX1 .sysres files stay
+            // empty and the "{resId}/" folder is missing, so EAE's Solution
+            // Integrity reports "Repair Instances" / "Missing Project Files".
             try
             {
-                var hcf = await Task.Run(() => MapperUI.Services.M262HwConfigCopier.Copy(Cfg()));
+                var s2 = await Task.Run(() => M262SysdevEmitter.EmitStation2Sysres(Cfg()));
+                AppendActivity($"[Stn2] mirrored FBs → M580:{s2.M580} BX1:{s2.BX1}");
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"[Stn2][Error] sysres mirror: {ex.Message}");
+            }
+
+            // Backfill the opcua.xml companion files EAE's Solution Integrity
+            // requires in every resource/companion folder (current + stale).
+            // Non-destructive sweep; only fills files that are missing.
+            try
+            {
+                var eae = CodeGen.Devices.M262.M262SysdevEmitter.DeriveEaeProjectRoot(Cfg());
+                if (!string.IsNullOrEmpty(eae))
+                {
+                    int n = CodeGen.Artefacts.OpcuaCompanionEmitter.EnsureOpcuaInAllResourceFolders(eae);
+                    AppendActivity($"[Artefacts] opcua.xml companions ensured: {n} created");
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"[Artefacts][Error] opcua sweep: {ex.Message}");
+            }
+
+            try
+            {
+                var hcf = await Task.Run(() => M262HwConfigCopier.Copy(Cfg()));
                 AppendActivity($"[M262] hcf re-patched; {hcf.ParametersOverwritten.Count} channel symlink(s) written");
                 foreach (var w in hcf.Warnings)
                     AppendActivity($"[M262][Warn] {w}");
@@ -507,29 +545,42 @@ namespace MapperUI
                 AppendActivity($"[M262][Error] hcf patch: {ex.Message}");
             }
 
-            // M580 HCF — runs AFTER Station2DeviceEmitter has copied the
-            // IO-folder template into the M580 sysdev folder. Rewrites the
-            // 'RES0.M580IO.…' export-time prefix to 'M580_RES.M580IO.…' so
-            // EAE's IO Mapping resolver finds the runtime resource, AND
-            // clears pins whose owning component is absent from the syslay.
+            // M580 HCF — authoritative final pass. Copies the user-authored
+            // IO-folder M580IO.hcf verbatim into the deployed M580 sysdev folder
+            // (re-rooted to DeviceHwConfigurationItems with the resource ID).
+            // Runs AFTER Station2DeviceEmitter so it refills the .hcf even when
+            // DemonstratorWiper left a 169-byte empty shell or the emit-time copy
+            // was skipped because the template path was unresolved. The
+            // 'RES0.M580IO.<sym>' channel symlinks are preserved byte-for-byte.
             try
             {
-                var hcf = await Task.Run(() => MapperUI.Services.M580HwConfigCopier.Copy(Cfg()));
-                AppendActivity($"[M580] hcf re-patched; {hcf.ParametersOverwritten.Count} channel symlink(s) written");
+                var hcf = await Task.Run(() => M580HwConfigCopier.Copy(Cfg()));
+                AppendActivity($"[M580] hcf deployed; {hcf.FilesCopied} file(s) copied → {hcf.HcfPath}");
                 foreach (var w in hcf.Warnings)
                     AppendActivity($"[M580][Warn] {w}");
             }
             catch (Exception ex)
             {
-                AppendActivity($"[M580][Error] hcf patch: {ex.Message}");
+                AppendActivity($"[M580][Error] hcf deploy: {ex.Message}");
             }
 
-            // BX1: no per-pin .hcf rewriting. The TM3 modules behind the
-            // EIPSCANNER2 coupler map their entire 16-bit input/output words
-            // to single VTQWORD symlinks (RES0.BX1_IO.EIP_Input_Word_1 /
-            // EIP_Output_Word_1); bit decoding lives inside the BX1_IO SIFB,
-            // not in the .hcf. Station2DeviceEmitter's verbatim copy is the
-            // only sensible action — there's nothing per-pin to refine.
+            // BX1 HCF — authoritative final pass (same rationale as M580). The
+            // BX1IO.hcf is an EtherNet/IP scanner whose TM3 module input/output
+            // words route through single VTQWORD symlinks
+            // ('{resId}.{fb}.EIP_*_Word_1'); bit decoding lives inside the BX1
+            // SIFB, not the .hcf. Carried verbatim. Without this the BX1 device
+            // showed an empty hardware config after a wipe.
+            try
+            {
+                var hcf = await Task.Run(() => BX1HwConfigCopier.Copy(Cfg()));
+                AppendActivity($"[BX1] hcf deployed; {hcf.FilesCopied} file(s) copied → {hcf.HcfPath}");
+                foreach (var w in hcf.Warnings)
+                    AppendActivity($"[BX1][Warn] {w}");
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"[BX1][Error] hcf deploy: {ex.Message}");
+            }
         }
 
         /// <summary>
@@ -544,7 +595,7 @@ namespace MapperUI
         {
             try
             {
-                if (MapperUI.Services.M262SysdevEmitter.M262SysdevAlreadyExists(Cfg()))
+                if (M262SysdevEmitter.M262SysdevAlreadyExists(Cfg()))
                     return true;
             }
             catch
@@ -709,7 +760,7 @@ namespace MapperUI
                 // Without these, EAE deploys but nothing initialises and the
                 // pusher never moves.
                 int wireCountBefore = report.Missing.Count;
-                await Task.Run(() => MapperUI.Services.M262SysresWireEmitter.Emit(Cfg(), report));
+                await Task.Run(() => M262SysresWireEmitter.Emit(Cfg(), report));
                 // Layout grid is sysres-only — syslay coordinates left
                 // untouched so the user can lay out the application canvas
                 // freely without Mapper overwriting on every Button 2.
@@ -721,7 +772,7 @@ namespace MapperUI
                 }
 
                 int hcfCountBefore = report.Missing.Count;
-                await Task.Run(() => MapperUI.Services.HcfPatchService.PatchDeployed(
+                await Task.Run(() => HcfPatchService.PatchDeployed(
                     Cfg(), path, bindings, report));
                 for (int i = hcfCountBefore; i < report.Missing.Count; i++)
                 {
