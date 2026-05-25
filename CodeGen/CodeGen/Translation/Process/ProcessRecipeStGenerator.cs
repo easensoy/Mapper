@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using CodeGen.Models;
 
-namespace CodeGen.Translation
+namespace CodeGen.Translation.Process
 {
     /// <summary>
     /// Local-id mapping for components inside a station: sensors first (ids 0..N-1),
