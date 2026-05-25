@@ -541,6 +541,8 @@ namespace CodeGen.Devices.M262
                 case "Station2":
                 case "Station2_HMI":
                 case "Assembly_Station":
+                case "Disassembly":
+                case "Disassembly_Station":
                 case "Stn2_Term":
                     return PlcAssignment.M580;
             }
