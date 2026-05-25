@@ -5,8 +5,10 @@ using System.IO.Compression;
 using System.Linq;
 using CodeGen.Configuration;
 using CodeGen.Models;
+using CodeGen.Devices.M262;
+using CodeGen.Devices.Shared;
 
-namespace MapperUI.Services
+namespace CodeGen.Services
 {
     public static class TemplateLibraryDeployer
     {
@@ -509,7 +511,7 @@ namespace MapperUI.Services
                     // in CodeGen so the deployed .fbt ArraySize and the recipe-
                     // length guard in ProcessRecipeArrayGenerator.Generate() can
                     // never drift apart.
-                    var target = CodeGen.Translation.ProcessRecipeArrayGenerator
+                    var target = CodeGen.Translation.Process.ProcessRecipeArrayGenerator
                         .RecipeArraySize.ToString();
                     int changed = 0;
                     foreach (var vd in root.Descendants(ns + "VarDeclaration"))
@@ -1222,7 +1224,7 @@ namespace MapperUI.Services
                 var initEvent = iface.Element(ns + "EventInputs")?.Elements(ns + "Event")
                     .FirstOrDefault(e => (string?)e.Attribute("Name") == "INIT");
                 var dataConns = net.Element(ns + "DataConnections");
-                var size = CodeGen.Translation.ProcessRecipeArrayGenerator.RecipeArraySize.ToString();
+                var size = CodeGen.Translation.Process.ProcessRecipeArrayGenerator.RecipeArraySize.ToString();
 
                 bool changed = false;
 
@@ -1362,7 +1364,7 @@ namespace MapperUI.Services
                 }
                 var inputVars = iface.Element(ns + "InputVars");
                 var eventInputs = iface.Element(ns + "EventInputs");
-                var size = CodeGen.Translation.ProcessRecipeArrayGenerator.RecipeArraySize.ToString();
+                var size = CodeGen.Translation.Process.ProcessRecipeArrayGenerator.RecipeArraySize.ToString();
 
                 bool changed = false;
 
