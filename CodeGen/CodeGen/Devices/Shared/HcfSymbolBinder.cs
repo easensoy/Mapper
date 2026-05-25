@@ -10,81 +10,90 @@ using CodeGen.Translation;
 namespace CodeGen.Devices.Shared
 {
     /// <summary>
-    /// M580/BX1 equivalent of the M262 <see cref="HcfPatchService"/>, restricted
-    /// to <b>symbol binding only</b> (no wiring, no recipes). After Test Runtime
-    /// has deployed the Station-2 <c>.hcf</c> files
-    /// (<see cref="CodeGen.Devices.M580.M580HwConfigCopier"/> /
-    /// <c>BX1HwConfigCopier</c>) and mirrored the Station-2 FBs onto each
-    /// resource, this rewrites the <b>deployed</b> channel
-    /// <c>&lt;ParameterValue&gt;</c> targets so EAE's "Symbolic Link" view treats
-    /// them as resolvable links instead of literal strings.
+    /// Binds the deployed Station-2 <c>.hcf</c> hardware-config channel symlinks so
+    /// EAE's "Symbolic Link" view resolves them. This is the M580/BX1 sibling of the
+    /// M262 <see cref="HcfPatchService"/> and follows the SAME proven scheme:
+    /// <b>DIRECT binding</b> to the consumer CAT instance — each channel value is
+    /// <c>{resourceId}.{consumerFbId}.{port}</c> (unquoted, GUID-headed), pointing
+    /// straight at the actuator/sensor FB on the resource.
     ///
-    /// <para><b>Why this is approach (B), not (A).</b> The M262 binding
-    /// (<see cref="HcfPatchService"/>) is <i>direct</i>: each TM3 channel binds
-    /// straight to the consumer FB instance (<c>{resId}.{consumerFbId}.{port}</c>,
-    /// unquoted, GUID-based) because the IO-bindings xlsx
-    /// (<c>SMC_Rig_IO_Bindings.xlsx</c>) carries a pin→component.port row for
-    /// every M262 channel. It does <b>not</b> carry any Station-2 pin rows — the
-    /// Actuators sheet lists only Feeder/Checker/Transfer/Rejecter (all M262), and
-    /// the only Station-2 sensor rows (BearingSensor/ShaftSensor) have an empty
-    /// <c>input_tag</c> ("Hardware tag not yet defined … To be confirmed against
-    /// M580 station I/O list"). With no channel→FB.port map, direct binding (A)
-    /// is impossible.</para>
+    /// <para><b>Why direct, not a broker.</b> The reference
+    /// <c>SMC_Rig_Expo_withClamp</c> routes M580 I/O through a <c>PLC_RW_M580</c>
+    /// broker FB ("M580IO") whose channels read <c>{resId}.{M580IO_id}.SwivelArmAtPick</c>.
+    /// But this Mapper's actuator CATs do <b>direct</b> <c>$${PATH}</c> symlink I/O
+    /// (Five_State_Actuator_CAT exposes <c>athome/atwork/OutputToWork</c>;
+    /// Sensor_Bool_CAT exposes <c>Input</c>) exactly like the working M262 — they
+    /// have no broker-facing ports, and no <c>PLC_RW_M580</c> FB is emitted. So the
+    /// authored broker symlinks cannot resolve. Instead of bolting on a broker, we
+    /// translate the reference channel name (the trailing segment of the authored
+    /// value, e.g. <c>ClampAtWork</c>) to the matching consumer CAT port via
+    /// <see cref="M580ChannelMap"/> and bind direct. The reference name carries the
+    /// component+position, so the map is a fixed lookup, not a guess.</para>
     ///
-    /// <para>Independently, the reference <c>SMC_Rig_Expo_withClamp</c> shows the
-    /// M580 was authored as a <b>broker</b> design, the opposite of M262: every
-    /// one of its 24 channels routes through a single <c>M580IO</c> FB of type
-    /// <c>PLC_RW_M580</c> (deployed form
-    /// <c>{resId}.{M580IO_fbId}.{brokerPort}</c>), and the actuator/sensor CATs
-    /// connect to <c>M580IO</c> by event/data wires — not to the TM3 channels.
-    /// The Mapper does not (yet) emit that broker FB, so full runtime resolution
-    /// still needs it. That is out of scope here (symbol binding only).</para>
+    /// <para><b>BX1 is deferred</b> (see <see cref="BindBX1"/>): it is EtherNet/IP,
+    /// so its <c>.hcf</c> carries <i>word</i> channels (<c>EIP_Input_Word_1</c>) that
+    /// only a <c>PLC_RW_BX1</c> broker's internal <c>WordToBits</c> can unpack — a
+    /// direct bit-level CAT cannot consume a word. That needs the broker design and
+    /// is left untouched here by request.</para>
     ///
-    /// <para><b>What this does (the minimal correct, non-destructive step).</b>
-    /// For each bindable channel symlink it (1) strips the wrapping single quotes
-    /// so EAE parses it as a symbolic link rather than a string constant, and
-    /// (2) re-aligns the leading resource segment to the <b>deployed sysres ID</b>
-    /// (the 16-hex GUID), matching the convention proven by both the deployed
-    /// M262 <c>.hcf</c> (<c>1459BCD12760907D.{fb}.{port}</c>) and the reference
-    /// M580 <c>.hcf</c> (<c>57E0C1B28A6C8371.{fb}.{port}</c>). The authored M580
-    /// export instead uses the resource <i>name</i> head <c>'RES0'</c>, which (a)
-    /// is quoted and (b) does not match the deployed resource — both reasons the
-    /// link is unresolved today. The broker-FB segment (<c>M580IO</c> for M580,
-    /// the EtherNet/IP word FB GUID for BX1) and the port segment are preserved
-    /// verbatim.</para>
-    ///
-    /// <para>Genuine literals (empty <c>''</c> spare channels, <c>RSTP_REDUNDANCY</c>,
-    /// the BX1 <c>SLAVE_BUS_ID='EtherNetIPDevice_1'</c>, bus ids, <c>T#…</c>
-    /// durations, numbers, booleans) are left byte-for-byte untouched. Running
-    /// twice is idempotent — the second pass finds every head already aligned and
-    /// every value already unquoted and writes nothing.</para>
-    ///
-    /// <para><b>Does NOT touch the M262 <see cref="HcfPatchService"/>.</b> This is
-    /// a separate class operating only on the M580/BX1 deployed sysdev folders.</para>
+    /// <para>Idempotent: a channel already bound to a component FB id is left
+    /// unchanged. Empty/literal channels (<c>''</c>, scanner ids, <c>T#…</c>) are
+    /// never touched. Does NOT touch the M262 <see cref="HcfPatchService"/>.</para>
     /// </summary>
     public static class HcfSymbolBinder
     {
-        /// <summary>Bind the deployed M580 X80 <c>.hcf</c> channels. Tag
-        /// <c>[HcfBind][M580]</c>.</summary>
+        /// <summary>
+        /// Maps the authored M580 <c>.hcf</c> channel symlink name (the trailing
+        /// segment of the value, e.g. <c>'RES0.M580IO.ClampAtWork'</c> -> key
+        /// <c>ClampAtWork</c>) to the Control.xml component instance and the CAT
+        /// port the channel binds to. Ports by CAT type:
+        ///   • Five_State_Actuator_CAT (Clamp, Shaft_Hr/Vr, mechanical grippers):
+        ///       <c>athome</c>/<c>atwork</c> (sensor symlinks), <c>OutputToWork</c>
+        ///       (the single drive-coil symlink).
+        ///   • Seven_State_Actuator_CAT (Bearing_PnP swivel): <c>athome</c>,
+        ///       <c>atwork1</c>, <c>atwork2</c> (3 position sensors),
+        ///       <c>current_state1_to_plc</c>/<c>current_state2_to_plc</c> (2 coils).
+        ///   • Sensor_Bool_CAT (BearingSensor, ShaftSensor): <c>Input</c>.
+        /// Grippers: "open" = home, "closed" = work.
+        /// </summary>
+        private static readonly Dictionary<string, (string Comp, string Port)> M580ChannelMap =
+            new(StringComparer.OrdinalIgnoreCase)
+            {
+                // Clamp (Five_State, single coil)
+                ["ClampAtWork"]             = ("Clamp", "atwork"),
+                ["ClampAtHome"]             = ("Clamp", "athome"),
+                ["Clamp"]                   = ("Clamp", "OutputToWork"),
+                // Shaft vertical / horizontal (Five_State)
+                ["ShaftPnpVrAtWork"]        = ("Shaft_Vr", "atwork"),
+                ["ShaftPnpVrAtHome"]        = ("Shaft_Vr", "athome"),
+                ["Shaft_Vertical"]          = ("Shaft_Vr", "OutputToWork"),
+                ["ShaftPnpHrAtWork"]        = ("Shaft_Hr", "atwork"),
+                ["ShaftPnpHrAtHome"]        = ("Shaft_Hr", "athome"),
+                ["Shaft_Horizontal"]        = ("Shaft_Hr", "OutputToWork"),
+                // Mechanical grippers (Five_State; open = home, closed = work)
+                ["Bearing_Gripper_Open"]    = ("Bearing_Gripper", "athome"),
+                ["Bearing_Gripper_Closed"]  = ("Bearing_Gripper", "atwork"),
+                ["Bearing_Gripper_Q"]       = ("Bearing_Gripper", "OutputToWork"),
+                ["ShaftPnpGripperOpened"]   = ("Shaft_Gripper", "athome"),
+                ["ShaftPnpGripperClosed"]   = ("Shaft_Gripper", "atwork"),
+                ["Shaft_Gripper"]           = ("Shaft_Gripper", "OutputToWork"),
+                // Sensors (Sensor_Bool_CAT)
+                ["Bearing_At_Place_Sensor"] = ("BearingSensor", "Input"),
+                ["ShaftPnpSensor"]          = ("ShaftSensor", "Input"),
+                // Bearing_PnP swivel (Seven_State: 3 position sensors + 2 coils)
+                ["SwivelArmAtHome"]         = ("Bearing_PnP", "athome"),
+                ["SwivelArmAtPick"]         = ("Bearing_PnP", "atwork1"),
+                ["SwivelArmAtPlace"]        = ("Bearing_PnP", "atwork2"),
+                ["Swivel_Arm_Left_Q"]       = ("Bearing_PnP", "current_state1_to_plc"),
+                ["Swivel_Arm_Right_Q"]      = ("Bearing_PnP", "current_state2_to_plc"),
+            };
+
+        /// <summary>Direct-bind the deployed M580 X80 <c>.hcf</c> channels to the
+        /// consumer CAT ports. Tag <c>[HcfBind][M580]</c>.</summary>
         public static void BindM580(MapperConfig? config,
             SystemInjector.BindingApplicationReport report)
-            => BindDeployedHcf(config, "M580_dPAC", "SE.DPAC", "M580", report);
-
-        /// <summary>Bind the deployed BX1 soft-dPAC <c>.hcf</c> channels. Tag
-        /// <c>[HcfBind][BX1]</c>. The BX1 EtherNet/IP export is already
-        /// GUID-headed and unquoted, so this is normally a verification no-op;
-        /// it still re-aligns the head to the live sysres ID if a re-export ever
-        /// changed it.</summary>
-        public static void BindBX1(MapperConfig? config,
-            SystemInjector.BindingApplicationReport report)
-            => BindDeployedHcf(config, "Soft_dPAC", "SE.DPAC", "BX1", report);
-
-        private static void BindDeployedHcf(MapperConfig? config,
-            string deviceType, string deviceNamespace, string tag,
-            SystemInjector.BindingApplicationReport report)
         {
-            string Log(string m) { var s = $"[HcfBind][{tag}] {m}"; report.Missing.Add(s); return s; }
-
+            string Log(string m) { var s = $"[HcfBind][M580] {m}"; report.Missing.Add(s); return s; }
             if (config == null) { Log("skipped, no MapperConfig available"); return; }
 
             try
@@ -92,82 +101,80 @@ namespace CodeGen.Devices.Shared
                 var eaeRoot = M262SysdevEmitter.DeriveEaeProjectRoot(config);
                 if (string.IsNullOrEmpty(eaeRoot)) { Log("skipped, could not derive EAE project root"); return; }
 
-                var sysdevFile = FindSysdevByType(eaeRoot, deviceType, deviceNamespace);
-                if (sysdevFile == null)
+                var sysdevFile = FindSysdevByType(eaeRoot, "M580_dPAC", "SE.DPAC");
+                if (sysdevFile == null) { Log("skipped, no deployed M580 sysdev (Type=M580_dPAC)"); return; }
+
+                var stem = Path.GetFileNameWithoutExtension(sysdevFile);
+                var folder = Path.Combine(Path.GetDirectoryName(sysdevFile)!, stem);
+                var hcfPath = Path.Combine(folder, stem + ".hcf");
+                if (!File.Exists(hcfPath)) { Log($"skipped, deployed .hcf not found at {hcfPath} (run the HCF copier first)"); return; }
+
+                var (resId, _) = ReadSysresIdentity(folder);
+                if (string.IsNullOrEmpty(resId)) { Log("skipped, deployed sysres ID not resolvable"); return; }
+
+                var compId = BuildComponentIdMap(folder);
+                if (compId.Count == 0)
                 {
-                    Log($"skipped, no deployed sysdev Type='{deviceType}' Namespace='{deviceNamespace}'");
+                    Log("skipped, no actuator/sensor FBs on the M580 sysres yet " +
+                        "(run the Station-2 FB mirror / EmitStation2Sysres first)");
                     return;
                 }
-
-                var sysdevStem = Path.GetFileNameWithoutExtension(sysdevFile);
-                var sysdevFolder = Path.Combine(Path.GetDirectoryName(sysdevFile)!, sysdevStem);
-                var hcfPath = Path.Combine(sysdevFolder, sysdevStem + ".hcf");
-                if (!File.Exists(hcfPath))
-                {
-                    Log($"skipped, deployed .hcf not found at {hcfPath} (run the HCF copier first)");
-                    return;
-                }
-
-                var (resId, resName) = ReadSysresIdentity(sysdevFolder);
-                if (string.IsNullOrEmpty(resId))
-                {
-                    Log("skipped, deployed sysres ID not resolvable — cannot align channel resource scope");
-                    return;
-                }
-
-                Log($"resource id={resId} name={resName ?? "<none>"}  → {hcfPath}");
 
                 XDocument doc;
                 try { doc = XDocument.Load(hcfPath); }
                 catch (Exception ex) { Log($"skipped, .hcf parse failed: {ex.GetType().Name}: {ex.Message}"); return; }
 
-                int rewritten = 0, alreadyOk = 0, literalsLeft = 0;
+                int bound = 0, already = 0, unmapped = 0, missingComp = 0, literals = 0;
+                var compFbIds = new HashSet<string>(compId.Values, StringComparer.OrdinalIgnoreCase);
+
                 foreach (var pv in doc.Descendants().Where(e => e.Name.LocalName == "ParameterValue"))
                 {
-                    var nameAttr = (string?)pv.Attribute("Name") ?? string.Empty;
+                    var chan = (string?)pv.Attribute("Name") ?? string.Empty;
                     var raw = (string?)pv.Attribute("Value");
                     if (raw == null) continue;
 
-                    if (!TryRebindSymlink(raw, resId, out var bound, out var brokerFb, out var port))
+                    if (!TrySplitSymlink(raw, out var _, out var mid, out var last))
                     {
-                        literalsLeft++;
-                        continue; // empty / literal / non-symlink — leave byte-identical
-                    }
-
-                    if (string.Equals(raw, bound, StringComparison.Ordinal))
-                    {
-                        alreadyOk++;
-                        report.HcfPinAssignments.Add((nameAttr, bound));
+                        literals++;            // empty / literal / not a head.mid.port triple
                         continue;
                     }
 
-                    pv.SetAttributeValue("Value", bound);
-                    rewritten++;
-                    report.HcfPinAssignments.Add((nameAttr, bound));
+                    // Reference form: trailing segment is a known broker symlink name.
+                    if (M580ChannelMap.TryGetValue(last, out var map))
+                    {
+                        if (!compId.TryGetValue(map.Comp, out var fbId))
+                        {
+                            missingComp++;
+                            report.Missing.Add(
+                                $"[HcfBind][M580] {chan}: '{last}' -> component '{map.Comp}' " +
+                                "not present on the M580 resource — left as-is");
+                            continue;
+                        }
+                        var boundVal = $"{resId}.{fbId}.{map.Port}";
+                        if (!string.Equals(raw, boundVal, StringComparison.Ordinal))
+                        {
+                            pv.SetAttributeValue("Value", boundVal);
+                            bound++;
+                            report.Missing.Add(
+                                $"[HcfBind][M580] {chan} = {boundVal}  ({map.Comp}.{map.Port}; was {raw})");
+                        }
+                        else already++;
+                        report.HcfPinAssignments.Add((chan, boundVal));
+                        continue;
+                    }
+
+                    // Already bound (middle segment is one of our component FB ids).
+                    if (compFbIds.Contains(mid)) { already++; continue; }
+
+                    unmapped++;
                     report.Missing.Add(
-                        $"[HcfBind][{tag}] {nameAttr} = {bound}  (was {raw}; unquoted + head→resId, broker '{brokerFb}.{port}')");
+                        $"[HcfBind][M580] {chan}: symlink '{last}' not in the M580 channel map — left as-is");
                 }
 
-                if (rewritten > 0)
-                {
-                    SaveHcf(doc, hcfPath);
-                    Log($"bound {rewritten} channel symlink(s); {alreadyOk} already aligned; {literalsLeft} literal/empty left untouched");
-                }
-                else
-                {
-                    Log($"no change — {alreadyOk} channel symlink(s) already well-formed; {literalsLeft} literal/empty left untouched");
-                }
-
-                // Honest scope note: the link now resolves to the RESOURCE, but the
-                // broker FB it targets is not on the resource yet. Surface that so
-                // the user knows what EAE's Symbolic Link view will still flag.
-                if (string.Equals(tag, "M580", StringComparison.Ordinal))
-                    Log("note: channels now point at the resource via the 'M580IO' broker name; " +
-                        "full resolution still needs an M580IO FB (Type PLC_RW_M580) on the M580 resource — " +
-                        "broker emission is out of scope for this symbol-binding pass.");
-                else
-                    Log("note: EtherNet/IP word channels point at the resource; full resolution still needs " +
-                        "the BX1 EtherNet/IP word FB (PLC_RW_BX1 / EtherNetIPDevice SIFB) on the BX1 resource.");
+                if (bound > 0) SaveHcf(doc, hcfPath);
+                Log($"direct-bound {bound} channel(s) to CAT ports (resId {resId}); {already} already bound, " +
+                    $"{unmapped} unmapped, {missingComp} missing-component, {literals} literal/empty. " +
+                    "No broker — each channel points straight at the actuator/sensor FB (M262-style).");
             }
             catch (Exception ex)
             {
@@ -176,40 +183,75 @@ namespace CodeGen.Devices.Shared
         }
 
         /// <summary>
-        /// Decide whether <paramref name="raw"/> is a bindable 3-segment channel
-        /// symlink and, if so, produce its <paramref name="bound"/> form:
-        /// quotes stripped and the leading resource segment forced to
-        /// <paramref name="resId"/>. Returns false for empty values, genuine
-        /// string literals, and anything that is not a <c>head.fb.port</c> triple.
+        /// BX1 is intentionally deferred. Its EtherNet/IP <c>.hcf</c> carries
+        /// word-level channels (<c>EIP_Input_Word_1</c>) that only a
+        /// <c>PLC_RW_BX1</c> broker's internal <c>WordToBits</c>/<c>BitsToWord</c>
+        /// can unpack; the Mapper's direct bit-level CATs (athome/atwork) cannot
+        /// consume a word. Binding it correctly needs the broker design, so this
+        /// only records the deferral and leaves the BX1 <c>.hcf</c> untouched.
+        /// Tag <c>[HcfBind][BX1]</c>.
         /// </summary>
-        private static bool TryRebindSymlink(string raw, string resId,
-            out string bound, out string brokerFb, out string port)
+        public static void BindBX1(MapperConfig? config,
+            SystemInjector.BindingApplicationReport report)
         {
-            bound = string.Empty; brokerFb = string.Empty; port = string.Empty;
+            report.Missing.Add(
+                "[HcfBind][BX1] deferred — BX1 is EtherNet/IP (word channels EIP_Input_Word_1/" +
+                "EIP_Output_Word_1). Resolving them needs a PLC_RW_BX1 broker FB on the BX1 " +
+                "resource to unpack word->bits (WordToBits); the direct bit-level CATs cannot " +
+                "consume a word. Left the BX1 .hcf untouched pending the broker decision.");
+        }
 
+        // ── helpers ──────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Splits a channel value into head.mid.last. Strips a single layer of
+        /// wrapping single quotes first. Returns false for empty values, genuine
+        /// string literals (no dots / quoted scanner ids), and <c>T#…</c> durations.
+        /// </summary>
+        private static bool TrySplitSymlink(string raw, out string head, out string mid, out string last)
+        {
+            head = mid = last = string.Empty;
             var t = raw.Trim();
             if (t.Length == 0) return false;
-
-            // Strip a single layer of wrapping single quotes ('…') — the authored
-            // M580 export quotes every symlink. Empty quoted spares ('') collapse
-            // to empty and are rejected below.
-            bool wasQuoted = t.Length >= 2 && t[0] == '\'' && t[^1] == '\'';
-            var inner = wasQuoted ? t.Substring(1, t.Length - 2).Trim() : t;
+            bool quoted = t.Length >= 2 && t[0] == '\'' && t[^1] == '\'';
+            var inner = quoted ? t.Substring(1, t.Length - 2).Trim() : t;
             if (inner.Length == 0) return false;
-
-            // Must be exactly head.fb.port with three non-empty segments.
+            if (inner.StartsWith("T#", StringComparison.OrdinalIgnoreCase)) return false;
             var parts = inner.Split('.');
             if (parts.Length != 3) return false;
             if (parts.Any(p => p.Length == 0)) return false;
-
-            // Reject obvious non-symlink literals that could still contain dots
-            // (durations like T#0.5s never split to 3 parts, but guard anyway).
-            if (inner.StartsWith("T#", StringComparison.OrdinalIgnoreCase)) return false;
-
-            brokerFb = parts[1];
-            port = parts[2];
-            bound = $"{resId}.{brokerFb}.{port}";
+            head = parts[0]; mid = parts[1]; last = parts[2];
             return true;
+        }
+
+        /// <summary>component instance Name -> FB id, read from the deployed
+        /// <c>.sysres</c> in the sysdev folder (the actuator/sensor CATs mirrored
+        /// there). The .hcf channel's middle segment must be this id so EAE
+        /// resolves the link to the FB instance.</summary>
+        private static Dictionary<string, string> BuildComponentIdMap(string sysdevFolder)
+        {
+            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                var sysres = Directory.Exists(sysdevFolder)
+                    ? Directory.EnumerateFiles(sysdevFolder, "*.sysres").FirstOrDefault()
+                    : null;
+                if (sysres == null) return map;
+                var root = XDocument.Load(sysres).Root;
+                if (root == null) return map;
+                XNamespace ns = root.GetDefaultNamespace();
+                var net = root.Element(ns + "FBNetwork");
+                if (net == null) return map;
+                foreach (var fb in net.Elements(ns + "FB"))
+                {
+                    var n = (string?)fb.Attribute("Name");
+                    var id = (string?)fb.Attribute("ID");
+                    if (!string.IsNullOrEmpty(n) && !string.IsNullOrEmpty(id))
+                        map[n!] = id!;
+                }
+            }
+            catch { /* best-effort */ }
+            return map;
         }
 
         private static string? FindSysdevByType(string eaeRoot, string deviceType, string deviceNamespace)
@@ -231,13 +273,8 @@ namespace CodeGen.Devices.Shared
             return null;
         }
 
-        /// <summary>
-        /// Read the deployed resource ID (16-hex GUID, = the .sysres file stem and
-        /// its root <c>ID</c> attribute) and Name from the sysdev folder. The .hcf
-        /// re-root pass already stamps <c>DeviceHwConfigurationItem/@ResourceId</c>
-        /// to this same stem, so the head we write matches what EAE resolves
-        /// against.
-        /// </summary>
+        /// <summary>Read the deployed resource ID (prefers the .sysres root
+        /// <c>ID</c> attribute, falls back to the file stem) and Name.</summary>
         private static (string Id, string? Name) ReadSysresIdentity(string sysdevFolder)
         {
             try
@@ -252,7 +289,7 @@ namespace CodeGen.Devices.Shared
                 {
                     var root = XDocument.Load(sysres).Root;
                     var rootId = (string?)root?.Attribute("ID");
-                    if (!string.IsNullOrWhiteSpace(rootId)) id = rootId!;   // prefer the in-file ID
+                    if (!string.IsNullOrWhiteSpace(rootId)) id = rootId!;
                     name = (string?)root?.Attribute("Name");
                 }
                 catch { /* fall back to file stem */ }
@@ -261,11 +298,8 @@ namespace CodeGen.Devices.Shared
             catch { return (string.Empty, null); }
         }
 
-        /// <summary>
-        /// Save with UTF-8 + BOM and 2-space indent to match
-        /// <see cref="HcfRootRewriter"/> / Schneider's own exporter, retrying if
-        /// EAE briefly holds a write lock.
-        /// </summary>
+        /// <summary>Save with UTF-8 + BOM and 2-space indent, retrying if EAE
+        /// briefly holds a write lock.</summary>
         private static void SaveHcf(XDocument doc, string hcfPath)
         {
             var settings = new System.Xml.XmlWriterSettings
