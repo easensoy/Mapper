@@ -78,14 +78,17 @@ namespace CodeGen.Translation.Process
         // ECC indexes the arrays via NextStep navigation (StepType[CurrentStep]),
         // not a fixed FOR loop, so a larger bound needs no ST change.
         //
-        // Raised 20 -> 50 for the full-system simulator: a collapsed multi-Process
-        // recipe runs to ~21+ rows, whereas 20 was sized for a single hardware
-        // station. SAFE for the byte-identical hardware slice — FormatIntArray
-        // emits ONLY the rows actually present (e.g. [1, 2, 9]), never padded to
-        // ArraySize, so no instance .syslay changes; only the shared TYPE's
-        // declared array bound grows (and that .fbt is already deploy-patched on
-        // both paths). ~26 bytes/row, so 20->50 adds <1 KB per Process instance.
-        public const int RecipeArraySize = 50;
+        // Raised 20 -> 50 for the full-system simulator (~21+ rows), then 50 -> 100
+        // for the Station-2 condition-driven recipes: Assembly_Station expands to 54
+        // rows once each "command actuator X to state Y" condition emits a CMD+WAIT
+        // pair (plus serialised auto-retract), and Disassembly to 43. 50 truncated
+        // Assembly mid-cycle. SAFE for the byte-identical hardware slice —
+        // FormatIntArray emits ONLY the rows actually present (e.g. [1, 2, 9]), never
+        // padded to ArraySize, so no instance .syslay changes; only the shared
+        // TYPE's declared array bound grows (and that .fbt is deploy-patched via
+        // PatchProcess1RecipeArraySize on both paths). ~26 bytes/row, so the
+        // 50->100 bump adds <1.5 KB to the two shared .fbt TYPEs, nothing per-instance.
+        public const int RecipeArraySize = 100;
 
         // Motion-in-progress verbs per the Phase-2 spec. "checking" included
         // pragmatically because PartChecking represents Checker descending in
@@ -127,9 +130,26 @@ namespace CodeGen.Translation.Process
         public static StationComponentMap BuildComponentMap(StationContents contents)
             => ProcessRecipeStGenerator.BuildComponentMap(contents);
 
+        /// <param name="commandFromCondition">
+        /// OPT-IN Station-2 path. When <c>false</c> (the default — Feed_Station /
+        /// M262) the classifier is BYTE-IDENTICAL to the proven hardware recipe:
+        /// commands are inferred from the source-state NAME (FeederAdvancing →
+        /// feeder advance). When <c>true</c> (Assembly_Station / Disassembly) a
+        /// state whose name does NOT encode a motion verb still emits a CMD+WAIT,
+        /// deriving the command from the transition CONDITION instead: "command
+        /// component C to its target state S, then wait until C settles there".
+        /// This is exactly the operator model — StepType 1 = command actuator X to
+        /// state Y, StepType 2 = wait until Z is W. The work/home split is by the
+        /// condition's target State_Number (1/2 → toWork=cmd1/settle AtWork=2;
+        /// 0/3/4 → toHome=cmd3/settle AtHomeInit=0). Only applied to
+        /// Five_State-commandable targets (Five_State actuators + mechanical
+        /// grippers); Seven_State (Bearing_PnP) and Robot targets fall back to a
+        /// settled WAIT and are surfaced in <see cref="RecipeArrays.Warnings"/>
+        /// because their command vocabulary is not the Five_State work/home pair.
+        /// </param>
         public static RecipeArrays Generate(VueOneComponent process,
             StationContents stationContents, IReadOnlyList<VueOneComponent> allComponents,
-            int processId = 10)
+            int processId = 10, bool commandFromCondition = false)
         {
             var arrays = new RecipeArrays();
             var states = process.States.OrderBy(s => s.StateNumber).ToList();
@@ -147,7 +167,7 @@ namespace CodeGen.Translation.Process
             // 2. Pass-1 classify: for each source state, decide if rows are emit/skip.
             var classifications = new List<StateClassification>(states.Count);
             foreach (var state in states)
-                classifications.Add(ClassifyState(state, allComponents, arrays, scopedRegistry));
+                classifications.Add(ClassifyState(state, allComponents, arrays, scopedRegistry, commandFromCondition));
 
             // 3. Pass-1 row layout. Skipped states contribute RowCount=0; the
             //    StateID-to-firstRowIndex map is built ONLY over surviving states.
@@ -597,7 +617,7 @@ namespace CodeGen.Translation.Process
 
         private static StateClassification ClassifyState(VueOneState state,
             IReadOnlyList<VueOneComponent> allComponents, RecipeArrays arrays,
-            Dictionary<string, int> scopedRegistry)
+            Dictionary<string, int> scopedRegistry, bool commandFromCondition)
         {
             // Initialisation is structurally special in VueOne — it asserts the
             // expected world AT BOOT (typically every actuator at ReturnedHome),
@@ -743,6 +763,60 @@ namespace CodeGen.Translation.Process
                 };
             }
 
+            // CONDITION-DRIVEN COMMAND (Station-2 opt-in; commandFromCondition).
+            // The source-state name did NOT encode a motion verb, but Control.xml
+            // still says "leave this state when component C reaches state S". For a
+            // Five_State-commandable target that IS the command: drive C toward S,
+            // then wait until it settles. Five_State ECC encoding — target work
+            // positions (transient ToWork=1 or settled Advanced/AtWork/Down/
+            // Clamped/CloseGripper=2) ← command toWork (cmd 1), settles AtWork=2;
+            // target home positions (AtHomeInit=0, transient ToHome=3, AtHomeEnd/
+            // ReturnedFinished/RisingFinished=4) ← command toHome (cmd 3), settles
+            // AtHomeInit=0. Feed_Station passes commandFromCondition=false and
+            // never enters here, so its recipe is byte-identical.
+            if (commandFromCondition &&
+                !string.Equals(inScopeTarget.Type, "Sensor", StringComparison.OrdinalIgnoreCase))
+            {
+                if (IsFiveStateCommandable(inScopeTarget))
+                {
+                    int condCmdState = (waitState == 1 || waitState == 2) ? 1 : 3;
+                    int condSettledWait = condCmdState == 1 ? 2 : 0;
+                    if (condSettledWait != waitState)
+                        arrays.Warnings.Add(
+                            $"[Recipe] '{state.Name}': condition-driven CMD on '{inScopeTarget.Name}' " +
+                            $"-> {(condCmdState == 1 ? "toWork" : "toHome")} (cmd {condCmdState}); WAIT " +
+                            $"remapped Control.xml State_Number {waitState} -> runtime ECC state {condSettledWait} " +
+                            "(actuator stably holds AtWork=2 or AtHomeInit=0).");
+                    return new StateClassification
+                    {
+                        Kind = ClassKind.MotionPair,
+                        RowCount = 2,
+                        CmdTargetName = (inScopeTarget.Name ?? string.Empty).Trim().ToLowerInvariant(),
+                        CmdState = condCmdState,
+                        WaitId = waitId,
+                        WaitState = condSettledWait,
+                    };
+                }
+                // Seven_State (Bearing_PnP) / Robot arm — NOT a Five_State work/home
+                // pair (e.g. Bearing_PnP's State_Number 4 is "Place", a WORK
+                // position, so the Five_State 4->home rule would mis-command it).
+                // Emit a settled WAIT on the published Control.xml state and flag
+                // that the toWork/toHome command vocabulary for this CAT is a
+                // follow-up — we never command it with the wrong encoding.
+                arrays.Warnings.Add(
+                    $"[Recipe] '{state.Name}': condition target '{inScopeTarget.Name}' (type " +
+                    $"{inScopeTarget.Type}, {inScopeTarget.States.Count} states) is not Five_State-" +
+                    "commandable (Seven_State / Robot). Emitted a settled WAIT only — its per-CAT " +
+                    "command vocabulary (e.g. Seven_State swivel pick/place) is a follow-up.");
+                return new StateClassification
+                {
+                    Kind = ClassKind.SettledWait,
+                    RowCount = 1,
+                    WaitId = waitId,
+                    WaitState = waitState,
+                };
+            }
+
             // SETTLED WAIT runtime encoding (complementary to the MotionPair
             // fix above). A settled wait on a Five_State actuator must target
             // the value the actuator STABLY HOLDS, not the transient
@@ -880,6 +954,50 @@ namespace CodeGen.Translation.Process
             var n = (s.Name ?? string.Empty).Trim();
             return n.Equals("Initialisation", StringComparison.OrdinalIgnoreCase) ||
                    n.Equals("Initialization", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// True if a condition target can be commanded with the Five_State
+        /// work/home pair (toWork=1 settles AtWork=2, toHome=3 settles
+        /// AtHomeInit=0). Mirrors <c>SystemLayoutInjector.ResolveActuatorFBType</c>:
+        /// sensors and Processes are never commandable; a 7-state or PARALLEL+
+        /// ALTERNATIVE-branched component is Seven_State (Bearing_PnP) and is NOT
+        /// Five_State-commandable; everything else (5-state cylinders + mechanical
+        /// grippers, whether VueOne Type is "Actuator" or "Robot") is. Used by the
+        /// condition-driven Station-2 classifier so we only emit work/home commands
+        /// for targets whose ECC actually understands them.
+        /// </summary>
+        private static bool IsFiveStateCommandable(VueOneComponent t)
+        {
+            if (t == null) return false;
+            if (string.Equals(t.Type, "Sensor", StringComparison.OrdinalIgnoreCase)) return false;
+            if (string.Equals(t.Type, "Process", StringComparison.OrdinalIgnoreCase)) return false;
+            if (t.States.Count == 7 || IsBranchedSevenState(t)) return false;
+            return true;
+        }
+
+        /// <summary>
+        /// Mirrors <c>SystemLayoutInjector.IsBranchedSevenState</c> — a resting
+        /// state with at least one outgoing PARALLEL transition AND at least one
+        /// outgoing ALTERNATIVE transition (Bearing_PnP's 13-state branched swivel,
+        /// which runs as a Seven_State_Actuator_CAT ECC).
+        /// </summary>
+        private static bool IsBranchedSevenState(VueOneComponent comp)
+        {
+            if (comp?.States == null) return false;
+            foreach (var st in comp.States)
+            {
+                bool hasParallel = false, hasAlternative = false;
+                foreach (var tr in st.Transitions)
+                {
+                    if (string.Equals(tr.TransitionType, "PARALLEL", StringComparison.OrdinalIgnoreCase))
+                        hasParallel = true;
+                    else if (string.Equals(tr.TransitionType, "ALTERNATIVE", StringComparison.OrdinalIgnoreCase))
+                        hasAlternative = true;
+                }
+                if (hasParallel && hasAlternative) return true;
+            }
+            return false;
         }
 
         /// <summary>
