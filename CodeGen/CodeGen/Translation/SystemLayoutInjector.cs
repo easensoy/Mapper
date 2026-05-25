@@ -949,11 +949,21 @@ namespace CodeGen.Translation
             // Feed_Station — we're only widening the COMPONENT scope, not
             // the Process scope. Assembly_Station's recipe lives in its own
             // Process FB instance which is emitted by a later phase.
+            // Grippers (Bearing_Gripper / Shaft_Gripper / CoverPnp_Gripper) carry
+            // VueOne Type="Robot", not "Actuator" — a strict Type=="Actuator"
+            // filter silently dropped all three, leaving the assembly recipe with
+            // no grasp/release step and the M580/BX1 frames missing their grippers.
+            // Accept Actuator OR Robot here; ResolveActuatorFBType still routes the
+            // 5-state mechanical grippers to Five_State_Actuator_CAT and the 7-state
+            // Robot arm to Seven_State. Sensor ids are unaffected, and the M262
+            // actuator ids (Feeder=…, Checker, Transfer) are unchanged because the
+            // grippers sort after them, so Feed_Station's recipe is byte-identical.
             var contents = new StationContents(
                 fullContents.Process,
                 allowedActuators
                     .Select(n => allComponents.FirstOrDefault(c =>
-                        string.Equals(c.Type, "Actuator", StringComparison.OrdinalIgnoreCase) &&
+                        (string.Equals(c.Type, "Actuator", StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(c.Type, "Robot", StringComparison.OrdinalIgnoreCase)) &&
                         string.Equals(c.Name, n, StringComparison.Ordinal)))
                     .Where(a => a != null).Select(a => a!).ToList(),
                 allowedSensors
@@ -979,6 +989,14 @@ namespace CodeGen.Translation
             int sensorIdStart = 0;
             int actuatorIdStart = contents.Sensors.Count;
             const int processId = 10;
+            // Station-2 process_ids sit ABOVE the component id space (sensors+
+            // actuators occupy 0..N-1, N≈16) so a recipe Wait1Id can never collide
+            // with a Process FB's own process_id — the collision
+            // ProcessRecipeArrayGenerator.ValidateProcessIdInvariant throws on.
+            // Feed_Station keeps process_id 10 (no M262 component reaches id 10),
+            // so the proven M262 recipe is unchanged.
+            const int assemblyProcessId = 101;
+            const int disassemblyProcessId = 102;
 
             // No top-level PLC_Start FB: Area_CAT and Station_CAT each contain their own
             // internal plcStart bootstrap, so an external one would double-bootstrap and
@@ -1084,19 +1102,29 @@ namespace CodeGen.Translation
                 processInstanceName, "Process1_Generic", "Main", 3360, 1460,
                 processOuter, processNested);
 
-            // Station 2 — Assembly_Station Process FB. Same FBType
-            // (Process1_Generic) as Feed_Station; the FBT is data-driven so
-            // multiple instances with different recipe arrays run independent
-            // recipes. NO separate Process2_CAT FBType is needed — that's
-            // what "data-driven" buys us. The reference SMC_Rig_Expo_withClamp
-            // uses bespoke Process1_CAT / Process2_CAT / Process3_CAT because
-            // it's hand-wired; our Mapper architecture keeps a single FBT.
+            // Station 2 — Assembly_Station + Disassembly Process FBs. Same FBType
+            // (Process1_Generic) as Feed_Station; the FBT is data-driven, so each
+            // instance carries its own recipe arrays. The reference
+            // SMC_Rig_Expo_withClamp hand-wires bespoke Process2_CAT/Process3_CAT;
+            // our single data-driven FBT replaces all of them.
             //
-            // For this phase the Assembly_Station recipe is emitted EMPTY
-            // (process_name + process_id only — no StepType/CmdTargetName
-            // etc.). The Assembly_Station recipe vocabulary (Bearing_PnP
-            // dual-target, gripper grasp/release, Clamp) needs a recipe
-            // generator extension which lands in a follow-up phase.
+            // Both recipes are now built on the HARDWARE path too (Assembly was an
+            // empty placeholder, Disassembly was sim-only). They reuse the SAME
+            // global, sensors-first `contents` registry as Feed_Station, so every
+            // Wait1Id matches the global FB id stamped on the actuator/sensor
+            // instances and mirrored onto the M580/BX1 resources (this is the
+            // global-id registry that closes deferred task #25). Commands are
+            // derived from the transition CONDITIONS (commandFromCondition: true) —
+            // "command actuator X to state Y, then wait until it settles" — because
+            // the Station-2 state names (Cover_PnP_Down, Clamping_Part, …) don't
+            // encode the motion verbs Feed_Station's do. Distinct out-of-range
+            // process_ids (101/102) avoid the ValidateProcessIdInvariant collision.
+            //
+            // Cross-PLC caveat: Assembly references BX1 cover components and
+            // Disassembly references BX1 (+ skipped M262 Ejector/Robot). Those
+            // waits carry the correct global id but only resolve on a single ring
+            // (the simulator) or once the M580↔BX1 broker bridge is emitted — the
+            // same outstanding piece HcfSymbolBinder flags. Reported per process.
             var assemblyStationProc = allComponents.FirstOrDefault(c =>
                 string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(c.Name, "Assembly_Station", StringComparison.Ordinal));
@@ -1107,142 +1135,88 @@ namespace CodeGen.Translation
             {
                 var assemblyName = InstanceNameResolver.Resolve(assemblyStationProc,
                     overrides.ByComponentId, overrides.ByVueOneName);
-
-                // Simulator full-system mode: build a proper recipe for
-                // Assembly_Station instead of the empty-shell placeholder.
-                // StationGroupingService walks the Process's transitions and
-                // collects the actuators/sensors it commands; in single-resource
-                // sim that registry covers the M580+BX1 components that share
-                // the canvas. Hardware path stays on the empty-recipe placeholder
-                // because Feed_Station (M262) cannot wait on M580 components
-                // across a SIFB gateway that the simulator skips.
-                StationContents? aContents = null;
-                if (config != null && config.SimulatorFullSystem)
-                {
-                    try
-                    {
-                        aContents = new StationGroupingService()
-                            .GroupStationContents(assemblyStationProc, allComponents);
-                    }
-                    catch (Exception ex)
-                    {
-                        report.Missing.Add(
-                            $"[Sim] Assembly_Station grouping failed: {ex.Message} — emitting empty recipe.");
-                    }
-                }
-
                 var (aOuter, aNested, aRecipe) = BuildProcessFbParameters(
-                    assemblyStationProc, allComponents, assemblyName, processId + 1,
-                    contents: aContents,   // sim → real recipe; hardware → null/empty
-                    useRecipeStruct: config != null && config.SimulatorFullSystem);
+                    assemblyStationProc, allComponents, assemblyName, assemblyProcessId,
+                    contents: contents,        // global registry → global Wait1Id ids
+                    useRecipeStruct: config != null && config.SimulatorFullSystem,
+                    commandFromCondition: true);
                 builder.AddFB(FBIdGenerator.GenerateFBId(assemblyStationProc.ComponentID),
                     assemblyName, "Process1_Generic", "Main", 12200, 1460,
                     aOuter, aNested);
                 crossProcInstances.Add(assemblyName);
-                if (aRecipe != null && aRecipe.StepType.Count > 0)
-                    report.Missing.Add(
-                        $"[Sim] {assemblyName} Process FB emitted with {aRecipe.StepType.Count}-row recipe " +
-                        $"({aRecipe.SkippedConditions.Count} condition(s) skipped).");
-                else
-                    report.Missing.Add(
-                        $"[Phase 7] {assemblyName} Process FB emitted with empty recipe — " +
-                        "(hardware path; sim mode would emit a proper recipe).");
+                ReportStation2Recipe(report, assemblyName, aRecipe, "M580");
             }
             else
             {
                 report.Missing.Add(
-                    "[Phase 7] Assembly_Station Process not found in Control.xml — " +
-                    "Station 2 frame will have actuators but no Process FB.");
+                    "[Recipe] Assembly_Station Process not found in Control.xml — " +
+                    "Station 2 (M580) frame will have actuators but no Process FB.");
             }
 
-            // Simulator full-system mode also emits the Disassembly Process FB.
-            // Same FBType (Process1_Generic) with its own recipe arrays. Sits
-            // in a third X column under the BX1 zone so the three Process FBs
-            // form a left→right Station1/Station2/Station3 row at y=1460.
-            // The hardware path skips this branch entirely so Feed Station's
-            // existing two-Process layout is unchanged.
-            if (config != null && config.SimulatorFullSystem)
+            // Disassembly Process FB. Same FBType (Process1_Generic) with its own
+            // recipe arrays. Sits in a third X column under the BX1 zone so the
+            // three Process FBs form a left→right Station1/Station2/Station3 row at
+            // y=1460. Now emitted on the hardware path too (was sim-only).
+            var disassyProc = allComponents.FirstOrDefault(c =>
+                string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase) &&
+                (string.Equals(c.Name, "Disassembly", StringComparison.Ordinal)
+                 || string.Equals(c.Name, "Disassembly_Station", StringComparison.Ordinal)));
+            if (disassyProc != null)
             {
-                var disassyProc = allComponents.FirstOrDefault(c =>
-                    string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase) &&
-                    (string.Equals(c.Name, "Disassembly", StringComparison.Ordinal)
-                     || string.Equals(c.Name, "Disassembly_Station", StringComparison.Ordinal)));
-                if (disassyProc != null)
-                {
-                    var disassyName = InstanceNameResolver.Resolve(disassyProc,
-                        overrides.ByComponentId, overrides.ByVueOneName);
-                    StationContents? dContents = null;
-                    try
-                    {
-                        dContents = new StationGroupingService()
-                            .GroupStationContents(disassyProc, allComponents);
-                    }
-                    catch (Exception ex)
-                    {
-                        report.Missing.Add(
-                            $"[Sim] Disassembly grouping failed: {ex.Message} — emitting empty recipe.");
-                    }
-                    var (dOuter, dNested, dRecipe) = BuildProcessFbParameters(
-                        disassyProc, allComponents, disassyName, processId + 2,
-                        contents: dContents,
-                        useRecipeStruct: config != null && config.SimulatorFullSystem);
-                    builder.AddFB(FBIdGenerator.GenerateFBId(disassyProc.ComponentID),
-                        disassyName, "Process1_Generic", "Main", 20800, 1460,
-                        dOuter, dNested);
-                    crossProcInstances.Add(disassyName);
-                    if (dRecipe != null && dRecipe.StepType.Count > 0)
-                        report.Missing.Add(
-                            $"[Sim] {disassyName} Process FB emitted with {dRecipe.StepType.Count}-row recipe " +
-                            $"({dRecipe.SkippedConditions.Count} condition(s) skipped).");
-                }
-                else
-                {
-                    report.Missing.Add(
-                        "[Sim] Disassembly Process not found in Control.xml — " +
-                        "BX1 zone will have actuators but no Process FB.");
-                }
-
-                // Cross-process synchronisation. In the reference SMC_Rig
-                // (audit E.2: M580 sysres lines 363, 419) Process2 and Process3
-                // exchange state changes through direct event wires
-                //   Process[i].state_update → Process[j].state_change
-                // bypassing the stateRptCmd ring entirely (because Process FBs
-                // are not ring participants — they're the consumers). We
-                // mirror that pattern here so the 8 cross-process handshake
-                // conditions catalogued in the audit (Feed/Initialisation ↔
-                // Assembly/Initialisation, Feed/HandShake ↔ Disassembly/handshake,
-                // Assembly/HandShaking ↔ Disassembly/handshake, …) fire from
-                // the canvas instead of stalling on a dropped Wait1Id row.
-                // Fully connected directed graph between every Process pair.
-                for (int i = 0; i < crossProcInstances.Count; i++)
-                {
-                    for (int j = 0; j < crossProcInstances.Count; j++)
-                    {
-                        if (i == j) continue;
-                        builder.AddEventConnection(
-                            $"{crossProcInstances[i]}.state_update",
-                            $"{crossProcInstances[j]}.state_change");
-                    }
-                }
-                if (crossProcInstances.Count >= 2)
-                    report.Missing.Add(
-                        $"[Sim] Cross-process event wires: {crossProcInstances.Count * (crossProcInstances.Count - 1)} " +
-                        $"state_update→state_change edges across {crossProcInstances.Count} Process FB(s).");
-
-                // Bearing_PnP routing. Restored 2026-05-21: routes to
-                // Seven_State_Actuator_CAT (deployed verbatim from Template
-                // Library; SevenStateActuator + SevenStateActuator2 basic
-                // FBs ship alongside). The 13-state PARALLEL+ALTERNATIVE
-                // pattern collapses onto Seven_State's 7-state ECC because
-                // the physical actuator has 3 positions + 2 work coils.
-                var bearingPnp = allComponents.FirstOrDefault(c =>
-                    string.Equals(c.Type, "Actuator", StringComparison.OrdinalIgnoreCase) &&
-                    string.Equals(c.Name, "Bearing_PnP", StringComparison.Ordinal));
-                if (bearingPnp != null)
-                    report.Missing.Add(
-                        $"[Sim] Bearing_PnP ({bearingPnp.States.Count} states / " +
-                        $"PARALLEL+ALTERNATIVE branched) routed to Seven_State_Actuator_CAT.");
+                var disassyName = InstanceNameResolver.Resolve(disassyProc,
+                    overrides.ByComponentId, overrides.ByVueOneName);
+                var (dOuter, dNested, dRecipe) = BuildProcessFbParameters(
+                    disassyProc, allComponents, disassyName, disassemblyProcessId,
+                    contents: contents,        // global registry → global Wait1Id ids
+                    useRecipeStruct: config != null && config.SimulatorFullSystem,
+                    commandFromCondition: true);
+                builder.AddFB(FBIdGenerator.GenerateFBId(disassyProc.ComponentID),
+                    disassyName, "Process1_Generic", "Main", 20800, 1460,
+                    dOuter, dNested);
+                crossProcInstances.Add(disassyName);
+                ReportStation2Recipe(report, disassyName, dRecipe, "M580");
             }
+            else
+            {
+                report.Missing.Add(
+                    "[Recipe] Disassembly Process not found in Control.xml — " +
+                    "BX1 zone will have actuators but no Disassembly Process FB.");
+            }
+
+            // Cross-process synchronisation. In the reference SMC_Rig (audit E.2:
+            // M580 sysres lines 363, 419) the station Processes exchange state
+            // changes through direct event wires Process[i].state_update →
+            // Process[j].state_change, bypassing the stateRptCmd ring (Process FBs
+            // are ring consumers, not participants). Mirrored here so the
+            // cross-process HandShake conditions — which the recipe drops as
+            // out-of-scope Process refs — fire from the canvas. Fully connected
+            // directed graph between every Process pair.
+            for (int i = 0; i < crossProcInstances.Count; i++)
+            {
+                for (int j = 0; j < crossProcInstances.Count; j++)
+                {
+                    if (i == j) continue;
+                    builder.AddEventConnection(
+                        $"{crossProcInstances[i]}.state_update",
+                        $"{crossProcInstances[j]}.state_change");
+                }
+            }
+            if (crossProcInstances.Count >= 2)
+                report.Missing.Add(
+                    $"[Recipe] Cross-process event wires: {crossProcInstances.Count * (crossProcInstances.Count - 1)} " +
+                    $"state_update→state_change edge(s) across {crossProcInstances.Count} Process FB(s).");
+
+            // Bearing_PnP routes to Seven_State_Actuator_CAT (13-state PARALLEL+
+            // ALTERNATIVE branched swivel → 7-state ECC). Its recipe rows are
+            // settled WAITs only — the Seven_State toWork/toHome command vocabulary
+            // is the remaining per-CAT step (flagged by the recipe generator).
+            var bearingPnp = allComponents.FirstOrDefault(c =>
+                string.Equals(c.Type, "Actuator", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(c.Name, "Bearing_PnP", StringComparison.Ordinal));
+            if (bearingPnp != null)
+                report.Missing.Add(
+                    $"[Recipe] Bearing_PnP ({bearingPnp.States.Count} states / PARALLEL+ALTERNATIVE " +
+                    "branched) → Seven_State_Actuator_CAT; recipe emits settled WAITs (CMD vocabulary pending).");
 
             // Surface every out-of-scope condition the recipe generator dropped so the
             // .syslay file self-documents what's missing. Without this, an operator
@@ -2455,7 +2429,8 @@ namespace CodeGen.Translation
                        RecipeArrays? Recipe)
             BuildProcessFbParameters(VueOneComponent process, List<VueOneComponent> allComponents,
                 string processName, int processId,
-                StationContents? contents = null, bool useRecipeStruct = false)
+                StationContents? contents = null, bool useRecipeStruct = false,
+                bool commandFromCondition = false)
         {
             // Phase 1+: recipe arrays travel as syslay Parameter values on the
             // Process1_Generic instance; Process1_Generic.fbt exposes 8 InputVars
@@ -2477,7 +2452,7 @@ namespace CodeGen.Translation
             RecipeArrays? recipe = null;
             if (contents != null)
             {
-                recipe = ProcessRecipeArrayGenerator.Generate(process, contents, allComponents, processId);
+                recipe = ProcessRecipeArrayGenerator.Generate(process, contents, allComponents, processId, commandFromCondition);
                 if (useRecipeStruct)
                 {
                     // Simulator interface reduction: the 6 parallel recipe arrays
@@ -2503,6 +2478,31 @@ namespace CodeGen.Translation
 
             var nested = new Dictionary<string, IDictionary<string, string>>(StringComparer.Ordinal);
             return (outer, nested, recipe);
+        }
+
+        /// <summary>
+        /// Surfaces a Station-2 process recipe into the binding report: row count,
+        /// CMD/WAIT split, dropped (out-of-scope) conditions and generator warnings,
+        /// plus the standing cross-PLC caveat. Keeps the Assembly_Station /
+        /// Disassembly call sites terse and identical.
+        /// </summary>
+        private static void ReportStation2Recipe(BindingApplicationReport report,
+            string processName, RecipeArrays? recipe, string plcLabel)
+        {
+            if (recipe == null)
+            {
+                report.Missing.Add($"[Recipe] {processName}: no recipe built (no station contents).");
+                return;
+            }
+            int cmd = recipe.StepType.Count(t => t == 1);
+            int wait = recipe.StepType.Count(t => t == 2);
+            report.Missing.Add(
+                $"[Recipe] {processName} ({plcLabel}): {recipe.StepType.Count}-row recipe — " +
+                $"{cmd} CMD / {wait} WAIT, {recipe.SkippedConditions.Count} condition(s) dropped, " +
+                $"{recipe.Warnings.Count} generator warning(s). Cross-PLC waits resolve on the " +
+                "single-ring simulator or once the M580↔BX1 broker bridge is emitted.");
+            foreach (var w in recipe.Warnings)
+                report.Missing.Add($"[Recipe] {processName}: {w}");
         }
 
         // Phase 1: ResolveProcessRuntimeFbtPath / RewriteProcessRuntimeRecipe / FbtRewriter
