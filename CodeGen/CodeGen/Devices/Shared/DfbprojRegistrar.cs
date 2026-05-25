@@ -4,7 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Xml.Linq;
 
-namespace MapperUI.Services
+namespace CodeGen.Devices.Shared
 {
     public static class DfbprojRegistrar
     {
