@@ -808,6 +808,38 @@ namespace MapperUI
                         AppendActivity(line);
                 }
 
+                // Station 2 — bind the deployed M580 + BX1 .hcf channel symlinks
+                // (symbol binding only; wiring + recipes untouched). Runs LAST so
+                // it patches the deployed copy after M580HwConfigCopier.Copy /
+                // BX1HwConfigCopier.Copy (in FinalizeM262StackAsync above) wrote it
+                // and after EmitStation2Resources mirrored the Station-2 FBs onto
+                // the resources. Approach (B): the IO-bindings xlsx has no
+                // Station-2 pin rows, so we can't direct-bind channel→FB.port like
+                // M262; instead we unquote each symlink and re-align its resource
+                // head to the deployed sysres ID so EAE's Symbolic Link view treats
+                // it as a link (full resolution still needs the M580IO / BX1 EIP
+                // broker FB on the resource — logged by the binder). Does NOT touch
+                // the M262 HcfPatchService. Try/catch per spec.
+                try
+                {
+                    int bindBefore = report.Missing.Count;
+                    await Task.Run(() =>
+                    {
+                        CodeGen.Devices.Shared.HcfSymbolBinder.BindM580(Cfg(), report);
+                        CodeGen.Devices.Shared.HcfSymbolBinder.BindBX1(Cfg(), report);
+                    });
+                    for (int i = bindBefore; i < report.Missing.Count; i++)
+                    {
+                        var line = report.Missing[i];
+                        if (line.StartsWith("[HcfBind]"))
+                            AppendActivity(line);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AppendActivity($"[HcfBind][Error] {ex.Message}");
+                }
+
                 TouchDfbprojToTriggerEaeReload();
 
                 AppendActivity($"Generated: {path}");
