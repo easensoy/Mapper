@@ -4,7 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Xml.Linq;
 
-namespace MapperUI.Services
+namespace CodeGen.Devices.Shared
 {
     /// <summary>
     /// Transforms a newly-exported <c>.hcf</c> from Schneider's
