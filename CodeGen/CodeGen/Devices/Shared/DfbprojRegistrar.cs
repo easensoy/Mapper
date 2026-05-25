@@ -51,7 +51,13 @@ namespace CodeGen.Devices.Shared
                 new XElement(ns + "Plugin", "OPCUAConfigurator"),
                 new XElement(ns + "IEC61499Type", "CAT_OPCUA"));
 
-            xml.Save(dfbprojPath);
+            // Save ONLY if something was added. An unconditional save rewrites the
+            // .dfbproj on every (idempotent) re-run, which bumps its mtime and makes
+            // EAE pop a "Reload Solution" prompt even though nothing changed. With
+            // ~8 CATs + basics + adapters + DTs each saving unconditionally, one
+            // Test Runtime produced a flurry of reload prompts. (a > 0) collapses
+            // that to a real change only.
+            if (a > 0) xml.Save(dfbprojPath);
             return a;
         }
 
@@ -62,7 +68,7 @@ namespace CodeGen.Devices.Shared
             var (cg, _) = Groups(xml, ns);
             int a = 0;
             Add(cg, ns, "Compile", fileName, ref a, new XElement(ns + "IEC61499Type", type));
-            xml.Save(dfbprojPath);
+            if (a > 0) xml.Save(dfbprojPath);   // only write on a real change (see RegisterCat)
             return a;
         }
 
@@ -79,7 +85,7 @@ namespace CodeGen.Devices.Shared
             var (cg, _) = Groups(xml, ns);
             int a = 0;
             Add(cg, ns, "Compile", dtRelativePath, ref a, new XElement(ns + "IEC61499Type", "DataType"));
-            xml.Save(dfbprojPath);
+            if (a > 0) xml.Save(dfbprojPath);   // only write on a real change (see RegisterCat)
             return a;
         }
 
@@ -158,15 +164,20 @@ namespace CodeGen.Devices.Shared
 
             // De-dup: any existing <None>/<Compile> referencing this sysdev that has
             // duplicate IEC61499Type or DependentUpon child elements gets cleaned up.
-            DeduplicateChildren(ng, ns, "None", sysdevFileName);
-            DeduplicateChildren(cg, ns, "Compile", sysdevFileName);
+            int removed = DeduplicateChildren(ng, ns, "None", sysdevFileName)
+                        + DeduplicateChildren(cg, ns, "Compile", sysdevFileName);
 
-            xml.Save(dfbprojPath);
+            // Save ONLY if we actually added an entry or removed a duplicate.
+            // Otherwise an idempotent re-run rewrites the .dfbproj and triggers a
+            // spurious EAE "Reload Solution" prompt (this is called once per sysdev
+            // — M262, M580, BX1 — so three needless saves per Test Runtime).
+            if (added > 0 || removed > 0) xml.Save(dfbprojPath);
             return added;
         }
 
-        static void DeduplicateChildren(XElement group, XNamespace ns, string tag, string sysdevFileName)
+        static int DeduplicateChildren(XElement group, XNamespace ns, string tag, string sysdevFileName)
         {
+            int removed = 0;
             foreach (var entry in group.Elements(ns + tag).ToList())
             {
                 var include = (string?)entry.Attribute("Include") ?? string.Empty;
@@ -176,18 +187,20 @@ namespace CodeGen.Devices.Shared
                         StringComparison.OrdinalIgnoreCase))
                     continue;
 
-                CollapseDuplicateChildElements(entry, ns + "IEC61499Type");
-                CollapseDuplicateChildElements(entry, ns + "DependentUpon");
+                removed += CollapseDuplicateChildElements(entry, ns + "IEC61499Type");
+                removed += CollapseDuplicateChildElements(entry, ns + "DependentUpon");
             }
+            return removed;
         }
 
-        static void CollapseDuplicateChildElements(XElement parent, XName childName)
+        static int CollapseDuplicateChildElements(XElement parent, XName childName)
         {
             var children = parent.Elements(childName).ToList();
-            if (children.Count <= 1) return;
+            if (children.Count <= 1) return 0;
             // Keep the first, drop the rest. EAE only honours the first anyway.
             for (int i = 1; i < children.Count; i++)
                 children[i].Remove();
+            return children.Count - 1;
         }
 
         /// <summary>
