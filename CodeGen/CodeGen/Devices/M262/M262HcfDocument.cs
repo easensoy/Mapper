@@ -6,8 +6,9 @@ using System.Text;
 using System.Xml;
 using System.Xml.Linq;
 using CodeGen.Translation;
+using CodeGen.Devices.Shared;
 
-namespace MapperUI.Services
+namespace CodeGen.Devices.M262
 {
     /// <summary>
     /// In-memory wrapper around an existing M262 <c>.hcf</c> file on disk.
