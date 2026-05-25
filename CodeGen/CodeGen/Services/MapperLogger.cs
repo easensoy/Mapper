@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 
-namespace MapperUI.Services
+namespace CodeGen.Services
 {
     public enum LogStep
     {
