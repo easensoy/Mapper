@@ -5,8 +5,9 @@ using System.Linq;
 using System.Xml.Linq;
 using CodeGen.Configuration;
 using CodeGen.Translation;
+using CodeGen.Devices.Shared;
 
-namespace MapperUI.Services
+namespace CodeGen.Devices.M262
 {
     /// <summary>
     /// Deploys the M262 .hcf file. Pure verbatim copy from
@@ -252,14 +253,5 @@ namespace MapperUI.Services
                 "Copy() now performs a pure verbatim copy of the IO-folder .hcf.");
             return 0;
         }
-    }
-
-    public class HwConfigCopyResult
-    {
-        public string? HcfPath { get; set; }
-        public int FilesCopied { get; set; }
-        public List<string> ParametersOverwritten { get; } = new();
-        public HashSet<string> ParametersOverwrittenSet { get; } = new(StringComparer.Ordinal);
-        public List<string> Warnings { get; } = new();
     }
 }
