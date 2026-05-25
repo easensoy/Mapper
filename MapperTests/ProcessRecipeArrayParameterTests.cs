@@ -5,7 +5,11 @@ using System.Xml.Linq;
 using CodeGen.IO;
 using CodeGen.Models;
 using CodeGen.Translation;
-using MapperUI.Services;
+using CodeGen.Translation.Process;
+using CodeGen.Devices.M262;
+using CodeGen.Devices.M580;
+using CodeGen.Devices.Shared;
+using CodeGen.Services;
 using Xunit;
 
 namespace MapperTests
