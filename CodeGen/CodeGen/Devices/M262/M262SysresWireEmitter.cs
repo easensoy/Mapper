@@ -8,7 +8,7 @@ using System.Xml.Linq;
 using CodeGen.Configuration;
 using CodeGen.Translation;
 
-namespace MapperUI.Services
+namespace CodeGen.Devices.M262
 {
     /// <summary>
     /// Emits the canonical event + data wires into the deployed M262 sysres
