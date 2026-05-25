@@ -4,8 +4,10 @@ using System.IO;
 using System.Linq;
 using System.Xml.Linq;
 using CodeGen.Configuration;
+using CodeGen.Devices.Shared;
+using CodeGen.Translation;
 
-namespace MapperUI.Services
+namespace CodeGen.Devices.M262
 {
     public static class M262SysdevEmitter
     {
@@ -127,7 +129,16 @@ namespace MapperUI.Services
             var sysresPath = FindSysresFor(sysdevPath);
             int sysresMirrorCount = 0;
             if (sysresPath != null && fbInstances.Count > 0)
-                sysresMirrorCount = MirrorFbsIntoSysres(sysresPath, fbInstances);
+                // Mirror only the FBs that belong on the M262 (Feed Station).
+                // The Station-2 FBs (Shaft/Clamp/Cover/Bearing/sensors and the
+                // Station2/Assembly_Station/Stn2_Term structural FBs) now live
+                // on the M580/BX1 resources, emitted by EmitStation2Sysres. If
+                // they were left in this bucket too they would be mapped onto
+                // BOTH the M262 and a Station-2 PLC, which EAE flags as a
+                // duplicate instance mapping in Solution Integrity.
+                sysresMirrorCount = MirrorFbsIntoSysres(
+                    sysresPath,
+                    fbInstances.Where(f => BucketFor(f.Name) == PlcAssignment.M262).ToList());
 
             int systemMappingsAdded = 0;
 
@@ -364,7 +375,16 @@ namespace MapperUI.Services
         public const string DpacFullInitFbId  = "593A8F4FDEA0A668";
         public const string PlcStartFbId      = "3DB1FB0F578E5F1E";
 
-        public static int MirrorFbsIntoSysres(string sysresPath, List<SyslayFb> syslayFbs)
+        public static int MirrorFbsIntoSysres(string sysresPath, List<SyslayFb> syslayFbs) =>
+            MirrorFbsIntoSysres(sysresPath, syslayFbs, DpacFullInitFbId, PlcStartFbId);
+
+        /// <summary>
+        /// Boot-ID-parameterized mirror so each PLC resource (M262 / M580 / BX1)
+        /// gets its OWN DPAC_FULLINIT + plcStart instance with a distinct ID
+        /// (EAE FB IDs must be unique across resources).
+        /// </summary>
+        public static int MirrorFbsIntoSysres(string sysresPath, List<SyslayFb> syslayFbs,
+            string dpacFullInitId, string plcStartId)
         {
             if (!File.Exists(sysresPath)) return 0;
             var doc = XDocument.Load(sysresPath);
@@ -391,11 +411,11 @@ namespace MapperUI.Services
             // M262IO disappear from the generated .sysres; the cleanup pass
             // in PrepareDemonstratorForGeneration only clears stale copies.
             EnsureSystemFb(network, ns,
-                id: DpacFullInitFbId, name: "FB1", type: "DPAC_FULLINIT", nsAttr: "SE.DPAC",
+                id: dpacFullInitId, name: "FB1", type: "DPAC_FULLINIT", nsAttr: "SE.DPAC",
                 mapping: null, x: 1900, y: 140,
                 loaded: true);
             EnsureSystemFb(network, ns,
-                id: PlcStartFbId, name: "FB2", type: "plcStart", nsAttr: "SE.AppBase",
+                id: plcStartId, name: "FB2", type: "plcStart", nsAttr: "SE.AppBase",
                 mapping: null, x: 820, y: 660,
                 loaded: true,
                 parameters: new[] { ("Prio", "10"), ("Delay", "T#1000ms") });
@@ -506,6 +526,106 @@ namespace MapperUI.Services
             if (!Directory.Exists(sysdevFolder)) return null;
             return Directory.EnumerateFiles(sysdevFolder, "*.sysres", SearchOption.TopDirectoryOnly)
                 .FirstOrDefault();
+        }
+
+        /// <summary>
+        /// Decides which PLC resource a syslay FB belongs on. Component FBs use
+        /// <see cref="HcfSymbolIndex.NameBasedPlcGuess"/>; the Station-2 structural
+        /// FBs (which have no IO bindings) are hard-routed to M580. Anything the
+        /// name guess can't place falls back to M262 so nothing is ever dropped.
+        /// </summary>
+        public static PlcAssignment BucketFor(string fbName)
+        {
+            switch (fbName)
+            {
+                case "Station2":
+                case "Station2_HMI":
+                case "Assembly_Station":
+                case "Stn2_Term":
+                    return PlcAssignment.M580;
+            }
+            var p = HcfSymbolIndex.NameBasedPlcGuess(fbName);
+            return p == PlcAssignment.Unknown ? PlcAssignment.M262 : p;
+        }
+
+        /// <summary>
+        /// Mirrors the Station-2 FBs from the syslay onto the M580 and BX1
+        /// resources (each bucketed by <see cref="BucketFor"/>), so those PLCs
+        /// carry their own actuators/sensors/station/process FBs instead of empty
+        /// shells. Runs AFTER <c>Station2DeviceEmitter.EmitAll</c> has written the
+        /// sysdev/sysres shells. Each resource gets its own DPAC_FULLINIT/plcStart
+        /// boot pair with a distinct ID. Returns (M580 count, BX1 count).
+        /// </summary>
+        public static (int M580, int BX1) EmitStation2Sysres(MapperConfig cfg)
+        {
+            if (cfg == null) throw new ArgumentNullException(nameof(cfg));
+            var eaeRoot = DeriveEaeProjectRoot(cfg);
+            if (string.IsNullOrEmpty(eaeRoot)) return (0, 0);
+
+            var syslayPath = cfg.ActiveSyslayPath;
+            var all = (string.IsNullOrWhiteSpace(syslayPath) || !File.Exists(syslayPath))
+                ? new List<SyslayFb>()
+                : ReadSyslayTopLevelFbs(syslayPath);
+            if (all.Count == 0) return (0, 0);
+
+            int m580 = MirrorBucket(eaeRoot, "M580_dPAC",
+                all.Where(f => BucketFor(f.Name) == PlcAssignment.M580).ToList(),
+                dpacFullInitId: "66C40EEF3F39D969", plcStartId: "ACED009B79DFCE69");
+            int bx1 = MirrorBucket(eaeRoot, "Soft_dPAC",
+                all.Where(f => BucketFor(f.Name) == PlcAssignment.BX1).ToList(),
+                dpacFullInitId: "0FE5E1B2C3D4A5B6", plcStartId: "1A2B3C4D5E6F7081");
+            return (m580, bx1);
+        }
+
+        static int MirrorBucket(string eaeRoot, string deviceType, List<SyslayFb> bucket,
+            string dpacFullInitId, string plcStartId)
+        {
+            if (bucket.Count == 0) return 0;
+            var sysdev = FindSysdevByDeviceType(eaeRoot, deviceType);
+            if (sysdev == null) return 0;
+            var sysres = FindSysresFor(sysdev);
+            if (sysres == null) return 0;
+            var added = MirrorFbsIntoSysres(sysres, bucket, dpacFullInitId, plcStartId);
+
+            // EAE Solution Integrity requires every deployed resource to have a
+            // sibling "{resId}/" metadata folder containing at minimum an
+            // opcua.xml whose UID equals the parent sysdev-folder GUID. The
+            // M262 Feed-Station path gets this via the same helper (the M262
+            // deployed "{resId}/" folder carries opcua.xml + EAE-generated
+            // offline.xml/opcuaclient.xml; only opcua.xml is Mapper-written).
+            // The M580/BX1 resources previously skipped it — exactly the gap
+            // that made the prior mirror attempt fail integrity with "Missing
+            // Project Files". Reuse the M262 helper so the folder name (sysres
+            // stem) and the UID convention match the working M262 output. The
+            // sister files offline.xml/opcuaclient.xml/symlink.xml are left for
+            // EAE to generate on open, mirroring the M262 behaviour.
+            SystemInjector.EnsureOpcuaXmlBesideArtefact(sysres);
+
+            return added;
+        }
+
+        /// <summary>
+        /// Locates the deployed sysdev whose root &lt;Device&gt; has the given
+        /// <paramref name="deviceType"/> (e.g. "M580_dPAC", "Soft_dPAC") in the
+        /// SE.DPAC namespace. Returns null if none match.
+        /// </summary>
+        static string? FindSysdevByDeviceType(string eaeRoot, string deviceType)
+        {
+            var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
+            if (!Directory.Exists(systemDir)) return null;
+            foreach (var sd in Directory.EnumerateFiles(systemDir, "*.sysdev", SearchOption.AllDirectories))
+            {
+                try
+                {
+                    var root = XDocument.Load(sd).Root;
+                    if (root == null || root.Name.LocalName != "Device") continue;
+                    if (string.Equals((string?)root.Attribute("Type"), deviceType, StringComparison.Ordinal) &&
+                        string.Equals((string?)root.Attribute("Namespace"), "SE.DPAC", StringComparison.Ordinal))
+                        return sd;
+                }
+                catch { /* skip malformed */ }
+            }
+            return null;
         }
 
         /// <summary>
