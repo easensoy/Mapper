@@ -7,7 +7,7 @@ using CodeGen.Configuration;
 using CodeGen.Devices.M262;
 using CodeGen.Devices.Core;
 
-namespace CodeGen.Devices.M580
+namespace CodeGen.Devices.Core
 {
     /// <summary>
     /// Emits Station 2 device + resource artefacts (the M580 X80 PLC and the

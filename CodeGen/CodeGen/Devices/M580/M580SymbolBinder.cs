@@ -4,14 +4,15 @@ using System.IO;
 using System.Linq;
 using System.Xml.Linq;
 using CodeGen.Configuration;
+using CodeGen.Devices.Core;
 using CodeGen.Devices.M262;
 using CodeGen.Translation;
 
-namespace CodeGen.Devices.Core
+namespace CodeGen.Devices.M580
 {
     /// <summary>
-    /// Binds the deployed Station-2 <c>.hcf</c> hardware-config channel symlinks so
-    /// EAE's "Symbolic Link" view resolves them. This is the M580/BX1 sibling of the
+    /// Binds the deployed M580 <c>.hcf</c> hardware-config channel symlinks so
+    /// EAE's "Symbolic Link" view resolves them. This is the M580 sibling of the
     /// M262 <see cref="HcfPatchService"/> and follows the SAME proven scheme:
     /// <b>DIRECT binding</b> to the consumer CAT instance — each channel value is
     /// <c>{resourceId}.{consumerFbId}.{port}</c> (unquoted, GUID-headed), pointing
@@ -30,17 +31,11 @@ namespace CodeGen.Devices.Core
     /// <see cref="M580ChannelMap"/> and bind direct. The reference name carries the
     /// component+position, so the map is a fixed lookup, not a guess.</para>
     ///
-    /// <para><b>BX1 is deferred</b> (see <see cref="BindBX1"/>): it is EtherNet/IP,
-    /// so its <c>.hcf</c> carries <i>word</i> channels (<c>EIP_Input_Word_1</c>) that
-    /// only a <c>PLC_RW_BX1</c> broker's internal <c>WordToBits</c> can unpack — a
-    /// direct bit-level CAT cannot consume a word. That needs the broker design and
-    /// is left untouched here by request.</para>
-    ///
     /// <para>Idempotent: a channel already bound to a component FB id is left
     /// unchanged. Empty/literal channels (<c>''</c>, scanner ids, <c>T#…</c>) are
     /// never touched. Does NOT touch the M262 <see cref="HcfPatchService"/>.</para>
     /// </summary>
-    public static class HcfSymbolBinder
+    public static class M580SymbolBinder
     {
         /// <summary>
         /// Maps the authored M580 <c>.hcf</c> channel symlink name (the trailing
@@ -101,7 +96,7 @@ namespace CodeGen.Devices.Core
                 var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(config);
                 if (string.IsNullOrEmpty(eaeRoot)) { Log("skipped, could not derive EAE project root"); return; }
 
-                var sysdevFile = FindSysdevByType(eaeRoot, "M580_dPAC", "SE.DPAC");
+                var sysdevFile = HcfBindingSupport.FindSysdevByType(eaeRoot, "M580_dPAC", "SE.DPAC");
                 if (sysdevFile == null) { Log("skipped, no deployed M580 sysdev (Type=M580_dPAC)"); return; }
 
                 var stem = Path.GetFileNameWithoutExtension(sysdevFile);
@@ -109,10 +104,10 @@ namespace CodeGen.Devices.Core
                 var hcfPath = Path.Combine(folder, stem + ".hcf");
                 if (!File.Exists(hcfPath)) { Log($"skipped, deployed .hcf not found at {hcfPath} (run the HCF copier first)"); return; }
 
-                var (resId, _) = ReadSysresIdentity(folder);
+                var (resId, _) = HcfBindingSupport.ReadSysresIdentity(folder);
                 if (string.IsNullOrEmpty(resId)) { Log("skipped, deployed sysres ID not resolvable"); return; }
 
-                var compId = BuildComponentIdMap(folder);
+                var compId = HcfBindingSupport.BuildComponentIdMap(folder);
                 if (compId.Count == 0)
                 {
                     Log("skipped, no actuator/sensor FBs on the M580 sysres yet " +
@@ -133,7 +128,7 @@ namespace CodeGen.Devices.Core
                     var raw = (string?)pv.Attribute("Value");
                     if (raw == null) continue;
 
-                    if (!TrySplitSymlink(raw, out var _, out var mid, out var last))
+                    if (!HcfBindingSupport.TrySplitSymlink(raw, out var _, out var mid, out var last))
                     {
                         literals++;            // empty / literal / not a head.mid.port triple
                         continue;
@@ -171,7 +166,7 @@ namespace CodeGen.Devices.Core
                         $"[HcfBind][M580] {chan}: symlink '{last}' not in the M580 channel map — left as-is");
                 }
 
-                if (bound > 0) SaveHcf(doc, hcfPath);
+                if (bound > 0) HcfBindingSupport.SaveHcf(doc, hcfPath);
                 Log($"direct-bound {bound} channel(s) to CAT ports (resId {resId}); {already} already bound, " +
                     $"{unmapped} unmapped, {missingComp} missing-component, {literals} literal/empty. " +
                     "No broker — each channel points straight at the actuator/sensor FB (M262-style).");
@@ -179,156 +174,6 @@ namespace CodeGen.Devices.Core
             catch (Exception ex)
             {
                 Log($"failed: {ex.GetType().Name}: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// BX1 is intentionally deferred. Its EtherNet/IP <c>.hcf</c> carries
-        /// word-level channels (<c>EIP_Input_Word_1</c>) that only a
-        /// <c>PLC_RW_BX1</c> broker's internal <c>WordToBits</c>/<c>BitsToWord</c>
-        /// can unpack; the Mapper's direct bit-level CATs (athome/atwork) cannot
-        /// consume a word. Binding it correctly needs the broker design, so this
-        /// only records the deferral and leaves the BX1 <c>.hcf</c> untouched.
-        /// Tag <c>[HcfBind][BX1]</c>.
-        /// </summary>
-        public static void BindBX1(MapperConfig? config,
-            SystemInjector.BindingApplicationReport report)
-        {
-            report.Missing.Add(
-                "[HcfBind][BX1] deferred — BX1 is EtherNet/IP (word channels EIP_Input_Word_1/" +
-                "EIP_Output_Word_1). Resolving them needs a PLC_RW_BX1 broker FB on the BX1 " +
-                "resource to unpack word->bits (WordToBits); the direct bit-level CATs cannot " +
-                "consume a word. Left the BX1 .hcf untouched pending the broker decision.");
-        }
-
-        // ── helpers ──────────────────────────────────────────────────────────
-
-        /// <summary>
-        /// Splits a channel value into head.mid.last. Strips a single layer of
-        /// wrapping single quotes first. Returns false for empty values, genuine
-        /// string literals (no dots / quoted scanner ids), and <c>T#…</c> durations.
-        /// </summary>
-        private static bool TrySplitSymlink(string raw, out string head, out string mid, out string last)
-        {
-            head = mid = last = string.Empty;
-            var t = raw.Trim();
-            if (t.Length == 0) return false;
-            bool quoted = t.Length >= 2 && t[0] == '\'' && t[^1] == '\'';
-            var inner = quoted ? t.Substring(1, t.Length - 2).Trim() : t;
-            if (inner.Length == 0) return false;
-            if (inner.StartsWith("T#", StringComparison.OrdinalIgnoreCase)) return false;
-            var parts = inner.Split('.');
-            if (parts.Length != 3) return false;
-            if (parts.Any(p => p.Length == 0)) return false;
-            head = parts[0]; mid = parts[1]; last = parts[2];
-            return true;
-        }
-
-        /// <summary>component instance Name -> FB id, read from the deployed
-        /// <c>.sysres</c> in the sysdev folder (the actuator/sensor CATs mirrored
-        /// there). The .hcf channel's middle segment must be this id so EAE
-        /// resolves the link to the FB instance.</summary>
-        private static Dictionary<string, string> BuildComponentIdMap(string sysdevFolder)
-        {
-            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            try
-            {
-                var sysres = Directory.Exists(sysdevFolder)
-                    ? Directory.EnumerateFiles(sysdevFolder, "*.sysres").FirstOrDefault()
-                    : null;
-                if (sysres == null) return map;
-                var root = XDocument.Load(sysres).Root;
-                if (root == null) return map;
-                XNamespace ns = root.GetDefaultNamespace();
-                var net = root.Element(ns + "FBNetwork");
-                if (net == null) return map;
-                foreach (var fb in net.Elements(ns + "FB"))
-                {
-                    var n = (string?)fb.Attribute("Name");
-                    var id = (string?)fb.Attribute("ID");
-                    if (!string.IsNullOrEmpty(n) && !string.IsNullOrEmpty(id))
-                        map[n!] = id!;
-                }
-            }
-            catch { /* best-effort */ }
-            return map;
-        }
-
-        private static string? FindSysdevByType(string eaeRoot, string deviceType, string deviceNamespace)
-        {
-            var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
-            if (!Directory.Exists(systemDir)) return null;
-            foreach (var sd in Directory.EnumerateFiles(systemDir, "*.sysdev", SearchOption.AllDirectories))
-            {
-                try
-                {
-                    var root = XDocument.Load(sd).Root;
-                    if (root == null || root.Name.LocalName != "Device") continue;
-                    if ((string?)root.Attribute("Type") == deviceType &&
-                        (string?)root.Attribute("Namespace") == deviceNamespace)
-                        return sd;
-                }
-                catch { /* skip malformed */ }
-            }
-            return null;
-        }
-
-        /// <summary>Read the deployed resource ID (prefers the .sysres root
-        /// <c>ID</c> attribute, falls back to the file stem) and Name.</summary>
-        private static (string Id, string? Name) ReadSysresIdentity(string sysdevFolder)
-        {
-            try
-            {
-                var sysres = Directory.Exists(sysdevFolder)
-                    ? Directory.EnumerateFiles(sysdevFolder, "*.sysres").FirstOrDefault()
-                    : null;
-                if (sysres == null) return (string.Empty, null);
-                string id = Path.GetFileNameWithoutExtension(sysres);
-                string? name = null;
-                try
-                {
-                    var root = XDocument.Load(sysres).Root;
-                    var rootId = (string?)root?.Attribute("ID");
-                    if (!string.IsNullOrWhiteSpace(rootId)) id = rootId!;
-                    name = (string?)root?.Attribute("Name");
-                }
-                catch { /* fall back to file stem */ }
-                return (id, name);
-            }
-            catch { return (string.Empty, null); }
-        }
-
-        /// <summary>Save with UTF-8 + BOM and 2-space indent, retrying if EAE
-        /// briefly holds a write lock.</summary>
-        private static void SaveHcf(XDocument doc, string hcfPath)
-        {
-            var settings = new System.Xml.XmlWriterSettings
-            {
-                OmitXmlDeclaration = false,
-                Indent = true,
-                Encoding = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true),
-            };
-            const int MaxAttempts = 8;
-            int delayMs = 50;
-            for (int attempt = 1; attempt <= MaxAttempts; attempt++)
-            {
-                try
-                {
-                    using var fs = new FileStream(hcfPath, FileMode.Create, FileAccess.Write, FileShare.Read);
-                    using var w = System.Xml.XmlWriter.Create(fs, settings);
-                    doc.Save(w);
-                    return;
-                }
-                catch (IOException) when (attempt < MaxAttempts)
-                {
-                    System.Threading.Thread.Sleep(delayMs);
-                    delayMs = Math.Min(delayMs * 2, 800);
-                }
-                catch (UnauthorizedAccessException) when (attempt < MaxAttempts)
-                {
-                    System.Threading.Thread.Sleep(delayMs);
-                    delayMs = Math.Min(delayMs * 2, 800);
-                }
             }
         }
     }

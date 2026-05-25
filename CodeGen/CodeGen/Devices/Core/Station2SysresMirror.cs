@@ -6,7 +6,7 @@ using CodeGen.Configuration;
 using CodeGen.Devices.Core;
 using CodeGen.Translation;
 
-namespace CodeGen.Devices.M580
+namespace CodeGen.Devices.Core
 {
     public static class Station2SysresMirror
     {

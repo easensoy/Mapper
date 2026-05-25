@@ -5,6 +5,7 @@ using CodeGen.Validation;
 using CodeGen.Devices.M262;
 using CodeGen.Devices.M580;
 using CodeGen.Devices.BX1;
+using CodeGen.Devices.Core;
 using CodeGen.Services;
 using CodeGen.Translation;
 using System;
@@ -825,8 +826,8 @@ namespace MapperUI
                     int bindBefore = report.Missing.Count;
                     await Task.Run(() =>
                     {
-                        CodeGen.Devices.Core.HcfSymbolBinder.BindM580(Cfg(), report);
-                        CodeGen.Devices.Core.HcfSymbolBinder.BindBX1(Cfg(), report);
+                        CodeGen.Devices.M580.M580SymbolBinder.BindM580(Cfg(), report);
+                        CodeGen.Devices.BX1.BX1SymbolBinder.BindBX1(Cfg(), report);
                     });
                     for (int i = bindBefore; i < report.Missing.Count; i++)
                     {

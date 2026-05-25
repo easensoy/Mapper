@@ -4,7 +4,7 @@ using CodeGen.Devices.Core;
 using CodeGen.Devices.M262;
 using CodeGen.Translation;
 
-namespace CodeGen.Devices.M580
+namespace CodeGen.Devices.Core
 {
     public static class Station2WireEmitter
     {
