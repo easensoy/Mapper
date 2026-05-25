@@ -6,7 +6,7 @@ using System.Text;
 using CodeGen.Configuration;
 using CodeGen.Models;
 
-namespace MapperUI.Services
+namespace CodeGen.Services
 {
     public static class ImportInstructionGenerator
     {
