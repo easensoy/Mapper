@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using CodeGen.Models;
 
-namespace CodeGen.Translation
+namespace CodeGen.Translation.Process
 {
     public static class ProcessCatGenerator
     {
