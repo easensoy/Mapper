@@ -1,6 +1,6 @@
 ﻿using System.Collections.Generic;
 
-namespace MapperUI.Services
+namespace CodeGen.Models
 {
     public class SystemInjectionResult
     {
