@@ -1961,14 +1961,19 @@ namespace CodeGen.Services
             }
         }
 
+        // ArraySize matches ProcessRecipeArrayGenerator.RecipeArraySize (100) so the
+        // create-default agrees with what PatchProcess1RecipeArraySize / Normalize*
+        // force onto every recipe-array InputVar — no 64->100 transient. Station-2
+        // recipes (Assembly_Station 54 rows, Disassembly 43) need >64; the generator
+        // refuses anything over RecipeArraySize, so declared and emitted stay in lock-step.
         static readonly (string Name, string Type, string ArraySize, string? Comment)[] RecipeArrayDecls = new[]
         {
-            ("StepType",      "INT",         "64", "Phase 1: recipe arrays now external. 1=command, 2=wait, 9=end. Mapper writes literal at instance level via Process1_Generic."),
-            ("CmdTargetName", "STRING[15]",  "64", (string?)null),
-            ("CmdStateArr",   "INT",         "64", (string?)null),
-            ("Wait1Id",       "INT",         "64", (string?)null),
-            ("Wait1State",    "INT",         "64", (string?)null),
-            ("NextStep",      "INT",         "64", (string?)null),
+            ("StepType",      "INT",         "100", "Phase 1: recipe arrays now external. 1=command, 2=wait, 9=end. Mapper writes literal at instance level via Process1_Generic."),
+            ("CmdTargetName", "STRING[15]",  "100", (string?)null),
+            ("CmdStateArr",   "INT",         "100", (string?)null),
+            ("Wait1Id",       "INT",         "100", (string?)null),
+            ("Wait1State",    "INT",         "100", (string?)null),
+            ("NextStep",      "INT",         "100", (string?)null),
         };
 
         /// <summary>
