@@ -2708,29 +2708,43 @@ namespace CodeGen.Services
             var dfbproj = Directory.GetFiles(iec61499Dir, "*.dfbproj").FirstOrDefault();
             if (dfbproj == null) return;
 
+            int changed = 0;
             foreach (var cat in result.CATsDeployed)
-                DfbprojRegistrar.RegisterCat(dfbproj, cat);
+                changed += DfbprojRegistrar.RegisterCat(dfbproj, cat);
 
             foreach (var basic in result.BasicFBsDeployed)
-                DfbprojRegistrar.RegisterBasicFb(dfbproj, basic + ".fbt", "Basic");
+                changed += DfbprojRegistrar.RegisterBasicFb(dfbproj, basic + ".fbt", "Basic");
 
             foreach (var adapter in result.AdaptersDeployed)
-                DfbprojRegistrar.RegisterBasicFb(dfbproj, adapter + ".adp", "Adapter");
+                changed += DfbprojRegistrar.RegisterBasicFb(dfbproj, adapter + ".adp", "Adapter");
 
             foreach (var composite in result.CompositesDeployed)
-                DfbprojRegistrar.RegisterBasicFb(dfbproj, composite + ".fbt", "Composite");
+                changed += DfbprojRegistrar.RegisterBasicFb(dfbproj, composite + ".fbt", "Composite");
 
             foreach (var dt in result.DataTypesDeployed)
-                DfbprojRegistrar.RegisterDataType(dfbproj, $@"DataType\{dt}.dt");
+                changed += DfbprojRegistrar.RegisterDataType(dfbproj, $@"DataType\{dt}.dt");
 
-            DfbprojRegistrar.RegisterReference(dfbproj, "SE.DPAC",   "24.1.0.33");
-            DfbprojRegistrar.RegisterReference(dfbproj, "SE.AppBase", "24.1.0.21");
-            DfbprojRegistrar.RegisterReference(dfbproj, "SE.IoTMx",   "24.1.0.19");
+            changed += DfbprojRegistrar.RegisterReference(dfbproj, "SE.DPAC",   "24.1.0.33");
+            changed += DfbprojRegistrar.RegisterReference(dfbproj, "SE.AppBase", "24.1.0.21");
+            changed += DfbprojRegistrar.RegisterReference(dfbproj, "SE.IoTMx",   "24.1.0.19");
 
-            DfbprojRegistrar.SweepIec61499Folder(dfbproj, iec61499Dir);
+            changed += DfbprojRegistrar.SweepIec61499Folder(dfbproj, iec61499Dir);
 
-            File.SetLastWriteTime(dfbproj, DateTime.Now);
-            MapperLogger.Info($"[Deploy] dfbproj updated: {Path.GetFileName(dfbproj)}");
+            // Only bump the mtime if registration actually changed the project.
+            // Each Register* now no-ops its save when nothing was added, so on an
+            // idempotent re-run this whole method writes NOTHING and EAE gets no
+            // spurious "Reload Solution" prompt from the deploy phase. The single
+            // intended reload trigger is MainForm.TouchDfbprojToTriggerEaeReload,
+            // fired once at the very end of the run.
+            if (changed > 0)
+            {
+                File.SetLastWriteTime(dfbproj, DateTime.Now);
+                MapperLogger.Info($"[Deploy] dfbproj updated ({changed} entr(y/ies)): {Path.GetFileName(dfbproj)}");
+            }
+            else
+            {
+                MapperLogger.Info($"[Deploy] dfbproj already up to date; no write: {Path.GetFileName(dfbproj)}");
+            }
         }
 
         static string ReadSysdevId(string sysdevPath)
