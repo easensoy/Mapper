@@ -66,6 +66,27 @@ namespace CodeGen.Configuration
         public string M262LogicalNetworkName { get; set; } = "DeviceNetwork_1";
 
         /// <summary>
+        /// IPV4 address of the M580 controller on the rig network. Written into
+        /// the M580 Equipment JSON the Topology emitter produces, on the
+        /// seGmac0 endpoint. Without a real IP (i.e. the prior hard-coded
+        /// "0.0.0.0" placeholder) EAE's Deploy &amp; Diagnostic tab refuses to
+        /// list the device — the M262 in the same project IS listed despite
+        /// having the same "00000000-0000-0000-0000-000000000000" domain UUID
+        /// because its IP is concrete, so the IP is the discriminator.
+        /// Default matches the reference SMC_Rig_Expo_withClamp rig wiring.
+        /// </summary>
+        public string M580TargetIp { get; set; } = "192.168.1.20";
+
+        /// <summary>
+        /// IPV4 address of the BX1 soft-dPAC workstation on the rig network.
+        /// Same Deploy &amp; Diagnostic visibility constraint as the M580 above.
+        /// Default matches the reference SMC_Rig_Expo_withClamp rig wiring,
+        /// where the BX1 softdpac runtime listens on 192.168.1.151 (the
+        /// HMIB1X_1 panel hosts it; 192.168.1.209 is the panel itself).
+        /// </summary>
+        public string BX1TargetIp { get; set; } = "192.168.1.151";
+
+        /// <summary>
         /// Resource name written into the .sysres root and the .sysdev's
         /// &lt;Resource&gt; entry. Schneider's default is "RES0" (the first runtime
         /// resource). Renamed to "RES0" so the EAE Deploy &amp; Diagnostic tree
