@@ -183,7 +183,7 @@ namespace CodeGen.Devices.Core
                 resourceName: m580ResourceName,
                 hcfTemplatePath: cfg.M580HcfTemplatePath,
                 equipmentJsonName: "Equipment_M580dPAC_1.json",
-                equipmentBuilder: () => BuildM580EquipmentJson(M580SysdevId, solutionId),
+                equipmentBuilder: () => BuildM580EquipmentJson(M580SysdevId, solutionId, cfg.M580TargetIp),
                 deployPluginPropertiesXml: BuildStandardDeployPluginPropertiesXml(),
                 simulationBindingDeployPort: 51500,
                 simulationBindingArchivePort: 51497);
@@ -196,7 +196,7 @@ namespace CodeGen.Devices.Core
                 resourceName: BX1ResourceName,
                 hcfTemplatePath: cfg.BX1HcfTemplatePath,
                 equipmentJsonName: "Equipment_Workstation_BX1.json",
-                equipmentBuilder: () => BuildBX1WorkstationEquipmentJson(BX1SysdevId, solutionId),
+                equipmentBuilder: () => BuildBX1WorkstationEquipmentJson(BX1SysdevId, solutionId, cfg.BX1TargetIp),
                 deployPluginPropertiesXml: BuildSoftDpacDeployPluginPropertiesXml(),
                 simulationBindingDeployPort: 51501,
                 simulationBindingArchivePort: 51498);
@@ -419,9 +419,13 @@ namespace CodeGen.Devices.Core
         /// M580 dPAC equipment JSON — modelled on
         /// <c>SMC_Rig_Expo_withClamp/Topology/Equipment_M580dPAC_1.json</c>.
         /// X80 4-slot rack + BMX CPS 4002 PSU + BME D58 1020 CPU with ETH0/1/2/3
-        /// ports. IP set to 0.0.0.0 / NOCONF (user binds on Physical Views after deploy).
+        /// ports. IP is taken from <c>cfg.M580TargetIp</c> (defaults to the rig
+        /// wiring address 192.168.1.20). The earlier "0.0.0.0" placeholder hid
+        /// the M580 from EAE's Deploy &amp; Diagnostic tab — the same panel
+        /// lists the M262 only because its IP is concrete, so the IP is the
+        /// discriminator and must be set here.
         /// </summary>
-        static string BuildM580EquipmentJson(string sysdevId, string solutionId)
+        static string BuildM580EquipmentJson(string sysdevId, string solutionId, string targetIp)
         {
             return $$"""
             {
@@ -469,7 +473,7 @@ namespace CodeGen.Devices.Core
                                   "identifier": "IP Address",
                                   "isReadOnly": false,
                                   "domainReadOnly": false,
-                                  "ipAddress": "0.0.0.0",
+                                  "ipAddress": "{{targetIp}}",
                                   "domain": "{{NoConfDomainUuid}}"
                                 }
                               ]
@@ -520,7 +524,7 @@ namespace CodeGen.Devices.Core
         /// standalone. Workstation is the right top-level catalog for any
         /// PC-hosted softdpac runtime.
         /// </summary>
-        static string BuildBX1WorkstationEquipmentJson(string sysdevId, string solutionId)
+        static string BuildBX1WorkstationEquipmentJson(string sysdevId, string solutionId, string targetIp)
         {
             // typeId used by Workstation_1's RuntimeDEO in the reference —
             // distinct from SoftDpacTypeId (which is for the HMIB1X-nested case).
@@ -559,7 +563,7 @@ namespace CodeGen.Devices.Core
                               "identifier": "IP Address",
                               "isReadOnly": false,
                               "domainReadOnly": false,
-                              "ipAddress": "0.0.0.0",
+                              "ipAddress": "{{targetIp}}",
                               "domain": "{{NoConfDomainUuid}}"
                             }
                           ]
