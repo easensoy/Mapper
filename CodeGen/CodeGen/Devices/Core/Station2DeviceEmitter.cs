@@ -161,16 +161,24 @@ namespace CodeGen.Devices.Core
             // NOTE: this only binds the .hcf to the resource SHELL — the symlink
             // targets (the M580IO variable group / the BX1 EIP-word FB) still
             // need the FB-side work before the bindings resolve at runtime.
-            var m580Ident = ReadHcfResourceIdentity(cfg.M580HcfTemplatePath);
-            var bx1Ident  = ReadHcfResourceIdentity(cfg.BX1HcfTemplatePath);
+            // M580 resource identity no longer read from the .hcf — name is fixed
+            // to M580ResourceName below. BX1 still reads its identity because its
+            // .hcf carries a GUID-scoped DeviceHwConfigurationItem/@ResourceId we
+            // align the sysres ID to.
+            var bx1Ident = ReadHcfResourceIdentity(cfg.BX1HcfTemplatePath);
 
-            var m580ResourceName = m580Ident.Name
-                ?? (string.IsNullOrWhiteSpace(cfg.ResourceName) ? M580ResourceName : cfg.ResourceName);
+            // M580 resource name is FIXED to the M580ResourceName constant
+            // ("M580_RES") — symmetric with M262 which carries Name="M262_RES"
+            // from cfg.ResourceName. Earlier code read the resource name from
+            // the M580 .hcf's authored channel prefix ('RES0.M580IO.<sym>' ->
+            // "RES0"), which made EAE's Devices tree show "M580 > RES0" while
+            // M262 showed "M262 > M262_RES" — same kind of resource, different
+            // visible name, no engineering reason. M580SymbolBinder rewrites
+            // every .hcf channel to a Form 1 GUID triple (<resId>.<fbId>.<port>),
+            // so the .hcf no longer carries any name-prefix dependency: the
+            // resource Name can be set purely for the EAE display tree.
+            var m580ResourceName = M580ResourceName;
             var bx1ResourceId = bx1Ident.GuidId ?? BX1ResourceId;
-
-            if (!string.Equals(m580ResourceName, M580ResourceName, StringComparison.Ordinal))
-                result.Warnings.Add(
-                    $"[M580] resource name aligned to '{m580ResourceName}' from the M580 .hcf symlinks (default was '{M580ResourceName}').");
             if (!string.Equals(bx1ResourceId, BX1ResourceId, StringComparison.Ordinal))
                 result.Warnings.Add(
                     $"[BX1] sysres ID aligned to '{bx1ResourceId}' from the BX1 .hcf ResourceId (default was '{BX1ResourceId}').");
