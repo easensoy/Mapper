@@ -2003,11 +2003,34 @@ namespace CodeGen.Translation
             var processInstanceName = InstanceNameResolver.Resolve(contents.Process);
             if (string.IsNullOrWhiteSpace(processInstanceName)) processInstanceName = "Process1";
 
+            // PER-PLC FILTER (added 2026-05-26 after Pusher would not actuate on the rig).
+            // Feed_Station lives on M262 only — Station1, Stn1_Term and the
+            // Area/Station HMI adapters all belong to the M262 frame. When
+            // contents.Sensors / contents.Actuators expanded to whole-system
+            // scope (Phase-1 task #9), this function began stitching M580 +
+            // BX1 components into a single cross-PLC chain on the syslay:
+            //   ... ShaftSensor (M580) → TopCoverSenosr (BX1) → Feeder (M262) ...
+            // EAE renders direct event/adapter wires that cross a resource
+            // boundary as DASHED ("unresolved") because they cannot be deployed
+            // — a wire on M262's resource cannot signal an FB that runs on
+            // M580. Result: every M262 actuator (Feeder, Checker, Transfer)
+            // showed dashed inputs on >>stationAdptr_in / >>stateRprtCmd_in,
+            // EAE blocked deploy, and the Pusher never received its CMD.
+            // Each PLC's sysres still gets its own contained chain via
+            // ResourceWireEmitter.EmitForResource (M580 + BX1 chain themselves
+            // through Station2 / their own components), so dropping non-M262
+            // names here only removes the cross-PLC syslay wires — every
+            // resource's runtime chain is unaffected.
+            static bool IsM262(string name) =>
+                HcfSymbolIndex.NameBasedPlcGuess(name) == PlcAssignment.M262;
+
             var initChain = new List<string>();
             initChain.Add("Area");
             initChain.Add("Station1");
-            foreach (var s in contents.Sensors) initChain.Add(s.Name);
-            foreach (var a in contents.Actuators) initChain.Add(a.Name);
+            foreach (var s in contents.Sensors)
+                if (IsM262(s.Name)) initChain.Add(s.Name);
+            foreach (var a in contents.Actuators)
+                if (IsM262(a.Name)) initChain.Add(a.Name);
             initChain.Add(processInstanceName);
 
             // No PLC_Start bootstrap edges: Area_CAT contains its own internal plcStart
@@ -2022,9 +2045,13 @@ namespace CodeGen.Translation
 
             // v1-assumption: Sensor_Bool_CAT lacks stationAdptr ports per .fbt verification.
             // CaSBus chain skips sensors and includes only actuators + the Process instance.
+            // M262-only filter (same rationale as the init chain above) — pre-filter
+            // keeps Station1.StationAdaptrOUT -> Feeder -> Checker -> Transfer -> Feed_Station
+            // -> Stn1_Term, with no cross-PLC actuators stitched in.
             var stationChain = new List<(string Name, string Type)>();
             foreach (var a in contents.Actuators)
-                stationChain.Add((a.Name, "Five_State_Actuator_CAT"));
+                if (IsM262(a.Name))
+                    stationChain.Add((a.Name, "Five_State_Actuator_CAT"));
             stationChain.Add((processInstanceName, "Process1_Generic"));
 
             if (stationChain.Count > 0)
@@ -2040,11 +2067,14 @@ namespace CodeGen.Translation
                     "Stn1_Term.CasAdptrIN");
             }
 
+            // Report-ring is M262-only too — keeps PartInHopper -> Feeder -> Checker
+            // -> Transfer -> Feed_Station -> PartInHopper (closed). The M580 / BX1
+            // resources each close their own ring in their own sysres.
             var ringComponents = new List<(string Name, string Type)>();
             foreach (var s in contents.Sensors)
-                ringComponents.Add((s.Name, "Sensor_Bool_CAT"));
+                if (IsM262(s.Name)) ringComponents.Add((s.Name, "Sensor_Bool_CAT"));
             foreach (var a in contents.Actuators)
-                ringComponents.Add((a.Name, "Five_State_Actuator_CAT"));
+                if (IsM262(a.Name)) ringComponents.Add((a.Name, "Five_State_Actuator_CAT"));
             ringComponents.Add((processInstanceName, "Process1_Generic"));
 
             if (ringComponents.Count > 1)
