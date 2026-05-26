@@ -1476,6 +1476,15 @@ namespace CodeGen.Translation
             }
 
             BuildFeedStationWiring(builder, contents);
+            // Station 2 (M580) — same INIT-chain + stationAdptr chain + stateRprtCmd
+            // ring shape as Feed_Station, but rooted at Station2 / Stn2_Term and
+            // routing through the M580 Process FBs (Assembly_Station + Disassembly).
+            // Added 2026-05-26 to populate the shared syslay with M580 wiring — the
+            // sysres had the wires (via Station2WireEmitter), but the application
+            // canvas showed every M580 FB unconnected. Each chain is contained inside
+            // the M580 partition so the syslay wires render solid (no cross-PLC
+            // dashed edges).
+            BuildStation2Wiring(builder, contents);
 
             // Phase 1: recipe arrays now ride on the Process1 syslay Parameter values written
             // by BuildProcessFbParameters above. The deployed ProcessRuntime_Generic_v1.fbt is
@@ -2134,6 +2143,97 @@ namespace CodeGen.Translation
             return string.Equals(fbType, "Process1_Generic", StringComparison.Ordinal)
                 ? "stateRptCmdAdptr_in"
                 : "stateRprtCmd_in";
+        }
+
+        /// <summary>
+        /// Sibling of <see cref="BuildFeedStationWiring"/> for the M580 (Station 2).
+        /// Emits the INIT chain, station-CaS adapter chain and stateRprtCmd ring for
+        /// every M580-bucketed actuator/sensor onto the SHARED syslay so the
+        /// application canvas shows the Station-2 wiring next to Feed_Station.
+        /// Anchors:
+        ///   Station FB  : Station2     (Station_CAT instance)
+        ///   HMI FB      : Station2_HMI
+        ///   Process FBs : Assembly_Station, Disassembly  (both Process1_Generic
+        ///                 instances live on the M580 — sequence-stitch through both)
+        ///   Terminator  : Stn2_Term    (CaSAdptrTerminator)
+        /// The chain is contained inside one resource bucket (M580), so the wires
+        /// render solid on the syslay — no dashed cross-PLC edges. M262 + BX1
+        /// components are filtered out via <see cref="HcfSymbolIndex.NameBasedPlcGuess"/>.
+        /// </summary>
+        private static void BuildStation2Wiring(SyslayBuilder builder, StationContents contents)
+        {
+            const string StationFb     = "Station2";
+            const string StationHmiFb  = "Station2_HMI";
+            const string AssemblyProc  = "Assembly_Station";
+            const string DisassemblyProc = "Disassembly";
+            const string Stn2Term      = "Stn2_Term";
+
+            static bool IsM580(string name) =>
+                HcfSymbolIndex.NameBasedPlcGuess(name) == PlcAssignment.M580;
+
+            // INIT chain: Station2 -> M580 sensors -> M580 actuators -> Assembly_Station -> Disassembly.
+            // Station2 has its own internal plcStart that fires Station2.INITO via INIT
+            // (same shape Area_CAT uses on M262), so no FB1-bootstrap edge is needed
+            // at syslay scope; the M580 sysres wires get the FB1->Station2.INIT bootstrap
+            // separately via Station2WireEmitter / ResourceWireEmitter.
+            var initChain = new List<string> { StationFb };
+            foreach (var s in contents.Sensors) if (IsM580(s.Name)) initChain.Add(s.Name);
+            foreach (var a in contents.Actuators) if (IsM580(a.Name)) initChain.Add(a.Name);
+            initChain.Add(AssemblyProc);
+            initChain.Add(DisassemblyProc);
+            for (int i = 0; i < initChain.Count - 1; i++)
+                builder.AddEventConnection($"{initChain[i]}.INITO", $"{initChain[i + 1]}.INIT");
+
+            // HMI adapter — Station2 faceplate feeds the Station2 instance.
+            builder.AddAdapterConnection($"{StationHmiFb}.StationHMIAdptrOUT",
+                                         $"{StationFb}.StationHMIAdptrIN");
+
+            // stationAdptr (CaS) chain: Station2 -> M580 actuators -> Assembly_Station ->
+            // Disassembly -> Stn2_Term. Sensors are excluded because Sensor_Bool_CAT
+            // has no stationAdptr ports per .fbt verification (same rule
+            // BuildFeedStationWiring uses for Feed_Station).
+            var stationChain = new List<(string Name, string Type)>();
+            foreach (var a in contents.Actuators)
+            {
+                if (!IsM580(a.Name)) continue;
+                // Bearing_PnP is the Seven_State_Actuator_CAT — same stationAdptr_in/out
+                // port names as Five_State_Actuator_CAT, so StationAdptrIn/Out helpers
+                // work for both without branching.
+                stationChain.Add((a.Name, "Five_State_Actuator_CAT"));
+            }
+            stationChain.Add((AssemblyProc, "Process1_Generic"));
+            stationChain.Add((DisassemblyProc, "Process1_Generic"));
+            if (stationChain.Count > 0)
+            {
+                builder.AddAdapterConnection($"{StationFb}.StationAdaptrOUT",
+                    $"{stationChain[0].Name}.{StationAdptrIn(stationChain[0].Type)}");
+                for (int i = 0; i < stationChain.Count - 1; i++)
+                    builder.AddAdapterConnection(
+                        $"{stationChain[i].Name}.{StationAdptrOut(stationChain[i].Type)}",
+                        $"{stationChain[i + 1].Name}.{StationAdptrIn(stationChain[i + 1].Type)}");
+                builder.AddAdapterConnection(
+                    $"{stationChain[^1].Name}.{StationAdptrOut(stationChain[^1].Type)}",
+                    $"{Stn2Term}.CasAdptrIN");
+            }
+
+            // stateRprtCmd ring: M580 sensors -> M580 actuators -> Assembly_Station ->
+            // Disassembly, closed back to the first sensor. Both Process FBs participate
+            // in the ring (each reads the full component state via stateRptCmdAdptr_in).
+            var ring = new List<(string Name, string Type)>();
+            foreach (var s in contents.Sensors) if (IsM580(s.Name)) ring.Add((s.Name, "Sensor_Bool_CAT"));
+            foreach (var a in contents.Actuators) if (IsM580(a.Name)) ring.Add((a.Name, "Five_State_Actuator_CAT"));
+            ring.Add((AssemblyProc, "Process1_Generic"));
+            ring.Add((DisassemblyProc, "Process1_Generic"));
+            if (ring.Count > 1)
+            {
+                for (int i = 0; i < ring.Count - 1; i++)
+                    builder.AddAdapterConnection(
+                        $"{ring[i].Name}.{StateRprtOut(ring[i].Type)}",
+                        $"{ring[i + 1].Name}.{StateRprtIn(ring[i + 1].Type)}");
+                builder.AddAdapterConnection(
+                    $"{ring[^1].Name}.{StateRprtOut(ring[^1].Type)}",
+                    $"{ring[0].Name}.{StateRprtIn(ring[0].Type)}");
+            }
         }
 
         public static string StationAdptrOut(string fbType) => "stationAdptr_out";
