@@ -922,15 +922,22 @@ namespace CodeGen.Translation
                 // Station 1 (M262)
                 // Ejector added 2026-05-26 — matches reference SMC_Rig_Expo
                 // (where it is named "Rejector"). Open-loop pneumatic eject
-                // arm: no athome/atwork sensors, so it routes through
-                // ResolveActuatorFBType -> Five_State_Actuator_No_Sensors_CAT
-                // via the NoSensorActuatorNames carve-out (see below).
-                // Without it in this scope filter Control.xml's Ejector
-                // component was silently dropped before reaching the syslay
-                // builder, so the Feed_Station sequence
-                //   Retract Transfer -> Extend Rejector -> Retract Rejector
-                //   -> Start Robot task
-                // collapsed to a single Transfer->Robot edge with no eject step.
+                // arm: no athome/atwork sensors. Emitted as the UNIVERSAL
+                // Five_State_Actuator_CAT — the same CAT that drives Feeder
+                // and Transfer — because that CAT already exposes the pair
+                //   WorkSensorFitted : BOOL
+                //   HomeSensorFitted : BOOL
+                // as InputVars on the FBType. BuildActuatorParameters'
+                // data-driven resolution counts how many other Control.xml
+                // components' Sequence_Conditions wait on each actuator's
+                // atWork (StateNumber=2) / atHome (StateNumber=0 or 4)
+                // StateIDs; Ejector has zero such references, so the
+                // resolver flips both fitted-flags to FALSE automatically.
+                // The CAT's internal ECC then skips the sensor-wait branch
+                // and runs the open-loop motion-time fallback, which is the
+                // exact behaviour the reference's separate No_Sensors_CAT
+                // would have provided. No extra CAT type, no new library
+                // packaging, no .fbt to deploy.
                 "Feeder", "Checker", "Transfer", "Ejector",
                 // Station 2 (M580)
                 "Bearing_PnP",
@@ -1552,32 +1559,19 @@ namespace CodeGen.Translation
             new(StringComparer.OrdinalIgnoreCase) { };
 
         /// <summary>
-        /// Actuator instance names that route to
-        /// <c>Five_State_Actuator_No_Sensors_CAT</c> regardless of state count.
-        /// Open-loop pneumatic eject / reject arms on the SMC rig have the
-        /// full five-state vocabulary in Control.xml (Home Pos / ToWork /
-        /// AtWork / ToHome / AtHome) but no athome/atwork feedback sensors,
-        /// so the regular Five_State_Actuator_CAT — which assumes both
-        /// sensors are fitted — leaves them stuck waiting for confirmation
-        /// pulses that never arrive. Reference SMC_Rig_Expo emits Rejector
-        /// as <c>Five_State_Actuator_No_Sensors_CAT</c>; this carve-out
-        /// matches that.
-        /// </summary>
-        private static readonly HashSet<string> NoSensorActuatorNames =
-            new(StringComparer.OrdinalIgnoreCase)
-            {
-                "Ejector",
-                "Rejector",   // SMC_Rig_Expo's name for the same physical arm
-            };
-
-        /// <summary>
         /// Maps a Control.xml &lt;Component&gt; to the FB Type= attribute the
         /// syslay should emit. Same logic as MainForm.Validate: 7-state and
         /// PARALLEL+ALTERNATIVE-branched actuators go to Seven_State, vacuum
-        /// gripper instance names go to Vacuum_Gripper_CAT, no-sensor
-        /// actuators (Ejector/Rejector) go to Five_State_Actuator_No_Sensors_CAT
-        /// via name carve-out, 4-state actuators also go there by shape,
-        /// everything else falls through to Five_State_Actuator_CAT.
+        /// gripper instance names go to Vacuum_Gripper_CAT, 4-state shape
+        /// goes to Five_State_Actuator_No_Sensors_CAT, everything else
+        /// (including Ejector / Rejector — open-loop pneumatic eject arms)
+        /// falls through to the UNIVERSAL Five_State_Actuator_CAT and lets
+        /// BuildActuatorParameters' data-driven WorkSensorFitted /
+        /// HomeSensorFitted resolution flip both flags to FALSE when no
+        /// other component's Sequence_Condition references the actuator's
+        /// atWork / atHome state IDs. That is the elegant single-CAT path
+        /// agreed 2026-05-26: do not multiply CAT types when a parameter
+        /// pair on the universal CAT already expresses the same intent.
         /// </summary>
         private static string ResolveActuatorFBType(VueOneComponent actuator)
         {
@@ -1596,12 +1590,6 @@ namespace CodeGen.Translation
             //      logical Control.xml states it carries.
             if (actuator.States.Count == 7 || IsBranchedSevenState(actuator))
                 return "Seven_State_Actuator_CAT";
-            // No-sensor actuators by name carve-out FIRST — Ejector/Rejector
-            // carry the full 5-state Control.xml vocabulary but have no
-            // physical sensors, so the State-count==4 fallback below misses
-            // them. Added 2026-05-26 with the Ejector allowed-list entry.
-            if (NoSensorActuatorNames.Contains(name))
-                return "Five_State_Actuator_No_Sensors_CAT";
             if (actuator.States.Count == 4) return "Five_State_Actuator_No_Sensors_CAT";
             return "Five_State_Actuator_CAT";
         }
