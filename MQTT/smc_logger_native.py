@@ -56,13 +56,53 @@ TOPIC       = "smc/#"
 KEEPALIVE   = 60
 
 
+def _resolve_desktop() -> str:
+    """
+    Find the user's REAL Desktop folder, respecting OneDrive redirection
+    (e.g. on this rig the Desktop is C:\\Users\\alper\\OneDrive\\Masaüstü —
+    the Turkish-localised OneDrive Desktop, not C:\\Users\\alper\\Desktop).
+
+    Order of preference:
+      1. Windows registry User Shell Folders\\Desktop — the OS's own answer,
+         updated by OneDrive when Desktop is redirected.
+      2. Common OneDrive Desktop folder names (Masaüstü / Desktop) under
+         %USERPROFILE%\\OneDrive\\.
+      3. %USERPROFILE%\\Desktop as the last resort.
+    Falls back to the current working directory if none of those exist.
+    """
+    # 1. Registry — authoritative on Windows.
+    try:
+        import winreg
+        with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders") as k:
+            raw, _ = winreg.QueryValueEx(k, "Desktop")
+            expanded = os.path.expandvars(raw)
+            if os.path.isdir(expanded):
+                return expanded
+    except (OSError, ImportError):
+        pass  # not Windows, or registry unreadable — fall through
+
+    # 2. Common OneDrive Desktop folder names.
+    user = os.path.expanduser("~")
+    for candidate in (
+        os.path.join(user, "OneDrive", "Masaüstü"),
+        os.path.join(user, "OneDrive", "Desktop"),
+        os.path.join(user, "OneDrive - Personal", "Desktop"),
+    ):
+        if os.path.isdir(candidate):
+            return candidate
+
+    # 3. Plain local Desktop.
+    plain = os.path.join(user, "Desktop")
+    if os.path.isdir(plain):
+        return plain
+
+    return os.getcwd()
+
+
 def _open_outputs():
-    desktop = os.path.join(os.path.expanduser("~"), "Desktop")
-    if not os.path.isdir(desktop):
-        sys.stderr.write(
-            f"[smc_logger_native] WARN Desktop not found at {desktop}; "
-            f"writing to cwd instead.\n")
-        desktop = os.getcwd()
+    desktop = _resolve_desktop()
     json_path = os.path.join(desktop, "smc_log.jsonl")
     txt_path  = os.path.join(desktop, "smc_log.txt")
     # buffering=1 = line buffered. Every event is on disk on the \n.
