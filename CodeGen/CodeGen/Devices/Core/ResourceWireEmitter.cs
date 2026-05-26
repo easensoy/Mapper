@@ -341,17 +341,16 @@ namespace CodeGen.Devices.Core
                 for (int i = 0; i < initChain.Count - 1; i++)
                     eventWires.Add(new Wire($"{initChain[i]}.INITO", $"{initChain[i + 1]}.INIT"));
 
-                // Cross-process synchronisation on THIS resource: every Process FB
-                // signals every other when its state changes, so the HandShake
-                // conditions (dropped from each recipe as out-of-scope Process refs)
-                // fire here instead of stalling. Same fully-connected pattern the
-                // syslay uses. On M580 this links Assembly_Station <-> Disassembly;
-                // single-process resources (M262) add nothing.
-                for (int i = 0; i < processNames.Count; i++)
-                    for (int j = 0; j < processNames.Count; j++)
-                        if (i != j)
-                            eventWires.Add(new Wire($"{processNames[i]}.state_update",
-                                $"{processNames[j]}.state_change"));
+                // Cross-process synchronisation REMOVED 2026-05-26: the prior
+                // code emitted Process[i].state_update → Process[j].state_change
+                // wires on the resource between every Process pair (M580 linked
+                // Assembly_Station ↔ Disassembly). Process1_Generic.fbt declares
+                // only INIT/INITO events — no state_update / state_change — so
+                // EAE rejected those wires (ERR_NO_SUCH_EVENT) and the project
+                // failed to compile, leaving the runtime offline (Pusher did not
+                // trigger). Recipe behaviour is unchanged: cross-process
+                // HandShake conditions were already dropped as out-of-scope
+                // refs, so the wires were purely speculative.
 
                 var adapterWires = new List<Wire>(anchors.HmiAdapterWires);
 
