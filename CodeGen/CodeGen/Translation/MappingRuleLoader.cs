@@ -64,7 +64,7 @@ namespace CodeGen.Translation
 
         public static IEnumerable<MappingRuleEntry> LoadAll(string xlsxPath)
         {
-            ValidatePath(xlsxPath);
+            xlsxPath = ValidatePath(xlsxPath);
             var sheetNames = ReadSheetNames(xlsxPath);
             foreach (var sheetName in sheetNames)
                 foreach (var entry in LoadSheetInternal(xlsxPath, sheetName))
@@ -73,13 +73,13 @@ namespace CodeGen.Translation
 
         public static IEnumerable<MappingRuleEntry> LoadSheet(string xlsxPath, string sheetName)
         {
-            ValidatePath(xlsxPath);
+            xlsxPath = ValidatePath(xlsxPath);
             return LoadSheetInternal(xlsxPath, sheetName);
         }
 
         public static IEnumerable<MappingRuleEntry> LoadSheets(string xlsxPath, List<string> sheetNames)
         {
-            ValidatePath(xlsxPath);
+            xlsxPath = ValidatePath(xlsxPath);
             var available = ReadSheetNames(xlsxPath);
             foreach (var sheetName in sheetNames)
             {
@@ -91,7 +91,7 @@ namespace CodeGen.Translation
 
         public static List<string> GetSheetNames(string xlsxPath)
         {
-            ValidatePath(xlsxPath);
+            xlsxPath = ValidatePath(xlsxPath);
             return ReadSheetNames(xlsxPath);
         }
 
@@ -281,11 +281,46 @@ namespace CodeGen.Translation
         }
 
 
-        private static void ValidatePath(string xlsxPath)
+        /// <summary>
+        /// Resolves the configured MappingRulesPath to a real file on disk and
+        /// returns the absolute path. The configured value may be either an
+        /// absolute path or a path relative to mapper_config.json (e.g. the
+        /// default <c>"Input\VueOne_IEC61499_Mapping.xlsx"</c>). Earlier code
+        /// only checked <c>File.Exists(xlsxPath)</c>, which silently relied on
+        /// the .NET current-working-directory to match the EXE folder; launching
+        /// the EXE from any other cwd (Explorer double-click is fine, but
+        /// PowerShell <c>Start-Process</c> without <c>-WorkingDirectory</c>
+        /// inherits the parent shell's cwd) made the file invisible and the
+        /// Mapper threw "Mapping rules spreadsheet not found" even though the
+        /// file was sitting right next to MapperUI.exe under <c>Input\</c>.
+        /// Probe order: the path as given → AppContext.BaseDirectory (the EXE
+        /// folder) → Path.GetFullPath against cwd. First hit wins.
+        /// </summary>
+        private static string ValidatePath(string xlsxPath)
         {
-            if (string.IsNullOrWhiteSpace(xlsxPath) || !File.Exists(xlsxPath))
+            if (string.IsNullOrWhiteSpace(xlsxPath))
                 throw new FileNotFoundException(
-                    $"Mapping rules spreadsheet not found:\n{xlsxPath}\n\nSet MappingRulesPath in mapper_config.json.");
+                    "Mapping rules spreadsheet path is empty.\n\nSet MappingRulesPath in mapper_config.json.");
+
+            if (File.Exists(xlsxPath))
+                return Path.GetFullPath(xlsxPath);
+
+            if (!Path.IsPathRooted(xlsxPath))
+            {
+                var nextToExe = Path.Combine(AppContext.BaseDirectory, xlsxPath);
+                if (File.Exists(nextToExe))
+                    return nextToExe;
+
+                var fromCwd = Path.GetFullPath(xlsxPath);
+                if (File.Exists(fromCwd))
+                    return fromCwd;
+            }
+
+            throw new FileNotFoundException(
+                $"Mapping rules spreadsheet not found:\n{xlsxPath}\n" +
+                $"Also tried: {Path.Combine(AppContext.BaseDirectory, xlsxPath)}\n\n" +
+                "Set MappingRulesPath in mapper_config.json to an absolute path " +
+                "(e.g. C:\\VueOneMapper\\MapperUI\\MapperUI\\Input\\VueOne_IEC61499_Mapping.xlsx).");
         }
 
         private static int ParseColIndex(string cellRef)
