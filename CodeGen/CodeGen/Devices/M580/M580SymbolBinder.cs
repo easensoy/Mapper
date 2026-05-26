@@ -153,22 +153,25 @@ namespace CodeGen.Devices.M580
                                 "not present on the M580 resource — left as-is");
                             continue;
                         }
-                        // Form 2 (per-instance symbolic): '<ResourceName>.<FBName>.<port>'.
-                        // Switched from Form 1 (direct GUID '<resId>.<fbId>.<port>') on
-                        // 2026-05-26 so EAE's Symbolic Link view shows each channel as a
-                        // proper symlink instead of an opaque GUID triple. The CAT body
-                        // already publishes a matching SYMLINK for every instance via
-                        // SYMLINKMULTIVARDST 'NAME = $${PATH}<port>' and SYMLINKMULTIVARSRC
-                        // 'NAME = $${PATH}<port>', and EAE resolves $${PATH} to the
-                        // FB's resource-prefixed path ("M580_RES.Bearing_PnP" etc.) — so
-                        // the value we write here is the exact name the CAT-internal
-                        // symlink table carries, and runtime resolution succeeds without
-                        // a PLC_RW_M580 broker FB (the reference SMC_Rig_Expo had one
-                        // because its .hcf used the broker prefix 'RES0.M580IO.*'; we
-                        // use the consumer-FB prefix instead). Single-quoted because
-                        // EAE's PNConfiguratorBuildTask treats the channel value as a
-                        // string literal exactly like the template's 'RES0.M580IO.*' form.
-                        var boundVal = $"'{resName}.{map.Comp}.{map.Port}'";
+                        // Form 1 (direct GUID triple): "<resId>.<fbId>.<port>" — unquoted,
+                        // dot-separated, GUID-headed. SAME form the M262 .hcf uses for
+                        // every PusherAtHome / Hopper / etc channel — verified by reading
+                        // the deployed M262 .hcf side-by-side with M580 on 2026-05-26:
+                        //   M262 DI00 -> "1459BCD12760907D.60AEF2679BD52F88.athome"  (Form 1)
+                        //   M580 DI00 -> "'M580_RES.Bearing_PnP.atwork1'"            (Form 2)
+                        //
+                        // Switched BACK from Form 2 ("'<ResName>.<FBName>.<port>'", quoted,
+                        // per-instance symbolic) on 2026-05-26 because Form 2 populated only
+                        // EAE's Symbolic Link side panel — the device-tree IO view
+                        // (System > Devices > M580 > M580_RES > BMEXBP0400 > BMXDDM16025)
+                        // left every channel's Value column blank, because EAE's Hardware
+                        // Configurator parses only the Form 1 GUID triple into that view.
+                        // Form 1 populates BOTH the device-tree IO view AND the symlink
+                        // panel — no broker FB required, because the CAT body's
+                        // SYMLINKMULTIVARSRC/DST table publishes a $${PATH}<port> symlink
+                        // for every instance, and EAE's runtime resolves the GUID triple
+                        // against that symlink table at deploy time. Mirrors M262 exactly.
+                        var boundVal = $"{resId}.{fbId}.{map.Port}";
                         if (!string.Equals(raw, boundVal, StringComparison.Ordinal))
                         {
                             pv.SetAttributeValue("Value", boundVal);
@@ -182,8 +185,11 @@ namespace CodeGen.Devices.M580
                     }
 
                     // Already bound — middle segment matches one of our component FB ids
-                    // (Form 1, legacy direct GUID) OR one of our component FB names
-                    // (Form 2, current per-instance symbolic). Both are no-ops on rerun.
+                    // (Form 1, current direct GUID — the form we now emit and the same
+                    // one M262 uses) OR one of our component FB names (Form 2, legacy
+                    // per-instance symbolic kept here ONLY for idempotent rerun detection
+                    // so prior-Form-2 .hcfs upgrade cleanly on next deploy without spurious
+                    // "unmapped" log lines). Both branches are no-ops on rerun.
                     if (compFbIds.Contains(mid) || compFbNames.Contains(mid))
                     { already++; continue; }
 
@@ -193,10 +199,11 @@ namespace CodeGen.Devices.M580
                 }
 
                 if (bound > 0) HcfBindingSupport.SaveHcf(doc, hcfPath);
-                Log($"symlink-bound {bound} channel(s) to CAT ports (resource '{resName}'); {already} already bound, " +
+                Log($"GUID-bound {bound} channel(s) to CAT ports (resource '{resName}' / {resId}); {already} already bound, " +
                     $"{unmapped} unmapped, {missingComp} missing-component, {literals} literal/empty. " +
-                    "Form 2 per-instance symbolic ('<resName>.<FB>.<port>') — EAE Symbolic Link " +
-                    "view shows the symlinks, no broker FB required.");
+                    "Form 1 direct GUID triple ('<resId>.<fbId>.<port>') — populates EAE's " +
+                    "device-tree IO view (BMXDDM16025 channel Value column) AND the Symbolic " +
+                    "Link side panel; matches the M262 .hcf binding pattern byte-for-byte.");
             }
             catch (Exception ex)
             {
