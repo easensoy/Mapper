@@ -193,6 +193,49 @@ namespace CodeGen.Configuration
         public bool MqttRetain { get; set; } = false;
 
         /// <summary>
+        /// MQTT_CONNECTION.KeepAlive in milliseconds. The MQTT keepalive ping
+        /// interval — the client tells the broker "I'm still here" this often,
+        /// and the broker disconnects clients that miss two periods. Default
+        /// 60000 ms = 60 s (standard MQTT 3.1.1 recommendation).
+        /// <para>Was left empty by Mapper for months because passing an INT
+        /// constant to the TIME port raised ERR_CAST_CONSTANT at compile
+        /// time. The fix is to format it as a TIME literal (<c>T#60000ms</c>)
+        /// via <c>SyslayBuilder.FormatTimeMs</c>, not as a bare int. Without
+        /// any value at all the M262 firmware applied <c>T#0s</c> as default,
+        /// which made the connection give up before the first SYN-ACK and
+        /// produced the rig symptom "broker never sees a connection attempt
+        /// from 192.168.1.10".</para>
+        /// </summary>
+        public int MqttKeepAliveMs { get; set; } = 60000;
+
+        /// <summary>
+        /// MQTT_CONNECTION.ConnectionTimeout in milliseconds. How long the FB
+        /// waits for the TCP 3-way handshake + MQTT CONNACK before deciding
+        /// the connect attempt failed. Default 5000 ms = 5 s. EAE's implicit
+        /// default for an unset TIME port is T#0s which aborts the connect
+        /// before the first SYN-ACK round-trip completes.
+        /// </summary>
+        public int MqttConnectionTimeoutMs { get; set; } = 5000;
+
+        /// <summary>
+        /// MQTT_CONNECTION.ConnectionRetryCount — how many times the FB
+        /// retries after a failed connect before giving up. Default 999
+        /// (effectively infinite so the FB keeps trying through transient
+        /// network blips). An unset value defaults to 0 = give up after the
+        /// first failure, which is the wrong choice for a rig that may boot
+        /// before its broker is reachable.
+        /// </summary>
+        public int MqttConnectionRetryCount { get; set; } = 999;
+
+        /// <summary>
+        /// MQTT_CONNECTION.ConnectionRetryTime in milliseconds. Wait between
+        /// retry attempts. Default 2000 ms = 2 s. Without an explicit value
+        /// the firmware applies T#0s which either disables retry entirely or
+        /// busy-loops them (depends on firmware revision).
+        /// </summary>
+        public int MqttConnectionRetryTimeMs { get; set; } = 2000;
+
+        /// <summary>
         /// Topic root. The per-instance topic is built as
         /// <c>{MqttTopicRoot}/{instance}/state</c>. When the CAT's
         /// RootPath='$${PATH}' macro resolves inside the MQTT parameter this
