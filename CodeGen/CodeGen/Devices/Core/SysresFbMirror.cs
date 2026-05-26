@@ -124,6 +124,15 @@ namespace CodeGen.Devices.Core
                 "Process1_Generic",
                 "CaSAdptrTerminator",
                 "Robot_Task_CAT",
+                // MQTT_CONNECTION — the single shared event-buffer FB injected
+                // by SystemLayoutInjector when MqttPublishEnabled is true. Without
+                // a mirror entry it stays only on the syslay (no Mapping="…"
+                // pointer) and EAE never deploys it to a resource, so the
+                // embedded MQTT_PUBLISH FBs inside every CAT have nothing to bind
+                // their ConnectionID to and publishes silently drop. Routed to
+                // M262 via BucketFor's default fallback (name guess → Unknown
+                // → M262), matching where the embedded publishes physically run.
+                "MQTT_CONNECTION",
             };
 
             int added = 0;
