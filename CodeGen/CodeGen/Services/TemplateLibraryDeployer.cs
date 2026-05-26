@@ -2733,7 +2733,22 @@ namespace CodeGen.Services
 
             changed += DfbprojRegistrar.RegisterReference(dfbproj, "SE.DPAC",   "24.1.0.33");
             changed += DfbprojRegistrar.RegisterReference(dfbproj, "SE.AppBase", "24.1.0.21");
+            // SE.IoTMx — TM3 module type library used by the M262's .hcf
+            //   (BMTM3 + BMTM3DDM16025_DI8_DO16 + TM3DXxxx). Without this
+            //   reference EAE shows the M262 Hardware Configurator empty.
             changed += DfbprojRegistrar.RegisterReference(dfbproj, "SE.IoTMx",   "24.1.0.19");
+            // SE.IoX80 — X80 module type library used by the M580's .hcf
+            //   (BMXBUS + BMEXBP0400 rack + BMXCPS2010 PSU + BMED581020 CPU +
+            //   BMXDDM16025 DI8/DO8 mixed-IO modules). Without this reference
+            //   EAE refuses to import the M580 .hcf with the error:
+            //     "Unable to import selected HW configuration: The following
+            //      reference(s) is missing: 1. SE.IoX80"
+            //   and the M580_RES Hardware Configurator stays empty. The
+            //   library ships with EAE 24.1 under
+            //   C:\ProgramData\Schneider Electric\Libraries\SE.IoX80-24.1.0.19;
+            //   we just have to declare the reference here so EAE wires it
+            //   into the .dfbproj's compile path.
+            changed += DfbprojRegistrar.RegisterReference(dfbproj, "SE.IoX80",   "24.1.0.19");
 
             changed += DfbprojRegistrar.SweepIec61499Folder(dfbproj, iec61499Dir);
 
