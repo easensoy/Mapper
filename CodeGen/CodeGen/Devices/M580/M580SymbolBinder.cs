@@ -104,8 +104,15 @@ namespace CodeGen.Devices.M580
                 var hcfPath = Path.Combine(folder, stem + ".hcf");
                 if (!File.Exists(hcfPath)) { Log($"skipped, deployed .hcf not found at {hcfPath} (run the HCF copier first)"); return; }
 
-                var (resId, _) = HcfBindingSupport.ReadSysresIdentity(folder);
+                var (resId, resName) = HcfBindingSupport.ReadSysresIdentity(folder);
                 if (string.IsNullOrEmpty(resId)) { Log("skipped, deployed sysres ID not resolvable"); return; }
+                // resName is the live Resource Name attribute (e.g. "M580_RES").
+                // It is what EAE's $${PATH} macro resolves to as the leading
+                // segment of every per-instance symlink the CAT body declares —
+                // so the symlink-form binding we emit below ("M580_RES.X.Y")
+                // matches the symlink the CAT already publishes for the same
+                // FB instance and EAE renders it in the Symbolic Link view.
+                if (string.IsNullOrWhiteSpace(resName)) resName = "M580_RES";
 
                 var compId = HcfBindingSupport.BuildComponentIdMap(folder);
                 if (compId.Count == 0)
@@ -120,7 +127,8 @@ namespace CodeGen.Devices.M580
                 catch (Exception ex) { Log($"skipped, .hcf parse failed: {ex.GetType().Name}: {ex.Message}"); return; }
 
                 int bound = 0, already = 0, unmapped = 0, missingComp = 0, literals = 0;
-                var compFbIds = new HashSet<string>(compId.Values, StringComparer.OrdinalIgnoreCase);
+                var compFbIds   = new HashSet<string>(compId.Values, StringComparer.OrdinalIgnoreCase);
+                var compFbNames = new HashSet<string>(compId.Keys,   StringComparer.OrdinalIgnoreCase);
 
                 foreach (var pv in doc.Descendants().Where(e => e.Name.LocalName == "ParameterValue"))
                 {
@@ -145,21 +153,39 @@ namespace CodeGen.Devices.M580
                                 "not present on the M580 resource — left as-is");
                             continue;
                         }
-                        var boundVal = $"{resId}.{fbId}.{map.Port}";
+                        // Form 2 (per-instance symbolic): '<ResourceName>.<FBName>.<port>'.
+                        // Switched from Form 1 (direct GUID '<resId>.<fbId>.<port>') on
+                        // 2026-05-26 so EAE's Symbolic Link view shows each channel as a
+                        // proper symlink instead of an opaque GUID triple. The CAT body
+                        // already publishes a matching SYMLINK for every instance via
+                        // SYMLINKMULTIVARDST 'NAME = $${PATH}<port>' and SYMLINKMULTIVARSRC
+                        // 'NAME = $${PATH}<port>', and EAE resolves $${PATH} to the
+                        // FB's resource-prefixed path ("M580_RES.Bearing_PnP" etc.) — so
+                        // the value we write here is the exact name the CAT-internal
+                        // symlink table carries, and runtime resolution succeeds without
+                        // a PLC_RW_M580 broker FB (the reference SMC_Rig_Expo had one
+                        // because its .hcf used the broker prefix 'RES0.M580IO.*'; we
+                        // use the consumer-FB prefix instead). Single-quoted because
+                        // EAE's PNConfiguratorBuildTask treats the channel value as a
+                        // string literal exactly like the template's 'RES0.M580IO.*' form.
+                        var boundVal = $"'{resName}.{map.Comp}.{map.Port}'";
                         if (!string.Equals(raw, boundVal, StringComparison.Ordinal))
                         {
                             pv.SetAttributeValue("Value", boundVal);
                             bound++;
                             report.Missing.Add(
-                                $"[HcfBind][M580] {chan} = {boundVal}  ({map.Comp}.{map.Port}; was {raw})");
+                                $"[HcfBind][M580] {chan} = {boundVal}  (was {raw})");
                         }
                         else already++;
                         report.HcfPinAssignments.Add((chan, boundVal));
                         continue;
                     }
 
-                    // Already bound (middle segment is one of our component FB ids).
-                    if (compFbIds.Contains(mid)) { already++; continue; }
+                    // Already bound — middle segment matches one of our component FB ids
+                    // (Form 1, legacy direct GUID) OR one of our component FB names
+                    // (Form 2, current per-instance symbolic). Both are no-ops on rerun.
+                    if (compFbIds.Contains(mid) || compFbNames.Contains(mid))
+                    { already++; continue; }
 
                     unmapped++;
                     report.Missing.Add(
@@ -167,9 +193,10 @@ namespace CodeGen.Devices.M580
                 }
 
                 if (bound > 0) HcfBindingSupport.SaveHcf(doc, hcfPath);
-                Log($"direct-bound {bound} channel(s) to CAT ports (resId {resId}); {already} already bound, " +
+                Log($"symlink-bound {bound} channel(s) to CAT ports (resource '{resName}'); {already} already bound, " +
                     $"{unmapped} unmapped, {missingComp} missing-component, {literals} literal/empty. " +
-                    "No broker — each channel points straight at the actuator/sensor FB (M262-style).");
+                    "Form 2 per-instance symbolic ('<resName>.<FB>.<port>') — EAE Symbolic Link " +
+                    "view shows the symlinks, no broker FB required.");
             }
             catch (Exception ex)
             {
