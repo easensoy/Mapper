@@ -135,13 +135,55 @@ namespace CodeGen.Devices.Core
                 "MQTT_CONNECTION",
             };
 
-            int added = 0;
+            // Build a Name → existing sysres FB element index so we can UPDATE
+            // parameters on an FB that was mirrored on a previous run, instead
+            // of skipping it and leaving stale parameter values behind. Added
+            // 2026-05-26 after this exact bug: SystemLayoutInjector started
+            // emitting four new MqttConn timing parameters
+            //   KeepAlive / ConnectionTimeout
+            //   ConnectionRetryCount / ConnectionRetryTime
+            // and they reached the syslay, but the MqttConn FB instance was
+            // already on the sysres from an earlier deploy, so the mirror's
+            // existingNames/Mappings guard short-circuited and the four new
+            // <Parameter> children never got written into the resource. The
+            // M262 firmware then applied T#0s defaults for the missing TIME
+            // ports, MQTT_CONNECTION aborted every connect before the
+            // SYN-ACK could complete (ReturnCode=50), and mosquitto logged
+            // zero connection attempts from 192.168.1.10. The fix: when the
+            // FB is already present, REPLACE its <Parameter> children with
+            // whatever the syslay now carries — keep the FB element's ID /
+            // Mapping / x / y unchanged so EAE's stable-instance tracking
+            // does not see it as a new FB on every regen.
+            var existingByName = new Dictionary<string, XElement>(StringComparer.Ordinal);
+            foreach (var fb in network.Elements(ns + "FB"))
+            {
+                var nm = (string?)fb.Attribute("Name") ?? string.Empty;
+                if (!string.IsNullOrEmpty(nm)) existingByName[nm] = fb;
+            }
+
+            int added = 0, updated = 0;
             foreach (var fb in syslayFbs)
             {
                 if (string.IsNullOrEmpty(fb.Id)) continue;
-                if (existingMappings.Contains(fb.Id)) continue;
-                if (existingNames.Contains(fb.Name)) continue;
                 if (!keepTypes.Contains(fb.Type)) continue;
+
+                if (existingByName.TryGetValue(fb.Name, out var existing))
+                {
+                    // Replace parameter children only; keep ID / Mapping / x / y
+                    // so EAE keeps its stable handle on the instance across regens.
+                    existing.Elements(ns + "Parameter").Remove();
+                    foreach (var p in fb.Parameters)
+                    {
+                        existing.Add(new XElement(ns + "Parameter",
+                            new XAttribute("Name",  p.Name),
+                            new XAttribute("Value", p.Value)));
+                    }
+                    updated++;
+                    continue;
+                }
+
+                if (existingMappings.Contains(fb.Id)) continue;
+
                 var mirrorId = ComputeMirrorId(fb.Id);
                 var fbElement = new XElement(ns + "FB",
                     new XAttribute("ID",        mirrorId),
@@ -163,8 +205,8 @@ namespace CodeGen.Devices.Core
                 added++;
             }
 
-            if (added > 0) doc.Save(sysresPath);
-            return added;
+            if (added > 0 || updated > 0) doc.Save(sysresPath);
+            return added + updated;
         }
 
         static void EnsureSystemFb(XElement network, XNamespace ns,
