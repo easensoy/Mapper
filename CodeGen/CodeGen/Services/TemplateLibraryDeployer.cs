@@ -2247,8 +2247,15 @@ namespace CodeGen.Services
                 stElement.Add(new System.Xml.Linq.XCData(
                     "CurrentStep := 0;\n" +
                     "CurrentStepType := 0;\n" +
-                    "WaitSatisfied := FALSE;\n" +
-                    "PusherID := 0;\n\n" +
+                    "WaitSatisfied := FALSE;\n\n" +
+                    // PusherID := 0; removed 2026-05-26 — leftover from the
+                    // pre-recipe Pusher-id scheme. The variable was never (or no
+                    // longer) declared on ProcessRuntime_Generic_v1, so EAE
+                    // raised ERR_NO_SUCH_VAR in initializeinit and the project
+                    // failed to compile, leaving the runtime offline (Pusher
+                    // would not actuate). Per-actuator state lookups now go
+                    // through Wait1Id / state_table indexing, not a single
+                    // PusherID register, so the assignment is redundant.
                     "cmd_target_name := '';\n" +
                     "cmd_state := 0;\n\n" +
                     "PreviousStepText := '';\n" +
