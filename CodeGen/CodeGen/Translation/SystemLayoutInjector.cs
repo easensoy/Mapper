@@ -1429,13 +1429,21 @@ namespace CodeGen.Translation
                     ["ClientIdentifier"] = SyslayBuilder.FormatString(config.MqttClientId),
                     ["CleanSession"] = SyslayBuilder.FormatBool(config.MqttCleanSession),
                     ["QueueDepth"] = SyslayBuilder.FormatInt(config.MqttQueueDepth),
-                    // KeepAlive / ConnectionRetryTime are TIME-typed ports on
-                    // MQTT_CONNECTION — giving them integers caused
-                    // ERR_CAST_CONSTANT (ANY_INT -> TIME). The working
-                    // TrainingIIoT connection sets none of these, so we leave
-                    // KeepAlive / ConnectionRetryCount / ConnectionRetryTime at
-                    // EAE defaults. QueueDepth (INT) + CleanSession (BOOL) stay
-                    // — they are the offline-buffer essentials and are not TIME.
+                    // TIME-typed and INT-typed timeout/retry parameters. Stamped
+                    // 2026-05-26 after the M262 ran the new code but the broker
+                    // logged ZERO TCP-connect attempts from 192.168.1.10 — EAE's
+                    // implicit default for an unset TIME port is T#0s, so the
+                    // FB aborted each connect before the SYN-ACK round-trip
+                    // could complete and never queued a retry. The earlier
+                    // ERR_CAST_CONSTANT regression came from passing INT
+                    // CONSTANTS to TIME ports (e.g. KeepAlive := 60); the fix
+                    // is to format them as TIME literals via FormatTimeMs
+                    // (emits "T#NNNms") and only ConnectionRetryCount, which
+                    // is actually INT, stays a plain integer via FormatInt.
+                    ["KeepAlive"]            = SyslayBuilder.FormatTimeMs(config.MqttKeepAliveMs),
+                    ["ConnectionTimeout"]    = SyslayBuilder.FormatTimeMs(config.MqttConnectionTimeoutMs),
+                    ["ConnectionRetryCount"] = SyslayBuilder.FormatInt(config.MqttConnectionRetryCount),
+                    ["ConnectionRetryTime"]  = SyslayBuilder.FormatTimeMs(config.MqttConnectionRetryTimeMs),
                 };
                 builder.AddFB(FBIdGenerator.GenerateFBId("MqttConn"),
                     "MqttConn", "MQTT_CONNECTION", "Runtime.NetConnectivity", 3760, 200, mqttParams);
