@@ -341,6 +341,37 @@ namespace CodeGen.Devices.Core
                 for (int i = 0; i < initChain.Count - 1; i++)
                     eventWires.Add(new Wire($"{initChain[i]}.INITO", $"{initChain[i + 1]}.INIT"));
 
+                // MqttConn (MQTT_CONNECTION) bring-up. Added 2026-05-26 after the
+                // PLC published nothing to the broker on a full rig cycle —
+                // mosquitto logged only the desktop subscriber's connection,
+                // never the M262 (192.168.1.10). The syslay already carries
+                // Area.INITO → MqttConn.INIT and MqttConn.INITO → MqttConn.CONNECT
+                // (SystemLayoutInjector lines 1444-1445), and SysresFbMirror
+                // mirrors the MqttConn FB instance onto whichever resource gets
+                // it (M262 by default), but the wires that pull MqttConn out of
+                // reset were never emitted onto the sysres FBNetwork — they
+                // exist on the syslay only. At runtime EAE executes each
+                // resource's sysres event graph, so a wire that lives only on
+                // the syslay never fires: MqttConn.INIT never sees the event,
+                // the broker connection never opens, and every embedded
+                // MQTT_PUBLISH inside the CATs (Five_State_Actuator_CAT,
+                // Sensor_Bool_CAT, Process1_Generic) binds-by-ConnectionID to
+                // an unopened connection and silently drops every publish.
+                // Re-emitting the same two wires onto whichever sysres carries
+                // MqttConn (M262 only in this rig) makes the runtime fire
+                // INIT and self-fire CONNECT exactly once, after Area has come
+                // up, so the broker connection is established before the first
+                // state-change publish. Skipped cleanly when MqttConn is not
+                // on this resource (MqttPublishEnabled=false, or M580/BX1).
+                if (byName.TryGetValue("MqttConn", out var mqttFb) &&
+                    string.Equals((string?)mqttFb.Attribute("Type"),
+                        "MQTT_CONNECTION", StringComparison.Ordinal))
+                {
+                    if (Present(anchors.AreaFb, byName))
+                        eventWires.Add(new Wire($"{anchors.AreaFb}.INITO", "MqttConn.INIT"));
+                    eventWires.Add(new Wire("MqttConn.INITO", "MqttConn.CONNECT"));
+                }
+
                 // Cross-process synchronisation REMOVED 2026-05-26: the prior
                 // code emitted Process[i].state_update → Process[j].state_change
                 // wires on the resource between every Process pair (M580 linked
