@@ -193,8 +193,17 @@ namespace CodeGen.Devices.Core
 
                 // Apply the canonical sysres canvas layout (single source of
                 // truth dict holds all M262 + M580 + BX1 coordinates; only the
-                // FBs present on THIS resource are moved).
-                ApplyCanonicalLayout(byName, report, tag);
+                // FBs present on THIS resource are moved). The M580 / BX1
+                // sysres canvases are device-local so we translate the present
+                // entries to the device-local canvas origin (so the chain lands
+                // next to FB1 / FB2 at x=2000 instead of x=12200+ on the M580
+                // own canvas). The M262 sysres keeps the raw CanonicalLayout
+                // coords because its FBs already start at x=2000 (Area / Feeder /
+                // PartInHopper are authored at that origin).
+                bool translateToOrigin =
+                    string.Equals(tag, "M580", StringComparison.Ordinal) ||
+                    string.Equals(tag, "BX1",  StringComparison.Ordinal);
+                ApplyCanonicalLayout(byName, report, tag, translateToOrigin);
 
                 // Cache loaded .fbt port lookups so we don't re-parse per wire.
                 var portsByType = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
@@ -600,27 +609,89 @@ namespace CodeGen.Devices.Core
             { "M262IO",       (9500, 400)  },
         };
 
+        // Sysres canvases are device-local — the M580 sysres only shows the M580
+        // FBs, the BX1 sysres only shows the BX1 FBs. The CanonicalLayout
+        // coordinates were authored for the SHARED syslay where every PLC lives
+        // on one canvas (M262 at x=2000-9500, M580 at x=12200-27200, BX1 at
+        // x=29000+), so re-applying those raw on a single-PLC sysres leaves the
+        // M580 chain way off to the right of FB1/FB2. When we're stamping a
+        // device-local canvas, pull the present FBs back so their leftmost
+        // column lands at this origin — matches the M262 sysres layout (Area at
+        // x=2000) and keeps the chain right next to FB1 (x=1900).
+        const int DeviceLocalCanvasOriginX = 2000;
+        const int DeviceLocalCanvasOriginY = 2000;
+
         /// <summary>
         /// Force every FB element in <paramref name="byName"/> matching a
         /// CanonicalLayout entry to the spec coordinates, then emit one
-        /// <c>[Layout] {Name} -> x=…, y=…</c> line per placed FB.
+        /// <c>[Layout] {Name} -&gt; x=…, y=…</c> line per placed FB. When
+        /// <paramref name="translateToOrigin"/> is true (set on M580 / BX1
+        /// sysres canvases), all matching entries are shifted as a group so
+        /// their bounding-box top-left sits at
+        /// (<see cref="DeviceLocalCanvasOriginX"/>, <see cref="DeviceLocalCanvasOriginY"/>);
+        /// relative spacing inside the bucket is preserved. The shared syslay
+        /// and the M262 sysres pass <c>translateToOrigin=false</c> so they keep
+        /// the global SubAppNetwork coordinates.
         /// </summary>
         private static void ApplyCanonicalLayout(Dictionary<string, XElement> byName,
-            SystemInjector.BindingApplicationReport report, string source)
+            SystemInjector.BindingApplicationReport report, string source,
+            bool translateToOrigin)
         {
-            int placed = 0;
-            foreach (var kv in CanonicalLayout)
+            // 1. Collect the present FBs (intersection of byName and CanonicalLayout).
+            var present = CanonicalLayout
+                .Where(kv => byName.ContainsKey(kv.Key))
+                .ToList();
+            if (present.Count == 0)
             {
-                if (!byName.TryGetValue(kv.Key, out var fb)) continue;
+                report.Missing.Add($"[{source} layout] 0/{CanonicalLayout.Count} FBs placed");
+                return;
+            }
+
+            // 2. Decide the per-axis delta to translate the COMPONENT bucket
+            //    (everything except the FB1/FB2 boot pair) onto the device-local
+            //    canvas origin. FB1 (DPAC_FULLINIT) and FB2 (plcStart) are the
+            //    boot anchors — their canonical positions are intentionally near
+            //    (3000, 400) and (800, 1100) so the user sees the same boot row
+            //    on every PLC. The component bucket below them then lines up at
+            //    y=2000+ matching the M262 sysres (Area_HMI at y=2000, Station1
+            //    at y=2900, sensors/processes at y=4000, actuators at y=5400).
+            int dx = 0, dy = 0;
+            if (translateToOrigin)
+            {
+                var bootPair = new HashSet<string>(StringComparer.Ordinal) { "FB1", "FB2" };
+                var components = present.Where(kv => !bootPair.Contains(kv.Key)).ToList();
+                if (components.Count > 0)
+                {
+                    int minX = components.Min(kv => kv.Value.X);
+                    int minY = components.Min(kv => kv.Value.Y);
+                    dx = DeviceLocalCanvasOriginX - minX;
+                    dy = DeviceLocalCanvasOriginY - minY;
+                }
+            }
+
+            int placed = 0;
+            foreach (var kv in present)
+            {
+                var fb = byName[kv.Key];
                 var oldX = (string?)fb.Attribute("x") ?? "?";
                 var oldY = (string?)fb.Attribute("y") ?? "?";
-                fb.SetAttributeValue("x", kv.Value.X.ToString(System.Globalization.CultureInfo.InvariantCulture));
-                fb.SetAttributeValue("y", kv.Value.Y.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                // FB1/FB2 stay at their CanonicalLayout positions on every PLC
+                // (consistent boot-row anchor); only the component bucket
+                // translates. M262 sysres uses translateToOrigin=false so this
+                // branch reduces to the identity transform there.
+                bool isBootPair = string.Equals(kv.Key, "FB1", StringComparison.Ordinal)
+                                || string.Equals(kv.Key, "FB2", StringComparison.Ordinal);
+                int newX = kv.Value.X + (isBootPair ? 0 : dx);
+                int newY = kv.Value.Y + (isBootPair ? 0 : dy);
+                fb.SetAttributeValue("x", newX.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                fb.SetAttributeValue("y", newY.ToString(System.Globalization.CultureInfo.InvariantCulture));
                 report.Missing.Add(
-                    $"[{source} layout] {kv.Key}: ({oldX},{oldY}) -> ({kv.Value.X},{kv.Value.Y})");
+                    $"[{source} layout] {kv.Key}: ({oldX},{oldY}) -> ({newX},{newY})");
                 placed++;
             }
-            report.Missing.Add($"[{source} layout] {placed}/{CanonicalLayout.Count} FBs placed");
+            report.Missing.Add(
+                $"[{source} layout] {placed}/{CanonicalLayout.Count} FBs placed" +
+                (translateToOrigin ? $" (component bucket dx={dx} dy={dy} -> device-local origin; FB1/FB2 fixed)" : ""));
         }
 
         /// <summary>
@@ -647,7 +718,10 @@ namespace CodeGen.Devices.Core
                     var n = (string?)fb.Attribute("Name") ?? string.Empty;
                     if (!string.IsNullOrEmpty(n)) byName[n] = fb;
                 }
-                ApplyCanonicalLayout(byName, report, "Syslay");
+                // The shared syslay carries every PLC's FBs on one canvas, so we
+                // KEEP the raw CanonicalLayout coords (M262 left, M580 middle,
+                // BX1 right). translateToOrigin=false.
+                ApplyCanonicalLayout(byName, report, "Syslay", translateToOrigin: false);
                 // Grow each coloured zone frame to fully enclose its FBs so
                 // nothing overflows the frame edges (the user's "positioning is
                 // terrible / overflow" report). Runs AFTER the FBs are placed.
