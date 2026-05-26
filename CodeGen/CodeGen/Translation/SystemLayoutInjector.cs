@@ -1183,28 +1183,20 @@ namespace CodeGen.Translation
                     "BX1 zone will have actuators but no Disassembly Process FB.");
             }
 
-            // Cross-process synchronisation. In the reference SMC_Rig (audit E.2:
-            // M580 sysres lines 363, 419) the station Processes exchange state
-            // changes through direct event wires Process[i].state_update →
-            // Process[j].state_change, bypassing the stateRptCmd ring (Process FBs
-            // are ring consumers, not participants). Mirrored here so the
-            // cross-process HandShake conditions — which the recipe drops as
-            // out-of-scope Process refs — fire from the canvas. Fully connected
-            // directed graph between every Process pair.
-            for (int i = 0; i < crossProcInstances.Count; i++)
-            {
-                for (int j = 0; j < crossProcInstances.Count; j++)
-                {
-                    if (i == j) continue;
-                    builder.AddEventConnection(
-                        $"{crossProcInstances[i]}.state_update",
-                        $"{crossProcInstances[j]}.state_change");
-                }
-            }
-            if (crossProcInstances.Count >= 2)
-                report.Missing.Add(
-                    $"[Recipe] Cross-process event wires: {crossProcInstances.Count * (crossProcInstances.Count - 1)} " +
-                    $"state_update→state_change edge(s) across {crossProcInstances.Count} Process FB(s).");
+            // Cross-process synchronisation REMOVED 2026-05-26: the prior code
+            // emitted Process[i].state_update → Process[j].state_change event
+            // wires across every Process pair. The deployed Process1_Generic.fbt
+            // declares ONLY INIT/INITO events — no state_update (EVENT_OUTPUT) or
+            // state_change (EVENT_INPUT) — so EAE rejected those wires with
+            // ERR_NO_SUCH_EVENT, the whole project failed to compile, and the
+            // runtime never started (Pusher / Feeder did not actuate on the rig).
+            // The reference-rig wires (SMC_Rig audit E.2) presumed a Process1_CAT
+            // variant that did expose those events; this Mapper's
+            // Process1_Generic doesn't, so the wires can't exist here. Removing
+            // them clears the three ERR_NO_SUCH_EVENT compile errors. Cross-
+            // process HandShake conditions in the recipe were already dropped as
+            // out-of-scope Process refs (the recipe ends at row 15 and loops),
+            // so no recipe behaviour changes — only the dead, dotted wires go.
 
             // Bearing_PnP routes to Seven_State_Actuator_CAT (13-state PARALLEL+
             // ALTERNATIVE branched swivel → 7-state ECC). Its recipe rows are
