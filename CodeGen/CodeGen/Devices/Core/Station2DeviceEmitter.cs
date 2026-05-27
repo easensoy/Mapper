@@ -156,6 +156,18 @@ namespace CodeGen.Devices.Core
             // does not list a deleted file.
             CleanupStaleTopologyJson(eaeRoot, "Equipment_Soft_dPAC_BX1.json", result);
             CleanupStaleTopologyJson(eaeRoot, "Equipment_BX1.json",           result);
+            // EAE auto-spawns Equipment_<deviceName>_<N>.json variants when its
+            // Physical Views editor wants to add a new instance of a device
+            // whose name collides with an already-loaded file. Observed
+            // 2026-05-27: deleting Equipment_M580dPAC_1.json mid-session made
+            // EAE write Equipment_M580dPAC_2.json with a random uuid + orphan
+            // logicalDeviceId 00000000-…0000 + the wrong rack (BMEXBP0800),
+            // and the Logical Devices physical-device dropdown then showed two
+            // "M580dPAC_1 \ BME D58 1020 #0" rows pointing at different files.
+            // Sweep the obvious _N variants so a Generate brings the disk back
+            // to canonical state.
+            for (int n = 2; n <= 9; n++)
+                CleanupStaleTopologyJson(eaeRoot, $"Equipment_M580dPAC_{n}.json", result);
 
             // Resource-identity alignment. The M580/BX1 .hcf files are authored
             // in EAE and carry their own resource scoping; the emitted sysres
@@ -200,7 +212,8 @@ namespace CodeGen.Devices.Core
                 resourceName: m580ResourceName,
                 hcfTemplatePath: cfg.M580HcfTemplatePath,
                 equipmentJsonName: "Equipment_M580dPAC_1.json",
-                equipmentBuilder: () => BuildM580EquipmentJson(M580SysdevId, solutionId, cfg.M580TargetIp),
+                equipmentBuilder: () => BuildM580EquipmentJson(M580SysdevId, solutionId,
+                                          cfg.M580TargetIp, cfg.M580BroadcastDomainUuid),
                 deployPluginPropertiesXml: BuildStandardDeployPluginPropertiesXml(),
                 simulationBindingDeployPort: 51500,
                 simulationBindingArchivePort: 51497);
@@ -464,7 +477,8 @@ namespace CodeGen.Devices.Core
         /// lists the M262 only because its IP is concrete, so the IP is the
         /// discriminator and must be set here.
         /// </summary>
-        static string BuildM580EquipmentJson(string sysdevId, string solutionId, string targetIp)
+        static string BuildM580EquipmentJson(string sysdevId, string solutionId,
+                                             string targetIp, string broadcastDomainUuid)
         {
             return $$"""
             {
@@ -513,7 +527,7 @@ namespace CodeGen.Devices.Core
                                   "isReadOnly": false,
                                   "domainReadOnly": false,
                                   "ipAddress": "{{targetIp}}",
-                                  "domain": "{{NoConfDomainUuid}}"
+                                  "domain": "{{broadcastDomainUuid}}"
                                 }
                               ]
                             }
