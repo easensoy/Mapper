@@ -6,7 +6,7 @@
   <VersionInfo Organization="Schneider Electric" Version="0.0" Author=" " Date="3/13/2026" Remarks="Template" />
   <CompilerInfo />
   <StructuredType>
-    <VarDeclaration Name="name" Type="STRING" />
+    <VarDeclaration Name="name" Type="STRING[150]" />
     <VarDeclaration Name="state" Type="INT" />
   </StructuredType>
 </DataType>
