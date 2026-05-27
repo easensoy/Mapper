@@ -203,6 +203,64 @@ namespace CodeGen.Devices.Core
             return added;
         }
 
+        /// <summary>
+        /// Strips every &lt;Content&gt;/&lt;None&gt;/&lt;Compile&gt; entry from the
+        /// .dfbproj whose Include path references a 14-17 hex-char sysres-stem
+        /// directory that no longer has a matching <c>.sysres</c> file on disk.
+        /// Companion to EmitOnePlc's sister-folder sweep — without this,
+        /// EAE's Solution Integrity dialog lists every opcua.xml / offline.xml
+        /// / opcuaclient.xml that used to live in those folders as a "missing
+        /// project file" even though the folders were deliberately removed.
+        /// Returns the number of entries removed.
+        /// </summary>
+        public static int StripStaleSysresStemEntries(string dfbprojPath, string eaeProjectDir)
+        {
+            if (!File.Exists(dfbprojPath) || !Directory.Exists(eaeProjectDir)) return 0;
+            var systemDir = Path.Combine(eaeProjectDir, "IEC61499", "System");
+            if (!Directory.Exists(systemDir)) return 0;
+
+            // Build the set of live sysres stems (the BaseName of every .sysres
+            // currently on disk anywhere under IEC61499/System/).
+            var liveStems = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var sysres in Directory.EnumerateFiles(systemDir, "*.sysres",
+                         SearchOption.AllDirectories))
+            {
+                liveStems.Add(Path.GetFileNameWithoutExtension(sysres));
+            }
+
+            var xml = XDocument.Load(dfbprojPath, LoadOptions.PreserveWhitespace);
+            var ns = xml.Root!.GetDefaultNamespace();
+            int removed = 0;
+            var stemRx = new System.Text.RegularExpressions.Regex(
+                @"\\([0-9A-Fa-f]{14,17})\\",
+                System.Text.RegularExpressions.RegexOptions.Compiled);
+
+            // Walk every Item element that can carry an Include path.
+            var candidates = new System.Collections.Generic.List<XElement>();
+            foreach (var name in new[] { "Content", "None", "Compile" })
+            {
+                candidates.AddRange(xml.Descendants(ns + name));
+            }
+            foreach (var el in candidates)
+            {
+                var include = (string?)el.Attribute("Include");
+                if (string.IsNullOrEmpty(include)) continue;
+                if (!include.Contains("System\\", StringComparison.OrdinalIgnoreCase)) continue;
+                var m = stemRx.Match(include);
+                if (!m.Success) continue;
+                var stem = m.Groups[1].Value;
+                if (liveStems.Contains(stem)) continue;
+                // Stale — remove the element (and its trailing whitespace so
+                // we do not leave blank lines).
+                var nextWs = el.NextNode as XText;
+                el.Remove();
+                if (nextWs != null) nextWs.Remove();
+                removed++;
+            }
+            if (removed > 0) xml.Save(dfbprojPath);
+            return removed;
+        }
+
         static int DeduplicateChildren(XElement group, XNamespace ns, string tag, string sysdevFileName)
         {
             int removed = 0;
