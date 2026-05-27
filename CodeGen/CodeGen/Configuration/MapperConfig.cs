@@ -143,21 +143,23 @@ namespace CodeGen.Configuration
         public string BX1TargetIp { get; set; } = "192.168.1.151";
 
         /// <summary>
-        /// Resource name written into every PLC's .sysres root and the
-        /// matching .sysdev's &lt;Resource&gt; entry. MUST be "RES0" — the
-        /// EAE 24.1 catalog templates for M262_dPAC / M580_dPAC / Soft_dPAC
-        /// carry an implicit Name="RES0" resource that EAE renders in the
-        /// device tree whenever the catalog item is instantiated. When our
-        /// sysres also carries Name="RES0", EAE collapses our sysres and the
-        /// catalog phantom into one entity. Any other name (e.g. an earlier
-        /// "M262_RES" attempt) makes EAE render BOTH and the compile fails
-        /// with "Device &lt;name&gt; contains 2 instances of
-        /// Runtime.Management.EMB_RES_ECO". The SMC_Rig_Expo_withClamp
-        /// reference uses Name="RES0" for every PLC sysres for the same
-        /// reason. Override only if Schneider ships a future catalog with a
-        /// different default and the reference is regenerated to match.
+        /// M262 resource name written into the .sysres root and the .sysdev's
+        /// &lt;Resource&gt; entry. Default "M262_RES" so the EAE Deploy &amp;
+        /// Diagnostic tree reads "M262 &gt; M262_RES" rather than the generic
+        /// Schneider default "RES0", making the device-target binding
+        /// self-evident in multi-runtime projects (the M580 + BX1 sysres are
+        /// equivalently named M580_RES / BX1_RES — see
+        /// Station2DeviceEmitter.M580ResourceName / BX1ResourceName).
+        ///
+        /// <para>An earlier attempt forced this to "RES0" on the hypothesis
+        /// that EAE 24.1's catalog templates rendered a phantom RES0 alongside
+        /// any custom-named sysres, surfacing "Device &lt;name&gt; contains 2
+        /// instances of Runtime.Management.EMB_RES_ECO" at compile. The real
+        /// root cause turned out to be a duplicate-Layer-ID .syslay stub
+        /// (handled by CompileCachePurger's sweep), not the resource name.
+        /// Per-PLC names are now safe and resumed.</para>
         /// </summary>
-        public string ResourceName { get; set; } = "RES0";
+        public string ResourceName { get; set; } = "M262_RES";
 
         /// <summary>
         /// Folder holding per-PLC HCF (Hardware Configuration File) templates exported
@@ -391,7 +393,7 @@ namespace CodeGen.Configuration
             M262SubnetMask = "255.255.255.0",
             M262Gateway = "192.168.1.254",
             M262LogicalNetworkName = "DeviceNetwork_1",
-            ResourceName = "RES0",
+            ResourceName = "M262_RES",
         };
 
         private static void Save(string path, MapperConfig config)
