@@ -500,6 +500,44 @@ namespace MapperUI
                 AppendActivity($"[Stn2][Error] Station 2 emit: {ex.Message}");
             }
 
+            // BroadcastDomain JSON — pin the Default Network subnet + gateway
+            // to the live rig values (cfg.DefaultNetworkSubnetAddress / Mask /
+            // Gateway). The M580 endpoint binds to this domain so a mismatch
+            // shows red in EAE's connect-to-device verification dialog.
+            try
+            {
+                var bd = await Task.Run(() => CodeGen.Devices.Core.BroadcastDomainEmitter.Emit(Cfg()));
+                foreach (var f in bd.FilesWritten) AppendActivity($"[Topology]   {f}");
+                foreach (var w in bd.Warnings)     AppendActivity($"[Topology][Warn] {w}");
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"[Topology][Error] BroadcastDomain emit: {ex.Message}");
+            }
+
+            // Strip stale sister-folder dfbproj <Content>/<None>/<Compile>
+            // entries — entries whose Include= references a hex-stem folder
+            // that no longer has a matching .sysres on disk. Without this
+            // step, EAE's Solution Integrity dialog lists every opcua.xml /
+            // offline.xml / opcuaclient.xml that used to live in those folders
+            // as a "missing project file" — confusing the user even when the
+            // sweep correctly removed the actual folders.
+            try
+            {
+                var eae = CodeGen.Devices.Core.EaeProjectLayout.DeriveEaeProjectRoot(Cfg());
+                if (!string.IsNullOrEmpty(eae))
+                {
+                    var dfb = System.IO.Path.Combine(eae, "IEC61499", "IEC61499.dfbproj");
+                    int n = await Task.Run(() =>
+                        CodeGen.Devices.Core.DfbprojRegistrar.StripStaleSysresStemEntries(dfb, eae));
+                    AppendActivity($"[Topology] stripped {n} stale dfbproj sysres-stem entries");
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"[Topology][Error] dfbproj stem sweep: {ex.Message}");
+            }
+
             // Topology network — emit Equipment_Switch_1.json + the Wire JSON
             // files connecting M262 ↔ Switch_1 ↔ M580. Reference rig has all
             // three PLCs cabled into one L2 switch on the Physical Views
