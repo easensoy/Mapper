@@ -143,11 +143,19 @@ namespace CodeGen.Configuration
         public string BX1TargetIp { get; set; } = "192.168.1.151";
 
         /// <summary>
-        /// Resource name written into the .sysres root and the .sysdev's
-        /// &lt;Resource&gt; entry. Schneider's default is "RES0" (the first runtime
-        /// resource). Renamed to "RES0" so the EAE Deploy &amp; Diagnostic tree
-        /// reads "M262.RES0" rather than "M262.RES0", which makes the
-        /// device-target binding self-evident in multi-runtime projects.
+        /// Resource name written into every PLC's .sysres root and the
+        /// matching .sysdev's &lt;Resource&gt; entry. MUST be "RES0" — the
+        /// EAE 24.1 catalog templates for M262_dPAC / M580_dPAC / Soft_dPAC
+        /// carry an implicit Name="RES0" resource that EAE renders in the
+        /// device tree whenever the catalog item is instantiated. When our
+        /// sysres also carries Name="RES0", EAE collapses our sysres and the
+        /// catalog phantom into one entity. Any other name (e.g. an earlier
+        /// "M262_RES" attempt) makes EAE render BOTH and the compile fails
+        /// with "Device &lt;name&gt; contains 2 instances of
+        /// Runtime.Management.EMB_RES_ECO". The SMC_Rig_Expo_withClamp
+        /// reference uses Name="RES0" for every PLC sysres for the same
+        /// reason. Override only if Schneider ships a future catalog with a
+        /// different default and the reference is regenerated to match.
         /// </summary>
         public string ResourceName { get; set; } = "RES0";
 
