@@ -312,9 +312,31 @@ namespace CodeGen.Devices.Core
             result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, simBindPath));
 
             // 4. Topology Equipment JSON.
+            //
+            // FORCE-CLEAN write. File.WriteAllText already overwrites, but EAE
+            // (or a manual user import of the reference Equipment JSON) can
+            // leave the file in a hybrid state where two backplanes coexist
+            // with two RuntimeDEO blocks — observed 2026-05-27 on the deployed
+            // M580 file: it carried both BMEXBP0800 (IP 0.0.0.0) AND BMEXBP0400
+            // (IP 192.168.1.20). EAE picks the FIRST RuntimeDEO it walks, the
+            // 0.0.0.0 one, and filters M580 out of Deploy & Diagnostic because
+            // it can't ping a null IP. Explicitly deleting before write
+            // guarantees the post-condition is exactly the emitter's template:
+            // one backplane, one RuntimeDEO, the configured IP.
             var topologyDir = Path.Combine(eaeRoot, "Topology");
             Directory.CreateDirectory(topologyDir);
             var equipmentPath = Path.Combine(topologyDir, equipmentJsonName);
+            if (File.Exists(equipmentPath))
+            {
+                try { File.Delete(equipmentPath); }
+                catch (Exception ex)
+                {
+                    result.Warnings.Add(
+                        $"{deviceName}: could not delete stale {equipmentJsonName} " +
+                        $"before re-emit: {ex.Message}. The new content will overwrite " +
+                        "but any merge corruption from a prior run may persist.");
+                }
+            }
             File.WriteAllText(equipmentPath, equipmentBuilder());
             result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, equipmentPath));
 
