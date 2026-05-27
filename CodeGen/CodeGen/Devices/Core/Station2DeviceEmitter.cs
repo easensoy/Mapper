@@ -46,20 +46,20 @@ namespace CodeGen.Devices.Core
         // Sysres IDs are 16-hex chars (EAE convention). Stable, deterministic.
         const string M580ResourceId  = "3E5C2B7F1A4D6C8E";
         const string BX1ResourceId   = "C9F2A4B7E1D3F5A8";
-        // Per-PLC resource names. Make EAE's Deploy & Diagnostic tree read
-        // "M580 > M580_RES" / "BX1 > BX1_RES" so the device-target binding
-        // is self-evident in multi-runtime projects.
+        // M580 resource name: TEMPORARY back-to-"RES0" override.
         //
-        // Historical note: an earlier attempt set both to "RES0" on the
-        // hypothesis that EAE's catalog templates carry a phantom RES0
-        // resource that double-counts when our sysres uses any other name.
-        // That hypothesis turned out to be wrong — the real root cause of
-        // "Device M580 contains 2 instances of Runtime.Management.EMB_RES_ECO"
-        // was a duplicate-Layer-ID .syslay stub that the
-        // CompileCachePurger.Purge sweep now removes on every Generate.
-        // With the duplicate-syslay sweep in place, per-PLC sysres names
-        // are safe.
-        const string M580ResourceName = "M580_RES";
+        // The compile error "Device M580 contains 2 instances of
+        // Runtime.Management.EMB_RES_ECO" returned on the rig even after
+        // the stale-sysres sweep + duplicate-Layer-ID syslay sweep + inline
+        // <Resources> block fixes were all in place. The exact second
+        // instance source for M580 specifically has not yet been
+        // root-caused, but renaming the sysres to "RES0" reliably makes the
+        // error disappear (observed across multiple cycles on the rig).
+        // M262 + BX1 stay on per-PLC names ("M262_RES" / "BX1_RES") which
+        // also compile cleanly. M580 alone uses "RES0" until the second-
+        // instance source can be pinned down — keep this as a known
+        // temporary asymmetry, not the long-term design.
+        const string M580ResourceName = "RES0";
         const string BX1ResourceName  = "BX1_RES";
 
         // Topology Equipment UUIDs — stable so the JSON Equipment entries
