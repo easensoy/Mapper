@@ -46,9 +46,23 @@ namespace CodeGen.Devices.Core
         // Sysres IDs are 16-hex chars (EAE convention). Stable, deterministic.
         const string M580ResourceId  = "3E5C2B7F1A4D6C8E";
         const string BX1ResourceId   = "C9F2A4B7E1D3F5A8";
-        // Resource names per the user's spec ("M580_RES" and "BX1_RES").
-        const string M580ResourceName = "M580_RES";
-        const string BX1ResourceName  = "BX1_RES";
+        // Resource Name MUST be "RES0" for every PLC.
+        //
+        // Schneider's EAE 24.1 catalog templates for M262_dPAC / M580_dPAC /
+        // Soft_dPAC carry an implicit "RES0" resource that EAE renders in the
+        // device tree whenever the catalog item is instantiated. When our
+        // sysres also carries Name="RES0", EAE sees one resource per device —
+        // ours — and the catalog template's phantom resolves to that same
+        // entity. When our sysres carried Name="M580_RES" (or "M262_RES"
+        // before its config-driven rename), EAE rendered TWO resources per
+        // device: the catalog phantom RES0 + our renamed one. The compile
+        // error surfaced as:
+        //   "Device M580 contains 2 instances of Runtime.Management.EMB_RES_ECO".
+        // SMC_Rig_Expo_withClamp/IEC61499/System/.../*.sysres uses
+        // Name="RES0" for every PLC sysres, confirming this is Schneider's
+        // canonical convention. Never rename.
+        const string M580ResourceName = "RES0";
+        const string BX1ResourceName  = "RES0";
 
         // Topology Equipment UUIDs — stable so the JSON Equipment entries
         // don't churn between Test Runtime clicks (which would invalidate
@@ -188,16 +202,16 @@ namespace CodeGen.Devices.Core
             // align the sysres ID to.
             var bx1Ident = ReadHcfResourceIdentity(cfg.BX1HcfTemplatePath);
 
-            // M580 resource name is FIXED to the M580ResourceName constant
-            // ("M580_RES") — symmetric with M262 which carries Name="M262_RES"
-            // from cfg.ResourceName. Earlier code read the resource name from
-            // the M580 .hcf's authored channel prefix ('RES0.M580IO.<sym>' ->
-            // "RES0"), which made EAE's Devices tree show "M580 > RES0" while
-            // M262 showed "M262 > M262_RES" — same kind of resource, different
-            // visible name, no engineering reason. M580SymbolBinder rewrites
-            // every .hcf channel to a Form 1 GUID triple (<resId>.<fbId>.<port>),
-            // so the .hcf no longer carries any name-prefix dependency: the
-            // resource Name can be set purely for the EAE display tree.
+            // M580 resource name is FIXED to "RES0" via M580ResourceName.
+            // Match for M262 (which reads cfg.ResourceName, also "RES0") and
+            // for BX1 below. See the M580ResourceName constant doc-comment for
+            // the EAE catalog-phantom rationale that forces this name: any
+            // other name surfaces the compile error "Device M580 contains 2
+            // instances of Runtime.Management.EMB_RES_ECO" because the
+            // M580_dPAC catalog template implicitly carries a RES0 resource
+            // EAE renders alongside ours. M580SymbolBinder rewrites every
+            // .hcf channel to a Form 1 GUID triple (<resId>.<fbId>.<port>),
+            // so the .hcf no longer carries any name-prefix dependency.
             var m580ResourceName = M580ResourceName;
             var bx1ResourceId = bx1Ident.GuidId ?? BX1ResourceId;
             if (!string.Equals(bx1ResourceId, BX1ResourceId, StringComparison.Ordinal))
