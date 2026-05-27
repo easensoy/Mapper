@@ -797,17 +797,52 @@ namespace CodeGen.Translation.Process
                         WaitState = condSettledWait,
                     };
                 }
-                // Seven_State (Bearing_PnP) / Robot arm — NOT a Five_State work/home
-                // pair (e.g. Bearing_PnP's State_Number 4 is "Place", a WORK
-                // position, so the Five_State 4->home rule would mis-command it).
-                // Emit a settled WAIT on the published Control.xml state and flag
-                // that the toWork/toHome command vocabulary for this CAT is a
-                // follow-up — we never command it with the wrong encoding.
-                arrays.Warnings.Add(
-                    $"[Recipe] '{state.Name}': condition target '{inScopeTarget.Name}' (type " +
-                    $"{inScopeTarget.Type}, {inScopeTarget.States.Count} states) is not Five_State-" +
-                    "commandable (Seven_State / Robot). Emitted a settled WAIT only — its per-CAT " +
-                    "command vocabulary (e.g. Seven_State swivel pick/place) is a follow-up.");
+                // Seven_State (Bearing_PnP) — the SE Seven_State_Actuator_CAT
+                // ECC accepts state_val as a target slot and stably publishes
+                // current_state_to_pocess matching the slot once settled:
+                //   state_val=1  -> ToPick   -> AtPick    publishes 1
+                //   state_val=2  -> ToPlace  -> AtPlace   publishes 2
+                //   state_val=0  -> ToHome   -> AtHome    publishes 0
+                // Control.xml's State_Number for the wait target (e.g.
+                // Bearing_PnP/AtPick State_Number=2) does NOT line up with the
+                // CAT's published value (AtPick publishes 1), so we cannot use
+                // waitState directly. Instead we read the WAIT condition's
+                // Name suffix ("Bearing_PnP/AtPick" -> "AtPick") and pattern
+                // match Pick/Place/Home to the CAT's settle value.
+                if (IsSevenStateCommandable(inScopeTarget))
+                {
+                    int sevenStateCmd = MapSevenStateCommandFromConditionName(cond.Name);
+                    if (sevenStateCmd >= 0)
+                    {
+                        arrays.Warnings.Add(
+                            $"[Recipe] '{state.Name}': Seven_State CMD on '{inScopeTarget.Name}' " +
+                            $"-> state_val={sevenStateCmd} (CAT settles publishing {sevenStateCmd}); " +
+                            $"derived from condition Name '{cond.Name}'.");
+                        return new StateClassification
+                        {
+                            Kind = ClassKind.MotionPair,
+                            RowCount = 2,
+                            CmdTargetName = (inScopeTarget.Name ?? string.Empty).Trim().ToLowerInvariant(),
+                            CmdState = sevenStateCmd,
+                            WaitId = waitId,
+                            WaitState = sevenStateCmd,
+                        };
+                    }
+                    arrays.Warnings.Add(
+                        $"[Recipe] '{state.Name}': Seven_State condition Name '{cond.Name}' did not " +
+                        "match Pick/Place/Home; falling back to settled WAIT. Extend " +
+                        "MapSevenStateCommandFromConditionName if a new state name keyword is needed.");
+                }
+                else
+                {
+                    // Robot arm or other non-commandable target — emit settled WAIT
+                    // and flag for follow-up. Bearing_PnP shouldn't land here now
+                    // (IsSevenStateCommandable catches it above).
+                    arrays.Warnings.Add(
+                        $"[Recipe] '{state.Name}': condition target '{inScopeTarget.Name}' (type " +
+                        $"{inScopeTarget.Type}, {inScopeTarget.States.Count} states) is neither " +
+                        "Five_State- nor Seven_State-commandable. Emitted a settled WAIT only.");
+                }
                 return new StateClassification
                 {
                     Kind = ClassKind.SettledWait,
@@ -974,6 +1009,46 @@ namespace CodeGen.Translation.Process
             if (string.Equals(t.Type, "Process", StringComparison.OrdinalIgnoreCase)) return false;
             if (t.States.Count == 7 || IsBranchedSevenState(t)) return false;
             return true;
+        }
+
+        /// <summary>
+        /// Complementary to <see cref="IsFiveStateCommandable"/>: returns true for
+        /// targets that drive a Seven_State_Actuator_CAT ECC (Bearing_PnP and any
+        /// 13-state branched-swivel actuator routed through the seven-state runtime).
+        /// Used by the condition-driven classifier to emit Pick/Place/Home CMDs on
+        /// these targets instead of falling back to a settled-WAIT-only row.
+        /// </summary>
+        private static bool IsSevenStateCommandable(VueOneComponent t)
+        {
+            if (t == null) return false;
+            if (string.Equals(t.Type, "Sensor", StringComparison.OrdinalIgnoreCase)) return false;
+            if (string.Equals(t.Type, "Process", StringComparison.OrdinalIgnoreCase)) return false;
+            return t.States.Count == 7 || IsBranchedSevenState(t);
+        }
+
+        /// <summary>
+        /// Maps a Sequence_Condition Name (e.g. "Bearing_PnP/AtPick") to the
+        /// Seven_State_Actuator_CAT command state_val. The SE Seven_State ECC
+        /// publishes current_state_to_pocess matching state_val once settled:
+        ///   AtPick (and Picking)   -> 1
+        ///   AtPlace / Place        -> 2
+        ///   AtHome / ReturnedHome  -> 0
+        /// Returns -1 when no keyword matches so the caller can decide whether to
+        /// emit a settled-WAIT fallback or extend this table.
+        /// </summary>
+        private static int MapSevenStateCommandFromConditionName(string? conditionName)
+        {
+            if (string.IsNullOrEmpty(conditionName)) return -1;
+            // Strip optional "Component/" prefix.
+            int slash = conditionName.LastIndexOf('/');
+            string stateName = slash >= 0 ? conditionName.Substring(slash + 1) : conditionName;
+            string lower = stateName.Trim().ToLowerInvariant();
+            // Order matters: "atplace" contains "place", "atpick" contains "pick".
+            // Place check before pick keeps "atplace2" / "place2" routing to 2.
+            if (lower.Contains("place")) return 2;
+            if (lower.Contains("pick"))  return 1;
+            if (lower.Contains("home") || lower.Contains("returned")) return 0;
+            return -1;
         }
 
         /// <summary>
