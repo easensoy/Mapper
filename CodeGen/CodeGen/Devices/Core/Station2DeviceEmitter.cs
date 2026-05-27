@@ -46,23 +46,21 @@ namespace CodeGen.Devices.Core
         // Sysres IDs are 16-hex chars (EAE convention). Stable, deterministic.
         const string M580ResourceId  = "3E5C2B7F1A4D6C8E";
         const string BX1ResourceId   = "C9F2A4B7E1D3F5A8";
-        // Resource Name MUST be "RES0" for every PLC.
+        // Per-PLC resource names. Make EAE's Deploy & Diagnostic tree read
+        // "M580 > M580_RES" / "BX1 > BX1_RES" so the device-target binding
+        // is self-evident in multi-runtime projects.
         //
-        // Schneider's EAE 24.1 catalog templates for M262_dPAC / M580_dPAC /
-        // Soft_dPAC carry an implicit "RES0" resource that EAE renders in the
-        // device tree whenever the catalog item is instantiated. When our
-        // sysres also carries Name="RES0", EAE sees one resource per device —
-        // ours — and the catalog template's phantom resolves to that same
-        // entity. When our sysres carried Name="M580_RES" (or "M262_RES"
-        // before its config-driven rename), EAE rendered TWO resources per
-        // device: the catalog phantom RES0 + our renamed one. The compile
-        // error surfaced as:
-        //   "Device M580 contains 2 instances of Runtime.Management.EMB_RES_ECO".
-        // SMC_Rig_Expo_withClamp/IEC61499/System/.../*.sysres uses
-        // Name="RES0" for every PLC sysres, confirming this is Schneider's
-        // canonical convention. Never rename.
-        const string M580ResourceName = "RES0";
-        const string BX1ResourceName  = "RES0";
+        // Historical note: an earlier attempt set both to "RES0" on the
+        // hypothesis that EAE's catalog templates carry a phantom RES0
+        // resource that double-counts when our sysres uses any other name.
+        // That hypothesis turned out to be wrong — the real root cause of
+        // "Device M580 contains 2 instances of Runtime.Management.EMB_RES_ECO"
+        // was a duplicate-Layer-ID .syslay stub that the
+        // CompileCachePurger.Purge sweep now removes on every Generate.
+        // With the duplicate-syslay sweep in place, per-PLC sysres names
+        // are safe.
+        const string M580ResourceName = "M580_RES";
+        const string BX1ResourceName  = "BX1_RES";
 
         // Topology Equipment UUIDs — stable so the JSON Equipment entries
         // don't churn between Test Runtime clicks (which would invalidate
@@ -202,16 +200,14 @@ namespace CodeGen.Devices.Core
             // align the sysres ID to.
             var bx1Ident = ReadHcfResourceIdentity(cfg.BX1HcfTemplatePath);
 
-            // M580 resource name is FIXED to "RES0" via M580ResourceName.
-            // Match for M262 (which reads cfg.ResourceName, also "RES0") and
-            // for BX1 below. See the M580ResourceName constant doc-comment for
-            // the EAE catalog-phantom rationale that forces this name: any
-            // other name surfaces the compile error "Device M580 contains 2
-            // instances of Runtime.Management.EMB_RES_ECO" because the
-            // M580_dPAC catalog template implicitly carries a RES0 resource
-            // EAE renders alongside ours. M580SymbolBinder rewrites every
+            // M580 resource name is FIXED to "M580_RES" via M580ResourceName,
+            // matching M262 (cfg.ResourceName = "M262_RES") and BX1 below for
+            // a consistent device tree. M580SymbolBinder rewrites every
             // .hcf channel to a Form 1 GUID triple (<resId>.<fbId>.<port>),
-            // so the .hcf no longer carries any name-prefix dependency.
+            // so the .hcf carries no name-prefix dependency on the sysres.
+            // The EMB_RES_ECO double-count error that briefly forced "RES0"
+            // is now blocked at root by CompileCachePurger's duplicate-Layer-ID
+            // .syslay sweep, so per-PLC names are safe again.
             var m580ResourceName = M580ResourceName;
             var bx1ResourceId = bx1Ident.GuidId ?? BX1ResourceId;
             if (!string.Equals(bx1ResourceId, BX1ResourceId, StringComparison.Ordinal))
