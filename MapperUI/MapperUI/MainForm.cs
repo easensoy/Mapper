@@ -500,6 +500,26 @@ namespace MapperUI
                 AppendActivity($"[Stn2][Error] Station 2 emit: {ex.Message}");
             }
 
+            // Purge EAE's per-device compile cache (IEC61499\bin\,
+            // IEC61499\obj\, snapshot.xml). EAE caches compile state
+            // structurally — when a sysres is renamed or a stale sysres is
+            // removed, the cache still records the OLD layout and surfaces
+            // stale "Device contains 2 instances of EMB_RES_ECO"-class errors
+            // even after the disk is clean. EAE's own Clean button does not
+            // flush these. Runs early so the subsequent emitters write into a
+            // freshly-clean cache.
+            try
+            {
+                var purge = await Task.Run(() => CodeGen.Devices.Core.CompileCachePurger.Purge(Cfg()));
+                if (purge.FoldersRemoved > 0 || purge.SnapshotReset)
+                    AppendActivity($"[Topology] compile cache purged: {purge.FoldersRemoved} folder(s), snapshot reset={purge.SnapshotReset}");
+                foreach (var w in purge.Warnings) AppendActivity($"[Topology][Warn] cache purge: {w}");
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"[Topology][Error] cache purge: {ex.Message}");
+            }
+
             // Folders.xml registration — register M580 + BX1 sysdev GUIDs in
             // the SystemDevice Root folder. EAE seeds Solution Explorer's
             // SystemDevice node + Deploy & Diagnostic enumeration from this
