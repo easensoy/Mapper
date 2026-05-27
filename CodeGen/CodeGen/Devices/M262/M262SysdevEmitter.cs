@@ -127,6 +127,37 @@ namespace CodeGen.Devices.M262
                 : SysresFbMirror.ReadSyslayTopLevelFbs(syslayPath);
 
             var sysresPath = EaeProjectLayout.FindSysresFor(sysdevPath);
+
+            // Sweep any extra .sysres files in the M262 sysdev folder. The
+            // canonical sysres is the one EaeProjectLayout returns above
+            // (1459BCD12760907D.sysres — Name="M262_RES"); anything else is a
+            // leftover from an older deploy that used a different resource
+            // ID/name (typically "RES0"). EAE compile rejects a sysdev that
+            // contains 2 instances of Runtime.Management.EMB_RES_ECO, so the
+            // stale file MUST go. Observed 2026-05-27: M262 folder carried
+            // both 1459BCD12760907D.sysres (M262_RES, active) AND
+            // 5ACDAFFD2183E4AD.sysres (RES0, stale), and the EAE message log
+            // surfaced "Device M580 contains 2 instances of EMB_RES_ECO" —
+            // note the misleading device name in EAE's message; the actual
+            // duplicate was on M262 but EAE reports it against the next
+            // device in the system tree. Same sweep pattern Station2DeviceEmitter
+            // already uses for M580 + BX1.
+            if (sysresPath != null)
+            {
+                var sysdevFolderForSweep = Path.GetDirectoryName(sysresPath);
+                if (!string.IsNullOrEmpty(sysdevFolderForSweep) &&
+                    Directory.Exists(sysdevFolderForSweep))
+                {
+                    foreach (var staleSysres in Directory.EnumerateFiles(sysdevFolderForSweep, "*.sysres"))
+                    {
+                        if (string.Equals(staleSysres, sysresPath, StringComparison.OrdinalIgnoreCase))
+                            continue;
+                        try { File.Delete(staleSysres); }
+                        catch { /* best-effort */ }
+                    }
+                }
+            }
+
             int sysresMirrorCount = 0;
             if (sysresPath != null && fbInstances.Count > 0)
                 // Mirror only the FBs that belong on the M262 (Feed Station).
