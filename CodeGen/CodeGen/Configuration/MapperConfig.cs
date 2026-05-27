@@ -78,6 +78,23 @@ namespace CodeGen.Configuration
         public string M580TargetIp { get; set; } = "192.168.1.20";
 
         /// <summary>
+        /// BroadcastDomain UUID the M580 seGmac0 IP-Address endpoint binds to.
+        /// Mapper used to emit the all-zeros NOCONF UUID here so EAE left the
+        /// device on "no broadcast domain" — but that hides the Logical Network
+        /// / Subnet / Gateway columns in EAE's hardware property editor, and the
+        /// user expects the M580 panel to read "Default Network / 192.168.0.0 /
+        /// 255.255.255.0 / 192.168.0.254" matching the Workstation NIC and the
+        /// BroadcastDomain_Default Network.json file that EAE 24.1 ships with
+        /// every fresh Demonstrator. Pin the M580 endpoint to the live
+        /// "Default Network" broadcast domain UUID
+        /// 2131fbdd-0a41-4e41-abfb-a14a5ca9218d (matches the value in
+        /// Topology/BroadcastDomain_Default Network.json on the rig). M262 is
+        /// intentionally left on NOCONF per user — don't touch the M262 file.
+        /// </summary>
+        public string M580BroadcastDomainUuid { get; set; }
+            = "2131fbdd-0a41-4e41-abfb-a14a5ca9218d";
+
+        /// <summary>
         /// IPV4 address of the BX1 soft-dPAC workstation on the rig network.
         /// Same Deploy &amp; Diagnostic visibility constraint as the M580 above.
         /// Default matches the reference SMC_Rig_Expo_withClamp rig wiring,
