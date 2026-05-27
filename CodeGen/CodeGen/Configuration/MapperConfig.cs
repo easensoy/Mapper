@@ -95,6 +95,40 @@ namespace CodeGen.Configuration
             = "2131fbdd-0a41-4e41-abfb-a14a5ca9218d";
 
         /// <summary>
+        /// Subnet base address the "Default Network" BroadcastDomain JSON
+        /// declares. Must contain every PLC endpoint that binds to this domain
+        /// (M580 192.168.1.20; M262 / BX1 if they bind too). EAE's
+        /// connect-to-device dialog flags a red mismatch against the rig when
+        /// this disagrees with the device's actual subnet. The rig is on
+        /// 192.168.1.0/24, not the EAE-template default of 192.168.0.0/24.
+        /// </summary>
+        public string DefaultNetworkSubnetAddress { get; set; } = "192.168.1.0";
+
+        /// <summary>
+        /// Subnet mask for the "Default Network" BroadcastDomain JSON.
+        /// </summary>
+        public string DefaultNetworkSubnetMask { get; set; } = "255.255.255.0";
+
+        /// <summary>
+        /// Gateway address for the "Default Network" BroadcastDomain JSON.
+        /// Rig has no gateway configured on the M580 panel (the connect
+        /// dialog shows 0.0.0.0 on the device side); the EAE template default
+        /// "192.168.0.254" caused a red mismatch. Default to 0.0.0.0 to match
+        /// the rig; override to a real gateway address only if the rig is
+        /// reconfigured.
+        /// </summary>
+        public string DefaultNetworkGateway { get; set; } = "0.0.0.0";
+
+        /// <summary>
+        /// UUID of the "Default Network" BroadcastDomain. Matches the live
+        /// Topology/BroadcastDomain_Default Network.json on the rig
+        /// (2131fbdd-...). Kept as a single constant on both the M580 endpoint
+        /// binding and the BroadcastDomain JSON so they always cross-reference.
+        /// </summary>
+        public string DefaultNetworkUuid { get; set; }
+            = "2131fbdd-0a41-4e41-abfb-a14a5ca9218d";
+
+        /// <summary>
         /// IPV4 address of the BX1 soft-dPAC workstation on the rig network.
         /// Same Deploy &amp; Diagnostic visibility constraint as the M580 above.
         /// Default matches the reference SMC_Rig_Expo_withClamp rig wiring,
