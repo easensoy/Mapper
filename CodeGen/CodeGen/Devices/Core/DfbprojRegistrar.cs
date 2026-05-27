@@ -146,8 +146,19 @@ namespace CodeGen.Devices.Core
             var (cg, ng) = Groups(xml, ns);
             int added = 0;
 
-            // .sysdev itself goes under <Compile> with IEC61499Type=SystemDevice.
+            // .sysdev itself goes under <Compile> with IEC61499Type=SystemDevice
+            // AND a DependentUpon pointer at the parent .system file. EAE's
+            // TopologyManager binds Logical Device -> System through that
+            // pointer; without it the sysdev compiles but stays orphaned and
+            // EAE's Deploy & Diagnostic tab silently filters it out (observed
+            // 2026-05-27 — M262 sysdev was registered WITH DependentUpon and
+            // appeared in D&D; M580 + BX1 sysdevs were registered WITHOUT and
+            // disappeared even though their Equipment JSON, Properties.xml,
+            // Simulation.Binding.xml and sysres were all valid). The .system
+            // file's name is the zero UUID by Mapper convention.
+            const string SystemFileName = "00000000-0000-0000-0000-000000000000.system";
             Add(cg, ns, "Compile", sysdevRel, ref added,
+                new XElement(ns + "DependentUpon", SystemFileName),
                 new XElement(ns + "IEC61499Type", "SystemDevice"));
 
             // Sibling files (under sysdev's per-device folder) go under <None>.
@@ -167,11 +178,28 @@ namespace CodeGen.Devices.Core
             int removed = DeduplicateChildren(ng, ns, "None", sysdevFileName)
                         + DeduplicateChildren(cg, ns, "Compile", sysdevFileName);
 
-            // Save ONLY if we actually added an entry or removed a duplicate.
-            // Otherwise an idempotent re-run rewrites the .dfbproj and triggers a
-            // spurious EAE "Reload Solution" prompt (this is called once per sysdev
-            // — M262, M580, BX1 — so three needless saves per Test Runtime).
-            if (added > 0 || removed > 0) xml.Save(dfbprojPath);
+            // Backfill: an existing Compile entry for this sysdev that was
+            // written by a prior Mapper version (before DependentUpon was
+            // emitted) needs the child added in place. Without it the device
+            // disappears from EAE's Deploy & Diagnostic tab. Detects the gap
+            // and inserts the child element exactly once.
+            int backfilled = 0;
+            foreach (var compile in cg.Elements(ns + "Compile"))
+            {
+                if (!string.Equals((string?)compile.Attribute("Include"), sysdevRel,
+                        StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (compile.Elements(ns + "DependentUpon").Any()) continue;
+                compile.AddFirst(new XElement(ns + "DependentUpon", SystemFileName));
+                backfilled++;
+            }
+
+            // Save ONLY if we actually added an entry, removed a duplicate, or
+            // backfilled a missing DependentUpon. Otherwise an idempotent re-run
+            // rewrites the .dfbproj and triggers a spurious EAE "Reload Solution"
+            // prompt (this is called once per sysdev — M262, M580, BX1 — so up
+            // to three needless saves per Test Runtime).
+            if (added > 0 || removed > 0 || backfilled > 0) xml.Save(dfbprojPath);
             return added;
         }
 
