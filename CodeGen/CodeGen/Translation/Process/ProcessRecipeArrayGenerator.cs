@@ -1035,6 +1035,24 @@ namespace CodeGen.Translation.Process
         ///   AtHome / ReturnedHome  -> 0
         /// Returns -1 when no keyword matches so the caller can decide whether to
         /// emit a settled-WAIT fallback or extend this table.
+        ///
+        /// <para>TODO (Seven_State data-driven Phase 1, see
+        /// Docs/SevenStateActuator_DataDriven_Gap.md): once the CAT carries
+        /// TargetPickState / TargetPlaceState / TargetHomeState parameters
+        /// matching the Control.xml State_Number on each actuator, this
+        /// keyword shim is redundant — caller can use the resolved waitState
+        /// directly the way the Five_State path does. Keep this method until
+        /// the parameter surface is widened; delete it the same commit that
+        /// stops the recipe generator from special-casing Seven_State.</para>
+        ///
+        /// <para>TODO (Phase 2, branched 13-state Bearing_PnP): the
+        /// disassembly-side states AtPick2 / AtPlace2 / Athome2 currently
+        /// fall through to the same Pick / Place / Home keywords and route
+        /// to the primary leg's state_val. That is silently wrong — both
+        /// legs share the same target slots. Fix when Disassembly testing
+        /// starts (see Phase 2 of the design doc — either add Pick2/Place2
+        /// state slots to the ECC + a BranchSelector parameter, or split
+        /// the branched actuator into two parallel CAT instances).</para>
         /// </summary>
         private static int MapSevenStateCommandFromConditionName(string? conditionName)
         {
