@@ -500,6 +500,27 @@ namespace MapperUI
                 AppendActivity($"[Stn2][Error] Station 2 emit: {ex.Message}");
             }
 
+            // Topology network — emit Equipment_Switch_1.json + the Wire JSON
+            // files connecting M262 ↔ Switch_1 ↔ M580. Reference rig has all
+            // three PLCs cabled into one L2 switch on the Physical Views
+            // diagram; without these files the deployed Demonstrator shows
+            // every PLC icon floating in isolation with no declared path
+            // between them. Runs AFTER Station2DeviceEmitter so the M262 +
+            // M580 Equipment UUIDs the wires reference are already on disk.
+            try
+            {
+                var net = await Task.Run(() => CodeGen.Devices.Core.TopologyNetworkEmitter.Emit(Cfg()));
+                AppendActivity(
+                    $"[Topology] {net.FilesWritten.Count} network file(s) written, " +
+                    $"{net.TopologyProjEntriesAdded} topologyproj entries");
+                foreach (var f in net.FilesWritten) AppendActivity($"[Topology]   {f}");
+                foreach (var w in net.Warnings)     AppendActivity($"[Topology][Warn] {w}");
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"[Topology][Error] network emit: {ex.Message}");
+            }
+
             // Station 2 — mirror the Station-2 FBs from the .syslay onto the
             // M580/BX1 resources (each bucketed by M262SysdevEmitter.BucketFor)
             // and emit the per-resource opcua.xml metadata folder beside each
