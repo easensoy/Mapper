@@ -492,12 +492,17 @@ namespace CodeGen.Devices.Core
         /// <summary>
         /// M580 dPAC equipment JSON — modelled on
         /// <c>SMC_Rig_Expo_withClamp/Topology/Equipment_M580dPAC_1.json</c>.
-        /// X80 4-slot rack + BMX CPS 4002 PSU + BME D58 1020 CPU with ETH0/1/2/3
-        /// ports. IP is taken from <c>cfg.M580TargetIp</c> (defaults to the rig
-        /// wiring address 192.168.1.20). The earlier "0.0.0.0" placeholder hid
-        /// the M580 from EAE's Deploy &amp; Diagnostic tab — the same panel
-        /// lists the M262 only because its IP is concrete, so the IP is the
-        /// discriminator and must be set here.
+        /// X80 8-slot rack (BMEXBP0800) + BMX CPS 4002 PSU + BME D58 1020 CPU
+        /// with ETH0/1/2/3 ports. Catalog refs must match values EAE 24.1's
+        /// catalog actually knows — BMEXBP0400 + BMXCPS2010 were rendered as
+        /// unknown placeholder boxes (warning triangle) next to the D58 chassis,
+        /// which looked like a duplicate D58 1020 in Physical Views. Aligned
+        /// with the reference rig on 2026-05-27.
+        ///
+        /// IP is taken from <c>cfg.M580TargetIp</c> (defaults to 192.168.1.20).
+        /// The endpoint binds to <c>cfg.M580BroadcastDomainUuid</c> (defaults
+        /// to the Default Network UUID) so EAE's hardware property editor shows
+        /// the Logical Network / Subnet / Mask / Gateway fields populated.
         /// </summary>
         static string BuildM580EquipmentJson(string sysdevId, string solutionId,
                                              string targetIp, string broadcastDomainUuid)
@@ -517,24 +522,24 @@ namespace CodeGen.Devices.Core
               ],
               "equipments": [
                 {
-                  "catalogReference": "BMEXBP0400_V01.00_01.00",
+                  "catalogReference": "BMEXBP0800_V01.00_01.00",
                   "uuid": "{{M580RackUuid}}",
-                  "identifier": "BME XBP 0400 #0",
-                  "path": "M580dPAC_1\\BME XBP 0400 #0",
-                  "partNumber": "BME XBP 0400",
+                  "identifier": "BME XBP 0800 #0",
+                  "path": "M580dPAC_1\\BME XBP 0800 #0",
+                  "partNumber": "BME XBP 0800",
                   "equipments": [
                     {
-                      "catalogReference": "BMXCPS2010_V01.00_01.00",
+                      "catalogReference": "BMXCPS4002_V01.00_01.00",
                       "uuid": "{{M580CpsUuid}}",
-                      "identifier": "BMX CPS 2010 #P",
-                      "path": "M580dPAC_1\\BME XBP 0400 #0\\BMX CPS 2010 #P",
-                      "partNumber": "BMX CPS 2010"
+                      "identifier": "BMX CPS 4002 #P",
+                      "path": "M580dPAC_1\\BME XBP 0800 #0\\BMX CPS 4002 #P",
+                      "partNumber": "BMX CPS 4002"
                     },
                     {
                       "catalogReference": "BMED581020_V01.00_01.00",
                       "uuid": "{{M580CpuUuid}}",
                       "identifier": "BME D58 1020 #0",
-                      "path": "M580dPAC_1\\BME XBP 0400 #0\\BME D58 1020 #0",
+                      "path": "M580dPAC_1\\BME XBP 0800 #0\\BME D58 1020 #0",
                       "partNumber": "BME D58 1020",
                       "components": [
                         {
