@@ -254,7 +254,7 @@ namespace CodeGen.Devices.Core
             // 1. sysdev — always (re)written; the device declaration carries no
             //    trust binding by itself, just the Name + Type + GUID.
             var sysdevPath = Path.Combine(systemGuidDir, $"{sysdevId}.sysdev");
-            File.WriteAllText(sysdevPath, BuildSysdevXml(sysdevId, deviceName, deviceType));
+            File.WriteAllText(sysdevPath, BuildSysdevXml(sysdevId, deviceName, deviceType, resourceId, resourceName));
             result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, sysdevPath));
 
             // 2. sysres — Resource declaration inside the sysdev folder.
@@ -486,10 +486,33 @@ namespace CodeGen.Devices.Core
             "  </LogicalDeviceBinding>\r\n" +
             "</Bindings>";
 
-        static string BuildSysdevXml(string sysdevId, string name, string type) =>
+        /// <summary>
+        /// Emits the per-PLC .sysdev with an INLINE &lt;Resources&gt;&lt;Resource&gt;
+        /// declaration that mirrors the sibling .sysres file's ID + Name.
+        ///
+        /// <para>Why the inline block matters: EAE 24.1's M_dPAC / Soft_dPAC
+        /// catalog templates auto-add a default EMB_RES_ECO Resource when the
+        /// sysdev has no inline Resources block. With our sibling .sysres
+        /// then layered on top, EAE counts BOTH and the compile fails with
+        /// "Device &lt;name&gt; contains 2 instances of
+        /// Runtime.Management.EMB_RES_ECO. The maximum allowed limit is 1
+        /// instances per device." The M262 sysdev path (M262SysdevEmitter)
+        /// has always emitted this inline block and never triggered the
+        /// error; M580 + BX1 used to emit only &lt;FBNetwork/&gt; and tripped
+        /// the catalog phantom. Mirror M262's pattern here.</para>
+        ///
+        /// <para>The inline &lt;Resource&gt; carries Name + Namespace + Type +
+        /// ID only — no body. The sibling .sysres file provides the FBNetwork
+        /// body. EAE merges them on the matching ID into one Resource entry
+        /// in the compiled System tree.</para>
+        /// </summary>
+        static string BuildSysdevXml(string sysdevId, string name, string type,
+                                     string resourceId, string resourceName) =>
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
             $"<Device xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" ID=\"{sysdevId}\" Name=\"{name}\" Type=\"{type}\" Namespace=\"SE.DPAC\" Locked=\"false\" xmlns=\"{LibElNs}\">\r\n" +
-            "  <FBNetwork />\r\n" +
+            "  <Resources>\r\n" +
+            $"    <Resource ID=\"{resourceId}\" Name=\"{resourceName}\" Type=\"EMB_RES_ECO\" Namespace=\"Runtime.Management\" />\r\n" +
+            "  </Resources>\r\n" +
             "</Device>\r\n";
 
         static string BuildSysresXml(string resourceId, string name) =>
