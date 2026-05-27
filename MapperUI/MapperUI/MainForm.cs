@@ -500,6 +500,22 @@ namespace MapperUI
                 AppendActivity($"[Stn2][Error] Station 2 emit: {ex.Message}");
             }
 
+            // Folders.xml registration — register M580 + BX1 sysdev GUIDs in
+            // the SystemDevice Root folder. EAE seeds Solution Explorer's
+            // SystemDevice node + Deploy & Diagnostic enumeration from this
+            // file; a sysdev that's not listed here gets silently dropped from
+            // D&D even with a valid sysdev + Equipment JSON + dfbproj entry.
+            try
+            {
+                var fx = await Task.Run(() => CodeGen.Devices.Core.FoldersXmlEmitter.Register(Cfg()));
+                if (fx.ItemsAdded > 0) AppendActivity($"[Topology] Folders.xml: registered {fx.ItemsAdded} sysdev GUID(s)");
+                foreach (var w in fx.Warnings) AppendActivity($"[Topology][Warn] Folders.xml: {w}");
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"[Topology][Error] Folders.xml register: {ex.Message}");
+            }
+
             // BroadcastDomain JSON — pin the Default Network subnet + gateway
             // to the live rig values (cfg.DefaultNetworkSubnetAddress / Mask /
             // Gateway). The M580 endpoint binds to this domain so a mismatch
