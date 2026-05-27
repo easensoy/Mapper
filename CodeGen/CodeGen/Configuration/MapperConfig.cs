@@ -96,13 +96,16 @@ namespace CodeGen.Configuration
 
         /// <summary>
         /// Subnet base address the "Default Network" BroadcastDomain JSON
-        /// declares. Must contain every PLC endpoint that binds to this domain
-        /// (M580 192.168.1.20; M262 / BX1 if they bind too). EAE's
-        /// connect-to-device dialog flags a red mismatch against the rig when
-        /// this disagrees with the device's actual subnet. The rig is on
-        /// 192.168.1.0/24, not the EAE-template default of 192.168.0.0/24.
+        /// declares. Pinned to the reference SMC_Rig_Expo_withClamp value
+        /// (192.168.0.0/24) so EAE sees a byte-identical topology when the
+        /// user opens that solution to Take Ownership of the M580. The rig's
+        /// device-side IP (192.168.1.20) sits OUTSIDE this /24 — EAE tolerates
+        /// the mismatch (the reference ships this way and works), the connect
+        /// dialog just highlights the subnet/gateway rows in yellow. Default
+        /// follows reference; override if you commission a rig on a strictly
+        /// matching subnet later.
         /// </summary>
-        public string DefaultNetworkSubnetAddress { get; set; } = "192.168.1.0";
+        public string DefaultNetworkSubnetAddress { get; set; } = "192.168.0.0";
 
         /// <summary>
         /// Subnet mask for the "Default Network" BroadcastDomain JSON.
@@ -111,13 +114,15 @@ namespace CodeGen.Configuration
 
         /// <summary>
         /// Gateway address for the "Default Network" BroadcastDomain JSON.
-        /// Rig has no gateway configured on the M580 panel (the connect
-        /// dialog shows 0.0.0.0 on the device side); the EAE template default
-        /// "192.168.0.254" caused a red mismatch. Default to 0.0.0.0 to match
-        /// the rig; override to a real gateway address only if the rig is
-        /// reconfigured.
+        /// Pinned to the reference SMC_Rig_Expo_withClamp value (192.168.0.254)
+        /// so the Demonstrator topology mirrors the SMC_Rig_Expo solution
+        /// exactly. The physical M580 reports 0.0.0.0 for its own gateway —
+        /// EAE flags this row yellow in the connect dialog but tolerates it
+        /// (the reference shipped this way and works). Default follows
+        /// reference; override only if you commission a rig with an actual
+        /// gateway set on the device.
         /// </summary>
-        public string DefaultNetworkGateway { get; set; } = "0.0.0.0";
+        public string DefaultNetworkGateway { get; set; } = "192.168.0.254";
 
         /// <summary>
         /// UUID of the "Default Network" BroadcastDomain. Matches the live
