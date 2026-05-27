@@ -76,6 +76,86 @@ namespace CodeGen.Devices.Core
                 }
             }
 
+            // Wipe the .obsolete folder. EAE stashes the previous compile's
+            // System.sys + per-device history there. Compile rewrites it,
+            // but EAE's internal validator also walks .obsolete looking for
+            // "removed but still referenced" elements — stale device records
+            // there can surface in modern compile errors.
+            var obsolete = Path.Combine(iec, "System", ".obsolete");
+            if (Directory.Exists(obsolete))
+            {
+                try { Directory.Delete(obsolete, recursive: true); result.FoldersRemoved++; }
+                catch (Exception ex) { result.Warnings.Add($"Could not delete System\\.obsolete: {ex.Message}"); }
+            }
+
+            // Detect duplicate-Layer-ID .syslay files. EAE walks every .syslay
+            // under System/ and reads its <Layer ID="…"> root attribute. If two
+            // .syslay files declare the SAME Layer ID, EAE double-counts every
+            // Resource the Layer references — surfaces at compile time as
+            // "Device <name> contains 2 instances of Runtime.Management.EMB_RES_ECO".
+            // Observed 2026-05-27: sysapp folder carried both the canonical
+            // 00000000-0000-0000-0000-000000000000.syslay AND a 238-byte
+            // empty stub 2240693B1370B496.syslay — same Layer ID 2240693B1370B496
+            // in both. The stub appears after a partial compile / EAE crash and
+            // re-emerges on subsequent compiles. Keep the canonical (zero-GUID
+            // filename); drop any other .syslay whose Layer ID matches its sibling.
+            var systemDir = Path.Combine(iec, "System");
+            if (Directory.Exists(systemDir))
+            {
+                foreach (var sysappDir in Directory.EnumerateDirectories(systemDir, "*", SearchOption.AllDirectories))
+                {
+                    var syslays = Directory.EnumerateFiles(sysappDir, "*.syslay",
+                        SearchOption.TopDirectoryOnly).ToList();
+                    if (syslays.Count < 2) continue;
+
+                    // Group by Layer ID; for any group with >1 file, keep the
+                    // canonical zero-GUID-named one and delete the rest.
+                    var byLayerId = new System.Collections.Generic.Dictionary<string,
+                        System.Collections.Generic.List<string>>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var sl in syslays)
+                    {
+                        string? layerId = TryReadLayerId(sl);
+                        if (string.IsNullOrEmpty(layerId)) continue;
+                        if (!byLayerId.TryGetValue(layerId, out var list))
+                            byLayerId[layerId] = list = new System.Collections.Generic.List<string>();
+                        list.Add(sl);
+                    }
+                    foreach (var grp in byLayerId.Values.Where(v => v.Count > 1))
+                    {
+                        // Prefer the canonical zero-GUID filename
+                        // (00000000-0000-0000-0000-000000000000.syslay) as the keeper.
+                        var keeper = grp.FirstOrDefault(p =>
+                            Path.GetFileNameWithoutExtension(p)
+                                .StartsWith("00000000-0000-0000-0000-", StringComparison.Ordinal))
+                            ?? grp.OrderByDescending(p => new FileInfo(p).Length).First();
+                        foreach (var dup in grp.Where(p =>
+                            !string.Equals(p, keeper, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            try
+                            {
+                                File.Delete(dup);
+                                // Also delete the sister folder that matches the
+                                // stale stem (EAE may have laid one down to hold
+                                // the .syslay's opcua / metadata files).
+                                var sisterDir = Path.Combine(
+                                    Path.GetDirectoryName(dup)!,
+                                    Path.GetFileNameWithoutExtension(dup));
+                                if (Directory.Exists(sisterDir))
+                                    Directory.Delete(sisterDir, recursive: true);
+                                result.Warnings.Add(
+                                    $"Removed duplicate-Layer-ID syslay '{Path.GetFileName(dup)}' " +
+                                    $"(canonical '{Path.GetFileName(keeper)}' kept).");
+                            }
+                            catch (Exception ex)
+                            {
+                                result.Warnings.Add(
+                                    $"Could not delete duplicate syslay {Path.GetFileName(dup)}: {ex.Message}");
+                            }
+                        }
+                    }
+                }
+            }
+
             // Reset snapshot.xml to the empty baseline. EAE rewrites it on
             // next Compile with the current device set, so wiping it forces a
             // full re-snapshot instead of an incremental one that could carry
@@ -99,6 +179,20 @@ namespace CodeGen.Devices.Core
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// Reads the &lt;Layer ID="…"&gt; root attribute of a .syslay file
+        /// without loading the whole document. Returns null on parse failure.
+        /// </summary>
+        static string? TryReadLayerId(string syslayPath)
+        {
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(syslayPath);
+                return (string?)doc.Root?.Attribute("ID");
+            }
+            catch { return null; }
         }
     }
 }
