@@ -7,8 +7,8 @@
   <CompilerInfo />
   <StructuredType>
     <VarDeclaration Name="src_id" Type="INT" />
-    <VarDeclaration Name="source_name" Type="STRING" />
-    <VarDeclaration Name="dest_name" Type="STRING" />
+    <VarDeclaration Name="source_name" Type="STRING[150]" />
+    <VarDeclaration Name="dest_name" Type="STRING[150]" />
     <VarDeclaration Name="state" Type="INT" />
   </StructuredType>
 </DataType>
