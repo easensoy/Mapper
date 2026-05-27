@@ -144,9 +144,18 @@ namespace CodeGen.Devices.Core
                     "with zero SolutionId; EAE may reject the import. Restore General/ProjectInfo.xml.");
 
             // Clean up Topology JSONs that earlier Mapper builds wrote with
-            // wrong catalog references / zero DomainTag. EAE keeps complaining
-            // on import as long as these are present in topologyproj.
+            // wrong catalog references / zero DomainTag / now-duplicate uuids.
+            // EAE keeps complaining on import as long as these are present in
+            // topologyproj — observed 2026-05-27: a pre-rename Equipment_BX1.json
+            // coexisted with the current Equipment_Workstation_BX1.json, BOTH
+            // declaring uuid 11111111-2222-3333-4444-000000000050. EAE rejected
+            // the whole topology with "Unable to import topology / Internal
+            // Server Error" and every Logical Device in Deploy & Diagnostic
+            // lost its Physical Device binding. Each entry below also unhooks
+            // the file from TopologyManager.topologyproj so the build target
+            // does not list a deleted file.
             CleanupStaleTopologyJson(eaeRoot, "Equipment_Soft_dPAC_BX1.json", result);
+            CleanupStaleTopologyJson(eaeRoot, "Equipment_BX1.json",           result);
 
             // Resource-identity alignment. The M580/BX1 .hcf files are authored
             // in EAE and carry their own resource scoping; the emitted sysres
