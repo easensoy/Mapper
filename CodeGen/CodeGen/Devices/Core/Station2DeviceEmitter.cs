@@ -266,6 +266,28 @@ namespace CodeGen.Devices.Core
                 }
                 catch { /* best-effort */ }
             }
+            // Each .sysres has a SIBLING folder with the same stem holding its
+            // opcua.xml + offline.xml. When the resource ID changed (multiple
+            // times during dev), the old sibling folder was orphaned. Observed
+            // 2026-05-27: nine stale sister folders remained inside the M580
+            // sysdev folder. EAE doesn't fail on them but the Devices tree
+            // exposes the extras as ghost resources and Solution Integrity
+            // bloats accordingly. Sweep any sister whose stem has no matching
+            // .sysres on disk now.
+            foreach (var sister in Directory.EnumerateDirectories(sysdevFolder))
+            {
+                var sisterName = Path.GetFileName(sister);
+                if (string.IsNullOrEmpty(sisterName)) continue;
+                var matchingSysres = Path.Combine(sysdevFolder, sisterName + ".sysres");
+                if (File.Exists(matchingSysres)) continue;
+                try
+                {
+                    Directory.Delete(sister, recursive: true);
+                    result.Warnings.Add(
+                        $"{deviceName}: removed stale sysres sister folder {sisterName} (no matching .sysres).");
+                }
+                catch { /* best-effort */ }
+            }
             if (!File.Exists(sysresPath))
             {
                 File.WriteAllText(sysresPath, BuildSysresXml(resourceId, resourceName));
