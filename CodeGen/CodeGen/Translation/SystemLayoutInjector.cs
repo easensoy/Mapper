@@ -1013,8 +1013,19 @@ namespace CodeGen.Translation
             // ProcessRecipeArrayGenerator.ValidateProcessIdInvariant throws on.
             // Feed_Station keeps process_id 10 (no M262 component reaches id 10),
             // so the proven M262 recipe is unchanged.
-            const int assemblyProcessId = 101;
-            const int disassemblyProcessId = 102;
+            // process_ids must stay in [0..19] so every state_table in the
+            // runtime chain (ProcessRuntime_Generic_v1.state_table,
+            // ProcessStateBusHandler.state_table, updateComponentState.state_table,
+            // CommonInterlockEvaluator.state_table) can keep its native
+            // ARRAY[20] size without forcing every CAT to allocate ARRAY[200]+
+            // just to hold one literal process_id index slot. Max actuator_id
+            // emitted is 16 (see SystemXmlReader component ordering); 17 and
+            // 18 sit just above that and below the boundary. The
+            // ValidateProcessIdInvariant check still passes because no
+            // Wait1Id of any process equals 17 or 18 (Wait1Ids only reference
+            // component ids 0..16).
+            const int assemblyProcessId = 17;
+            const int disassemblyProcessId = 18;
 
             // No top-level PLC_Start FB: Area_CAT and Station_CAT each contain their own
             // internal plcStart bootstrap, so an external one would double-bootstrap and
