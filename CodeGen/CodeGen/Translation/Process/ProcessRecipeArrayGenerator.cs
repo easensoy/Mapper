@@ -152,7 +152,18 @@ namespace CodeGen.Translation.Process
             int processId = 10, bool commandFromCondition = false)
         {
             var arrays = new RecipeArrays();
-            var states = process.States.OrderBy(s => s.StateNumber).ToList();
+            // Step order MUST follow the transition chain, not State_Number.
+            // VueOne models built incrementally leave State_Number = 0 on every
+            // state added after the first authoring pass (e.g. Assembly_Station's
+            // shaft-place and cover steps). OrderBy(State_Number) then sorts all
+            // those 0-numbered states to the front, so the runtime — which starts
+            // at CurrentStep 0 — begins mid-cycle (observed: shaft_vr first
+            // instead of clamp). Walking Initial_State -> transition chain
+            // reproduces the true sequence Initialisation -> Clamping_Part ->
+            // Bearing_PnP_Picking -> ... -> shaft -> cover. Feed_Station is
+            // unaffected: its State_Numbers are already sequential (0..9), so the
+            // chain walk yields the identical order it had under OrderBy.
+            var states = OrderStatesByTransitionChain(process.States);
 
             // 1. Build scoped registry from the in-scope sensors + actuators ONLY.
             var scopedRegistry = BuildScopedComponentMap(stationContents.Sensors, stationContents.Actuators);
@@ -989,6 +1000,56 @@ namespace CodeGen.Translation.Process
             var n = (s.Name ?? string.Empty).Trim();
             return n.Equals("Initialisation", StringComparison.OrdinalIgnoreCase) ||
                    n.Equals("Initialization", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// Orders a Process's states in EXECUTION order by walking the transition
+        /// chain from the initial state, rather than by State_Number.
+        ///
+        /// <para>Why: VueOne models authored incrementally leave State_Number = 0
+        /// on every state added after the first pass. Ordering by State_Number then
+        /// pulls all the 0-numbered states to the front, and because the runtime
+        /// starts at CurrentStep 0 the recipe begins mid-cycle. Observed on
+        /// Assembly_Station: the shaft-place and cover steps all carry
+        /// State_Number = 0, so the recipe started with shaft_vr instead of the
+        /// real first step (Clamping_Part). Walking Initial_State -&gt;
+        /// transition.DestinationStateID reproduces the true sequence.</para>
+        ///
+        /// <para>Any state not reachable from the initial state (alternate /
+        /// parallel branches such as Bearing_PnP's disassembly leg) is appended in
+        /// declaration order so the classifier still sees every state and no work
+        /// is silently dropped.</para>
+        /// </summary>
+        private static List<VueOneState> OrderStatesByTransitionChain(IList<VueOneState> states)
+        {
+            if (states == null || states.Count == 0) return new List<VueOneState>();
+
+            var byId = new Dictionary<string, VueOneState>(StringComparer.OrdinalIgnoreCase);
+            foreach (var s in states)
+                if (!string.IsNullOrEmpty(s.StateID) && !byId.ContainsKey(s.StateID))
+                    byId[s.StateID] = s;
+
+            var start = states.FirstOrDefault(IsInitialisationState) ?? states[0];
+            var ordered = new List<VueOneState>(states.Count);
+            var seen = new HashSet<VueOneState>();
+
+            VueOneState? cur = start;
+            while (cur != null && seen.Add(cur))
+            {
+                ordered.Add(cur);
+                VueOneState? next = null;
+                var tr = cur.Transitions?.FirstOrDefault();
+                if (tr != null && !string.IsNullOrEmpty(tr.DestinationStateID))
+                    byId.TryGetValue(tr.DestinationStateID, out next);
+                cur = next;
+            }
+
+            // Append unreachable branch states in declaration order so nothing is lost.
+            foreach (var s in states)
+                if (!seen.Contains(s))
+                    ordered.Add(s);
+
+            return ordered;
         }
 
         /// <summary>
