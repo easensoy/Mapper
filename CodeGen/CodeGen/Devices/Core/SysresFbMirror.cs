@@ -254,13 +254,6 @@ namespace CodeGen.Devices.Core
         {
             switch (fbName)
             {
-                // Area2 / Area2_HMI are the M580's OWN local Area driver (the
-                // run-command source for Station2). They have no IO bindings, so
-                // NameBasedPlcGuess can't place them — hard-route to M580 here,
-                // exactly like Station2/Stn2_Term, so the mirror copies them onto
-                // the M580 sysres instead of letting them fall back to the M262.
-                case "Area2":
-                case "Area2_HMI":
                 case "Station2":
                 case "Station2_HMI":
                 case "Assembly_Station":
