@@ -1475,11 +1475,16 @@ namespace CodeGen.Translation
                     ["ConnectionRetryTime"]  = SyslayBuilder.FormatTimeMs(config.MqttConnectionRetryTimeMs),
                 };
                 builder.AddFB(FBIdGenerator.GenerateFBId("MqttConn"),
-                    "MqttConn", "MQTT_CONNECTION", "Runtime.NetConnectivity", 3760, 200, mqttParams);
-                // Bring the link up at startup: INIT (off the Area init) then
-                // CONNECT (off its own INITO). CONN_STATE_IND/retry keep it up.
-                builder.AddEventConnection("Area.INITO", "MqttConn.INIT");
-                builder.AddEventConnection("MqttConn.INITO", "MqttConn.CONNECT");
+                    "MqttConn", "MQTT_CONNECTION", "Runtime.NetConnectivity", 29000, 200, mqttParams);
+                // MqttConn is hard-routed to BX1 (Soft dPAC) by
+                // SysresFbMirror.BucketFor — M262/M580 have no MQTT runtime client
+                // (ReturnCode 50). Its bring-up wires (FB1.INITO -> MqttConn.INIT,
+                // then MqttConn.INITO -> MqttConn.CONNECT) are emitted on the BX1
+                // SYSRES by ResourceWireEmitter. We deliberately do NOT wire
+                // Area.INITO -> MqttConn.INIT here: Area lives on the M262, a
+                // different resource, so that event would never reach a BX1-hosted
+                // connection. (Cross-resource DATA for the publishers is a separate,
+                // EAE-bridged syslay wire added in the publisher step.)
                 report.Missing.Add(
                     $"[MQTT] MqttConn (MQTT_CONNECTION) injected at app scope — " +
                     $"ConnectionID={config.MqttConnectionId}, URL={config.MqttBrokerUrl}, " +
