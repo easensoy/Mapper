@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using CodeGen.Configuration;
 using CodeGen.Models;
 
 namespace CodeGen.Translation.Process
@@ -1068,7 +1069,11 @@ namespace CodeGen.Translation.Process
             if (t == null) return false;
             if (string.Equals(t.Type, "Sensor", StringComparison.OrdinalIgnoreCase)) return false;
             if (string.Equals(t.Type, "Process", StringComparison.OrdinalIgnoreCase)) return false;
-            if (t.States.Count == 7 || IsBranchedSevenState(t)) return false;
+            // Interim stub: when on, Seven_State actuators ARE Five_State-commandable
+            // (they emit as Five_State_Actuator_CAT — see MapperConfig flag), so the
+            // recipe drives them with work/home instead of Pick/Place/Home.
+            if (!MapperConfig.StubSevenStateActuatorsAsFiveState
+                && (t.States.Count == 7 || IsBranchedSevenState(t))) return false;
             return true;
         }
 
@@ -1084,6 +1089,10 @@ namespace CodeGen.Translation.Process
             if (t == null) return false;
             if (string.Equals(t.Type, "Sensor", StringComparison.OrdinalIgnoreCase)) return false;
             if (string.Equals(t.Type, "Process", StringComparison.OrdinalIgnoreCase)) return false;
+            // Interim stub: when on, nothing is Seven_State-commandable — Bearing_PnP
+            // runs as Five_State (see MapperConfig flag), so the recipe must NOT emit
+            // Pick/Place/Home state_val commands a Five_State ECC can't honour.
+            if (MapperConfig.StubSevenStateActuatorsAsFiveState) return false;
             return t.States.Count == 7 || IsBranchedSevenState(t);
         }
 
