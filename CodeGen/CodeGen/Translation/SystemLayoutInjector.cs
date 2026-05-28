@@ -1608,7 +1608,11 @@ namespace CodeGen.Translation
             //      The physical actuator has 3 positions + 2 coils so it
             //      collapses onto Seven_State's ECC regardless of how many
             //      logical Control.xml states it carries.
-            if (actuator.States.Count == 7 || IsBranchedSevenState(actuator))
+            // Interim stub (see MapperConfig.StubSevenStateActuatorsAsFiveState):
+            // when set, Seven_State actuators fall through to Five_State so they
+            // join the stateRprtCmd ring and the recipe can actually drive them.
+            if (!Configuration.MapperConfig.StubSevenStateActuatorsAsFiveState
+                && (actuator.States.Count == 7 || IsBranchedSevenState(actuator)))
                 return "Seven_State_Actuator_CAT";
             if (actuator.States.Count == 4) return "Five_State_Actuator_No_Sensors_CAT";
             return "Five_State_Actuator_CAT";
@@ -1741,6 +1745,22 @@ namespace CodeGen.Translation
             var atHomeIds = ResolveAtHomeStateIds(actuator);
             bool workSensorFitted = AnyComponentReferencesStates(allComponents, actuator, atWorkIds);
             bool homeSensorFitted = AnyComponentReferencesStates(allComponents, actuator, atHomeIds);
+
+            // Interim stub (MapperConfig.StubSevenStateActuatorsAsFiveState): a
+            // Seven_State swivel (Bearing_PnP) emitted as Five_State is physically
+            // double-acting/bistable with 3 position sensors — none of which map
+            // onto the Five_State athome/atwork pair, and it won't spring back on
+            // its own. A sensored Five_State would therefore hang forever on the
+            // return step (athome never trips). Force it sensorless so the ECC
+            // settles work/home on toWork/toHome timers and the recipe always
+            // advances; the drive coil still energises so the swivel visibly
+            // triggers. Lift this when task #69 restores the real Seven_State.
+            if (Configuration.MapperConfig.StubSevenStateActuatorsAsFiveState
+                && (actuator.States.Count == 7 || IsBranchedSevenState(actuator)))
+            {
+                workSensorFitted = false;
+                homeSensorFitted = false;
+            }
 
             // InterlockManager rule arrays from this actuator's own Control.xml
             // NOT-conditions. scopedIds==null only for legacy/test callers →
