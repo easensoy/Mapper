@@ -185,12 +185,18 @@ namespace CodeGen.Services
             NormalizeFiveStateFaultEnables(eaeProjectDir, cfg.SimulatorFullSystem, result);
             // Process FB recipe struct: collapse the 6 overlapping recipe arrays
             // into one Recipe : ARRAY OF RecipeStep on Process1_Generic + the
-            // ProcessRuntime engine (datatype, NOT a new FB). Same flag, same
-            // bidirectional pattern as RuleTable; hardware keeps the 6 arrays.
-            if (cfg.SimulatorFullSystem)
+            // ProcessRuntime engine (datatype, NOT a new FB). Now driven by
+            // (SimulatorFullSystem || UseRecipeStruct) so the HARDWARE / Test
+            // Runtime path uses the struct too, not only the simulator. The three
+            // pieces flip together (deploy the datatype, reshape the composite,
+            // reshape the engine) so the FB interface, engine ST and instance
+            // parameter never disagree. Set UseRecipeStruct=false to revert the
+            // runtime to the six parallel arrays.
+            bool recipeStruct = cfg.SimulatorFullSystem || cfg.UseRecipeStruct;
+            if (recipeStruct)
                 DeployRecipeStepDatatype(eaeProjectDir, result);
-            NormalizeProcess1RecipeArrays(eaeProjectDir, cfg.SimulatorFullSystem, result);
-            NormalizeProcessRuntimeRecipeArrays(eaeProjectDir, cfg.SimulatorFullSystem, result);
+            NormalizeProcess1RecipeArrays(eaeProjectDir, recipeStruct, result);
+            NormalizeProcessRuntimeRecipeArrays(eaeProjectDir, recipeStruct, result);
 
             GenerateCfgFiles(eaeProjectDir, result);
             RegisterInDfbproj(eaeProjectDir, result);
@@ -1137,7 +1143,7 @@ namespace CodeGen.Services
         static readonly (string Name, string Type)[] RecipeArrays = new[]
         {
             ("StepType", "INT"),
-            ("CmdTargetName", "STRING[15]"),
+            ("CmdTargetName", "STRING[150]"),
             ("CmdStateArr", "INT"),
             ("Wait1Id", "INT"),
             ("Wait1State", "INT"),
@@ -1155,7 +1161,7 @@ namespace CodeGen.Services
             "  <CompilerInfo />\r\n" +
             "  <StructuredType>\r\n" +
             "    <VarDeclaration Name=\"StepType\" Type=\"INT\" />\r\n" +
-            "    <VarDeclaration Name=\"CmdTargetName\" Type=\"STRING[15]\" />\r\n" +
+            "    <VarDeclaration Name=\"CmdTargetName\" Type=\"STRING[150]\" />\r\n" +
             "    <VarDeclaration Name=\"CmdStateArr\" Type=\"INT\" />\r\n" +
             "    <VarDeclaration Name=\"Wait1Id\" Type=\"INT\" />\r\n" +
             "    <VarDeclaration Name=\"Wait1State\" Type=\"INT\" />\r\n" +
