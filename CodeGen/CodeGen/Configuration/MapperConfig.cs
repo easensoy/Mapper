@@ -8,6 +8,26 @@ namespace CodeGen.Configuration
     {
         private const string ConfigFileName = "mapper_config.json";
 
+        // Interim flag (2026-05-28): route every Seven_State actuator
+        // (Bearing_PnP swivel) to Five_State_Actuator_CAT instead.
+        // WHY: Process1_Generic commands actuators only through the stateRprtCmd
+        // ring, and Seven_State_Actuator_CAT.fbt declares NO ring port — so the
+        // recipe can neither command Bearing_PnP nor read its state, and the
+        // Assembly sequence stalls forever at the bearing step (command goes
+        // nowhere, the WAIT never satisfies). Five_State sits on the ring, so the
+        // recipe drives it (work/home) and the whole clamp->bearing->shaft
+        // sequence cycles. Trade-off: no true two-position pick/place swivel
+        // until task #69 gives Seven_State its own stateRprtCmd adapter — flip
+        // this to false in that same commit. Gated at all four Seven_State
+        // detection sites (ResolveActuatorFBType, SevenStateActuators,
+        // IsFiveStateCommandable, IsSevenStateCommandable) so the FB type and the
+        // recipe command vocabulary stay in lock-step.
+        // static readonly (not const) on purpose: the const form makes the
+        // compiler treat the real-Seven_State branches gated on this flag as dead
+        // code (CS0162). They are not dead — they are the path #69 re-enables when
+        // it flips this to false. static readonly keeps both branches live.
+        public static readonly bool StubSevenStateActuatorsAsFiveState = true;
+
         public string SystemXmlPath { get; set; } = string.Empty;
         public string MappingRulesPath { get; set; } = string.Empty;
         public string TemplateLibraryPath { get; set; } = string.Empty;
