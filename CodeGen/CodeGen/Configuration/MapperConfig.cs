@@ -240,6 +240,24 @@ namespace CodeGen.Configuration
         /// </summary>
         public bool SimulatorFullSystem { get; set; } = false;
 
+        /// <summary>
+        /// Emit the Process recipe as one <c>Recipe : ARRAY OF RecipeStep</c>
+        /// struct input instead of the six parallel arrays (StepType,
+        /// CmdTargetName, CmdStateArr, Wait1Id, Wait1State, NextStep) — on the
+        /// HARDWARE / Test Runtime path, not just the simulator. The exact same
+        /// machinery the simulator already uses (DeployRecipeStepDatatype +
+        /// NormalizeProcess1RecipeArrays + NormalizeProcessRuntimeRecipeArrays +
+        /// BuildProcessFbParameters useRecipeStruct) is driven by
+        /// <c>(SimulatorFullSystem || UseRecipeStruct)</c>, so the FB interface,
+        /// the engine ST and the instance parameter stay in lock-step. The
+        /// RecipeStep struct's CmdTargetName is STRING[150] (not the simulator's
+        /// old STRING[15]) so long names like 'coverpnp_gripper' don't overflow.
+        /// Default TRUE (the user asked to see the struct in EAE). Set FALSE to
+        /// instantly revert the runtime to the six parallel arrays — a clean
+        /// rollback if the struct ever misbehaves on the rig.
+        /// </summary>
+        public bool UseRecipeStruct { get; set; } = true;
+
         // ============================================================
         // MQTT event-driven state publishing (no-loss fix)
         // ------------------------------------------------------------
