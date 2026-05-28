@@ -578,16 +578,8 @@ namespace CodeGen.Devices.Core
             // One actuator row => no actuator-below-actuator stacking; the 2500 gap
             // from the process row clears the 1700 process body. ResizeFramesToFitFbs
             // then grows the purple frame to enclose the whole thing (no overflow).
-            // Area2 is the M580's own run driver, placed LEFT of Station2 the
-            // same way the M262 puts Area left of Station1 (Area x=2000 <
-            // Station1 x=4500). Area2 takes the leftmost M580 column (x=12200);
-            // Station2 shifts one column right (x=14700) to clear it. The rows
-            // below (Assembly_Station/sensors at y=4000, actuators at y=6500)
-            // sit clear under Area2 (Area body ~650 tall, ends ~3550 < 4000).
-            { "Area2_HMI",       (12200, 2000) },   // mirrors Area_HMI (y=2000)
-            { "Area2",           (12200, 2900) },   // mirrors Area     (y=2900)
-            { "Station2_HMI",    (14700, 2000) },   // mirrors Station1_HMI (y=2000)
-            { "Station2",        (14700, 2900) },   // mirrors Station1     (y=2900)
+            { "Station2_HMI",    (12200, 2000) },   // mirrors Station1_HMI (y=2000)
+            { "Station2",        (12200, 2900) },   // mirrors Station1     (y=2900)
             // sensors + process row (y=4000), mirrors PartInHopper/…/Feed_Station
             { "Assembly_Station",(12200, 4000) },
             { "Disassembly",     (14700, 4000) },
