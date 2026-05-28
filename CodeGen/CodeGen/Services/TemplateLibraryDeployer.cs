@@ -158,15 +158,17 @@ namespace CodeGen.Services
             // ConnectionID value (no wire). See RUNBOOK.txt + the jitter gate.
             if (cfg.MqttPublishEnabled)
             {
+                // MqttStateFormatter is still deployed — the standalone publishers
+                // on BX1 use it to turn an INT state into the STRING payload.
                 DeployMqttFormatter(eaeProjectDir, result);
-                PatchCatMqttPublish(eaeProjectDir, "Five_State_Actuator_CAT",
-                    stateEventSource: "ActuatorCore.pst_out",
-                    stateDataSource: "ActuatorCore.current_state_to_process",
-                    initSource: "StateHandling.INITO", cfg, result);
-                PatchCatMqttPublish(eaeProjectDir, "Sensor_Bool_CAT",
-                    stateEventSource: "FB1.CNF",
-                    stateDataSource: "FB1.Status",
-                    initSource: "StateHandling.INITO", cfg, result);
+                // DELIBERATELY NO LONGER embedding MQTT_PUBLISH inside the shared
+                // CATs. Five_State_Actuator_CAT / Sensor_Bool_CAT instances run on
+                // the M262 and M580 dPACs, where MQTT_PUBLISH has no runtime client
+                // (EAE 24.1 platform matrix — ReturnCode 50). An embedded publish
+                // there published nothing and risked an import error. MQTT now lives
+                // entirely on BX1 (Soft dPAC) as standalone MqttFmt+MqttPub FBs fed
+                // by cross-resource wiring (the BX1 publisher step). The removed calls
+                // were PatchCatMqttPublish(... "Five_State_Actuator_CAT" / "Sensor_Bool_CAT" ...).
             }
 
             // Simulator interface reduction (the 4 Rule arrays -> 1 RuleTable).
