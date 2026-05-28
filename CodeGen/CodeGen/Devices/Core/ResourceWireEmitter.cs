@@ -376,8 +376,13 @@ namespace CodeGen.Devices.Core
                     string.Equals((string?)mqttFb.Attribute("Type"),
                         "MQTT_CONNECTION", StringComparison.Ordinal))
                 {
-                    if (Present(anchors.AreaFb, byName))
-                        eventWires.Add(new Wire($"{anchors.AreaFb}.INITO", "MqttConn.INIT"));
+                    // Bring the link up at boot. A resource with an Area (M262)
+                    // drives INIT off Area.INITO; BX1 has no Area but now HOSTS
+                    // MqttConn, so drive it straight off the resource boot FB
+                    // (FB1.INITO) — otherwise INIT never fires and the connection
+                    // sits idle. It then self-fires CONNECT off its own INITO.
+                    var mqttInit = Present(anchors.AreaFb, byName) ? anchors.AreaFb! : "FB1";
+                    eventWires.Add(new Wire($"{mqttInit}.INITO", "MqttConn.INIT"));
                     eventWires.Add(new Wire("MqttConn.INITO", "MqttConn.CONNECT"));
                 }
 
