@@ -279,13 +279,19 @@ namespace CodeGen.Configuration
         /// safe. Flip TRUE only after the two-part jitter gate passes on the
         /// rig (dead broker + slow broker, ActuatorCore scan stays flat).
         /// </summary>
-        public bool MqttPublishEnabled { get; set; } = false;
+        // Default TRUE (2026-05-28 pivot): MQTT is the chosen IIoT egress, hosted
+        // on the BX1 Soft dPAC. When on, the Mapper injects ONE MqttConn on BX1
+        // (M262/M580 cannot run MQTT — ReturnCode 50) and standalone publishers on
+        // BX1 fed by cross-resource wiring. Set FALSE to suppress all MQTT.
+        public bool MqttPublishEnabled { get; set; } = true;
 
         /// <summary>Broker endpoint for MQTT_CONNECTION.URL (e.g. tcp://192.168.1.50:1883).</summary>
         public string MqttBrokerUrl { get; set; } = "tcp://192.168.1.50:1883";
 
-        /// <summary>MQTT_CONNECTION.ClientIdentifier — one per runtime/resource.</summary>
-        public string MqttClientId { get; set; } = "SMC_M262";
+        /// <summary>MQTT_CONNECTION.ClientIdentifier — one per runtime/resource.
+        /// The connection now runs on the BX1 Soft dPAC, so the broker sees this
+        /// id originating from BX1's NIC.</summary>
+        public string MqttClientId { get; set; } = "SMC_BX1";
 
         /// <summary>
         /// MQTT_CONNECTION.ConnectionID — the registry key. The single
