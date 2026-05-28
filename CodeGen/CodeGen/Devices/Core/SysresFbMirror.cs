@@ -261,7 +261,20 @@ namespace CodeGen.Devices.Core
                 case "Disassembly_Station":
                 case "Stn2_Term":
                     return PlcAssignment.M580;
+                // MQTT runs ONLY on the Soft dPAC (BX1). Per the EAE 24.1 platform
+                // matrix the M262/M580 dPACs have no MQTT runtime client
+                // (MQTT_CONNECTION returns ReturnCode 50 — service unavailable), so
+                // the single MqttConn and every standalone MQTT publish/formatter FB
+                // is hard-routed to BX1. M262/M580 state reaches these via
+                // cross-resource (syslay) wiring that EAE bridges at deploy.
+                case "MqttConn":
+                    return PlcAssignment.BX1;
             }
+            // Standalone MQTT publish/formatter FBs (MqttPub_*, MqttFmt_*) also
+            // live on BX1 — match by prefix so the per-source publishers route there.
+            if (fbName.StartsWith("MqttPub", StringComparison.Ordinal) ||
+                fbName.StartsWith("MqttFmt", StringComparison.Ordinal))
+                return PlcAssignment.BX1;
             var p = HcfSymbolIndex.NameBasedPlcGuess(fbName);
             return p == PlcAssignment.Unknown ? PlcAssignment.M262 : p;
         }
