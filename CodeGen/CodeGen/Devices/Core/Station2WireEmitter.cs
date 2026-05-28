@@ -16,14 +16,28 @@ namespace CodeGen.Devices.Core
         //    fan-out + the report ring among the BX1 components.
         private static readonly ResourceWireEmitter.ResourceAnchors M580Anchors = new(
             Label:        "M580",
-            AreaFb:       null,                 // Area lives on the M262 only
+            AreaFb:       "Area2",              // M580's OWN local Area drives Station2
             StationFb:    "Station2",
             ProcessFb:    "Assembly_Station",
             TerminatorFb: "Stn2_Term",
             HmiAdapterWires: new[]
             {
-                // Station2 faceplate; no Area on this resource so no Area ring.
+                // Area2 is the M580's local run-command source. EmitForResource
+                // threads it into the init chain (FB1.INITO -> Area2.INIT ->
+                // Station2.INIT -> components -> Assembly_Station) because AreaFb
+                // is now non-null; here we add the three adapter wires that make
+                // it the run driver, exactly mirroring the M262 Area->Station1
+                // wiring (ResourceWireEmitter.HmiAdapterWires):
+                //   Area2_HMI faceplate -> Area2  (operator start/stop socket)
+                //   Station2_HMI faceplate -> Station2
+                //   Area2.AreaAdptrOUT -> Station2.AreaAdptrIN  (THE run driver)
+                // Without that last wire Station2 never enables and Assembly
+                // never cycles. No Area2_Term needed: the M262 sysres likewise
+                // leaves Station1.AreaAdptrOUT unterminated and runs fine (the
+                // terminator only closes the chain on the shared syslay canvas).
+                new ResourceWireEmitter.Wire("Area2_HMI.AreaHMIAdptrOUT", "Area2.AreaHMIAdptrIN"),
                 new ResourceWireEmitter.Wire("Station2_HMI.StationHMIAdptrOUT", "Station2.StationHMIAdptrIN"),
+                new ResourceWireEmitter.Wire("Area2.AreaAdptrOUT", "Station2.AreaAdptrIN"),
             });
 
         private static readonly ResourceWireEmitter.ResourceAnchors BX1Anchors = new(
