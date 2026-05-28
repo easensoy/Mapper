@@ -87,17 +87,22 @@ namespace CodeGen.Devices.M580
         {
             if (MapperConfig.StubSevenStateActuatorsAsFiveState)
             {
-                // Five_State stub: single drive coil + athome/atwork sensor pair.
-                // Pick = the Five_State "work" position, driven by the Left coil.
-                // The Place sensor and Right coil have no Five_State port, so they
-                // are intentionally left unbound — the swivel runs sensorless /
-                // timer-settled (see SystemLayoutInjector.BuildActuatorParameters),
-                // so the missing second sensor/coil cannot stall the recipe.
-                // Restore the full 5-channel map when task #69 brings the
-                // Seven_State CAT back.
-                M580ChannelMap["SwivelArmAtHome"]   = ("Bearing_PnP", "athome");
-                M580ChannelMap["SwivelArmAtPick"]   = ("Bearing_PnP", "atwork");
-                M580ChannelMap["Swivel_Arm_Left_Q"] = ("Bearing_PnP", "OutputToWork");
+                // Five_State stub: the Five_State_Actuator_CAT drives TWO coils —
+                // OutputToWork (extend) AND OutputToHome (return) — so the
+                // double-acting swivel CAN go home. Bind BOTH: Left coil = extend
+                // (toward pick / work), Right coil = return (home). Earlier this
+                // bound only the Left coil, so on the home command the FB correctly
+                // drove OutputToHome=TRUE but it reached no physical coil
+                // (Swivel_Arm_Right_Q was unbound) and the swivel stayed out —
+                // confirmed online: VALUE1 OutputToHome=TRUE, VALUE2 OutputToWork=
+                // FALSE, yet the arm didn't move. athome/atwork are bound for
+                // completeness; the FB runs sensorless/timer-settled
+                // (SystemLayoutInjector.BuildActuatorParameters). The 3rd (Place)
+                // position sensor has no Five_State port, so it stays unbound.
+                M580ChannelMap["SwivelArmAtHome"]    = ("Bearing_PnP", "athome");
+                M580ChannelMap["SwivelArmAtPick"]    = ("Bearing_PnP", "atwork");
+                M580ChannelMap["Swivel_Arm_Left_Q"]  = ("Bearing_PnP", "OutputToWork");
+                M580ChannelMap["Swivel_Arm_Right_Q"] = ("Bearing_PnP", "OutputToHome");
             }
             else
             {
