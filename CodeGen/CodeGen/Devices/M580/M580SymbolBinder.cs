@@ -75,13 +75,40 @@ namespace CodeGen.Devices.M580
                 // Sensors (Sensor_Bool_CAT)
                 ["Bearing_At_Place_Sensor"] = ("BearingSensor", "Input"),
                 ["ShaftPnpSensor"]          = ("ShaftSensor", "Input"),
-                // Bearing_PnP swivel (Seven_State: 3 position sensors + 2 coils)
-                ["SwivelArmAtHome"]         = ("Bearing_PnP", "athome"),
-                ["SwivelArmAtPick"]         = ("Bearing_PnP", "atwork1"),
-                ["SwivelArmAtPlace"]        = ("Bearing_PnP", "atwork2"),
-                ["Swivel_Arm_Left_Q"]       = ("Bearing_PnP", "current_state1_to_plc"),
-                ["Swivel_Arm_Right_Q"]      = ("Bearing_PnP", "current_state2_to_plc"),
+                // Bearing_PnP swivel channels are added by the static ctor below —
+                // their target ports differ between the real Seven_State swivel and
+                // the interim Five_State stub.
             };
+
+        // Bearing_PnP (swivel) channel bindings, split out because the target CAT
+        // ports differ between the real Seven_State swivel and the interim
+        // Five_State stub (MapperConfig.StubSevenStateActuatorsAsFiveState).
+        static M580SymbolBinder()
+        {
+            if (MapperConfig.StubSevenStateActuatorsAsFiveState)
+            {
+                // Five_State stub: single drive coil + athome/atwork sensor pair.
+                // Pick = the Five_State "work" position, driven by the Left coil.
+                // The Place sensor and Right coil have no Five_State port, so they
+                // are intentionally left unbound — the swivel runs sensorless /
+                // timer-settled (see SystemLayoutInjector.BuildActuatorParameters),
+                // so the missing second sensor/coil cannot stall the recipe.
+                // Restore the full 5-channel map when task #69 brings the
+                // Seven_State CAT back.
+                M580ChannelMap["SwivelArmAtHome"]   = ("Bearing_PnP", "athome");
+                M580ChannelMap["SwivelArmAtPick"]   = ("Bearing_PnP", "atwork");
+                M580ChannelMap["Swivel_Arm_Left_Q"] = ("Bearing_PnP", "OutputToWork");
+            }
+            else
+            {
+                // Real Seven_State swivel: 3 position sensors + 2 drive coils.
+                M580ChannelMap["SwivelArmAtHome"]    = ("Bearing_PnP", "athome");
+                M580ChannelMap["SwivelArmAtPick"]    = ("Bearing_PnP", "atwork1");
+                M580ChannelMap["SwivelArmAtPlace"]   = ("Bearing_PnP", "atwork2");
+                M580ChannelMap["Swivel_Arm_Left_Q"]  = ("Bearing_PnP", "current_state1_to_plc");
+                M580ChannelMap["Swivel_Arm_Right_Q"] = ("Bearing_PnP", "current_state2_to_plc");
+            }
+        }
 
         /// <summary>Direct-bind the deployed M580 X80 <c>.hcf</c> channels to the
         /// consumer CAT ports. Tag <c>[HcfBind][M580]</c>.</summary>
