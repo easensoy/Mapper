@@ -1658,7 +1658,24 @@ namespace CodeGen.Translation
                 ["actuator_name"] = SyslayBuilder.FormatString(actuator.Name.ToLowerInvariant()),
                 ["actuator_id"]   = SyslayBuilder.FormatInt(assignedId),
             };
-            // Seven_State_Actuator_CAT-specific block removed 2026-05-21.
+            // Seven_State_Actuator_CAT is now data-driven (2026-05-27). The CAT
+            // exposes TargetPickState / TargetPlaceState / TargetHomeState inputs
+            // that its ECC reads instead of hardcoded literals. Emit them
+            // explicitly so the command vocabulary lives in the syslay data, not
+            // baked in the function block. The values match the SE Seven_State
+            // ECC's published-state convention (AtPick publishes 1, AtPlace 2,
+            // AtHome 0) — which is also the value ProcessRecipeArrayGenerator's
+            // MapSevenStateCommandFromConditionName emits as the CMD state, so
+            // the command and the actuator's settle value stay in lock-step.
+            // Defaults equal the CAT's InitialValue, so emitting them is a no-op
+            // on behaviour but makes the data-driven contract explicit and lets
+            // a future per-component recipe override the slot numbers per rig.
+            if (string.Equals(fbType, "Seven_State_Actuator_CAT", StringComparison.OrdinalIgnoreCase))
+            {
+                dict["TargetPickState"]  = SyslayBuilder.FormatInt(1);
+                dict["TargetPlaceState"] = SyslayBuilder.FormatInt(2);
+                dict["TargetHomeState"]  = SyslayBuilder.FormatInt(0);
+            }
             // Vacuum_Gripper_CAT + Five_State_Actuator_No_Sensors_CAT (the other
             // non-5-state cases that still route through this minimal path)
             // only need the scalar actuator_name + actuator_id pair declared above.
