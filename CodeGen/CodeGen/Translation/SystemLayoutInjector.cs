@@ -1051,33 +1051,12 @@ namespace CodeGen.Translation
             builder.AddFB(FBIdGenerator.GenerateFBId("Station1_HMI"),
                 "Station1_HMI", "Station_CAT", "Main", 2220, 100);
 
-            // Station 2 structural stack — same shape as Station 1, but driven
-            // by its OWN local Area FB (Area2), NOT the M262's Area. Each PLC
-            // resource runs its own sysres event graph in isolation, so a single
-            // shared Area on the M262 can never reach Station2 on the M580 (an
-            // adapter wire Area.AreaAdptrOUT -> Station2.AreaAdptrIN would cross
-            // the PLC boundary and never fire at runtime). With no local Area,
-            // Station2.AreaAdptrIN gets no run command, Station2 never enables
-            // its StationAdaptrOUT, and Assembly_Station never cycles — the
-            // "Assembly doesn't run / Clamp + Bearing_PnP don't trigger" bug.
-            // Area2 reproduces the proven M262 Area->Station1 driver on the M580:
-            // Station2WireEmitter wires Area2.AreaAdptrOUT -> Station2.AreaAdptrIN
-            // and threads Area2 into the M580 init chain (FB1.INITO -> Area2.INIT
-            // -> Station2.INIT -> components -> Assembly_Station). Bucketed to the
-            // M580 by SysresFbMirror.BucketFor so the mirror copies it onto the
-            // M580 sysres. Mirrors SMC_Rig_Expo_withClamp (an Area per station
-            // resource). The post-syslay CanonicalLayout pass rewrites coordinates;
-            // the values here just need to be unique so two FBs don't overlap.
-            builder.AddFB(FBIdGenerator.GenerateFBId("Area2_HMI"),
-                "Area2_HMI", "Area_CAT", "Main", 11600, 100);
-
-            builder.AddFB(FBIdGenerator.GenerateFBId("Area2"),
-                "Area2", "Area", "Main", 11600, 600,
-                new Dictionary<string, string>
-                {
-                    ["AreaName"] = SyslayBuilder.FormatString("Area2")
-                });
-
+            // Station 2 structural stack — same shape as Station 1, parented
+            // under the same Area FB. Mirrors SMC_Rig_Expo_withClamp's reference
+            // layout (Station + Station_HMI + Station_Term per station). The
+            // post-syslay CanonicalLayout pass rewrites coordinates; the
+            // values here just need to be unique so two FBs don't share an
+            // initial position. M580 frame holds Station2 graphically.
             builder.AddFB(FBIdGenerator.GenerateFBId("Station2"),
                 "Station2", "Station", "Main", 12000, 600,
                 new Dictionary<string, string>
