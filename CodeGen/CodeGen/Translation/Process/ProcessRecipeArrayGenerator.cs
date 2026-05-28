@@ -315,52 +315,7 @@ namespace CodeGen.Translation.Process
                     }
                 }
 
-                // CROSS-PROCESS RELEASE AWARENESS (added 2026-05-28). An actuator
-                // advanced in THIS process whose return-to-home is owned by ANOTHER
-                // process must NOT be auto-retracted here. Concretely: Assembly
-                // clamps the part (Clamping_Part -> Clamp/Clamped) and must HOLD it
-                // through bearing+shaft insertion; the Disassembly process releases
-                // it via its 'Unclamping' step (condition Clamp/Home Finished). The
-                // recipe generator only sees THIS process's steps, so without this
-                // it treats the clamp as "stranded" and auto-inserts clamp->home
-                // immediately after clamp->work — releasing the part before any
-                // assembly happens (observed on the rig: clamp pulses ~1s then lets
-                // go). Scan the OTHER Process components for a transition condition
-                // that references one of this process's actuators at a home/release
-                // state, and exclude those so they hold across the boundary.
-                var releasedElsewhere = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var other in allComponents)
-                {
-                    if (other == null) continue;
-                    if (!string.Equals(other.Type, "Process", StringComparison.OrdinalIgnoreCase)) continue;
-                    if (NameEquals(other.Name, process.Name)) continue;     // skip THIS process
-                    foreach (var ost in other.States)
-                        foreach (var otr in ost.Transitions)
-                            foreach (var oc in otr.Conditions)
-                            {
-                                var refComp = LookupComponent(oc.ComponentID, allComponents);
-                                if (refComp == null ||
-                                    !string.Equals(refComp.Type, "Actuator", StringComparison.OrdinalIgnoreCase))
-                                    continue;
-                                var cn = oc.Name ?? string.Empty;
-                                int sl = cn.IndexOf('/');
-                                var sref = (sl >= 0 ? cn.Substring(sl + 1) : cn).Trim().ToLowerInvariant();
-                                if (sref.Contains("home") || sref.Contains("returned") ||
-                                    sref.Contains("unclamp") || sref.Contains("finished"))
-                                    releasedElsewhere.Add((refComp.Name ?? string.Empty).Trim());
-                            }
-                }
-                var heldAcross = advancedOrder
-                    .Where(a => !retracted.Contains(a) && releasedElsewhere.Contains(a)).ToList();
-                if (heldAcross.Count > 0)
-                    arrays.Warnings.Add(
-                        "[Recipe] auto-retract SKIPPED for '" + string.Join(", ", heldAcross) +
-                        "' — held across the process boundary (returned home by another " +
-                        "process's step, e.g. Disassembly's Unclamping). The actuator stays " +
-                        "engaged until that process releases it.");
-
-                var stranded = advancedOrder
-                    .Where(a => !retracted.Contains(a) && !releasedElsewhere.Contains(a)).ToList();
+                var stranded = advancedOrder.Where(a => !retracted.Contains(a)).ToList();
 
                 if (stranded.Count > 0)
                 {
