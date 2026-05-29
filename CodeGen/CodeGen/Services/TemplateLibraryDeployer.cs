@@ -1555,8 +1555,8 @@ namespace CodeGen.Services
                 // ConnectionID is a STRING (the working MQTT_CONNECTION/SUBSCRIBE
                 // use $ConnectionID='SoftdPAC'); both the connection and every
                 // publisher must carry the SAME string to bind.
-                P(pubFb, "ConnectionID", Q(cfg.MqttConnectionId.ToString()));
-                P(pubFb, "RootPath", Q("$${PATH}"));   // EAE resolves per-instance; falls back to Mapper-stamped topic if unresolved
+                P(pubFb, "ConnectionID", Q(cfg.MqttClientId));
+                P(pubFb, "RootPath", Q("smc/$${PATH}"));   // smc/<instance>/state per-instance topic; EAE resolves $${PATH}
                 P(pubFb, "Topic1", Q("state"));
                 P(pubFb, "QoS1", cfg.MqttQoS.ToString());
                 P(pubFb, "Retain1", cfg.MqttRetain ? "TRUE" : "FALSE");
@@ -1819,7 +1819,7 @@ namespace CodeGen.Services
             "      <ECTransition Source=\"Format\" Destination=\"START\" Condition=\"1\" x=\"500\" y=\"520\" />\r\n" +
             "    </ECC>\r\n" +
             "    <Algorithm Name=\"INIT\" Comment=\"Initialization algorithm\"><ST><![CDATA[;]]></ST></Algorithm>\r\n" +
-            "    <Algorithm Name=\"Fmt\" Comment=\"INT state to STRING payload\"><ST><![CDATA[payload := INT_TO_STRING(state);]]></ST></Algorithm>\r\n" +
+            "    <Algorithm Name=\"Fmt\" Comment=\"INT state to JSON payload\"><ST><![CDATA[payload := CONCAT(CONCAT('{state:', INT_TO_STRING(state)), '}');]]></ST></Algorithm>\r\n" +
             "  </BasicFB>\r\n" +
             "</FBType>\r\n";
 
