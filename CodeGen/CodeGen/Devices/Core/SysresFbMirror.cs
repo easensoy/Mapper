@@ -17,8 +17,10 @@ namespace CodeGen.Devices.Core
         }
 
         public record SyslayFbParameter(string Name, string Value);
+        public record SyslayFbAttribute(string Name, string Value);
         public record SyslayFb(string Id, string Name, string Type, string Namespace,
-            string X, string Y, List<SyslayFbParameter> Parameters);
+            string X, string Y, List<SyslayFbParameter> Parameters,
+            List<SyslayFbAttribute> Attributes);
 
         public static List<SyslayFb> ReadSyslayTopLevelFbs(string syslayPath)
         {
@@ -41,6 +43,12 @@ namespace CodeGen.Devices.Core
                             (string?)p.Attribute("Name")  ?? string.Empty,
                             (string?)p.Attribute("Value") ?? string.Empty))
                         .Where(p => !string.IsNullOrEmpty(p.Name))
+                        .ToList(),
+                    Attributes: e.Elements(ns + "Attribute")
+                        .Select(a => new SyslayFbAttribute(
+                            (string?)a.Attribute("Name")  ?? string.Empty,
+                            (string?)a.Attribute("Value") ?? string.Empty))
+                        .Where(a => !string.IsNullOrEmpty(a.Name))
                         .ToList()))
                 .Where(fb => !string.IsNullOrWhiteSpace(fb.Name))
                 .ToList();
@@ -133,6 +141,12 @@ namespace CodeGen.Devices.Core
                 // M262 via BucketFor's default fallback (name guess → Unknown
                 // → M262), matching where the embedded publishes physically run.
                 "MQTT_CONNECTION",
+                // Standalone MQTT publisher FBs (MqttFmt_<comp> + MqttPub_<comp>)
+                // emitted at app scope and routed to BX1 by BucketFor. Without a
+                // mirror entry they stay on the syslay only and EAE never deploys
+                // them to the BX1 resource (same reason MQTT_CONNECTION is here).
+                "MqttStateFormatter",
+                "MQTT_PUBLISH_115480E69E664F878",
             };
 
             // Build a Name → existing sysres FB element index so we can UPDATE
@@ -169,6 +183,17 @@ namespace CodeGen.Devices.Core
 
                 if (existingByName.TryGetValue(fb.Name, out var existing))
                 {
+                    // Upsert <Attribute> children (don't blanket-remove — EAE may
+                    // have added its own). Keeps a mirrored MQTT_PUBLISH's
+                    // InterfaceParams channel-count config current across regens.
+                    foreach (var a in fb.Attributes)
+                    {
+                        var existingAttr = existing.Elements(ns + "Attribute")
+                            .FirstOrDefault(x => (string?)x.Attribute("Name") == a.Name);
+                        if (existingAttr != null) existingAttr.SetAttributeValue("Value", a.Value);
+                        else existing.Add(new XElement(ns + "Attribute",
+                            new XAttribute("Name", a.Name), new XAttribute("Value", a.Value)));
+                    }
                     // Replace parameter children only; keep ID / Mapping / x / y
                     // so EAE keeps its stable handle on the instance across regens.
                     existing.Elements(ns + "Parameter").Remove();
@@ -193,6 +218,15 @@ namespace CodeGen.Devices.Core
                     new XAttribute("Mapping",   fb.Id),
                     new XAttribute("x",         fb.X),
                     new XAttribute("y",         fb.Y));
+
+                // Carry <Attribute> children (generic-FB InterfaceParams) so a
+                // mirrored MQTT_PUBLISH keeps its channel-count config on the sysres.
+                foreach (var a in fb.Attributes)
+                {
+                    fbElement.Add(new XElement(ns + "Attribute",
+                        new XAttribute("Name",  a.Name),
+                        new XAttribute("Value", a.Value)));
+                }
 
                 foreach (var p in fb.Parameters)
                 {
