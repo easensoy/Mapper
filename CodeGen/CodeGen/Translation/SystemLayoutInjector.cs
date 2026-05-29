@@ -1447,43 +1447,30 @@ namespace CodeGen.Translation
             // unchanged when MQTT is off.
             if (config != null && config.MqttPublishEnabled)
             {
+                // Reference-exact MQTT_CONNECTION (TrainingIIoT 953A76D7B5F530F1.sysres:
+                // only QI / ConnectionID / URL / ClientIdentifier). The Soft-dPAC
+                // defaults cover the rest — the reference connects with just these
+                // four — so the earlier QueueDepth/KeepAlive/timeout params are dropped
+                // to match the proven shape and avoid unverified port names.
                 var mqttParams = new Dictionary<string, string>
                 {
                     ["QI"] = SyslayBuilder.FormatBool(true),
-                    // ConnectionID is a STRING (working MQTT_CONNECTION uses
-                    // $ConnectionID='SoftdPAC'); the embedded MqttPub FBs carry
-                    // the SAME string to bind. Quote the configured value.
-                    ["ConnectionID"] = SyslayBuilder.FormatString(config.MqttConnectionId.ToString()),
+                    // ConnectionID = binding key (STRING). Every embedded MqttPub
+                    // carries the SAME string to bind (no wire). Uses MqttClientId.
+                    ["ConnectionID"] = SyslayBuilder.FormatString(config.MqttClientId),
                     ["URL"] = SyslayBuilder.FormatString(config.MqttBrokerUrl),
                     ["ClientIdentifier"] = SyslayBuilder.FormatString(config.MqttClientId),
-                    ["CleanSession"] = SyslayBuilder.FormatBool(config.MqttCleanSession),
-                    ["QueueDepth"] = SyslayBuilder.FormatInt(config.MqttQueueDepth),
-                    // TIME-typed and INT-typed timeout/retry parameters. Stamped
-                    // 2026-05-26 after the M262 ran the new code but the broker
-                    // logged ZERO TCP-connect attempts from 192.168.1.10 — EAE's
-                    // implicit default for an unset TIME port is T#0s, so the
-                    // FB aborted each connect before the SYN-ACK round-trip
-                    // could complete and never queued a retry. The earlier
-                    // ERR_CAST_CONSTANT regression came from passing INT
-                    // CONSTANTS to TIME ports (e.g. KeepAlive := 60); the fix
-                    // is to format them as TIME literals via FormatTimeMs
-                    // (emits "T#NNNms") and only ConnectionRetryCount, which
-                    // is actually INT, stays a plain integer via FormatInt.
-                    ["KeepAlive"]            = SyslayBuilder.FormatTimeMs(config.MqttKeepAliveMs),
-                    ["ConnectionTimeout"]    = SyslayBuilder.FormatTimeMs(config.MqttConnectionTimeoutMs),
-                    ["ConnectionRetryCount"] = SyslayBuilder.FormatInt(config.MqttConnectionRetryCount),
-                    ["ConnectionRetryTime"]  = SyslayBuilder.FormatTimeMs(config.MqttConnectionRetryTimeMs),
                 };
                 builder.AddFB(FBIdGenerator.GenerateFBId("MqttConn"),
                     "MqttConn", "MQTT_CONNECTION", "Runtime.NetConnectivity", 3760, 200, mqttParams);
-                // Bring the link up at startup: INIT (off the Area init) then
-                // CONNECT (off its own INITO). CONN_STATE_IND/retry keep it up.
-                builder.AddEventConnection("Area.INITO", "MqttConn.INIT");
-                builder.AddEventConnection("MqttConn.INITO", "MqttConn.CONNECT");
+                // MqttConn is routed to BX1 (Soft dPAC) by SysresFbMirror.BucketFor —
+                // M262/M580 have no MQTT runtime client. Its INIT/CONNECT bring-up is
+                // emitted on the BX1 SYSRES by ResourceWireEmitter (a syslay-only event
+                // wire never fires at runtime); Area lives on the M262, a different
+                // resource, so there is NO Area.INITO -> MqttConn.INIT wire here.
                 report.Missing.Add(
-                    $"[MQTT] MqttConn (MQTT_CONNECTION) injected at app scope — " +
-                    $"ConnectionID={config.MqttConnectionId}, URL={config.MqttBrokerUrl}, " +
-                    $"QueueDepth={config.MqttQueueDepth}. Embedded MqttPub FBs bind by ConnectionID.");
+                    $"[MQTT] MqttConn (MQTT_CONNECTION) injected — ConnectionID={config.MqttClientId}, " +
+                    $"URL={config.MqttBrokerUrl}; routed to BX1, INIT/CONNECT wired on BX1 sysres.");
             }
 
             BuildFeedStationWiring(builder, contents);
