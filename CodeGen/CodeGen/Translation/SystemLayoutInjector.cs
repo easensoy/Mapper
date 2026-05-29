@@ -1475,81 +1475,15 @@ namespace CodeGen.Translation
                     ["ConnectionRetryTime"]  = SyslayBuilder.FormatTimeMs(config.MqttConnectionRetryTimeMs),
                 };
                 builder.AddFB(FBIdGenerator.GenerateFBId("MqttConn"),
-                    "MqttConn", "MQTT_CONNECTION", "Runtime.NetConnectivity", 29000, 200, mqttParams);
-                // MqttConn is hard-routed to BX1 (Soft dPAC) by
-                // SysresFbMirror.BucketFor — M262/M580 have no MQTT runtime client
-                // (ReturnCode 50). Its bring-up wires (FB1.INITO -> MqttConn.INIT,
-                // then MqttConn.INITO -> MqttConn.CONNECT) are emitted on the BX1
-                // SYSRES by ResourceWireEmitter. We deliberately do NOT wire
-                // Area.INITO -> MqttConn.INIT here: Area lives on the M262, a
-                // different resource, so that event would never reach a BX1-hosted
-                // connection. (Cross-resource DATA for the publishers is a separate,
-                // EAE-bridged syslay wire added in the publisher step.)
+                    "MqttConn", "MQTT_CONNECTION", "Runtime.NetConnectivity", 3760, 200, mqttParams);
+                // Bring the link up at startup: INIT (off the Area init) then
+                // CONNECT (off its own INITO). CONN_STATE_IND/retry keep it up.
+                builder.AddEventConnection("Area.INITO", "MqttConn.INIT");
+                builder.AddEventConnection("MqttConn.INITO", "MqttConn.CONNECT");
                 report.Missing.Add(
                     $"[MQTT] MqttConn (MQTT_CONNECTION) injected at app scope — " +
                     $"ConnectionID={config.MqttConnectionId}, URL={config.MqttBrokerUrl}, " +
                     $"QueueDepth={config.MqttQueueDepth}. Embedded MqttPub FBs bind by ConnectionID.");
-
-                // MQTT Step-3 PROOF (single component). Emit ONE standalone publisher
-                // pair (MqttFmt_<comp> + MqttPub_<comp>) on BX1 — routed there by
-                // BucketFor's MqttFmt_/MqttPub_ prefix — fed by the component's
-                // exposed state_out boundary over a CROSS-RESOURCE wire. This proves
-                // EAE's deploy-time cross-resource bridge carries M262 state to BX1
-                // before we expand to every M262/M580 component. The publishers' INIT
-                // and the local Fmt->Pub chain are ALSO emitted on the BX1 sysres by
-                // ResourceWireEmitter (a syslay-only wire never fires at runtime); only
-                // the cross-resource REQ/state feed below relies on the EAE bridge.
-                var proofAct = contents.Actuators.FirstOrDefault(a =>
-                        string.Equals(a.Name, "Feeder", StringComparison.OrdinalIgnoreCase))
-                    ?? contents.Actuators.FirstOrDefault(a =>
-                        plcIndex.ResolveComponent(a.Name, bindings) == PlcAssignment.M262);
-                if (proofAct != null)
-                {
-                    var compName = InstanceNameResolver.Resolve(proofAct,
-                        overrides.ByComponentId, overrides.ByVueOneName);
-                    var fmtName = "MqttFmt_" + compName;
-                    var pubName = "MqttPub_" + compName;
-                    var topic = $"{config.MqttTopicRoot}/{compName.ToLowerInvariant()}/state";
-
-                    builder.AddFB(FBIdGenerator.GenerateFBId(fmtName),
-                        fmtName, "MqttStateFormatter", "Main", 29000, 1200);
-
-                    var pubParams = new Dictionary<string, string>
-                    {
-                        ["QI"] = SyslayBuilder.FormatBool(true),
-                        ["ConnectionID"] = SyslayBuilder.FormatString(config.MqttConnectionId.ToString()),
-                        ["Topic1"] = SyslayBuilder.FormatString(topic),
-                        ["QoS1"] = SyslayBuilder.FormatInt(config.MqttQoS),
-                        ["Retain1"] = SyslayBuilder.FormatBool(config.MqttRetain),
-                    };
-                    var pubAttrs = new Dictionary<string, string>
-                    {
-                        // Generic multi-channel FB: CNTX:=1 materialises Topic1/Payload1/
-                        // QoS1/PUBLISH1. Same hashed variant + InterfaceParams the working
-                        // MQTT_SUBSCRIBE uses; the plain base type fails ERR_NO_SUCH_TYPE.
-                        ["Configuration.GenericFBType.InterfaceParams"] = "Runtime.NetConnectivity#CNTX:=1",
-                    };
-                    builder.AddFB(FBIdGenerator.GenerateFBId(pubName),
-                        pubName, "MQTT_PUBLISH_115480E69E664F878", "Main", 29600, 1200,
-                        pubParams, attributes: pubAttrs);
-
-                    // Cross-resource feed (M262 component -> BX1 formatter): the ONE
-                    // unproven wire. EAE is documented to auto-bridge app-scope
-                    // connections across resources at deploy.
-                    builder.AddEventConnection($"{compName}.state_out", $"{fmtName}.REQ");
-                    builder.AddDataConnection($"{compName}.current_state_to_process", $"{fmtName}.state");
-                    // Local publish chain (formatter -> publisher, both on BX1).
-                    builder.AddEventConnection($"{fmtName}.CNF", $"{pubName}.PUBLISH1");
-                    builder.AddDataConnection($"{fmtName}.payload", $"{pubName}.Payload1");
-
-                    report.Missing.Add(
-                        $"[MQTT] PROOF publisher {pubName} on BX1 (topic '{topic}'), fed cross-resource " +
-                        $"by {compName}.state_out — bridge UNVERIFIED, deploy and check the broker.");
-                }
-                else
-                {
-                    report.Missing.Add("[MQTT] PROOF publisher skipped — no M262 actuator in scope.");
-                }
             }
 
             BuildFeedStationWiring(builder, contents);

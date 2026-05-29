@@ -158,28 +158,15 @@ namespace CodeGen.Services
             // ConnectionID value (no wire). See RUNBOOK.txt + the jitter gate.
             if (cfg.MqttPublishEnabled)
             {
-                // MqttStateFormatter is still deployed — the standalone publishers
-                // on BX1 use it to turn an INT state into the STRING payload.
                 DeployMqttFormatter(eaeProjectDir, result);
-                // DELIBERATELY NO LONGER embedding MQTT_PUBLISH inside the shared
-                // CATs. Five_State_Actuator_CAT / Sensor_Bool_CAT instances run on
-                // the M262 and M580 dPACs, where MQTT_PUBLISH has no runtime client
-                // (EAE 24.1 platform matrix — ReturnCode 50). An embedded publish
-                // there published nothing and risked an import error. MQTT now lives
-                // entirely on BX1 (Soft dPAC) as standalone MqttFmt+MqttPub FBs fed
-                // by cross-resource wiring (the BX1 publisher step). The removed calls
-                // were PatchCatMqttPublish(... "Five_State_Actuator_CAT" / "Sensor_Bool_CAT" ...).
-
-                // Step 3 piece 1 — expose component state at the CAT BOUNDARY so the
-                // BX1 publishers can read it over a cross-resource wire. The actuator
-                // CAT has no boundary state output, so add an event state_out (WITH
-                // current_state_to_process) + an INT OutputVar current_state_to_process,
-                // wired from ActuatorCore.pst_out / ActuatorCore.current_state_to_process.
-                // Sensor_Bool_CAT ALREADY exposes pst_out (event) + Status (INT) at its
-                // boundary, so it needs no patch — the publisher step wires those.
-                PatchCatExposeState(eaeProjectDir, "Five_State_Actuator_CAT",
-                    "ActuatorCore.pst_out", "ActuatorCore.current_state_to_process",
-                    "state_out", "current_state_to_process", "INT", result);
+                PatchCatMqttPublish(eaeProjectDir, "Five_State_Actuator_CAT",
+                    stateEventSource: "ActuatorCore.pst_out",
+                    stateDataSource: "ActuatorCore.current_state_to_process",
+                    initSource: "StateHandling.INITO", cfg, result);
+                PatchCatMqttPublish(eaeProjectDir, "Sensor_Bool_CAT",
+                    stateEventSource: "FB1.CNF",
+                    stateDataSource: "FB1.Status",
+                    initSource: "StateHandling.INITO", cfg, result);
             }
 
             // Simulator interface reduction (the 4 Rule arrays -> 1 RuleTable).
@@ -1608,144 +1595,6 @@ namespace CodeGen.Services
             catch (Exception ex)
             {
                 result.Warnings.Add($"{catName} MQTT publish patch failed: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Additive deploy-time patch: expose a CAT's internal post-update state at
-        /// the COMPOSITE BOUNDARY so an external (cross-resource) consumer can read
-        /// it. Adds an EventOutput <paramref name="boundaryEventName"/> (WITH
-        /// <paramref name="boundaryDataName"/>), an OutputVar
-        /// <paramref name="boundaryDataName"/> : <paramref name="dataType"/>, the
-        /// matching graphical &lt;Output&gt; pins, and connections from the internal
-        /// source ports (<paramref name="internalEventSource"/> /
-        /// <paramref name="internalDataSource"/>). Nothing existing is removed — the
-        /// internal source event keeps all current targets (EAE allows event
-        /// multi-fan-out, and the INT state already fans to several consumers).
-        /// Idempotent: skips if the boundary event already exists.
-        ///
-        /// Used by the BX1 MQTT publisher path. Five_State_Actuator_CAT has no
-        /// boundary state output, so this adds state_out / current_state_to_process
-        /// off ActuatorCore. Sensor_Bool_CAT already exposes pst_out / Status, so it
-        /// is not patched (the publisher wires those existing ports for sensors).
-        /// </summary>
-        static void PatchCatExposeState(string eaeProjectDir, string catName,
-            string internalEventSource, string internalDataSource,
-            string boundaryEventName, string boundaryDataName, string dataType,
-            DeployResult result)
-        {
-            var fbt = Directory.EnumerateFiles(
-                    Path.Combine(eaeProjectDir, "IEC61499"),
-                    catName + ".fbt", SearchOption.AllDirectories)
-                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
-                ?? string.Empty;
-            if (string.IsNullOrEmpty(fbt))
-            {
-                result.Warnings.Add($"{catName}.fbt not found; expose-state patch skipped.");
-                return;
-            }
-
-            try
-            {
-                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                var root = doc.Root;
-                if (root == null) return;
-                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
-
-                var iface = root.Element(ns + "InterfaceList");
-                var net = root.Element(ns + "FBNetwork");
-                if (iface == null || net == null)
-                {
-                    result.Warnings.Add($"{catName}.fbt: no InterfaceList/FBNetwork; expose-state patch skipped.");
-                    return;
-                }
-
-                var eventOutputs = iface.Element(ns + "EventOutputs");
-                if (eventOutputs == null)
-                {
-                    eventOutputs = new System.Xml.Linq.XElement(ns + "EventOutputs");
-                    var eventInputs = iface.Element(ns + "EventInputs");
-                    if (eventInputs != null) eventInputs.AddAfterSelf(eventOutputs);
-                    else iface.AddFirst(eventOutputs);
-                }
-
-                // Idempotent: skip if already exposed.
-                if (eventOutputs.Elements(ns + "Event")
-                        .Any(e => (string?)e.Attribute("Name") == boundaryEventName))
-                {
-                    result.PatchesApplied.Add(
-                        $"{catName}: state already exposed at boundary ({boundaryEventName}) — skipped");
-                    return;
-                }
-
-                // 1) Boundary EventOutput WITH the state var.
-                eventOutputs.Add(new System.Xml.Linq.XElement(ns + "Event",
-                    new System.Xml.Linq.XAttribute("Name", boundaryEventName),
-                    new System.Xml.Linq.XAttribute("Comment", "Post-update state for the MQTT cross-resource bridge"),
-                    new System.Xml.Linq.XElement(ns + "With",
-                        new System.Xml.Linq.XAttribute("Var", boundaryDataName))));
-
-                // 2) Boundary OutputVar. Create the OutputVars section if absent
-                //    (DTD order: after InputVars, before Sockets).
-                var outputVars = iface.Element(ns + "OutputVars");
-                if (outputVars == null)
-                {
-                    outputVars = new System.Xml.Linq.XElement(ns + "OutputVars");
-                    var inputVars = iface.Element(ns + "InputVars");
-                    if (inputVars != null) inputVars.AddAfterSelf(outputVars);
-                    else eventOutputs.AddAfterSelf(outputVars);
-                }
-                if (!outputVars.Elements(ns + "VarDeclaration")
-                        .Any(v => (string?)v.Attribute("Name") == boundaryDataName))
-                    outputVars.Add(new System.Xml.Linq.XElement(ns + "VarDeclaration",
-                        new System.Xml.Linq.XAttribute("Name", boundaryDataName),
-                        new System.Xml.Linq.XAttribute("Type", dataType),
-                        new System.Xml.Linq.XAttribute("Comment", "Exposed component state for MQTT")));
-
-                // 3) Graphical boundary <Output> pins (mirror the existing ones; EAE
-                //    re-lays-out on load, so the coordinates only need to be in-frame).
-                var lastOutput = net.Elements(ns + "Output").LastOrDefault();
-                var pinEvt = new System.Xml.Linq.XElement(ns + "Output",
-                    new System.Xml.Linq.XAttribute("Name", boundaryEventName),
-                    new System.Xml.Linq.XAttribute("x", "7600"),
-                    new System.Xml.Linq.XAttribute("y", "5200"),
-                    new System.Xml.Linq.XAttribute("Type", "Event"));
-                var pinData = new System.Xml.Linq.XElement(ns + "Output",
-                    new System.Xml.Linq.XAttribute("Name", boundaryDataName),
-                    new System.Xml.Linq.XAttribute("x", "7600"),
-                    new System.Xml.Linq.XAttribute("y", "5300"),
-                    new System.Xml.Linq.XAttribute("Type", "Data"));
-                if (lastOutput != null) { lastOutput.AddAfterSelf(pinData); lastOutput.AddAfterSelf(pinEvt); }
-                else
-                {
-                    var ecEl = net.Element(ns + "EventConnections");
-                    if (ecEl != null) { ecEl.AddBeforeSelf(pinEvt); ecEl.AddBeforeSelf(pinData); }
-                    else { net.Add(pinEvt); net.Add(pinData); }
-                }
-
-                // 4) Wire internal source -> boundary (additive fan-out; EAE allows
-                //    an event/data output to fan to multiple destinations).
-                var ec = net.Element(ns + "EventConnections");
-                if (ec == null) { ec = new System.Xml.Linq.XElement(ns + "EventConnections"); net.Add(ec); }
-                var dc = net.Element(ns + "DataConnections");
-                if (dc == null) { dc = new System.Xml.Linq.XElement(ns + "DataConnections"); net.Add(dc); }
-                ec.Add(new System.Xml.Linq.XElement(ns + "Connection",
-                    new System.Xml.Linq.XAttribute("Source", internalEventSource),
-                    new System.Xml.Linq.XAttribute("Destination", boundaryEventName)));
-                dc.Add(new System.Xml.Linq.XElement(ns + "Connection",
-                    new System.Xml.Linq.XAttribute("Source", internalDataSource),
-                    new System.Xml.Linq.XAttribute("Destination", boundaryDataName)));
-
-                doc.Save(fbt);
-                result.PatchesApplied.Add(
-                    $"{catName}: state exposed at boundary ({internalEventSource} → {boundaryEventName}, " +
-                    $"{internalDataSource} → {boundaryDataName}:{dataType})");
-                MapperLogger.Info(
-                    $"[Deploy][MQTT] {catName}.fbt: exposed {boundaryEventName}/{boundaryDataName} at composite boundary");
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"{catName} expose-state patch failed: {ex.Message}");
             }
         }
 

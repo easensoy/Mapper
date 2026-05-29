@@ -342,7 +342,6 @@ namespace CodeGen.Devices.Core
                 // Station / Process) collapse out, leaving FB1.INITO fanning
                 // straight into the first component so actuators still init.
                 var eventWires = new List<Wire>(BootstrapEventWires);
-                var dataWires = new List<Wire>(DataWires);
                 var initChain = new List<string> { "FB1" };
                 if (Present(anchors.AreaFb, byName)) initChain.Add(anchors.AreaFb!);
                 if (Present(anchors.StationFb, byName)) initChain.Add(anchors.StationFb!);
@@ -377,36 +376,9 @@ namespace CodeGen.Devices.Core
                     string.Equals((string?)mqttFb.Attribute("Type"),
                         "MQTT_CONNECTION", StringComparison.Ordinal))
                 {
-                    // Bring the link up at boot. A resource with an Area (M262)
-                    // drives INIT off Area.INITO; BX1 has no Area but now HOSTS
-                    // MqttConn, so drive it straight off the resource boot FB
-                    // (FB1.INITO) — otherwise INIT never fires and the connection
-                    // sits idle. It then self-fires CONNECT off its own INITO.
-                    var mqttInit = Present(anchors.AreaFb, byName) ? anchors.AreaFb! : "FB1";
-                    eventWires.Add(new Wire($"{mqttInit}.INITO", "MqttConn.INIT"));
+                    if (Present(anchors.AreaFb, byName))
+                        eventWires.Add(new Wire($"{anchors.AreaFb}.INITO", "MqttConn.INIT"));
                     eventWires.Add(new Wire("MqttConn.INITO", "MqttConn.CONNECT"));
-                }
-
-                // Standalone MQTT publishers (MqttFmt_<comp> + MqttPub_<comp>) live on
-                // BX1, fed cross-resource by each component's exposed state_out. Their
-                // INIT bring-up and local publish chain (Fmt.CNF -> Pub.PUBLISH1,
-                // Fmt.payload -> Pub.Payload1) MUST be on this sysres — same lesson as
-                // MqttConn above: a wire that lives only on the syslay never fires at
-                // runtime. The cross-resource REQ/state feed stays on the syslay and is
-                // bridged by EAE at deploy. INIT drives off Area.INITO when present
-                // (none on BX1) else the resource boot FB (FB1.INITO).
-                var pubInit = Present(anchors.AreaFb, byName) ? anchors.AreaFb! : "FB1";
-                foreach (var fmtName in byName.Keys
-                    .Where(n => n.StartsWith("MqttFmt", StringComparison.Ordinal))
-                    .OrderBy(n => n, StringComparer.Ordinal)
-                    .ToList())
-                {
-                    var pubName = "MqttPub" + fmtName.Substring("MqttFmt".Length);
-                    if (!byName.ContainsKey(pubName)) continue;
-                    eventWires.Add(new Wire($"{pubInit}.INITO", $"{fmtName}.INIT"));
-                    eventWires.Add(new Wire($"{pubInit}.INITO", $"{pubName}.INIT"));
-                    eventWires.Add(new Wire($"{fmtName}.CNF", $"{pubName}.PUBLISH1"));
-                    dataWires.Add(new Wire($"{fmtName}.payload", $"{pubName}.Payload1"));
                 }
 
                 // Cross-process synchronisation REMOVED 2026-05-26: the prior
@@ -485,7 +457,7 @@ namespace CodeGen.Devices.Core
                 }
 
                 foreach (var w in eventWires)   Process(w, emittedEvents,   "event");
-                foreach (var w in dataWires)    Process(w, emittedData,     "data");
+                foreach (var w in DataWires)    Process(w, emittedData,     "data");
                 foreach (var w in adapterWires) Process(w, emittedAdapters, "adapter");
 
                 // Replace all three existing connection blocks with the
