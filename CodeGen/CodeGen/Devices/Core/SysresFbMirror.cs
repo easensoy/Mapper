@@ -261,6 +261,10 @@ namespace CodeGen.Devices.Core
                 case "Disassembly_Station":
                 case "Stn2_Term":
                     return PlcAssignment.M580;
+                // MQTT runs ONLY on the Soft dPAC (BX1); M262/M580 have no MQTT
+                // runtime client (ReturnCode 50). Route the single MqttConn there.
+                case "MqttConn":
+                    return PlcAssignment.BX1;
             }
             var p = HcfSymbolIndex.NameBasedPlcGuess(fbName);
             return p == PlcAssignment.Unknown ? PlcAssignment.M262 : p;
