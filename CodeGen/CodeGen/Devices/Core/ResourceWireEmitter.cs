@@ -376,8 +376,11 @@ namespace CodeGen.Devices.Core
                     string.Equals((string?)mqttFb.Attribute("Type"),
                         "MQTT_CONNECTION", StringComparison.Ordinal))
                 {
-                    if (Present(anchors.AreaFb, byName))
-                        eventWires.Add(new Wire($"{anchors.AreaFb}.INITO", "MqttConn.INIT"));
+                    // INIT off the resource boot: Area.INITO when present (M262),
+                    // else FB1.INITO. BX1 has no Area, so without the FB1 fallback
+                    // the BX1 MqttConn.INIT never fires and the broker never opens.
+                    var mqttInit = Present(anchors.AreaFb, byName) ? anchors.AreaFb! : "FB1";
+                    eventWires.Add(new Wire($"{mqttInit}.INITO", "MqttConn.INIT"));
                     eventWires.Add(new Wire("MqttConn.INITO", "MqttConn.CONNECT"));
                 }
 
