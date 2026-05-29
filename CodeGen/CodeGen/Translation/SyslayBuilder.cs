@@ -39,7 +39,8 @@ namespace CodeGen.Translation
 
         public SyslayBuilder AddFB(string id, string name, string type, string ns, double x, double y,
             IDictionary<string, string>? parameters = null,
-            IDictionary<string, IDictionary<string, string>>? nestedFbParameters = null)
+            IDictionary<string, IDictionary<string, string>>? nestedFbParameters = null,
+            IDictionary<string, string>? attributes = null)
         {
             var fb = new XElement(Ns + "FB",
                 new XAttribute("ID", id),
@@ -48,6 +49,19 @@ namespace CodeGen.Translation
                 new XAttribute("Namespace", ns),
                 new XAttribute("x", x.ToString(System.Globalization.CultureInfo.InvariantCulture)),
                 new XAttribute("y", y.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+
+            // <Attribute> children must precede <Parameter> children. Required for
+            // generic FBs (e.g. MQTT_PUBLISH) whose numbered channel ports only
+            // exist once Configuration.GenericFBType.InterfaceParams sets CNTX.
+            if (attributes != null)
+            {
+                foreach (var kv in attributes)
+                {
+                    fb.Add(new XElement(Ns + "Attribute",
+                        new XAttribute("Name", kv.Key),
+                        new XAttribute("Value", kv.Value)));
+                }
+            }
 
             if (parameters != null)
             {
