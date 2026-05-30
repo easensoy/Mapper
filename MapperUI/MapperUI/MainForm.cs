@@ -875,6 +875,27 @@ namespace MapperUI
                 // gets the full chain (Station2/Assembly_Station/Stn2_Term); the
                 // BX1 has no Station FB this increment so it gets only the INIT
                 // fan-out + report ring among its cover actuators.
+                //
+                // FIRST re-mirror the Station-2 FBs from the freshly regenerated
+                // syslay onto the M580/BX1 sysres, so each component's CAT type is
+                // synced on EVERY Test Runtime (e.g. Bearing_PnP flipping
+                // Seven_State <-> Five_State). This path previously only RE-WIRED
+                // Station 2 and never re-mirrored the FBs, so the M580 Bearing_PnP
+                // kept a stale Type that mismatched the Five_State syslay -> EAE
+                // "Solution Integrity: Found References to Missing Instances:
+                // Bearing_PnP". The mirror MUST run before the wiring (it creates/
+                // updates the FBs the wiring connects). Same call the full-system
+                // path uses (~line 607).
+                try
+                {
+                    var s2m = await Task.Run(() => Station2SysresMirror.EmitStation2Sysres(Cfg()));
+                    AppendActivity($"[Stn2] re-mirrored FBs -> M580:{s2m.M580} BX1:{s2m.BX1} (CAT types synced to syslay)");
+                }
+                catch (Exception ex)
+                {
+                    AppendActivity($"[Stn2][Error] sysres mirror: {ex.Message}");
+                }
+
                 try
                 {
                     int s2WireBefore = report.Missing.Count;
