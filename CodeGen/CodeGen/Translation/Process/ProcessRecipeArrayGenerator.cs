@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using CodeGen.Configuration;
 using CodeGen.Models;
+using CodeGen.Devices.Core;   // SysresFbMirror.BucketFor — PLC bucket for the intra-PLC process-handoff park guard
 
 namespace CodeGen.Translation.Process
 {
@@ -176,10 +177,72 @@ namespace CodeGen.Translation.Process
                     LookupComponent(kv.Key, allComponents) is { } c &&
                     (NameEquals(c.Name, "Feeder") || NameEquals(c.Name, "Pusher"))).Value;
 
+            // PARK GUARD (2026-05-29): a process whose INITIAL state gates on
+            // ANOTHER process on the SAME PLC is an intra-PLC hand-off (e.g.
+            // Disassembly's Initialize waits for Assembly_Station/HandShaking,
+            // both on the M580). That hand-off is not wired at runtime yet:
+            // ProcessStateBusHandler never publishes a process's live state into
+            // state_table (state_sts is unconnected -> always 0) and the wait-
+            // registry deliberately excludes process ids, so the gate can never
+            // be satisfied. The old IsInitialisationState path DROPPED the gate,
+            // which let the process FREE-RUN from its first motion and collide
+            // with the still-running upstream process over the shared actuators
+            // (bearing_pnp / shaft / clamp on the M580). Until cross-process
+            // coordination is built, PARK such a process: emit a single END row so
+            // it holds at step 0 and issues NO actuator commands. Feed_Station and
+            // Assembly_Station gate on CROSS-PLC processes (different bucket) and
+            // are NOT parked -- they free-run to start their own cycle (unchanged,
+            // so the M262 Feed recipe stays byte-identical).
+            if (ShouldParkOnIntraPlcProcessHandoff(process, states, allComponents))
+            {
+                arrays.Warnings.Add(
+                    $"[Recipe] Process '{process.Name}' PARKED: its initial state gates on a " +
+                    "same-PLC process (intra-PLC hand-off) the runtime cannot yet signal -- no " +
+                    "cross-process state publish. Emitting a single END row so it holds at step 0 " +
+                    "and issues no commands; prevents a free-run collision with the upstream " +
+                    "process over the shared actuators. Lift when cross-process coordination is built.");
+                arrays.StepType.Add(9);
+                arrays.CmdTargetName.Add(string.Empty);
+                arrays.CmdStateArr.Add(0);
+                arrays.Wait1Id.Add(0);
+                arrays.Wait1State.Add(0);
+                arrays.NextStep.Add(0);
+                arrays.OrderingSummary =
+                    $"PARKED ('{process.Name}' gates on a same-PLC process; holds at step 0, no commands)";
+                ValidateProcessIdInvariant(arrays, processId);
+                return arrays;
+            }
+
+            // TEST ISOLATION (MapperConfig.RecipeTestActuatorAllowlist): when an
+            // allowlist is configured AND this process is the targeted one (or the
+            // target name is blank = all), restrict the recipe to those actuators —
+            // every other actuator's CMD/WAIT state is dropped (parked). Used to
+            // exercise bearing_pnp + bearing_gripper alone while shaft_pnp / clamp /
+            // cover stay still. Null when no restriction applies (Feed_Station etc.),
+            // so those recipes stay byte-identical.
+            HashSet<string>? testActuatorAllowlist = null;
+            if (MapperConfig.RecipeTestActuatorAllowlist != null &&
+                MapperConfig.RecipeTestActuatorAllowlist.Length > 0 &&
+                (string.IsNullOrWhiteSpace(MapperConfig.RecipeTestProcessName) ||
+                 string.Equals((process.Name ?? string.Empty).Trim(),
+                               MapperConfig.RecipeTestProcessName.Trim(),
+                               StringComparison.OrdinalIgnoreCase)))
+            {
+                testActuatorAllowlist = new HashSet<string>(
+                    MapperConfig.RecipeTestActuatorAllowlist
+                        .Select(s => (s ?? string.Empty).Trim().ToLowerInvariant()),
+                    StringComparer.Ordinal);
+                arrays.Warnings.Add(
+                    $"[Recipe] TEST ISOLATION active for '{process.Name}': only actuators " +
+                    $"[{string.Join(", ", testActuatorAllowlist)}] are commanded; every other " +
+                    "actuator is PARKED (its CMD/WAIT steps dropped). Clear " +
+                    "MapperConfig.RecipeTestActuatorAllowlist to restore the full cycle.");
+            }
+
             // 2. Pass-1 classify: for each source state, decide if rows are emit/skip.
             var classifications = new List<StateClassification>(states.Count);
             foreach (var state in states)
-                classifications.Add(ClassifyState(state, allComponents, arrays, scopedRegistry, commandFromCondition));
+                classifications.Add(ClassifyState(state, allComponents, arrays, scopedRegistry, commandFromCondition, testActuatorAllowlist));
 
             // 3. Pass-1 row layout. Skipped states contribute RowCount=0; the
             //    StateID-to-firstRowIndex map is built ONLY over surviving states.
@@ -629,7 +692,8 @@ namespace CodeGen.Translation.Process
 
         private static StateClassification ClassifyState(VueOneState state,
             IReadOnlyList<VueOneComponent> allComponents, RecipeArrays arrays,
-            Dictionary<string, int> scopedRegistry, bool commandFromCondition)
+            Dictionary<string, int> scopedRegistry, bool commandFromCondition,
+            IReadOnlyCollection<string>? testActuatorAllowlist = null)
         {
             // Initialisation is structurally special in VueOne — it asserts the
             // expected world AT BOOT (typically every actuator at ReturnedHome),
@@ -711,6 +775,27 @@ namespace CodeGen.Translation.Process
                     $"State '{state.Name}': in-scope ComponentID '{cond.ComponentID}' could not " +
                     "be resolved to a VueOneComponent in allComponents. Emitting WAIT id=0.");
                 return new StateClassification { Kind = ClassKind.SettledWait, RowCount = 1 };
+            }
+
+            // TEST ISOLATION (MapperConfig.RecipeTestActuatorAllowlist): when a
+            // restricted allowlist is active for this process, any state whose
+            // command/wait target is NOT on the allowlist is dropped (that target
+            // is PARKED -- never commanded). Lets one mechanism (bearing_pnp +
+            // bearing_gripper) run while shaft_pnp / clamp / cover stay still.
+            // NOTE: grippers carry Control.xml Type="Robot" (NOT "Actuator"); an
+            // earlier "Actuator only" check let shaft_gripper / coverpnp_gripper
+            // slip through, so we now drop ANY non-Process target not on the
+            // allowlist. Process targets are never parked here (the intra-PLC park
+            // guard handles those).
+            if (testActuatorAllowlist != null
+                && !string.Equals(inScopeTarget.Type, "Process", StringComparison.OrdinalIgnoreCase)
+                && !testActuatorAllowlist.Contains((inScopeTarget.Name ?? string.Empty).Trim().ToLowerInvariant()))
+            {
+                arrays.SkippedConditions.Add(
+                    $"state '{state.Name}': dropped -- actuator '{inScopeTarget.Name}' PARKED by " +
+                    "RecipeTestActuatorAllowlist (bearing-only isolation test); CMD/WAIT removed, " +
+                    "NextStep pointers skip past it.");
+                return new StateClassification { Kind = ClassKind.Skipped, RowCount = 0 };
             }
 
             int waitId    = scopedRegistry[cond.ComponentID.Trim()];
@@ -1001,6 +1086,42 @@ namespace CodeGen.Translation.Process
             var n = (s.Name ?? string.Empty).Trim();
             return n.Equals("Initialisation", StringComparison.OrdinalIgnoreCase) ||
                    n.Equals("Initialization", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// True when <paramref name="process"/>'s initial state has a transition
+        /// gate that references ANOTHER process on the SAME PLC (an intra-PLC
+        /// hand-off, e.g. Disassembly's Initialize -> Assembly_Station/HandShaking,
+        /// both M580). Such a process must wait for the upstream process to finish,
+        /// but the runtime has no cross-process state publish yet (see PARK GUARD in
+        /// Generate), so the wait is unsatisfiable. We park it (single END) rather
+        /// than drop the gate (which free-runs into a collision over shared
+        /// actuators). Cross-PLC process gates (Feed &lt;-&gt; Assembly, different
+        /// bucket) return false -- those are boot coordination and the process
+        /// should free-run to start its own cycle.
+        /// </summary>
+        private static bool ShouldParkOnIntraPlcProcessHandoff(
+            VueOneComponent process, List<VueOneState> orderedStates,
+            IReadOnlyList<VueOneComponent> allComponents)
+        {
+            var initial = orderedStates.FirstOrDefault();
+            var trans = initial?.Transitions?.FirstOrDefault();
+            if (trans?.Conditions == null) return false;
+            var myPlc = SysresFbMirror.BucketFor(process.Name ?? string.Empty);
+            foreach (var cond in trans.Conditions)
+            {
+                if (string.IsNullOrEmpty(cond.ComponentID)) continue;
+                var target = LookupComponent(cond.ComponentID, allComponents);
+                if (target == null) continue;
+                if (!string.Equals(target.Type, "Process", StringComparison.OrdinalIgnoreCase)) continue;
+                // Never park on a self-reference (a process gating on its own state).
+                if (string.Equals((target.ComponentID ?? string.Empty).Trim(),
+                                  (process.ComponentID ?? string.Empty).Trim(),
+                                  StringComparison.OrdinalIgnoreCase)) continue;
+                if (SysresFbMirror.BucketFor(target.Name ?? string.Empty) == myPlc)
+                    return true;   // same-PLC upstream process -> park until coordination exists
+            }
+            return false;
         }
 
         /// <summary>
