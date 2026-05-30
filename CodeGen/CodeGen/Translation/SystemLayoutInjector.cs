@@ -1666,6 +1666,24 @@ namespace CodeGen.Translation
                 dict["TargetPickState"]  = SyslayBuilder.FormatInt(1);
                 dict["TargetPlaceState"] = SyslayBuilder.FormatInt(2);
                 dict["TargetHomeState"]  = SyslayBuilder.FormatInt(0);
+                // Statically satisfy SevenStateActuator2's ECC name-gate. Every commanded
+                // transition (START→ToPick / AtPick→ToPlace / *→timerStart) carries
+                // `process_state_name = actuator_name`. The surgical ring path delivers
+                // state_val + pst_event via StateHandling/updateComponentState but does
+                // NOT deliver process_state_name (BREQ never touches it). The only wire
+                // to FB4.process_state_name in the syslay is the legacy direct one from
+                // proc.actuator_name — and Process1_Generic has no such data output, so
+                // that wire is phantom (source pin does not exist). Without this
+                // parameter, process_state_name defaults to '' and the gate
+                // '' = '<actuator>' is FALSE forever → the swivel never leaves START on
+                // a Pick/Place/state_val=Home command, only the bare `tohome` event
+                // moves it. Setting process_state_name = lowercased actuator_name as a
+                // STATIC parameter collapses the gate to its state_val arm, which
+                // ProcessRecipeArrayGenerator.MapSevenStateCommandFromConditionName
+                // already emits in lock-step with the TargetPick/Place/HomeState above
+                // (place→2, pick→1, home→0). Five_State path leaves this alone — its
+                // FiveStateActuator ECC has no process_state_name input.
+                dict["process_state_name"] = SyslayBuilder.FormatString(actuator.Name.ToLowerInvariant());
             }
             // Vacuum_Gripper_CAT + Five_State_Actuator_No_Sensors_CAT (the other
             // non-5-state cases that still route through this minimal path)
@@ -2227,13 +2245,20 @@ namespace CodeGen.Translation
             // Disassembly -> Stn2_Term. Sensors are excluded because Sensor_Bool_CAT
             // has no stationAdptr ports per .fbt verification (same rule
             // BuildFeedStationWiring uses for Feed_Station).
+            //
+            // Seven_State_Actuator_CAT is ALSO excluded here — its surgical body (task
+            // #69) has only the stateRprtCmd ring adapter and NO stationAdptr port, so
+            // wiring it into this chain would dangle Bearing_PnP.stationAdptr_in/out
+            // edges on EAE import (Solution Integrity / unresolved adapter errors).
+            // Mirrors ResourceWireEmitter.NoStationAdapterTypes on the sysres side —
+            // the two were out of sync until 2026-05-30.
             var stationChain = new List<(string Name, string Type)>();
             foreach (var a in contents.Actuators)
             {
                 if (!IsM580(a.Name)) continue;
-                // Bearing_PnP is the Seven_State_Actuator_CAT — same stationAdptr_in/out
-                // port names as Five_State_Actuator_CAT, so StationAdptrIn/Out helpers
-                // work for both without branching.
+                bool isSeven = !Configuration.MapperConfig.StubSevenStateActuatorsAsFiveState
+                               && (a.States.Count == 7 || IsBranchedSevenState(a));
+                if (isSeven) continue;  // no stationAdptr port on the surgical Seven CAT
                 stationChain.Add((a.Name, "Five_State_Actuator_CAT"));
             }
             stationChain.Add((AssemblyProc, "Process1_Generic"));
