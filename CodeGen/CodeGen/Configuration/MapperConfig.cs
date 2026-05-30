@@ -26,7 +26,55 @@ namespace CodeGen.Configuration
         // compiler treat the real-Seven_State branches gated on this flag as dead
         // code (CS0162). They are not dead — they are the path #69 re-enables when
         // it flips this to false. static readonly keeps both branches live.
-        public static readonly bool StubSevenStateActuatorsAsFiveState = true;
+        // 2026-05-29 (task #69): FLIPPED to false. Seven_State_Actuator_CAT.fbt
+        // now carries a stateRprtCmd ring node (an updateComponentState FB wired
+        // exactly like Five_State's StateHandling) so Process1_Generic commands
+        // and reads Bearing_PnP through the report ring, and ResourceWireEmitter
+        // now rings it (NoRingAdapterTypes is empty; it stays off the station
+        // chain via NoStationAdapterTypes). Bearing_PnP therefore resolves to
+        // Seven_State_Actuator_CAT, not the Five_State stub.
+        // 2026-05-29 (re-flip to TRUE): my Seven_State_Actuator_CAT surgery is
+        // unverified and on the rig it leaves Bearing_PnP stuck at INIT (the ring
+        // command is never processed -> "nothing triggered"). Reverted to the
+        // proven Five_State stub so the recipe drives Bearing_PnP and it is
+        // forceable for testing. Flip back to FALSE when Jyotsna's real
+        // Seven_State_Actuator_CAT (with interlock) lands.
+        // 2026-05-30: flipped to FALSE for the "Seven_State end-to-end in Test Simulator"
+        // session. SimulatorPostProcessor.InjectSimSwivelForce now publishes atwork1/
+        // atwork2 in sim by mirroring the actuator's own current_state{1,2}_to_plc
+        // outputs (sensors close instantly when coil energises). The 3 deferred rig
+        // fixes (committed surgical CAT in the .cat.zip + BuildStation2Wiring skips
+        // Seven from stationChain + BuildMinimalActuatorParameters parameterises
+        // process_state_name = lowercased name) all landed earlier in this session.
+        // Re-flip to TRUE only if the sim demo regresses and you can't afford to debug
+        // the Seven_State path during that demo window.
+        public static readonly bool StubSevenStateActuatorsAsFiveState = false;
+
+        // TEST ISOLATION (2026-05-29, TEMPORARY): restrict ONE process's recipe to a
+        // subset of actuators so a single mechanism can be exercised on the rig
+        // without the others moving. RecipeTestProcessName = the process to restrict
+        // (empty string = apply to every process); RecipeTestActuatorAllowlist = the
+        // actuator names (lower-case, matching the recipe CmdTargetName) that may
+        // still be commanded. Every OTHER actuator's CMD/WAIT step in that process is
+        // dropped, so the actuator is PARKED — never commanded, stays where it is.
+        // EMPTY allowlist = no restriction (normal full recipe).
+        //
+        // 2026-05-29 update: cleared to restore the FULL Assembly_Station cycle for the
+        // end-to-end simulator demo. The bench rig is unsafe (clamp damaged + swivel
+        // collision risk) so testing moves to the "Test Simulator" button (Cfg
+        // .SimulatorFullSystem=true): all 3 PLCs collapse into one SIM resource, every
+        // Five_State_Actuator_CAT is forced no-sensor so the internal No_Sensor_Handler
+        // timer self-advances the ECC (toWorkTime → atwork, toHomeTime → athome), and
+        // the single ring resolves the cross-PLC/cross-process Wait1Id refs Assembly
+        // makes to BX1 cover components and Feed_Station handoffs. Bearing_PnP stays
+        // on the Five_State stub (StubSevenStateActuatorsAsFiveState above) — Iss
+        // SevenStateCommandable returns false under the stub, so the recipe commands
+        // bearing with work/home like any other Five_State actuator, and it self-
+        // advances on the timer instead of waiting for a 3-position swivel sensor the
+        // simulator has no model for. To return to the bearing-only bench test, repopu
+        // late the allowlist with { "bearing_pnp", "bearing_gripper" }.
+        public static readonly string RecipeTestProcessName = "Assembly_Station";
+        public static readonly string[] RecipeTestActuatorAllowlist = new string[0];
 
         public string SystemXmlPath { get; set; } = string.Empty;
         public string MappingRulesPath { get; set; } = string.Empty;
