@@ -82,13 +82,17 @@ The bench rig is unsafe (damaged clamp, swivel collision risk), so **all testing
 
 6. **`BuildStation2Wiring` (sys-lay) vs `ResourceWireEmitter` (sysres) disagree on Seven_State adapters.** Syslay hardcodes Five_State and wires `Bearing_PnP.stationAdptr_in/out`; the deployed Seven_State CAT has no stationAdptr port. Throws on import when Seven is deployed. Same story: only matters when the rig comes back.
 
-### Deferred rig fixes — DO NOT IMPLEMENT IN THIS LOOP
+### Deferred rig fixes — ALL LANDED 2026-05-30
 
-These are the three fixes that make the rig Seven_State path work. They have no effect on the simulator path, so they are out of scope for this loop. Queued for when the rig comes back:
+These were the three fixes that make the rig Seven_State path work. **All three landed in the 2026-05-30 session and are verified by the harness.** The stub flag is now FALSE; Bearing_PnP deploys as the real `Seven_State_Actuator_CAT` in both sim and rig paths. Kept here as a reference for where each landed:
 
-1. Commit the surgical `Seven_State_Actuator_CAT.fbt` into the committed `.cat.zip` so a Clean doesn't revert it.
-2. In `BuildStation2Wiring`, exclude Seven from the `stationChain` (mirror `ResourceWireEmitter.NoStationAdapterTypes`), stop hardcoding Five_State.
-3. In `SystemLayoutInjector.BuildMinimalActuatorParameters` (the Seven branch around line 1664-1668), add `["process_state_name"] = SyslayBuilder.FormatString(actuator.Name.ToLowerInvariant())` next to `actuator_name`.
+1. **Commit surgical `Seven_State_Actuator_CAT.fbt` into the committed `.cat.zip`.** Landed: `Template Library/CAT/Seven_State_Actuator_CAT.cat.zip` — `diff -q` against the deployed copy is empty (19 ring/StateHandling tokens). DemonstratorWiper's Clean + re-extract path no longer reverts the surgery.
+2. **`BuildStation2Wiring` excludes Seven from `stationChain`.** Landed: `SystemLayoutInjector.cs` ~lines 2230-2240. Mirrors `ResourceWireEmitter.NoStationAdapterTypes` (sysres side); the two halves of the wiring layer now agree about Seven's adapter set.
+3. **`BuildMinimalActuatorParameters` parameterises `process_state_name = <lowercased name>` on Seven instances.** Landed: `SystemLayoutInjector.cs` ~lines 1664-1668. Statically satisfies `SevenStateActuator2`'s ECC name-gate so Pick/Place/Home commands actually fire under the ring model.
+
+Plus the new piece this session built on top: `SimulatorPostProcessor.InjectSimSwivelForce` (sim sensor synthesis for Seven_State). See Status entry above.
+
+**Caveat for the rig path:** the stub flip also takes effect on the hardware path (`btnTestStation1_Click`). The rig is currently unsafe so this is unverified; coil-direction must be physically confirmed before any rig deploy (`Docs/REVERTED_FIXES.md` R-12).
 
 ## Finish line — Assembly Station end-to-end in simulator
 
@@ -106,8 +110,8 @@ The headless harness asserts these. Each iteration aims to turn red items green.
 - [ ] One `Process1_Generic` FB named `Assembly_Station` (M580 process) is present in the SIM syslay.
 - [ ] One `Process1_Generic` FB named `Disassembly` is present.
 - [ ] The Process FB named `Feed_Station` (M262) is present.
-- [ ] All Assembly actuators are present: `Bearing_PnP`, `Bearing_Gripper`, `Shaft_Hr`, `Shaft_Vr`, `Shaft_Gripper`, `Clamp`. All are `Type=Five_State_Actuator_CAT` (because stub flag is true).
-- [ ] Every `Five_State_Actuator_CAT` instance in the syslay AND sysres has `WorkSensorFitted="FALSE"` and `HomeSensorFitted="FALSE"`.
+- [ ] All Assembly actuators are present: `Bearing_PnP`, `Bearing_Gripper`, `Shaft_Hr`, `Shaft_Vr`, `Shaft_Gripper` (`Clamp` is NOT a Component in the current `Full_System_Fixture.xml` — see iteration 3 audit). **Type depends on stub flag**: under `StubSevenStateActuatorsAsFiveState=false` (current), `Bearing_PnP` is `Type=Seven_State_Actuator_CAT`, the others are `Type=Five_State_Actuator_CAT`. Under stub=true, all are Five_State. The harness's B4 check computes the expected type per-actuator from the live flag.
+- [ ] Every `Five_State_Actuator_CAT` instance in the syslay AND sysres has `WorkSensorFitted="FALSE"` and `HomeSensorFitted="FALSE"` (no-sensor override).
 - [ ] No FB references a source pin that doesn't exist (phantom checks: `proc.state_update`, `proc.actuator_name`, `proc.state_val` should NOT appear as `Source=` in `EventConnections`/`DataConnections` of the SIM syslay).
 
 ### C. Assembly recipe has actuator coverage
@@ -119,8 +123,14 @@ The headless harness asserts these. Each iteration aims to turn red items green.
 ### D. Sim no-sensor model is intact
 
 - [ ] `SimHopperForce` SYMLINKMULTIVARSRC is present in both syslay and sysres.
-- [ ] Its wiring matches `MainForm_simulator.InjectSimHopperForce`'s defensive idempotent rebuild (FB1.INITO → SimHopperForce.INIT → Area.INIT; PartInHopper.INITO → SimHopperForce.REQ).
+- [ ] Its wiring matches `SimulatorPostProcessor.InjectSimHopperForce`'s defensive idempotent rebuild (FB1.INITO → SimHopperForce.INIT → Area.INIT; PartInHopper.INITO → SimHopperForce.REQ).
 - [ ] `VerifySimActuatorsNoSensorOrAbort` would PASS (every Five_State has the no-sensor params, no duplicates).
+
+### D2. Sim sensor synthesis for Seven_State (added 2026-05-30)
+
+- [ ] For every `Seven_State_Actuator_CAT` instance in the SIM syslay AND sysres, a `SimSwivelForce_<name>` SYMLINKMULTIVARSRC FB is present (currently 1: `Bearing_PnP` → `SimSwivelForce_Bearing_PnP`).
+- [ ] Each is wired: event `<actuator>.INITO → SimSwivelForce_<name>.INIT`, event `<actuator>.plc_out → SimSwivelForce_<name>.REQ`, data `<actuator>.current_state1_to_plc → VALUE1`, data `<actuator>.current_state2_to_plc → VALUE2`. Net: `atwork1`/`atwork2` close the instant the coil energises.
+- [ ] No-op-green when `StubSevenStateActuatorsAsFiveState=true` (no Seven instances to wire).
 
 ### E. Disassembly is parked
 
@@ -158,9 +168,10 @@ The harness proves the generation pipeline produces the right artefacts. EAE is 
 6. **Add this Watch list** to verify the Assembly cycle:
    - `Assembly_Station.ProcessEngine.CurrentStep` — should march from 0 through the recipe.
    - `Assembly_Station.ProcessEngine.cmd_target_name` — the lowercased actuator the engine is currently commanding.
-   - `Assembly_Station.ProcessEngine.cmd_state` — the state value being sent (1/2 for Pick/Place under stub, work/home for Five_State).
+   - `Assembly_Station.ProcessEngine.cmd_state` — the state value being sent. Under stub=false (current): Bearing_PnP/Seven_State takes 1=pick, 2=place, 0=home; Five_State actuators (Bearing_Gripper, Shaft_*) take 1=toWork, 3=toHome.
    - `Assembly_Station.ProcessEngine.CMDREQ` — pulses when a CMD is issued.
-   - For each Assembly actuator (`Bearing_PnP`, `Bearing_Gripper`, `Shaft_Hr`, `Shaft_Vr`, `Shaft_Gripper`): the FB's `current_state_to_process` (the internal `FiveStateActuator` output) — should advance 0 → 1 → 2 → 3 → 0 over the recipe's CMD/WAIT cycles, driven by the no-sensor timer.
+   - For each Five_State Assembly actuator (`Bearing_Gripper`, `Shaft_Hr`, `Shaft_Vr`, `Shaft_Gripper`): the FB's `current_state_to_process` (internal `FiveStateActuator` output) — should advance 0 → 1 → 2 → 3 → 0 over the recipe's CMD/WAIT cycles, driven by the no-sensor timer.
+   - For `Bearing_PnP` (Seven_State): watch the FB's `state` STRING (cycles `INIT` → `moving` → `atPick` → `toPlace` → `atPlace` → `timerstart` → `ToInitPos` → `timerstop` → `stopAtHome`) and `current_state{1,2}_to_plc` (the coil-drive BOOL outputs `SimSwivelForce` reads to synthesise `atwork1`/`atwork2`).
    - `Feed_Station.PartInHopper.Input` — should read TRUE at startup (SimHopperForce keeps it forced).
 7. **Expected sequence on a successful run** (intra-process Assembly only — cross-process Wait1Ids onto Feed_Station get dropped in sim per `SystemLayoutInjector.ClassifyState`'s out-of-scope guard, so Assembly runs standalone):
    - `cmd_target_name` cycles through `bearing_pnp` → `bearing_gripper` → `shaft_hr` → `shaft_vr` → `shaft_gripper` (and the BX1 cover chain). Each actuator's `current_state_to_process` advances on its own toWorkTime/toHomeTime via the No_Sensor_Handler timer.
@@ -168,9 +179,9 @@ The harness proves the generation pipeline produces the right artefacts. EAE is 
    - `Disassembly.ProcessEngine.CurrentStep` stays at the single END row (intra-PLC handoff park guard).
 8. **If the recipe stalls at a row**, copy `CurrentStep`, `cmd_target_name`, `cmd_state`, and the `current_state_to_process` of the named actuator into the loop's next iteration prompt — that's enough to triage the stall from source.
 
-**Fixture used:** `MapperTests\TestData\Feed_Station_Fixture.xml` (full system — Feed + Assembly + Disassembly + BX1 cover components, despite the name).
+**Fixture used:** `MapperTests\TestData\Full_System_Fixture.xml` (a copy of `C:\VueOne\system\SMC_Vue2VC_With_Processes\Control.xml`, 34 components — full SMC system with Bearing_PnP 13-state, Shaft_Hr/Vr, the Robot grippers, and the 3 Processes). Swapped in at iteration 2 (2026-05-29) because the older `Feed_Station_Fixture.xml` had only 8 Components (Feed-only — the 39 Assembly/Bearing/Shaft tokens were inside the Process FBs' transition names, not standalone Component definitions).
 
-**Real Control.xml** lives at `C:\VueOne\system\Control.xml` and can be pointed at by the harness for one-off cross-checks, but the loop's deterministic iteration uses the committed fixture.
+**Real Control.xml** lives at `C:\VueOne\system\Control.xml` and can be pointed at by the harness for one-off cross-checks, but the loop's deterministic iteration uses the committed `Full_System_Fixture.xml`. The legacy `Feed_Station_Fixture.xml` is kept in the repo for narrower Feed-only tests but the SimulatorEndToEndHarness no longer loads it.
 
 ## Standing rules
 
