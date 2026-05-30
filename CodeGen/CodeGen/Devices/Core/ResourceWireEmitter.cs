@@ -89,24 +89,32 @@ namespace CodeGen.Devices.Core
                 "Five_State_Actuator_No_Sensors_CAT",
                 // Seven_State_Actuator_CAT — Bearing_PnP (13-state PARALLEL+
                 // ALTERNATIVE branched) routes here. It is INIT-chained like
-                // any actuator BUT, unlike Five_State, its .fbt declares NO CaS
-                // adapter ports (no stationAdptr_*/stateRprtCmd_*), so it is
-                // excluded from the station chain + report ring via
-                // NoCaSAdapterTypes below. (The prior "same adapter port names"
-                // claim was stale — verified against the zipped .fbt.)
+                // any actuator. Task #69 added a stateRprtCmd ring node to its
+                // .fbt, so it now JOINS the report ring (NoRingAdapterTypes is
+                // empty) and Process1_Generic can command/read it. It still has
+                // NO stationAdptr port, so it stays off the CaSBus station chain
+                // (listed in NoStationAdapterTypes below).
                 "Seven_State_Actuator_CAT",
                 "Vacuum_Gripper_CAT",
             };
 
-        // CAT types whose .fbt declares NO CaS adapter ports
-        // (stationAdptr_in/out, stateRprtCmd_in/out). These are still INIT-
-        // chained (they expose INIT/INITO) but are excluded from the CaSBus
-        // station chain and the stateRprtCmd report ring, otherwise the emitter
-        // would write dangling adapter wires to ports that don't exist (EAE
-        // flags them on import). Seven_State_Actuator_CAT (Bearing_PnP) is the
-        // only such type present in the rig; verified against the zipped .fbt.
-        private static readonly HashSet<string> NoCaSAdapterTypes =
+        // CAT types whose .fbt declares NO stationAdptr (CaSAdptr) port. They
+        // are INIT-chained and (if they have the ring port) join the
+        // stateRprtCmd report ring, but stay OFF the CaSBus station/mode/fault
+        // chain. Seven_State_Actuator_CAT (Bearing_PnP) gained a stateRprtCmd
+        // ring node (task #69) so Process1_Generic can command/read it, but it
+        // still has no stationAdptr — so it is listed here (station chain only).
+        private static readonly HashSet<string> NoStationAdapterTypes =
             new(StringComparer.Ordinal) { "Seven_State_Actuator_CAT" };
+
+        // CAT types whose .fbt declares NO stateRprtCmd ring port. Empty now
+        // that Seven_State_Actuator_CAT carries the ring node; kept as an
+        // explicit hook so a future ring-less CAT can be excluded from the
+        // report ring without re-plumbing the filter. Excluding a type here
+        // (but not from NoStationAdapterTypes) would dangle ring wires on EAE
+        // import, so the two sets are deliberately kept separate.
+        private static readonly HashSet<string> NoRingAdapterTypes =
+            new(StringComparer.Ordinal);
 
         // Component-independent adapter wires (HMI faceplates + Area/Station
         // structural ring). The CaSBus station chain (Station1→actuators→
@@ -284,14 +292,19 @@ namespace CodeGen.Devices.Core
                     SensorCatTypes.Contains((string?)fb.Attribute("Type") ?? string.Empty);
                 bool IsActuator(XElement fb) =>
                     ActuatorCatTypes.Contains((string?)fb.Attribute("Type") ?? string.Empty);
-                // True when the FB's type exposes the CaS adapter ports
-                // (stationAdptr_*/stateRprtCmd_*). Seven_State_Actuator_CAT does
-                // NOT, so it is INIT-chained but kept out of the station chain
-                // and report ring. (M262's components are all Sensor/Five_State,
-                // which DO have the ports — so this filters nothing on M262 and
-                // its output is unchanged.)
-                bool HasCaSAdapter(XElement fb) =>
-                    !NoCaSAdapterTypes.Contains((string?)fb.Attribute("Type") ?? string.Empty);
+                // True when the FB's type exposes the stationAdptr (CaSAdptr)
+                // port — used for the CaSBus station/mode/fault chain.
+                // Seven_State_Actuator_CAT does NOT, so it is kept off that chain.
+                bool HasStationAdapter(XElement fb) =>
+                    !NoStationAdapterTypes.Contains((string?)fb.Attribute("Type") ?? string.Empty);
+                // True when the FB's type exposes the stateRprtCmd ring port —
+                // used for the report ring. Seven_State_Actuator_CAT now carries
+                // the ring node (task #69), so Bearing_PnP joins the ring and
+                // Process1_Generic can command/read it. (M262's components are
+                // all Sensor/Five_State, which already have the port — so this
+                // filters nothing on M262 and its output is unchanged.)
+                bool HasRingAdapter(XElement fb) =>
+                    !NoRingAdapterTypes.Contains((string?)fb.Attribute("Type") ?? string.Empty);
 
                 var orderedComps = new List<XElement>();
                 var seenComp = new HashSet<string>(StringComparer.Ordinal);
@@ -310,12 +323,13 @@ namespace CodeGen.Devices.Core
                 // chain (all CATs expose INIT/INITO).
                 var initNames = orderedComps.Select(Nm).Where(s => s.Length > 0).ToList();
                 // ringNames — components that expose the stateRprtCmd adapter
-                // (excludes Seven_State); used for the report ring.
-                var ringNames = orderedComps.Where(HasCaSAdapter).Select(Nm)
+                // (now INCLUDES Seven_State/Bearing_PnP); used for the report ring.
+                var ringNames = orderedComps.Where(HasRingAdapter).Select(Nm)
                     .Where(s => s.Length > 0).ToList();
                 // actNames — actuators that expose the stationAdptr adapter
-                // (excludes Seven_State); used for the CaS station chain.
-                var actNames = orderedComps.Where(c => IsActuator(c) && HasCaSAdapter(c))
+                // (still excludes Seven_State, which has no stationAdptr); used
+                // for the CaS station chain.
+                var actNames = orderedComps.Where(c => IsActuator(c) && HasStationAdapter(c))
                     .Select(Nm).Where(s => s.Length > 0).ToList();
 
                 // processNames — EVERY Process1_Generic on this resource, anchor
