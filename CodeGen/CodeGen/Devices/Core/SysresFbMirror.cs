@@ -169,8 +169,21 @@ namespace CodeGen.Devices.Core
 
                 if (existingByName.TryGetValue(fb.Name, out var existing))
                 {
-                    // Replace parameter children only; keep ID / Mapping / x / y
-                    // so EAE keeps its stable handle on the instance across regens.
+                    // Keep ID / Mapping / x / y so EAE keeps its stable handle on
+                    // the instance across regens — but SYNC Type / Namespace to the
+                    // syslay. A component's CAT type can change between regens
+                    // (Bearing_PnP: Five_State stub -> Seven_State_Actuator_CAT when
+                    // StubSevenStateActuatorsAsFiveState flips). Leaving the stale
+                    // Type while refreshing the params left a Five_State-typed FB
+                    // carrying Seven_State params AND a syslay(Seven)/sysres(Five)
+                    // type mismatch — which EAE's Solution Integrity flags as a
+                    // missing instance ("Found References to Missing Instances:
+                    // Bearing_PnP"). Syncing the type here keeps the resource and
+                    // the layout in lock-step; ID/Mapping stay so the instance
+                    // handle is stable.
+                    existing.SetAttributeValue("Type",      fb.Type);
+                    existing.SetAttributeValue("Namespace", fb.Namespace);
+                    // Replace parameter children to match the syslay.
                     existing.Elements(ns + "Parameter").Remove();
                     foreach (var p in fb.Parameters)
                     {
