@@ -84,16 +84,34 @@ namespace CodeGen.Mapping
                 .Max();
 
         /// <summary>
-        /// Frame width that fully encloses every column on this PLC plus a right-side
-        /// pad: <c>(MaxColumn + 1) × ColumnPitchX + FrameRightPadding</c>. Returns 0
-        /// when the PLC has no components in the registry.
+        /// Frame width for a PLC zone. Each frame ABUTS the next zone's origin
+        /// (no overlap between M262 ↔ M580 ↔ BX1), so the three coloured bands
+        /// stay in their own lanes and EAE's auto-grow (when ever re-enabled)
+        /// has nothing to fight. The trailing zone (BX1) uses
+        /// (MaxColumn + 1) × ColumnPitchX + FrameRightPadding since there is no
+        /// next-zone origin to abut. Returns 0 when the PLC has no components.
         /// </summary>
         public static int FrameWidth(PlcAssignment plc)
         {
+            int nextOrigin = NextZoneOriginX(plc);
+            if (nextOrigin > 0) return nextOrigin - FrameOriginX(plc);
+
             int max = MaxColumn(plc);
             if (max < 0) return 0;
             return (max + 1) * ColumnPitchX + FrameRightPadding;
         }
+
+        /// <summary>
+        /// X coordinate of the next PLC zone to the right of <paramref name="plc"/>,
+        /// or -1 if <paramref name="plc"/> is the rightmost zone. M262 → M580 origin;
+        /// M580 → BX1 origin; BX1 → no next.
+        /// </summary>
+        private static int NextZoneOriginX(PlcAssignment plc) => plc switch
+        {
+            PlcAssignment.M262 => FrameOriginX(PlcAssignment.M580),
+            PlcAssignment.M580 => FrameOriginX(PlcAssignment.BX1),
+            _ => -1,
+        };
 
         /// <summary>Right edge X of the PLC's frame.</summary>
         public static int FrameRightEdge(PlcAssignment plc) =>
