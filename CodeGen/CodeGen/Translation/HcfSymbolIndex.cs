@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Xml.Linq;
 using CodeGen.Configuration;
+using CodeGen.Mapping;
 
 namespace CodeGen.Translation
 {
@@ -167,34 +168,28 @@ namespace CodeGen.Translation
 
         /// <summary>
         /// Hard-coded fallback used when a component has no row in IoBindings.xlsx.
-        /// Mirrors the SMC_Rig_Expo_withClamp reference partitioning so the syslay
-        /// renders with the right colour even before the bindings sheet is filled in.
+        /// Primary partition comes from <see cref="ControllerMap"/> (the canonical
+        /// SMC component registry); the small alias / Robot list below handles
+        /// names that aren't registered (Robot* arms, Rejector synonym for Ejector,
+        /// typo-free TopCoverSensor) so the syslay renders with the right colour
+        /// even before the bindings sheet is filled in.
         /// </summary>
         public static PlcAssignment NameBasedPlcGuess(string componentName)
         {
             if (string.IsNullOrWhiteSpace(componentName)) return PlcAssignment.Unknown;
+
+            // Primary: the canonical SMC partition table.
+            var fromRegistry = ControllerMap.PlcOf(componentName);
+            if (fromRegistry != PlcAssignment.Unknown) return fromRegistry;
+
+            // Fallbacks for names not registered in CodeGen.Mapping.ComponentRegistry:
+            //   • Rejector — synonym of Ejector (M262 Feed Station).
+            //   • TopCoverSensor — typo-free variant of TopCoverSenosr (BX1).
+            //   • Robot / Robot_Pick_And_Place1 — RobotStatus channel is on M262IO.
             var n = componentName.Trim();
-
-            // Station 1 (M262)
-            if (Eq(n, "Feeder") || Eq(n, "Checker") || Eq(n, "Transfer")
-                || Eq(n, "Ejector") || Eq(n, "Rejector")
-                || Eq(n, "PartInHopper") || Eq(n, "PartAtChecker"))
-                return PlcAssignment.M262;
-
-            // Station 2 (M580) — swivel arm + clamp + shaft column
-            if (Eq(n, "Bearing_PnP") || Eq(n, "Bearing_Gripper") || Eq(n, "BearingSensor")
-                || Eq(n, "Shaft_Hr") || Eq(n, "Shaft_Vr") || Eq(n, "Shaft_Gripper")
-                || Eq(n, "ShaftSensor") || Eq(n, "Clamp"))
-                return PlcAssignment.M580;
-
-            // Station 2 (BX1) — cover pick-and-place + top cover sensing
-            if (Eq(n, "CoverPNP_Hr") || Eq(n, "CoverPNP_Vr") || Eq(n, "CoverPnp_Gripper")
-                || Eq(n, "TopCoverSenosr") || Eq(n, "TopCoverSensor"))
-                return PlcAssignment.BX1;
-
-            // Robot arm sits on M262 in the reference layout (RobotStatus channel is on M262IO).
-            if (Eq(n, "Robot") || Eq(n, "Robot_Pick_And_Place1"))
-                return PlcAssignment.M262;
+            if (Eq(n, "Rejector")) return PlcAssignment.M262;
+            if (Eq(n, "TopCoverSensor")) return PlcAssignment.BX1;
+            if (Eq(n, "Robot") || Eq(n, "Robot_Pick_And_Place1")) return PlcAssignment.M262;
 
             return PlcAssignment.Unknown;
         }
