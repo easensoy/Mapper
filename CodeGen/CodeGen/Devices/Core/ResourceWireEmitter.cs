@@ -6,6 +6,7 @@ using System.Text;
 using System.Xml;
 using System.Xml.Linq;
 using CodeGen.Configuration;
+using CodeGen.Mapping;
 using CodeGen.Translation;
 
 namespace CodeGen.Devices.Core
@@ -543,88 +544,26 @@ namespace CodeGen.Devices.Core
         // Canonical canvas layout — applied to BOTH the sysres
         // (ApplyCanonicalLayout in Emit) and the deployed syslay
         // (ApplyLayoutToSyslay, now invoked at the end of Emit). Single source
-        // of truth so the two canvases read identically and never overlap.
+        // of truth lives in CodeGen.Mapping.ComponentRegistry — this dictionary
+        // is projected from there so the table never drifts.
         //
-        // Grid: 2500-unit horizontal pitch (≥2000; clears EAE's widest
-        // composite body ~1500-1800 with margin — fixes Feeder/Checker which
-        // were only 400 apart and overlapped) and ~700-1400 vertical pitch.
-        // Top-down flow: bootstrap → HMI → structural → sensors+process →
-        // actuators. START is EAE's built-in E_RESTART auto-instance at the
-        // top-left (NOT in the FBNetwork — can't move it, only avoid it):
-        // FB2 sits at x=800 (known-clear column) y=1100 (below START's
-        // footprint); FB1 (DPAC_FULLINIT) top-right. Feed_Station is pushed
-        // right of the sensor row so the stateRprtCmd adapter wires don't
-        // cross. M262IO is listed for completeness but is a no-op (the
-        // PLC_RW_M262 broker was retired — no such FB is ever instantiated).
-        private static readonly Dictionary<string, (int X, int Y)> CanonicalLayout = new(StringComparer.Ordinal)
+        // Grid (defined in CodeGen.Mapping.LayoutGrid): 2500-unit horizontal
+        // pitch, ~700-1400 vertical pitch, per-PLC actuator row Y. Top-down
+        // flow: bootstrap → HMI → structural → sensors+process → actuators.
+        // START is EAE's built-in E_RESTART auto-instance at the top-left (NOT
+        // in the FBNetwork — can't move it, only avoid it): FB2 sits at x=800
+        // y=1100 (below START's footprint); FB1 (DPAC_FULLINIT) top-right.
+        // Adding/moving a component = one row in ComponentRegistry.Build();
+        // every position consumer here picks it up automatically.
+        private static readonly Dictionary<string, (int X, int Y)> CanonicalLayout = BuildCanonicalLayout();
+
+        private static Dictionary<string, (int X, int Y)> BuildCanonicalLayout()
         {
-            // Runtime bootstrap (START is EAE-auto, top-left)
-            { "FB1",          (3000, 400)  },   // DPAC_FULLINIT — top-right
-            { "FB2",          (800,  1100) },   // plcStart — below START
-            // HMI row (y=2000)
-            { "Area_HMI",     (2000, 2000) },
-            { "Station1_HMI", (4500, 2000) },
-            // Structural row (y=2900)
-            { "Area",         (2000, 2900) },
-            { "Station1",     (4500, 2900) },
-            { "Area_Term",    (7000, 2900) },
-            // Sensors + process row (y=4000) — Feed_Station right of sensors
-            { "PartInHopper", (2000, 4000) },
-            { "PartAtChecker",(4500, 4000) },
-            { "Feed_Station", (7000, 4000) },
-            // Actuator row (y=5400) — 2500 pitch, terminator far right.
-            // Use the Control.xml component name "Feeder" as the FB Name
-            // attribute; the previous "Pusher" alias broke symbolic-link
-            // PATH expansion (CAT SYMLINKMULTIVARDST $${PATH} macros
-            // resolved to Pusher.athome instead of Feeder.athome and lost
-            // their channel bindings). Hardware-side hardware names
-            // (PusherAtHome, ExtendPusher) stay inside the .hcf only.
-            { "Feeder",       (2000, 5400) },
-            { "Checker",      (4500, 5400) },
-            { "Transfer",     (7000, 5400) },
-            { "Stn1_Term",    (9500, 5400) },
-            // M580 zone (Station 2 — purple). Same row scheme as Station 1, but
-            // every gap is sized to the MEASURED FB heights (FbEstHeight) so no two
-            // bodies touch:
-            //   y=2000  HMI faceplate  (Station2_HMI, ~500 tall)
-            //   y=2900  Station        (Station2, ~650 tall)
-            //   y=4000  sensors (~800) + processes (~1700): BearingSensor/ShaftSensor
-            //           + Assembly_Station/Disassembly
-            //   y=6500  actuators (single row, Five_State ~3050 tall): 6 actuators +
-            //           Stn2_Term marching left->right at 2500 x-pitch
-            // One actuator row => no actuator-below-actuator stacking; the 2500 gap
-            // from the process row clears the 1700 process body. ResizeFramesToFitFbs
-            // then grows the purple frame to enclose the whole thing (no overflow).
-            { "Station2_HMI",    (12200, 2000) },   // mirrors Station1_HMI (y=2000)
-            { "Station2",        (12200, 2900) },   // mirrors Station1     (y=2900)
-            // sensors + process row (y=4000), mirrors PartInHopper/…/Feed_Station
-            { "Assembly_Station",(12200, 4000) },
-            { "Disassembly",     (14700, 4000) },
-            { "BearingSensor",   (17200, 4000) },
-            { "ShaftSensor",     (19700, 4000) },
-            // single actuator row at y=6500 (NOT 5400). The process row above
-            // renders ~1700 tall (to ~5700), so the actuator row is pushed to 6500
-            // to clear it -- a 2500 gap > the 1700 process body = no overlap. One
-            // row only => no actuator-below-actuator stacking. Five_State bodies are
-            // ~3050 tall; ResizeFramesToFitFbs grows the purple frame to ~6500+3050
-            // so the row is fully enclosed.
-            { "Bearing_PnP",     (12200, 6500) },
-            { "Bearing_Gripper", (14700, 6500) },
-            { "Shaft_Hr",        (17200, 6500) },
-            { "Shaft_Vr",        (19700, 6500) },
-            { "Shaft_Gripper",   (22200, 6500) },
-            { "Clamp",           (24700, 6500) },
-            { "Stn2_Term",       (27200, 6500) },
-            // BX1 zone (Station 2 — green). Same row scheme, to the right of the
-            // M580 actuator row (ends at Stn2_Term x=27200, +body+pad ~28500), so
-            // BX1 starts at 29000 and the green frame stays clear of the purple.
-            { "TopCoverSenosr",  (29000, 4000) },
-            { "CoverPNP_Hr",     (29000, 6500) },
-            { "CoverPNP_Vr",     (31500, 6500) },
-            { "CoverPnp_Gripper",(34000, 6500) },
-            // No-op (M262IO/PLC_RW_M262 retired — never instantiated)
-            { "M262IO",       (9500, 400)  },
-        };
+            var dict = new Dictionary<string, (int X, int Y)>(StringComparer.Ordinal);
+            foreach (var entry in ComponentRegistry.ByName.Values)
+                dict[entry.Name] = (entry.X, entry.Y);
+            return dict;
+        }
 
         // Sysres canvases are device-local — the M580 sysres only shows the M580
         // FBs, the BX1 sysres only shows the BX1 FBs. The CanonicalLayout
