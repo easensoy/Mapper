@@ -102,7 +102,13 @@ namespace CodeGen.Translation
             AddParam("TextColor", "Black");
             AddParam("Font", font);
             AddParam("TextAlignment", textAlignment);
-            AddParam("MoveStyle", "AnyContained");
+            // MoveStyle="None" pins the frame at the emitted X/Y/Width/Height.
+            // Was "AnyContained" — that's EAE's auto-grow mode which re-anchored
+            // the BX1 frame westward to swallow Station 1 / Station 2 (M580) on
+            // every regen. "None" is what the SE DesignGuidelines reference
+            // project uses; combined with non-overlapping abutting frame widths
+            // from CodeGen.Mapping.LayoutGrid, each PLC zone stays in its lane.
+            AddParam("MoveStyle", "None");
             AddParam("Text", text);
             AddParam("NxtLayerIdentifier", string.Empty);
 
