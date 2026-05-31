@@ -39,8 +39,7 @@ namespace CodeGen.Translation
 
         public SyslayBuilder AddFB(string id, string name, string type, string ns, double x, double y,
             IDictionary<string, string>? parameters = null,
-            IDictionary<string, IDictionary<string, string>>? nestedFbParameters = null,
-            IDictionary<string, string>? attributes = null)
+            IDictionary<string, IDictionary<string, string>>? nestedFbParameters = null)
         {
             var fb = new XElement(Ns + "FB",
                 new XAttribute("ID", id),
@@ -49,21 +48,6 @@ namespace CodeGen.Translation
                 new XAttribute("Namespace", ns),
                 new XAttribute("x", x.ToString(System.Globalization.CultureInfo.InvariantCulture)),
                 new XAttribute("y", y.ToString(System.Globalization.CultureInfo.InvariantCulture)));
-
-            // <Attribute> children must precede <Parameter> children. Required for
-            // generic FBs (e.g. MQTT_PUBLISH_115480E69E664F878) whose numbered
-            // channel ports (Topic1/Payload1/QoS1/PUBLISH1) only materialise once
-            // Configuration.GenericFBType.InterfaceParams sets the channel count
-            // (CNTX:=1). The MQTT bridge publishers on BX1 use this hook.
-            if (attributes != null)
-            {
-                foreach (var kv in attributes)
-                {
-                    fb.Add(new XElement(Ns + "Attribute",
-                        new XAttribute("Name", kv.Key),
-                        new XAttribute("Value", kv.Value)));
-                }
-            }
 
             if (parameters != null)
             {
