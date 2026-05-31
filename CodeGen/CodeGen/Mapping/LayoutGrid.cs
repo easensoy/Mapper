@@ -62,10 +62,11 @@ namespace CodeGen.Mapping
         /// </summary>
         public static int RowY(PlcAssignment plc, LayoutRow row) => (plc, row) switch
         {
-            (_, LayoutRow.Hmi)     => 2000,
-            (_, LayoutRow.Station) => 2900,
-            (_, LayoutRow.Process) => 4000,
-            (_, LayoutRow.Sensor)  => 4000,
+            (_, LayoutRow.Floating) => 200,
+            (_, LayoutRow.Hmi)      => 2000,
+            (_, LayoutRow.Station)  => 2900,
+            (_, LayoutRow.Process)  => 4000,
+            (_, LayoutRow.Sensor)   => 4000,
             (PlcAssignment.M262, LayoutRow.Actuator) => 5400,
             (PlcAssignment.M580, LayoutRow.Actuator) => 6500,
             (PlcAssignment.BX1,  LayoutRow.Actuator) => 6500,
@@ -84,33 +85,20 @@ namespace CodeGen.Mapping
                 .Max();
 
         /// <summary>
-        /// Frame width for a PLC zone. Each frame ABUTS the next zone's origin
-        /// (no overlap between M262 ↔ M580 ↔ BX1), so the three coloured bands
-        /// stay in their own lanes and EAE's auto-grow (when ever re-enabled)
-        /// has nothing to fight. The trailing zone (BX1) uses
-        /// (MaxColumn + 1) × ColumnPitchX + FrameRightPadding since there is no
-        /// next-zone origin to abut. Returns 0 when the PLC has no components.
+        /// Frame width for a PLC zone. Hardcoded per the canonical SMC mapping
+        /// table — three clearly-separated coloured bands with small gaps so the
+        /// yellow/purple/green zones never overlap visually (zone end → next
+        /// origin: M262 10300 → 11800 (gap 1500), M580 27800 → 28200 (gap 400)).
+        /// Combined with <c>MoveStyle="None"</c> on every Frame, EAE renders the
+        /// three bands at exactly these emitted bounds — no auto-grow, no green
+        /// swallowing the yellow.
         /// </summary>
-        public static int FrameWidth(PlcAssignment plc)
+        public static int FrameWidth(PlcAssignment plc) => plc switch
         {
-            int nextOrigin = NextZoneOriginX(plc);
-            if (nextOrigin > 0) return nextOrigin - FrameOriginX(plc);
-
-            int max = MaxColumn(plc);
-            if (max < 0) return 0;
-            return (max + 1) * ColumnPitchX + FrameRightPadding;
-        }
-
-        /// <summary>
-        /// X coordinate of the next PLC zone to the right of <paramref name="plc"/>,
-        /// or -1 if <paramref name="plc"/> is the rightmost zone. M262 → M580 origin;
-        /// M580 → BX1 origin; BX1 → no next.
-        /// </summary>
-        private static int NextZoneOriginX(PlcAssignment plc) => plc switch
-        {
-            PlcAssignment.M262 => FrameOriginX(PlcAssignment.M580),
-            PlcAssignment.M580 => FrameOriginX(PlcAssignment.BX1),
-            _ => -1,
+            PlcAssignment.M262 => 8500,    // 1800..10300 (gap 1500 to M580 origin)
+            PlcAssignment.M580 => 16000,   // 11800..27800 (gap 400 to BX1 origin)
+            PlcAssignment.BX1  => 6600,    // 28200..34800 (last zone)
+            _ => 0,
         };
 
         /// <summary>Right edge X of the PLC's frame.</summary>
