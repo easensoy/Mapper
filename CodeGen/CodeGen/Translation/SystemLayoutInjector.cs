@@ -1462,8 +1462,16 @@ namespace CodeGen.Translation
                     ["URL"] = SyslayBuilder.FormatString(config.MqttBrokerUrl),
                     ["ClientIdentifier"] = SyslayBuilder.FormatString(config.MqttClientId),
                 };
+                // Position from ComponentRegistry — single source of truth.
+                // Registry pins MqttConn at (29000, 200) (BX1 zone, floating row).
+                // Falls back to the historic (3760, 200) only if the entry is
+                // somehow missing, so callers without the Mapping namespace still
+                // get a syslay-valid coordinate.
+                var mqttEntry = CodeGen.Mapping.ComponentRegistry.Get("MqttConn");
+                int mqttX = mqttEntry?.X ?? 3760;
+                int mqttY = mqttEntry?.Y ?? 200;
                 builder.AddFB(FBIdGenerator.GenerateFBId("MqttConn"),
-                    "MqttConn", "MQTT_CONNECTION", "Runtime.NetConnectivity", 3760, 200, mqttParams);
+                    "MqttConn", "MQTT_CONNECTION", "Runtime.NetConnectivity", mqttX, mqttY, mqttParams);
                 // MqttConn is routed to BX1 (Soft dPAC) by SysresFbMirror.BucketFor —
                 // M262/M580 have no MQTT runtime client. Its INIT/CONNECT bring-up is
                 // emitted on the BX1 SYSRES by ResourceWireEmitter (a syslay-only event
@@ -1484,6 +1492,13 @@ namespace CodeGen.Translation
             // the M580 partition so the syslay wires render solid (no cross-PLC
             // dashed edges).
             BuildStation2Wiring(builder, contents);
+            // BX1 — Cover PnP sub-station. No Station_CAT / no Process FB on BX1
+            // itself (Assembly_Station on M580 commands the BX1 actuators
+            // cross-PLC). Emits an INIT chain + closed stateRprtCmd ring among
+            // BX1's own sensor + actuators so the green band on the syslay
+            // canvas shows the same wiring style as M262 / M580 instead of
+            // floating disconnected FBs (the visual gap the user flagged).
+            BuildBx1Wiring(builder, contents);
 
             // Phase 1: recipe arrays now ride on the Process1 syslay Parameter values written
             // by BuildProcessFbParameters above. The deployed ProcessRuntime_Generic_v1.fbt is
@@ -2295,6 +2310,58 @@ namespace CodeGen.Translation
             foreach (var a in contents.Actuators) if (IsM580(a.Name)) ring.Add((a.Name, "Five_State_Actuator_CAT"));
             ring.Add((AssemblyProc, "Process1_Generic"));
             ring.Add((DisassemblyProc, "Process1_Generic"));
+            if (ring.Count > 1)
+            {
+                for (int i = 0; i < ring.Count - 1; i++)
+                    builder.AddAdapterConnection(
+                        $"{ring[i].Name}.{StateRprtOut(ring[i].Type)}",
+                        $"{ring[i + 1].Name}.{StateRprtIn(ring[i + 1].Type)}");
+                builder.AddAdapterConnection(
+                    $"{ring[^1].Name}.{StateRprtOut(ring[^1].Type)}",
+                    $"{ring[0].Name}.{StateRprtIn(ring[0].Type)}");
+            }
+        }
+
+        /// <summary>
+        /// Sibling of <see cref="BuildStation2Wiring"/> for the BX1 Soft-dPAC
+        /// sub-station (Cover PnP). BX1 has NO Station_CAT, NO Process FB and NO
+        /// HMI faceplate on its own resource — Assembly_Station on the M580
+        /// commands every BX1 actuator over the cross-PLC state_table broadcast
+        /// ring (see Docs/ARCHITECTURE.md §4a). So BX1's syslay wiring is two
+        /// chains over its own component set:
+        /// <list type="bullet">
+        ///   <item>INIT chain — sensor(s) → actuator(s). No upstream source on
+        ///     the syslay (the actual FB1.INITO → first-FB.INIT bootstrap is
+        ///     wired on the BX1 sysres by ResourceWireEmitter); the syslay
+        ///     just shows the relay so the green band reads as one connected
+        ///     island instead of disconnected FBs.</item>
+        ///   <item>stateRprtCmd ring — closed loop across all BX1 sensors +
+        ///     actuators. Closes back to the first sensor so every component
+        ///     sees every other's state broadcast (the ring is how state
+        ///     reaches the M580's Assembly_Station via the cross-PLC bridge).</item>
+        /// </list>
+        /// Skipped cleanly when BX1 has no components in the current fixture.
+        /// </summary>
+        private static void BuildBx1Wiring(SyslayBuilder builder, StationContents contents)
+        {
+            static bool IsBx1(string name) =>
+                HcfSymbolIndex.NameBasedPlcGuess(name) == PlcAssignment.BX1;
+
+            // INIT chain — BX1 sensors first, then BX1 actuators. No upstream
+            // source on the syslay (ResourceWireEmitter handles FB1.INITO on
+            // the BX1 sysres).
+            var initChain = new List<string>();
+            foreach (var s in contents.Sensors)    if (IsBx1(s.Name)) initChain.Add(s.Name);
+            foreach (var a in contents.Actuators)  if (IsBx1(a.Name)) initChain.Add(a.Name);
+            for (int i = 0; i < initChain.Count - 1; i++)
+                builder.AddEventConnection($"{initChain[i]}.INITO", $"{initChain[i + 1]}.INIT");
+
+            // stateRprtCmd ring — every BX1 sensor + actuator carries the
+            // stateRprtCmd_in/out adapter ports. Closed loop so the broadcast
+            // ring is a true ring (last → first).
+            var ring = new List<(string Name, string Type)>();
+            foreach (var s in contents.Sensors)    if (IsBx1(s.Name)) ring.Add((s.Name, "Sensor_Bool_CAT"));
+            foreach (var a in contents.Actuators)  if (IsBx1(a.Name)) ring.Add((a.Name, "Five_State_Actuator_CAT"));
             if (ring.Count > 1)
             {
                 for (int i = 0; i < ring.Count - 1; i++)
