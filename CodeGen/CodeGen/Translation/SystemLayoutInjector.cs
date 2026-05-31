@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Xml.Linq;
 using CodeGen.Configuration;
+using CodeGen.Mapping;
 using CodeGen.Models;
 using CodeGen.Translation;
 using CodeGen.Translation.Process;
@@ -1516,13 +1517,39 @@ namespace CodeGen.Translation
             // The two "Station 2" frames are visually distinct rather than
             // wrapped in a single outer, matching the SMC_Rig_Expo_withClamp
             // reference which colour-codes per PLC.
-            builder.AddFrame("FRAME_Station1", 1800, 1700, 8400, 5100,
+            //
+            // FRAME WIDTHS MUST ENCLOSE ALL FBs that visually belong to that
+            // PLC; EAE's MoveStyle="AnyContained" auto-grows a frame to
+            // contain any FB whose body overlaps it. If a BX1-typed actuator
+            // is placed past the BX1 frame's right edge, EAE re-anchors the
+            // frame westward to "find" the missing FBs and swallows the
+            // neighbouring station frames (observed: BX1 frame grew to
+            // X=3340, W=32020 covering all of Station 1). Coordinates here
+            // are sized to the actual FB X column at deploy time:
+            //   M262 column: 2000, 4500, 7000, 9500             → frame 1800..10300
+            //   M580 column: 12200, 14700, 17200, 19700, 22200,
+            //                24700, 27200 (Stn2_Term)           → frame 11800..27800
+            //   BX1  column: 29000, 31500, 34000                → frame 28200..34800
+            // Height covers the HMI row (Y=2000) through the actuator row
+            // (Y=6500) + default FB body height (~400) → H=5300 from Y=1700.
+            // Frame X / Y / Width / Height derive from CodeGen.Mapping.LayoutGrid
+            // so the bounds always enclose every column registered in
+            // ComponentRegistry — no more drift between hand-edited Width values
+            // and the actual FB X positions (the trigger for EAE's
+            // auto-grow-and-swallow-stations bug).
+            builder.AddFrame("FRAME_Station1",
+                LayoutGrid.FrameOriginX(PlcAssignment.M262), LayoutGrid.FrameOriginY,
+                LayoutGrid.FrameWidth(PlcAssignment.M262), LayoutGrid.FrameHeight,
                 "LightYellow", "Station 1   —   PLC M262", "TopCenter",
                 "Microsoft Sans Serif, 36pt, style=Bold");
-            builder.AddFrame("FRAME_Station2_M580", 12000, 1700, 8300, 5100,
+            builder.AddFrame("FRAME_Station2_M580",
+                LayoutGrid.FrameOriginX(PlcAssignment.M580), LayoutGrid.FrameOriginY,
+                LayoutGrid.FrameWidth(PlcAssignment.M580), LayoutGrid.FrameHeight,
                 "MediumPurple", "Station 2   —   PLC M580", "TopCenter",
                 "Microsoft Sans Serif, 36pt, style=Bold");
-            builder.AddFrame("FRAME_Station2_BX1", 20400, 1700, 6800, 5100,
+            builder.AddFrame("FRAME_Station2_BX1",
+                LayoutGrid.FrameOriginX(PlcAssignment.BX1), LayoutGrid.FrameOriginY,
+                LayoutGrid.FrameWidth(PlcAssignment.BX1), LayoutGrid.FrameHeight,
                 "LightGreen", "Station 2   —   PLC BX1", "TopCenter",
                 "Microsoft Sans Serif, 36pt, style=Bold");
             // Empirical observation 2026-05-21: EAE always renders <FB> z-order
@@ -1582,27 +1609,16 @@ namespace CodeGen.Translation
         /// </summary>
         private static string ResolveActuatorFBType(VueOneComponent actuator)
         {
+            // Delegates to the canonical template lens (CodeGen.Mapping.TemplateMap).
+            // Logic: VacuumGripperNames → Vacuum_Gripper_CAT; stub OFF + (7-state OR
+            // PARALLEL+ALTERNATIVE branched) → Seven_State_Actuator_CAT; 4-state →
+            // Five_State_Actuator_No_Sensors_CAT; else → Five_State_Actuator_CAT.
+            // See Docs/INVARIANTS.md I-4 for the 6 sites that must agree on this.
             if (actuator == null) return "Five_State_Actuator_CAT";
-            var name = actuator.Name ?? string.Empty;
-            if (VacuumGripperNames.Contains(name)) return "Vacuum_Gripper_CAT";
-            // Seven_State_Actuator_CAT routing restored 2026-05-21 for
-            // Bearing_PnP. Two detection paths:
-            //   1. States.Count == 7 — the simple "seven-state actuator"
-            //      (turn-pick / pick / turn-place / place / turn-home / home).
-            //   2. PARALLEL+ALTERNATIVE branched (Bearing_PnP's 13-state
-            //      pattern: assembly path leaves the resting state via PARALLEL,
-            //      disassembly path leaves the same state via ALTERNATIVE).
-            //      The physical actuator has 3 positions + 2 coils so it
-            //      collapses onto Seven_State's ECC regardless of how many
-            //      logical Control.xml states it carries.
-            // Interim stub (see MapperConfig.StubSevenStateActuatorsAsFiveState):
-            // when set, Seven_State actuators fall through to Five_State so they
-            // join the stateRprtCmd ring and the recipe can actually drive them.
-            if (!Configuration.MapperConfig.StubSevenStateActuatorsAsFiveState
-                && (actuator.States.Count == 7 || IsBranchedSevenState(actuator)))
-                return "Seven_State_Actuator_CAT";
-            if (actuator.States.Count == 4) return "Five_State_Actuator_No_Sensors_CAT";
-            return "Five_State_Actuator_CAT";
+            return TemplateMap.ResolveActuatorCatType(
+                actuator.Name ?? string.Empty,
+                actuator.States?.Count ?? 0,
+                IsBranchedSevenState(actuator));
         }
 
         /// <summary>
@@ -1704,27 +1720,22 @@ namespace CodeGen.Translation
         /// </summary>
         private static (int X, int Y) PlcZoneActuatorPosition(PlcAssignment plc, int colIndexInPlc)
         {
-            const int Y = 5400;
-            int baseX = plc switch
-            {
-                PlcAssignment.M580 => 12200,
-                PlcAssignment.BX1  => 20600,
-                _ /* M262 / Unknown */ => 2000,
-            };
-            return (baseX + colIndexInPlc * 2500, Y);
+            // Initial placeholder placement only — ApplyCanonicalLayout /
+            // ApplyLayoutToSyslay later rewrites every registered name to the
+            // ComponentRegistry coordinate. Derive from LayoutGrid so the
+            // placeholder lands inside the correct PLC frame even for names
+            // that aren't in the registry yet (single source of truth).
+            return (LayoutGrid.ColumnBaseX(plc) + colIndexInPlc * LayoutGrid.ColumnPitchX,
+                    LayoutGrid.RowY(plc, LayoutRow.Actuator));
         }
 
         /// <summary>Sensor counterpart of <see cref="PlcZoneActuatorPosition"/>.</summary>
         private static (int X, int Y) PlcZoneSensorPosition(PlcAssignment plc, int colIndexInPlc)
         {
-            const int Y = 4000;
-            int baseX = plc switch
-            {
-                PlcAssignment.M580 => 12200,
-                PlcAssignment.BX1  => 20600,
-                _ /* M262 / Unknown */ => 2000,
-            };
-            return (baseX + colIndexInPlc * 2500, Y);
+            // Same as PlcZoneActuatorPosition — initial placeholder, later
+            // rewritten by CanonicalLayout for registered names.
+            return (LayoutGrid.ColumnBaseX(plc) + colIndexInPlc * LayoutGrid.ColumnPitchX,
+                    LayoutGrid.RowY(plc, LayoutRow.Sensor));
         }
 
         /// <summary>
