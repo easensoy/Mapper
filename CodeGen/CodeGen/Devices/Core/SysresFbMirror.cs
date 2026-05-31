@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Xml.Linq;
+using CodeGen.Mapping;
 using CodeGen.Translation;
 
 namespace CodeGen.Devices.Core
@@ -258,28 +259,28 @@ namespace CodeGen.Devices.Core
         }
 
         /// <summary>
-        /// Decides which PLC resource a syslay FB belongs on. Component FBs use
-        /// <see cref="HcfSymbolIndex.NameBasedPlcGuess"/>; the Station-2 structural
-        /// FBs (which have no IO bindings) are hard-routed to M580. Anything the
-        /// name guess can't place falls back to M262 so nothing is ever dropped.
+        /// Decides which PLC resource a syslay FB belongs on. Primary lookup is
+        /// the canonical SMC partition table (<see cref="ControllerMap"/>); two
+        /// special cases handle FBs not in the registry — <c>MqttConn</c> is
+        /// pinned to BX1 (MQTT runtime is Soft-dPAC-only; M262/M580 return
+        /// ReturnCode 50) and the legacy <c>Disassembly_Station</c> name variant
+        /// stays on M580. Anything neither the registry nor the legacy cases
+        /// know about falls back to M262 so nothing is ever dropped.
         /// </summary>
         public static PlcAssignment BucketFor(string fbName)
         {
-            switch (fbName)
-            {
-                case "Station2":
-                case "Station2_HMI":
-                case "Assembly_Station":
-                case "Disassembly":
-                case "Disassembly_Station":
-                case "Stn2_Term":
-                    return PlcAssignment.M580;
-                // MQTT runs ONLY on the Soft dPAC (BX1); M262/M580 have no MQTT
-                // runtime client (ReturnCode 50). Route the single MqttConn there.
-                case "MqttConn":
-                    return PlcAssignment.BX1;
-            }
-            var p = HcfSymbolIndex.NameBasedPlcGuess(fbName);
+            if (string.IsNullOrEmpty(fbName)) return PlcAssignment.Unknown;
+
+            // MQTT runs ONLY on the Soft dPAC (BX1). Not a component, not in the
+            // registry — pin it explicitly.
+            if (string.Equals(fbName, "MqttConn", StringComparison.Ordinal))
+                return PlcAssignment.BX1;
+
+            // Legacy structural-FB name variant not in ComponentRegistry.
+            if (string.Equals(fbName, "Disassembly_Station", StringComparison.Ordinal))
+                return PlcAssignment.M580;
+
+            var p = ControllerMap.PlcOf(fbName);
             return p == PlcAssignment.Unknown ? PlcAssignment.M262 : p;
         }
 
