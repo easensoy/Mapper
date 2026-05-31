@@ -1480,6 +1480,16 @@ namespace CodeGen.Translation
                 report.Missing.Add(
                     $"[MQTT] MqttConn (MQTT_CONNECTION) injected — ConnectionID={config.MqttClientId}, " +
                     $"URL={config.MqttBrokerUrl}; routed to BX1, INIT/CONNECT wired on BX1 sysres.");
+
+                // Cross-PLC MQTT bridge — one standalone MqttFmt_<comp> +
+                // MqttPub_<comp> pair on BX1 for every M262 / M580 sensor or
+                // actuator, with a cross-resource syslay wire from the remote
+                // component's exposed boundary state into the BX1 formatter.
+                // BX1's own components are skipped here (they publish via the
+                // embedded MqttPub patched into each CAT by
+                // TemplateLibraryDeployer.PatchCatMqttPublish — bridging them
+                // would duplicate the publish). See CodeGen.Services.MqttBridgeEmitter.
+                CodeGen.Services.MqttBridgeEmitter.EmitBridge(builder, config);
             }
 
             BuildFeedStationWiring(builder, contents);
