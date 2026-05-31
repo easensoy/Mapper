@@ -18,10 +18,8 @@ namespace CodeGen.Devices.Core
         }
 
         public record SyslayFbParameter(string Name, string Value);
-        public record SyslayFbAttribute(string Name, string Value);
         public record SyslayFb(string Id, string Name, string Type, string Namespace,
-            string X, string Y, List<SyslayFbParameter> Parameters,
-            List<SyslayFbAttribute> Attributes);
+            string X, string Y, List<SyslayFbParameter> Parameters);
 
         public static List<SyslayFb> ReadSyslayTopLevelFbs(string syslayPath)
         {
@@ -44,12 +42,6 @@ namespace CodeGen.Devices.Core
                             (string?)p.Attribute("Name")  ?? string.Empty,
                             (string?)p.Attribute("Value") ?? string.Empty))
                         .Where(p => !string.IsNullOrEmpty(p.Name))
-                        .ToList(),
-                    Attributes: e.Elements(ns + "Attribute")
-                        .Select(a => new SyslayFbAttribute(
-                            (string?)a.Attribute("Name")  ?? string.Empty,
-                            (string?)a.Attribute("Value") ?? string.Empty))
-                        .Where(a => !string.IsNullOrEmpty(a.Name))
                         .ToList()))
                 .Where(fb => !string.IsNullOrWhiteSpace(fb.Name))
                 .ToList();
@@ -142,14 +134,6 @@ namespace CodeGen.Devices.Core
                 // M262 via BucketFor's default fallback (name guess → Unknown
                 // → M262), matching where the embedded publishes physically run.
                 "MQTT_CONNECTION",
-                // Bridge publishers (BX1-side) that receive M262/M580 component
-                // state via cross-resource syslay wires and publish via MqttConn.
-                // Without these in keepTypes, the mirror skips them and the
-                // standalone publishers stay only on the syslay (no Mapping="…")
-                // — EAE never deploys them to the BX1 resource and the cross-PLC
-                // bridge silently does nothing.
-                "MqttStateFormatter",
-                "MQTT_PUBLISH_115480E69E664F878",
             };
 
             // Build a Name → existing sysres FB element index so we can UPDATE
@@ -200,17 +184,6 @@ namespace CodeGen.Devices.Core
                     // handle is stable.
                     existing.SetAttributeValue("Type",      fb.Type);
                     existing.SetAttributeValue("Namespace", fb.Namespace);
-                    // Upsert <Attribute> children (don't blanket-remove — EAE may
-                    // have added its own). Keeps a mirrored MQTT_PUBLISH's
-                    // InterfaceParams channel-count config in sync across regens.
-                    foreach (var a in fb.Attributes)
-                    {
-                        var existingAttr = existing.Elements(ns + "Attribute")
-                            .FirstOrDefault(x => (string?)x.Attribute("Name") == a.Name);
-                        if (existingAttr != null) existingAttr.SetAttributeValue("Value", a.Value);
-                        else existing.Add(new XElement(ns + "Attribute",
-                            new XAttribute("Name", a.Name), new XAttribute("Value", a.Value)));
-                    }
                     // Replace parameter children to match the syslay.
                     existing.Elements(ns + "Parameter").Remove();
                     foreach (var p in fb.Parameters)
@@ -234,17 +207,6 @@ namespace CodeGen.Devices.Core
                     new XAttribute("Mapping",   fb.Id),
                     new XAttribute("x",         fb.X),
                     new XAttribute("y",         fb.Y));
-
-                // Carry <Attribute> children (e.g. generic-FB InterfaceParams)
-                // so a mirrored MQTT_PUBLISH keeps its channel-count config on
-                // the BX1 sysres — otherwise the numbered Topic1/Payload1/QoS1
-                // ports vanish and EAE rejects the FB on import.
-                foreach (var a in fb.Attributes)
-                {
-                    fbElement.Add(new XElement(ns + "Attribute",
-                        new XAttribute("Name",  a.Name),
-                        new XAttribute("Value", a.Value)));
-                }
 
                 foreach (var p in fb.Parameters)
                 {
@@ -312,13 +274,6 @@ namespace CodeGen.Devices.Core
             // MQTT runs ONLY on the Soft dPAC (BX1). Not a component, not in the
             // registry — pin it explicitly.
             if (string.Equals(fbName, "MqttConn", StringComparison.Ordinal))
-                return PlcAssignment.BX1;
-
-            // Standalone MQTT bridge publishers (MqttFmt_<comp>, MqttPub_<comp>)
-            // also live on BX1 — they receive M262/M580 component state via
-            // cross-resource syslay wires and publish via the BX1 broker.
-            if (fbName.StartsWith("MqttPub_", StringComparison.Ordinal) ||
-                fbName.StartsWith("MqttFmt_", StringComparison.Ordinal))
                 return PlcAssignment.BX1;
 
             // Legacy structural-FB name variant not in ComponentRegistry.
