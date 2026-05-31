@@ -13,15 +13,17 @@ namespace CodeGen.Mapping
     {
         /// <summary>Bootstrap FBs (DPAC_FULLINIT / plcStart) — fixed coordinates, no column grid.</summary>
         Boot,
+        /// <summary>Floating row at the top of the canvas (Y=200) — e.g. MqttConn.</summary>
+        Floating,
         /// <summary>HMI faceplate row.</summary>
         Hmi,
         /// <summary>Structural row (Area / Station / Terminator).</summary>
         Station,
-        /// <summary>Process FB row.</summary>
+        /// <summary>Process FB row — Processes AND sensors share this row per the canonical SMC mapping table (both at Y=4000).</summary>
         Process,
-        /// <summary>Sensor row (shares Y with Process on M262/M580).</summary>
+        /// <summary>Legacy alias for the Process row — same Y, kept for callers that distinguish sensor placement semantically.</summary>
         Sensor,
-        /// <summary>Actuator row.</summary>
+        /// <summary>Actuator row — per-PLC Y (M262=5400, M580=6500, BX1=6500).</summary>
         Actuator,
     }
 
@@ -94,8 +96,8 @@ namespace CodeGen.Mapping
                 M262("Area",          column: 0, row: LayoutRow.Station,  owner: ""),
                 M262("Station1",      column: 1, row: LayoutRow.Station,  owner: ""),
                 M262("Area_Term",     column: 2, row: LayoutRow.Station,  owner: ""),
-                M262("PartInHopper",  column: 0, row: LayoutRow.Sensor,   owner: "Feed_Station"),
-                M262("PartAtChecker", column: 1, row: LayoutRow.Sensor,   owner: "Feed_Station"),
+                M262("PartInHopper",  column: 0, row: LayoutRow.Process,  owner: "Feed_Station"),
+                M262("PartAtChecker", column: 1, row: LayoutRow.Process,  owner: "Feed_Station"),
                 M262("Feed_Station",  column: 2, row: LayoutRow.Process,  owner: "Feed_Station"),
                 M262("Feeder",        column: 0, row: LayoutRow.Actuator, owner: "Feed_Station"),
                 M262("Checker",       column: 1, row: LayoutRow.Actuator, owner: "Feed_Station"),
@@ -111,8 +113,8 @@ namespace CodeGen.Mapping
                 M580("Station2",         column: 0, row: LayoutRow.Station,  owner: ""),
                 M580("Assembly_Station", column: 0, row: LayoutRow.Process,  owner: "Assembly_Station"),
                 M580("Disassembly",      column: 1, row: LayoutRow.Process,  owner: "Disassembly"),
-                M580("BearingSensor",    column: 2, row: LayoutRow.Sensor,   owner: "Assembly_Station"),
-                M580("ShaftSensor",      column: 3, row: LayoutRow.Sensor,   owner: "Assembly_Station"),
+                M580("BearingSensor",    column: 2, row: LayoutRow.Process,  owner: "Assembly_Station"),
+                M580("ShaftSensor",      column: 3, row: LayoutRow.Process,  owner: "Assembly_Station"),
                 M580("Bearing_PnP",      column: 0, row: LayoutRow.Actuator, owner: "Assembly_Station"),
                 M580("Bearing_Gripper",  column: 1, row: LayoutRow.Actuator, owner: "Assembly_Station"),
                 M580("Shaft_Hr",         column: 2, row: LayoutRow.Actuator, owner: "Assembly_Station"),
@@ -124,10 +126,16 @@ namespace CodeGen.Mapping
                 // ── BX1 — Cover PnP (BX1_RES, frame X=28200, columns 0..2). No
                 //    Process FB on BX1: Assembly_Station drives the BX1 actuators
                 //    cross-PLC, so ProcessOwner = "Assembly_Station".
-                BX1("TopCoverSenosr",    column: 0, row: LayoutRow.Sensor,   owner: "Assembly_Station"),
+                BX1("TopCoverSenosr",    column: 0, row: LayoutRow.Process,  owner: "Assembly_Station"),
                 BX1("CoverPNP_Hr",       column: 0, row: LayoutRow.Actuator, owner: "Assembly_Station"),
                 BX1("CoverPNP_Vr",       column: 1, row: LayoutRow.Actuator, owner: "Assembly_Station"),
                 BX1("CoverPnp_Gripper",  column: 2, row: LayoutRow.Actuator, owner: "Assembly_Station"),
+
+                // MqttConn — MQTT broker FB, hosted on BX1 (Soft dPAC) because M262/
+                // M580 have no MQTT runtime client (ReturnCode 50). Floats at the top
+                // of BX1's zone (Y=200) above the Station1/Station2 frames. Routed to
+                // BX1_RES by SysresFbMirror.BucketFor.
+                BX1("MqttConn",          column: 0, row: LayoutRow.Floating, owner: ""),
             };
             return rows.ToDictionary(r => r.Name, r => r, StringComparer.Ordinal);
         }
