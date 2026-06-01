@@ -268,6 +268,17 @@ namespace MapperTests
             CheckSimSwivelForce(syslayNet, "syslay", Fail, Pass, Note);
             CheckSimSwivelForce(sysresNet, "sysres", Fail, Pass, Note);
 
+            // ── D3: Cross-PLC MQTT bridge (sim-only) ─────────────────────────
+            // For every M262/M580 component the MqttBridgeEmitter must emit a
+            // MqttFmt_<comp> + MqttPub_<comp> pair on BX1, locally chained
+            // (Fmt.CNF→Pub.PUBLISH1, Fmt.payload→Pub.Payload1), INIT off
+            // MqttConn.INITO, and fed cross-resource from the remote
+            // component's state. BX1's OWN components must NOT be bridged
+            // (they publish via their embedded MqttPub). Gated on
+            // MqttPublishEnabled — no-op-green when MQTT is off.
+            if (cfg.MqttPublishEnabled)
+                CheckMqttBridge(syslayNet, "syslay", Fail, Pass, Note);
+
             // ── E: Disassembly parked ────────────────────────────────────────
             var disassyFb = syslayFbs.FirstOrDefault(f =>
                 string.Equals((string?)f.Attribute("Name"), "Disassembly", StringComparison.Ordinal));
@@ -581,6 +592,75 @@ namespace MapperTests
                 Pass("D2", $"{label}: SimSwivelForce wired for all {sevens.Count} Seven_State instance(s)");
             else
                 Note($"D2 {label}: {ok}/{sevens.Count} Seven instances fully wired");
+        }
+
+        /// <summary>
+        /// D3 — Cross-PLC MQTT bridge. Every MqttPub_&lt;comp&gt; on BX1 must
+        /// have a matching MqttFmt_&lt;comp&gt;, the local Fmt→Pub chain, INIT
+        /// off MqttConn.INITO, and a cross-resource feed into MqttFmt.REQ +
+        /// MqttFmt.state. BX1's own components (CoverPNP*/TopCoverSenosr) must
+        /// NOT be bridged — they publish via their embedded MqttPub.
+        /// </summary>
+        static void CheckMqttBridge(XElement net, string label,
+            Action<string, string> Fail, Action<string, string> Pass, Action<string> Note)
+        {
+            var fbs = net.Elements(Ns + "FB").ToList();
+            var pubs = fbs.Where(f => ((string?)f.Attribute("Name"))?.StartsWith("MqttPub_", StringComparison.Ordinal) == true)
+                          .Select(f => (string)f.Attribute("Name")!).ToList();
+            var fmts = fbs.Where(f => ((string?)f.Attribute("Name"))?.StartsWith("MqttFmt_", StringComparison.Ordinal) == true)
+                          .Select(f => (string)f.Attribute("Name")!).ToHashSet(StringComparer.Ordinal);
+
+            if (pubs.Count == 0)
+            {
+                Fail("D3", $"{label}: no MqttPub_<comp> bridge publishers found — the cross-PLC bridge emitted nothing");
+                return;
+            }
+
+            // BX1's own components must NOT be bridged (they use embedded MqttPub).
+            string[] bx1Own = { "CoverPNP_Hr", "CoverPNP_Vr", "CoverPnp_Gripper", "TopCoverSenosr" };
+            foreach (var own in bx1Own)
+            {
+                if (pubs.Contains("MqttPub_" + own))
+                    Fail("D3", $"{label}: BX1-own component '{own}' was bridged (MqttPub_{own}) — it must publish via its embedded MqttPub, not the bridge");
+            }
+
+            var ev = net.Element(Ns + "EventConnections");
+            var dc = net.Element(Ns + "DataConnections");
+            bool HasEvent(string src, string dst) => ev?.Elements(Ns + "Connection").Any(c =>
+                (string?)c.Attribute("Source") == src && (string?)c.Attribute("Destination") == dst) == true;
+            bool HasData(string src, string dst) => dc?.Elements(Ns + "Connection").Any(c =>
+                (string?)c.Attribute("Source") == src && (string?)c.Attribute("Destination") == dst) == true;
+            bool HasEventInto(string dst) => ev?.Elements(Ns + "Connection").Any(c =>
+                (string?)c.Attribute("Destination") == dst) == true;
+            bool HasDataInto(string dst) => dc?.Elements(Ns + "Connection").Any(c =>
+                (string?)c.Attribute("Destination") == dst) == true;
+
+            int ok = 0;
+            foreach (var pub in pubs)
+            {
+                var comp = pub.Substring("MqttPub_".Length);
+                var fmt = "MqttFmt_" + comp;
+                var reasons = new List<string>();
+
+                if (!fmts.Contains(fmt)) reasons.Add($"missing {fmt}");
+                // Local Fmt → Pub chain.
+                if (!HasEvent($"{fmt}.CNF", $"{pub}.PUBLISH1")) reasons.Add("no Fmt.CNF→Pub.PUBLISH1");
+                if (!HasData($"{fmt}.payload", $"{pub}.Payload1")) reasons.Add("no Fmt.payload→Pub.Payload1");
+                // INIT off MqttConn bring-up.
+                if (!HasEvent("MqttConn.INITO", $"{fmt}.INIT")) reasons.Add("no MqttConn.INITO→Fmt.INIT");
+                if (!HasEvent("MqttConn.INITO", $"{pub}.INIT")) reasons.Add("no MqttConn.INITO→Pub.INIT");
+                // Cross-resource feed from the remote component into the formatter.
+                if (!HasEventInto($"{fmt}.REQ")) reasons.Add("no cross-resource event → Fmt.REQ");
+                if (!HasDataInto($"{fmt}.state")) reasons.Add("no cross-resource data → Fmt.state");
+
+                if (reasons.Count == 0) ok++;
+                else Fail("D3", $"{label}: bridge for '{comp}' incomplete — {string.Join(", ", reasons)}");
+            }
+
+            if (ok == pubs.Count)
+                Pass("D3", $"{label}: cross-PLC MQTT bridge fully wired for all {pubs.Count} M262/M580 component(s)");
+            else
+                Note($"D3 {label}: {ok}/{pubs.Count} bridge publishers fully wired");
         }
 
         // ApplyNoSensorOverride: deleted in Iteration 6. Was a local replica added
