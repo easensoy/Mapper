@@ -1461,17 +1461,15 @@ namespace CodeGen.Translation
                     ["ConnectionID"] = SyslayBuilder.FormatString(config.MqttClientId),
                     ["URL"] = SyslayBuilder.FormatString(config.MqttBrokerUrl),
                     ["ClientIdentifier"] = SyslayBuilder.FormatString(config.MqttClientId),
-                    // ValidateCert='None' skips TLS certificate + hostname
-                    // validation. The mqtts:// URL scheme satisfies EAE 24.1's
-                    // validateEndpoint "secure-by-default" gate, but without
-                    // this override the runtime then attempts a real TLS
-                    // handshake against the broker and trips ReturnCode=100
-                    // (IsConnected=FALSE) when the broker is a plain-MQTT
-                    // mosquitto on port 1883 with no cert. The displayed
-                    // default in Online Watch is 'Server certificate and
-                    // hostname' (strict); 'None' disables both checks. STRING
-                    // value, not a numeric enum.
-                    ["ValidateCert"] = SyslayBuilder.FormatString("None"),
+                    // NOTE: ValidateCert='None' was tried (commit 8d8c7ed,
+                    // reverted) — the literal string 'None' did not match the
+                    // underlying enum the runtime expects, so the default
+                    // 'Server certificate and hostname' applied and the broker
+                    // connection failed (ReturnCode=100). Until the correct
+                    // enum value is identified OR mosquitto is set up with a
+                    // self-signed cert, leave ValidateCert unset and rely on
+                    // EAE's cached compile (with looser validation) being
+                    // preserved across runs.
                 };
                 // Position from ComponentRegistry — single source of truth.
                 // Registry pins MqttConn at (29000, 200) (BX1 zone, floating row).
