@@ -1603,24 +1603,23 @@ namespace CodeGen.Services
                 // publisher must carry the SAME string to bind.
                 P(pubFb, "ConnectionID", Q(cfg.MqttClientId));
 
-                // Per-instance topic is SIM-ONLY. The rig path keeps the old
-                // RootPath='smc/$${PATH}' + Topic1='state' literal pair (every
-                // CAT instance publishes to the same literal topic — that's
-                // the pre-existing behaviour and the rig is currently parked
-                // unsafe, so we don't touch it here). The simulator path
-                // switches to RootPath='smc' + WIRED Topic1, giving distinct
-                // per-instance topics (smc/coverpnp_hr, smc/bearing_pnp, ...)
-                // — required to measure data loss per component.
-                if (cfg.SimulatorFullSystem)
-                {
-                    P(pubFb, "RootPath", Q(cfg.MqttTopicRoot));
-                    // Topic1 intentionally NOT a parameter — wired below.
-                }
-                else
-                {
-                    P(pubFb, "RootPath", Q(cfg.MqttTopicRoot + "/$${PATH}"));
-                    P(pubFb, "Topic1", Q("state"));
-                }
+                // Per-instance topic for both rig AND sim. RootPath is the
+                // common prefix ('smc'); Topic1 is wired from each CAT's
+                // per-instance name InputVar (see DataConnection below) so
+                // each instance publishes to <prefix>/<lowercased_name> —
+                // smc/coverpnp_hr, smc/bearing_pnp, smc/topcoversenosr, etc.
+                // The earlier sim-only gate kept the rig on the literal
+                // 'smc/$${PATH}' + Topic1='state' pair, but EAE 24.1 doesn't
+                // resolve $${PATH} at runtime (proven in sim test), so the
+                // rig publishers were all hitting the same literal topic
+                // 'smc/${PATH}/state' anyway — making per-component
+                // breakdown impossible. Per-instance is strictly better and
+                // affects the embedded MqttPub topic only, no other CAT
+                // behaviour. M262/M580 publishers still hit ReturnCode 50
+                // (firmware-gated MQTT on those PLCs); only BX1 (Soft dPAC)
+                // actually pushes to the broker in runtime.
+                P(pubFb, "RootPath", Q(cfg.MqttTopicRoot));
+                // Topic1 intentionally NOT a parameter — wired below.
                 P(pubFb, "QoS1", cfg.MqttQoS.ToString());
                 P(pubFb, "Retain1", cfg.MqttRetain ? "TRUE" : "FALSE");
 
@@ -1648,14 +1647,13 @@ namespace CodeGen.Services
                 // Data.
                 Conn(dc, stateDataSource, "MqttFmt.state");
                 Conn(dc, "MqttFmt.payload", "MqttPub.Payload1");
-                // Per-instance topic suffix — SIM-ONLY (the rig path took the
-                // literal RootPath='smc/$${PATH}' + Topic1='state' branch
-                // above and does NOT wire Topic1 from the InputVar). Wires
-                // the CAT's per-instance name InputVar into MqttPub.Topic1.
-                // Runtime concatenates RootPath/Topic1, so each instance
-                // publishes to <MqttTopicRoot>/<actuator_name|name>.
-                if (cfg.SimulatorFullSystem)
-                    Conn(dc, topicNameSource, "MqttPub.Topic1");
+                // Per-instance topic suffix — wires the CAT's per-instance
+                // name InputVar (Five_State.actuator_name / Sensor_Bool.name)
+                // into MqttPub.Topic1. Runtime concatenates RootPath/Topic1,
+                // so each instance publishes to <MqttTopicRoot>/<name>.
+                // Applies to BOTH rig and sim — the earlier sim-only gate
+                // was a safety clamp now lifted (see RootPath branch).
+                Conn(dc, topicNameSource, "MqttPub.Topic1");
 
                 doc.Save(fbt);
                 result.PatchesApplied.Add(
