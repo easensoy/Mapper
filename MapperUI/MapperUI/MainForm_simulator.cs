@@ -82,30 +82,19 @@ namespace MapperUI
 
                 await DeployUniversalTemplatesAsync();
 
-                // Compile-cache purge. EAE 24.1 caches compiled FB binaries in
-                // IEC61499/bin/CompilerResults/<sysdev-guid>/ across runs. When
-                // a CAT body change (e.g. PatchCatMqttPublish swapping
-                // MqttPub.Topic1 from a literal parameter to a wired data
-                // input) writes a new .fbt, EAE's incremental Compile sees the
-                // GUID is unchanged and re-uses the OLD .bin — so the runtime
-                // still runs the pre-change logic and the MQTT bridge keeps
-                // publishing to the old topic shape. The rig path
-                // (MainForm.btnTestStation1_Click ~line 513) already calls
-                // CompileCachePurger.Purge; the sim path was missing it. Now
-                // every Test Simulator click wipes bin/ + obj/ + the EAE
-                // snapshot baseline so the next Build/Deploy in EAE has to
-                // recompile from current source.
-                try
-                {
-                    var purge = await Task.Run(() => CodeGen.Devices.Core.CompileCachePurger.Purge(Cfg()));
-                    if (purge.FoldersRemoved > 0 || purge.SnapshotReset)
-                        AppendActivity($"[Topology] compile cache purged: {purge.FoldersRemoved} folder(s), snapshot reset={purge.SnapshotReset}");
-                    foreach (var w in purge.Warnings) AppendActivity($"[Topology][Warn] cache purge: {w}");
-                }
-                catch (Exception ex)
-                {
-                    AppendActivity($"[Topology][Error] cache purge: {ex.Message}");
-                }
+                // NOTE: CompileCachePurger.Purge intentionally NOT called here.
+                // Adding it forced EAE to recompile from current source, and
+                // the fresh compile applied STRICT TLS validation on the
+                // MQTT_CONNECTION FB (ValidateCert='Server certificate and
+                // hostname' default → ReturnCode=100, IsConnected=FALSE
+                // against a plain mosquitto on port 1883). The pre-purge
+                // cached compile had looser validation and the broker
+                // connection opened (with WARNING but functional). Until
+                // mosquitto is set up with a self-signed cert or the right
+                // ValidateCert-skip enum value is found, the cache must stay
+                // so the MQTT runtime keeps connecting. The rig path
+                // (MainForm.btnTestStation1_Click ~line 513) does call
+                // CompileCachePurger.Purge — leave that alone, rig is parked.
 
                 var injector = new SystemInjector();
                 var cleanup = await Task.Run(() => injector.PrepareDemonstratorForGeneration(Cfg()));
