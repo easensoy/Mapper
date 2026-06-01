@@ -1518,6 +1518,16 @@ namespace CodeGen.Translation
                 // MqttConn_M262 to IsConnected = TRUE.
                 builder.AddEventConnection("MqttConn_M262.INITO", "MqttConn_M262.CONNECT");
                 builder.AddEventConnection("MqttConn_M580.INITO", "MqttConn_M580.CONNECT");
+                // Wire each per-resource MqttConn's INIT into ITS PLC's boot so
+                // it is NOT a standalone/floating FB on the canvas. Area is the
+                // M262/Feed_Station boot anchor (Area.INITO already heads the
+                // Feed_Station init chain); Station2 is the M580 boot. This is
+                // the same source ResourceWireEmitter uses on each sysres
+                // (Area.INITO → MqttConn_M262.INIT), so the syslay + sysres
+                // agree and the connection visibly belongs to Feed_Station /
+                // Station 2 rather than hanging loose.
+                builder.AddEventConnection("Area.INITO", "MqttConn_M262.INIT");
+                builder.AddEventConnection("Station2.INITO", "MqttConn_M580.INIT");
 
                 report.Missing.Add(
                     $"[MQTT] per-resource MqttConn injected — BX1 (SMC_BX1) + M262 (SMC_M262) + " +
