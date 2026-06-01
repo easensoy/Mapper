@@ -2539,7 +2539,93 @@ namespace CodeGen.Translation
             // resource EAE relies on. If the duplicate-syslay / orphan-sysres
             // problems resurface, re-introduce a NARROWER fix that targets
             // only the simulator tree, never the rig device files.
+
+            // Sweep stale cross-PLC bridge FBs (MqttFmt_<comp> / MqttPub_<comp>)
+            // out of EVERY .sysres. The bridge was removed from the syslay
+            // emitter, but the standard FBNetwork clean only touches the M262
+            // sysres — so bridge FBs that were mirrored onto the BX1 / M580
+            // sysres in an earlier (bridge-on) deploy LINGER there and EAE
+            // keeps deploying + displaying them. This removes those FB elements
+            // and their connections from all sysres. It deletes ONLY FBs whose
+            // name starts with MqttFmt_ or MqttPub_ (never MqttConn, never any
+            // CAT instance), so it cannot harm a live resource. Pure
+            // contents-edit of the .sysres FBNetwork; no file deletion, no
+            // device/trust touch.
+            SweepBridgeFbsFromAllSysres(config, report);
+
             return report;
+        }
+
+        /// <summary>
+        /// Remove stale standalone MQTT bridge FBs (names starting
+        /// <c>MqttFmt_</c> / <c>MqttPub_</c>) and their event/data connections
+        /// from every <c>.sysres</c> under <c>IEC61499/System/&lt;sys-guid&gt;/</c>.
+        /// The bridge emitter is gone; any such FB on disk is a leftover from a
+        /// previous bridge-on deploy (typically mirrored onto the BX1 sysres).
+        /// Surgical: touches only those FB names, never MqttConn or CAT
+        /// instances; edits FBNetwork contents in place, deletes no files.
+        /// </summary>
+        private static void SweepBridgeFbsFromAllSysres(MapperConfig config, CleanupReport report)
+        {
+            var syslayDir = Path.GetDirectoryName(config.SyslayPath2);
+            if (string.IsNullOrEmpty(syslayDir)) return;
+            var sysGuidDir = Path.GetDirectoryName(syslayDir);
+            if (string.IsNullOrEmpty(sysGuidDir) || !Directory.Exists(sysGuidDir)) return;
+
+            // Guard: only act on a REAL EAE System folder (one that contains
+            // .sysdev files). The harness uses a flat temp syslay whose parent
+            // is the OS Temp dir — walking that recursively trips access-denied
+            // and has no business being swept. No sysdev → not a System folder.
+            try { if (!Directory.EnumerateFiles(sysGuidDir, "*.sysdev").Any()) return; }
+            catch { return; }
+
+            System.Xml.Linq.XNamespace ns = "https://www.se.com/LibraryElements";
+            bool IsBridge(string? n) =>
+                n != null && (n.StartsWith("MqttFmt_", StringComparison.Ordinal)
+                           || n.StartsWith("MqttPub_", StringComparison.Ordinal));
+
+            List<string> sysresFiles;
+            try { sysresFiles = Directory.EnumerateFiles(sysGuidDir, "*.sysres", SearchOption.AllDirectories).ToList(); }
+            catch { return; }
+
+            foreach (var file in sysresFiles)
+            {
+                System.Xml.Linq.XDocument doc;
+                try { doc = System.Xml.Linq.XDocument.Load(file, System.Xml.Linq.LoadOptions.PreserveWhitespace); }
+                catch { continue; }
+                var net = doc.Root?.Element(ns + "FBNetwork") ?? doc.Root?.Element(ns + "SubAppNetwork");
+                if (net == null) continue;
+
+                int removedFb = 0, removedConn = 0;
+                foreach (var fb in net.Elements(ns + "FB")
+                             .Where(f => IsBridge((string?)f.Attribute("Name"))).ToList())
+                { fb.Remove(); removedFb++; }
+
+                foreach (var section in new[] { "EventConnections", "DataConnections" })
+                {
+                    var sec = net.Element(ns + section);
+                    if (sec == null) continue;
+                    foreach (var c in sec.Elements(ns + "Connection").Where(c =>
+                    {
+                        var s = (string?)c.Attribute("Source") ?? "";
+                        var d = (string?)c.Attribute("Destination") ?? "";
+                        return IsBridge(s.Split('.')[0]) || IsBridge(d.Split('.')[0]);
+                    }).ToList())
+                    { c.Remove(); removedConn++; }
+                }
+
+                if (removedFb > 0 || removedConn > 0)
+                {
+                    try
+                    {
+                        doc.Save(file);
+                        report.DeviceCleanupLog.Add(
+                            $"[CleanDevice] swept {removedFb} stale bridge FB(s) + {removedConn} wire(s) " +
+                            $"from {Path.GetFileName(file)}");
+                    }
+                    catch { /* best-effort */ }
+                }
+            }
         }
 
         /// <summary>
