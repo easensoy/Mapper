@@ -64,8 +64,11 @@ namespace MapperUI
                 AppendActivity($"[Test Full-System Simulator] Generating into Demonstrator at {syslayPath} — SIMULATOR FULL-SYSTEM mode...");
                 AppendActivity(
                     "[Simulator] Full-system collapse: Feed_Station + Assembly_Station + Disassembly " +
-                    "all emit as Process_Generic FBs in one SIM resource. M580/BX1 sysdev/sysres/HCF " +
-                    "emission skipped. Cross-process handshakes wired Process[i].state_update → " +
+                    "all emit as Process_Generic FBs in one syslay SubAppNetwork. M262, M580 RES0 and " +
+                    "BX1_RES are each emitted as full per-PLC EMB_RES_ECO resources (sysdev + sysres + " +
+                    "HCF + wiring), with the syslay FBs bucketed by PLC into the right .sysres. EAE's " +
+                    "\"Local Test\" Active Network Profile then simulates each PLC locally instead of " +
+                    "downloading to hardware. Cross-process handshakes wired Process[i].state_update → " +
                     "Process[j].state_change directly (no PLC_RW gateway, no SIFB).");
                 AppendActivity(
                     "[Simulator][KnownLimitation] Per-Process scoped ID registry (today): each Process's " +
@@ -78,6 +81,31 @@ namespace MapperUI
                     "ID scheme so cross-process actuator/sensor references resolve.");
 
                 await DeployUniversalTemplatesAsync();
+
+                // Compile-cache purge. EAE 24.1 caches compiled FB binaries in
+                // IEC61499/bin/CompilerResults/<sysdev-guid>/ across runs. When
+                // a CAT body change (e.g. PatchCatMqttPublish swapping
+                // MqttPub.Topic1 from a literal parameter to a wired data
+                // input) writes a new .fbt, EAE's incremental Compile sees the
+                // GUID is unchanged and re-uses the OLD .bin — so the runtime
+                // still runs the pre-change logic and the MQTT bridge keeps
+                // publishing to the old topic shape. The rig path
+                // (MainForm.btnTestStation1_Click ~line 513) already calls
+                // CompileCachePurger.Purge; the sim path was missing it. Now
+                // every Test Simulator click wipes bin/ + obj/ + the EAE
+                // snapshot baseline so the next Build/Deploy in EAE has to
+                // recompile from current source.
+                try
+                {
+                    var purge = await Task.Run(() => CodeGen.Devices.Core.CompileCachePurger.Purge(Cfg()));
+                    if (purge.FoldersRemoved > 0 || purge.SnapshotReset)
+                        AppendActivity($"[Topology] compile cache purged: {purge.FoldersRemoved} folder(s), snapshot reset={purge.SnapshotReset}");
+                    foreach (var w in purge.Warnings) AppendActivity($"[Topology][Warn] cache purge: {w}");
+                }
+                catch (Exception ex)
+                {
+                    AppendActivity($"[Topology][Error] cache purge: {ex.Message}");
+                }
 
                 var injector = new SystemInjector();
                 var cleanup = await Task.Run(() => injector.PrepareDemonstratorForGeneration(Cfg()));
@@ -96,6 +124,31 @@ namespace MapperUI
                 {
                     var line = report.Missing[i];
                     if (line.StartsWith("[Wire]") || line.StartsWith("[Sysres"))
+                        AppendActivity(line);
+                }
+
+                // Station 2 (M580 + BX1) wire emit — the equivalent of
+                // M262SysresWireEmitter for the per-PLC resources. Without
+                // this, FinalizeM262StackAsync mirrors the Station 2 FBs onto
+                // M580 RES0 and BX1_RES via Station2SysresMirror but never
+                // wires them, so each resource ships with FBs and zero
+                // Connections. EAE then deploys both resources as half-empty
+                // shells — exactly the "All wiring has gone for M580 RES0"
+                // failure mode. The rig path (MainForm.btnTestStation1_Click
+                // ~line 903) has always called this; the sim path was missing
+                // it. In sim mode the three resources still exist independently
+                // — collapsing into a single SIM resource is just a syslay
+                // convenience; EAE deploys per-PLC with the "Local Test"
+                // Active Network Profile picking the simulator runtime.
+                int s2WireCountBefore = report.Missing.Count;
+                await Task.Run(() =>
+                    CodeGen.Devices.Core.Station2WireEmitter.EmitStation2Resources(Cfg(), report));
+                for (int i = s2WireCountBefore; i < report.Missing.Count; i++)
+                {
+                    var line = report.Missing[i];
+                    if (line.StartsWith("[Wire][M580]") || line.StartsWith("[M580]") ||
+                        line.StartsWith("[Wire][BX1]") || line.StartsWith("[BX1]") ||
+                        line.StartsWith("[Wire][Stn2]"))
                         AppendActivity(line);
                 }
 
@@ -171,6 +224,16 @@ namespace MapperUI
                     path, Cfg(), AppendActivity);
                 if (swivelFb > 0)
                     AppendActivity($"[Simulator] Seven_State swivel sensor synthesis: {swivelFb} SimSwivelForce SYMLINKMULTIVARSRC(s) wired across syslay+sysres");
+
+                // Defensive post-write check — mirrors VerifySimActuatorsNoSensorOrAbort
+                // for Seven_State. Re-reads syslay + sysres and asserts every
+                // Seven_State_Actuator_CAT instance has its SimSwivelForce companion
+                // present and correctly wired. Throws on any violation so a future
+                // pipeline step that silently drops or mis-wires a SimSwivelForce
+                // can't ship a sim build that stalls at ToPick. No-op-green when
+                // there are no Seven instances (stub on).
+                CodeGen.Services.SimulatorPostProcessor.VerifySimSwivelForceOrAbort(
+                    path, Cfg(), AppendActivity);
 
                 // Post-write verification (Defect 1). Re-read the on-disk
                 // syslay AND sysres AFTER every generator step has run and
