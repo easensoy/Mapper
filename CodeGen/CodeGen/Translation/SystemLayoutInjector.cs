@@ -1456,28 +1456,17 @@ namespace CodeGen.Translation
                 var mqttParams = new Dictionary<string, string>
                 {
                     ["QI"] = SyslayBuilder.FormatBool(true),
-                    // ConnectionID = binding key (STRING). Every embedded MqttPub
-                    // carries the SAME string to bind (no wire). Uses MqttClientId.
+                    // Reference-exact 4-parameter shape from TrainingIIoT's
+                    // working MQTT_CONNECTION (Schneider's own sample). Adding
+                    // CACert tripped CTcpClientStateMgr.getUriStrValue with
+                    // "Unsupported parameter format" — the runtime's URI
+                    // parser rejects something about the path (C:/... read as
+                    // unknown URI scheme C, or the parameter type doesn't
+                    // accept a file path). Stick to the reference shape until
+                    // the correct CACert syntax is verified against EAE docs.
                     ["ConnectionID"] = SyslayBuilder.FormatString(config.MqttClientId),
                     ["URL"] = SyslayBuilder.FormatString(config.MqttBrokerUrl),
                     ["ClientIdentifier"] = SyslayBuilder.FormatString(config.MqttClientId),
-                    // CACert points at the self-signed CA that signed
-                    // mosquitto's server.crt. EAE 24.1's MQTT_CONNECTION
-                    // defaults to ValidateCert='Server certificate and
-                    // hostname' (strict); without a CACert the connection
-                    // trips ReturnCode=100. Providing this against the
-                    // matching mqtts://127.0.0.1:8883 broker satisfies the
-                    // strict validator (cert SAN includes IP=127.0.0.1).
-                    //
-                    // PATH IS FORWARD-SLASHED. IEC 61131-3 ST STRING literals
-                    // use '$' as the escape character, so a Windows backslash
-                    // path 'C:\VueOneMapper\...' would be misparsed
-                    // (\V/\M/\c are unknown escape sequences) and the runtime
-                    // either silently mangles the path or trips on it. Windows
-                    // file APIs accept forward slashes identically; rewriting
-                    // before formatting sidesteps the escape problem entirely.
-                    ["CACert"] = SyslayBuilder.FormatString(
-                        config.MqttCaCertPath.Replace('\\', '/')),
                 };
                 // Position from ComponentRegistry — single source of truth.
                 // Registry pins MqttConn at (29000, 200) (BX1 zone, floating row).
