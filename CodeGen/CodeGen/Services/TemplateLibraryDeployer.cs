@@ -169,6 +169,22 @@ namespace CodeGen.Services
                     stateDataSource: "FB1.Status",
                     initSource: "StateHandling.INITO",
                     topicNameSource: "name", cfg, result);
+                // Bridge enabler — SIM-ONLY. Expose Five_State_Actuator_CAT's
+                // post-update state event + INT at the CAT boundary so the
+                // BX1-side cross-resource MQTT bridge (emitted by
+                // SystemLayoutInjector.MqttBridgeEmitter) can wire to
+                // <comp>.state_out / <comp>.current_state_to_process across
+                // resources. Sensor_Bool_CAT already exposes pst_out + Status
+                // at its boundary (verified .fbt), so it needs no patch — the
+                // bridge wires reach those names directly. GATED on
+                // SimulatorFullSystem so the rig CAT body stays byte-identical
+                // until the bridge is proven in sim and explicitly cleared for
+                // the rig. Idempotent.
+                if (cfg.SimulatorFullSystem)
+                    PatchCatExposeState(eaeProjectDir, "Five_State_Actuator_CAT",
+                        internalEventSource: "ActuatorCore.pst_out",
+                        internalDataSource: "ActuatorCore.current_state_to_process",
+                        result);
             }
 
             // Simulator interface reduction (the 4 Rule arrays -> 1 RuleTable).
@@ -665,6 +681,7 @@ namespace CodeGen.Services
                 result.Warnings.Add($"MqttStateFormatter deploy failed: {ex.Message}");
             }
         }
+
 
         // Embedded InterlockRule datatype (4 INT fields) for the simulator
         // interface reduction — the 4 parallel Rule arrays collapse to one
@@ -1664,6 +1681,117 @@ namespace CodeGen.Services
             catch (Exception ex)
             {
                 result.Warnings.Add($"{catName} MQTT publish patch failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Additive deploy-time patch: expose a CAT's internal post-update state
+        /// at the COMPOSITE BOUNDARY (Event <c>state_out</c> + INT
+        /// <c>current_state_to_process</c>) so a cross-resource consumer can read
+        /// it through the syslay. Used by the BX1-side MQTT bridge: each
+        /// <c>MqttPub_&lt;comp&gt;</c> on BX1 wires to <c>&lt;comp&gt;.state_out</c>
+        /// (event) and <c>&lt;comp&gt;.current_state_to_process</c> (data) on the
+        /// remote M262/M580 component, and EAE bridges the cross-resource events
+        /// at deploy. Nothing existing is removed — the internal source event
+        /// keeps all its current targets (EAE allows event multi-fan-out, and
+        /// <c>current_state_to_process</c> already fans to several consumers).
+        /// Idempotent: skips if <c>state_out</c> already exists in EventOutputs.
+        /// </summary>
+        static void PatchCatExposeState(string eaeProjectDir, string catName,
+            string internalEventSource, string internalDataSource,
+            DeployResult result)
+        {
+            var fbt = Directory.EnumerateFiles(
+                    Path.Combine(eaeProjectDir, "IEC61499"),
+                    catName + ".fbt", SearchOption.AllDirectories)
+                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
+                ?? string.Empty;
+            if (string.IsNullOrEmpty(fbt))
+            {
+                result.Warnings.Add($"{catName}.fbt not found; expose-state patch skipped.");
+                return;
+            }
+
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+
+                var iface = root.Element(ns + "InterfaceList");
+                var net = root.Element(ns + "FBNetwork");
+                if (iface == null || net == null)
+                {
+                    result.Warnings.Add($"{catName}.fbt: missing InterfaceList/FBNetwork; expose-state skipped.");
+                    return;
+                }
+
+                var eventOutputs = iface.Element(ns + "EventOutputs");
+                if (eventOutputs == null)
+                {
+                    eventOutputs = new System.Xml.Linq.XElement(ns + "EventOutputs");
+                    var eventInputs = iface.Element(ns + "EventInputs");
+                    if (eventInputs != null) eventInputs.AddAfterSelf(eventOutputs);
+                    else iface.AddFirst(eventOutputs);
+                }
+
+                // Idempotent.
+                if (eventOutputs.Elements(ns + "Event")
+                        .Any(e => (string?)e.Attribute("Name") == "state_out"))
+                {
+                    result.PatchesApplied.Add($"{catName}: state_out already exposed at boundary (skipped)");
+                    return;
+                }
+
+                // 1) EventOutput state_out WITH current_state_to_process.
+                eventOutputs.Add(new System.Xml.Linq.XElement(ns + "Event",
+                    new System.Xml.Linq.XAttribute("Name", "state_out"),
+                    new System.Xml.Linq.XAttribute("Comment", "Post-update state for the cross-resource MQTT bridge"),
+                    new System.Xml.Linq.XElement(ns + "With",
+                        new System.Xml.Linq.XAttribute("Var", "current_state_to_process"))));
+
+                // 2) OutputVar current_state_to_process : INT. Create OutputVars
+                //    section if absent (DTD order: after InputVars, before Sockets).
+                var outputVars = iface.Element(ns + "OutputVars");
+                if (outputVars == null)
+                {
+                    outputVars = new System.Xml.Linq.XElement(ns + "OutputVars");
+                    var inputVars = iface.Element(ns + "InputVars");
+                    if (inputVars != null) inputVars.AddAfterSelf(outputVars);
+                    else eventOutputs.AddAfterSelf(outputVars);
+                }
+                if (!outputVars.Elements(ns + "VarDeclaration")
+                        .Any(v => (string?)v.Attribute("Name") == "current_state_to_process"))
+                    outputVars.Add(new System.Xml.Linq.XElement(ns + "VarDeclaration",
+                        new System.Xml.Linq.XAttribute("Name", "current_state_to_process"),
+                        new System.Xml.Linq.XAttribute("Type", "INT"),
+                        new System.Xml.Linq.XAttribute("Comment", "Exposed component state for cross-resource MQTT bridge")));
+
+                // 3) Internal fan-out from the existing state sources to the
+                //    boundary. Additive — the internal sources keep all current
+                //    targets (EAE allows event multi-fan-out, data multi-fan-out).
+                var ec = net.Element(ns + "EventConnections");
+                if (ec == null) { ec = new System.Xml.Linq.XElement(ns + "EventConnections"); net.Add(ec); }
+                var dc = net.Element(ns + "DataConnections");
+                if (dc == null) { dc = new System.Xml.Linq.XElement(ns + "DataConnections"); net.Add(dc); }
+                ec.Add(new System.Xml.Linq.XElement(ns + "Connection",
+                    new System.Xml.Linq.XAttribute("Source", internalEventSource),
+                    new System.Xml.Linq.XAttribute("Destination", "state_out")));
+                dc.Add(new System.Xml.Linq.XElement(ns + "Connection",
+                    new System.Xml.Linq.XAttribute("Source", internalDataSource),
+                    new System.Xml.Linq.XAttribute("Destination", "current_state_to_process")));
+
+                doc.Save(fbt);
+                result.PatchesApplied.Add(
+                    $"{catName}: state exposed at boundary ({internalEventSource} → state_out, " +
+                    $"{internalDataSource} → current_state_to_process)");
+                MapperLogger.Info(
+                    $"[Deploy][MQTT bridge] {catName}.fbt: state_out / current_state_to_process exposed at composite boundary");
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"{catName} expose-state patch failed: {ex.Message}");
             }
         }
 
