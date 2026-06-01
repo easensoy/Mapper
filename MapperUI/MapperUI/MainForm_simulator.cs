@@ -151,6 +151,30 @@ namespace MapperUI
                         AppendActivity(line);
                 }
 
+                // Topology self-consistency guard. The sim path does NOT run
+                // Station2DeviceEmitter / BroadcastDomainEmitter (those are
+                // rig-only), so the Topology folder is whatever's left on disk
+                // — including any DeviceNetwork the user created in EAE's
+                // Logical Networks Editor that got a UUID but was never saved
+                // as a BroadcastDomain file. An Equipment that binds to such a
+                // dangling domain UUID makes EAE reject the whole topology on
+                // import ("Unable to import topology / Internal Server Error").
+                // EnsureReferencedDomains scans the Equipment JSONs and creates
+                // any referenced-but-missing BroadcastDomain at 192.168.1.0/24.
+                // Writes ONLY broadcast-domain JSON — never devices/sysres/
+                // trust — so it cannot disturb the rig binding.
+                try
+                {
+                    var bd = await Task.Run(() =>
+                        CodeGen.Devices.Core.BroadcastDomainEmitter.EnsureReferencedDomains(Cfg()));
+                    foreach (var f in bd.FilesWritten) AppendActivity($"[Topology] {f}");
+                    foreach (var w in bd.Warnings) AppendActivity($"[Topology] {w}");
+                }
+                catch (Exception ex)
+                {
+                    AppendActivity($"[Topology][Error] domain consistency: {ex.Message}");
+                }
+
                 // No .sysres Resource Type flip. EAE has no SIM_RES type
                 // (verified: ERR_NO_SUCH_TYPE on Runtime.Management.SIM_RES).
                 // Resource stays EMB_RES_ECO; simulator mode = the
