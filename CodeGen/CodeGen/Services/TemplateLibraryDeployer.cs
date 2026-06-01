@@ -162,11 +162,13 @@ namespace CodeGen.Services
                 PatchCatMqttPublish(eaeProjectDir, "Five_State_Actuator_CAT",
                     stateEventSource: "ActuatorCore.pst_out",
                     stateDataSource: "ActuatorCore.current_state_to_process",
-                    initSource: "StateHandling.INITO", cfg, result);
+                    initSource: "StateHandling.INITO",
+                    topicNameSource: "actuator_name", cfg, result);
                 PatchCatMqttPublish(eaeProjectDir, "Sensor_Bool_CAT",
                     stateEventSource: "FB1.CNF",
                     stateDataSource: "FB1.Status",
-                    initSource: "StateHandling.INITO", cfg, result);
+                    initSource: "StateHandling.INITO",
+                    topicNameSource: "name", cfg, result);
             }
 
             // Simulator interface reduction (the 4 Rule arrays -> 1 RuleTable).
@@ -1466,8 +1468,20 @@ namespace CodeGen.Services
         /// <param name="stateDataSource">INT state value to publish
         /// (<c>ActuatorCore.current_state_to_process</c> / <c>FB1.Status</c>).</param>
         /// <param name="initSource">Existing INITO event to seed MqttFmt/MqttPub INIT.</param>
+        /// <param name="topicNameSource">CAT-level STRING InputVar carrying the
+        /// per-instance component name — Five_State_Actuator_CAT exposes
+        /// <c>actuator_name</c>, Sensor_Bool_CAT exposes <c>name</c>. Wired as
+        /// a DATA input into <c>MqttPub.Topic1</c> at runtime so each instance
+        /// publishes to <c>RootPath/&lt;component_name&gt;</c> instead of every
+        /// instance sharing the same literal topic. The earlier approach of
+        /// <c>'smc/$${PATH}'</c> failed: EAE 24.1's MQTT_PUBLISH does NOT
+        /// resolve the <c>${PATH}</c> placeholder at runtime, so every
+        /// instance published to the literal string <c>smc/${PATH}/state</c>
+        /// — making the bridge work but leaving every component
+        /// indistinguishable on the broker.</param>
         static void PatchCatMqttPublish(string eaeProjectDir, string catName,
             string stateEventSource, string stateDataSource, string initSource,
+            string topicNameSource,
             MapperConfig cfg, DeployResult result)
         {
             var fbt = Directory.EnumerateFiles(
@@ -1491,12 +1505,44 @@ namespace CodeGen.Services
                 var net = root.Element(ns + "FBNetwork");
                 if (net == null) { result.Warnings.Add($"{catName}.fbt: no FBNetwork; MQTT patch skipped."); return; }
 
-                // Idempotent: skip if already patched.
-                if (net.Elements(ns + "FB").Any(f => (string?)f.Attribute("Name") == "MqttPub"))
+                // Re-patchable: remove any existing MqttPub/MqttFmt FBs + their
+                // wires before re-emitting fresh. Without this, an earlier
+                // patch's stale topic/parameter shape persists across deploys
+                // because Test Simulator only PrepareDemonstratorForGeneration
+                // (which cleans .sysres FBNetwork) and does NOT invoke
+                // DemonstratorWiper.Wipe (the CAT-folder delete). So the
+                // deployed Five_State_Actuator_CAT.fbt carries the OLD MqttPub
+                // forever and the old idempotency-skip stopped the new wire
+                // shape ever reaching the runtime. Removing first guarantees
+                // each deploy reflects the latest source.
+                var staleFbs = net.Elements(ns + "FB")
+                    .Where(f => (string?)f.Attribute("Name") is "MqttPub" or "MqttFmt")
+                    .ToList();
+                int removedFbs = staleFbs.Count;
+                foreach (var f in staleFbs) f.Remove();
+
+                int removedWires = 0;
+                foreach (var section in new[] { "EventConnections", "DataConnections" })
                 {
-                    result.PatchesApplied.Add($"{catName}: MQTT publish already present (skipped)");
-                    return;
+                    var sec = net.Element(ns + section);
+                    if (sec == null) continue;
+                    var staleConns = sec.Elements(ns + "Connection")
+                        .Where(c =>
+                        {
+                            var s = (string?)c.Attribute("Source") ?? string.Empty;
+                            var d = (string?)c.Attribute("Destination") ?? string.Empty;
+                            return s.StartsWith("MqttFmt.", StringComparison.Ordinal)
+                                || s.StartsWith("MqttPub.", StringComparison.Ordinal)
+                                || d.StartsWith("MqttFmt.", StringComparison.Ordinal)
+                                || d.StartsWith("MqttPub.", StringComparison.Ordinal);
+                        })
+                        .ToList();
+                    removedWires += staleConns.Count;
+                    foreach (var c in staleConns) c.Remove();
                 }
+                if (removedFbs > 0 || removedWires > 0)
+                    result.PatchesApplied.Add(
+                        $"{catName}: removed stale MQTT patch ({removedFbs} FB(s), {removedWires} wire(s)) before re-emit");
 
                 // Bump the FB IDCounter so the two new FBs get unique IDs.
                 var idAttr = root.Elements(ns + "Attribute")
@@ -1556,8 +1602,25 @@ namespace CodeGen.Services
                 // use $ConnectionID='SoftdPAC'); both the connection and every
                 // publisher must carry the SAME string to bind.
                 P(pubFb, "ConnectionID", Q(cfg.MqttClientId));
-                P(pubFb, "RootPath", Q("smc/$${PATH}"));   // smc/<instance>/state per-instance topic; EAE resolves $${PATH}
-                P(pubFb, "Topic1", Q("state"));
+
+                // Per-instance topic is SIM-ONLY. The rig path keeps the old
+                // RootPath='smc/$${PATH}' + Topic1='state' literal pair (every
+                // CAT instance publishes to the same literal topic — that's
+                // the pre-existing behaviour and the rig is currently parked
+                // unsafe, so we don't touch it here). The simulator path
+                // switches to RootPath='smc' + WIRED Topic1, giving distinct
+                // per-instance topics (smc/coverpnp_hr, smc/bearing_pnp, ...)
+                // — required to measure data loss per component.
+                if (cfg.SimulatorFullSystem)
+                {
+                    P(pubFb, "RootPath", Q(cfg.MqttTopicRoot));
+                    // Topic1 intentionally NOT a parameter — wired below.
+                }
+                else
+                {
+                    P(pubFb, "RootPath", Q(cfg.MqttTopicRoot + "/$${PATH}"));
+                    P(pubFb, "Topic1", Q("state"));
+                }
                 P(pubFb, "QoS1", cfg.MqttQoS.ToString());
                 P(pubFb, "Retain1", cfg.MqttRetain ? "TRUE" : "FALSE");
 
@@ -1585,6 +1648,14 @@ namespace CodeGen.Services
                 // Data.
                 Conn(dc, stateDataSource, "MqttFmt.state");
                 Conn(dc, "MqttFmt.payload", "MqttPub.Payload1");
+                // Per-instance topic suffix — SIM-ONLY (the rig path took the
+                // literal RootPath='smc/$${PATH}' + Topic1='state' branch
+                // above and does NOT wire Topic1 from the InputVar). Wires
+                // the CAT's per-instance name InputVar into MqttPub.Topic1.
+                // Runtime concatenates RootPath/Topic1, so each instance
+                // publishes to <MqttTopicRoot>/<actuator_name|name>.
+                if (cfg.SimulatorFullSystem)
+                    Conn(dc, topicNameSource, "MqttPub.Topic1");
 
                 doc.Save(fbt);
                 result.PatchesApplied.Add(
