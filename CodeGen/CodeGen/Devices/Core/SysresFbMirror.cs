@@ -309,14 +309,24 @@ namespace CodeGen.Devices.Core
         {
             if (string.IsNullOrEmpty(fbName)) return PlcAssignment.Unknown;
 
-            // MQTT runs ONLY on the Soft dPAC (BX1). Not a component, not in the
-            // registry — pin it explicitly.
+            // Per-resource MQTT connections. Each PLC resource gets its own
+            // MQTT_CONNECTION so the embedded MqttPub inside that resource's
+            // CATs can bind locally and publish directly (no cross-resource
+            // bridge FBs). The bare "MqttConn" is BX1's; the suffixed ones go
+            // to their named PLC. On the rig M262/M580 firmware-gate MQTT, so
+            // those connections return ReturnCode 50 there; in the simulator
+            // the runtime is not the real firmware so they may connect.
             if (string.Equals(fbName, "MqttConn", StringComparison.Ordinal))
                 return PlcAssignment.BX1;
+            if (string.Equals(fbName, "MqttConn_M262", StringComparison.Ordinal))
+                return PlcAssignment.M262;
+            if (string.Equals(fbName, "MqttConn_M580", StringComparison.Ordinal))
+                return PlcAssignment.M580;
 
             // Standalone MQTT bridge publishers (MqttFmt_<comp>, MqttPub_<comp>)
             // also live on BX1 — they receive M262/M580 component state via
             // cross-resource syslay wires and publish via the BX1 broker.
+            // (Bridge currently removed; kept for when/if it's re-enabled.)
             if (fbName.StartsWith("MqttPub_", StringComparison.Ordinal) ||
                 fbName.StartsWith("MqttFmt_", StringComparison.Ordinal))
                 return PlcAssignment.BX1;
