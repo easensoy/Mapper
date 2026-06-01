@@ -342,7 +342,7 @@ namespace CodeGen.Configuration
         ///     accepts the scheme name and uses plain transport on the port,
         ///     no actual TLS negotiation occurs.</item>
         /// </list></summary>
-        public string MqttBrokerUrl { get; set; } = "mqtts://127.0.0.1:1883";
+        public string MqttBrokerUrl { get; set; } = "mqtt://127.0.0.1:1883";
 
         /// <summary>MQTT_CONNECTION.ClientIdentifier — one per runtime/resource.</summary>
         public string MqttClientId { get; set; } = "SMC_M262";
