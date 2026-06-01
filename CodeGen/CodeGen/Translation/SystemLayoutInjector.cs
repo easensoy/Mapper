@@ -1468,39 +1468,51 @@ namespace CodeGen.Translation
                     brokerUrl = System.Text.RegularExpressions.Regex.Replace(
                         brokerUrl, @"://[^:/]+", "://127.0.0.1");
 
-                var mqttParams = new Dictionary<string, string>
+                // PER-RESOURCE MqttConn. The embedded MqttPub inside each CAT
+                // binds by ConnectionID (= config.MqttClientId, 'SMC_BX1') and
+                // can ONLY use a connection on its OWN resource. So drop one
+                // MQTT_CONNECTION onto EACH PLC resource — BX1 (Cover P&P),
+                // M262 (Feed_Station) and M580 (Assembly) — and every local
+                // MqttPub then publishes DIRECTLY, with NO standalone bridge
+                // FBs. All three share ConnectionID 'SMC_BX1' so the local
+                // MqttPub binds; each gets a UNIQUE ClientIdentifier
+                // (SMC_BX1 / SMC_M262 / SMC_M580) so the broker doesn't evict
+                // them as duplicate clients ("session taken over"). On the RIG
+                // M262/M580 firmware-gate MQTT (ReturnCode 50) so only BX1
+                // connects there; in the SIMULATOR the runtime is not the real
+                // firmware, so all three may connect — that is what makes
+                // Feed_Station data reach the broker without a bridge.
+                void InjectMqttConn(string fbName, string clientId, int x, int y)
                 {
-                    ["QI"] = SyslayBuilder.FormatBool(true),
-                    // Reference-exact 4-parameter shape from TrainingIIoT's
-                    // working MQTT_CONNECTION (Schneider's own sample). Adding
-                    // CACert tripped CTcpClientStateMgr.getUriStrValue with
-                    // "Unsupported parameter format" — the runtime's URI
-                    // parser rejects something about the path. Stick to the
-                    // reference shape until the correct CACert syntax is
-                    // verified against EAE docs.
-                    ["ConnectionID"] = SyslayBuilder.FormatString(config.MqttClientId),
-                    ["URL"] = SyslayBuilder.FormatString(brokerUrl),
-                    ["ClientIdentifier"] = SyslayBuilder.FormatString(config.MqttClientId),
-                };
-                // Position from ComponentRegistry — single source of truth.
-                // Registry pins MqttConn at (29000, 200) (BX1 zone, floating row).
-                // Falls back to the historic (3760, 200) only if the entry is
-                // somehow missing, so callers without the Mapping namespace still
-                // get a syslay-valid coordinate.
+                    var p = new Dictionary<string, string>
+                    {
+                        ["QI"] = SyslayBuilder.FormatBool(true),
+                        ["ConnectionID"] = SyslayBuilder.FormatString(config.MqttClientId),
+                        ["URL"] = SyslayBuilder.FormatString(brokerUrl),
+                        ["ClientIdentifier"] = SyslayBuilder.FormatString(clientId),
+                    };
+                    builder.AddFB(FBIdGenerator.GenerateFBId(fbName), fbName,
+                        "MQTT_CONNECTION", "Runtime.NetConnectivity", x, y, p);
+                }
+
                 var mqttEntry = CodeGen.Mapping.ComponentRegistry.Get("MqttConn");
-                int mqttX = mqttEntry?.X ?? 3760;
-                int mqttY = mqttEntry?.Y ?? 200;
-                builder.AddFB(FBIdGenerator.GenerateFBId("MqttConn"),
-                    "MqttConn", "MQTT_CONNECTION", "Runtime.NetConnectivity", mqttX, mqttY, mqttParams);
-                // MqttConn is routed to BX1 (Soft dPAC) by SysresFbMirror.BucketFor —
-                // M262/M580 have no MQTT runtime client. Its INIT/CONNECT bring-up is
-                // emitted on the BX1 SYSRES by ResourceWireEmitter (a syslay-only event
-                // wire never fires at runtime); Area lives on the M262, a different
-                // resource, so there is NO Area.INITO -> MqttConn.INIT wire here.
+                int bx1X = mqttEntry?.X ?? 29000;
+                int bx1Y = mqttEntry?.Y ?? 200;
+                InjectMqttConn("MqttConn", config.MqttClientId, bx1X, bx1Y);
+                InjectMqttConn("MqttConn_M262", "SMC_M262",
+                    LayoutGrid.ColumnBaseX(PlcAssignment.M262), 200);
+                InjectMqttConn("MqttConn_M580", "SMC_M580",
+                    LayoutGrid.ColumnBaseX(PlcAssignment.M580), 200);
+                // Each MqttConn is routed to its own resource by
+                // SysresFbMirror.BucketFor (MqttConn→BX1, MqttConn_M262→M262,
+                // MqttConn_M580→M580). ResourceWireEmitter wires each one's
+                // INIT/CONNECT bring-up on its resource (it finds the
+                // MQTT_CONNECTION FB by type, not by the fixed name "MqttConn").
                 report.Missing.Add(
-                    $"[MQTT] MqttConn (MQTT_CONNECTION) injected — ConnectionID={config.MqttClientId}, " +
-                    $"URL={brokerUrl} ({(config.SimulatorFullSystem ? "sim → loopback" : "rig → LAN IP")}); " +
-                    $"routed to BX1, INIT/CONNECT wired on BX1 sysres.");
+                    $"[MQTT] per-resource MqttConn injected — BX1 (SMC_BX1) + M262 (SMC_M262) + " +
+                    $"M580 (SMC_M580), ConnectionID={config.MqttClientId}, URL={brokerUrl} " +
+                    $"({(config.SimulatorFullSystem ? "sim → loopback" : "rig → LAN IP")}); each " +
+                    $"local embedded MqttPub binds + publishes directly, no bridge FBs.");
 
                 // Cross-PLC MQTT bridge REMOVED 2026-06-01 at user request —
                 // the standalone MqttFmt_<comp>/MqttPub_<comp> pairs cluttered
