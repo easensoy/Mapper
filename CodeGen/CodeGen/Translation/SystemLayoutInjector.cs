@@ -1487,15 +1487,20 @@ namespace CodeGen.Translation
                     $"[MQTT] MqttConn (MQTT_CONNECTION) injected — ConnectionID={config.MqttClientId}, " +
                     $"URL={config.MqttBrokerUrl}; routed to BX1, INIT/CONNECT wired on BX1 sysres.");
 
-                // Cross-PLC MQTT bridge — one standalone MqttFmt_<comp> +
-                // MqttPub_<comp> pair on BX1 for every M262 / M580 sensor or
-                // actuator, with a cross-resource syslay wire from the remote
-                // component's exposed boundary state into the BX1 formatter.
-                // BX1's own components are skipped here (they publish via the
-                // embedded MqttPub patched into each CAT by
-                // TemplateLibraryDeployer.PatchCatMqttPublish — bridging them
-                // would duplicate the publish). See CodeGen.Services.MqttBridgeEmitter.
-                CodeGen.Services.MqttBridgeEmitter.EmitBridge(builder, config);
+                // Cross-PLC MQTT bridge — SIM-ONLY. One standalone
+                // MqttFmt_<comp> + MqttPub_<comp> pair on BX1 for every
+                // M262 / M580 sensor or actuator, with a cross-resource syslay
+                // wire from the remote component's exposed boundary state into
+                // the BX1 formatter. BX1's own components are skipped (they
+                // publish via the embedded MqttPub patched into each CAT by
+                // PatchCatMqttPublish — bridging them would double-publish).
+                // GATED on SimulatorFullSystem: the bridge is proven in the
+                // simulator first; the rig path stays free of the bridge FBs
+                // until explicitly cleared (and the actuator boundary-expose
+                // PatchCatExposeState is likewise sim-gated, so the rig CAT
+                // body is untouched). See CodeGen.Services.MqttBridgeEmitter.
+                if (config.SimulatorFullSystem)
+                    CodeGen.Services.MqttBridgeEmitter.EmitBridge(builder, config);
             }
 
             BuildFeedStationWiring(builder, contents);
