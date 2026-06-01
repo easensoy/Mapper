@@ -26,7 +26,7 @@
   "M580HcfTemplatePath": "C:\\VueOneMapper\\IO\\M580IO.hcf",
   "BX1HcfTemplatePath": "C:\\VueOneMapper\\IO\\BX1IO.hcf",
   "MqttPublishEnabled": true,
-  "MqttBrokerUrl": "mqtt://127.0.0.1:1883",
+  "MqttBrokerUrl": "mqtt://192.168.1.50:1883",
   "MqttClientId": "SMC_BX1",
   "MqttConnectionId": 1,
   "MqttQueueDepth": 100,
