@@ -428,25 +428,27 @@ namespace CodeGen.Services
                 {
                     actuatorsChecked++;
                     var fbName = (string?)fb.Attribute("Name") ?? "(unnamed)";
+
+                    // Scalar form (post SimSensorConfig POC revert 2026-05-30). The CAT
+                    // body keeps the original two BOOL parameters; the override sets both
+                    // FALSE. Anything else means a later writer overrode the override.
                     foreach (var pname in new[] { "WorkSensorFitted", "HomeSensorFitted" })
                     {
                         var ps = fb.Elements(Ns + "Parameter")
                             .Where(p => (string?)p.Attribute("Name") == pname).ToList();
                         if (ps.Count == 0)
                         {
-                            violations.Add($"{label}: {fbName}.{pname} parameter is MISSING (expected FALSE).");
+                            violations.Add($"{label}: {fbName}.{pname} parameter is MISSING (the override should have inserted it).");
                             continue;
                         }
                         if (ps.Count > 1)
-                            violations.Add(
-                                $"{label}: {fbName}.{pname} has {ps.Count} duplicate Parameter entries " +
-                                "(override de-dupe did not run last).");
+                            violations.Add($"{label}: {fbName}.{pname} has {ps.Count} duplicate Parameter entries (override de-dupe did not run last).");
                         foreach (var p in ps)
                         {
                             var v = ((string?)p.Attribute("Value") ?? string.Empty).Trim();
                             if (!string.Equals(v, "FALSE", StringComparison.OrdinalIgnoreCase))
                                 violations.Add(
-                                    $"{label}: {fbName}.{pname}=\"{v}\" — expected \"FALSE\". A later " +
+                                    $"{label}: {fbName}.{pname}=\"{v}\" — expected FALSE. A later " +
                                     "pipeline step overwrote the no-sensor override.");
                         }
                     }
@@ -473,6 +475,141 @@ namespace CodeGen.Services
                 $"& HomeSensorFitted=FALSE on all {actuatorsChecked} Five_State_Actuator_CAT " +
                 $"instance(s) across {targets.Count} artefact(s) (syslay + sysres). Override is the " +
                 "last writer; EAE Watch will read FALSE.");
+        }
+
+        /// <summary>
+        /// Defensive post-write assertion for Seven_State sensor synthesis. Mirrors
+        /// <see cref="VerifySimActuatorsNoSensorOrAbort"/> for the Five_State path: re-
+        /// reads the on-disk syslay AND the deployed sysres AFTER every generator step
+        /// and asserts that for every <c>Seven_State_Actuator_CAT</c> instance in the
+        /// SIM resource, the matching <c>SimSwivelForce_&lt;name&gt;</c> SYMLINKMULTIVARSRC
+        /// FB is present and correctly wired (event INITO→INIT + plc_out→REQ; data
+        /// current_state1/2_to_plc → VALUE1/2). Without this, a later pipeline step (or
+        /// a future refactor) that silently drops a SimSwivelForce — or wires it wrong
+        /// — would ship a sim build where the Seven_State ECC stalls at <c>ToPick</c>
+        /// forever because <c>atwork1</c> never closes. Throws on any violation so the
+        /// deploy aborts loudly instead of producing a stalling build. No-op-green when
+        /// there are no Seven instances (stub on). Hardware path NEVER calls this — the
+        /// rig's real Swivel_Arm sensors close the loop with values bound at the .hcf
+        /// layer.
+        /// </summary>
+        public static void VerifySimSwivelForceOrAbort(string syslayPath, MapperConfig cfg,
+            Action<string>? log = null)
+        {
+            var violations = new List<string>();
+
+            var targets = new List<(string label, string file)>();
+            if (!string.IsNullOrEmpty(syslayPath) && File.Exists(syslayPath))
+                targets.Add(("syslay", syslayPath));
+            else
+                violations.Add($"syslay not found on disk at '{syslayPath}' — cannot verify SimSwivelForce.");
+
+            string? sysresFile = null;
+            var sysresDir = Path.GetDirectoryName(cfg.SysresPath2);
+            if (!string.IsNullOrEmpty(sysresDir) && Directory.Exists(sysresDir))
+                sysresFile = Directory
+                    .EnumerateFiles(sysresDir, "*.sysres", SearchOption.TopDirectoryOnly)
+                    .FirstOrDefault();
+            if (sysresFile != null)
+                targets.Add(("sysres", sysresFile));
+            else
+                violations.Add(
+                    "deployed .sysres not found — cannot verify SimSwivelForce on the artefact EAE " +
+                    "actually compiles.");
+
+            int sevenInstancesChecked = 0;
+            int fullyWired = 0;
+            foreach (var (label, file) in targets)
+            {
+                XDocument doc;
+                try { doc = XDocument.Load(file); }
+                catch (Exception ex)
+                {
+                    violations.Add($"{label} '{Path.GetFileName(file)}' could not be re-read: {ex.Message}");
+                    continue;
+                }
+                var net = doc.Root?.Element(Ns + "SubAppNetwork")
+                          ?? doc.Root?.Element(Ns + "FBNetwork");
+                if (net == null)
+                {
+                    violations.Add($"{label} '{Path.GetFileName(file)}' has no SubAppNetwork/FBNetwork.");
+                    continue;
+                }
+
+                var sevens = net.Elements(Ns + "FB")
+                    .Where(f => (string?)f.Attribute("Type") == "Seven_State_Actuator_CAT")
+                    .Select(f => (string?)f.Attribute("Name") ?? string.Empty)
+                    .Where(n => n.Length > 0)
+                    .ToList();
+                // No Seven instances → no SimSwivelForce expected. Stub-on case is silent green.
+                if (sevens.Count == 0) continue;
+
+                var ec = net.Element(Ns + "EventConnections");
+                var dc = net.Element(Ns + "DataConnections");
+
+                bool HasEv(string s, string d) =>
+                    (ec?.Elements(Ns + "Connection") ?? Enumerable.Empty<XElement>())
+                    .Any(c => (string?)c.Attribute("Source") == s && (string?)c.Attribute("Destination") == d);
+                bool HasDt(string s, string d) =>
+                    (dc?.Elements(Ns + "Connection") ?? Enumerable.Empty<XElement>())
+                    .Any(c => (string?)c.Attribute("Source") == s && (string?)c.Attribute("Destination") == d);
+
+                foreach (var name in sevens)
+                {
+                    sevenInstancesChecked++;
+                    var fbName = "SimSwivelForce_" + name;
+                    var fb = net.Elements(Ns + "FB")
+                        .FirstOrDefault(f => (string?)f.Attribute("Name") == fbName);
+                    if (fb == null)
+                    {
+                        violations.Add(
+                            $"{label}: {fbName} FB MISSING — Seven_State instance '{name}' has no sim " +
+                            "sensor synthesis, ECC will stall at ToPick forever (atwork1 never closes).");
+                        continue;
+                    }
+                    var ty = (string?)fb.Attribute("Type") ?? string.Empty;
+                    if (!string.Equals(ty, SimSymlinkSrcType, StringComparison.Ordinal))
+                    {
+                        violations.Add($"{label}: {fbName} has Type={ty}, expected {SimSymlinkSrcType}.");
+                        continue;
+                    }
+                    var n1 = (string?)fb.Elements(Ns + "Parameter")
+                        .FirstOrDefault(p => (string?)p.Attribute("Name") == "NAME1")?.Attribute("Value");
+                    var n2 = (string?)fb.Elements(Ns + "Parameter")
+                        .FirstOrDefault(p => (string?)p.Attribute("Name") == "NAME2")?.Attribute("Value");
+                    if (string.IsNullOrEmpty(n1) || !n1.Contains(".atwork1"))
+                        violations.Add($"{label}: {fbName}.NAME1='{n1}' — expected to end with '.atwork1'.");
+                    if (string.IsNullOrEmpty(n2) || !n2.Contains(".atwork2"))
+                        violations.Add($"{label}: {fbName}.NAME2='{n2}' — expected to end with '.atwork2'.");
+
+                    bool ok = true;
+                    if (!HasEv($"{name}.INITO",                 $"{fbName}.INIT"))   { violations.Add($"{label}: missing event wire {name}.INITO → {fbName}.INIT");                       ok = false; }
+                    if (!HasEv($"{name}.plc_out",               $"{fbName}.REQ"))    { violations.Add($"{label}: missing event wire {name}.plc_out → {fbName}.REQ");                       ok = false; }
+                    if (!HasDt($"{name}.current_state1_to_plc", $"{fbName}.VALUE1")) { violations.Add($"{label}: missing data wire {name}.current_state1_to_plc → {fbName}.VALUE1");        ok = false; }
+                    if (!HasDt($"{name}.current_state2_to_plc", $"{fbName}.VALUE2")) { violations.Add($"{label}: missing data wire {name}.current_state2_to_plc → {fbName}.VALUE2");        ok = false; }
+                    if (ok) fullyWired++;
+                }
+            }
+
+            if (violations.Count > 0)
+            {
+                log?.Invoke(
+                    "[Simulator][ABORT] SimSwivelForce verification FAILED — the simulator build would " +
+                    "stall at Seven_State.ToPick because atwork1/atwork2 never close in sim. Violations:");
+                foreach (var v in violations)
+                    log?.Invoke($"  ✗ {v}");
+                throw new InvalidOperationException(
+                    "Simulator SimSwivelForce verification failed (" + violations.Count +
+                    " violation(s)); see log. Every Seven_State_Actuator_CAT instance must have a " +
+                    "matching SimSwivelForce_<name> SYMLINKMULTIVARSRC wired (INITO→INIT, plc_out→REQ, " +
+                    "current_state1/2_to_plc → VALUE1/2) in both syslay and sysres. Deploy aborted.");
+            }
+
+            log?.Invoke(
+                $"[Simulator][Verify] SimSwivelForce CONFIRMED on disk: {fullyWired} fully-wired " +
+                $"SimSwivelForce instance(s) across {targets.Count} artefact(s) (syslay + sysres). " +
+                $"Every Seven_State_Actuator_CAT instance has its sensor-synthesis companion; the " +
+                $"ECC ToPick/ToPlace gates will close on coil energise.");
         }
 
         /// <summary>
@@ -694,6 +831,32 @@ namespace CodeGen.Services
                         AddEventWire(ec, $"{name}.plc_out",   $"{fbName}.REQ");
                         AddDataWire (dc, $"{name}.current_state1_to_plc", $"{fbName}.VALUE1");
                         AddDataWire (dc, $"{name}.current_state2_to_plc", $"{fbName}.VALUE2");
+
+                        // Per-instance SymCheck — mirrors InjectSimHopperForce's
+                        // [Simulator][SymCheck] log line. SimSwivelForce's NAME1/NAME2
+                        // are the absolute symlink names this publisher writes; the
+                        // CAT's internal Inputs_AB/Inputs_C SYMLINKMULTIVARDST inside
+                        // the Seven_State_Actuator_CAT instance subscribe to
+                        // $${PATH}atwork1 / $${PATH}atwork2 which EAE expands to
+                        // <ResourceName>.<inst>.atwork{1,2} at deploy. If the two
+                        // strings drift (resource-prefix rename, quoting change,
+                        // trailing-dot bug, case mismatch), the publish lands on a
+                        // symbol the subscriber never reads and the swivel stalls at
+                        // ToPick forever with no error. Logging both forms surfaces
+                        // any drift in the Activity log immediately. Per-label so
+                        // syslay vs sysres mismatches show up distinctly.
+                        var expectedExpansion1 = $"'{resourceName}.{name}.atwork1'";
+                        var expectedExpansion2 = $"'{resourceName}.{name}.atwork2'";
+                        bool sym1 = string.Equals(atwork1Symbol, expectedExpansion1, StringComparison.Ordinal);
+                        bool sym2 = string.Equals(atwork2Symbol, expectedExpansion2, StringComparison.Ordinal);
+                        log?.Invoke(
+                            $"[Simulator][SymCheck][{label}] {fbName}.NAME1={atwork1Symbol} ; " +
+                            $"{name} $${{PATH}}atwork1 expands to {expectedExpansion1} ; " +
+                            (sym1 ? "MATCH" : "MISMATCH — atwork1 publish will NOT reach the actuator, fix resource prefix"));
+                        log?.Invoke(
+                            $"[Simulator][SymCheck][{label}] {fbName}.NAME2={atwork2Symbol} ; " +
+                            $"{name} $${{PATH}}atwork2 expands to {expectedExpansion2} ; " +
+                            (sym2 ? "MATCH" : "MISMATCH — atwork2 publish will NOT reach the actuator, fix resource prefix"));
 
                         slot++;
                     }
