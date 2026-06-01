@@ -329,8 +329,20 @@ namespace CodeGen.Configuration
         /// </summary>
         public bool MqttPublishEnabled { get; set; } = false;
 
-        /// <summary>Broker endpoint for MQTT_CONNECTION.URL (e.g. tcp://192.168.1.50:1883).</summary>
-        public string MqttBrokerUrl { get; set; } = "tcp://192.168.1.50:1883";
+        /// <summary>Broker endpoint for MQTT_CONNECTION.URL. EAE 24.1's
+        /// <c>CMQTTClientStateMgr.validateEndpoint</c> has two gates:
+        /// <list type="number">
+        ///   <item>Scheme must be one of <c>mqtt://</c> / <c>mqtts://</c> / <c>ws://</c>
+        ///     / <c>wss://</c> — <c>tcp://</c> trips "The URI scheme is not MQTT".</item>
+        ///   <item>The runtime defaults to <b>secure-by-default</b>: plain
+        ///     <c>mqtt://</c> trips "Insecure configuration prohibited; TLSconfig"
+        ///     unless a TLS cert is wired. The proven workaround (matches the
+        ///     reference TrainingIIoT MQTT_CONNECTION) is to use scheme
+        ///     <c>mqtts://</c> against a plain broker on port 1883 — EAE
+        ///     accepts the scheme name and uses plain transport on the port,
+        ///     no actual TLS negotiation occurs.</item>
+        /// </list></summary>
+        public string MqttBrokerUrl { get; set; } = "mqtts://127.0.0.1:1883";
 
         /// <summary>MQTT_CONNECTION.ClientIdentifier — one per runtime/resource.</summary>
         public string MqttClientId { get; set; } = "SMC_M262";
