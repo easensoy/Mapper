@@ -268,16 +268,9 @@ namespace MapperTests
             CheckSimSwivelForce(syslayNet, "syslay", Fail, Pass, Note);
             CheckSimSwivelForce(sysresNet, "sysres", Fail, Pass, Note);
 
-            // ── D3: Cross-PLC MQTT bridge (sim-only) ─────────────────────────
-            // For every M262/M580 component the MqttBridgeEmitter must emit a
-            // MqttFmt_<comp> + MqttPub_<comp> pair on BX1, locally chained
-            // (Fmt.CNF→Pub.PUBLISH1, Fmt.payload→Pub.Payload1), INIT off
-            // MqttConn.INITO, and fed cross-resource from the remote
-            // component's state. BX1's OWN components must NOT be bridged
-            // (they publish via their embedded MqttPub). Gated on
-            // MqttPublishEnabled — no-op-green when MQTT is off.
-            if (cfg.MqttPublishEnabled)
-                CheckMqttBridge(syslayNet, "syslay", Fail, Pass, Note);
+            // ── D3 (cross-PLC MQTT bridge) REMOVED 2026-06-01 with the bridge.
+            // Only MqttConn + embedded MqttPub remain; no standalone bridge
+            // pairs to assert. CheckMqttBridge retained but uncalled.
 
             // ── E: Disassembly parked ────────────────────────────────────────
             var disassyFb = syslayFbs.FirstOrDefault(f =>
