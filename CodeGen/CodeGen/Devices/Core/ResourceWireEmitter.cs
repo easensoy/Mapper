@@ -387,16 +387,25 @@ namespace CodeGen.Devices.Core
                 // up, so the broker connection is established before the first
                 // state-change publish. Skipped cleanly when MqttConn is not
                 // on this resource (MqttPublishEnabled=false, or M580/BX1).
-                if (byName.TryGetValue("MqttConn", out var mqttFb) &&
-                    string.Equals((string?)mqttFb.Attribute("Type"),
-                        "MQTT_CONNECTION", StringComparison.Ordinal))
+                // Find the MQTT_CONNECTION FB on THIS resource by TYPE, not by
+                // the fixed name "MqttConn" — each resource now has its own
+                // (MqttConn on BX1, MqttConn_M262 on M262, MqttConn_M580 on
+                // M580) so the embedded MqttPub can bind + publish locally.
+                // Wire whichever one is here: <boot>.INITO → <fb>.INIT and
+                // <fb>.INITO → <fb>.CONNECT so the broker connection opens once
+                // after the resource comes up.
+                foreach (var mqttKv in byName)
                 {
+                    if (!string.Equals((string?)mqttKv.Value.Attribute("Type"),
+                            "MQTT_CONNECTION", StringComparison.Ordinal))
+                        continue;
+                    var mqttName = mqttKv.Key;
                     // INIT off the resource boot: Area.INITO when present (M262),
                     // else FB1.INITO. BX1 has no Area, so without the FB1 fallback
-                    // the BX1 MqttConn.INIT never fires and the broker never opens.
+                    // the MqttConn.INIT never fires and the broker never opens.
                     var mqttInit = Present(anchors.AreaFb, byName) ? anchors.AreaFb! : "FB1";
-                    eventWires.Add(new Wire($"{mqttInit}.INITO", "MqttConn.INIT"));
-                    eventWires.Add(new Wire("MqttConn.INITO", "MqttConn.CONNECT"));
+                    eventWires.Add(new Wire($"{mqttInit}.INITO", $"{mqttName}.INIT"));
+                    eventWires.Add(new Wire($"{mqttName}.INITO", $"{mqttName}.CONNECT"));
                 }
 
                 // Cross-process synchronisation REMOVED 2026-05-26: the prior
