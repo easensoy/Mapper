@@ -168,6 +168,14 @@ namespace CodeGen.Devices.Core
             // does not list a deleted file.
             CleanupStaleTopologyJson(eaeRoot, "Equipment_Soft_dPAC_BX1.json", result);
             CleanupStaleTopologyJson(eaeRoot, "Equipment_BX1.json",           result);
+            // 2026-06-01: the (now-reverted) HMIB1X-form experiment wrote
+            // Equipment_HMIB1X_1.json into the deployed Topology folder. The
+            // revert returned the emitter to the Workstation form, so any
+            // lingering HMIB1X file is a stale orphan — sweep it (and its
+            // topologyproj <None Include=...> line) so EAE doesn't read two
+            // BX1 equipment files. Pure cleanup of a Topology JSON only; does
+            // NOT touch .sysres, .sysdev or any trusted-machine binding.
+            CleanupStaleTopologyJson(eaeRoot, "Equipment_HMIB1X_1.json",      result);
             // EAE auto-spawns Equipment_<deviceName>_<N>.json variants when its
             // Physical Views editor wants to add a new instance of a device
             // whose name collides with an already-loaded file. Observed
