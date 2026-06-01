@@ -288,6 +288,17 @@ namespace MapperTests
             if (assemblyFb != null)
                 CheckWait1IdResolution(assemblyFb, sysresNet, Fail, Pass, Note);
 
+            // ── G1: Interlock STRUCT (RuleTable) collapse landed ─────────────
+            // Under SimulatorFullSystem, BuildActuatorParameters' dropInterlockConstants
+            // branch swaps the 4 parallel Rule{From,To,Source,Blocked}State arrays for
+            // one RuleTable InterlockRule[10] STRUCT literal (SystemLayoutInjector.cs
+            // ~1843-1848) and TemplateLibraryDeployer.NormalizeFiveStateRuleArrays /
+            // NormalizeCommonInterlockEvaluatorRules reshapes the CAT + basic FB to
+            // match. G1 asserts the swap actually lands on disk so a regression that
+            // flips reduce=false on the sim path gets caught.
+            CheckInterlockStructCollapse(syslayNet, "syslay", Fail, Pass, Note);
+            CheckInterlockStructCollapse(sysresNet, "sysres", Fail, Pass, Note);
+
             // ── Summary ──────────────────────────────────────────────────────
             _out.WriteLine("");
             _out.WriteLine($"[Harness] {failures.Count} checklist failure(s).");
@@ -304,6 +315,13 @@ namespace MapperTests
         static void CheckNoSensorOverride(XElement net, string label,
             Action<string, string> Fail, Action<string, string> Pass)
         {
+            // 2026-05-30: SimSensorConfig POC reverted. Five_State CAT retains its
+            // two original scalar BOOL parameters; the sim override sets both
+            // FALSE so No_Sensor_Handler's timer path advances the ECC. Assert
+            // every Five_State_Actuator_CAT instance has WorkSensorFitted=FALSE
+            // and HomeSensorFitted=FALSE. (The connection-level field-access
+            // approach the POC tried — Source="SensorConfig.Fitted_Work" — is
+            // unproven in EAE 24.1 and broke the deployed CAT body.)
             int actuators = 0, ok = 0;
             foreach (var fb in net.Elements(Ns + "FB")
                 .Where(f => (string?)f.Attribute("Type") == "Five_State_Actuator_CAT"))
@@ -311,13 +329,14 @@ namespace MapperTests
                 actuators++;
                 var fbName = (string?)fb.Attribute("Name") ?? "(unnamed)";
                 bool fbOk = true;
+
                 foreach (var pname in new[] { "WorkSensorFitted", "HomeSensorFitted" })
                 {
                     var ps = fb.Elements(Ns + "Parameter")
                         .Where(p => (string?)p.Attribute("Name") == pname).ToList();
                     if (ps.Count == 0)
                     {
-                        Fail("B5", $"{label}: {fbName}.{pname} missing (expected FALSE)");
+                        Fail("B5", $"{label}: {fbName}.{pname} parameter MISSING (override should have inserted FALSE)");
                         fbOk = false;
                         continue;
                     }
@@ -326,8 +345,8 @@ namespace MapperTests
                         Fail("B5", $"{label}: {fbName}.{pname} has {ps.Count} duplicate entries");
                         fbOk = false;
                     }
-                    var v = (string?)ps[0].Attribute("Value") ?? "";
-                    if (!string.Equals(v.Trim(), "FALSE", StringComparison.OrdinalIgnoreCase))
+                    var v = ((string?)ps[0].Attribute("Value") ?? "").Trim();
+                    if (!string.Equals(v, "FALSE", StringComparison.OrdinalIgnoreCase))
                     {
                         Fail("B5", $"{label}: {fbName}.{pname}=\"{v}\" (expected FALSE)");
                         fbOk = false;
@@ -338,7 +357,7 @@ namespace MapperTests
             if (actuators == 0)
                 Fail("B5", $"{label}: zero Five_State_Actuator_CAT instances (expected ≥6 Assembly + Feed)");
             else if (ok == actuators)
-                Pass("B5", $"{label}: WorkSensorFitted/HomeSensorFitted=FALSE on all {actuators} Five_State actuator(s)");
+                Pass("B5", $"{label}: WorkSensorFitted=FALSE & HomeSensorFitted=FALSE on all {actuators} Five_State actuator(s)");
         }
 
         static void CheckNoPhantomSources(XElement net, string label,
@@ -455,6 +474,51 @@ namespace MapperTests
             else
                 Fail("D", $"{label}: SimHopperForce FB missing — the post-gen InjectSimHopperForce did not run "
                           + "(harness needs to mirror MainForm_simulator's call or that pipeline must be exposed)");
+        }
+
+        /// <summary>G1 — for every Five_State_Actuator_CAT instance in the SIM
+        /// syslay/sysres, assert the interlock STRUCT collapse has landed: the 4
+        /// parallel RuleFromState/RuleToState/RuleSourceID/RuleBlockedState arrays
+        /// MUST have been dropped and replaced by one RuleTable parameter holding
+        /// the InterlockRule[10] STRUCT literal. Catches a regression that flips
+        /// dropInterlockConstants=false on the sim path (would re-emit the 4 arrays
+        /// against a CAT whose normalised body no longer declares them).</summary>
+        static void CheckInterlockStructCollapse(XElement net, string label,
+            Action<string, string> Fail, Action<string, string> Pass, Action<string> Note)
+        {
+            var legacy = new[] { "RuleFromState", "RuleToState", "RuleSourceID", "RuleBlockedState" };
+            int collapsed = 0, total = 0;
+            foreach (var fb in net.Elements(Ns + "FB")
+                .Where(f => (string?)f.Attribute("Type") == "Five_State_Actuator_CAT"))
+            {
+                total++;
+                var fbName = (string?)fb.Attribute("Name") ?? "(unnamed)";
+                var paramNames = fb.Elements(Ns + "Parameter")
+                    .Select(p => (string?)p.Attribute("Name") ?? string.Empty)
+                    .ToHashSet(StringComparer.Ordinal);
+
+                var legacyStill = legacy.Where(n => paramNames.Contains(n)).ToList();
+                if (legacyStill.Count > 0)
+                {
+                    Fail("G1", $"{label}: {fbName} still carries the legacy parallel rule array(s): "
+                              + string.Join(", ", legacyStill)
+                              + " — interlock STRUCT collapse did not run (dropInterlockConstants flag off?).");
+                    continue;
+                }
+                if (!paramNames.Contains("RuleTable"))
+                {
+                    Fail("G1", $"{label}: {fbName} has no RuleTable parameter — interlock STRUCT collapse did not emit the InterlockRule[10] struct array.");
+                    continue;
+                }
+                collapsed++;
+            }
+            if (total == 0)
+            {
+                Note($"G1 {label}: no Five_State_Actuator_CAT instances to check (skipped).");
+                return;
+            }
+            if (collapsed == total)
+                Pass("G1", $"{label}: interlock STRUCT collapse landed on all {total} Five_State actuator(s) (RuleTable replaces the 4 parallel arrays).");
         }
 
         /// <summary>D2 — for every Seven_State_Actuator_CAT instance, the matching
