@@ -1508,11 +1508,23 @@ namespace CodeGen.Translation
                 // MqttConn_M580→M580). ResourceWireEmitter wires each one's
                 // INIT/CONNECT bring-up on its resource (it finds the
                 // MQTT_CONNECTION FB by type, not by the fixed name "MqttConn").
+                // Syslay bring-up self-loop for the M262/M580 connections so
+                // CONNECT fires after INIT (BX1's is added by BuildBx1Wiring).
+                // The INIT trigger itself is wired on each resource's sysres by
+                // ResourceWireEmitter (FB1.INITO → MqttConn_*.INIT, by FB type).
+                // Adding INITO → CONNECT here makes the M262 connection visibly
+                // wired on the canvas and guarantees it opens — this is the
+                // "wire it into Station 1" the rig test needs to drive
+                // MqttConn_M262 to IsConnected = TRUE.
+                builder.AddEventConnection("MqttConn_M262.INITO", "MqttConn_M262.CONNECT");
+                builder.AddEventConnection("MqttConn_M580.INITO", "MqttConn_M580.CONNECT");
+
                 report.Missing.Add(
                     $"[MQTT] per-resource MqttConn injected — BX1 (SMC_BX1) + M262 (SMC_M262) + " +
                     $"M580 (SMC_M580), ConnectionID={config.MqttClientId}, URL={brokerUrl} " +
                     $"({(config.SimulatorFullSystem ? "sim → loopback" : "rig → LAN IP")}); each " +
-                    $"local embedded MqttPub binds + publishes directly, no bridge FBs.");
+                    $"local embedded MqttPub binds + publishes directly, no bridge FBs. " +
+                    $"M262/M580 INITO→CONNECT self-loops wired on the syslay.");
 
                 // Cross-PLC MQTT bridge REMOVED 2026-06-01 at user request —
                 // the standalone MqttFmt_<comp>/MqttPub_<comp> pairs cluttered
