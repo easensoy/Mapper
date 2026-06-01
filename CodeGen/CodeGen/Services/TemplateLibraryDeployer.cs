@@ -169,13 +169,19 @@ namespace CodeGen.Services
                     stateDataSource: "FB1.Status",
                     initSource: "StateHandling.INITO",
                     topicNameSource: "name", cfg, result);
-                // PatchCatExposeState call REMOVED 2026-06-01 with the bridge.
-                // It only existed to expose state_out at the Five_State CAT
-                // boundary for the cross-resource bridge wires; with the bridge
-                // gone there's no consumer, so we don't modify the CAT boundary.
-                // The embedded MqttPub (above) taps ActuatorCore.pst_out
-                // INTERNALLY and needs no boundary exposure. (Method retained
-                // in this file but no longer called.)
+                // Bridge enabler — SIM-ONLY. Exposes Five_State_Actuator_CAT's
+                // post-update state event + INT at the CAT boundary so the
+                // cross-PLC bridge (MqttBridgeEmitter) can wire to
+                // <comp>.state_out / <comp>.current_state_to_process across
+                // resources. Sensor_Bool_CAT already exposes pst_out + Status,
+                // so it needs no patch. Gated on SimulatorFullSystem so the rig
+                // CAT body stays byte-identical until the bridge is cleared for
+                // the rig. Idempotent.
+                if (cfg.SimulatorFullSystem)
+                    PatchCatExposeState(eaeProjectDir, "Five_State_Actuator_CAT",
+                        internalEventSource: "ActuatorCore.pst_out",
+                        internalDataSource: "ActuatorCore.current_state_to_process",
+                        result);
             }
 
             // Simulator interface reduction (the 4 Rule arrays -> 1 RuleTable).
