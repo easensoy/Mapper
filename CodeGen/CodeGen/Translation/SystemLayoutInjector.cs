@@ -2465,6 +2465,25 @@ namespace CodeGen.Translation
 
             CleanM262SysdevResources(config, report);
 
+            // System-wide duplicate-syslay sweep. The sim path writes a fresh
+            // 00000000-0000-0000-0000-000000000000.syslay every Test Simulator
+            // click, but a stale 2240693B1370B496.syslay (or similar
+            // layer-id-named file) can persist alongside from a prior
+            // compile / EAE crash / aborted deploy. Both files declare the
+            // SAME <Layer ID="..."> and the SAME top-level FB instances —
+            // EAE reads BOTH and the stale one's parameter values silently
+            // win for any FB whose ID matches across the pair (most visibly:
+            // MqttConn ending up with the OLD URL / CACert combination even
+            // after the source change). Keep the canonical zero-GUID-named
+            // file; delete every other .syslay whose Layer ID collides with
+            // it. Sister folders (which hold per-layer opcua / metadata
+            // files) are removed too. CompileCachePurger does the same on
+            // the rig path; this is the sim-path equivalent and runs every
+            // Generate — does NOT touch bin/ or obj/ (those purges trigger
+            // the strict-TLS recompile failure mode we already burned a
+            // session on).
+            SweepDuplicateSyslayPerSysapp(config, report);
+
             // System-wide orphan-sysres sweep — every Generate (sim AND rig)
             // walks every <sysdev-guid>.sysdev under IEC61499/System/<sys-guid>/,
             // reads its <Resource ID="..."> element, and deletes any sibling
@@ -2480,6 +2499,87 @@ namespace CodeGen.Translation
             SweepOrphanSysresPerSysdev(config, report);
 
             return report;
+        }
+
+        /// <summary>
+        /// For every sysapp folder under <c>IEC61499/System/&lt;sys-guid&gt;/</c>,
+        /// detect <c>.syslay</c> files that share the same <c>&lt;Layer ID&gt;</c>
+        /// and keep ONLY the canonical zero-GUID-named one. Removes the matching
+        /// sister folder (per-layer opcua / metadata) so EAE never sees the stale
+        /// pair on its next solution read. Matches the sweep done by
+        /// CompileCachePurger but path-independent — runs on every Generate
+        /// (rig and sim) and does NOT touch bin/ or obj/ caches.
+        /// </summary>
+        private static void SweepDuplicateSyslayPerSysapp(MapperConfig config, CleanupReport report)
+        {
+            var syslayDir = Path.GetDirectoryName(config.SyslayPath2);
+            if (string.IsNullOrEmpty(syslayDir)) return;
+            var sysGuidDir = Path.GetDirectoryName(syslayDir);
+            if (string.IsNullOrEmpty(sysGuidDir) || !Directory.Exists(sysGuidDir)) return;
+
+            // TopDirectoryOnly: sysapp folders live exactly one level below
+            // sysGuidDir. AllDirectories triggers access-denied on harness
+            // temp subfolders (UnauthorizedAccessException kills the run).
+            IEnumerable<string> sysappDirs;
+            try { sysappDirs = Directory.EnumerateDirectories(sysGuidDir, "*", SearchOption.TopDirectoryOnly); }
+            catch { return; }
+
+            foreach (var sysappDir in sysappDirs)
+            {
+                List<string> syslays;
+                try
+                {
+                    syslays = Directory.EnumerateFiles(sysappDir, "*.syslay",
+                        SearchOption.TopDirectoryOnly).ToList();
+                }
+                catch { continue; }
+                if (syslays.Count < 2) continue;
+
+                var byLayerId = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+                foreach (var sl in syslays)
+                {
+                    string? layerId = null;
+                    try
+                    {
+                        var doc = System.Xml.Linq.XDocument.Load(sl);
+                        layerId = (string?)doc.Root?.Attribute("ID");
+                    }
+                    catch { /* skip on parse failure */ }
+                    if (string.IsNullOrEmpty(layerId)) continue;
+                    if (!byLayerId.TryGetValue(layerId, out var list))
+                        byLayerId[layerId] = list = new List<string>();
+                    list.Add(sl);
+                }
+
+                foreach (var grp in byLayerId.Values.Where(v => v.Count > 1))
+                {
+                    // Prefer the canonical zero-GUID filename as the keeper —
+                    // it's what GenerateStation1TestSyslay writes to.
+                    var keeper = grp.FirstOrDefault(p =>
+                        Path.GetFileNameWithoutExtension(p)
+                            .StartsWith("00000000-0000-0000-0000-", StringComparison.Ordinal))
+                        ?? grp.OrderByDescending(p => new FileInfo(p).Length).First();
+
+                    foreach (var dup in grp.Where(p =>
+                        !string.Equals(p, keeper, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        try
+                        {
+                            File.Delete(dup);
+                            var sisterDir = Path.Combine(
+                                Path.GetDirectoryName(dup)!,
+                                Path.GetFileNameWithoutExtension(dup));
+                            if (Directory.Exists(sisterDir))
+                                Directory.Delete(sisterDir, recursive: true);
+                            report.DeviceCleanupLog.Add(
+                                $"[CleanDevice] removed duplicate-Layer-ID syslay " +
+                                $"{Path.GetFileName(dup)} (canonical " +
+                                $"{Path.GetFileName(keeper)} kept)");
+                        }
+                        catch { /* best-effort */ }
+                    }
+                }
+            }
         }
 
         /// <summary>
