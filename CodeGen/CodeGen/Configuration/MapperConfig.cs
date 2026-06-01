@@ -164,16 +164,19 @@ namespace CodeGen.Configuration
 
         /// <summary>
         /// Subnet base address the "Default Network" BroadcastDomain JSON
-        /// declares. Pinned to the reference SMC_Rig_Expo_withClamp value
-        /// (192.168.0.0/24) so EAE sees a byte-identical topology when the
-        /// user opens that solution to Take Ownership of the M580. The rig's
-        /// device-side IP (192.168.1.20) sits OUTSIDE this /24 — EAE tolerates
-        /// the mismatch (the reference ships this way and works), the connect
-        /// dialog just highlights the subnet/gateway rows in yellow. Default
-        /// follows reference; override if you commission a rig on a strictly
-        /// matching subnet later.
+        /// declares. Set to <c>192.168.1.0/24</c> — the actual rig subnet
+        /// where M262 (192.168.1.10), M580 (192.168.1.20) and BX1
+        /// (192.168.1.151) live. The reference SMC_Rig_Expo_withClamp keeps
+        /// its "Default Network" at 192.168.0.0/24 AND ships a separate
+        /// DeviceNetwork_1 at 192.168.1.0/24 — but our single-broadcast-domain
+        /// emit only writes "Default Network", so if that domain doesn't
+        /// cover the rig subnet, EAE 24.1 rejects the topology import with
+        /// "Unable to import topology / Internal Server Error" the moment an
+        /// HMIB1X-form Equipment JSON references a subnet no broadcast domain
+        /// covers. Pinning to 192.168.1.0/24 directly makes a single domain
+        /// suffice.
         /// </summary>
-        public string DefaultNetworkSubnetAddress { get; set; } = "192.168.0.0";
+        public string DefaultNetworkSubnetAddress { get; set; } = "192.168.1.0";
 
         /// <summary>
         /// Subnet mask for the "Default Network" BroadcastDomain JSON.
@@ -190,7 +193,7 @@ namespace CodeGen.Configuration
         /// reference; override only if you commission a rig with an actual
         /// gateway set on the device.
         /// </summary>
-        public string DefaultNetworkGateway { get; set; } = "192.168.0.254";
+        public string DefaultNetworkGateway { get; set; } = "192.168.1.254";
 
         /// <summary>
         /// UUID of the "Default Network" BroadcastDomain. Matches the live
