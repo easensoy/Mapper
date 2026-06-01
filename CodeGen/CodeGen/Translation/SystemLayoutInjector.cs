@@ -1453,6 +1453,21 @@ namespace CodeGen.Translation
                 // defaults cover the rest — the reference connects with just these
                 // four — so the earlier QueueDepth/KeepAlive/timeout params are dropped
                 // to match the proven shape and avoid unverified port names.
+                // Broker host depends on the path. The SIMULATOR runtime runs
+                // on this PC and CANNOT reach the PC's own LAN IP
+                // (192.168.1.50) — connecting to it stalls/times out (the same
+                // loopback-via-LAN-IP failure mosquitto_sub -h 192.168.1.50
+                // hits on this machine), which surfaces as IsConnected=FALSE /
+                // ReturnCode 50 on MqttConn. 127.0.0.1 connects reliably and
+                // gave IsConnected=TRUE in sim. The RIG keeps the configured
+                // LAN IP so the M262/M580/BX1 hardware reaches the broker over
+                // the network. So: sim → rewrite host to 127.0.0.1; rig →
+                // cfg.MqttBrokerUrl verbatim.
+                string brokerUrl = config.MqttBrokerUrl;
+                if (config.SimulatorFullSystem)
+                    brokerUrl = System.Text.RegularExpressions.Regex.Replace(
+                        brokerUrl, @"://[^:/]+", "://127.0.0.1");
+
                 var mqttParams = new Dictionary<string, string>
                 {
                     ["QI"] = SyslayBuilder.FormatBool(true),
@@ -1460,12 +1475,11 @@ namespace CodeGen.Translation
                     // working MQTT_CONNECTION (Schneider's own sample). Adding
                     // CACert tripped CTcpClientStateMgr.getUriStrValue with
                     // "Unsupported parameter format" — the runtime's URI
-                    // parser rejects something about the path (C:/... read as
-                    // unknown URI scheme C, or the parameter type doesn't
-                    // accept a file path). Stick to the reference shape until
-                    // the correct CACert syntax is verified against EAE docs.
+                    // parser rejects something about the path. Stick to the
+                    // reference shape until the correct CACert syntax is
+                    // verified against EAE docs.
                     ["ConnectionID"] = SyslayBuilder.FormatString(config.MqttClientId),
-                    ["URL"] = SyslayBuilder.FormatString(config.MqttBrokerUrl),
+                    ["URL"] = SyslayBuilder.FormatString(brokerUrl),
                     ["ClientIdentifier"] = SyslayBuilder.FormatString(config.MqttClientId),
                 };
                 // Position from ComponentRegistry — single source of truth.
@@ -1485,7 +1499,8 @@ namespace CodeGen.Translation
                 // resource, so there is NO Area.INITO -> MqttConn.INIT wire here.
                 report.Missing.Add(
                     $"[MQTT] MqttConn (MQTT_CONNECTION) injected — ConnectionID={config.MqttClientId}, " +
-                    $"URL={config.MqttBrokerUrl}; routed to BX1, INIT/CONNECT wired on BX1 sysres.");
+                    $"URL={brokerUrl} ({(config.SimulatorFullSystem ? "sim → loopback" : "rig → LAN IP")}); " +
+                    $"routed to BX1, INIT/CONNECT wired on BX1 sysres.");
 
                 // Cross-PLC MQTT bridge — SIM-ONLY. One standalone
                 // MqttFmt_<comp> + MqttPub_<comp> pair on BX1 for every
