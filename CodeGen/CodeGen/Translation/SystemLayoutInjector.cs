@@ -1502,20 +1502,18 @@ namespace CodeGen.Translation
                     $"URL={brokerUrl} ({(config.SimulatorFullSystem ? "sim → loopback" : "rig → LAN IP")}); " +
                     $"routed to BX1, INIT/CONNECT wired on BX1 sysres.");
 
-                // Cross-PLC MQTT bridge — SIM-ONLY. One standalone
-                // MqttFmt_<comp> + MqttPub_<comp> pair on BX1 for every
-                // M262 / M580 sensor or actuator, with a cross-resource syslay
-                // wire from the remote component's exposed boundary state into
-                // the BX1 formatter. BX1's own components are skipped (they
-                // publish via the embedded MqttPub patched into each CAT by
-                // PatchCatMqttPublish — bridging them would double-publish).
-                // GATED on SimulatorFullSystem: the bridge is proven in the
-                // simulator first; the rig path stays free of the bridge FBs
-                // until explicitly cleared (and the actuator boundary-expose
-                // PatchCatExposeState is likewise sim-gated, so the rig CAT
-                // body is untouched). See CodeGen.Services.MqttBridgeEmitter.
-                if (config.SimulatorFullSystem)
-                    CodeGen.Services.MqttBridgeEmitter.EmitBridge(builder, config);
+                // Cross-PLC MQTT bridge REMOVED 2026-06-01 at user request —
+                // the standalone MqttFmt_<comp>/MqttPub_<comp> pairs cluttered
+                // the syslay. Only MqttConn (above, on BX1) + the embedded
+                // MqttPub inside each CAT (PatchCatMqttPublish) remain.
+                // CONSEQUENCE: only BX1's own components publish — their
+                // embedded MqttPub finds the SMC_BX1 connection on their own
+                // resource. M262/M580 components' embedded MqttPub binds to
+                // ConnectionID 'SMC_BX1' which lives on BX1's resource, NOT
+                // theirs, so they cannot publish (and on hardware they're
+                // firmware-gated anyway, ReturnCode 50). Getting M262/M580
+                // state onto the broker requires EITHER the cross-resource
+                // bridge (removed) OR a per-resource MqttConn. See MQTT.md.
             }
 
             BuildFeedStationWiring(builder, contents);
