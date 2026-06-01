@@ -245,8 +245,7 @@ namespace CodeGen.Devices.Core
                 resourceName: BX1ResourceName,
                 hcfTemplatePath: cfg.BX1HcfTemplatePath,
                 equipmentJsonName: "Equipment_HMIB1X_1.json",
-                equipmentBuilder: () => BuildBX1HMIB1XEquipmentJson(
-                    BX1SysdevId, solutionId, cfg.BX1TargetIp, cfg.DefaultNetworkUuid),
+                equipmentBuilder: () => BuildBX1HMIB1XEquipmentJson(BX1SysdevId, solutionId, cfg.BX1TargetIp),
                 deployPluginPropertiesXml: BuildSoftDpacDeployPluginPropertiesXml(),
                 simulationBindingDeployPort: 51501,
                 simulationBindingArchivePort: 51498);
@@ -647,7 +646,7 @@ namespace CodeGen.Devices.Core
         /// standalone. Workstation is the right top-level catalog for any
         /// PC-hosted softdpac runtime.
         /// </summary>
-        static string BuildBX1HMIB1XEquipmentJson(string sysdevId, string solutionId, string targetIp, string broadcastDomainUuid)
+        static string BuildBX1HMIB1XEquipmentJson(string sysdevId, string solutionId, string targetIp)
         {
             // Reproduces the HMIB1X-form topology from SMC_Rig_Expo_withClamp's
             // Equipment_HMIB1X_1.json — the working reference that EAE 24.1's
@@ -703,7 +702,7 @@ namespace CodeGen.Devices.Core
                               "isReadOnly": false,
                               "domainReadOnly": true,
                               "ipAddress": "{{targetIp}}",
-                              "domain": "{{broadcastDomainUuid}}"
+                              "domain": "{{NoConfDomainUuid}}"
                             }
                           ]
                         }
@@ -792,7 +791,7 @@ namespace CodeGen.Devices.Core
                     {
                       "identifier": "softdpacDeviceNet",
                       "type": 0,
-                      "domain": "{{broadcastDomainUuid}}",
+                      "domain": "{{NoConfDomainUuid}}",
                       "interface": "eth0",
                       "domainReadOnly": false
                     }
