@@ -38,34 +38,61 @@ namespace CodeGen.Services
     public static class MqttBridgeEmitter
     {
         /// <summary>
-        /// Bridge formatter row Y (above the BX1 frame top at Y=1700; sits in
-        /// the BX1 floating zone alongside MqttConn at Y=200).
+        /// Dedicated bridge band sits BELOW the three station frames (which
+        /// span Y=1700..7000), so the bridge publishers read as one labeled
+        /// zone instead of a dense stack overlapping the BX1 floating row.
+        /// Frame top.
         /// </summary>
-        private const int FormatterRowY = 600;
+        private const int BridgeFrameY = 7300;
+
+        /// <summary>Bridge frame height (covers the formatter + publisher rows).</summary>
+        private const int BridgeFrameH = 1500;
+
+        /// <summary>Bridge formatter row Y (inside the bridge frame).</summary>
+        private const int FormatterRowY = 7550;
 
         /// <summary>Bridge publisher row Y (one row below the formatter row).</summary>
-        private const int PublisherRowY = 1100;
+        private const int PublisherRowY = 8150;
 
         /// <summary>Horizontal pitch between bridge publisher columns.</summary>
-        private const int BridgeColumnPitch = 500;
+        private const int BridgeColumnPitch = 700;
+
+        /// <summary>Left edge of the bridge band — starts under the M262 frame origin.</summary>
+        private const int BridgeBaseX = 1800;
 
         /// <summary>
         /// Emits one <c>MqttFmt_&lt;comp&gt;</c> + <c>MqttPub_&lt;comp&gt;</c>
         /// pair per M262 / M580 component (sensors + actuators) along with the
-        /// cross-resource event/data feed and the local Fmt → Pub chain.
-        /// Skipped entirely when <paramref name="cfg"/> has
-        /// <c>MqttPublishEnabled = false</c>.
+        /// cross-resource event/data feed and the local Fmt → Pub chain. All
+        /// pairs sit inside a single labeled "MQTT Bridge" frame below the
+        /// station frames so the canvas reads cleanly. Skipped entirely when
+        /// <paramref name="cfg"/> has <c>MqttPublishEnabled = false</c>.
         /// </summary>
         public static void EmitBridge(SyslayBuilder builder, MapperConfig cfg)
         {
             if (cfg == null || !cfg.MqttPublishEnabled) return;
 
-            int xBase = LayoutGrid.ColumnBaseX(PlcAssignment.BX1);  // 29000
-            int index = 0;
+            // Collect the bridged components first so the enclosing frame can
+            // be sized to exactly cover them.
+            var bridged = new List<ComponentEntry>();
             foreach (var entry in ComponentRegistry.ByName.Values)
+                if (ShouldBridge(entry)) bridged.Add(entry);
+            if (bridged.Count == 0) return;
+
+            // One labeled frame around the whole bridge band — turns "numerous
+            // loose FBs" into a single self-documenting zone. LightSteelBlue
+            // distinguishes it from the yellow/purple/green station frames.
+            int frameW = bridged.Count * BridgeColumnPitch + 400;
+            builder.AddFrame("FRAME_MqttBridge",
+                BridgeBaseX - 200, BridgeFrameY, frameW, BridgeFrameH,
+                "LightSteelBlue",
+                "MQTT Bridge  —  M262 / M580 component state  →  BX1 publish (smc/<component>/state)",
+                "TopCenter", "Microsoft Sans Serif, 28pt, style=Bold");
+
+            int index = 0;
+            foreach (var entry in bridged)
             {
-                if (!ShouldBridge(entry)) continue;
-                EmitBridgePublisher(builder, cfg, entry, xBase, index);
+                EmitBridgePublisher(builder, cfg, entry, BridgeBaseX, index);
                 index++;
             }
         }
