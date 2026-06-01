@@ -917,7 +917,7 @@ namespace CodeGen.Translation
             // Station 1 (M262): Feeder, Checker, Transfer + PartInHopper, PartAtChecker
             // Station 2 (M580): Bearing_PnP, Bearing_Gripper, Shaft_Hr, Shaft_Vr,
             //                   Shaft_Gripper, Clamp + BearingSensor, ShaftSensor
-            // Station 2 (BX1):  CoverPNP_Hr, CoverPNP_Vr, CoverPnp_Gripper + TopCoverSenosr
+            // Soft dPAC (BX1):  CoverPNP_Hr, CoverPNP_Vr, CoverPnp_Gripper + TopCoverSenosr
             var allowedActuators = new[]
             {
                 // Station 1 (M262)
@@ -945,7 +945,7 @@ namespace CodeGen.Translation
                 "Bearing_Gripper",
                 "Shaft_Hr", "Shaft_Vr", "Shaft_Gripper",
                 "Clamp",
-                // Station 2 (BX1)
+                // Soft dPAC (BX1) — Cover P&P
                 "CoverPNP_Hr", "CoverPNP_Vr",
                 "CoverPnp_Gripper",
             };
@@ -1498,7 +1498,7 @@ namespace CodeGen.Translation
             // BX1's own sensor + actuators so the green band on the syslay
             // canvas shows the same wiring style as M262 / M580 instead of
             // floating disconnected FBs (the visual gap the user flagged).
-            BuildBx1Wiring(builder, contents);
+            BuildBx1Wiring(builder, contents, config);
 
             // Phase 1: recipe arrays now ride on the Process1 syslay Parameter values written
             // by BuildProcessFbParameters above. The deployed ProcessRuntime_Generic_v1.fbt is
@@ -1524,12 +1524,13 @@ namespace CodeGen.Translation
             // reference syslays (SMC_Rig_Expo_withClamp) confirm this — they
             // set BackgroundColor only on <Frame>, never on <FB>. So we do not
             // attempt to recolour the type strip here.
-            // Frame layout — three independent station frames, no combined
-            // outer envelope. Each PLC zone is self-titled and self-coloured.
-            //   Station 1 (M262)  — yellow,    holds Feed_Station logic
-            //   Station 2 (M580)  — purple,    holds swivel-arm + shaft column
-            //   Station 2 (BX1)   — green,     holds cover pick-and-place
-            // The two "Station 2" frames are visually distinct rather than
+            // Frame layout — three independent PLC frames, no combined outer
+            // envelope. Each PLC zone is self-titled and self-coloured.
+            //   Station 1 (M262)   — yellow,  holds Feed_Station logic
+            //   Station 2 (M580)   — purple,  holds swivel-arm + shaft column
+            //   Soft dPAC (BX1)    — green,   holds cover pick-and-place
+            // BX1 is the Soft dPAC host (Cover P&P) — NOT Station 2. Station 2
+            // is the M580. The three frames are visually distinct rather than
             // wrapped in a single outer, matching the SMC_Rig_Expo_withClamp
             // reference which colour-codes per PLC.
             //
@@ -1562,10 +1563,15 @@ namespace CodeGen.Translation
                 LayoutGrid.FrameWidth(PlcAssignment.M580), LayoutGrid.FrameHeight,
                 "MediumPurple", "Station 2   —   PLC M580", "TopCenter",
                 "Microsoft Sans Serif, 36pt, style=Bold");
-            builder.AddFrame("FRAME_Station2_BX1",
+            // BX1 is the Soft dPAC host (Cover P&P) — NOT Station 2. Station 2
+            // is the M580 frame above. Labelling this band "Station 2 — PLC BX1"
+            // was the wrong carry-over from when this PLC sat physically next
+            // to the M580 cabinet on the rig. The frame title now matches the
+            // role, not the cabinet location.
+            builder.AddFrame("FRAME_BX1",
                 LayoutGrid.FrameOriginX(PlcAssignment.BX1), LayoutGrid.FrameOriginY,
                 LayoutGrid.FrameWidth(PlcAssignment.BX1), LayoutGrid.FrameHeight,
-                "LightGreen", "Station 2   —   PLC BX1", "TopCenter",
+                "LightGreen", "Soft dPAC   —   PLC BX1", "TopCenter",
                 "Microsoft Sans Serif, 36pt, style=Bold");
             // Empirical observation 2026-05-21: EAE always renders <FB> z-order
             // above <Frame> z-order, regardless of XML document order. Verified
@@ -2327,14 +2333,22 @@ namespace CodeGen.Translation
         /// sub-station (Cover PnP). BX1 has NO Station_CAT, NO Process FB and NO
         /// HMI faceplate on its own resource — Assembly_Station on the M580
         /// commands every BX1 actuator over the cross-PLC state_table broadcast
-        /// ring (see Docs/ARCHITECTURE.md §4a). So BX1's syslay wiring is two
+        /// ring (see Docs/ARCHITECTURE.md §4a). So BX1's syslay wiring is three
         /// chains over its own component set:
         /// <list type="bullet">
-        ///   <item>INIT chain — sensor(s) → actuator(s). No upstream source on
-        ///     the syslay (the actual FB1.INITO → first-FB.INIT bootstrap is
-        ///     wired on the BX1 sysres by ResourceWireEmitter); the syslay
-        ///     just shows the relay so the green band reads as one connected
-        ///     island instead of disconnected FBs.</item>
+        ///   <item>MqttConn bring-up — <c>MqttConn.INITO → MqttConn.CONNECT</c>
+        ///     self-loop so the broker connection opens as soon as the FB is
+        ///     initialised (broker URL/ConnectionID/ClientIdentifier already
+        ///     parameterised at injection time). Emitted only when MQTT is
+        ///     enabled. MqttConn.INIT itself is sourced from the BX1 resource
+        ///     boot anchor (FB1) on the sysres — that wire is invisible on the
+        ///     syslay because FB1 lives on the sysres only.</item>
+        ///   <item>INIT chain — MqttConn → sensor(s) → actuator(s). MqttConn
+        ///     sits at the head so the broker is up BEFORE the embedded
+        ///     MqttPub inside each CAT (patched in by PatchCatMqttPublish)
+        ///     starts publishing. Without MqttConn at the head, the first
+        ///     MqttPub.PUBLISH1 fires before MQTT_CONNECTION has opened and
+        ///     EAE drops it (no QueueDepth on the publish side).</item>
         ///   <item>stateRprtCmd ring — closed loop across all BX1 sensors +
         ///     actuators. Closes back to the first sensor so every component
         ///     sees every other's state broadcast (the ring is how state
@@ -2342,15 +2356,28 @@ namespace CodeGen.Translation
         /// </list>
         /// Skipped cleanly when BX1 has no components in the current fixture.
         /// </summary>
-        private static void BuildBx1Wiring(SyslayBuilder builder, StationContents contents)
+        private static void BuildBx1Wiring(SyslayBuilder builder, StationContents contents,
+            MapperConfig? config)
         {
             static bool IsBx1(string name) =>
                 HcfSymbolIndex.NameBasedPlcGuess(name) == PlcAssignment.BX1;
 
-            // INIT chain — BX1 sensors first, then BX1 actuators. No upstream
-            // source on the syslay (ResourceWireEmitter handles FB1.INITO on
-            // the BX1 sysres).
+            // MqttConn bring-up: self-loop INITO → CONNECT so the broker
+            // connection opens as soon as the FB is initialised. Emitted only
+            // when MQTT is enabled (otherwise no MqttConn FB exists). The
+            // matching INIT-input wire (FB1.INITO → MqttConn.INIT) is emitted
+            // on the BX1 sysres by ResourceWireEmitter — FB1 is the resource
+            // boot anchor and lives only on the sysres, so the syslay shows
+            // MqttConn.INIT dangling at the head; runtime resolves it through
+            // the sysres bridge.
+            bool mqttEnabled = config != null && config.MqttPublishEnabled;
+            if (mqttEnabled)
+                builder.AddEventConnection("MqttConn.INITO", "MqttConn.CONNECT");
+
+            // INIT chain — MqttConn first (broker up before any embedded
+            // MqttPub fires), then BX1 sensors, then BX1 actuators.
             var initChain = new List<string>();
+            if (mqttEnabled) initChain.Add("MqttConn");
             foreach (var s in contents.Sensors)    if (IsBx1(s.Name)) initChain.Add(s.Name);
             foreach (var a in contents.Actuators)  if (IsBx1(a.Name)) initChain.Add(a.Name);
             for (int i = 0; i < initChain.Count - 1; i++)
@@ -2358,7 +2385,8 @@ namespace CodeGen.Translation
 
             // stateRprtCmd ring — every BX1 sensor + actuator carries the
             // stateRprtCmd_in/out adapter ports. Closed loop so the broadcast
-            // ring is a true ring (last → first).
+            // ring is a true ring (last → first). MqttConn is NOT in the ring
+            // (no stateRprtCmd port).
             var ring = new List<(string Name, string Type)>();
             foreach (var s in contents.Sensors)    if (IsBx1(s.Name)) ring.Add((s.Name, "Sensor_Bool_CAT"));
             foreach (var a in contents.Actuators)  if (IsBx1(a.Name)) ring.Add((a.Name, "Five_State_Actuator_CAT"));
@@ -2431,7 +2459,94 @@ namespace CodeGen.Translation
 
             CleanM262SysdevResources(config, report);
 
+            // System-wide orphan-sysres sweep — every Generate (sim AND rig)
+            // walks every <sysdev-guid>.sysdev under IEC61499/System/<sys-guid>/,
+            // reads its <Resource ID="..."> element, and deletes any sibling
+            // .sysres / sister folder under that sysdev whose stem doesn't
+            // match. Station2DeviceEmitter.EmitOnePlc already runs an
+            // equivalent sweep but ONLY when it (re)writes a sysdev — the sim
+            // path doesn't call EmitOnePlc, so an orphan .sysres left by an
+            // earlier rig deploy under a previous resource ID hash persists
+            // forever and EAE's Solution Integrity check trips "Unable to load
+            // file: it is missing or corrupted" with every BX1 (or M580)
+            // instance listed for Repair. Doing the sweep here makes the
+            // cleanup path-independent.
+            SweepOrphanSysresPerSysdev(config, report);
+
             return report;
+        }
+
+        /// <summary>
+        /// For every <c>.sysdev</c> under <c>IEC61499/System/&lt;sys-guid&gt;/</c>,
+        /// read its <c>&lt;Resource ID="..."&gt;</c> element and delete every
+        /// sibling <c>.sysres</c> / sister folder inside its sysdev folder
+        /// whose stem doesn't match. Two BX1 sysres (17E739…sysres +
+        /// C9F2A4…sysres) is the failure mode this fixes — EAE then flags
+        /// every multiply-defined instance for Repair.
+        /// </summary>
+        private static void SweepOrphanSysresPerSysdev(MapperConfig config, CleanupReport report)
+        {
+            // Locate the system folder (parent of all sysdev files).
+            var syslayDir = Path.GetDirectoryName(config.SyslayPath2);
+            if (string.IsNullOrEmpty(syslayDir)) return;
+            var sysGuidDir = Path.GetDirectoryName(syslayDir);
+            if (string.IsNullOrEmpty(sysGuidDir) || !Directory.Exists(sysGuidDir)) return;
+
+            foreach (var sysdevPath in Directory.EnumerateFiles(sysGuidDir, "*.sysdev"))
+            {
+                string sysdevId;
+                string? activeResourceId = null;
+                try
+                {
+                    sysdevId = Path.GetFileNameWithoutExtension(sysdevPath);
+                    var doc = System.Xml.Linq.XDocument.Load(sysdevPath);
+                    var root = doc.Root;
+                    if (root == null) continue;
+                    var ns = root.GetDefaultNamespace();
+                    activeResourceId = root.Descendants(ns + "Resource")
+                        .Select(r => (string?)r.Attribute("ID"))
+                        .FirstOrDefault(id => !string.IsNullOrEmpty(id));
+                }
+                catch { continue; }
+
+                if (string.IsNullOrEmpty(activeResourceId)) continue;
+
+                var sysdevFolder = Path.Combine(sysGuidDir, sysdevId);
+                if (!Directory.Exists(sysdevFolder)) continue;
+
+                // Delete orphan .sysres files.
+                foreach (var sysres in Directory.EnumerateFiles(sysdevFolder, "*.sysres"))
+                {
+                    var stem = Path.GetFileNameWithoutExtension(sysres);
+                    if (string.Equals(stem, activeResourceId, StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    try
+                    {
+                        File.Delete(sysres);
+                        report.DeviceCleanupLog.Add(
+                            $"[CleanDevice] removed orphan sysres {Path.GetFileName(sysres)} " +
+                            $"(active resource ID is '{activeResourceId}')");
+                    }
+                    catch { /* best-effort */ }
+                }
+
+                // Delete sister folders whose .sysres was just removed (or
+                // never matched). Match the EmitOnePlc convention: a sister
+                // folder is orphan iff there is no matching .sysres on disk.
+                foreach (var sister in Directory.EnumerateDirectories(sysdevFolder))
+                {
+                    var sisterName = Path.GetFileName(sister);
+                    if (string.IsNullOrEmpty(sisterName)) continue;
+                    if (File.Exists(Path.Combine(sysdevFolder, sisterName + ".sysres"))) continue;
+                    try
+                    {
+                        Directory.Delete(sister, recursive: true);
+                        report.DeviceCleanupLog.Add(
+                            $"[CleanDevice] removed orphan sysres sister folder {sisterName}");
+                    }
+                    catch { /* best-effort */ }
+                }
+            }
         }
 
         /// <summary>
