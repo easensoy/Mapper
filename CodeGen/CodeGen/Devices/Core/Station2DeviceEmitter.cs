@@ -168,15 +168,6 @@ namespace CodeGen.Devices.Core
             // does not list a deleted file.
             CleanupStaleTopologyJson(eaeRoot, "Equipment_Soft_dPAC_BX1.json", result);
             CleanupStaleTopologyJson(eaeRoot, "Equipment_BX1.json",           result);
-            // 2026-06-01: switched BX1's topology shape from
-            // Equipment_Workstation_BX1.json (Workstation_V01.00_01.00 catalog
-            // — EAE's Default Network Profile couldn't resolve IP from this
-            // form, deploy kept reading 127.0.0.1) to Equipment_HMIB1X_1.json
-            // (HMIB1X_V01.00_01.00 catalog + nested Softdpac_1, matching the
-            // SMC_Rig_Expo_withClamp reference verbatim). Sweep the old file +
-            // its topologyproj reference so a regen doesn't leave both on disk
-            // with the same BX1EquipmentUuid causing EAE import to reject.
-            CleanupStaleTopologyJson(eaeRoot, "Equipment_Workstation_BX1.json", result);
             // EAE auto-spawns Equipment_<deviceName>_<N>.json variants when its
             // Physical Views editor wants to add a new instance of a device
             // whose name collides with an already-loaded file. Observed
@@ -244,8 +235,8 @@ namespace CodeGen.Devices.Core
                 resourceId: bx1ResourceId,
                 resourceName: BX1ResourceName,
                 hcfTemplatePath: cfg.BX1HcfTemplatePath,
-                equipmentJsonName: "Equipment_HMIB1X_1.json",
-                equipmentBuilder: () => BuildBX1HMIB1XEquipmentJson(BX1SysdevId, solutionId, cfg.BX1TargetIp),
+                equipmentJsonName: "Equipment_Workstation_BX1.json",
+                equipmentBuilder: () => BuildBX1WorkstationEquipmentJson(BX1SysdevId, solutionId, cfg.BX1TargetIp),
                 deployPluginPropertiesXml: BuildSoftDpacDeployPluginPropertiesXml(),
                 simulationBindingDeployPort: 51501,
                 simulationBindingArchivePort: 51498);
@@ -646,38 +637,22 @@ namespace CodeGen.Devices.Core
         /// standalone. Workstation is the right top-level catalog for any
         /// PC-hosted softdpac runtime.
         /// </summary>
-        static string BuildBX1HMIB1XEquipmentJson(string sysdevId, string solutionId, string targetIp)
+        static string BuildBX1WorkstationEquipmentJson(string sysdevId, string solutionId, string targetIp)
         {
-            // Reproduces the HMIB1X-form topology from SMC_Rig_Expo_withClamp's
-            // Equipment_HMIB1X_1.json — the working reference that EAE 24.1's
-            // Network Profile reader actually understands for a BX1 Soft dPAC
-            // hosted on an HMIB1X panel. The earlier Workstation form (with NIC
-            // hanging off a generic Workstation parent) compiled fine but the
-            // Default network profile couldn't resolve BX1's IP from it, so
-            // Deploy & Diagnostic kept showing BX1 at 127.0.0.1 even after the
-            // ipAddress field was correctly written.
-            //
-            // Structure (matching reference verbatim):
-            //   HMIB1X_1 device (catalogReference HMIB1X_V01.00_01.00)
-            //     ├── Softdpac_1 nested equipment (HMIB1X_SoftdpacContainer)
-            //     │     └── eth0 endpoint @ targetIp (192.168.1.151) — this is
-            //     │           the IP EAE actually deploys to
-            //     └── HMIB1X-level eth0 @ 192.168.1.209 — panel management IP
-            //         (NOT the SoftPAC IP). Plus eth1, SoftdpacManagerDEO,
-            //         TimeSettingsDEO, CyberSecurityDEO completing the panel.
-            const string SoftDpacRuntimeTypeId   = "29797a55-a6b8-47c4-9c06-e8a42b1a38b5";
-            const string SoftdpacContainerUuid   = "11111111-2222-3333-4444-000000000054";
-            const string SoftdpacRuntimeUuid     = "11111111-2222-3333-4444-000000000055";
-            const string BX1PanelIp              = "192.168.1.209";
+            // typeId used by Workstation_1's RuntimeDEO in the reference —
+            // distinct from SoftDpacTypeId (which is for the HMIB1X-nested case).
+            const string WorkstationRuntimeTypeId = "422ee926-a34a-4ab5-9e8f-dce0782579f0";
+            const string BX1NicUuid = "11111111-2222-3333-4444-000000000053";
 
             return $$"""
             {
-              "catalogReference": "HMIB1X_V01.00_01.00",
+              "catalogReference": "Workstation_V01.00_01.00",
               "uuid": "{{BX1EquipmentUuid}}",
-              "identifier": "HMIB1X_1",
+              "identifier": "BX1",
               "path": "Topology",
               "properties": [
                 { "propertyName": "IsUnderConstruction", "propertyValue": "False" },
+                { "propertyName": "CommCardReference",   "propertyValue": "" },
                 { "propertyName": "DomainTag",            "propertyValue": "{{solutionId}}" }
               ],
               "references": [
@@ -685,22 +660,22 @@ namespace CodeGen.Devices.Core
               ],
               "equipments": [
                 {
-                  "catalogReference": "HMIB1X_SoftdpacContainer_V01.00_01.00",
-                  "uuid": "{{SoftdpacContainerUuid}}",
-                  "identifier": "Softdpac_1",
-                  "path": "HMIB1X_1\\Softdpac_1",
+                  "catalogReference": "NIC_EAE_V01.00_01.00",
+                  "uuid": "{{BX1NicUuid}}",
+                  "identifier": "NIC_1",
+                  "path": "BX1\\NIC_1",
                   "components": [
                     {
                       "interfaces": [
                         {
-                          "identifier": "eth0",
+                          "identifier": "eno1",
                           "disabled": false,
                           "physicalAddress": "",
                           "endpoints": [
                             {
                               "identifier": "IP Address",
                               "isReadOnly": false,
-                              "domainReadOnly": true,
+                              "domainReadOnly": false,
                               "ipAddress": "{{targetIp}}",
                               "domain": "{{NoConfDomainUuid}}"
                             }
@@ -708,110 +683,28 @@ namespace CodeGen.Devices.Core
                         }
                       ],
                       "ports": [
-                        { "identifier": "Port0", "side": "Default" }
+                        { "identifier": "Port1", "side": "Default" }
                       ],
                       "componentType": "EthernetDEO"
-                    },
-                    {
-                      "scannerId": "270AFDB7F209BFE8",
-                      "endpoint": "eth0\\IP Address",
-                      "connectionTypes": "None",
-                      "componentType": "EthernetMasterDEO"
-                    },
-                    {
-                      "enabled": false,
-                      "securityMode": 0,
-                      "componentType": "SysLogClientDEO"
-                    },
-                    {
-                      "imageName": "softdpac",
-                      "imageVersion": "v24.1.25090.08",
-                      "identifier": "DockerContainer",
-                      "allocatedRam": 524288,
-                      "cpuCores": [ 0, 1, 2, 3 ],
-                      "componentType": "DockerContainerDEO"
-                    },
-                    {
-                      "uuid": "{{SoftdpacRuntimeUuid}}",
-                      "typeId": "{{SoftDpacRuntimeTypeId}}",
-                      "logicalDeviceId": "{{sysdevId}}",
-                      "runtimeServices": [
-                        { "identifier": "Deployment" },
-                        { "identifier": "Archive Service", "logicalPortSecured": "0" }
-                      ],
-                      "componentType": "RuntimeDEO"
                     }
                   ]
                 }
               ],
               "components": [
                 {
-                  "interfaces": [
+                  "uuid": "{{BX1RuntimeUuid}}",
+                  "typeId": "{{WorkstationRuntimeTypeId}}",
+                  "logicalDeviceId": "{{sysdevId}}",
+                  "identifier": "Runtime_1",
+                  "runtimeServices": [
                     {
-                      "identifier": "eth0",
-                      "disabled": false,
-                      "physicalAddress": "",
-                      "endpoints": [
-                        {
-                          "identifier": "IP Address",
-                          "isReadOnly": false,
-                          "domainReadOnly": false,
-                          "ipAddress": "{{BX1PanelIp}}",
-                          "domain": "{{NoConfDomainUuid}}"
-                        }
-                      ]
-                    },
-                    {
-                      "identifier": "eth1",
-                      "disabled": false,
-                      "physicalAddress": "",
-                      "endpoints": [
-                        {
-                          "identifier": "IP Address",
-                          "isReadOnly": false,
-                          "domainReadOnly": false,
-                          "ipAddress": "0.0.0.0",
-                          "domain": "{{NoConfDomainUuid}}"
-                        }
-                      ]
+                      "identifier": "Deployment",
+                      "endpoint": "NIC_1\\eno1\\IP Address",
+                      "logicalPort": "61999",
+                      "logicalPortSecured": "51443"
                     }
                   ],
-                  "ports": [
-                    { "identifier": "LAN1", "side": "Default" },
-                    { "identifier": "LAN2", "side": "Default" }
-                  ],
-                  "componentType": "EthernetDEO"
-                },
-                {
-                  "preferredPrimary": false,
-                  "dockerImages": [
-                    { "identifier": "softdpac", "version": "" }
-                  ],
-                  "dockerVlans": [
-                    {
-                      "identifier": "softdpacDeviceNet",
-                      "type": 0,
-                      "domain": "{{NoConfDomainUuid}}",
-                      "interface": "eth0",
-                      "domainReadOnly": false
-                    }
-                  ],
-                  "softdpacManagerServices": [
-                    { "identifier": "Management services", "logicalPort": 8080, "endpoint": "" }
-                  ],
-                  "componentType": "SoftdpacManagerDEO"
-                },
-                {
-                  "mode": 1,
-                  "servers": [
-                    { "name": "Primary NTP Server_1", "address": "0.0.0.0", "type": 0, "minPoll": 1, "maxPoll": 1 },
-                    { "name": "Secondary NTP Server_1", "address": "0.0.0.0", "type": 1, "minPoll": 1, "maxPoll": 1 }
-                  ],
-                  "componentType": "TimeSettingsDEO"
-                },
-                {
-                  "mode": 0,
-                  "componentType": "CyberSecurityDEO"
+                  "componentType": "RuntimeDEO"
                 }
               ]
             }
