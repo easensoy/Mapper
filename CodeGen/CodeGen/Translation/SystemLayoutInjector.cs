@@ -1395,6 +1395,18 @@ namespace CodeGen.Translation
                         for (int ri = 0; ri < chRuleCount && ri < InterlockRuleCap; ri++)
                         {
                             if (chFrom[ri] < 0 || chFrom[ri] > 6 || chTo[ri] < 0 || chTo[ri] > 6) continue;
+                            // Drop "block-when-source-is-home" rules (RuleBlockedState == 0).
+                            // A source component sitting at its home/rest state is OUT of the
+                            // swivel's crossing, so the swivel is SAFE to move — it must not be
+                            // blocked. (Per user 2026-06-02: Bearing_PnP must be free to move
+                            // when Transfer is at home / ReturnedFinished.) The Transfer rule
+                            // came out Blocked=0 via the ReturnedFinished 4->0 home-family remap,
+                            // so keeping it would FALSELY block the turn-to-Place whenever
+                            // Transfer is home — including the M580-only test, where Transfer
+                            // isn't running and its state_table slot reads 0. The real crossing
+                            // hazards (Shaft_Hr=AtWork, CoverPNP_Hr=Advanced) block on state 2,
+                            // not 0, so those rules are kept and still protect the swivel.
+                            if (chBlk[ri] == 0) continue;
                             f[kept] = chFrom[ri]; t[kept] = chTo[ri];
                             s[kept] = chSrc[ri];  b[kept] = chBlk[ri];
                             kept++;
