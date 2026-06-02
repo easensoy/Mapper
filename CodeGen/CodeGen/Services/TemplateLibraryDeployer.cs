@@ -250,11 +250,14 @@ namespace CodeGen.Services
                 DeployRecipeStepDatatype(eaeProjectDir, result);
             NormalizeProcess1RecipeArrays(eaeProjectDir, recipeStruct, result);
             NormalizeProcessRuntimeRecipeArrays(eaeProjectDir, recipeStruct, result);
-            // Anti-race guard on the process engine: a WAIT must not be satisfied
-            // off the blank startup state_table; it waits for a fresh actuator
-            // report. Runs AFTER the recipe-array normalize so it patches the final
-            // check_wait (whichever recipe form that produced).
-            PatchProcessRuntimeWaitGuard(eaeProjectDir, result);
+            // Process-engine WAIT guard — RIG ONLY. On the rig the engine inits last
+            // and its state_table boots blank, so a home WAIT races; the guard makes a
+            // post-command WAIT wait for that actuator's fresh report. In the SIMULATOR
+            // the sim-force FBs keep state_table accurate and the swivel boots home, so
+            // the guard is unnecessary AND would stall the home-preamble no-op -> the
+            // sim path STRIPS the guard (original entry-check engine). Runs after the
+            // recipe-array normalize so it patches the final check_wait.
+            PatchProcessRuntimeWaitGuard(eaeProjectDir, apply: !cfg.SimulatorFullSystem, result);
 
             GenerateCfgFiles(eaeProjectDir, result);
             RegisterInDfbproj(eaeProjectDir, result);
@@ -632,7 +635,7 @@ namespace CodeGen.Services
         /// the existing check_wait so this works for both the struct and six-array
         /// recipe forms.
         /// </summary>
-        static void PatchProcessRuntimeWaitGuard(string eaeProjectDir, DeployResult result)
+        static void PatchProcessRuntimeWaitGuard(string eaeProjectDir, bool apply, DeployResult result)
         {
             var fbt = Path.Combine(eaeProjectDir, "IEC61499", "ProcessRuntime_Generic_v1.fbt");
             if (!File.Exists(fbt))
@@ -652,29 +655,12 @@ namespace CodeGen.Services
                 System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
                 bool changed = false;
 
-                // 1. internal `armed : BOOL`
-                var internalVars = root.Descendants(ns + "InternalVars").FirstOrDefault();
-                if (internalVars != null &&
-                    !internalVars.Elements(ns + "VarDeclaration")
-                        .Any(v => (string?)v.Attribute("Name") == "armed"))
-                {
-                    internalVars.Add(new System.Xml.Linq.XElement(ns + "VarDeclaration",
-                        new System.Xml.Linq.XAttribute("Name", "armed"),
-                        new System.Xml.Linq.XAttribute("Type", "BOOL"),
-                        new System.Xml.Linq.XAttribute("Comment",
-                            "Anti-race: WAIT only evaluated after a fresh state report since the step was loaded.")));
-                    changed = true;
-                }
-
                 System.Xml.Linq.XElement? St(string algName) =>
                     root.Descendants(ns + "Algorithm")
                         .FirstOrDefault(a => (string?)a.Attribute("Name") == algName)
                         ?.Element(ns + "ST");
 
-                // Normalize the trailing `armed := TRUE/FALSE;` in an algorithm's ST.
-                // desired = "TRUE", "FALSE", or null (remove any). Strips whatever a
-                // prior (broken) patch left so re-applying converges. Returns true if
-                // it changed the text.
+                // Set/strip the trailing `armed := TRUE/FALSE;` in an algorithm's ST.
                 bool SetArmed(System.Xml.Linq.XElement? st, string? desired)
                 {
                     if (st == null) return false;
@@ -687,56 +673,84 @@ namespace CodeGen.Services
                     return true;
                 }
 
-                // 2. check_wait: wrap the existing WaitSatisfied assignment in the
-                //    armed guard, preserving the original expression + trailing text.
+                var internalVars = root.Descendants(ns + "InternalVars").FirstOrDefault();
+                var armedDecl = internalVars?.Elements(ns + "VarDeclaration")
+                    .FirstOrDefault(v => (string?)v.Attribute("Name") == "armed");
                 var cw = St("check_wait");
-                if (cw != null && !cw.Value.Contains("NOT armed"))
+
+                if (apply)
                 {
-                    var body = cw.Value;
-                    var m = System.Text.RegularExpressions.Regex.Match(
-                        body, @"WaitSatisfied\s*:=\s*(?<expr>[^;]*);");
-                    if (m.Success)
+                    // RIG path. The engine inits LAST in the resource INIT chain, so it
+                    // misses the actuators' boot reports and state_table boots all-0; a
+                    // WAIT whose target is 0 (home) then passes instantly -> race.
+                    // Install an `armed` guard: armed defaults TRUE (initializeinit) so a
+                    // STANDALONE/sensor WAIT still evaluates on entry (never stalls), but
+                    // IssueCmd clears it FALSE so the WAIT that FOLLOWS a command must
+                    // wait for THAT actuator's fresh report. AdvanceStep must NOT clear it.
+                    if (internalVars != null && armedDecl == null)
                     {
-                        var expr = m.Groups["expr"].Value.Trim();
-                        var tail = body.Substring(m.Index + m.Length);
-                        var guarded =
-                            "IF NOT armed THEN\r\n" +
-                            "\tarmed := TRUE;\r\n" +
-                            "\tWaitSatisfied := FALSE;\r\n" +
-                            "ELSE\r\n" +
-                            "\tWaitSatisfied := " + expr + ";\r\n" +
-                            "END_IF;" + tail;
-                        cw.ReplaceNodes(new System.Xml.Linq.XCData(guarded));
+                        internalVars.Add(new System.Xml.Linq.XElement(ns + "VarDeclaration",
+                            new System.Xml.Linq.XAttribute("Name", "armed"),
+                            new System.Xml.Linq.XAttribute("Type", "BOOL"),
+                            new System.Xml.Linq.XAttribute("Comment",
+                                "Anti-race: WAIT after a command waits for a fresh state report.")));
                         changed = true;
                     }
-                    else
+                    if (cw != null && !cw.Value.Contains("NOT armed"))
                     {
-                        result.Warnings.Add(
-                            "ProcessRuntime wait-guard: WaitSatisfied assignment not found in check_wait; guard not applied.");
+                        var m = System.Text.RegularExpressions.Regex.Match(
+                            cw.Value, @"WaitSatisfied\s*:=\s*(?<expr>[^;]*);");
+                        if (m.Success)
+                        {
+                            var expr = m.Groups["expr"].Value.Trim();
+                            var tail = cw.Value.Substring(m.Index + m.Length);
+                            cw.ReplaceNodes(new System.Xml.Linq.XCData(
+                                "IF NOT armed THEN\r\n\tarmed := TRUE;\r\n\tWaitSatisfied := FALSE;\r\n" +
+                                "ELSE\r\n\tWaitSatisfied := " + expr + ";\r\nEND_IF;" + tail));
+                            changed = true;
+                        }
+                    }
+                    changed |= SetArmed(St("initializeinit"), "TRUE");
+                    changed |= SetArmed(St("IssueCmd"), "FALSE");
+                    changed |= SetArmed(St("AdvanceStep"), null);
+                    if (changed)
+                    {
+                        doc.Save(fbt);
+                        result.PatchesApplied.Add("ProcessRuntime_Generic_v1.fbt: anti-race WAIT guard applied (rig)");
+                        MapperLogger.Info("[Deploy] ProcessRuntime_Generic_v1: anti-race WAIT guard applied (rig)");
                     }
                 }
-
-                // 3. `armed` placement — THE FIX.
-                //    armed defaults TRUE (initializeinit) so a STANDALONE / sensor
-                //    WAIT (e.g. Feed_Station's "WAIT PartInHopper on") evaluates on
-                //    entry against the live state_table and never stalls. Only
-                //    IssueCmd clears it FALSE, so the NEXT WAIT (the one that follows
-                //    a command) must wait for THAT actuator's fresh report before it
-                //    can pass -- killing the blank-state_table race without touching
-                //    sensor waits. AdvanceStep must NOT clear armed (doing so guarded
-                //    EVERY wait and stalled the sensor waits -- the bug that broke
-                //    Feed_Station). SetArmed also repairs the earlier broken patch.
-                changed |= SetArmed(St("initializeinit"), "TRUE");
-                changed |= SetArmed(St("IssueCmd"), "FALSE");
-                changed |= SetArmed(St("AdvanceStep"), null);
-
-                if (changed)
+                else
                 {
-                    doc.Save(fbt);
-                    result.PatchesApplied.Add(
-                        "ProcessRuntime_Generic_v1.fbt: anti-race WAIT guard (armed) applied");
-                    MapperLogger.Info(
-                        "[Deploy] ProcessRuntime_Generic_v1: anti-race WAIT guard applied");
+                    // SIMULATOR path. The sim-force FBs (SimSwivelForce / SimHopperForce
+                    // + no-sensor timers) keep the engine's state_table accurate AFTER
+                    // init, so the ORIGINAL entry-check engine is correct here. The guard
+                    // is not only unnecessary but HARMFUL in sim: the sim swivel boots
+                    // home, so the home-preamble's "CMD home" is a no-op that produces no
+                    // fresh report and the guard would stall on it. So strip the guard:
+                    // unwrap check_wait back to the plain assignment + remove every armed.
+                    if (cw != null && cw.Value.Contains("NOT armed"))
+                    {
+                        var m = System.Text.RegularExpressions.Regex.Match(cw.Value,
+                            @"IF\s+NOT\s+armed\s+THEN.*?ELSE\s*WaitSatisfied\s*:=\s*(?<expr>[^;]*);\s*END_IF;(?<tail>.*)",
+                            System.Text.RegularExpressions.RegexOptions.Singleline);
+                        if (m.Success)
+                        {
+                            cw.ReplaceNodes(new System.Xml.Linq.XCData(
+                                "WaitSatisfied := " + m.Groups["expr"].Value.Trim() + ";" + m.Groups["tail"].Value));
+                            changed = true;
+                        }
+                    }
+                    changed |= SetArmed(St("initializeinit"), null);
+                    changed |= SetArmed(St("IssueCmd"), null);
+                    changed |= SetArmed(St("AdvanceStep"), null);
+                    if (armedDecl != null) { armedDecl.Remove(); changed = true; }
+                    if (changed)
+                    {
+                        doc.Save(fbt);
+                        result.PatchesApplied.Add("ProcessRuntime_Generic_v1.fbt: WAIT guard removed (simulator uses original engine)");
+                        MapperLogger.Info("[Deploy] ProcessRuntime_Generic_v1: WAIT guard removed (sim)");
+                    }
                 }
             }
             catch (Exception ex)
