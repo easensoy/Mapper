@@ -2,9 +2,15 @@
 
 **Claude does this automatically after every code change — never handed off to the user.**
 
+> **IGNORE THE MAPPER TESTS.** Do NOT build, run, or gate on `MapperTests`
+> (`dotnet test`, `SimulatorEndToEndHarness`, `TemplateDeployerTests`, etc.). They
+> are not the verification path — the real check is a clean EAE Build/Deploy of the
+> Test Simulator output. Never enable a `<Compile Remove>`-excluded test file or add
+> diagnostic tests. Build only the MapperUI project (which pulls in CodeGen).
+
 After editing any Mapper/CodeGen source, run these in order:
 
-1. **Build** — recompiles CodeGen + MapperUI.
+1. **Build** — recompiles CodeGen + MapperUI (build the MapperUI project ONLY, never the test project).
    ```powershell
    dotnet build MapperUI/MapperUI/MapperUI.csproj -c Debug
    ```
@@ -22,5 +28,8 @@ The user then just clicks **Test Simulator** (or Test Runtime) on the already-ru
 
 ## Notes
 - Order when the DLL is locked: **kill → build → relaunch**.
-- The harness (`MapperTests`) also references `CodeGen.dll`; if a running MapperUI blocks `dotnet test`, kill MapperUI first.
+- **Mapper tests are ignored** — do not run `dotnet test` as a gate. Verify in EAE instead.
 - Verify the relaunch: `Get-Process -Name MapperUI` should show a PID.
+- Only mess with the **Test Simulator** path (`MainForm_simulator.cs` + sim-only
+  `SimulatorPostProcessor` methods). Do NOT change the **Test Runtime** / rig button
+  (`MainForm.cs` `btnTestStation1_Click`) or the template `.cat.zip`/`.Basic.zip` files.
