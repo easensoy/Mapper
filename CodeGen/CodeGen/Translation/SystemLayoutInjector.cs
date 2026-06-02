@@ -1349,6 +1349,50 @@ namespace CodeGen.Translation
                         report.Bound.Add((actuator.Name,
                             $"interlock RuleCount={emittedRuleCount}"));
                 }
+                else if (string.Equals(fbType, "Seven_State_Actuator_Centre_Home_CAT", StringComparison.Ordinal))
+                {
+                    // Centre-home swivel (Bearing_PnP). Minimal centre-home params
+                    // (Target / work-home-time / fault) PLUS the REAL interlock rules
+                    // translated from Control.xml — reusing the SAME BuildInterlockRules
+                    // machinery Five_State uses, since this CAT exposes the identical
+                    // RuleFromState/ToState/SourceID/BlockedState[10] + RuleCount inputs
+                    // wired to its CommonInterlockManager.
+                    //
+                    // For Bearing_PnP the rules come out as: block the turn-to-Place
+                    // (CurrentRawState = AtWork1 2, target = AtWork2 4) while any
+                    // crossing occupant is present — Shaft_Hr=AtWork, CoverPNP_Hr=
+                    // Advanced, Transfer=ReturnedFinished. RuleSourceID is the sensors-
+                    // first state_table index, so those cross-PLC source states resolve
+                    // over the broadcast bus. (The "2"-suffixed Disassembly interlock
+                    // on TurningPlace2 maps to From=AtPick2's Control number, which is
+                    // outside the core's 0..6 range, so that rule is inert until a
+                    // dedicated Control->core state remap lands — the Assembly turn-to-
+                    // Place interlock being tested now is correct.)
+                    actParams = BuildMinimalActuatorParameters(actuator, assignedId, fbType);
+                    actParams["actuator_name"] = SyslayBuilder.FormatString(
+                        displayName.ToLowerInvariant());
+                    var (chRuleCount, chFrom, chTo, chSrc, chBlk) =
+                        scopedIds != null
+                            ? BuildInterlockRules(actuator, allComponents, scopedIds)
+                            : (0, new int[InterlockRuleCap], new int[InterlockRuleCap],
+                                  new int[InterlockRuleCap], new int[InterlockRuleCap]);
+                    actParams["RuleCount"]        = SyslayBuilder.FormatInt(chRuleCount);
+                    actParams["RuleFromState"]    = SyslayBuilder.FormatIntArray(chFrom);
+                    actParams["RuleToState"]      = SyslayBuilder.FormatIntArray(chTo);
+                    actParams["RuleSourceID"]     = SyslayBuilder.FormatIntArray(chSrc);
+                    actParams["RuleBlockedState"] = SyslayBuilder.FormatIntArray(chBlk);
+                    if (scopedIds != null)
+                    {
+                        int chInScope = CountInScopeInterlockConds(actuator, scopedIds);
+                        if (chInScope > 0 && chRuleCount == 0)
+                            throw new InvalidOperationException(
+                                $"[Recipe] Bearing_PnP '{actuator.Name}' has {chInScope} in-scope " +
+                                "interlock condition(s) but emitted RuleCount=0 — refusing to ship an " +
+                                "inert safety net for the swivel that is the cross-process intersection.");
+                    }
+                    report.Bound.Add((actuator.Name,
+                        $"centre-home interlock RuleCount={chRuleCount} (blocks turn-to-Place when the crossing is occupied)"));
+                }
                 else
                 {
                     actParams = BuildMinimalActuatorParameters(actuator, assignedId, fbType);
@@ -1810,19 +1854,14 @@ namespace CodeGen.Translation
                 dict["faultTimeoutWork1"] = SyslayBuilder.FormatTimeMs(10000);
                 dict["faultTimeoutWork2"] = SyslayBuilder.FormatTimeMs(10000);
                 dict["RuleCount"] = SyslayBuilder.FormatInt(0);
-                // Emit the four interlock Rule arrays EXPLICITLY (zero-filled),
-                // exactly like the Five_State path — the CAT declares them
-                // RuleFromState/ToState/SourceID/BlockedState : INT[10] and wires
-                // them to CommonInterlockManager, so leaving them unset renders an
-                // empty/ambiguous param. RuleCount=0 means none is evaluated.
-                //
-                // The REAL cross-PLC rules (block ToWork2 when Shaft_Hr=AtWork /
-                // CoverPNP_Hr=Advanced / Transfer=ReturnedFinished) are deliberately
-                // WITHHELD for the isolated Bearing_PnP test: Transfer/ReturnedFinished
-                // (State_Number 4) remaps to 0, and an un-deployed/parked Transfer's
-                // state_table slot is also 0 — so a live rule would FALSE-BLOCK the
-                // swivel at the turn-to-Place in isolation. They populate (RuleCount>0
-                // via BuildInterlockRules) when the full 3-PLC system runs.
+                // Emit the four interlock Rule arrays EXPLICITLY (zero-filled) as a
+                // safe DEFAULT — the CAT declares them RuleFromState/ToState/SourceID/
+                // BlockedState : INT[10] wired to CommonInterlockManager, so leaving
+                // them unset renders an empty/ambiguous param. The real Bearing_PnP
+                // generation path OVERLAYS the actual Control.xml interlock rules over
+                // these defaults (the Seven_State_Actuator_Centre_Home_CAT branch at
+                // the param call-site calls BuildInterlockRules). These zeros only
+                // survive for callers without a scopedIds map (legacy / tests).
                 int[] zero = new int[InterlockRuleCap];
                 dict["RuleFromState"]    = SyslayBuilder.FormatIntArray(zero);
                 dict["RuleToState"]      = SyslayBuilder.FormatIntArray(zero);
