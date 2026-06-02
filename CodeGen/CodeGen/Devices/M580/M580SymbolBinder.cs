@@ -106,12 +106,20 @@ namespace CodeGen.Devices.M580
             }
             else
             {
-                // Real Seven_State swivel: 3 position sensors + 2 drive coils.
+                // Centre-home swivel CAT (Seven_State_Actuator_Centre_Home_CAT,
+                // 2026-06-02). Sensor symlinks the CAT subscribes to: athome /
+                // atwork1 / atWork2 — note the CAPITAL W on atWork2, matching the
+                // CAT's Inputs SYMLINKMULTIVARDST NAME3 '$${PATH}atWork2'. Drive
+                // coils the CAT publishes: OutputToWork1 (toward Work1 = Pick) and
+                // OutputToWork2 (toward Work2 = Place). The 3rd home sensor closes
+                // the loop via No_Sensor_Handler_7SCH; the work sensors are physical.
+                // ⚠ COIL DIRECTION (Left=Work1/Pick, Right=Work2/Place) MUST be
+                // physically confirmed on the rig before motion — Docs/REVERTED_FIXES.md R-12.
                 M580ChannelMap["SwivelArmAtHome"]    = ("Bearing_PnP", "athome");
                 M580ChannelMap["SwivelArmAtPick"]    = ("Bearing_PnP", "atwork1");
-                M580ChannelMap["SwivelArmAtPlace"]   = ("Bearing_PnP", "atwork2");
-                M580ChannelMap["Swivel_Arm_Left_Q"]  = ("Bearing_PnP", "current_state1_to_plc");
-                M580ChannelMap["Swivel_Arm_Right_Q"] = ("Bearing_PnP", "current_state2_to_plc");
+                M580ChannelMap["SwivelArmAtPlace"]   = ("Bearing_PnP", "atWork2");
+                M580ChannelMap["Swivel_Arm_Left_Q"]  = ("Bearing_PnP", "OutputToWork1");
+                M580ChannelMap["Swivel_Arm_Right_Q"] = ("Bearing_PnP", "OutputToWork2");
             }
         }
 
