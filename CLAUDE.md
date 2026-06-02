@@ -208,7 +208,7 @@ The harness proves the generation pipeline produces the right artefacts. EAE is 
 - **HTTPS push only**, never SSH. Don't touch `git config` or `~/.git-credentials`.
 - **Push to `github.com/easensoy/Mapper`.**
 - Never regenerate `MapperTests\TestData\SMC_Rig_IO_Bindings.xlsx` — it is hand-crafted per-CAT content.
-- Every time you change Mapper code that affects the live MapperUI app, the user must close MapperUI and rebuild it before clicking Test Simulator. State that in the iteration's Status note so the user knows.
+- **After every code change, Claude itself builds → kills MapperUI → relaunches it** (kill→build→relaunch when the DLL is locked). Do NOT hand this off to the user — they should find an already-running, up-to-date MapperUI and just click Test Simulator/Test Runtime. See `BUILD_RELAUNCH.md`. Still note in the Status what was rebuilt.
 - Before claiming a checklist item green, the harness must actually assert it. Don't mark it on confidence alone.
 
 ## Memory references
