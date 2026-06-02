@@ -500,6 +500,82 @@ namespace CodeGen.Translation.Process
             arrays.Wait1State.Add(0);
             arrays.NextStep.Add(0);   // engine never reads NextStep after StepType=9
 
+            // 6. HOME-FIRST PREAMBLE for a Seven_State swivel (safe-start).
+            //    A Seven_State swivel (Bearing_PnP) boots to whatever its physical
+            //    sensors report: the Centre-Home core's INIT arcs are
+            //    "INIT -> AtWork1 if atWork1=TRUE", "INIT -> ToWork2 if atWork2=TRUE",
+            //    only "INIT -> AtHomeInit if BOTH work sensors are FALSE". There is
+            //    NO force-home-at-INIT. So if the swivel is physically parked at
+            //    Pick/Place at power-up (e.g. left there by a previous run or a
+            //    manual jog), it boots parked at that work position -- NOT home.
+            //    The recipe's first swivel command is Pick, which from AtWork1 is a
+            //    no-op (the ECC has no AtWork1 ->(state_val=1) arc), so the swivel
+            //    never produces a fresh state transition; and because the Process
+            //    engine inits LAST in the resource INIT chain it already missed the
+            //    swivel's boot-time publish, so its "WAIT swivel AtWork1" can never
+            //    re-trigger and the WHOLE recipe stalls before the gripper is ever
+            //    commanded (observed on the rig: "nothing triggered", swivel sitting
+            //    at AtWork1). Prepend "command swivel Home (state_val=5), wait
+            //    AtHomeInit=0" so the swivel ALWAYS establishes a known home first --
+            //    a real ECC transition (AtWork1/AtWork2 -> ToHome -> AtHome ->
+            //    AtHomeInit) the running engine observes -- then Pick runs from home.
+            //    Safe no-op when already home: state_val=5 has no arc out of
+            //    AtHomeInit, and WAIT AtHomeInit=0 is satisfied on entry because a
+            //    homed swivel already publishes 0 (and state_table defaults to 0).
+            //    Only fires when the recipe actually commands a Seven_State swivel
+            //    (Assembly) -- Feed_Station has none, so its recipe is byte-identical.
+            {
+                string? sevenSwivelName = null;
+                int sevenSwivelId = 0;
+                for (int i = 0; i < arrays.StepType.Count; i++)
+                {
+                    if (arrays.StepType[i] != 1) continue;
+                    var tgt = (arrays.CmdTargetName[i] ?? string.Empty).Trim();
+                    if (tgt.Length == 0) continue;
+                    var comp = allComponents.FirstOrDefault(c =>
+                        string.Equals((c.Name ?? string.Empty).Trim(), tgt,
+                            StringComparison.OrdinalIgnoreCase));
+                    if (comp != null && IsSevenStateCommandable(comp) &&
+                        scopedRegistry.TryGetValue((comp.ComponentID ?? string.Empty).Trim(), out var sid))
+                    {
+                        sevenSwivelName = tgt;
+                        sevenSwivelId = sid;
+                        break;
+                    }
+                }
+
+                if (sevenSwivelName != null)
+                {
+                    // Every existing row moves down by 2, so every NextStep pointer
+                    // (including pointers to the final END row) is rebased +2.
+                    for (int i = 0; i < arrays.NextStep.Count; i++)
+                        arrays.NextStep[i] += 2;
+
+                    // row 0: CMD swivel = 5 (Home)  -> its own WAIT at row 1
+                    arrays.StepType.Insert(0, 1);
+                    arrays.CmdTargetName.Insert(0, sevenSwivelName);
+                    arrays.CmdStateArr.Insert(0, 5);
+                    arrays.Wait1Id.Insert(0, 0);
+                    arrays.Wait1State.Insert(0, 0);
+                    arrays.NextStep.Insert(0, 1);
+
+                    // row 1: WAIT swivel AtHomeInit = 0 -> the original first row (now at index 2)
+                    arrays.StepType.Insert(1, 2);
+                    arrays.CmdTargetName.Insert(1, string.Empty);
+                    arrays.CmdStateArr.Insert(1, 0);
+                    arrays.Wait1Id.Insert(1, sevenSwivelId);
+                    arrays.Wait1State.Insert(1, 0);
+                    arrays.NextStep.Insert(1, 2);
+
+                    arrays.Warnings.Add(
+                        $"[Recipe] HOME-FIRST preamble prepended for Seven_State swivel " +
+                        $"'{sevenSwivelName}' (id {sevenSwivelId}): CMD state_val=5 (Home) -> " +
+                        "WAIT AtHomeInit=0, then the cycle. Guarantees the swivel starts from a " +
+                        "known home regardless of where it was physically parked at power-up; " +
+                        "without it the swivel can boot parked at Pick/Place and stall the recipe.");
+                }
+            }
+
             ValidateProcessIdInvariant(arrays, processId);
             ValidateSingleEndMarker(arrays);
 
@@ -956,9 +1032,18 @@ namespace CodeGen.Translation.Process
                             CmdTargetName = (inScopeTarget.Name ?? string.Empty).Trim().ToLowerInvariant(),
                             CmdState = sevenStateCmd,
                             WaitId = waitId,
-                            // Centre-Home core publishes the AT-value (cmd+1) once settled:
-                            // pick 1->AtWork1 2, place 3->AtWork2 4, home 5->AtHome 6.
-                            WaitState = sevenStateCmd + 1,
+                            // Centre-Home core settle value once stable:
+                            //   pick  1 -> AtWork1     publishes 2
+                            //   place 3 -> AtWork2     publishes 4
+                            //   home  5 -> AtHomeInit  publishes 0  (NOT AtHome=6)
+                            // Home is the exception: the ECC takes AtHome -> AtHomeInit
+                            // on (atWork1=FALSE AND atWork2=FALSE AND atHome=TRUE) in the
+                            // same run-to-stable tick as the AtHome entry, so current_state
+                            // is overwritten 6 -> 0 and the engine (which re-samples
+                            // state_table on each state_change) only ever sees the stable
+                            // 0. Waiting on the transient 6 misses it and parks the engine
+                            // forever -- exactly the Five_State AtHomeEnd=4 -> 0 remap.
+                            WaitState = sevenStateCmd == 5 ? 0 : sevenStateCmd + 1,
                         };
                     }
                     arrays.Warnings.Add(
