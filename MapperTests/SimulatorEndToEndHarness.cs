@@ -229,8 +229,10 @@ namespace MapperTests
                 }
                 var type = (string?)fb.Attribute("Type") ?? string.Empty;
                 bool isBearing = string.Equals(name, "Bearing_PnP", StringComparison.Ordinal);
+                // 2026-06-02: Bearing_PnP now routes to Jyotsna's centre-home swivel
+                // CAT (TemplateMap.ResolveActuatorCatType), not the old Seven CAT.
                 string expected = (!stubOn && isBearing)
-                    ? "Seven_State_Actuator_CAT"
+                    ? "Seven_State_Actuator_Centre_Home_CAT"
                     : "Five_State_Actuator_CAT";
                 if (!string.Equals(type, expected, StringComparison.Ordinal))
                 {
