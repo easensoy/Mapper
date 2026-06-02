@@ -155,6 +155,24 @@ namespace MapperUI
                     "(M580/M262/BX1) — sim has no physical IO; sensors are synthesized via " +
                     "SimHopperForce / SimSwivelForce / no-sensor timers.");
 
+                // Simulator-only: reconcile Process1_Generic.fbt to the recipe-struct
+                // engine. In sim the engine (ProcessRuntime_Generic_v1) is reshaped to a
+                // single Recipe : RecipeStep[] input, but the deployed composite can ship
+                // with BOTH Recipe AND the legacy six parallel arrays (StepType/CmdTargetName/
+                // CmdStateArr/Wait1Id/Wait1State/NextStep) still wired to ProcessEngine.<array>
+                // — members the reshaped engine no longer has — which EAE rejects with ~26
+                // "member does not exist in ProcessRuntime_Generic_v1" / "input not in WITH
+                // clause" errors. Run LAST (after deploy/generate/finalize/wire-emit) so it is
+                // the final writer of the .fbt; strips the six legacy arrays and guarantees the
+                // single Recipe input + wire. Edits the deployed artifact only (never the
+                // template .cat.zip); the rig path (Test Runtime) never calls it.
+                int recipeFixed = await Task.Run(() =>
+                    CodeGen.Services.SimulatorPostProcessor.EnforceProcessRecipeStructOnly(path, AppendActivity));
+                AppendActivity(recipeFixed > 0
+                    ? $"[Simulator] Process1_Generic recipe interface reconciled: stripped {recipeFixed} legacy " +
+                      "recipe-array InputVar(s) so the composite matches the Recipe-struct engine."
+                    : "[Simulator] Process1_Generic recipe interface already consistent with the engine.");
+
                 // Topology self-consistency guard. The sim path does NOT run
                 // Station2DeviceEmitter / BroadcastDomainEmitter (those are
                 // rig-only), so the Topology folder is whatever's left on disk
