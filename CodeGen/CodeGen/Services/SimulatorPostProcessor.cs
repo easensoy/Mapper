@@ -69,6 +69,136 @@ namespace CodeGen.Services
         }
 
         /// <summary>
+        /// Simulator-only: make the deployed <c>Process1_Generic.fbt</c> recipe interface
+        /// MATCH the recipe-struct engine (<c>ProcessRuntime_Generic_v1</c>). In the sim the
+        /// engine is reshaped to a single <c>Recipe : RecipeStep[]</c> input, but the
+        /// composite can end up carrying BOTH the new <c>Recipe</c> AND the legacy six
+        /// parallel arrays (StepType/CmdTargetName/CmdStateArr/Wait1Id/Wait1State/NextStep)
+        /// still declared and still wired to <c>ProcessEngine.&lt;array&gt;</c> — members the
+        /// reshaped engine no longer has. EAE then throws ~26 errors
+        /// ("a member variable named 'StepType' does not exist in
+        /// Main.ProcessRuntime_Generic_v1", "input variable that does not appear in any WITH
+        /// clause cannot be connected", "Cannot convert ARRAY[0..99] OF INT to &lt;unknown&gt;").
+        ///
+        /// This strips the six legacy arrays from the composite (VarDeclaration, INIT With,
+        /// boundary Input pin, and every <c>Source==&lt;array&gt; -&gt; ProcessEngine.*</c>
+        /// connection) and guarantees the single <c>Recipe</c> input + the
+        /// <c>Recipe -&gt; ProcessEngine.Recipe</c> wire — so the composite's port set equals
+        /// the engine's. Idempotent: when the composite is already Recipe-only it makes no
+        /// change and does not re-save (byte-identical).
+        ///
+        /// IMPORTANT scope: this edits the DEPLOYED artifact under
+        /// <c>IEC61499/Process1_Generic/Process1_Generic.fbt</c> — NEVER the template
+        /// <c>.cat.zip</c>. It is called ONLY from the Test Simulator button (after the
+        /// deploy / generate / finalize / wire-emit steps, so it is the last writer); the
+        /// Test Runtime / rig path never invokes it. The deployed <c>.fbt</c> files carry an
+        /// EMPTY default namespace, so this uses <c>root.GetDefaultNamespace()</c> rather than
+        /// the SE syslay namespace.
+        /// Returns the number of legacy-array InputVars stripped (0 = already consistent).
+        /// </summary>
+        public static int EnforceProcessRecipeStructOnly(string syslayPath, Action<string>? log = null)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(syslayPath)) return 0;
+
+                // Walk up from the syslay (…/IEC61499/System/{guid}/{guid}/x.syslay) to IEC61499.
+                var dir = Path.GetDirectoryName(syslayPath);
+                string? iec = null;
+                while (!string.IsNullOrEmpty(dir))
+                {
+                    if (string.Equals(Path.GetFileName(dir), "IEC61499", StringComparison.OrdinalIgnoreCase))
+                    { iec = dir; break; }
+                    dir = Path.GetDirectoryName(dir);
+                }
+                if (string.IsNullOrEmpty(iec) || !Directory.Exists(iec)) return 0;
+
+                var fbt = Directory.EnumerateFiles(iec, "Process1_Generic.fbt", SearchOption.AllDirectories)
+                    .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal));
+                if (string.IsNullOrEmpty(fbt))
+                {
+                    log?.Invoke("[Simulator][RecipeStruct] Process1_Generic.fbt not found — nothing to enforce.");
+                    return 0;
+                }
+
+                var doc = XDocument.Load(fbt, LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return 0;
+                XNamespace ns = root.GetDefaultNamespace();   // deployed .fbt have an EMPTY default ns
+
+                var iface = root.Element(ns + "InterfaceList");
+                var net = root.Element(ns + "FBNetwork");
+                if (iface == null || net == null) return 0;
+                var inputVars = iface.Element(ns + "InputVars");
+                var initEvent = iface.Element(ns + "EventInputs")?.Elements(ns + "Event")
+                    .FirstOrDefault(e => (string?)e.Attribute("Name") == "INIT");
+                var dataConns = net.Element(ns + "DataConnections");
+
+                bool changed = false;
+                int stripped = 0;
+                string[] legacyArrays = { "StepType", "CmdTargetName", "CmdStateArr", "Wait1Id", "Wait1State", "NextStep" };
+                foreach (var nm in legacyArrays)
+                {
+                    foreach (var v in (inputVars?.Elements(ns + "VarDeclaration") ?? Enumerable.Empty<XElement>())
+                             .Where(v => (string?)v.Attribute("Name") == nm).ToList())
+                    { v.Remove(); stripped++; changed = true; }
+                    foreach (var w in (initEvent?.Elements(ns + "With") ?? Enumerable.Empty<XElement>())
+                             .Where(w => (string?)w.Attribute("Var") == nm).ToList())
+                    { w.Remove(); changed = true; }
+                    foreach (var i in net.Elements(ns + "Input")
+                             .Where(i => (string?)i.Attribute("Name") == nm).ToList())
+                    { i.Remove(); changed = true; }
+                    foreach (var c in (dataConns?.Elements(ns + "Connection") ?? Enumerable.Empty<XElement>())
+                             .Where(c => (string?)c.Attribute("Source") == nm &&
+                                         ((string?)c.Attribute("Destination") ?? "").StartsWith("ProcessEngine.", StringComparison.Ordinal)).ToList())
+                    { c.Remove(); changed = true; }
+                }
+
+                // Guarantee the Recipe struct input + its wire exist (idempotent).
+                var size = CodeGen.Translation.Process.ProcessRecipeArrayGenerator.RecipeArraySize.ToString();
+                if (inputVars != null && !inputVars.Elements(ns + "VarDeclaration").Any(v => (string?)v.Attribute("Name") == "Recipe"))
+                {
+                    inputVars.Add(new XElement(ns + "VarDeclaration",
+                        new XAttribute("Name", "Recipe"), new XAttribute("Type", "RecipeStep"),
+                        new XAttribute("ArraySize", size), new XAttribute("Namespace", "Main")));
+                    changed = true;
+                }
+                if (initEvent != null && !initEvent.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == "Recipe"))
+                { initEvent.Add(new XElement(ns + "With", new XAttribute("Var", "Recipe"))); changed = true; }
+                if (!net.Elements(ns + "Input").Any(i => (string?)i.Attribute("Name") == "Recipe"))
+                {
+                    var pin = new XElement(ns + "Input", new XAttribute("Name", "Recipe"),
+                        new XAttribute("x", "300"), new XAttribute("y", "1300"), new XAttribute("Type", "Data"));
+                    var last = net.Elements(ns + "Input").LastOrDefault();
+                    if (last != null) last.AddAfterSelf(pin); else net.Add(pin);
+                    changed = true;
+                }
+                if (dataConns != null && !dataConns.Elements(ns + "Connection").Any(c => (string?)c.Attribute("Source") == "Recipe"))
+                {
+                    dataConns.Add(new XElement(ns + "Connection",
+                        new XAttribute("Source", "Recipe"), new XAttribute("Destination", "ProcessEngine.Recipe")));
+                    changed = true;
+                }
+
+                if (changed)
+                {
+                    doc.Save(fbt);
+                    log?.Invoke($"[Simulator][RecipeStruct] Process1_Generic.fbt reconciled to the recipe-struct engine: " +
+                        $"stripped {stripped} legacy recipe-array InputVar(s) + their ProcessEngine wires; " +
+                        $"Recipe : RecipeStep[{size}] + Recipe->ProcessEngine.Recipe ensured.");
+                }
+                else
+                    log?.Invoke("[Simulator][RecipeStruct] Process1_Generic.fbt already Recipe-only (no change).");
+                return stripped;
+            }
+            catch (Exception ex)
+            {
+                log?.Invoke($"[Simulator][RecipeStruct][Warn] enforce failed: {ex.GetType().Name}: {ex.Message}");
+                return 0;
+            }
+        }
+
+        /// <summary>
         /// Simulator-only: inject one <c>SimHopperForce</c>
         /// SYMLINKMULTIVARSRC into the syslay SubAppNetwork and mirror it
         /// into the deployed sysres FBNetwork. It publishes
