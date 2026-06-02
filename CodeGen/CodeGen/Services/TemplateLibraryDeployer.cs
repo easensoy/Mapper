@@ -158,7 +158,14 @@ namespace CodeGen.Services
             PatchProcessFbsForRecipeAsInputVars(eaeProjectDir, result);
             PatchSensorBoolCatDstQi(eaeProjectDir, result);
             PatchFiveStateActuatorCatQi(eaeProjectDir, result);
-            PatchFiveStateActuatorModeInitialValue(eaeProjectDir, result);
+            PatchActuatorModeInitialValue(eaeProjectDir, "FiveStateActuator.fbt", result);
+            // 2026-06-02: the centre-home swivel core needs the SAME auto-mode default.
+            // Without it SevenStateCentreHomeActuator powers up at mode=0, its ECC sits
+            // in AtHomeInit, and it ignores every recipe command — which stalls the whole
+            // Assembly recipe on the first Bearing_PnP step (so even Bearing_Gripper,
+            // which is downstream in the recipe, never gets commanded). Symptom on the
+            // rig: all coil outputs read 1970/never-written while inputs read fine.
+            PatchActuatorModeInitialValue(eaeProjectDir, "SevenStateCentreHomeActuator.fbt", result);
             // Simulator-only interface reduction. Bidirectional normalizer:
             // when SimulatorFullSystem is on it bakes the two constant interlock
             // targets onto the embedded InterlockManager FB and removes their
@@ -2050,14 +2057,14 @@ namespace CodeGen.Services
         /// deploy so a future zip re-swap losing it is auto-fixed.
         /// FiveStateActuator basic FB only — no CAT/ECC/recipe changes.
         /// </summary>
-        static void PatchFiveStateActuatorModeInitialValue(string eaeProjectDir, DeployResult result)
+        static void PatchActuatorModeInitialValue(string eaeProjectDir, string fbtFileName, DeployResult result)
         {
-            var fbt = Path.Combine(eaeProjectDir, "IEC61499", "FiveStateActuator.fbt");
+            var fbt = Path.Combine(eaeProjectDir, "IEC61499", fbtFileName);
             if (!File.Exists(fbt))
             {
                 fbt = Directory.EnumerateFiles(
                         Path.Combine(eaeProjectDir, "IEC61499"),
-                        "FiveStateActuator.fbt", SearchOption.AllDirectories)
+                        fbtFileName, SearchOption.AllDirectories)
                     .FirstOrDefault() ?? string.Empty;
                 if (string.IsNullOrEmpty(fbt)) return;
             }
@@ -2077,7 +2084,7 @@ namespace CodeGen.Services
                 if (modeVar == null)
                 {
                     result.Warnings.Add(
-                        "FiveStateActuator.fbt: no 'mode' InputVar found; Mode-default guard skipped.");
+                        $"{fbtFileName}: no 'mode' InputVar found; Mode-default guard skipped.");
                     return;
                 }
 
@@ -2087,14 +2094,14 @@ namespace CodeGen.Services
                 doc.Save(fbt);
 
                 result.PatchesApplied.Add(
-                    "FiveStateActuator: forced mode InputVar InitialValue=1 (powers up in auto mode)");
+                    $"{fbtFileName}: forced mode InputVar InitialValue=1 (powers up in auto mode)");
                 MapperLogger.Info(
-                    "[Deploy] FiveStateActuator.fbt: mode InputVar InitialValue=1 " +
+                    $"[Deploy] {fbtFileName}: mode InputVar InitialValue=1 " +
                     "(actuator ECC no longer stuck in AtHomeInit at boot)");
             }
             catch (Exception ex)
             {
-                result.Warnings.Add($"FiveStateActuator.fbt Mode-default guard failed: {ex.Message}");
+                result.Warnings.Add($"{fbtFileName} Mode-default guard failed: {ex.Message}");
             }
         }
 
