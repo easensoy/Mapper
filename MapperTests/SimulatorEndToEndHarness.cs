@@ -540,11 +540,27 @@ namespace MapperTests
 
             Note?.Invoke($"Assembly recipe distinct CMD targets: [{string.Join(", ", cmdTargets.OrderBy(s => s))}]");
 
-            var missing = actuators
+            // When the bearing-only test-isolation allowlist is active, only the
+            // allowlisted actuators are commanded BY DESIGN — every other actuator
+            // is intentionally PARKED (MapperConfig.RecipeTestActuatorAllowlist). So
+            // narrow the expected-CMD set to the allowlist; otherwise expect them all.
+            var allow = MapperConfig.RecipeTestActuatorAllowlist;
+            IEnumerable<string> expected = actuators;
+            if (allow != null && allow.Length > 0)
+            {
+                var allowSet = new HashSet<string>(
+                    allow.Select(a => (a ?? string.Empty).Trim().ToLowerInvariant()),
+                    StringComparer.Ordinal);
+                expected = actuators.Where(a => allowSet.Contains(a.ToLowerInvariant()));
+                Note?.Invoke($"C: RecipeTestActuatorAllowlist active -> expecting CMD rows only for [{string.Join(", ", allow)}]");
+            }
+
+            var missing = expected
                 .Where(a => !cmdTargets.Contains(a) && !cmdTargets.Contains(a.ToLowerInvariant()))
                 .ToList();
+            int expectedCount = expected.Count();
             if (missing.Count == 0)
-                Pass("C", $"Assembly_Station.Recipe has CMD row(s) for all {actuators.Length} required actuator(s)");
+                Pass("C", $"Assembly_Station.Recipe has CMD row(s) for all {expectedCount} expected actuator(s)");
             else
                 Fail("C", "Assembly_Station.Recipe has NO CMD row (StepType=1) for: "
                           + string.Join(", ", missing)
