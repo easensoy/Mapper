@@ -2551,9 +2551,121 @@ namespace CodeGen.Translation
             // CAT instance), so it cannot harm a live resource. Pure
             // contents-edit of the .sysres FBNetwork; no file deletion, no
             // device/trust touch.
+            // Re-introduced 2026-06-02 (NARROW form, per the note above): the
+            // orphan-sysres problem resurfaced as an EAE "Solution Integrity /
+            // Repair Instances" dialog on the 4 BX1 components. Cause: the BX1
+            // sysdev folder held TWO .sysres — the active BX1_RES
+            // (C9F2A4B7E1D3F5A8, referenced by the sysdev) plus a stale RES0
+            // (916E01BBCD70B5DD, referenced by nothing) left over from before
+            // BX1's resource was renamed. Both declare the same 4 CAT instances
+            // with the same FB IDs, so EAE loads both and flags the instances
+            // for repair. This deletes ONLY a .sysres whose stem (resource ID)
+            // is NOT referenced by its parent sysdev, AND only once every
+            // referenced (active) resource's own .sysres is confirmed present —
+            // so a renamed-active file can never be mistaken for an orphan.
+            // Per-sysdev, top-directory only; the broad system-wide deletes
+            // that caused the trust-loss are NOT back.
+            SweepOrphanSysresPerSysdev(config, report);
+
             SweepBridgeFbsFromAllSysres(config, report);
 
             return report;
+        }
+
+        /// <summary>
+        /// Delete orphan <c>.sysres</c> files — ones that physically exist in a
+        /// sysdev's resource folder but whose resource ID (the filename stem)
+        /// is referenced by no <c>&lt;Resource&gt;</c> in that sysdev. Such a
+        /// file is a leftover from a previous deploy when the resource had a
+        /// different ID/name; EAE loads it alongside the active resource and,
+        /// because both declare the same FB instances, raises a "Solution
+        /// Integrity / Repair Instances" dialog.
+        ///
+        /// Narrow + safe by construction:
+        ///   • Needs a real EAE project root (a <c>.dfbproj</c> ancestor) — the
+        ///     headless harness has none, so it is a no-op there.
+        ///   • Per sysdev, TopDirectoryOnly — never an AllDirectories sweep.
+        ///   • Acts only when the folder holds 2+ .sysres (a single file can
+        ///     never be an orphan).
+        ///   • Deletes nothing unless EVERY referenced (active) resource ID has
+        ///     its matching <c>{ID}.sysres</c> present. If an active file is
+        ///     missing the filename==ID convention is broken (EAE may have
+        ///     renamed it) and the whole sysdev is skipped — a renamed-active
+        ///     can never be mistaken for an orphan and deleted. This is the
+        ///     guard the removed broad sweep lacked, which (combined with the
+        ///     reverted topology rewrite) caused the trusted-machine data loss.
+        /// </summary>
+        private static void SweepOrphanSysresPerSysdev(MapperConfig config, CleanupReport report)
+        {
+            void Log(string line) => report.DeviceCleanupLog.Add($"[CleanDevice] {line}");
+
+            string? eaeRoot = DeriveDemonstratorEaeRoot(config);
+            if (string.IsNullOrEmpty(eaeRoot)) return; // harness / no project root → skip
+
+            var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
+            if (!Directory.Exists(systemDir)) return;
+
+            List<string> sysdevFiles;
+            try { sysdevFiles = Directory.EnumerateFiles(systemDir, "*.sysdev", SearchOption.AllDirectories).ToList(); }
+            catch { return; }
+            if (sysdevFiles.Count == 0) return; // not a real System folder
+
+            foreach (var sysdevPath in sysdevFiles)
+            {
+                XDocument doc;
+                try { doc = XDocument.Load(sysdevPath); }
+                catch { continue; }
+                var root = doc.Root;
+                if (root == null) continue;
+                XNamespace dns = root.GetDefaultNamespace();
+
+                var activeIds = new HashSet<string>(
+                    (root.Element(dns + "Resources")?.Elements(dns + "Resource")
+                        ?? Enumerable.Empty<XElement>())
+                        .Select(r => (string?)r.Attribute("ID") ?? string.Empty)
+                        .Where(s => s.Length > 0),
+                    StringComparer.Ordinal);
+                if (activeIds.Count == 0) continue; // nothing referenced → don't touch
+
+                // Resource files live in {sysdevFolder}/{sysdevStem}/
+                var sysdevStem = Path.GetFileNameWithoutExtension(sysdevPath);
+                var resDir = Path.Combine(Path.GetDirectoryName(sysdevPath)!, sysdevStem);
+                if (!Directory.Exists(resDir)) continue;
+
+                List<string> sysresFiles;
+                try { sysresFiles = Directory.GetFiles(resDir, "*.sysres", SearchOption.TopDirectoryOnly).ToList(); }
+                catch { continue; }
+                if (sysresFiles.Count <= 1) continue; // 0 or 1 file → no possible orphan
+
+                // SAFETY GATE: every active resource must have its {ID}.sysres
+                // present before we trust the filename==ID convention enough to
+                // delete anything. A missing active file means the convention is
+                // broken → skip this sysdev whole (delete nothing).
+                bool allActivePresent = activeIds.All(id =>
+                    sysresFiles.Any(f => string.Equals(
+                        Path.GetFileNameWithoutExtension(f), id, StringComparison.Ordinal)));
+                if (!allActivePresent)
+                {
+                    Log($"{Path.GetFileName(sysdevPath)}: an active Resource has no matching .sysres on disk — orphan sweep skipped (filename!=ID convention not satisfied)");
+                    continue;
+                }
+
+                foreach (var file in sysresFiles)
+                {
+                    var stem = Path.GetFileNameWithoutExtension(file);
+                    if (activeIds.Contains(stem)) continue; // active → keep
+                    try
+                    {
+                        File.Delete(file);
+                        Log($"deleted orphan sysres {Path.GetFileName(file)} under {sysdevStem} " +
+                            $"(referenced by no Resource in {Path.GetFileName(sysdevPath)}; active = {string.Join(",", activeIds)})");
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"failed to delete orphan sysres {file}: {ex.Message}");
+                    }
+                }
+            }
         }
 
         /// <summary>
