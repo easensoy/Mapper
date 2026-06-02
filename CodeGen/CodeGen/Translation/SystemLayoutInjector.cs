@@ -1471,17 +1471,19 @@ namespace CodeGen.Translation
                 // PER-RESOURCE MqttConn. The embedded MqttPub inside each CAT
                 // binds by ConnectionID (= config.MqttClientId, 'SMC_BX1') and
                 // can ONLY use a connection on its OWN resource. So drop one
-                // MQTT_CONNECTION onto EACH PLC resource — BX1 (Cover P&P),
-                // M262 (Feed_Station) and M580 (Assembly) — and every local
-                // MqttPub then publishes DIRECTLY, with NO standalone bridge
-                // FBs. All three share ConnectionID 'SMC_BX1' so the local
+                // MQTT_CONNECTION onto the two resources we publish from — BX1
+                // (Cover P&P) and M262 (Feed_Station) — and every local MqttPub
+                // on those resources publishes DIRECTLY, with NO standalone
+                // bridge FBs. Both share ConnectionID 'SMC_BX1' so the local
                 // MqttPub binds; each gets a UNIQUE ClientIdentifier
-                // (SMC_BX1 / SMC_M262 / SMC_M580) so the broker doesn't evict
-                // them as duplicate clients ("session taken over"). On the RIG
-                // M262/M580 firmware-gate MQTT (ReturnCode 50) so only BX1
-                // connects there; in the SIMULATOR the runtime is not the real
-                // firmware, so all three may connect — that is what makes
-                // Feed_Station data reach the broker without a bridge.
+                // (SMC_BX1 / SMC_M262) so the broker doesn't evict them as
+                // duplicate clients ("session taken over"). M580/Assembly gets
+                // NO MqttConn (out of scope for now) — its embedded MqttPub
+                // simply finds no local connection and stays silent, which is
+                // harmless. On the RIG M262 firmware-gates MQTT (ReturnCode 50)
+                // so only BX1 connects there; in the SIMULATOR the runtime is
+                // not the real firmware, so M262 connects too — that is what
+                // makes Feed_Station data reach the broker without a bridge.
                 void InjectMqttConn(string fbName, string clientId, int x, int y)
                 {
                     var p = new Dictionary<string, string>
@@ -1501,40 +1503,34 @@ namespace CodeGen.Translation
                 InjectMqttConn("MqttConn", config.MqttClientId, bx1X, bx1Y);
                 InjectMqttConn("MqttConn_M262", "SMC_M262",
                     LayoutGrid.ColumnBaseX(PlcAssignment.M262), 200);
-                InjectMqttConn("MqttConn_M580", "SMC_M580",
-                    LayoutGrid.ColumnBaseX(PlcAssignment.M580), 200);
                 // Each MqttConn is routed to its own resource by
-                // SysresFbMirror.BucketFor (MqttConn→BX1, MqttConn_M262→M262,
-                // MqttConn_M580→M580). ResourceWireEmitter wires each one's
-                // INIT/CONNECT bring-up on its resource (it finds the
-                // MQTT_CONNECTION FB by type, not by the fixed name "MqttConn").
-                // Syslay bring-up self-loop for the M262/M580 connections so
-                // CONNECT fires after INIT (BX1's is added by BuildBx1Wiring).
-                // The INIT trigger itself is wired on each resource's sysres by
-                // ResourceWireEmitter (FB1.INITO → MqttConn_*.INIT, by FB type).
-                // Adding INITO → CONNECT here makes the M262 connection visibly
-                // wired on the canvas and guarantees it opens — this is the
-                // "wire it into Station 1" the rig test needs to drive
-                // MqttConn_M262 to IsConnected = TRUE.
+                // SysresFbMirror.BucketFor (MqttConn→BX1_RES, MqttConn_M262→
+                // M262_RES). ResourceWireEmitter wires each one's INIT/CONNECT
+                // bring-up on its resource (it finds the MQTT_CONNECTION FB by
+                // type, not by the fixed name "MqttConn"). Syslay bring-up
+                // self-loop for the M262 connection so CONNECT fires after INIT
+                // (BX1's is added by BuildBx1Wiring). The INIT trigger itself is
+                // wired on each resource's sysres by ResourceWireEmitter
+                // (FB1.INITO → MqttConn_*.INIT, by FB type). Adding INITO →
+                // CONNECT here makes the M262 connection visibly wired on the
+                // canvas and guarantees it opens — driving MqttConn_M262 to
+                // IsConnected = TRUE so Feed_Station data flows in sim.
                 builder.AddEventConnection("MqttConn_M262.INITO", "MqttConn_M262.CONNECT");
-                builder.AddEventConnection("MqttConn_M580.INITO", "MqttConn_M580.CONNECT");
-                // Wire each per-resource MqttConn's INIT into ITS PLC's boot so
-                // it is NOT a standalone/floating FB on the canvas. Area is the
+                // Wire the M262 MqttConn's INIT into the Feed_Station boot so it
+                // is NOT a standalone/floating FB on the canvas. Area is the
                 // M262/Feed_Station boot anchor (Area.INITO already heads the
-                // Feed_Station init chain); Station2 is the M580 boot. This is
-                // the same source ResourceWireEmitter uses on each sysres
-                // (Area.INITO → MqttConn_M262.INIT), so the syslay + sysres
-                // agree and the connection visibly belongs to Feed_Station /
-                // Station 2 rather than hanging loose.
+                // Feed_Station init chain). This is the same source
+                // ResourceWireEmitter uses on the M262 sysres (Area.INITO →
+                // MqttConn_M262.INIT), so syslay + sysres agree and the
+                // connection visibly belongs to Feed_Station rather than loose.
                 builder.AddEventConnection("Area.INITO", "MqttConn_M262.INIT");
-                builder.AddEventConnection("Station2.INITO", "MqttConn_M580.INIT");
 
                 report.Missing.Add(
-                    $"[MQTT] per-resource MqttConn injected — BX1 (SMC_BX1) + M262 (SMC_M262) + " +
-                    $"M580 (SMC_M580), ConnectionID={config.MqttClientId}, URL={brokerUrl} " +
+                    $"[MQTT] per-resource MqttConn injected — BX1 (SMC_BX1) + M262 (SMC_M262), " +
+                    $"ConnectionID={config.MqttClientId}, URL={brokerUrl} " +
                     $"({(config.SimulatorFullSystem ? "sim → loopback" : "rig → LAN IP")}); each " +
                     $"local embedded MqttPub binds + publishes directly, no bridge FBs. " +
-                    $"M262/M580 INITO→CONNECT self-loops wired on the syslay.");
+                    $"M262 INITO→CONNECT self-loop wired on the syslay; M580 has no MqttConn.");
 
                 // Cross-PLC MQTT bridge REMOVED 2026-06-01 at user request —
                 // the standalone MqttFmt_<comp>/MqttPub_<comp> pairs cluttered
