@@ -124,6 +124,7 @@ namespace CodeGen.Devices.Core
                 "Five_State_Actuator_CAT",
                 "Five_State_Actuator_No_Sensors_CAT",
                 "Seven_State_Actuator_CAT",
+                "Seven_State_Actuator_Centre_Home_CAT",
                 "Sensor_Bool_CAT",
                 "PLC_RW_M262",
                 "Area",
