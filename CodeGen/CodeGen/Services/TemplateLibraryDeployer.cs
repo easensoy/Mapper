@@ -273,6 +273,18 @@ namespace CodeGen.Services
                 DeployRecipeStepDatatype(eaeProjectDir, result);
             NormalizeProcess1RecipeArrays(eaeProjectDir, recipeStruct, result);
             NormalizeProcessRuntimeRecipeArrays(eaeProjectDir, recipeStruct, result);
+            // Simulator-only debug watchability. CurrentStep / CurrentStepType /
+            // WaitSatisfied are "Exposed for debug" OutputVars on ProcessRuntime_Generic_v1
+            // but are in NO output event's WITH list (EAE WRN_XML_VAR_WITHOUT_OEVENT), so
+            // EAE Online Watch can never refresh them — they sit frozen at their power-up
+            // 0/FALSE regardless of which recipe step the engine is really on. That is the
+            // "CurrentStep stuck at 0, WaitSatisfied stuck FALSE" confusion: the engine is
+            // stepping (cmd_target_name advances on CMDREQ), but the step counter never
+            // updates in Watch. Add the three to the CMDREQ + SCNF output-event WITH lists
+            // so they refresh on every command + step confirmation. Pure watch aid — the
+            // vars are already computed by the ECC; this changes no logic. reduce==false
+            // (rig) strips them so the hardware engine is byte-identical.
+            NormalizeProcessEngineDebugWatch(eaeProjectDir, cfg.SimulatorFullSystem, result);
             // Process-engine WAIT guard — RIG ONLY. On the rig the engine inits last
             // and its state_table boots blank, so a home WAIT races; the guard makes a
             // post-command WAIT wait for that actuator's fresh report. In the SIMULATOR
@@ -1196,6 +1208,80 @@ namespace CodeGen.Services
             catch (Exception ex)
             {
                 result.Warnings.Add($"Centre-Home swivel sim-sensor normalize failed: {ex.Message}");
+            }
+        }
+
+        // Debug OutputVars on the engine that have no output-event mapping out of the box.
+        static readonly string[] EngineDebugVars = { "CurrentStep", "CurrentStepType", "WaitSatisfied" };
+
+        /// <summary>
+        /// Simulator-only watch aid: map the engine's "Exposed for debug" OutputVars
+        /// (CurrentStep / CurrentStepType / WaitSatisfied) into the CMDREQ and SCNF
+        /// output-event WITH lists so EAE Online Watch refreshes them (instead of leaving
+        /// them frozen at power-up 0/FALSE — the WRN_XML_VAR_WITHOUT_OEVENT symptom). The
+        /// vars are already computed by the ECC, so this is purely a watch/observability
+        /// change — no logic, no ST, no algorithm touched. Bidirectional + idempotent:
+        /// reduce==false (rig) strips the WITH entries so the hardware engine is byte-identical.
+        /// </summary>
+        static void NormalizeProcessEngineDebugWatch(string eaeProjectDir, bool reduce, DeployResult result)
+        {
+            var fbt = Directory.EnumerateFiles(
+                    Path.Combine(eaeProjectDir, "IEC61499"),
+                    "ProcessRuntime_Generic_v1.fbt", SearchOption.AllDirectories)
+                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
+                ?? string.Empty;
+            if (string.IsNullOrEmpty(fbt))
+            {
+                result.Warnings.Add("ProcessRuntime_Generic_v1.fbt not found; engine debug-watch normalize skipped.");
+                return;
+            }
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+                var eventOutputs = root.Element(ns + "InterfaceList")?.Element(ns + "EventOutputs");
+                if (eventOutputs == null)
+                {
+                    result.Warnings.Add("ProcessRuntime_Generic_v1.fbt: EventOutputs not found; engine debug-watch normalize skipped.");
+                    return;
+                }
+
+                bool changed = false;
+                foreach (var evName in new[] { "CMDREQ", "SCNF" })
+                {
+                    var ev = eventOutputs.Elements(ns + "Event")
+                        .FirstOrDefault(e => (string?)e.Attribute("Name") == evName);
+                    if (ev == null) continue;
+                    foreach (var v in EngineDebugVars)
+                    {
+                        var existing = ev.Elements(ns + "With")
+                            .Where(w => (string?)w.Attribute("Var") == v).ToList();
+                        if (reduce)
+                        {
+                            if (existing.Count == 0)
+                            { ev.Add(new System.Xml.Linq.XElement(ns + "With", new System.Xml.Linq.XAttribute("Var", v))); changed = true; }
+                        }
+                        else
+                        {
+                            foreach (var w in existing) { w.Remove(); changed = true; }
+                        }
+                    }
+                }
+
+                if (changed)
+                {
+                    doc.Save(fbt);
+                    result.PatchesApplied.Add(reduce
+                        ? "ProcessRuntime_Generic_v1: CurrentStep/CurrentStepType/WaitSatisfied mapped to CMDREQ+SCNF (sim watchable)"
+                        : "ProcessRuntime_Generic_v1: debug-watch WITH entries removed (hardware)");
+                    MapperLogger.Info($"[Deploy] Engine debug-watch normalize: reduce={reduce}");
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"Engine debug-watch normalize failed: {ex.Message}");
             }
         }
 
