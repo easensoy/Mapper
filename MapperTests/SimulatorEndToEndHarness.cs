@@ -294,6 +294,14 @@ namespace MapperTests
             if (assemblyFb != null)
                 CheckWait1IdResolution(assemblyFb, sysresNet, Fail, Pass, Note);
 
+            // ── F5: Assembly recipe HOMES the Seven_State swivel FIRST ───────
+            // The recipe must open with "CMD bearing_pnp state_val=5 (Home)" so
+            // the swivel establishes a known home before Pick, regardless of where
+            // it booted (its core trusts sensors at INIT and has no force-home).
+            // No-op-green when the stub is ON (no Seven swivel -> no preamble).
+            if (assemblyFb != null && !MapperConfig.StubSevenStateActuatorsAsFiveState)
+                CheckRecipeHomesSwivelFirst(assemblyFb, Fail, Pass, Note);
+
             // ── G1: Interlock STRUCT (RuleTable) collapse landed ─────────────
             // Under SimulatorFullSystem, BuildActuatorParameters' dropInterlockConstants
             // branch swaps the 4 parallel Rule{From,To,Source,Blocked}State arrays for
@@ -783,6 +791,40 @@ namespace MapperTests
                 Fail("F1", "Assembly_Station.Recipe has NO StepType=9 (END) row — recipe never terminates");
             else
                 Pass("F1", $"Assembly_Station.Recipe terminates with {matches.Count} END row(s)");
+        }
+
+        /// <summary>
+        /// F5 — Assembly's recipe must OPEN with a "command the Seven_State swivel
+        /// Home" row (StepType=1, CmdTargetName='bearing_pnp', CmdStateArr=5). The
+        /// swivel core has no force-home-at-INIT (it trusts atWork1/atWork2 at boot),
+        /// so if it powers up parked at Pick/Place the recipe's first real command
+        /// (Pick) is a no-op and the engine stalls. The home-first preamble
+        /// (ProcessRecipeArrayGenerator.Generate) guarantees a known home start.
+        /// </summary>
+        static void CheckRecipeHomesSwivelFirst(XElement procFb,
+            Action<string, string> Fail, Action<string, string> Pass,
+            Action<string>? Note = null)
+        {
+            var blob = (string?)procFb.Elements(Ns + "Parameter")
+                .FirstOrDefault(p => string.Equals((string?)p.Attribute("Name"), "Recipe", StringComparison.Ordinal))
+                ?.Attribute("Value") ?? string.Empty;
+            // First CMD row (StepType:=1) in execution order, with its target + state.
+            var firstCmdRx = new System.Text.RegularExpressions.Regex(
+                @"StepType\s*:=\s*1\b\s*,\s*CmdTargetName\s*:=\s*'(?<tgt>[^']*)'\s*,\s*CmdStateArr\s*:=\s*(?<st>\d+)",
+                System.Text.RegularExpressions.RegexOptions.Singleline);
+            var m = firstCmdRx.Match(blob);
+            if (!m.Success)
+            {
+                Fail("F5", "Assembly_Station.Recipe has no parseable first CMD row — cannot confirm the swivel home preamble.");
+                return;
+            }
+            var tgt = m.Groups["tgt"].Value.Trim();
+            var st = m.Groups["st"].Value;
+            Note?.Invoke($"Assembly recipe first CMD: target='{tgt}', state={st} (expect bearing_pnp=5 Home)");
+            if (string.Equals(tgt, "bearing_pnp", StringComparison.OrdinalIgnoreCase) && st == "5")
+                Pass("F5", "Assembly_Station.Recipe opens with the swivel HOME preamble (bearing_pnp state_val=5).");
+            else
+                Fail("F5", $"Assembly_Station.Recipe does NOT open with the swivel home preamble — first CMD is '{tgt}'={st}, expected bearing_pnp=5. Swivel may boot parked at Pick/Place and stall the recipe.");
         }
 
         /// <summary>
