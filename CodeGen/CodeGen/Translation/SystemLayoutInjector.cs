@@ -1376,6 +1376,31 @@ namespace CodeGen.Translation
                             ? BuildInterlockRules(actuator, allComponents, scopedIds)
                             : (0, new int[InterlockRuleCap], new int[InterlockRuleCap],
                                   new int[InterlockRuleCap], new int[InterlockRuleCap]);
+                    // Per the Common Interlock Evaluator Mapper Guide, the core's
+                    // CurrentRawState is the seven-state encoding 0..6 (0 Home, 2
+                    // AtWork1, 4 AtWork2, 6 AtHome) and a rule is checked ONLY when
+                    // CurrentRawState == RuleFromState AND requested target == RuleToState.
+                    // BuildInterlockRules numbers in Control.xml State_Number space; the
+                    // Assembly turn-to-Place (AtPick 2 -> Place 4) lands on 2 -> 4 and is
+                    // correct, but the "2"-suffixed Disassembly route (AtPick2 -> AtPlace2)
+                    // numbers as 12 -> 0, which can NEVER match a 0..6 CurrentRawState.
+                    // Drop those provably-inert rules so RuleCount = the number of VALID
+                    // rules (the guide's definition). The kept Assembly rules already
+                    // cover BOTH recipe directions, since the core reports CurrentRawState=2
+                    // at the pick position regardless of which process commanded it.
+                    {
+                        int kept = 0;
+                        int[] f = new int[InterlockRuleCap], t = new int[InterlockRuleCap];
+                        int[] s = new int[InterlockRuleCap], b = new int[InterlockRuleCap];
+                        for (int ri = 0; ri < chRuleCount && ri < InterlockRuleCap; ri++)
+                        {
+                            if (chFrom[ri] < 0 || chFrom[ri] > 6 || chTo[ri] < 0 || chTo[ri] > 6) continue;
+                            f[kept] = chFrom[ri]; t[kept] = chTo[ri];
+                            s[kept] = chSrc[ri];  b[kept] = chBlk[ri];
+                            kept++;
+                        }
+                        chRuleCount = kept; chFrom = f; chTo = t; chSrc = s; chBlk = b;
+                    }
                     actParams["RuleCount"]        = SyslayBuilder.FormatInt(chRuleCount);
                     actParams["RuleFromState"]    = SyslayBuilder.FormatIntArray(chFrom);
                     actParams["RuleToState"]      = SyslayBuilder.FormatIntArray(chTo);
