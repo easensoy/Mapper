@@ -671,6 +671,22 @@ namespace CodeGen.Services
                         .FirstOrDefault(a => (string?)a.Attribute("Name") == algName)
                         ?.Element(ns + "ST");
 
+                // Normalize the trailing `armed := TRUE/FALSE;` in an algorithm's ST.
+                // desired = "TRUE", "FALSE", or null (remove any). Strips whatever a
+                // prior (broken) patch left so re-applying converges. Returns true if
+                // it changed the text.
+                bool SetArmed(System.Xml.Linq.XElement? st, string? desired)
+                {
+                    if (st == null) return false;
+                    var before = st.Value;
+                    var text = System.Text.RegularExpressions.Regex.Replace(
+                        before, @"\s*armed\s*:=\s*(?:TRUE|FALSE)\s*;", "").TrimEnd();
+                    if (desired != null) text += "\r\narmed := " + desired + ";";
+                    if (text == before) return false;
+                    st.ReplaceNodes(new System.Xml.Linq.XCData(text));
+                    return true;
+                }
+
                 // 2. check_wait: wrap the existing WaitSatisfied assignment in the
                 //    armed guard, preserving the original expression + trailing text.
                 var cw = St("check_wait");
@@ -700,17 +716,19 @@ namespace CodeGen.Services
                     }
                 }
 
-                // 3. clear `armed` whenever a new step is loaded so every WAIT re-arms.
-                foreach (var alg in new[] { "AdvanceStep", "initializeinit" })
-                {
-                    var st = St(alg);
-                    if (st != null && !st.Value.Contains("armed := FALSE"))
-                    {
-                        st.ReplaceNodes(new System.Xml.Linq.XCData(
-                            st.Value.TrimEnd() + "\r\narmed := FALSE;"));
-                        changed = true;
-                    }
-                }
+                // 3. `armed` placement — THE FIX.
+                //    armed defaults TRUE (initializeinit) so a STANDALONE / sensor
+                //    WAIT (e.g. Feed_Station's "WAIT PartInHopper on") evaluates on
+                //    entry against the live state_table and never stalls. Only
+                //    IssueCmd clears it FALSE, so the NEXT WAIT (the one that follows
+                //    a command) must wait for THAT actuator's fresh report before it
+                //    can pass -- killing the blank-state_table race without touching
+                //    sensor waits. AdvanceStep must NOT clear armed (doing so guarded
+                //    EVERY wait and stalled the sensor waits -- the bug that broke
+                //    Feed_Station). SetArmed also repairs the earlier broken patch.
+                changed |= SetArmed(St("initializeinit"), "TRUE");
+                changed |= SetArmed(St("IssueCmd"), "FALSE");
+                changed |= SetArmed(St("AdvanceStep"), null);
 
                 if (changed)
                 {
