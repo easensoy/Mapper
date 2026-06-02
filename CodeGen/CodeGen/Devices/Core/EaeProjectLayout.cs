@@ -29,8 +29,53 @@ namespace CodeGen.Devices.Core
                 Path.GetDirectoryName(sysdevPath)!,
                 Path.GetFileNameWithoutExtension(sysdevPath));
             if (!Directory.Exists(sysdevFolder)) return null;
-            return Directory.EnumerateFiles(sysdevFolder, "*.sysres", SearchOption.TopDirectoryOnly)
-                .FirstOrDefault();
+            var sysresFiles = Directory
+                .EnumerateFiles(sysdevFolder, "*.sysres", SearchOption.TopDirectoryOnly)
+                .ToList();
+            if (sysresFiles.Count == 0) return null;
+            if (sysresFiles.Count == 1) return sysresFiles[0];
+
+            // MORE THAN ONE .sysres in the folder => an orphan from a prior deploy
+            // sits alongside the active resource. We MUST return the ACTIVE one --
+            // the .sysres whose stem matches the resource ID the parent sysdev's
+            // <Resource ID="..."/> actually references -- NOT FirstOrDefault, which
+            // routinely returned the orphan (its GUID often sorts before the active
+            // resource's). Picking the orphan made the FB mirror + opcua-stamp write
+            // to the orphan: it populated the orphan .sysres and created an orphan
+            // "{orphanId}/" sister folder (with opcua.xml), while the ACTIVE resource
+            // stayed empty. EAE then loads that ghost sister folder and raises the
+            // "Solution Integrity / Repair Instances" dialog on the duplicated CAT
+            // instances. Matching the sysdev's active ID makes the mirror always
+            // target the live resource; the orphan is left for the stale-sysres /
+            // sister-folder sweep to delete.
+            var activeIds = ReadActiveResourceIds(sysdevPath);
+            var active = sysresFiles.FirstOrDefault(f =>
+                activeIds.Contains(Path.GetFileNameWithoutExtension(f)));
+            return active ?? sysresFiles[0];
+        }
+
+        /// <summary>
+        /// The resource IDs a sysdev actually references via
+        /// <c>&lt;Resources&gt;&lt;Resource ID="..."/&gt;</c>. Used to tell the
+        /// live resource apart from an orphan .sysres left in the same folder.
+        /// </summary>
+        static HashSet<string> ReadActiveResourceIds(string sysdevPath)
+        {
+            var ids = new HashSet<string>(StringComparer.Ordinal);
+            try
+            {
+                var root = XDocument.Load(sysdevPath).Root;
+                if (root == null) return ids;
+                XNamespace ns = root.GetDefaultNamespace();
+                foreach (var r in root.Element(ns + "Resources")?.Elements(ns + "Resource")
+                                  ?? Enumerable.Empty<XElement>())
+                {
+                    var id = (string?)r.Attribute("ID");
+                    if (!string.IsNullOrEmpty(id)) ids.Add(id);
+                }
+            }
+            catch { /* malformed sysdev -> empty set, caller falls back to first file */ }
+            return ids;
         }
 
         /// <summary>
