@@ -96,6 +96,13 @@ namespace CodeGen.Devices.Core
                 // NO stationAdptr port, so it stays off the CaSBus station chain
                 // (listed in NoStationAdapterTypes below).
                 "Seven_State_Actuator_CAT",
+                // Centre-home swivel (Bearing_PnP, 2026-06-02). Unlike the old
+                // Seven CAT it HAS stationAdptr_in/out + stateRprtCmd_in/out, so
+                // it is treated like any Five_State actuator: INIT-chained, on the
+                // report ring AND on the CaSBus station chain (NOT listed in
+                // NoStationAdapterTypes) — the station chain is what delivers
+                // ModeCMD to the core, without which the ECC never leaves home.
+                "Seven_State_Actuator_Centre_Home_CAT",
                 "Vacuum_Gripper_CAT",
             };
 
@@ -738,6 +745,7 @@ namespace CodeGen.Devices.Core
             "Five_State_Actuator_No_Sensors_CAT" => 3050,
             "Vacuum_Gripper_CAT"                 => 3050,
             "Seven_State_Actuator_CAT"           => 1850,   // 10 port rows
+            "Seven_State_Actuator_Centre_Home_CAT" => 3050, // 16 INIT data inputs + 4 adapters
             "Process1_Generic"                   => 1700,   //  9 port rows
             "Sensor_Bool_CAT"                    => 800,    //  3 port rows
             "Area" or "Station"                  => 650,    //  2 port rows
