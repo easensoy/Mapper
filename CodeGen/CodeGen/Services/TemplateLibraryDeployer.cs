@@ -250,6 +250,11 @@ namespace CodeGen.Services
                 DeployRecipeStepDatatype(eaeProjectDir, result);
             NormalizeProcess1RecipeArrays(eaeProjectDir, recipeStruct, result);
             NormalizeProcessRuntimeRecipeArrays(eaeProjectDir, recipeStruct, result);
+            // Anti-race guard on the process engine: a WAIT must not be satisfied
+            // off the blank startup state_table; it waits for a fresh actuator
+            // report. Runs AFTER the recipe-array normalize so it patches the final
+            // check_wait (whichever recipe form that produced).
+            PatchProcessRuntimeWaitGuard(eaeProjectDir, result);
 
             GenerateCfgFiles(eaeProjectDir, result);
             RegisterInDfbproj(eaeProjectDir, result);
@@ -600,6 +605,126 @@ namespace CodeGen.Services
                 "Process1_Generic.fbt"), "Process1_Generic.fbt");
             PatchOne(Path.Combine(eaeProjectDir, "IEC61499",
                 "ProcessRuntime_Generic_v1.fbt"), "ProcessRuntime_Generic_v1.fbt");
+        }
+
+        /// <summary>
+        /// Anti-race guard for ProcessRuntime_Generic_v1 (the process engine).
+        /// The engine inits LAST in the resource INIT chain, so it misses the
+        /// actuators' boot-time state reports and its state_table starts blank (0).
+        /// check_wait was evaluated on ENTRY to a WAIT step, so a WAIT whose target
+        /// equals that blank value (e.g. "home" = 0) was satisfied INSTANTLY and the
+        /// engine blew through the whole recipe in one tick without any actuator
+        /// actually sequencing (rig-observed: CMDREQ pulsed for every step, swivel
+        /// never left its boot Pick position, gripper never gripped).
+        ///
+        /// Fix: an internal <c>armed</c> flag. A WAIT is NOT satisfied on its first
+        /// (entry) check_wait — only after a fresh state report arrives (the
+        /// WAIT_STEP -> WAIT_STEP "state_change" self-loop re-runs check_wait). So
+        /// the engine must observe the commanded actuator actually report before it
+        /// advances. <c>armed</c> is cleared by AdvanceStep / initializeinit so every
+        /// new WAIT re-arms. The recipe is built so each commanded step is a REAL
+        /// move that reports (the Seven_State swivel home-preamble drives it off its
+        /// boot work position; Five_State actuators boot home and their first command
+        /// moves them), so the guard never stalls on a no-op.
+        ///
+        /// Idempotent XML deploy-time patch (same pattern as PatchCatSymlinkQi):
+        /// no-op once present. The WaitSatisfied EXPRESSION is lifted verbatim from
+        /// the existing check_wait so this works for both the struct and six-array
+        /// recipe forms.
+        /// </summary>
+        static void PatchProcessRuntimeWaitGuard(string eaeProjectDir, DeployResult result)
+        {
+            var fbt = Path.Combine(eaeProjectDir, "IEC61499", "ProcessRuntime_Generic_v1.fbt");
+            if (!File.Exists(fbt))
+            {
+                fbt = Directory.EnumerateFiles(
+                        Path.Combine(eaeProjectDir, "IEC61499"),
+                        "ProcessRuntime_Generic_v1.fbt", SearchOption.AllDirectories)
+                    .FirstOrDefault() ?? string.Empty;
+                if (string.IsNullOrEmpty(fbt)) return;
+            }
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(
+                    fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+                bool changed = false;
+
+                // 1. internal `armed : BOOL`
+                var internalVars = root.Descendants(ns + "InternalVars").FirstOrDefault();
+                if (internalVars != null &&
+                    !internalVars.Elements(ns + "VarDeclaration")
+                        .Any(v => (string?)v.Attribute("Name") == "armed"))
+                {
+                    internalVars.Add(new System.Xml.Linq.XElement(ns + "VarDeclaration",
+                        new System.Xml.Linq.XAttribute("Name", "armed"),
+                        new System.Xml.Linq.XAttribute("Type", "BOOL"),
+                        new System.Xml.Linq.XAttribute("Comment",
+                            "Anti-race: WAIT only evaluated after a fresh state report since the step was loaded.")));
+                    changed = true;
+                }
+
+                System.Xml.Linq.XElement? St(string algName) =>
+                    root.Descendants(ns + "Algorithm")
+                        .FirstOrDefault(a => (string?)a.Attribute("Name") == algName)
+                        ?.Element(ns + "ST");
+
+                // 2. check_wait: wrap the existing WaitSatisfied assignment in the
+                //    armed guard, preserving the original expression + trailing text.
+                var cw = St("check_wait");
+                if (cw != null && !cw.Value.Contains("NOT armed"))
+                {
+                    var body = cw.Value;
+                    var m = System.Text.RegularExpressions.Regex.Match(
+                        body, @"WaitSatisfied\s*:=\s*(?<expr>[^;]*);");
+                    if (m.Success)
+                    {
+                        var expr = m.Groups["expr"].Value.Trim();
+                        var tail = body.Substring(m.Index + m.Length);
+                        var guarded =
+                            "IF NOT armed THEN\r\n" +
+                            "\tarmed := TRUE;\r\n" +
+                            "\tWaitSatisfied := FALSE;\r\n" +
+                            "ELSE\r\n" +
+                            "\tWaitSatisfied := " + expr + ";\r\n" +
+                            "END_IF;" + tail;
+                        cw.ReplaceNodes(new System.Xml.Linq.XCData(guarded));
+                        changed = true;
+                    }
+                    else
+                    {
+                        result.Warnings.Add(
+                            "ProcessRuntime wait-guard: WaitSatisfied assignment not found in check_wait; guard not applied.");
+                    }
+                }
+
+                // 3. clear `armed` whenever a new step is loaded so every WAIT re-arms.
+                foreach (var alg in new[] { "AdvanceStep", "initializeinit" })
+                {
+                    var st = St(alg);
+                    if (st != null && !st.Value.Contains("armed := FALSE"))
+                    {
+                        st.ReplaceNodes(new System.Xml.Linq.XCData(
+                            st.Value.TrimEnd() + "\r\narmed := FALSE;"));
+                        changed = true;
+                    }
+                }
+
+                if (changed)
+                {
+                    doc.Save(fbt);
+                    result.PatchesApplied.Add(
+                        "ProcessRuntime_Generic_v1.fbt: anti-race WAIT guard (armed) applied");
+                    MapperLogger.Info(
+                        "[Deploy] ProcessRuntime_Generic_v1: anti-race WAIT guard applied");
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"ProcessRuntime wait-guard patch failed: {ex.Message}");
+            }
         }
 
         /// <summary>
