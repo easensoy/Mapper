@@ -552,9 +552,16 @@ namespace CodeGen.Translation.Process
                 {
                     int shift = 2 * homeOrder.Count;
                     // Every existing row moves down by `shift`, so every NextStep
-                    // pointer (including pointers to the final END row) is rebased.
+                    // pointer is rebased -- EXCEPT the final END row's own NextStep,
+                    // which must stay 0. The END ECState runs EndSequence
+                    // (CurrentStep := Recipe[CurrentStep].NextStep) on its END->END
+                    // self-loop; rebasing END's NextStep to `shift` made it walk
+                    // CurrentStep off into the cycle rows instead of pinning at the
+                    // recipe start. Pointers TO the END row (other rows' NextStep)
+                    // are still rebased correctly because the END row itself moved +shift.
                     for (int i = 0; i < arrays.NextStep.Count; i++)
-                        arrays.NextStep[i] += shift;
+                        if (arrays.StepType[i] != 9)
+                            arrays.NextStep[i] += shift;
 
                     // Insert the home CMD+WAIT pairs at the front, in order. Each row
                     // chains to the next (NextStep = its own index + 1); the last
