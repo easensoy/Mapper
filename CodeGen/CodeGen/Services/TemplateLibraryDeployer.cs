@@ -157,7 +157,18 @@ namespace CodeGen.Services
             PatchKnownArraySizeBugs(eaeProjectDir, result);
             PatchProcessFbsForRecipeAsInputVars(eaeProjectDir, result);
             PatchSensorBoolCatDstQi(eaeProjectDir, result);
-            PatchFiveStateActuatorCatQi(eaeProjectDir, result);
+            PatchCatSymlinkQi(eaeProjectDir, "Five_State_Actuator_CAT", result);
+            // 2026-06-02: the new centre-home swivel CAT has the SAME symlink FBs
+            // (Inputs SYMLINKMULTIVARDST + Output SYMLINKMULTIVARSRC) but ships with
+            // QI unset -> defaults FALSE -> the FBs are DISABLED. On the rig that
+            // islands the core from its IO: the coil commands never reach the DO
+            // channels (all 1970/never-written) and the physical atwork/athome
+            // sensors never reach the core (reads FALSE while the channel is TRUE).
+            // The symbolic links themselves resolve fine ($${PATH} -> RES0.Bearing_PnP.*
+            // bound to DO17/DI00 etc.) — it's purely the QI gate. Five_State got this
+            // patch long ago (above); the new CAT was missed. Masked in the simulator
+            // (no-sensor timers advance state, coils unused), fatal on the rig.
+            PatchCatSymlinkQi(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT", result);
             PatchActuatorModeInitialValue(eaeProjectDir, "FiveStateActuator.fbt", result);
             // 2026-06-02: the centre-home swivel core needs the SAME auto-mode default.
             // Without it SevenStateCentreHomeActuator powers up at mode=0, its ECC sits
@@ -605,15 +616,15 @@ namespace CodeGen.Services
         /// QI. Runs on hardware AND sim paths. Five_State_Actuator_CAT only —
         /// no event/ECC/NAME1 changes; Sensor_Bool_CAT untouched here.
         /// </summary>
-        static void PatchFiveStateActuatorCatQi(string eaeProjectDir, DeployResult result)
+        static void PatchCatSymlinkQi(string eaeProjectDir, string catName, DeployResult result)
         {
             var fbt = Path.Combine(eaeProjectDir, "IEC61499",
-                "Five_State_Actuator_CAT", "Five_State_Actuator_CAT.fbt");
+                catName, catName + ".fbt");
             if (!File.Exists(fbt))
             {
                 fbt = Directory.EnumerateFiles(
                         Path.Combine(eaeProjectDir, "IEC61499"),
-                        "Five_State_Actuator_CAT.fbt", SearchOption.AllDirectories)
+                        catName + ".fbt", SearchOption.AllDirectories)
                     .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
                     ?? string.Empty;
                 if (string.IsNullOrEmpty(fbt)) return;
@@ -636,7 +647,7 @@ namespace CodeGen.Services
                 if (targets.Count == 0)
                 {
                     result.Warnings.Add(
-                        "Five_State_Actuator_CAT.fbt: no SYMLINKMULTIVARDST/SRC FB found; QI guard skipped.");
+                        $"{catName}.fbt: no SYMLINKMULTIVARDST/SRC FB found; QI guard skipped.");
                     return;
                 }
 
@@ -661,18 +672,18 @@ namespace CodeGen.Services
                         else fb.Add(qi);
                     }
                     result.PatchesApplied.Add(
-                        $"Five_State_Actuator_CAT: ensured {(string?)fb.Attribute("Name")} " +
+                        $"{catName}: ensured {(string?)fb.Attribute("Name")} " +
                         $"({(string?)fb.Attribute("Type")}) QI=TRUE");
                 }
 
                 doc.Save(fbt);
                 MapperLogger.Info(
-                    $"[Deploy] Five_State_Actuator_CAT.fbt: QI=TRUE ensured on " +
+                    $"[Deploy] {catName}.fbt: QI=TRUE ensured on " +
                     $"{targets.Count} SYMLINKMULTIVAR FB(s) (DST subscriber + SRC publisher enabled)");
             }
             catch (Exception ex)
             {
-                result.Warnings.Add($"Five_State_Actuator_CAT.fbt QI guard failed: {ex.Message}");
+                result.Warnings.Add($"{catName}.fbt QI guard failed: {ex.Message}");
             }
         }
 
