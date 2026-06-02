@@ -894,18 +894,17 @@ namespace CodeGen.Translation.Process
                         WaitState = condSettledWait,
                     };
                 }
-                // Seven_State (Bearing_PnP) — the SE Seven_State_Actuator_CAT
-                // ECC accepts state_val as a target slot and stably publishes
-                // current_state_to_pocess matching the slot once settled:
-                //   state_val=1  -> ToPick   -> AtPick    publishes 1
-                //   state_val=2  -> ToPlace  -> AtPlace   publishes 2
-                //   state_val=0  -> ToHome   -> AtHome    publishes 0
-                // Control.xml's State_Number for the wait target (e.g.
-                // Bearing_PnP/AtPick State_Number=2) does NOT line up with the
-                // CAT's published value (AtPick publishes 1), so we cannot use
-                // waitState directly. Instead we read the WAIT condition's
-                // Name suffix ("Bearing_PnP/AtPick" -> "AtPick") and pattern
-                // match Pick/Place/Home to the CAT's settle value.
+                // Seven_State (Bearing_PnP) — Seven_State_Actuator_Centre_Home_CAT.
+                // The core takes state_val as a target slot and, once settled,
+                // publishes current_state_to_process = the slot's AT-value (cmd+1):
+                //   state_val=1 (Work1/Pick)  -> ToWork1 -> AtWork1 publishes 2
+                //   state_val=3 (Work2/Place) -> ToWork2 -> AtWork2 publishes 4
+                //   state_val=5 (Home/centre) -> ToHome  -> AtHome  publishes 6
+                // Control.xml's State_Number for the wait target does NOT line up
+                // with the core's published value, so we read the WAIT condition's
+                // Name suffix ("Bearing_PnP/AtPick" -> "AtPick") and pattern-match
+                // Pick/Place/Home to the CMD slot (CmdState) and its settle value
+                // (WaitState = CmdState + 1).
                 if (IsSevenStateCommandable(inScopeTarget))
                 {
                     int sevenStateCmd = MapSevenStateCommandFromConditionName(cond.Name);
@@ -913,7 +912,7 @@ namespace CodeGen.Translation.Process
                     {
                         arrays.Warnings.Add(
                             $"[Recipe] '{state.Name}': Seven_State CMD on '{inScopeTarget.Name}' " +
-                            $"-> state_val={sevenStateCmd} (CAT settles publishing {sevenStateCmd}); " +
+                            $"-> state_val={sevenStateCmd} (Centre-Home core settles publishing {sevenStateCmd + 1}); " +
                             $"derived from condition Name '{cond.Name}'.");
                         return new StateClassification
                         {
@@ -922,7 +921,9 @@ namespace CodeGen.Translation.Process
                             CmdTargetName = (inScopeTarget.Name ?? string.Empty).Trim().ToLowerInvariant(),
                             CmdState = sevenStateCmd,
                             WaitId = waitId,
-                            WaitState = sevenStateCmd,
+                            // Centre-Home core publishes the AT-value (cmd+1) once settled:
+                            // pick 1->AtWork1 2, place 3->AtWork2 4, home 5->AtHome 6.
+                            WaitState = sevenStateCmd + 1,
                         };
                     }
                     arrays.Warnings.Add(
@@ -1253,10 +1254,16 @@ namespace CodeGen.Translation.Process
             string stateName = slash >= 0 ? conditionName.Substring(slash + 1) : conditionName;
             string lower = stateName.Trim().ToLowerInvariant();
             // Order matters: "atplace" contains "place", "atpick" contains "pick".
-            // Place check before pick keeps "atplace2" / "place2" routing to 2.
-            if (lower.Contains("place")) return 2;
+            // Place check before pick keeps "atplace2" / "place2" routing to Place.
+            // Seven_State_Actuator_Centre_Home_CAT command vocabulary (state_val):
+            //   1 = Work1 (Pick), 3 = Work2 (Place), 5 = Home (centre).
+            // The core then settles publishing current_state_to_process = cmd+1
+            // (AtWork1=2 / AtWork2=4 / AtHome=6) — see the WAIT row's Wait1State
+            // (= sevenStateCmd + 1) in ClassifyState. The "2"-suffixed Disassembly
+            // names (AtPick2 / AtPlace2) are the SAME physical Work1/Work2 slots.
+            if (lower.Contains("place")) return 3;
             if (lower.Contains("pick"))  return 1;
-            if (lower.Contains("home") || lower.Contains("returned")) return 0;
+            if (lower.Contains("home") || lower.Contains("returned")) return 5;
             return -1;
         }
 
