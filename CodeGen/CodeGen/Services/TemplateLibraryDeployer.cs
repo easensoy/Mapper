@@ -233,7 +233,13 @@ namespace CodeGen.Services
             // RuleTable emission (BuildActuatorParameters.dropInterlockConstants).
             if (cfg.SimulatorFullSystem)
                 DeployInterlockRuleDatatype(eaeProjectDir, result);
-            NormalizeFiveStateRuleArrays(eaeProjectDir, cfg.SimulatorFullSystem, result);
+            NormalizeFiveStateRuleArrays(eaeProjectDir, "Five_State_Actuator_CAT.fbt", "InterlockManager", cfg.SimulatorFullSystem, result);
+            // Jyotsna's Centre-Home swivel CAT carries the SAME four interlock arrays wired
+            // into its CommonInterlockManager (a CommonInterlockEvaluator). Collapse them to
+            // the RuleTable STRUCT too — otherwise the sim build fails with 17 errors
+            // ("RuleFromState does not exist in Main.CommonInterlockEvaluator", etc.) because
+            // the evaluator FB was reshaped to RuleTable but this CAT still wires the arrays.
+            NormalizeFiveStateRuleArrays(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT.fbt", "CommonInterlockManager", cfg.SimulatorFullSystem, result);
             NormalizeCommonInterlockEvaluatorRules(eaeProjectDir, cfg.SimulatorFullSystem, result);
             NormalizeFiveStateFaultEnables(eaeProjectDir, cfg.SimulatorFullSystem, result);
             // Process FB recipe struct: collapse the 6 overlapping recipe arrays
@@ -955,16 +961,17 @@ namespace CodeGen.Services
         /// arrays so the byte-identical hardware slice is untouched.
         /// </summary>
         static void NormalizeFiveStateRuleArrays(
-            string eaeProjectDir, bool reduce, DeployResult result)
+            string eaeProjectDir, string catFileName, string interlockFbName,
+            bool reduce, DeployResult result)
         {
             var fbt = Directory.EnumerateFiles(
                     Path.Combine(eaeProjectDir, "IEC61499"),
-                    "Five_State_Actuator_CAT.fbt", SearchOption.AllDirectories)
+                    catFileName, SearchOption.AllDirectories)
                 .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
                 ?? string.Empty;
             if (string.IsNullOrEmpty(fbt))
             {
-                result.Warnings.Add("Five_State_Actuator_CAT.fbt not found; RuleTable normalize skipped.");
+                result.Warnings.Add($"{catFileName} not found; RuleTable normalize skipped.");
                 return;
             }
             try
@@ -978,12 +985,19 @@ namespace CodeGen.Services
                 var net = root.Element(ns + "FBNetwork");
                 if (iface == null || net == null)
                 {
-                    result.Warnings.Add("Five_State_Actuator_CAT.fbt: missing InterfaceList/FBNetwork; RuleTable normalize skipped.");
+                    result.Warnings.Add($"{catFileName}: missing InterfaceList/FBNetwork; RuleTable normalize skipped.");
                     return;
                 }
                 var inputVars = iface.Element(ns + "InputVars");
+                // Find the event whose WITH list carries the rule data (the 4 arrays
+                // when expanded, or RuleTable when collapsed). Five_State uses INIT; the
+                // Centre-Home CAT may use a different event -- search, don't hardcode.
                 var initEvent = iface.Element(ns + "EventInputs")?.Elements(ns + "Event")
-                    .FirstOrDefault(e => (string?)e.Attribute("Name") == "INIT");
+                    .FirstOrDefault(e => e.Elements(ns + "With").Any(w =>
+                        RuleArrayNames.Contains((string?)w.Attribute("Var"))
+                        || (string?)w.Attribute("Var") == "RuleTable"))
+                    ?? iface.Element(ns + "EventInputs")?.Elements(ns + "Event")
+                        .FirstOrDefault(e => (string?)e.Attribute("Name") == "INIT");
                 var dataConns = net.Element(ns + "DataConnections");
 
                 bool changed = false;
@@ -1028,7 +1042,7 @@ namespace CodeGen.Services
                     {
                         dataConns.Add(new System.Xml.Linq.XElement(ns + "Connection",
                             new System.Xml.Linq.XAttribute("Source", "RuleTable"),
-                            new System.Xml.Linq.XAttribute("Destination", "InterlockManager.RuleTable")));
+                            new System.Xml.Linq.XAttribute("Destination", interlockFbName + ".RuleTable")));
                         changed = true;
                     }
                 }
@@ -1077,7 +1091,7 @@ namespace CodeGen.Services
                         {
                             dataConns.Add(new System.Xml.Linq.XElement(ns + "Connection",
                                 new System.Xml.Linq.XAttribute("Source", a),
-                                new System.Xml.Linq.XAttribute("Destination", "InterlockManager." + a)));
+                                new System.Xml.Linq.XAttribute("Destination", interlockFbName + "." + a)));
                             changed = true;
                         }
                     }
@@ -1086,10 +1100,11 @@ namespace CodeGen.Services
                 if (changed)
                 {
                     doc.Save(fbt);
+                    var catLabel = Path.GetFileNameWithoutExtension(catFileName);
                     result.PatchesApplied.Add(reduce
-                        ? "Five_State_Actuator_CAT: 4 Rule arrays -> RuleTable (sim interface reduced)"
-                        : "Five_State_Actuator_CAT: RuleTable -> 4 Rule arrays (hardware interface)");
-                    MapperLogger.Info($"[Deploy] Five_State_Actuator_CAT RuleTable normalize: reduce={reduce}");
+                        ? $"{catLabel}: 4 Rule arrays -> RuleTable (sim interface reduced)"
+                        : $"{catLabel}: RuleTable -> 4 Rule arrays (hardware interface)");
+                    MapperLogger.Info($"[Deploy] {catLabel} RuleTable normalize: reduce={reduce}");
                 }
             }
             catch (Exception ex)
