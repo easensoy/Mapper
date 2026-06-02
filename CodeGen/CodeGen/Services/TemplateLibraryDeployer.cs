@@ -27,6 +27,15 @@ namespace CodeGen.Services
             // patch failures; with Bearing_PnP routed to the verbatim CAT
             // (no runtime parameter graft) those failures no longer apply.
             { "Seven_State_Actuator_CAT", new[] { "SevenStateActuator", "SevenStateActuator2" } },
+            // Jyotsna's new centre-home swivel (2026-06-02). Basic leaf FBs:
+            // SevenStateCentreHomeActuator (core ECC), No_Sensor_Handler_7SCH
+            // (synthesises atHome on the work->home timer), FaultLatch_7SCH
+            // (leaf inside the faultDetection_7SCH composite). The composite
+            // faultDetection_7SCH itself ships via UniversalComposites; the
+            // shared CommonInterlockEvaluator + updateComponentState are already
+            // in UniversalBasics.
+            { "Seven_State_Actuator_Centre_Home_CAT",
+              new[] { "SevenStateCentreHomeActuator", "No_Sensor_Handler_7SCH", "FaultLatch_7SCH" } },
             { "Station_CAT",             new[] { "Station_Core", "Station_Fault", "Station_Status" } },
             { "Process1_Generic",        new[] { "ProcessRuntime_Generic_v1", "ProcessStateBusHandler" } },
         };
@@ -46,6 +55,10 @@ namespace CodeGen.Services
             // PARALLEL+ALTERNATIVE branched). Deployed verbatim from the
             // Template Library — no runtime data-driven patching.
             "Seven_State_Actuator_CAT",
+            // Jyotsna's centre-home swivel CAT (2026-06-02) — Bearing_PnP now
+            // instantiates this instead of the old Seven CAT (TemplateMap).
+            // Deployed always so EAE can resolve the type on import.
+            "Seven_State_Actuator_Centre_Home_CAT",
         };
 
         // No I/O-bridge FB is deployed. PLC_RW_M262 (the old "M262IO" broker)
@@ -57,7 +70,9 @@ namespace CodeGen.Services
 
         static readonly string[] UniversalComposites = new[]
         {
-            "Area", "Station", "CaSAdptrTerminator", "faultDetection"
+            "Area", "Station", "CaSAdptrTerminator", "faultDetection",
+            // Composite fault FB for the centre-home swivel (wraps FaultLatch_7SCH).
+            "faultDetection_7SCH",
         };
 
         static readonly string[] UniversalAdapters = new[]
@@ -88,6 +103,10 @@ namespace CodeGen.Services
             // does not exist". Restored 2026-05-21 alongside the CAT for
             // Bearing_PnP routing.
             "SevenStateActuator", "SevenStateActuator2",
+            // Centre-home swivel leaf Basics (2026-06-02). SevenStateCentreHomeActuator
+            // is the core ECC; No_Sensor_Handler_7SCH synthesises atHome on the
+            // work->home timer; FaultLatch_7SCH is the leaf inside faultDetection_7SCH.
+            "SevenStateCentreHomeActuator", "No_Sensor_Handler_7SCH", "FaultLatch_7SCH",
         };
 
         static readonly string[] UniversalHmiCats = new[]
