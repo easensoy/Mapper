@@ -241,6 +241,23 @@ namespace CodeGen.Services
             // the evaluator FB was reshaped to RuleTable but this CAT still wires the arrays.
             NormalizeFiveStateRuleArrays(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT.fbt", "CommonInterlockManager", cfg.SimulatorFullSystem, result);
             NormalizeCommonInterlockEvaluatorRules(eaeProjectDir, cfg.SimulatorFullSystem, result);
+            // Simulator-only swivel sensor synthesis. The Centre-Home swivel reads
+            // atWork1/atWork2 from its internal Inputs SYMLINKMULTIVARDST, which subscribes
+            // '$${PATH}atwork1' / '$${PATH}atWork2'. On the rig those resolve to the physical
+            // SwivelArmAtPick / AtWork sensors (HCF-bound to that symbol). In the SIMULATOR
+            // there are no physical sensors and nothing publishes them, so the core's ECC
+            // stalls at ToWork1 forever (atWork1 never TRUE) — exactly the "swivel stuck at
+            // Pick, engine waiting for target state" symptom. Repoint the two subscriptions at
+            // the swivel's OWN drive-coil symlinks ('$${PATH}OutputToWork1' / 'OutputToWork2',
+            // published by its Output SYMLINKMULTIVARSRC) so atWork1/atWork2 follow the coils:
+            // the instant the ECC energises a coil to move to a work position, the matching
+            // atWork closes and ToWork1->AtWork1 / ToWork2->AtWork2 fire. Entirely internal to
+            // the Bearing_PnP instance (same resource, same $${PATH} scope) — no bridge FB, no
+            // cross-resource symlink. Bidirectional + gated like NormalizeFiveStateRuleArrays:
+            // reduce==false (rig) RESTORES '$${PATH}atwork1'/'atWork2' so the hardware path is
+            // byte-identical. athome (NAME1) is untouched — it is timer-driven by the CAT's
+            // ReturnToHomeHandler / No_Sensor_Handler_7SCH, so it needs no external publish.
+            NormalizeSwivelSimSensorSource(eaeProjectDir, cfg.SimulatorFullSystem, result);
             NormalizeFiveStateFaultEnables(eaeProjectDir, cfg.SimulatorFullSystem, result);
             // Process FB recipe struct: collapse the 6 overlapping recipe arrays
             // into one Recipe : ARRAY OF RecipeStep on Process1_Generic + the
@@ -1110,6 +1127,75 @@ namespace CodeGen.Services
             catch (Exception ex)
             {
                 result.Warnings.Add($"Five_State_Actuator_CAT RuleTable normalize failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Simulator-only: repoint the Centre-Home swivel's internal Inputs
+        /// SYMLINKMULTIVARDST so atWork1/atWork2 read the swivel's own drive-coil
+        /// symlinks instead of the (unpublished-in-sim) physical sensor symlinks.
+        /// reduce==true (sim): NAME2 -> '$${PATH}OutputToWork1', NAME3 -> '$${PATH}OutputToWork2'
+        ///   (the coils the Output SYMLINKMULTIVARSRC publishes) so the ECC's ToWork1->AtWork1
+        ///   / ToWork2->AtWork2 gates close the instant the coil energises.
+        /// reduce==false (rig): NAME2 -> '$${PATH}atwork1', NAME3 -> '$${PATH}atWork2'
+        ///   (the physical SwivelArmAtPick/AtWork sensors, HCF-bound) — byte-identical hardware.
+        /// NAME1 ('$${PATH}athome') is left untouched (timer-driven by ReturnToHomeHandler).
+        /// Bidirectional + idempotent; deployer is copy-if-absent so the deployed CAT persists
+        /// and must be reshaped to match the flag every deploy (mirrors NormalizeFiveStateRuleArrays).
+        /// </summary>
+        static void NormalizeSwivelSimSensorSource(string eaeProjectDir, bool reduce, DeployResult result)
+        {
+            var fbt = Directory.EnumerateFiles(
+                    Path.Combine(eaeProjectDir, "IEC61499"),
+                    "Seven_State_Actuator_Centre_Home_CAT.fbt", SearchOption.AllDirectories)
+                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
+                ?? string.Empty;
+            if (string.IsNullOrEmpty(fbt))
+            {
+                result.Warnings.Add("Seven_State_Actuator_Centre_Home_CAT.fbt not found; swivel sim-sensor normalize skipped.");
+                return;
+            }
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+                var net = root.Element(ns + "FBNetwork");
+                var inputs = net?.Elements(ns + "FB")
+                    .FirstOrDefault(f => (string?)f.Attribute("Name") == "Inputs");
+                if (inputs == null)
+                {
+                    result.Warnings.Add("Seven_State_Actuator_Centre_Home_CAT.fbt: Inputs FB not found; swivel sim-sensor normalize skipped.");
+                    return;
+                }
+
+                var want = new[]
+                {
+                    ("NAME2", reduce ? "'$${PATH}OutputToWork1'" : "'$${PATH}atwork1'"),
+                    ("NAME3", reduce ? "'$${PATH}OutputToWork2'" : "'$${PATH}atWork2'"),
+                };
+                bool changed = false;
+                foreach (var (pn, val) in want)
+                {
+                    var p = inputs.Elements(ns + "Parameter")
+                        .FirstOrDefault(e => (string?)e.Attribute("Name") == pn);
+                    if (p == null) continue;
+                    if ((string?)p.Attribute("Value") != val) { p.SetAttributeValue("Value", val); changed = true; }
+                }
+
+                if (changed)
+                {
+                    doc.Save(fbt);
+                    result.PatchesApplied.Add(reduce
+                        ? "Seven_State_Actuator_Centre_Home_CAT: Inputs atwork1/atWork2 -> coil symlinks (sim sensor synthesis)"
+                        : "Seven_State_Actuator_Centre_Home_CAT: Inputs atwork1/atWork2 -> physical sensor symlinks (hardware)");
+                    MapperLogger.Info($"[Deploy] Centre-Home swivel sim-sensor source normalize: reduce={reduce}");
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"Centre-Home swivel sim-sensor normalize failed: {ex.Message}");
             }
         }
 
