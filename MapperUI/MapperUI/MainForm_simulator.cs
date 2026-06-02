@@ -141,15 +141,19 @@ namespace MapperUI
                         AppendActivity(line);
                 }
 
-                int hcfCountBefore = report.Missing.Count;
-                await Task.Run(() => HcfPatchService.PatchDeployed(
-                    Cfg(), path, bindings, report));
-                for (int i = hcfCountBefore; i < report.Missing.Count; i++)
-                {
-                    var line = report.Missing[i];
-                    if (line.StartsWith("[Hcf]"))
-                        AppendActivity(line);
-                }
+                // SIMULATOR: BYPASS the hardware-config (.hcf) entirely. In "Local Test"
+                // the PLCs are simulated — there is no physical IO — and the M580/M262/BX1
+                // .hcf (physical racks/modules + channel bindings) makes EAE's hardware-
+                // config build FAIL in sim mode. The simulator never reads physical IO
+                // (every sensor is synthesized via SimHopperForce / SimSwivelForce /
+                // No_Sensor_Handler timers), so the .hcf is dead weight here. Strip every
+                // deployed .hcf instead of patching it (was: HcfPatchService.PatchDeployed,
+                // which is correct only for the rig). Rig path keeps its HCF flow.
+                int strippedHcf = await Task.Run(() =>
+                    CodeGen.Services.SimulatorPostProcessor.StripHardwareConfigForSimulator(path));
+                AppendActivity($"[Simulator] Hardware-config bypass: removed {strippedHcf} .hcf file(s) " +
+                    "(M580/M262/BX1) — sim has no physical IO; sensors are synthesized via " +
+                    "SimHopperForce / SimSwivelForce / no-sensor timers.");
 
                 // Topology self-consistency guard. The sim path does NOT run
                 // Station2DeviceEmitter / BroadcastDomainEmitter (those are
