@@ -876,9 +876,44 @@ namespace CodeGen.Translation.Process
             {
                 if (IsFiveStateCommandable(inScopeTarget))
                 {
-                    int condCmdState = (waitState == 1 || waitState == 2) ? 1 : 3;
+                    // GRIPPER GRIP/RELEASE DIRECTION (derive from the Assembly STEP
+                    // name, not the WAIT condition). A mechanical gripper's
+                    // Control.xml WAIT condition is the SAME for both the grip step
+                    // and the release step -- "Bearing_Gripper/ReturnedHome" (the
+                    // twin waits for the gripper's internal open/close cycle to
+                    // settle home each time), so the condition target State_Number
+                    // is 0 in BOTH cases and the generic
+                    // "(waitState 1|2 -> toWork else toHome)" rule collapses both to
+                    // toHome=3. The gripper would then OPEN twice and never grip the
+                    // bearing -- the exact bug observed on the rig. The Assembly STEP
+                    // NAME does encode intent ("Gripping_Part" vs
+                    // "BearingPnPOpenGripper"), so for a gripper target we take the
+                    // command from the step name: a grip/close step commands toWork
+                    // (cmd 1 -> Five_State AtWork=2; M580SymbolBinder maps
+                    // closed=atwork and the single OutputToWork coil energises the
+                    // close valve), a release/open step commands toHome (cmd 3 ->
+                    // AtHomeInit=0; open=athome). Non-gripper Five_State targets
+                    // (clamps, shaft cylinders) keep the condition-derived command.
+                    // NOTE (R-12, coil direction unverified on the rig): if the
+                    // physical gripper grips/releases the OPPOSITE way to this
+                    // (energise OutputToWork opens it), that is a binder/coil wiring
+                    // inversion -- swap Bearing_Gripper_Q / the open+closed sensor
+                    // pair in M580SymbolBinder, NOT the recipe, so sim stays correct.
+                    int gripperCmd = IsGripperTarget(inScopeTarget)
+                        ? MapGripperCommandFromStepName(state.Name)
+                        : -1;
+                    int condCmdState = gripperCmd >= 0
+                        ? gripperCmd
+                        : (waitState == 1 || waitState == 2) ? 1 : 3;
                     int condSettledWait = condCmdState == 1 ? 2 : 0;
-                    if (condSettledWait != waitState)
+                    if (gripperCmd >= 0)
+                        arrays.Warnings.Add(
+                            $"[Recipe] '{state.Name}': gripper '{inScopeTarget.Name}' command derived " +
+                            $"from the STEP name -> {(condCmdState == 1 ? "CLOSE/grip (toWork, settles AtWork=2)" : "OPEN/release (toHome, settles AtHomeInit=0)")} " +
+                            $"(cmd {condCmdState}). Control.xml WAIT condition '{cond.Name}' is " +
+                            "direction-agnostic (ReturnedHome) so the step name is authoritative for " +
+                            "grippers -- this is what makes the gripper grip at Pick and release at Place.");
+                    else if (condSettledWait != waitState)
                         arrays.Warnings.Add(
                             $"[Recipe] '{state.Name}': condition-driven CMD on '{inScopeTarget.Name}' " +
                             $"-> {(condCmdState == 1 ? "toWork" : "toHome")} (cmd {condCmdState}); WAIT " +
@@ -1264,6 +1299,43 @@ namespace CodeGen.Translation.Process
             if (lower.Contains("place")) return 3;
             if (lower.Contains("pick"))  return 1;
             if (lower.Contains("home") || lower.Contains("returned")) return 5;
+            return -1;
+        }
+
+        /// <summary>
+        /// True when the condition target is a mechanical gripper (VueOne
+        /// Type="Robot" whose name contains "gripper"/"grasp"). Grippers deploy as
+        /// Five_State_Actuator_CAT but, unlike clamps/cylinders, their Control.xml
+        /// WAIT condition does not encode grip-vs-release direction (it is the same
+        /// "ReturnedHome" for both), so the command is taken from the Assembly STEP
+        /// name instead (see <see cref="MapGripperCommandFromStepName"/>).
+        /// </summary>
+        private static bool IsGripperTarget(VueOneComponent t)
+        {
+            if (t == null) return false;
+            var n = (t.Name ?? string.Empty).ToLowerInvariant();
+            return n.Contains("gripper") || n.Contains("grasp");
+        }
+
+        /// <summary>
+        /// Maps an Assembly STEP name to the Five_State gripper command:
+        ///   1 = toWork  (CLOSE / grip  — settles AtWork=2),
+        ///   3 = toHome  (OPEN  / release — settles AtHomeInit=0),
+        ///  -1 = unknown (caller falls back to the condition-derived command).
+        /// "open"/"release"/"unclamp" -> OPEN; otherwise a grip/grasp/close/hold/
+        /// pick keyword -> CLOSE. Open is checked FIRST so "BearingPnPOpenGripper"
+        /// (which also contains "gripper") routes to OPEN, while "Gripping_Part"
+        /// routes to CLOSE. This is what sequences the bearing pick-and-place
+        /// correctly: gripper CLOSES at the pick/grip step to hold the bearing,
+        /// OPENS at the place/release step to let it go.
+        /// </summary>
+        private static int MapGripperCommandFromStepName(string? stepName)
+        {
+            var n = (stepName ?? string.Empty).ToLowerInvariant();
+            if (n.Length == 0) return -1;
+            if (n.Contains("open") || n.Contains("release") || n.Contains("unclamp")) return 3;
+            if (n.Contains("grip") || n.Contains("grasp") || n.Contains("clos") ||
+                n.Contains("hold") || n.Contains("pick")) return 1;
             return -1;
         }
 
