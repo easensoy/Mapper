@@ -303,6 +303,87 @@ namespace MapperTests
             CheckInterlockStructCollapse(syslayNet, "syslay", Fail, Pass, Note);
             CheckInterlockStructCollapse(sysresNet, "sysres", Fail, Pass, Note);
 
+            // ── D4: MQTT injection — per-resource MqttConn (BX1 + M262 only) ──
+            // The main pipeline above runs with MqttPublishEnabled=false (default),
+            // so MQTT is never exercised there. This self-contained block re-runs
+            // generation with MqttPublishEnabled=true and asserts the per-resource
+            // MQTT_CONNECTION layout the live "Test Simulator" button produces:
+            //   • MqttConn       — BX1 (Cover P&P / Soft dPAC, the rig MQTT host)
+            //   • MqttConn_M262  — M262 (Feed_Station) so its embedded MqttPub
+            //                      binds locally and Feed data reaches the broker
+            //   • NO MqttConn_M580 — Assembly is out of scope; M580 has no MqttConn
+            // plus the Feed_Station bring-up wires that drive MqttConn_M262 to
+            // IsConnected=TRUE in sim (Area.INITO→INIT, INITO→CONNECT self-loop).
+            // This is the headless proof that MQTT is actually generated.
+            try
+            {
+                var mqttRoot = Path.Combine(Path.GetTempPath(), "SimHarnessMqtt_" + Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(mqttRoot);
+                var mqttSyslay = Path.Combine(mqttRoot, "sim.syslay");
+                var mqttSysres = Path.Combine(mqttRoot, "sim.sysres");
+                File.WriteAllText(mqttSyslay, "<Layer xmlns=\"https://www.se.com/LibraryElements\"><SubAppNetwork/></Layer>");
+                File.WriteAllText(mqttSysres, "<Layer xmlns=\"https://www.se.com/LibraryElements\"><FBNetwork/></Layer>");
+
+                var mqttCfg = new MapperConfig
+                {
+                    SyslayPath2 = mqttSyslay,
+                    SysresPath2 = mqttSysres,
+                    SimulatorFullSystem = true,
+                    MqttPublishEnabled = true,
+                    MqttClientId = "SMC_BX1",
+                    MqttBrokerUrl = "mqtt://192.168.1.50:1883",
+                };
+
+                SystemInjector.BindingApplicationReport mqttRep = null!;
+                var mqttInjector = new SystemInjector();
+                await Task.Run(() => mqttInjector.GenerateStation1TestSyslay(mqttCfg, FixturePath(), bindings, out mqttRep));
+
+                var mqttFbs = SysresFbMirror.ReadSyslayTopLevelFbs(mqttSyslay);
+                var mqttConns = mqttFbs.Where(f => f.Type == "MQTT_CONNECTION")
+                    .Select(f => f.Name).OrderBy(n => n, StringComparer.Ordinal).ToList();
+
+                bool hasBx1  = mqttConns.Contains("MqttConn");
+                bool hasM262 = mqttConns.Contains("MqttConn_M262");
+                bool hasM580 = mqttConns.Contains("MqttConn_M580");
+
+                if (hasBx1 && hasM262 && !hasM580)
+                    Pass("D4", $"MQTT: per-resource MqttConn present — BX1 (MqttConn) + M262 (MqttConn_M262), no M580 [{string.Join(", ", mqttConns)}]");
+                else
+                    Fail("D4", $"MQTT: expected MqttConn + MqttConn_M262 and NO MqttConn_M580; got [{string.Join(", ", mqttConns)}]");
+
+                // ConnectionID must be the embedded MqttPub bind string (config.MqttClientId,
+                // 'SMC_BX1') on BOTH connections — that string is what binds a local MqttPub
+                // to the MqttConn on its own resource. Informational (FormatString form may
+                // wrap it in quotes), so it never fails the run.
+                var connIds = mqttFbs.Where(f => f.Type == "MQTT_CONNECTION")
+                    .Select(f => f.Parameters.FirstOrDefault(p => p.Name == "ConnectionID")?.Value ?? "(none)")
+                    .ToList();
+                if (connIds.All(v => v.Contains("SMC_BX1", StringComparison.Ordinal)))
+                    Pass("D4b", "MQTT: both MqttConn carry ConnectionID 'SMC_BX1' (embedded MqttPub bind string)");
+                else
+                    Note($"D4b: ConnectionID values = [{string.Join(", ", connIds)}]");
+
+                // Feed_Station bring-up wires for MqttConn_M262 (drives IsConnected=TRUE in sim).
+                var mqttDoc = XDocument.Load(mqttSyslay);
+                var mqttNet = mqttDoc.Root?.Element(Ns + "SubAppNetwork") ?? mqttDoc.Root?.Element(Ns + "FBNetwork");
+                bool HasEv(string s, string d) =>
+                    (mqttNet?.Element(Ns + "EventConnections")?.Elements(Ns + "Connection") ?? Enumerable.Empty<XElement>())
+                    .Any(c => (string?)c.Attribute("Source") == s && (string?)c.Attribute("Destination") == d);
+                var wireMissing = new List<string>();
+                if (!HasEv("Area.INITO", "MqttConn_M262.INIT")) wireMissing.Add("Area.INITO → MqttConn_M262.INIT");
+                if (!HasEv("MqttConn_M262.INITO", "MqttConn_M262.CONNECT")) wireMissing.Add("MqttConn_M262.INITO → MqttConn_M262.CONNECT");
+                if (wireMissing.Count == 0)
+                    Pass("D4c", "MQTT: MqttConn_M262 wired into Feed_Station boot (Area.INITO→INIT) + INITO→CONNECT self-loop");
+                else
+                    Fail("D4c", "MQTT: MqttConn_M262 bring-up wires missing: " + string.Join("; ", wireMissing));
+
+                try { Directory.Delete(mqttRoot, true); } catch { /* best-effort temp cleanup */ }
+            }
+            catch (Exception ex)
+            {
+                Fail("D4", $"MQTT injection check threw: {ex.GetType().Name}: {ex.Message}");
+            }
+
             // ── Summary ──────────────────────────────────────────────────────
             _out.WriteLine("");
             _out.WriteLine($"[Harness] {failures.Count} checklist failure(s).");
