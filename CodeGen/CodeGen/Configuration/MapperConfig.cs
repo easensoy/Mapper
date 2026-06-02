@@ -74,7 +74,13 @@ namespace CodeGen.Configuration
         // simulator has no model for. To return to the bearing-only bench test, repopu
         // late the allowlist with { "bearing_pnp", "bearing_gripper" }.
         public static readonly string RecipeTestProcessName = "Assembly_Station";
-        public static readonly string[] RecipeTestActuatorAllowlist = new string[0];
+        // 2026-06-02 (TEMPORARY, bench): bearing-only isolation test on M580. Restricts
+        // the Assembly_Station recipe to Bearing_PnP + Bearing_Gripper so they actually
+        // RUN on an M580-only deploy — every other actuator's CMD/WAIT (Shaft_*, Clamp,
+        // CoverPNP_*) AND the cross-PLC Transfer wait are dropped, so the recipe no longer
+        // stalls on the Feed/Transfer (M262) prerequisites that never complete when only
+        // M580 runs. Clear back to `new string[0]` to restore the full Assembly cycle.
+        public static readonly string[] RecipeTestActuatorAllowlist = new[] { "bearing_pnp", "bearing_gripper" };
 
         public string SystemXmlPath { get; set; } = string.Empty;
         public string MappingRulesPath { get; set; } = string.Empty;
