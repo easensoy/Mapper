@@ -1414,10 +1414,39 @@ namespace CodeGen.Translation
                         chRuleCount = kept; chFrom = f; chTo = t; chSrc = s; chBlk = b;
                     }
                     actParams["RuleCount"]        = SyslayBuilder.FormatInt(chRuleCount);
-                    actParams["RuleFromState"]    = SyslayBuilder.FormatIntArray(chFrom);
-                    actParams["RuleToState"]      = SyslayBuilder.FormatIntArray(chTo);
-                    actParams["RuleSourceID"]     = SyslayBuilder.FormatIntArray(chSrc);
-                    actParams["RuleBlockedState"] = SyslayBuilder.FormatIntArray(chBlk);
+                    // Simulator interface reduction (mirrors BuildActuatorParameters'
+                    // dropInterlockConstants block for Five_State). The deployer's
+                    // NormalizeFiveStateRuleArrays collapses THIS CAT's four
+                    // RuleFromState/ToState/SourceID/BlockedState INT[10] inputs
+                    // (wired into CommonInterlockManager) into a single
+                    // RuleTable : InterlockRule[10] under the SAME
+                    // cfg.SimulatorFullSystem flag. An instance <Parameter> for a
+                    // var the reshaped CAT no longer declares raises
+                    // ERR_MEMBER_VAR_NOTFOUND ("RuleFromState does not exist in
+                    // Main.CommonInterlockEvaluator" — the 17 sim-compile errors),
+                    // so on the sim path emit RuleTable and drop the four arrays;
+                    // on the rig (flag off) keep the four arrays the un-reshaped
+                    // CAT still declares. RuleCount stays separate either way (the
+                    // Evaluate loop bound). NB only the rule arrays collapse for
+                    // this CAT — NormalizeFiveStateInterlockConstants /
+                    // NormalizeFiveStateFaultEnables touch ONLY Five_State_Actuator_CAT,
+                    // so Target*State + fault-enable params stay emitted below.
+                    if (config != null && config.SimulatorFullSystem)
+                    {
+                        actParams.Remove("RuleFromState");
+                        actParams.Remove("RuleToState");
+                        actParams.Remove("RuleSourceID");
+                        actParams.Remove("RuleBlockedState");
+                        actParams["RuleTable"] = SyslayBuilder.FormatRuleTable(
+                            chFrom, chTo, chSrc, chBlk, chRuleCount);
+                    }
+                    else
+                    {
+                        actParams["RuleFromState"]    = SyslayBuilder.FormatIntArray(chFrom);
+                        actParams["RuleToState"]      = SyslayBuilder.FormatIntArray(chTo);
+                        actParams["RuleSourceID"]     = SyslayBuilder.FormatIntArray(chSrc);
+                        actParams["RuleBlockedState"] = SyslayBuilder.FormatIntArray(chBlk);
+                    }
                     if (scopedIds != null)
                     {
                         int chInScope = CountInScopeInterlockConds(actuator, scopedIds);
