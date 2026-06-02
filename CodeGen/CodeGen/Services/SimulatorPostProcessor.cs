@@ -29,6 +29,46 @@ namespace CodeGen.Services
         static readonly XNamespace Ns = "https://www.se.com/LibraryElements";
 
         /// <summary>
+        /// Simulator-only: BYPASS the hardware-config layer. Deletes every deployed
+        /// <c>.hcf</c> under <c>IEC61499/System</c> (all three PLCs — M262, M580, BX1).
+        /// In the "Local Test" sim profile the PLCs are simulated, there is no physical
+        /// IO, and the .hcf (physical racks/modules + channel bindings) makes EAE's
+        /// hardware-config build fail in sim mode. The simulator never reads physical
+        /// IO — every sensor is synthesized (SimHopperForce / SimSwivelForce /
+        /// No_Sensor_Handler timers) — so the .hcf is dead weight here. The deployed
+        /// project references the .hcf only by folder CONVENTION
+        /// (<c>{sysdev}/{sysdevId}.hcf</c>), not by an explicit path, so removing the
+        /// files just leaves each device with no hardware config (no dangling
+        /// reference, no PNConfiguratorBuildTask to fail). Rig path never calls this.
+        /// Returns the number of .hcf files removed.
+        /// </summary>
+        public static int StripHardwareConfigForSimulator(string syslayPath)
+        {
+            if (string.IsNullOrWhiteSpace(syslayPath)) return 0;
+            // Walk up to the IEC61499/System directory that holds the device tree.
+            var dir = Path.GetDirectoryName(syslayPath);
+            string? systemDir = null;
+            while (!string.IsNullOrEmpty(dir))
+            {
+                if (string.Equals(Path.GetFileName(dir), "System", StringComparison.OrdinalIgnoreCase))
+                { systemDir = dir; break; }
+                dir = Path.GetDirectoryName(dir);
+            }
+            if (string.IsNullOrEmpty(systemDir) || !Directory.Exists(systemDir)) return 0;
+
+            int removed = 0;
+            try
+            {
+                foreach (var hcf in Directory.EnumerateFiles(systemDir, "*.hcf", SearchOption.AllDirectories))
+                {
+                    try { File.Delete(hcf); removed++; } catch { /* best-effort */ }
+                }
+            }
+            catch { /* enumeration failure -> nothing removed */ }
+            return removed;
+        }
+
+        /// <summary>
         /// Simulator-only: inject one <c>SimHopperForce</c>
         /// SYMLINKMULTIVARSRC into the syslay SubAppNetwork and mirror it
         /// into the deployed sysres FBNetwork. It publishes
