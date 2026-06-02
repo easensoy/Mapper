@@ -539,13 +539,20 @@ namespace CodeGen.Translation.Process
                         string.Equals((c.Name ?? string.Empty).Trim(), tgt,
                             StringComparison.OrdinalIgnoreCase));
                     if (comp == null) continue;
+                    // Home ONLY the Seven_State swivel. It is the actuator that boots
+                    // parked at a work position (atWork1/atWork2) and so needs to be
+                    // driven home first. Five_State actuators (cylinders, mechanical
+                    // grippers) boot to home via their athome sensor and their first
+                    // recipe command is already a real move, so they need no home
+                    // preamble -- and crucially, with the anti-race engine guard a
+                    // "go home" command to an actuator that ALREADY boots home is a
+                    // no-op (no transition, no fresh report) that the engine would
+                    // then wait on forever. So we must not prepend a home step for
+                    // them.
+                    if (!IsSevenStateCommandable(comp)) continue;
                     if (!scopedRegistry.TryGetValue((comp.ComponentID ?? string.Empty).Trim(), out var id))
                         continue;
-                    // Seven_State swivel homes with state_val=5; Five_State actuator
-                    // (cylinders, mechanical grippers) homes with toHome=3. Both
-                    // settle publishing current_state_to_process=0 (AtHomeInit).
-                    int homeCmd = IsSevenStateCommandable(comp) ? 5 : 3;
-                    homeOrder.Add((tgt, id, homeCmd));
+                    homeOrder.Add((tgt, id, 5));   // Seven_State Home = state_val 5, settles AtHomeInit=0
                 }
 
                 if (homeOrder.Count > 0)
