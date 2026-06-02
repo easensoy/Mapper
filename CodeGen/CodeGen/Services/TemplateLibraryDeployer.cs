@@ -35,7 +35,8 @@ namespace CodeGen.Services
             // shared CommonInterlockEvaluator + updateComponentState are already
             // in UniversalBasics.
             { "Seven_State_Actuator_Centre_Home_CAT",
-              new[] { "SevenStateCentreHomeActuator", "No_Sensor_Handler_7SCH", "FaultLatch_7SCH" } },
+              new[] { "SevenStateCentreHomeActuator", "No_Sensor_Handler_7SCH", "FaultLatch_7SCH",
+                      "actuatorStateEvents_7SCH" } },
             { "Station_CAT",             new[] { "Station_Core", "Station_Fault", "Station_Status" } },
             { "Process1_Generic",        new[] { "ProcessRuntime_Generic_v1", "ProcessStateBusHandler" } },
         };
@@ -105,8 +106,14 @@ namespace CodeGen.Services
             "SevenStateActuator", "SevenStateActuator2",
             // Centre-home swivel leaf Basics (2026-06-02). SevenStateCentreHomeActuator
             // is the core ECC; No_Sensor_Handler_7SCH synthesises atHome on the
-            // work->home timer; FaultLatch_7SCH is the leaf inside faultDetection_7SCH.
+            // work->home timer; FaultLatch_7SCH + actuatorStateEvents_7SCH are the
+            // leaves inside faultDetection_7SCH. actuatorStateEvents_7SCH was MISSING
+            // from Jyotsna's delivery (faultDetection_7SCH instantiates it as
+            // 'ActuatorEvents' but no .fbt shipped -> EAE: "type 'Main:actuatorStateEvents_7SCH'
+            // does not exist"); reconstructed from the non-7SCH actuatorStateEvents
+            // as the two-work variant (state 1 -> toWork1_Event, state 3 -> toWork2_Event).
             "SevenStateCentreHomeActuator", "No_Sensor_Handler_7SCH", "FaultLatch_7SCH",
+            "actuatorStateEvents_7SCH",
         };
 
         static readonly string[] UniversalHmiCats = new[]
