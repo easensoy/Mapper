@@ -504,24 +504,33 @@ namespace CodeGen.Services
                     Save(sdoc, syslayPath);
                 }
 
-                // ── sysres (the actual runtime artefact EAE compiles) ───
-                var sysresDir = Path.GetDirectoryName(cfg.SysresPath2);
-                if (!string.IsNullOrEmpty(sysresDir) && Directory.Exists(sysresDir))
+                // ── sysres: EVERY per-PLC resource (M262 + M580 + BX1) ─────
+                // Each PLC's runtime compiles ITS OWN .sysres, so a Five_State
+                // actuator on M580/BX1 only goes no-sensor if WorkSensorFitted=FALSE
+                // in THAT resource's file. The old code wrote only the FIRST .sysres in
+                // cfg.SysresPath2's folder (M262), leaving the M580/BX1 actuators
+                // (Bearing_Gripper, Shaft_*, CoverPNP_*) at WorkSensorFitted=TRUE — so
+                // they wait on a physical atwork/athome sensor that never closes in sim
+                // and stall at ToWork (verified: M580 Bearing_Gripper sat at
+                // current_state_to_process=1, atwork=FALSE). Walk up to the System dir
+                // and cover all .sysres (they live in sibling folders per PLC).
+                int sysresTouched = 0;
+                foreach (var sysresFile in EnumerateAllSysresFiles(cfg))
                 {
-                    var sysresFile = Directory
-                        .EnumerateFiles(sysresDir, "*.sysres", SearchOption.TopDirectoryOnly)
-                        .FirstOrDefault();
-                    if (sysresFile != null)
+                    try
                     {
                         var rdoc = XDocument.Load(sysresFile, LoadOptions.PreserveWhitespace);
-                        var rnet = rdoc.Root?.Element(Ns + "FBNetwork");
-                        if (rnet != null)
+                        var rnet = rdoc.Root?.Element(Ns + "FBNetwork") ?? rdoc.Root;
+                        if (rnet != null && ForceNoSensor(rnet) > 0)
                         {
-                            ForceNoSensor(rnet);
                             Save(rdoc, sysresFile);
+                            sysresTouched++;
                         }
                     }
+                    catch { /* skip an unreadable/locked sysres */ }
                 }
+                log?.Invoke($"[Simulator] No-sensor override: {total} Five_State actuator(s) in syslay; " +
+                    $"WorkSensorFitted/HomeSensorFitted=FALSE written into {sysresTouched} per-PLC .sysres (M262+M580+BX1).");
 
                 return total;
             }
@@ -1075,6 +1084,32 @@ namespace CodeGen.Services
             if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return null;
             return Directory.EnumerateFiles(dir, "*.sysres", SearchOption.TopDirectoryOnly)
                 .FirstOrDefault();
+        }
+
+        /// <summary>
+        /// Every <c>*.sysres</c> under the project's <c>IEC61499/System</c> tree — i.e.
+        /// ALL per-PLC resources (M262 + M580 + BX1), not just the one beside
+        /// cfg.SysresPath2. The resources live in sibling folders
+        /// (<c>…/System/{sys}/{res2}/…</c>, <c>{res3}</c>, <c>{res4}</c>), so a
+        /// TopDirectoryOnly scan of one folder misses M580/BX1. Found by walking up from
+        /// cfg.SysresPath2 to the System dir, then enumerating recursively.
+        /// </summary>
+        static System.Collections.Generic.IEnumerable<string> EnumerateAllSysresFiles(MapperConfig cfg)
+        {
+            var dir = Path.GetDirectoryName(cfg.SysresPath2);
+            string? systemDir = null;
+            var probe = dir;
+            while (!string.IsNullOrEmpty(probe))
+            {
+                if (string.Equals(Path.GetFileName(probe), "System", StringComparison.OrdinalIgnoreCase))
+                { systemDir = probe; break; }
+                probe = Path.GetDirectoryName(probe);
+            }
+            if (!string.IsNullOrEmpty(systemDir) && Directory.Exists(systemDir))
+                return Directory.EnumerateFiles(systemDir, "*.sysres", SearchOption.AllDirectories);
+            if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
+                return Directory.EnumerateFiles(dir, "*.sysres", SearchOption.TopDirectoryOnly);
+            return System.Linq.Enumerable.Empty<string>();
         }
 
         /// <summary>Appends a child element to <paramref name="parent"/> and returns it,
