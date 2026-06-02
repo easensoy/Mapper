@@ -1786,6 +1786,29 @@ namespace CodeGen.Translation
                 // FiveStateActuator ECC has no process_state_name input.
                 dict["process_state_name"] = SyslayBuilder.FormatString(actuator.Name.ToLowerInvariant());
             }
+            // Centre-home swivel CAT (Bearing_PnP, 2026-06-02). The core publishes
+            // current_state_to_process 2=AtWork1(Pick) / 4=AtWork2(Place) / 6=AtHome;
+            // Target*State feed CommonInterlockManager at those settle values.
+            // work{1,2}ToHomeTime drive No_Sensor_Handler_7SCH's return-to-home
+            // fallback — on the rig the real SwivelArmAtHome sensor closes the loop
+            // first; the timer only fires if it doesn't. Fault timeouts OFF so an
+            // isolated test never faults waiting for a work sensor. RuleCount=0:
+            // NO cross-PLC interlock for the ISOLATED Bearing_PnP test (Shaft_Hr /
+            // CoverPNP_Hr / Transfer are parked → no collision). The real interlock
+            // rules (block ToWork2 when those occupy the crossing) land when the
+            // full system integrates — the CAT already has RuleFromState[10] etc.
+            // wired to CommonInterlockManager, so it is purely a parameter change.
+            if (string.Equals(fbType, "Seven_State_Actuator_Centre_Home_CAT", StringComparison.OrdinalIgnoreCase))
+            {
+                dict["TargetWork1State"] = SyslayBuilder.FormatInt(2);
+                dict["TargetWork2State"] = SyslayBuilder.FormatInt(4);
+                dict["TargetHomeState"]  = SyslayBuilder.FormatInt(6);
+                dict["work1ToHomeTime"]  = SyslayBuilder.FormatTimeMs(3000);
+                dict["work2ToHomeTime"]  = SyslayBuilder.FormatTimeMs(3000);
+                dict["enableToWork1FaultTimeout"] = SyslayBuilder.FormatBool(false);
+                dict["enableToWork2FaultTimeout"] = SyslayBuilder.FormatBool(false);
+                dict["RuleCount"] = SyslayBuilder.FormatInt(0);
+            }
             // Vacuum_Gripper_CAT + Five_State_Actuator_No_Sensors_CAT (the other
             // non-5-state cases that still route through this minimal path)
             // only need the scalar actuator_name + actuator_id pair declared above.
