@@ -75,7 +75,14 @@ namespace CodeGen.Mapping
 
             if (!MapperConfig.StubSevenStateActuatorsAsFiveState
                 && (stateCount == 7 || isBranchedSeven))
-                return "Seven_State_Actuator_CAT";
+                // 2026-06-02: Bearing_PnP now instantiates Jyotsna's centre-home
+                // swivel CAT (3-position: Work1=Pick / Work2=Place / centre Home).
+                // It wires like Five_State (has stationAdptr + stateRprtCmd, uses
+                // updateComponentState, takes mode from the station ring) — unlike
+                // the old Seven_State_Actuator_CAT which had no stationAdptr. Command
+                // vocabulary: state_val 1=Work1, 3=Work2, 5=Home; the core settles
+                // publishing current_state_to_process 2/4/6.
+                return "Seven_State_Actuator_Centre_Home_CAT";
 
             if (stateCount == 4)
                 return "Five_State_Actuator_No_Sensors_CAT";
