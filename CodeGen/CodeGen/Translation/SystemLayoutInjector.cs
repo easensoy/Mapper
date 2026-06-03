@@ -1920,8 +1920,15 @@ namespace CodeGen.Translation
                 dict["TargetWork1State"] = SyslayBuilder.FormatInt(2);
                 dict["TargetWork2State"] = SyslayBuilder.FormatInt(4);
                 dict["TargetHomeState"]  = SyslayBuilder.FormatInt(6);
-                dict["work1ToHomeTime"]  = SyslayBuilder.FormatTimeMs(750);   // home from Pick — proven old-CAT toPickTime
-                dict["work2ToHomeTime"]  = SyslayBuilder.FormatTimeMs(500);   // home from Place — proven old-CAT toPlaceTime
+                // 2026-06-03: 750/500ms REMOVED per rig feedback (they overshot centre
+                // on this CAT). 0 => the home timer fires immediately, so the swivel no
+                // longer swings past centre to the far work end on a Home command; it
+                // settles at AtHomeInit where it already is. Pick/Place are unaffected
+                // (they use the atWork sensors, not these timers). If a real physical
+                // centre is needed later, set these to the measured Pick->centre /
+                // Place->centre swing times.
+                dict["work1ToHomeTime"]  = SyslayBuilder.FormatTimeMs(0);
+                dict["work2ToHomeTime"]  = SyslayBuilder.FormatTimeMs(0);
                 dict["enableToWork1FaultTimeout"] = SyslayBuilder.FormatBool(false);
                 dict["enableToWork2FaultTimeout"] = SyslayBuilder.FormatBool(false);
                 dict["faultTimeoutWork1"] = SyslayBuilder.FormatTimeMs(10000);
