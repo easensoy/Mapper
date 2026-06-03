@@ -111,7 +111,11 @@ namespace CodeGen.Configuration
         // CoverPNP_*) AND the cross-PLC Transfer wait are dropped, so the recipe no longer
         // stalls on the Feed/Transfer (M262) prerequisites that never complete when only
         // M580 runs. Clear back to `new string[0]` to restore the full Assembly cycle.
-        public static readonly string[] RecipeTestActuatorAllowlist = new[] { "bearing_pnp", "bearing_gripper" };
+        // 2026-06-03: shaft actuators added back (IO restored from backup). M580-only
+        // set: bearing + shaft, NO BX1 covers (those would stall waiting on the
+        // unconnected BX1). Clear to `new string[0]` for the full cycle incl. covers.
+        public static readonly string[] RecipeTestActuatorAllowlist = new[]
+            { "bearing_pnp", "bearing_gripper", "shaft_hr", "shaft_vr", "shaft_gripper" };
 
         public string SystemXmlPath { get; set; } = string.Empty;
         public string MappingRulesPath { get; set; } = string.Empty;
