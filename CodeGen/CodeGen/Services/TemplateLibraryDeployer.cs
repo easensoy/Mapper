@@ -1192,8 +1192,20 @@ namespace CodeGen.Services
 
                 var want = new[]
                 {
+                    // atwork1 / atWork2 -> the two work coils (Pick / Place gates).
                     ("NAME2", reduce ? "'$${PATH}OutputToWork1'" : "'$${PATH}atwork1'"),
                     ("NAME3", reduce ? "'$${PATH}OutputToWork2'" : "'$${PATH}atWork2'"),
+                    // athome -> OutputToWork1 in sim. The internal ReturnToHomeHandler
+                    // timer that normally synthesizes atHome is dead in sim (it gates on
+                    // [work-coil AND its sensor], and the coil-mirror drops the sensor the
+                    // instant the coil drops), so the swivel froze at ToHome (current_state=5)
+                    // with atHome never TRUE. The recipe homes the swivel from Place (work2):
+                    // toHome then energizes OutputToWork1 to swing back through centre and
+                    // leaves it TRUE at AtHome, so atHome := OutputToWork1 goes TRUE through
+                    // the whole home move -> ToHome -> AtHome fires (current_state=6). (athome
+                    // also reads TRUE while at Pick, but no transition there checks it, so it
+                    // is harmless.) Rig keeps the real '$${PATH}athome' sensor.
+                    ("NAME1", reduce ? "'$${PATH}OutputToWork1'" : "'$${PATH}athome'"),
                 };
                 bool changed = false;
                 foreach (var (pn, val) in want)
