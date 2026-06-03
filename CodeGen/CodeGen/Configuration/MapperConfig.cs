@@ -67,6 +67,20 @@ namespace CodeGen.Configuration
         //                 the swivel to physically reach home before commanding Pick.
         public static bool SimulatorRecipeMode = false;
 
+        // RECIPE RUN-ONCE (2026-06-03). When true (default), each process recipe
+        // runs its sequence ONE time and then PARKS on the END row instead of
+        // looping back to step 0. The Process engine's END ECState runs
+        // EndSequence (CurrentStep := Recipe[CurrentStep].NextStep), so the END
+        // row's NextStep decides what happens after the recipe finishes: pointing
+        // it at step 0 RESTARTS the whole cycle (and with the home-first preamble
+        // now at step 0, that means Home->Pick->Place->Home->Home->Pick... forever
+        // -- the observed swivel "bounce between atWork1 and atWork2"); pointing it
+        // at ITSELF parks the engine (no further commands, actuators hold their
+        // last/home position). Set false to restore continuous looping for a
+        // production line that should keep cycling. Applied in
+        // ProcessRecipeArrayGenerator.Generate after the preamble shifts indices.
+        public static bool RecipeRunOnce = true;
+
         // TEST ISOLATION (2026-05-29, TEMPORARY): restrict ONE process's recipe to a
         // subset of actuators so a single mechanism can be exercised on the rig
         // without the others moving. RecipeTestProcessName = the process to restrict
