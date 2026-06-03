@@ -1920,15 +1920,18 @@ namespace CodeGen.Translation
                 dict["TargetWork1State"] = SyslayBuilder.FormatInt(2);
                 dict["TargetWork2State"] = SyslayBuilder.FormatInt(4);
                 dict["TargetHomeState"]  = SyslayBuilder.FormatInt(6);
-                // 2026-06-03: 750/500ms REMOVED per rig feedback (they overshot centre
-                // on this CAT). 0 => the home timer fires immediately, so the swivel no
-                // longer swings past centre to the far work end on a Home command; it
-                // settles at AtHomeInit where it already is. Pick/Place are unaffected
-                // (they use the atWork sensors, not these timers). If a real physical
-                // centre is needed later, set these to the measured Pick->centre /
-                // Place->centre swing times.
-                dict["work1ToHomeTime"]  = SyslayBuilder.FormatTimeMs(0);
-                dict["work2ToHomeTime"]  = SyslayBuilder.FormatTimeMs(0);
+                // 2026-06-03: MUST be > 0. Setting these to 0 froze the recipe -- an
+                // E_DELAY with DT=0 never fires its EO, so the swivel's home never
+                // completed, the home-preamble WAIT never satisfied, and the engine
+                // stalled on step 1 (nothing downstream ran: no grip, no release, no
+                // shaft). The timer ALSO has to be long enough for the swivel to leave
+                // the work position (atWork clears) so AtHome->AtHomeInit can fire.
+                // 750/500ms are the values proven to do both (the recipe ran end to end
+                // with them). The physical overshoot they cause is COSMETIC -- it only
+                // affects where the arm rests, not whether the recipe advances. Do NOT
+                // set these to 0.
+                dict["work1ToHomeTime"]  = SyslayBuilder.FormatTimeMs(750);
+                dict["work2ToHomeTime"]  = SyslayBuilder.FormatTimeMs(500);
                 dict["enableToWork1FaultTimeout"] = SyslayBuilder.FormatBool(false);
                 dict["enableToWork2FaultTimeout"] = SyslayBuilder.FormatBool(false);
                 dict["faultTimeoutWork1"] = SyslayBuilder.FormatTimeMs(10000);
