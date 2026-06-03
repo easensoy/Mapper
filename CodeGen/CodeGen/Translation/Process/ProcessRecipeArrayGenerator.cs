@@ -588,18 +588,29 @@ namespace CodeGen.Translation.Process
                         arrays.CmdTargetName.Insert(pos, string.Empty);
                         arrays.CmdStateArr.Insert(pos, 0);
                         arrays.Wait1Id.Insert(pos, id);
-                        // Home-preamble WAIT target — differs RIG vs SIM (see
-                        // MapperConfig.SimulatorRecipeMode). SIM: the swivel boots at
-                        // AtHomeInit(0) and a home command is a no-op, so wait for 0.
-                        // RIG: the swivel boots parked at a work position and the engine's
-                        // blank state_table reads 0 — WAIT-for-0 false-matches and the
-                        // homing is SKIPPED (swivel goes atWork1->atWork2, atHome never
-                        // TRUE). Wait for AtHome=6 instead (== atHome sensor TRUE): the
-                        // blank 0 can't match it, so the engine truly waits for the swivel
-                        // to physically reach home before the Pick step. The Centre-Home
-                        // ECC reports current_state=6 the moment the atHome sensor closes
-                        // (a distinct pst_out event the engine catches), then settles to 0.
-                        arrays.Wait1State.Insert(pos, MapperConfig.SimulatorRecipeMode ? 0 : 6);
+                        // Home-preamble WAIT target = AtHomeInit(0), the value the swivel
+                        // STABLY holds at home -- for BOTH rig and sim. (2026-06-03)
+                        //
+                        // This used to be RIG=6 to dodge a "blank state_table reads 0 ->
+                        // WAIT-for-0 false-matches -> homing skipped" race: the swivel
+                        // booted parked at a work position but the engine, having inited
+                        // last, never caught its boot report, so state_table[swivel]
+                        // defaulted to 0 and a WAIT-for-0 matched instantly. But waiting
+                        // for the transient AtHome=6 STALLS instead, because on the rig the
+                        // ECC takes AtHome(6) -> AtHomeInit(0) in the same tick (atWork both
+                        // FALSE, atHome TRUE) so the engine only ever sees the stable 0 --
+                        // exactly what the FINAL-home classifier wait already uses (RIG=0).
+                        //
+                        // The real cure is the AtHomeInit sensor-recovery arc added to the
+                        // Centre-Home core (TemplateLibraryDeployer.PatchSwivelAtHomeInitRecovery):
+                        // a swivel that mis-booted into AtHomeInit re-syncs to AtWork1/AtWork2
+                        // the instant its work sensor reads TRUE, firing a FRESH pst_out the
+                        // running engine DOES catch -> state_table holds the true 2/4, not a
+                        // stale 0, so WAIT-for-0 no longer false-matches. And regardless of
+                        // the wait, the swivel got the CMD home=5 and its ECC sequences
+                        // home-before-pick, so it physically homes either way. Net: wait for
+                        // the stable 0 (reliably seen) instead of the transient 6 (missed).
+                        arrays.Wait1State.Insert(pos, 0);
                         arrays.NextStep.Insert(pos, pos + 1);
                         pos++;
                     }
