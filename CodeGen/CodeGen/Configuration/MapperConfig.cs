@@ -50,6 +50,23 @@ namespace CodeGen.Configuration
         // the Seven_State path during that demo window.
         public static readonly bool StubSevenStateActuatorsAsFiveState = false;
 
+        // RIG vs SIM behaviour for the Seven_State swivel HOME-FIRST preamble.
+        // Set from cfg.SimulatorFullSystem at the start of GenerateStation1TestSyslay
+        // (fresh every generation — no session carry-over). The recipe generator reads
+        // it to choose the home-preamble WAIT target:
+        //   SIM  (true):  the swivel boots at AtHomeInit (current_state=0) and a home
+        //                 command from there is a no-op, so the home WAIT must target 0
+        //                 (else it stalls waiting for a move that never happens).
+        //   RIG (false): the swivel boots PARKED AT A WORK position (atWork1=TRUE) and
+        //                 the process engine inits LAST, so its state_table reads the
+        //                 blank default 0 — which a WAIT-for-0 false-matches, so the
+        //                 engine thinks "already home" and SKIPS the physical homing
+        //                 (observed: swivel goes atWork1 -> atWork2, atHome never TRUE).
+        //                 The rig home WAIT must target AtHome=6 (== atHome sensor TRUE),
+        //                 a value the blank 0 cannot match, so the engine truly waits for
+        //                 the swivel to physically reach home before commanding Pick.
+        public static bool SimulatorRecipeMode = false;
+
         // TEST ISOLATION (2026-05-29, TEMPORARY): restrict ONE process's recipe to a
         // subset of actuators so a single mechanism can be exercised on the rig
         // without the others moving. RecipeTestProcessName = the process to restrict
