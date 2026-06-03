@@ -1080,7 +1080,17 @@ namespace CodeGen.Translation.Process
                             // state_table on each state_change) only ever sees the stable
                             // 0. Waiting on the transient 6 misses it and parks the engine
                             // forever -- exactly the Five_State AtHomeEnd=4 -> 0 remap.
-                            WaitState = sevenStateCmd == 5 ? 0 : sevenStateCmd + 1,
+                            // Home wait target differs RIG vs SIM (MapperConfig.SimulatorRecipeMode):
+                            //   RIG (0): real sensors take AtHome(6) -> AtHomeInit(0) in the same
+                            //            tick, so the engine only ever sees the stable 0.
+                            //   SIM (6): the coil-mirror that synthesizes the swivel's sensors
+                            //            holds a work-coil TRUE at home, so atwork never clears and
+                            //            the AtHome(6) -> AtHomeInit(0) arc can't fire -- the swivel
+                            //            stably parks at AtHome=6. So the sim recipe must accept 6,
+                            //            or it parks the engine on the final home step forever.
+                            WaitState = sevenStateCmd == 5
+                                ? (MapperConfig.SimulatorRecipeMode ? 6 : 0)
+                                : sevenStateCmd + 1,
                         };
                     }
                     arrays.Warnings.Add(
