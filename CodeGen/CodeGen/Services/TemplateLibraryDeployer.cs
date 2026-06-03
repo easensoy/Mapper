@@ -177,6 +177,28 @@ namespace CodeGen.Services
             // which is downstream in the recipe, never gets commanded). Symptom on the
             // rig: all coil outputs read 1970/never-written while inputs read fine.
             PatchActuatorModeInitialValue(eaeProjectDir, "SevenStateCentreHomeActuator.fbt", result);
+            // 2026-06-03: Rig swivel "boots at AtHomeInit, ignores the Home command,
+            // never reaches atHome" fix. The Centre-Home core's ECC has INIT->AtWork1
+            // (fires only if atWork1=TRUE at the *instant* INIT runs) but AtHomeInit has
+            // NO sensor-recovery arc and NO Home exit -- its only exits are Pick
+            // (state_val=1 -> ToWork1) and Place (state_val=3 -> ToWork2). On the rig the
+            // swivel's DI is frequently not live the moment the core runs INIT, so atWork1
+            // reads FALSE -> INIT->AtHomeInit. A scan later the IO comes alive and
+            // atWork1=TRUE (swivel is physically parked at Pick) but nothing re-evaluates:
+            // the core is frozen in AtHomeInit, and the engine's home-preamble
+            // CMD bearing_pnp=5 lands on a state with no matching transition -> dead, so
+            // the whole Assembly recipe stalls on step 1 (Feed_Station, all Five_State,
+            // runs fine -- this is Seven_State-specific). Add a sensor-recovery arc that
+            // mirrors INIT->AtWork1 but from AtHomeInit: if a work sensor says we're
+            // actually at a work position, correct the logical state to match reality.
+            // Pure logic correction -- the AtWork1/AtWork2 entry algo re-energises the
+            // coil the swivel is already sitting on (NO motion) -- then the stock
+            // AtWork1->ToHome / AtWork2->ToHome path carries the Home command through.
+            // Real sensors only (atWork1/atWork2/atHome are the physical symlinks on the
+            // rig; no SIM, no SimHopperForce). Bidirectional + gated: added on the rig
+            // (!SimulatorFullSystem), stripped on the simulator so the proven sim core
+            // stays byte-identical (the arcs are inert there anyway).
+            PatchSwivelAtHomeInitRecovery(eaeProjectDir, addArc: !cfg.SimulatorFullSystem, result);
             // Simulator-only interface reduction. Bidirectional normalizer:
             // when SimulatorFullSystem is on it bakes the two constant interlock
             // targets onto the embedded InterlockManager FB and removes their
@@ -2552,6 +2574,116 @@ namespace CodeGen.Services
             catch (Exception ex)
             {
                 result.Warnings.Add($"{fbtFileName} Mode-default guard failed: {ex.Message}");
+            }
+        }
+
+        // 2026-06-03: see the detailed rationale at the call site in
+        // DeployUniversalArchitecture. Adds (rig) or strips (sim) two
+        // sensor-recovery ECTransitions on the Centre-Home swivel core so a
+        // swivel that powered up before its IO went live (frozen in AtHomeInit
+        // while physically at a work position) re-syncs to AtWork1/AtWork2 and
+        // can then accept the engine's Home command. Identified by
+        // Source=AtHomeInit AND Destination in {AtWork1,AtWork2}; the stock
+        // AtHomeInit arcs go to ToWork1/ToWork2 so this never collides with them.
+        static void PatchSwivelAtHomeInitRecovery(string eaeProjectDir, bool addArc, DeployResult result)
+        {
+            var fbt = Path.Combine(eaeProjectDir, "IEC61499", "SevenStateCentreHomeActuator.fbt");
+            if (!File.Exists(fbt))
+            {
+                fbt = Directory.EnumerateFiles(
+                        Path.Combine(eaeProjectDir, "IEC61499"),
+                        "SevenStateCentreHomeActuator.fbt", SearchOption.AllDirectories)
+                    .FirstOrDefault() ?? string.Empty;
+                if (string.IsNullOrEmpty(fbt)) return;
+            }
+
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+
+                var ecc = root.Descendants(ns + "ECC").FirstOrDefault();
+                if (ecc == null)
+                {
+                    result.Warnings.Add(
+                        "SevenStateCentreHomeActuator.fbt: no <ECC>; AtHomeInit sensor-recovery skipped.");
+                    return;
+                }
+
+                bool IsRecoveryArc(System.Xml.Linq.XElement t) =>
+                    (string?)t.Attribute("Source") == "AtHomeInit" &&
+                    ((string?)t.Attribute("Destination") == "AtWork1" ||
+                     (string?)t.Attribute("Destination") == "AtWork2");
+
+                var existing = ecc.Elements(ns + "ECTransition").Where(IsRecoveryArc).ToList();
+
+                if (!addArc)
+                {
+                    // Simulator path: strip the recovery arcs so the sim core is pristine.
+                    if (existing.Count == 0) return; // idempotent
+                    foreach (var t in existing) t.Remove();
+                    doc.Save(fbt);
+                    result.PatchesApplied.Add(
+                        "SevenStateCentreHomeActuator.fbt: removed AtHomeInit sensor-recovery arcs (sim path -> core byte-identical)");
+                    return;
+                }
+
+                // Rig path: ensure both recovery arcs are present.
+                bool hasWork1 = existing.Any(t => (string?)t.Attribute("Destination") == "AtWork1");
+                bool hasWork2 = existing.Any(t => (string?)t.Attribute("Destination") == "AtWork2");
+                if (hasWork1 && hasWork2) return; // idempotent
+
+                System.Xml.Linq.XElement MakeArc(string dest, string cond, string x, string y, string bezier)
+                {
+                    var t = new System.Xml.Linq.XElement(ns + "ECTransition",
+                        new System.Xml.Linq.XAttribute("Source", "AtHomeInit"),
+                        new System.Xml.Linq.XAttribute("Destination", dest),
+                        new System.Xml.Linq.XAttribute("Condition", cond),
+                        new System.Xml.Linq.XAttribute("x", x),
+                        new System.Xml.Linq.XAttribute("y", y));
+                    t.Add(new System.Xml.Linq.XElement(ns + "Attribute",
+                        new System.Xml.Linq.XAttribute("Name", "Configuration.Transaction.BezierPoints"),
+                        new System.Xml.Linq.XAttribute("Value", bezier)));
+                    return t;
+                }
+
+                // Append after the last existing ECTransition so the stock Pick/Place
+                // (state_val) arcs keep priority; the sensor-recovery fires only when no
+                // command arc matches -- e.g. the home preamble on a mis-booted swivel.
+                var content = new List<object>();
+                if (!hasWork1)
+                {
+                    content.Add(new System.Xml.Linq.XText("\r\n      "));
+                    content.Add(MakeArc("AtWork1", "atWork1 = TRUE AND atWork2 = FALSE AND atHome = FALSE",
+                        "2700", "1250", "541.25,273.75,735,416.25"));
+                }
+                if (!hasWork2)
+                {
+                    content.Add(new System.Xml.Linq.XText("\r\n      "));
+                    content.Add(MakeArc("AtWork2", "atWork2 = TRUE AND atWork1 = FALSE AND atHome = FALSE",
+                        "4800", "1480", "1303.733,262.3214,1306.017,478.75"));
+                }
+
+                var lastTransition = ecc.Elements(ns + "ECTransition").LastOrDefault();
+                if (lastTransition != null)
+                    lastTransition.AddAfterSelf(content.ToArray());
+                else
+                    foreach (var o in content) ecc.Add(o);
+                doc.Save(fbt);
+
+                result.PatchesApplied.Add(
+                    "SevenStateCentreHomeActuator.fbt: added AtHomeInit->AtWork1/AtWork2 sensor-recovery arcs " +
+                    "(rig: swivel mis-booted at AtHomeInit while a work sensor is TRUE now re-syncs and accepts Home)");
+                MapperLogger.Info(
+                    "[Deploy] SevenStateCentreHomeActuator.fbt: AtHomeInit sensor-recovery arcs added " +
+                    "(rig swivel that powered up before IO settled re-syncs to its real position; Home command no longer dead)");
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add(
+                    $"SevenStateCentreHomeActuator.fbt AtHomeInit sensor-recovery patch failed: {ex.Message}");
             }
         }
 
