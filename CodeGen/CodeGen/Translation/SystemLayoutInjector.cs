@@ -1899,9 +1899,16 @@ namespace CodeGen.Translation
             // Centre-home swivel CAT (Bearing_PnP, 2026-06-02). The core publishes
             // current_state_to_process 2=AtWork1(Pick) / 4=AtWork2(Place) / 6=AtHome;
             // Target*State feed CommonInterlockManager at those settle values.
-            // work{1,2}ToHomeTime drive No_Sensor_Handler_7SCH's return-to-home
-            // fallback — on the rig the real SwivelArmAtHome sensor closes the loop
-            // first; the timer only fires if it doesn't. Fault timeouts OFF so an
+            // work{1,2}ToHomeTime are the SWING-TO-CENTRE times: the core drives the
+            // opposite coil for this long, then cuts both coils (AtHome) so the arm
+            // coasts to a stop on centre. There is NO spring-centre and the physical
+            // SwivelArmAtHome (DI02) is not closing, so this timer IS what parks the
+            // arm on home -- if it is too long the arm sails PAST centre to the far
+            // work end (the observed atWork1<->atWork2 behaviour). 3000ms overshot.
+            // Use the PROVEN values from the old hardcoded Seven_State_Actuator_CAT
+            // that homed correctly: toPickTime=T#750ms (home from work1/Pick) and
+            // toPlaceTime=T#500ms (home from work2/Place). (2026-06-03.)
+            // Fault timeouts OFF so an
             // isolated test never faults waiting for a work sensor. RuleCount=0:
             // NO cross-PLC interlock for the ISOLATED Bearing_PnP test (Shaft_Hr /
             // CoverPNP_Hr / Transfer are parked → no collision). The real interlock
@@ -1913,8 +1920,8 @@ namespace CodeGen.Translation
                 dict["TargetWork1State"] = SyslayBuilder.FormatInt(2);
                 dict["TargetWork2State"] = SyslayBuilder.FormatInt(4);
                 dict["TargetHomeState"]  = SyslayBuilder.FormatInt(6);
-                dict["work1ToHomeTime"]  = SyslayBuilder.FormatTimeMs(3000);
-                dict["work2ToHomeTime"]  = SyslayBuilder.FormatTimeMs(3000);
+                dict["work1ToHomeTime"]  = SyslayBuilder.FormatTimeMs(750);   // home from Pick — proven old-CAT toPickTime
+                dict["work2ToHomeTime"]  = SyslayBuilder.FormatTimeMs(500);   // home from Place — proven old-CAT toPlaceTime
                 dict["enableToWork1FaultTimeout"] = SyslayBuilder.FormatBool(false);
                 dict["enableToWork2FaultTimeout"] = SyslayBuilder.FormatBool(false);
                 dict["faultTimeoutWork1"] = SyslayBuilder.FormatTimeMs(10000);
