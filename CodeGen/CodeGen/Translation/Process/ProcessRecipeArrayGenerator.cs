@@ -588,7 +588,18 @@ namespace CodeGen.Translation.Process
                         arrays.CmdTargetName.Insert(pos, string.Empty);
                         arrays.CmdStateArr.Insert(pos, 0);
                         arrays.Wait1Id.Insert(pos, id);
-                        arrays.Wait1State.Insert(pos, 0);
+                        // Home-preamble WAIT target — differs RIG vs SIM (see
+                        // MapperConfig.SimulatorRecipeMode). SIM: the swivel boots at
+                        // AtHomeInit(0) and a home command is a no-op, so wait for 0.
+                        // RIG: the swivel boots parked at a work position and the engine's
+                        // blank state_table reads 0 — WAIT-for-0 false-matches and the
+                        // homing is SKIPPED (swivel goes atWork1->atWork2, atHome never
+                        // TRUE). Wait for AtHome=6 instead (== atHome sensor TRUE): the
+                        // blank 0 can't match it, so the engine truly waits for the swivel
+                        // to physically reach home before the Pick step. The Centre-Home
+                        // ECC reports current_state=6 the moment the atHome sensor closes
+                        // (a distinct pst_out event the engine catches), then settles to 0.
+                        arrays.Wait1State.Insert(pos, MapperConfig.SimulatorRecipeMode ? 0 : 6);
                         arrays.NextStep.Insert(pos, pos + 1);
                         pos++;
                     }
