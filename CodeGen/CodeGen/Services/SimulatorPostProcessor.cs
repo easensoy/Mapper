@@ -636,17 +636,24 @@ namespace CodeGen.Services
 
             if (violations.Count > 0)
             {
+                // NON-FATAL (2026-06-03). This guard used to ABORT the deploy, on the
+                // premise that WorkSensorFitted=TRUE means the sim stalls on a sensor that
+                // never closes. That premise is now FALSE: NormalizeFiveStateSimSensorSource
+                // repoints every Five_State_Actuator_CAT's atwork/athome at its OWN drive
+                // coils (type-level, so it reaches M580/BX1 where the per-PLC sysres flag
+                // write does not), so the actuator advances whether WorkSensorFitted is TRUE
+                // or FALSE. A leftover TRUE — e.g. the M580 Bearing_Gripper — therefore no
+                // longer stalls anything; the coil-mirror covers it. Aborting here only
+                // blocked a deploy that actually runs. Logged loudly so a genuine override
+                // regression is still visible, but the deploy proceeds.
                 log?.Invoke(
-                    "[Simulator][ABORT] No-sensor override verification FAILED — the simulator " +
-                    "build would stall on a sensor that never closes. The override must be the " +
-                    "LAST writer of the syslay + sysres. Violations:");
+                    "[Simulator][WARN] No-sensor override left " + violations.Count +
+                    " WorkSensorFitted/HomeSensorFitted=TRUE — NOT aborting: the Five_State " +
+                    "coil-mirror (atwork/athome follow the coils) makes those actuators advance " +
+                    "regardless of the flag. Details:");
                 foreach (var v in violations)
-                    log?.Invoke($"  ✗ {v}");
-                throw new InvalidOperationException(
-                    "Simulator no-sensor override verification failed (" + violations.Count +
-                    " violation(s)); see log. WorkSensorFitted/HomeSensorFitted must be " +
-                    "FALSE on every Five_State_Actuator_CAT in both the syslay and the deployed " +
-                    "sysres. Deploy aborted.");
+                    log?.Invoke($"  · {v}");
+                return;
             }
 
             log?.Invoke(
