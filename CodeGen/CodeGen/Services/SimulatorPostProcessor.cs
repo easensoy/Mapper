@@ -897,6 +897,16 @@ namespace CodeGen.Services
         /// duplicates). Hardware path NEVER calls this — the rig's physical
         /// SwivelArmAtPick/AtPlace sensors close the loop with values bound at the
         /// .hcf layer. Returns total instances injected across syslay + sysres.</para>
+        /// <para>OBSOLETE / NO-OP (2026-06-03 note): this matches FBs of Type
+        /// "Seven_State_Actuator_CAT". The live swivel is now
+        /// Seven_State_Actuator_Centre_Home_CAT (different pins — no
+        /// current_state1/2_to_plc), so this finds ZERO instances and injects nothing.
+        /// The Centre-Home swivel's sim-sensor path is handled INSIDE
+        /// TemplateLibraryDeployer (Normalize/sim-sensor rewire of the CAT body), not
+        /// here. The harness D2 check (same old-type guard) therefore passes vacuously
+        /// as "no Seven_State instances" and does NOT prove the live swivel's sim path.
+        /// Do not "fix" this by retargeting the Centre-Home type — its coil model is
+        /// different and the rewire already lives in the deployer.</para>
         /// </summary>
         public static int InjectSimSwivelForce(string syslayPath, MapperConfig cfg,
             Action<string>? log = null)

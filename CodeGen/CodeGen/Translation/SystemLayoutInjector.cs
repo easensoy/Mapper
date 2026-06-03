@@ -527,6 +527,17 @@ namespace CodeGen.Translation
             }
         }
 
+        // ===========================================================================
+        // LEGACY / DORMANT — DO NOT REUSE FOR THE CENTRE-HOME SWIVEL (2026-06-03 note).
+        // Reachable ONLY via the old Inject() -> InjectSyslay() entry. The live rig and
+        // simulator buttons both call GenerateStation1TestSyslay(), which does NOT use
+        // this method, so it never runs in production. It wires PHANTOM data pins
+        // (proc.state_update / proc.state_val / proc.<name>) that do not exist on
+        // Process1_Generic — the real command path is the stateRprtCmd adapter ring
+        // (updateComponentState), and Bearing_PnP is now Seven_State_Actuator_Centre_Home_CAT
+        // with command vocabulary 1/3/5 (Pick/Place/Home), not the old 1/2/0. If you ever
+        // resurrect Inject(), rewire through the ring; do not extend these phantom edges.
+        // ===========================================================================
         private static void WireSevenStateActuators(XElement net, List<string> actuators,
             string proc, SystemInjectionResult result)
         {
