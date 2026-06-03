@@ -199,6 +199,24 @@ namespace CodeGen.Services
             // (!SimulatorFullSystem), stripped on the simulator so the proven sim core
             // stays byte-identical (the arcs are inert there anyway).
             PatchSwivelAtHomeInitRecovery(eaeProjectDir, addArc: !cfg.SimulatorFullSystem, result);
+            // 2026-06-03: Rig swivel "overshoots home, bounces atWork1<->atWork2,
+            // never parks" fix -- the third stacked fault. The Centre-Home core
+            // defines TWO home-entry algorithms: 'AtHomeEnd' (current_state:=6 ONLY)
+            // and 'atHome' (current_state:=6 AND outputToWork1:=FALSE;
+            // outputToWork2:=FALSE -- clears BOTH coils). The AtHome ECState is wired
+            // to 'AtHomeEnd', so a work coil stays ENERGISED at "home" (toHome
+            // energises the opposite coil to swing through centre and never turns it
+            // off). When the ReturnToHome timer declares home, the arm keeps being
+            // driven past centre to the other work position -> the atWork1<->atWork2
+            // bounce. On the RIG run the coil-clearing 'atHome' instead: both coils
+            // de-energised, the spring-centred arm settles at centre and STAYS (real
+            // atWork1/atWork2 go FALSE -> AtHome->AtHomeInit fires -> rests at
+            // AtHomeInit=0). In the SIMULATOR keep 'AtHomeEnd' (no clear): the sim
+            // synthesizes atwork FROM the coils, so clearing them would drop the
+            // coil-mirror and break the sim's park-at-AtHome=6 (which sim final-home
+            // WAIT=6 needs). Uses Jyotsna's own 'atHome' algorithm -- no new ST.
+            // Gated + bidirectional like the other Centre-Home normalizers.
+            PatchSwivelAtHomeCoilClear(eaeProjectDir, rigMode: !cfg.SimulatorFullSystem, result);
             // Simulator-only interface reduction. Bidirectional normalizer:
             // when SimulatorFullSystem is on it bakes the two constant interlock
             // targets onto the embedded InterlockManager FB and removes their
@@ -2684,6 +2702,81 @@ namespace CodeGen.Services
             {
                 result.Warnings.Add(
                     $"SevenStateCentreHomeActuator.fbt AtHomeInit sensor-recovery patch failed: {ex.Message}");
+            }
+        }
+
+        // 2026-06-03: see the detailed rationale at the call site. Wires the AtHome
+        // ECState to the coil-clearing 'atHome' algorithm on the rig (so the arm
+        // de-energises and spring-settles at centre instead of being driven past it),
+        // or back to 'AtHomeEnd' on the sim (coils held, so the coil-mirror parks at
+        // AtHome=6). Both algorithms already exist in the core; this only swaps which
+        // one the AtHome state runs. Idempotent + bidirectional.
+        static void PatchSwivelAtHomeCoilClear(string eaeProjectDir, bool rigMode, DeployResult result)
+        {
+            var fbt = Path.Combine(eaeProjectDir, "IEC61499", "SevenStateCentreHomeActuator.fbt");
+            if (!File.Exists(fbt))
+            {
+                fbt = Directory.EnumerateFiles(
+                        Path.Combine(eaeProjectDir, "IEC61499"),
+                        "SevenStateCentreHomeActuator.fbt", SearchOption.AllDirectories)
+                    .FirstOrDefault() ?? string.Empty;
+                if (string.IsNullOrEmpty(fbt)) return;
+            }
+
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+
+                var atHomeState = root.Descendants(ns + "ECState")
+                    .FirstOrDefault(s => (string?)s.Attribute("Name") == "AtHome");
+                if (atHomeState == null)
+                {
+                    result.Warnings.Add(
+                        "SevenStateCentreHomeActuator.fbt: no AtHome ECState; coil-clear patch skipped.");
+                    return;
+                }
+                var ecAction = atHomeState.Elements(ns + "ECAction").FirstOrDefault();
+                if (ecAction == null)
+                {
+                    result.Warnings.Add(
+                        "SevenStateCentreHomeActuator.fbt: AtHome has no ECAction; coil-clear patch skipped.");
+                    return;
+                }
+
+                // Both candidate algorithms must exist before we swap.
+                var algoNames = root.Descendants(ns + "Algorithm")
+                    .Select(a => (string?)a.Attribute("Name"))
+                    .Where(n => n != null)
+                    .ToHashSet();
+                string want = rigMode ? "atHome" : "AtHomeEnd";
+                if (!algoNames.Contains(want))
+                {
+                    result.Warnings.Add(
+                        $"SevenStateCentreHomeActuator.fbt: algorithm '{want}' not found; AtHome coil-clear patch skipped.");
+                    return;
+                }
+
+                var current = (string?)ecAction.Attribute("Algorithm");
+                if (current == want) return; // idempotent
+                ecAction.SetAttributeValue("Algorithm", want);
+                doc.Save(fbt);
+
+                result.PatchesApplied.Add(
+                    $"SevenStateCentreHomeActuator.fbt: AtHome ECState now runs '{want}' " +
+                    (rigMode
+                        ? "(rig: clears both coils at home so the spring-centred arm settles at centre instead of overshooting/bouncing)"
+                        : "(sim: holds coils so the coil-mirror parks at AtHome=6)"));
+                MapperLogger.Info(
+                    $"[Deploy] SevenStateCentreHomeActuator.fbt: AtHome -> '{want}' " +
+                    (rigMode ? "(coils cleared at home -> no overshoot)" : "(coils held -> sim coil-mirror park)"));
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add(
+                    $"SevenStateCentreHomeActuator.fbt AtHome coil-clear patch failed: {ex.Message}");
             }
         }
 
