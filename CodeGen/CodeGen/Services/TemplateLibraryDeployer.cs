@@ -2682,10 +2682,21 @@ namespace CodeGen.Services
                     return;
                 }
 
-                // RIG: drive home on power-up.
+                // RIG: drive home on power-up via INIT ONLY. (2026-06-03 -- the
+                // AtHomeInit -> ToHome "self-home" arc is now REMOVED, not added.)
+                // That arc re-fired whenever the swivel sat in AtHomeInit and a work
+                // sensor momentarily read TRUE -- and the rig DI00/DI01 are noisy /
+                // bad-quality, so it re-homed over and over: observed as
+                // current_state=5 (ToHome) with state_val=0 and the arm cycling
+                // atWork1<->atWork2, never settling. INIT -> ToHome below already homes
+                // the swivel on every power-up; once it reaches AtHomeInit it MUST stay
+                // there until the recipe commands Pick/Place, so AtHomeInit must have NO
+                // self-driving exit. So: redirect INIT to ToHome, and strip every
+                // AtHomeInit -> {ToHome, AtWork1, AtWork2} arc we ever added. The stock
+                // AtHomeInit -> ToWork1/ToWork2 (state_val Pick/Place) arcs stay intact.
                 bool changed = false;
 
-                // 1. INIT -> AtWork1 / INIT -> ToWork2  ==>  INIT -> ToHome.
+                // 1. INIT -> AtWork1 / INIT -> ToWork2  ==>  INIT -> ToHome (boot self-home).
                 foreach (var t in initArcs)
                 {
                     var dest = (string?)t.Attribute("Destination");
@@ -2693,64 +2704,21 @@ namespace CodeGen.Services
                     { t.SetAttributeValue("Destination", "ToHome"); changed = true; }
                 }
 
-                // 2. Drop any older AtHomeInit -> AtWork1/AtWork2 "re-sync to work" arcs
-                //    (we now re-sync to HOME, not to the work position).
-                foreach (var t in ecc.Elements(ns + "ECTransition").Where(IsStaleWorkArc).ToList())
+                // 2. Strip every AtHomeInit -> {ToHome, AtWork1, AtWork2} arc we added
+                //    (self-home AND the older re-sync-to-work). These re-fire on noisy
+                //    sensors and cycle the swivel; AtHomeInit must be a stable rest state.
+                foreach (var t in ecc.Elements(ns + "ECTransition")
+                             .Where(x => IsSelfHomeArc(x) || IsStaleWorkArc(x)).ToList())
                 { t.Remove(); changed = true; }
-
-                // 3. Ensure AtHomeInit -> ToHome self-home arcs exist (IO-late boot: the
-                //    core landed in AtHomeInit, then a physical work sensor went TRUE).
-                bool hasW1 = ecc.Elements(ns + "ECTransition").Any(t =>
-                    IsSelfHomeArc(t) && ((string?)t.Attribute("Condition") ?? string.Empty).Contains("atWork1 = TRUE"));
-                bool hasW2 = ecc.Elements(ns + "ECTransition").Any(t =>
-                    IsSelfHomeArc(t) && ((string?)t.Attribute("Condition") ?? string.Empty).Contains("atWork2 = TRUE"));
-
-                System.Xml.Linq.XElement MakeArc(string cond, string x, string y, string bezier)
-                {
-                    var t = new System.Xml.Linq.XElement(ns + "ECTransition",
-                        new System.Xml.Linq.XAttribute("Source", "AtHomeInit"),
-                        new System.Xml.Linq.XAttribute("Destination", "ToHome"),
-                        new System.Xml.Linq.XAttribute("Condition", cond),
-                        new System.Xml.Linq.XAttribute("x", x),
-                        new System.Xml.Linq.XAttribute("y", y));
-                    t.Add(new System.Xml.Linq.XElement(ns + "Attribute",
-                        new System.Xml.Linq.XAttribute("Name", "Configuration.Transaction.BezierPoints"),
-                        new System.Xml.Linq.XAttribute("Value", bezier)));
-                    return t;
-                }
-
-                var content = new List<object>();
-                if (!hasW1)
-                {
-                    content.Add(new System.Xml.Linq.XText("\r\n      "));
-                    content.Add(MakeArc("atWork1 = TRUE AND atWork2 = FALSE AND atHome = FALSE",
-                        "2700", "1250", "541.25,273.75,735,416.25"));
-                    changed = true;
-                }
-                if (!hasW2)
-                {
-                    content.Add(new System.Xml.Linq.XText("\r\n      "));
-                    content.Add(MakeArc("atWork2 = TRUE AND atWork1 = FALSE AND atHome = FALSE",
-                        "4800", "1480", "1303.733,262.3214,1306.017,478.75"));
-                    changed = true;
-                }
-                if (content.Count > 0)
-                {
-                    var lastTransition = ecc.Elements(ns + "ECTransition").LastOrDefault();
-                    if (lastTransition != null)
-                        lastTransition.AddAfterSelf(content.ToArray());
-                    else
-                        foreach (var o in content) ecc.Add(o);
-                }
 
                 if (changed)
                 {
                     doc.Save(fbt);
                     result.PatchesApplied.Add(
-                        "SevenStateCentreHomeActuator.fbt: HOME-ON-INIT -- INIT/AtHomeInit work-position boot paths redirected to ToHome " +
-                        "(rig: the swivel drives itself home at power-up, so home is its permanent initial state)");
+                        "SevenStateCentreHomeActuator.fbt: HOME-ON-INIT (boot only) -- INIT work-position arcs redirected to ToHome; " +
+                        "ALL AtHomeInit->{ToHome,AtWork1,AtWork2} self-home/recovery arcs stripped (they re-fired on noisy sensors and cycled the swivel)");
                     MapperLogger.Info(
-                        "[Deploy] SevenStateCentreHomeActuator.fbt: home-on-init wired -- swivel self-homes at power-up before the engine runs");
+                        "[Deploy] SevenStateCentreHomeActuator.fbt: self-homes at power-up via INIT->ToHome; AtHomeInit is now a stable rest state (no self-driving exit)");
                 }
             }
             catch (Exception ex)
