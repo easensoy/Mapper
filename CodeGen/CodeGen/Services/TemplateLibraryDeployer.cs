@@ -258,6 +258,14 @@ namespace CodeGen.Services
             // byte-identical. athome (NAME1) is untouched — it is timer-driven by the CAT's
             // ReturnToHomeHandler / No_Sensor_Handler_7SCH, so it needs no external publish.
             NormalizeSwivelSimSensorSource(eaeProjectDir, cfg.SimulatorFullSystem, result);
+            // Same coil->sensor synthesis for the Five_State actuators (Bearing_Gripper,
+            // Shaft_*, CoverPNP_*). Bearing_Gripper deploys with WorkSensorFitted=TRUE on
+            // M580 and the per-PLC no-sensor sysres override has not reliably reached the
+            // M580 .sysres, so the gripper sat stuck at ToWork (atwork=FALSE) waiting for a
+            // sensor nothing publishes. This type-level repoint makes its atwork/athome read
+            // its own coils, so it advances regardless of WorkSensorFitted or which .sysres
+            // it lives in. Inert for the M262 no-sensor actuators (they use their timer).
+            NormalizeFiveStateSimSensorSource(eaeProjectDir, cfg.SimulatorFullSystem, result);
             NormalizeFiveStateFaultEnables(eaeProjectDir, cfg.SimulatorFullSystem, result);
             // Process FB recipe struct: collapse the 6 overlapping recipe arrays
             // into one Recipe : ARRAY OF RecipeStep on Process1_Generic + the
@@ -1208,6 +1216,81 @@ namespace CodeGen.Services
             catch (Exception ex)
             {
                 result.Warnings.Add($"Centre-Home swivel sim-sensor normalize failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Simulator-only: repoint the Five_State_Actuator_CAT's internal Inputs
+        /// SYMLINKMULTIVARDST so athome/atwork read the actuator's OWN drive-coil symlinks
+        /// instead of the (unpublished-in-sim) physical sensor symlinks. The core's
+        /// athome/atwork come from InputHandler (the No_Sensor_Handler), which — when
+        /// WorkSensorFitted/HomeSensorFitted=TRUE — passes the physical sensor (Inputs.VALUE*
+        /// = '$${PATH}athome'/'$${PATH}atwork', which NOTHING publishes in sim, so the ECC
+        /// stalls at ToWork). Repointing those subscriptions at '$${PATH}OutputToHome' /
+        /// '$${PATH}OutputToWork' makes athome/atwork follow the coils, so a sensored
+        /// Five_State actuator (e.g. Bearing_Gripper, which deploys with WorkSensorFitted=TRUE
+        /// on M580 and which the per-PLC no-sensor sysres override has not reliably reached)
+        /// advances the instant it energises a coil. SAFE for no-sensor instances (M262
+        /// Feed_Station, WorkSensorFitted=FALSE): InputHandler uses its TIMER for those and
+        /// IGNORES Inputs.VALUE*, so the repoint is inert for them. Type-level (applies to
+        /// every Five_State instance regardless of which .sysres it lives in) — that is why
+        /// it works on M580 where the instance-parameter override did not. Bidirectional +
+        /// idempotent: reduce==false (rig) restores '$${PATH}athome'/'$${PATH}atwork' so the
+        /// hardware path reads its real sensors.
+        /// </summary>
+        static void NormalizeFiveStateSimSensorSource(string eaeProjectDir, bool reduce, DeployResult result)
+        {
+            var fbt = Directory.EnumerateFiles(
+                    Path.Combine(eaeProjectDir, "IEC61499"),
+                    "Five_State_Actuator_CAT.fbt", SearchOption.AllDirectories)
+                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
+                ?? string.Empty;
+            if (string.IsNullOrEmpty(fbt))
+            {
+                result.Warnings.Add("Five_State_Actuator_CAT.fbt not found; Five_State sim-sensor normalize skipped.");
+                return;
+            }
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+                var net = root.Element(ns + "FBNetwork");
+                var inputs = net?.Elements(ns + "FB")
+                    .FirstOrDefault(f => (string?)f.Attribute("Name") == "Inputs");
+                if (inputs == null)
+                {
+                    result.Warnings.Add("Five_State_Actuator_CAT.fbt: Inputs FB not found; Five_State sim-sensor normalize skipped.");
+                    return;
+                }
+
+                var want = new[]
+                {
+                    ("NAME1", reduce ? "'$${PATH}OutputToHome'" : "'$${PATH}athome'"),
+                    ("NAME2", reduce ? "'$${PATH}OutputToWork'" : "'$${PATH}atwork'"),
+                };
+                bool changed = false;
+                foreach (var (pn, val) in want)
+                {
+                    var p = inputs.Elements(ns + "Parameter")
+                        .FirstOrDefault(e => (string?)e.Attribute("Name") == pn);
+                    if (p == null) continue;
+                    if ((string?)p.Attribute("Value") != val) { p.SetAttributeValue("Value", val); changed = true; }
+                }
+
+                if (changed)
+                {
+                    doc.Save(fbt);
+                    result.PatchesApplied.Add(reduce
+                        ? "Five_State_Actuator_CAT: Inputs athome/atwork -> coil symlinks (sim sensor synthesis)"
+                        : "Five_State_Actuator_CAT: Inputs athome/atwork -> physical sensor symlinks (hardware)");
+                    MapperLogger.Info($"[Deploy] Five_State sim-sensor source normalize: reduce={reduce}");
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"Five_State sim-sensor normalize failed: {ex.Message}");
             }
         }
 
