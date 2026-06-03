@@ -132,6 +132,99 @@ namespace CodeGen.Translation.Process
         public static StationComponentMap BuildComponentMap(StationContents contents)
             => ProcessRecipeStGenerator.BuildComponentMap(contents);
 
+        /// <summary>
+        /// Emit the OPERATOR-VERIFIED Assembly recipe verbatim (2026-06-03). The
+        /// operator ran each actuator's Output section end-to-end on the rig and gave
+        /// the exact working order; we encode it as a fixed CMD/WAIT chain rather than
+        /// derive it from the (mis-ordering) data-driven classifier.
+        ///
+        /// Command vocabulary:
+        ///  - Bearing_PnP (Seven_State Centre-Home): Home=cmd5/wait0, Pick(atWork1)=cmd1/wait2,
+        ///    Place(atWork2)=cmd3/wait4 (current_state_to_process settle values 0/2/4).
+        ///  - Five_State (grippers, shaft_hr/vr): work=cmd1/wait2 (AtWork), home/release=cmd3/wait0 (AtHome).
+        ///
+        /// Sequence:
+        ///  Bearing: home -> pick -> gripper grip -> place -> gripper release
+        ///  Shaft:   vr work -> gripper work -> vr home -> hr work -> gripper release -> hr home -> vr work
+        /// </summary>
+        private static void BuildVerifiedAssemblyRecipe(
+            RecipeArrays arrays, IReadOnlyList<VueOneComponent> allComponents)
+        {
+            // (lowercased target name, CmdState, WAIT settle state)
+            var seq = new (string name, int cmd, int wait)[]
+            {
+                ("bearing_pnp",     5, 0),   // 1. home
+                ("bearing_pnp",     1, 2),   // 2. pick  (atWork1)
+                ("bearing_gripper", 1, 2),   // 3. gripper grip
+                ("bearing_pnp",     3, 4),   // 4. place (atWork2)
+                ("bearing_gripper", 3, 0),   // 5. gripper release
+                ("shaft_vr",        1, 2),   // 6. shaft_vr work
+                ("shaft_gripper",   1, 2),   // 7. shaft_gripper work
+                ("shaft_vr",        3, 0),   // 8. shaft_vr home
+                ("shaft_hr",        1, 2),   // 9. shaft_hr work
+                ("shaft_gripper",   3, 0),   // 10. shaft_gripper release
+                ("shaft_hr",        3, 0),   // 11. shaft_hr home
+                ("shaft_vr",        1, 2),   // 12. shaft_vr work (up)
+            };
+
+            // Resolve a lowercased actuator name to its local Wait1Id via the registry
+            // (ComponentID -> id), matching on the component's Name.
+            int WaitIdOf(string lcName)
+            {
+                foreach (var kv in arrays.ComponentRegistry)
+                {
+                    var comp = LookupComponent(kv.Key, allComponents);
+                    if (comp != null &&
+                        string.Equals((comp.Name ?? string.Empty).Trim(), lcName,
+                                      StringComparison.OrdinalIgnoreCase))
+                        return kv.Value;
+                }
+                return -1;
+            }
+
+            var summary = new List<string>();
+            foreach (var (name, cmd, wait) in seq)
+            {
+                int wid = WaitIdOf(name);
+                if (wid < 0)
+                {
+                    arrays.Warnings.Add(
+                        $"[Recipe][VerifiedAssembly] target '{name}' is not in the scoped " +
+                        "registry (not emitted as an in-scope actuator) — step dropped. " +
+                        "Check RecipeTestActuatorAllowlist / station scope.");
+                    continue;
+                }
+                // CMD row
+                arrays.StepType.Add(1);
+                arrays.CmdTargetName.Add(name);
+                arrays.CmdStateArr.Add(cmd);
+                arrays.Wait1Id.Add(0);
+                arrays.Wait1State.Add(0);
+                arrays.NextStep.Add(arrays.StepType.Count);   // -> our WAIT row
+                // WAIT row
+                arrays.StepType.Add(2);
+                arrays.CmdTargetName.Add(string.Empty);
+                arrays.CmdStateArr.Add(0);
+                arrays.Wait1Id.Add(wid);
+                arrays.Wait1State.Add(wait);
+                arrays.NextStep.Add(arrays.StepType.Count);   // -> next CMD (or the END row)
+                summary.Add($"{name}={cmd}(wait {wait})");
+            }
+
+            // Single END row.
+            int endIdx = arrays.StepType.Count;
+            arrays.StepType.Add(9);
+            arrays.CmdTargetName.Add(string.Empty);
+            arrays.CmdStateArr.Add(0);
+            arrays.Wait1Id.Add(0);
+            arrays.Wait1State.Add(0);
+            // Run-once: END points at itself (park). Else loop back to step 0.
+            arrays.NextStep.Add(MapperConfig.RecipeRunOnce ? endIdx : 0);
+
+            arrays.OrderingSummary =
+                "VERIFIED Assembly: " + string.Join(" -> ", summary) + " -> END";
+        }
+
         /// <param name="commandFromCondition">
         /// OPT-IN Station-2 path. When <c>false</c> (the default — Feed_Station /
         /// M262) the classifier is BYTE-IDENTICAL to the proven hardware recipe:
@@ -176,6 +269,21 @@ namespace CodeGen.Translation.Process
                 arrays.ComponentRegistry.FirstOrDefault(kv =>
                     LookupComponent(kv.Key, allComponents) is { } c &&
                     (NameEquals(c.Name, "Feeder") || NameEquals(c.Name, "Pusher"))).Value;
+
+            // OPERATOR-VERIFIED ASSEMBLY SEQUENCE (2026-06-03). The data-driven
+            // classifier emitted the wrong command ORDER for Assembly_Station. The
+            // operator drove each actuator's Output section end-to-end on the rig and
+            // gave the exact working sequence, so emit it verbatim. Registry is already
+            // built (above), so Wait1Id lookups resolve. Feed_Station / Disassembly
+            // (different names) fall through to the normal data-driven path unchanged.
+            if (MapperConfig.UseVerifiedAssemblyRecipe &&
+                string.Equals((process.Name ?? string.Empty).Trim(), "Assembly_Station",
+                              StringComparison.OrdinalIgnoreCase))
+            {
+                BuildVerifiedAssemblyRecipe(arrays, allComponents);
+                ValidateProcessIdInvariant(arrays, processId);
+                return arrays;
+            }
 
             // PARK GUARD (2026-05-29): a process whose INITIAL state gates on
             // ANOTHER process on the SAME PLC is an intra-PLC hand-off (e.g.

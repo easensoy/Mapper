@@ -81,6 +81,15 @@ namespace CodeGen.Configuration
         // ProcessRecipeArrayGenerator.Generate after the preamble shifts indices.
         public static bool RecipeRunOnce = true;
 
+        // 2026-06-03: emit the OPERATOR-VERIFIED Assembly sequence verbatim instead
+        // of the data-driven order. The data-driven classifier produced the wrong
+        // command order for Assembly_Station; the operator ran each actuator's Output
+        // section end-to-end on the rig and gave the exact working order, so the
+        // recipe generator emits that fixed CMD/WAIT chain when the process is
+        // Assembly_Station. Feed_Station and Disassembly are untouched. Set false to
+        // fall back to the data-driven classifier.
+        public static bool UseVerifiedAssemblyRecipe = true;
+
         // TEST ISOLATION (2026-05-29, TEMPORARY): restrict ONE process's recipe to a
         // subset of actuators so a single mechanism can be exercised on the rig
         // without the others moving. RecipeTestProcessName = the process to restrict
