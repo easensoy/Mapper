@@ -588,34 +588,21 @@ namespace CodeGen.Translation.Process
                         arrays.CmdTargetName.Insert(pos, string.Empty);
                         arrays.CmdStateArr.Insert(pos, 0);
                         arrays.Wait1Id.Insert(pos, id);
-                        // Home-preamble WAIT target. (2026-06-03, rev 2 -- see git history
-                        // for the 6 and 0 attempts; this is why neither worked.)
-                        //
-                        // SIM=0: the sim swivel boots at AtHomeInit(0) and the recovery arc
-                        //   is stripped on the sim path, so a home command is a no-op there
-                        //   -- it already reads 0, so wait for 0 (immediate pass). Unchanged.
-                        //
-                        // RIG=5 (ToHome): the rig swivel boots parked at a work position
-                        //   (atWork1=TRUE at Pick). The engine inits LAST and misses the
-                        //   swivel's boot/re-sync report, so state_table[swivel] defaults to
-                        //   0. A WAIT-for-0 then false-matches INSTANTLY: the engine races
-                        //   home->pick->place without waiting and the swivel only ever
-                        //   latches the LAST command (place), so it skips home and goes
-                        //   atWork1->atWork2 -- the exact reported symptom. (And WAIT-for-6
-                        //   STALLS: AtHome(6)->AtHomeInit(0) fires the same tick, so 6 is
-                        //   never observed.) Wait for ToHome=5 instead: the boot 0 can't
-                        //   false-match 5, so the engine HOLDS state_val=5 until the swivel
-                        //   actually enters the home swing. The swivel gets there via the
-                        //   AtHomeInit->AtWork1->ToHome recovery arc (run-to-completion on
-                        //   the home command) and HOLDS ToHome=5 for the full
-                        //   work*ToHomeTime swing (~3s), so the engine reliably catches it --
-                        //   no race, no skip. It then finishes the swing (the ReturnToHome
-                        //   timer closes atHome -> AtHome -> AtHomeInit) while the queued Pick
-                        //   waits at ToHome and only fires once it lands back in AtHomeInit.
-                        //   Net: physically homes first, then picks. The FINAL-home wait stays
-                        //   RIG=0 (classifier) -- there the swivel comes from AtWork2=4, so 0
-                        //   can't false-match and waiting for the fully-settled 0 is correct.
-                        arrays.Wait1State.Insert(pos, MapperConfig.SimulatorRecipeMode ? 0 : 5);
+                        // Home-preamble WAIT target = AtHomeInit(0), for BOTH rig and sim.
+                        // (2026-06-03, rev 3.) This pairs with HOME-ON-INIT in the core
+                        // (TemplateLibraryDeployer.PatchSwivelAtHomeInitRecovery): the
+                        // swivel now DRIVES ITSELF HOME at power-up (INIT/AtHomeInit work
+                        // boot paths redirected to ToHome), so by the time the engine runs
+                        // this preamble the swivel has already settled at AtHomeInit=0 (or
+                        // is still swinging there). So wait for the stable 0:
+                        //   - already home (0): passes immediately (correct -- it IS home,
+                        //     so no false-match like the old "boots parked at work" race);
+                        //   - still self-homing (ToHome=5): waits until it lands at 0.
+                        // The CMD Home in this preamble is then a harmless no-op/confirm.
+                        // (Earlier this was RIG=5 to dodge the boot-at-work race; HOME-ON-
+                        // INIT removes that race by making the swivel boot home, so 0 is
+                        // correct again and matches the FINAL-home classifier wait.)
+                        arrays.Wait1State.Insert(pos, 0);
                         arrays.NextStep.Insert(pos, pos + 1);
                         pos++;
                     }
