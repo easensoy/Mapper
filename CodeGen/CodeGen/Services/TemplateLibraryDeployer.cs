@@ -2630,34 +2630,86 @@ namespace CodeGen.Services
                     return;
                 }
 
-                bool IsRecoveryArc(System.Xml.Linq.XElement t) =>
+                // SELF-HOME ON POWER-UP (2026-06-03, supersedes the earlier "re-sync to
+                // AtWork" recovery). Jyotsna's core latches whatever work position it
+                // physically booted at: INIT -> AtWork1 (atWork1 TRUE) or INIT -> ToWork2
+                // (atWork2 TRUE). The swivel has NO spring-centre (both coils off => it
+                // holds position -- confirmed on the rig), so the ONLY way to make HOME
+                // its initial state is to DRIVE it home at power-up. On the rig (addArc)
+                // redirect every "booted at a work position" boot path to ToHome, so the
+                // actuator swings itself home the instant it powers up, before the engine
+                // even starts -- home becomes its permanent initial positioning state,
+                // independent of the recipe. Covers both the IO-ready boot (INIT -> work)
+                // and the IO-late boot (INIT -> AtHomeInit, then a work sensor comes TRUE
+                // -> AtHomeInit -> ToHome). On the sim (!addArc) restore INIT -> work
+                // states (inert there: coils are FALSE at sim boot so atwork is FALSE and
+                // INIT -> AtHomeInit fires) and strip the self-home arcs, leaving the
+                // proven sim core unchanged. Idempotent + bidirectional. NOTE: the arm
+                // physically moves (swings home) at power-up -- safe direction (toward
+                // centre), but the rig swing path must be clear before a cold download.
+                var initArcs = ecc.Elements(ns + "ECTransition")
+                    .Where(t => (string?)t.Attribute("Source") == "INIT").ToList();
+                bool IsSelfHomeArc(System.Xml.Linq.XElement t) =>
+                    (string?)t.Attribute("Source") == "AtHomeInit" &&
+                    (string?)t.Attribute("Destination") == "ToHome";
+                bool IsStaleWorkArc(System.Xml.Linq.XElement t) =>
                     (string?)t.Attribute("Source") == "AtHomeInit" &&
                     ((string?)t.Attribute("Destination") == "AtWork1" ||
                      (string?)t.Attribute("Destination") == "AtWork2");
 
-                var existing = ecc.Elements(ns + "ECTransition").Where(IsRecoveryArc).ToList();
-
                 if (!addArc)
                 {
-                    // Simulator path: strip the recovery arcs so the sim core is pristine.
-                    if (existing.Count == 0) return; // idempotent
-                    foreach (var t in existing) t.Remove();
-                    doc.Save(fbt);
-                    result.PatchesApplied.Add(
-                        "SevenStateCentreHomeActuator.fbt: removed AtHomeInit sensor-recovery arcs (sim path -> core byte-identical)");
+                    // SIM / restore: INIT boot arcs back to the work states; strip the
+                    // self-home arcs (and any older AtWork "re-sync" recovery arcs).
+                    bool ch = false;
+                    foreach (var t in initArcs)
+                    {
+                        if ((string?)t.Attribute("Destination") != "ToHome") continue;
+                        var cond = (string?)t.Attribute("Condition") ?? string.Empty;
+                        t.SetAttributeValue("Destination",
+                            cond.Contains("atWork1 = TRUE") ? "AtWork1" : "ToWork2");
+                        ch = true;
+                    }
+                    foreach (var t in ecc.Elements(ns + "ECTransition")
+                                 .Where(x => IsSelfHomeArc(x) || IsStaleWorkArc(x)).ToList())
+                    { t.Remove(); ch = true; }
+                    if (ch)
+                    {
+                        doc.Save(fbt);
+                        result.PatchesApplied.Add(
+                            "SevenStateCentreHomeActuator.fbt: INIT boot arcs restored to work states; self-home arcs stripped (sim path)");
+                    }
                     return;
                 }
 
-                // Rig path: ensure both recovery arcs are present.
-                bool hasWork1 = existing.Any(t => (string?)t.Attribute("Destination") == "AtWork1");
-                bool hasWork2 = existing.Any(t => (string?)t.Attribute("Destination") == "AtWork2");
-                if (hasWork1 && hasWork2) return; // idempotent
+                // RIG: drive home on power-up.
+                bool changed = false;
 
-                System.Xml.Linq.XElement MakeArc(string dest, string cond, string x, string y, string bezier)
+                // 1. INIT -> AtWork1 / INIT -> ToWork2  ==>  INIT -> ToHome.
+                foreach (var t in initArcs)
+                {
+                    var dest = (string?)t.Attribute("Destination");
+                    if (dest == "AtWork1" || dest == "ToWork2")
+                    { t.SetAttributeValue("Destination", "ToHome"); changed = true; }
+                }
+
+                // 2. Drop any older AtHomeInit -> AtWork1/AtWork2 "re-sync to work" arcs
+                //    (we now re-sync to HOME, not to the work position).
+                foreach (var t in ecc.Elements(ns + "ECTransition").Where(IsStaleWorkArc).ToList())
+                { t.Remove(); changed = true; }
+
+                // 3. Ensure AtHomeInit -> ToHome self-home arcs exist (IO-late boot: the
+                //    core landed in AtHomeInit, then a physical work sensor went TRUE).
+                bool hasW1 = ecc.Elements(ns + "ECTransition").Any(t =>
+                    IsSelfHomeArc(t) && ((string?)t.Attribute("Condition") ?? string.Empty).Contains("atWork1 = TRUE"));
+                bool hasW2 = ecc.Elements(ns + "ECTransition").Any(t =>
+                    IsSelfHomeArc(t) && ((string?)t.Attribute("Condition") ?? string.Empty).Contains("atWork2 = TRUE"));
+
+                System.Xml.Linq.XElement MakeArc(string cond, string x, string y, string bezier)
                 {
                     var t = new System.Xml.Linq.XElement(ns + "ECTransition",
                         new System.Xml.Linq.XAttribute("Source", "AtHomeInit"),
-                        new System.Xml.Linq.XAttribute("Destination", dest),
+                        new System.Xml.Linq.XAttribute("Destination", "ToHome"),
                         new System.Xml.Linq.XAttribute("Condition", cond),
                         new System.Xml.Linq.XAttribute("x", x),
                         new System.Xml.Linq.XAttribute("y", y));
@@ -2667,36 +2719,39 @@ namespace CodeGen.Services
                     return t;
                 }
 
-                // Append after the last existing ECTransition so the stock Pick/Place
-                // (state_val) arcs keep priority; the sensor-recovery fires only when no
-                // command arc matches -- e.g. the home preamble on a mis-booted swivel.
                 var content = new List<object>();
-                if (!hasWork1)
+                if (!hasW1)
                 {
                     content.Add(new System.Xml.Linq.XText("\r\n      "));
-                    content.Add(MakeArc("AtWork1", "atWork1 = TRUE AND atWork2 = FALSE AND atHome = FALSE",
+                    content.Add(MakeArc("atWork1 = TRUE AND atWork2 = FALSE AND atHome = FALSE",
                         "2700", "1250", "541.25,273.75,735,416.25"));
+                    changed = true;
                 }
-                if (!hasWork2)
+                if (!hasW2)
                 {
                     content.Add(new System.Xml.Linq.XText("\r\n      "));
-                    content.Add(MakeArc("AtWork2", "atWork2 = TRUE AND atWork1 = FALSE AND atHome = FALSE",
+                    content.Add(MakeArc("atWork2 = TRUE AND atWork1 = FALSE AND atHome = FALSE",
                         "4800", "1480", "1303.733,262.3214,1306.017,478.75"));
+                    changed = true;
+                }
+                if (content.Count > 0)
+                {
+                    var lastTransition = ecc.Elements(ns + "ECTransition").LastOrDefault();
+                    if (lastTransition != null)
+                        lastTransition.AddAfterSelf(content.ToArray());
+                    else
+                        foreach (var o in content) ecc.Add(o);
                 }
 
-                var lastTransition = ecc.Elements(ns + "ECTransition").LastOrDefault();
-                if (lastTransition != null)
-                    lastTransition.AddAfterSelf(content.ToArray());
-                else
-                    foreach (var o in content) ecc.Add(o);
-                doc.Save(fbt);
-
-                result.PatchesApplied.Add(
-                    "SevenStateCentreHomeActuator.fbt: added AtHomeInit->AtWork1/AtWork2 sensor-recovery arcs " +
-                    "(rig: swivel mis-booted at AtHomeInit while a work sensor is TRUE now re-syncs and accepts Home)");
-                MapperLogger.Info(
-                    "[Deploy] SevenStateCentreHomeActuator.fbt: AtHomeInit sensor-recovery arcs added " +
-                    "(rig swivel that powered up before IO settled re-syncs to its real position; Home command no longer dead)");
+                if (changed)
+                {
+                    doc.Save(fbt);
+                    result.PatchesApplied.Add(
+                        "SevenStateCentreHomeActuator.fbt: HOME-ON-INIT -- INIT/AtHomeInit work-position boot paths redirected to ToHome " +
+                        "(rig: the swivel drives itself home at power-up, so home is its permanent initial state)");
+                    MapperLogger.Info(
+                        "[Deploy] SevenStateCentreHomeActuator.fbt: home-on-init wired -- swivel self-homes at power-up before the engine runs");
+                }
             }
             catch (Exception ex)
             {
