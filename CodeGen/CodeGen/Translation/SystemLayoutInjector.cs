@@ -3307,6 +3307,14 @@ namespace CodeGen.Translation
         {
             if (string.IsNullOrEmpty(config.SyslayPath2))
                 throw new InvalidOperationException("MapperConfig.SyslayPath2 is not configured.");
+            // Tell the recipe generator whether this is the SIM or the RIG path so the
+            // Seven_State swivel HOME-FIRST preamble waits for the right state. Set fresh
+            // every generation (no session carry-over): SIM swivel boots at AtHomeInit(0)
+            // so home WAIT=0; RIG swivel boots parked at a work position and the engine's
+            // blank state_table reads 0, so home WAIT must target AtHome=6 (atHome=TRUE) or
+            // the homing is skipped. Both the Test Simulator and Test Runtime buttons enter
+            // here, so this covers both. See MapperConfig.SimulatorRecipeMode.
+            Configuration.MapperConfig.SimulatorRecipeMode = config.SimulatorFullSystem;
             return GenerateFeedStationSyslayToPath(controlXmlPath, config.SyslayPath2, bindings, config, out report);
         }
 
