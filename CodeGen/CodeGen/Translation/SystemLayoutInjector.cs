@@ -2018,6 +2018,26 @@ namespace CodeGen.Translation
                 homeSensorFitted = false;
             }
 
+            // 2026-06-03: M580 bench actuators (the recipe allowlist) sit on
+            // bad-quality M580 DIs (atwork/athome read quality 16#0), so a sensored
+            // Five_State HANGS on its atWork/atHome WAIT and stalls the whole Assembly
+            // recipe -- gripper never confirms release, shaft never gets commanded,
+            // swivel never reaches the final home (observed: pick->place then nothing).
+            // Feed_Station's M262 sensors are good and it's NOT in this Assembly
+            // allowlist, so it's untouched. Force the allowlisted Five_State actuators
+            // (bearing_gripper, shaft_hr/vr/gripper -- bearing_pnp is Centre-Home,
+            // handled elsewhere) sensorless so they settle on the toWork/toHome timers
+            // and the recipe advances; the drive coils still fire so they physically
+            // move. Lift when the M580 IO quality is fixed (empty allowlist = no-op).
+            if (Configuration.MapperConfig.RecipeTestActuatorAllowlist.Length > 0
+                && System.Linq.Enumerable.Contains(
+                    Configuration.MapperConfig.RecipeTestActuatorAllowlist,
+                    (actuator.Name ?? string.Empty).Trim().ToLowerInvariant()))
+            {
+                workSensorFitted = false;
+                homeSensorFitted = false;
+            }
+
             // InterlockManager rule arrays from this actuator's own Control.xml
             // NOT-conditions. scopedIds==null only for legacy/test callers →
             // pass-through (RuleCount=0). The real Button 2 / Button 4 path
