@@ -629,6 +629,25 @@ namespace CodeGen.Translation.Process
                 }
             }
 
+            // RUN-ONCE: park on the END row after one cycle instead of looping.
+            // (2026-06-03 — MapperConfig.RecipeRunOnce, default ON.) The END
+            // ECState runs EndSequence (CurrentStep := Recipe[CurrentStep].NextStep),
+            // so the END row's NextStep decides what happens when the recipe
+            // finishes. It was 0 -> the engine jumps to step 0; with the home-first
+            // preamble now at step 0 that RE-RUNS Home->Pick->Place->Home forever
+            // (the observed swivel atWork1<->atWork2 bounce). Point the END row at
+            // ITSELF so CurrentStep stays on the END row: the engine parks, issues
+            // no further commands, and the swivel holds its last (home) position --
+            // a clean single Home->Pick->Place->Home. Done HERE (after the preamble
+            // prepend has shifted every index) so endIdx is the FINAL END index.
+            // Flip RecipeRunOnce off to restore continuous looping.
+            if (MapperConfig.RecipeRunOnce && arrays.StepType.Count > 0)
+            {
+                int endIdx = arrays.StepType.Count - 1;
+                if (arrays.StepType[endIdx] == 9)
+                    arrays.NextStep[endIdx] = endIdx;   // self-loop = park (was 0 = restart)
+            }
+
             ValidateProcessIdInvariant(arrays, processId);
             ValidateSingleEndMarker(arrays);
 
