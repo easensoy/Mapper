@@ -81,14 +81,28 @@ namespace CodeGen.Configuration
         // ProcessRecipeArrayGenerator.Generate after the preamble shifts indices.
         public static bool RecipeRunOnce = true;
 
-        // 2026-06-03: emit the OPERATOR-VERIFIED Assembly sequence verbatim instead
-        // of the data-driven order. The data-driven classifier produced the wrong
-        // command order for Assembly_Station; the operator ran each actuator's Output
-        // section end-to-end on the rig and gave the exact working order, so the
-        // recipe generator emits that fixed CMD/WAIT chain when the process is
-        // Assembly_Station. Feed_Station and Disassembly are untouched. Set false to
-        // fall back to the data-driven classifier.
-        public static bool UseVerifiedAssemblyRecipe = true;
+        // AUTO-RETRACT SCOPE (2026-06-04): the recipe generator's auto-retract
+        // safety net (it inserts a return-home for an actuator the twin advances but
+        // never retracts) runs ONLY for the processes listed here. It exists for the
+        // Feed_Station twin, which advances the Checker but never retracts it (leaving
+        // it energized at-work — a documented rig-recovery incident). Every OTHER
+        // process's recipe is generated VERBATIM from its Control.xml state-transition
+        // chain, with NO inserted steps — so Assembly_Station holds the Clamp exactly
+        // as the twin sequences it (engage at Clamping_Part, no release in the chain)
+        // instead of having a clamp release injected. Add a process name here only if
+        // its twin is known to omit a retract it genuinely needs.
+        public static readonly string[] AutoRetractProcesses = new[] { "Feed_Station" };
+
+        // SEVEN_STATE HOME PREAMBLE (2026-06-04): ON for the rig-facing Assembly
+        // recipe. Bearing_PnP is a centre-home swivel that can boot parked at Pick
+        // or Place after a manual jog / interrupted cycle. The generated process
+        // must therefore command the swivel home before issuing Pick, so the
+        // bearing transfer always starts from a known rest position.
+        // When true, ProcessRecipeArrayGenerator prepends "CMD swivel Home -> WAIT
+        // AtHomeInit=0" before the cycle. It is an operational safe-start step added
+        // by the mapper, not a Control.xml process state. The rest of the Assembly
+        // recipe is still derived from the Control.xml transition chain.
+        public static bool EnableSevenStateHomePreamble = true;
 
         // TEST ISOLATION (2026-05-29, TEMPORARY): restrict ONE process's recipe to a
         // subset of actuators so a single mechanism can be exercised on the rig
@@ -123,8 +137,26 @@ namespace CodeGen.Configuration
         // 2026-06-03: shaft actuators added back (IO restored from backup). M580-only
         // set: bearing + shaft, NO BX1 covers (those would stall waiting on the
         // unconnected BX1). Clear to `new string[0]` for the full cycle incl. covers.
+        // 2026-06-04: clamp added. Assembly_Station's Clamping_Part state waits on
+        // Clamp/Clamped (Control.xml C-f021417c… line 2748), so with clamp in the
+        // allowlist the data-driven recipe keeps the clamp CMD/WAIT in its native
+        // chain position (after the bearing+shaft assembly) instead of dropping it.
+        // Clamp is M580 with real sensors (DI06=ClampAtWork, DI07=ClampAtHome).
         public static readonly string[] RecipeTestActuatorAllowlist = new[]
-            { "bearing_pnp", "bearing_gripper", "shaft_hr", "shaft_vr", "shaft_gripper" };
+            { "bearing_pnp", "bearing_gripper", "shaft_hr", "shaft_vr", "shaft_gripper", "clamp" };
+
+        // TEST ISOLATION (2026-06-04, TEMPORARY, bench): drop the centre-home swivel's
+        // (Bearing_PnP) cross-component interlock rules so its turn-to-Place (AtWork1 2
+        // -> AtWork2 4) is never blocked. Alex traced the swivel sticking at atWork1 to
+        // the shaft-sensor interlock rule (RuleSourceID=shaft_hr, RuleBlockedState=AtWork):
+        // the swivel refuses to turn-to-Place while shaft_hr reads AtWork. In the isolated
+        // bearing+shaft+clamp bench test the shaft is home during the swivel's Place, but
+        // the rule still fires, so the swivel never reaches atWork2 and never releases the
+        // bearing. RuleCount=0 removes the block for the test. Set false to restore the
+        // real Control.xml interlock when the full collision-aware system runs (it also
+        // re-arms the SystemLayoutInjector safety guard that refuses an inert RuleCount=0
+        // when Control.xml defines in-scope swivel interlocks).
+        public static bool DropSwivelInterlockForTest = true;
 
         public string SystemXmlPath { get; set; } = string.Empty;
         public string MappingRulesPath { get; set; } = string.Empty;
