@@ -55,6 +55,13 @@ namespace CodeGen.Translation.Process
         public List<string> Warnings { get; } = new();
 
         /// <summary>
+        /// StateID-based Control.xml transition chain used to derive this recipe.
+        /// Kept as generated metadata so the syslay/report can show the exact
+        /// design-intent path without maintaining a separate hand-written table.
+        /// </summary>
+        public List<string> TransitionTable { get; } = new();
+
+        /// <summary>
         /// Human-readable one-line rendering of the FINAL emitted recipe
         /// (every CMD/WAIT row in execution order, e.g. "feeder advance →
         /// feeder atwork → checker advance → … → END"). Surfaced verbatim
@@ -132,99 +139,6 @@ namespace CodeGen.Translation.Process
         public static StationComponentMap BuildComponentMap(StationContents contents)
             => ProcessRecipeStGenerator.BuildComponentMap(contents);
 
-        /// <summary>
-        /// Emit the OPERATOR-VERIFIED Assembly recipe verbatim (2026-06-03). The
-        /// operator ran each actuator's Output section end-to-end on the rig and gave
-        /// the exact working order; we encode it as a fixed CMD/WAIT chain rather than
-        /// derive it from the (mis-ordering) data-driven classifier.
-        ///
-        /// Command vocabulary:
-        ///  - Bearing_PnP (Seven_State Centre-Home): Home=cmd5/wait0, Pick(atWork1)=cmd1/wait2,
-        ///    Place(atWork2)=cmd3/wait4 (current_state_to_process settle values 0/2/4).
-        ///  - Five_State (grippers, shaft_hr/vr): work=cmd1/wait2 (AtWork), home/release=cmd3/wait0 (AtHome).
-        ///
-        /// Sequence:
-        ///  Bearing: home -> pick -> gripper grip -> place -> gripper release
-        ///  Shaft:   vr work -> gripper work -> vr home -> hr work -> gripper release -> hr home -> vr work
-        /// </summary>
-        private static void BuildVerifiedAssemblyRecipe(
-            RecipeArrays arrays, IReadOnlyList<VueOneComponent> allComponents)
-        {
-            // (lowercased target name, CmdState, WAIT settle state)
-            var seq = new (string name, int cmd, int wait)[]
-            {
-                ("bearing_pnp",     5, 0),   // 1. home
-                ("bearing_pnp",     1, 2),   // 2. pick  (atWork1)
-                ("bearing_gripper", 1, 2),   // 3. gripper grip
-                ("bearing_pnp",     3, 4),   // 4. place (atWork2)
-                ("bearing_gripper", 3, 0),   // 5. gripper release
-                ("shaft_vr",        1, 2),   // 6. shaft_vr work
-                ("shaft_gripper",   1, 2),   // 7. shaft_gripper work
-                ("shaft_vr",        3, 0),   // 8. shaft_vr home
-                ("shaft_hr",        1, 2),   // 9. shaft_hr work
-                ("shaft_gripper",   3, 0),   // 10. shaft_gripper release
-                ("shaft_hr",        3, 0),   // 11. shaft_hr home
-                ("shaft_vr",        1, 2),   // 12. shaft_vr work (up)
-            };
-
-            // Resolve a lowercased actuator name to its local Wait1Id via the registry
-            // (ComponentID -> id), matching on the component's Name.
-            int WaitIdOf(string lcName)
-            {
-                foreach (var kv in arrays.ComponentRegistry)
-                {
-                    var comp = LookupComponent(kv.Key, allComponents);
-                    if (comp != null &&
-                        string.Equals((comp.Name ?? string.Empty).Trim(), lcName,
-                                      StringComparison.OrdinalIgnoreCase))
-                        return kv.Value;
-                }
-                return -1;
-            }
-
-            var summary = new List<string>();
-            foreach (var (name, cmd, wait) in seq)
-            {
-                int wid = WaitIdOf(name);
-                if (wid < 0)
-                {
-                    arrays.Warnings.Add(
-                        $"[Recipe][VerifiedAssembly] target '{name}' is not in the scoped " +
-                        "registry (not emitted as an in-scope actuator) — step dropped. " +
-                        "Check RecipeTestActuatorAllowlist / station scope.");
-                    continue;
-                }
-                // CMD row
-                arrays.StepType.Add(1);
-                arrays.CmdTargetName.Add(name);
-                arrays.CmdStateArr.Add(cmd);
-                arrays.Wait1Id.Add(0);
-                arrays.Wait1State.Add(0);
-                arrays.NextStep.Add(arrays.StepType.Count);   // -> our WAIT row
-                // WAIT row
-                arrays.StepType.Add(2);
-                arrays.CmdTargetName.Add(string.Empty);
-                arrays.CmdStateArr.Add(0);
-                arrays.Wait1Id.Add(wid);
-                arrays.Wait1State.Add(wait);
-                arrays.NextStep.Add(arrays.StepType.Count);   // -> next CMD (or the END row)
-                summary.Add($"{name}={cmd}(wait {wait})");
-            }
-
-            // Single END row.
-            int endIdx = arrays.StepType.Count;
-            arrays.StepType.Add(9);
-            arrays.CmdTargetName.Add(string.Empty);
-            arrays.CmdStateArr.Add(0);
-            arrays.Wait1Id.Add(0);
-            arrays.Wait1State.Add(0);
-            // Run-once: END points at itself (park). Else loop back to step 0.
-            arrays.NextStep.Add(MapperConfig.RecipeRunOnce ? endIdx : 0);
-
-            arrays.OrderingSummary =
-                "VERIFIED Assembly: " + string.Join(" -> ", summary) + " -> END";
-        }
-
         /// <param name="commandFromCondition">
         /// OPT-IN Station-2 path. When <c>false</c> (the default — Feed_Station /
         /// M262) the classifier is BYTE-IDENTICAL to the proven hardware recipe:
@@ -259,6 +173,19 @@ namespace CodeGen.Translation.Process
             // unaffected: its State_Numbers are already sequential (0..9), so the
             // chain walk yields the identical order it had under OrderBy.
             var states = OrderStatesByTransitionChain(process.States);
+            foreach (var line in BuildTransitionTable(process.States, states))
+                arrays.TransitionTable.Add(line);
+
+            var reachable = new HashSet<VueOneState>(states);
+            var unreachable = process.States.Where(s => !reachable.Contains(s)).ToList();
+            if (unreachable.Count > 0)
+            {
+                arrays.Warnings.Add(
+                    $"[Recipe] Process '{process.Name}': {unreachable.Count} state(s) are not " +
+                    "reachable from the Initialisation transition chain and were not serialized " +
+                    "into the recipe: " +
+                    string.Join(", ", unreachable.Select(s => $"'{s.Name}'")) + ".");
+            }
 
             // 1. Build scoped registry from the in-scope sensors + actuators ONLY.
             var scopedRegistry = BuildScopedComponentMap(stationContents.Sensors, stationContents.Actuators);
@@ -269,21 +196,6 @@ namespace CodeGen.Translation.Process
                 arrays.ComponentRegistry.FirstOrDefault(kv =>
                     LookupComponent(kv.Key, allComponents) is { } c &&
                     (NameEquals(c.Name, "Feeder") || NameEquals(c.Name, "Pusher"))).Value;
-
-            // OPERATOR-VERIFIED ASSEMBLY SEQUENCE (2026-06-03). The data-driven
-            // classifier emitted the wrong command ORDER for Assembly_Station. The
-            // operator drove each actuator's Output section end-to-end on the rig and
-            // gave the exact working sequence, so emit it verbatim. Registry is already
-            // built (above), so Wait1Id lookups resolve. Feed_Station / Disassembly
-            // (different names) fall through to the normal data-driven path unchanged.
-            if (MapperConfig.UseVerifiedAssemblyRecipe &&
-                string.Equals((process.Name ?? string.Empty).Trim(), "Assembly_Station",
-                              StringComparison.OrdinalIgnoreCase))
-            {
-                BuildVerifiedAssemblyRecipe(arrays, allComponents);
-                ValidateProcessIdInvariant(arrays, processId);
-                return arrays;
-            }
 
             // PARK GUARD (2026-05-29): a process whose INITIAL state gates on
             // ANOTHER process on the SAME PLC is an intra-PLC hand-off (e.g.
@@ -329,7 +241,8 @@ namespace CodeGen.Translation.Process
             // cover stay still. Null when no restriction applies (Feed_Station etc.),
             // so those recipes stay byte-identical.
             HashSet<string>? testActuatorAllowlist = null;
-            if (MapperConfig.RecipeTestActuatorAllowlist != null &&
+            if (!MapperConfig.SimulatorRecipeMode &&
+                MapperConfig.RecipeTestActuatorAllowlist != null &&
                 MapperConfig.RecipeTestActuatorAllowlist.Length > 0 &&
                 (string.IsNullOrWhiteSpace(MapperConfig.RecipeTestProcessName) ||
                  string.Equals((process.Name ?? string.Empty).Trim(),
@@ -385,6 +298,23 @@ namespace CodeGen.Translation.Process
 
                 int nextRowOnTransition = ResolveDestRow(
                     state, i, classifications, stateIdToFallForwardRow, finalEndIndex);
+
+                if (c.Rows.Count > 0)
+                {
+                    for (int r = 0; r < c.Rows.Count; r++)
+                    {
+                        var row = c.Rows[r];
+                        arrays.StepType.Add(row.StepType);
+                        arrays.CmdTargetName.Add(row.CmdTargetName);
+                        arrays.CmdStateArr.Add(row.CmdState);
+                        arrays.Wait1Id.Add(row.WaitId);
+                        arrays.Wait1State.Add(row.WaitState);
+                        arrays.NextStep.Add(r == c.Rows.Count - 1
+                            ? nextRowOnTransition
+                            : arrays.StepType.Count);
+                    }
+                    continue;
+                }
 
                 switch (c.Kind)
                 {
@@ -461,6 +391,20 @@ namespace CodeGen.Translation.Process
             //     LIFO let Transfer fully cycle while Checker was atwork —
             //     a rig collision). Index discipline is handled per-insertion
             //     (NextStep values >= the insert point are rebased by +2).
+            //
+            // SCOPE (2026-06-04): runs ONLY for processes in
+            // MapperConfig.AutoRetractProcesses (default Feed_Station). Other
+            // processes — e.g. Assembly_Station — are generated VERBATIM from their
+            // Control.xml state-transition chain: the bearing/shaft retract via their
+            // own GoHome/Go_Up states, and the CLAMP is HELD (engaged at Clamping_Part,
+            // never released in the chain, exactly as the twin sequences it). Injecting
+            // a retract there would contradict the twin. Feed_Station keeps the net (its
+            // twin forgets the Checker retract). Don't touch Feed_Station's mechanism.
+            if (MapperConfig.AutoRetractProcesses != null &&
+                MapperConfig.AutoRetractProcesses.Any(p =>
+                    string.Equals((p ?? string.Empty).Trim(),
+                        (process.Name ?? string.Empty).Trim(),
+                        StringComparison.OrdinalIgnoreCase)))
             {
                 var actuatorNameToId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
                 foreach (var a in stationContents.Actuators)
@@ -608,6 +552,8 @@ namespace CodeGen.Translation.Process
             arrays.Wait1State.Add(0);
             arrays.NextStep.Add(0);   // engine never reads NextStep after StepType=9
 
+            ApplyAssemblyBearingReleaseSequence(process, arrays, allComponents);
+
             // 6. HOME-FIRST PREAMBLE for EVERY commanded actuator (safe-start).
             //    Every actuator core boots to whatever its physical sensors report:
             //    the Five_State ECC does INIT -> AtWork on atwork=TRUE, the Seven
@@ -625,9 +571,14 @@ namespace CodeGen.Translation.Process
             //    on the rig: swivel parked at AtWork1 and gripper parked closed ->
             //    "nothing triggered"). Prepend, for each distinct actuator the recipe
             //    commands (in first-appearance order), a "command Home -> wait
-            //    AtHomeInit=0" pair: Seven swivel uses state_val=5, Five_State uses
-            //    toHome=3; both settle publishing current_state_to_process=0. This
-            //    drives a REAL ECC transition (AtWork* -> ToHome -> AtHome ->
+            //    home proof at the front. Seven swivel uses state_val=5, and the proof
+            //    WAIT targets the settled AtHomeInit=0 (sim AND rig). 0 is reachable only
+            //    through AtHome in the core, so it proves the arm homed, and -- key -- it
+            //    is satisfied whether the swivel was already home or just homed. (A prior
+            //    rig variant waited on the transient AtHome=6 first; that stalled for
+            //    ever when the swivel booted already settled at 0 -- the clamp/cycle then
+            //    never started.)
+            //    This drives a REAL ECC transition (AtWork* -> ToHome -> AtHome ->
             //    AtHomeInit) the running engine observes, so the cycle then starts
             //    from a known all-home state and every later command is a real move.
             //    Safe no-op when an actuator already boots home: the home command has
@@ -635,6 +586,15 @@ namespace CodeGen.Translation.Process
             //    (state_table defaults to 0 and a homed actuator publishes 0). Only
             //    fires for actuators the recipe actually commands, so Feed_Station's
             //    recipe is unchanged when it commands none via this path.
+            //
+            // 2026-06-04 DISABLED BY DEFAULT (follow the twin). CurrentStep=0 stall
+            // traced here: with the swivel parked at atWork1 holding the bearing, the
+            // hardcoded "CMD Home -> WAIT AtHomeInit=0" hangs at step 0 and the cycle
+            // never starts. The twin has no home-first step — the bearing Pick command
+            // handles whatever position the swivel boots in (Pick at atWork1 is a
+            // satisfied no-op; the engine reads state 2, the WAIT AtPick=2 clears, then
+            // Place carries it to atWork2). Flip EnableSevenStateHomePreamble to restore.
+            if (MapperConfig.EnableSevenStateHomePreamble)
             {
                 var homeOrder = new List<(string name, int id, int homeCmd)>();
                 var seenActuator = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -665,7 +625,8 @@ namespace CodeGen.Translation.Process
 
                 if (homeOrder.Count > 0)
                 {
-                    int shift = 2 * homeOrder.Count;
+                    int rowsPerHome = MapperConfig.SimulatorRecipeMode ? 2 : 3;
+                    int shift = rowsPerHome * homeOrder.Count;
                     // Every existing row moves down by `shift`, so every NextStep
                     // pointer is rebased -- EXCEPT the final END row's own NextStep,
                     // which must stay 0. The END ECState runs EndSequence
@@ -678,9 +639,22 @@ namespace CodeGen.Translation.Process
                         if (arrays.StepType[i] != 9)
                             arrays.NextStep[i] += shift;
 
-                    // Insert the home CMD+WAIT pairs at the front, in order. Each row
+                    // 2026-06-04 STALL FIX (was: rig=6, sim=0). Waiting for AtHome=6 on
+                    // the rig stalls forever when the swivel BOOTS already home: it sits
+                    // at AtHomeInit=0 (the settled rest state, reached via AtHome during
+                    // boot), CMD Home is a no-op (no ECC arc out of AtHomeInit), so state
+                    // 6 never re-pulses and the engine waits on it for ever -> the whole
+                    // cycle (clamp at step 3 included) never starts. AtHomeInit=0 is
+                    // reachable ONLY through AtHome in the core, so 0 already proves the
+                    // arm homed, AND it is satisfied whether the swivel was already home
+                    // or just homed. (Restores the reverted bd806b0 6->0 remap.)
+                    int sevenHomePreambleProofWait = 0;
+
+                    // Insert the home CMD+WAIT rows at the front, in order. Each row
                     // chains to the next (NextStep = its own index + 1); the last
                     // WAIT's NextStep lands on `shift`, i.e. the original first row.
+                    // Hardware adds a second WAIT for AtHomeInit=0 after the AtHome=6
+                    // proof so startup homing cannot false-pass on the transient 6.
                     int pos = 0;
                     foreach (var (name, id, homeCmd) in homeOrder)
                     {
@@ -696,29 +670,35 @@ namespace CodeGen.Translation.Process
                         arrays.CmdTargetName.Insert(pos, string.Empty);
                         arrays.CmdStateArr.Insert(pos, 0);
                         arrays.Wait1Id.Insert(pos, id);
-                        // Home-preamble WAIT target = AtHomeInit(0), for BOTH rig and sim.
-                        // (2026-06-03, rev 3.) This pairs with HOME-ON-INIT in the core
-                        // (TemplateLibraryDeployer.PatchSwivelAtHomeInitRecovery): the
-                        // swivel now DRIVES ITSELF HOME at power-up (INIT/AtHomeInit work
-                        // boot paths redirected to ToHome), so by the time the engine runs
-                        // this preamble the swivel has already settled at AtHomeInit=0 (or
-                        // is still swinging there). So wait for the stable 0:
-                        //   - already home (0): passes immediately (correct -- it IS home,
-                        //     so no false-match like the old "boots parked at work" race);
-                        //   - still self-homing (ToHome=5): waits until it lands at 0.
-                        // The CMD Home in this preamble is then a harmless no-op/confirm.
-                        // (Earlier this was RIG=5 to dodge the boot-at-work race; HOME-ON-
-                        // INIT removes that race by making the swivel boot home, so 0 is
-                        // correct again and matches the FINAL-home classifier wait.)
-                        arrays.Wait1State.Insert(pos, 0);
+                        // Home-preamble proof WAIT target = AtHomeInit (0), the swivel's
+                        // settled rest state (sim AND rig). Reaching 0 proves the arm
+                        // homed because the core reaches AtHomeInit only through AtHome.
+                        // (Was rig=6; that stalled when the swivel booted already home --
+                        // see the STALL FIX note above.)
+                        arrays.Wait1State.Insert(pos, sevenHomePreambleProofWait);
                         arrays.NextStep.Insert(pos, pos + 1);
                         pos++;
+
+                        if (!MapperConfig.SimulatorRecipeMode)
+                        {
+                            arrays.StepType.Insert(pos, 2);
+                            arrays.CmdTargetName.Insert(pos, string.Empty);
+                            arrays.CmdStateArr.Insert(pos, 0);
+                            arrays.Wait1Id.Insert(pos, id);
+                            // Rig-only second confirmation of the settled rest state
+                            // (AtHomeInit=0, coils cleared). Redundant now that the proof
+                            // WAIT above also targets 0, but harmless: both pass on the
+                            // same scan when the swivel is home.
+                            arrays.Wait1State.Insert(pos, 0);
+                            arrays.NextStep.Insert(pos, pos + 1);
+                            pos++;
+                        }
                     }
 
                     arrays.Warnings.Add(
                         $"[Recipe] HOME-FIRST preamble prepended for {homeOrder.Count} actuator(s): " +
                         string.Join(", ", homeOrder.Select(h => $"{h.name}(cmd {h.homeCmd})")) +
-                        " -- each CMD Home -> WAIT AtHomeInit=0 before the cycle. Guarantees a known " +
+                        $" -- each CMD Home -> WAIT AtHomeInit=0 before the cycle. Guarantees a known " +
                         "all-home start regardless of where each actuator was physically parked at " +
                         "power-up; without it an actuator booting parked at work stalls the recipe.");
                 }
@@ -765,6 +745,112 @@ namespace CodeGen.Translation.Process
             return arrays;
         }
 
+        private static void ApplyAssemblyBearingReleaseSequence(VueOneComponent process,
+            RecipeArrays arrays, IReadOnlyList<VueOneComponent> allComponents)
+        {
+            if (!string.Equals((process.Name ?? string.Empty).Trim(), "Assembly_Station",
+                    StringComparison.OrdinalIgnoreCase))
+                return;
+
+            if (!TryGetComponentId(arrays, allComponents, "bearing_pnp", out var pnpId) ||
+                !TryGetComponentId(arrays, allComponents, "bearing_gripper", out var gripperId))
+                return;
+
+            int pickCmd = FindCmd(arrays, "bearing_pnp", 1, 0);
+            if (pickCmd < 0) return;
+            int pickWait = FindWaitAfter(arrays, pickCmd, pnpId, 2);
+            if (pickWait < 0) return;
+            int gripCmd = FindCmd(arrays, "bearing_gripper", 1, pickWait + 1);
+            if (gripCmd < 0) return;
+            int gripWait = FindWaitAfter(arrays, gripCmd, gripperId, 2);
+            if (gripWait < 0) return;
+            int placeCmd = FindCmd(arrays, "bearing_pnp", 3, gripWait + 1);
+            if (placeCmd < 0) return;
+            int placeWait = FindWaitAfter(arrays, placeCmd, pnpId, 4);
+            if (placeWait < 0) return;
+            int releaseCmd = FindCmd(arrays, "bearing_gripper", 3, placeWait + 1);
+            if (releaseCmd < 0) return;
+            int releaseWait = FindWaitAfter(arrays, releaseCmd, gripperId, 0);
+            if (releaseWait < 0) return;
+            int homeCmd = FindCmd(arrays, "bearing_pnp", 5, releaseWait + 1);
+            if (homeCmd < 0) return;
+            int homeWait = FindWaitAfter(arrays, homeCmd, pnpId, 0);
+            if (homeWait < 0) return;
+
+            int afterHome = arrays.NextStep[homeWait];
+
+            // The centre-home CAT can physically reach atWork2 but fail to publish a
+            // long enough state-table update for the Process wait. Release the bearing
+            // immediately after the Place command, then home the swivel after release.
+            // Keeping a short PnP home wait preserves the downstream shaft handoff.
+            arrays.NextStep[placeCmd] = releaseCmd;
+            arrays.NextStep[releaseCmd] = releaseWait;
+            arrays.NextStep[releaseWait] = homeCmd;
+            arrays.NextStep[homeCmd] = homeWait;
+            arrays.NextStep[homeWait] = afterHome;
+            arrays.NextStep[placeWait] = releaseCmd; // parked/unreachable fallback if manually jumped.
+
+            arrays.Warnings.Add(
+                "[Recipe] Assembly bearing release override: after Bearing_PnP Place CMD, " +
+                "command Bearing_Gripper release before the PnP home command. The generated " +
+                "Place WAIT row is bypassed because the centre-home CAT's AtWork2 publish is " +
+                "not reliable enough on the rig; release is confirmed by gripper home before " +
+                "Bearing_PnP is commanded home.");
+        }
+
+        private static bool TryGetComponentId(RecipeArrays arrays,
+            IReadOnlyList<VueOneComponent> allComponents, string componentName, out int id)
+        {
+            foreach (var kv in arrays.ComponentRegistry)
+            {
+                var comp = LookupComponent(kv.Key, allComponents);
+                if (comp != null &&
+                    string.Equals((comp.Name ?? string.Empty).Trim(), componentName,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    id = kv.Value;
+                    return true;
+                }
+            }
+
+            id = -1;
+            return false;
+        }
+
+        private static int FindCmd(RecipeArrays arrays, string target, int cmdState, int start)
+        {
+            for (int i = Math.Max(0, start); i < arrays.StepType.Count; i++)
+            {
+                if (arrays.StepType[i] == 1 &&
+                    arrays.CmdStateArr[i] == cmdState &&
+                    string.Equals((arrays.CmdTargetName[i] ?? string.Empty).Trim(), target,
+                        StringComparison.OrdinalIgnoreCase))
+                    return i;
+            }
+
+            return -1;
+        }
+
+        private static int FindWaitAfter(RecipeArrays arrays, int cmdRow, int waitId, int waitState)
+        {
+            int i = cmdRow >= 0 && cmdRow < arrays.NextStep.Count ? arrays.NextStep[cmdRow] : -1;
+            if (i >= 0 && i < arrays.StepType.Count &&
+                arrays.StepType[i] == 2 &&
+                arrays.Wait1Id[i] == waitId &&
+                arrays.Wait1State[i] == waitState)
+                return i;
+
+            for (i = cmdRow + 1; i < arrays.StepType.Count; i++)
+            {
+                if (arrays.StepType[i] == 2 &&
+                    arrays.Wait1Id[i] == waitId &&
+                    arrays.Wait1State[i] == waitState)
+                    return i;
+            }
+
+            return -1;
+        }
+
         /// <summary>
         /// Walk the FINAL emitted recipe in row order and render it as one
         /// human-readable line, e.g. "WAIT PartInHopper on → feeder advance →
@@ -783,6 +869,7 @@ namespace CodeGen.Translation.Process
             // id → component display name (sensors first, actuators next —
             // exactly the recipe Wait1Id scheme in arrays.ComponentRegistry).
             var idToName = new Dictionary<int, string>();
+            var idToComponent = new Dictionary<int, VueOneComponent>();
             foreach (var kv in arrays.ComponentRegistry)
             {
                 var comp = allComponents.FirstOrDefault(c =>
@@ -790,6 +877,7 @@ namespace CodeGen.Translation.Process
                         StringComparison.OrdinalIgnoreCase));
                 idToName[kv.Value] =
                     (comp?.Name ?? $"id{kv.Value}").Trim();
+                if (comp != null) idToComponent[kv.Value] = comp;
             }
 
             var parts = new List<string>(arrays.StepType.Count);
@@ -803,7 +891,18 @@ namespace CodeGen.Translation.Process
                     case 1:
                         var tgt = (arrays.CmdTargetName[i] ?? string.Empty).Trim();
                         if (tgt.Length == 0) tgt = "?";
-                        var verb = arrays.CmdStateArr[i] switch
+                        var cmdComp = allComponents.FirstOrDefault(c =>
+                            string.Equals((c.Name ?? string.Empty).Trim(), tgt,
+                                StringComparison.OrdinalIgnoreCase));
+                        var verb = IsSevenStateCommandable(cmdComp!)
+                            ? arrays.CmdStateArr[i] switch
+                            {
+                                1 => "pick/work1",
+                                3 => "place/work2",
+                                5 => "home",
+                                _ => $"cmd{arrays.CmdStateArr[i]}",
+                            }
+                            : arrays.CmdStateArr[i] switch
                         {
                             1 => "advance",
                             3 => "retract",
@@ -814,7 +913,17 @@ namespace CodeGen.Translation.Process
                     case 2:
                         int wid = arrays.Wait1Id[i];
                         var nm = idToName.TryGetValue(wid, out var n) ? n : $"id{wid}";
-                        var phase = arrays.Wait1State[i] switch
+                        idToComponent.TryGetValue(wid, out var waitComp);
+                        var phase = IsSevenStateCommandable(waitComp!)
+                            ? arrays.Wait1State[i] switch
+                            {
+                                0 => "home-init",
+                                2 => "atWork1/pick",
+                                4 => "atWork2/place",
+                                6 => "atHome",
+                                _ => $"state{arrays.Wait1State[i]}",
+                            }
+                            : arrays.Wait1State[i] switch
                         {
                             2 => "atwork",
                             4 => "athome",
@@ -931,6 +1040,16 @@ namespace CodeGen.Translation.Process
             public int CmdState;
             public int WaitId;
             public int WaitState;
+            public List<RecipeRow> Rows { get; } = new();
+        }
+
+        private sealed class RecipeRow
+        {
+            public int StepType;
+            public string CmdTargetName = string.Empty;
+            public int CmdState;
+            public int WaitId;
+            public int WaitState;
         }
 
         private static StateClassification ClassifyState(VueOneState state,
@@ -967,17 +1086,20 @@ namespace CodeGen.Translation.Process
             if (trans == null)
                 return new StateClassification { Kind = ClassKind.End, RowCount = 0 };
 
-            // Find the FIRST condition whose ComponentID is in the scoped registry.
+            // Find every condition whose ComponentID is in the scoped registry.
             // Conditions on out-of-scope components are recorded in SkippedConditions
-            // and effectively dropped from the recipe.
-            VueOneCondition? cond = null;
+            // and effectively dropped from the recipe. Older code stopped at the
+            // first in-scope condition; that loses conjunctive joins such as
+            // CoverPnp_Gripper/AtReleasePos AND CoverPNP_Hr/ReturnedHome, causing
+            // auto-retract to guess the missing home command at the wrong point.
+            var inScopeConds = new List<VueOneCondition>();
             foreach (var c in allConds)
             {
                 if (string.IsNullOrEmpty(c.ComponentID)) continue;
                 if (scopedRegistry.ContainsKey(c.ComponentID.Trim()))
                 {
-                    cond = c;
-                    break;
+                    inScopeConds.Add(c);
+                    continue;
                 }
                 // Out-of-scope reference → record for the syslay top comment.
                 var target = LookupComponent(c.ComponentID, allComponents);
@@ -987,6 +1109,7 @@ namespace CodeGen.Translation.Process
                     $"(name={(target?.Name ?? "?")}, type={(target?.Type ?? "?")})");
             }
 
+            var cond = inScopeConds.FirstOrDefault();
             if (cond == null)
             {
                 // Every condition on this transition was out of scope. Drop the row
@@ -1030,7 +1153,8 @@ namespace CodeGen.Translation.Process
             // slip through, so we now drop ANY non-Process target not on the
             // allowlist. Process targets are never parked here (the intra-PLC park
             // guard handles those).
-            if (testActuatorAllowlist != null
+            if (!commandFromCondition &&
+                testActuatorAllowlist != null
                 && !string.Equals(inScopeTarget.Type, "Process", StringComparison.OrdinalIgnoreCase)
                 && !testActuatorAllowlist.Contains((inScopeTarget.Name ?? string.Empty).Trim().ToLowerInvariant()))
             {
@@ -1043,6 +1167,13 @@ namespace CodeGen.Translation.Process
 
             int waitId    = scopedRegistry[cond.ComponentID.Trim()];
             int waitState = ResolveStateNumber(cond, inScopeTarget, arrays);
+
+            if (commandFromCondition)
+            {
+                return ClassifyConditionDrivenState(
+                    state, inScopeConds, allComponents, arrays, scopedRegistry,
+                    testActuatorAllowlist);
+            }
 
             // Bug-1 dispatch (kept from previous Phase 2): on source-state name, not target type.
             if (StateNameSuggestsMotion(state.Name))
@@ -1177,7 +1308,8 @@ namespace CodeGen.Translation.Process
                 // publishes current_state_to_process = the slot's AT-value (cmd+1):
                 //   state_val=1 (Work1/Pick)  -> ToWork1 -> AtWork1 publishes 2
                 //   state_val=3 (Work2/Place) -> ToWork2 -> AtWork2 publishes 4
-                //   state_val=5 (Home/centre) -> ToHome  -> AtHome  publishes 6
+                //   state_val=5 (Home/centre) -> ToHome  -> AtHome  publishes 6,
+                //                                     then AtHomeInit publishes 0
                 // Control.xml's State_Number for the wait target does NOT line up
                 // with the core's published value, so we read the WAIT condition's
                 // Name suffix ("Bearing_PnP/AtPick" -> "AtPick") and pattern-match
@@ -1190,7 +1322,7 @@ namespace CodeGen.Translation.Process
                     {
                         arrays.Warnings.Add(
                             $"[Recipe] '{state.Name}': Seven_State CMD on '{inScopeTarget.Name}' " +
-                            $"-> state_val={sevenStateCmd} (Centre-Home core settles publishing {sevenStateCmd + 1}); " +
+                            $"-> state_val={sevenStateCmd} (Centre-Home core settles publishing {(sevenStateCmd == 5 ? 0 : sevenStateCmd + 1)}); " +
                             $"derived from condition Name '{cond.Name}'.");
                         return new StateClassification
                         {
@@ -1210,16 +1342,13 @@ namespace CodeGen.Translation.Process
                             // state_table on each state_change) only ever sees the stable
                             // 0. Waiting on the transient 6 misses it and parks the engine
                             // forever -- exactly the Five_State AtHomeEnd=4 -> 0 remap.
-                            // Home wait target differs RIG vs SIM (MapperConfig.SimulatorRecipeMode):
-                            //   RIG (0): real sensors take AtHome(6) -> AtHomeInit(0) in the same
-                            //            tick, so the engine only ever sees the stable 0.
-                            //   SIM (6): the coil-mirror that synthesizes the swivel's sensors
-                            //            holds a work-coil TRUE at home, so atwork never clears and
-                            //            the AtHome(6) -> AtHomeInit(0) arc can't fire -- the swivel
-                            //            stably parks at AtHome=6. So the sim recipe must accept 6,
-                            //            or it parks the engine on the final home step forever.
+                            // The obsolete sim coil-mirror used to park at 6 because it could
+                            // leave atHome and atWork1 TRUE together. The simulator now uses
+                            // SimCentreHomeSensor_7SCH, which publishes mutually-exclusive
+                            // home/work sensors from current_state_to_process, so the same
+                            // stable AtHomeInit=0 wait is correct in both sim and hardware.
                             WaitState = sevenStateCmd == 5
-                                ? (MapperConfig.SimulatorRecipeMode ? 6 : 0)
+                                ? 0
                                 : sevenStateCmd + 1,
                         };
                     }
@@ -1294,6 +1423,156 @@ namespace CodeGen.Translation.Process
                     n.Contains(verb, StringComparison.Ordinal))
                     return true;
             return false;
+        }
+
+        private static StateClassification ClassifyConditionDrivenState(
+            VueOneState state,
+            IReadOnlyList<VueOneCondition> inScopeConds,
+            IReadOnlyList<VueOneComponent> allComponents,
+            RecipeArrays arrays,
+            Dictionary<string, int> scopedRegistry,
+            IReadOnlyCollection<string>? testActuatorAllowlist)
+        {
+            var result = new StateClassification { Kind = ClassKind.MotionPair };
+
+            foreach (var cond in inScopeConds)
+            {
+                var target = LookupComponent(cond.ComponentID, allComponents);
+                if (target == null)
+                {
+                    arrays.Warnings.Add(
+                        $"State '{state.Name}': in-scope ComponentID '{cond.ComponentID}' could not " +
+                        "be resolved to a VueOneComponent in allComponents; condition skipped.");
+                    continue;
+                }
+
+                if (testActuatorAllowlist != null
+                    && !string.Equals(target.Type, "Process", StringComparison.OrdinalIgnoreCase)
+                    && !testActuatorAllowlist.Contains((target.Name ?? string.Empty).Trim().ToLowerInvariant()))
+                {
+                    arrays.SkippedConditions.Add(
+                        $"state '{state.Name}': condition on actuator '{target.Name}' PARKED by " +
+                        "RecipeTestActuatorAllowlist; row segment removed.");
+                    continue;
+                }
+
+                int waitId = scopedRegistry[cond.ComponentID.Trim()];
+                int waitState = ResolveStateNumber(cond, target, arrays);
+
+                if (!string.Equals(target.Type, "Sensor", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (IsFiveStateCommandable(target))
+                    {
+                        int gripperCmd = IsGripperTarget(target)
+                            ? MapGripperCommandFromStepName(state.Name)
+                            : -1;
+                        int cmdState = gripperCmd >= 0
+                            ? gripperCmd
+                            : (waitState == 1 || waitState == 2) ? 1 : 3;
+                        int settledWait = cmdState == 1 ? 2 : 0;
+
+                        if (gripperCmd >= 0)
+                            arrays.Warnings.Add(
+                                $"[Recipe] '{state.Name}': gripper '{target.Name}' command derived " +
+                                $"from the STEP name -> {(cmdState == 1 ? "CLOSE/grip" : "OPEN/release")} " +
+                                $"(cmd {cmdState}, wait {settledWait}). Condition '{cond.Name}' supplies " +
+                                "the target component/state; the step name supplies gripper direction.");
+                        else if (settledWait != waitState)
+                            arrays.Warnings.Add(
+                                $"[Recipe] '{state.Name}': condition-driven CMD on '{target.Name}' " +
+                                $"-> {(cmdState == 1 ? "toWork" : "toHome")} (cmd {cmdState}); WAIT " +
+                                $"remapped Control.xml State_Number {waitState} -> runtime ECC state {settledWait}.");
+
+                        AddCmdWaitRows(result.Rows,
+                            (target.Name ?? string.Empty).Trim().ToLowerInvariant(),
+                            cmdState, waitId, settledWait);
+                        continue;
+                    }
+
+                    if (IsSevenStateCommandable(target))
+                    {
+                        int sevenStateCmd = MapSevenStateCommandFromConditionName(cond.Name);
+                        if (sevenStateCmd >= 0)
+                        {
+                            int sevenWait = sevenStateCmd == 5
+                                ? 0
+                                : sevenStateCmd + 1;
+                            arrays.Warnings.Add(
+                                $"[Recipe] '{state.Name}': Seven_State CMD on '{target.Name}' " +
+                                $"-> state_val={sevenStateCmd}, wait {sevenWait}; derived from " +
+                                $"condition Name '{cond.Name}'.");
+                            AddCmdWaitRows(result.Rows,
+                                (target.Name ?? string.Empty).Trim().ToLowerInvariant(),
+                                sevenStateCmd, waitId, sevenWait);
+                            continue;
+                        }
+
+                        arrays.Warnings.Add(
+                            $"[Recipe] '{state.Name}': Seven_State condition Name '{cond.Name}' did not " +
+                            "match Pick/Place/Home; emitted a settled WAIT segment.");
+                    }
+                    else
+                    {
+                        arrays.Warnings.Add(
+                            $"[Recipe] '{state.Name}': condition target '{target.Name}' (type " +
+                            $"{target.Type}, {target.States.Count} states) is not commandable; " +
+                            "emitted a settled WAIT segment.");
+                    }
+                }
+
+                result.Rows.Add(new RecipeRow
+                {
+                    StepType = 2,
+                    CmdTargetName = string.Empty,
+                    CmdState = 0,
+                    WaitId = waitId,
+                    WaitState = RemapSettledWaitState(state, target, waitState, arrays),
+                });
+            }
+
+            result.RowCount = result.Rows.Count;
+            if (result.RowCount == 0)
+            {
+                arrays.SkippedConditions.Add(
+                    $"state '{state.Name}': every in-scope condition was filtered out; row dropped.");
+                result.Kind = ClassKind.Skipped;
+            }
+            return result;
+        }
+
+        private static void AddCmdWaitRows(List<RecipeRow> rows,
+            string targetName, int cmdState, int waitId, int waitState)
+        {
+            rows.Add(new RecipeRow
+            {
+                StepType = 1,
+                CmdTargetName = targetName,
+                CmdState = cmdState,
+                WaitId = 0,
+                WaitState = 0,
+            });
+            rows.Add(new RecipeRow
+            {
+                StepType = 2,
+                CmdTargetName = string.Empty,
+                CmdState = 0,
+                WaitId = waitId,
+                WaitState = waitState,
+            });
+        }
+
+        private static int RemapSettledWaitState(VueOneState state,
+            VueOneComponent target, int waitState, RecipeArrays arrays)
+        {
+            if (string.Equals(target.Type, "Actuator", StringComparison.OrdinalIgnoreCase) &&
+                waitState == 4)
+            {
+                arrays.Warnings.Add(
+                    $"[Recipe] '{state.Name}': SETTLED WAIT on '{target.Name}' remapped " +
+                    "Control.xml State_Number 4 -> runtime AtHomeInit 0.");
+                return 0;
+            }
+            return waitState;
         }
 
         // ----------------------------------------------------------------------
@@ -1435,10 +1714,10 @@ namespace CodeGen.Translation.Process
         /// real first step (Clamping_Part). Walking Initial_State -&gt;
         /// transition.DestinationStateID reproduces the true sequence.</para>
         ///
-        /// <para>Any state not reachable from the initial state (alternate /
-        /// parallel branches such as Bearing_PnP's disassembly leg) is appended in
-        /// declaration order so the classifier still sees every state and no work
-        /// is silently dropped.</para>
+        /// <para>States not reachable from the initial chain are intentionally not
+        /// serialized. A Process recipe is a linear executable plan; appending
+        /// unreachable authoring leftovers after a loop back to Initialisation would
+        /// create motions that the Control.xml transition graph never reaches.</para>
         /// </summary>
         private static List<VueOneState> OrderStatesByTransitionChain(IList<VueOneState> states)
         {
@@ -1464,12 +1743,39 @@ namespace CodeGen.Translation.Process
                 cur = next;
             }
 
-            // Append unreachable branch states in declaration order so nothing is lost.
-            foreach (var s in states)
-                if (!seen.Contains(s))
-                    ordered.Add(s);
-
             return ordered;
+        }
+
+        private static IEnumerable<string> BuildTransitionTable(
+            IList<VueOneState> allStates,
+            IList<VueOneState> orderedStates)
+        {
+            var byId = new Dictionary<string, VueOneState>(StringComparer.OrdinalIgnoreCase);
+            foreach (var s in allStates)
+                if (!string.IsNullOrEmpty(s.StateID) && !byId.ContainsKey(s.StateID))
+                    byId[s.StateID] = s;
+
+            for (int i = 0; i < orderedStates.Count; i++)
+            {
+                var state = orderedStates[i];
+                var tr = state.Transitions?.FirstOrDefault();
+                if (tr == null)
+                {
+                    yield return $"{i}: {state.Name} -> END";
+                    continue;
+                }
+
+                string dest = tr.DestinationStateID;
+                if (!string.IsNullOrWhiteSpace(dest) &&
+                    byId.TryGetValue(dest, out var destState))
+                    dest = destState.Name;
+
+                var cond = tr.Conditions?.FirstOrDefault();
+                string on = cond == null || string.IsNullOrWhiteSpace(cond.Name)
+                    ? "(no condition)"
+                    : cond.Name.Trim();
+                yield return $"{i}: {state.Name} -> {dest} on {on}";
+            }
         }
 
         /// <summary>
