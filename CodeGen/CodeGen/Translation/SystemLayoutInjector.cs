@@ -1186,6 +1186,7 @@ namespace CodeGen.Translation
                     aOuter, aNested);
                 crossProcInstances.Add(assemblyName);
                 ReportStation2Recipe(report, assemblyName, aRecipe, "M580");
+                AppendProcessRecipeComment(builder, assemblyName, aRecipe);
             }
             else
             {
@@ -1216,6 +1217,7 @@ namespace CodeGen.Translation
                     dOuter, dNested);
                 crossProcInstances.Add(disassyName);
                 ReportStation2Recipe(report, disassyName, dRecipe, "M580");
+                AppendProcessRecipeComment(builder, disassyName, dRecipe);
             }
             else
             {
@@ -1424,6 +1426,24 @@ namespace CodeGen.Translation
                         }
                         chRuleCount = kept; chFrom = f; chTo = t; chSrc = s; chBlk = b;
                     }
+                    // TEST ISOLATION (2026-06-04, bench): drop the swivel's cross-
+                    // component interlock so its turn-to-Place (AtWork1 2 -> AtWork2 4)
+                    // is never blocked. Alex traced the swivel sticking at atWork1 to
+                    // the shaft-sensor rule (RuleSourceID=shaft_hr, Blocked=AtWork): the
+                    // swivel refuses to Place while shaft_hr reads AtWork, so in the
+                    // isolated bearing+shaft test it never reaches atWork2 and never
+                    // releases the bearing. RuleCount=0 frees it. Flip
+                    // MapperConfig.DropSwivelInterlockForTest=false to restore the real
+                    // Control.xml interlock (and the inert-safety-net guard below).
+                    bool dropSwivelInterlock = MapperConfig.DropSwivelInterlockForTest;
+                    if (dropSwivelInterlock)
+                    {
+                        chRuleCount = 0;
+                        chFrom = new int[InterlockRuleCap];
+                        chTo   = new int[InterlockRuleCap];
+                        chSrc  = new int[InterlockRuleCap];
+                        chBlk  = new int[InterlockRuleCap];
+                    }
                     actParams["RuleCount"]        = SyslayBuilder.FormatInt(chRuleCount);
                     // Simulator interface reduction (mirrors BuildActuatorParameters'
                     // dropInterlockConstants block for Five_State). The deployer's
@@ -1458,7 +1478,7 @@ namespace CodeGen.Translation
                         actParams["RuleSourceID"]     = SyslayBuilder.FormatIntArray(chSrc);
                         actParams["RuleBlockedState"] = SyslayBuilder.FormatIntArray(chBlk);
                     }
-                    if (scopedIds != null)
+                    if (scopedIds != null && !dropSwivelInterlock)
                     {
                         int chInScope = CountInScopeInterlockConds(actuator, scopedIds);
                         if (chInScope > 0 && chRuleCount == 0)
@@ -1467,8 +1487,9 @@ namespace CodeGen.Translation
                                 "interlock condition(s) but emitted RuleCount=0 — refusing to ship an " +
                                 "inert safety net for the swivel that is the cross-process intersection.");
                     }
-                    report.Bound.Add((actuator.Name,
-                        $"centre-home interlock RuleCount={chRuleCount} (blocks turn-to-Place when the crossing is occupied)"));
+                    report.Bound.Add((actuator.Name, dropSwivelInterlock
+                        ? "centre-home interlock DROPPED for bench test (DropSwivelInterlockForTest=true; swivel free to turn-to-Place)"
+                        : $"centre-home interlock RuleCount={chRuleCount} (blocks turn-to-Place when the crossing is occupied)"));
                 }
                 else
                 {
@@ -2039,25 +2060,15 @@ namespace CodeGen.Translation
                 homeSensorFitted = false;
             }
 
-            // 2026-06-03: M580 bench actuators (the recipe allowlist) sit on
-            // bad-quality M580 DIs (atwork/athome read quality 16#0), so a sensored
-            // Five_State HANGS on its atWork/atHome WAIT and stalls the whole Assembly
-            // recipe -- gripper never confirms release, shaft never gets commanded,
-            // swivel never reaches the final home (observed: pick->place then nothing).
-            // Feed_Station's M262 sensors are good and it's NOT in this Assembly
-            // allowlist, so it's untouched. Force the allowlisted Five_State actuators
-            // (bearing_gripper, shaft_hr/vr/gripper -- bearing_pnp is Centre-Home,
-            // handled elsewhere) sensorless so they settle on the toWork/toHome timers
-            // and the recipe advances; the drive coils still fire so they physically
-            // move. Lift when the M580 IO quality is fixed (empty allowlist = no-op).
-            if (Configuration.MapperConfig.RecipeTestActuatorAllowlist.Length > 0
-                && System.Linq.Enumerable.Contains(
-                    Configuration.MapperConfig.RecipeTestActuatorAllowlist,
-                    (actuator.Name ?? string.Empty).Trim().ToLowerInvariant()))
-            {
-                workSensorFitted = false;
-                homeSensorFitted = false;
-            }
+            // 2026-06-04: SENSORLESS OVERRIDE REMOVED. It previously forced the
+            // allowlisted M580 Five_State actuators (bearing_gripper, shaft_hr/vr/gripper)
+            // to WorkSensorFitted=FALSE / HomeSensorFitted=FALSE because the M580 DIs were
+            // reading bad quality at the time. The IO is good now, so these actuators
+            // must read their REAL atwork/athome DIs (e.g. Bearing_Gripper.atwork = DI04).
+            // The override made the grip/release confirmation come from a TIMER instead
+            // of the real sensor -- which is exactly what stalled the recipe at the
+            // gripper-close WAIT (the engine never saw current_state=2 from DI04). The
+            // data-driven WorkSensorFitted/HomeSensorFitted resolution above now stands.
 
             // InterlockManager rule arrays from this actuator's own Control.xml
             // NOT-conditions. scopedIds==null only for legacy/test callers →
@@ -2538,20 +2549,18 @@ namespace CodeGen.Translation
             // has no stationAdptr ports per .fbt verification (same rule
             // BuildFeedStationWiring uses for Feed_Station).
             //
-            // Seven_State_Actuator_CAT is ALSO excluded here — its surgical body (task
-            // #69) has only the stateRprtCmd ring adapter and NO stationAdptr port, so
-            // wiring it into this chain would dangle Bearing_PnP.stationAdptr_in/out
-            // edges on EAE import (Solution Integrity / unresolved adapter errors).
-            // Mirrors ResourceWireEmitter.NoStationAdapterTypes on the sysres side —
-            // the two were out of sync until 2026-05-30.
+            // Only the legacy Seven_State_Actuator_CAT lacks stationAdptr ports. The
+            // active centre-home swivel CAT does have stationAdptr + stateRprtCmd, so
+            // Station2 must wire Bearing_PnP through the chains using its resolved
+            // template type instead of excluding every Seven-shaped actuator.
             var stationChain = new List<(string Name, string Type)>();
             foreach (var a in contents.Actuators)
             {
                 if (!IsM580(a.Name)) continue;
-                bool isSeven = !Configuration.MapperConfig.StubSevenStateActuatorsAsFiveState
-                               && (a.States.Count == 7 || IsBranchedSevenState(a));
-                if (isSeven) continue;  // no stationAdptr port on the surgical Seven CAT
-                stationChain.Add((a.Name, "Five_State_Actuator_CAT"));
+                var fbType = ResolveActuatorFBType(a);
+                if (string.Equals(fbType, SevenStateActuatorCatType, StringComparison.Ordinal))
+                    continue;
+                stationChain.Add((a.Name, fbType));
             }
             stationChain.Add((AssemblyProc, "Process1_Generic"));
             stationChain.Add((DisassemblyProc, "Process1_Generic"));
@@ -2573,7 +2582,8 @@ namespace CodeGen.Translation
             // in the ring (each reads the full component state via stateRptCmdAdptr_in).
             var ring = new List<(string Name, string Type)>();
             foreach (var s in contents.Sensors) if (IsM580(s.Name)) ring.Add((s.Name, "Sensor_Bool_CAT"));
-            foreach (var a in contents.Actuators) if (IsM580(a.Name)) ring.Add((a.Name, "Five_State_Actuator_CAT"));
+            foreach (var a in contents.Actuators)
+                if (IsM580(a.Name)) ring.Add((a.Name, ResolveActuatorFBType(a)));
             ring.Add((AssemblyProc, "Process1_Generic"));
             ring.Add((DisassemblyProc, "Process1_Generic"));
             if (ring.Count > 1)
@@ -3294,6 +3304,39 @@ namespace CodeGen.Translation
                 "single-ring simulator or once the M580↔BX1 broker bridge is emitted.");
             foreach (var w in recipe.Warnings)
                 report.Missing.Add($"[Recipe] {processName}: {w}");
+        }
+
+        private static void AppendProcessRecipeComment(SyslayBuilder builder,
+            string processName, RecipeArrays? recipe)
+        {
+            if (recipe == null) return;
+
+            if (recipe.TransitionTable.Count > 0)
+            {
+                builder.AppendTopComment(
+                    $" {processName} Control.xml transition chain used for recipe:\n  - " +
+                    string.Join("\n  - ", recipe.TransitionTable));
+            }
+
+            if (!string.IsNullOrWhiteSpace(recipe.OrderingSummary))
+            {
+                builder.AppendTopComment(
+                    $" {processName} recipe ordering: " + recipe.OrderingSummary);
+            }
+
+            if (recipe.SkippedConditions.Count > 0)
+            {
+                builder.AppendTopComment(
+                    $" {processName} skipped condition(s):\n  - " +
+                    string.Join("\n  - ", recipe.SkippedConditions));
+            }
+
+            if (recipe.Warnings.Count > 0)
+            {
+                builder.AppendTopComment(
+                    $" {processName} recipe warning(s):\n  - " +
+                    string.Join("\n  - ", recipe.Warnings));
+            }
         }
 
         // Phase 1: ResolveProcessRuntimeFbtPath / RewriteProcessRuntimeRecipe / FbtRewriter
