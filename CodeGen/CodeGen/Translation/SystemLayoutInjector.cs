@@ -1349,7 +1349,7 @@ namespace CodeGen.Translation
                     // actuator an in-scope interlock (a NOT-condition referencing
                     // an in-scope component) but no rule was emitted, the safety
                     // net would be silently theoretical — refuse to generate.
-                    int inScopeInterlocks = CountInScopeInterlockConds(actuator, scopedIds);
+                    int inScopeInterlocks = CountInScopeInterlockConds(actuator, allComponents, scopedIds);
                     int emittedRuleCount = int.Parse(actParams["RuleCount"],
                         System.Globalization.CultureInfo.InvariantCulture);
                     if (inScopeInterlocks > 0 && emittedRuleCount == 0)
@@ -1480,7 +1480,7 @@ namespace CodeGen.Translation
                     }
                     if (scopedIds != null && !dropSwivelInterlock)
                     {
-                        int chInScope = CountInScopeInterlockConds(actuator, scopedIds);
+                        int chInScope = CountInScopeInterlockConds(actuator, allComponents, scopedIds);
                         if (chInScope > 0 && chRuleCount == 0)
                             throw new InvalidOperationException(
                                 $"[Recipe] Bearing_PnP '{actuator.Name}' has {chInScope} in-scope " +
@@ -2286,6 +2286,23 @@ namespace CodeGen.Translation
                         blockedStateRuntime = 0;
                     }
 
+                    // ROOT-CAUSE FIX (2026-06-05): drop "block-while-source-is-home"
+                    // rules (resolved BlockedState == 0). A source component sitting at
+                    // its home/rest state is OUT of the moving actuator's crossing, so it
+                    // must NOT block — a rule that fires while the source is home is an
+                    // INVERTED safety rule that deadlocks the recipe. This is exactly
+                    // shaft_hr's Rule 0 (block AtHomeInit->ToWork while Bearing_PnP is at
+                    // home/state 0): the recipe parks the swivel home immediately before
+                    // commanding shaft_hr to work, so that rule blocks the shaft turn
+                    // forever. The Seven_State centre-home swivel ALREADY drops this exact
+                    // case (see ~L1422); porting the filter here makes Five_State
+                    // consistent and removes the wrong rule for the rig too — the REAL
+                    // crossing hazards block on AtWork=2 (not 0), so they are kept and
+                    // still protect the actuator. Runs AFTER the StateNumber 4 -> 0 home-
+                    // family remap above, so a "block while source ReturnedFinished" rule
+                    // (which remaps to 0) is correctly dropped as well.
+                    if (blockedStateRuntime == 0) continue;
+
                     from[n] = fromState;
                     to[n] = toState;
                     src[n] = srcId;
@@ -2305,6 +2322,7 @@ namespace CodeGen.Translation
         /// generation must abort.
         /// </summary>
         public static int CountInScopeInterlockConds(VueOneComponent actuator,
+            IReadOnlyList<VueOneComponent> allComponents,
             IReadOnlyDictionary<string, int> scopedIds)
         {
             int n = 0;
@@ -2312,7 +2330,28 @@ namespace CodeGen.Translation
             foreach (var c in st.InterlockConditions)
             {
                 var key = (c.ComponentID ?? string.Empty).Trim();
-                if (key.Length > 0 && scopedIds.ContainsKey(key)) n++;
+                if (key.Length == 0 || !scopedIds.ContainsKey(key)) continue;
+
+                // Mirror BuildInterlockRules' inverted-rule drop: a
+                // "block-while-source-is-home" condition (resolved BlockedState
+                // == 0, including the StateNumber 4 home-family remap) is NOT a
+                // real safety net — BuildInterlockRules discards it — so it must
+                // not count toward the inert-RuleCount guard. Otherwise the guard
+                // would falsely abort generation for an actuator whose every
+                // in-scope interlock is an inverted home-block.
+                var srcComp = allComponents.FirstOrDefault(x =>
+                    string.Equals((x.ComponentID ?? string.Empty).Trim(), key,
+                        StringComparison.OrdinalIgnoreCase));
+                int blockedState = srcComp?.States.FirstOrDefault(s =>
+                    string.Equals((s.StateID ?? string.Empty).Trim(),
+                        (c.ID ?? string.Empty).Trim(),
+                        StringComparison.OrdinalIgnoreCase))?.StateNumber ?? -1;
+                if (blockedState < 0) continue;
+                if (blockedState == 4 && srcComp != null &&
+                    string.Equals(srcComp.Type, "Actuator", StringComparison.OrdinalIgnoreCase))
+                    blockedState = 0;
+                if (blockedState == 0) continue;
+                n++;
             }
             return n;
         }
