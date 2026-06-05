@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Xml.Linq;
 using CodeGen.Configuration;
 using CodeGen.Models;
 using CodeGen.Devices.M262;
@@ -112,8 +113,12 @@ namespace CodeGen.Services
             // 'ActuatorEvents' but no .fbt shipped -> EAE: "type 'Main:actuatorStateEvents_7SCH'
             // does not exist"); reconstructed from the non-7SCH actuatorStateEvents
             // as the two-work variant (state 1 -> toWork1_Event, state 3 -> toWork2_Event).
+            // SimCentreHomeSensor_7SCH is simulator-only wiring inserted into the CAT by
+            // NormalizeSwivelSimSensorSource; it derives mutually-exclusive atHome/atWork
+            // signals from the core's current_state_to_process so the sim never presents
+            // impossible sensor combinations like atHome=TRUE and atWork1=TRUE.
             "SevenStateCentreHomeActuator", "No_Sensor_Handler_7SCH", "FaultLatch_7SCH",
-            "actuatorStateEvents_7SCH",
+            "actuatorStateEvents_7SCH", "SimCentreHomeSensor_7SCH",
         };
 
         static readonly string[] UniversalHmiCats = new[]
@@ -199,24 +204,30 @@ namespace CodeGen.Services
             // (!SimulatorFullSystem), stripped on the simulator so the proven sim core
             // stays byte-identical (the arcs are inert there anyway).
             PatchSwivelAtHomeInitRecovery(eaeProjectDir, addArc: !cfg.SimulatorFullSystem, result);
-            // 2026-06-03: Rig swivel "overshoots home, bounces atWork1<->atWork2,
-            // never parks" fix -- the third stacked fault. The Centre-Home core
-            // defines TWO home-entry algorithms: 'AtHomeEnd' (current_state:=6 ONLY)
-            // and 'atHome' (current_state:=6 AND outputToWork1:=FALSE;
-            // outputToWork2:=FALSE -- clears BOTH coils). The AtHome ECState is wired
-            // to 'AtHomeEnd', so a work coil stays ENERGISED at "home" (toHome
-            // energises the opposite coil to swing through centre and never turns it
-            // off). When the ReturnToHome timer declares home, the arm keeps being
-            // driven past centre to the other work position -> the atWork1<->atWork2
-            // bounce. On the RIG run the coil-clearing 'atHome' instead: both coils
-            // de-energised, the spring-centred arm settles at centre and STAYS (real
-            // atWork1/atWork2 go FALSE -> AtHome->AtHomeInit fires -> rests at
-            // AtHomeInit=0). In the SIMULATOR keep 'AtHomeEnd' (no clear): the sim
-            // synthesizes atwork FROM the coils, so clearing them would drop the
-            // coil-mirror and break the sim's park-at-AtHome=6 (which sim final-home
-            // WAIT=6 needs). Uses Jyotsna's own 'atHome' algorithm -- no new ST.
-            // Gated + bidirectional like the other Centre-Home normalizers.
-            PatchSwivelAtHomeCoilClear(eaeProjectDir, rigMode: !cfg.SimulatorFullSystem, result);
+            // 2026-06-03: Centre-Home swivel home must clear both work coils. The
+            // shipped AtHome state ran 'AtHomeEnd' (current_state:=6 only), so the
+            // work coil used to swing through centre stayed energized at "home".
+            // With the old simulator coil-mirror this was hidden by accepting the
+            // transient 6. The simulator now has a proper state-derived position
+            // model, so both simulator and hardware can use Jyotsna's coil-clearing
+            // 'atHome' algorithm and publish output_event at AtHome.
+            PatchSwivelAtHomeCoilClear(eaeProjectDir, clearCoils: true, result);
+            // 2026-06-04 (Alex + Jyotsna fix): the Centre-Home CAT was 100% dependent on
+            // three clean, mutually-exclusive physical DIs with NO software fallback, so a
+            // weak/overlapping work sensor blocked the AtWork latch (which gates the
+            // gripper-release) and a missed DI02 blocked home. Two rig-only rewires here;
+            // the timer-driven atWork synthesis is a separate, larger CAT addition.
+            //  (1) Relax the work latches: ToWork1->AtWork1 / ToWork2->AtWork2 fire on
+            //      atWorkN=TRUE alone (drop the mutually-exclusive AND), so a brief transit
+            //      overlap of the two work sensors no longer blocks the latch.
+            //  (2) Drive ActuatorCore.atHome from ReturnToHomeHandler.atHomeOutput
+            //      ((work->home timer fired) OR real DI02) instead of raw DI02 -- so home
+            //      is timer-driven with the real sensor as a bonus. atHomeOutput was
+            //      COMPUTED but wired to nothing, so the "timer-driven home" never ran.
+            // Both bidirectional + gated: applied on the rig (!SimulatorFullSystem),
+            // reverted on the simulator.
+            PatchSwivelRelaxWorkLatch(eaeProjectDir, relax: !cfg.SimulatorFullSystem, result);
+            PatchSwivelAtHomeTimerWiring(eaeProjectDir, useTimer: !cfg.SimulatorFullSystem, result);
             // Simulator-only interface reduction. Bidirectional normalizer:
             // when SimulatorFullSystem is on it bakes the two constant interlock
             // targets onto the embedded InterlockManager FB and removes their
@@ -1191,17 +1202,15 @@ namespace CodeGen.Services
         }
 
         /// <summary>
-        /// Simulator-only: repoint the Centre-Home swivel's internal Inputs
-        /// SYMLINKMULTIVARDST so atWork1/atWork2 read the swivel's own drive-coil
-        /// symlinks instead of the (unpublished-in-sim) physical sensor symlinks.
-        /// reduce==true (sim): NAME2 -> '$${PATH}OutputToWork1', NAME3 -> '$${PATH}OutputToWork2'
-        ///   (the coils the Output SYMLINKMULTIVARSRC publishes) so the ECC's ToWork1->AtWork1
-        ///   / ToWork2->AtWork2 gates close the instant the coil energises.
-        /// reduce==false (rig): NAME2 -> '$${PATH}atwork1', NAME3 -> '$${PATH}atWork2'
-        ///   (the physical SwivelArmAtPick/AtWork sensors, HCF-bound) — byte-identical hardware.
-        /// NAME1 ('$${PATH}athome') is left untouched (timer-driven by ReturnToHomeHandler).
-        /// Bidirectional + idempotent; deployer is copy-if-absent so the deployed CAT persists
-        /// and must be reshaped to match the flag every deploy (mirrors NormalizeFiveStateRuleArrays).
+        /// Simulator-only centre-home swivel position synthesis. The earlier sim patch
+        /// pointed the CAT's atHome and atWork1 subscriptions at the same OutputToWork1
+        /// coil symlink, which made EAE Watch show an impossible physical state:
+        /// atHome=TRUE and atWork1=TRUE. This normalizer now leaves the physical Inputs
+        /// block on the real sensor symlinks and, in simulator mode only, inserts a small
+        /// SimCentreHomeSensor_7SCH Basic inside the CAT. That helper derives mutually
+        /// exclusive atHome/atWork1/atWork2 from ActuatorCore.current_state_to_process
+        /// on ActuatorCore.pst_out, then feeds the normal ActuatorCore.input_event path.
+        /// Hardware mode removes the helper and restores Jyotsna's physical wiring.
         /// </summary>
         static void NormalizeSwivelSimSensorSource(string eaeProjectDir, bool reduce, DeployResult result)
         {
@@ -1222,7 +1231,12 @@ namespace CodeGen.Services
                 if (root == null) return;
                 System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
                 var net = root.Element(ns + "FBNetwork");
-                var inputs = net?.Elements(ns + "FB")
+                if (net == null)
+                {
+                    result.Warnings.Add("Seven_State_Actuator_Centre_Home_CAT.fbt: FBNetwork not found; swivel sim-sensor normalize skipped.");
+                    return;
+                }
+                var inputs = net.Elements(ns + "FB")
                     .FirstOrDefault(f => (string?)f.Attribute("Name") == "Inputs");
                 if (inputs == null)
                 {
@@ -1230,43 +1244,258 @@ namespace CodeGen.Services
                     return;
                 }
 
-                var want = new[]
-                {
-                    // atwork1 / atWork2 -> the two work coils (Pick / Place gates).
-                    ("NAME2", reduce ? "'$${PATH}OutputToWork1'" : "'$${PATH}atwork1'"),
-                    ("NAME3", reduce ? "'$${PATH}OutputToWork2'" : "'$${PATH}atWork2'"),
-                    // athome -> OutputToWork1 in sim. The internal ReturnToHomeHandler
-                    // timer that normally synthesizes atHome is dead in sim (it gates on
-                    // [work-coil AND its sensor], and the coil-mirror drops the sensor the
-                    // instant the coil drops), so the swivel froze at ToHome (current_state=5)
-                    // with atHome never TRUE. The recipe homes the swivel from Place (work2):
-                    // toHome then energizes OutputToWork1 to swing back through centre and
-                    // leaves it TRUE at AtHome, so atHome := OutputToWork1 goes TRUE through
-                    // the whole home move -> ToHome -> AtHome fires (current_state=6). (athome
-                    // also reads TRUE while at Pick, but no transition there checks it, so it
-                    // is harmless.) Rig keeps the real '$${PATH}athome' sensor.
-                    ("NAME1", reduce ? "'$${PATH}OutputToWork1'" : "'$${PATH}athome'"),
-                };
+                const string simFbName = "SimPosition";
                 bool changed = false;
-                foreach (var (pn, val) in want)
+
+                XElement EnsureSection(string localName)
                 {
-                    var p = inputs.Elements(ns + "Parameter")
-                        .FirstOrDefault(e => (string?)e.Attribute("Name") == pn);
-                    if (p == null) continue;
-                    if ((string?)p.Attribute("Value") != val) { p.SetAttributeValue("Value", val); changed = true; }
+                    var section = net.Element(ns + localName);
+                    if (section != null) return section;
+                    section = new XElement(ns + localName);
+                    net.Add(section);
+                    changed = true;
+                    return section;
+                }
+
+                var eventConns = EnsureSection("EventConnections");
+                var dataConns = EnsureSection("DataConnections");
+
+                void SetParam(System.Xml.Linq.XElement fb, string name, string value)
+                {
+                    var p = fb.Elements(ns + "Parameter")
+                        .FirstOrDefault(e => (string?)e.Attribute("Name") == name);
+                    if (p == null)
+                    {
+                        fb.Add(new XElement(ns + "Parameter",
+                            new XAttribute("Name", name),
+                            new XAttribute("Value", value)));
+                        changed = true;
+                        return;
+                    }
+                    if ((string?)p.Attribute("Value") != value)
+                    {
+                        p.SetAttributeValue("Value", value);
+                        changed = true;
+                    }
+                }
+
+                void RemoveEvent(string source, string destination)
+                {
+                    foreach (var c in eventConns.Elements(ns + "Connection")
+                                 .Where(c => (string?)c.Attribute("Source") == source &&
+                                             (string?)c.Attribute("Destination") == destination)
+                                 .ToList())
+                    {
+                        c.Remove();
+                        changed = true;
+                    }
+                }
+
+                void AddEvent(string source, string destination)
+                {
+                    if (eventConns.Elements(ns + "Connection").Any(c =>
+                            (string?)c.Attribute("Source") == source &&
+                            (string?)c.Attribute("Destination") == destination))
+                        return;
+                    eventConns.Add(new XElement(ns + "Connection",
+                        new XAttribute("Source", source),
+                        new XAttribute("Destination", destination)));
+                    changed = true;
+                }
+
+                void RemoveDataTo(params string[] destinations)
+                {
+                    var destinationSet = destinations.ToHashSet(StringComparer.Ordinal);
+                    foreach (var c in dataConns.Elements(ns + "Connection")
+                                 .Where(c => destinationSet.Contains((string?)c.Attribute("Destination") ?? string.Empty))
+                                 .ToList())
+                    {
+                        c.Remove();
+                        changed = true;
+                    }
+                }
+
+                void AddData(string source, string destination)
+                {
+                    if (dataConns.Elements(ns + "Connection").Any(c =>
+                            (string?)c.Attribute("Source") == source &&
+                            (string?)c.Attribute("Destination") == destination))
+                        return;
+                    dataConns.Add(new XElement(ns + "Connection",
+                        new XAttribute("Source", source),
+                        new XAttribute("Destination", destination)));
+                    changed = true;
+                }
+
+                void RemoveSimPosition()
+                {
+                    foreach (var c in eventConns.Elements(ns + "Connection")
+                                 .Where(c =>
+                                 {
+                                     var s = (string?)c.Attribute("Source") ?? string.Empty;
+                                     var d = (string?)c.Attribute("Destination") ?? string.Empty;
+                                     return s.StartsWith(simFbName + ".", StringComparison.Ordinal) ||
+                                            d.StartsWith(simFbName + ".", StringComparison.Ordinal);
+                                 })
+                                 .ToList())
+                    {
+                        c.Remove();
+                        changed = true;
+                    }
+
+                    foreach (var c in dataConns.Elements(ns + "Connection")
+                                 .Where(c =>
+                                 {
+                                     var s = (string?)c.Attribute("Source") ?? string.Empty;
+                                     var d = (string?)c.Attribute("Destination") ?? string.Empty;
+                                     return s.StartsWith(simFbName + ".", StringComparison.Ordinal) ||
+                                            d.StartsWith(simFbName + ".", StringComparison.Ordinal);
+                                 })
+                                 .ToList())
+                    {
+                        c.Remove();
+                        changed = true;
+                    }
+
+                    foreach (var fb in net.Elements(ns + "FB")
+                                 .Where(f => (string?)f.Attribute("Name") == simFbName)
+                                 .ToList())
+                    {
+                        fb.Remove();
+                        changed = true;
+                    }
+                }
+
+                void AddSimPosition()
+                {
+                    var fb = net.Elements(ns + "FB")
+                        .FirstOrDefault(f => (string?)f.Attribute("Name") == simFbName);
+                    if (fb == null)
+                    {
+                        var nextId = net.Elements(ns + "FB")
+                            .Select(f => int.TryParse((string?)f.Attribute("ID"), out var id) ? id : 0)
+                            .DefaultIfEmpty(0)
+                            .Max() + 1;
+                        fb = new XElement(ns + "FB",
+                            new XAttribute("ID", nextId),
+                            new XAttribute("Name", simFbName),
+                            new XAttribute("Type", "SimCentreHomeSensor_7SCH"),
+                            new XAttribute("x", "6200"),
+                            new XAttribute("y", "4040"),
+                            new XAttribute("Namespace", "Main"));
+                    }
+                    else
+                    {
+                        fb.Remove();
+                    }
+
+                    var firstNonFb = net.Elements()
+                        .FirstOrDefault(e => e.Name.LocalName != "FB");
+                    if (firstNonFb != null) firstNonFb.AddBeforeSelf(fb);
+                    else net.Add(fb);
+                    changed = true;
+                }
+
+                // Always leave the actual Inputs block subscribed to the real physical
+                // sensor names. In sim mode the block is no longer the source of the
+                // core's position pins; in hardware mode these connections are restored.
+                SetParam(inputs, "NAME1", "'$${PATH}athome'");
+                SetParam(inputs, "NAME2", "'$${PATH}atwork1'");
+                SetParam(inputs, "NAME3", "'$${PATH}atWork2'");
+
+                RemoveEvent("Inputs.INITO", "SimPosition.INIT");
+                RemoveEvent("SimPosition.INITO", "ActuatorCore.INIT");
+                RemoveEvent("ActuatorCore.pst_out", "SimPosition.REQ");
+                RemoveEvent("SimPosition.CNF", "FB1.EI");
+
+                RemoveDataTo(
+                    "ActuatorCore.atHome", "ActuatorCore.atWork1", "ActuatorCore.atWork2",
+                    "IThis.atHome", "IThis.atWork1", "IThis.atWork2",
+                    "FaultHandling.atHome", "FaultHandling.atWork1", "FaultHandling.atWork2",
+                    "SimPosition.CurrentState");
+
+                if (reduce)
+                {
+                    AddSimPosition();
+
+                    RemoveEvent("Inputs.INITO", "ActuatorCore.INIT");
+                    AddEvent("Inputs.INITO", "SimPosition.INIT");
+                    AddEvent("SimPosition.INITO", "ActuatorCore.INIT");
+                    AddEvent("ActuatorCore.pst_out", "SimPosition.REQ");
+                    AddEvent("SimPosition.CNF", "FB1.EI");
+
+                    AddData("ActuatorCore.current_state_to_process", "SimPosition.CurrentState");
+                    AddData("SimPosition.atHome", "ActuatorCore.atHome");
+                    AddData("SimPosition.atWork1", "ActuatorCore.atWork1");
+                    AddData("SimPosition.atWork2", "ActuatorCore.atWork2");
+                    AddData("SimPosition.atHome", "IThis.atHome");
+                    AddData("SimPosition.atWork1", "IThis.atWork1");
+                    AddData("SimPosition.atWork2", "IThis.atWork2");
+                    AddData("SimPosition.atHome", "FaultHandling.atHome");
+                    AddData("SimPosition.atWork1", "FaultHandling.atWork1");
+                    AddData("SimPosition.atWork2", "FaultHandling.atWork2");
+                }
+                else
+                {
+                    RemoveSimPosition();
+
+                    AddEvent("Inputs.INITO", "ActuatorCore.INIT");
+                    // Hardware/Test Runtime must use the real atHome input. The
+                    // ReturnToHomeHandler also raises atHomeOutput from work->home
+                    // timers, which is useful only for synthetic/no-sensor behaviour;
+                    // using it on the rig can make a Home command stop on a timer
+                    // instead of the centre sensor, or miss the centre and continue
+                    // toward the opposite work position.
+                    AddData("Inputs.VALUE1", "ActuatorCore.atHome");
+                    AddData("Inputs.VALUE2", "ActuatorCore.atWork1");
+                    AddData("Inputs.VALUE3", "ActuatorCore.atWork2");
+                    AddData("Inputs.VALUE1", "IThis.atHome");
+                    AddData("Inputs.VALUE2", "IThis.atWork1");
+                    AddData("Inputs.VALUE3", "IThis.atWork2");
+                    AddData("Inputs.VALUE1", "FaultHandling.atHome");
+                    AddData("Inputs.VALUE2", "FaultHandling.atWork1");
+                    AddData("Inputs.VALUE3", "FaultHandling.atWork2");
+                }
+
+                bool hasSimPosition =
+                    net.Elements(ns + "FB").Any(f =>
+                        string.Equals((string?)f.Attribute("Name"), simFbName, StringComparison.Ordinal) ||
+                        string.Equals((string?)f.Attribute("Type"), "SimCentreHomeSensor_7SCH", StringComparison.Ordinal)) ||
+                    eventConns.Elements(ns + "Connection").Any(ReferencesSimPosition) ||
+                    dataConns.Elements(ns + "Connection").Any(ReferencesSimPosition);
+
+                bool ReferencesSimPosition(XElement connection)
+                {
+                    var source = (string?)connection.Attribute("Source") ?? string.Empty;
+                    var destination = (string?)connection.Attribute("Destination") ?? string.Empty;
+                    return source.StartsWith(simFbName + ".", StringComparison.Ordinal) ||
+                           destination.StartsWith(simFbName + ".", StringComparison.Ordinal);
+                }
+
+                if (!reduce && hasSimPosition)
+                {
+                    throw new InvalidOperationException(
+                        "Hardware/Test Runtime cannot use simulator centre-home wiring: " +
+                        "Seven_State_Actuator_Centre_Home_CAT still contains SimPosition/SimCentreHomeSensor_7SCH.");
                 }
 
                 if (changed)
                 {
                     doc.Save(fbt);
                     result.PatchesApplied.Add(reduce
-                        ? "Seven_State_Actuator_Centre_Home_CAT: Inputs atwork1/atWork2 -> coil symlinks (sim sensor synthesis)"
-                        : "Seven_State_Actuator_Centre_Home_CAT: Inputs atwork1/atWork2 -> physical sensor symlinks (hardware)");
+                        ? "Seven_State_Actuator_Centre_Home_CAT: simulator position model inserted (mutually-exclusive home/work sensors)"
+                        : "Seven_State_Actuator_Centre_Home_CAT: simulator position model removed; physical sensor wiring restored");
                     MapperLogger.Info($"[Deploy] Centre-Home swivel sim-sensor source normalize: reduce={reduce}");
                 }
             }
             catch (Exception ex)
             {
+                if (!reduce)
+                    throw new InvalidOperationException(
+                        "Hardware/Test Runtime cannot continue because the centre-home swivel CAT could not be restored to physical sensor wiring. " +
+                        "Close any open Seven_State_Actuator_Centre_Home_CAT editor tab in EAE and regenerate.",
+                        ex);
+
                 result.Warnings.Add($"Centre-Home swivel sim-sensor normalize failed: {ex.Message}");
             }
         }
@@ -2595,6 +2824,110 @@ namespace CodeGen.Services
             }
         }
 
+        // 2026-06-04: relax the swivel core's work-arrival latches so a brief overlap of
+        // the two physical work sensors (or a slightly noisy DI) no longer blocks the
+        // latch. ToWork1->AtWork1 / ToWork2->AtWork2 fire on atWorkN=TRUE alone instead
+        // of "atWorkN=TRUE AND atWorkOther=FALSE". Bidirectional: relax on the rig,
+        // restore the strict mutually-exclusive guard on the simulator. Idempotent.
+        static void PatchSwivelRelaxWorkLatch(string eaeProjectDir, bool relax, DeployResult result)
+        {
+            var fbt = Path.Combine(eaeProjectDir, "IEC61499", "SevenStateCentreHomeActuator.fbt");
+            if (!File.Exists(fbt))
+            {
+                fbt = Directory.EnumerateFiles(
+                        Path.Combine(eaeProjectDir, "IEC61499"),
+                        "SevenStateCentreHomeActuator.fbt", SearchOption.AllDirectories)
+                    .FirstOrDefault() ?? string.Empty;
+                if (string.IsNullOrEmpty(fbt)) return;
+            }
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+
+                // (Source, Destination, relaxed condition, original strict condition)
+                var latches = new[]
+                {
+                    ("ToWork1", "AtWork1", "atWork1 = TRUE", "atWork1 = TRUE AND atWork2 = FALSE"),
+                    ("ToWork2", "AtWork2", "atWork2 = TRUE", "atWork2 = TRUE AND atWork1 = FALSE"),
+                };
+                int changed = 0;
+                foreach (var (src, dst, relaxed, strict) in latches)
+                {
+                    var tr = root.Descendants(ns + "ECTransition").FirstOrDefault(t =>
+                        (string?)t.Attribute("Source") == src &&
+                        (string?)t.Attribute("Destination") == dst);
+                    if (tr == null) continue;
+                    var want = relax ? relaxed : strict;
+                    if ((string?)tr.Attribute("Condition") != want)
+                    {
+                        tr.SetAttributeValue("Condition", want);
+                        changed++;
+                    }
+                }
+                if (changed > 0)
+                {
+                    doc.Save(fbt);
+                    result.PatchesApplied.Add(
+                        $"SevenStateCentreHomeActuator.fbt: work-arrival latch {(relax ? "RELAXED (atWorkN=TRUE only)" : "restored (mutually exclusive)")} on {changed} transition(s)");
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"SevenStateCentreHomeActuator.fbt work-latch patch failed: {ex.Message}");
+            }
+        }
+
+        // 2026-06-04: point ActuatorCore.atHome at the No_Sensor_Handler's atHomeOutput
+        // (= (work->home timer fired) OR real DI02) instead of the raw DI02 symlink, so
+        // home is timer-driven with the physical sensor still honoured. The handler's
+        // output was computed but connected to nothing, so the CAT's intended timer-
+        // driven home never actually reached the core. Bidirectional: rig uses the
+        // handler, simulator restores the raw Inputs.VALUE1. Idempotent.
+        static void PatchSwivelAtHomeTimerWiring(string eaeProjectDir, bool useTimer, DeployResult result)
+        {
+            const string catName = "Seven_State_Actuator_Centre_Home_CAT";
+            var fbt = Path.Combine(eaeProjectDir, "IEC61499", catName, catName + ".fbt");
+            if (!File.Exists(fbt))
+            {
+                fbt = Directory.EnumerateFiles(
+                        Path.Combine(eaeProjectDir, "IEC61499"),
+                        catName + ".fbt", SearchOption.AllDirectories)
+                    .FirstOrDefault() ?? string.Empty;
+                if (string.IsNullOrEmpty(fbt)) return;
+            }
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+
+                var conn = root.Descendants(ns + "Connection").FirstOrDefault(c =>
+                    (string?)c.Attribute("Destination") == "ActuatorCore.atHome");
+                if (conn == null)
+                {
+                    result.Warnings.Add(
+                        $"{catName}.fbt: no Connection into ActuatorCore.atHome; atHome timer-wiring skipped.");
+                    return;
+                }
+                var wantSource = useTimer ? "ReturnToHomeHandler.atHomeOutput" : "Inputs.VALUE1";
+                if ((string?)conn.Attribute("Source") != wantSource)
+                {
+                    conn.SetAttributeValue("Source", wantSource);
+                    doc.Save(fbt);
+                    result.PatchesApplied.Add(
+                        $"{catName}.fbt: ActuatorCore.atHome source -> {wantSource} ({(useTimer ? "timer-driven home" : "raw DI02 restored")})");
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"{catName}.fbt atHome timer-wiring patch failed: {ex.Message}");
+            }
+        }
+
         // 2026-06-03: see the detailed rationale at the call site in
         // DeployUniversalArchitecture. Adds (rig) or strips (sim) two
         // sensor-recovery ECTransitions on the Centre-Home swivel core so a
@@ -2729,12 +3062,11 @@ namespace CodeGen.Services
         }
 
         // 2026-06-03: see the detailed rationale at the call site. Wires the AtHome
-        // ECState to the coil-clearing 'atHome' algorithm on the rig (so the arm
-        // de-energises and spring-settles at centre instead of being driven past it),
-        // or back to 'AtHomeEnd' on the sim (coils held, so the coil-mirror parks at
-        // AtHome=6). Both algorithms already exist in the core; this only swaps which
-        // one the AtHome state runs. Idempotent + bidirectional.
-        static void PatchSwivelAtHomeCoilClear(string eaeProjectDir, bool rigMode, DeployResult result)
+        // ECState to the coil-clearing 'atHome' algorithm and makes AtHome publish
+        // output_event, so the Output SYMLINKMULTIVARSRC writes both work coils FALSE.
+        // Both algorithms already exist in the core; this only swaps which one the
+        // AtHome state runs and whether the coil-clear event is emitted.
+        static void PatchSwivelAtHomeCoilClear(string eaeProjectDir, bool clearCoils, DeployResult result)
         {
             var fbt = Path.Combine(eaeProjectDir, "IEC61499", "SevenStateCentreHomeActuator.fbt");
             if (!File.Exists(fbt))
@@ -2774,7 +3106,7 @@ namespace CodeGen.Services
                     .Select(a => (string?)a.Attribute("Name"))
                     .Where(n => n != null)
                     .ToHashSet();
-                string want = rigMode ? "atHome" : "AtHomeEnd";
+                string want = clearCoils ? "atHome" : "AtHomeEnd";
                 if (!algoNames.Contains(want))
                 {
                     result.Warnings.Add(
@@ -2783,18 +3115,41 @@ namespace CodeGen.Services
                 }
 
                 var current = (string?)ecAction.Attribute("Algorithm");
-                if (current == want) return; // idempotent
-                ecAction.SetAttributeValue("Algorithm", want);
+                bool changed = false;
+                if (current != want)
+                {
+                    ecAction.SetAttributeValue("Algorithm", want);
+                    changed = true;
+                }
+
+                var outputEventAction = atHomeState.Elements(ns + "ECAction")
+                    .FirstOrDefault(a => (string?)a.Attribute("Output") == "output_event");
+                if (clearCoils)
+                {
+                    if (outputEventAction == null)
+                    {
+                        atHomeState.Add(new XElement(ns + "ECAction",
+                            new XAttribute("Output", "output_event")));
+                        changed = true;
+                    }
+                }
+                else if (outputEventAction != null)
+                {
+                    outputEventAction.Remove();
+                    changed = true;
+                }
+
+                if (!changed) return; // idempotent
                 doc.Save(fbt);
 
                 result.PatchesApplied.Add(
                     $"SevenStateCentreHomeActuator.fbt: AtHome ECState now runs '{want}' " +
-                    (rigMode
-                        ? "(rig: clears both coils at home so the spring-centred arm settles at centre instead of overshooting/bouncing)"
-                        : "(sim: holds coils so the coil-mirror parks at AtHome=6)"));
+                    (clearCoils
+                        ? "and emits output_event (clears both coils at home)"
+                        : "without output_event (legacy no-clear mode)"));
                 MapperLogger.Info(
                     $"[Deploy] SevenStateCentreHomeActuator.fbt: AtHome -> '{want}' " +
-                    (rigMode ? "(coils cleared at home -> no overshoot)" : "(coils held -> sim coil-mirror park)"));
+                    (clearCoils ? "(coils cleared and published at home)" : "(coils held)"));
             }
             catch (Exception ex)
             {
