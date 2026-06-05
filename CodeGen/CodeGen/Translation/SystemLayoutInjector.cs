@@ -1963,7 +1963,18 @@ namespace CodeGen.Translation
                 // affects where the arm rests, not whether the recipe advances. Do NOT
                 // set these to 0.
                 dict["work1ToHomeTime"]  = SyslayBuilder.FormatTimeMs(750);
-                dict["work2ToHomeTime"]  = SyslayBuilder.FormatTimeMs(500);
+                // 2026-06-05: reduced 500 -> 350. work2ToHomeTime is the atWork2(Place)
+                // -> home swing — the ONLY home leg the Assembly recipe exercises (the
+                // swivel homes from Place, never directly from Pick, so work1ToHomeTime
+                // above is unused by this recipe). Leaving atWork2 the toHome algorithm
+                // energises the WORK1 coil, so the arm swings toward the Pick(atWork1)
+                // side as it crosses centre; at 500ms it coasted PAST centre and parked
+                // "between home and atWork1" (operator-observed 2026-06-05). 350ms cuts
+                // the drive earlier so it stops on centre. RIG-TUNABLE: if it still
+                // overshoots toward atWork1, reduce further; if it stops short of centre
+                // (or stalls because atWork2 never clears so AtHome->AtHomeInit can't
+                // fire) raise it. MUST stay > 0 (E_DELAY DT=0 never fires -> freeze).
+                dict["work2ToHomeTime"]  = SyslayBuilder.FormatTimeMs(350);
                 dict["enableToWork1FaultTimeout"] = SyslayBuilder.FormatBool(false);
                 dict["enableToWork2FaultTimeout"] = SyslayBuilder.FormatBool(false);
                 dict["faultTimeoutWork1"] = SyslayBuilder.FormatTimeMs(10000);
