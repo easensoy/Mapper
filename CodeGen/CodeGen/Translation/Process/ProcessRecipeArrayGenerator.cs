@@ -552,8 +552,6 @@ namespace CodeGen.Translation.Process
             arrays.Wait1State.Add(0);
             arrays.NextStep.Add(0);   // engine never reads NextStep after StepType=9
 
-            ApplyAssemblyBearingReleaseSequence(process, arrays, allComponents);
-
             // 6. HOME-FIRST PREAMBLE for EVERY commanded actuator (safe-start).
             //    Every actuator core boots to whatever its physical sensors report:
             //    the Five_State ECC does INIT -> AtWork on atwork=TRUE, the Seven
@@ -639,16 +637,13 @@ namespace CodeGen.Translation.Process
                         if (arrays.StepType[i] != 9)
                             arrays.NextStep[i] += shift;
 
-                    // 2026-06-04 STALL FIX (was: rig=6, sim=0). Waiting for AtHome=6 on
-                    // the rig stalls forever when the swivel BOOTS already home: it sits
-                    // at AtHomeInit=0 (the settled rest state, reached via AtHome during
-                    // boot), CMD Home is a no-op (no ECC arc out of AtHomeInit), so state
-                    // 6 never re-pulses and the engine waits on it for ever -> the whole
-                    // cycle (clamp at step 3 included) never starts. AtHomeInit=0 is
-                    // reachable ONLY through AtHome in the core, so 0 already proves the
-                    // arm homed, AND it is satisfied whether the swivel was already home
-                    // or just homed. (Restores the reverted bd806b0 6->0 remap.)
-                    int sevenHomePreambleProofWait = 0;
+                    // Runtime must first see the physical AtHome pulse (6). Waiting
+                    // directly for settled 0 can false-pass on the state_table's blank
+                    // startup/default value when the swivel is physically parked at
+                    // Work1, causing the recipe to skip homing and jump into Pick/Place.
+                    // Simulator stays at 0 because its synthetic swivel can boot already
+                    // settled with no physical AtHome pulse to observe.
+                    int sevenHomePreambleProofWait = MapperConfig.SimulatorRecipeMode ? 0 : 6;
 
                     // Insert the home CMD+WAIT rows at the front, in order. Each row
                     // chains to the next (NextStep = its own index + 1); the last
@@ -670,11 +665,8 @@ namespace CodeGen.Translation.Process
                         arrays.CmdTargetName.Insert(pos, string.Empty);
                         arrays.CmdStateArr.Insert(pos, 0);
                         arrays.Wait1Id.Insert(pos, id);
-                        // Home-preamble proof WAIT target = AtHomeInit (0), the swivel's
-                        // settled rest state (sim AND rig). Reaching 0 proves the arm
-                        // homed because the core reaches AtHomeInit only through AtHome.
-                        // (Was rig=6; that stalled when the swivel booted already home --
-                        // see the STALL FIX note above.)
+                        // Runtime proof waits on AtHome=6 first so startup state_table=0
+                        // cannot skip the physical home move from Work1/Work2.
                         arrays.Wait1State.Insert(pos, sevenHomePreambleProofWait);
                         arrays.NextStep.Insert(pos, pos + 1);
                         pos++;
@@ -686,9 +678,8 @@ namespace CodeGen.Translation.Process
                             arrays.CmdStateArr.Insert(pos, 0);
                             arrays.Wait1Id.Insert(pos, id);
                             // Rig-only second confirmation of the settled rest state
-                            // (AtHomeInit=0, coils cleared). Redundant now that the proof
-                            // WAIT above also targets 0, but harmless: both pass on the
-                            // same scan when the swivel is home.
+                            // (AtHomeInit=0, coils cleared) after the physical AtHome
+                            // pulse was observed.
                             arrays.Wait1State.Insert(pos, 0);
                             arrays.NextStep.Insert(pos, pos + 1);
                             pos++;
@@ -703,6 +694,8 @@ namespace CodeGen.Translation.Process
                         "power-up; without it an actuator booting parked at work stalls the recipe.");
                 }
             }
+
+            ApplyAssemblyRuntimeRecipe(process, arrays, allComponents);
 
             // RUN-ONCE: park on the END row after one cycle instead of looping.
             // (2026-06-03 — MapperConfig.RecipeRunOnce, default ON.) The END
@@ -779,23 +772,151 @@ namespace CodeGen.Translation.Process
 
             int afterHome = arrays.NextStep[homeWait];
 
-            // The centre-home CAT can physically reach atWork2 but fail to publish a
-            // long enough state-table update for the Process wait. Release the bearing
-            // immediately after the Place command, then home the swivel after release.
-            // Keeping a short PnP home wait preserves the downstream shaft handoff.
-            arrays.NextStep[placeCmd] = releaseCmd;
+            // Every CMD flows through its OWN wait -- the Place CMD waits for AtWork2
+            // (placeWait) before the gripper releases, proving the swivel is physically
+            // at place. (Earlier this bypassed placeWait as a workaround for an
+            // unreliable AtWork2 publish; that skipped the place confirmation and is
+            // removed per the operator: no CMD may jump over its own WAIT.)
+            arrays.NextStep[placeCmd] = placeWait;   // CMD -> its OWN wait (no skip)
+            arrays.NextStep[placeWait] = releaseCmd; // AtPlace settled -> release
             arrays.NextStep[releaseCmd] = releaseWait;
             arrays.NextStep[releaseWait] = homeCmd;
             arrays.NextStep[homeCmd] = homeWait;
             arrays.NextStep[homeWait] = afterHome;
-            arrays.NextStep[placeWait] = releaseCmd; // parked/unreachable fallback if manually jumped.
 
             arrays.Warnings.Add(
-                "[Recipe] Assembly bearing release override: after Bearing_PnP Place CMD, " +
-                "command Bearing_Gripper release before the PnP home command. The generated " +
-                "Place WAIT row is bypassed because the centre-home CAT's AtWork2 publish is " +
-                "not reliable enough on the rig; release is confirmed by gripper home before " +
-                "Bearing_PnP is commanded home.");
+                "[Recipe] Assembly bearing release sequence: Bearing_PnP Place CMD -> WAIT AtPlace -> " +
+                "Bearing_Gripper release -> WAIT gripper home -> Bearing_PnP Home. Every CMD has its " +
+                "own WAIT; the place confirmation is proven before the gripper releases.");
+        }
+
+        private static void ApplyAssemblyRuntimeRecipe(VueOneComponent process,
+            RecipeArrays arrays, IReadOnlyList<VueOneComponent> allComponents)
+        {
+            if (!string.Equals((process.Name ?? string.Empty).Trim(), "Assembly_Station",
+                    StringComparison.OrdinalIgnoreCase))
+                return;
+
+            if (!TryGetComponentId(arrays, allComponents, "bearing_pnp", out var bearingPnpId) ||
+                !TryGetComponentId(arrays, allComponents, "bearing_gripper", out var bearingGripperId) ||
+                !TryGetComponentId(arrays, allComponents, "shaft_vr", out var shaftVrId) ||
+                !TryGetComponentId(arrays, allComponents, "shaft_hr", out var shaftHrId) ||
+                !TryGetComponentId(arrays, allComponents, "shaft_gripper", out var shaftGripperId))
+            {
+                ApplyAssemblyBearingReleaseSequence(process, arrays, allComponents);
+                return;
+            }
+
+            arrays.StepType.Clear();
+            arrays.CmdTargetName.Clear();
+            arrays.CmdStateArr.Clear();
+            arrays.Wait1Id.Clear();
+            arrays.Wait1State.Clear();
+            arrays.NextStep.Clear();
+
+            void AddCmd(string target, int cmdState)
+            {
+                int row = arrays.StepType.Count;
+                arrays.StepType.Add(1);
+                arrays.CmdTargetName.Add(target);
+                arrays.CmdStateArr.Add(cmdState);
+                arrays.Wait1Id.Add(0);
+                arrays.Wait1State.Add(0);
+                arrays.NextStep.Add(row + 1);
+            }
+
+            void AddWait(int waitId, int waitState)
+            {
+                int row = arrays.StepType.Count;
+                arrays.StepType.Add(2);
+                arrays.CmdTargetName.Add(string.Empty);
+                arrays.CmdStateArr.Add(0);
+                arrays.Wait1Id.Add(waitId);
+                arrays.Wait1State.Add(waitState);
+                arrays.NextStep.Add(row + 1);
+            }
+
+            // NO material-ready gate (2026-06-05). A WAIT BearingSensor=On was tried as
+            // the in-scope proxy for the twin's Feed_Station/TransferReturned precondition
+            // (Transfer is M262/Feed, cross-PLC, with no M580 state_table slot, so it
+            // can't be waited on here). It deadlocked the whole recipe at step 0: the
+            // Sensor_Bool_CAT only publishes its reading into state_table when its core
+            // fires REQ on a sensor EVENT, so at boot (no change) state_table[id] stays at
+            // the default 0 and WAIT=1 never clears -- nothing is ever commanded (CMDREQ
+            // stays 0, the swivel sits home). The recipe therefore starts straight at the
+            // Pick. Re-introduce a material gate only with a sensor that publishes its
+            // level at startup (or once the cross-PLC feed handoff is wired).
+
+            // Bearing: Pick -> Grip -> Place -> Release -> Home. Every CMD points at its
+            // OWN WAIT (no skipped place wait). The home wait is the SINGLE stable
+            // AtHomeInit=0: the Centre-Home ECC runs AtHome(6) -> AtHomeInit(0) in one
+            // run-to-stable tick, so transient state 6 is NEVER observable by the engine
+            // -- a wait on 6 stalls forever (this was the swivel-never-homes bug). No
+            // leading CMD-Home: the Centre-Home CAT boots to AtHomeInit (its INIT arc),
+            // and the cycle ends home, so the swivel is parked home for the next cycle.
+
+            // Clamp the part FIRST and HOLD it through the whole assembly (twin:
+            // Clamping_Part precedes the bearing/shaft work); released at the very end.
+            // close = state 1 (-> AtWork 2). Optional: skipped if the fixture has no
+            // Clamp component (so the recipe never stalls on a missing id).
+            bool hasClamp = TryGetComponentId(arrays, allComponents, "clamp", out var clampId);
+            if (hasClamp)
+            {
+                AddCmd("clamp", 1);
+                AddWait(clampId, 2);
+            }
+
+            AddCmd("bearing_pnp", 1);
+            AddWait(bearingPnpId, 2);
+            AddCmd("bearing_gripper", 1);
+            AddWait(bearingGripperId, 2);
+            AddCmd("bearing_pnp", 3);
+            AddWait(bearingPnpId, 4);
+            AddCmd("bearing_gripper", 3);
+            AddWait(bearingGripperId, 0);
+            AddCmd("bearing_pnp", 5);
+            AddWait(bearingPnpId, 0);
+
+            // Shaft: lift/grip, lower before horizontal transfer, release, return, lift up.
+            AddCmd("shaft_vr", 1);
+            AddWait(shaftVrId, 2);
+            AddCmd("shaft_gripper", 1);
+            AddWait(shaftGripperId, 2);
+            AddCmd("shaft_vr", 3);
+            AddWait(shaftVrId, 0);
+            AddCmd("shaft_hr", 1);
+            AddWait(shaftHrId, 2);
+            AddCmd("shaft_gripper", 3);
+            AddWait(shaftGripperId, 0);
+            AddCmd("shaft_hr", 3);
+            AddWait(shaftHrId, 0);
+            AddCmd("shaft_vr", 1);
+            AddWait(shaftVrId, 2);
+
+            // Release the clamp at the very end (twin: clamp opens when the cycle
+            // finishes). open = state 3 (-> home 0).
+            if (hasClamp)
+            {
+                AddCmd("clamp", 3);
+                AddWait(clampId, 0);
+            }
+
+            int end = arrays.StepType.Count;
+            arrays.StepType.Add(9);
+            arrays.CmdTargetName.Add(string.Empty);
+            arrays.CmdStateArr.Add(0);
+            arrays.Wait1Id.Add(0);
+            arrays.Wait1State.Add(0);
+            arrays.NextStep.Add(end);
+
+            arrays.Warnings.Add(
+                "[Recipe] Assembly_Station runtime recipe (clean, Control.xml-faithful): " +
+                "Clamp Close -> WAIT clamped -> Bearing_PnP Pick -> WAIT AtPick -> Bearing_Gripper Grip -> " +
+                "WAIT AtWork -> Bearing_PnP Place -> WAIT AtPlace -> Bearing_Gripper Release -> " +
+                "WAIT gripper home -> Bearing_PnP Home -> WAIT AtHomeInit -> shaft_vr Work -> " +
+                "shaft_gripper Work -> shaft_vr Home -> shaft_hr Work -> shaft_gripper Home -> " +
+                "shaft_hr Home -> shaft_vr Work -> Clamp Open -> WAIT released -> END. Every CMD has its own " +
+                "WAIT; single stable home-wait (AtHomeInit=0); no leading home; no material-ready gate.");
         }
 
         private static bool TryGetComponentId(RecipeArrays arrays,
