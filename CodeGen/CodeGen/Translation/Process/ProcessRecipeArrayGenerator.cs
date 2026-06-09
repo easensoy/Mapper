@@ -696,6 +696,7 @@ namespace CodeGen.Translation.Process
             }
 
             ApplyAssemblyRuntimeRecipe(process, arrays, allComponents);
+            ApplyCoverRuntimeRecipe(process, arrays, allComponents, stationContents);
 
             // RUN-ONCE: park on the END row after one cycle instead of looping.
             // (2026-06-03 — MapperConfig.RecipeRunOnce, default ON.) The END
@@ -709,7 +710,11 @@ namespace CodeGen.Translation.Process
             // a clean single Home->Pick->Place->Home. Done HERE (after the preamble
             // prepend has shifted every index) so endIdx is the FINAL END index.
             // Flip RecipeRunOnce off to restore continuous looping.
-            if (MapperConfig.RecipeRunOnce && arrays.StepType.Count > 0)
+            // Cover_Station runs a CONTINUOUS cover cycle (its END loops to step 0), so it
+            // is exempted from the run-once self-park that the other engines use.
+            bool isCoverStation = string.Equals((process.Name ?? string.Empty).Trim(),
+                "Cover_Station", StringComparison.OrdinalIgnoreCase);
+            if (MapperConfig.RecipeRunOnce && !isCoverStation && arrays.StepType.Count > 0)
             {
                 int endIdx = arrays.StepType.Count - 1;
                 if (arrays.StepType[endIdx] == 9)
@@ -797,11 +802,17 @@ namespace CodeGen.Translation.Process
                     StringComparison.OrdinalIgnoreCase))
                 return;
 
+            int shaftVrId = -1;
+            int shaftHrId = -1;
+            int shaftGripperId = -1;
+            bool hasShaft =
+                TryGetComponentId(arrays, allComponents, "shaft_vr", out shaftVrId) &&
+                TryGetComponentId(arrays, allComponents, "shaft_hr", out shaftHrId) &&
+                TryGetComponentId(arrays, allComponents, "shaft_gripper", out shaftGripperId);
+
             if (!TryGetComponentId(arrays, allComponents, "bearing_pnp", out var bearingPnpId) ||
                 !TryGetComponentId(arrays, allComponents, "bearing_gripper", out var bearingGripperId) ||
-                !TryGetComponentId(arrays, allComponents, "shaft_vr", out var shaftVrId) ||
-                !TryGetComponentId(arrays, allComponents, "shaft_hr", out var shaftHrId) ||
-                !TryGetComponentId(arrays, allComponents, "shaft_gripper", out var shaftGripperId))
+                !hasShaft)
             {
                 ApplyAssemblyBearingReleaseSequence(process, arrays, allComponents);
                 return;
@@ -877,21 +888,66 @@ namespace CodeGen.Translation.Process
             AddCmd("bearing_pnp", 5);
             AddWait(bearingPnpId, 0);
 
-            // Shaft: lift/grip, lower before horizontal transfer, release, return, lift up.
-            AddCmd("shaft_vr", 1);
-            AddWait(shaftVrId, 2);
-            AddCmd("shaft_gripper", 1);
-            AddWait(shaftGripperId, 2);
-            AddCmd("shaft_vr", 3);
-            AddWait(shaftVrId, 0);
-            AddCmd("shaft_hr", 1);
-            AddWait(shaftHrId, 2);
-            AddCmd("shaft_gripper", 3);
-            AddWait(shaftGripperId, 0);
-            AddCmd("shaft_hr", 3);
-            AddWait(shaftHrId, 0);
-            AddCmd("shaft_vr", 1);
-            AddWait(shaftVrId, 2);
+            if (hasShaft)
+            {
+                // Shaft transfer (rig intent 2026-06-08): lower to pick, grip, lift, carry
+                // horizontally, LOWER TO PLACE, release, then lift away + return home. The
+                // earlier order released the shaft mid-air (hr Work -> release) before it was
+                // ever lowered onto the assembly; this lowers shaft_vr to the place position
+                // BEFORE releasing so the shaft is set down, not dropped.
+                AddCmd("shaft_vr", 1);        // 1. lower (Work) onto the shaft
+                AddWait(shaftVrId, 2);
+                AddCmd("shaft_gripper", 1);   // 2. grip / pick the shaft
+                AddWait(shaftGripperId, 2);
+                AddCmd("shaft_vr", 3);        // 3. lift the shaft up (Home)
+                AddWait(shaftVrId, 0);
+                AddCmd("shaft_hr", 1);        // 4. carry horizontally (Work) to the assembly
+                AddWait(shaftHrId, 2);
+                AddCmd("shaft_vr", 1);        // 5. lower (Work) to place the shaft
+                AddWait(shaftVrId, 2);
+                AddCmd("shaft_gripper", 3);   // 6. release the shaft
+                AddWait(shaftGripperId, 0);
+                AddCmd("shaft_vr", 3);        // 7. lift away (Home)
+                AddWait(shaftVrId, 0);
+                AddCmd("shaft_hr", 3);        // 8. return horizontally (Home)
+                AddWait(shaftHrId, 0);
+            }
+
+            // BX1 COVER PnP (task #69, MapperConfig.ExtendStateRingAcrossBx1): place the
+            // top cover. ONLY emitted when the cross-PLC cover ring is enabled — the
+            // covers live on the BX1 Soft-dPAC, so without the M580↔BX1 ring bridge the
+            // engine's CMD would never reach them and the WAIT would stall the whole
+            // Assembly cycle forever. Gated together with the transport so flag-off keeps
+            // today's working bearing+shaft recipe byte-identical. Skipped silently if any
+            // cover id is missing (fixture without covers) so it can never stall on a
+            // missing id. Five_State convention: Work = cmd1→WAIT AtWork(2),
+            // Home = cmd3→WAIT AtHomeInit(0). Sequence mirrors the shaft transfer
+            // (down→grip→up→advance→down→release→up→return) per the Control.xml
+            // Assembly cover states (Cover_PnP_GoDown_Pick → GripCover →
+            // Cover_PnP_Go_Up → Cover_Pnp_advanced → Cover_PnP_Down → release →
+            // Cover_PnP_Up → Cover_PnP_returned).
+            if (MapperConfig.ExtendStateRingAcrossBx1 &&
+                TryGetComponentId(arrays, allComponents, "coverpnp_vr", out var coverVrId) &&
+                TryGetComponentId(arrays, allComponents, "coverpnp_hr", out var coverHrId) &&
+                TryGetComponentId(arrays, allComponents, "coverpnp_gripper", out var coverGripperId))
+            {
+                AddCmd("coverpnp_vr", 1);        // 1. lower (Work) onto the cover
+                AddWait(coverVrId, 2);
+                AddCmd("coverpnp_gripper", 1);   // 2. grip / pick the cover
+                AddWait(coverGripperId, 2);
+                AddCmd("coverpnp_vr", 3);         // 3. lift the cover up (Home)
+                AddWait(coverVrId, 0);
+                AddCmd("coverpnp_hr", 1);         // 4. advance horizontally (Work) over the assembly
+                AddWait(coverHrId, 2);
+                AddCmd("coverpnp_vr", 1);         // 5. lower (Work) to place the cover
+                AddWait(coverVrId, 2);
+                AddCmd("coverpnp_gripper", 3);    // 6. release the cover
+                AddWait(coverGripperId, 0);
+                AddCmd("coverpnp_vr", 3);         // 7. lift away (Home)
+                AddWait(coverVrId, 0);
+                AddCmd("coverpnp_hr", 3);         // 8. return horizontally (Home)
+                AddWait(coverHrId, 0);
+            }
 
             // Release the clamp at the very end (twin: clamp opens when the cycle
             // finishes). open = state 3 (-> home 0).
@@ -914,9 +970,113 @@ namespace CodeGen.Translation.Process
                 "Clamp Close -> WAIT clamped -> Bearing_PnP Pick -> WAIT AtPick -> Bearing_Gripper Grip -> " +
                 "WAIT AtWork -> Bearing_PnP Place -> WAIT AtPlace -> Bearing_Gripper Release -> " +
                 "WAIT gripper home -> Bearing_PnP Home -> WAIT AtHomeInit -> shaft_vr Work -> " +
-                "shaft_gripper Work -> shaft_vr Home -> shaft_hr Work -> shaft_gripper Home -> " +
-                "shaft_hr Home -> shaft_vr Work -> Clamp Open -> WAIT released -> END. Every CMD has its own " +
+                "shaft_gripper Grip -> shaft_vr Home -> shaft_hr Work -> shaft_vr Work (place) -> " +
+                "shaft_gripper Release -> shaft_vr Home -> shaft_hr Home -> Clamp Open -> WAIT released -> " +
+                "END. Every CMD has its own " +
                 "WAIT; single stable home-wait (AtHomeInit=0); no leading home; no material-ready gate.");
+        }
+
+        /// <summary>
+        /// Cover pick/place recipe for the LOCAL BX1 Cover_Station engine
+        /// (MapperConfig.DeployBx1CoverEngine). Mirrors ApplyAssemblyRuntimeRecipe but
+        /// targets Cover_Station and is INDEPENDENT of ExtendStateRingAcrossBx1 (the covers
+        /// are commanded locally on BX1, not cross-PLC). Five_State convention: Work =
+        /// cmd1 → WAIT AtWork(2); Home = cmd3 → WAIT AtHomeInit(0). EVERY wait is the
+        /// commanded actuator's OWN settled state — never a cross-component or sensor wait —
+        /// so it can never stall on a never-closing sensor. Skipped silently if cover ids are
+        /// absent. Minimal mode (Bx1CoverMinimalCycle): CoverPNP_Vr work→home only (proof).
+        /// </summary>
+        private static void ApplyCoverRuntimeRecipe(VueOneComponent process,
+            RecipeArrays arrays, IReadOnlyList<VueOneComponent> allComponents,
+            StationContents stationContents)
+        {
+            if (!string.Equals((process.Name ?? string.Empty).Trim(), "Cover_Station",
+                    StringComparison.OrdinalIgnoreCase))
+                return;
+            if (!MapperConfig.DeployBx1CoverEngine)
+                return;
+
+            // The covers are Mapper-SYNTHESIZED (BX1 cover PnP) — they are NOT in the
+            // Control.xml's allComponents, so TryGetComponentId(...allComponents...) can't
+            // resolve them. They ARE in stationContents.Actuators (that's where their global
+            // ids in arrays.ComponentRegistry came from). Build a lookup that includes the
+            // synthesized covers so the registry's ComponentID keys resolve to the covers.
+            // HARDCODED cover ids for TESTING (per user request 2026-06-09). The covers are
+            // Mapper-synthesized (no Control.xml <Component>), so dynamic id resolution via the
+            // recipe registry kept failing. These are the deployed global actuator_ids from the
+            // sensors-first registry (verified on BX1_RES): coverpnp_vr=15, coverpnp_hr=14,
+            // coverpnp_gripper=16. Each cover publishes its state to state_table[<its id>], so
+            // the engine's WAIT Wait1Id matches. CmdTargetName uses the lowercased instance
+            // name, which equals the cover's actuator_name param (what the ring's
+            // updateComponentState matches on). TODO: replace with dynamic resolution once the
+            // synthesized covers carry a resolvable name/id.
+            const int coverVrId = 15;
+            const int coverHrId = 14;
+            const int coverGripperId = 16;
+
+            arrays.StepType.Clear();
+            arrays.CmdTargetName.Clear();
+            arrays.CmdStateArr.Clear();
+            arrays.Wait1Id.Clear();
+            arrays.Wait1State.Clear();
+            arrays.NextStep.Clear();
+
+            void AddCmd(string target, int cmdState)
+            {
+                int row = arrays.StepType.Count;
+                arrays.StepType.Add(1);
+                arrays.CmdTargetName.Add(target);
+                arrays.CmdStateArr.Add(cmdState);
+                arrays.Wait1Id.Add(0);
+                arrays.Wait1State.Add(0);
+                arrays.NextStep.Add(row + 1);
+            }
+
+            void AddWait(int waitId, int waitState)
+            {
+                int row = arrays.StepType.Count;
+                arrays.StepType.Add(2);
+                arrays.CmdTargetName.Add(string.Empty);
+                arrays.CmdStateArr.Add(0);
+                arrays.Wait1Id.Add(waitId);
+                arrays.Wait1State.Add(waitState);
+                arrays.NextStep.Add(row + 1);
+            }
+
+            bool full = !MapperConfig.Bx1CoverMinimalCycle
+                        && coverHrId > 0 && coverGripperId > 0;
+            if (full)
+            {
+                AddCmd("coverpnp_vr", 1);        AddWait(coverVrId, 2);       // 1. lower onto cover
+                AddCmd("coverpnp_gripper", 1);   AddWait(coverGripperId, 2);  // 2. grip
+                AddCmd("coverpnp_vr", 3);        AddWait(coverVrId, 0);       // 3. lift
+                AddCmd("coverpnp_hr", 1);        AddWait(coverHrId, 2);       // 4. advance over assembly
+                AddCmd("coverpnp_vr", 1);        AddWait(coverVrId, 2);       // 5. lower to place
+                AddCmd("coverpnp_gripper", 3);   AddWait(coverGripperId, 0);  // 6. release
+                AddCmd("coverpnp_vr", 3);        AddWait(coverVrId, 0);       // 7. lift away
+                AddCmd("coverpnp_hr", 3);        AddWait(coverHrId, 0);       // 8. return
+            }
+            else
+            {
+                // Minimal proof-of-life: drive CoverPNP_Vr work → home (one actuator
+                // end-to-end through the broker to the EtherNet/IP output and back).
+                AddCmd("coverpnp_vr", 1);        AddWait(coverVrId, 2);
+                AddCmd("coverpnp_vr", 3);        AddWait(coverVrId, 0);
+            }
+
+            arrays.StepType.Add(9);
+            arrays.CmdTargetName.Add(string.Empty);
+            arrays.CmdStateArr.Add(0);
+            arrays.Wait1Id.Add(0);
+            arrays.Wait1State.Add(0);
+            // END loops back to step 0 -> continuous Work<->Home cycle (matches the
+            // hand-verified hardcoded recipe). RecipeRunOnce is exempted for Cover_Station
+            // (see Generate) so this loop is not rewritten to a self-park.
+            arrays.NextStep.Add(0);
+
+            arrays.Warnings.Add(
+                $"[Recipe] Cover_Station BX1-local cover recipe emitted ({(full ? "FULL 8-step" : "MINIMAL coverpnp_vr work->home")}); " +
+                "END loops to step 0; all WAITs are the commanded actuator's own settled state (no sensor stall).");
         }
 
         private static bool TryGetComponentId(RecipeArrays arrays,
