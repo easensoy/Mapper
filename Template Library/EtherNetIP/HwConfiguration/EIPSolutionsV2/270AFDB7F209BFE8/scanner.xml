@@ -1,0 +1,133 @@
+<Configuration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" version="1.0" xsi:noNamespaceSchemaLocation="M580Configuration.xsd" DeviceTypeID="16" PlcVersion="" SubDeviceTypeID="15">
+	<Module id="1" name="ST_MODULE" enabled="true" version="1.0">
+		<ModuleSettings productType="1" productSubType="6" cpuStopMode="0" allowExplicitReset="false"/>
+		<MemorySettings cpuAlignment="4">
+			<MemoryMap id="1" taskType="1" addressStatus="0" addressControl="0" addressIn="0" addressOut="0" reservedIn="32" reservedOut="32"/>
+		</MemorySettings>
+	</Module>
+	<GeneralNetwork id="2" name="ST_GENERAL" enabled="true" version="1.0">
+		<GeneralNetworkSettings ethernetFrameType="0" configurationType="0" deviceName="" ipAddressA="192.168.11.1" ipAddressB="0.0.0.0" ipAddressC="192.168.1.151" ipAddressD="0.0.0.0" subnetMaskAB="255.255.0.0" subnetMaskCD="255.255.255.0" gatewayAddress="192.168.1.254"/>
+	</GeneralNetwork>
+	<Switch id="3" name="ST_SWITCH" enabled="true" version="1.0">
+		<SwitchSettings igmpSnoopingEnabled="false"/>
+		<Ports>
+			<Port portNumber="0" enable="true" speed10mbps="true" speed100mbps="true" speed1gbps="true" autoSpeed="true" fullDuplex="false" autoDuplex="true" mdix="false" autoMDIX="true" physicalPortNumber="5" logicalPortNumber="0"/>
+			<Port portNumber="1" enable="true" speed10mbps="true" speed100mbps="true" speed1gbps="false" autoSpeed="true" fullDuplex="false" autoDuplex="true" mdix="false" autoMDIX="true" physicalPortNumber="4" logicalPortNumber="1"/>
+			<Port portNumber="2" enable="true" speed10mbps="true" speed100mbps="true" speed1gbps="false" autoSpeed="true" fullDuplex="false" autoDuplex="true" mdix="false" autoMDIX="true" physicalPortNumber="1" logicalPortNumber="2"/>
+			<Port portNumber="3" enable="true" speed10mbps="true" speed100mbps="true" speed1gbps="false" autoSpeed="true" fullDuplex="false" autoDuplex="true" mdix="false" autoMDIX="true" physicalPortNumber="0" logicalPortNumber="3"/>
+			<Port portNumber="4" enable="true" speed10mbps="false" speed100mbps="true" speed1gbps="false" autoSpeed="false" fullDuplex="true" autoDuplex="false" mdix="false" autoMDIX="true" physicalPortNumber="2" logicalPortNumber="4"/>
+			<Port portNumber="5" enable="false" speed10mbps="true" speed100mbps="true" speed1gbps="false" autoSpeed="true" fullDuplex="false" autoDuplex="true" mdix="false" autoMDIX="true" physicalPortNumber="3" logicalPortNumber="255"/>
+		</Ports>
+	</Switch>
+	<Layer2Config id="4" name="ST_LAYER2CONFIG" enabled="true" version="1.0">
+		<Layer2Settings rstpEnabled="true" prpEnabled="true" hsrNetworkEnabled="true"/>
+	</Layer2Config>
+	<RSTP id="5" name="ST_RSTP" enabled="true" version="1.0">
+		<RSTPInstances>
+			<RSTPInstance id="1" enabled="true">
+				<RSTPSettings>
+					<BridgeForceVersion valid="true" value="2"/>
+					<BridgeForwardDelay valid="true" value="21000"/>
+					<BridgeMaxAge valid="true" value="40000"/>
+					<BridgeTransmitHoldCount valid="true" value="40"/>
+					<BridgeIdentifierPriority valid="true" value="0"/>
+					<BridgeHelloTime valid="true" value="2000"/>
+				</RSTPSettings>
+				<RSTPPorts>
+					<RSTPPort index="0" logicalPortNumber="2" pathCost="0" identifierPriority="128"/>
+					<RSTPPort index="1" logicalPortNumber="3" pathCost="0" identifierPriority="128"/>
+				</RSTPPorts>
+			</RSTPInstance>
+		</RSTPInstances>
+	</RSTP>
+	<SNTP id="8" name="ST_SNTP" enabled="false" version="1.0">
+		<SNTPSettings primaryServer="0.0.0.0" secondaryServer="0.0.0.0" pollingPeriod="20" updateCPUTime="false" sntpMode="0"/>
+		<DayLightSaving startTime="7200" startDateWeekNo="0" startDateOccurrence="1" startMonth="3" endTime="10800" endDateWeekNo="0" endDateOccurrence="1" endMonth="11" bias="0"/>
+		<TimeZone offset="330" index="63"/>
+	</SNTP>
+	<QOS id="11" name="ST_QOS" enabled="true" version="1.0">
+		<QOSSettings networkId="0" enabled="true">
+			<Vlan type="1"/>
+			<DSCPQOSControl valid="true" enabled="true" source="0"/>
+			<Tag8021Q valid="true" enabled="true"/>
+			<PTPEvent>
+				<Priority valid="true" value="59"/>
+				<Queue valid="true" value="3"/>
+			</PTPEvent>
+			<PTPGeneral>
+				<Priority valid="true" value="47"/>
+				<Queue valid="true" value="2"/>
+			</PTPGeneral>
+			<CIPScheduled>
+				<DSCPPriority valid="true" value="47"/>
+				<Queue valid="true" value="2"/>
+			</CIPScheduled>
+			<CIPUrgent>
+				<DSCPPriority valid="true" value="55"/>
+				<Queue valid="true" value="2"/>
+			</CIPUrgent>
+			<CIPLow>
+				<DSCPPriority valid="true" value="31"/>
+				<Queue valid="true" value="1"/>
+			</CIPLow>
+			<CIPHigh>
+				<DSCPPriority valid="true" value="43"/>
+				<Queue valid="true" value="2"/>
+			</CIPHigh>
+			<CIPExplicit>
+				<DSCPPriority valid="true" value="27"/>
+				<Queue valid="true" value="1"/>
+			</CIPExplicit>
+			<ModbusIO>
+				<DSCPPriority valid="true" value="43"/>
+				<Queue valid="true" value="2"/>
+			</ModbusIO>
+			<ModbusExplicit>
+				<DSCPPriority valid="true" value="27"/>
+				<Queue valid="true" value="1"/>
+			</ModbusExplicit>
+			<NTP>
+				<DSCPPriority valid="true" value="59"/>
+				<Queue valid="true" value="3"/>
+			</NTP>
+		</QOSSettings>
+	</QOS>
+	<SNMP id="12" name="ST_SNMP" enabled="true" version="1.0">
+		<SNMPSettings ipAddressManager1="0.0.0.0" ipAddressManager2="0.0.0.0" authenticationFailureTrap="false">
+			<CommunityNames setCommunityName="private" getCommunityName="public" trapCommunityName="alert"/>
+			<AgentSettings sysLocation="" sysContact="" allowOIDModification="false"/>
+		</SNMPSettings>
+	</SNMP>
+	<AddressServer id="13" name="ST_ADDRSVR" enabled="false" version="1.0">
+		<AddressServerSettings enableFDR="false"/>
+		<AddressServerClients><Client deviceNumber="513" enabled="false" ipAddress="192.168.1.210" nonScannedDevice="0" automaticDevice="1"/></AddressServerClients></AddressServer>
+	<ServicePort id="14" name="ST_SRVPORT" enabled="true" version="1.0">
+		<ServicePortSettings servicePortNumber="1" portMode="1">
+			<Mirror internalPort="false" eth1="false" eth2="false" eth3="false" backplanePort="false" blockServiceport="0"/>
+		</ServicePortSettings>
+	</ServicePort>
+	<EthernetBackplane id="16" name="ST_ETHBKPL" enabled="true" version="1.0">
+		<BackplaneSettings configuredSlots="1" bkpLogicalPort="4" mirrorTarget="254" mirrorSource="0">
+			<Slot id="255" qos8021Q="0" broadcastTrafficLimit="100000000" miscTrafficLimit="100000000" chassisIDTLV="backplane(255)" systemDescriptionTLV="Product:Ethernet Backplane Processor;FwId:01.00;"/>
+		</BackplaneSettings>
+	</EthernetBackplane>
+	<Security id="17" name="ST_SECURITY" enabled="true" version="2.0">
+		<SecuritySettings achillessLevel2="true" firmwareUpgrade="true" ftp="false" port502Server="true" accessToCPUVia502="true" eipServer="false" tftp="false" accessControlList="true" snmp="false" ntpServer="true" webServer="false" dhcp_bootp="false"/>
+	</Security>
+	<AccessControlList id="18" name="ST_ACL" enabled="true" version="2.0">
+		<ACLEntries>
+			<AclEntry id="1">
+				<AclEntrySettings ipAddress="90.0.0.0" subnetMask="255.255.255.0" entryEnabled="true" addressIsSubnet="true"/>
+				<AclServices firmwareUpgrade="true" ftp="false" port502Server="false" accessToCPUVia502="true" eipServer="false" tftp="false" snmpServer="false" ntpServer="true" webServer="false" dhcp_bootp="false"/>
+			</AclEntry>
+		</ACLEntries>
+	</AccessControlList>
+	<CommonScanner id="19" name="ST_COMM_SCANNER" enabled="true" version="1.0">
+		<ScannerSettings ioEnableDisableFlags="1" modbusConnectionCount="0" eipConnectionCount="1" inputObjectID="2048" outputObjectID="2049"/>
+	</CommonScanner>
+	<ModbusTCP id="20" name="ST_MBTCPDEVICES" enabled="true" version="1.0">
+		<ModbusTCPSettings inputOffset="0" outputOffset="0"/><ModbusDevices/></ModbusTCP>
+	<EthernetIP id="21" name="ST_EIPDEVICES" enabled="true" version="1.0">
+		<EthernetIPSettings deviceCount="1" eipCTBuild="1" fwIOOpenTimeout="4960" fwEMOpenTimeout="3000" emReqTimeout="10" emConnectedRPI="10000000"/>
+		<EthernetIPDevices><EIPDevice deviceID="49d2ea8e-3a4f-4ead-add4-ec4ba00d5239" deviceName="EtherNetIPDevice_1" deviceNumber="513" DeviceProfileType="1" ipAddress="192.168.1.210" subnetMask="" gatewayAddress="" signature="0xFFFFFFFF" ccotfCounter="0xFFFF" hsbyState="0" vendorId="243" rpiOT="10000000" netOTConnId="0" netOTConnParam="17407" rpiTO="10000000" netTOConnId="0" netTOConnParam="17407" transClassTrigger="163" originatorSerialNum="4294967295" connTimeOutX="0" pathByteSize="4" path="20 02 24 01" enableDHCP="false" clientIdentifierType="1" clientIdentifier="" IsCipSafetyDevice="0"><ConnectionList><Connection inputObjectID="1024" outputObjectID="1025" connectionID="897" dscpValue="43" attachedTask="4" cipPriority="1" inputFallbackMode="0" redundantAdapStatus="0" scannerIPAddress="1" cpuStateBehavior="2" timeOutMultiplier="0" vendorId="243" productType="12" productCode="4105" majorRevision="2" minorRevision="3" connectionNameString="Exclusive Owner" helpString="Connection for I/O Combination Assemblies" ePath="34 04 00 00 00 00 00 00 00 00 20 04 24 01 2C 64 2C 65"><Config1 value=""/><Config2 value=""/><TriggerAndTransport class1="1" triggerCyclic="1" transportTypeExclusiveOwner="1" server="0"/><Originator2TargetParameters rpi="30000"><ConnectionParameters fixedSizeSupported="1" realTimeTransferFormat="4" connectionTypePoint2Point="1" priorityScheduled="1"/><Size constant="2"/></Originator2TargetParameters><Target2OriginatorParameters rpi="30000"><ConnectionParameters fixedSizeSupported="1" realTimeTransferFormat="0" connectionTypeMulticast="1" priorityScheduled="1"/><Size constant="6"/></Target2OriginatorParameters></Connection></ConnectionList></EIPDevice></EthernetIPDevices><LocalSlaveList/><LocalSlaves/><LocalSlaveListCIPSafety/></EthernetIP>
+</Configuration>
