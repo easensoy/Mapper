@@ -124,7 +124,7 @@ namespace CodeGen.Devices.M262
             var syslayPath = cfg.ActiveSyslayPath;
             var fbInstances = string.IsNullOrWhiteSpace(syslayPath) || !File.Exists(syslayPath)
                 ? new List<SysresFbMirror.SyslayFb>()
-                : SysresFbMirror.ReadSyslayTopLevelFbs(syslayPath);
+                : SysresFbMirror.ReadTopLevelFbsWithSystemModelFallback(syslayPath);
 
             var sysresPath = EaeProjectLayout.FindSysresFor(sysdevPath);
 
