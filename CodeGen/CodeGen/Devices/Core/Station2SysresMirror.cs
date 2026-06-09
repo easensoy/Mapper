@@ -28,7 +28,7 @@ namespace CodeGen.Devices.Core
             var syslayPath = cfg.ActiveSyslayPath;
             var all = (string.IsNullOrWhiteSpace(syslayPath) || !File.Exists(syslayPath))
                 ? new List<SysresFbMirror.SyslayFb>()
-                : SysresFbMirror.ReadSyslayTopLevelFbs(syslayPath);
+                : SysresFbMirror.ReadTopLevelFbsWithSystemModelFallback(syslayPath);
             if (all.Count == 0) return (0, 0);
 
             int m580 = MirrorBucket(eaeRoot, "M580_dPAC",
