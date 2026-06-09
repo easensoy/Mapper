@@ -1,5 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
+using System.Xml.Linq;
 using CodeGen.Configuration;
 using CodeGen.Devices.M262;
 
@@ -46,6 +50,15 @@ namespace CodeGen.Devices.Core
         const string M580CpuUuid          = "11111111-2222-3333-4444-000000000044";
         const string FallbackSolutionUuid = "00000000-0000-0000-0000-000000000000";
 
+        // BX1 EtherNet/IP daisy-chain endpoints (match Station2DeviceEmitter's
+        // BX1EtherNetIpUuid + BX1EquipmentUuid, which match the reference). The
+        // reference wires the TM3BC coupler between the Switch and the HMIB1X panel:
+        // Switch Port4 -> EtherNetIPDevice Port2 (Wire 191), EtherNetIPDevice Port1
+        // -> HMIB1X LAN1 (Wire 193). We mirror that so the BX1 panel reaches the
+        // network through its coupler.
+        const string Bx1EtherNetIpUuid    = "49d2ea8e-3a4f-4ead-add4-ec4ba00d5239"; // EtherNetIPDevice_1 (.210)
+        const string Bx1HmiB1XUuid        = "49363b74-1a84-46c1-b4cd-93f02374daec"; // HMIB1X_1 (BX1 panel .209)
+
         public sealed class EmitResult
         {
             public System.Collections.Generic.List<string> FilesWritten { get; } = new();
@@ -91,18 +104,45 @@ namespace CodeGen.Devices.Core
                 destinationEquipmentUuid:   M580CpuUuid,
                 destinationPortIdentifier:  "ETH1"), result, eaeRoot);
 
-            // Register all three in TopologyManager.topologyproj so the
-            // EAE build target picks them up.
+            var registerNames = new List<string>
+            {
+                "Equipment_Switch_1.json",
+                "Wire_M262_to_Switch1.json",
+                "Wire_Switch1_to_M580.json",
+            };
+
+            // BX1 EtherNet/IP daisy-chain (only when the coupler is emitted). Mirrors
+            // the reference: Switch Port3 -> EtherNetIPDevice Port2, and
+            // EtherNetIPDevice Port1 -> HMIB1X LAN1 — so the BX1 panel reaches the
+            // network through its TM3BC coupler and the softdpac's EtherNet/IP scanner
+            // (declared by the .hcf) has its physical-views counterpart. Both endpoints
+            // are real Equipment, so SweepOrphanWires keeps them. Switch Port3 is free
+            // (Port1=M262, Port2=M580).
+            if (cfg.EmitBx1EtherNetIpDevice)
+            {
+                ForceWriteJson(topologyDir, "Wire_Switch1_to_EtherNetIP.json", BuildWireJson(
+                    identifier:                 "Switch1_to_EtherNetIP",
+                    sourceEquipmentUuid:        Switch1Uuid,
+                    sourcePortIdentifier:       "Port3",
+                    destinationEquipmentUuid:   Bx1EtherNetIpUuid,
+                    destinationPortIdentifier:  "Port2"), result, eaeRoot);
+                ForceWriteJson(topologyDir, "Wire_EtherNetIP_to_BX1.json", BuildWireJson(
+                    identifier:                 "EtherNetIP_to_BX1",
+                    sourceEquipmentUuid:        Bx1EtherNetIpUuid,
+                    sourcePortIdentifier:       "Port1",
+                    destinationEquipmentUuid:   Bx1HmiB1XUuid,
+                    destinationPortIdentifier:  "LAN1"), result, eaeRoot);
+                registerNames.Add("Wire_Switch1_to_EtherNetIP.json");
+                registerNames.Add("Wire_EtherNetIP_to_BX1.json");
+            }
+
+            // Register in TopologyManager.topologyproj so the EAE build target picks
+            // them up.
             var topologyProj = Path.Combine(topologyDir, "TopologyManager.topologyproj");
             if (File.Exists(topologyProj))
             {
                 result.TopologyProjEntriesAdded = M262TopologyEmitter.RegisterInTopologyProj(
-                    topologyProj, new[]
-                    {
-                        "Equipment_Switch_1.json",
-                        "Wire_M262_to_Switch1.json",
-                        "Wire_Switch1_to_M580.json",
-                    });
+                    topologyProj, registerNames.ToArray());
             }
             else
             {
@@ -111,7 +151,97 @@ namespace CodeGen.Devices.Core
                     "written but not registered with the TopologyManager build target.");
             }
 
+            // ORPHAN-WIRE SWEEP (2026-06-09 — THE topology-import 500 fix). EAE 24.1's
+            // TopologyManager resolves every Wire's source/destination Equipment UUID
+            // against the loaded Equipment_*.json. A wire pointing at a UUID that NO
+            // device declares makes the import throw HTTP 500 ("Unable to import
+            // topology / Internal Server Error") in ~150 ms BEFORE any device is
+            // parsed — aborting the WHOLE topology (empty Physical Views). This bit us
+            // when BX1 changed from the Workstation form (NIC sub-component uuid
+            // …000000000053) to HMIB1X (no …053): the stale Wire_Wire 145.json
+            // (…053 → Switch Port3) was left behind AND still registered, because the
+            // existing CleanupStaleTopologyJson sweep only ever targeted
+            // Equipment_*.json — never Wire_*.json. Generic + future-proof: delete +
+            // de-register ANY Wire_*.json whose endpoint UUID is declared by no
+            // Equipment, so any future device-form change self-heals.
+            SweepOrphanWires(topologyDir, Path.Combine(topologyDir, "TopologyManager.topologyproj"),
+                result, eaeRoot);
+
             return result;
+        }
+
+        /// <summary>
+        /// Deletes + de-registers any <c>Wire_*.json</c> whose <c>sourceEquipment</c>
+        /// or <c>destinationEquipment</c> UUID is declared by NO <c>Equipment_*.json</c>
+        /// in the Topology folder (a dangling wire from a device UUID/form change). A
+        /// dangling wire endpoint makes EAE's TopologyManager 500 the entire import.
+        /// Conservative: if no equipment UUIDs are readable it sweeps nothing.
+        /// </summary>
+        static void SweepOrphanWires(string topologyDir, string topologyProj,
+            EmitResult result, string eaeRoot)
+        {
+            try
+            {
+                // Every UUID any Equipment declares (root + nested equipments + components).
+                var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var uuidRx = new Regex("\"uuid\"\\s*:\\s*\"([0-9a-fA-F-]{36})\"");
+                foreach (var eq in Directory.EnumerateFiles(topologyDir, "Equipment_*.json"))
+                {
+                    string text;
+                    try { text = File.ReadAllText(eq); } catch { continue; }
+                    foreach (Match m in uuidRx.Matches(text)) known.Add(m.Groups[1].Value);
+                }
+                if (known.Count == 0) return;   // safety: never sweep blind
+
+                const string Zero = "00000000-0000-0000-0000-000000000000";
+                var endpointRx = new Regex(
+                    "\"(?:sourceEquipment|destinationEquipment)\"\\s*:\\s*\"([0-9a-fA-F-]{36})\"");
+
+                foreach (var wire in Directory.EnumerateFiles(topologyDir, "Wire_*.json").ToList())
+                {
+                    string text;
+                    try { text = File.ReadAllText(wire); } catch { continue; }
+
+                    bool orphan = false;
+                    string badUuid = string.Empty;
+                    foreach (Match m in endpointRx.Matches(text))
+                    {
+                        var u = m.Groups[1].Value;
+                        if (string.Equals(u, Zero, StringComparison.OrdinalIgnoreCase)) continue;
+                        if (!known.Contains(u)) { orphan = true; badUuid = u; break; }
+                    }
+                    if (!orphan) continue;
+
+                    var name = Path.GetFileName(wire);
+                    try { File.Delete(wire); } catch { /* best-effort */ }
+                    UnregisterFromTopologyProj(topologyProj, name);
+                    result.Warnings.Add(
+                        $"[Topology] Swept ORPHAN wire {name} — endpoint UUID {badUuid} is declared by no " +
+                        "Equipment (dangling wire → EAE topology-import 500). De-registered from topologyproj.");
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"[Topology] Orphan-wire sweep failed: {ex.Message}");
+            }
+        }
+
+        static void UnregisterFromTopologyProj(string topologyProj, string fileName)
+        {
+            if (!File.Exists(topologyProj)) return;
+            try
+            {
+                var doc = XDocument.Load(topologyProj);
+                var ns = doc.Root!.GetDefaultNamespace();
+                var nodes = doc.Descendants(ns + "None")
+                    .Where(e => string.Equals((string?)e.Attribute("Include"), fileName,
+                        StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                if (nodes.Count == 0) return;
+                foreach (var n in nodes) n.Remove();
+                doc.Save(topologyProj);
+            }
+            catch { /* best-effort; the deleted file alone is the primary fix */ }
         }
 
         // Force-clean write — delete any pre-existing file before rewrite so a
