@@ -1,0 +1,312 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="a27a4c66-423f-4c3b-a66e-0f2832dacd7e" Name="TM3BC_Ethe_yYhtt9jWKUOJs" Comment="Composite Function Block Type" Namespace="Main">
+  <Attribute Name="HMI.Alias" Value="" />
+  <Attribute Name="Signature" Value="9B-51-86-C6-44-F1-B9-23-4E-CE-E4-D3-BB-FD-BE-0A-D2-5B-5E-A3-24-21-0B-6D-81-3C-00-8F-1B-F1-B9-BB-43-CA-DC-29-26-A0-D3-07-47-84-6D-56-70-09-2E-2C-30-58-B0-D9-37-4B-26-3D-BF-E3-73-7B-3A-E4-6A-55_67-4B-EE-2B-F7-15-C2-07-6B-CD-FB-3F-4A-FB-6C-FA-FE-85-84-91-EA-8A-10-A4-3E-5F-A5-D7-87-43-15-4E-8E-61-10-AD-23-0C-80-F7-8B-ED-9D-C9-E2-50-D4-40-3E-AD-16-B1-1E-C7-18-6C-9F-7C-EF-80-0E-8A-1D-44" />
+  <Attribute Name="CreationMethod" Value="Generic" />
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Date="4/12/2022" Remarks="template" />
+  <InterfaceList>
+    <InputVars>
+      <VarDeclaration Name="SLAVE_BUS_ID" Type="STRING">
+        <Attribute Name="Configuration.HWConfiguration.HideInHwConfigurator" Value="False" />
+        <Attribute Name="Configuration.HWConfiguration.InheritInstanceName" Value="True" />
+      </VarDeclaration>
+      <VarDeclaration Name="RIO" Type="BOOL">
+        <Attribute Name="Configuration.HWConfiguration.HideInHwConfigurator" Value="True" />
+        <Attribute Name="Configuration.HWConfiguration.ReadOnlyInHwConfigurator" Value="True" />
+      </VarDeclaration>
+      <VarDeclaration Name="InputObjectId0" Type="UINT" Comment="Object ID of Input connection 0">
+        <Attribute Name="Configuration.HWConfiguration.ReadOnlyInHwConfigurator" Value="True" />
+      </VarDeclaration>
+      <VarDeclaration Name="OutputObjectId0" Type="UINT" Comment="Object ID of Output connection 0">
+        <Attribute Name="Configuration.HWConfiguration.ReadOnlyInHwConfigurator" Value="True" />
+      </VarDeclaration>
+      <VarDeclaration Name="IO_Modules_Status" Type="STRING" />
+      <VarDeclaration Name="Module_1_TM3DI16_G_Input_IW0" Type="STRING" />
+      <VarDeclaration Name="Module_2_TM3DQ16T_G_Output_QW" Type="STRING" />
+    </InputVars>
+    <Sockets>
+      <AdapterDeclaration Name="BUSIN" Type="IHwEIPAdapter" Namespace="Standard.IoEtherNetIP" x="1160" y="160" />
+    </Sockets>
+    <Plugs>
+      <AdapterDeclaration Name="BUSOUT" Type="IHwEIPAdapter" Namespace="Standard.IoEtherNetIP" x="9640" y="160" />
+    </Plugs>
+  </InterfaceList>
+  <FBNetwork>
+    <FB Name="CONFIG" Type="TEMPLATE_CONFIGURATION" x="3660" y="1100" Namespace="Standard.IoEtherNetIP">
+      <Parameter Name="ConnectionCount" Value="1" />
+    </FB>
+    <FB Name="GetInstanceName" Type="GET_INSTANCE_NAME" x="3800" y="2040" Namespace="Standard.IoEtherNetIP">
+      <Parameter Name="instanceLevel" Value="1" />
+    </FB>
+    <FB Name="LogicalAndConnectionHealth" Type="AND_88A3DD8EC65DD11C" x="5280" y="1220" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=2;OUT:BOOL" />
+      <Parameter Name="IN2" Value="TRUE" />
+    </FB>
+    <FB Name="fp" Type="BaseFaceplate" x="6100" y="1100" Namespace="Standard.IoEtherNetIP" />
+    <FB Name="busout_Connection_Check" Type="CONNECTION_TEST" x="7300" y="1100" Namespace="SE.HwCommon">
+      <Parameter Name="IOName" Value="'BUSOUT'" />
+    </FB>
+    <FB Name="SwitchConnectionCheck" Type="E_SWITCH" x="8720" y="1100" Namespace="IEC61499.Standard" />
+    <FB Name="SelectLastSlotNo" Type="DS_SELECTX_29841900CAFD143A" x="220" y="160" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNTX:=2;CNTY:=1;DI${CNTX,_,CNTY}:UDINT" />
+    </FB>
+    <FB Name="SelectHealthAdapters" Type="DS_SELECTX_2536758B411A6CE51" x="220" y="860" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNTX:=2;CNTY:=1;DI${CNTX,_,CNTY}:BOOL" />
+    </FB>
+    <FB Name="SelectConnectionsConfig" Type="DS_SELECTX_170BB6FE986585D03" x="220" y="1540" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNTX:=2;CNTY:=1;DI${CNTX,_,CNTY}:Standard.IoEtherNetIP.ConfigurationAC" />
+    </FB>
+    <FB Name="NOBUSCOUPLER" Type="NOT_42C76073DCEB1A7A" x="2920" y="1100" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=1;OUT${CNT}:BOOL" />
+    </FB>
+    <FB Name="CONNECTION0" Type="TEMPLATE_BUS_DEVICE_SLOT_NO" x="3680" y="3000" Namespace="Standard.IoEtherNetIP">
+      <Parameter Name="ConnectionIndex" Value="0" />
+    </FB>
+    <FB Name="EIPConnectionInput0" Type="BUSDEVICE" x="4860" y="3000" Namespace="Runtime.Fieldbus">
+      <Parameter Name="QI" Value="TRUE" />
+      <Parameter Name="ISBITDEVICE" Value="FALSE" />
+      <Parameter Name="NINPUTBITS" Value="48" />
+    </FB>
+    <FB Name="EIPConnectionOutput0" Type="BUSDEVICE" x="5960" y="3000" Namespace="Runtime.Fieldbus">
+      <Parameter Name="QI" Value="TRUE" />
+      <Parameter Name="ISBITDEVICE" Value="FALSE" />
+      <Parameter Name="NOUTPUTBITS" Value="16" />
+    </FB>
+    <FB Name="ConfigConnection0" Type="AdapterSpecificCommon" x="7840" y="3000" Namespace="Standard.IoEtherNetIP">
+      <Parameter Name="connectionName" Value="'Connection_0'" />
+      <Parameter Name="adapterIP" Value="''" />
+      <Parameter Name="inputSize" Value="48" />
+      <Parameter Name="outputSize" Value="16" />
+    </FB>
+    <FB Name="Event_OC_read_0_0" Type="EVENTCHAIN" x="11500" y="3120" Namespace="Runtime.Standard">
+      <Parameter Name="NAME" Value="'EIP_HW_OC_INIT'" />
+      <Parameter Name="PRIO" Value="1" />
+      <Parameter Name="TIMEOUT" Value="T#10ms" />
+      <Parameter Name="DELAY" Value="T#0ms" />
+    </FB>
+    <FB Name="ioDataIn_0_0" Type="templateItemInputUDINT" x="14000" y="3000" Namespace="Standard.IoEtherNetIP">
+      <Parameter Name="Offset" Value="0" />
+      <Parameter Name="PdAnyInQI" Value="TRUE" />
+      <Parameter Name="ForceValue" Value="FALSE" />
+    </FB>
+    <FB Name="Event_OC_read_0_1" Type="EVENTCHAIN" x="16000" y="3120" Namespace="Runtime.Standard">
+      <Parameter Name="NAME" Value="'EIP_HW_OC_INIT'" />
+      <Parameter Name="PRIO" Value="1" />
+      <Parameter Name="TIMEOUT" Value="T#10ms" />
+      <Parameter Name="DELAY" Value="T#0ms" />
+    </FB>
+    <FB Name="ioDataIn_0_1" Type="templateItemInputWORD" x="18500" y="3000" Namespace="Standard.IoEtherNetIP">
+      <Parameter Name="Offset" Value="32" />
+      <Parameter Name="PdAnyInQI" Value="TRUE" />
+      <Parameter Name="ForceValue" Value="FALSE" />
+    </FB>
+    <FB Name="Event_OC_write_0_2" Type="EVENTCHAIN" x="20500" y="3120" Namespace="Runtime.Standard">
+      <Parameter Name="NAME" Value="'EIP_HW_OC_INIT'" />
+      <Parameter Name="PRIO" Value="1" />
+      <Parameter Name="TIMEOUT" Value="T#10ms" />
+      <Parameter Name="DELAY" Value="T#0ms" />
+    </FB>
+    <FB Name="ioDataOut_0_2" Type="templateItemOutputWORD" x="23000" y="3000" Namespace="Standard.IoEtherNetIP">
+      <Parameter Name="Offset" Value="0" />
+      <Parameter Name="PdAnyOutQI" Value="TRUE" />
+    </FB>
+    <Input Name="SLAVE_BUS_ID" x="1620" y="1432" Type="Data" />
+    <Input Name="RIO" x="1900" y="1312" Type="Data" />
+    <Input Name="InputObjectId0" x="6920" y="3812" Type="Data" />
+    <Input Name="OutputObjectId0" x="6920" y="3872" Type="Data" />
+    <Input Name="IO_Modules_Status" x="12500" y="3812" Type="Data" />
+    <Input Name="Module_1_TM3DI16_G_Input_IW0" x="17000" y="3812" Type="Data" />
+    <Input Name="Module_2_TM3DQ16T_G_Output_QW" x="21500" y="3752" Type="Data" />
+    <EventConnections>
+      <Connection Source="LogicalAndConnectionHealth.CNF" Destination="fp.REQ_CHILDREN" />
+      <Connection Source="fp.INITO" Destination="busout_Connection_Check.REQ" />
+      <Connection Source="CONFIG.INITO" Destination="GetInstanceName.REQ" dx1="157.4375" dx2="50" dy="720">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="BUSOUT.INITO" Destination="SelectLastSlotNo.REQ1">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="SelectLastSlotNo.IND" Destination="BUSIN.INITO" />
+      <Connection Source="busout_Connection_Check.E_NOT_CONNECTED" Destination="SelectLastSlotNo.REQ2">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="busout_Connection_Check.E_CONNECTED" Destination="BUSOUT.INIT" dx1="265.3125">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="BUSOUT.HEALTHADAPTERS_RAISE" Destination="SelectHealthAdapters.REQ1">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="SelectHealthAdapters.IND" Destination="BUSIN.HEALTHADAPTERS_RAISE" dx1="40" />
+      <Connection Source="BUSIN.INIT" Destination="NOBUSCOUPLER.REQ" dx1="160" />
+      <Connection Source="NOBUSCOUPLER.CNF" Destination="CONFIG.INIT" />
+      <Connection Source="SwitchConnectionCheck.EO0" Destination="SelectHealthAdapters.REQ2">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="SwitchConnectionCheck.EO1" Destination="BUSOUT.RECEIVE_HEALTHADAPTERS" dx1="279.7295">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="BUSOUT.CONFIG_RAISE" Destination="SelectConnectionsConfig.REQ1">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="SelectConnectionsConfig.IND" Destination="BUSIN.CONFIG_RAISE" dx1="330.0209">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="CONNECTION0.INITO" Destination="EIPConnectionInput0.INIT" />
+      <Connection Source="GetInstanceName.CNF" Destination="CONNECTION0.INIT" dx1="60" dx2="50" dy="290" />
+      <Connection Source="BUSIN.RECEIVE_HEALTHADAPTERS" Destination="ConfigConnection0.CONNECTION_HEALTH_RECEIVE_PREVIOUS_HEALTH">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="ConfigConnection0.HEALTH_CONNECTIONS_IND" Destination="SwitchConnectionCheck.EI">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="ConfigConnection0.INITO" Destination="fp.INIT">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="EIPConnectionInput0.INITO" Destination="EIPConnectionOutput0.INIT" />
+      <Connection Source="EIPConnectionOutput0.INITO" Destination="ConfigConnection0.INIT" />
+      <Connection Source="ConfigConnection0.HEALTH_IND" Destination="LogicalAndConnectionHealth.REQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="ConfigConnection0.INITO" Destination="SelectConnectionsConfig.REQ2">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="ConfigConnection0.INITO" Destination="ioDataIn_0_0.INIT">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="ConfigConnection0.HEALTH_IND_INPUT" Destination="ioDataIn_0_0.HEALTH_UPDATE_REQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="Event_OC_read_0_0.EO" Destination="Event_OC_read_0_0.ACK" dx1="40" dx2="50" dy="-110" />
+      <Connection Source="Event_OC_read_0_0.EO" Destination="ioDataIn_0_0.OC_REQ" />
+      <Connection Source="ConfigConnection0.INITO" Destination="ioDataIn_0_1.INIT">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="ConfigConnection0.HEALTH_IND_INPUT" Destination="ioDataIn_0_1.HEALTH_UPDATE_REQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="Event_OC_read_0_1.EO" Destination="Event_OC_read_0_1.ACK" dx1="40" dx2="50" dy="-110" />
+      <Connection Source="Event_OC_read_0_1.EO" Destination="ioDataIn_0_1.OC_REQ" />
+      <Connection Source="ConfigConnection0.INITO" Destination="ioDataOut_0_2.INIT">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="ConfigConnection0.HEALTH_IND_OUTPUT" Destination="ioDataOut_0_2.HEALTH_UPDATE_REQ">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="Event_OC_write_0_2.EO" Destination="Event_OC_write_0_2.ACK" dx1="40" dx2="160" dy="-110" />
+      <Connection Source="Event_OC_write_0_2.EO" Destination="ioDataOut_0_2.OC_REQ" />
+    </EventConnections>
+    <DataConnections>
+      <Connection Source="LogicalAndConnectionHealth.OUT" Destination="fp.childrenHealth" dx1="47.479" />
+      <Connection Source="GetInstanceName.instanceName" Destination="fp.instanceName">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="BUSIN.busId" Destination="BUSOUT.busId" />
+      <Connection Source="BUSIN.diagBusId" Destination="BUSOUT.diagBusId" />
+      <Connection Source="BUSOUT.healthAdapters_Raise" Destination="SelectHealthAdapters.DI1_1">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="SelectHealthAdapters.OUT1" Destination="BUSIN.healthAdapters_Raise" />
+      <Connection Source="busout_Connection_Check.Connected" Destination="SwitchConnectionCheck.G" />
+      <Connection Source="BUSOUT.config_Raise" Destination="SelectConnectionsConfig.DI1_1">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="SelectConnectionsConfig.OUT1" Destination="BUSIN.config_Raise" dx1="370.0209">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="CONFIG.NextSlotNo" Destination="BUSOUT.nextSlotNo" dx1="297.4375">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="BUSIN.busId" Destination="CONFIG.BusId" dx1="980.9375">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="SLAVE_BUS_ID" Destination="CONFIG.SlaveBusId" />
+      <Connection Source="BUSIN.nextSlotNo" Destination="CONFIG.SlotNo" dx1="100" />
+      <Connection Source="RIO" Destination="NOBUSCOUPLER.IN1" />
+      <Connection Source="NOBUSCOUPLER.OUT1" Destination="CONFIG.NeedsBusCoupler" />
+      <Connection Source="BUSIN.diagHealthSlotNo" Destination="BUSOUT.diagHealthSlotNo" />
+      <Connection Source="SelectLastSlotNo.OUT1" Destination="BUSIN.lastSlotNo" />
+      <Connection Source="BUSOUT.lastSlotNo" Destination="SelectLastSlotNo.DI1_1">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="CONFIG.LastSlotNoUsed" Destination="SelectLastSlotNo.DI2_1">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="CONFIG.BusCouplerBusId" Destination="EIPConnectionInput0.BUS_ID">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="CONFIG.BusCouplerBusId" Destination="EIPConnectionOutput0.BUS_ID">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="CONNECTION0.ConnectionSlotInput" Destination="ConfigConnection0.adapterSlot">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="CONNECTION0.ConnectionSlotInput" Destination="EIPConnectionInput0.SLOT_NO">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="CONNECTION0.ConnectionSlotOutput" Destination="EIPConnectionOutput0.SLOT_NO">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="CONFIG.FirstBusDeviceSlotInput" Destination="CONNECTION0.FirstSlot" dx1="47.4375" dx2="220" dy="180">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="ConfigConnection0.configAC" Destination="SelectConnectionsConfig.DI2_1">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="GetInstanceName.instanceName" Destination="ConfigConnection0.adapterName">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="BUSIN.diagBusId" Destination="ConfigConnection0.diagBusId">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="BUSIN.diagHealthSlotNo" Destination="ConfigConnection0.diagHealthSlotNo">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="ConfigConnection0.health" Destination="LogicalAndConnectionHealth.IN1">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="BUSIN.healthAdapters" Destination="ConfigConnection0.healthConnectionsIn">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="ConfigConnection0.healthConnectionsOut" Destination="SelectHealthAdapters.DI2_1">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="ConfigConnection0.healthConnectionsOut" Destination="BUSOUT.healthAdapters">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="CONFIG.BusCouplerBusId" Destination="ioDataIn_0_0.BusId">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="CONNECTION0.ConnectionSlotInput" Destination="ioDataIn_0_0.SlotNo">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="ConfigConnection0.healthInput" Destination="ioDataIn_0_0.HealthBit">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="IO_Modules_Status" Destination="ioDataIn_0_0.SymLinkName" />
+      <Connection Source="CONFIG.BusCouplerBusId" Destination="ioDataIn_0_1.BusId">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="CONNECTION0.ConnectionSlotInput" Destination="ioDataIn_0_1.SlotNo">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="ConfigConnection0.healthInput" Destination="ioDataIn_0_1.HealthBit">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="Module_1_TM3DI16_G_Input_IW0" Destination="ioDataIn_0_1.SymLinkName" />
+      <Connection Source="CONFIG.BusCouplerBusId" Destination="ioDataOut_0_2.BusId">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="CONNECTION0.ConnectionSlotOutput" Destination="ioDataOut_0_2.SlotNo">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="ConfigConnection0.healthOutput" Destination="ioDataOut_0_2.HealthBit">
+        <Attribute Name="Configuration.Connections.CrossReference" Value="True" />
+      </Connection>
+      <Connection Source="Module_2_TM3DQ16T_G_Output_QW" Destination="ioDataOut_0_2.SymLinkName" />
+      <Connection Source="InputObjectId0" Destination="ConfigConnection0.inputObjectId" />
+      <Connection Source="OutputObjectId0" Destination="ConfigConnection0.outputObjectId" />
+    </DataConnections>
+  </FBNetwork>
+</FBType>
