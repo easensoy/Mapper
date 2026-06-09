@@ -54,11 +54,29 @@ namespace CodeGen.Devices.Core
             }
 
             var m580 = ResourceWireEmitter.LocateSysresByDeviceType(eaeRoot, "M580_dPAC");
-            if (m580 != null) ResourceWireEmitter.EmitForResource(cfg, m580, M580Anchors, report);
+            if (m580 != null)
+            {
+                var synced = SysresFbMirror.SyncProcessRecipesFromSyslay(cfg.ActiveSyslayPath, m580);
+                if (synced > 0)
+                    report.Missing.Add($"[Wire][M580] synced {synced} Process recipe(s) from syslay to sysres");
+                ResourceWireEmitter.EmitForResource(cfg, m580, M580Anchors, report);
+                synced = SysresFbMirror.SyncProcessRecipesFromSyslay(cfg.ActiveSyslayPath, m580);
+                if (synced > 0)
+                    report.Missing.Add($"[Wire][M580] post-wire synced {synced} Process parameter set(s) from syslay to sysres");
+            }
             else report.Missing.Add("[Wire][M580] skipped, M580 sysres not found");
 
             var bx1 = ResourceWireEmitter.LocateSysresByDeviceType(eaeRoot, "Soft_dPAC");
-            if (bx1 != null) ResourceWireEmitter.EmitForResource(cfg, bx1, BX1Anchors, report);
+            if (bx1 != null)
+            {
+                var synced = SysresFbMirror.SyncProcessRecipesFromSyslay(cfg.ActiveSyslayPath, bx1);
+                if (synced > 0)
+                    report.Missing.Add($"[Wire][BX1] synced {synced} Process recipe(s) from syslay to sysres");
+                ResourceWireEmitter.EmitForResource(cfg, bx1, BX1Anchors, report);
+                synced = SysresFbMirror.SyncProcessRecipesFromSyslay(cfg.ActiveSyslayPath, bx1);
+                if (synced > 0)
+                    report.Missing.Add($"[Wire][BX1] post-wire synced {synced} Process parameter set(s) from syslay to sysres");
+            }
             else report.Missing.Add("[Wire][BX1] skipped, BX1 sysres not found");
         }
     }
