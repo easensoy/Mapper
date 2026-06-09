@@ -31,6 +31,7 @@ namespace MapperUI
         List<ComponentValidationRow> _validationRows = new();
         SystemXmlReader? _lastReader;
         DebugConsoleForm? _debugConsole;
+        StateTransitionTableForm? _stateTransitionTableForm;
         Process? _llmProcess;
         System.Windows.Forms.Timer? _healthTimer;
 
@@ -354,6 +355,30 @@ namespace MapperUI
             _debugConsole.BringToFront();
         }
 
+        void menuItemStateTransitionTable_Click(object sender, EventArgs e)
+        {
+            if (string.IsNullOrEmpty(_loadedControlXmlPath) || !File.Exists(_loadedControlXmlPath))
+            {
+                ShowError("Load a Control.xml first via Browse.");
+                return;
+            }
+
+            if (_loadedComponents.Count == 0)
+            {
+                ShowError("The selected Control.xml has not finished loading yet.");
+                return;
+            }
+
+            if (_stateTransitionTableForm == null || _stateTransitionTableForm.IsDisposed)
+                _stateTransitionTableForm = new StateTransitionTableForm(
+                    _loadedControlXmlPath, _loadedComponents);
+            else
+                _stateTransitionTableForm.Reload(_loadedControlXmlPath, _loadedComponents);
+
+            _stateTransitionTableForm.Show(this);
+            _stateTransitionTableForm.BringToFront();
+        }
+
         string? _loadedControlXmlPath;
 
         async void btnBrowse_Click(object sender, EventArgs e)
@@ -369,6 +394,7 @@ namespace MapperUI
             btnTestStation1.Enabled = true;
             btnGenerateFullSystemSimulator.Enabled = true;
             await LoadAndValidateAsync(dlg.FileName);
+            menuItemStateTransitionTable.Enabled = _loadedComponents.Count > 0;
         }
 
         bool TryResolveDemonstratorPath(out string syslayPath)
@@ -549,6 +575,29 @@ namespace MapperUI
             catch (Exception ex)
             {
                 AppendActivity($"[Topology][Error] BroadcastDomain emit: {ex.Message}");
+            }
+
+            // Topology self-consistency guard (RIG path). Station2DeviceEmitter just
+            // wrote Equipment_BX1.json, whose softdpac container binds to the
+            // softdpacDeviceNet domain (db72f221 = DeviceNetwork_1). That domain is
+            // NOT one of the always-emitted ones (Default Network / NoConf), so
+            // without a BroadcastDomain_DeviceNetwork_1.json on disk the BX1 Equipment
+            // points at a DANGLING domain UUID and EAE rejects the WHOLE topology
+            // import ("Unable to import topology / verify file format / Internal
+            // Server Error"). EnsureReferencedDomains scans every Equipment_*.json and
+            // creates + registers any referenced-but-undeclared domain at
+            // 192.168.1.0/24 (matching the reference's DeviceNetwork_1). The sim path
+            // already ran this; the rig path never did — that was the root cause.
+            try
+            {
+                var dom = await Task.Run(() =>
+                    CodeGen.Devices.Core.BroadcastDomainEmitter.EnsureReferencedDomains(Cfg()));
+                foreach (var f in dom.FilesWritten) AppendActivity($"[Topology]   {f}");
+                foreach (var w in dom.Warnings)     AppendActivity($"[Topology] {w}");
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"[Topology][Error] domain consistency: {ex.Message}");
             }
 
             // Strip stale sister-folder dfbproj <Content>/<None>/<Compile>
@@ -828,8 +877,13 @@ namespace MapperUI
                 if (!TryResolveDemonstratorPath(out var syslayPath)) return;
                 if (!EnsureM262SysdevExistsOrAbort()) return;
 
+                Cfg().SimulatorFullSystem = false;
+                Cfg().UseRecipeStruct = true;
+                MapperConfig.SimulatorRecipeMode = false;
+
                 lblStatus.Text = "Generating...";
                 AppendActivity($"[Test Feed Station] Generating into Demonstrator at {syslayPath}...");
+                AppendActivity("[Test Runtime] Hardware mode forced: SimulatorFullSystem=false; RecipeStep data-array carrier active; physical IO/sensor wiring and rig HOME-FIRST recipe waits are active.");
 
                 await DeployUniversalTemplatesAsync();
 
@@ -915,6 +969,25 @@ namespace MapperUI
                     AppendActivity($"[Wire][Stn2][Error] {ex.Message}");
                 }
 
+                // BX1 EtherNet/IP cover-I/O broker (Stage 1): instantiate BX1_IO
+                // (PLC_RW_BX1, id F6C04A4BA6FA8593) on the BX1 SubApp + sysres so the
+                // .hcf's EIP_Input/Output_Word_1 symlinks resolve. Runs after the
+                // Station-2 sysres mirror + wire emit so the cover FBs already exist.
+                // Gated; local to BX1, so the M580 run is unaffected.
+                if (Cfg().DeployBx1IoBroker)
+                {
+                    try
+                    {
+                        int n = await Task.Run(() =>
+                            CodeGen.Devices.BX1.Bx1IoBrokerInjector.InjectBx1IoBroker(Cfg(), syslayPath, report));
+                        AppendActivity($"[BX1][Broker] BX1_IO injected into {n} artefact(s).");
+                    }
+                    catch (Exception ex)
+                    {
+                        AppendActivity($"[BX1][Broker][Error] {ex.Message}");
+                    }
+                }
+
                 int hcfCountBefore = report.Missing.Count;
                 await Task.Run(() => HcfPatchService.PatchDeployed(
                     Cfg(), path, bindings, report));
@@ -955,6 +1028,18 @@ namespace MapperUI
                 catch (Exception ex)
                 {
                     AppendActivity($"[HcfBind][Error] {ex.Message}");
+                }
+
+                try
+                {
+                    var synced = await Task.Run(() =>
+                        RuntimeArtifactVerifier.SyncMappedSysresParametersFromSyslay(path, Cfg(), AppendActivity));
+                    if (synced > 0)
+                        AppendActivity($"[Test Runtime] final sysres parameter sync: {synced} mapped FB(s).");
+                }
+                catch (Exception ex)
+                {
+                    AppendActivity($"[Test Runtime][Sync][Warn] final sysres parameter sync failed: {ex.Message}");
                 }
 
                 TouchDfbprojToTriggerEaeReload();
@@ -1627,6 +1712,7 @@ namespace MapperUI
         }
 
         MapperConfig Cfg() => _mapperConfig ??= MapperConfig.Load();
+
 
         static string? FindDfbproj(string startPath)
         {
