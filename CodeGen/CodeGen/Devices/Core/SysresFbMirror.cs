@@ -55,6 +55,63 @@ namespace CodeGen.Devices.Core
                 .ToList();
         }
 
+        public static List<SyslayFb> ReadTopLevelFbsWithSystemModelFallback(string syslayPath)
+        {
+            if (!string.IsNullOrWhiteSpace(syslayPath) && File.Exists(syslayPath))
+            {
+                var direct = ReadSyslayTopLevelFbs(syslayPath);
+                if (direct.Count > 0) return direct;
+            }
+
+            var systemHash = FindSystemHashBeside(syslayPath);
+            return systemHash == null ? new List<SyslayFb>() : ReadSystemHashFbs(systemHash);
+        }
+
+        static string? FindSystemHashBeside(string syslayPath)
+        {
+            if (string.IsNullOrWhiteSpace(syslayPath)) return null;
+
+            var dir = Path.GetDirectoryName(syslayPath);
+            while (!string.IsNullOrWhiteSpace(dir))
+            {
+                var candidate = Path.Combine(dir, "obj", "System.hash");
+                if (File.Exists(candidate)) return candidate;
+                dir = Directory.GetParent(dir)?.FullName;
+            }
+
+            return null;
+        }
+
+        static List<SyslayFb> ReadSystemHashFbs(string systemHashPath)
+        {
+            var doc = XDocument.Load(systemHashPath);
+            return doc.Descendants()
+                .Where(e => e.Name.LocalName == "FB")
+                .Select(e => new SyslayFb(
+                    Id:        (string?)e.Attribute("ID")        ?? string.Empty,
+                    Name:      (string?)e.Attribute("Name")      ?? string.Empty,
+                    Type:      (string?)e.Attribute("Type")      ?? string.Empty,
+                    Namespace: (string?)e.Attribute("Namespace") ?? "Main",
+                    X:         (string?)e.Attribute("x")         ?? "0",
+                    Y:         (string?)e.Attribute("y")         ?? "0",
+                    Parameters: e.Elements()
+                        .Where(p => p.Name.LocalName == "Parameter")
+                        .Select(p => new SyslayFbParameter(
+                            (string?)p.Attribute("Name")  ?? string.Empty,
+                            (string?)p.Attribute("Value") ?? string.Empty))
+                        .Where(p => !string.IsNullOrEmpty(p.Name))
+                        .ToList(),
+                    Attributes: e.Elements()
+                        .Where(a => a.Name.LocalName == "Attribute")
+                        .Select(a => new SyslayFbAttribute(
+                            (string?)a.Attribute("Name")  ?? string.Empty,
+                            (string?)a.Attribute("Value") ?? string.Empty))
+                        .Where(a => !string.IsNullOrEmpty(a.Name))
+                        .ToList()))
+                .Where(fb => !string.IsNullOrWhiteSpace(fb.Name))
+                .ToList();
+        }
+
         public const string M262IoFbId        = "E786D6371CF444F9";
         public const string DpacFullInitFbId  = "593A8F4FDEA0A668";
         public const string PlcStartFbId      = "3DB1FB0F578E5F1E";
@@ -260,6 +317,89 @@ namespace CodeGen.Devices.Core
 
             if (added > 0 || updated > 0) doc.Save(sysresPath);
             return added + updated;
+        }
+
+        public static int SyncProcessRecipesFromSyslay(string syslayPath, string sysresPath)
+        {
+            if (string.IsNullOrWhiteSpace(syslayPath) || !File.Exists(syslayPath)) return 0;
+            if (string.IsNullOrWhiteSpace(sysresPath) || !File.Exists(sysresPath)) return 0;
+
+            var doc = XDocument.Load(sysresPath);
+            var changed = SyncProcessRecipesFromSyslay(syslayPath, doc);
+            if (changed > 0) doc.Save(sysresPath);
+            return changed;
+        }
+
+        public static int SyncProcessRecipesFromSyslay(string syslayPath, XDocument sysresDoc)
+        {
+            if (string.IsNullOrWhiteSpace(syslayPath) || !File.Exists(syslayPath)) return 0;
+            var root = sysresDoc.Root;
+            if (root == null) return 0;
+
+            var sourceByName = ReadTopLevelFbsWithSystemModelFallback(syslayPath)
+                .Where(f => string.Equals(f.Type, "Process1_Generic", StringComparison.Ordinal))
+                .Select(f => new
+                {
+                    f.Id,
+                    f.Name,
+                    Parameters = f.Parameters.ToArray()
+                })
+                .Where(f => f.Parameters.Length > 0)
+                .ToDictionary(f => f.Name, StringComparer.Ordinal);
+
+            var sourceById = sourceByName.Values
+                .Where(f => !string.IsNullOrWhiteSpace(f.Id))
+                .ToDictionary(f => f.Id, StringComparer.Ordinal);
+
+            if (sourceByName.Count == 0) return 0;
+
+            XNamespace ns = root.GetDefaultNamespace().NamespaceName.Length > 0
+                ? root.GetDefaultNamespace()
+                : LibElNs;
+
+            var network = root.Elements().FirstOrDefault(e => e.Name.LocalName == "FBNetwork");
+            if (network == null) return 0;
+
+            int changed = 0;
+            foreach (var fb in network.Elements()
+                         .Where(e => e.Name.LocalName == "FB")
+                         .Where(f => string.Equals((string?)f.Attribute("Type"),
+                             "Process1_Generic", StringComparison.Ordinal)))
+            {
+                var name = (string?)fb.Attribute("Name") ?? string.Empty;
+                var mapping = (string?)fb.Attribute("Mapping") ?? string.Empty;
+
+                if (!sourceByName.TryGetValue(name, out var source) &&
+                    !sourceById.TryGetValue(mapping, out source))
+                    continue;
+
+                var existing = fb.Elements()
+                    .Where(e => e.Name.LocalName == "Parameter")
+                    .Select(p => (
+                        Name: (string?)p.Attribute("Name") ?? string.Empty,
+                        Value: (string?)p.Attribute("Value") ?? string.Empty))
+                    .ToArray();
+
+                var expected = source.Parameters
+                    .Select(p => (p.Name, p.Value))
+                    .ToArray();
+
+                if (!existing.SequenceEqual(expected))
+                {
+                    fb.Elements()
+                        .Where(e => e.Name.LocalName == "Parameter")
+                        .Remove();
+                    foreach (var p in source.Parameters)
+                    {
+                        fb.Add(new XElement(ns + "Parameter",
+                            new XAttribute("Name", p.Name),
+                            new XAttribute("Value", p.Value)));
+                    }
+                    changed++;
+                }
+            }
+
+            return changed;
         }
 
         static void EnsureSystemFb(XElement network, XNamespace ns,
