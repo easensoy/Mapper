@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="0164be49-126f-4a75-b5d9-7513977c0eee" Name="changeEventM262_2" Comment="Basic Function Block Type" Namespace="Main">
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author="azam_w" Date="5/23/2025" Remarks="Template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="Scan_Event">
+        <With Var="CoverPnpHrAtWork" />
+        <With Var="CoverPnpHrAtHome" />
+        <With Var="CoverPnpVrAtWork" />
+        <With Var="CoverPnpVrAtHome" />
+        <With Var="CoverPnpSensor" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO" Comment="Initialization Confirm" />
+      <Event Name="CoverPnpHrEvent">
+        <With Var="Out" />
+      </Event>
+      <Event Name="CoverPnpVrEvent">
+        <With Var="Out" />
+      </Event>
+      <Event Name="CoverPnpGripperEvent">
+        <With Var="Out" />
+      </Event>
+      <Event Name="CoverPnpSensorEvent">
+        <With Var="Out" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="CoverPnpHrAtWork" Type="BOOL" />
+      <VarDeclaration Name="CoverPnpHrAtHome" Type="BOOL" />
+      <VarDeclaration Name="CoverPnpVrAtWork" Type="BOOL" />
+      <VarDeclaration Name="CoverPnpVrAtHome" Type="BOOL" />
+      <VarDeclaration Name="CoverPnpSensor" Type="BOOL" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="Out" Type="BOOL" />
+    </OutputVars>
+  </InterfaceList>
+  <BasicFB>
+    <Attribute Name="FBType.Basic.Algorithm.Order" Value="INIT,ShaftPnpHrEvent,CoverPnpSensorEvent,CoverPnpVrEvent" />
+    <InternalVars>
+      <VarDeclaration Name="CoverPnpHrAtWork_PrevVal" Type="BOOL" />
+      <VarDeclaration Name="CoverPnpHrAtHome_PrevVal" Type="BOOL" />
+      <VarDeclaration Name="CoverPnpVrAtWork_PrevVal" Type="BOOL" />
+      <VarDeclaration Name="CoverPnpVrAtHome_PrevVal" Type="BOOL" />
+      <VarDeclaration Name="CoverPnpGripperClosed_PrevVal" Type="BOOL" />
+      <VarDeclaration Name="CoverPnpGripperOpened_PrevVal" Type="BOOL" />
+      <VarDeclaration Name="CoverPnpSensor_PreVal" Type="BOOL" />
+    </InternalVars>
+    <ECC>
+      <ECState Name="START" Comment="Initial State" x="3396.941" y="1655.126" />
+      <ECState Name="CoverPnpHrEvent" x="2641.778" y="2285.333">
+        <ECAction Algorithm="ShaftPnpHrEvent" Output="CoverPnpHrEvent" />
+      </ECState>
+      <ECState Name="CoverPnpVrEvent" x="1620.19" y="1131.873">
+        <ECAction Algorithm="CoverPnpVrEvent" Output="CoverPnpVrEvent" />
+      </ECState>
+      <ECState Name="CoverSensorEvent" x="3779.047" y="729.3972">
+        <ECAction Algorithm="CoverPnpSensorEvent" Output="CoverPnpSensorEvent" />
+      </ECState>
+      <ECTransition Source="START" Destination="CoverPnpHrEvent" Condition="CoverPnpHrAtHome &lt;&gt; CoverPnpHrAtHome_PrevVal OR CoverPnpHrAtWork &lt;&gt; CoverPnpHrAtWork_PrevVal" x="3053.458" y="2020.682">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="789.7803,488.7158,737.9236,530.0342" />
+      </ECTransition>
+      <ECTransition Source="CoverPnpHrEvent" Destination="START" Condition="1" x="2992.341" y="1896.07">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="727.5115,486.1538,770.3322,449.521" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="CoverPnpVrEvent" Condition="CoverPnpVrAtHome &lt;&gt; CoverPnpVrAtHome_PrevVal OR CoverPnpVrAtWork &lt;&gt; CoverPnpVrAtWork_PrevVal" x="2488.06" y="1460.634">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="684.3473,388.7294,557.1891,350.0664" />
+      </ECTransition>
+      <ECTransition Source="CoverPnpVrEvent" Destination="START" Condition="1" x="2621.972" y="1341.275">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="601.5635,314.3379,715.9235,348.5461" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="CoverSensorEvent" Condition="CoverPnpSensor &lt;&gt; CoverPnpSensor_PreVal" x="3520.136" y="1221.896">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="861.2678,342.3997,889.3993,273.4876" />
+      </ECTransition>
+      <ECTransition Source="CoverSensorEvent" Destination="START" Condition="1" x="3777.992" y="1237.294">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="1007,288,907.7367,338.1521" />
+      </ECTransition>
+    </ECC>
+    <Algorithm Name="INIT" Comment="Initialization algorithm">
+      <ST><![CDATA[;
+ 
+ 
+ ]]></ST>
+    </Algorithm>
+    <Algorithm Name="ShaftPnpHrEvent">
+      <ST><![CDATA[;
+IF CoverPnpHrAtHome <> CoverPnpHrAtHome_PrevVal THEN
+	CoverPnpHrAtHome_PrevVal := CoverPnpHrAtHome;
+	Out := CoverPnpHrAtHome;
+END_IF;
+
+IF CoverPnpHrAtWork <> CoverPnpHrAtWork_PrevVal THEN
+	CoverPnpHrAtWork_PrevVal := CoverPnpHrAtWork;
+	Out := CoverPnpHrAtWork;
+END_IF;
+]]></ST>
+    </Algorithm>
+    <Algorithm Name="CoverPnpSensorEvent">
+      <ST><![CDATA[;
+IF CoverPnpSensor <> CoverPnpSensor_PreVal THEN
+	CoverPnpSensor_PreVal := CoverPnpSensor;
+	Out := CoverPnpSensor;
+END_IF;]]></ST>
+    </Algorithm>
+    <Algorithm Name="CoverPnpVrEvent">
+      <ST><![CDATA[;
+IF CoverPnpVrAtHome <> CoverPnpVrAtHome_PrevVal THEN
+	CoverPnpVrAtHome_PrevVal := CoverPnpVrAtHome;
+	Out := CoverPnpVrAtHome;
+END_IF;
+
+IF CoverPnpVrAtWork <> CoverPnpVrAtWork_PrevVal THEN
+	CoverPnpVrAtWork_PrevVal := CoverPnpVrAtWork;
+	Out := CoverPnpVrAtWork;
+END_IF;]]></ST>
+    </Algorithm>
+  </BasicFB>
+</FBType>
