@@ -1,0 +1,87 @@
+<?xml version="1.0"?>
+<Items><Header><Alignment value="8"/><Struct_Prefix value=""/><Version value="0x101"/></Header><Master DeviceTypeID="16" PlcVersion="" SubDeviceTypeID="15" StructType="BMEP58_ECPU_EXT" StructVariable="BMEP58_ECPU_EXT" DeviceDDTKind="0" IsTypeHiddenButExported="1" ManagedKey="" IsDeviceDDT="1" IsHSBYExchange="0" Comment="Device DDT for embedded M580 DTM (with standalone PLC)" Owner="BMEP58_ECPU_EXT" EnhancedMode="0"><Connection>
+			<Inputs Length="88" inputObjectID="2048">
+				<Numerical>
+					<Item Name="ETH_STATUS" Type="3" Offset="0" Length="2" Comment="Ethernet status"/>
+					<Item Name="SERVICE_STATUS" Type="3" Offset="2" Length="2" Comment="One bit for each user-observable feature"/>
+					<Item Name="SERVICE_STATUS2" Type="3" Offset="4" Length="2" Comment="One bit for each user-observable feature"/>
+					<Item Name="ETH_PORT_1_2_STATUS" Type="0" Offset="6" Length="1" Comment="Ethernet port 1 and 2 status"/>
+					<Item Name="ETH_PORT3_BKP_STATUS" Type="0" Offset="7" Length="1" Comment="Ethernet port 3 and backplane port status"/>
+					<Item Name="RESERVED" Type="4" Offset="8" Length="4" Comment="Reserved" Hidden="1"/>
+					<Item Name="IN_BYTES" Type="1" Offset="12" Length="2" Comment="Number of bytes received on interface"/>
+					<Item Name="IN_ERRORS" Type="1" Offset="14" Length="2" Comment="Number of Inbound packets that contain errors"/>
+					<Item Name="OUT_BYTES" Type="1" Offset="16" Length="2" Comment="Number of bytes sent on interface"/>
+					<Item Name="OUT_ERRORS" Type="1" Offset="18" Length="2" Comment="Number of Outbound packets that contain errors"/>
+					<Item Name="CONF_SIG" Type="4" Offset="20" Length="4" Comment="Signature of all files on local module FDR Server"/>
+					<Item Name="CRA_CNX_HEALTH" Type="50" Offset="24" Length="16" Comment="CRA Connection health" ArrayIndex="1"/>
+					<Item Name="RES_CRA_CNX_HEALTH" Type="50" Offset="40" Length="16" Comment="CRA Connection health" Hidden="1" ArrayIndex="17"/>
+					<Item Name="DEVICE_CNX_HEALTH_256_271" Type="3" Offset="56" Length="2" Comment="Device Connection health bits 256 to 271"/>
+					<Item Name="DEVICE_CNX_HEALTH_272_287" Type="3" Offset="58" Length="2" Comment="Device Connection health bits 272 to 287"/>
+					<Item Name="DEVICE_CNX_HEALTH_288_303" Type="3" Offset="60" Length="2" Comment="Device Connection health bits 288 to 303"/>
+					<Item Name="DEVICE_CNX_HEALTH_304_319" Type="3" Offset="62" Length="2" Comment="Device Connection health bits 304 to 319"/>
+					<Item Name="DEVICE_CNX_HEALTH_320_335" Type="3" Offset="64" Length="2" Comment="Device Connection health bits 320 to 335"/>
+					<Item Name="DEVICE_CNX_HEALTH_336_351" Type="3" Offset="66" Length="2" Comment="Device Connection health bits 336 to 351"/>
+					<Item Name="DEVICE_CNX_HEALTH_352_367" Type="3" Offset="68" Length="2" Comment="Device Connection health bits 352 to 367"/>
+					<Item Name="DEVICE_CNX_HEALTH_368_383" Type="3" Offset="70" Length="2" Comment="Device Connection health bits 368 to 383"/>
+					<Item Name="DEVICE_CNX_HEALTH_384_399" Type="3" Offset="72" Length="2" Comment="Device Connection health bits 384 to 399"/>
+					<Item Name="DEVICE_CNX_HEALTH_400_415" Type="3" Offset="74" Length="2" Comment="Device Connection health bits 400 to 415"/>
+					<Item Name="DEVICE_CNX_HEALTH_416_431" Type="3" Offset="76" Length="2" Comment="Device Connection health bits 416 to 431"/>
+					<Item Name="DEVICE_CNX_HEALTH_432_447" Type="3" Offset="78" Length="2" Comment="Device Connection health bits 432 to 447"/>
+					<Item Name="DEVICE_CNX_HEALTH_448_463" Type="3" Offset="80" Length="2" Comment="Device Connection health bits 448 to 463"/>
+					<Item Name="DEVICE_CNX_HEALTH_464_479" Type="3" Offset="82" Length="2" Comment="Device Connection health bits 464 to 479"/>
+					<Item Name="DEVICE_CNX_HEALTH_480_495" Type="3" Offset="84" Length="2" Comment="Device Connection health bits 480 to 495"/>
+					<Item Name="DEVICE_CNX_HEALTH_496_511" Type="3" Offset="86" Length="2" Comment="Device Connection health bits 496 to 511"/>
+				</Numerical>
+				<Discrete>
+					<Item Name="PORT1_LINK" BitOffset="0" Comment="Link up/down for Ethernet port 1"/>
+					<Item Name="PORT2_LINK" BitOffset="1" Comment="Link up/down for Ethernet port 2"/>
+					<Item Name="PORT3_LINK" BitOffset="2" Comment="Link up/down for Ethernet port 3"/>
+					<Item Name="ETH_BKP_PORT_LINK" BitOffset="3" Comment="Link up/down for Ethernet Backplane port"/>
+					<Item Name="HSBY_LINK" BitOffset="4" Comment="Link up/down for HSBY port"/>
+					<Item Name="REDUNDANCY_STATUS" BitOffset="5" Comment="Redundancy status / backup path available"/>
+					<Item Name="SCANNER_OK" BitOffset="6" Comment="Scanner OK and scanning at least 1 device (if at least 1 device configured)"/>
+					<Item Name="GLOBAL_STATUS" BitOffset="7" Comment="0: one or more services not operating normally / 1: all operational"/>
+					<Item Name="RSTP_SERVICE" BitOffset="16" Comment="0: service not operating normally / 1: service operating normally or disabled"/>
+					<Item Name="PORT502_SERVICE" BitOffset="18" Comment="0: service not operating normally / 1: service operating normally or disabled"/>
+					<Item Name="SNMP_SERVICE" BitOffset="19" Comment="0: service not operating normally / 1: service operating normally or disabled"/>
+					<Item Name="MAIN_IP_ADDRESS_STATUS" BitOffset="20" Comment="Main IP Address Status (0 in case of duplicate IP or no IP assigned)"/>
+					<Item Name="ETH_BKP_FAILURE" BitOffset="21" Comment="Ethernet backplane hardware status (0: failure, 1: OK)"/>
+					<Item Name="ETH_BKP_ERROR" BitOffset="22" Comment="Ethernet backplane error (0: error, 1: OK)"/>
+					<Item Name="EIP_SCANNER" BitOffset="23" Comment="0: service not operating normally / 1: service operating normally or disabled"/>
+					<Item Name="MODBUS_SCANNER" BitOffset="24" Comment="0: service not operating normally / 1: service operating normally or disabled"/>
+					<Item Name="NTP_SERVER" BitOffset="25" Comment="0: service not operating normally / 1: service operating normally or disabled"/>
+					<Item Name="SNTP_CLIENT" BitOffset="26" Comment="0: service not operating normally / 1: service operating normally or disabled"/>
+					<Item Name="WEB_SERVER" BitOffset="27" Comment="0: service not operating normally / 1: service operating normally or disabled"/>
+					<Item Name="FIRMWARE_UPGRADE" BitOffset="28" Comment="0: service not operating normally / 1: service operating normally or disabled"/>
+					<Item Name="FTP" BitOffset="29" Comment="0: service not operating normally / 1: service operating normally or disabled"/>
+					<Item Name="FDR_SERVER" BitOffset="30" Comment="0: service not operating normally / 1: service operating normally or disabled"/>
+					<Item Name="EIP_ADAPTER" BitOffset="31" Comment="EIP Adapter (Server) service 0: service not operating normally / 1: service operating normally or disabled"/>
+					<Item Name="A_B_IP_ADDRESS_STATUS" BitOffset="32" Comment="0 in case of duplicate IP or no IP assigned"/>
+					<Item Name="LLDP_SERVICE" BitOffset="33" Comment="LLDP service status"/>
+				</Discrete>
+			</Inputs>
+			<Outputs Length="80" outputObjectID="2049">
+				<Numerical>
+					<Item Name="CRA_CNX_CTRL" Type="50" Offset="0" Length="16" Comment="CRA Connection CTRL" ArrayIndex="1"/>
+					<Item Name="RES_CRA_CNX_CTRL" Type="50" Offset="16" Length="16" Comment="CRA Connection CTRL" Hidden="1" ArrayIndex="17"/>
+					<Item Name="DEVICE_CNX_CTRL_256_271" Type="3" Offset="32" Length="2" Comment="Device Connection CTRL bits 256 to 271"/>
+					<Item Name="DEVICE_CNX_CTRL_272_287" Type="3" Offset="34" Length="2" Comment="Device Connection CTRL bits 272 to 287"/>
+					<Item Name="DEVICE_CNX_CTRL_288_303" Type="3" Offset="36" Length="2" Comment="Device Connection CTRL bits 288 to 303"/>
+					<Item Name="DEVICE_CNX_CTRL_304_319" Type="3" Offset="38" Length="2" Comment="Device Connection CTRL bits 304 to 319"/>
+					<Item Name="DEVICE_CNX_CTRL_320_335" Type="3" Offset="40" Length="2" Comment="Device Connection CTRL bits 320 to 335"/>
+					<Item Name="DEVICE_CNX_CTRL_336_351" Type="3" Offset="42" Length="2" Comment="Device Connection CTRL bits 336 to 351"/>
+					<Item Name="DEVICE_CNX_CTRL_352_367" Type="3" Offset="44" Length="2" Comment="Device Connection CTRL bits 352 to 367"/>
+					<Item Name="DEVICE_CNX_CTRL_368_383" Type="3" Offset="46" Length="2" Comment="Device Connection CTRL bits 368 to 383"/>
+					<Item Name="DEVICE_CNX_CTRL_384_399" Type="3" Offset="48" Length="2" Comment="Device Connection CTRL bits 384 to 399"/>
+					<Item Name="DEVICE_CNX_CTRL_400_415" Type="3" Offset="50" Length="2" Comment="Device Connection CTRL bits 400 to 415"/>
+					<Item Name="DEVICE_CNX_CTRL_416_431" Type="3" Offset="52" Length="2" Comment="Device Connection CTRL bits 416 to 431"/>
+					<Item Name="DEVICE_CNX_CTRL_432_447" Type="3" Offset="54" Length="2" Comment="Device Connection CTRL bits 432 to 447"/>
+					<Item Name="DEVICE_CNX_CTRL_448_463" Type="3" Offset="56" Length="2" Comment="Device Connection CTRL bits 448 to 463"/>
+					<Item Name="DEVICE_CNX_CTRL_464_479" Type="3" Offset="58" Length="2" Comment="Device Connection CTRL bits 464 to 479"/>
+					<Item Name="DEVICE_CNX_CTRL_480_495" Type="3" Offset="60" Length="2" Comment="Device Connection CTRL bits 480 to 495"/>
+					<Item Name="DEVICE_CNX_CTRL_496_511" Type="3" Offset="62" Length="2" Comment="Device Connection CTRL bits 496 to 511"/>
+					<Item Name="RESERVED2" Type="51" Offset="64" Length="16" Comment="Reserved" Hidden="1"/>
+				</Numerical>
+			</Outputs>
+		</Connection>
+	</Master><Device Name="TM3BC_EtherNetIP Revision 2.3 (from EDS)" Version="2.3" Vendor="Schneider Electric" dtmDevTypeID="" StructType="DEVICE_513" StructVariable="DEVICE_513" Owner="DEVICE_513" DeviceDDTKind="0" IsTypeHiddenButExported="1" ManagedKey="49d2ea8e-3a4f-4ead-add4-ec4ba00d5239" IsDeviceDDT="1" IsHSBYExchange="0" Comment="Device DDT for embedded M580 DTM (with standalone PLC)" GenerateLayoutInfo="1" deviceNumber="513" DeviceProfileType="1" IsGateway="0" TotalConnectionsCount="1" IsFixedStructType="0" IsLocalSlave="0" DeviceType="EtherNet IP" scanImportMode="1" IsCipSafetyDevice="0"><Connection HealthBit="897"><Inputs Length="6" inputObjectID="1024"><Numerical><Item Name="IO_Modules_Status" Type="4" Offset="0" Length="4" Comment=""/><Item Name="Module_1_TM3DI16_G_Input_IW0" Type="3" Offset="4" Length="2" Comment=""/></Numerical><Discrete/></Inputs><Outputs Length="2" outputObjectID="1025"><Numerical><Item Name="Module_2_TM3DQ16T_G_Output_QW" Type="3" Offset="0" Length="2" Comment=""/></Numerical><Discrete/></Outputs></Connection></Device></Items>
