@@ -104,6 +104,64 @@ namespace CodeGen.Configuration
         // recipe is still derived from the Control.xml transition chain.
         public static bool EnableSevenStateHomePreamble = true;
 
+        // CROSS-PLC COVER RING (2026-06-08, task #69): extend the single stateRprtCmd
+        // report/command ring across the M580↔BX1 device boundary so the M580
+        // Assembly_Station engine can COMMAND the BX1 Cover PnP actuators
+        // (CoverPNP_Hr / CoverPNP_Vr / CoverPnp_Gripper) and READ their state reports
+        // into its own state_table. Today the M580 ring and the BX1 ring are two
+        // SEPARATE closed loops, so cover commands never leave the M580 and cover
+        // reports never reach the engine — the covers carry the correct GLOBAL ids
+        // (task #25) but "only resolve once the M580↔BX1 bridge is emitted"
+        // (SystemLayoutInjector ~L1164). When TRUE this flag makes ONE ring that
+        // spans both PLCs:
+        //   …Clamp → [cross to BX1] TopCoverSenosr → CoverPNP_Hr → CoverPNP_Vr →
+        //    CoverPnp_Gripper → [cross to M580] Assembly_Station → BearingSensor…
+        // The two cross-device hops live ONLY on the syslay (the application); EAE
+        // bridges cross-resource connections into per-resource transport at deploy
+        // (the same mechanism MqttBridgeEmitter relies on for cross-PLC event/data).
+        // The per-PLC sysres rings are OPENED at the boundary so the adapter sockets
+        // are not double-driven. This ALSO enables the cover CMD/WAIT rows in the
+        // Assembly recipe — gated together because commanding a cover whose reports
+        // cannot reach the engine would stall the WAIT forever.
+        //
+        // CORNERSTONE RISK: EAE bridging a cross-device ADAPTER connection (stateRprtCmd
+        // carries a CNF event + CNFD/Component_State_Msg) is unproven — only cross-device
+        // EVENT/DATA bridging is proven (MqttBridge). If EAE rejects it at Build, OR the
+        // M580 ring breaks (bearing/shaft stop cycling), set this back to FALSE and
+        // rebuild — that restores the two separate closed rings (today's working rig)
+        // exactly, and we pivot to explicit PUBLISH/SUBSCRIBE SIFB transport instead.
+        // 2026-06-09 REVERTED TO FALSE: with this TRUE the M580 Assembly_Station ring
+        // closed THROUGH the BX1 covers cross-PLC (Assembly_Station.stateRptCmdAdptr_in
+        // <- BX1.CoverPnp_Gripper.stateRprtCmd_out). EAE does NOT bridge that cross-
+        // device ADAPTER connection at runtime (BX1 isn't even running), so the M580
+        // ring was BROKEN at the boundary: the engine's own state reports never
+        // circulated back, state_table never updated, and the Assembly recipe stalled
+        // -> "M580 runs nothing". This is the cornerstone failure flagged when the ring
+        // extension was built. FALSE restores the SEPARATE per-PLC rings (M580 closes
+        // Clamp->Assembly_Station->BearingSensor LOCALLY) and drops the cover CMD/WAIT
+        // rows, so M580 bearing/shaft runs STANDALONE again. Re-enable only once a
+        // proven cross-PLC transport (PUBLISH/SUBSCRIBE SIFB, not a raw adapter) exists.
+        public static bool ExtendStateRingAcrossBx1 = false;
+
+        /// <summary>
+        /// Master gate for the LOCAL BX1 cover command engine (Cover_Station). When TRUE,
+        /// a Process1_Generic engine named Cover_Station is instantiated on the BX1 SubApp +
+        /// sysres, spliced into the BX1 cover stateRprtCmd ring (the sysres ring auto-splices
+        /// any Process FB it finds), and carries the cover pick/place recipe — so BX1 cycles
+        /// its own covers with NO M580 dependency and NO cross-PLC ring. Independent of (and
+        /// mutually exclusive with) ExtendStateRingAcrossBx1, which stays FALSE because the
+        /// cross-PLC ring broke the M580 run. Entirely BX1-scoped, so it cannot disturb M580.
+        /// </summary>
+        public static bool DeployBx1CoverEngine = true;
+
+        /// <summary>
+        /// When TRUE, Cover_Station runs a MINIMAL proof-of-life recipe (CoverPNP_Vr
+        /// work→home only — one actuator end-to-end, no cross-component waits that could
+        /// stall on a missing sensor). Flip FALSE for the full 8-step cover pick/place
+        /// sequence (vr down → grip → up → hr advance → vr down → release → up → hr return).
+        /// </summary>
+        public static bool Bx1CoverMinimalCycle = true;
+
         // TEST ISOLATION (2026-05-29, TEMPORARY): restrict ONE process's recipe to a
         // subset of actuators so a single mechanism can be exercised on the rig
         // without the others moving. RecipeTestProcessName = the process to restrict
@@ -143,7 +201,7 @@ namespace CodeGen.Configuration
         // chain position (after the bearing+shaft assembly) instead of dropping it.
         // Clamp is M580 with real sensors (DI06=ClampAtWork, DI07=ClampAtHome).
         public static readonly string[] RecipeTestActuatorAllowlist = new[]
-            { "bearing_pnp", "bearing_gripper", "shaft_hr", "shaft_vr", "shaft_gripper", "clamp" };
+            { "bearing_pnp", "bearing_gripper", "clamp" };
 
         // TEST ISOLATION (2026-06-04, TEMPORARY, bench): drop the centre-home swivel's
         // (Bearing_PnP) cross-component interlock rules so its turn-to-Place (AtWork1 2
@@ -293,6 +351,56 @@ namespace CodeGen.Configuration
         public string BX1TargetIp { get; set; } = "192.168.1.151";
 
         /// <summary>
+        /// IPV4 address of the HMIB1X industrial panel that HOSTS the BX1 softdpac
+        /// container. On the reference SMC_Rig_Expo_withClamp the panel (HMIB1X_1)
+        /// is 192.168.1.209 and the softdpac runtime it hosts is BX1TargetIp
+        /// (192.168.1.151). EAE deploys/logs in to the runtime IP (.151); the host
+        /// IP (.209) is the panel's management interface. This is the field that
+        /// makes BX1 a REMOTE HMIB1X panel rather than a local Workstation (whose
+        /// runtime EAE resolves to 127.0.0.1 — the "cannot connect to BX1" error).
+        /// </summary>
+        public string BX1HostIp { get; set; } = "192.168.1.209";
+
+        /// <summary>
+        /// ISOLATION (2026-06-08): emit the BX1 EtherNet/IP remote-I/O coupler
+        /// (Equipment_EtherNetIPDevice_1.json + its FDT Content) only when TRUE.
+        /// A DtmDeviceDEO forces EAE's FDT framework to LOAD an FdtProject.prj on
+        /// topology import; an FDT project copied verbatim from another solution can
+        /// make EAE's topology server throw an immediate 500 ("Unable to import
+        /// topology / Internal Server Error"). The BX1 HMIB1X login does NOT need
+        /// this device (it is the covers' physical I/O, a separate concern), so it
+        /// is held OUT by default until the HMIB1X import + login is confirmed
+        /// working. When FALSE the emitter also SWEEPS any previously-deployed copy
+        /// (equipment JSON + Content files + topologyproj registrations) so the
+        /// topology imports clean. Flip to TRUE once a DTM-import path is proven.
+        /// </summary>
+        // 2026-06-09: re-enabled. The topology-import 500 was an ORPHANED WIRE
+        // (Wire_Wire 145.json → the dead Workstation NIC uuid …053), now auto-swept
+        // by TopologyNetworkEmitter.SweepOrphanWires — NOT this device. With that
+        // fixed + the SE.FieldDevice/Standard.IoEtherNetIP libraries referenced, the
+        // EtherNet/IP cover-I/O coupler imports cleanly, so it is emitted again (the
+        // BX1 softdpac's EtherNet/IP scanner in the .hcf references it; without the
+        // topology device the physical-devices section is incomplete).
+        public bool EmitBx1EtherNetIpDevice { get; set; } = true;
+
+        /// <summary>
+        /// Master gate for the BX1 EtherNet/IP cover-I/O broker (BX1_IO). When TRUE:
+        ///   (Stage 1) deploys PLC_RW_BX1 + changeEventM262_2 and instantiates the
+        ///     BX1_IO broker (id F6C04A4BA6FA8593) on the BX1 sysres + SubApp, wiring
+        ///     its INIT — so the .hcf EtherNet/IP symlinks (RES0.BX1_IO.EIP_Input_Word_1
+        ///     / _Output_Word_1) resolve instead of showing red/unresolved;
+        ///   (Stage 2) bridges the broker's word I/O to OUR ring-model covers'
+        ///     symlinks (RES0.&lt;cover&gt;.athome/atwork in; .OutputToWork/OutputToHome out)
+        ///     — no cover CAT changes, our Five_State_Actuator_CAT already exposes them;
+        ///   (Stage 3) a local BX1 cover pick/place cycle drives the covers.
+        /// FALSE = today's working compile (no broker). Independent of
+        /// ExtendStateRingAcrossBx1 (which stays FALSE — it broke the M580 run): the
+        /// reference BX1 has NO cover stateRprtCmd ring, so the broker is wholly
+        /// separate from any cross-PLC ring extension.
+        /// </summary>
+        public bool DeployBx1IoBroker { get; set; } = true;
+
+        /// <summary>
         /// M262 resource name written into the .sysres root and the .sysdev's
         /// &lt;Resource&gt; entry. Default "M262_RES" so the EAE Deploy &amp;
         /// Diagnostic tree reads "M262 &gt; M262_RES" rather than the generic
@@ -382,9 +490,9 @@ namespace CodeGen.Configuration
         /// the engine ST and the instance parameter stay in lock-step. The
         /// RecipeStep struct's CmdTargetName is STRING[150] (not the simulator's
         /// old STRING[15]) so long names like 'coverpnp_gripper' don't overflow.
-        /// Default TRUE (the user asked to see the struct in EAE). Set FALSE to
-        /// instantly revert the runtime to the six parallel arrays — a clean
-        /// rollback if the struct ever misbehaves on the rig.
+        /// Default TRUE: runtime and simulator both use the single RecipeStep
+        /// array input. Recipe content/ordering is generated upstream; the
+        /// carrier mechanism stays stable.
         /// </summary>
         public bool UseRecipeStruct { get; set; } = true;
 
@@ -567,7 +675,7 @@ namespace CodeGen.Configuration
             IoFolderPath = @"C:\VueOneMapper\IO",
             M262HcfTemplatePath = @"C:\VueOneMapper\IO\M262IO.hcf",
             M580HcfTemplatePath = @"C:\VueOneMapper\IO\M580IO.hcf",
-            BX1HcfTemplatePath = @"C:\VueOneMapper\IO\BX1IO.hcf",
+            BX1HcfTemplatePath = @"C:\VueOneMapper\IO\BX1IO.ethernetip.hcf",
             M262TargetIp = "192.168.1.10",
             M262SubnetAddress = "192.168.1.0",
             M262SubnetMask = "255.255.255.0",
