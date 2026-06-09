@@ -70,9 +70,35 @@ namespace CodeGen.Devices.Core
         const string M580RackUuid        = "11111111-2222-3333-4444-000000000042";
         const string M580CpsUuid         = "11111111-2222-3333-4444-000000000043";
         const string M580CpuUuid         = "11111111-2222-3333-4444-000000000044";
-        const string BX1EquipmentUuid    = "11111111-2222-3333-4444-000000000050";
-        const string BX1ContainerUuid    = "11111111-2222-3333-4444-000000000051";
-        const string BX1RuntimeUuid      = "11111111-2222-3333-4444-000000000052";
+        // BX1 HMIB1X equipment uuids — REUSE the reference SMC_Rig_Expo_withClamp's
+        // exact uuids so the emitted Equipment_HMIB1X_1.json is byte-identical to the
+        // reference (which imports cleanly). Only the solution-specific DomainTag and
+        // the RuntimeDEO.logicalDeviceId (→ this project's BX1 sysdev) are substituted.
+        const string BX1EquipmentUuid    = "49363b74-1a84-46c1-b4cd-93f02374daec"; // HMIB1X_1
+        const string BX1ContainerUuid    = "37f5487c-396f-477a-a9ae-9c0476a4f772"; // Softdpac_1
+        const string BX1RuntimeUuid      = "52c5633b-f50b-4bc4-8fbd-e035bc5dfffa"; // RuntimeDEO
+        // EtherNetIPDevice equipment uuid — REUSE the reference's exact uuid so the
+        // DTM Content artifacts (Topology\Content\<uuid>_FdtProject.prj /
+        // _IOProfile.xml) can be copied verbatim from the reference (their content is
+        // uuid-independent; only the filename carries the uuid). EAE's FDT importer
+        // loads the Content by this uuid; without those two files the DtmDeviceDEO
+        // aborts the whole topology import ("verify file format / Internal Server Error").
+        const string BX1EtherNetIpUuid   = "49d2ea8e-3a4f-4ead-add4-ec4ba00d5239";
+
+        // softdpacDeviceNet docker-vlan domain shared by the HMIB1X host's
+        // dockerVlans declaration and the nested Softdpac container's eth0
+        // endpoint (same value the reference SMC_Rig_Expo_withClamp uses). It is
+        // self-declared in the HMIB1X Equipment JSON, so reusing the reference
+        // uuid is safe — EAE creates the docker network from the dockerVlans block.
+        const string Bx1SoftdpacDomainUuid = "db72f221-ece1-4b82-8132-731ce655044e";
+        // EtherNet/IP scanner id of the BX1 softdpac's EthernetMasterDEO. Must
+        // match the associatedScannerId on the EtherNetIPDevice AND the <ID> in
+        // the BX1 EtherNet/IP .hcf (270AFDB7F209BFE8) so EAE binds the scanned
+        // device to the scanner.
+        const string Bx1ScannerId = "270AFDB7F209BFE8";
+        // BX1 remote-I/O coupler (TM3BC_EtherNetIP) address — the covers' physical
+        // I/O island, scanned by the softdpac over EtherNet/IP (reference = .210).
+        const string Bx1IoDeviceIp = "192.168.1.210";
 
         // Schneider EAE TypeIds for RuntimeDEO per device class — same values
         // the reference SMC_Rig_Expo_withClamp uses, verified by inspection.
@@ -167,15 +193,18 @@ namespace CodeGen.Devices.Core
             // the file from TopologyManager.topologyproj so the build target
             // does not list a deleted file.
             CleanupStaleTopologyJson(eaeRoot, "Equipment_Soft_dPAC_BX1.json", result);
-            CleanupStaleTopologyJson(eaeRoot, "Equipment_BX1.json",           result);
-            // 2026-06-01: the (now-reverted) HMIB1X-form experiment wrote
-            // Equipment_HMIB1X_1.json into the deployed Topology folder. The
-            // revert returned the emitter to the Workstation form, so any
-            // lingering HMIB1X file is a stale orphan — sweep it (and its
-            // topologyproj <None Include=...> line) so EAE doesn't read two
-            // BX1 equipment files. Pure cleanup of a Topology JSON only; does
-            // NOT touch .sysres, .sysdev or any trusted-machine binding.
-            CleanupStaleTopologyJson(eaeRoot, "Equipment_HMIB1X_1.json",      result);
+            // 2026-06-08: BX1 is emitted in the REFERENCE HMIB1X form as
+            // Equipment_HMIB1X_1.json — BYTE-IDENTICAL to the reference's BX1 device
+            // (host panel .209 + nested Softdpac container .151), reference uuids,
+            // identifier "HMIB1X_1". Sweep BOTH the old Workstation form AND the
+            // interim "Equipment_BX1.json" name. The interim "BX1" equipment
+            // identifier COLLIDED with the BX1 sysdev Name "BX1" (every working
+            // device keeps equipment-identifier != sysdev-name: M580dPAC_1 != M580,
+            // reference HMIB1X_1 != BX1) — the cause of the topology-import 500.
+            // Equipment_HMIB1X_1.json is now the ACTIVE file (no longer cleaned here;
+            // EmitOnePlc force-cleans it just before re-writing).
+            CleanupStaleTopologyJson(eaeRoot, "Equipment_Workstation_BX1.json", result);
+            CleanupStaleTopologyJson(eaeRoot, "Equipment_BX1.json",            result);
             // EAE auto-spawns Equipment_<deviceName>_<N>.json variants when its
             // Physical Views editor wants to add a new instance of a device
             // whose name collides with an already-loaded file. Observed
@@ -206,7 +235,13 @@ namespace CodeGen.Devices.Core
             // to M580ResourceName below. BX1 still reads its identity because its
             // .hcf carries a GUID-scoped DeviceHwConfigurationItem/@ResourceId we
             // align the sysres ID to.
-            var bx1Ident = ReadHcfResourceIdentity(cfg.BX1HcfTemplatePath);
+            // Resolve the BX1 EtherNet/IP .hcf robustly. The configured path
+            // historically defaulted to "BX1IO.hcf" — a file that never existed;
+            // the real EAE export is "BX1IO.ethernetip.hcf" — so the copy silently
+            // no-op'd and BX1 shipped with NO hardware config ("pass the BX1 hcf").
+            // Fall back to <IoFolder>\BX1IO.ethernetip.hcf so it is always passed.
+            var bx1HcfPath = ResolveBx1HcfPath(cfg);
+            var bx1Ident = ReadHcfResourceIdentity(bx1HcfPath);
 
             // M580 resource name is FIXED to "M580_RES" via M580ResourceName,
             // matching M262 (cfg.ResourceName = "M262_RES") and BX1 below for
@@ -242,12 +277,78 @@ namespace CodeGen.Devices.Core
                 deviceType: "Soft_dPAC",
                 resourceId: bx1ResourceId,
                 resourceName: BX1ResourceName,
-                hcfTemplatePath: cfg.BX1HcfTemplatePath,
-                equipmentJsonName: "Equipment_Workstation_BX1.json",
-                equipmentBuilder: () => BuildBX1WorkstationEquipmentJson(BX1SysdevId, solutionId, cfg.BX1TargetIp),
+                hcfTemplatePath: bx1HcfPath,
+                equipmentJsonName: "Equipment_HMIB1X_1.json",
+                equipmentBuilder: () => BuildBX1HmiB1XEquipmentJson(
+                    BX1SysdevId, solutionId, cfg.BX1TargetIp, cfg.BX1HostIp),
                 deployPluginPropertiesXml: BuildSoftDpacDeployPluginPropertiesXml(),
                 simulationBindingDeployPort: 51501,
                 simulationBindingArchivePort: 51498);
+
+            // BX1 remote-I/O coupler (TM3BC_EtherNetIP @ Bx1IoDeviceIp) scanned by
+            // the BX1 softdpac's EtherNet/IP master (Bx1ScannerId). Matches the
+            // reference Equipment_EtherNetIPDevice_1.json + its DTM Content artifacts.
+            // ISOLATION (cfg.EmitBx1EtherNetIpDevice): a DtmDeviceDEO makes EAE's FDT
+            // framework load an FdtProject.prj on topology import — a project copied
+            // from another solution can throw an immediate server 500 ("Unable to
+            // import topology / Internal Server Error"). Held OUT by default until the
+            // HMIB1X import + login is confirmed; when OFF, SWEEP any previously-
+            // deployed copy (equipment + Content + topologyproj registrations) so the
+            // topology imports clean.
+            if (cfg.EmitBx1EtherNetIpDevice)
+            {
+                EmitBx1EtherNetIpDevice(cfg, eaeRoot, result, solutionId);
+                // The EtherNet/IP scanner (EIPSCANNER2) in the BX1 .hcf instantiates
+                // the generated coupler FB type Main.TM3BC_Ethe_yYhtt9jWKUOJs. Without
+                // its saved .fbt the BX1 dPAC fails to compile with
+                // "Type 'Main.TM3BC_Ethe_yYhtt9jWKUOJs' is undefined (ERR_NO_SUCH_TYPE)".
+                // Deploy the saved device type (the gate types it pulls in — AND_*,
+                // NOT_*, DS_SELECTX_* — are compiler-generated by EAE, not shipped).
+                DeployBx1EtherNetIpType(cfg, eaeRoot, result);
+                // The compiled EtherNet/IP scanner (EIPSCANNER2.xml) is built by EAE from
+                // the HwConfiguration project's DEVICE MODEL — NOT from the .hcf/.sysres or
+                // the deployed scanner XML (that is build output EAE re-emits each compile).
+                // Without the TM3BC_Ethe_* device-model folders + the EIPSolutionsV2 scanner
+                // config registered in HwConfiguration.hwconfigproj, EAE's HwConfiguration
+                // model has no TM3BC device, so the Deploy export is an EMPTY scanner (333
+                // bytes, no .210 buscoupler) and the cover I/O never reaches the coupler —
+                // even though the app model shows the scanner FB and EIP_Output_Word packs
+                // correctly (split-brain root-caused 2026-06-09, verified fixed: compiled
+                // EIPSCANNER2.xml became 1200 bytes incl. 192.168.1.210). BX1-only.
+                DeployBx1HwConfigScannerModel(cfg, eaeRoot, result);
+            }
+            else
+            {
+                CleanupStaleTopologyJson(eaeRoot, "Equipment_EtherNetIPDevice_1.json", result);
+                CleanupStaleTopologyJson(eaeRoot,
+                    Path.Combine("Content", $"{BX1EtherNetIpUuid}_FdtProject.prj"), result);
+                CleanupStaleTopologyJson(eaeRoot,
+                    Path.Combine("Content", $"{BX1EtherNetIpUuid}_IOProfile.xml"), result);
+                SweepBx1EtherNetIpType(eaeRoot, result);
+                SweepBx1HwConfigScannerModel(eaeRoot, result);
+                result.Warnings.Add(
+                    "[BX1] EtherNet/IP field device HELD OUT (cfg.EmitBx1EtherNetIpDevice=false) — " +
+                    "isolating the topology-import failure; equipment + FDT Content + device type swept.");
+            }
+
+            // Sweep stale sysres references out of the .dfbproj. A prior deploy
+            // that used the OLD BX1 resource id (C9F2A4B7E1D3F5A8, before the
+            // .hcf-driven realignment to 78E9CD3D27851B64) left a dangling
+            // <None Include="…\C9F2A4B7E1D3F5A8.sysres"> entry. EAE's Solution
+            // Integrity lists it as a Missing Project File and aborts the
+            // topology import ("Unable to import topology / Internal Server
+            // Error"). StripStaleSysresStemEntries removes every dfbproj entry
+            // whose .sysres stem (or sister-folder stem) has no matching file on
+            // disk — so only the live resources remain.
+            var dfbprojForStrip = FindDfbproj(eaeRoot);
+            if (dfbprojForStrip != null)
+            {
+                int stripped = DfbprojRegistrar.StripStaleSysresStemEntries(dfbprojForStrip, eaeRoot);
+                if (stripped > 0)
+                    result.Warnings.Add(
+                        $"Removed {stripped} stale sysres reference(s) from the .dfbproj " +
+                        "(resource id realigned to the .hcf ResourceId).");
+            }
 
             return result;
         }
@@ -635,88 +736,612 @@ namespace CodeGen.Devices.Core
         }
 
         /// <summary>
-        /// BX1 equipment JSON — modelled on the reference
-        /// <c>SMC_Rig_Expo_withClamp/Topology/Equipment_Workstation_1.json</c>.
-        /// BX1 is a Soft_dPAC software runtime; the matching Physical Views
-        /// catalog entry is <c>Workstation_V01.00_01.00</c> with a nested
-        /// NIC card. The earlier <c>Softdpac_V01.00_01.00</c> attempt failed
-        /// with "Unable to import topology" because that catalog reference
-        /// only exists nested inside an HMIB1X container in EAE 24.1, never
-        /// standalone. Workstation is the right top-level catalog for any
-        /// PC-hosted softdpac runtime.
+        /// BX1 equipment JSON in the REFERENCE <c>HMIB1X</c> form — an exact
+        /// structural match of
+        /// <c>SMC_Rig_Expo_withClamp/Topology/Equipment_HMIB1X_1.json</c>.
+        ///
+        /// <para>BX1 is a Harmony HMIB1X industrial panel (host at
+        /// <paramref name="hostIp"/> = 192.168.1.209) that HOSTS a nested
+        /// <c>HMIB1X_SoftdpacContainer</c> running the BX1 softdpac runtime at
+        /// <paramref name="softpacIp"/> = 192.168.1.151. The nested container's
+        /// RuntimeDEO carries <c>logicalDeviceId = </c><paramref name="sysdevId"/>,
+        /// binding it to the BX1 .sysdev. EAE deploys/logs in to the softdpac IP
+        /// (.151).</para>
+        ///
+        /// <para>The earlier <c>Workstation_V01.00_01.00</c> form was WRONG: the
+        /// Workstation catalog is the local engineering PC, so EAE resolved the
+        /// runtime to 127.0.0.1 and the deploy failed with "cannot connect to
+        /// device 'BX1' / IP 127.0.0.1 port 51443". The HMIB1X form is what the
+        /// reference rig uses and what the physical panels (.209 host, .151
+        /// softdpac) on the network actually are.</para>
+        ///
+        /// <para>The HMIB1X host declares the <c>softdpacDeviceNet</c> docker vlan
+        /// (SoftdpacManagerDEO) on <see cref="Bx1SoftdpacDomainUuid"/>; the nested
+        /// container's eth0 endpoint references the same domain (domainReadOnly =
+        /// true — the docker network assigns the .151). The container's
+        /// EthernetMasterDEO scanner id (<see cref="Bx1ScannerId"/>) ties the
+        /// EtherNet/IP scanned cover-I/O coupler to this softdpac.</para>
         /// </summary>
-        static string BuildBX1WorkstationEquipmentJson(string sysdevId, string solutionId, string targetIp)
+        static string BuildBX1HmiB1XEquipmentJson(string sysdevId, string solutionId,
+            string softpacIp, string hostIp)
         {
-            // typeId used by Workstation_1's RuntimeDEO in the reference —
-            // distinct from SoftDpacTypeId (which is for the HMIB1X-nested case).
-            const string WorkstationRuntimeTypeId = "422ee926-a34a-4ab5-9e8f-dce0782579f0";
-            const string BX1NicUuid = "11111111-2222-3333-4444-000000000053";
-
             return $$"""
             {
-              "catalogReference": "Workstation_V01.00_01.00",
+              "catalogReference": "HMIB1X_V01.00_01.00",
               "uuid": "{{BX1EquipmentUuid}}",
-              "identifier": "BX1",
+              "identifier": "HMIB1X_1",
               "path": "Topology",
               "properties": [
                 { "propertyName": "IsUnderConstruction", "propertyValue": "False" },
-                { "propertyName": "CommCardReference",   "propertyValue": "" },
                 { "propertyName": "DomainTag",            "propertyValue": "{{solutionId}}" }
               ],
               "references": [
-                { "diagramPath": "Physical Views", "x": 320, "y": -380 }
+                { "diagramPath": "Physical Views", "x": 112.30403451708418, "y": -352.30162018013522 }
               ],
               "equipments": [
                 {
-                  "catalogReference": "NIC_EAE_V01.00_01.00",
-                  "uuid": "{{BX1NicUuid}}",
-                  "identifier": "NIC_1",
-                  "path": "BX1\\NIC_1",
+                  "catalogReference": "HMIB1X_SoftdpacContainer_V01.00_01.00",
+                  "uuid": "{{BX1ContainerUuid}}",
+                  "identifier": "Softdpac_1",
+                  "path": "HMIB1X_1\\Softdpac_1",
                   "components": [
                     {
                       "interfaces": [
                         {
-                          "identifier": "eno1",
+                          "identifier": "eth0",
                           "disabled": false,
                           "physicalAddress": "",
                           "endpoints": [
                             {
                               "identifier": "IP Address",
                               "isReadOnly": false,
-                              "domainReadOnly": false,
-                              "ipAddress": "{{targetIp}}",
-                              "domain": "{{NoConfDomainUuid}}"
+                              "domainReadOnly": true,
+                              "ipAddress": "{{softpacIp}}",
+                              "domain": "{{Bx1SoftdpacDomainUuid}}"
                             }
                           ]
                         }
                       ],
                       "ports": [
-                        { "identifier": "Port1", "side": "Default" }
+                        { "identifier": "Port0", "side": "Default" }
                       ],
                       "componentType": "EthernetDEO"
+                    },
+                    {
+                      "scannerId": "{{Bx1ScannerId}}",
+                      "endpoint": "eth0\\IP Address",
+                      "connectionTypes": "None",
+                      "componentType": "EthernetMasterDEO"
+                    },
+                    {
+                      "enabled": false,
+                      "securityMode": 0,
+                      "componentType": "SysLogClientDEO"
+                    },
+                    {
+                      "imageName": "softdpac",
+                      "imageVersion": "v24.1.25090.08",
+                      "identifier": "DockerContainer",
+                      "allocatedRam": 524288,
+                      "cpuCores": [ 0, 1, 2, 3 ],
+                      "componentType": "DockerContainerDEO"
+                    },
+                    {
+                      "uuid": "{{BX1RuntimeUuid}}",
+                      "typeId": "{{SoftDpacTypeId}}",
+                      "logicalDeviceId": "{{sysdevId}}",
+                      "runtimeServices": [
+                        { "identifier": "Deployment" },
+                        { "identifier": "Archive Service", "logicalPortSecured": "0" }
+                      ],
+                      "componentType": "RuntimeDEO"
                     }
                   ]
                 }
               ],
               "components": [
                 {
-                  "uuid": "{{BX1RuntimeUuid}}",
-                  "typeId": "{{WorkstationRuntimeTypeId}}",
-                  "logicalDeviceId": "{{sysdevId}}",
-                  "identifier": "Runtime_1",
-                  "runtimeServices": [
+                  "interfaces": [
                     {
-                      "identifier": "Deployment",
-                      "endpoint": "NIC_1\\eno1\\IP Address",
-                      "logicalPort": "61999",
-                      "logicalPortSecured": "51443"
+                      "identifier": "eth0",
+                      "disabled": false,
+                      "physicalAddress": "",
+                      "endpoints": [
+                        {
+                          "identifier": "IP Address",
+                          "isReadOnly": false,
+                          "domainReadOnly": false,
+                          "ipAddress": "{{hostIp}}",
+                          "domain": "{{NoConfDomainUuid}}"
+                        }
+                      ]
+                    },
+                    {
+                      "identifier": "eth1",
+                      "disabled": false,
+                      "physicalAddress": "",
+                      "endpoints": [
+                        {
+                          "identifier": "IP Address",
+                          "isReadOnly": false,
+                          "domainReadOnly": false,
+                          "ipAddress": "0.0.0.0",
+                          "domain": "{{NoConfDomainUuid}}"
+                        }
+                      ]
                     }
                   ],
-                  "componentType": "RuntimeDEO"
+                  "ports": [
+                    { "identifier": "LAN1", "side": "Default" },
+                    { "identifier": "LAN2", "side": "Default" }
+                  ],
+                  "componentType": "EthernetDEO"
+                },
+                {
+                  "preferredPrimary": false,
+                  "dockerImages": [
+                    { "identifier": "softdpac", "version": "" }
+                  ],
+                  "dockerVlans": [
+                    {
+                      "identifier": "softdpacDeviceNet",
+                      "type": 0,
+                      "domain": "{{Bx1SoftdpacDomainUuid}}",
+                      "interface": "eth0",
+                      "domainReadOnly": false
+                    }
+                  ],
+                  "softdpacManagerServices": [
+                    { "identifier": "Management services", "logicalPort": 8080, "endpoint": "" }
+                  ],
+                  "componentType": "SoftdpacManagerDEO"
+                },
+                {
+                  "mode": 1,
+                  "servers": [
+                    { "name": "Primary NTP Server_1", "address": "0.0.0.0", "type": 0, "minPoll": 1, "maxPoll": 1 },
+                    { "name": "Secondary NTP Server_1", "address": "0.0.0.0", "type": 1, "minPoll": 1, "maxPoll": 1 }
+                  ],
+                  "componentType": "TimeSettingsDEO"
+                },
+                {
+                  "mode": 0,
+                  "componentType": "CyberSecurityDEO"
                 }
               ]
             }
             """;
+        }
+
+        /// <summary>
+        /// EtherNet/IP remote-I/O coupler equipment JSON — an exact structural
+        /// match of <c>SMC_Rig_Expo_withClamp/Topology/Equipment_EtherNetIPDevice_1.json</c>.
+        /// A <c>TM3BC_EtherNetIP</c> bus coupler (the Cover PnP physical I/O island)
+        /// at <paramref name="deviceIp"/> = 192.168.1.210, scanned by the BX1
+        /// softdpac's EtherNet/IP master (<paramref name="scannerId"/>). Topology-
+        /// only: a field device has no logical runtime, so there is no sysdev/sysres.
+        /// </summary>
+        static string BuildEtherNetIpDeviceEquipmentJson(string solutionId, string deviceIp, string scannerId)
+        {
+            return $$"""
+            {
+              "catalogReference": "GenericEthernetIPFieldDevice_V01.00_01.00",
+              "uuid": "{{BX1EtherNetIpUuid}}",
+              "identifier": "EtherNetIPDevice_1",
+              "path": "Topology",
+              "properties": [
+                { "propertyName": "IsUnderConstruction", "propertyValue": "False" },
+                { "propertyName": "DomainTag",            "propertyValue": "{{solutionId}}" }
+              ],
+              "references": [
+                { "diagramPath": "Physical Views", "x": 109, "y": -104 }
+              ],
+              "components": [
+                {
+                  "fdtProjectIdentifiers": [ "FdtProject" ],
+                  "catalogDtmIsInitialized": true,
+                  "catalogDeviceName": "TM3BC_EtherNetIP Revision 2.3 (from EDS)",
+                  "catalogDeviceVersion": "2.3",
+                  "catalogDeviceVendor": "Schneider Electric",
+                  "catalogDtmName": "Generic EDS Device DTM",
+                  "catalogDtmVendor": "Schneider Electric",
+                  "catalogDtmVersion": "1.15.1.0",
+                  "componentType": "DtmDeviceDEO"
+                },
+                {
+                  "interfaces": [
+                    {
+                      "identifier": "Embedded Interface",
+                      "disabled": false,
+                      "physicalAddress": "",
+                      "endpoints": [
+                        {
+                          "identifier": "IP Address",
+                          "isReadOnly": false,
+                          "domainReadOnly": false,
+                          "ipAddress": "{{deviceIp}}",
+                          "domain": "{{NoConfDomainUuid}}"
+                        }
+                      ]
+                    }
+                  ],
+                  "ports": [
+                    { "identifier": "Port1", "side": "Default" },
+                    { "identifier": "Port2", "side": "Default" }
+                  ],
+                  "componentType": "EthernetDEO"
+                },
+                {
+                  "associatedScannerId": "{{scannerId}}",
+                  "associatedHwCatType": "Generic",
+                  "ioProfileIdentifiers": [ "IOProfile" ],
+                  "componentType": "EthernetScannedDeviceDEO"
+                }
+              ]
+            }
+            """;
+        }
+
+        /// <summary>
+        /// Resolves the BX1 EtherNet/IP .hcf. The configured path historically
+        /// defaulted to <c>BX1IO.hcf</c> — a file that never existed (the real EAE
+        /// export is <c>BX1IO.ethernetip.hcf</c>), so the copy silently no-op'd and
+        /// BX1 shipped with no hardware config. Falls back to
+        /// <c>&lt;IoFolder&gt;\BX1IO.ethernetip.hcf</c> then the absolute IO path so
+        /// the BX1 hcf is always passed regardless of mapper_config.json.
+        /// </summary>
+        static string ResolveBx1HcfPath(MapperConfig cfg)
+        {
+            if (!string.IsNullOrWhiteSpace(cfg.BX1HcfTemplatePath) &&
+                File.Exists(cfg.BX1HcfTemplatePath))
+                return cfg.BX1HcfTemplatePath;
+
+            var ioFolder = !string.IsNullOrWhiteSpace(cfg.IoFolderPath)
+                ? cfg.IoFolderPath : @"C:\VueOneMapper\IO";
+            var candidate = Path.Combine(ioFolder, "BX1IO.ethernetip.hcf");
+            if (File.Exists(candidate)) return candidate;
+
+            return @"C:\VueOneMapper\IO\BX1IO.ethernetip.hcf";
+        }
+
+        /// <summary>
+        /// Emits the BX1 EtherNet/IP remote-I/O coupler (a DtmDeviceDEO field
+        /// device): the Equipment JSON, its TWO required DTM Content artifacts
+        /// (<c>Topology\Content\&lt;uuid&gt;_FdtProject.prj</c> +
+        /// <c>&lt;uuid&gt;_IOProfile.xml</c> — copied verbatim from the reference,
+        /// their content is uuid-independent), and the TopologyManager.topologyproj
+        /// registrations for all three. The Content artifacts are MANDATORY: EAE's
+        /// FDT importer loads them by the device uuid, and without them the whole
+        /// topology import aborts with "Unable to import topology / verify file
+        /// format / Internal Server Error". A field device has no logical runtime,
+        /// so there is no sysdev/sysres.
+        /// </summary>
+        static void EmitBx1EtherNetIpDevice(MapperConfig cfg, string eaeRoot,
+            EmitResult result, string solutionId)
+        {
+            const string EquipmentJsonName = "Equipment_EtherNetIPDevice_1.json";
+            var topologyDir = Path.Combine(eaeRoot, "Topology");
+            Directory.CreateDirectory(topologyDir);
+
+            // 1. Equipment JSON (force-clean).
+            var equipmentPath = Path.Combine(topologyDir, EquipmentJsonName);
+            if (File.Exists(equipmentPath))
+            {
+                try { File.Delete(equipmentPath); }
+                catch (Exception ex)
+                {
+                    result.Warnings.Add(
+                        $"{EquipmentJsonName}: could not delete stale copy before re-emit: {ex.Message}");
+                }
+            }
+            File.WriteAllText(equipmentPath,
+                BuildEtherNetIpDeviceEquipmentJson(solutionId, Bx1IoDeviceIp, Bx1ScannerId));
+            result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, equipmentPath));
+
+            // 2. DTM Content artifacts (copied verbatim from the IO-folder templates).
+            var contentDir = Path.Combine(topologyDir, "Content");
+            Directory.CreateDirectory(contentDir);
+            var (prjTemplate, xmlTemplate) = ResolveEtherNetIpContentTemplates(cfg);
+            var registerNames = new List<string> { EquipmentJsonName };
+
+            void CopyContent(string template, string suffix)
+            {
+                var destName = $"{BX1EtherNetIpUuid}_{suffix}";
+                if (string.IsNullOrEmpty(template) || !File.Exists(template))
+                {
+                    result.Warnings.Add(
+                        $"EtherNetIPDevice: DTM content template for '{suffix}' not found at " +
+                        $"'{template ?? "<unset>"}' — the device will FAIL to import. Expected " +
+                        "BX1_EtherNetIP_FdtProject.prj / BX1_EtherNetIP_IOProfile.xml in the IO folder.");
+                    return;
+                }
+                var dest = Path.Combine(contentDir, destName);
+                File.Copy(template, dest, overwrite: true);
+                result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, dest));
+                registerNames.Add(Path.Combine("Content", destName));
+            }
+            CopyContent(prjTemplate, "FdtProject.prj");
+            CopyContent(xmlTemplate, "IOProfile.xml");
+
+            // 3. Register equipment + content in topologyproj.
+            var topologyProj = Path.Combine(topologyDir, "TopologyManager.topologyproj");
+            if (File.Exists(topologyProj))
+                result.TopologyProjEntriesAdded +=
+                    M262TopologyEmitter.RegisterInTopologyProj(topologyProj, registerNames);
+            else
+                result.Warnings.Add(
+                    "EtherNetIPDevice: TopologyManager.topologyproj missing — equipment + content " +
+                    "written but not registered with TopologyManager build target.");
+        }
+
+        /// <summary>
+        /// The single SAVED FB type the BX1 EtherNet/IP scanner needs. Generated once
+        /// by EAE's FDT/DTM for the TM3BC coupler and committed to the Template Library
+        /// (IEC61499 + HMI subfolders). Its name is referenced verbatim by the BX1
+        /// <c>.hcf</c> (which we copy from the reference), so the saved-type name and the
+        /// scanner's instance type stay in lock-step.
+        /// </summary>
+        const string Bx1EtherNetIpDeviceType = "TM3BC_Ethe_yYhtt9jWKUOJs";
+
+        /// <summary>
+        /// Deploys the saved EtherNet/IP coupler FB type (<see cref="Bx1EtherNetIpDeviceType"/>)
+        /// from <c>{TemplateLibrary}\EtherNetIP\</c> into the EAE project: copies the
+        /// <c>IEC61499\&lt;type&gt;\</c> folder (.fbt/.cfg/_HMI.fbt) and the
+        /// <c>HMI\&lt;type&gt;\</c> folder (faceplate sources referenced by the .cfg), then
+        /// registers the four dfbproj entries. Idempotent (overwrites files, idempotent
+        /// dfbproj add). The compiler-generated gate types (AND_*, NOT_*, DS_SELECTX_*)
+        /// are produced by EAE at compile — not copied here.
+        /// </summary>
+        static void DeployBx1EtherNetIpType(MapperConfig cfg, string eaeRoot, EmitResult result)
+        {
+            try
+            {
+                var libRoot = !string.IsNullOrWhiteSpace(cfg.TemplateLibraryPath)
+                    ? cfg.TemplateLibraryPath : @"C:\VueOneMapper\Template Library";
+                var srcIec = Path.Combine(libRoot, "EtherNetIP", "IEC61499", Bx1EtherNetIpDeviceType);
+                var srcHmi = Path.Combine(libRoot, "EtherNetIP", "HMI", Bx1EtherNetIpDeviceType);
+                if (!Directory.Exists(srcIec))
+                {
+                    result.Warnings.Add(
+                        $"[BX1] EtherNet/IP device type '{Bx1EtherNetIpDeviceType}' NOT found in the " +
+                        $"Template Library ('{srcIec}'). BX1 will fail to compile (ERR_NO_SUCH_TYPE). " +
+                        "Stage it from the reference project's IEC61499 + HMI folders.");
+                    return;
+                }
+
+                var dstIec = Path.Combine(eaeRoot, "IEC61499", Bx1EtherNetIpDeviceType);
+                var dstHmi = Path.Combine(eaeRoot, "HMI", Bx1EtherNetIpDeviceType);
+                CopyDirectory(srcIec, dstIec);
+                if (Directory.Exists(srcHmi)) CopyDirectory(srcHmi, dstHmi);
+                result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, dstIec));
+
+                var dfbproj = FindDfbproj(eaeRoot);
+                if (dfbproj != null)
+                {
+                    int added = DfbprojRegistrar.RegisterHardwareDeviceCat(dfbproj, Bx1EtherNetIpDeviceType);
+                    result.Warnings.Add(added > 0
+                        ? $"[BX1] EtherNet/IP device type '{Bx1EtherNetIpDeviceType}' deployed + registered " +
+                          $"({added} dfbproj entr{(added == 1 ? "y" : "ies")}); gate types compile-generated by EAE."
+                        : $"[BX1] EtherNet/IP device type '{Bx1EtherNetIpDeviceType}' deployed (dfbproj already current).");
+                }
+                else
+                {
+                    result.Warnings.Add(
+                        $"[BX1] EtherNet/IP device type '{Bx1EtherNetIpDeviceType}' copied but no .dfbproj " +
+                        "found to register it — BX1 may not compile.");
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"[BX1] EtherNet/IP device type deploy failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Sweeps the saved EtherNet/IP coupler FB type — deletes its IEC61499 + HMI
+        /// folders and removes its dfbproj registrations — when the EtherNet/IP device is
+        /// held out (cfg.EmitBx1EtherNetIpDevice false). Idempotent.
+        /// </summary>
+        static void SweepBx1EtherNetIpType(string eaeRoot, EmitResult result)
+        {
+            try
+            {
+                var dstIec = Path.Combine(eaeRoot, "IEC61499", Bx1EtherNetIpDeviceType);
+                var dstHmi = Path.Combine(eaeRoot, "HMI", Bx1EtherNetIpDeviceType);
+                if (Directory.Exists(dstIec)) Directory.Delete(dstIec, recursive: true);
+                if (Directory.Exists(dstHmi)) Directory.Delete(dstHmi, recursive: true);
+                var dfbproj = FindDfbproj(eaeRoot);
+                if (dfbproj != null)
+                    DfbprojRegistrar.UnregisterHardwareDeviceCat(dfbproj, Bx1EtherNetIpDeviceType);
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"[BX1] EtherNet/IP device type sweep failed: {ex.Message}");
+            }
+        }
+
+        // ── BX1 EtherNet/IP scanner HwConfiguration device model ───────────────────
+        // EAE compiles EIPSCANNER2.xml from THESE source files (the HwConfiguration
+        // device model), NOT from the .hcf/.sysres or the deployed scanner XML.
+        const string Bx1HwConfigScannerId = "270AFDB7F209BFE8";
+        static readonly string[] Bx1Tm3bcModelFolders =
+            { "TM3BC_Ethe_R1C9LFqq0OfJh", "TM3BC_Ethe_yYhtt9jWKUOJs" };
+
+        /// <summary>
+        /// Deploys the BX1 EtherNet/IP scanner's HwConfiguration DEVICE MODEL — the
+        /// TM3BC_Ethe_* device-model folders (.prop.cs/.prop.xml/.script.cs) + the
+        /// EIPSolutionsV2\&lt;scannerId&gt;\scanner.xml + scanner_items.xml — and registers
+        /// them in HwConfiguration.hwconfigproj. EAE compiles EIPSCANNER2.xml from this
+        /// model; without it the scanner export is EMPTY (no .210 buscoupler) and the
+        /// cover I/O never reaches the coupler. BX1-only (M262/M580 have no EtherNet/IP
+        /// scanner). Acceptance: compiled EIPSCANNER2.xml ~1200 bytes incl. 192.168.1.210.
+        /// </summary>
+        static void DeployBx1HwConfigScannerModel(MapperConfig cfg, string eaeRoot, EmitResult result)
+        {
+            try
+            {
+                var libRoot = !string.IsNullOrWhiteSpace(cfg.TemplateLibraryPath)
+                    ? cfg.TemplateLibraryPath : @"C:\VueOneMapper\Template Library";
+                var srcHc = Path.Combine(libRoot, "EtherNetIP", "HwConfiguration");
+                var dstHc = Path.Combine(eaeRoot, "HwConfiguration");
+                if (!Directory.Exists(srcHc))
+                {
+                    result.Warnings.Add(
+                        $"[BX1] EtherNet/IP HwConfiguration device model NOT in the Template Library ('{srcHc}') — " +
+                        "EAE will compile an EMPTY EIPSCANNER2.xml (no .210 buscoupler) and the cover I/O will not " +
+                        "reach the coupler. Stage TM3BC_Ethe_* + EIPSolutionsV2 from the reference HwConfiguration.");
+                    return;
+                }
+                if (!Directory.Exists(dstHc))
+                {
+                    result.Warnings.Add($"[BX1] no HwConfiguration project at '{dstHc}' — cannot deploy the EtherNet/IP scanner model.");
+                    return;
+                }
+
+                var subs = new List<string> { Path.Combine("EIPSolutionsV2", Bx1HwConfigScannerId) };
+                subs.AddRange(Bx1Tm3bcModelFolders);
+                foreach (var sub in subs)
+                {
+                    var s = Path.Combine(srcHc, sub);
+                    if (Directory.Exists(s)) CopyDirectory(s, Path.Combine(dstHc, sub));
+                }
+
+                var hwproj = Path.Combine(dstHc, "HwConfiguration.hwconfigproj");
+                int reg = RegisterBx1HwConfigScannerModel(hwproj);
+                result.FilesWritten.Add(Path.GetRelativePath(eaeRoot,
+                    Path.Combine(dstHc, "EIPSolutionsV2", Bx1HwConfigScannerId, "scanner.xml")));
+                result.Warnings.Add(
+                    $"[BX1] EtherNet/IP HwConfiguration device model deployed (TM3BC_Ethe_* + EIPSolutionsV2 scanner; " +
+                    $"{reg} hwconfigproj entr{(reg == 1 ? "y" : "ies")}). EAE compiles a POPULATED EIPSCANNER2.xml " +
+                    "(acceptance: ~1200 bytes incl. 192.168.1.210).");
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"[BX1] EtherNet/IP HwConfiguration model deploy failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>Removes the BX1 EtherNet/IP scanner HwConfiguration model (folders +
+        /// hwconfigproj entries) when the EtherNet/IP device is held out. Idempotent.</summary>
+        static void SweepBx1HwConfigScannerModel(string eaeRoot, EmitResult result)
+        {
+            try
+            {
+                var dstHc = Path.Combine(eaeRoot, "HwConfiguration");
+                if (!Directory.Exists(dstHc)) return;
+                var subs = new List<string> { Path.Combine("EIPSolutionsV2", Bx1HwConfigScannerId) };
+                subs.AddRange(Bx1Tm3bcModelFolders);
+                foreach (var sub in subs)
+                {
+                    var d = Path.Combine(dstHc, sub);
+                    if (Directory.Exists(d)) Directory.Delete(d, recursive: true);
+                }
+                var eip = Path.Combine(dstHc, "EIPSolutionsV2");
+                if (Directory.Exists(eip) && !Directory.EnumerateFileSystemEntries(eip).Any())
+                    Directory.Delete(eip);
+                UnregisterBx1HwConfigScannerModel(Path.Combine(dstHc, "HwConfiguration.hwconfigproj"));
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"[BX1] EtherNet/IP HwConfiguration model sweep failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>Idempotently registers the BX1 scanner model source files in
+        /// HwConfiguration.hwconfigproj exactly as the reference does: TM3BC .prop.cs +
+        /// .script.cs under &lt;Compile&gt;, scanner.xml/scanner_items.xml + TM3BC .prop.xml
+        /// under &lt;None&gt;, the four folders under &lt;Folder&gt;. Returns the count added.</summary>
+        static int RegisterBx1HwConfigScannerModel(string hwproj)
+        {
+            if (!File.Exists(hwproj)) return 0;
+            var xml = XDocument.Load(hwproj);
+            var ns = xml.Root!.GetDefaultNamespace();
+            int added = 0;
+
+            var cg = xml.Descendants(ns + "ItemGroup").FirstOrDefault(g => g.Elements(ns + "Compile").Any());
+            var ng = xml.Descendants(ns + "ItemGroup").FirstOrDefault(g => g.Elements(ns + "None").Any());
+            var fg = xml.Descendants(ns + "ItemGroup").FirstOrDefault(g => g.Elements(ns + "Folder").Any());
+
+            void AddItem(ref XElement? group, string tag, string include, XElement? child)
+            {
+                if (group == null) { group = new XElement(ns + "ItemGroup"); xml.Root!.Add(group); }
+                if (group.Elements(ns + tag).Any(e =>
+                    string.Equals((string?)e.Attribute("Include"), include, StringComparison.OrdinalIgnoreCase)))
+                    return;
+                var el = new XElement(ns + tag, new XAttribute("Include", include));
+                if (child != null) el.Add(child);
+                group.Add(el); added++;
+            }
+
+            foreach (var t in Bx1Tm3bcModelFolders)
+            {
+                AddItem(ref cg, "Compile", $@"{t}\{t}.prop.cs", null);
+                AddItem(ref cg, "Compile", $@"{t}\{t}.script.cs", null);
+                AddItem(ref ng, "None", $@"{t}\{t}.prop.xml", new XElement(ns + "DependentUpon", $"{t}.fbt"));
+            }
+            AddItem(ref ng, "None", $@"EIPSolutionsV2\{Bx1HwConfigScannerId}\scanner.xml", null);
+            AddItem(ref ng, "None", $@"EIPSolutionsV2\{Bx1HwConfigScannerId}\scanner_items.xml", null);
+
+            AddItem(ref fg, "Folder", "EIPSolutionsV2", null);
+            AddItem(ref fg, "Folder", $@"EIPSolutionsV2\{Bx1HwConfigScannerId}", null);
+            foreach (var t in Bx1Tm3bcModelFolders) AddItem(ref fg, "Folder", t, null);
+
+            if (added > 0) xml.Save(hwproj);
+            return added;
+        }
+
+        /// <summary>Removes the entries added by RegisterBx1HwConfigScannerModel. Idempotent.</summary>
+        static void UnregisterBx1HwConfigScannerModel(string hwproj)
+        {
+            if (!File.Exists(hwproj)) return;
+            var xml = XDocument.Load(hwproj, LoadOptions.PreserveWhitespace);
+            var ns = xml.Root!.GetDefaultNamespace();
+            bool changed = false;
+            foreach (var name in new[] { "Compile", "None", "Folder" })
+            {
+                foreach (var el in xml.Descendants(ns + name).ToList())
+                {
+                    var inc = (string?)el.Attribute("Include");
+                    if (string.IsNullOrEmpty(inc)) continue;
+                    bool match = inc.StartsWith("EIPSolutionsV2", StringComparison.OrdinalIgnoreCase)
+                              || Bx1Tm3bcModelFolders.Any(t => inc.Equals(t, StringComparison.OrdinalIgnoreCase)
+                                     || inc.StartsWith(t + @"\", StringComparison.OrdinalIgnoreCase));
+                    if (!match) continue;
+                    var nextWs = el.NextNode as XText;
+                    el.Remove();
+                    if (nextWs != null) nextWs.Remove();
+                    changed = true;
+                }
+            }
+            if (changed) xml.Save(hwproj);
+        }
+
+        static void CopyDirectory(string src, string dst)
+        {
+            Directory.CreateDirectory(dst);
+            foreach (var file in Directory.EnumerateFiles(src, "*.*", SearchOption.TopDirectoryOnly))
+                File.Copy(file, Path.Combine(dst, Path.GetFileName(file)), overwrite: true);
+            foreach (var dir in Directory.EnumerateDirectories(src))
+                CopyDirectory(dir, Path.Combine(dst, Path.GetFileName(dir)));
+        }
+
+        /// <summary>
+        /// Resolves the EtherNet/IP DTM Content templates (FDT project + IO profile)
+        /// from the IO folder, falling back to the absolute IO path. These are the
+        /// reference SMC_Rig_Expo_withClamp artifacts staged into the IO folder.
+        /// </summary>
+        static (string Prj, string Xml) ResolveEtherNetIpContentTemplates(MapperConfig cfg)
+        {
+            var ioFolder = !string.IsNullOrWhiteSpace(cfg.IoFolderPath)
+                ? cfg.IoFolderPath : @"C:\VueOneMapper\IO";
+            string Pick(string name)
+            {
+                var p = Path.Combine(ioFolder, name);
+                if (File.Exists(p)) return p;
+                var fallback = Path.Combine(@"C:\VueOneMapper\IO", name);
+                return File.Exists(fallback) ? fallback : p;
+            }
+            return (Pick("BX1_EtherNetIP_FdtProject.prj"), Pick("BX1_EtherNetIP_IOProfile.xml"));
         }
 
         /// <summary>
