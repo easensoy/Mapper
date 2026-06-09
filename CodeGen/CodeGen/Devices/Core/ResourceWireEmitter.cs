@@ -197,6 +197,12 @@ namespace CodeGen.Devices.Core
 
                 // Build (Name → element) and (Type → element) maps so endpoint
                 // references can be either an instance name or a type token.
+                var recipeSyncCount = SysresFbMirror.SyncProcessRecipesFromSyslay(
+                    cfg.ActiveSyslayPath, doc);
+                if (recipeSyncCount > 0)
+                    report.Missing.Add(
+                        $"[Wire][{tag}] synced {recipeSyncCount} Process recipe(s) from syslay to sysres");
+
                 var byName = new Dictionary<string, XElement>(StringComparer.Ordinal);
                 var byType = new Dictionary<string, XElement>(StringComparer.Ordinal);
                 foreach (var fb in fbNet.Elements(ns + "FB"))
@@ -318,12 +324,16 @@ namespace CodeGen.Devices.Core
                 var seenComp = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var nm in CaSBusOrder)
                     if (byName.TryGetValue(nm, out var cfb) &&
-                        (IsSensor(cfb) || IsActuator(cfb)) && seenComp.Add(nm))
-                        orderedComps.Add(cfb);
+                        (IsSensor(cfb) || IsActuator(cfb)))
+                    {
+                        if (seenComp.Add(nm))
+                            orderedComps.Add(cfb);
+                    }
                 foreach (var fb in fbNet.Elements(ns + "FB"))
                 {
                     var nm = (string?)fb.Attribute("Name") ?? string.Empty;
-                    if (nm.Length > 0 && (IsSensor(fb) || IsActuator(fb)) && seenComp.Add(nm))
+                    if (nm.Length == 0 || (!IsSensor(fb) && !IsActuator(fb))) continue;
+                    if (seenComp.Add(nm))
                         orderedComps.Add(fb);
                 }
                 string Nm(XElement fb) => (string?)fb.Attribute("Name") ?? string.Empty;
@@ -346,16 +356,27 @@ namespace CodeGen.Devices.Core
                 // below thread through every one (so a second process is never left
                 // unwired), and they get cross-process state_update->state_change
                 // wires too. M262 has only Feed_Station, so this is a single-element
-                // list and its output is byte-identical to before.
+                // list and its output is byte-identical to before. The parked
+                // M580 Disassembly process is filtered out below.
+                bool BypassParkedM580Disassembly(string name) =>
+                    string.Equals(anchors.ProcessFb, "Assembly_Station", StringComparison.Ordinal) &&
+                    (string.Equals(name, "Disassembly", StringComparison.Ordinal) ||
+                     string.Equals(name, "Disassembly_Station", StringComparison.Ordinal));
+
                 var processNames = new List<string>();
-                if (Present(anchors.ProcessFb, byName)) processNames.Add(anchors.ProcessFb!);
+                if (Present(anchors.ProcessFb, byName) &&
+                    !BypassParkedM580Disassembly(anchors.ProcessFb!))
+                    processNames.Add(anchors.ProcessFb!);
                 foreach (var fb in fbNet.Elements(ns + "FB"))
                 {
                     var nm = (string?)fb.Attribute("Name") ?? string.Empty;
                     if (nm.Length == 0 || processNames.Contains(nm)) continue;
+                    if (BypassParkedM580Disassembly(nm)) continue;
                     if ((string?)fb.Attribute("Type") == "Process1_Generic")
                         processNames.Add(nm);
                 }
+                if (byName.ContainsKey("Disassembly") && BypassParkedM580Disassembly("Disassembly"))
+                    report.Missing.Add("[M580 RES0] Disassembly parked and bypassed in init/CaS/stateRprtCmd wiring");
                 bool haveProcess = processNames.Count > 0;
 
                 // Init chain: FB1.INITO→[Area]→[Station]→components…→[Process],
@@ -465,6 +486,25 @@ namespace CodeGen.Devices.Core
                 // directly comp(last)→comp(0) so the components still gossip
                 // state among themselves. Process1_Generic uses the *Adptr
                 // suffix; Sensor/Actuator CATs use stateRprtCmd_*.
+                // CROSS-PLC COVER RING (task #69, MapperConfig.ExtendStateRingAcrossBx1):
+                // when the syslay carries the M580→BX1 cross-hop, this resource's ring is
+                // a PORTION of one ring spanning both PLCs, so it must be left OPEN at the
+                // device boundary — otherwise the boundary adapter socket would be driven
+                // by both this sysres close AND the EAE-bridged cross-hop. We gate on the
+                // cross-hop ACTUALLY present in the generated syslay (single source of
+                // truth) so the sysres opens iff the syslay crossed — never half-and-half.
+                //   M580: drop the Clamp→Assembly_Station close (Clamp.out crosses to BX1).
+                //   BX1 : drop the CoverPnp_Gripper→TopCoverSenosr self-close (it crosses
+                //         to Assembly_Station). The far ends are joined by the syslay hops.
+                bool crossRingActive = CrossPlcCoverRingActive(cfg);
+                bool openM580Boundary = crossRingActive && haveProcess &&
+                    string.Equals(tag, "M580", StringComparison.Ordinal) &&
+                    ringNames.Count > 0 &&
+                    string.Equals(ringNames[^1], "Clamp", StringComparison.OrdinalIgnoreCase);
+                bool openBx1Boundary = crossRingActive && !haveProcess &&
+                    string.Equals(tag, "BX1", StringComparison.Ordinal) &&
+                    ringNames.Count > 1;
+
                 if (ringNames.Count > 0)
                 {
                     for (int i = 0; i < ringNames.Count - 1; i++)
@@ -475,8 +515,18 @@ namespace CodeGen.Devices.Core
                         // Close the ring THROUGH every process in turn:
                         //   compN → P0 → P1 → … → comp0
                         // so each Process FB reads the whole component state ring.
-                        adapterWires.Add(new Wire($"{ringNames[^1]}.stateRprtCmd_out",
-                            $"{processNames[0]}.stateRptCmdAdptr_in"));
+                        // Under the cross-PLC cover ring, the compN(=Clamp)→Process close
+                        // is OMITTED — Clamp.out crosses to BX1 (TopCoverSenosr) and the
+                        // process's in-edge arrives from BX1 (CoverPnp_Gripper) via the
+                        // syslay hop EAE bridges. The Process→comp0 close-back stays local.
+                        if (!openM580Boundary)
+                            adapterWires.Add(new Wire($"{ringNames[^1]}.stateRprtCmd_out",
+                                $"{processNames[0]}.stateRptCmdAdptr_in"));
+                        else
+                            report.Missing.Add(
+                                $"[{tag}] cross-PLC cover ring: left {ringNames[^1]}.stateRprtCmd_out " +
+                                $"OPEN (crosses to BX1 TopCoverSenosr) and {processNames[0]}" +
+                                ".stateRptCmdAdptr_in OPEN (arrives from BX1 CoverPnp_Gripper) — EAE bridges via syslay");
                         for (int i = 0; i < processNames.Count - 1; i++)
                             adapterWires.Add(new Wire($"{processNames[i]}.stateRptCmdAdptr_out",
                                 $"{processNames[i + 1]}.stateRptCmdAdptr_in"));
@@ -485,8 +535,17 @@ namespace CodeGen.Devices.Core
                     }
                     else if (ringNames.Count > 1)
                     {
-                        adapterWires.Add(new Wire($"{ringNames[^1]}.stateRprtCmd_out",
-                            $"{ringNames[0]}.stateRprtCmd_in"));
+                        // BX1: self-close UNLESS the cross-PLC cover ring is active, in
+                        // which case the chain is OPEN (last→first omitted) — the two ends
+                        // join the M580 ring via the syslay cross-hops EAE bridges.
+                        if (!openBx1Boundary)
+                            adapterWires.Add(new Wire($"{ringNames[^1]}.stateRprtCmd_out",
+                                $"{ringNames[0]}.stateRprtCmd_in"));
+                        else
+                            report.Missing.Add(
+                                $"[{tag}] cross-PLC cover ring: left {ringNames[^1]}.stateRprtCmd_out " +
+                                $"OPEN (crosses to M580 Assembly_Station) and {ringNames[0]}" +
+                                ".stateRprtCmd_in OPEN (arrives from M580 Clamp) — EAE bridges via syslay");
                     }
                 }
 
@@ -556,6 +615,39 @@ namespace CodeGen.Devices.Core
         /// dangling wires that fail port validation.</summary>
         private static bool Present(string? name, Dictionary<string, XElement> byName)
             => !string.IsNullOrEmpty(name) && byName.ContainsKey(name);
+
+        /// <summary>
+        /// True when the active generated syslay actually carries the M580→BX1
+        /// cross-PLC cover-ring hop (Clamp.stateRprtCmd_out → TopCoverSenosr
+        /// .stateRprtCmd_in). This is the single source of truth that keeps the
+        /// per-resource sysres ring opening EXACTLY when SystemLayoutInjector
+        /// spliced the covers in — so the boundary adapter sockets are never both
+        /// closed locally AND bridged (which would double-drive them), nor left
+        /// dangling on both sides. Returns false (→ keep the local ring CLOSED,
+        /// i.e. today's working two-ring behaviour) when the flag is off, the
+        /// syslay is missing/unreadable, or the hop is absent.
+        /// </summary>
+        private static bool CrossPlcCoverRingActive(MapperConfig cfg)
+        {
+            if (cfg == null || !MapperConfig.ExtendStateRingAcrossBx1) return false;
+            try
+            {
+                var path = cfg.ActiveSyslayPath;
+                if (string.IsNullOrEmpty(path) || !File.Exists(path)) return false;
+                var doc = XDocument.Load(path);
+                var dns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
+                return doc.Descendants(dns + "Connection").Any(c =>
+                    string.Equals((string?)c.Attribute("Source"),
+                        "Clamp.stateRprtCmd_out", StringComparison.Ordinal) &&
+                    string.Equals((string?)c.Attribute("Destination"),
+                        "TopCoverSenosr.stateRprtCmd_in", StringComparison.Ordinal));
+            }
+            catch
+            {
+                // Any read/parse failure → safest is to keep the ring CLOSED locally.
+                return false;
+            }
+        }
 
         // Canonical canvas layout — applied to BOTH the sysres
         // (ApplyCanonicalLayout in Emit) and the deployed syslay
