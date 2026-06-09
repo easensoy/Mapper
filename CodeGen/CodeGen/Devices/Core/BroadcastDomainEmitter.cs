@@ -136,10 +136,29 @@ namespace CodeGen.Devices.Core
                 """;
                 File.WriteAllText(path, json);
                 result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, path));
+
+                // Register the new domain in TopologyManager.topologyproj. The
+                // reference registers its BroadcastDomain_* entries, and some EAE
+                // import paths only honour REGISTERED topology items — so the file
+                // alone may be ignored. Registration runs AFTER the M262 emitter's
+                // BroadcastDomain strip (EnsureReferencedDomains is the last topology
+                // step), so it persists. Best-effort: the file on disk is the
+                // primary fix regardless.
+                var topoProj = Path.Combine(topologyDir, "TopologyManager.topologyproj");
+                if (File.Exists(topoProj))
+                {
+                    try
+                    {
+                        CodeGen.Devices.M262.M262TopologyEmitter.RegisterInTopologyProj(
+                            topoProj, new[] { Path.GetFileName(path) });
+                    }
+                    catch { /* registration best-effort */ }
+                }
+
                 result.Warnings.Add(
-                    $"Created missing BroadcastDomain '{name}' (uuid {uuid}) — an Equipment " +
-                    $"referenced it but no file existed (dangling domain → topology import failure). " +
-                    $"Pinned to 192.168.1.0/24.");
+                    $"Created + registered missing BroadcastDomain '{name}' (uuid {uuid}) — an " +
+                    $"Equipment referenced it but no file declared it (dangling domain → topology " +
+                    $"import failure). Pinned to 192.168.1.0/24.");
             }
             return result;
         }
