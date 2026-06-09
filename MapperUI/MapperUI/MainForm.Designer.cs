@@ -17,6 +17,7 @@ namespace MapperUI
             this.menuStrip = new System.Windows.Forms.MenuStrip();
             this.fileToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.dataToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.menuItemStateTransitionTable = new System.Windows.Forms.ToolStripMenuItem();
             this.buildToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.menuItemDebugConsole = new System.Windows.Forms.ToolStripMenuItem();
             this.lblVueOneModel = new System.Windows.Forms.Label();
@@ -89,6 +90,10 @@ namespace MapperUI
             this.menuStrip.Size = new System.Drawing.Size(1400, 24);
             this.fileToolStripMenuItem.Text = "File";
             this.dataToolStripMenuItem.Text = "Data";
+            this.dataToolStripMenuItem.DropDownItems.Add(this.menuItemStateTransitionTable);
+            this.menuItemStateTransitionTable.Text = "State-Transition Table";
+            this.menuItemStateTransitionTable.Enabled = false;
+            this.menuItemStateTransitionTable.Click += new System.EventHandler(this.menuItemStateTransitionTable_Click);
             this.buildToolStripMenuItem.Text = "Build";
             this.buildToolStripMenuItem.DropDownItems.Add(this.menuItemDebugConsole);
             this.menuItemDebugConsole.Text = "Debug Console";
@@ -396,6 +401,7 @@ namespace MapperUI
         private System.Windows.Forms.MenuStrip menuStrip;
         private System.Windows.Forms.ToolStripMenuItem fileToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem dataToolStripMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem menuItemStateTransitionTable;
         private System.Windows.Forms.ToolStripMenuItem buildToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem menuItemDebugConsole;
         private System.Windows.Forms.Label lblVueOneModel;
