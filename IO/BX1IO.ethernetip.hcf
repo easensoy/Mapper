@@ -1,0 +1,194 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<DeviceHwConfigurationItems xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <DeviceHwConfigurationItem ResourceId="78E9CD3D27851B64">
+    <ConfigurationBaseItem>
+      <Name>EIPSCANNER2</Name>
+      <CanCopy>false</CanCopy>
+      <CanExport>false</CanExport>
+      <CanAddChildren>false</CanAddChildren>
+      <CanResetProperties>false</CanResetProperties>
+      <ID>270AFDB7F209BFE8</ID>
+      <Type>
+        <Name>EIPSCANNER2</Name>
+        <Namespace>Standard.IoEtherNetIP</Namespace>
+      </Type>
+      <ItemProperties>
+        <ItemProperty>
+          <Name>busid</Name>
+          <Value xsi:type="xsd:string">EIPSCANNER2</Value>
+          <HWParameters>
+            <string>BUS_ID</string>
+          </HWParameters>
+        </ItemProperty>
+        <ItemProperty>
+          <Name>protocol</Name>
+          <Value xsi:type="xsd:string">CIP</Value>
+        </ItemProperty>
+        <ItemProperty>
+          <Name>buscycletime</Name>
+          <Value xsi:type="xsd:string">T#80ms</Value>
+          <HWParameters>
+            <string>busCycleTime</string>
+          </HWParameters>
+        </ItemProperty>
+        <ItemProperty>
+          <Name>buscycletolerance</Name>
+          <Value xsi:type="xsd:string">30</Value>
+          <HWParameters>
+            <string>busCycleTolerance</string>
+          </HWParameters>
+        </ItemProperty>
+        <ItemProperty>
+          <Name>buscycleactionwhenmissed</Name>
+          <Value xsi:type="xsd:string">1</Value>
+          <HWParameters>
+            <string>busCycleActionWhenMissed</string>
+          </HWParameters>
+        </ItemProperty>
+        <ItemProperty>
+          <Name>enableSymlinkOC</Name>
+          <Value xsi:type="xsd:string">FALSE</Value>
+          <HWParameters>
+            <string>enableSymlinkOC</string>
+          </HWParameters>
+        </ItemProperty>
+        <ItemProperty>
+          <Name>connectinfo.mastertype</Name>
+          <Value xsi:type="xsd:string">Master</Value>
+        </ItemProperty>
+        <ItemProperty>
+          <Name>connectinfo.transportprotocol</Name>
+          <Value xsi:type="xsd:string">UDP</Value>
+        </ItemProperty>
+        <ItemProperty>
+          <Name>connectinfo.ipaddress</Name>
+          <Value xsi:type="xsd:string">192.168.1.151</Value>
+        </ItemProperty>
+        <ItemProperty>
+          <Name>healths.objectid</Name>
+          <Value xsi:type="xsd:unsignedInt">2048</Value>
+        </ItemProperty>
+        <ItemProperty>
+          <Name>healths.MemoryRequested</Name>
+          <Value xsi:type="xsd:unsignedInt">32</Value>
+        </ItemProperty>
+        <ItemProperty>
+          <Name>healths.ioevent</Name>
+          <Value xsi:type="xsd:string">cyclic</Value>
+        </ItemProperty>
+        <ItemProperty>
+          <Name>controls.objectid</Name>
+          <Value xsi:type="xsd:unsignedInt">2049</Value>
+        </ItemProperty>
+        <ItemProperty>
+          <Name>controls.MemoryRequested</Name>
+          <Value xsi:type="xsd:unsignedInt">64</Value>
+        </ItemProperty>
+        <ItemProperty>
+          <Name>controls.ioevent</Name>
+          <Value xsi:type="xsd:string">cyclic</Value>
+        </ItemProperty>
+        <ItemProperty>
+          <Name>logging.enabled</Name>
+          <Value xsi:type="xsd:boolean">false</Value>
+        </ItemProperty>
+        <ItemProperty>
+          <Name>logging.filename</Name>
+          <Value xsi:type="xsd:string">CIP.log</Value>
+        </ItemProperty>
+        <ItemProperty>
+          <Name>eipbusmaster</Name>
+          <Value xsi:type="xsd:boolean">true</Value>
+        </ItemProperty>
+      </ItemProperties>
+      <ParameterValues>
+        <ParameterValue Name="autoStart" Value="FALSE" Comment="If TRUE the initial event is taken from an E_RESTART block; if FALSE the function block can be initialized using an event chain with name HW_INIT" />
+        <ParameterValue Name="BUS_ID" Value="'EIPSCANNER2'" Comment="Uniquely identifies a bus master" />
+        <ParameterValue Name="enableSymlinkOC" Value="FALSE" Comment="If TRUE, Symlink variables are relearnt during OnlineChange" />
+        <ParameterValue Name="phase" Value="T#25ms" Comment="Delay before starting the bus events at application start to avoid same phase. Please apply a different phase for each bus master to avoid having all events processed in the same time phase." />
+        <ParameterValue Name="busCycleTime" Value="T#80ms" Comment="Period at which the bus is scheduled (RX/TX)" />
+        <ParameterValue Name="busCycleTolerance" Value="30" Comment="Tolerance expressed as percentage of the bus cycle time. We consider a missed cycle if elapsed time since previous cycle &gt; (bus cycle time + tolerance) or &lt; (bus cycle time - tolerance)." />
+        <ParameterValue Name="busCycleActionWhenMissed" Value="1" Comment="Action to trigger on missed bus cycle. INFO to log warning with lower impact on performances (indicates how many bus cycle(s) were missed) ; DEBUG to log detailed warning with higher impact on performance (indicates exact drift for each missed cycle) ; ERROR_HALT to log an error and move to Error Halt state" />
+      </ParameterValues>
+      <MasterConfigFileName>${ProjectDir}\${SystemName}\RuntimeData\${DeviceName}\boot\${busid}.xml</MasterConfigFileName>
+      <Items>
+        <ConfigurationBaseItem>
+          <Name>EtherNetIPDevice_1</Name>
+          <CanDelete>false</CanDelete>
+          <CanCopy>false</CanCopy>
+          <CanResetProperties>false</CanResetProperties>
+          <ID>BDD2721C98C6A6CE</ID>
+          <Type>
+            <Name>TM3BC_Ethe_yYhtt9jWKUOJs</Name>
+            <Namespace>Main</Namespace>
+          </Type>
+          <ItemProperties>
+            <ItemProperty>
+              <Name>guid</Name>
+              <Value xsi:type="xsd:string">49d2ea8e-3a4f-4ead-add4-ec4ba00d5239</Value>
+            </ItemProperty>
+            <ItemProperty>
+              <Name>connectinfo.devicenumber</Name>
+              <Value xsi:type="xsd:unsignedShort">513</Value>
+            </ItemProperty>
+            <ItemProperty>
+              <Name>connectinfo.ipaddress</Name>
+              <Value xsi:type="xsd:string">192.168.1.210</Value>
+            </ItemProperty>
+            <ItemProperty>
+              <Name>connectinfo.RIO</Name>
+              <Value xsi:type="xsd:string">FALSE</Value>
+              <HWParameters>
+                <string>RIO</string>
+              </HWParameters>
+            </ItemProperty>
+            <ItemProperty>
+              <Name>input0.objectid</Name>
+              <Value xsi:type="xsd:string">1024</Value>
+              <HWParameters>
+                <string>InputObjectId0</string>
+              </HWParameters>
+            </ItemProperty>
+            <ItemProperty>
+              <Name>input0.MemoryRequested</Name>
+              <Value xsi:type="xsd:unsignedInt">6</Value>
+            </ItemProperty>
+            <ItemProperty>
+              <Name>input0.ioevent</Name>
+              <Value xsi:type="xsd:string">cyclic</Value>
+            </ItemProperty>
+            <ItemProperty>
+              <Name>output0.objectid</Name>
+              <Value xsi:type="xsd:string">1025</Value>
+              <HWParameters>
+                <string>OutputObjectId0</string>
+              </HWParameters>
+            </ItemProperty>
+            <ItemProperty>
+              <Name>output0.MemoryRequested</Name>
+              <Value xsi:type="xsd:unsignedInt">2</Value>
+            </ItemProperty>
+            <ItemProperty>
+              <Name>output0.ioevent</Name>
+              <Value xsi:type="xsd:string">requestwrite</Value>
+            </ItemProperty>
+          </ItemProperties>
+          <ParameterValues>
+            <ParameterValue Name="SLAVE_BUS_ID" Value="'EtherNetIPDevice_1'" />
+            <ParameterValue Name="RIO" Value="FALSE" />
+            <ParameterValue Name="InputObjectId0" Value="1024" Comment="Object ID of Input connection 0" />
+            <ParameterValue Name="OutputObjectId0" Value="1025" Comment="Object ID of Output connection 0" />
+            <ParameterValue Name="IO_Modules_Status" Value="" />
+            <ParameterValue Name="Module_1_TM3DI16_G_Input_IW0" Value="78E9CD3D27851B64.F6C04A4BA6FA8593.EIP_Input_Word_1" />
+            <ParameterValue Name="Module_2_TM3DQ16T_G_Output_QW" Value="78E9CD3D27851B64.F6C04A4BA6FA8593.EIP_Output_Word_1" />
+          </ParameterValues>
+          <PreviousItem>
+            <Name>EIPSCANNER2</Name>
+            <PortName>BUSOUT</PortName>
+          </PreviousItem>
+          <Items />
+        </ConfigurationBaseItem>
+      </Items>
+    </ConfigurationBaseItem>
+  </DeviceHwConfigurationItem>
+</DeviceHwConfigurationItems>
