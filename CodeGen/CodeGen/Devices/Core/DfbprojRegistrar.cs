@@ -61,6 +61,88 @@ namespace CodeGen.Devices.Core
             return a;
         }
 
+        /// <summary>
+        /// Registers a generated <i>hardware device</i> CAT type folder — e.g. the
+        /// EtherNet/IP coupler type <c>TM3BC_Ethe_yYhtt9jWKUOJs</c> that the BX1
+        /// <c>.hcf</c> scanner (EIPSCANNER2) instantiates — using the EXACT shape the
+        /// reference project uses:
+        /// <code>
+        ///   &lt;Compile Include="&lt;t&gt;\&lt;t&gt;.fbt"&gt;&lt;IEC61499Type&gt;CAT&lt;/IEC61499Type&gt;&lt;SubType&gt;Hardware&lt;/SubType&gt;&lt;/Compile&gt;
+        ///   &lt;Compile Include="&lt;t&gt;\&lt;t&gt;_HMI.fbt"&gt;&lt;DependentUpon&gt;&lt;t&gt;.fbt&lt;/DependentUpon&gt;&lt;IEC61499Type&gt;CAT&lt;/IEC61499Type&gt;&lt;HMI&gt;..\HMI\&lt;t&gt;\&lt;t&gt;_sDefault.cnv.cs&lt;/HMI&gt;&lt;/Compile&gt;
+        ///   &lt;None Include="&lt;t&gt;\&lt;t&gt;.cfg"&gt;&lt;DependentUpon&gt;&lt;t&gt;.fbt&lt;/DependentUpon&gt;&lt;IEC61499Type&gt;CAT&lt;/IEC61499Type&gt;&lt;/None&gt;
+        ///   &lt;Folder Include="&lt;t&gt;" /&gt;
+        /// </code>
+        /// Unlike <see cref="RegisterCat"/> this does NOT register the actuator-CAT
+        /// siblings (<c>_CAT.offline.xml</c> / <c>_CAT.opcua.xml</c> / <c>_HMI.*.xml</c>)
+        /// — a generated hardware device type has none of those, and registering missing
+        /// files makes EAE's Solution Integrity flag them as Missing Project Files. The
+        /// compiler-generated gate types it pulls in (<c>AND_*</c>, <c>NOT_*</c>,
+        /// <c>DS_SELECTX_*</c> in namespace Main) are produced by EAE at compile into
+        /// SnapshotCompiles, not shipped. Idempotent.
+        /// </summary>
+        public static int RegisterHardwareDeviceCat(string dfbprojPath, string typeName)
+        {
+            var hmi = typeName + "_HMI";
+            var xml = XDocument.Load(dfbprojPath);
+            var ns = xml.Root!.GetDefaultNamespace();
+            var (cg, ng) = Groups(xml, ns);
+            int a = 0;
+
+            Add(cg, ns, "Compile", $@"{typeName}\{typeName}.fbt", ref a,
+                new XElement(ns + "IEC61499Type", "CAT"),
+                new XElement(ns + "SubType", "Hardware"));
+
+            Add(cg, ns, "Compile", $@"{typeName}\{hmi}.fbt", ref a,
+                new XElement(ns + "DependentUpon", $"{typeName}.fbt"),
+                new XElement(ns + "IEC61499Type", "CAT"),
+                new XElement(ns + "HMI", $@"..\HMI\{typeName}\{typeName}_sDefault.cnv.cs"));
+
+            Add(ng, ns, "None", $@"{typeName}\{typeName}.cfg", ref a,
+                new XElement(ns + "DependentUpon", $"{typeName}.fbt"),
+                new XElement(ns + "IEC61499Type", "CAT"));
+
+            var fg = xml.Descendants(ns + "ItemGroup").FirstOrDefault(g => g.Elements(ns + "Folder").Any())
+                     ?? AddGroup(xml, ns);
+            Add(fg, ns, "Folder", typeName, ref a);
+
+            if (a > 0) xml.Save(dfbprojPath);
+            return a;
+        }
+
+        /// <summary>
+        /// Removes every <c>&lt;Compile&gt;</c>/<c>&lt;None&gt;</c>/<c>&lt;Folder&gt;</c>
+        /// entry registered by <see cref="RegisterHardwareDeviceCat"/> for the named type
+        /// — used when the EtherNet/IP device is held out (cfg.EmitBx1EtherNetIpDevice
+        /// false) so the type folder + its registrations are swept together and EAE does
+        /// not list orphaned project files. Idempotent. Returns the number removed.
+        /// </summary>
+        public static int UnregisterHardwareDeviceCat(string dfbprojPath, string typeName)
+        {
+            if (!File.Exists(dfbprojPath)) return 0;
+            var xml = XDocument.Load(dfbprojPath, LoadOptions.PreserveWhitespace);
+            var ns = xml.Root!.GetDefaultNamespace();
+            int removed = 0;
+            var prefix = typeName + @"\";
+            foreach (var name in new[] { "Compile", "None", "Folder" })
+            {
+                foreach (var el in xml.Descendants(ns + name).ToList())
+                {
+                    var inc = (string?)el.Attribute("Include");
+                    if (string.IsNullOrEmpty(inc)) continue;
+                    bool match = name == "Folder"
+                        ? string.Equals(inc, typeName, StringComparison.OrdinalIgnoreCase)
+                        : inc.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+                    if (!match) continue;
+                    var nextWs = el.NextNode as XText;
+                    el.Remove();
+                    if (nextWs != null) nextWs.Remove();
+                    removed++;
+                }
+            }
+            if (removed > 0) xml.Save(dfbprojPath);
+            return removed;
+        }
+
         public static int RegisterBasicFb(string dfbprojPath, string fileName, string type = "Basic")
         {
             var xml = XDocument.Load(dfbprojPath);
@@ -161,15 +243,53 @@ namespace CodeGen.Devices.Core
                 new XElement(ns + "DependentUpon", SystemFileName),
                 new XElement(ns + "IEC61499Type", "SystemDevice"));
 
-            // Sibling files (under sysdev's per-device folder) go under <None>.
+            // Sibling files (under sysdev's per-device folder). MOST go under <None>.
+            // The BX1 SoftPAC (the only PLC with an EtherNet/IP scanner — sysdev id
+            // ...0004 by Mapper convention) needs its .sysres + .hcf registered the way
+            // the working reference (SMC_Rig_Expo_withClamp) does, or EAE carries the
+            // files but never COMPILES the resource's HWConfig → the Deploy export emits
+            // an EMPTY EtherNet/IP scanner (the split-brain that kept the cover I/O dead):
+            //   - .sysres : <Compile IEC61499Type=SystemResource DependentUpon=sysdev>
+            //   - .hcf    : BOTH <None SystemDevice> AND <Content SystemDevice>
+            // M262/M580 keep the legacy <None SystemDevice> for the .sysres + no .hcf
+            // <Content> — their working mechanism is left UNTOUCHED (user directive
+            // 2026-06-09: "don't touch M262/M580"); they have no EtherNet/IP scanner so
+            // the SystemResource registration is irrelevant to them anyway. NOTE: this
+            // registration is NECESSARY but not sufficient for a populated scanner — the
+            // HwConfiguration TM3BC device model (Station2DeviceEmitter
+            // .DeployBx1HwConfigScannerModel) is what EAE actually compiles the scanner from.
+            bool isBx1Resource = sysdevFileName.StartsWith(
+                "00000000-0000-0000-0000-000000000004", StringComparison.OrdinalIgnoreCase);
             if (Directory.Exists(sysdevFolder))
             {
                 foreach (var sibling in Directory.EnumerateFiles(sysdevFolder, "*.*", SearchOption.TopDirectoryOnly))
                 {
                     var rel = Path.GetRelativePath(iec, sibling).Replace('/', '\\');
+                    var ext = Path.GetExtension(sibling).ToLowerInvariant();
+
+                    if (ext == ".sysres" && isBx1Resource)
+                    {
+                        // Migrate any stale <None ...> registration of this .sysres (older
+                        // Mapper versions emitted it as <None SystemDevice>) to the correct
+                        // <Compile SystemResource> — otherwise both would coexist as a dup.
+                        foreach (var stale in xml.Root!.Descendants(ns + "None")
+                                     .Where(e => string.Equals((string?)e.Attribute("Include"), rel,
+                                         StringComparison.OrdinalIgnoreCase)).ToList())
+                        { stale.Remove(); added++; }
+                        Add(cg, ns, "Compile", rel, ref added,
+                            new XElement(ns + "IEC61499Type", "SystemResource"),
+                            new XElement(ns + "DependentUpon", sysdevFileName));
+                        continue;
+                    }
+
                     Add(ng, ns, "None", rel, ref added,
                         new XElement(ns + "IEC61499Type", "SystemDevice"),
                         new XElement(ns + "DependentUpon", sysdevFileName));
+
+                    if (ext == ".hcf" && isBx1Resource)
+                        Add(cg, ns, "Content", rel, ref added,
+                            new XElement(ns + "IEC61499Type", "SystemDevice"),
+                            new XElement(ns + "DependentUpon", sysdevFileName));
                 }
             }
 
@@ -246,9 +366,26 @@ namespace CodeGen.Devices.Core
                 var include = (string?)el.Attribute("Include");
                 if (string.IsNullOrEmpty(include)) continue;
                 if (!include.Contains("System\\", StringComparison.OrdinalIgnoreCase)) continue;
-                var m = stemRx.Match(include);
-                if (!m.Success) continue;
-                var stem = m.Groups[1].Value;
+
+                string? stem = null;
+                if (include.EndsWith(".sysres", StringComparison.OrdinalIgnoreCase))
+                {
+                    // A .sysres FILE entry whose stem has no matching file on disk
+                    // — e.g. a prior-deploy BX1 resource id (C9F2A4B7E1D3F5A8) left
+                    // behind after the id was realigned to the .hcf's ResourceId
+                    // (78E9CD3D27851B64). The directory-stem regex below MISSES this
+                    // because here the stem is a filename, not a folder between
+                    // backslashes — EAE then lists it as a Missing Project File and
+                    // refuses to import the topology.
+                    stem = Path.GetFileNameWithoutExtension(include);
+                }
+                else
+                {
+                    // A sister-folder reference (…\<stem>\opcua.xml etc.).
+                    var m = stemRx.Match(include);
+                    if (m.Success) stem = m.Groups[1].Value;
+                }
+                if (string.IsNullOrEmpty(stem)) continue;
                 if (liveStems.Contains(stem)) continue;
                 // Stale — remove the element (and its trailing whitespace so
                 // we do not leave blank lines).
