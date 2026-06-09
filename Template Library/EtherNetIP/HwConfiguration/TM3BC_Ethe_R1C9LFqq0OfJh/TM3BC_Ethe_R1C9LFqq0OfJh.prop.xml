@@ -1,0 +1,22 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<ComplexProperty xmlns="http://www.nxtControl.com/DeviceProperties">
+	<!--device parameters -->
+  <Property Name="guid" Type="string" Description="Standard.IoEtherNetIP.guid.Description" Value="" DisplayName="Standard.IoEtherNetIP.guid" ReadOnly="true" Hidden="true" />
+  <ComplexProperty Name="connectinfo" DisplayName="Standard.IoEtherNetIP.connectinfo">
+    <Property Name="devicenumber" Description="Standard.IoEtherNetIP.connectinfo.devicenumber.Description" Value="0" Type="ushort" DisplayName="Standard.IoEtherNetIP.connectinfo.devicenumber" MinExclusive="0" MaxInclusive="255"  ReadOnly="true" />
+    <Property Name="ipaddress" Value="" Description="Standard.IoEtherNetIP.connectinfo.ipaddress.Description.Slave" DisplayName="Standard.IoEtherNetIP.connectinfo.ipaddress" TypeConverter="NxtControl.Automation.Engineering.IPAddressTypeConverter, EngineeringData"  ReadOnly="true" />
+    <Property Name="RIO" Type="bool" Description="RIO embeded" DisplayName="RIO" LinkedToHWParameters="RIO" Hidden="true" Value="false"  ReadOnly="true"/>
+  </ComplexProperty>
+	<!-- Connection 0-->
+	<ComplexProperty Name="input0" DisplayName="{$res:Standard.IoEtherNetIP.connection} 0 {$res:Standard.IoEtherNetIP.inputs}" >
+	 	<Property Name="objectid" Type="uint" Description="Standard.IoEtherNetIP.objectid.Description.Inputs" Value="0" DisplayName="Standard.IoEtherNetIP.objectid" LinkedToHWParameters="InputObjectId0" ReadOnly="true" Hidden="false"/>
+		<Property Name="MemoryRequested" Type="uint" Description="Standard.IoEtherNetIP.memoryRequested.Description" Value="6" DisplayName="Standard.IoEtherNetIP.memoryRequested" ReadOnly="true"/>
+	 	<Property Name="ioevent" Type="string" Items="cyclic|requestread" Description="Standard.IoEtherNetIP.ioevent.Description" Value="cyclic" DisplayName="Standard.IoEtherNetIP.ioevent" ReadOnly="true" Hidden="false"/>
+	</ComplexProperty>
+	<ComplexProperty Name="output0" DisplayName="{$res:Standard.IoEtherNetIP.connection} 0 {$res:Standard.IoEtherNetIP.outputs}">
+	 	<Property Name="objectid" Type="uint" Description="Standard.IoEtherNetIP.objectid.Description.Outputs" Value="0" DisplayName="Standard.IoEtherNetIP.objectid" LinkedToHWParameters="OutputObjectId0" ReadOnly="true" Hidden="false"/>
+		<Property Name="MemoryRequested" Type="uint" Description="Standard.IoEtherNetIP.memoryRequested.Description" Value="2" DisplayName="Standard.IoEtherNetIP.memoryRequested" ReadOnly="true" />	
+		<Property Name="ioevent" Type="string" Items="cyclic|requestwrite" Description="Standard.IoEtherNetIP.ioevent.Description" Value="requestwrite" DisplayName="Standard.IoEtherNetIP.ioevent" ReadOnly="true" Hidden="false" />
+	</ComplexProperty>
+
+</ComplexProperty>
