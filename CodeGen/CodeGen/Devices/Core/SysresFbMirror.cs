@@ -161,6 +161,35 @@ namespace CodeGen.Devices.Core
                 loaded: true,
                 parameters: new[] { ("Prio", "10"), ("Delay", "T#1000ms") });
 
+            // DEDUP (2026-06-10): the M262 component instance ids flip-flop between
+            // regens (a sysres FB ID is ComputeMirrorId(syslayId) = the syslay id with
+            // its top hex bit flipped, e.g. 60AE…↔E0AE…). When the syslay id flips, the
+            // mirror's add/update loop below — whose existingByName index holds only ONE
+            // element per name — updates one copy but leaves the previous-id copy behind,
+            // so the same component ends up declared TWICE (ID/Mapping swapped). EAE then
+            // sees duplicate instances and ALL M262 I/O goes red (the .hcf binds just one
+            // {res}.{id}.{pin}). Fix: drop any same-named sysres FB whose Mapping does NOT
+            // point at a CURRENT syslay FB id; the loop then keeps exactly one per name,
+            // and HcfPatchService re-aligns the .hcf to the survivor. Name-scoped to syslay
+            // components, so FB1/FB2 and other non-mirrored FBs are never touched.
+            var currentSyslayIds = new HashSet<string>(
+                syslayFbs.Where(f => !string.IsNullOrEmpty(f.Id)).Select(f => f.Id),
+                StringComparer.Ordinal);
+            var syslayNames = new HashSet<string>(
+                syslayFbs.Select(f => f.Name).Where(n => !string.IsNullOrEmpty(n)),
+                StringComparer.Ordinal);
+            int deduped = 0;
+            foreach (var fb in network.Elements(ns + "FB").ToList())
+            {
+                var nm = (string?)fb.Attribute("Name") ?? string.Empty;
+                var map = (string?)fb.Attribute("Mapping") ?? string.Empty;
+                if (syslayNames.Contains(nm) && !currentSyslayIds.Contains(map))
+                {
+                    fb.Remove();
+                    deduped++;
+                }
+            }
+
             var existingMappings = new HashSet<string>(
                 network.Elements(ns + "FB")
                     .Select(e => (string?)e.Attribute("Mapping") ?? string.Empty)
@@ -190,6 +219,7 @@ namespace CodeGen.Devices.Core
                 "Station_CAT",
                 "Process1_Generic",
                 "CaSAdptrTerminator",
+                "RingCrossGate",
                 "Robot_Task_CAT",
                 // MQTT_CONNECTION — the single shared event-buffer FB injected
                 // by SystemLayoutInjector when MqttPublishEnabled is true. Without
@@ -402,6 +432,77 @@ namespace CodeGen.Devices.Core
             return changed;
         }
 
+        public static int SyncMirroredFbParametersFromSyslay(string syslayPath, string sysresPath)
+        {
+            if (string.IsNullOrWhiteSpace(syslayPath) || !File.Exists(syslayPath)) return 0;
+            if (string.IsNullOrWhiteSpace(sysresPath) || !File.Exists(sysresPath)) return 0;
+
+            var doc = XDocument.Load(sysresPath);
+            var changed = SyncMirroredFbParametersFromSyslay(syslayPath, doc);
+            if (changed > 0) doc.Save(sysresPath);
+            return changed;
+        }
+
+        public static int SyncMirroredFbParametersFromSyslay(string syslayPath, XDocument sysresDoc)
+        {
+            if (string.IsNullOrWhiteSpace(syslayPath) || !File.Exists(syslayPath)) return 0;
+            var root = sysresDoc.Root;
+            if (root == null) return 0;
+
+            var sourceByName = ReadTopLevelFbsWithSystemModelFallback(syslayPath)
+                .Where(f => f.Parameters.Count > 0)
+                .ToDictionary(f => f.Name, StringComparer.Ordinal);
+            var sourceById = sourceByName.Values
+                .Where(f => !string.IsNullOrWhiteSpace(f.Id))
+                .ToDictionary(f => f.Id, StringComparer.Ordinal);
+            if (sourceByName.Count == 0) return 0;
+
+            XNamespace ns = root.GetDefaultNamespace().NamespaceName.Length > 0
+                ? root.GetDefaultNamespace()
+                : LibElNs;
+
+            var network = root.Elements().FirstOrDefault(e => e.Name.LocalName == "FBNetwork");
+            if (network == null) return 0;
+
+            int changed = 0;
+            foreach (var fb in network.Elements().Where(e => e.Name.LocalName == "FB"))
+            {
+                var name = (string?)fb.Attribute("Name") ?? string.Empty;
+                var mapping = (string?)fb.Attribute("Mapping") ?? string.Empty;
+
+                if (!sourceByName.TryGetValue(name, out var source) &&
+                    !sourceById.TryGetValue(mapping, out source))
+                    continue;
+
+                var existing = fb.Elements()
+                    .Where(e => e.Name.LocalName == "Parameter")
+                    .Select(p => (
+                        Name: (string?)p.Attribute("Name") ?? string.Empty,
+                        Value: (string?)p.Attribute("Value") ?? string.Empty))
+                    .ToArray();
+
+                var expected = source.Parameters
+                    .Select(p => (p.Name, p.Value))
+                    .ToArray();
+
+                if (existing.SequenceEqual(expected))
+                    continue;
+
+                fb.Elements()
+                    .Where(e => e.Name.LocalName == "Parameter")
+                    .Remove();
+                foreach (var p in source.Parameters)
+                {
+                    fb.Add(new XElement(ns + "Parameter",
+                        new XAttribute("Name", p.Name),
+                        new XAttribute("Value", p.Value)));
+                }
+                changed++;
+            }
+
+            return changed;
+        }
+
         static void EnsureSystemFb(XElement network, XNamespace ns,
             string id, string name, string type, string nsAttr,
             string? mapping, int x, int y, bool loaded,
@@ -468,6 +569,11 @@ namespace CodeGen.Devices.Core
             // (Bridge currently removed; kept for when/if it's re-enabled.)
             if (fbName.StartsWith("MqttPub_", StringComparison.Ordinal) ||
                 fbName.StartsWith("MqttFmt_", StringComparison.Ordinal))
+                return PlcAssignment.BX1;
+
+            if (string.Equals(fbName, "M580_CoverRingGate", StringComparison.Ordinal))
+                return PlcAssignment.M580;
+            if (string.Equals(fbName, "BX1_CoverRingGate", StringComparison.Ordinal))
                 return PlcAssignment.BX1;
 
             // Legacy structural-FB name variant not in ComponentRegistry.
