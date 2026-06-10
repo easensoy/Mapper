@@ -93,7 +93,7 @@ namespace CodeGen.Configuration
         // its twin is known to omit a retract it genuinely needs.
         public static readonly string[] AutoRetractProcesses = new[] { "Feed_Station" };
 
-        // SEVEN_STATE HOME PREAMBLE (2026-06-04): ON for the rig-facing Assembly
+        // SEVEN_STATE HOME PREAMBLE (2026-06-04): OFF for the rig-facing Assembly
         // recipe. Bearing_PnP is a centre-home swivel that can boot parked at Pick
         // or Place after a manual jog / interrupted cycle. The generated process
         // must therefore command the swivel home before issuing Pick, so the
@@ -102,7 +102,10 @@ namespace CodeGen.Configuration
         // AtHomeInit=0" before the cycle. It is an operational safe-start step added
         // by the mapper, not a Control.xml process state. The rest of the Assembly
         // recipe is still derived from the Control.xml transition chain.
-        public static bool EnableSevenStateHomePreamble = true;
+        // Keep FALSE on the rig: if Bearing_PnP is already at home, CMD Home
+        // is a no-op and no fresh state report is produced, leaving the
+        // Process engine stuck at step 0 before the first real Pick command.
+        public static bool EnableSevenStateHomePreamble = false;
 
         // CROSS-PLC COVER RING (2026-06-08, task #69): extend the single stateRprtCmd
         // report/command ring across the M580↔BX1 device boundary so the M580
@@ -139,9 +142,58 @@ namespace CodeGen.Configuration
         // -> "M580 runs nothing". This is the cornerstone failure flagged when the ring
         // extension was built. FALSE restores the SEPARATE per-PLC rings (M580 closes
         // Clamp->Assembly_Station->BearingSensor LOCALLY) and drops the cover CMD/WAIT
-        // rows, so M580 bearing/shaft runs STANDALONE again. Re-enable only once a
-        // proven cross-PLC transport (PUBLISH/SUBSCRIBE SIFB, not a raw adapter) exists.
-        public static bool ExtendStateRingAcrossBx1 = false;
+        // rows, so M580 bearing/shaft runs STANDALONE again.
+        // 2026-06-10 STAGE 4 — RE-ENABLED (TRUE). This is now the SIMPLE cross-PLC
+        // mechanism the user asked for: NO custom FB. The BX1 cover stateRprtCmd ring is
+        // spliced into the M580 Assembly ring via two cross-DEVICE adapter hops drawn in
+        // the syslay (Clamp.out→TopCoverSenosr.in, CoverPnp_Gripper.out→Assembly.in); EAE
+        // compiles those into its CrossComm transport at Build (the SAME mechanism the SE
+        // reference uses on this exact M580↔BX1 pair — proven to bridge cross-device
+        // adapters). The reason it failed on 06-08 was simply that BX1 WAS NOT RUNNING;
+        // now BX1 runs (covers cycled physically on the rig today), so both PLCs deployed
+        // = the ring circulates. Gates: the adapter hops (BuildStation2Wiring /
+        // BuildBx1Wiring crossPlcCoverRing), the sysres boundary-open
+        // (ResourceWireEmitter.CrossPlcCoverRingActive) AND the Assembly recipe cover
+        // block all key off this flag. Pair with DeployBx1CoverEngine=FALSE (Cover_Station
+        // scaffold retires + is swept). FALSE reverts to the proven two-engine state in
+        // one rebuild. (The RingCrossGate-FB variant — FoldCoversIntoAssembly — is shelved:
+        // the user wants no extra FBs.) OPERATING RULE: deploy + login BOTH M580 and BX1.
+        // 2026-06-10 RE-ENABLED (TRUE) after a HEADLESS REPRO disproved the syslay-abort
+        // theory: running GenerateStation1TestSyslay with these exact Stage-4 flags on the
+        // real Demonstrator produces a FULL syslay — 31 FBs, NO Cover_Station, all M262
+        // (Feeder/Checker/Transfer/Ejector/Feed_Station) + M580 (Assembly/Bearing/Shaft/Clamp)
+        // + BX1 covers present, BOTH cross-hops drawn, Assembly recipe commanding all 9
+        // actuators incl coverpnp_vr/hr/gripper. So the earlier empty syslay was NOT this code
+        // — it was EAE's "Not Used Instances → Delete" (deletes the app instances) or a partial
+        // run. Generation is correct. (Deploy still needs a clean Build in EAE so the
+        // HwConfiguration recompiles BMXBUS/EIPSCANNER2 after a wipe.)
+        public static bool ExtendStateRingAcrossBx1 = true;
+
+        /// <summary>
+        /// Experimental cross-PLC cover fold-in. Disabled for the rig: the working
+        /// mechanism is the BX1-local Cover_Station engine and the M580 Assembly ring
+        /// must stay local so Bearing_PnP/shaft/clamp continue to run independently.
+        /// If this is ever re-enabled, it must be proven without changing the M580 ring.
+        /// Former Stage 4 intent was to fold the BX1 covers into the M580 Assembly_Station —
+        /// the twin's Assembly process natively defines the 8 cover steps
+        /// (Cover_PnP_GoDown_Pick … Cover_PnP_returned, before the clamp opens), so the
+        /// covers are commanded by Assembly's recipe like every other actuator. Gates,
+        /// as ONE unit: (a) a RingCrossGate node spliced into EACH locally-closed
+        /// stateRprtCmd ring (M580 Mode 0, BX1 Mode 1) + the cross-device TX→RX
+        /// event/data connections in the syslay, which EAE compiles into CrossComm
+        /// (nxtv3 UDP — the SE reference's proven mechanism on this exact PLC pair;
+        /// NO unified ring, NO SIFBs); (b) the 8-step cover CMD/WAIT block in the
+        /// Assembly recipe. Both rings stay locally closed, so M580 survives BX1
+        /// being offline (Assembly parks at the first cover WAIT instead of dying —
+        /// the exact failure mode that killed ExtendStateRingAcrossBx1).
+        /// Pair with DeployBx1CoverEngine=false (the Cover_Station scaffold retires;
+        /// its deployed instance is swept). FALSE reverts to the proven two-engine
+        /// state in one rebuild.
+        /// 2026-06-10 SHELVED (stays FALSE): the user wants NO extra FBs, so the cover
+        /// fold uses ExtendStateRingAcrossBx1's plain cross-device adapter ring instead of
+        /// the RingCrossGate FB. This flag + its RingCrossGate code path stay dormant.
+        /// </summary>
+        public static bool FoldCoversIntoAssembly = false; // shelved (no extra FBs) — see ExtendStateRingAcrossBx1
 
         /// <summary>
         /// Master gate for the LOCAL BX1 cover command engine (Cover_Station). When TRUE,
@@ -149,18 +201,71 @@ namespace CodeGen.Configuration
         /// sysres, spliced into the BX1 cover stateRprtCmd ring (the sysres ring auto-splices
         /// any Process FB it finds), and carries the cover pick/place recipe — so BX1 cycles
         /// its own covers with NO M580 dependency and NO cross-PLC ring. Independent of (and
-        /// mutually exclusive with) ExtendStateRingAcrossBx1, which stays FALSE because the
-        /// cross-PLC ring broke the M580 run. Entirely BX1-scoped, so it cannot disturb M580.
+        /// mutually exclusive with) ExtendStateRingAcrossBx1.
+        /// 2026-06-10 FALSE — STAGE 4: the Cover_Station scaffold retires (it proved the
+        /// BX1 cover chain end-to-end on the rig but is NOT in the twin). The covers are now
+        /// commanded by Assembly_Station over the cross-PLC adapter ring
+        /// (ExtendStateRingAcrossBx1=true). When FALSE, the already-deployed Cover_Station
+        /// instance is SWEPT from the BX1 sysres before wiring (Station2WireEmitter) — a
+        /// leftover would be re-discovered by the ring type-scan and fight Assembly's cover
+        /// commands. Flip back TRUE (with ExtendStateRingAcrossBx1=false) to restore the
+        /// proven BX1-local cover cycle exactly.
+        /// 2026-06-10 FALSE — STAGE 4 re-enabled: Cover_Station removed from BX1 (verified by
+        /// headless repro: no Cover_Station FB in the generated syslay), Assembly_Station now
+        /// commands the covers over the cross-PLC ring. The sweep clears the already-deployed
+        /// Cover_Station from the BX1 sysres on the next Test Runtime.
         /// </summary>
-        public static bool DeployBx1CoverEngine = true;
+        public static bool DeployBx1CoverEngine = false;
+
+        /// <summary>
+        /// STAGE 5 (2026-06-10): unpark Disassembly_Station. Default FALSE = today's proven
+        /// state (Disassembly is a parked single-END Process, Assembly opens the clamp at its
+        /// tail). When TRUE: (a) Disassembly gets a real recipe (ApplyDisassemblyRuntimeRecipe
+        /// — reverse of Assembly: covers off → shaft out → bearing out → UNCLAMP at the end,
+        /// the twin order, M580+BX1 only — Ejector/Robot are M262 and deferred to Stage 5b);
+        /// (b) Assembly's clamp-open tail is REMOVED (the twin keeps the clamp closed through
+        /// assembly AND disassembly; it opens only at Disassembly's Unclamping step) and
+        /// Assembly instead publishes a handshake sentinel (CMD state=7) so Disassembly can
+        /// WAIT on (Assembly process_id, 7); (c) Disassembly is unparked in the M580 wiring
+        /// (ResourceWireEmitter.BypassParkedM580Disassembly + the syslay init/station/ring).
+        /// The clamp-open MUST move with the unpark — gating both on this one flag keeps it
+        /// atomic (the clamp can never be left to never-open). FALSE reverts in one rebuild.
+        /// 2026-06-10 TRUE — Stage 5a enabled. Headless-verified on the real Demonstrator:
+        /// Disassembly recipe = 46 rows (covers→shaft→bearing→unclamp + WAIT(17,7) handshake),
+        /// Assembly tail = assembly_handshake_done sentinel (no clamp-open), and the M580 sysres
+        /// threads Disassembly INTO the ring (INIT-wired, ring_in/out, Assembly→Disassembly edge).
+        /// </summary>
+        public static bool UnparkDisassembly = true;
+
+        /// <summary>
+        /// Process-FB <c>process_id</c> slots — the SINGLE SOURCE OF TRUTH shared by
+        /// SystemLayoutInjector (which stamps each Process FB's <c>process_id</c> parameter)
+        /// and ProcessRecipeArrayGenerator (whose Disassembly handshake WAITs on Assembly's
+        /// id). They are fixed constants BY DESIGN, not registry-resolved: every Process FB's
+        /// id must sit ABOVE the component id space so it never collides with a sensor/actuator
+        /// id in the shared <c>state_table[20]</c> (ProcessRecipeArrayGenerator.ValidateProcessIdInvariant
+        /// throws on a collision). The Disassembly↔Assembly hand-off rides the ring as a
+        /// sentinel CMD whose message carries <c>src_id = </c><see cref="AssemblyProcessId"/>;
+        /// Disassembly's row-0 WAIT(<see cref="AssemblyProcessId"/>, 7) holds on exactly that.
+        /// Centralising the literal here is what makes the handshake non-brittle — change the
+        /// slot in ONE place and both the stamp and the WAIT move together.
+        /// </summary>
+        public const int FeedStationProcessId    = 10;
+        public const int AssemblyProcessId       = 17;
+        public const int DisassemblyProcessId    = 18;
+        public const int CoverStationProcessId   = 19;
 
         /// <summary>
         /// When TRUE, Cover_Station runs a MINIMAL proof-of-life recipe (CoverPNP_Vr
         /// work→home only — one actuator end-to-end, no cross-component waits that could
         /// stall on a missing sensor). Flip FALSE for the full 8-step cover pick/place
         /// sequence (vr down → grip → up → hr advance → vr down → release → up → hr return).
+        /// 2026-06-10: FALSE — the minimal Vr cycle ran end-to-end on the rig (valve moved,
+        /// physical atwork closed the WAIT, recipe completed), so the full sequence is live.
+        /// CoverPnp_Gripper runs timer-acknowledged (no home sensor bit exists on the TM3BC
+        /// input assembly — see the BuildActuatorParameters override).
         /// </summary>
-        public static bool Bx1CoverMinimalCycle = true;
+        public static bool Bx1CoverMinimalCycle = false;
 
         // TEST ISOLATION (2026-05-29, TEMPORARY): restrict ONE process's recipe to a
         // subset of actuators so a single mechanism can be exercised on the rig
@@ -200,8 +305,7 @@ namespace CodeGen.Configuration
         // allowlist the data-driven recipe keeps the clamp CMD/WAIT in its native
         // chain position (after the bearing+shaft assembly) instead of dropping it.
         // Clamp is M580 with real sensors (DI06=ClampAtWork, DI07=ClampAtHome).
-        public static readonly string[] RecipeTestActuatorAllowlist = new[]
-            { "bearing_pnp", "bearing_gripper", "clamp" };
+        public static readonly string[] RecipeTestActuatorAllowlist = Array.Empty<string>();
 
         // TEST ISOLATION (2026-06-04, TEMPORARY, bench): drop the centre-home swivel's
         // (Bearing_PnP) cross-component interlock rules so its turn-to-Place (AtWork1 2
@@ -399,6 +503,21 @@ namespace CodeGen.Configuration
         /// separate from any cross-PLC ring extension.
         /// </summary>
         public bool DeployBx1IoBroker { get; set; } = true;
+
+        /// <summary>
+        /// BX1 cover-I/O bridge placement. TRUE (default) = INTERNALIZED: the per-cover
+        /// sensor/coil symlink bridge + scan cycle live INSIDE the PLC_RW_BX1 composite
+        /// (Bx1IoBrokerInjector.EmbedCoverBridgeInComposite generates them from the cover↔bit
+        /// map at deploy time), so the generated BX1 sysres/syslay carries ONLY the single
+        /// <c>BX1_IO</c> instance — no BX1IO_Sense_*/BX1IO_Coil_*/BX1_IO_Cycle FBs.
+        /// FALSE = the proven EXTERNAL bridge: Bx1IoBrokerInjector injects the 6 symlink FBs
+        /// + E_DELAY into the resource (the path verified live at EIP_Output_Word=16#0004).
+        /// BX1-only — M262/M580 unaffected. The one EAE-runtime unknown the internalized path
+        /// rests on is whether a SYMLINKMULTIVAR with an ABSOLUTE cross-instance NAME
+        /// (BX1_RES.CoverPNP_Vr.OutputToWork) resolves from INSIDE a composite type; flip to
+        /// FALSE + clean-rebuild to restore the external path if it doesn't.
+        /// </summary>
+        public bool Bx1BridgeInsideComposite { get; set; } = true;
 
         /// <summary>
         /// M262 resource name written into the .sysres root and the .sysdev's
