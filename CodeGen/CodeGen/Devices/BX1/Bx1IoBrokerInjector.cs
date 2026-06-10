@@ -74,6 +74,222 @@ namespace CodeGen.Devices.BX1
                            Event = "CoverSensorEvent", CoilToHome = null,                   CoilToWork = "Cover_Gripper_Q" },
         };
 
+        // ── Internalized cover-I/O broker (cfg.Bx1BridgeInsideComposite) ──────────────────
+        // MINIMAL, data-driven. The whole design is these two ordered tables: index = VALUE
+        // index = NAME index = wiring order. Bit positions match the PLC_RW_BX1 WordToBits/
+        // BitsToWord core (fixed, verified vs the .fbt): IN bit0=Hr athome,1=Hr atwork,2=Vr
+        // athome,3=Vr atwork,5=gripper atwork; OUT bit0=Hr OutputToWork,1=Hr OutputToHome,
+        // 2=Vr OutputToWork,3=gripper OutputToWork.
+        static readonly (string Sym, int Bit)[] CoverSensors =
+        {
+            ("CoverPNP_Hr.athome", 0), ("CoverPNP_Hr.atwork", 1),
+            ("CoverPNP_Vr.athome", 2), ("CoverPNP_Vr.atwork", 3),
+            ("CoverPnp_Gripper.atwork", 5),     // gripper has no home sensor — none invented
+        };
+        static readonly (string Sym, int Bit)[] CoverCoils =
+        {
+            ("CoverPNP_Hr.OutputToWork", 0), ("CoverPNP_Hr.OutputToHome", 1),
+            ("CoverPNP_Vr.OutputToWork", 2), ("CoverPnp_Gripper.OutputToWork", 3),
+        };
+
+        // EAE compiler-generates SYMLINKMULTIVAR{SRC,DST}_<hash> per BOOL arity; the hash is
+        // GUI-computed (NOT derivable — confirmed: not crc64/fnv/md5/sha). Only these arities
+        // exist in EAE's generated set, so a publisher/subscriber must use the smallest
+        // available arity >= its value count (surplus VALUEs are inert). SRC and DST of the
+        // same arity share the hash. 5-BOOL does not exist -> the 5-sensor publisher uses 7.
+        static readonly (int Arity, string Hash)[] BoolSymlinkTypes =
+        {
+            (1, "1559B0FF8170C9BA0"), (2, "277E97BEC1451D2C"), (3, "151ACB50A2F8223B2"),
+            (4, "19628BFC3C74F1AB1"), (7, "238520AAD20108C65"), (10, "2183AAEC3B58E76C9"),
+            (15, "2217C9CA39686140D"),
+        };
+
+        /// <summary>
+        /// Transforms the deployed <c>PLC_RW_BX1.fbt</c> into the INTERNALIZED broker, MINIMAL form:
+        /// ONE <c>CoverSensorPublisher</c> (SYMLINKMULTIVARSRC) publishing ALL cover athome/atwork
+        /// symbols + ONE <c>CoverCoilSubscriber</c> (SYMLINKMULTIVARDST) consuming ALL cover
+        /// OutputToWork/Home symbols + one <c>ScanCycle</c> (E_DELAY) — NO per-cover FBs, NO serial
+        /// coil chain (the subscriber's own CNF packs the word, independent of Hr/Gripper). VALUEs
+        /// map straight onto the existing WordToBits/BitsToWord bits; the superseded
+        /// cover-InputVar→bit connections are removed. New FBs are inserted BEFORE Input/Output/
+        /// connections (EAE FBNetwork ordering). Idempotent; upgrades a prior per-cover embed by
+        /// sweeping its Sense_*/Coil_* FBs first. EIP word symlinks + the .hcf binding untouched.
+        /// BX1-only. The single EAE-runtime unknown: do ABSOLUTE cross-instance symlink names
+        /// resolve from inside a composite (validated tomorrow via the watch points).
+        /// </summary>
+        public static void EmbedCoverBridgeInComposite(string fbtPath, string resourceName = "BX1_RES")
+        {
+            if (!File.Exists(fbtPath)) return;
+            // No PreserveWhitespace: Save re-indents the whole file so every FB lands on its own
+            // line (never "stacked on one XML line"). EAE renders by the x/y below regardless.
+            var doc = XDocument.Load(fbtPath);
+            var net = doc.Root?.Element("FBNetwork");
+            if (net == null) return;
+            // Already embedded? Re-apply the LAYOUT only and stop. ExtractToEae is copy-if-absent,
+            // so a re-deploy never re-copies the pristine base over the live .fbt — re-laying-out
+            // here is the only way an already-embedded file picks up layout/spacing changes.
+            if (net.Elements("FB").Any(f => (string?)f.Attribute("Name") == "CoverSensorPublisher"))
+            { ApplyBrokerLayout(net); doc.Save(fbtPath); return; }
+
+            var ec = net.Element("EventConnections");
+            var dc = net.Element("DataConnections");
+            if (ec == null || dc == null) return;
+
+            // Upgrade path: sweep any prior PER-COVER embed (Sense_*/Coil_*/ScanCycle) + its wires
+            // so re-deploying onto an old embed cleanly replaces it with the consolidated broker.
+            static string FbOf(string? ep) =>
+                ep == null ? "" : (ep.Contains('.') ? ep[..ep.IndexOf('.')] : ep);
+            bool IsStale(string n) =>
+                n.StartsWith("Sense_") || n.StartsWith("Coil_") || n == "ScanCycle";
+            foreach (var fb in net.Elements("FB")
+                         .Where(f => IsStale((string?)f.Attribute("Name") ?? "")).ToList())
+                fb.Remove();
+            foreach (var grp in new[] { ec, dc })
+                foreach (var conn in grp.Elements("Connection")
+                             .Where(c => IsStale(FbOf((string?)c.Attribute("Source"))) ||
+                                         IsStale(FbOf((string?)c.Attribute("Destination")))).ToList())
+                    conn.Remove();
+
+            var idc = doc.Root!.Elements("Attribute")
+                .FirstOrDefault(a => (string?)a.Attribute("Name") == "Configuration.FB.IDCounter");
+            int nextId = (idc != null && int.TryParse((string?)idc.Attribute("Value"), out var cur))
+                ? System.Math.Max(cur, 24) : 24;
+            int uid = 20;
+            var firstInput = net.Elements("Input").FirstOrDefault();
+
+            string Iface(int n) =>
+                "Runtime.System#I:=" + n + ";VALUE${I}:" + string.Join(",", Enumerable.Repeat("BOOL", n));
+            (int arity, string type) Pick(string sd, int need)
+            {
+                var t = BoolSymlinkTypes.Where(x => x.Arity >= need).OrderBy(x => x.Arity).First();
+                return (t.Arity, $"SYMLINKMULTIVAR{sd}_{t.Hash}");
+            }
+            void AddFb(string name, string type, int arity, string[] names, int x, int y)
+            {
+                var fb = new XElement("FB",
+                    new XAttribute("ID", nextId++), new XAttribute("UID", uid++),
+                    new XAttribute("Name", name), new XAttribute("Type", type),
+                    new XAttribute("x", x.ToString()), new XAttribute("y", y.ToString()),
+                    new XAttribute("Namespace", "Main"),
+                    new XElement("Attribute",
+                        new XAttribute("Name", "Configuration.GenericFBType.InterfaceParams"),
+                        new XAttribute("Value", Iface(arity))),
+                    new XElement("Parameter", new XAttribute("Name", "QI"), new XAttribute("Value", "TRUE")));
+                for (int i = 0; i < arity; i++)
+                    fb.Add(new XElement("Parameter", new XAttribute("Name", $"NAME{i + 1}"),
+                        new XAttribute("Value", $"'{names[i]}'")));
+                if (firstInput != null) firstInput.AddBeforeSelf(fb); else net.Add(fb);
+            }
+            void Ev(string s, string d) => ec.Add(new XElement("Connection",
+                new XAttribute("Source", s), new XAttribute("Destination", d)));
+            void Da(string s, string d) => dc.Add(new XElement("Connection",
+                new XAttribute("Source", s), new XAttribute("Destination", d)));
+
+            // ONE sensor publisher (smallest available arity >= sensor count; surplus = inert).
+            var (sArity, sType) = Pick("SRC", CoverSensors.Length);
+            var sNames = new string[sArity];
+            for (int i = 0; i < sArity; i++)
+                sNames[i] = i < CoverSensors.Length
+                    ? $"{resourceName}.{CoverSensors[i].Sym}"
+                    : $"{resourceName}.{BrokerFbName}.CoverSensorSpare{i + 1}";
+            AddFb("CoverSensorPublisher", sType, sArity, sNames, 3000, 700);
+
+            // ONE coil subscriber (4 coils -> exact 4-BOOL DST).
+            var (cArity, cType) = Pick("DST", CoverCoils.Length);
+            var cNames = new string[cArity];
+            for (int i = 0; i < cArity; i++)
+                cNames[i] = i < CoverCoils.Length
+                    ? $"{resourceName}.{CoverCoils[i].Sym}"
+                    : $"{resourceName}.{BrokerFbName}.CoverCoilSpare{i + 1}";
+            AddFb("CoverCoilSubscriber", cType, cArity, cNames, 5000, 700);
+
+            // ONE scan tick (ScanCycle, E_DELAY @ ScanPeriod). This is NOT general PLC polling —
+            // it is a contained BX1 symbolic-link REFRESH heartbeat, structurally required by the
+            // universal Five_State_Actuator_CAT: that CAT publishes each cover coil via an INTERNAL
+            // SYMLINKMULTIVARSRC (its 'Output' FB) that writes the symbol ONLY when its own REQ
+            // fires (a coil-change event) and exposes NO public coil pin/event on its boundary
+            // (InterfaceList has no OutputVars; EventOutputs = INITO only). A symlink carries a
+            // VALUE, not an event, so CoverCoilSubscriber receives no notification when a coil
+            // changes — it must be REQ'd each cycle to re-sample the registry and re-pack the
+            // output word. Without this tick the EtherNet/IP output word freezes at 16#0000 and the
+            // cover never actuates. (The SE reference avoids the poll only by using a different
+            // broker-MODEL cover CAT with public coil pins — adopting that means editing the CAT,
+            // which is out of scope; so polling is mandatory for the symlink-only design.)
+            var scan = new XElement("FB",
+                new XAttribute("ID", nextId++), new XAttribute("Name", "ScanCycle"),
+                new XAttribute("Type", "E_DELAY"), new XAttribute("x", "700"),
+                new XAttribute("y", "1400"), new XAttribute("Namespace", "IEC61499.Standard"),
+                new XElement("Parameter", new XAttribute("Name", "DT"), new XAttribute("Value", ScanPeriod)));
+            if (firstInput != null) firstInput.AddBeforeSelf(scan); else net.Add(scan);
+
+            // Events — INIT registers both symlinks + starts the tick; the tick reads input word
+            // AND coils in PARALLEL; sensors publish after WordToBits; the subscriber's OWN CNF
+            // packs the output word (no per-cover CNF dependency — single FB, single confirm).
+            Ev("INIT", "CoverSensorPublisher.INIT");
+            Ev("INIT", "CoverCoilSubscriber.INIT");
+            Ev("INIT", "ScanCycle.START");
+            Ev("ScanCycle.EO", "ScanCycle.START");
+            Ev("ScanCycle.EO", "EIP_Input_Word.REQ");
+            Ev("ScanCycle.EO", "CoverCoilSubscriber.REQ");
+            Ev("EIPInputs_Bool.CNF", "CoverSensorPublisher.REQ");
+            Ev("CoverCoilSubscriber.CNF", "EIPOutput_Bits.REQ");
+
+            // Data — input bits -> publisher VALUEs; subscriber VALUEs -> output bits.
+            for (int i = 0; i < CoverSensors.Length; i++)
+                Da($"EIPInputs_Bool.bit{CoverSensors[i].Bit}", $"CoverSensorPublisher.VALUE{i + 1}");
+            for (int i = 0; i < CoverCoils.Length; i++)
+                Da($"CoverCoilSubscriber.VALUE{i + 1}", $"EIPOutput_Bits.bit{CoverCoils[i].Bit}");
+
+            // Remove the superseded cover-InputVar -> BitsToWord bit connections (output bits now
+            // come from the subscriber; leaving both = two data sources per bit = an EAE error).
+            var inputVarSources = new[] { "Cover_Pnp_Hr_ToWork", "Cover_Pnp_Hr_ToHome", "Cover_Pnp_Vr_Q", "Cover_Gripper_Q" };
+            foreach (var conn in dc.Elements("Connection").Where(c =>
+                         ((string?)c.Attribute("Destination"))?.StartsWith("EIPOutput_Bits.bit") == true &&
+                         inputVarSources.Contains((string?)c.Attribute("Source"))).ToList())
+                conn.Remove();
+
+            idc?.SetAttributeValue("Value", nextId.ToString());
+            ApplyBrokerLayout(net);
+            doc.Save(fbtPath);
+        }
+
+        /// <summary>
+        /// Lays the embedded broker FBs + interface pins out in clean left-to-right columns with
+        /// generous spacing so EAE renders them with no FB/pin/label/wire overlap. Deterministic,
+        /// safe to re-run on every (re)deploy. BX1-only.
+        /// </summary>
+        static void ApplyBrokerLayout(XElement net)
+        {
+            // EAE renders by these x/y. Compact left-to-right columns ~1200-2100 apart — still
+            // enough that the wide symlink NAME labels clear the next FB — with the two tall
+            // symlink FBs sharing the mid-right column ~1600 apart vertically. ScanCycle stands
+            // alone far-left; FB2 drops to the lower row under WordToBits; all Input pins pin to
+            // x=0, all Output pins to the far-right edge (x=9400).
+            var fbXY = new Dictionary<string, (int x, int y)>
+            {
+                ["ScanCycle"]            = (400, 300),     // far-left: the tick
+                ["EIP_Input_Word"]       = (2100, 300),    // upper/mid-left: word symlink in
+                ["EIPInputs_Bool"]       = (3300, 300),    // mid: WordToBits
+                ["CoverSensorPublisher"] = (5400, 300),    // mid-right upper: sensor SRC
+                ["EIPOutput_Bits"]       = (6700, 300),    // right: BitsToWord
+                ["EIP_Output_Word"]      = (8000, 300),    // far-right: word symlink out
+                ["CoverCoilSubscriber"]  = (5400, 1900),   // mid-right lower: coil DST
+                ["FB2"]                  = (3300, 1900),    // lower row: changeEventM262_2
+            };
+            foreach (var fb in net.Elements("FB"))
+                if (fbXY.TryGetValue((string?)fb.Attribute("Name") ?? "", out var p))
+                {
+                    fb.SetAttributeValue("x", p.x.ToString());
+                    fb.SetAttributeValue("y", p.y.ToString());
+                }
+            int py = 300;   // Input pins: far-left edge, generous vertical gaps.
+            foreach (var pin in net.Elements("Input"))
+            { pin.SetAttributeValue("x", "0"); pin.SetAttributeValue("y", py.ToString()); py += 450; }
+            py = 300;       // Output pins: far-right edge, clear of every FB.
+            foreach (var pin in net.Elements("Output"))
+            { pin.SetAttributeValue("x", "9400"); pin.SetAttributeValue("y", py.ToString()); py += 450; }
+        }
+
         /// <summary>
         /// Injects the BX1_IO broker + the cover symlink bridge into the BX1 SubApp (syslay)
         /// and the BX1 sysres. Returns the number of files touched. Idempotent.
@@ -95,7 +311,8 @@ namespace CodeGen.Devices.BX1
                     if (string.IsNullOrEmpty(path) || !File.Exists(path)) continue;
                     try
                     {
-                        if (InjectInto(path, isSysres, label, resourceName, report)) touched++;
+                        if (InjectInto(path, isSysres, label, resourceName,
+                                cfg.Bx1BridgeInsideComposite, report)) touched++;
                     }
                     catch (IOException)
                     {
@@ -125,7 +342,7 @@ namespace CodeGen.Devices.BX1
         }
 
         static bool InjectInto(string path, bool isSysres, string label, string resourceName,
-            SystemInjector.BindingApplicationReport report)
+            bool internalized, SystemInjector.BindingApplicationReport report)
         {
             var doc = XDocument.Load(path, LoadOptions.PreserveWhitespace);
             var net = FindCoverNetwork(doc);
@@ -144,7 +361,37 @@ namespace CodeGen.Devices.BX1
             if (hasGripper)
                 AddEvent(ec, "CoverPnp_Gripper.INITO", $"{BrokerFbName}.INIT");
 
-            // --- Stage 2: the symlink bridge + scan cycle ---
+            // INTERNALIZED (cfg.Bx1BridgeInsideComposite, default): the per-cover symlink
+            // bridge + the scan cycle live INSIDE the PLC_RW_BX1 composite
+            // (EmbedCoverBridgeInComposite, driven by CoverIoBits). The generated resource
+            // carries ONLY BX1_IO — emit none of the external bridge here. Acceptance:
+            // no BX1IO_Sense_*/BX1IO_Coil_*/BX1_IO_Cycle in the sysres/syslay.
+            if (internalized)
+            {
+                // Sweep any external bridge FBs/connections a prior external-path deploy may
+                // have left in this file, so the resource ends with ONLY BX1_IO (acceptance:
+                // no BX1IO_Sense_*/BX1IO_Coil_*/BX1_IO_Cycle). BX1_IO + its INIT are kept.
+                static string FbOf(string? ep) =>
+                    ep == null ? "" : (ep.Contains('.') ? ep[..ep.IndexOf('.')] : ep);
+                bool IsExtBridge(string n) =>
+                    n.StartsWith("BX1IO_Sense_") || n.StartsWith("BX1IO_Coil_") || n == ScanFbName;
+                foreach (var fb in net.Elements(Ns + "FB")
+                             .Where(f => IsExtBridge((string?)f.Attribute("Name") ?? "")).ToList())
+                    fb.Remove();
+                foreach (var grp in new[] { ec, dc })
+                    foreach (var conn in grp.Elements(Ns + "Connection")
+                                 .Where(c => IsExtBridge(FbOf((string?)c.Attribute("Source"))) ||
+                                             IsExtBridge(FbOf((string?)c.Attribute("Destination")))).ToList())
+                        conn.Remove();
+
+                SaveWithRetry(doc, path);
+                report.Missing.Add($"[BX1][Broker] BX1_IO injected into {label} (resource " +
+                    $"{resourceName}); cover bridge INTERNALIZED in PLC_RW_BX1 — swept any external " +
+                    "BX1IO_Sense_*/BX1IO_Coil_*/BX1_IO_Cycle FBs (cfg.Bx1BridgeInsideComposite).");
+                return true;
+            }
+
+            // --- Stage 2: the EXTERNAL symlink bridge + scan cycle (legacy fallback path) ---
             int xSrc = isSysres ? 11000 : 35000;
             int xDst = isSysres ? 13000 : 37000;
             int slot = 0;
