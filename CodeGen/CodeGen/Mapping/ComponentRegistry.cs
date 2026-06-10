@@ -124,11 +124,8 @@ namespace CodeGen.Mapping
                 M580("Stn2_Term",        column: 6, row: LayoutRow.Actuator, owner: ""),
 
                 // ── BX1 — Cover PnP (BX1_RES, frame X=28200, columns 0..2). The covers
-                //    are driven by a LOCAL Cover_Station Process engine on BX1 (gated by
-                //    MapperConfig.DeployBx1CoverEngine), NOT cross-PLC from M580 — so the
-                //    ProcessOwner is "Cover_Station". The engine row is registered so it
-                //    buckets to BX1 + lands on the BX1 frame; it only emits an FB when the
-                //    flag is on (SystemLayoutInjector gates the instantiation).
+                //    are driven by a LOCAL Cover_Station Process engine on BX1, not
+                //    cross-PLC from M580, so the ProcessOwner stays "Cover_Station".
                 BX1("Cover_Station",     column: 1, row: LayoutRow.Process,  owner: "Cover_Station"),
                 BX1("TopCoverSenosr",    column: 0, row: LayoutRow.Process,  owner: "Cover_Station"),
                 BX1("CoverPNP_Hr",       column: 0, row: LayoutRow.Actuator, owner: "Cover_Station"),
