@@ -22,6 +22,9 @@ namespace CodeGen.Translation
         private const string SensorCatType = "Sensor_Bool_CAT";
         private const string ProcessCatType = "Process1_Generic";
         private const string RobotCatType = "Robot_Task_CAT";
+        private const string RingCrossGateType = "RingCrossGate";
+        private const string M580CoverRingGate = "M580_CoverRingGate";
+        private const string Bx1CoverRingGate = "BX1_CoverRingGate";
 
         private const int ActuatorYGap = 800;
         private const int SensorYGap = 480;
@@ -1018,7 +1021,6 @@ namespace CodeGen.Translation
 
             int sensorIdStart = 0;
             int actuatorIdStart = contents.Sensors.Count;
-            const int processId = 10;
             // Station-2 process_ids sit ABOVE the component id space (sensors+
             // actuators occupy 0..N-1, N≈16) so a recipe Wait1Id can never collide
             // with a Process FB's own process_id — the collision
@@ -1036,12 +1038,14 @@ namespace CodeGen.Translation
             // ValidateProcessIdInvariant check still passes because no
             // Wait1Id of any process equals 17 or 18 (Wait1Ids only reference
             // component ids 0..16).
-            const int assemblyProcessId = 17;
-            const int disassemblyProcessId = 18;
-            // Cover_Station (local BX1 cover engine) — last [0..19] process_id slot,
-            // above the max actuator_id (16). No Wait1Id ever equals 19, so the
-            // process-id invariant holds.
-            const int coverStationProcessId = 19;
+            // SINGLE SOURCE OF TRUTH: these slots live in MapperConfig so the
+            // Disassembly recipe's cross-process handshake WAIT(AssemblyProcessId, 7)
+            // can never drift from the id this injector stamps onto Assembly_Station.
+            // Values are unchanged (10/17/18/19) — pure centralisation, no behaviour change.
+            const int processId = MapperConfig.FeedStationProcessId;
+            const int assemblyProcessId = MapperConfig.AssemblyProcessId;
+            const int disassemblyProcessId = MapperConfig.DisassemblyProcessId;
+            const int coverStationProcessId = MapperConfig.CoverStationProcessId;
 
             // No top-level PLC_Start FB: Area_CAT and Station_CAT each contain their own
             // internal plcStart bootstrap, so an external one would double-bootstrap and
@@ -1384,15 +1388,26 @@ namespace CodeGen.Translation
                     // actuator an in-scope interlock (a NOT-condition referencing
                     // an in-scope component) but no rule was emitted, the safety
                     // net would be silently theoretical — refuse to generate.
+                    // EXEMPT the BX1 covers: their rules are DELIBERATELY zeroed
+                    // (user "block interlocks for now", 2026-06-10 — see the drop in
+                    // BuildActuatorParameters), so the empty rule set is intentional,
+                    // not a translation failure. Mirrors the swivel's
+                    // DropSwivelInterlockForTest guard exemption.
                     int inScopeInterlocks = CountInScopeInterlockConds(actuator, allComponents, scopedIds);
                     int emittedRuleCount = int.Parse(actParams["RuleCount"],
                         System.Globalization.CultureInfo.InvariantCulture);
                     if (inScopeInterlocks > 0 && emittedRuleCount == 0)
-                        throw new InvalidOperationException(
-                            $"[Recipe] Actuator '{actuator.Name}' has {inScopeInterlocks} in-scope " +
-                            "Control.xml interlock condition(s) but emitted RuleCount=0 — refusing to " +
-                            "generate code whose InterlockManager passes everything through (false " +
-                            "safety net). Interlock rule translation failed for this actuator.");
+                    {
+                        if (IsBx1CoverActuator(actuator.Name))
+                            report.Bound.Add((actuator.Name,
+                                "cover interlock rules DELIBERATELY dropped (BX1 local cycle test)"));
+                        else
+                            throw new InvalidOperationException(
+                                $"[Recipe] Actuator '{actuator.Name}' has {inScopeInterlocks} in-scope " +
+                                "Control.xml interlock condition(s) but emitted RuleCount=0 — refusing to " +
+                                "generate code whose InterlockManager passes everything through (false " +
+                                "safety net). Interlock rule translation failed for this actuator.");
+                    }
                     if (emittedRuleCount > 0)
                         report.Bound.Add((actuator.Name,
                             $"interlock RuleCount={emittedRuleCount}"));
@@ -1723,6 +1738,8 @@ namespace CodeGen.Translation
                 // bridge (removed) OR a per-resource MqttConn. See MQTT.md.
             }
 
+            AddCoverRingGateFbs(builder, contents, report);
+
             BuildFeedStationWiring(builder, contents);
             // Station 2 (M580) — same INIT-chain + stationAdptr chain + stateRprtCmd
             // ring shape as Feed_Station, but rooted at Station2 / Stn2_Term and
@@ -1998,7 +2015,9 @@ namespace CodeGen.Translation
                 // affects where the arm rests, not whether the recipe advances. Do NOT
                 // set these to 0.
                 dict["work1ToHomeTime"]  = SyslayBuilder.FormatTimeMs(750);
-                // 2026-06-08: set to 500ms (per rig request; was briefly 350). work2ToHomeTime
+                // 2026-06-10: set to 100ms after rig feedback that 300ms still
+                // overshoots/fails to settle at centre.
+                // past centre toward Work1. work2ToHomeTime
                 // is the atWork2(Place) -> home swing — the ONLY home leg the Assembly recipe
                 // exercises (the swivel homes from Place, never directly from Pick, so
                 // work1ToHomeTime above is unused by this recipe). Leaving atWork2 the toHome
@@ -2007,7 +2026,7 @@ namespace CodeGen.Translation
                 // reduce; if it stops short of centre (or stalls because atWork2 never clears
                 // so AtHome->AtHomeInit can't fire) raise it. MUST stay > 0 (E_DELAY DT=0
                 // never fires -> freeze).
-                dict["work2ToHomeTime"]  = SyslayBuilder.FormatTimeMs(500);
+                dict["work2ToHomeTime"]  = SyslayBuilder.FormatTimeMs(100);
                 dict["enableToWork1FaultTimeout"] = SyslayBuilder.FormatBool(false);
                 dict["enableToWork2FaultTimeout"] = SyslayBuilder.FormatBool(false);
                 dict["faultTimeoutWork1"] = SyslayBuilder.FormatTimeMs(10000);
@@ -2074,6 +2093,14 @@ namespace CodeGen.Translation
         ///   atHome (StateNumber=0 or 4) StateID. This replaces the old fragile
         ///   "actuator.Name + /atWork" literal substring lookup.
         /// </summary>
+        /// <summary>
+        /// The three BX1 cover P&amp;P actuators driven by the local Cover_Station cycle.
+        /// Used by the cover-specific overrides (gripper no-sensor, interlock zeroing)
+        /// and by the RuleCount=0 safety guard exemption at the Five_State call site.
+        /// </summary>
+        internal static bool IsBx1CoverActuator(string name) =>
+            name is "CoverPNP_Hr" or "CoverPNP_Vr" or "CoverPnp_Gripper";
+
         public static Dictionary<string, string> BuildActuatorParameters(
             VueOneComponent actuator, int assignedId,
             IReadOnlyList<VueOneComponent> allComponents,
@@ -2114,6 +2141,27 @@ namespace CodeGen.Translation
             // gripper-close WAIT (the engine never saw current_state=2 from DI04). The
             // data-driven WorkSensorFitted/HomeSensorFitted resolution above now stands.
 
+            // BX1 cover gripper (2026-06-10): NARROW per-actuator no-sensor override —
+            // the TM3BC input assembly has NO home-position bit for this gripper (the
+            // BX1_IO broker publishes only input bit5 -> CoverPnp_Gripper.atwork, and on
+            // the rig that bit reads TRUE at rest, so even its atwork semantics are
+            // unverified). With HomeSensorFitted=TRUE the full cover recipe's release
+            // step (CMD 3 -> WAIT 0) stalls forever: athome is never published, the ECC
+            // never reaches AtHomeInit. Force the proven timer-acknowledge pattern for
+            // THIS actuator only — the physical coil (output bit3) still drives the
+            // gripper; only the state confirmation comes from toWork/toHomeTime. The
+            // M580 grippers keep their real DI sensors (see the 2026-06-04 note above).
+            if (string.Equals(actuator.Name, "CoverPnp_Gripper", StringComparison.OrdinalIgnoreCase))
+            {
+                workSensorFitted = false;
+                homeSensorFitted = false;
+            }
+
+            // M580 shaft actuators must use their real work sensors. The
+            // ProcessRuntime anti-leftover guard handles stale state_table values;
+            // timer-acknowledging Shaft_Vr/Shaft_Gripper can release the shaft before
+            // the fresh physical down/grip motion has actually completed.
+
             // InterlockManager rule arrays from this actuator's own Control.xml
             // NOT-conditions. scopedIds==null only for legacy/test callers →
             // pass-through (RuleCount=0). The real Button 2 / Button 4 path
@@ -2123,6 +2171,22 @@ namespace CodeGen.Translation
                 scopedIds != null
                     ? BuildInterlockRules(actuator, allComponents, scopedIds)
                     : (0, new int[10], new int[10], new int[10], new int[10]);
+
+            // BX1 covers (2026-06-10, per user "block interlocks for now"): zero the
+            // interlock rules on the three cover actuators so no Control.xml-derived rule
+            // can ever block the local pick/place cycle. CoverPNP_Hr carried one rule
+            // (Src=10, an M580 component that never publishes on the BX1-local ring →
+            // its observed state is permanently 0 → inert but misleading in Watch);
+            // Vr/gripper carried none. Narrow + name-scoped; M580/M262 untouched.
+            // The RuleCount=0 safety guard at the Five_State call site exempts these
+            // names (the drop is deliberate, not a translation failure). Delete this
+            // block to restore the Control.xml rules once the cycle is proven.
+            if (IsBx1CoverActuator(actuator.Name))
+            {
+                ruleCount = 0;
+                ruleFrom = new int[10]; ruleTo = new int[10];
+                ruleSrc = new int[10]; ruleBlk = new int[10];
+            }
 
             var actuatorParams = new Dictionary<string, string>
             {
@@ -2584,6 +2648,79 @@ namespace CodeGen.Translation
                 : "stateRprtCmd_in";
         }
 
+        private static bool HasBx1CoverBridgeSet(StationContents contents) =>
+            contents.Actuators.Any(a => NameEq(a.Name, "CoverPNP_Hr")) &&
+            contents.Actuators.Any(a => NameEq(a.Name, "CoverPNP_Vr")) &&
+            contents.Actuators.Any(a => NameEq(a.Name, "CoverPnp_Gripper"));
+
+        private static Dictionary<string, string> BuildCoverRingGateParameters(bool engineSide)
+        {
+            var p = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["Mode"] = SyslayBuilder.FormatInt(engineSide ? 0 : 1),
+                // Native names are source_name values emitted by the BX1 CAT instances.
+                // Mode 0 uses them to terminate reports after Assembly_Station has seen
+                // the injected remote state. Mode 1 ignores them.
+                ["Native1"] = SyslayBuilder.FormatString(engineSide ? "TopCoverSenosr" : string.Empty),
+                ["Native2"] = SyslayBuilder.FormatString(engineSide ? "CoverPNP_Hr" : string.Empty),
+                ["Native3"] = SyslayBuilder.FormatString(engineSide ? "CoverPNP_Vr" : string.Empty),
+                ["Native4"] = SyslayBuilder.FormatString(engineSide ? "CoverPnp_Gripper" : string.Empty),
+                // Target names are dest_name values emitted by the Process recipe.
+                // Only these commands cross M580 -> BX1; bearing/shaft/clamp commands
+                // remain on the M580 local ring.
+                ["Target1"] = SyslayBuilder.FormatString(engineSide ? "coverpnp_hr" : string.Empty),
+                ["Target2"] = SyslayBuilder.FormatString(engineSide ? "coverpnp_vr" : string.Empty),
+                ["Target3"] = SyslayBuilder.FormatString(engineSide ? "coverpnp_gripper" : string.Empty),
+                ["Target4"] = SyslayBuilder.FormatString(string.Empty),
+            };
+            return p;
+        }
+
+        private static void AddCoverRingGateFbs(SyslayBuilder builder,
+            StationContents contents, BindingApplicationReport report)
+        {
+            if (!MapperConfig.FoldCoversIntoAssembly)
+                return;
+
+            if (!HasBx1CoverBridgeSet(contents))
+            {
+                report.Missing.Add(
+                    "[CoverBridge] FoldCoversIntoAssembly requested, but the BX1 cover set " +
+                    "(CoverPNP_Hr/CoverPNP_Vr/CoverPnp_Gripper) is incomplete; " +
+                    "bridge FBs skipped.");
+                return;
+            }
+
+            var m580Pos = LayoutGrid.PositionOf(M580CoverRingGate) ?? (X: 27200, Y: 4000);
+            var bx1Pos = LayoutGrid.PositionOf(Bx1CoverRingGate) ?? (X: 34000, Y: 4000);
+
+            builder.AddFB(FBIdGenerator.GenerateFBId("ringcross:m580:cover"),
+                M580CoverRingGate, RingCrossGateType, "Main", m580Pos.X, m580Pos.Y,
+                BuildCoverRingGateParameters(engineSide: true));
+            builder.AddFB(FBIdGenerator.GenerateFBId("ringcross:bx1:cover"),
+                Bx1CoverRingGate, RingCrossGateType, "Main", bx1Pos.X, bx1Pos.Y,
+                BuildCoverRingGateParameters(engineSide: false));
+
+            report.Missing.Add(
+                "[CoverBridge] RingCrossGate FBs emitted: M580 engine gate + BX1 remote gate. " +
+                "Only coverpnp_* CMDs cross M580->BX1; BX1 native reports cross BX1->M580.");
+        }
+
+        private static void AddCoverRingGateCrossConnections(SyslayBuilder builder)
+        {
+            builder.AddEventConnection($"{M580CoverRingGate}.TX", $"{Bx1CoverRingGate}.RX");
+            builder.AddDataConnection($"{M580CoverRingGate}.tx_src_id", $"{Bx1CoverRingGate}.rx_src_id");
+            builder.AddDataConnection($"{M580CoverRingGate}.tx_source_name", $"{Bx1CoverRingGate}.rx_source_name");
+            builder.AddDataConnection($"{M580CoverRingGate}.tx_dest_name", $"{Bx1CoverRingGate}.rx_dest_name");
+            builder.AddDataConnection($"{M580CoverRingGate}.tx_state", $"{Bx1CoverRingGate}.rx_state");
+
+            builder.AddEventConnection($"{Bx1CoverRingGate}.TX", $"{M580CoverRingGate}.RX");
+            builder.AddDataConnection($"{Bx1CoverRingGate}.tx_src_id", $"{M580CoverRingGate}.rx_src_id");
+            builder.AddDataConnection($"{Bx1CoverRingGate}.tx_source_name", $"{M580CoverRingGate}.rx_source_name");
+            builder.AddDataConnection($"{Bx1CoverRingGate}.tx_dest_name", $"{M580CoverRingGate}.rx_dest_name");
+            builder.AddDataConnection($"{Bx1CoverRingGate}.tx_state", $"{M580CoverRingGate}.rx_state");
+        }
+
         /// <summary>
         /// Sibling of <see cref="BuildFeedStationWiring"/> for the M580 (Station 2).
         /// Emits the INIT chain, station-CaS adapter chain and stateRprtCmd ring for
@@ -2608,6 +2745,8 @@ namespace CodeGen.Translation
 
             static bool IsM580(string name) =>
                 HcfSymbolIndex.NameBasedPlcGuess(name) == PlcAssignment.M580;
+            bool foldCoversIntoAssembly =
+                MapperConfig.FoldCoversIntoAssembly && HasBx1CoverBridgeSet(contents);
 
             // Disassembly is generated as a parked END-only Process, but is not
             // threaded through the M580 wiring while Assembly_Station owns the cycle.
@@ -2621,6 +2760,7 @@ namespace CodeGen.Translation
                 if (IsM580(s.Name)) initChain.Add(s.Name);
             foreach (var a in contents.Actuators)
                 if (IsM580(a.Name)) initChain.Add(a.Name);
+            if (foldCoversIntoAssembly) initChain.Add(M580CoverRingGate);
             initChain.Add(AssemblyProc);
             for (int i = 0; i < initChain.Count - 1; i++)
                 builder.AddEventConnection($"{initChain[i]}.INITO", $"{initChain[i + 1]}.INIT");
@@ -2686,7 +2826,7 @@ namespace CodeGen.Translation
             const string M580RingTail = "Clamp";           // M580 last ring node (CaSBus tail)
             const string M580RingHead = "BearingSensor";   // M580 first ring node (CaSBus head)
             bool crossPlcCoverRing =
-                MapperConfig.ExtendStateRingAcrossBx1 &&
+                MapperConfig.ExtendStateRingAcrossBx1 && !MapperConfig.FoldCoversIntoAssembly &&
                 m580.Exists(c => NameEq(c.Name, M580RingTail)) &&
                 contents.Sensors.Exists(s => NameEq(s.Name, Bx1RingHead)) &&
                 contents.Actuators.Exists(a => NameEq(a.Name, Bx1RingTail));
@@ -2729,6 +2869,8 @@ namespace CodeGen.Translation
                 {
                     (AssemblyProc, "Process1_Generic")
                 };
+                if (foldCoversIntoAssembly)
+                    ring.Add((M580CoverRingGate, RingCrossGateType));
                 if (ring.Count > 1)
                 {
                     for (int i = 0; i < ring.Count - 1; i++)
@@ -2739,6 +2881,8 @@ namespace CodeGen.Translation
                         $"{ring[^1].Name}.{StateRprtOut(ring[^1].Type)}",
                         $"{ring[0].Name}.{StateRprtIn(ring[0].Type)}");
                 }
+                if (foldCoversIntoAssembly)
+                    AddCoverRingGateCrossConnections(builder);
             }
         }
 
@@ -2792,6 +2936,8 @@ namespace CodeGen.Translation
         {
             static bool IsBx1(string name) =>
                 HcfSymbolIndex.NameBasedPlcGuess(name) == PlcAssignment.BX1;
+            bool foldCoversIntoAssembly =
+                MapperConfig.FoldCoversIntoAssembly && HasBx1CoverBridgeSet(contents);
 
             // MqttConn bring-up: self-loop INITO → CONNECT so the broker
             // connection opens as soon as the FB is initialised. Emitted only
@@ -2815,6 +2961,7 @@ namespace CodeGen.Translation
             // CoverPnp_Gripper.INITO → Cover_Station.INIT — the engine is ready once the
             // actuators it commands are initialised.
             if (MapperConfig.DeployBx1CoverEngine) initChain.Add("Cover_Station");
+            if (foldCoversIntoAssembly) initChain.Add(Bx1CoverRingGate);
             for (int i = 0; i < initChain.Count - 1; i++)
                 builder.AddEventConnection($"{initChain[i]}.INITO", $"{initChain[i + 1]}.INIT");
 
@@ -2833,7 +2980,7 @@ namespace CodeGen.Translation
             // the cross-device hops in BuildStation2Wiring; EAE bridges them at deploy.
             // This gate is IDENTICAL to BuildStation2Wiring's so the two halves agree.
             bool crossPlcCoverRing =
-                MapperConfig.ExtendStateRingAcrossBx1 &&
+                MapperConfig.ExtendStateRingAcrossBx1 && !MapperConfig.FoldCoversIntoAssembly &&
                 contents.Actuators.Exists(a => NameEq(a.Name, "Clamp")) &&
                 ring.Exists(c => NameEq(c.Name, "TopCoverSenosr")) &&
                 ring.Exists(c => NameEq(c.Name, "CoverPnp_Gripper"));
@@ -2872,14 +3019,18 @@ namespace CodeGen.Translation
             }
             else if (ring.Count > 1)
             {
-                // Original BX1 self-closed broadcast loop (last → first).
-                for (int i = 0; i < ring.Count - 1; i++)
+                // Original BX1 self-closed broadcast loop (last -> first), optionally
+                // closed through the folded-cover transport gate.
+                var closedRing = new List<(string Name, string Type)>(ring);
+                if (foldCoversIntoAssembly)
+                    closedRing.Add((Bx1CoverRingGate, RingCrossGateType));
+                for (int i = 0; i < closedRing.Count - 1; i++)
                     builder.AddAdapterConnection(
-                        $"{ring[i].Name}.{StateRprtOut(ring[i].Type)}",
-                        $"{ring[i + 1].Name}.{StateRprtIn(ring[i + 1].Type)}");
+                        $"{closedRing[i].Name}.{StateRprtOut(closedRing[i].Type)}",
+                        $"{closedRing[i + 1].Name}.{StateRprtIn(closedRing[i + 1].Type)}");
                 builder.AddAdapterConnection(
-                    $"{ring[^1].Name}.{StateRprtOut(ring[^1].Type)}",
-                    $"{ring[0].Name}.{StateRprtIn(ring[0].Type)}");
+                    $"{closedRing[^1].Name}.{StateRprtOut(closedRing[^1].Type)}",
+                    $"{closedRing[0].Name}.{StateRprtIn(closedRing[0].Type)}");
             }
         }
 
@@ -2889,7 +3040,8 @@ namespace CodeGen.Translation
         private static readonly HashSet<string> UniversalCatTypes = new(StringComparer.Ordinal)
         {
             "Five_State_Actuator_CAT", "Sensor_Bool_CAT", "Process1_Generic",
-            "Station_CAT", "Area_CAT", "CaSAdptrTerminator", "Station", "Area"
+            "Station_CAT", "Area_CAT", "CaSAdptrTerminator", "Station", "Area",
+            RingCrossGateType
         };
 
         /// <summary>
