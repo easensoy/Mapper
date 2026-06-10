@@ -213,6 +213,24 @@ namespace CodeGen.Translation.Process
             // Assembly_Station gate on CROSS-PLC processes (different bucket) and
             // are NOT parked -- they free-run to start their own cycle (unchanged,
             // so the M262 Feed recipe stays byte-identical).
+            // STAGE 5a (MapperConfig.UnparkDisassembly): give Disassembly a real reverse
+            // recipe instead of the park END row. Short-circuit BEFORE the park guard AND the
+            // Control.xml walk — ApplyDisassemblyRuntimeRecipe builds the whole recipe from the
+            // proven hardcoded pattern (the twin's bearing "2"-route + cross-process handshake
+            // states don't classify cleanly through the generic walk). Default-off → today's
+            // parked behaviour is byte-identical.
+            if (MapperConfig.UnparkDisassembly &&
+                string.Equals((process.Name ?? string.Empty).Trim(), "Disassembly",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                ApplyDisassemblyRuntimeRecipe(process, arrays, allComponents);
+                arrays.OrderingSummary =
+                    "Disassembly (Stage 5a): handshake-wait -> covers off -> shaft out -> " +
+                    "bearing out -> UNCLAMP -> END (Ejector/Robot = M262, Stage 5b)";
+                ValidateProcessIdInvariant(arrays, processId);
+                return arrays;
+            }
+
             if (ShouldParkOnIntraPlcProcessHandoff(process, states, allComponents))
             {
                 arrays.Warnings.Add(
@@ -360,6 +378,23 @@ namespace CodeGen.Translation.Process
             // than empty arrays which would crash bounds checks).
             if (arrays.StepType.Count == 0)
             {
+                // Cover_Station is a SYNTHESIZED, STATELESS engine — its recipe comes from
+                // ApplyCoverRuntimeRecipe (the BX1 cover pick/place cycle), NOT a state walk,
+                // so the walk legitimately yields 0 steps. Fill it from the cover recipe HERE
+                // instead of collapsing to an empty END — otherwise Cover_Station deploys with
+                // a single StepType=9 and sits "Resting in END" commanding nothing, so the
+                // cover never moves (regression observed 2026-06-09: the degenerate-case early
+                // return at this line pre-empted the ApplyCoverRuntimeRecipe call near the end
+                // of Generate). ApplyCoverRuntimeRecipe bails on its Name guard for every
+                // non-Cover_Station process, so the genuine every-state-skipped degenerate
+                // path below is unchanged for them.
+                ApplyCoverRuntimeRecipe(process, arrays, allComponents, stationContents);
+                if (arrays.StepType.Count > 0)
+                {
+                    ValidateProcessIdInvariant(arrays, processId);
+                    return arrays;
+                }
+
                 arrays.Warnings.Add(
                     "Every source state was skipped or unsatisfiable — collapsing the recipe " +
                     "to a single END row at index 0. Engine will halt immediately.");
@@ -870,6 +905,12 @@ namespace CodeGen.Translation.Process
             // Clamping_Part precedes the bearing/shaft work); released at the very end.
             // close = state 1 (-> AtWork 2). Optional: skipped if the fixture has no
             // Clamp component (so the recipe never stalls on a missing id).
+            if (MapperConfig.EnableSevenStateHomePreamble)
+            {
+                AddCmd("bearing_pnp", 5);
+                AddWait(bearingPnpId, 0);
+            }
+
             bool hasClamp = TryGetComponentId(arrays, allComponents, "clamp", out var clampId);
             if (hasClamp)
             {
@@ -913,7 +954,7 @@ namespace CodeGen.Translation.Process
                 AddWait(shaftHrId, 0);
             }
 
-            // BX1 COVER PnP (task #69, MapperConfig.ExtendStateRingAcrossBx1): place the
+            // BX1 COVER PnP (MapperConfig.FoldCoversIntoAssembly): place the
             // top cover. ONLY emitted when the cross-PLC cover ring is enabled — the
             // covers live on the BX1 Soft-dPAC, so without the M580↔BX1 ring bridge the
             // engine's CMD would never reach them and the WAIT would stall the whole
@@ -949,12 +990,27 @@ namespace CodeGen.Translation.Process
                 AddWait(coverHrId, 0);
             }
 
-            // Release the clamp at the very end (twin: clamp opens when the cycle
-            // finishes). open = state 3 (-> home 0).
-            if (hasClamp)
+            // Release the clamp at the very end. TWIN-CORRECTION (Stage 5a): the twin does
+            // NOT open the clamp in Assembly — it closes at Assembly start and stays closed
+            // through assembly AND disassembly, opening only at Disassembly's Unclamping step
+            // (verified: Clamp ComponentID appears in exactly the Assembly 'Clamped' wait and
+            // the Disassembly 'Home Finished' wait). So when Disassembly is unparked, the
+            // clamp-open MOVES to ApplyDisassemblyRuntimeRecipe and Assembly instead publishes
+            // a handshake sentinel (CMD state 7) that Disassembly's row-0 WAIT(17,7) holds on.
+            // When Disassembly stays parked (default), keep opening the clamp here so the part
+            // is never left clamped with no engine to release it.
+            if (hasClamp && !MapperConfig.UnparkDisassembly)
             {
                 AddCmd("clamp", 3);
                 AddWait(clampId, 0);
+            }
+            else if (MapperConfig.UnparkDisassembly)
+            {
+                // Handshake publish: a sentinel CMD whose dest_name matches no actuator, so
+                // nothing moves, but the ring message carries src_id = Assembly process_id and
+                // state 7 — Disassembly's row 0 waits on exactly that. State 7 is outside the
+                // real command vocabulary (1/3/5) so it can't be confused with a motion command.
+                AddCmd("assembly_handshake_done", 7);
             }
 
             int end = arrays.StepType.Count;
@@ -967,13 +1023,167 @@ namespace CodeGen.Translation.Process
 
             arrays.Warnings.Add(
                 "[Recipe] Assembly_Station runtime recipe (clean, Control.xml-faithful): " +
-                "Clamp Close -> WAIT clamped -> Bearing_PnP Pick -> WAIT AtPick -> Bearing_Gripper Grip -> " +
-                "WAIT AtWork -> Bearing_PnP Place -> WAIT AtPlace -> Bearing_Gripper Release -> " +
+                "Clamp Close -> WAIT clamped -> Bearing_PnP Pick -> WAIT AtPick -> " +
+                "Bearing_Gripper Grip -> WAIT AtWork -> " +
+                "Bearing_PnP Place -> WAIT AtPlace -> Bearing_Gripper Release -> " +
                 "WAIT gripper home -> Bearing_PnP Home -> WAIT AtHomeInit -> shaft_vr Work -> " +
                 "shaft_gripper Grip -> shaft_vr Home -> shaft_hr Work -> shaft_vr Work (place) -> " +
-                "shaft_gripper Release -> shaft_vr Home -> shaft_hr Home -> Clamp Open -> WAIT released -> " +
+                "shaft_gripper Release -> shaft_vr Home -> shaft_hr Home -> cover_vr down -> grip cover -> " +
+                "cover_vr up -> cover_hr advance -> cover_vr down -> release cover -> cover_vr up -> " +
+                "cover_hr home -> Clamp Open -> WAIT released -> " +
                 "END. Every CMD has its own " +
-                "WAIT; single stable home-wait (AtHomeInit=0); no leading home; no material-ready gate.");
+                "WAIT; stable home-wait is AtHomeInit=0; no material-ready gate.");
+        }
+
+        /// <summary>
+        /// STAGE 5a Disassembly recipe (MapperConfig.UnparkDisassembly). The twin's
+        /// Disassembly is the REVERSE of Assembly: covers off -> shaft out -> bearing out ->
+        /// UNCLAMP (the twin opens the clamp HERE, at the end of Disassembly, not in Assembly).
+        /// Only the M580 + BX1 actuators are commanded — the Ejector and Robot are M262 and
+        /// need the cross-PLC ring extended to M262 (Stage 5b), so they are NOT in this recipe;
+        /// it ends at the unclamp. Same hardcoded AddCmd/AddWait pattern + Five_State
+        /// convention (Work = cmd1 -> WAIT AtWork 2; Home = cmd3 -> WAIT AtHomeInit 0) as the
+        /// proven ApplyAssemblyRuntimeRecipe; every WAIT is the commanded actuator's OWN
+        /// settled state so it can never stall on a cross-component sensor. Row 0 is the
+        /// HANDSHAKE: hold until Assembly's tail publishes its sentinel (src_id = Assembly
+        /// process_id, state 7) onto the shared M580 ring. Skipped (single END) if any id is
+        /// missing.
+        /// </summary>
+        private static void ApplyDisassemblyRuntimeRecipe(VueOneComponent process,
+            RecipeArrays arrays, IReadOnlyList<VueOneComponent> allComponents)
+        {
+            if (!string.Equals((process.Name ?? string.Empty).Trim(), "Disassembly",
+                    StringComparison.OrdinalIgnoreCase))
+                return;
+
+            bool ok =
+                TryGetComponentId(arrays, allComponents, "coverpnp_hr", out var coverHrId) &
+                TryGetComponentId(arrays, allComponents, "coverpnp_vr", out var coverVrId) &
+                TryGetComponentId(arrays, allComponents, "coverpnp_gripper", out var coverGripperId) &
+                TryGetComponentId(arrays, allComponents, "shaft_hr", out var shaftHrId) &
+                TryGetComponentId(arrays, allComponents, "shaft_vr", out var shaftVrId) &
+                TryGetComponentId(arrays, allComponents, "shaft_gripper", out var shaftGripperId) &
+                TryGetComponentId(arrays, allComponents, "bearing_pnp", out var bearingPnpId) &
+                TryGetComponentId(arrays, allComponents, "bearing_gripper", out var bearingGripperId) &
+                TryGetComponentId(arrays, allComponents, "clamp", out var clampId);
+
+            arrays.StepType.Clear();
+            arrays.CmdTargetName.Clear();
+            arrays.CmdStateArr.Clear();
+            arrays.Wait1Id.Clear();
+            arrays.Wait1State.Clear();
+            arrays.NextStep.Clear();
+
+            void AddCmd(string target, int cmdState)
+            {
+                int row = arrays.StepType.Count;
+                arrays.StepType.Add(1);
+                arrays.CmdTargetName.Add(target);
+                arrays.CmdStateArr.Add(cmdState);
+                arrays.Wait1Id.Add(0);
+                arrays.Wait1State.Add(0);
+                arrays.NextStep.Add(row + 1);
+            }
+            void AddWait(int waitId, int waitState)
+            {
+                int row = arrays.StepType.Count;
+                arrays.StepType.Add(2);
+                arrays.CmdTargetName.Add(string.Empty);
+                arrays.CmdStateArr.Add(0);
+                arrays.Wait1Id.Add(waitId);
+                arrays.Wait1State.Add(waitState);
+                arrays.NextStep.Add(row + 1);
+            }
+
+            if (!ok)
+            {
+                int e0 = arrays.StepType.Count;
+                arrays.StepType.Add(9); arrays.CmdTargetName.Add(string.Empty);
+                arrays.CmdStateArr.Add(0); arrays.Wait1Id.Add(0); arrays.Wait1State.Add(0);
+                arrays.NextStep.Add(e0);
+                arrays.Warnings.Add("[Recipe] Disassembly unpark requested but a cover/shaft/" +
+                    "bearing/clamp id did not resolve — emitted a single END (parked). No change.");
+                return;
+            }
+
+            // HANDSHAKE — hold until Assembly finishes. Assembly's tail publishes a sentinel
+            // CMD (state 7) so its ring message carries src_id = Assembly's process_id and
+            // state 7. The id is NOT hardcoded here: it is the SAME shared constant
+            // SystemLayoutInjector stamps onto Assembly_Station's process_id parameter
+            // (MapperConfig.AssemblyProcessId), so the WAIT can never drift from the publisher.
+            const int HandshakeSentinel = 7;
+            AddWait(MapperConfig.AssemblyProcessId, HandshakeSentinel);
+
+            // COVERS OFF (reverse of the Assembly cover place: hr forward -> vr down -> grasp
+            // -> vr up -> hr back -> vr down -> release -> vr up).
+            AddCmd("coverpnp_hr", 1);      AddWait(coverHrId, 2);
+            AddCmd("coverpnp_vr", 1);      AddWait(coverVrId, 2);
+            AddCmd("coverpnp_gripper", 1); AddWait(coverGripperId, 2);
+            AddCmd("coverpnp_vr", 3);      AddWait(coverVrId, 0);
+            AddCmd("coverpnp_hr", 3);      AddWait(coverHrId, 0);
+            AddCmd("coverpnp_vr", 1);      AddWait(coverVrId, 2);
+            AddCmd("coverpnp_gripper", 3); AddWait(coverGripperId, 0);
+            AddCmd("coverpnp_vr", 3);      AddWait(coverVrId, 0);
+
+            // SHAFT OUT (reverse).
+            AddCmd("shaft_hr", 1);      AddWait(shaftHrId, 2);
+            AddCmd("shaft_vr", 1);      AddWait(shaftVrId, 2);
+            AddCmd("shaft_gripper", 1); AddWait(shaftGripperId, 2);
+            AddCmd("shaft_vr", 3);      AddWait(shaftVrId, 0);
+            AddCmd("shaft_hr", 3);      AddWait(shaftHrId, 0);
+            AddCmd("shaft_vr", 1);      AddWait(shaftVrId, 2);
+            AddCmd("shaft_gripper", 3); AddWait(shaftGripperId, 0);
+            AddCmd("shaft_vr", 3);      AddWait(shaftVrId, 0);
+
+            // BEARING OUT (reverse swivel). DETERMINED, not guessed: the centre-home CAT
+            // (SevenStateCentreHomeActuator.fbt) has EXACTLY two work positions — AtWork1
+            // (coil outputToWork1, publishes current_state_to_process 2) and AtWork2 (coil
+            // outputToWork2, publishes 4) — plus AtHomeInit (0). There is NO distinct
+            // AtPick2/AtPlace2 ECC state; the twin's Disassembly step names say it directly:
+            // "bearing_work2_Pos" -> work2 = AtWork2(4), "bearing_pnp_work1" -> work1 =
+            // AtWork1(2). So the reverse swivel is the proven Assembly vocabulary run the
+            // other way: Assembly picks at AtWork1(2)/hopper side and places at AtWork2(4)/
+            // assembly side, leaving the part at AtWork2; Disassembly therefore goes to
+            // AtWork2 FIRST to collect it, then to AtWork1 to deposit it back. cmd3->ToWork2,
+            // cmd1->ToWork1, cmd5->ToHome — identical to the rig-proven Assembly bearing.
+            AddCmd("bearing_pnp", 3);     AddWait(bearingPnpId, 4);   // to AtWork2 (assembly side) — collect the part
+            AddCmd("bearing_gripper", 1); AddWait(bearingGripperId, 2); // grip the part
+            AddCmd("bearing_pnp", 1);     AddWait(bearingPnpId, 2);   // to AtWork1 (deposit side)
+            AddCmd("bearing_gripper", 3); AddWait(bearingGripperId, 0); // release
+            AddCmd("bearing_pnp", 5);     AddWait(bearingPnpId, 0);   // home (stable AtHomeInit 0)
+
+            // UNCLAMP — the twin opens the clamp at the very END of Disassembly (the LAST
+            // state, "Unclamping" -> WAIT Clamp/Home Finished). Assembly no longer opens it
+            // (it closes the clamp at the start and HOLDS through assembly+disassembly — see
+            // ApplyAssemblyRuntimeRecipe under UnparkDisassembly). The clamp is a
+            // Five_State_Actuator_CAT, so its open settles at the stable AtHomeInit (0) — the
+            // same home every other Five_State actuator waits on; the twin's distinct "Home
+            // Finished"(4) and "Home Pos"(0) both collapse onto the CAT's single AtHomeInit.
+            // NOTE: in Control.xml the Unclamping step sits AFTER the M262 Ejector+Robot steps;
+            // those are omitted here (no M262 transport — see the warning below), so the
+            // unclamp becomes the last reachable step — still "clamp home at the end of
+            // Disassembly", exactly the twin's intent.
+            AddCmd("clamp", 3); AddWait(clampId, 0);
+
+            int end = arrays.StepType.Count;
+            arrays.StepType.Add(9);
+            arrays.CmdTargetName.Add(string.Empty);
+            arrays.CmdStateArr.Add(0);
+            arrays.Wait1Id.Add(0);
+            arrays.Wait1State.Add(0);
+            arrays.NextStep.Add(end);
+
+            arrays.Warnings.Add(
+                $"[Recipe] Disassembly_Station (Stage 5a) emitted: WAIT(Assembly proc " +
+                $"{MapperConfig.AssemblyProcessId}, 7) -> covers off (hr/vr/grip reverse, " +
+                "Control.xml-faithful) -> shaft out -> bearing out (centre-home CAT work2->work1, " +
+                "rig-proven mapping) -> UNCLAMP (clamp home) -> END. " +
+                "OMITTED — Ejector + Robot: both are M262 actuators (Ejector I/O on M262, Robot " +
+                "is the M262 UR3e), orphan to Feed_Station, and there is NO existing cross-PLC " +
+                "transport M580->M262. Commanding them needs the stateRprtCmd ring extended to " +
+                "M262 (a new M580<->M262 adapter hop), which is deferred (Stage 5b) so the proven " +
+                "M262 Feed ring is not disturbed. Including them WITHOUT transport would stall the " +
+                "whole recipe at the first ejector WAIT, so they are left out by design.");
         }
 
         /// <summary>
