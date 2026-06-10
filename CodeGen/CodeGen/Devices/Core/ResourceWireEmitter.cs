@@ -81,6 +81,10 @@ namespace CodeGen.Devices.Core
             "CoverPNP_Hr", "CoverPNP_Vr", "CoverPnp_Gripper",
         };
 
+        private const string RingCrossGateType = "RingCrossGate";
+        private const string M580CoverRingGate = "M580_CoverRingGate";
+        private const string Bx1CoverRingGate = "BX1_CoverRingGate";
+
         private static readonly HashSet<string> SensorCatTypes =
             new(StringComparer.Ordinal) { "Sensor_Bool_CAT" };
         private static readonly HashSet<string> ActuatorCatTypes =
@@ -358,7 +362,13 @@ namespace CodeGen.Devices.Core
                 // wires too. M262 has only Feed_Station, so this is a single-element
                 // list and its output is byte-identical to before. The parked
                 // M580 Disassembly process is filtered out below.
+                // STAGE 5a (MapperConfig.UnparkDisassembly): when the flag is on, STOP
+                // bypassing Disassembly — it then enters processNames and the init chain, CaS
+                // station chain and stateRprtCmd report ring below thread through BOTH engines
+                // automatically (compN -> Assembly -> Disassembly -> comp0). Default-off keeps
+                // today's proven single-engine wiring byte-identical.
                 bool BypassParkedM580Disassembly(string name) =>
+                    !MapperConfig.UnparkDisassembly &&
                     string.Equals(anchors.ProcessFb, "Assembly_Station", StringComparison.Ordinal) &&
                     (string.Equals(name, "Disassembly", StringComparison.Ordinal) ||
                      string.Equals(name, "Disassembly_Station", StringComparison.Ordinal));
@@ -378,6 +388,13 @@ namespace CodeGen.Devices.Core
                 if (byName.ContainsKey("Disassembly") && BypassParkedM580Disassembly("Disassembly"))
                     report.Missing.Add("[M580 RES0] Disassembly parked and bypassed in init/CaS/stateRprtCmd wiring");
                 bool haveProcess = processNames.Count > 0;
+                string? ringGateName = null;
+                if (string.Equals(tag, "M580", StringComparison.Ordinal) &&
+                    byName.ContainsKey(M580CoverRingGate))
+                    ringGateName = M580CoverRingGate;
+                else if (string.Equals(tag, "BX1", StringComparison.Ordinal) &&
+                         byName.ContainsKey(Bx1CoverRingGate))
+                    ringGateName = Bx1CoverRingGate;
 
                 // Init chain: FB1.INITO→[Area]→[Station]→components…→[Process],
                 // wiring INITO(N)→INIT(N+1) so every node is reached. Anchors
@@ -389,6 +406,7 @@ namespace CodeGen.Devices.Core
                 if (Present(anchors.AreaFb, byName)) initChain.Add(anchors.AreaFb!);
                 if (Present(anchors.StationFb, byName)) initChain.Add(anchors.StationFb!);
                 initChain.AddRange(initNames);
+                if (ringGateName != null) initChain.Add(ringGateName);
                 initChain.AddRange(processNames);   // every process is INIT-chained
                 for (int i = 0; i < initChain.Count - 1; i++)
                     eventWires.Add(new Wire($"{initChain[i]}.INITO", $"{initChain[i + 1]}.INIT"));
@@ -530,15 +548,32 @@ namespace CodeGen.Devices.Core
                         for (int i = 0; i < processNames.Count - 1; i++)
                             adapterWires.Add(new Wire($"{processNames[i]}.stateRptCmdAdptr_out",
                                 $"{processNames[i + 1]}.stateRptCmdAdptr_in"));
-                        adapterWires.Add(new Wire($"{processNames[^1]}.stateRptCmdAdptr_out",
-                            $"{ringNames[0]}.stateRprtCmd_in"));
+                        if (ringGateName != null)
+                        {
+                            adapterWires.Add(new Wire($"{processNames[^1]}.stateRptCmdAdptr_out",
+                                $"{ringGateName}.stateRprtCmd_in"));
+                            adapterWires.Add(new Wire($"{ringGateName}.stateRprtCmd_out",
+                                $"{ringNames[0]}.stateRprtCmd_in"));
+                        }
+                        else
+                        {
+                            adapterWires.Add(new Wire($"{processNames[^1]}.stateRptCmdAdptr_out",
+                                $"{ringNames[0]}.stateRprtCmd_in"));
+                        }
                     }
                     else if (ringNames.Count > 1)
                     {
                         // BX1: self-close UNLESS the cross-PLC cover ring is active, in
                         // which case the chain is OPEN (last→first omitted) — the two ends
                         // join the M580 ring via the syslay cross-hops EAE bridges.
-                        if (!openBx1Boundary)
+                        if (ringGateName != null)
+                        {
+                            adapterWires.Add(new Wire($"{ringNames[^1]}.stateRprtCmd_out",
+                                $"{ringGateName}.stateRprtCmd_in"));
+                            adapterWires.Add(new Wire($"{ringGateName}.stateRprtCmd_out",
+                                $"{ringNames[0]}.stateRprtCmd_in"));
+                        }
+                        else if (!openBx1Boundary)
                             adapterWires.Add(new Wire($"{ringNames[^1]}.stateRprtCmd_out",
                                 $"{ringNames[0]}.stateRprtCmd_in"));
                         else
