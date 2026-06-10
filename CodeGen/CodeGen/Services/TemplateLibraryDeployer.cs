@@ -168,11 +168,26 @@ namespace CodeGen.Services
             {
                 DeployArtifact(libPath, "Basic", "changeEventM262_2", eaeProjectDir, result, isBasic: true);
                 DeployArtifact(libPath, "Composite", "PLC_RW_BX1", eaeProjectDir, result, isBasic: false);
+                // INTERNALIZED cover bridge (cfg.Bx1BridgeInsideComposite, default): transform
+                // the just-deployed PLC_RW_BX1.fbt so the per-cover sensor/coil symlink bridge
+                // + scan cycle live INSIDE the composite (data-driven from
+                // Bx1IoBrokerInjector.CoverIoBits). The generated BX1 resource then carries ONLY
+                // BX1_IO — the injector skips the external bridge. Idempotent; BX1-only; the EIP
+                // word symlinks + the .hcf binding to BX1_IO are left untouched.
+                if (cfg.Bx1BridgeInsideComposite)
+                    CodeGen.Devices.BX1.Bx1IoBrokerInjector.EmbedCoverBridgeInComposite(
+                        Path.Combine(eaeProjectDir, "IEC61499", "PLC_RW_BX1.fbt"));
             }
+
+            // STAGE 4 folds the BX1 covers into Assembly_Station over a plain cross-device
+            // adapter ring (ExtendStateRingAcrossBx1) that EAE compiles into CrossComm — NO
+            // custom FB to deploy. (The RingCrossGate FB variant was abandoned per the
+            // user's "no extra FBs"; its FB types are deleted and FoldCoversIntoAssembly
+            // stays FALSE, so nothing is staged here.)
 
             DeployDataTypes(libPath, eaeProjectDir, result);
             PatchKnownArraySizeBugs(eaeProjectDir, result);
-            PatchProcessFbsForRecipeAsInputVars(eaeProjectDir, result);
+            PatchProcessRuntimeCompatibility(eaeProjectDir, result);
             PatchSensorBoolCatDstQi(eaeProjectDir, result);
             PatchCatSymlinkQi(eaeProjectDir, "Five_State_Actuator_CAT", result);
             // 2026-06-02: the new centre-home swivel CAT has the SAME symlink FBs
@@ -275,6 +290,16 @@ namespace CodeGen.Services
             // REQ clears dest_name so a report carries NO command target and cannot
             // spuriously re-command anyone.
             PatchRingReportClearDest(eaeProjectDir, result);
+            // 2026-06-10: updateComponentState originally emitted CNF on every BREQ
+            // pass-through, even when component_state_in.dest_name did NOT match this
+            // actuator. Since StateHandling.CNF is wired to ActuatorCore.pst_event, an
+            // unrelated ring report could re-fire the actuator with its last retained
+            // command value. Live symptom: Shaft_Gripper finished a cycle with
+            // state_cmd/state_val=3 (release), then on the next cycle it gripped and an
+            // unrelated report immediately replayed that stale release at AtWork. Keep
+            // BCNF on every pass-through so the ring still advances and state_table still
+            // updates, but emit CNF only on an actual command for this actuator.
+            PatchRingCommandCnfOnlyOnDestination(eaeProjectDir, result);
             // Simulator-only interface reduction. Bidirectional normalizer:
             // when SimulatorFullSystem is on it bakes the two constant interlock
             // targets onto the embedded InterlockManager FB and removes their
@@ -399,6 +424,17 @@ namespace CodeGen.Services
             // sim path STRIPS the guard (original entry-check engine). Runs after the
             // recipe-array normalize so it patches the final check_wait.
             PatchProcessRuntimeWaitGuard(eaeProjectDir, apply: !cfg.SimulatorFullSystem, result);
+            // The WAIT guard above still read the target state from the persistent
+            // state_table. On repeated moves of the same actuator in one recipe
+            // (shaft_vr Work -> Home -> Work), a stale table slot can look correct
+            // before the second physical move has actually reported. Wire the
+            // ProcessHandler's current ring message into ProcessRuntime and make
+            // check_wait satisfy only on a fresh report from the waited component.
+            if (!cfg.SimulatorFullSystem)
+            {
+                PatchProcessRuntimeFreshWaitTrigger(eaeProjectDir, result);
+                PatchProcess1FreshWaitTriggerWiring(eaeProjectDir, result);
+            }
 
             GenerateCfgFiles(eaeProjectDir, result);
             RegisterInDfbproj(eaeProjectDir, result);
@@ -897,6 +933,165 @@ namespace CodeGen.Services
             catch (Exception ex)
             {
                 result.Warnings.Add($"ProcessRuntime wait-guard patch failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Tightens the rig WAIT semantics from "the state_table slot currently has
+        /// the requested value" to "the ring message that woke the engine is a fresh
+        /// report from the waited component with the requested value".
+        ///
+        /// This matters for repeated actuator targets in one recipe, especially
+        /// Shaft_Vr Work -> Home -> Work. If the persistent state_table still carries
+        /// the first Work report when the second Work wait is armed, the release row can
+        /// be reached before the second physical down stroke really reports. Feeding the
+        /// current ProcessHandler.component_state_out into the engine makes WAITs edge-
+        /// true on the actual reporting component instead of table history.
+        /// </summary>
+        static void PatchProcessRuntimeFreshWaitTrigger(string eaeProjectDir, DeployResult result)
+        {
+            var fbt = Path.Combine(eaeProjectDir, "IEC61499", "ProcessRuntime_Generic_v1.fbt");
+            if (!File.Exists(fbt))
+            {
+                fbt = Directory.EnumerateFiles(
+                        Path.Combine(eaeProjectDir, "IEC61499"),
+                        "ProcessRuntime_Generic_v1.fbt", SearchOption.AllDirectories)
+                    .FirstOrDefault() ?? string.Empty;
+                if (string.IsNullOrEmpty(fbt)) return;
+            }
+
+            try
+            {
+                var doc = XDocument.Load(fbt, LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                XNamespace ns = root.GetDefaultNamespace();
+                bool changed = false;
+
+                var inputVars = root.Element(ns + "InterfaceList")?.Element(ns + "InputVars");
+                if (inputVars != null &&
+                    !inputVars.Elements(ns + "VarDeclaration")
+                        .Any(v => (string?)v.Attribute("Name") == "last_state_msg"))
+                {
+                    inputVars.Add(new XElement(ns + "VarDeclaration",
+                        new XAttribute("Name", "last_state_msg"),
+                        new XAttribute("Type", "Component_State_Msg"),
+                        new XAttribute("Namespace", "Main"),
+                        new XAttribute("Comment",
+                            "Current stateRprtCmd ring message from ProcessHandler; WAITs satisfy only on this fresh report.")));
+                    changed = true;
+                }
+
+                var stateChange = root.Element(ns + "InterfaceList")
+                    ?.Element(ns + "EventInputs")
+                    ?.Elements(ns + "Event")
+                    .FirstOrDefault(e => (string?)e.Attribute("Name") == "state_change");
+                if (stateChange != null &&
+                    !stateChange.Elements(ns + "With")
+                        .Any(w => (string?)w.Attribute("Var") == "last_state_msg"))
+                {
+                    stateChange.Add(new XElement(ns + "With",
+                        new XAttribute("Var", "last_state_msg")));
+                    changed = true;
+                }
+
+                var checkWait = root.Descendants(ns + "Algorithm")
+                    .FirstOrDefault(a => (string?)a.Attribute("Name") == "check_wait");
+                var st = checkWait?.Element(ns + "ST");
+                if (st == null)
+                {
+                    result.Warnings.Add("ProcessRuntime_Generic_v1.fbt: no check_wait ST; fresh WAIT trigger skipped.");
+                }
+                else if (!st.Value.Contains("last_state_msg.src_id", StringComparison.Ordinal))
+                {
+                    var current = st.Value;
+                    var waitId = current.Contains("Recipe[CurrentStep].Wait1Id", StringComparison.Ordinal)
+                        ? "Recipe[CurrentStep].Wait1Id"
+                        : "Wait1Id[CurrentStep]";
+                    var waitState = current.Contains("Recipe[CurrentStep].Wait1State", StringComparison.Ordinal)
+                        ? "Recipe[CurrentStep].Wait1State"
+                        : "Wait1State[CurrentStep]";
+
+                    string newBody =
+                        "IF NOT armed THEN\r\n" +
+                        "\tarmed := TRUE;\r\n" +
+                        "\tWaitSatisfied := FALSE;\r\n" +
+                        "\t(* Anti-leftover: if the target slot ALREADY equals the wait target at arm\r\n" +
+                        "\t   time it is a stale value from a prior cycle (the actuator has not moved\r\n" +
+                        "\t   yet this step). Mark it suspect so a stale slot cannot satisfy the WAIT. *)\r\n" +
+                        $"\tleftoverSuspect := (state_table[{waitId}].state = {waitState});\r\n" +
+                        "ELSE\r\n" +
+                        $"\tIF (last_state_msg.src_id = {waitId}) AND (last_state_msg.state <> {waitState}) THEN\r\n" +
+                        "\t\tleftoverSuspect := FALSE;\r\n" +
+                        "\tEND_IF;\r\n" +
+                        $"\tWaitSatisfied := (last_state_msg.src_id = {waitId}) AND (last_state_msg.state = {waitState}) AND (NOT leftoverSuspect);\r\n" +
+                        "END_IF;\r\n" +
+                        "\r\n" +
+                        "PreviousStepText := ThisStepText;\r\n" +
+                        "ThisStepText := 'Waiting for target state';\r\n" +
+                        "NextStepText := 'Advance when satisfied';";
+
+                    st.ReplaceNodes(new XCData(newBody));
+                    changed = true;
+                }
+
+                if (changed)
+                {
+                    doc.Save(fbt);
+                    result.PatchesApplied.Add(
+                        "ProcessRuntime_Generic_v1: WAIT now requires the triggering ring message to be from the waited component (fresh-report guard)");
+                    MapperLogger.Info("[Deploy] ProcessRuntime_Generic_v1: WAIT fresh-report trigger guard applied");
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"ProcessRuntime fresh WAIT trigger patch failed: {ex.Message}");
+            }
+        }
+
+        static void PatchProcess1FreshWaitTriggerWiring(string eaeProjectDir, DeployResult result)
+        {
+            var fbt = Directory.EnumerateFiles(
+                    Path.Combine(eaeProjectDir, "IEC61499"),
+                    "Process1_Generic.fbt", SearchOption.AllDirectories)
+                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
+                ?? string.Empty;
+            if (string.IsNullOrEmpty(fbt))
+            {
+                result.Warnings.Add("Process1_Generic.fbt not found; fresh WAIT trigger wiring skipped.");
+                return;
+            }
+
+            try
+            {
+                var doc = XDocument.Load(fbt, LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                XNamespace ns = root.GetDefaultNamespace();
+                var dataConns = root.Element(ns + "FBNetwork")?.Element(ns + "DataConnections");
+                if (dataConns == null)
+                {
+                    result.Warnings.Add("Process1_Generic.fbt: DataConnections not found; fresh WAIT trigger wiring skipped.");
+                    return;
+                }
+
+                if (dataConns.Elements(ns + "Connection").Any(c =>
+                        (string?)c.Attribute("Source") == "ProcessHandler.component_state_out" &&
+                        (string?)c.Attribute("Destination") == "ProcessEngine.last_state_msg"))
+                    return;
+
+                dataConns.Add(new XElement(ns + "Connection",
+                    new XAttribute("Source", "ProcessHandler.component_state_out"),
+                    new XAttribute("Destination", "ProcessEngine.last_state_msg"),
+                    new XAttribute("dx1", "80")));
+                doc.Save(fbt);
+                result.PatchesApplied.Add(
+                    "Process1_Generic: ProcessHandler.component_state_out wired to ProcessEngine.last_state_msg");
+                MapperLogger.Info("[Deploy] Process1_Generic: wired fresh WAIT trigger message into ProcessRuntime");
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"Process1_Generic fresh WAIT trigger wiring failed: {ex.Message}");
             }
         }
 
@@ -3153,6 +3348,148 @@ namespace CodeGen.Services
             }
         }
 
+        /// <summary>
+        /// The ring relay must always pass messages forward with BCNF, but it must only
+        /// fire CNF into the actuator core when the message is truly addressed to this
+        /// actuator. Otherwise any unrelated state report replays the last retained
+        /// state_cmd through ActuatorCore.pst_event.
+        /// </summary>
+        static void PatchRingCommandCnfOnlyOnDestination(string eaeProjectDir, DeployResult result)
+        {
+            var fbt = Path.Combine(eaeProjectDir, "IEC61499", "updateComponentState.fbt");
+            if (!File.Exists(fbt))
+            {
+                fbt = Directory.EnumerateFiles(
+                        Path.Combine(eaeProjectDir, "IEC61499"),
+                        "updateComponentState.fbt", SearchOption.AllDirectories)
+                    .FirstOrDefault() ?? string.Empty;
+                if (string.IsNullOrEmpty(fbt)) return;
+            }
+
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+
+                var ecc = root.Descendants(ns + "ECC").FirstOrDefault();
+                if (ecc == null)
+                {
+                    result.Warnings.Add("updateComponentState.fbt: no ECC; destination-gated CNF patch skipped.");
+                    return;
+                }
+
+                const string commonCondition = "BREQ AND name <> component_state_in.source_name";
+                const string addressedCondition = commonCondition + " AND component_state_in.dest_name = name";
+                const string passThroughCondition = commonCondition + " AND component_state_in.dest_name <> name";
+
+                bool changed = false;
+
+                var addressedTransition = ecc.Elements(ns + "ECTransition")
+                    .FirstOrDefault(t =>
+                        (string?)t.Attribute("Source") == "START" &&
+                        (string?)t.Attribute("Destination") == "BREQ");
+                if (addressedTransition == null)
+                {
+                    ecc.Add(new System.Xml.Linq.XElement(ns + "ECTransition",
+                        new System.Xml.Linq.XAttribute("Source", "START"),
+                        new System.Xml.Linq.XAttribute("Destination", "BREQ"),
+                        new System.Xml.Linq.XAttribute("Condition", addressedCondition),
+                        new System.Xml.Linq.XAttribute("x", "825.226"),
+                        new System.Xml.Linq.XAttribute("y", "407.2253")));
+                    changed = true;
+                }
+                else if ((string?)addressedTransition.Attribute("Condition") != addressedCondition)
+                {
+                    addressedTransition.SetAttributeValue("Condition", addressedCondition);
+                    changed = true;
+                }
+
+                var passState = ecc.Elements(ns + "ECState")
+                    .FirstOrDefault(s => (string?)s.Attribute("Name") == "BREQ_PASS");
+                if (passState == null)
+                {
+                    passState = new System.Xml.Linq.XElement(ns + "ECState",
+                        new System.Xml.Linq.XAttribute("Name", "BREQ_PASS"),
+                        new System.Xml.Linq.XAttribute("x", "1036"),
+                        new System.Xml.Linq.XAttribute("y", "752"),
+                        new System.Xml.Linq.XElement(ns + "ECAction",
+                            new System.Xml.Linq.XAttribute("Algorithm", "BREQ"),
+                            new System.Xml.Linq.XAttribute("Output", "BCNF")));
+                    var reqState = ecc.Elements(ns + "ECState")
+                        .FirstOrDefault(s => (string?)s.Attribute("Name") == "BREQ");
+                    if (reqState != null)
+                        reqState.AddAfterSelf(passState);
+                    else
+                        ecc.AddFirst(passState);
+                    changed = true;
+                }
+                else
+                {
+                    var actions = passState.Elements(ns + "ECAction").ToList();
+                    if (!actions.Any(a =>
+                            (string?)a.Attribute("Algorithm") == "BREQ" &&
+                            (string?)a.Attribute("Output") == "BCNF") ||
+                        actions.Any(a => (string?)a.Attribute("Output") == "CNF"))
+                    {
+                        passState.Elements(ns + "ECAction").Remove();
+                        passState.Add(new System.Xml.Linq.XElement(ns + "ECAction",
+                            new System.Xml.Linq.XAttribute("Algorithm", "BREQ"),
+                            new System.Xml.Linq.XAttribute("Output", "BCNF")));
+                        changed = true;
+                    }
+                }
+
+                var passTransition = ecc.Elements(ns + "ECTransition")
+                    .FirstOrDefault(t =>
+                        (string?)t.Attribute("Source") == "START" &&
+                        (string?)t.Attribute("Destination") == "BREQ_PASS");
+                if (passTransition == null)
+                {
+                    ecc.Add(new System.Xml.Linq.XElement(ns + "ECTransition",
+                        new System.Xml.Linq.XAttribute("Source", "START"),
+                        new System.Xml.Linq.XAttribute("Destination", "BREQ_PASS"),
+                        new System.Xml.Linq.XAttribute("Condition", passThroughCondition),
+                        new System.Xml.Linq.XAttribute("x", "721"),
+                        new System.Xml.Linq.XAttribute("y", "655")));
+                    changed = true;
+                }
+                else if ((string?)passTransition.Attribute("Condition") != passThroughCondition)
+                {
+                    passTransition.SetAttributeValue("Condition", passThroughCondition);
+                    changed = true;
+                }
+
+                var passReturn = ecc.Elements(ns + "ECTransition")
+                    .FirstOrDefault(t =>
+                        (string?)t.Attribute("Source") == "BREQ_PASS" &&
+                        (string?)t.Attribute("Destination") == "START");
+                if (passReturn == null)
+                {
+                    ecc.Add(new System.Xml.Linq.XElement(ns + "ECTransition",
+                        new System.Xml.Linq.XAttribute("Source", "BREQ_PASS"),
+                        new System.Xml.Linq.XAttribute("Destination", "START"),
+                        new System.Xml.Linq.XAttribute("Condition", "1"),
+                        new System.Xml.Linq.XAttribute("x", "793"),
+                        new System.Xml.Linq.XAttribute("y", "760")));
+                    changed = true;
+                }
+
+                if (changed)
+                {
+                    doc.Save(fbt);
+                    result.PatchesApplied.Add(
+                        "updateComponentState.fbt: CNF is now destination-gated; non-target BREQ messages pass with BCNF only, preventing stale actuator command replay.");
+                    MapperLogger.Info("[Deploy] updateComponentState.fbt: gated CNF to dest_name match only (stale command replay fix)");
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"updateComponentState.fbt destination-gated CNF patch failed: {ex.Message}");
+            }
+        }
+
         // (PatchSwivelAtHomeTimerWiring removed 2026-06-04: atHome is intentionally the
         // real DI02 on the rig, wired by NormalizeSwivelSimSensorSource -- the timer
         // output can fire before the arm reaches centre and stop Home short or overshoot,
@@ -3485,6 +3822,27 @@ namespace CodeGen.Services
             ("Wait1State",    "INT",         "100", (string?)null),
             ("NextStep",      "INT",         "100", (string?)null),
         };
+
+        static void PatchProcessRuntimeCompatibility(string eaeProjectDir, DeployResult result)
+        {
+            var enginePath = Path.Combine(eaeProjectDir, "IEC61499", "ProcessRuntime_Generic_v1.fbt");
+            if (!File.Exists(enginePath))
+            {
+                result.Warnings.Add("ProcessRuntime_Generic_v1.fbt not deployed; runtime compatibility patch skipped.");
+                return;
+            }
+
+            try
+            {
+                PatchProcessRuntimeEccDeadEnd(enginePath, result);
+                PatchProcessRuntimeStartBypass(enginePath, result);
+                PatchProcessRuntimeEndSequenceNoOp(enginePath, result);
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"ProcessRuntime_Generic_v1 compatibility patch failed: {ex.Message}");
+            }
+        }
 
         /// <summary>
         /// Silence EAE's WRN_ECC_DEAD_END on the <c>END</c> state of
@@ -4040,6 +4398,57 @@ namespace CodeGen.Services
                 {
                     result.FilesSkipped++;
                 }
+            }
+        }
+
+        static void PatchRingCrossGateCoreSchemaOrder(string eaeProjectDir, DeployResult result)
+        {
+            var candidates = new[]
+            {
+                Path.Combine(eaeProjectDir, "IEC61499", "RingCrossGateCore.fbt"),
+                Path.Combine(eaeProjectDir, "IEC61499", "RingCrossGateCore", "RingCrossGateCore.fbt"),
+            };
+
+            foreach (var fbt in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                if (!File.Exists(fbt))
+                    continue;
+
+                var doc = XDocument.Load(fbt, LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null)
+                    continue;
+
+                var ns = root.Name.Namespace;
+                var basicFb = root.Element(ns + "BasicFB");
+                if (basicFb == null)
+                    continue;
+
+                var orderAttributes = basicFb.Elements(ns + "Attribute")
+                    .Where(e => string.Equals(
+                        (string?)e.Attribute("Name"),
+                        "FBType.Basic.Algorithm.Order",
+                        StringComparison.Ordinal))
+                    .ToList();
+
+                if (orderAttributes.Count == 0)
+                    continue;
+
+                var normalized = new XElement(orderAttributes[0]);
+                foreach (var attribute in orderAttributes)
+                    attribute.Remove();
+
+                var firstNonAttribute = basicFb.Elements()
+                    .FirstOrDefault(e => e.Name != ns + "Attribute");
+
+                if (firstNonAttribute != null)
+                    firstNonAttribute.AddBeforeSelf(normalized);
+                else
+                    basicFb.Add(normalized);
+
+                doc.Save(fbt);
+                result.PatchesApplied.Add(
+                    "RingCrossGateCore.fbt: normalized BasicFB Attribute order for EAE schema");
             }
         }
 
