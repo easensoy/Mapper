@@ -885,11 +885,15 @@ namespace MapperUI
                 AppendActivity($"[Test Feed Station] Generating into Demonstrator at {syslayPath}...");
                 AppendActivity("[Test Runtime] Hardware mode forced: SimulatorFullSystem=false; RecipeStep data-array carrier active; physical IO/sensor wiring and rig HOME-FIRST recipe waits are active.");
 
-                await DeployUniversalTemplatesAsync();
-
                 var injector = new SystemInjector();
                 var cleanup = await Task.Run(() => injector.PrepareDemonstratorForGeneration(Cfg()));
                 LogCleanup(cleanup);
+
+                // Deploy templates after cleanup. The cleanup step deletes flat
+                // root-level Basic FB files such as FiveStateActuator.fbt; deploying
+                // before it lets the patched FiveState core disappear from the
+                // generated EAE project.
+                await DeployUniversalTemplatesAsync();
 
                 var bindings = TryLoadBindings();
                 SystemInjector.BindingApplicationReport report = null!;
