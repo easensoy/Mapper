@@ -33,6 +33,11 @@ namespace CodeGen.Translation
             ["Five_State_Actuator_CAT"] = new[] { "stationAdptr_in", "stateRprtCmd_in", "stationAdptr_out", "stateRprtCmd_out" },
             ["Sensor_Bool_CAT"] = new[] { "stateRprtCmd_in", "stateRprtCmd_out" },
             ["Process1_Generic"] = new[] { "stateRptCmdAdptr_in", "stationAdptr_in", "stateRptCmdAdptr_out", "stationAdptr_out" },
+            // STAGE 5b: the UR3e task arm. RING ports ONLY (the StateHandling node grafted into
+            // its .fbt) — NO stationAdptr (it is in ResourceWireEmitter.NoStationAdapterTypes,
+            // off the CaSBus chain). If a future edit adds a stationAdptr port or drops a ring
+            // port, this validator flags it.
+            ["Robot_Task_CAT"] = new[] { "stateRprtCmd_in", "stateRprtCmd_out" },
         };
 
         public static List<PortNameMismatch> Validate(string templateLibraryPath)
