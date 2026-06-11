@@ -8,6 +8,10 @@ namespace CodeGen.Models
         public string Name { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
         public string Type { get; set; } = string.Empty;
+        // VueOne <VcID> — the design-tool hardware marker (e.g. "UR3e" for the robot arm,
+        // "Swivel Arm"/"pnp"/"coverpnp" for the grippers). Used ONLY to narrowly identify the
+        // real UR3e task arm (TemplateMap.IsRobotTaskArm); empty when the XML omits it.
+        public string VcID { get; set; } = string.Empty;
         public List<VueOneState> States { get; set; } = new();
         public string NameTag { get; set; } = "Name";
     }
