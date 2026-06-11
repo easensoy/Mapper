@@ -739,8 +739,12 @@ namespace CodeGen.Translation
         private static List<VueOneComponent> Processes(List<VueOneComponent> all) =>
             all.Where(c => c.Type?.Equals("Process", StringComparison.OrdinalIgnoreCase) == true).ToList();
 
+        // HARDENED (Stage 5b): a Type="Robot" component is NOT necessarily the UR3e — the
+        // Bearing/Shaft/CoverPnp grippers are also Type="Robot" (5-state) and must NEVER be
+        // emitted as Robot_Task_CAT. Use the SAME narrow predicate as the active resolver so this
+        // legacy InjectGroup path can only ever select the real task arm.
         private static List<VueOneComponent> Robots(List<VueOneComponent> all, MapperConfig config) =>
-            all.Where(c => c.Type?.Equals("Robot", StringComparison.OrdinalIgnoreCase) == true).ToList();
+            all.Where(c => TemplateMap.IsRobotTaskArm(c)).ToList();
 
         private static List<VueOneComponent> Unsupported(List<VueOneComponent> all, MapperConfig config) =>
             all.Where(c => !Actuators(all).Contains(c)
@@ -963,6 +967,13 @@ namespace CodeGen.Translation
                 "CoverPNP_Hr", "CoverPNP_Vr",
                 "CoverPnp_Gripper",
             };
+            // STAGE 5b (gated): emit the real UR3e task arm on M262. ONLY "Robot" is added —
+            // the Type="Robot" grippers (Bearing/Shaft/CoverPnp) are NOT here and would be
+            // rejected by IsRobotTaskArm anyway. Resolves to Robot_Task_CAT, lands on M262
+            // (NameBasedPlcGuess Robot→M262), gets minimal params (actuator_name='robot',
+            // actuator_id). Default-off → array unchanged → Stage 5a byte-identical.
+            if (MapperConfig.EnableRobotTaskTail)
+                allowedActuators = allowedActuators.Append("Robot").ToArray();
             var allowedSensors = new[]
             {
                 "PartInHopper", "PartAtChecker",
@@ -1207,6 +1218,11 @@ namespace CodeGen.Translation
             // recipe arrays. Sits in a third X column under the BX1 zone so the
             // three Process FBs form a left→right Station1/Station2/Station3 row at
             // y=1460. Now emitted on the hardware path too (was sim-only).
+            // Captured so BuildStation2Wiring can thread the SAME Disassembly FB into the
+            // syslay init/CaS/ring chains that ResourceWireEmitter threads on the sysres
+            // (STAGE 5a, MapperConfig.UnparkDisassembly). Null when there is no Disassembly
+            // Process — then the syslay stays Assembly-only, matching the parked sysres.
+            string disassemblyFbName = null;
             var disassyProc = allComponents.FirstOrDefault(c =>
                 string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase) &&
                 (string.Equals(c.Name, "Disassembly", StringComparison.Ordinal)
@@ -1215,6 +1231,7 @@ namespace CodeGen.Translation
             {
                 var disassyName = InstanceNameResolver.Resolve(disassyProc,
                     overrides.ByComponentId, overrides.ByVueOneName);
+                disassemblyFbName = disassyName;
                 var (dOuter, dNested, dRecipe) = BuildProcessFbParameters(
                     disassyProc, allComponents, disassyName, disassemblyProcessId,
                     contents: contents,        // global registry → global Wait1Id ids
@@ -1352,6 +1369,12 @@ namespace CodeGen.Translation
                 var actuator = contents.Actuators[i];
                 int assignedId = actuatorIdStart + i;
                 var fbType = ResolveActuatorFBType(actuator);
+                // STAGE 5b: the UR3e's positional id (17) collides with the Assembly station on the
+                // M580 state_table its ring reports cross to. Force the dedicated non-colliding slot
+                // so the CAT actuator_id == the recipe's WAIT robot Wait1Id (one source —
+                // MapperConfig.RobotActuatorId). Gated → Stage 5a positional ids byte-identical.
+                if (MapperConfig.EnableRobotTaskTail && TemplateMap.IsRobotTaskArm(actuator))
+                    assignedId = MapperConfig.RobotActuatorId;
                 // Resolve FB instance name via the same path Process FB names use:
                 //   1. Instance_Name_Overrides xlsx sheet (ComponentID, then VueOne Name)
                 //   2. Default convention (suffix stripping)
@@ -1618,6 +1641,35 @@ namespace CodeGen.Translation
                     });
             }
 
+            // STAGE 5b (gated): the two real M262 rig proximity sensors the digital twin does NOT
+            // model — PartAtAssembly (DI08, the Feed→Assembly handoff) and PartAtExit (DI09, the robot
+            // gate). The physical SMC rig wires them; HcfPatchService binds them. Synthesized as
+            // Sensor_Bool_CAT with EXPLICIT ids (from MapperConfig.M262SynthSensors) so they never
+            // shift the Feed actuator ids (actuatorIdStart was already fixed from the REAL sensor
+            // count). Init-chained off the hopper sensor (a fan-out, parallel to the Feed chain) and
+            // currently OFF every report ring — exposed-only, so the proven Feed ring stays
+            // byte-identical and nothing crosses to the M580 state_table yet. See
+            // MapperConfig.M262SynthSensors for the id/consumption strategy. FB ids via FBIdGenerator,
+            // never the reference's. Off -> not emitted.
+            if (MapperConfig.EnableRobotTaskTail)
+            {
+                int synthY = 5200;
+                string prevSynthInit = "PartInHopper";
+                foreach (var (synthName, _, synthId) in MapperConfig.M262SynthSensors)
+                {
+                    builder.AddFB(FBIdGenerator.GenerateFBId("m262rigsensor-" + synthName),
+                        synthName, "Sensor_Bool_CAT", "Main", 2000, synthY,
+                        new Dictionary<string, string>
+                        {
+                            ["name"] = SyslayBuilder.FormatString(synthName),
+                            ["id"] = SyslayBuilder.FormatInt(synthId),
+                        });
+                    builder.AddEventConnection($"{prevSynthInit}.INITO", $"{synthName}.INIT");
+                    prevSynthInit = synthName;
+                    synthY += 500;
+                }
+            }
+
             builder.AddFB(FBIdGenerator.GenerateFBId("Stn1_Term"),
                 "Stn1_Term", "CaSAdptrTerminator", "Main", 4780, 2360);
 
@@ -1749,7 +1801,7 @@ namespace CodeGen.Translation
             // canvas showed every M580 FB unconnected. Each chain is contained inside
             // the M580 partition so the syslay wires render solid (no cross-PLC
             // dashed edges).
-            BuildStation2Wiring(builder, contents);
+            BuildStation2Wiring(builder, contents, disassemblyFbName);
             // BX1 — Cover PnP sub-station. No Station_CAT / no Process FB on BX1
             // itself (Assembly_Station on M580 commands the BX1 actuators
             // cross-PLC). Emits an INIT chain + closed stateRprtCmd ring among
@@ -1894,6 +1946,12 @@ namespace CodeGen.Translation
             // Five_State_Actuator_No_Sensors_CAT; else → Five_State_Actuator_CAT.
             // See Docs/INVARIANTS.md I-4 for the 6 sites that must agree on this.
             if (actuator == null) return "Five_State_Actuator_CAT";
+            // STAGE 5b foundation: ONLY the real UR3e task arm resolves to Robot_Task_CAT — the
+            // Bearing/Shaft/CoverPnp grippers are also Type="Robot" and must stay Five_State/Vacuum.
+            // The narrowing lives in ONE shared predicate (TemplateMap.IsRobotTaskArm). Gated so the
+            // proven path is byte-identical when off.
+            if (MapperConfig.EnableRobotTaskTail && TemplateMap.IsRobotTaskArm(actuator))
+                return "Robot_Task_CAT";
             return TemplateMap.ResolveActuatorCatType(
                 actuator.Name ?? string.Empty,
                 actuator.States?.Count ?? 0,
@@ -2152,6 +2210,20 @@ namespace CodeGen.Translation
             // gripper; only the state confirmation comes from toWork/toHomeTime. The
             // M580 grippers keep their real DI sensors (see the 2026-06-04 note above).
             if (string.Equals(actuator.Name, "CoverPnp_Gripper", StringComparison.OrdinalIgnoreCase))
+            {
+                workSensorFitted = false;
+                homeSensorFitted = false;
+            }
+
+            // STAGE 5b (gated): the M262 Ejector is reference-compatible OPEN-LOOP. The reference
+            // uses Five_State_Actuators_No_Sensors_CAT (timer-driven, coil only); our generator
+            // keeps it Five_State_Actuator_CAT, but the rig binds NO ejector athome/atwork DIs (only
+            // the DO03 coil — see HcfPatchService). A sensored WAIT ejector=2 / ejector=0 would
+            // stall forever on a sensor that never closes. Force sensorless so the ECC settles
+            // AtWork/AtHome on the toWork/toHome timers; the coil (OutputToWork) still fires the
+            // physical push. Narrow to "Ejector", gated -> Stage 5a byte-identical.
+            if (MapperConfig.EnableRobotTaskTail
+                && string.Equals(actuator.Name, "Ejector", StringComparison.OrdinalIgnoreCase))
             {
                 workSensorFitted = false;
                 homeSensorFitted = false;
@@ -2569,14 +2641,30 @@ namespace CodeGen.Translation
             static bool IsM262(string name) =>
                 HcfSymbolIndex.NameBasedPlcGuess(name) == PlcAssignment.M262;
 
+            // STAGE 5b: the M262 robot-tail (Ejector + Robot) are Disassembly's actuators that
+            // merely live on M262 and carry cross-PLC links to M580. They must NOT sit in the
+            // critical INIT path to Feed_Station: a stall in the Robot's bring-up would block
+            // Feed_Station.INIT and kill the whole Feed station when all three PLCs run (Feed works
+            // M262-alone because the cross-PLC links are absent). So init the Feed components ->
+            // Feed_Station FIRST, then the tail. Same split is mirrored in ResourceWireEmitter
+            // (sysres). This bool is also reused for the report-ring split below. Off -> tail empty
+            // -> byte-identical.
+            bool robotTail = MapperConfig.EnableRobotTaskTail &&
+                contents.Actuators.Any(a => NameEq(a.Name, "Ejector")) &&
+                contents.Actuators.Any(a => NameEq(a.Name, "Robot"));
+            bool IsRobotTailName(string name) =>
+                robotTail && (NameEq(name, "Ejector") || NameEq(name, "Robot"));
+
             var initChain = new List<string>();
             initChain.Add("Area");
             initChain.Add("Station1");
             foreach (var s in contents.Sensors)
                 if (IsM262(s.Name)) initChain.Add(s.Name);
             foreach (var a in contents.Actuators)
-                if (IsM262(a.Name)) initChain.Add(a.Name);
+                if (IsM262(a.Name) && !IsRobotTailName(a.Name)) initChain.Add(a.Name);
             initChain.Add(processInstanceName);
+            foreach (var a in contents.Actuators)
+                if (IsM262(a.Name) && IsRobotTailName(a.Name)) initChain.Add(a.Name);
 
             // No PLC_Start bootstrap edges: Area_CAT contains its own internal plcStart
             // which fires Area.INITO via INIT, propagating through this chain.
@@ -2593,10 +2681,24 @@ namespace CodeGen.Translation
             // M262-only filter (same rationale as the init chain above) — pre-filter
             // keeps Station1.StationAdaptrOUT -> Feeder -> Checker -> Transfer -> Feed_Station
             // -> Stn1_Term, with no cross-PLC actuators stitched in.
+            // Resolve each actuator's REAL CAT type (not a blanket Five_State assumption) and skip
+            // types with NO stationAdptr port. STAGE 5b: the UR3e (Robot_Task_CAT) is an M262
+            // actuator with no stationAdptr — without this skip it dangled
+            //   Ejector.stationAdptr_out -> Robot.stationAdptr_in  and
+            //   Robot.stationAdptr_out -> Feed_Station.stationAdptr_in
+            // (ports that don't exist → EAE rejected M262 → "nothing triggers"). Ejector
+            // (Five_State, real ports) stays, so the chain re-links Transfer → Ejector →
+            // Feed_Station. Same single rule the M580 chain + ResourceWireEmitter use
+            // (TemplateMap.NoStationAdapterCatTypes). Off → every M262 actuator is Five_State, so
+            // ResolveActuatorFBType returns the identical type and the chain is byte-identical.
             var stationChain = new List<(string Name, string Type)>();
             foreach (var a in contents.Actuators)
-                if (IsM262(a.Name))
-                    stationChain.Add((a.Name, "Five_State_Actuator_CAT"));
+            {
+                if (!IsM262(a.Name)) continue;
+                var fbType = ResolveActuatorFBType(a);
+                if (TemplateMap.LacksStationAdapter(fbType)) continue;
+                stationChain.Add((a.Name, fbType));
+            }
             stationChain.Add((processInstanceName, "Process1_Generic"));
 
             if (stationChain.Count > 0)
@@ -2615,11 +2717,20 @@ namespace CodeGen.Translation
             // Report-ring is M262-only too — keeps PartInHopper -> Feeder -> Checker
             // -> Transfer -> Feed_Station -> PartInHopper (closed). The M580 / BX1
             // resources each close their own ring in their own sysres.
+            // STAGE 5b: when the robot tail is active the Ejector + Robot are NOT part of the
+            // closed Feed ring — they form a separate cross-PLC segment (BuildStation2Wiring
+            // splices Disassembly→Ejector and Robot→BearingSensor; the local Ejector→Robot hop is
+            // added below). Filtering them here keeps the Feed ring closed around Feed components
+            // + Feed_Station ONLY and stops Robot.stateRprtCmd_out being driven twice (Feed ring +
+            // cross-hop = the double-drive). Off → ringComponents byte-identical.
+            // (robotTail is computed once above, by the init-chain split, and reused here.)
             var ringComponents = new List<(string Name, string Type)>();
             foreach (var s in contents.Sensors)
                 if (IsM262(s.Name)) ringComponents.Add((s.Name, "Sensor_Bool_CAT"));
             foreach (var a in contents.Actuators)
-                if (IsM262(a.Name)) ringComponents.Add((a.Name, "Five_State_Actuator_CAT"));
+                if (IsM262(a.Name) &&
+                    !(robotTail && (NameEq(a.Name, "Ejector") || NameEq(a.Name, "Robot"))))
+                    ringComponents.Add((a.Name, "Five_State_Actuator_CAT"));
             ringComponents.Add((processInstanceName, "Process1_Generic"));
 
             if (ringComponents.Count > 1)
@@ -2632,6 +2743,12 @@ namespace CodeGen.Translation
                     $"{ringComponents[^1].Name}.{StateRprtOut(ringComponents[^1].Type)}",
                     $"{ringComponents[0].Name}.{StateRprtIn(ringComponents[0].Type)}");
             }
+
+            // STAGE 5b: the local intra-M262 hop of the robot-tail segment. Ejector.in (from
+            // Disassembly) and Robot.out (to BearingSensor) are the cross-device ends — added in
+            // BuildStation2Wiring and bridged by EAE; only Ejector→Robot is local here.
+            if (robotTail)
+                builder.AddAdapterConnection("Ejector.stateRprtCmd_out", "Robot.stateRprtCmd_in");
         }
 
         public static string StateRprtOut(string fbType)
@@ -2736,7 +2853,8 @@ namespace CodeGen.Translation
         /// render solid on the syslay — no dashed cross-PLC edges. M262 + BX1
         /// components are filtered out via <see cref="HcfSymbolIndex.NameBasedPlcGuess"/>.
         /// </summary>
-        private static void BuildStation2Wiring(SyslayBuilder builder, StationContents contents)
+        private static void BuildStation2Wiring(SyslayBuilder builder, StationContents contents,
+            string disassemblyFbName = null)
         {
             const string StationFb     = "Station2";
             const string StationHmiFb  = "Station2_HMI";
@@ -2747,6 +2865,17 @@ namespace CodeGen.Translation
                 HcfSymbolIndex.NameBasedPlcGuess(name) == PlcAssignment.M580;
             bool foldCoversIntoAssembly =
                 MapperConfig.FoldCoversIntoAssembly && HasBx1CoverBridgeSet(contents);
+
+            // STAGE 5a: thread the Disassembly Process FB into the M580 init chain, CaS
+            // station chain and stateRprtCmd ring — RIGHT AFTER Assembly_Station — exactly as
+            // ResourceWireEmitter does on the M580 sysres (compN → Assembly → Disassembly →
+            // comp0). This keeps the application syslay and the resource sysres in lock-step;
+            // without it the syslay's Assembly→BearingSensor close-back skips Disassembly and
+            // EAE could re-derive a ring that drops it. Gated on the SAME flag as the sysres
+            // side (UnparkDisassembly) AND the FB actually being present, so flag-off / no
+            // Disassembly keeps the byte-identical Assembly-only layout.
+            bool threadDisassembly =
+                MapperConfig.UnparkDisassembly && !string.IsNullOrEmpty(disassemblyFbName);
 
             // Disassembly is generated as a parked END-only Process, but is not
             // threaded through the M580 wiring while Assembly_Station owns the cycle.
@@ -2762,6 +2891,7 @@ namespace CodeGen.Translation
                 if (IsM580(a.Name)) initChain.Add(a.Name);
             if (foldCoversIntoAssembly) initChain.Add(M580CoverRingGate);
             initChain.Add(AssemblyProc);
+            if (threadDisassembly) initChain.Add(disassemblyFbName);   // Assembly_Station → Disassembly
             for (int i = 0; i < initChain.Count - 1; i++)
                 builder.AddEventConnection($"{initChain[i]}.INITO", $"{initChain[i + 1]}.INIT");
 
@@ -2783,11 +2913,15 @@ namespace CodeGen.Translation
             {
                 if (!IsM580(a.Name)) continue;
                 var fbType = ResolveActuatorFBType(a);
-                if (string.Equals(fbType, SevenStateActuatorCatType, StringComparison.Ordinal))
+                // Skip types with no stationAdptr port (Seven_State + Robot_Task_CAT) — one shared
+                // rule with BuildFeedStationWiring + ResourceWireEmitter.
+                if (TemplateMap.LacksStationAdapter(fbType))
                     continue;
                 stationChain.Add((a.Name, fbType));
             }
             stationChain.Add((AssemblyProc, "Process1_Generic"));
+            if (threadDisassembly)   // Assembly_Station → Disassembly → Stn2_Term
+                stationChain.Add((disassemblyFbName, "Process1_Generic"));
             if (stationChain.Count > 0)
             {
                 builder.AddAdapterConnection($"{StationFb}.StationAdaptrOUT",
@@ -2856,10 +2990,48 @@ namespace CodeGen.Translation
                     $"{Bx1RingTail}.stateRprtCmd_out",
                     $"{AssemblyProc}.stateRptCmdAdptr_in");
 
-                // Close back on the M580: Assembly_Station → BearingSensor.
-                builder.AddAdapterConnection(
-                    $"{AssemblyProc}.stateRptCmdAdptr_out",
-                    $"{m580[0].Name}.stateRprtCmd_in");
+                // Close back on the M580. STAGE 5a: route through Disassembly so the ring is
+                // Assembly_Station → Disassembly → BearingSensor (matches the M580 sysres);
+                // otherwise Assembly_Station → BearingSensor directly (parked Disassembly).
+                if (threadDisassembly)
+                {
+                    builder.AddAdapterConnection(
+                        $"{AssemblyProc}.stateRptCmdAdptr_out",
+                        $"{disassemblyFbName}.stateRptCmdAdptr_in");
+                    // STAGE 5b (gated): splice the M262 ejector+robot segment between Disassembly
+                    // and the M580 ring head so the Disassembly engine commands them over the ring
+                    // (2 cross-device hops M580→M262, M262→M580 — EAE bridges them like the cover
+                    // hops). Both are orphan to Feed, so the Feed RECIPE is untouched. NOTE: the
+                    // M262 sysres still auto-wires ejector+robot onto the M262 ring (ResourceWire
+                    // Emitter line ~353) — the boundary-open that prevents the plug-fan-out
+                    // double-drive is the rig-coupled follow-up (see report). Off → Disassembly
+                    // closes straight to the M580 head (Stage 5a byte-identical).
+                    bool robotTail = MapperConfig.EnableRobotTaskTail &&
+                        contents.Actuators.Exists(a => NameEq(a.Name, "Ejector")) &&
+                        contents.Actuators.Exists(a => NameEq(a.Name, "Robot"));
+                    if (robotTail)
+                    {
+                        // CROSS-DEVICE hops only (M580→M262 and M262→M580; EAE bridges these). The
+                        // intra-M262 Ejector→Robot hop is added by BuildFeedStationWiring (M262-
+                        // local) so the segment is never duplicated in the syslay.
+                        builder.AddAdapterConnection(
+                            $"{disassemblyFbName}.stateRptCmdAdptr_out", "Ejector.stateRprtCmd_in");
+                        builder.AddAdapterConnection(
+                            "Robot.stateRprtCmd_out", $"{m580[0].Name}.stateRprtCmd_in");
+                    }
+                    else
+                    {
+                        builder.AddAdapterConnection(
+                            $"{disassemblyFbName}.stateRptCmdAdptr_out",
+                            $"{m580[0].Name}.stateRprtCmd_in");
+                    }
+                }
+                else
+                {
+                    builder.AddAdapterConnection(
+                        $"{AssemblyProc}.stateRptCmdAdptr_out",
+                        $"{m580[0].Name}.stateRprtCmd_in");
+                }
             }
             else
             {
@@ -2869,6 +3041,8 @@ namespace CodeGen.Translation
                 {
                     (AssemblyProc, "Process1_Generic")
                 };
+                if (threadDisassembly)   // … → Assembly_Station → Disassembly → (close back)
+                    ring.Add((disassemblyFbName, "Process1_Generic"));
                 if (foldCoversIntoAssembly)
                     ring.Add((M580CoverRingGate, RingCrossGateType));
                 if (ring.Count > 1)
