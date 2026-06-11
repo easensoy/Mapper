@@ -337,6 +337,54 @@ namespace CodeGen.Devices.M262
                         int.TryParse(kv.Key.Substring(2), out var di)) usedDi.Add(di);
                 }
             }
+            // The xlsx pre-seeds DI/DO channels with EMPTY values, so a plain
+            // effective.ContainsKey(pin) check wrongly treats a blank channel as already taken —
+            // that is exactly why DO03/DI08/DI09 stayed blank in the generated HCF. A pin is truly
+            // free to bind in code when it is absent, empty, OR points at a component not on this
+            // sysres. One DRY predicate, used by every code-side binding below.
+            bool PinBlank(string p) => !effective.TryGetValue(p, out var v)
+                || string.IsNullOrEmpty(v.Comp) || !fbIdByName.ContainsKey(v.Comp);
+            // STAGE 5b (gated): bind the UR3e task arm's two channels — but ONLY when the Robot
+            // FB is actually on THIS resource's sysres (so it's a no-op on M580/BX1 and when the
+            // robot isn't emitted). DO04 drives the start-task pulse, DI10 reads task-complete.
+            // The port names are the symlinks Robot_Task_CAT publishes/subscribes, so Sym()
+            // emits {resId}.{robotFbId}.RobotCommands_StartTask / .RobotStatus_Task_Complete —
+            // exactly the reference SMC_Rig_Expo binding form. The xlsx has no robot row, so
+            // these are added in code (xlsx untouched).
+            if (MapperConfig.EnableRobotTaskTail && fbIdByName.ContainsKey("Robot"))
+            {
+                if (!effective.ContainsKey("DO04"))
+                    effective["DO04"] = ("Robot", "RobotCommands_StartTask");
+                if (!effective.ContainsKey("DI10"))
+                {
+                    effective["DI10"] = ("Robot", "RobotStatus_Task_Complete");
+                    usedDi.Add(10);
+                }
+                report.Missing.Add("[Hcf][5b] bound DO04=Robot.RobotCommands_StartTask, DI10=Robot.RobotStatus_Task_Complete");
+            }
+            // STAGE 5b (gated): the M262 Ejector is reference-compatible OPEN-LOOP (the reference
+            // uses Five_State_Actuators_No_Sensors_CAT — coil only, no sensors). Bind its output
+            // coil to DO03 so it physically actuates; it has NO athome/atwork DIs (its WAITs are
+            // timer-driven — see the sensorless override in SystemLayoutInjector). Only when the
+            // Ejector FB is on THIS resource's sysres (no-op on M580/BX1). xlsx untouched.
+            if (MapperConfig.EnableRobotTaskTail && fbIdByName.ContainsKey("Ejector")
+                && PinBlank("DO03"))
+            {
+                effective["DO03"] = ("Ejector", "OutputToWork");
+                report.Missing.Add("[Hcf][5b] bound DO03=Ejector.OutputToWork (open-loop, no sensor DIs)");
+            }
+            // STAGE 5b (gated): the three synthesized M262 rig proximity sensors the twin doesn't
+            // model — bind each to its fixed physical DI channel (the rig wiring). Only when the
+            // synthesized FB is actually on THIS resource's sysres (so it's a no-op on M580/BX1).
+            // Sym() resolves to {resId}.{generatedFbId}.Input — project-generated id, never copied.
+            foreach (var (synthName, synthPin, _) in MapperConfig.M262SynthSensors)
+            {
+                if (!MapperConfig.EnableRobotTaskTail) break;
+                if (!fbIdByName.ContainsKey(synthName) || !PinBlank(synthPin)) continue;
+                effective[synthPin] = (synthName, "Input");
+                if (synthPin.Length == 4 && int.TryParse(synthPin.Substring(2), out var diCh)) usedDi.Add(diCh);
+                report.Missing.Add($"[Hcf][5b] bound {synthPin}={synthName}.Input (synthesized M262 rig sensor, not in twin)");
+            }
             var alreadyBoundSensors = new HashSet<string>(
                 effective.Values
                     .Where(v => string.Equals(v.Port, "Input", StringComparison.OrdinalIgnoreCase))
