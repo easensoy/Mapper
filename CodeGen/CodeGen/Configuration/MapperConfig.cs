@@ -256,6 +256,71 @@ namespace CodeGen.Configuration
         public const int CoverStationProcessId   = 19;
 
         /// <summary>
+        /// state_table slot the UR3e (<c>Robot_Task_CAT</c>) stamps on its ring reports (STAGE 5b).
+        /// The robot lives on M262 but its reports cross to the <b>M580</b> state_table (where the
+        /// Disassembly engine waits on it), so its id must be free <i>there</i>. The registry's
+        /// positional id (17) collides on M580 with the Assembly station
+        /// (<c>Station2_HMI</c> / <see cref="AssemblyProcessId"/>=17). In the 20-slot table, 19 is
+        /// the ONLY slot free on BOTH M262 and M580: 0..18 are taken on one PLC or the other, and 19
+        /// (<see cref="CoverStationProcessId"/>) is empty because Cover_Station was folded into
+        /// Assembly (Stage 4, <see cref="DeployBx1CoverEngine"/>=false). Used in exactly two places —
+        /// the CAT's <c>actuator_id</c> param (SystemLayoutInjector) and the Disassembly recipe's
+        /// WAIT robot rows (ProcessRecipeArrayGenerator) — so the slot the robot writes == the slot
+        /// the WAIT reads. WARNING: do not run <see cref="EnableRobotTaskTail"/> and
+        /// <see cref="DeployBx1CoverEngine"/> together — both would claim slot 19.
+        /// </summary>
+        public const int RobotActuatorId         = 19;
+
+        /// <summary>
+        /// Real M262 rig proximity sensors the digital twin does NOT model, but the physical SMC rig
+        /// wires to fixed DI channels (we copy the physical MAPPING from SMC_Rig_Expo_withClamp only,
+        /// never its ids/names). ONLY the two the flow needs:
+        ///  • <b>PartAtAssembly</b> (DI08) — the Feed→Assembly handoff: Assembly_Station should start
+        ///    only after the part is reported at the assembly position.
+        ///  • <b>PartAtExit</b> (DI09) — the robot gate: the robot task should start only after the
+        ///    ejected part is at the exit.
+        /// (PartAtChecker is NOT synthesized — the twin's Checker just goes down/up; nothing in
+        /// Control.xml references a part-at-checker sensor.)
+        /// <para>
+        /// Synthesized as <c>Sensor_Bool_CAT</c> on M262 with project-generated FB ids (FBIdGenerator)
+        /// and these explicit state ids. ID NOTE (per the cross-PLC collision review): the 20-slot
+        /// state_table is FULL — every id 0..19 is claimed somewhere, and the only ids free on the
+        /// M580 table (the would-be consumer) are {0,4,5,6} = the M262 Feed ids. So a globally-unique
+        /// id is IMPOSSIBLE at the current table size. While these sensors are EXPOSED-ONLY (off every
+        /// ring — current state), the id never indexes any state_table, so it is an inert label; we
+        /// park it at 20/21 (ABOVE the 20-slot table) so it cannot be mistaken for, or collide with,
+        /// any ring participant on any PLC. WHEN the cross-PLC handoff is wired (Assembly waits on
+        /// PartAtAssembly, robot on PartAtExit), re-id to the M580-free in-table slots 5/6 and splice
+        /// them onto the M262→M580 cross ring ONLY (never the M262 Feed ring) — then 5/6 are free on
+        /// M580 while Checker/Transfer keep 5/6 on M262's separate table. Bound in
+        /// <c>HcfPatchService</c>; gated on <see cref="EnableRobotTaskTail"/>.
+        /// </para>
+        /// </summary>
+        public static readonly (string Name, string Pin, int Id)[] M262SynthSensors =
+        {
+            ("PartAtAssembly", "DI08", 20),
+            ("PartAtExit",     "DI09", 21),
+        };
+
+        /// <summary>
+        /// STAGE 5b — the UR3e robot + M262 ejector tail for Disassembly. ENABLED 2026-06-11 (user
+        /// request) for the rig test. When TRUE the FULL bundle activates: (1) ONLY the real UR3e
+        /// (<see cref="CodeGen.Mapping.TemplateMap.IsRobotTaskArm"/> — narrow; every gripper stays
+        /// Five_State) resolves to <c>Robot_Task_CAT</c>; (2) <c>Robot_Task_CAT</c> +
+        /// <c>Robot_Task_Core</c> templates are deployed; (3) exactly one Robot FB is emitted on M262;
+        /// (4) the stateRprtCmd ring extends to the M262 ejector+robot (boundary-open: they leave the
+        /// Feed ring; a local <c>Ejector.stateRprtCmd_out→Robot.stateRprtCmd_in</c> segment + the two
+        /// M580↔M262 cross-hops carry the tail); (5) HCF <c>DO04=RobotCommands_StartTask</c>,
+        /// <c>DI10=RobotStatus_Task_Complete</c>; (6) the Disassembly recipe appends
+        /// unclamp(clamp=3)→ejector→robot→END. FLAG-OFF is byte-identical Stage 5a.
+        /// IMPORTANT: with this ON the M580 Disassembly ring opens toward M262, so ALL THREE PLCs
+        /// (M580+M262+BX1) MUST be deployed together — M580+BX1 alone leaves the ring open and stalls.
+        /// NOT runtime-safe until EAE Clean/Build/Deploy confirms the CAT compiles + live M580↔M262
+        /// adapter bridging (rig-only unknowns). Revert: set false (one rebuild = Stage 5a).
+        /// </summary>
+        public static bool EnableRobotTaskTail = true;
+
+        /// <summary>
         /// When TRUE, Cover_Station runs a MINIMAL proof-of-life recipe (CoverPNP_Vr
         /// work→home only — one actuator end-to-end, no cross-component waits that could
         /// stall on a missing sensor). Flip FALSE for the full 8-step cover pick/place
