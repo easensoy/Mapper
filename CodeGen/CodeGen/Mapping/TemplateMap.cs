@@ -40,6 +40,12 @@ namespace CodeGen.Mapping
         public static string CatTypeOf(VueOneComponent component, bool isBranchedSeven = false)
         {
             if (component is null) return "Five_State_Actuator_CAT";
+            // STAGE 5b foundation: route ONLY the real UR3e task arm to the task-handshake
+            // Robot_Task_CAT. Type="Robot" is NOT enough — the Bearing/Shaft/CoverPnp grippers
+            // are also Type="Robot" (5-state) and MUST keep their Five_State/Vacuum mapping; the
+            // narrow IsRobotTaskArm predicate excludes them. Default-off → byte-identical.
+            if (MapperConfig.EnableRobotTaskTail && IsRobotTaskArm(component))
+                return "Robot_Task_CAT";
             return component.Type switch
             {
                 "Process" => "Process1_Generic",
@@ -50,6 +56,47 @@ namespace CodeGen.Mapping
                     isBranchedSeven),
             };
         }
+
+        /// <summary>
+        /// TRUE only for the real UR3e task arm — the single Type="Robot" component that is an
+        /// actual robot, NOT a robot-category gripper. In this twin <c>Bearing_Gripper</c>,
+        /// <c>Shaft_Gripper</c> and <c>CoverPnp_Gripper</c> are ALSO <c>Type="Robot"</c> (5-state
+        /// mechanical/vacuum grippers) and MUST keep their Five_State/Vacuum CAT. The arm is
+        /// identified by exact Name "Robot", its known ComponentID, or <c>VcID="UR3e"</c>; anything
+        /// named *Gripper*/*Grasp* is excluded first. Shared by every Stage 5b site so the
+        /// narrowing is defined in exactly one place.
+        /// </summary>
+        public static bool IsRobotTaskArm(VueOneComponent component)
+        {
+            if (component is null) return false;
+            var name = component.Name ?? string.Empty;
+            if (name.IndexOf("Gripper", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                name.IndexOf("Grasp", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                return false;
+            return string.Equals(name, "Robot", System.StringComparison.OrdinalIgnoreCase)
+                || string.Equals(component.ComponentID, "C-c4ebfd68-0a5b-4512-889e-f6ab61bccecb",
+                                 System.StringComparison.OrdinalIgnoreCase)
+                || string.Equals(component.VcID, "UR3e", System.StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
+        /// CAT types whose .fbt declares NO stationAdptr (CaSBus) port. They are INIT-chained and
+        /// (if they carry the ring node) join the stateRprtCmd report ring, but stay OFF the
+        /// station/mode/fault chain. SINGLE source of truth for every wiring site — the syslay
+        /// (<c>SystemLayoutInjector.BuildFeedStationWiring</c> + <c>BuildStation2Wiring</c>) and the
+        /// sysres (<c>ResourceWireEmitter.NoStationAdapterTypes</c>) all read this set. Stitching one
+        /// of these into a station chain dangles <c>stationAdptr_in/out</c> against ports that don't
+        /// exist → EAE rejects the resource (the Stage 5b "nothing triggers" bug). Seven_State (the
+        /// old, non-centre-home swivel) has the ring node but no stationAdptr; Robot_Task_CAT (UR3e)
+        /// the same.
+        /// </summary>
+        public static readonly System.Collections.Generic.IReadOnlySet<string> NoStationAdapterCatTypes =
+            new System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal)
+            { "Seven_State_Actuator_CAT", "Robot_Task_CAT" };
+
+        /// <summary>True if <paramref name="catType"/> has no stationAdptr port (off the CaSBus chain).</summary>
+        public static bool LacksStationAdapter(string? catType) =>
+            catType != null && NoStationAdapterCatTypes.Contains(catType);
 
         /// <summary>
         /// Actuator CAT routing, factored out so callers that already know
