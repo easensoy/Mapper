@@ -158,6 +158,16 @@ namespace CodeGen.Services
             foreach (var name in UniversalCats)
                 DeployArtifact(libPath, "CAT", name, eaeProjectDir, result, isBasic: false, isCat: true);
 
+            // STAGE 5b foundation (gated, MapperConfig.EnableRobotTaskTail): make the UR3e robot
+            // type resolvable. Robot_Task_CAT is the task-handshake CAT (StartTask DO04 / Task_Complete
+            // DI10); its core state machine is the Robot_Task_Core Basic FB — deploy the core first so
+            // the composite resolves on import. Default-off deploys NEITHER → byte-identical.
+            if (MapperConfig.EnableRobotTaskTail)
+            {
+                DeployArtifact(libPath, "Basic", "Robot_Task_Core", eaeProjectDir, result, isBasic: true);
+                DeployArtifact(libPath, "CAT", "Robot_Task_CAT", eaeProjectDir, result, isBasic: false, isCat: true);
+            }
+
             // BX1 EtherNet/IP cover-I/O broker (gated). PLC_RW_BX1 is the composite
             // that unpacks the EtherNet/IP input word into cover sensor-bits and packs
             // cover coil-bits into the output word; changeEventM262_2 is its leaf
