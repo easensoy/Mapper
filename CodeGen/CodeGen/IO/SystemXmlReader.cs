@@ -176,6 +176,7 @@ namespace CodeGen.IO
             {
                 ComponentID = GetElementValue(elem, "ComponentID"),
                 Name = name,
+                VcID = GetElementValue(elem, "VcID"),
                 Description = GetElementValue(elem, "Description"),
                 Type = GetElementValue(elem, "Type"),
                 NameTag = isSystemFile ? "n" : "Name"
