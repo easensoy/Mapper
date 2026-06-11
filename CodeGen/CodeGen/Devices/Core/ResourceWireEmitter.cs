@@ -108,6 +108,10 @@ namespace CodeGen.Devices.Core
                 // ModeCMD to the core, without which the ECC never leaves home.
                 "Seven_State_Actuator_Centre_Home_CAT",
                 "Vacuum_Gripper_CAT",
+                // STAGE 5b: the UR3e task arm. Has stateRprtCmd_in/out (ring node grafted into
+                // its .fbt) so Process1_Generic commands/reads it over the report ring; NO
+                // stationAdptr (listed in NoStationAdapterTypes below → off the CaSBus chain).
+                "Robot_Task_CAT",
             };
 
         // CAT types whose .fbt declares NO stationAdptr (CaSAdptr) port. They
@@ -116,8 +120,10 @@ namespace CodeGen.Devices.Core
         // chain. Seven_State_Actuator_CAT (Bearing_PnP) gained a stateRprtCmd
         // ring node (task #69) so Process1_Generic can command/read it, but it
         // still has no stationAdptr — so it is listed here (station chain only).
-        private static readonly HashSet<string> NoStationAdapterTypes =
-            new(StringComparer.Ordinal) { "Seven_State_Actuator_CAT" };
+        // Single source of truth lives in TemplateMap so the syslay wiring
+        // (BuildFeedStationWiring/BuildStation2Wiring) and this sysres wiring can never drift.
+        private static readonly IReadOnlySet<string> NoStationAdapterTypes =
+            TemplateMap.NoStationAdapterCatTypes;
 
         // CAT types whose .fbt declares NO stateRprtCmd ring port. Empty now
         // that Seven_State_Actuator_CAT carries the ring node; kept as an
@@ -344,10 +350,22 @@ namespace CodeGen.Devices.Core
                 // initNames — every component, in CaSBus order, for the INIT
                 // chain (all CATs expose INIT/INITO).
                 var initNames = orderedComps.Select(Nm).Where(s => s.Length > 0).ToList();
+                // STAGE 5b: when the robot tail is active, Ejector + Robot LEAVE the local
+                // (M262 Feed) report ring — they form a separate cross-PLC segment (Ejector.in
+                // arrives from Disassembly, Ejector.out→Robot.in is local, Robot.out crosses to
+                // BearingSensor). They must NOT be in ringNames, or the Feed ring would drive
+                // Robot.stateRprtCmd_out a SECOND time (the double-drive). No-op on M580/BX1
+                // (no Ejector/Robot there). They stay in initNames so they are still INIT'd.
+                // Off → ringNames byte-identical.
+                bool robotTail = RobotTailActive(cfg);
                 // ringNames — components that expose the stateRprtCmd adapter
                 // (now INCLUDES Seven_State/Bearing_PnP); used for the report ring.
                 var ringNames = orderedComps.Where(HasRingAdapter).Select(Nm)
-                    .Where(s => s.Length > 0).ToList();
+                    .Where(s => s.Length > 0)
+                    .Where(s => !(robotTail &&
+                        (string.Equals(s, "Ejector", StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(s, "Robot",   StringComparison.OrdinalIgnoreCase))))
+                    .ToList();
                 // actNames — actuators that expose the stationAdptr adapter
                 // (still excludes Seven_State, which has no stationAdptr); used
                 // for the CaS station chain.
@@ -405,9 +423,20 @@ namespace CodeGen.Devices.Core
                 var initChain = new List<string> { "FB1" };
                 if (Present(anchors.AreaFb, byName)) initChain.Add(anchors.AreaFb!);
                 if (Present(anchors.StationFb, byName)) initChain.Add(anchors.StationFb!);
-                initChain.AddRange(initNames);
+                // STAGE 5b: the M262 robot-tail (Ejector + Robot) are Disassembly's actuators that
+                // merely live on M262 and carry cross-PLC adapter links to M580. Keep them OUT of
+                // the critical init path to the process: init the Feed components -> process FIRST,
+                // then the tail. Otherwise a stall in the Robot's bring-up (its cross-PLC links)
+                // blocks Feed_Station.INIT and the whole Feed station is dead when all three PLCs run
+                // (it works M262-alone because the links are absent). Self-scoping: only the M262
+                // resource has Ejector/Robot in initNames. Off -> tail empty -> byte-identical.
+                var robotTailInit = RobotTailActive(cfg)
+                    ? new HashSet<string>(StringComparer.Ordinal) { "Ejector", "Robot" }
+                    : new HashSet<string>(StringComparer.Ordinal);
+                initChain.AddRange(initNames.Where(n => !robotTailInit.Contains(n)));
                 if (ringGateName != null) initChain.Add(ringGateName);
-                initChain.AddRange(processNames);   // every process is INIT-chained
+                initChain.AddRange(processNames);   // every process is INIT-chained (before the tail)
+                initChain.AddRange(initNames.Where(n => robotTailInit.Contains(n)));  // tail inits last
                 for (int i = 0; i < initChain.Count - 1; i++)
                     eventWires.Add(new Wire($"{initChain[i]}.INITO", $"{initChain[i + 1]}.INIT"));
 
@@ -557,8 +586,18 @@ namespace CodeGen.Devices.Core
                         }
                         else
                         {
-                            adapterWires.Add(new Wire($"{processNames[^1]}.stateRptCmdAdptr_out",
-                                $"{ringNames[0]}.stateRprtCmd_in"));
+                            // STAGE 5b: under the robot tail the M580 ring does NOT close locally
+                            // back to its head — Disassembly.out crosses to M262 Ejector and
+                            // BearingSensor.in arrives from M262 Robot (syslay cross-hops EAE
+                            // bridges). Omit the local close-back so neither plug is double-driven.
+                            if (robotTail && string.Equals(tag, "M580", StringComparison.Ordinal))
+                                report.Missing.Add(
+                                    $"[{tag}] robot tail: left {processNames[^1]}.stateRptCmdAdptr_out OPEN " +
+                                    $"(crosses to M262 Ejector) and {ringNames[0]}.stateRprtCmd_in OPEN " +
+                                    "(arrives from M262 Robot) — EAE bridges via syslay");
+                            else
+                                adapterWires.Add(new Wire($"{processNames[^1]}.stateRptCmdAdptr_out",
+                                    $"{ringNames[0]}.stateRprtCmd_in"));
                         }
                     }
                     else if (ringNames.Count > 1)
@@ -582,6 +621,20 @@ namespace CodeGen.Devices.Core
                                 $"OPEN (crosses to M580 Assembly_Station) and {ringNames[0]}" +
                                 ".stateRprtCmd_in OPEN (arrives from M580 Clamp) — EAE bridges via syslay");
                     }
+                }
+
+                // STAGE 5b: the M262 ejector→robot tail segment, kept OFF the Feed ring (the
+                // ejector+robot were filtered out of ringNames above). Only the intra-M262 hop is
+                // local; Ejector.stateRprtCmd_in is left OPEN (arrives from M580 Disassembly) and
+                // Robot.stateRprtCmd_out is left OPEN (crosses to M580 BearingSensor) — EAE bridges
+                // both via the syslay cross-hops. Only the M262 resource carries both FBs, so this
+                // is a no-op on M580/BX1, and a no-op entirely when the flag is off.
+                if (robotTail && byName.ContainsKey("Ejector") && byName.ContainsKey("Robot"))
+                {
+                    adapterWires.Add(new Wire("Ejector.stateRprtCmd_out", "Robot.stateRprtCmd_in"));
+                    report.Missing.Add(
+                        $"[{tag}] robot tail: Ejector→Robot local segment added; Ejector.stateRprtCmd_in " +
+                        "OPEN (from M580 Disassembly), Robot.stateRprtCmd_out OPEN (to M580 BearingSensor)");
                 }
 
                 foreach (var w in eventWires)   Process(w, emittedEvents,   "event");
@@ -680,6 +733,37 @@ namespace CodeGen.Devices.Core
             catch
             {
                 // Any read/parse failure → safest is to keep the ring CLOSED locally.
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// STAGE 5b — single source of truth (mirrors <see cref="CrossPlcCoverRingActive"/>):
+        /// TRUE when the generated syslay actually carries the M580→M262 robot-tail hop
+        /// (Disassembly.stateRptCmdAdptr_out → Ejector.stateRprtCmd_in). When TRUE, every
+        /// per-resource sysres ring is opened EXACTLY at the robot-tail boundary: the M262 ring
+        /// drops Ejector+Robot (they become a separate Ejector→Robot segment with open ends) and
+        /// the M580 ring omits the Disassembly→BearingSensor close-back — so no boundary adapter
+        /// plug is driven twice. Returns false (→ keep rings closed locally, today's behaviour)
+        /// when the flag is off, the syslay is missing/unreadable, or the hop is absent.
+        /// </summary>
+        private static bool RobotTailActive(MapperConfig cfg)
+        {
+            if (cfg == null || !MapperConfig.EnableRobotTaskTail) return false;
+            try
+            {
+                var path = cfg.ActiveSyslayPath;
+                if (string.IsNullOrEmpty(path) || !File.Exists(path)) return false;
+                var doc = XDocument.Load(path);
+                var dns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
+                return doc.Descendants(dns + "Connection").Any(c =>
+                    string.Equals((string?)c.Attribute("Source"),
+                        "Disassembly.stateRptCmdAdptr_out", StringComparison.Ordinal) &&
+                    string.Equals((string?)c.Attribute("Destination"),
+                        "Ejector.stateRprtCmd_in", StringComparison.Ordinal));
+            }
+            catch
+            {
                 return false;
             }
         }
