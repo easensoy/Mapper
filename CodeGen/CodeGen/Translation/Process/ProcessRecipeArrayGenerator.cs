@@ -1152,18 +1152,47 @@ namespace CodeGen.Translation.Process
             AddCmd("bearing_gripper", 3); AddWait(bearingGripperId, 0); // release
             AddCmd("bearing_pnp", 5);     AddWait(bearingPnpId, 0);   // home (stable AtHomeInit 0)
 
-            // UNCLAMP — the twin opens the clamp at the very END of Disassembly (the LAST
-            // state, "Unclamping" -> WAIT Clamp/Home Finished). Assembly no longer opens it
-            // (it closes the clamp at the start and HOLDS through assembly+disassembly — see
-            // ApplyAssemblyRuntimeRecipe under UnparkDisassembly). The clamp is a
-            // Five_State_Actuator_CAT, so its open settles at the stable AtHomeInit (0) — the
-            // same home every other Five_State actuator waits on; the twin's distinct "Home
-            // Finished"(4) and "Home Pos"(0) both collapse onto the CAT's single AtHomeInit.
-            // NOTE: in Control.xml the Unclamping step sits AFTER the M262 Ejector+Robot steps;
-            // those are omitted here (no M262 transport — see the warning below), so the
-            // unclamp becomes the last reachable step — still "clamp home at the end of
-            // Disassembly", exactly the twin's intent.
+            // UNCLAMP FIRST — release the assembled part from the clamp BEFORE the ejector pushes
+            // it out and the robot picks it (the physically-correct order: unclamp -> eject ->
+            // robot). Assembly no longer opens the clamp (it closes it at the start and HOLDS
+            // through assembly+disassembly — see ApplyAssemblyRuntimeRecipe under UnparkDisassembly).
+            // The clamp is a Five_State_Actuator_CAT, so its open settles at the stable AtHomeInit
+            // (0); the twin's distinct "Home Finished"(4)/"Home Pos"(0) both collapse onto it.
+            // NOTE: Control.xml lists Unclamping as the LAST Disassembly step (after the robot), but
+            // that is not physically sensible (eject/pick while still clamped); per the user's
+            // correction the unclamp precedes the ejector+robot tail. With the flag OFF the tail
+            // below is absent, so the unclamp is the last reachable step (Stage 5a byte-identical).
             AddCmd("clamp", 3); AddWait(clampId, 0);
+
+            // STAGE 5b (gated MapperConfig.EnableRobotTaskTail): the M262 EJECTOR + UR3e ROBOT tail,
+            // AFTER the unclamp. Both are M262, reached over the cross-PLC ring. Ejector = the
+            // existing Five_State actuator (EjectorForward cmd1 -> AtWork(2); EjectorBack cmd3 ->
+            // AtHomeInit(0)). Robot = Robot_Task_CAT task handshake (Robot_Task_Core's confirmed
+            // vocabulary): cmd1 = start task -> current_state 1, then 2 when DI10 task_complete;
+            // cmd2 = reset/home (Complete -> HomeInitial) -> current_state 0. The UR3e runs the
+            // full pick/drop/home INTERNALLY on one StartTask — Control.xml's PickPart/DropPart/
+            // Home multi-states are the robot's own program, NOT separate PLC commands (the CAT is
+            // a 2-bit task handshake, not a multi-position actuator). WAITs are the robot's OWN
+            // reported state. Skipped silently if an id is missing. Flag-off -> block absent.
+            if (MapperConfig.EnableRobotTaskTail)
+            {
+                if (TryGetComponentId(arrays, allComponents, "ejector", out var ejectorId))
+                {
+                    AddCmd("ejector", 1); AddWait(ejectorId, 2);   // EjectorForward -> AtWork
+                    AddCmd("ejector", 3); AddWait(ejectorId, 0);   // EjectorBack -> home
+                }
+                if (TryGetComponentId(arrays, allComponents, "robot", out _))
+                {
+                    // The robot's ring reports cross to the M580 state_table, where its registry id
+                    // (17) collides with the Assembly station (Station2_HMI / AssemblyProcessId).
+                    // WAIT on the dedicated non-colliding slot — the SAME id SystemLayoutInjector
+                    // forces the CAT's actuator_id to, so the WAIT reads the slot the robot writes.
+                    // (TryGetComponentId is only the presence guard.)
+                    int robotId = MapperConfig.RobotActuatorId;
+                    AddCmd("robot", 1);   AddWait(robotId, 2);     // start task (UR3e pick/drop/home) -> WAIT done (2)
+                    AddCmd("robot", 2);   AddWait(robotId, 0);     // reset -> WAIT ready (0)
+                }
+            }
 
             int end = arrays.StepType.Count;
             arrays.StepType.Add(9);
@@ -1174,16 +1203,19 @@ namespace CodeGen.Translation.Process
             arrays.NextStep.Add(end);
 
             arrays.Warnings.Add(
-                $"[Recipe] Disassembly_Station (Stage 5a) emitted: WAIT(Assembly proc " +
-                $"{MapperConfig.AssemblyProcessId}, 7) -> covers off (hr/vr/grip reverse, " +
-                "Control.xml-faithful) -> shaft out -> bearing out (centre-home CAT work2->work1, " +
-                "rig-proven mapping) -> UNCLAMP (clamp home) -> END. " +
-                "OMITTED — Ejector + Robot: both are M262 actuators (Ejector I/O on M262, Robot " +
-                "is the M262 UR3e), orphan to Feed_Station, and there is NO existing cross-PLC " +
-                "transport M580->M262. Commanding them needs the stateRprtCmd ring extended to " +
-                "M262 (a new M580<->M262 adapter hop), which is deferred (Stage 5b) so the proven " +
-                "M262 Feed ring is not disturbed. Including them WITHOUT transport would stall the " +
-                "whole recipe at the first ejector WAIT, so they are left out by design.");
+                $"[Recipe] Disassembly_Station emitted: WAIT(Assembly proc {MapperConfig.AssemblyProcessId}, 7) " +
+                "-> covers off (hr/vr/grip reverse, Control.xml-faithful) -> shaft out -> bearing out " +
+                "(centre-home CAT work2->work1, rig-proven mapping) -> UNCLAMP (clamp home) -> " +
+                (MapperConfig.EnableRobotTaskTail
+                    ? "EJECTOR (EjectorForward->AtWork, EjectorBack->AtHomeInit) -> ROBOT (cmd1 start->" +
+                      "WAIT done(2), cmd2 reset->WAIT ready(0)) -> END. Order is unclamp THEN eject THEN " +
+                      "robot (release before push/pick). Ejector + Robot are M262, commanded by " +
+                      "Disassembly over the stateRprtCmd ring extended to M262 (Stage 5b cross-PLC hops; " +
+                      "EAE bridges them — NOT yet rig-verified)."
+                    : "END. OMITTED — Ejector + Robot (M262 UR3e + ejector, " +
+                      "orphan to Feed_Station): commanded only when EnableRobotTaskTail is ON (which " +
+                      "extends the stateRprtCmd ring to M262). Off → left out so the M262 Feed ring is " +
+                      "untouched and the recipe never stalls on an unreachable M262 WAIT."));
         }
 
         /// <summary>
