@@ -369,14 +369,28 @@ namespace MapperUI
                 return;
             }
 
-            if (_stateTransitionTableForm == null || _stateTransitionTableForm.IsDisposed)
-                _stateTransitionTableForm = new StateTransitionTableForm(
-                    _loadedControlXmlPath, _loadedComponents);
-            else
-                _stateTransitionTableForm.Reload(_loadedControlXmlPath, _loadedComponents);
+            try
+            {
+                if (_stateTransitionTableForm == null || _stateTransitionTableForm.IsDisposed)
+                    _stateTransitionTableForm = new StateTransitionTableForm(
+                        _loadedControlXmlPath, _loadedComponents);
+                else
+                    _stateTransitionTableForm.Reload(_loadedControlXmlPath, _loadedComponents);
 
-            _stateTransitionTableForm.Show(this);
-            _stateTransitionTableForm.BringToFront();
+                _stateTransitionTableForm.Show(this);
+                _stateTransitionTableForm.BringToFront();
+            }
+            catch (Exception ex)
+            {
+                // Never let the State-Transition Table take down MapperUI with an unhandled popup.
+                // Surface the real cause (and the missing file name, if it's a FileNotFound) so it
+                // can be fixed, instead of the generic "Unhandled exception" dialog.
+                var fnf = ex as System.IO.FileNotFoundException
+                          ?? ex.InnerException as System.IO.FileNotFoundException;
+                ShowError(
+                    $"State-Transition Table failed: {ex.GetType().Name}: {ex.Message}" +
+                    (fnf?.FileName != null ? $"{Environment.NewLine}Missing file: {fnf.FileName}" : string.Empty));
+            }
         }
 
         string? _loadedControlXmlPath;
