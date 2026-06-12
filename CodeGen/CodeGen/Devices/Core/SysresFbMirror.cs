@@ -183,8 +183,25 @@ namespace CodeGen.Devices.Core
             {
                 var nm = (string?)fb.Attribute("Name") ?? string.Empty;
                 var map = (string?)fb.Attribute("Mapping") ?? string.Empty;
+                bool mirrored = !string.IsNullOrEmpty(map);   // mirrored FBs carry a Mapping; FB1/FB2 do not
                 if (syslayNames.Contains(nm) && !currentSyslayIds.Contains(map))
                 {
+                    // DEDUP: same-named FB with a stale (non-current) mapping (the id-flip dup).
+                    fb.Remove();
+                    deduped++;
+                }
+                else if (mirrored && !syslayNames.Contains(nm))
+                {
+                    // STALE-ARTIFACT FLUSH (2026-06-12, source-of-truth fix). A previously-mirrored FB
+                    // whose Name is no longer ANYWHERE in the current syslay — e.g. a Robot_Task_CAT
+                    // left over after EnableRobotTaskTail flips false, or any actuator/process dropped
+                    // from the twin. The dedup above only catches same-named stale-MAPPED dups; an
+                    // entirely-absent FB would otherwise survive an incremental Test Runtime forever
+                    // and make the deployed per-device sysres diverge from the syslay (the exact bug
+                    // that produced the leftover Robot). Drop it here; ResourceWireEmitter clears and
+                    // re-derives the ring from the surviving FBs, so the stale FB's wires vanish too.
+                    // Scoped to mirrored (Mapping-carrying) FBs, so FB1/FB2 and other non-mirrored
+                    // system FBs are never touched.
                     fb.Remove();
                     deduped++;
                 }
