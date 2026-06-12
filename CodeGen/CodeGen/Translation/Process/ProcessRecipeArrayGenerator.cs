@@ -578,6 +578,37 @@ namespace CodeGen.Translation.Process
                 }
             }
 
+            // FEED -> ASSEMBLY HANDSHAKE sentinel (gated, MapperConfig.FeedAssemblyHandshake).
+            // Publish a state-7 CMD just before END so the engine emits a ring message
+            // {src_id = FeedStationProcessId(10), state = 7} on Feed completion -- the exact mirror
+            // of Assembly's assembly_handshake_done=7. dest_name 'feed_handshake_done' matches no
+            // actuator, so it commands nothing and only stamps the ring; harmless when no one waits
+            // (Feed runs identically). Assembly's row-0 WAIT(10,7) holds on it IFF the M262 -> M580
+            // cross-PLC transport carries the message to M580 state_table[10] -- that bridge is the
+            // unproven/deferred piece (see MapperConfig.FeedAssemblyHandshake). Inserted before END:
+            // the home preamble below (disabled by default, and never fires for Feed -- it commands
+            // no Seven_State actuator) rebases every non-END NextStep, so this row stays consistent.
+            // Gate on processId (== FeedStationProcessId 10), NOT process.Name: the Feed process
+            // component's Name is NOT the literal "Feed_Station" (its STATES are "Feed_Station/..."
+            // but the process node itself is named otherwise), so a name match silently failed and
+            // the sentinel never emitted. processId is the value the engine stamps as the message
+            // src_id, so it is exactly what Assembly's WAIT(10,7) keys on — the right discriminator.
+            if (MapperConfig.FeedAssemblyHandshake &&
+                processId == MapperConfig.FeedStationProcessId)
+            {
+                int hsRow = arrays.StepType.Count;
+                arrays.StepType.Add(1);                            // CMD
+                arrays.CmdTargetName.Add("feed_handshake_done");   // sentinel: matches no actuator
+                arrays.CmdStateArr.Add(7);
+                arrays.Wait1Id.Add(0);
+                arrays.Wait1State.Add(0);
+                arrays.NextStep.Add(hsRow + 1);                    // -> the END row appended next
+                arrays.Warnings.Add(
+                    "[Recipe] Feed_Station: appended feed_handshake_done=7 sentinel " +
+                    "(FeedAssemblyHandshake). Publishes {10,7}; Assembly's WAIT(10,7) clears ONLY " +
+                    "once the M262->M580 cross-PLC bridge carries it (not yet wired).");
+            }
+
             // 5. Append the single final END row at the highest index.
             //    StepType=9 must appear ONLY here in the array.
             arrays.StepType.Add(9);
@@ -882,16 +913,37 @@ namespace CodeGen.Translation.Process
                 arrays.NextStep.Add(row + 1);
             }
 
-            // NO material-ready gate (2026-06-05). A WAIT BearingSensor=On was tried as
-            // the in-scope proxy for the twin's Feed_Station/TransferReturned precondition
-            // (Transfer is M262/Feed, cross-PLC, with no M580 state_table slot, so it
-            // can't be waited on here). It deadlocked the whole recipe at step 0: the
-            // Sensor_Bool_CAT only publishes its reading into state_table when its core
-            // fires REQ on a sensor EVENT, so at boot (no change) state_table[id] stays at
-            // the default 0 and WAIT=1 never clears -- nothing is ever commanded (CMDREQ
-            // stays 0, the swivel sits home). The recipe therefore starts straight at the
-            // Pick. Re-introduce a material gate only with a sensor that publishes its
-            // level at startup (or once the cross-PLC feed handoff is wired).
+            // FEED -> ASSEMBLY HANDSHAKE (gated, MapperConfig.FeedAssemblyHandshake). Row 0 waits
+            // for Feed_Station's completion sentinel {FeedStationProcessId(10), 7} -- the exact
+            // mirror of Disassembly's row-0 WAIT(AssemblyProcessId, 7). UNLIKE that one this is
+            // CROSS-PLC (Feed = M262, Assembly = M580): it clears ONLY if the sentinel crosses
+            // M262 -> M580 into THIS PLC's state_table[10]. With no such bridge wired, the WAIT
+            // never clears and Assembly stalls at step 0 -- precisely the cross-PLC deadlock the
+            // material-gate note just below records. So it is gated OFF and stays off until the
+            // M262 -> M580 transport is proven and the bridge is wired. NextStep auto-chains via the
+            // AddWait helper (row+1), so every later row shifts by one; the recipe is otherwise
+            // byte-identical and the trailing assembly_handshake_done=7 sentinel is unaffected.
+            if (MapperConfig.FeedAssemblyHandshake)
+                AddWait(MapperConfig.FeedStationProcessId, 7);
+
+            // MATERIAL GATE (2026-06-12 — the chosen Feed -> Assembly sequencing). Row 0 holds
+            // Assembly until the bearing the Feed station delivers trips the BearingSensor, then
+            // Assembly runs. BearingSensor is a Sensor_Bool_CAT on the M580 ring, so this is
+            // M580-LOCAL: NO cross-PLC link, no new FB, no stretched stateRprtCmd ring (the fragile
+            // thing that broke). It is the natural production sequencing — the next station starts
+            // when the part arrives. Wait state 1 = BearingSensor On: a Sensor_Bool_CAT publishes the
+            // Control.xml State_Number verbatim (unremapped — see ResolveStateNumber / the ~L1959
+            // "Sensor_Bool_CAT publishes the Control.xml number" note), and BearingSensor's On is
+            // State_Number 1. On the rig the delivered bearing drives the sensor off->on — a change
+            // the CAT publishes into state_table[bearingsensor], clearing the wait. The 2026-06-05
+            // attempt "deadlocked" ONLY in the SIM, where no physical part ever arrived so the sensor
+            // never changed/published; on the rig the real part trips it. Skipped silently if
+            // BearingSensor is absent (recipe runs immediately, as before). Gate:
+            // AssemblyWaitForFeedPart (default ON); set false to run Assembly immediately. Mutually
+            // exclusive with FeedAssemblyHandshake above (OFF) — both on would give two row-0 waits.
+            if (MapperConfig.AssemblyWaitForFeedPart &&
+                TryGetComponentId(arrays, allComponents, "BearingSensor", out var matGateBsId))
+                AddWait(matGateBsId, 1);
 
             // Bearing: Pick -> Grip -> Place -> Release -> Home. Every CMD points at its
             // OWN WAIT (no skipped place wait). The home wait is the SINGLE stable
