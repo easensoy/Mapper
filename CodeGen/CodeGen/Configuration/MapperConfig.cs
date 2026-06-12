@@ -272,6 +272,75 @@ namespace CodeGen.Configuration
         public const int RobotActuatorId         = 19;
 
         /// <summary>
+        /// FEED -> ASSEMBLY cross-process handshake (default OFF). When true, Feed_Station's
+        /// recipe appends a sentinel <c>CMD feed_handshake_done=7</c> just before END (the engine
+        /// then publishes a ring message <c>{src_id = FeedStationProcessId(10), state = 7}</c> on
+        /// Feed completion), and Assembly_Station's recipe prepends a row-0
+        /// <c>WAIT(FeedStationProcessId, 7)</c> -- the exact mirror of the proven
+        /// Assembly->Disassembly handshake (<c>assembly_handshake_done=7</c> + Disassembly's row-0
+        /// WAIT(<see cref="AssemblyProcessId"/>, 7)).
+        ///
+        /// THE DECISIVE DIFFERENCE -- this handshake is CROSS-PLC, the proven one is not.
+        /// Assembly->Disassembly works because BOTH engines live on the SAME M580 ring, so
+        /// Assembly's {17,7} lands in the M580 state_table Disassembly already reads (local hop, no
+        /// CrossComm). Feed_Station lives on M262: its {10,7} sits in the M262 state_table, NOT
+        /// M580's. For Assembly's WAIT(10,7) to ever clear, that sentinel must cross M262 -> M580
+        /// and land in M580 state_table[10]. That transport is UNPROVEN (only the M580<->BX1
+        /// cross-device adapter bridge is rig-proven; the M262<->M580 robot-tail hops are not), and
+        /// there is no free ring port to tap the Feed_Station sentinel onto the M580 ring additively
+        /// -- bridging it needs either a new gate FB (RingCrossGate was deleted) or merging the two
+        /// rings (which makes the proven M262-local Feed ring depend on M580). BOTH conflict with
+        /// "no new FB / don't disturb the proven rings".
+        ///
+        /// So this flag is OFF and MUST stay off until the M262 -> M580 transport is proven (the
+        /// robot tail, <see cref="EnableRobotTaskTail"/>, rides the same path -- prove it THERE
+        /// first: deploy all three PLCs and see the ejector/robot fire). Turning this ON without the
+        /// bridge DEADLOCKS Assembly at row 0 -- ProcessRecipeArrayGenerator already records the
+        /// identical stall (a Feed precondition WAIT that could not resolve cross-PLC). The recipe
+        /// rows are ready.
+        ///
+        /// 2026-06-12 — WIRED + ENABLED (user request: "inform Assembly through the ring, no new FB").
+        /// The bridge is built as a RING MERGE (no new FB): BuildStation2Wiring + BuildFeedStationWiring
+        /// splice the M262 Feed ring and the M580 ring into ONE ring via two cross-device hops
+        /// (Disassembly.out->PartInHopper.in, Feed_Station.out->BearingSensor.in), and ResourceWire
+        /// Emitter opens both sysres close-backs at the boundary so EAE bridges them (the same mechanism
+        /// as the proven M580<->BX1 cover ring). The Feed sentinel {10,7} then circulates into the M580
+        /// state_table; Assembly's row-0 WAIT(10,7) holds until Feed finishes.
+        /// CONSEQUENCE (the trade-off of "through ring, no FB"): the three PLCs now share ONE ring, so
+        /// all three MUST be deployed together — if any is down the ring is open and ALL stall. It also
+        /// rides the M262<->M580 cross-device adapter bridge, which is rig-UNPROVEN (only M580<->BX1 is
+        /// confirmed). If EAE does not bridge it, the M580 ring will not close and Assembly/Disassembly
+        /// stall too. Revert instantly: set false (one rebuild) => decoupled local rings (Stage 5a).
+        /// </summary>
+        // 2026-06-12 — REVERTED to false. The ring-merge made the cross-PLC stateRprtCmd ring
+        // span M262+M580+BX1 (the fragile thing the whole redesign set out to avoid), AND it surfaced
+        // a real incoherence: the cross-hops + sentinel + WAIT(10,7) emit into the top-level SYSLAY,
+        // but the deployed per-device SYSRES did not match (stale recipes, no sentinel, Assembly still
+        // starting at clamp=1, and a Robot_Task_CAT left over from a prior EnableRobotTaskTail=true
+        // build). EAE then bridges the syslay cross-hops at deploy and splices the M580 ring to M262,
+        // while the sysres has no handshake -> nothing triggers. OFF restores ONE coherent source of
+        // truth: local, closed rings per PLC (M580/BX1 Assembly+Disassembly+covers; M262 Feed), no
+        // cross-PLC live ring splice. Feed->Assembly auto-sequencing remains UNsolved without the one
+        // minimal bridge FB (the only EAE-native cross-PLC transport that does NOT stretch the ring).
+        public static bool FeedAssemblyHandshake = false;
+
+        /// <summary>
+        /// MATERIAL-GATE Feed -> Assembly sequencing (chosen 2026-06-12; default ON). Assembly's
+        /// recipe row 0 holds on <c>WAIT(BearingSensor, 1)</c> — the bearing the Feed station
+        /// physically delivers trips the sensor, then Assembly runs. BearingSensor is a
+        /// <c>Sensor_Bool_CAT</c> on the M580 ring, so this is M580-LOCAL: no cross-PLC link, no new
+        /// FB, no stretched stateRprtCmd ring (unlike the removed <see cref="FeedAssemblyHandshake"/>).
+        /// It is the natural production sequencing — the next station starts when the part arrives.
+        /// State 1 = BearingSensor On (a Sensor_Bool_CAT publishes the Control.xml State_Number
+        /// verbatim). CAVEAT: relies on the sensor going off->on when Feed delivers (a change the CAT
+        /// publishes into state_table). A prior attempt "deadlocked" only in the SIM, where no
+        /// physical part ever arrived so the sensor never changed; on the rig the delivered bearing
+        /// trips it. Set false if the rig sensor doesn't trip — then Assembly runs immediately (no
+        /// handoff). The wait state (1) is rig-tunable if the sensor reports a different value.
+        /// </summary>
+        public static bool AssemblyWaitForFeedPart = true;
+
+        /// <summary>
         /// Real M262 rig proximity sensors the digital twin does NOT model, but the physical SMC rig
         /// wires to fixed DI channels (we copy the physical MAPPING from SMC_Rig_Expo_withClamp only,
         /// never its ids/names). ONLY the two the flow needs:
@@ -324,8 +393,20 @@ namespace CodeGen.Configuration
         /// (M580+M262+BX1) MUST be deployed together — M580+BX1 alone leaves the ring open and stalls.
         /// NOT runtime-safe until EAE Clean/Build/Deploy confirms the CAT compiles + live M580↔M262
         /// adapter bridging (rig-only unknowns). Revert: set false (one rebuild = Stage 5a).
+        ///
+        /// 2026-06-12 — SET FALSE (architecture decision). The robot-tail design stretched the live
+        /// stateRprtCmd ring THROUGH M262 (Disassembly.out→Ejector→Robot→m580 head), so the M580
+        /// ring could not close unless M262 was up — M580+BX1 alone stalled. Investigation confirmed
+        /// EAE's ONLY cross-PLC transport is the cross-device adapter (the reference's
+        /// ReliableCrossComm; no PUBLISH/SUBSCRIBE or cross-PLC symlinks), the CaS/station adapter
+        /// carries mode/cycle/fault (not a process sentinel), and the Process engines have NO spare
+        /// ports — so a cross-PLC (process_id,state) handoff for the tail needs one minimal bridge FB.
+        /// The user chose the no-new-FB path: keep M580/BX1 closed + local (this flag OFF = Stage 5a),
+        /// M262 Feed closed + local, and DEFER the M262 ejector/robot tail + auto-sequencing until a
+        /// bridge FB is approved. Re-enabling this flag re-introduces the M262-coupling and must NOT
+        /// be done without that bridge. (FeedAssemblyHandshake stays OFF for the same reason.)
         /// </summary>
-        public static bool EnableRobotTaskTail = true;
+        public static bool EnableRobotTaskTail = false;
 
         /// <summary>
         /// When TRUE, Cover_Station runs a MINIMAL proof-of-life recipe (CoverPNP_Vr
