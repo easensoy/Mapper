@@ -358,6 +358,12 @@ namespace CodeGen.Devices.Core
                 // (no Ejector/Robot there). They stay in initNames so they are still INIT'd.
                 // Off → ringNames byte-identical.
                 bool robotTail = RobotTailActive(cfg);
+                // FEED -> ASSEMBLY MERGE: when on, the M262 Feed ring and the M580 ring are spliced
+                // into one ring (BuildStation2Wiring adds Disassembly.out->PartInHopper.in +
+                // Feed_Station.out->BearingSensor.in). BOTH this M580 and this M262 sysres ring then
+                // leave their process close-back OPEN at the boundary (handled below) so EAE bridges
+                // the open ends instead of double-driving them.
+                bool feedMerge = MapperConfig.FeedAssemblyHandshake && !robotTail;
                 // ringNames — components that expose the stateRprtCmd adapter
                 // (now INCLUDES Seven_State/Bearing_PnP); used for the report ring.
                 var ringNames = orderedComps.Where(HasRingAdapter).Select(Nm)
@@ -586,15 +592,20 @@ namespace CodeGen.Devices.Core
                         }
                         else
                         {
-                            // STAGE 5b: under the robot tail the M580 ring does NOT close locally
-                            // back to its head — Disassembly.out crosses to M262 Ejector and
-                            // BearingSensor.in arrives from M262 Robot (syslay cross-hops EAE
-                            // bridges). Omit the local close-back so neither plug is double-driven.
-                            if (robotTail && string.Equals(tag, "M580", StringComparison.Ordinal))
+                            // CROSS-PLC RING boundary-open: when a cross-PLC hop leaves this resource's
+                            // ring open at the boundary, OMIT the local close-back so the boundary
+                            // socket is not double-driven (EAE bridges the open ends via the syslay
+                            // cross-hops). Robot tail: M580 Disassembly.out crosses to M262 Ejector.
+                            // Feed merge: BOTH rings open — M580 Disassembly.out crosses to M262
+                            // PartInHopper AND M262 Feed_Station.out crosses to M580 BearingSensor.
+                            bool openBoundary =
+                                (robotTail && string.Equals(tag, "M580", StringComparison.Ordinal)) ||
+                                (feedMerge && (string.Equals(tag, "M580", StringComparison.Ordinal) ||
+                                               string.Equals(tag, "M262", StringComparison.Ordinal)));
+                            if (openBoundary)
                                 report.Missing.Add(
-                                    $"[{tag}] robot tail: left {processNames[^1]}.stateRptCmdAdptr_out OPEN " +
-                                    $"(crosses to M262 Ejector) and {ringNames[0]}.stateRprtCmd_in OPEN " +
-                                    "(arrives from M262 Robot) — EAE bridges via syslay");
+                                    $"[{tag}] cross-PLC ring: left {processNames[^1]}.stateRptCmdAdptr_out OPEN " +
+                                    $"and {ringNames[0]}.stateRprtCmd_in OPEN — EAE bridges via syslay cross-hops");
                             else
                                 adapterWires.Add(new Wire($"{processNames[^1]}.stateRptCmdAdptr_out",
                                     $"{ringNames[0]}.stateRprtCmd_in"));
