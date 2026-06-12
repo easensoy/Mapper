@@ -2739,9 +2739,19 @@ namespace CodeGen.Translation
                     builder.AddAdapterConnection(
                         $"{ringComponents[i].Name}.{StateRprtOut(ringComponents[i].Type)}",
                         $"{ringComponents[i + 1].Name}.{StateRprtIn(ringComponents[i + 1].Type)}");
-                builder.AddAdapterConnection(
-                    $"{ringComponents[^1].Name}.{StateRprtOut(ringComponents[^1].Type)}",
-                    $"{ringComponents[0].Name}.{StateRprtIn(ringComponents[0].Type)}");
+                // FEED -> ASSEMBLY MERGE (MapperConfig.FeedAssemblyHandshake): leave the M262 Feed
+                // ring's close-back OPEN — Feed_Station.stateRptCmdAdptr_out crosses to the M580 ring
+                // head (BearingSensor) and PartInHopper.stateRprtCmd_in arrives from M580 Disassembly
+                // (the two cross-device hops are added in BuildStation2Wiring; EAE bridges them like
+                // the proven cover hops). This is the ONLY no-new-FB way to carry the Feed completion
+                // sentinel {FeedStationProcessId,7} into the M580 state_table so Assembly's row-0
+                // WAIT(10,7) clears. NOTE: it MERGES the two rings — M262 + M580 now share one ring,
+                // so all three PLCs must be deployed together (the trade-off of "inform through ring").
+                bool feedMerge = MapperConfig.FeedAssemblyHandshake && !robotTail;
+                if (!feedMerge)
+                    builder.AddAdapterConnection(
+                        $"{ringComponents[^1].Name}.{StateRprtOut(ringComponents[^1].Type)}",
+                        $"{ringComponents[0].Name}.{StateRprtIn(ringComponents[0].Type)}");
             }
 
             // STAGE 5b: the local intra-M262 hop of the robot-tail segment. Ejector.in (from
@@ -3018,6 +3028,25 @@ namespace CodeGen.Translation
                             $"{disassemblyFbName}.stateRptCmdAdptr_out", "Ejector.stateRprtCmd_in");
                         builder.AddAdapterConnection(
                             "Robot.stateRprtCmd_out", $"{m580[0].Name}.stateRprtCmd_in");
+                    }
+                    else if (MapperConfig.FeedAssemblyHandshake)
+                    {
+                        // FEED -> ASSEMBLY MERGE: splice the M262 Feed ring and the M580 ring into ONE
+                        // ring via two cross-device hops (EAE bridges them like the cover hops):
+                        //   Disassembly.out  -> PartInHopper.in   (M580 -> M262, returns M580 reports)
+                        //   Feed_Station.out -> BearingSensor.in  (M262 -> M580, carries the Feed sentinel)
+                        // The Feed_Station completion sentinel {FeedStationProcessId,7} now circulates
+                        // into the M580 state_table, so Assembly's row-0 WAIT(10,7) holds until Feed
+                        // finishes. No new FB. The local close-backs (Disassembly->BearingSensor here +
+                        // Feed_Station->PartInHopper in BuildFeedStationWiring) are dropped so neither
+                        // boundary socket is double-driven; ResourceWireEmitter opens the matching
+                        // sysres ports on both PLCs.
+                        builder.AddAdapterConnection(
+                            $"{disassemblyFbName}.stateRptCmdAdptr_out",
+                            "PartInHopper.stateRprtCmd_in");
+                        builder.AddAdapterConnection(
+                            "Feed_Station.stateRptCmdAdptr_out",
+                            $"{m580[0].Name}.stateRprtCmd_in");
                     }
                     else
                     {
