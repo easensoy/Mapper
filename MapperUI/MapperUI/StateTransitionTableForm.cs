@@ -55,9 +55,21 @@ namespace MapperUI
             _transitionGrid.DataSource = snapshot.TransitionRows;
             _notesGrid.DataSource = snapshot.Notes;
 
-            var snapshotDir = StateTransitionTableExporter.Save(controlXmlPath, snapshot);
-            _header.Text =
-                $"Source: {Path.GetFileName(controlXmlPath)}   Saved snapshot: {snapshotDir}";
+            // The CSV snapshot export is a CONVENIENCE — the three grids are already populated
+            // above. A failure to write the snapshot folder (path/permission/missing dir) must NOT
+            // take down the whole table view, so swallow it and just note it in the header. This is
+            // what threw the FileNotFound* unhandled crash that hid the table.
+            try
+            {
+                var snapshotDir = StateTransitionTableExporter.Save(controlXmlPath, snapshot);
+                _header.Text =
+                    $"Source: {Path.GetFileName(controlXmlPath)}   Saved snapshot: {snapshotDir}";
+            }
+            catch (Exception ex)
+            {
+                _header.Text =
+                    $"Source: {Path.GetFileName(controlXmlPath)}   (snapshot not saved: {ex.GetType().Name})";
+            }
 
             AutoSizeUsefulColumns(_recipeGrid);
             AutoSizeUsefulColumns(_transitionGrid);
