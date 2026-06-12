@@ -296,11 +296,18 @@ namespace CodeGen.Configuration
         /// <c>HcfPatchService</c>; gated on <see cref="EnableRobotTaskTail"/>.
         /// </para>
         /// </summary>
+        // 2026-06-12: EMPTIED. The ids 20/21 are OUT OF BOUNDS for the 20-slot state_table
+        // [0..19]. Although these sensors are meant to be exposed-only (off the ring), in
+        // practice ResourceWireEmitter wires every Sensor_Bool_CAT on the sysres INTO the Feed
+        // report ring, so they landed on the ring with ids 20/21 and the M262 resource faulted
+        // (ERR_RT_VALUERANGE → ErrorHalt → all Feed I/O dead). That fault is a SOFTWARE bug,
+        // independent of the (separate, hardware) feeder/checker sensor-wiring issue, and it
+        // re-faults M262 the moment these are re-enabled. Keep EMPTY until the cross-PLC handoff
+        // is wired with in-table ids (5/6) on the M262→M580 cross ring ONLY (see the note above).
+        // The robot/ejector tail (EnableRobotTaskTail) does NOT need these — they were a separate,
+        // deferred part-handoff feature; the tail runs fine without them.
         public static readonly (string Name, string Pin, int Id)[] M262SynthSensors =
-        {
-            ("PartAtAssembly", "DI08", 20),
-            ("PartAtExit",     "DI09", 21),
-        };
+            System.Array.Empty<(string Name, string Pin, int Id)>();
 
         /// <summary>
         /// STAGE 5b — the UR3e robot + M262 ejector tail for Disassembly. ENABLED 2026-06-11 (user
