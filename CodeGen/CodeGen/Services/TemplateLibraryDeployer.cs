@@ -167,6 +167,35 @@ namespace CodeGen.Services
                 DeployArtifact(libPath, "Basic", "Robot_Task_Core", eaeProjectDir, result, isBasic: true);
                 DeployArtifact(libPath, "CAT", "Robot_Task_CAT", eaeProjectDir, result, isBasic: false, isCat: true);
             }
+            else
+            {
+                // STALE-ARTIFACT SWEEP (2026-06-12). When the robot tail is OFF, delete any
+                // Robot_Task_CAT / Robot_Task_Core artefacts a PRIOR flag-on deploy left behind.
+                // DeployArtifact is copy-if-absent, so the IEC61499 type folder is usually gone, BUT
+                // the HMI faceplate folder (HMI/Robot_Task_CAT/) survives — and EAE auto-compiles
+                // every HMI/<type>/ faceplate against its IEC type, so a stale faceplate referencing
+                // the now-undefined Robot_Task_CAT throws ERR_NO_SUCH_TYPE + two ERR_CAST_UNDEFINED
+                // on its stateRptCmdAdptr port (exactly the 3 compile errors). Remove all three so the
+                // deployed tree can never carry a Robot artefact a flag-off build does not define.
+                foreach (var stale in new[]
+                {
+                    Path.Combine(eaeProjectDir, "IEC61499", "Robot_Task_CAT"),
+                    Path.Combine(eaeProjectDir, "IEC61499", "Robot_Task_Core"),
+                    Path.Combine(eaeProjectDir, "HMI", "Robot_Task_CAT"),
+                })
+                {
+                    if (!Directory.Exists(stale)) continue;
+                    try
+                    {
+                        Directory.Delete(stale, recursive: true);
+                        MapperLogger.Info($"[Deploy][Sweep] removed stale Robot artefact: {stale}");
+                    }
+                    catch (Exception ex)
+                    {
+                        MapperLogger.Info($"[Deploy][Sweep] FAILED to remove {stale}: {ex.Message}");
+                    }
+                }
+            }
 
             // BX1 EtherNet/IP cover-I/O broker (gated). PLC_RW_BX1 is the composite
             // that unpacks the EtherNet/IP input word into cover sensor-bits and packs
