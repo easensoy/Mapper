@@ -819,11 +819,20 @@ namespace CodeGen.Devices.Core
                 if (string.IsNullOrEmpty(path) || !File.Exists(path)) return false;
                 var doc = XDocument.Load(path);
                 var dns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
+                // Detect the segment TAIL hop (PartAtAssembly -> M580 head BearingSensor), which is
+                // present whenever PartAtAssembly is in the M262 cross-ring segment — REGARDLESS of
+                // whether the robot tail (Ejector/Robot) precedes it. PartAtAssembly is ALWAYS added
+                // last in TemplateMap.M262CrossRingSegment, so it is always the tail.
+                // BUG THIS FIXES: keying on the HEAD hop (Disassembly -> PartAtAssembly) was correct
+                // only when the bridge ran alone; with the robot tail ALSO on, the head becomes
+                // Disassembly -> Ejector, so the detector falsely returned false and the M262 sysres
+                // left PartAtAssembly on the Feed ring (id-5 collision with Checker -> Feeder stalled)
+                // while the syslay still crossed it to M580 (double-drive). The tail hop is invariant.
                 return doc.Descendants(dns + "Connection").Any(c =>
                     string.Equals((string?)c.Attribute("Source"),
-                        "Disassembly.stateRptCmdAdptr_out", StringComparison.Ordinal) &&
+                        "PartAtAssembly.stateRprtCmd_out", StringComparison.Ordinal) &&
                     string.Equals((string?)c.Attribute("Destination"),
-                        "PartAtAssembly.stateRprtCmd_in", StringComparison.Ordinal));
+                        "BearingSensor.stateRprtCmd_in", StringComparison.Ordinal));
             }
             catch
             {
