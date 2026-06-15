@@ -1651,7 +1651,11 @@ namespace CodeGen.Translation
             // byte-identical and nothing crosses to the M580 state_table yet. See
             // MapperConfig.M262SynthSensors for the id/consumption strategy. FB ids via FBIdGenerator,
             // never the reference's. Off -> not emitted.
-            if (MapperConfig.EnableRobotTaskTail)
+            // Emitted for the robot tail OR the PartAtAssembly cross-ring (FeedAssemblyPartBridge):
+            // both consume the synthesized M262 sensor. The FB + its INIT fan-off PartInHopper are
+            // added here; whether it joins a ring is decided in BuildStation2Wiring / ResourceWire
+            // Emitter (cross-ring for the bridge; off the Feed ring either way). Off both -> not emitted.
+            if (MapperConfig.EnableRobotTaskTail || MapperConfig.FeedAssemblyPartBridge)
             {
                 int synthY = 5200;
                 string prevSynthInit = "PartInHopper";
@@ -3019,6 +3023,13 @@ namespace CodeGen.Translation
                     bool robotTail = MapperConfig.EnableRobotTaskTail &&
                         contents.Actuators.Exists(a => NameEq(a.Name, "Ejector")) &&
                         contents.Actuators.Exists(a => NameEq(a.Name, "Robot"));
+                    // PartAtAssembly cross-ring (FeedAssemblyPartBridge): same seam as the robot tail
+                    // (Disassembly -> [M262 node] -> M580 head), but a single synthesized SENSOR node.
+                    // Mutually exclusive with the robot tail (same seam). PartAtAssembly is emitted on
+                    // M262 by the synth block above when the flag is on, so guard on the config entry.
+                    bool partBridge = MapperConfig.FeedAssemblyPartBridge && !robotTail &&
+                        System.Array.Exists(MapperConfig.M262SynthSensors,
+                            s => NameEq(s.Name, "PartAtAssembly"));
                     if (robotTail)
                     {
                         // CROSS-DEVICE hops only (M580→M262 and M262→M580; EAE bridges these). The
@@ -3046,6 +3057,23 @@ namespace CodeGen.Translation
                             "PartInHopper.stateRprtCmd_in");
                         builder.AddAdapterConnection(
                             "Feed_Station.stateRptCmdAdptr_out",
+                            $"{m580[0].Name}.stateRprtCmd_in");
+                    }
+                    else if (partBridge)
+                    {
+                        // PartAtAssembly cross-ring (mirrors the cover hops EAE bridges):
+                        //   Disassembly.out   -> PartAtAssembly.in   (M580 -> M262)
+                        //   PartAtAssembly.out -> M580 head.in        (M262 -> M580, carries {id 5, On})
+                        // PartAtAssembly is OFF the M262 Feed ring; its report lands in the M580
+                        // state_table so Assembly's row-0 WAIT(PartAtAssembly,1) holds until Feed
+                        // delivers the part and DI08 trips. The local close-back Disassembly->head is
+                        // dropped (ResourceWireEmitter opens the M580 boundary) so neither boundary
+                        // socket is double-driven; EAE bridges both cross-device hops via the syslay.
+                        builder.AddAdapterConnection(
+                            $"{disassemblyFbName}.stateRptCmdAdptr_out",
+                            "PartAtAssembly.stateRprtCmd_in");
+                        builder.AddAdapterConnection(
+                            "PartAtAssembly.stateRprtCmd_out",
                             $"{m580[0].Name}.stateRprtCmd_in");
                     }
                     else
