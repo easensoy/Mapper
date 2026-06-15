@@ -341,6 +341,29 @@ namespace CodeGen.Configuration
         public static bool AssemblyWaitForFeedPart = true;
 
         /// <summary>
+        /// FEED -> ASSEMBLY via the PartAtAssembly CROSS-RING (chosen 2026-06-15; default ON). This is
+        /// the elegant, EAE-native sequencing the user asked for: "do the same thing for M262-M580 as
+        /// M580-BX1". PartAtAssembly stays on M262 (it reads DI08, the rig's part-at-assembly proximity
+        /// sensor); we carry ONLY its state across to M580 by splicing it into the M580 Assembly ring
+        /// via TWO cross-device adapter hops — IDENTICAL to the rig-proven M580<->BX1 cover ring:
+        ///   Disassembly.stateRptCmdAdptr_out -> PartAtAssembly.stateRprtCmd_in   (M580 -> M262)
+        ///   PartAtAssembly.stateRprtCmd_out  -> BearingSensor.stateRprtCmd_in    (M262 -> M580)
+        /// PartAtAssembly is kept OFF the M262 Feed ring (ResourceWireEmitter excludes it), so it never
+        /// disturbs the proven Feed ring and never collides with Checker (both id 5 on M262's SEPARATE
+        /// table). Its report {id 5, 1} lands in M580 state_table[5] (5 is M580-free), and Assembly's
+        /// row-0 WAIT(5,1) holds until Feed delivers the part and DI08 trips. NO new FB. Mutually
+        /// exclusive with the removed <see cref="FeedAssemblyHandshake"/> (whole-ring merge) and with
+        /// <see cref="EnableRobotTaskTail"/> (same seam) — both stay OFF.
+        /// CONSEQUENCE: with this ON the M580 Assembly ring opens toward M262, so ALL THREE PLCs
+        /// (M262+M580+BX1) must be deployed together — M580+BX1 alone leaves the ring open and stalls
+        /// (the same coupling any real Feed->Assembly handoff implies). RIG-ONLY UNKNOWN: this is the
+        /// FIRST live test of the M262<->M580 cross-device adapter bridge (only M580<->BX1 is proven).
+        /// Generation is headless-verified; transport is confirmed only on the rig. Revert instantly:
+        /// set false (one rebuild) => decoupled local rings + the local BearingSensor material gate.
+        /// </summary>
+        public static bool FeedAssemblyPartBridge = true;
+
+        /// <summary>
         /// Real M262 rig proximity sensors the digital twin does NOT model, but the physical SMC rig
         /// wires to fixed DI channels (we copy the physical MAPPING from SMC_Rig_Expo_withClamp only,
         /// never its ids/names). ONLY the two the flow needs:
@@ -365,18 +388,19 @@ namespace CodeGen.Configuration
         /// <c>HcfPatchService</c>; gated on <see cref="EnableRobotTaskTail"/>.
         /// </para>
         /// </summary>
-        // 2026-06-12: EMPTIED. The ids 20/21 are OUT OF BOUNDS for the 20-slot state_table
-        // [0..19]. Although these sensors are meant to be exposed-only (off the ring), in
-        // practice ResourceWireEmitter wires every Sensor_Bool_CAT on the sysres INTO the Feed
-        // report ring, so they landed on the ring with ids 20/21 and the M262 resource faulted
-        // (ERR_RT_VALUERANGE → ErrorHalt → all Feed I/O dead). That fault is a SOFTWARE bug,
-        // independent of the (separate, hardware) feeder/checker sensor-wiring issue, and it
-        // re-faults M262 the moment these are re-enabled. Keep EMPTY until the cross-PLC handoff
-        // is wired with in-table ids (5/6) on the M262→M580 cross ring ONLY (see the note above).
-        // The robot/ejector tail (EnableRobotTaskTail) does NOT need these — they were a separate,
-        // deferred part-handoff feature; the tail runs fine without them.
+        // 2026-06-15: WIRED for the PartAtAssembly cross-ring (see FeedAssemblyPartBridge). Exactly
+        // ONE entry — PartAtAssembly on DI08 with the M580-free in-table id 5. The earlier
+        // ERR_RT_VALUERANGE fault (ids 20/21 out of the 20-slot table) is GONE: id 5 is a valid slot,
+        // AND PartAtAssembly is now kept OFF the M262 Feed ring (ResourceWireEmitter excludes it under
+        // FeedAssemblyPartBridge), so it never lands on M262's ring/table at all — its id 5 is used
+        // only in its cross-ring report into M580 state_table[5] (free on M580; Checker keeps id 5 on
+        // M262's separate table, no collision). PartAtExit (DI09, the robot gate) is intentionally
+        // omitted — it belongs to the deferred EnableRobotTaskTail and is not needed for Feed->Assembly.
         public static readonly (string Name, string Pin, int Id)[] M262SynthSensors =
-            System.Array.Empty<(string Name, string Pin, int Id)>();
+            new[]
+            {
+                ("PartAtAssembly", "DI08", 5),
+            };
 
         /// <summary>
         /// STAGE 5b — the UR3e robot + M262 ejector tail for Disassembly. ENABLED 2026-06-11 (user
