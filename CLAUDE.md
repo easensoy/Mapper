@@ -261,6 +261,7 @@ The harness proves the generation pipeline produces the right artefacts. EAE is 
 - **Commit each file separately.** No bundling. No `Claude` attribution in any commit message.
 - **HTTPS push only**, never SSH. Don't touch `git config` or `~/.git-credentials`.
 - **Push to `github.com/easensoy/Mapper`.**
+- **PUSH AFTER EVERY UPDATE — automatically, without being asked (user directive 2026-06-15).** The moment a change is complete (any code edit, fix, or Status update), commit each changed file separately (own message, no attribution) and `git push origin main` IMMEDIATELY. Do NOT batch multiple changes, and do NOT wait for the user to say "push" — every iteration must end with the work on GitHub. Still never `git add -A` (the MQTT certs/keys + throwaway `_dis`/`_verify2` harnesses must stay out): stage only the specific files you changed. After pushing, verify `git rev-parse HEAD` == `git rev-parse origin/main`.
 - Never regenerate `MapperTests\TestData\SMC_Rig_IO_Bindings.xlsx` — it is hand-crafted per-CAT content.
 - **After every code change, Claude itself builds → kills MapperUI → relaunches it** (kill→build→relaunch when the DLL is locked). Do NOT hand this off to the user — they should find an already-running, up-to-date MapperUI and just click Test Simulator/Test Runtime. See `BUILD_RELAUNCH.md`. Still note in the Status what was rebuilt.
 - Before claiming a checklist item green, the harness must actually assert it. Don't mark it on confidence alone.
