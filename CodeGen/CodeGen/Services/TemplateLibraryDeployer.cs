@@ -143,6 +143,23 @@ namespace CodeGen.Services
             if (string.IsNullOrWhiteSpace(eaeProjectDir))
                 throw new InvalidOperationException("Cannot determine EAE project directory from syslay path.");
 
+            // HANDLER REFRESH (2026-06-16): the centre-home swivel's No_Sensor_Handler_7SCH was
+            // changed to a SENSOR-DRIVEN home — its START->AtHome transition now gates on the
+            // physical atHome sensor ('inputEvent AND atHomeInput = TRUE') instead of the open-loop
+            // work1/work2ToHomeTimer that overshot centre (the swivel-never-homes bug). DeployArtifact
+            // below is COPY-IF-ABSENT, so a previously-deployed (timer) handler would never be
+            // refreshed from the Template Library zip. Delete the deployed handler files first so the
+            // copy-if-absent re-extracts the fixed one. Pipeline-respecting (the deployer does it, no
+            // direct Demonstrator edit), idempotent, and guarantees the deployed handler always
+            // matches the committed zip. EAE recompiles the one small Basic FB on the next Build.
+            foreach (var ext in new[] { ".fbt", ".doc.xml", ".meta.xml" })
+            {
+                var stale = Path.Combine(eaeProjectDir, "IEC61499", "No_Sensor_Handler_7SCH" + ext);
+                try { if (File.Exists(stale)) File.Delete(stale); }
+                catch (Exception ex)
+                { MapperLogger.Info($"[Deploy][Refresh] could not remove stale {stale}: {ex.Message}"); }
+            }
+
             foreach (var name in UniversalBasics)
                 DeployArtifact(libPath, "Basic", name, eaeProjectDir, result, isBasic: true);
 
