@@ -780,11 +780,22 @@ namespace CodeGen.Translation.Process
             // is exempted from the run-once self-park that the other engines use.
             bool isCoverStation = string.Equals((process.Name ?? string.Empty).Trim(),
                 "Cover_Station", StringComparison.OrdinalIgnoreCase);
-            if (MapperConfig.RecipeRunOnce && !isCoverStation && arrays.StepType.Count > 0)
+            if (!isCoverStation && arrays.StepType.Count > 0)
             {
                 int endIdx = arrays.StepType.Count - 1;
                 if (arrays.StepType[endIdx] == 9)
-                    arrays.NextStep[endIdx] = endIdx;   // self-loop = park (was 0 = restart)
+                {
+                    if (MapperConfig.EnableCyclicRestart)
+                        // CYCLIC: END jumps back to step 0 (this recipe's trigger gate). The engine's
+                        // EndSequence runs CurrentStep := Recipe[END].NextStep, so 0 = restart; the
+                        // leftoverSuspect logic holds row-0's WAIT until a FRESH trigger, so the line
+                        // self-sequences (Feed->Assembly->Disassembly->robot drop->Feed...). Overrides
+                        // the run-once self-park. Safe: EnableSevenStateHomePreamble is off, so step 0
+                        // is a trigger WAIT, never a Home command (no atWork1<->atWork2 bounce).
+                        arrays.NextStep[endIdx] = 0;
+                    else if (MapperConfig.RecipeRunOnce)
+                        arrays.NextStep[endIdx] = endIdx;   // self-loop = park (run once)
+                }
             }
 
             ValidateProcessIdInvariant(arrays, processId);
@@ -1263,7 +1274,10 @@ namespace CodeGen.Translation.Process
             arrays.CmdStateArr.Add(0);
             arrays.Wait1Id.Add(0);
             arrays.Wait1State.Add(0);
-            arrays.NextStep.Add(end);
+            // CYCLIC RESTART: loop END -> step 0 (Disassembly row 0 = WAIT(Assembly handshake)) so it
+            // re-arms for the next cycle; else self-park (run once). The Disassembly path returns
+            // before Generate's shared run-once block, so the loop is applied here at its own END.
+            arrays.NextStep.Add(MapperConfig.EnableCyclicRestart ? 0 : end);
 
             arrays.Warnings.Add(
                 $"[Recipe] Disassembly_Station emitted: WAIT(Assembly proc {MapperConfig.AssemblyProcessId}, 7) " +
