@@ -941,7 +941,18 @@ namespace CodeGen.Translation.Process
             // BearingSensor is absent (recipe runs immediately, as before). Gate:
             // AssemblyWaitForFeedPart (default ON); set false to run Assembly immediately. Mutually
             // exclusive with FeedAssemblyHandshake above (OFF) — both on would give two row-0 waits.
-            if (MapperConfig.AssemblyWaitForFeedPart &&
+            // FEED -> ASSEMBLY via the PartAtAssembly cross-ring (MapperConfig.FeedAssemblyPartBridge):
+            // row 0 holds on the PartAtAssembly sensor (synthesized on M262, DI08) whose state crosses
+            // M262->M580 into M580 state_table[id] — the proven M580<->BX1 cover-ring mechanism applied
+            // to M262. Assembly starts when Feed delivers the part and PartAtAssembly reports On (1).
+            // The id is the SAME one the synth FB carries (MapperConfig.M262SynthSensors), so the WAIT
+            // can never drift from the publisher. Takes precedence over the local BearingSensor
+            // material gate below (mutually exclusive — never two row-0 waits); off -> that fallback.
+            var paBridge = System.Array.Find(MapperConfig.M262SynthSensors,
+                s => string.Equals(s.Name, "PartAtAssembly", System.StringComparison.OrdinalIgnoreCase));
+            if (MapperConfig.FeedAssemblyPartBridge && paBridge.Name != null)
+                AddWait(paBridge.Id, 1);
+            else if (MapperConfig.AssemblyWaitForFeedPart &&
                 TryGetComponentId(arrays, allComponents, "BearingSensor", out var matGateBsId))
                 AddWait(matGateBsId, 1);
 
