@@ -364,6 +364,13 @@ namespace CodeGen.Devices.Core
                 // leave their process close-back OPEN at the boundary (handled below) so EAE bridges
                 // the open ends instead of double-driving them.
                 bool feedMerge = MapperConfig.FeedAssemblyHandshake && !robotTail;
+                // PARTATASSEMBLY CROSS-RING (FeedAssemblyPartBridge): PartAtAssembly is a synthesized
+                // M262 sensor spliced into the M580 ring (Disassembly -> PartAtAssembly -> BearingSensor
+                // via two cross-device hops EAE bridges). It must NOT join the M262 Feed ring — there it
+                // would report {id 5} into M262's table (colliding with Checker) AND be driven twice.
+                // Detected from the syslay hop actually emitted (single source of truth). No-op on
+                // M580/BX1 (no PartAtAssembly there).
+                bool partBridge = PartBridgeActive(cfg);
                 // ringNames — components that expose the stateRprtCmd adapter
                 // (now INCLUDES Seven_State/Bearing_PnP); used for the report ring.
                 var ringNames = orderedComps.Where(HasRingAdapter).Select(Nm)
@@ -371,6 +378,8 @@ namespace CodeGen.Devices.Core
                     .Where(s => !(robotTail &&
                         (string.Equals(s, "Ejector", StringComparison.OrdinalIgnoreCase) ||
                          string.Equals(s, "Robot",   StringComparison.OrdinalIgnoreCase))))
+                    .Where(s => !(partBridge &&
+                        string.Equals(s, "PartAtAssembly", StringComparison.OrdinalIgnoreCase)))
                     .ToList();
                 // actNames — actuators that expose the stationAdptr adapter
                 // (still excludes Seven_State, which has no stationAdptr); used
@@ -439,6 +448,10 @@ namespace CodeGen.Devices.Core
                 var robotTailInit = RobotTailActive(cfg)
                     ? new HashSet<string>(StringComparer.Ordinal) { "Ejector", "Robot" }
                     : new HashSet<string>(StringComparer.Ordinal);
+                // PartAtAssembly is a cross-PLC node (its report crosses to M580); init it LAST too,
+                // after Feed -> Feed_Station, so its cross-PLC adapter bring-up never sits in the
+                // critical path to Feed_Station.INIT (same reasoning as the robot tail). M262-only.
+                if (partBridge) robotTailInit.Add("PartAtAssembly");
                 initChain.AddRange(initNames.Where(n => !robotTailInit.Contains(n)));
                 if (ringGateName != null) initChain.Add(ringGateName);
                 initChain.AddRange(processNames);   // every process is INIT-chained (before the tail)
@@ -601,7 +614,13 @@ namespace CodeGen.Devices.Core
                             bool openBoundary =
                                 (robotTail && string.Equals(tag, "M580", StringComparison.Ordinal)) ||
                                 (feedMerge && (string.Equals(tag, "M580", StringComparison.Ordinal) ||
-                                               string.Equals(tag, "M262", StringComparison.Ordinal)));
+                                               string.Equals(tag, "M262", StringComparison.Ordinal))) ||
+                                // PartAtAssembly cross-ring: M580 omits the Disassembly->BearingSensor
+                                // close-back (Disassembly.out crosses to M262 PartAtAssembly, and the
+                                // M580 head arrives from PartAtAssembly). M262 needs no open here —
+                                // PartAtAssembly is excluded from the Feed ring above, so the Feed
+                                // close-back is untouched and the Feed ring stays closed + local.
+                                (partBridge && string.Equals(tag, "M580", StringComparison.Ordinal));
                             if (openBoundary)
                                 report.Missing.Add(
                                     $"[{tag}] cross-PLC ring: left {processNames[^1]}.stateRptCmdAdptr_out OPEN " +
@@ -772,6 +791,37 @@ namespace CodeGen.Devices.Core
                         "Disassembly.stateRptCmdAdptr_out", StringComparison.Ordinal) &&
                     string.Equals((string?)c.Attribute("Destination"),
                         "Ejector.stateRprtCmd_in", StringComparison.Ordinal));
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Single source of truth (mirrors <see cref="RobotTailActive"/>) for the PartAtAssembly
+        /// cross-ring (<see cref="MapperConfig.FeedAssemblyPartBridge"/>): TRUE when the generated
+        /// syslay actually carries the M580->M262 hop
+        /// (Disassembly.stateRptCmdAdptr_out -> PartAtAssembly.stateRprtCmd_in). When TRUE, the M262
+        /// sysres keeps PartAtAssembly OUT of the Feed ring (so it never reports into M262's table)
+        /// and the M580 sysres omits the Disassembly->BearingSensor close-back — EAE bridges the two
+        /// cross-device hops. Returns false (rings closed locally) when the flag is off, the syslay is
+        /// missing/unreadable, or the hop is absent.
+        /// </summary>
+        private static bool PartBridgeActive(MapperConfig cfg)
+        {
+            if (cfg == null || !MapperConfig.FeedAssemblyPartBridge) return false;
+            try
+            {
+                var path = cfg.ActiveSyslayPath;
+                if (string.IsNullOrEmpty(path) || !File.Exists(path)) return false;
+                var doc = XDocument.Load(path);
+                var dns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
+                return doc.Descendants(dns + "Connection").Any(c =>
+                    string.Equals((string?)c.Attribute("Source"),
+                        "Disassembly.stateRptCmdAdptr_out", StringComparison.Ordinal) &&
+                    string.Equals((string?)c.Attribute("Destination"),
+                        "PartAtAssembly.stateRprtCmd_in", StringComparison.Ordinal));
             }
             catch
             {
