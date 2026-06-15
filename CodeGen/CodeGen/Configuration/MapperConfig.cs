@@ -429,8 +429,19 @@ namespace CodeGen.Configuration
         /// M262 Feed closed + local, and DEFER the M262 ejector/robot tail + auto-sequencing until a
         /// bridge FB is approved. Re-enabling this flag re-introduces the M262-coupling and must NOT
         /// be done without that bridge. (FeedAssemblyHandshake stays OFF for the same reason.)
+        ///
+        /// 2026-06-15 — RE-ENABLED (true). The M262&lt;-&gt;M580 cross-device adapter transport is now
+        /// RIG-PROVEN (the PartAtAssembly bridge runs end-to-end on the rig), which was the ONLY
+        /// blocker. The tail needs NO new FB — it rides the SAME proven transport as PartAtAssembly,
+        /// and the two COMPOSE on one ordered M262 segment (TemplateMap.M262CrossRingSegment):
+        /// Disassembly -&gt; Ejector -&gt; Robot -&gt; PartAtAssembly -&gt; BearingSensor. The HCF binds
+        /// DO03=Ejector.OutputToWork, DO04=Robot.RobotCommands_StartTask, DI10=Robot.RobotStatus_Task_
+        /// Complete; the Disassembly recipe appends unclamp -&gt; ejector -&gt; robot -&gt; END. All three
+        /// PLCs (M262+M580+BX1) must deploy together (the M580 ring opens toward M262). The Robot_Task_
+        /// CAT compile is the one remaining EAE-only check. Revert: set false (one rebuild) -&gt; tail
+        /// gone, PartAtAssembly bridge stays (independent flag).
         /// </summary>
-        public static bool EnableRobotTaskTail = false;
+        public static bool EnableRobotTaskTail = true;
 
         /// <summary>
         /// When TRUE, Cover_Station runs a MINIMAL proof-of-life recipe (CoverPNP_Vr
