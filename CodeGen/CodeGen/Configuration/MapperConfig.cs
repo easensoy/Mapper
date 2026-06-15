@@ -81,6 +81,21 @@ namespace CodeGen.Configuration
         // ProcessRecipeArrayGenerator.Generate after the preamble shifts indices.
         public static bool RecipeRunOnce = true;
 
+        // CYCLIC RESTART (2026-06-16, default ON). Make the WHOLE line cycle continuously:
+        // Feed -> Assembly -> Disassembly -> robot drops the part in the hopper -> Feed again.
+        // When TRUE the END row of every (non-Cover) recipe points back to STEP 0 instead of
+        // self-parking (overrides RecipeRunOnce above). Step 0 of each recipe is already its
+        // TRIGGER gate: Feed row0 = WAIT(PartInHopper), Assembly row0 = WAIT(PartAtAssembly),
+        // Disassembly row0 = WAIT(Assembly handshake). The engine's check_wait/leftoverSuspect
+        // logic makes each row-0 WAIT hold until a FRESH trigger message (not a stale state_table
+        // value), so the loop self-sequences with NO free-run collision: the robot dropping the
+        // finished part trips PartInHopper (off->on) -> Feed re-runs -> delivers -> PartAtAssembly
+        // (off->on) -> Assembly -> handshake -> Disassembly -> robot drops -> ... Safe because
+        // EnableSevenStateHomePreamble is OFF, so no recipe has a Home command at step 0 (which is
+        // what caused the old atWork1<->atWork2 bounce when END->0 was used naively). Set false to
+        // revert to RecipeRunOnce's single-cycle self-park.
+        public static bool EnableCyclicRestart = true;
+
         // AUTO-RETRACT SCOPE (2026-06-04): the recipe generator's auto-retract
         // safety net (it inserts a return-home for an actuator the twin advances but
         // never retracts) runs ONLY for the processes listed here. It exists for the
