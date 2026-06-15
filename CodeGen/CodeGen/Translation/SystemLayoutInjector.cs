@@ -2758,11 +2758,18 @@ namespace CodeGen.Translation
                         $"{ringComponents[0].Name}.{StateRprtIn(ringComponents[0].Type)}");
             }
 
-            // STAGE 5b: the local intra-M262 hop of the robot-tail segment. Ejector.in (from
-            // Disassembly) and Robot.out (to BearingSensor) are the cross-device ends — added in
-            // BuildStation2Wiring and bridged by EAE; only Ejector→Robot is local here.
-            if (robotTail)
-                builder.AddAdapterConnection("Ejector.stateRprtCmd_out", "Robot.stateRprtCmd_in");
+            // STAGE 5b + PartAtAssembly bridge: the local intra-M262 chain of the cross-ring segment.
+            // The segment ENDS (seg[0].in from M580 Disassembly, seg[^1].out to M580 BearingSensor) are
+            // the cross-device hops added in BuildStation2Wiring + bridged by EAE; only the intra-M262
+            // links seg[i]->seg[i+1] are local here. Composes Ejector->Robot (tail) with Robot->
+            // PartAtAssembly (bridge): both on -> Ejector->Robot->PartAtAssembly; tail-only ->
+            // Ejector->Robot; bridge-only -> single node, no intra link. Off both -> empty -> no-op.
+            bool partBridge = MapperConfig.FeedAssemblyPartBridge &&
+                System.Array.Exists(MapperConfig.M262SynthSensors, s => NameEq(s.Name, "PartAtAssembly"));
+            var m262Seg = TemplateMap.M262CrossRingSegment(robotTail, partBridge);
+            for (int i = 0; i < m262Seg.Count - 1; i++)
+                builder.AddAdapterConnection(
+                    $"{m262Seg[i]}.stateRprtCmd_out", $"{m262Seg[i + 1]}.stateRprtCmd_in");
         }
 
         public static string StateRprtOut(string fbType)
@@ -3024,21 +3031,27 @@ namespace CodeGen.Translation
                         contents.Actuators.Exists(a => NameEq(a.Name, "Ejector")) &&
                         contents.Actuators.Exists(a => NameEq(a.Name, "Robot"));
                     // PartAtAssembly cross-ring (FeedAssemblyPartBridge): same seam as the robot tail
-                    // (Disassembly -> [M262 node] -> M580 head), but a single synthesized SENSOR node.
-                    // Mutually exclusive with the robot tail (same seam). PartAtAssembly is emitted on
-                    // M262 by the synth block above when the flag is on, so guard on the config entry.
-                    bool partBridge = MapperConfig.FeedAssemblyPartBridge && !robotTail &&
+                    // (Disassembly -> [M262 node] -> M580 head), a single synthesized SENSOR node.
+                    // COMPOSES with the robot tail now (TemplateMap.M262CrossRingSegment orders both),
+                    // so NO !robotTail guard. PartAtAssembly is emitted on M262 by the synth block above
+                    // when the flag is on, so guard on the config entry.
+                    bool partBridge = MapperConfig.FeedAssemblyPartBridge &&
                         System.Array.Exists(MapperConfig.M262SynthSensors,
                             s => NameEq(s.Name, "PartAtAssembly"));
-                    if (robotTail)
+                    // UNIFIED M262 cross-ring segment — Ejector/Robot tail + PartAtAssembly sensor,
+                    // composed in one ordered list. Two cross-device hops only here (Disassembly.out ->
+                    // seg[0].in ; seg[^1].out -> M580 head.in); the intra-M262 chain seg[i]->seg[i+1] is
+                    // added in BuildFeedStationWiring (M262-local) so it is never duplicated. EAE bridges
+                    // the two cross-device ends like the proven cover hops. seg empty -> ring closes
+                    // locally (the final else). Replaces the old mutually-exclusive robotTail/partBridge
+                    // branches.
+                    var m262Seg = TemplateMap.M262CrossRingSegment(robotTail, partBridge);
+                    if (m262Seg.Count > 0)
                     {
-                        // CROSS-DEVICE hops only (M580→M262 and M262→M580; EAE bridges these). The
-                        // intra-M262 Ejector→Robot hop is added by BuildFeedStationWiring (M262-
-                        // local) so the segment is never duplicated in the syslay.
                         builder.AddAdapterConnection(
-                            $"{disassemblyFbName}.stateRptCmdAdptr_out", "Ejector.stateRprtCmd_in");
+                            $"{disassemblyFbName}.stateRptCmdAdptr_out", $"{m262Seg[0]}.stateRprtCmd_in");
                         builder.AddAdapterConnection(
-                            "Robot.stateRprtCmd_out", $"{m580[0].Name}.stateRprtCmd_in");
+                            $"{m262Seg[^1]}.stateRprtCmd_out", $"{m580[0].Name}.stateRprtCmd_in");
                     }
                     else if (MapperConfig.FeedAssemblyHandshake)
                     {
@@ -3057,23 +3070,6 @@ namespace CodeGen.Translation
                             "PartInHopper.stateRprtCmd_in");
                         builder.AddAdapterConnection(
                             "Feed_Station.stateRptCmdAdptr_out",
-                            $"{m580[0].Name}.stateRprtCmd_in");
-                    }
-                    else if (partBridge)
-                    {
-                        // PartAtAssembly cross-ring (mirrors the cover hops EAE bridges):
-                        //   Disassembly.out   -> PartAtAssembly.in   (M580 -> M262)
-                        //   PartAtAssembly.out -> M580 head.in        (M262 -> M580, carries {id 5, On})
-                        // PartAtAssembly is OFF the M262 Feed ring; its report lands in the M580
-                        // state_table so Assembly's row-0 WAIT(PartAtAssembly,1) holds until Feed
-                        // delivers the part and DI08 trips. The local close-back Disassembly->head is
-                        // dropped (ResourceWireEmitter opens the M580 boundary) so neither boundary
-                        // socket is double-driven; EAE bridges both cross-device hops via the syslay.
-                        builder.AddAdapterConnection(
-                            $"{disassemblyFbName}.stateRptCmdAdptr_out",
-                            "PartAtAssembly.stateRprtCmd_in");
-                        builder.AddAdapterConnection(
-                            "PartAtAssembly.stateRprtCmd_out",
                             $"{m580[0].Name}.stateRprtCmd_in");
                     }
                     else
