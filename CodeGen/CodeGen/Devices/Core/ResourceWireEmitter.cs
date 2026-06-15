@@ -653,19 +653,21 @@ namespace CodeGen.Devices.Core
                     }
                 }
 
-                // STAGE 5b: the M262 ejector→robot tail segment, kept OFF the Feed ring (the
-                // ejector+robot were filtered out of ringNames above). Only the intra-M262 hop is
-                // local; Ejector.stateRprtCmd_in is left OPEN (arrives from M580 Disassembly) and
-                // Robot.stateRprtCmd_out is left OPEN (crosses to M580 BearingSensor) — EAE bridges
-                // both via the syslay cross-hops. Only the M262 resource carries both FBs, so this
-                // is a no-op on M580/BX1, and a no-op entirely when the flag is off.
-                if (robotTail && byName.ContainsKey("Ejector") && byName.ContainsKey("Robot"))
-                {
-                    adapterWires.Add(new Wire("Ejector.stateRprtCmd_out", "Robot.stateRprtCmd_in"));
+                // STAGE 5b + PartAtAssembly bridge: the M262 cross-ring segment's intra-M262 chain,
+                // kept OFF the Feed ring (its nodes were filtered out of ringNames above). seg[0].in is
+                // left OPEN (arrives from M580 Disassembly) and seg[^1].out is left OPEN (crosses to
+                // M580 BearingSensor) — EAE bridges both via the syslay cross-hops. Filtered to nodes
+                // actually on THIS resource, so it is a no-op on M580/BX1 and when both flags are off.
+                // Composes Ejector->Robot (tail) with Robot->PartAtAssembly (bridge) into one chain.
+                var crossSeg = TemplateMap.M262CrossRingSegment(robotTail, partBridge)
+                    .Where(byName.ContainsKey).ToList();
+                for (int i = 0; i < crossSeg.Count - 1; i++)
+                    adapterWires.Add(new Wire(
+                        $"{crossSeg[i]}.stateRprtCmd_out", $"{crossSeg[i + 1]}.stateRprtCmd_in"));
+                if (crossSeg.Count > 0)
                     report.Missing.Add(
-                        $"[{tag}] robot tail: Ejector→Robot local segment added; Ejector.stateRprtCmd_in " +
-                        "OPEN (from M580 Disassembly), Robot.stateRprtCmd_out OPEN (to M580 BearingSensor)");
-                }
+                        $"[{tag}] M262 cross-ring segment {string.Join("->", crossSeg)}: ends OPEN " +
+                        "(seg[0].in from M580 Disassembly, seg[^1].out to M580 BearingSensor) — EAE bridges via syslay");
 
                 foreach (var w in eventWires)   Process(w, emittedEvents,   "event");
                 foreach (var w in DataWires)    Process(w, emittedData,     "data");
