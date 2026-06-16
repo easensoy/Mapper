@@ -197,40 +197,19 @@ namespace CodeGen.Services
             // type resolvable. Robot_Task_CAT is the task-handshake CAT (StartTask DO04 / Task_Complete
             // DI10); its core state machine is the Robot_Task_Core Basic FB — deploy the core first so
             // the composite resolves on import. Default-off deploys NEITHER → byte-identical.
-            if (MapperConfig.EnableRobotTaskTail)
-            {
-                DeployArtifact(libPath, "Basic", "Robot_Task_Core", eaeProjectDir, result, isBasic: true);
-                DeployArtifact(libPath, "CAT", "Robot_Task_CAT", eaeProjectDir, result, isBasic: false, isCat: true);
-            }
-            else
-            {
-                // STALE-ARTIFACT SWEEP (2026-06-12). When the robot tail is OFF, delete any
-                // Robot_Task_CAT / Robot_Task_Core artefacts a PRIOR flag-on deploy left behind.
-                // DeployArtifact is copy-if-absent, so the IEC61499 type folder is usually gone, BUT
-                // the HMI faceplate folder (HMI/Robot_Task_CAT/) survives — and EAE auto-compiles
-                // every HMI/<type>/ faceplate against its IEC type, so a stale faceplate referencing
-                // the now-undefined Robot_Task_CAT throws ERR_NO_SUCH_TYPE + two ERR_CAST_UNDEFINED
-                // on its stateRptCmdAdptr port (exactly the 3 compile errors). Remove all three so the
-                // deployed tree can never carry a Robot artefact a flag-off build does not define.
-                foreach (var stale in new[]
-                {
-                    Path.Combine(eaeProjectDir, "IEC61499", "Robot_Task_CAT"),
-                    Path.Combine(eaeProjectDir, "IEC61499", "Robot_Task_Core"),
-                    Path.Combine(eaeProjectDir, "HMI", "Robot_Task_CAT"),
-                })
-                {
-                    if (!Directory.Exists(stale)) continue;
-                    try
-                    {
-                        Directory.Delete(stale, recursive: true);
-                        MapperLogger.Info($"[Deploy][Sweep] removed stale Robot artefact: {stale}");
-                    }
-                    catch (Exception ex)
-                    {
-                        MapperLogger.Info($"[Deploy][Sweep] FAILED to remove {stale}: {ex.Message}");
-                    }
-                }
-            }
+            // ROBOT_TASK_CAT ALWAYS DEPLOYED (2026-06-17): the UR3e robot is a real Control.xml
+            // component, so its CAT type + Robot_Task_Core core must ALWAYS be present. The old
+            // EnableRobotTaskTail gate conflated THREE separate concerns — type DEPLOY, robot
+            // INSTANCE emission, and cross-PLC RING membership — so turning the tail OFF (to decouple
+            // the M580 ring) ALSO deleted the deployed CAT while the dfbproj still referenced it ->
+            // EAE Solution Integrity "Missing Project Files" (Robot_Task_CAT.cfg/.fbt/...). Deploying
+            // the type unconditionally fixes that. The robot INSTANCE + its M262-local sub-sequence +
+            // the cross-PLC handoff are gated/wired SEPARATELY (the conflation is split out in the
+            // HandoffPlanner / RingWiringGenerator refactor). An unused-but-defined CAT type is
+            // harmless; EAE compiles the HMI faceplate against it. (DemonstratorWiper still deletes the
+            // folder on Clean; this re-creates it on the next deploy — consistent.)
+            DeployArtifact(libPath, "Basic", "Robot_Task_Core", eaeProjectDir, result, isBasic: true);
+            DeployArtifact(libPath, "CAT", "Robot_Task_CAT", eaeProjectDir, result, isBasic: false, isCat: true);
 
             // BX1 EtherNet/IP cover-I/O broker (gated). PLC_RW_BX1 is the composite
             // that unpacks the EtherNet/IP input word into cover sensor-bits and packs
