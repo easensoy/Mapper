@@ -579,6 +579,8 @@ namespace CodeGen.Devices.Core
                 return PlcAssignment.BX1;
             if (string.Equals(fbName, "MqttConn_M262", StringComparison.Ordinal))
                 return PlcAssignment.M262;
+            if (string.Equals(fbName, "MqttConn_M580", StringComparison.Ordinal))
+                return PlcAssignment.M580;
 
             // Standalone MQTT bridge publishers (MqttFmt_<comp>, MqttPub_<comp>)
             // also live on BX1 — they receive M262/M580 component state via
