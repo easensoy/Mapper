@@ -1716,28 +1716,31 @@ namespace CodeGen.Translation
                     brokerUrl = System.Text.RegularExpressions.Regex.Replace(
                         brokerUrl, @"://[^:/]+", "://127.0.0.1");
 
-                // PER-RESOURCE MqttConn. The embedded MqttPub inside each CAT
-                // binds by ConnectionID (= config.MqttClientId, 'SMC_BX1') and
-                // can ONLY use a connection on its OWN resource. So drop one
-                // MQTT_CONNECTION onto the two resources we publish from — BX1
-                // (Cover P&P) and M262 (Feed_Station) — and every local MqttPub
-                // on those resources publishes DIRECTLY, with NO standalone
-                // bridge FBs. Both share ConnectionID 'SMC_BX1' so the local
-                // MqttPub binds; each gets a UNIQUE ClientIdentifier
-                // (SMC_BX1 / SMC_M262) so the broker doesn't evict them as
-                // duplicate clients ("session taken over"). M580/Assembly gets
-                // NO MqttConn (out of scope for now) — its embedded MqttPub
-                // simply finds no local connection and stays silent, which is
-                // harmless. On the RIG M262 firmware-gates MQTT (ReturnCode 50)
-                // so only BX1 connects there; in the SIMULATOR the runtime is
-                // not the real firmware, so M262 connects too — that is what
-                // makes Feed_Station data reach the broker without a bridge.
+                // PER-RESOURCE MqttConn — one MQTT_CONNECTION per PLC (BX1 +
+                // M262 + M580), NO standalone bridge FBs (no MqttFmt_/MqttPub_
+                // pairs), NO cross-resource wires. Each MqttConn gets a UNIQUE
+                // ConnectionID + ClientIdentifier per resource so EAE never
+                // collides them (sharing ONE ConnectionID across the three
+                // returned ReturnCode 101 on the duplicates). BX1's embedded
+                // MqttPub (ConnectionID 'SMC_BX1') binds BX1's MqttConn, so BX1
+                // PUBLISHES its Cover P&P state through it — no bridge. On the
+                // RIG the M262/M580 dPAC firmware gates MQTT (ReturnCode 50 —
+                // the MQTT runtime is Soft-dPAC/BX1-only), so their MqttConn
+                // read RC50 and those PLCs do not publish; the per-resource
+                // MqttConn make that status visible (RC50 = firmware-gated, the
+                // expected clean result, NOT the RC101 collision).
                 void InjectMqttConn(string fbName, string clientId, int x, int y)
                 {
                     var p = new Dictionary<string, string>
                     {
                         ["QI"] = SyslayBuilder.FormatBool(true),
-                        ["ConnectionID"] = SyslayBuilder.FormatString(config.MqttClientId),
+                        // ConnectionID UNIQUE per resource (= the per-resource clientId:
+                        // SMC_BX1 / SMC_M262 / SMC_M580). Sharing ONE ConnectionID across all
+                        // three MQTT_CONNECTION FBs made EAE bind it to ONE resource (M262 won,
+                        // RC0) while the duplicate (BX1) returned ReturnCode 101. Unique per
+                        // resource removes that collision; each resource's embedded MqttPub binds
+                        // to its LOCAL connection by this same per-resource ConnectionID.
+                        ["ConnectionID"] = SyslayBuilder.FormatString(clientId),
                         ["URL"] = SyslayBuilder.FormatString(brokerUrl),
                         ["ClientIdentifier"] = SyslayBuilder.FormatString(clientId),
                     };
@@ -1748,38 +1751,33 @@ namespace CodeGen.Translation
                 var mqttEntry = CodeGen.Mapping.ComponentRegistry.Get("MqttConn");
                 int bx1X = mqttEntry?.X ?? 29000;
                 int bx1Y = mqttEntry?.Y ?? 200;
-                // THE MQTT MECHANISM = ONE connection + two publish paths:
-                //   (1) ONE MqttConn (MQTT_CONNECTION) at the top level — injected here, on BX1
-                //       (the only PLC with a working MQTT runtime; M262/M580 firmware-gate it, RC50).
-                //   (2) BX1's OWN components publish via a FORMATTER (MqttStateFormatter) + PUBLISH
-                //       (MQTT_PUBLISH) EMBEDDED inside each CAT (TemplateLibraryDeployer.
-                //       PatchCatMqttPublish), bound to this MqttConn by matching ConnectionID.
-                //   (3) M262/M580 components CANNOT publish themselves (their dPAC firmware has no
-                //       MQTT runtime — MQTT_CONNECTION returns ReturnCode 50). So BX1 publishes ON
-                //       THEIR BEHALF via the cross-PLC BRIDGE (MqttBridgeEmitter.EmitBridge, below):
-                //       one MqttFmt_<comp> (formatter) + MqttPub_<comp> (publish) pair per M262/M580
-                //       sensor/actuator, grouped in a single labeled "MQTT Bridge" frame, with the
-                //       component's state wired cross-resource (the same transport rig-proven by the
-                //       cover ring) to that pair, which publishes through this one MqttConn.
-                // Re-enabled 2026-06-16 at the user's explicit request ("I need to get data from
-                // M262 and M580 — implement the BX1 bridge"). The bridge is the ONLY rig-real way to
-                // get M262/M580 telemetry to the broker; its per-component pairs live in their own
-                // frame so they don't scatter across the canvas. BX1's own components are skipped by
-                // ShouldBridge (they already publish via their embedded MqttPub — bridging would
-                // double-publish).
+                // Inject the three connections (BX1 + M262 + M580), each with its
+                // OWN unique ConnectionID + ClientIdentifier (see InjectMqttConn
+                // above). NO MqttFmt_/MqttPub_ bridge pairs, NO cross-resource
+                // wires — the Formatter + Publish stay EMBEDDED inside each CAT
+                // (PatchCatMqttPublish). User's explicit spec (2026-06-16):
+                // per-resource MQTT_CONNECTION, no pairs; BX1 publishes its covers,
+                // M262/M580 read RC50 (firmware-gated) on the rig — not RC101.
                 InjectMqttConn("MqttConn", config.MqttClientId, bx1X, bx1Y);
+                InjectMqttConn("MqttConn_M262", "SMC_M262",
+                    LayoutGrid.ColumnBaseX(PlcAssignment.M262), 200);
+                InjectMqttConn("MqttConn_M580", "SMC_M580",
+                    LayoutGrid.ColumnBaseX(PlcAssignment.M580), 200);
+                // Each MqttConn routes to its own resource via SysresFbMirror.BucketFor
+                // (MqttConn→BX1, MqttConn_M262→M262, MqttConn_M580→M580). ResourceWireEmitter wires
+                // each one's INIT bring-up on its sysres (it finds the MQTT_CONNECTION FB by TYPE).
+                // Here add the syslay bring-up self-loops so CONNECT fires after INIT (BX1's is added
+                // by BuildBx1Wiring), and wire each one's INIT into its PLC's boot so the connection
+                // isn't floating on the canvas (Area = M262/Feed boot, Station2 = M580 boot).
+                builder.AddEventConnection("MqttConn_M262.INITO", "MqttConn_M262.CONNECT");
+                builder.AddEventConnection("MqttConn_M580.INITO", "MqttConn_M580.CONNECT");
+                builder.AddEventConnection("Area.INITO", "MqttConn_M262.INIT");
+                builder.AddEventConnection("Station2.INITO", "MqttConn_M580.INIT");
                 report.Missing.Add(
-                    $"[MQTT] MqttConn (MQTT_CONNECTION) injected on BX1 — ConnectionID={config.MqttClientId}, " +
-                    $"URL={brokerUrl} ({(config.SimulatorFullSystem ? "sim → loopback" : "rig → LAN IP")}); " +
-                    $"BX1 components publish via embedded MqttPub; M262/M580 via the BX1 bridge below.");
-
-                // Cross-PLC MQTT BRIDGE — BX1 republishes M262/M580 component state (those dPACs are
-                // RC50-gated and cannot publish themselves). EmitBridge re-checks MqttPublishEnabled,
-                // skips BX1's own components (ShouldBridge accepts only M262 + M580), and lays one
-                // MqttFmt_<comp>/MqttPub_<comp> pair per remote component in a labeled "MQTT Bridge"
-                // frame, cross-resource-wired to the component's state output, publishing through the
-                // single MqttConn above.
-                CodeGen.Services.MqttBridgeEmitter.EmitBridge(builder, config);
+                    $"[MQTT] per-resource MqttConn injected — BX1 (SMC_BX1) + M262 (SMC_M262) + " +
+                    $"M580 (SMC_M580), ConnectionID={config.MqttClientId}, URL={brokerUrl} " +
+                    $"({(config.SimulatorFullSystem ? "sim → loopback" : "rig → LAN IP")}); each PLC's " +
+                    $"embedded MqttPub binds + publishes locally — no bridge FBs, no pairs.");
             }
 
             AddCoverRingGateFbs(builder, contents, report);
