@@ -739,37 +739,52 @@ namespace MapperUI
             {
                 AppendActivity($"[BX1][Error] hcf deploy: {ex.Message}");
             }
+
+            // Final dfbproj hygiene. After a device wipe the dfbproj can still
+            // reference per-resource EAE compile artifacts (opcua/offline/
+            // opcuaclient/symlink) that were deleted with the device folders —
+            // EAE's Solution Integrity then lists them as Missing Project Files.
+            // All device files (sysdev/sysres/hcf/Properties/Simulation.Binding)
+            // are written by now, so the only still-missing System files are those
+            // EAE-owned artifacts; strip their dangling refs (EAE regenerates +
+            // re-registers them on the next Build). Never touches the device files.
+            try
+            {
+                var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(Cfg());
+                if (!string.IsNullOrEmpty(eaeRoot))
+                {
+                    int stripped = await Task.Run(() =>
+                        DfbprojRegistrar.StripDanglingResourceArtifactEntries(eaeRoot));
+                    if (stripped > 0)
+                        AppendActivity(
+                            $"[Device] stripped {stripped} dangling compile-artifact ref(s) " +
+                            "from the dfbproj (EAE regenerates them on Build) — Solution Integrity clean");
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendActivity($"[Device][Warn] dfbproj artifact-ref cleanup: {ex.Message}");
+            }
         }
 
         /// <summary>
-        /// Pre-flight gate for Button 2. Mapper no longer creates the M262
-        /// device — when the .sysdev with <c>Type="M262_dPAC"</c> /
-        /// <c>Namespace="SE.DPAC"</c> is missing under the Demonstrator's
-        /// <c>IEC61499/System/</c> tree, abort with a friendly message and
-        /// the required log line so the user knows to add the device in
-        /// EAE first.
+        /// Pre-flight note for Button 2. The Mapper now OWNS the M262 logical
+        /// device: when an M262 <c>.sysdev</c> already exists it is preserved
+        /// (trust binding kept); when it is ABSENT (e.g. right after Clean
+        /// Demonstrator) <see cref="M262SysdevEmitter"/> BOOTSTRAPS it from
+        /// scratch with the same sysdev GUID + resource id (so trust keyed by
+        /// the device GUID is preserved). No longer an abort — the user does
+        /// not hand-add the device in EAE. Always returns true; just logs.
         /// </summary>
-        bool EnsureM262SysdevExistsOrAbort()
+        bool EnsureM262SysdevReady()
         {
-            try
-            {
-                if (M262SysdevEmitter.M262SysdevAlreadyExists(Cfg()))
-                    return true;
-            }
-            catch
-            {
-                // Treat any lookup failure as "not found" — caller still aborts.
-            }
-            AppendActivity(
-                "[Device] M262 sysdev not found, user must add the device " +
-                "manually in EAE before running Mapper");
-            ShowError(
-                "M262 device not found in the Demonstrator.\n\n" +
-                "Add the M262 dPAC device manually in EAE (Devices view) " +
-                "and establish the controller trust binding before running " +
-                "this button. Mapper will not create or modify the device " +
-                "file because doing so would invalidate the existing trust.");
-            return false;
+            bool exists = false;
+            try { exists = M262SysdevEmitter.M262SysdevAlreadyExists(Cfg()); }
+            catch { /* treat as absent — the Mapper bootstraps it below */ }
+            AppendActivity(exists
+                ? "[Device] M262 sysdev present — preserved (trust binding intact)."
+                : "[Device] M262 sysdev absent — Mapper will bootstrap the M262 logical device from scratch.");
+            return true;
         }
 
         static string ReadSysdevId(string sysdevPath)
@@ -888,7 +903,7 @@ namespace MapperUI
                 if (string.IsNullOrEmpty(_loadedControlXmlPath) || !File.Exists(_loadedControlXmlPath))
                 { ShowError("Load a Control.xml first via Browse."); return; }
                 if (!TryResolveDemonstratorPath(out var syslayPath)) return;
-                if (!EnsureM262SysdevExistsOrAbort()) return;
+                EnsureM262SysdevReady();  // logs preserve-vs-bootstrap; never aborts (Mapper owns the device)
 
                 Cfg().SimulatorFullSystem = false;
                 Cfg().UseRecipeStruct = true;
