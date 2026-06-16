@@ -1188,16 +1188,24 @@ namespace CodeGen.Translation.Process
             const int HandshakeSentinel = 7;
             AddWait(MapperConfig.AssemblyProcessId, HandshakeSentinel);
 
-            // COVERS OFF (reverse of the Assembly cover place: hr forward -> vr down -> grasp
-            // -> vr up -> hr back -> vr down -> release -> vr up).
-            AddCmd("coverpnp_hr", 1);      AddWait(coverHrId, 2);
-            AddCmd("coverpnp_vr", 1);      AddWait(coverVrId, 2);
-            AddCmd("coverpnp_gripper", 1); AddWait(coverGripperId, 2);
-            AddCmd("coverpnp_vr", 3);      AddWait(coverVrId, 0);
-            AddCmd("coverpnp_hr", 3);      AddWait(coverHrId, 0);
-            AddCmd("coverpnp_vr", 1);      AddWait(coverVrId, 2);
-            AddCmd("coverpnp_gripper", 3); AddWait(coverGripperId, 0);
-            AddCmd("coverpnp_vr", 3);      AddWait(coverVrId, 0);
+            // COVERS OFF (reverse of the Assembly cover place). GATED on ExtendStateRingAcrossBx1
+            // (2026-06-16) — MIRRORS the same gate on the Assembly cover-place block (~L1044). With
+            // the cross-PLC cover ring retired (ExtendStateRingAcrossBx1=false), the covers are
+            // commanded LOCALLY by the BX1 Cover_Station; the M580 Disassembly cannot reach the BX1
+            // covers without a cross-PLC ring and would STALL forever on the first cover WAIT, so it
+            // must NOT command them. (Before this gate the Disassembly covers were unconditional —
+            // the last cross-PLC dependency keeping M580 from running standalone.)
+            if (MapperConfig.ExtendStateRingAcrossBx1)
+            {
+                AddCmd("coverpnp_hr", 1);      AddWait(coverHrId, 2);
+                AddCmd("coverpnp_vr", 1);      AddWait(coverVrId, 2);
+                AddCmd("coverpnp_gripper", 1); AddWait(coverGripperId, 2);
+                AddCmd("coverpnp_vr", 3);      AddWait(coverVrId, 0);
+                AddCmd("coverpnp_hr", 3);      AddWait(coverHrId, 0);
+                AddCmd("coverpnp_vr", 1);      AddWait(coverVrId, 2);
+                AddCmd("coverpnp_gripper", 3); AddWait(coverGripperId, 0);
+                AddCmd("coverpnp_vr", 3);      AddWait(coverVrId, 0);
+            }
 
             // SHAFT OUT (reverse).
             AddCmd("shaft_hr", 1);      AddWait(shaftHrId, 2);
