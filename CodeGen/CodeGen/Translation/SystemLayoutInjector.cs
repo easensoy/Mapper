@@ -1748,34 +1748,23 @@ namespace CodeGen.Translation
                 var mqttEntry = CodeGen.Mapping.ComponentRegistry.Get("MqttConn");
                 int bx1X = mqttEntry?.X ?? 29000;
                 int bx1Y = mqttEntry?.Y ?? 200;
-                // ONE MqttConn, on BX1 — the only PLC with a working MQTT runtime (M262/M580
-                // firmware-gate it, RC50). M262/M580 component state reaches THIS connection via the
-                // cross-PLC BRIDGE (MqttBridgeEmitter, below): each remote component's state is wired
-                // cross-resource to a BX1-side MqttFmt_<comp>/MqttPub_<comp> that publishes through
-                // this MqttConn. BX1's own components publish via their embedded MqttPub
-                // (PatchCatMqttPublish) binding to it locally. (The per-resource MqttConn_M262/M580
-                // were removed 2026-06-16: RC50-dead on the rig, redundant with the bridge, and they
-                // double-published in sim. Restores the proven 9f463cd shape.)
+                // THE MQTT MECHANISM = exactly THREE FB roles, nothing more:
+                //   (1) ONE MqttConn (MQTT_CONNECTION) at the top level — injected here, on BX1.
+                //   (2)+(3) a FORMATTER (MqttStateFormatter) + PUBLISH (MQTT_PUBLISH) EMBEDDED INSIDE
+                //       each CAT — added by TemplateLibraryDeployer.PatchCatMqttPublish (it fans an
+                //       MqttStateFormatter + MQTT_PUBLISH off the actuator/sensor's own state-change
+                //       event), bound to this MqttConn by matching ConnectionID (no wire). So the
+                //       formatter+publish ride WITH each actuator/sensor instance.
+                // There are NO standalone per-component MqttFmt_<comp>/MqttPub_<comp> FBs on the
+                // syslay. The cross-PLC "bridge" that emitted those (one pair per component, which
+                // cluttered the canvas) was DELETED 2026-06-16 at the user's explicit request, and
+                // MqttBridgeEmitter.cs was removed so it can NEVER be re-introduced. DO NOT add any
+                // standalone-MQTT-publisher emitter here — the embedded-CAT mechanism is the only one.
                 InjectMqttConn("MqttConn", config.MqttClientId, bx1X, bx1Y);
                 report.Missing.Add(
                     $"[MQTT] MqttConn (MQTT_CONNECTION) injected on BX1 — ConnectionID={config.MqttClientId}, " +
                     $"URL={brokerUrl} ({(config.SimulatorFullSystem ? "sim → loopback" : "rig → LAN IP")}); " +
-                    $"M262/M580 component state reaches it via the cross-PLC bridge below.");
-
-                // Cross-PLC MQTT BRIDGE — RE-ENABLED 2026-06-16 (user request: bring back the M262 +
-                // BX1 MQTT and add M580). It was added (145cc96/618d4a5), removed as "syslay clutter"
-                // (a7a56c2), re-enabled gated-to-sim (9f463cd), then that was reverted (4d2e8eb) —
-                // leaving EmitBridge as dead code. For every M262/M580 sensor/actuator (Component
-                // Registry × MqttBridgeEmitter.ShouldBridge — which already accepts BOTH M262 and
-                // M580) it emits a MqttFmt_<comp> (MqttStateFormatter = the FORMATTER) + MqttPub_
-                // <comp> (MQTT_PUBLISH = the PUBLISH) pair on BX1 in a labeled "MQTT Bridge" frame,
-                // cross-resource-wired to the component's state output. THE rig-compatible path:
-                // M262/M580 can't publish themselves (RC50), so BX1 publishes on their behalf through
-                // its MqttConn. BX1's own components are skipped (their embedded MqttPub already
-                // publishes — bridging would double-publish). Un-gated from SimulatorFullSystem so it
-                // runs on the rig too; we are already inside the MqttPublishEnabled gate, and
-                // EmitBridge re-checks it.
-                CodeGen.Services.MqttBridgeEmitter.EmitBridge(builder, config);
+                    $"Formatter + Publish are EMBEDDED inside each CAT (PatchCatMqttPublish) — no standalone bridge FBs.");
             }
 
             AddCoverRingGateFbs(builder, contents, report);
