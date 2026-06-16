@@ -833,9 +833,11 @@ namespace CodeGen.Configuration
         // ============================================================
 
         /// <summary>
-        /// Master opt-in for the MQTT mechanism: the BX1 MqttConn (MQTT_CONNECTION) + the cross-PLC
-        /// bridge (MqttBridgeEmitter — a MqttFmt_/MqttPub_ pair on BX1 per M262/M580 component) + the
-        /// embedded MqttPub inside the CATs. DEFAULT TRUE (2026-06-16): the user wants MQTT on, and a
+        /// Master opt-in for the MQTT mechanism: ONE MqttConn (MQTT_CONNECTION) at the top level + the
+        /// FORMATTER (MqttStateFormatter) + PUBLISH (MQTT_PUBLISH) EMBEDDED INSIDE each CAT
+        /// (PatchCatMqttPublish). NO standalone bridge — the per-component MqttFmt_/MqttPub_ bridge was
+        /// deleted 2026-06-16 (it cluttered the syslay); the embedded-CAT mechanism is the only one.
+        /// DEFAULT TRUE (2026-06-16): the user wants MQTT on, and a
         /// mapper_config.json that OMITS this key was silently defaulting it to false at runtime (the
         /// repo-root config lacks the key) — which is why no MQTT was generated. Defaulting TRUE means
         /// a key-less config still enables MQTT; a config can still set it false explicitly to opt out.
