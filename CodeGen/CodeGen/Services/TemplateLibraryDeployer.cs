@@ -160,15 +160,17 @@ namespace CodeGen.Services
                 { MapperLogger.Info($"[Deploy][Refresh] could not remove stale {stale}: {ex.Message}"); }
             }
 
-            // CAT REFRESH (2026-06-16): Sensor_Bool_CAT now has a cyclic re-read (Poll E_DELAY ->
-            // FB2.REQ every 200ms) so each sensor RE-SAMPLES its DI and re-publishes onto the
-            // stateRprtCmd ring, instead of reading exactly once at INIT. That one-shot read was the
-            // universal lost-step-0-trigger: the sensor's only publish raced (and lost to) the engine
-            // INIT, and the edge-triggered engine never got a fresh ring message. DeployArtifact is
-            // COPY-IF-ABSENT, so delete the deployed CAT folder first to force re-extract of the fixed
-            // zip. Pipeline-respecting (deployer does it, no direct Demonstrator edit); PatchCatMqttPublish
-            // re-applies the embedded MQTT afterward; EAE recompiles the CAT on the next Build.
-            foreach (var catRefresh in new[] { "Sensor_Bool_CAT" })
+            // CAT REFRESH (2026-06-16): both ring CATs now CYCLICALLY re-read their DIs every 200ms
+            // via an E_DELAY self-loop — Sensor_Bool_CAT (Poll.EO -> FB2.REQ) and Five_State_Actuator_CAT
+            // (Poll.EO -> Inputs.REQ; re-process via the pre-existing Inputs.CNF -> InputHandler.inputEvent).
+            // The original CATs read their DI EXACTLY ONCE at INIT, which was the universal stall: the
+            // engine's check_wait is edge-triggered and at step 0 no ring token circulates, so the
+            // one-shot publish raced the engine INIT and was lost (sensors) and sensor-fitted actuators
+            // (Feeder/Transfer/grippers/shafts/clamp = WorkSensorFitted TRUE) never detected reaching
+            // atWork/atHome after a CMD. DeployArtifact is COPY-IF-ABSENT, so delete the deployed CAT
+            // folders first to force re-extract of the fixed zips. Pipeline-respecting (no direct
+            // Demonstrator edit); PatchCatMqttPublish re-applies embedded MQTT after; EAE recompiles on Build.
+            foreach (var catRefresh in new[] { "Sensor_Bool_CAT", "Five_State_Actuator_CAT" })
             {
                 var dir = Path.Combine(eaeProjectDir, "IEC61499", catRefresh);
                 try { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
