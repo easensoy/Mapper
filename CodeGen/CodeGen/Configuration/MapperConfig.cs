@@ -136,7 +136,7 @@ namespace CodeGen.Configuration
         //    CoverPnp_Gripper → [cross to M580] Assembly_Station → BearingSensor…
         // The two cross-device hops live ONLY on the syslay (the application); EAE
         // bridges cross-resource connections into per-resource transport at deploy
-        // (the same mechanism MqttBridgeEmitter relies on for cross-PLC event/data).
+        // (the cross-device adapter mechanism — the cover ring's proven transport).
         // The per-PLC sysres rings are OPENED at the boundary so the adapter sockets
         // are not double-driven. This ALSO enables the cover CMD/WAIT rows in the
         // Assembly recipe — gated together because commanding a cover whose reports
