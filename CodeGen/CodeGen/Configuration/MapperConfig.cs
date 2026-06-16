@@ -860,8 +860,11 @@ namespace CodeGen.Configuration
         /// </list></summary>
         public string MqttBrokerUrl { get; set; } = "mqtt://192.168.1.50:1883";
 
-        /// <summary>MQTT_CONNECTION.ClientIdentifier — one per runtime/resource.</summary>
-        public string MqttClientId { get; set; } = "SMC_M262";
+        /// <summary>MQTT_CONNECTION.ClientIdentifier — one per runtime/resource.
+        /// Default SMC_BX1 (was SMC_M262): BX1 is the only Soft-dPAC that runs MQTT, so a key-less
+        /// config must NOT make BX1's MqttConn clash with M262's id. No live RC101 (deployed ids are
+        /// already unique per resource); this only removes the latent default trap.</summary>
+        public string MqttClientId { get; set; } = "SMC_BX1";
 
         /// <summary>
         /// MQTT_CONNECTION.ConnectionID — the registry key. The single
