@@ -1737,7 +1737,13 @@ namespace CodeGen.Translation
                     var p = new Dictionary<string, string>
                     {
                         ["QI"] = SyslayBuilder.FormatBool(true),
-                        ["ConnectionID"] = SyslayBuilder.FormatString(config.MqttClientId),
+                        // ConnectionID UNIQUE per resource (= the per-resource clientId:
+                        // SMC_BX1 / SMC_M262 / SMC_M580). Sharing ONE ConnectionID across all
+                        // three MQTT_CONNECTION FBs made EAE bind it to ONE resource (M262 won,
+                        // RC0) while the duplicate (BX1) returned ReturnCode 101. Unique per
+                        // resource removes that collision; each resource's embedded MqttPub binds
+                        // to its LOCAL connection by this same per-resource ConnectionID.
+                        ["ConnectionID"] = SyslayBuilder.FormatString(clientId),
                         ["URL"] = SyslayBuilder.FormatString(brokerUrl),
                         ["ClientIdentifier"] = SyslayBuilder.FormatString(clientId),
                     };
