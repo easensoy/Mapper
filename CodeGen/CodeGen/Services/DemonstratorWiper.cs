@@ -322,7 +322,15 @@ namespace CodeGen.Services
             while (i < lines.Length)
             {
                 var line = lines[i];
-                var m = Regex.Match(line, @"^\s*<(Compile|None|EmbeddedResource)\b", RegexOptions.IgnoreCase);
+                // Include <Content> too: the device .hcf + the EAE compile
+                // artifacts (opcua.xml / offline.xml / opcuaclient.xml / symlink.xml)
+                // are registered as <Content System\…>. Without stripping these,
+                // a Clean that deletes the device folders leaves the dfbproj
+                // pointing at non-existent files → EAE's Solution Integrity lists
+                // them as Missing Project Files. ShouldKeepDfbprojEntry keeps the
+                // ones whose file still exists (e.g. the application 0001 opcua/
+                // aspmap), so widening the match is safe.
+                var m = Regex.Match(line, @"^\s*<(Compile|None|EmbeddedResource|Content)\b", RegexOptions.IgnoreCase);
                 if (m.Success)
                 {
                     string tag = m.Groups[1].Value;
