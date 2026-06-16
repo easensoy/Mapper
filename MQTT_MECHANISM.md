@@ -1,67 +1,62 @@
-# MQTT mechanism — the ONLY allowed shape (read before touching MQTT generation)
+# MQTT mechanism — the BX1 bridge IS the working path (read before touching MQTT)
 
-> **🔒 HARD RULE — NEVER place standalone publisher pairs.**
-> There must be **zero** `MqttFmt_*` and **zero** `MqttPub_*` FBs in the generated
-> `.syslay` and `.sysres`. The "BX1 bridge" (`MqttBridgeEmitter`, which emitted one
-> `MqttFmt_<comp>`/`MqttPub_<comp>` pair per component) is **DELETED** and must never
-> be re-introduced — not framed, not grouped, not "just for M262/M580", not for any
-> reason. This has been reversed three times; this document is the final word. If a
-> future task says "get M262/M580 data via MQTT", the answer is: that is not possible
-> with this mechanism (see *Consequence* below) — do **not** build pairs.
+> **🔒 HARD RULE — DO NOT remove the BX1 bridge for "cleanliness."**
+> The `MqttBridgeEmitter` / `EmitBridge` path was deleted **three times** under a
+> "no standalone pairs / clean syslay" instruction, and **every time it killed the
+> M262/M580 live stream** (`smc/feeder`, `smc/checker`, `smc/transfer`, …). It is
+> the **rig-real** path. The earlier "never reintroduce bridge pairs" version of
+> this file was WRONG and is replaced. If the syslay clutter is the concern, the
+> answer is the **grouped-frame form** (all pairs inside one labeled "MQTT Bridge"
+> frame) — NOT deleting the bridge.
 
-## The mechanism — exactly two FB roles
+## Why per-resource / embedded-only does NOT work on the rig
 
-1. **`MQTT_CONNECTION` — one per PLC resource.** `SystemLayoutInjector.InjectMqttConn`
-   emits `MqttConn` (BX1), `MqttConn_M262` (M262), `MqttConn_M580` (M580). All carry the
-   SAME `ConnectionID` (`config.MqttClientId` = `SMC_BX1`) — that is the *within-resource*
-   link the embedded publisher binds to — and each a UNIQUE `ClientIdentifier`
-   (`SMC_BX1` / `SMC_M262` / `SMC_M580`) so the broker doesn't evict them as duplicate
-   clients. `INIT`/`CONNECT` are wired (BX1 by `BuildBx1Wiring`; M262/M580 by the
-   `INITO→CONNECT` self-loop + `Area.INITO`/`Station2.INITO → MqttConn_*.INIT`).
+The M262 and M580 dPAC firmware **cannot run an MQTT client** — `MQTT_CONNECTION`
+returns **ReturnCode 50/101** there (observed: with a per-resource `MqttConn` on each
+PLC, all three sit at RC 101 and nothing publishes). Only **BX1 (Soft dPAC)** has a
+working MQTT runtime. So M262/M580 **cannot publish themselves**; something on BX1 has
+to publish on their behalf. That something is the bridge.
 
-2. **Embedded `MqttStateFormatter` + `MQTT_PUBLISH` — inside each CAT.**
-   `TemplateLibraryDeployer.PatchCatMqttPublish` patches `Five_State_Actuator_CAT` and
-   `Sensor_Bool_CAT` so every actuator/sensor instance carries its own `MqttFmt`
-   (`MqttStateFormatter`) + `MqttPub` (`MQTT_PUBLISH`), bound to the local
-   `MQTT_CONNECTION` by matching `ConnectionID` (no wire), publishing `smc/<component>/state`.
-   The formatter+publish ride WITH the instance — they are NOT top-level syslay FBs.
+## The mechanism — what MUST be generated
 
-That is the whole mechanism: **per-resource `MQTT_CONNECTION` + embedded formatter/publish
-per CAT.** Nothing else.
+1. **ONE `MQTT_CONNECTION` on BX1** (`MqttConn`, `ConnectionID = SMC_BX1`).
+   Injected by `SystemLayoutInjector.InjectMqttConn`. There are **no** `MqttConn_M262`
+   / `MqttConn_M580` — M262/M580 can't run MQTT, so a per-resource connection there
+   only RC50/RC101s.
 
-## Consequence (the accepted trade-off — do NOT re-litigate)
+2. **BX1's OWN components** (Cover PnP) publish via the **embedded** `MqttFmt`
+   (`MqttStateFormatter`) + `MqttPub` (`MQTT_PUBLISH`) inside their CAT
+   (`TemplateLibraryDeployer.PatchCatMqttPublish`), bound to `MqttConn` by `ConnectionID`.
 
-MQTT runs only on the **BX1 Soft dPAC**. The **M262 and M580 dPAC firmware cannot run an
-MQTT runtime** — `MQTT_CONNECTION` returns **ReturnCode 50** there. So:
+3. **M262/M580 components are BRIDGED** by `MqttBridgeEmitter.EmitBridge`
+   (called right after `InjectMqttConn`): for each M262/M580 sensor/actuator it emits a
+   `MqttFmt_<comp>` (formatter) + `MqttPub_<comp>` (publish) pair **on BX1**, inside ONE
+   labeled **"MQTT Bridge" frame** (`FRAME_MqttBridge`), cross-resource-wired to the
+   component's state output (`state_out`+`current_state_to_process` for actuators,
+   `pst_out`+`Status` for sensors), publishing `smc/<comp>/state` through BX1's `MqttConn`.
+   `ShouldBridge` accepts only M262 + M580 (BX1's own covers already publish via the
+   embedded path — bridging them would double-publish).
 
-- **BX1 components** (covers): embedded publisher + local `MqttConn` → **publish.** ✓
-- **M262 / M580 components**: embedded publisher + local `MqttConn_M262`/`_M580` → on the
-  **rig** the connection RC50s, so they **do not publish there**. (In the EAE simulator,
-  which is not the real firmware, they connect and publish.)
+End-to-end: `M262/M580 component state → cross-resource wire → BX1 MqttFmt_/MqttPub_ pair
+→ BX1 MQTT_CONNECTION → broker`.
 
-Getting M262/M580 telemetry onto the broker on the rig requires BX1 to **republish on
-their behalf** — that is the bridge, which is **forbidden** (per-component pairs). So
-M262/M580 live telemetry on the rig is **not available** with this mechanism. That is the
-explicit, accepted trade-off: a clean syslay (no pairs) over M262/M580 rig telemetry.
+## Files
 
-## Where it is generated (the only files involved)
+- `CodeGen/CodeGen/Translation/SystemLayoutInjector.cs` — `InjectMqttConn` (ONE BX1
+  connection) **+ `MqttBridgeEmitter.EmitBridge(builder, config)`** right after it.
+- `CodeGen/CodeGen/Services/MqttBridgeEmitter.cs` — the bridge (frame-grouped pairs).
+  **Do not delete.**
+- `CodeGen/CodeGen/Services/TemplateLibraryDeployer.cs` — `PatchCatMqttPublish`
+  (BX1's own embedded publish).
+- `CodeGen/CodeGen/Devices/Core/SysresFbMirror.cs` — `BucketFor` routes `MqttFmt_*` /
+  `MqttPub_*` to BX1.
 
-- `CodeGen/CodeGen/Translation/SystemLayoutInjector.cs` — `InjectMqttConn` (the per-resource
-  `MQTT_CONNECTION` FBs + INIT/CONNECT wiring). **No `EmitBridge` call.**
-- `CodeGen/CodeGen/Services/TemplateLibraryDeployer.cs` — `PatchCatMqttPublish` (the embedded
-  `MqttFmt`+`MqttPub` inside each CAT), gated on `MapperConfig.MqttPublishEnabled`.
-- `CodeGen/CodeGen/Devices/Core/SysresFbMirror.cs` — `BucketFor` routes each `MqttConn*` to
-  its resource. **There is no `MqttBridgeEmitter`** (deleted).
-
-## Verification (grep proof — must hold on every generated Demonstrator)
+## Verification (must hold on every generated Demonstrator)
 
 ```
-# syslay + each sysres: MQTT_CONNECTION present, ZERO bridge pairs
-grep -c "MQTT_CONNECTION"  <syslay>            # >= 1 (3 across the syslay)
-grep -c 'Name="MqttFmt_'   <syslay> <sysres>   # 0
-grep -c 'Name="MqttPub_'   <syslay> <sysres>   # 0
-
-# embedded publish lives INSIDE the CATs (not the syslay)
-grep -c "MQTT_PUBLISH"      IEC61499/Five_State_Actuator_CAT/Five_State_Actuator_CAT.fbt   # 1
-grep -c "MqttStateFormatter" IEC61499/Sensor_Bool_CAT/Sensor_Bool_CAT.fbt                  # >= 1
+grep -c "MQTT_CONNECTION"  <syslay>            # 1  (BX1 only)
+grep -c 'Name="MqttConn_M' <syslay>            # 0  (no per-resource connections)
+grep -c 'Name="MqttFmt_'   <syslay>            # > 0 (one per M262/M580 component)
+grep -c 'Name="MqttPub_'   <syslay>            # equal to MqttFmt_ count
+grep -c 'Name="FRAME_MqttBridge"' <syslay>     # 1  (the labeled frame)
 ```
