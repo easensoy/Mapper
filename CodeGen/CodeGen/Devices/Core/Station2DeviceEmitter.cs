@@ -455,11 +455,7 @@ namespace CodeGen.Devices.Core
                 "E0601B81-4A3A-4A96-B6C2-007BDC680D59.Properties.xml");
             if (!File.Exists(sysDevPropsPath))
             {
-                File.WriteAllText(sysDevPropsPath,
-                    "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
-                    "<SystemDeviceProperties xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" " +
-                    "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" " +
-                    "xmlns=\"http://www.nxtControl.com/DeviceProperties\" />");
+                File.WriteAllText(sysDevPropsPath, BuildEmptySystemDeviceProps());
                 result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, sysDevPropsPath));
             }
 
@@ -586,7 +582,7 @@ namespace CodeGen.Devices.Core
         /// Deploy &amp; Diagnostic panel + Hardware Configuration tab both look
         /// up the .hcf via these LogicalDevice service registrations.
         /// </summary>
-        static string BuildSimulationBindingXml(string logicalDeviceId, int deployPort, int archivePort) =>
+        internal static string BuildSimulationBindingXml(string logicalDeviceId, int deployPort, int archivePort) =>
             "<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"yes\"?>\r\n" +
             "<Bindings>\r\n" +
             $"  <LogicalDeviceBinding LogicalDeviceId=\"{logicalDeviceId}\">\r\n" +
@@ -615,7 +611,9 @@ namespace CodeGen.Devices.Core
         /// body. EAE merges them on the matching ID into one Resource entry
         /// in the compiled System tree.</para>
         /// </summary>
-        static string BuildSysdevXml(string sysdevId, string name, string type,
+        // internal so M262SysdevEmitter's bootstrap-from-empty path reuses the
+        // EXACT same proven sysdev/sysres XML the M580/BX1 path emits.
+        internal static string BuildSysdevXml(string sysdevId, string name, string type,
                                      string resourceId, string resourceName) =>
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
             $"<Device xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" ID=\"{sysdevId}\" Name=\"{name}\" Type=\"{type}\" Namespace=\"SE.DPAC\" Locked=\"false\" xmlns=\"{LibElNs}\">\r\n" +
@@ -624,12 +622,20 @@ namespace CodeGen.Devices.Core
             "  </Resources>\r\n" +
             "</Device>\r\n";
 
-        static string BuildSysresXml(string resourceId, string name) =>
+        internal static string BuildSysresXml(string resourceId, string name) =>
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
             $"<Resource xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" ID=\"{resourceId}\" Name=\"{name}\" Type=\"EMB_RES_ECO\" Namespace=\"Runtime.Management\" xmlns=\"{LibElNs}\">\r\n" +
             "  <FBNetwork>\r\n" +
             "  </FBNetwork>\r\n" +
             "</Resource>\r\n";
+
+        /// <summary>Empty SystemDeviceProperties (E0601B81 plugin) — shipped pre-empty
+        /// so the project compiles cold. Shared with M262SysdevEmitter's bootstrap.</summary>
+        internal static string BuildEmptySystemDeviceProps() =>
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
+            "<SystemDeviceProperties xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" " +
+            "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" " +
+            "xmlns=\"http://www.nxtControl.com/DeviceProperties\" />";
 
         /// <summary>
         /// M580 dPAC equipment JSON — modelled on
