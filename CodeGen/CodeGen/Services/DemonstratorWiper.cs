@@ -13,18 +13,31 @@ namespace CodeGen.Services
     /// FB instances on the canvases (they're tracked at HEAD) and the FB type
     /// definitions deployed by Mapper (those are tracked too).
     ///
-    /// This wiper takes the project to a brand-new-EAE-project state:
+    /// This wiper takes the project to a brand-new-EAE-project state with NO
+    /// devices — the Mapper recreates every logical + physical device on the next
+    /// Test Runtime (user directive 2026-06-16: "no devices at first — Clean wipes,
+    /// Mapper creates"):
     ///   * IEC61499/        — only the dfbproj shell + System/ folder
-    ///   * System/          — sysdev/sysapp/sysres shells with empty FBNetwork
+    ///   * System/          — the .system project root + the application (.sysapp +
+    ///                       its folder) kept; the dPAC LOGICAL DEVICES (every
+    ///                       .sysdev + its device folder) DELETED — recreated by
+    ///                       M262SysdevEmitter (bootstrap) + Station2DeviceEmitter
     ///   * .syslay          — empty SubAppNetwork
-    ///   * .hcf             — empty DeviceHwConfigurationItems
-    ///   * dfbproj          — stripped of CAT/Basic/Adapter entries (System refs kept)
+    ///   * dfbproj          — stripped of CAT/Basic/Adapter entries AND the deleted
+    ///                       sysdev/sysres entries (System refs kept only if the
+    ///                       file still exists); Mapper re-registers devices
     ///   * HwConfiguration/ — DELETED (TM3 module + M262 hardware-config snapshots
     ///                       that M262HwConfigCopier replays every Button 2; without
     ///                       wiping it, baseline entries stack on top of the
     ///                       previously-deployed copy and EAE's Deploy &amp;
     ///                       Diagnostic tree shows duplicate M262_RES nodes)
-    ///   * Topology/        — UNTOUCHED (per standing instruction; topology is hand-curated)
+    ///   * Topology/        — the PHYSICAL DEVICES (Equipment/Wire/BroadcastDomain
+    ///                       JSON + their topologyproj registrations) DELETED —
+    ///                       recreated by M262TopologyEmitter / Station2DeviceEmitter
+    ///                       / TopologyNetworkEmitter / BroadcastDomainEmitter. The
+    ///                       .solutionData (trust/identity) + topologyproj shell
+    ///                       stay. (Reverses the older "topology hand-curated /
+    ///                       untouched" rule per the user directive above.)
     ///   * General/         — UNTOUCHED (project metadata)
     ///   * HMI/, AvevaOMI/  — UNTOUCHED (other project sections)
     ///
@@ -101,6 +114,15 @@ namespace CodeGen.Services
             //    skeleton and stay untouched.
             EmptyAllCanvases(iec, report);
 
+            // 1b. Delete the LOGICAL DEVICES (each dPAC's .sysdev file + its device
+            //     folder) so the Mapper recreates them from scratch. Runs BEFORE
+            //     StripDfbproj so the now-missing sysdev/sysres/.hcf/Properties
+            //     entries are pruned from the dfbproj automatically (it keeps a
+            //     System/* entry only if File.Exists). User directive 2026-06-16:
+            //     "no devices at first — Clean wipes, Mapper creates." The .system
+            //     project root + the application (.sysapp + its folder) stay.
+            DeleteLogicalDevices(iec, report);
+
             // 2. Delete Mapper-deployed FB type files (.fbt, .adp, .dt, etc.) at IEC61499/ root.
             DeleteFlatTypeFiles(iec, report);
 
@@ -124,6 +146,18 @@ namespace CodeGen.Services
             //    until the user wires one up — strictly better than carrying
             //    duplicated resource entries forward.
             DeleteHwConfiguration(demonstratorRepoRoot, report);
+
+            // 7. Delete the PHYSICAL DEVICES — Topology Equipment (PLCs, the L2
+            //    switch, the EtherNet/IP coupler), the Wires connecting them, and
+            //    the BroadcastDomains — plus their TopologyManager.topologyproj
+            //    registrations. Reverses the prior "Topology hand-curated /
+            //    untouched" rule per the user directive 2026-06-16 ("no physical
+            //    devices as well"). Every one is Mapper-regenerated on the next
+            //    Test Runtime (M262TopologyEmitter / Station2DeviceEmitter /
+            //    TopologyNetworkEmitter / BroadcastDomainEmitter), so the wipe is
+            //    safe. The project .solutionData (trust/identity) + the
+            //    topologyproj shell stay.
+            DeletePhysicalDevices(iec, report);
 
             // Sysdev <Resource> dedup lives in
             // SystemInjector.PrepareDemonstratorForGeneration — see the
@@ -389,6 +423,145 @@ namespace CodeGen.Services
                 report.Warnings.Add(
                     $"Could not delete HwConfiguration/ at {found}: {ex.Message}. " +
                     "Stale entries will continue to surface as duplicate M262_RES nodes in EAE.");
+            }
+        }
+
+        /// <summary>
+        /// Deletes the LOGICAL DEVICES — every dPAC <c>.sysdev</c> file plus its
+        /// same-stem device folder (which holds that device's <c>.sysres</c>,
+        /// <c>.hcf</c>, <c>opcua.xml</c>, the two Properties XMLs and
+        /// <c>Simulation.Binding.xml</c>). KEEPS the project root (<c>.system</c>),
+        /// the application (<c>.sysapp</c> + its folder), and the
+        /// <c>.cfg</c>/<c>.doc.xml</c>/<c>snapshot.xml</c> skeleton — those are not
+        /// devices; they are what the Mapper recreates devices INTO. On the next
+        /// Test Runtime <see cref="CodeGen.Devices.M262.M262SysdevEmitter"/>
+        /// (bootstrap) + <see cref="CodeGen.Devices.Core.Station2DeviceEmitter"/>
+        /// rebuild the M262/M580/BX1 logical devices from scratch.
+        /// </summary>
+        static void DeleteLogicalDevices(string iecDir, WipeReport report)
+        {
+            var systemDir = Path.Combine(iecDir, "System");
+            if (!Directory.Exists(systemDir))
+            {
+                report.Warnings.Add("IEC61499/System not found — no logical devices to wipe.");
+                return;
+            }
+
+            int devs = 0;
+            foreach (var sysdev in Directory.EnumerateFiles(
+                systemDir, "*.sysdev", SearchOption.AllDirectories))
+            {
+                var folder = Path.Combine(
+                    Path.GetDirectoryName(sysdev)!, Path.GetFileNameWithoutExtension(sysdev));
+                try { File.Delete(sysdev); devs++; }
+                catch (Exception ex)
+                {
+                    report.Warnings.Add(
+                        $"Could not delete sysdev {Path.GetFileName(sysdev)}: {ex.Message}");
+                }
+                if (Directory.Exists(folder))
+                {
+                    try { Directory.Delete(folder, recursive: true); }
+                    catch (Exception ex)
+                    {
+                        report.Warnings.Add(
+                            $"Could not delete device folder {Path.GetFileName(folder)}: {ex.Message}");
+                    }
+                }
+            }
+            report.FilesDeleted += devs;
+            report.Steps.Add(
+                $"Deleted {devs} logical device(s) (.sysdev + device folder) under System/ — " +
+                "Mapper recreates M262/M580/BX1 on the next Test Runtime.");
+        }
+
+        /// <summary>
+        /// Deletes the PHYSICAL DEVICES — the Topology <c>Equipment_*.json</c>
+        /// (PLCs, the L2 switch, the EtherNet/IP coupler), the <c>Wire_*.json</c>
+        /// that connect them, and the <c>BroadcastDomain_*.json</c> networks — and
+        /// prunes their <c>TopologyManager.topologyproj</c> registrations. All are
+        /// Mapper-regenerated on the next Test Runtime, so the wipe yields a clean
+        /// "no physical devices" slate. The project <c>.solutionData</c> (trust /
+        /// identity) and the topologyproj shell are kept.
+        /// </summary>
+        static void DeletePhysicalDevices(string iecDir, WipeReport report)
+        {
+            // Topology/ is a sibling of IEC61499/ under the project folder.
+            var projectDir = Path.GetDirectoryName(iecDir);
+            if (projectDir == null) return;
+            var topoDir = Path.Combine(projectDir, "Topology");
+            if (!Directory.Exists(topoDir))
+            {
+                report.Steps.Add("Topology/ not present — no physical devices to wipe.");
+                return;
+            }
+
+            int n = 0;
+            foreach (var pattern in new[] { "Equipment_*.json", "Wire_*.json", "BroadcastDomain_*.json" })
+                foreach (var f in Directory.EnumerateFiles(topoDir, pattern))
+                {
+                    try { File.Delete(f); n++; }
+                    catch (Exception ex)
+                    {
+                        report.Warnings.Add($"Could not delete {Path.GetFileName(f)}: {ex.Message}");
+                    }
+                }
+
+            StripTopologyProj(topoDir, report);
+            report.FilesDeleted += n;
+            report.Steps.Add(
+                $"Deleted {n} physical device file(s) (Equipment/Wire/BroadcastDomain) under Topology/ — " +
+                "Mapper recreates them on the next Test Runtime.");
+        }
+
+        /// <summary>
+        /// Removes <c>&lt;None Include="…"&gt;</c> entries from
+        /// <c>TopologyManager.topologyproj</c> that point at an Equipment/Wire/
+        /// BroadcastDomain JSON just deleted (file no longer on disk). Keeps every
+        /// other entry (solutionData, Content/, folders, files still present). The
+        /// Mapper re-registers the regenerated devices on the next Test Runtime.
+        /// </summary>
+        static void StripTopologyProj(string topoDir, WipeReport report)
+        {
+            var proj = Path.Combine(topoDir, "TopologyManager.topologyproj");
+            if (!File.Exists(proj)) return;
+            string text;
+            try { text = File.ReadAllText(proj); }
+            catch (Exception ex) { report.Warnings.Add($"Read topologyproj failed: {ex.Message}"); return; }
+
+            var lines = text.Split('\n');
+            var kept = new List<string>(lines.Length);
+            int removed = 0;
+            foreach (var line in lines)
+            {
+                var inc = Regex.Match(line, @"Include\s*=\s*""([^""]+)""");
+                if (inc.Success)
+                {
+                    var raw = inc.Groups[1].Value;
+                    var fileName = Path.GetFileName(raw.Replace('\\', '/'));
+                    var rel = raw.Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar);
+                    bool isDeviceJson =
+                        fileName.StartsWith("Equipment_", StringComparison.OrdinalIgnoreCase) ||
+                        fileName.StartsWith("Wire_", StringComparison.OrdinalIgnoreCase) ||
+                        fileName.StartsWith("BroadcastDomain_", StringComparison.OrdinalIgnoreCase);
+                    if (isDeviceJson && !File.Exists(Path.Combine(topoDir, rel)))
+                    {
+                        removed++;
+                        continue;  // drop the registration for the deleted file
+                    }
+                }
+                kept.Add(line);
+            }
+
+            if (removed > 0)
+            {
+                try
+                {
+                    File.WriteAllText(proj, string.Join("\n", kept));
+                    report.Steps.Add(
+                        $"Stripped {removed} topologyproj entry/entries for deleted physical devices.");
+                }
+                catch (Exception ex) { report.Warnings.Add($"Write topologyproj failed: {ex.Message}"); }
             }
         }
 
