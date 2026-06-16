@@ -35,7 +35,7 @@ namespace CodeGen.Devices.BX1
     ///
     /// Bit map (from <c>PLC_RW_BX1</c>): IN bit0=Hr athome,1=Hr atwork,2=Vr athome,3=Vr atwork,
     /// 5=gripper; OUT bit0=Hr OutputToWork,1=Hr OutputToHome,2=Vr OutputToWork,3=gripper.
-    /// Modelled on <see cref="CodeGen.Services.SimulatorPostProcessor.InjectSimSwivelForce"/>.
+    /// Modelled on the symlink-bridge pattern (formerly the simulator swivel-force injector, removed).
     /// Gated by <c>cfg.DeployBx1IoBroker</c>. Idempotent.
     /// </summary>
     public static class Bx1IoBrokerInjector
