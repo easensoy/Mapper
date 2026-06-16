@@ -18,6 +18,16 @@ namespace CodeGen.Devices.M262
         // the live Emit path now reads cfg.ResourceName and passes it through.
         const string DefaultResourceName = "RES0";
 
+        // M262 logical-device identity — used to BOOTSTRAP the sysdev from
+        // scratch when none exists (the empty-start path after Clean Demonstrator
+        // wipes the devices). The sysdev GUID + resource ID match what EAE
+        // originally created — and what the M262 .hcf Form-1 binding + the FB
+        // mirror key off — so a bootstrapped device is byte-consistent with the
+        // established layout. (M580/BX1 use the analogous constants in
+        // Station2DeviceEmitter.)
+        const string M262SysdevId   = "00000000-0000-0000-0000-000000000002";
+        const string M262ResourceId = "1459BCD12760907D";
+
         /// <summary>
         /// When true, the Mapper treats the M262 sysdev as user-managed: the
         /// device file, its resource declaration, the Topology Equipment
@@ -77,20 +87,36 @@ namespace CodeGen.Devices.M262
                 ?? throw new InvalidOperationException(
                     "Cannot derive EAE project root from MapperConfig.SyslayPath/SyslayPath2.");
 
-            var sysdevPath = FindSysdev(eaeRoot)
-                ?? throw new FileNotFoundException(
-                    $"No .sysdev found under {eaeRoot}\\IEC61499\\System\\");
             var resourceName = string.IsNullOrWhiteSpace(cfg.ResourceName)
                 ? DefaultResourceName
                 : cfg.ResourceName;
 
+            // Locate the M262 .sysdev. When ABSENT (e.g. right after the Clean
+            // Demonstrator button wiped the devices), BOOTSTRAP it from scratch
+            // so the Mapper owns the full logical-device lifecycle. The .system
+            // project root that Clean keeps anchors the System GUID folder the
+            // device is created in. (M580/BX1 already build from scratch in
+            // Station2DeviceEmitter.)
+            bool justBootstrapped = false;
+            var sysdevPath = FindSysdev(eaeRoot);
+            if (sysdevPath == null)
+            {
+                sysdevPath = BootstrapM262Device(eaeRoot, resourceName);
+                justBootstrapped = sysdevPath != null;
+                if (sysdevPath == null)
+                    throw new FileNotFoundException(
+                        $"No .sysdev and no System GUID folder under {eaeRoot}\\IEC61499\\System\\ — " +
+                        "cannot bootstrap M262 (the .system project root must exist).");
+            }
+
             // Trust-preservation guard. If the sysdev on disk is already an
-            // M262, every device-layer write below is skipped to keep EAE's
-            // trust binding with the controller intact. Only the .sysres
-            // FBNetwork mirror and dfbproj registration (both application
-            // content, per spec) still run further down.
+            // M262 AND we did not just create it, every device-layer write
+            // below is skipped to keep EAE's trust binding with the controller
+            // intact (only the .sysres FBNetwork mirror + dfbproj registration
+            // run). A freshly bootstrapped device needs the full setup, so
+            // justBootstrapped forces those writes to run.
             bool preserveDevice =
-                PreserveExistingM262Device && IsM262SysdevFile(sysdevPath);
+                PreserveExistingM262Device && IsM262SysdevFile(sysdevPath) && !justBootstrapped;
 
             string propsPath = string.Empty;
             if (!preserveDevice)
@@ -232,8 +258,14 @@ namespace CodeGen.Devices.M262
         {
             var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
             if (!Directory.Exists(systemDir)) return null;
+            // Return the M262 device SPECIFICALLY (Type="M262_dPAC") — never a
+            // sibling M580/BX1 sysdev. Otherwise, when the real M262 sysdev is
+            // absent but the siblings still exist (a partial post-Clean state),
+            // the rewrite/preserve logic below would target the wrong device and
+            // rewrite an M580/BX1 sysdev AS M262. Returning null when no M262
+            // sysdev exists is exactly what triggers the bootstrap in Emit.
             return Directory.EnumerateFiles(systemDir, "*.sysdev", SearchOption.AllDirectories)
-                .FirstOrDefault();
+                .FirstOrDefault(IsM262SysdevFile);
         }
 
         static string? FindSystemFile(string eaeRoot)
@@ -242,6 +274,60 @@ namespace CodeGen.Devices.M262
             if (!Directory.Exists(systemDir)) return null;
             return Directory.EnumerateFiles(systemDir, "*.system", SearchOption.AllDirectories)
                 .FirstOrDefault();
+        }
+
+        /// <summary>
+        /// Creates the M262 logical device (.sysdev + sibling .sysres + empty
+        /// SystemDeviceProperties + Simulation.Binding) from scratch when none
+        /// exists — the empty-start path after Clean Demonstrator wipes the
+        /// devices. The System GUID folder (anchored by the kept .system project
+        /// root) must exist; returns null if it does not. Reuses
+        /// <see cref="Station2DeviceEmitter"/>'s proven builders so the
+        /// bootstrapped device matches the M580/BX1 shape exactly. The F513
+        /// DeployPlugin Properties + the Topology equipment + the .hcf are
+        /// written by the rest of the M262 pipeline (WriteM262DevicePropertiesXml,
+        /// M262TopologyEmitter, M262HwConfigCopier) once this sysdev exists.
+        /// </summary>
+        static string? BootstrapM262Device(string eaeRoot, string resourceName)
+        {
+            var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
+            if (!Directory.Exists(systemDir)) return null;
+            // Same System-GUID-folder discovery Station2DeviceEmitter uses: the
+            // one GUID-named directory under System/ (anchored by the .system root).
+            var sysGuidDir = Directory.EnumerateDirectories(systemDir)
+                .FirstOrDefault(d =>
+                {
+                    var n = Path.GetFileName(d);
+                    return Guid.TryParse(n, out _) && !n.StartsWith(".");
+                });
+            if (sysGuidDir == null) return null;
+
+            // 1. .sysdev (Device + inline Resource).
+            var sysdevPath = Path.Combine(sysGuidDir, $"{M262SysdevId}.sysdev");
+            File.WriteAllText(sysdevPath, Station2DeviceEmitter.BuildSysdevXml(
+                M262SysdevId, DeviceName, "M262_dPAC", M262ResourceId, resourceName));
+
+            // 2. sysdev folder + .sysres (empty FBNetwork; the FB mirror fills it).
+            var sysdevFolder = Path.Combine(sysGuidDir, M262SysdevId);
+            Directory.CreateDirectory(sysdevFolder);
+            var sysresPath = Path.Combine(sysdevFolder, $"{M262ResourceId}.sysres");
+            if (!File.Exists(sysresPath))
+                File.WriteAllText(sysresPath,
+                    Station2DeviceEmitter.BuildSysresXml(M262ResourceId, resourceName));
+
+            // 3. Empty SystemDeviceProperties (E0601B81). The F513 DeployPlugin
+            //    Properties is written later by WriteM262DevicePropertiesXml.
+            var e0601 = Path.Combine(sysdevFolder,
+                "E0601B81-4A3A-4A96-B6C2-007BDC680D59.Properties.xml");
+            if (!File.Exists(e0601))
+                File.WriteAllText(e0601, Station2DeviceEmitter.BuildEmptySystemDeviceProps());
+
+            // 4. Simulation.Binding (M262 service ports: deploy 51499 / archive 51496).
+            var simBind = Path.Combine(sysdevFolder, $"{M262SysdevId}.Simulation.Binding.xml");
+            File.WriteAllText(simBind,
+                Station2DeviceEmitter.BuildSimulationBindingXml(M262SysdevId, 51499, 51496));
+
+            return sysdevPath;
         }
 
         static string? FindDfbproj(string eaeRoot)
