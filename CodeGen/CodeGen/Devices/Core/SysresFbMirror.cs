@@ -577,10 +577,8 @@ namespace CodeGen.Devices.Core
             // firmware so it connects too. M580/Assembly has no MqttConn.
             if (string.Equals(fbName, "MqttConn", StringComparison.Ordinal))
                 return PlcAssignment.BX1;
-            if (string.Equals(fbName, "MqttConn_M262", StringComparison.Ordinal))
-                return PlcAssignment.M262;
-            if (string.Equals(fbName, "MqttConn_M580", StringComparison.Ordinal))
-                return PlcAssignment.M580;
+            // (No per-resource MqttConn_M262/M580: M262/M580 firmware can't run MQTT,
+            // RC50, so they publish via the BX1 bridge below, not a local connection.)
 
             // Standalone MQTT bridge publishers (MqttFmt_<comp>, MqttPub_<comp>)
             // also live on BX1 — they receive M262/M580 component state via
