@@ -406,7 +406,6 @@ namespace MapperUI
             txtModelPath.Text = dlg.FileName;
             _loadedControlXmlPath = dlg.FileName;
             btnTestStation1.Enabled = true;
-            btnGenerateFullSystemSimulator.Enabled = true;
             await LoadAndValidateAsync(dlg.FileName);
             menuItemStateTransitionTable.Enabled = _loadedComponents.Count > 0;
         }
