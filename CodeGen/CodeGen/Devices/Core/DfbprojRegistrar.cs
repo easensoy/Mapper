@@ -398,6 +398,55 @@ namespace CodeGen.Devices.Core
             return removed;
         }
 
+        /// <summary>
+        /// Removes dfbproj &lt;Content&gt;/&lt;None&gt;/&lt;Compile&gt; entries that point at a
+        /// per-resource EAE COMPILE ARTIFACT (<c>opcua.xml</c> / <c>offline.xml</c> /
+        /// <c>opcuaclient.xml</c> / <c>symlink.xml</c> under a <c>System\…\&lt;resId&gt;\</c>
+        /// sister folder) whose file does NOT exist on disk. These artifacts are
+        /// EAE-OWNED — EAE regenerates them (and re-adds the registration) on the next
+        /// Build — so a dangling reference left after a device wipe shows up in EAE's
+        /// Solution Integrity as a "Missing Project File". Targeted on purpose: it NEVER
+        /// touches <c>.sysdev</c>/<c>.sysres</c>/<c>.hcf</c>/<c>.Properties.xml</c> entries
+        /// (those are Mapper-created and must stay), so it is safe to run at ANY point in
+        /// the pipeline regardless of write ordering. Returns the number of entries removed.
+        /// </summary>
+        public static int StripDanglingResourceArtifactEntries(string eaeProjectDir)
+        {
+            if (string.IsNullOrEmpty(eaeProjectDir)) return 0;
+            var iec = Path.Combine(eaeProjectDir, "IEC61499");
+            if (!Directory.Exists(iec)) return 0;
+            var dfbprojPath = Directory.EnumerateFiles(iec, "*.dfbproj").FirstOrDefault();
+            if (dfbprojPath == null) return 0;
+
+            var xml = XDocument.Load(dfbprojPath, LoadOptions.PreserveWhitespace);
+            var ns = xml.Root!.GetDefaultNamespace();
+            var artifactRx = new System.Text.RegularExpressions.Regex(
+                @"[\\/](opcua|offline|opcuaclient|symlink)\.xml$",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase |
+                System.Text.RegularExpressions.RegexOptions.Compiled);
+            int removed = 0;
+            var candidates = new System.Collections.Generic.List<XElement>();
+            foreach (var name in new[] { "Content", "None", "Compile" })
+                candidates.AddRange(xml.Descendants(ns + name));
+            foreach (var el in candidates)
+            {
+                var include = (string?)el.Attribute("Include");
+                if (string.IsNullOrEmpty(include)) continue;
+                if (!include.Contains("System\\", StringComparison.OrdinalIgnoreCase) &&
+                    !include.Contains("System/", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!artifactRx.IsMatch(include)) continue;  // only the EAE compile artifacts
+                var abs = Path.Combine(iec,
+                    include.Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar));
+                if (File.Exists(abs)) continue;  // file present — keep (EAE compiled it)
+                var nextWs = el.NextNode as XText;
+                el.Remove();
+                if (nextWs != null) nextWs.Remove();
+                removed++;
+            }
+            if (removed > 0) xml.Save(dfbprojPath);
+            return removed;
+        }
+
         static int DeduplicateChildren(XElement group, XNamespace ns, string tag, string sysdevFileName)
         {
             int removed = 0;
