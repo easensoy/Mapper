@@ -7,7 +7,17 @@ each actuator/sensor CAT publish `smc/<component>/state` through the BX1 `MQTT_C
 subscription captures the whole rig.
 
 > Paths assume mosquitto is installed at `C:\Program Files\Mosquitto\` and this repo is at
-> `C:\VueOneMapper`. Adjust `-h` if the broker runs on a different machine.
+> `C:\VueOneMapper`.
+>
+> **`-h` host:** the **PLCs** publish to the broker's LAN IP `192.168.1.50` (set in the
+> Mapper's `MqttConn` URL — they're remote and can't reach loopback). A **logger running on
+> the broker machine** can use `127.0.0.1` (localhost) instead, because `mosquitto.conf`
+> listens on `0.0.0.0:1883` (all interfaces, loopback included). Both reach the same broker;
+> keep the listener on `0.0.0.0` so the PLCs aren't locked out. The commands below use
+> `127.0.0.1`; swap for `192.168.1.50` if you log from another machine on the LAN.
+>
+> For a millisecond-stamped logger that writes BOTH `.txt` and `.jsonl` to your Desktop in
+> one go, run **`smc_capture_desktop.ps1`** (PowerShell) — see §3b.
 
 ---
 
@@ -26,7 +36,7 @@ only), and persists QoS-1 backlog under `MQTT\data\`.
 ## 2. Capture ALL component states → JSONL  (durable, lossless)
 
 ```bat
-"C:\Program Files\Mosquitto\mosquitto_sub.exe" -h 192.168.1.50 -p 1883 -t "smc/#" -q 1 -i smc_logger -c -F "%J" >> "C:\VueOneMapper\MQTT\smc_log.jsonl"
+"C:\Program Files\Mosquitto\mosquitto_sub.exe" -h 127.0.0.1 -p 1883 -t "smc/#" -q 1 -i smc_logger -c -F "%J" >> "C:\VueOneMapper\MQTT\smc_log.jsonl"
 ```
 
 (This is exactly what `smc_logger.cmd` runs — in a `.cmd` the `%J` must be written `%%J`.)
@@ -52,7 +62,7 @@ Start it **before** cycling the actuators. Stop with `Ctrl+C`.
 ## 3. Capture ALL component states → TXT  (human-readable)
 
 ```bat
-"C:\Program Files\Mosquitto\mosquitto_sub.exe" -h 192.168.1.50 -p 1883 -t "smc/#" -q 1 -F "%I  %t  %p" >> "C:\VueOneMapper\MQTT\smc_log.txt"
+"C:\Program Files\Mosquitto\mosquitto_sub.exe" -h 127.0.0.1 -p 1883 -t "smc/#" -q 1 -F "%I  %t  %p" >> "C:\VueOneMapper\MQTT\smc_log.txt"
 ```
 
 (Ready-to-run as `smc_capture_txt.cmd`.) `%I` = ISO-8601 timestamp, `%t` = topic, `%p` =
@@ -64,10 +74,28 @@ payload. Each line:
 
 ---
 
+## 3b. Capture to the Desktop, MILLISECOND-stamped, TXT **and** JSONL at once (PowerShell)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\VueOneMapper\MQTT\smc_capture_desktop.ps1
+```
+
+Runs `mosquitto_sub -F "%t|%p"` and, per message, stamps a PowerShell millisecond ISO
+timestamp and writes BOTH files on your Desktop in one pass:
+
+- `smc_mqtt_log_ms.txt`   → `2026-06-16T14:08:22.531+01:00|smc/feeder/state|2`
+- `smc_mqtt_log_ms.jsonl` → `{"t":"2026-06-16T14:08:22.531+01:00","topic":"smc/feeder/state","payload":2}`
+
+The millisecond stamp is generated locally (finer than mosquitto's `%I`), and the payload is
+written unquoted — valid JSON while payloads are numeric (the state numbers are). Connects via
+`127.0.0.1` (the logger runs on the broker machine).
+
+---
+
 ## 4. Live watch (no file, just the console)
 
 ```bat
-"C:\Program Files\Mosquitto\mosquitto_sub.exe" -h 192.168.1.50 -t "smc/#" -v
+"C:\Program Files\Mosquitto\mosquitto_sub.exe" -h 127.0.0.1 -t "smc/#" -v
 ```
 
 `-v` prints `topic payload`. Good for confirming a component is publishing at all.
@@ -77,7 +105,7 @@ payload. Each line:
 ## 5. One component only
 
 ```bat
-"C:\Program Files\Mosquitto\mosquitto_sub.exe" -h 192.168.1.50 -t "smc/bearing_pnp/state" -v
+"C:\Program Files\Mosquitto\mosquitto_sub.exe" -h 127.0.0.1 -t "smc/bearing_pnp/state" -v
 ```
 
 Swap the topic for any component, e.g. `smc/clamp/state`, `smc/coverpnp_vr/state`,
