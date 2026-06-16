@@ -94,7 +94,7 @@ namespace CodeGen.Configuration
         // EnableSevenStateHomePreamble is OFF, so no recipe has a Home command at step 0 (which is
         // what caused the old atWork1<->atWork2 bounce when END->0 was used naively). Set false to
         // revert to RecipeRunOnce's single-cycle self-park.
-        public static bool EnableCyclicRestart = true;
+        public static bool EnableCyclicRestart = false;  // 2026-06-16: park each engine at END for ONE clean ordered cycle (cyclic-restart made stations loop+race); re-enable only with a Feed re-arm interlock (Feed row0 also waiting on a Disassembly done-bit).
 
         // AUTO-RETRACT SCOPE (2026-06-04): the recipe generator's auto-retract
         // safety net (it inserts a return-home for an actuator the twin advances but
@@ -182,7 +182,7 @@ namespace CodeGen.Configuration
         // — it was EAE's "Not Used Instances → Delete" (deletes the app instances) or a partial
         // run. Generation is correct. (Deploy still needs a clean Build in EAE so the
         // HwConfiguration recompiles BMXBUS/EIPSCANNER2 after a wipe.)
-        public static bool ExtendStateRingAcrossBx1 = true;
+        public static bool ExtendStateRingAcrossBx1 = false; // 2026-06-16: retire the cross-PLC cover ring (EAE does NOT bridge cross-device stateRprtCmd adapters at runtime -> M580 ring was open at the BX1 boundary). Covers run on a BX1-LOCAL Cover_Station (DeployBx1CoverEngine=true).
 
         /// <summary>
         /// Experimental cross-PLC cover fold-in. Disabled for the rig: the working
@@ -230,7 +230,7 @@ namespace CodeGen.Configuration
         /// commands the covers over the cross-PLC ring. The sweep clears the already-deployed
         /// Cover_Station from the BX1 sysres on the next Test Runtime.
         /// </summary>
-        public static bool DeployBx1CoverEngine = false;
+        public static bool DeployBx1CoverEngine = true;  // 2026-06-16: BX1 commands its own covers on a LOCAL closed ring (pairs with ExtendStateRingAcrossBx1=false) so the covers need no cross-PLC ring.
 
         /// <summary>
         /// STAGE 5 (2026-06-10): unpark Disassembly_Station. Default FALSE = today's proven
@@ -376,7 +376,7 @@ namespace CodeGen.Configuration
         /// Generation is headless-verified; transport is confirmed only on the rig. Revert instantly:
         /// set false (one rebuild) => decoupled local rings + the local BearingSensor material gate.
         /// </summary>
-        public static bool FeedAssemblyPartBridge = true;
+        public static bool FeedAssemblyPartBridge = false; // 2026-06-16: Feed->Assembly handoff is now PURELY M580-LOCAL (Assembly row0 = WAIT(BearingSensor id1) via AssemblyWaitForFeedPart) - the part physically arriving is the handoff, no cross-PLC signal. Also drops the synthesized PartAtAssembly id5 -> eliminates the M262 Checker/PartAtAssembly state_table[5] collision.
 
         /// <summary>
         /// Real M262 rig proximity sensors the digital twin does NOT model, but the physical SMC rig
@@ -456,7 +456,7 @@ namespace CodeGen.Configuration
         /// CAT compile is the one remaining EAE-only check. Revert: set false (one rebuild) -&gt; tail
         /// gone, PartAtAssembly bridge stays (independent flag).
         /// </summary>
-        public static bool EnableRobotTaskTail = true;
+        public static bool EnableRobotTaskTail = false; // 2026-06-16: M580 Disassembly ring closes LOCALLY (Disassembly.out->BearingSensor.in); the M262 Ejector/Robot tail re-attaches via ONE isolated cross-PLC pub/sub done-bit (NOT the unbridgeable cross-device adapter ring). Tail deferred until that bridge is built.
 
         /// <summary>
         /// When TRUE, Cover_Station runs a MINIMAL proof-of-life recipe (CoverPNP_Vr
