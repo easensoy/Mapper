@@ -833,13 +833,15 @@ namespace CodeGen.Configuration
         // ============================================================
 
         /// <summary>
-        /// Master opt-in. When FALSE (default) the Mapper emits exactly what
-        /// it does today — no MQTT_CONNECTION injected, no ConnectionID
-        /// stamped — so the hardware/sim paths stay byte-stable and backward
-        /// safe. Flip TRUE only after the two-part jitter gate passes on the
-        /// rig (dead broker + slow broker, ActuatorCore scan stays flat).
+        /// Master opt-in for the MQTT mechanism: the BX1 MqttConn (MQTT_CONNECTION) + the cross-PLC
+        /// bridge (MqttBridgeEmitter — a MqttFmt_/MqttPub_ pair on BX1 per M262/M580 component) + the
+        /// embedded MqttPub inside the CATs. DEFAULT TRUE (2026-06-16): the user wants MQTT on, and a
+        /// mapper_config.json that OMITS this key was silently defaulting it to false at runtime (the
+        /// repo-root config lacks the key) — which is why no MQTT was generated. Defaulting TRUE means
+        /// a key-less config still enables MQTT; a config can still set it false explicitly to opt out.
+        /// If the broker is down the MqttConn just buffers/retries (harmless), so default-on is safe.
         /// </summary>
-        public bool MqttPublishEnabled { get; set; } = false;
+        public bool MqttPublishEnabled { get; set; } = true;
 
         /// <summary>Broker endpoint for MQTT_CONNECTION.URL. EAE 24.1's
         /// <c>CMQTTClientStateMgr.validateEndpoint</c> has two gates:
