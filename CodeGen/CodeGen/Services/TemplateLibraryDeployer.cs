@@ -160,6 +160,22 @@ namespace CodeGen.Services
                 { MapperLogger.Info($"[Deploy][Refresh] could not remove stale {stale}: {ex.Message}"); }
             }
 
+            // CAT REFRESH (2026-06-16): Sensor_Bool_CAT now has a cyclic re-read (Poll E_DELAY ->
+            // FB2.REQ every 200ms) so each sensor RE-SAMPLES its DI and re-publishes onto the
+            // stateRprtCmd ring, instead of reading exactly once at INIT. That one-shot read was the
+            // universal lost-step-0-trigger: the sensor's only publish raced (and lost to) the engine
+            // INIT, and the edge-triggered engine never got a fresh ring message. DeployArtifact is
+            // COPY-IF-ABSENT, so delete the deployed CAT folder first to force re-extract of the fixed
+            // zip. Pipeline-respecting (deployer does it, no direct Demonstrator edit); PatchCatMqttPublish
+            // re-applies the embedded MQTT afterward; EAE recompiles the CAT on the next Build.
+            foreach (var catRefresh in new[] { "Sensor_Bool_CAT" })
+            {
+                var dir = Path.Combine(eaeProjectDir, "IEC61499", catRefresh);
+                try { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
+                catch (Exception ex)
+                { MapperLogger.Info($"[Deploy][Refresh] could not remove deployed CAT {dir}: {ex.Message}"); }
+            }
+
             foreach (var name in UniversalBasics)
                 DeployArtifact(libPath, "Basic", name, eaeProjectDir, result, isBasic: true);
 
