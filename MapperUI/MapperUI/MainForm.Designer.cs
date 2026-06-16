@@ -62,7 +62,6 @@ namespace MapperUI
             this.btnGeneratePusherTest = new System.Windows.Forms.Button();
             this.btnGenerateFeedStation = new System.Windows.Forms.Button();
             this.btnTestStation1 = new System.Windows.Forms.Button();
-            this.btnGenerateFullSystemSimulator = new System.Windows.Forms.Button();
             this.btnCleanDemonstrator = new System.Windows.Forms.Button();
             this.statusStrip = new System.Windows.Forms.StatusStrip();
             this.lblStatus = new System.Windows.Forms.ToolStripStatusLabel();
@@ -149,20 +148,6 @@ namespace MapperUI
             this.btnTestStation1.Text = "Test Runtime";
             this.btnTestStation1.UseVisualStyleBackColor = false;
             this.btnTestStation1.Click += new System.EventHandler(this.btnTestStation1_Click);
-
-
-            this.btnGenerateFullSystemSimulator.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
-            this.btnGenerateFullSystemSimulator.BackColor = System.Drawing.Color.FromArgb(0, 120, 153);
-            this.btnGenerateFullSystemSimulator.Enabled = false;
-            this.btnGenerateFullSystemSimulator.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-            this.btnGenerateFullSystemSimulator.FlatAppearance.BorderSize = 0;
-            this.btnGenerateFullSystemSimulator.Font = new System.Drawing.Font("Segoe UI", 8.5F, System.Drawing.FontStyle.Bold);
-            this.btnGenerateFullSystemSimulator.ForeColor = System.Drawing.Color.White;
-            this.btnGenerateFullSystemSimulator.Location = new System.Drawing.Point(1409, 28);
-            this.btnGenerateFullSystemSimulator.Size = new System.Drawing.Size(210, 25);
-            this.btnGenerateFullSystemSimulator.Text = "Test Simulator";
-            this.btnGenerateFullSystemSimulator.UseVisualStyleBackColor = false;
-            this.btnGenerateFullSystemSimulator.Click += new System.EventHandler(this.btnGenerateFullSystemSimulator_Click);
 
             this.btnCleanDemonstrator.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
             this.btnCleanDemonstrator.BackColor = System.Drawing.Color.FromArgb(64, 64, 64);
@@ -350,7 +335,6 @@ namespace MapperUI
             this.Controls.Add(this.btnGeneratePusherTest);
             this.Controls.Add(this.btnGenerateFeedStation);
             this.Controls.Add(this.btnTestStation1);
-            this.Controls.Add(this.btnGenerateFullSystemSimulator);
             this.Controls.Add(this.btnCleanDemonstrator);
             this.Controls.Add(this.btnBrowse);
             this.Controls.Add(this.lblLoadedFile);
@@ -446,7 +430,6 @@ namespace MapperUI
         private System.Windows.Forms.Button btnGeneratePusherTest;
         private System.Windows.Forms.Button btnGenerateFeedStation;
         private System.Windows.Forms.Button btnTestStation1;
-        private System.Windows.Forms.Button btnGenerateFullSystemSimulator;
         private System.Windows.Forms.Button btnCleanDemonstrator;
         private System.Windows.Forms.Label lblLoadedFile;
         private System.Windows.Forms.StatusStrip statusStrip;
