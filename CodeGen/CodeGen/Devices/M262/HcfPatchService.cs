@@ -379,9 +379,9 @@ namespace CodeGen.Devices.M262
             // Sym() resolves to {resId}.{generatedFbId}.Input — project-generated id, never copied.
             foreach (var (synthName, synthPin, _) in MapperConfig.M262SynthSensors)
             {
-                // Bound for the robot tail OR the PartAtAssembly cross-ring (FeedAssemblyPartBridge):
-                // PartAtAssembly reads DI08 on M262 and reports its state across to M580.
-                if (!MapperConfig.EnableRobotTaskTail && !MapperConfig.FeedAssemblyPartBridge) break;
+                // Bound for the robot tail (EnableRobotTaskTail): the synthesized M262 rig sensors
+                // read their DI channel and report state across to M580.
+                if (!MapperConfig.EnableRobotTaskTail) break;
                 if (!fbIdByName.ContainsKey(synthName) || !PinBlank(synthPin)) continue;
                 effective[synthPin] = (synthName, "Input");
                 if (synthPin.Length == 4 && int.TryParse(synthPin.Substring(2), out var diCh)) usedDi.Add(diCh);
