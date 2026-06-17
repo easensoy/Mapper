@@ -1099,6 +1099,32 @@ namespace MapperUI
                     AppendActivity($"[Test Runtime][Sync][Warn] final sysres parameter sync failed: {ex.Message}");
                 }
 
+                // HARD syslay<->sysres<->hcf parity guard. The deployable per-device sysres MUST be a
+                // faithful projection of the syslay (the design canvas). If a Robot/PartAtAssembly FB,
+                // a process recipe, or a discharge hcf binding is on the syslay but missing/stale on the
+                // sysres, EAE deploys the OLD logic and the demo silently runs the wrong sequence. Surface
+                // it LOUDLY here (the HcfReferenceValidator above only proves bindings that EXIST resolve;
+                // this proves required FBs/recipes are PRESENT). A FAIL almost always means EAE held a
+                // sysres locked during the sync — close EAE and re-run Test Runtime.
+                try
+                {
+                    var eaeRoot = CodeGen.Devices.Core.EaeProjectLayout.DeriveEaeProjectRoot(Cfg());
+                    var parity = await Task.Run(() =>
+                        CodeGen.Devices.Core.SyslaySysresParityValidator.Validate(eaeRoot, path));
+                    if (parity.Count == 0)
+                        AppendActivity("[Parity] PASS — every device sysres mirrors the syslay (FBs + recipes + discharge hcf).");
+                    else
+                    {
+                        AppendActivity($"[Parity] FAIL — {parity.Count} sysres/hcf divergence(s) from the syslay (the deployable LAGS the design):");
+                        foreach (var v in parity)
+                            AppendActivity($"  [Parity][DIVERGENCE] {v}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AppendActivity($"[Parity][Error] {ex.Message}");
+                }
+
                 TouchDfbprojToTriggerEaeReload();
 
                 AppendActivity($"Generated: {path}");
