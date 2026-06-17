@@ -1062,6 +1062,31 @@ namespace MapperUI
                     AppendActivity($"[HcfBind][Error] {ex.Message}");
                 }
 
+                // SPLIT-BRAIN GUARD: every deployed .hcf DI/DO binding MUST resolve to an FB + pin
+                // that actually exists on the SAME resource's sysres. A legacy symbolic name
+                // ('RES0.M262IO.x' / 'RES0.Robot_Pick_And_Place1.x') or a GUID triple pointing at an
+                // FB absent from the resource means the device I/O can never resolve. Validate the
+                // final generated tree and report every offending channel loudly so a regression can
+                // never ship silently.
+                try
+                {
+                    var eaeRoot = CodeGen.Devices.Core.EaeProjectLayout.DeriveEaeProjectRoot(Cfg());
+                    var hcfViolations = await Task.Run(() =>
+                        CodeGen.Devices.Core.HcfReferenceValidator.Validate(eaeRoot));
+                    if (hcfViolations.Count == 0)
+                        AppendActivity("[Hcf][Validate] PASS — every DI/DO binding resolves to a sysres FB + pin (no split-brain).");
+                    else
+                    {
+                        AppendActivity($"[Hcf][Validate] FAIL — {hcfViolations.Count} split-brain HCF binding(s) reference an FB/pin NOT on the resource:");
+                        foreach (var v in hcfViolations)
+                            AppendActivity($"  [Hcf][SPLIT-BRAIN] {v}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AppendActivity($"[Hcf][Validate][Error] {ex.Message}");
+                }
+
                 try
                 {
                     var synced = await Task.Run(() =>
