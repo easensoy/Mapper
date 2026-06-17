@@ -2859,16 +2859,19 @@ namespace CodeGen.Translation
             foreach (var a in contents.Actuators)
                 if (IsM580(a.Name)) m580.Add((a.Name, ResolveActuatorFBType(a)));
 
-            // stateRprtCmd ring (ONE local closed ring): M580 sensors → actuators →
-            // Assembly_Station → [Disassembly], closed back to the first sensor. Covers run on a
-            // BX1-local Cover_Station — there is no cross-PLC ring. When the robot tail is rebuilt
-            // via the HandoffPlanner, its M580→M262→M580 discharge hops attach at this ring's
-            // Disassembly seam (Disassembly.stateRptCmdAdptr_out → [M262 segment] → m580 head).
+            // stateRprtCmd ring: M580 sensors → actuators → Assembly_Station → [Disassembly]. The
+            // discharge (HandoffPlanner.DischargeActive) splices the M262 segment (Ejector → Robot →
+            // PartAtAssembly) onto the ring AT THE DISASSEMBLY SEAM via TWO cross-device adapter hops
+            // EAE bridges (Disassembly.out → seg[0], seg[^1] → m580 head); the intra-M262 chain
+            // seg[i]→seg[i+1] is added in BuildFeedStationWiring and the M580 sysres opens its
+            // close-back at the boundary (ResourceWireEmitter). The M580 bearing/shaft/clamp ring
+            // itself is NOT stretched — only a short segment hangs off the Disassembly node. Off →
+            // the ring closes locally Disassembly → first sensor (BX1 covers stay BX1-local either way).
             var ring = new List<(string Name, string Type)>(m580)
             {
                 (AssemblyProc, "Process1_Generic")
             };
-            if (threadDisassembly)   // … → Assembly_Station → Disassembly → (close back)
+            if (threadDisassembly)   // … → Assembly_Station → Disassembly → (close back / segment)
                 ring.Add((disassemblyFbName, "Process1_Generic"));
             if (ring.Count > 1)
             {
@@ -2876,9 +2879,22 @@ namespace CodeGen.Translation
                     builder.AddAdapterConnection(
                         $"{ring[i].Name}.{StateRprtOut(ring[i].Type)}",
                         $"{ring[i + 1].Name}.{StateRprtIn(ring[i + 1].Type)}");
-                builder.AddAdapterConnection(
-                    $"{ring[^1].Name}.{StateRprtOut(ring[^1].Type)}",
-                    $"{ring[0].Name}.{StateRprtIn(ring[0].Type)}");
+                var seg = TemplateMap.M262CrossRingSegment(HandoffPlanner.DischargeActive);
+                if (seg.Count > 0)
+                {
+                    builder.AddAdapterConnection(
+                        $"{ring[^1].Name}.{StateRprtOut(ring[^1].Type)}",
+                        $"{seg[0]}.stateRprtCmd_in");
+                    builder.AddAdapterConnection(
+                        $"{seg[^1]}.stateRprtCmd_out",
+                        $"{ring[0].Name}.{StateRprtIn(ring[0].Type)}");
+                }
+                else
+                {
+                    builder.AddAdapterConnection(
+                        $"{ring[^1].Name}.{StateRprtOut(ring[^1].Type)}",
+                        $"{ring[0].Name}.{StateRprtIn(ring[0].Type)}");
+                }
             }
         }
 
