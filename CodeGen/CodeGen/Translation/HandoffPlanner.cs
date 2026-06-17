@@ -50,6 +50,36 @@ namespace CodeGen.Translation
         /// </summary>
         public const bool CrossPlcDischargeActive = true;
 
+        /// <summary>
+        /// When ON, the BX1 cover P&amp;P actuators are spliced onto the M580 Assembly/Disassembly
+        /// stateRprtCmd ring as a "cover detour" at the Clamp→Assembly seam (the SAME cross-device
+        /// adapter EAE bridges for the ejector/robot), and the cover place (Assembly) + remove
+        /// (Disassembly) steps are folded into the M580 recipes — REPLACING the BX1-local
+        /// Cover_Station engine (<see cref="MapperConfig.DeployBx1CoverEngine"/> is its inverse).
+        /// <c>TopCoverSenosr</c> stays OFF the ring: its id 3 would collide with PartAtAssembly on the
+        /// M580 state_table and the recipe never waits on it. The cover detour sits at a DIFFERENT
+        /// seam than the discharge segment (Disassembly→ejector/robot), so the two compose with only
+        /// M580↔BX1 and M580↔M262 boundaries — never M262↔BX1. RIG-PROVEN mechanism (STAGE 4). OFF →
+        /// covers run BX1-local under Cover_Station and the M580 recipe skips them (today's behaviour).
+        /// </summary>
+        public const bool CoversOnM580Ring = true;
+
+        /// <summary>
+        /// The BX1 cover P&amp;P ACTUATORS spliced onto the M580 ring (ring order), inserted between the
+        /// last M580 actuator (Clamp) and Assembly_Station. <c>TopCoverSenosr</c> is intentionally
+        /// excluded (its id clashes with PartAtAssembly on the M580 state_table; nothing waits on it).
+        /// Empty when the cover detour is off. SINGLE SOURCE for the ring wiring (syslay + sysres) and
+        /// the recipe's cover ids — RingWiringPlanner, ResourceWireEmitter and RecipePlanner all read this.
+        /// </summary>
+        public static IReadOnlyList<string> CoverDetour =>
+            CoversOnM580Ring
+                ? new[] { "CoverPNP_Hr", "CoverPNP_Vr", "CoverPnp_Gripper" }
+                : System.Array.Empty<string>();
+
+        /// <summary>True when <paramref name="name"/> is a cover actuator on the M580 cover detour.</summary>
+        public static bool IsCoverDetourActuator(string name) =>
+            CoverDetour.Any(c => string.Equals(c, name, System.StringComparison.OrdinalIgnoreCase));
+
         // ── Component identities the handoffs reference (from the one component map) ──────────────
 
         /// <summary>The M262 part-present proximity sensor (DI08) the Feed station trips when it
