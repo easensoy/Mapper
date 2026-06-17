@@ -22,9 +22,6 @@ namespace CodeGen.Translation
         private const string SensorCatType = "Sensor_Bool_CAT";
         private const string ProcessCatType = "Process1_Generic";
         private const string RobotCatType = "Robot_Task_CAT";
-        private const string RingCrossGateType = "RingCrossGate";
-        private const string M580CoverRingGate = "M580_CoverRingGate";
-        private const string Bx1CoverRingGate = "BX1_CoverRingGate";
 
         private const int ActuatorYGap = 800;
         private const int SensorYGap = 480;
@@ -1259,7 +1256,7 @@ namespace CodeGen.Translation
             // cover pick/place sequence), NOT by walking States. BuildBx1Wiring splices it into
             // the BX1 cover ring on the syslay; ResourceWireEmitter auto-splices it on the BX1
             // sysres (it closes the ring through any Process FB it finds). BX1-local: no M580
-            // dependency, no cross-PLC ring (ExtendStateRingAcrossBx1 stays FALSE).
+            // dependency, no cross-PLC ring.
             if (MapperConfig.DeployBx1CoverEngine)
             {
                 var coverProc = new VueOneComponent
@@ -1651,11 +1648,11 @@ namespace CodeGen.Translation
             // byte-identical and nothing crosses to the M580 state_table yet. See
             // MapperConfig.M262SynthSensors for the id/consumption strategy. FB ids via FBIdGenerator,
             // never the reference's. Off -> not emitted.
-            // Emitted for the robot tail OR the PartAtAssembly cross-ring (FeedAssemblyPartBridge):
-            // both consume the synthesized M262 sensor. The FB + its INIT fan-off PartInHopper are
-            // added here; whether it joins a ring is decided in BuildStation2Wiring / ResourceWire
-            // Emitter (cross-ring for the bridge; off the Feed ring either way). Off both -> not emitted.
-            if (MapperConfig.EnableRobotTaskTail || MapperConfig.FeedAssemblyPartBridge)
+            // Emitted for the robot tail (EnableRobotTaskTail): consumes the synthesized M262
+            // sensor. The FB + its INIT fan-off PartInHopper are added here; whether it joins a
+            // ring is decided in BuildStation2Wiring / ResourceWireEmitter (off the Feed ring).
+            // Off -> not emitted.
+            if (MapperConfig.EnableRobotTaskTail)
             {
                 int synthY = 5200;
                 string prevSynthInit = "PartInHopper";
@@ -1780,7 +1777,6 @@ namespace CodeGen.Translation
                     $"embedded MqttPub binds + publishes locally — no bridge FBs, no pairs.");
             }
 
-            AddCoverRingGateFbs(builder, contents, report);
 
             BuildFeedStationWiring(builder, contents);
             // Station 2 (M580) — same INIT-chain + stationAdptr chain + stateRprtCmd
@@ -2729,30 +2725,18 @@ namespace CodeGen.Translation
                     builder.AddAdapterConnection(
                         $"{ringComponents[i].Name}.{StateRprtOut(ringComponents[i].Type)}",
                         $"{ringComponents[i + 1].Name}.{StateRprtIn(ringComponents[i + 1].Type)}");
-                // FEED -> ASSEMBLY MERGE (MapperConfig.FeedAssemblyHandshake): leave the M262 Feed
-                // ring's close-back OPEN — Feed_Station.stateRptCmdAdptr_out crosses to the M580 ring
-                // head (BearingSensor) and PartInHopper.stateRprtCmd_in arrives from M580 Disassembly
-                // (the two cross-device hops are added in BuildStation2Wiring; EAE bridges them like
-                // the proven cover hops). This is the ONLY no-new-FB way to carry the Feed completion
-                // sentinel {FeedStationProcessId,7} into the M580 state_table so Assembly's row-0
-                // WAIT(10,7) clears. NOTE: it MERGES the two rings — M262 + M580 now share one ring,
-                // so all three PLCs must be deployed together (the trade-off of "inform through ring").
-                bool feedMerge = MapperConfig.FeedAssemblyHandshake && !robotTail;
-                if (!feedMerge)
-                    builder.AddAdapterConnection(
-                        $"{ringComponents[^1].Name}.{StateRprtOut(ringComponents[^1].Type)}",
-                        $"{ringComponents[0].Name}.{StateRprtIn(ringComponents[0].Type)}");
+                // Close the M262 Feed ring locally (last -> first). The Feed ring is its own
+                // closed loop; there is no cross-PLC ring splice.
+                builder.AddAdapterConnection(
+                    $"{ringComponents[^1].Name}.{StateRprtOut(ringComponents[^1].Type)}",
+                    $"{ringComponents[0].Name}.{StateRprtIn(ringComponents[0].Type)}");
             }
 
-            // STAGE 5b + PartAtAssembly bridge: the local intra-M262 chain of the cross-ring segment.
-            // The segment ENDS (seg[0].in from M580 Disassembly, seg[^1].out to M580 BearingSensor) are
-            // the cross-device hops added in BuildStation2Wiring + bridged by EAE; only the intra-M262
-            // links seg[i]->seg[i+1] are local here. Composes Ejector->Robot (tail) with Robot->
-            // PartAtAssembly (bridge): both on -> Ejector->Robot->PartAtAssembly; tail-only ->
-            // Ejector->Robot; bridge-only -> single node, no intra link. Off both -> empty -> no-op.
-            bool partBridge = MapperConfig.FeedAssemblyPartBridge &&
-                System.Array.Exists(MapperConfig.M262SynthSensors, s => NameEq(s.Name, "PartAtAssembly"));
-            var m262Seg = TemplateMap.M262CrossRingSegment(robotTail, partBridge);
+            // STAGE 5b robot tail: the local intra-M262 chain of the Ejector->Robot segment.
+            // The segment ENDS (seg[0].in from M580 Disassembly, seg[^1].out to M580 BearingSensor)
+            // are the cross-device hops re-added by the HandoffPlanner when the robot tail is built;
+            // only the intra-M262 links seg[i]->seg[i+1] are local here. robotTail off -> empty -> no-op.
+            var m262Seg = TemplateMap.M262CrossRingSegment(robotTail);
             for (int i = 0; i < m262Seg.Count - 1; i++)
                 builder.AddAdapterConnection(
                     $"{m262Seg[i]}.stateRprtCmd_out", $"{m262Seg[i + 1]}.stateRprtCmd_in");
@@ -2770,79 +2754,6 @@ namespace CodeGen.Translation
             return string.Equals(fbType, "Process1_Generic", StringComparison.Ordinal)
                 ? "stateRptCmdAdptr_in"
                 : "stateRprtCmd_in";
-        }
-
-        private static bool HasBx1CoverBridgeSet(StationContents contents) =>
-            contents.Actuators.Any(a => NameEq(a.Name, "CoverPNP_Hr")) &&
-            contents.Actuators.Any(a => NameEq(a.Name, "CoverPNP_Vr")) &&
-            contents.Actuators.Any(a => NameEq(a.Name, "CoverPnp_Gripper"));
-
-        private static Dictionary<string, string> BuildCoverRingGateParameters(bool engineSide)
-        {
-            var p = new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["Mode"] = SyslayBuilder.FormatInt(engineSide ? 0 : 1),
-                // Native names are source_name values emitted by the BX1 CAT instances.
-                // Mode 0 uses them to terminate reports after Assembly_Station has seen
-                // the injected remote state. Mode 1 ignores them.
-                ["Native1"] = SyslayBuilder.FormatString(engineSide ? "TopCoverSenosr" : string.Empty),
-                ["Native2"] = SyslayBuilder.FormatString(engineSide ? "CoverPNP_Hr" : string.Empty),
-                ["Native3"] = SyslayBuilder.FormatString(engineSide ? "CoverPNP_Vr" : string.Empty),
-                ["Native4"] = SyslayBuilder.FormatString(engineSide ? "CoverPnp_Gripper" : string.Empty),
-                // Target names are dest_name values emitted by the Process recipe.
-                // Only these commands cross M580 -> BX1; bearing/shaft/clamp commands
-                // remain on the M580 local ring.
-                ["Target1"] = SyslayBuilder.FormatString(engineSide ? "coverpnp_hr" : string.Empty),
-                ["Target2"] = SyslayBuilder.FormatString(engineSide ? "coverpnp_vr" : string.Empty),
-                ["Target3"] = SyslayBuilder.FormatString(engineSide ? "coverpnp_gripper" : string.Empty),
-                ["Target4"] = SyslayBuilder.FormatString(string.Empty),
-            };
-            return p;
-        }
-
-        private static void AddCoverRingGateFbs(SyslayBuilder builder,
-            StationContents contents, BindingApplicationReport report)
-        {
-            if (!MapperConfig.FoldCoversIntoAssembly)
-                return;
-
-            if (!HasBx1CoverBridgeSet(contents))
-            {
-                report.Missing.Add(
-                    "[CoverBridge] FoldCoversIntoAssembly requested, but the BX1 cover set " +
-                    "(CoverPNP_Hr/CoverPNP_Vr/CoverPnp_Gripper) is incomplete; " +
-                    "bridge FBs skipped.");
-                return;
-            }
-
-            var m580Pos = LayoutGrid.PositionOf(M580CoverRingGate) ?? (X: 27200, Y: 4000);
-            var bx1Pos = LayoutGrid.PositionOf(Bx1CoverRingGate) ?? (X: 34000, Y: 4000);
-
-            builder.AddFB(FBIdGenerator.GenerateFBId("ringcross:m580:cover"),
-                M580CoverRingGate, RingCrossGateType, "Main", m580Pos.X, m580Pos.Y,
-                BuildCoverRingGateParameters(engineSide: true));
-            builder.AddFB(FBIdGenerator.GenerateFBId("ringcross:bx1:cover"),
-                Bx1CoverRingGate, RingCrossGateType, "Main", bx1Pos.X, bx1Pos.Y,
-                BuildCoverRingGateParameters(engineSide: false));
-
-            report.Missing.Add(
-                "[CoverBridge] RingCrossGate FBs emitted: M580 engine gate + BX1 remote gate. " +
-                "Only coverpnp_* CMDs cross M580->BX1; BX1 native reports cross BX1->M580.");
-        }
-
-        private static void AddCoverRingGateCrossConnections(SyslayBuilder builder)
-        {
-            builder.AddEventConnection($"{M580CoverRingGate}.TX", $"{Bx1CoverRingGate}.RX");
-            builder.AddDataConnection($"{M580CoverRingGate}.tx_src_id", $"{Bx1CoverRingGate}.rx_src_id");
-            builder.AddDataConnection($"{M580CoverRingGate}.tx_source_name", $"{Bx1CoverRingGate}.rx_source_name");
-            builder.AddDataConnection($"{M580CoverRingGate}.tx_dest_name", $"{Bx1CoverRingGate}.rx_dest_name");
-            builder.AddDataConnection($"{M580CoverRingGate}.tx_state", $"{Bx1CoverRingGate}.rx_state");
-
-            builder.AddEventConnection($"{Bx1CoverRingGate}.TX", $"{M580CoverRingGate}.RX");
-            builder.AddDataConnection($"{Bx1CoverRingGate}.tx_src_id", $"{M580CoverRingGate}.rx_src_id");
-            builder.AddDataConnection($"{Bx1CoverRingGate}.tx_source_name", $"{M580CoverRingGate}.rx_source_name");
-            builder.AddDataConnection($"{Bx1CoverRingGate}.tx_dest_name", $"{M580CoverRingGate}.rx_dest_name");
-            builder.AddDataConnection($"{Bx1CoverRingGate}.tx_state", $"{M580CoverRingGate}.rx_state");
         }
 
         /// <summary>
@@ -2870,8 +2781,6 @@ namespace CodeGen.Translation
 
             static bool IsM580(string name) =>
                 HcfSymbolIndex.NameBasedPlcGuess(name) == PlcAssignment.M580;
-            bool foldCoversIntoAssembly =
-                MapperConfig.FoldCoversIntoAssembly && HasBx1CoverBridgeSet(contents);
 
             // STAGE 5a: thread the Disassembly Process FB into the M580 init chain, CaS
             // station chain and stateRprtCmd ring — RIGHT AFTER Assembly_Station — exactly as
@@ -2896,7 +2805,6 @@ namespace CodeGen.Translation
                 if (IsM580(s.Name)) initChain.Add(s.Name);
             foreach (var a in contents.Actuators)
                 if (IsM580(a.Name)) initChain.Add(a.Name);
-            if (foldCoversIntoAssembly) initChain.Add(M580CoverRingGate);
             initChain.Add(AssemblyProc);
             if (threadDisassembly) initChain.Add(disassemblyFbName);   // Assembly_Station → Disassembly
             for (int i = 0; i < initChain.Count - 1; i++)
@@ -2951,170 +2859,31 @@ namespace CodeGen.Translation
             foreach (var a in contents.Actuators)
                 if (IsM580(a.Name)) m580.Add((a.Name, ResolveActuatorFBType(a)));
 
-            // CROSS-PLC COVER RING (task #69, MapperConfig.ExtendStateRingAcrossBx1):
-            // when enabled AND the BX1 cover boundary components are present, splice the
-            // BX1 cover chain INTO the Assembly ring so the engine commands the covers
-            // and reads their reports into state_table. BuildBx1Wiring lays the BX1 chain
-            // (TopCoverSenosr → CoverPNP_Hr → CoverPNP_Vr → CoverPnp_Gripper) as an OPEN
-            // chain; here we add the two cross-device hops + the close-back. The boundary
-            // endpoints match the CaSBus order ResourceWireEmitter OPENS on the per-PLC
-            // sysres, so exactly two dangling adapter hops remain for EAE to bridge:
-            //   Clamp.out → TopCoverSenosr.in   (M580 → BX1)
-            //   CoverPnp_Gripper.out → Assembly_Station.in  (BX1 → M580)
-            // and Assembly_Station.out → BearingSensor.in closes the loop on the M580.
-            const string Bx1RingHead = "TopCoverSenosr";   // BX1 first ring node (Control.xml spelling)
-            const string Bx1RingTail = "CoverPnp_Gripper"; // BX1 last ring node
-            const string M580RingTail = "Clamp";           // M580 last ring node (CaSBus tail)
-            const string M580RingHead = "BearingSensor";   // M580 first ring node (CaSBus head)
-            bool crossPlcCoverRing =
-                MapperConfig.ExtendStateRingAcrossBx1 && !MapperConfig.FoldCoversIntoAssembly &&
-                m580.Exists(c => NameEq(c.Name, M580RingTail)) &&
-                contents.Sensors.Exists(s => NameEq(s.Name, Bx1RingHead)) &&
-                contents.Actuators.Exists(a => NameEq(a.Name, Bx1RingTail));
-
-            if (crossPlcCoverRing)
+            // stateRprtCmd ring (ONE local closed ring): M580 sensors → actuators →
+            // Assembly_Station → [Disassembly], closed back to the first sensor. Covers run on a
+            // BX1-local Cover_Station — there is no cross-PLC ring. When the robot tail is rebuilt
+            // via the HandoffPlanner, its M580→M262→M580 discharge hops attach at this ring's
+            // Disassembly seam (Disassembly.stateRptCmdAdptr_out → [M262 segment] → m580 head).
+            var ring = new List<(string Name, string Type)>(m580)
             {
-                // Pin the M580 chain head to BearingSensor and tail to Clamp so the
-                // boundary hops connect the exact ports the sysres leaves dangling
-                // (only head/tail matter — the broadcast ring is order-agnostic in the
-                // middle, and the syslay/sysres middle order already differs today).
-                PinFirst(m580, M580RingHead);
-                PinLast(m580, M580RingTail);
-
-                // M580 component chain: BearingSensor → … → Clamp.
-                for (int i = 0; i < m580.Count - 1; i++)
-                    builder.AddAdapterConnection(
-                        $"{m580[i].Name}.stateRprtCmd_out",
-                        $"{m580[i + 1].Name}.stateRprtCmd_in");
-
-                // Cross M580 → BX1: Clamp → TopCoverSenosr.
-                builder.AddAdapterConnection(
-                    $"{M580RingTail}.stateRprtCmd_out",
-                    $"{Bx1RingHead}.stateRprtCmd_in");
-
-                // Cross BX1 → M580: CoverPnp_Gripper → Assembly_Station.
-                builder.AddAdapterConnection(
-                    $"{Bx1RingTail}.stateRprtCmd_out",
-                    $"{AssemblyProc}.stateRptCmdAdptr_in");
-
-                // Close back on the M580. STAGE 5a: route through Disassembly so the ring is
-                // Assembly_Station → Disassembly → BearingSensor (matches the M580 sysres);
-                // otherwise Assembly_Station → BearingSensor directly (parked Disassembly).
-                if (threadDisassembly)
-                {
-                    builder.AddAdapterConnection(
-                        $"{AssemblyProc}.stateRptCmdAdptr_out",
-                        $"{disassemblyFbName}.stateRptCmdAdptr_in");
-                    // STAGE 5b (gated): splice the M262 ejector+robot segment between Disassembly
-                    // and the M580 ring head so the Disassembly engine commands them over the ring
-                    // (2 cross-device hops M580→M262, M262→M580 — EAE bridges them like the cover
-                    // hops). Both are orphan to Feed, so the Feed RECIPE is untouched. NOTE: the
-                    // M262 sysres still auto-wires ejector+robot onto the M262 ring (ResourceWire
-                    // Emitter line ~353) — the boundary-open that prevents the plug-fan-out
-                    // double-drive is the rig-coupled follow-up (see report). Off → Disassembly
-                    // closes straight to the M580 head (Stage 5a byte-identical).
-                    bool robotTail = MapperConfig.EnableRobotTaskTail &&
-                        contents.Actuators.Exists(a => NameEq(a.Name, "Ejector")) &&
-                        contents.Actuators.Exists(a => NameEq(a.Name, "Robot"));
-                    // PartAtAssembly cross-ring (FeedAssemblyPartBridge): same seam as the robot tail
-                    // (Disassembly -> [M262 node] -> M580 head), a single synthesized SENSOR node.
-                    // COMPOSES with the robot tail now (TemplateMap.M262CrossRingSegment orders both),
-                    // so NO !robotTail guard. PartAtAssembly is emitted on M262 by the synth block above
-                    // when the flag is on, so guard on the config entry.
-                    bool partBridge = MapperConfig.FeedAssemblyPartBridge &&
-                        System.Array.Exists(MapperConfig.M262SynthSensors,
-                            s => NameEq(s.Name, "PartAtAssembly"));
-                    // UNIFIED M262 cross-ring segment — Ejector/Robot tail + PartAtAssembly sensor,
-                    // composed in one ordered list. Two cross-device hops only here (Disassembly.out ->
-                    // seg[0].in ; seg[^1].out -> M580 head.in); the intra-M262 chain seg[i]->seg[i+1] is
-                    // added in BuildFeedStationWiring (M262-local) so it is never duplicated. EAE bridges
-                    // the two cross-device ends like the proven cover hops. seg empty -> ring closes
-                    // locally (the final else). Replaces the old mutually-exclusive robotTail/partBridge
-                    // branches.
-                    var m262Seg = TemplateMap.M262CrossRingSegment(robotTail, partBridge);
-                    if (m262Seg.Count > 0)
-                    {
-                        builder.AddAdapterConnection(
-                            $"{disassemblyFbName}.stateRptCmdAdptr_out", $"{m262Seg[0]}.stateRprtCmd_in");
-                        builder.AddAdapterConnection(
-                            $"{m262Seg[^1]}.stateRprtCmd_out", $"{m580[0].Name}.stateRprtCmd_in");
-                    }
-                    else if (MapperConfig.FeedAssemblyHandshake)
-                    {
-                        // FEED -> ASSEMBLY MERGE: splice the M262 Feed ring and the M580 ring into ONE
-                        // ring via two cross-device hops (EAE bridges them like the cover hops):
-                        //   Disassembly.out  -> PartInHopper.in   (M580 -> M262, returns M580 reports)
-                        //   Feed_Station.out -> BearingSensor.in  (M262 -> M580, carries the Feed sentinel)
-                        // The Feed_Station completion sentinel {FeedStationProcessId,7} now circulates
-                        // into the M580 state_table, so Assembly's row-0 WAIT(10,7) holds until Feed
-                        // finishes. No new FB. The local close-backs (Disassembly->BearingSensor here +
-                        // Feed_Station->PartInHopper in BuildFeedStationWiring) are dropped so neither
-                        // boundary socket is double-driven; ResourceWireEmitter opens the matching
-                        // sysres ports on both PLCs.
-                        builder.AddAdapterConnection(
-                            $"{disassemblyFbName}.stateRptCmdAdptr_out",
-                            "PartInHopper.stateRprtCmd_in");
-                        builder.AddAdapterConnection(
-                            "Feed_Station.stateRptCmdAdptr_out",
-                            $"{m580[0].Name}.stateRprtCmd_in");
-                    }
-                    else
-                    {
-                        builder.AddAdapterConnection(
-                            $"{disassemblyFbName}.stateRptCmdAdptr_out",
-                            $"{m580[0].Name}.stateRprtCmd_in");
-                    }
-                }
-                else
-                {
-                    builder.AddAdapterConnection(
-                        $"{AssemblyProc}.stateRptCmdAdptr_out",
-                        $"{m580[0].Name}.stateRprtCmd_in");
-                }
-            }
-            else
+                (AssemblyProc, "Process1_Generic")
+            };
+            if (threadDisassembly)   // … → Assembly_Station → Disassembly → (close back)
+                ring.Add((disassemblyFbName, "Process1_Generic"));
+            if (ring.Count > 1)
             {
-                // Original M580-only CLOSED ring: sensors → actuators → Assembly_Station,
-                // closed back to the first sensor (byte-identical to pre-#69 behaviour).
-                var ring = new List<(string Name, string Type)>(m580)
-                {
-                    (AssemblyProc, "Process1_Generic")
-                };
-                if (threadDisassembly)   // … → Assembly_Station → Disassembly → (close back)
-                    ring.Add((disassemblyFbName, "Process1_Generic"));
-                if (foldCoversIntoAssembly)
-                    ring.Add((M580CoverRingGate, RingCrossGateType));
-                if (ring.Count > 1)
-                {
-                    for (int i = 0; i < ring.Count - 1; i++)
-                        builder.AddAdapterConnection(
-                            $"{ring[i].Name}.{StateRprtOut(ring[i].Type)}",
-                            $"{ring[i + 1].Name}.{StateRprtIn(ring[i + 1].Type)}");
+                for (int i = 0; i < ring.Count - 1; i++)
                     builder.AddAdapterConnection(
-                        $"{ring[^1].Name}.{StateRprtOut(ring[^1].Type)}",
-                        $"{ring[0].Name}.{StateRprtIn(ring[0].Type)}");
-                }
-                if (foldCoversIntoAssembly)
-                    AddCoverRingGateCrossConnections(builder);
+                        $"{ring[i].Name}.{StateRprtOut(ring[i].Type)}",
+                        $"{ring[i + 1].Name}.{StateRprtIn(ring[i + 1].Type)}");
+                builder.AddAdapterConnection(
+                    $"{ring[^1].Name}.{StateRprtOut(ring[^1].Type)}",
+                    $"{ring[0].Name}.{StateRprtIn(ring[0].Type)}");
             }
         }
 
         private static bool NameEq(string a, string b) =>
             string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
-
-        // Move the entry named <name> (if present) to index 0, preserving the rest.
-        private static void PinFirst(List<(string Name, string Type)> list, string name)
-        {
-            int idx = list.FindIndex(c => NameEq(c.Name, name));
-            if (idx > 0) { var item = list[idx]; list.RemoveAt(idx); list.Insert(0, item); }
-        }
-
-        // Move the entry named <name> (if present) to the last index, preserving the rest.
-        private static void PinLast(List<(string Name, string Type)> list, string name)
-        {
-            int idx = list.FindIndex(c => NameEq(c.Name, name));
-            if (idx >= 0 && idx != list.Count - 1) { var item = list[idx]; list.RemoveAt(idx); list.Add(item); }
-        }
 
         /// <summary>
         /// Sibling of <see cref="BuildStation2Wiring"/> for the BX1 Soft-dPAC
@@ -3149,8 +2918,6 @@ namespace CodeGen.Translation
         {
             static bool IsBx1(string name) =>
                 HcfSymbolIndex.NameBasedPlcGuess(name) == PlcAssignment.BX1;
-            bool foldCoversIntoAssembly =
-                MapperConfig.FoldCoversIntoAssembly && HasBx1CoverBridgeSet(contents);
 
             // MqttConn bring-up: self-loop INITO → CONNECT so the broker
             // connection opens as soon as the FB is initialised. Emitted only
@@ -3174,7 +2941,6 @@ namespace CodeGen.Translation
             // CoverPnp_Gripper.INITO → Cover_Station.INIT — the engine is ready once the
             // actuators it commands are initialised.
             if (MapperConfig.DeployBx1CoverEngine) initChain.Add("Cover_Station");
-            if (foldCoversIntoAssembly) initChain.Add(Bx1CoverRingGate);
             for (int i = 0; i < initChain.Count - 1; i++)
                 builder.AddEventConnection($"{initChain[i]}.INITO", $"{initChain[i + 1]}.INIT");
 
@@ -3185,40 +2951,16 @@ namespace CodeGen.Translation
             foreach (var s in contents.Sensors)    if (IsBx1(s.Name)) ring.Add((s.Name, "Sensor_Bool_CAT"));
             foreach (var a in contents.Actuators)  if (IsBx1(a.Name)) ring.Add((a.Name, "Five_State_Actuator_CAT"));
 
-            // CROSS-PLC COVER RING (task #69): when enabled (and the M580 boundary is
-            // present so BuildStation2Wiring really splices the covers in), lay the BX1
-            // covers as an OPEN chain (TopCoverSenosr → CoverPNP_Hr → CoverPNP_Vr →
-            // CoverPnp_Gripper) instead of a self-closed loop. The two dangling ends
-            // (TopCoverSenosr.in, CoverPnp_Gripper.out) are joined to the M580 ring by
-            // the cross-device hops in BuildStation2Wiring; EAE bridges them at deploy.
-            // This gate is IDENTICAL to BuildStation2Wiring's so the two halves agree.
-            bool crossPlcCoverRing =
-                MapperConfig.ExtendStateRingAcrossBx1 && !MapperConfig.FoldCoversIntoAssembly &&
-                contents.Actuators.Exists(a => NameEq(a.Name, "Clamp")) &&
-                ring.Exists(c => NameEq(c.Name, "TopCoverSenosr")) &&
-                ring.Exists(c => NameEq(c.Name, "CoverPnp_Gripper"));
-
-            if (crossPlcCoverRing)
+            // stateRprtCmd ring (BX1-LOCAL, two shapes):
+            //  • DeployBx1CoverEngine (default): splice the local Cover_Station engine into the
+            //    cover ring so it BOTH commands the covers and receives their reports —
+            //      …CoverPnp_Gripper.stateRprtCmd_out → Cover_Station.stateRptCmdAdptr_in
+            //      Cover_Station.stateRptCmdAdptr_out → TopCoverSenosr.stateRprtCmd_in
+            //    (mirrors how Assembly_Station sits in the M580 ring; ResourceWireEmitter
+            //    auto-splices the same way on the BX1 sysres). No cross-PLC ring.
+            //  • no engine: the original BX1 self-closed broadcast loop (last -> first).
+            if (MapperConfig.DeployBx1CoverEngine && ring.Count > 1)
             {
-                PinFirst(ring, "TopCoverSenosr");
-                PinLast(ring, "CoverPnp_Gripper");
-                // OPEN chain only — no last → first self-close.
-                for (int i = 0; i < ring.Count - 1; i++)
-                    builder.AddAdapterConnection(
-                        $"{ring[i].Name}.{StateRprtOut(ring[i].Type)}",
-                        $"{ring[i + 1].Name}.{StateRprtIn(ring[i + 1].Type)}");
-            }
-            else if (MapperConfig.DeployBx1CoverEngine &&
-                     !MapperConfig.ExtendStateRingAcrossBx1 && ring.Count > 1)
-            {
-                // LOCAL cover engine: splice Cover_Station into the cover ring so it both
-                // commands the covers and receives their reports. Chain the sensors+actuators,
-                // then close the loop THROUGH the engine:
-                //   …CoverPnp_Gripper.stateRprtCmd_out → Cover_Station.stateRptCmdAdptr_in
-                //   Cover_Station.stateRptCmdAdptr_out → TopCoverSenosr.stateRprtCmd_in
-                // (mirrors how Assembly_Station sits in the M580 ring). The BX1 sysres ring
-                // is auto-spliced the same way by ResourceWireEmitter (it closes the ring
-                // through any Process FB on the resource), so syslay + sysres agree.
                 for (int i = 0; i < ring.Count - 1; i++)
                     builder.AddAdapterConnection(
                         $"{ring[i].Name}.{StateRprtOut(ring[i].Type)}",
@@ -3232,18 +2974,14 @@ namespace CodeGen.Translation
             }
             else if (ring.Count > 1)
             {
-                // Original BX1 self-closed broadcast loop (last -> first), optionally
-                // closed through the folded-cover transport gate.
-                var closedRing = new List<(string Name, string Type)>(ring);
-                if (foldCoversIntoAssembly)
-                    closedRing.Add((Bx1CoverRingGate, RingCrossGateType));
-                for (int i = 0; i < closedRing.Count - 1; i++)
+                // Original BX1 self-closed broadcast loop (last -> first).
+                for (int i = 0; i < ring.Count - 1; i++)
                     builder.AddAdapterConnection(
-                        $"{closedRing[i].Name}.{StateRprtOut(closedRing[i].Type)}",
-                        $"{closedRing[i + 1].Name}.{StateRprtIn(closedRing[i + 1].Type)}");
+                        $"{ring[i].Name}.{StateRprtOut(ring[i].Type)}",
+                        $"{ring[i + 1].Name}.{StateRprtIn(ring[i + 1].Type)}");
                 builder.AddAdapterConnection(
-                    $"{closedRing[^1].Name}.{StateRprtOut(closedRing[^1].Type)}",
-                    $"{closedRing[0].Name}.{StateRprtIn(closedRing[0].Type)}");
+                    $"{ring[^1].Name}.{StateRprtOut(ring[^1].Type)}",
+                    $"{ring[0].Name}.{StateRprtIn(ring[0].Type)}");
             }
         }
 
@@ -3253,8 +2991,7 @@ namespace CodeGen.Translation
         private static readonly HashSet<string> UniversalCatTypes = new(StringComparer.Ordinal)
         {
             "Five_State_Actuator_CAT", "Sensor_Bool_CAT", "Process1_Generic",
-            "Station_CAT", "Area_CAT", "CaSAdptrTerminator", "Station", "Area",
-            RingCrossGateType
+            "Station_CAT", "Area_CAT", "CaSAdptrTerminator", "Station", "Area"
         };
 
         /// <summary>
