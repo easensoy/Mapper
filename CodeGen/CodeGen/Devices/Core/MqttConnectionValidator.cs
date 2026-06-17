@@ -86,9 +86,11 @@ namespace CodeGen.Devices.Core
                             true));
                     else if (isMqtt)
                         findings.Add(new(resLabel, name,
-                            "insecure mqtt:// — EAE returns ReturnCode 101 ('Secure URL required') UNLESS this " +
-                            "device has 'Security -> Insecure Application -> Enable' set in EAE. With it enabled, " +
-                            "this is the smallest path to ReturnCode 0 against a plain broker.",
+                            "insecure mqtt:// — the device must allow insecure app config or MQTT_CONNECTION " +
+                            "faults ReturnCode 101 ('Secure URL required'). The Mapper now AUTO-WRITES the " +
+                            "'Security -> Insecure Application -> Enable' override into the BX1 Soft-dPAC device " +
+                            "Properties (insecure MQTT mode), so BX1 reaches ReturnCode 0 on a plain broker. " +
+                            "M262/M580 firmware-gate MQTT and do not run an MQTT client regardless.",
                             false));
                     else if (!isMqtts)
                         findings.Add(new(resLabel, name,
