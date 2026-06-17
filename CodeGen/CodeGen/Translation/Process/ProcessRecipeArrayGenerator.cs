@@ -906,10 +906,17 @@ namespace CodeGen.Translation.Process
             // attempt "deadlocked" ONLY in the SIM, where no physical part ever arrived so the sensor
             // never changed/published; on the rig the real part trips it. Skipped silently if
             // BearingSensor is absent (recipe runs immediately, as before). Gate:
-            // AssemblyWaitForFeedPart (default ON); set false to run Assembly immediately.
-            if (MapperConfig.AssemblyWaitForFeedPart &&
-                TryGetComponentId(arrays, allComponents, "BearingSensor", out var matGateBsId))
-                AddWait(matGateBsId, 1);
+            // Assembly START gate — the signal the next station waits on comes from the HandoffPlanner
+            // (the single source of truth for cross-station sequencing): PartAtAssembly (the M262
+            // part-present sensor, reported across to M580 over the cross-device segment) when the
+            // cross-PLC discharge is active, else the M580-local BearingSensor. A non-negative WaitId
+            // is the explicit synth-sensor id (PartAtAssembly is not a Control.xml component); a
+            // negative WaitId means "resolve the id from the component map" (BearingSensor).
+            var asmStart = HandoffPlanner.AssemblyStart;
+            if (asmStart.WaitId >= 0)
+                AddWait(asmStart.WaitId, asmStart.WaitState);
+            else if (TryGetComponentId(arrays, allComponents, asmStart.SignalComponent, out var matGateBsId))
+                AddWait(matGateBsId, asmStart.WaitState);
 
             // Bearing: Pick -> Grip -> Place -> Release -> Home. Every CMD points at its
             // OWN WAIT (no skipped place wait). The home wait is the SINGLE stable
