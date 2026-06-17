@@ -102,16 +102,20 @@ namespace CodeGen.Mapping
         /// The ordered M262 nodes spliced into the M580 Assembly/Disassembly stateRprtCmd ring as ONE
         /// cross-PLC segment (Disassembly.out -> seg[0] -> ... -> seg[^1] -> M580 head) via two
         /// cross-device adapter hops EAE bridges (the rig-proven M580&lt;-&gt;BX1 cover-ring mechanism).
-        /// robotTail (EnableRobotTaskTail): the Disassembly Ejector + UR3e Robot tail, in the
-        /// rig-proven order (Disassembly-&gt;Ejector-&gt;Robot). Empty when the tail is off (the ring
-        /// closes locally Disassembly-&gt;head). Single source of truth for BuildFeedStationWiring +
-        /// ResourceWireEmitter (intra-M262 chain + Feed-ring exclusion). The Phase-4 HandoffPlanner
-        /// will own where the segment's ends attach to the M580 ring.
+        /// The ordered M262 cross-device segment spliced onto the M580 ring at the Disassembly seam
+        /// when the cross-PLC discharge is active (HandoffPlanner.DischargeActive). Two cross-device
+        /// adapter hops EAE bridges (Disassembly-&gt;seg[0], seg[^1]-&gt;M580 head) carry the Ejector/Robot
+        /// COMMANDS out to M262 and PartAtAssembly's REPORT back into M580 — WITHOUT stretching the
+        /// M580 bearing/shaft/clamp actuator ring. Order: Ejector, Robot (rig-proven
+        /// Disassembly-&gt;Ejector-&gt;Robot), then PartAtAssembly (its report tacks on before the return
+        /// hop). Empty when discharge is off (the ring closes locally Disassembly-&gt;head). Single
+        /// source for BuildStation2Wiring (the two cross-hops), BuildFeedStationWiring +
+        /// ResourceWireEmitter (intra-M262 chain + Feed-ring exclusion).
         /// </summary>
-        public static System.Collections.Generic.List<string> M262CrossRingSegment(bool robotTail)
+        public static System.Collections.Generic.List<string> M262CrossRingSegment(bool discharge)
         {
             var seg = new System.Collections.Generic.List<string>();
-            if (robotTail) { seg.Add("Ejector"); seg.Add("Robot"); }
+            if (discharge) { seg.Add("Ejector"); seg.Add("Robot"); seg.Add("PartAtAssembly"); }
             return seg;
         }
 
