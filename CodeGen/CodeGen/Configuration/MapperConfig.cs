@@ -130,8 +130,13 @@ namespace CodeGen.Configuration
         /// its own covers with NO M580 dependency and NO cross-PLC ring. When FALSE, any
         /// already-deployed Cover_Station instance is SWEPT from the BX1 sysres before wiring
         /// (Station2WireEmitter) so a leftover cannot be re-discovered by the ring type-scan.
+        ///
+        /// This is the INVERSE of <see cref="CodeGen.Translation.HandoffPlanner.CoversOnM580Ring"/>:
+        /// the covers are EITHER commanded by their own local engine (this TRUE) OR folded into the
+        /// M580 Assembly/Disassembly flow over the cross-PLC cover detour (CoversOnM580Ring TRUE) —
+        /// never both. Reading the planner keeps the one decision in one place (DRY).
         /// </summary>
-        public static bool DeployBx1CoverEngine = true;
+        public static bool DeployBx1CoverEngine => !CodeGen.Translation.HandoffPlanner.CoversOnM580Ring;
 
         /// <summary>
         /// STAGE 5 (2026-06-10): unpark Disassembly_Station. Default FALSE = today's proven
