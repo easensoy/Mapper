@@ -646,35 +646,23 @@ namespace CodeGen.Devices.Core
             => !string.IsNullOrEmpty(name) && byName.ContainsKey(name);
 
         /// <summary>
-        /// STAGE 5b — single source of truth (syslay hop detector):
-        /// TRUE when the generated syslay actually carries the M580→M262 robot-tail hop
-        /// (Disassembly.stateRptCmdAdptr_out → Ejector.stateRprtCmd_in). When TRUE, every
-        /// per-resource sysres ring is opened EXACTLY at the robot-tail boundary: the M262 ring
-        /// drops Ejector+Robot (they become a separate Ejector→Robot segment with open ends) and
-        /// the M580 ring omits the Disassembly→BearingSensor close-back — so no boundary adapter
-        /// plug is driven twice. Returns false (→ keep rings closed locally, today's behaviour)
-        /// when the flag is off, the syslay is missing/unreadable, or the hop is absent.
+        /// STAGE 5b — source of truth for the cross-PLC discharge tail, read DIRECTLY from
+        /// <see cref="CodeGen.Translation.HandoffPlanner.DischargeActive"/> — the SAME authority
+        /// <c>SystemLayoutInjector.BuildStation2Wiring</c> uses to emit the syslay cross-hops
+        /// (Disassembly→Ejector / PartAtAssembly→head). When TRUE every per-resource sysres ring
+        /// is opened EXACTLY at the robot-tail boundary: the M262 ring drops Ejector+Robot+
+        /// PartAtAssembly (they become a separate cross-device segment) and the M580 ring omits the
+        /// Disassembly→BearingSensor close-back — so no boundary adapter plug is driven twice.
+        ///
+        /// Previously this RE-READ the generated syslay from disk and pattern-matched the hop to
+        /// decide. That made the sysres wiring depend on file state + emit order — if the syslay on
+        /// disk lagged (stale tree / a 2nd Test Runtime), the sysres ring stayed closed while the
+        /// syslay was open: the exact syslay↔sysres divergence Codex caught. Reading the planner
+        /// removes the disk/order dependency — the sysres ring topology now follows the SAME
+        /// decision that shaped the syslay, deterministically.
         /// </summary>
         private static bool RobotTailActive(MapperConfig cfg)
-        {
-            if (cfg == null || !MapperConfig.EnableRobotTaskTail) return false;
-            try
-            {
-                var path = cfg.ActiveSyslayPath;
-                if (string.IsNullOrEmpty(path) || !File.Exists(path)) return false;
-                var doc = XDocument.Load(path);
-                var dns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
-                return doc.Descendants(dns + "Connection").Any(c =>
-                    string.Equals((string?)c.Attribute("Source"),
-                        "Disassembly.stateRptCmdAdptr_out", StringComparison.Ordinal) &&
-                    string.Equals((string?)c.Attribute("Destination"),
-                        "Ejector.stateRprtCmd_in", StringComparison.Ordinal));
-            }
-            catch
-            {
-                return false;
-            }
-        }
+            => CodeGen.Translation.HandoffPlanner.DischargeActive;
 
         // Canonical canvas layout — applied to BOTH the sysres
         // (ApplyCanonicalLayout in Emit) and the deployed syslay
