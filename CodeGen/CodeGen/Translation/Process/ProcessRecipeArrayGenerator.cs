@@ -578,37 +578,6 @@ namespace CodeGen.Translation.Process
                 }
             }
 
-            // FEED -> ASSEMBLY HANDSHAKE sentinel (gated, MapperConfig.FeedAssemblyHandshake).
-            // Publish a state-7 CMD just before END so the engine emits a ring message
-            // {src_id = FeedStationProcessId(10), state = 7} on Feed completion -- the exact mirror
-            // of Assembly's assembly_handshake_done=7. dest_name 'feed_handshake_done' matches no
-            // actuator, so it commands nothing and only stamps the ring; harmless when no one waits
-            // (Feed runs identically). Assembly's row-0 WAIT(10,7) holds on it IFF the M262 -> M580
-            // cross-PLC transport carries the message to M580 state_table[10] -- that bridge is the
-            // unproven/deferred piece (see MapperConfig.FeedAssemblyHandshake). Inserted before END:
-            // the home preamble below (disabled by default, and never fires for Feed -- it commands
-            // no Seven_State actuator) rebases every non-END NextStep, so this row stays consistent.
-            // Gate on processId (== FeedStationProcessId 10), NOT process.Name: the Feed process
-            // component's Name is NOT the literal "Feed_Station" (its STATES are "Feed_Station/..."
-            // but the process node itself is named otherwise), so a name match silently failed and
-            // the sentinel never emitted. processId is the value the engine stamps as the message
-            // src_id, so it is exactly what Assembly's WAIT(10,7) keys on — the right discriminator.
-            if (MapperConfig.FeedAssemblyHandshake &&
-                processId == MapperConfig.FeedStationProcessId)
-            {
-                int hsRow = arrays.StepType.Count;
-                arrays.StepType.Add(1);                            // CMD
-                arrays.CmdTargetName.Add("feed_handshake_done");   // sentinel: matches no actuator
-                arrays.CmdStateArr.Add(7);
-                arrays.Wait1Id.Add(0);
-                arrays.Wait1State.Add(0);
-                arrays.NextStep.Add(hsRow + 1);                    // -> the END row appended next
-                arrays.Warnings.Add(
-                    "[Recipe] Feed_Station: appended feed_handshake_done=7 sentinel " +
-                    "(FeedAssemblyHandshake). Publishes {10,7}; Assembly's WAIT(10,7) clears ONLY " +
-                    "once the M262->M580 cross-PLC bridge carries it (not yet wired).");
-            }
-
             // 5. Append the single final END row at the highest index.
             //    StepType=9 must appear ONLY here in the array.
             arrays.StepType.Add(9);
@@ -924,19 +893,6 @@ namespace CodeGen.Translation.Process
                 arrays.NextStep.Add(row + 1);
             }
 
-            // FEED -> ASSEMBLY HANDSHAKE (gated, MapperConfig.FeedAssemblyHandshake). Row 0 waits
-            // for Feed_Station's completion sentinel {FeedStationProcessId(10), 7} -- the exact
-            // mirror of Disassembly's row-0 WAIT(AssemblyProcessId, 7). UNLIKE that one this is
-            // CROSS-PLC (Feed = M262, Assembly = M580): it clears ONLY if the sentinel crosses
-            // M262 -> M580 into THIS PLC's state_table[10]. With no such bridge wired, the WAIT
-            // never clears and Assembly stalls at step 0 -- precisely the cross-PLC deadlock the
-            // material-gate note just below records. So it is gated OFF and stays off until the
-            // M262 -> M580 transport is proven and the bridge is wired. NextStep auto-chains via the
-            // AddWait helper (row+1), so every later row shifts by one; the recipe is otherwise
-            // byte-identical and the trailing assembly_handshake_done=7 sentinel is unaffected.
-            if (MapperConfig.FeedAssemblyHandshake)
-                AddWait(MapperConfig.FeedStationProcessId, 7);
-
             // MATERIAL GATE (2026-06-12 — the chosen Feed -> Assembly sequencing). Row 0 holds
             // Assembly until the bearing the Feed station delivers trips the BearingSensor, then
             // Assembly runs. BearingSensor is a Sensor_Bool_CAT on the M580 ring, so this is
@@ -950,20 +906,8 @@ namespace CodeGen.Translation.Process
             // attempt "deadlocked" ONLY in the SIM, where no physical part ever arrived so the sensor
             // never changed/published; on the rig the real part trips it. Skipped silently if
             // BearingSensor is absent (recipe runs immediately, as before). Gate:
-            // AssemblyWaitForFeedPart (default ON); set false to run Assembly immediately. Mutually
-            // exclusive with FeedAssemblyHandshake above (OFF) — both on would give two row-0 waits.
-            // FEED -> ASSEMBLY via the PartAtAssembly cross-ring (MapperConfig.FeedAssemblyPartBridge):
-            // row 0 holds on the PartAtAssembly sensor (synthesized on M262, DI08) whose state crosses
-            // M262->M580 into M580 state_table[id] — the proven M580<->BX1 cover-ring mechanism applied
-            // to M262. Assembly starts when Feed delivers the part and PartAtAssembly reports On (1).
-            // The id is the SAME one the synth FB carries (MapperConfig.M262SynthSensors), so the WAIT
-            // can never drift from the publisher. Takes precedence over the local BearingSensor
-            // material gate below (mutually exclusive — never two row-0 waits); off -> that fallback.
-            var paBridge = System.Array.Find(MapperConfig.M262SynthSensors,
-                s => string.Equals(s.Name, "PartAtAssembly", System.StringComparison.OrdinalIgnoreCase));
-            if (MapperConfig.FeedAssemblyPartBridge && paBridge.Name != null)
-                AddWait(paBridge.Id, 1);
-            else if (MapperConfig.AssemblyWaitForFeedPart &&
+            // AssemblyWaitForFeedPart (default ON); set false to run Assembly immediately.
+            if (MapperConfig.AssemblyWaitForFeedPart &&
                 TryGetComponentId(arrays, allComponents, "BearingSensor", out var matGateBsId))
                 AddWait(matGateBsId, 1);
 
@@ -1026,42 +970,6 @@ namespace CodeGen.Translation.Process
                 AddWait(shaftVrId, 0);
                 AddCmd("shaft_hr", 3);        // 8. return horizontally (Home)
                 AddWait(shaftHrId, 0);
-            }
-
-            // BX1 COVER PnP (MapperConfig.FoldCoversIntoAssembly): place the
-            // top cover. ONLY emitted when the cross-PLC cover ring is enabled — the
-            // covers live on the BX1 Soft-dPAC, so without the M580↔BX1 ring bridge the
-            // engine's CMD would never reach them and the WAIT would stall the whole
-            // Assembly cycle forever. Gated together with the transport so flag-off keeps
-            // today's working bearing+shaft recipe byte-identical. Skipped silently if any
-            // cover id is missing (fixture without covers) so it can never stall on a
-            // missing id. Five_State convention: Work = cmd1→WAIT AtWork(2),
-            // Home = cmd3→WAIT AtHomeInit(0). Sequence mirrors the shaft transfer
-            // (down→grip→up→advance→down→release→up→return) per the Control.xml
-            // Assembly cover states (Cover_PnP_GoDown_Pick → GripCover →
-            // Cover_PnP_Go_Up → Cover_Pnp_advanced → Cover_PnP_Down → release →
-            // Cover_PnP_Up → Cover_PnP_returned).
-            if (MapperConfig.ExtendStateRingAcrossBx1 &&
-                TryGetComponentId(arrays, allComponents, "coverpnp_vr", out var coverVrId) &&
-                TryGetComponentId(arrays, allComponents, "coverpnp_hr", out var coverHrId) &&
-                TryGetComponentId(arrays, allComponents, "coverpnp_gripper", out var coverGripperId))
-            {
-                AddCmd("coverpnp_vr", 1);        // 1. lower (Work) onto the cover
-                AddWait(coverVrId, 2);
-                AddCmd("coverpnp_gripper", 1);   // 2. grip / pick the cover
-                AddWait(coverGripperId, 2);
-                AddCmd("coverpnp_vr", 3);         // 3. lift the cover up (Home)
-                AddWait(coverVrId, 0);
-                AddCmd("coverpnp_hr", 1);         // 4. advance horizontally (Work) over the assembly
-                AddWait(coverHrId, 2);
-                AddCmd("coverpnp_vr", 1);         // 5. lower (Work) to place the cover
-                AddWait(coverVrId, 2);
-                AddCmd("coverpnp_gripper", 3);    // 6. release the cover
-                AddWait(coverGripperId, 0);
-                AddCmd("coverpnp_vr", 3);         // 7. lift away (Home)
-                AddWait(coverVrId, 0);
-                AddCmd("coverpnp_hr", 3);         // 8. return horizontally (Home)
-                AddWait(coverHrId, 0);
             }
 
             // Release the clamp at the very end. TWIN-CORRECTION (Stage 5a): the twin does
@@ -1188,24 +1096,10 @@ namespace CodeGen.Translation.Process
             const int HandshakeSentinel = 7;
             AddWait(MapperConfig.AssemblyProcessId, HandshakeSentinel);
 
-            // COVERS OFF (reverse of the Assembly cover place). GATED on ExtendStateRingAcrossBx1
-            // (2026-06-16) — MIRRORS the same gate on the Assembly cover-place block (~L1044). With
-            // the cross-PLC cover ring retired (ExtendStateRingAcrossBx1=false), the covers are
-            // commanded LOCALLY by the BX1 Cover_Station; the M580 Disassembly cannot reach the BX1
-            // covers without a cross-PLC ring and would STALL forever on the first cover WAIT, so it
-            // must NOT command them. (Before this gate the Disassembly covers were unconditional —
-            // the last cross-PLC dependency keeping M580 from running standalone.)
-            if (MapperConfig.ExtendStateRingAcrossBx1)
-            {
-                AddCmd("coverpnp_hr", 1);      AddWait(coverHrId, 2);
-                AddCmd("coverpnp_vr", 1);      AddWait(coverVrId, 2);
-                AddCmd("coverpnp_gripper", 1); AddWait(coverGripperId, 2);
-                AddCmd("coverpnp_vr", 3);      AddWait(coverVrId, 0);
-                AddCmd("coverpnp_hr", 3);      AddWait(coverHrId, 0);
-                AddCmd("coverpnp_vr", 1);      AddWait(coverVrId, 2);
-                AddCmd("coverpnp_gripper", 3); AddWait(coverGripperId, 0);
-                AddCmd("coverpnp_vr", 3);      AddWait(coverVrId, 0);
-            }
+            // Covers run on the BX1-local Cover_Station, NOT commanded by Disassembly (M580 cannot
+            // reach the BX1 covers without a cross-PLC ring). The cover ids resolved in the `ok`
+            // precondition above stay (so cover-less fixtures still park) but are intentionally
+            // unused here — 3 benign unused-variable warnings.
 
             // SHAFT OUT (reverse).
             AddCmd("shaft_hr", 1);      AddWait(shaftHrId, 2);
@@ -1306,8 +1200,8 @@ namespace CodeGen.Translation.Process
         /// <summary>
         /// Cover pick/place recipe for the LOCAL BX1 Cover_Station engine
         /// (MapperConfig.DeployBx1CoverEngine). Mirrors ApplyAssemblyRuntimeRecipe but
-        /// targets Cover_Station and is INDEPENDENT of ExtendStateRingAcrossBx1 (the covers
-        /// are commanded locally on BX1, not cross-PLC). Five_State convention: Work =
+        /// targets Cover_Station; the covers are commanded locally on BX1, not cross-PLC.
+        /// Five_State convention: Work =
         /// cmd1 → WAIT AtWork(2); Home = cmd3 → WAIT AtHomeInit(0). EVERY wait is the
         /// commanded actuator's OWN settled state — never a cross-component or sensor wait —
         /// so it can never stall on a never-closing sensor. Skipped silently if cover ids are
