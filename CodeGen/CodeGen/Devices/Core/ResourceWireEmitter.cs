@@ -365,6 +365,11 @@ namespace CodeGen.Devices.Core
                         (string.Equals(s, "Ejector",        StringComparison.OrdinalIgnoreCase) ||
                          string.Equals(s, "Robot",          StringComparison.OrdinalIgnoreCase) ||
                          string.Equals(s, "PartAtAssembly", StringComparison.OrdinalIgnoreCase))))
+                    // COVER DETOUR: TopCoverSenosr stays OFF the ring (its id 3 would collide with
+                    // PartAtAssembly on the M580 state_table once the covers join the M580 ring; the
+                    // recipe never waits on it). It still INITs via the fan-out above. BX1-only effect.
+                    .Where(s => !(CodeGen.Translation.HandoffPlanner.CoversOnM580Ring &&
+                        string.Equals(s, "TopCoverSenosr", StringComparison.OrdinalIgnoreCase)))
                     .ToList();
                 // actNames — actuators that expose the stationAdptr adapter
                 // (still excludes Seven_State, which has no stationAdptr); used
@@ -535,8 +540,21 @@ namespace CodeGen.Devices.Core
                         // Close the ring THROUGH every process in turn:
                         //   compN → P0 → P1 → … → comp0
                         // so each Process FB reads the whole component state ring.
-                        adapterWires.Add(new Wire($"{ringNames[^1]}.stateRprtCmd_out",
-                            $"{processNames[0]}.stateRptCmdAdptr_in"));
+                        // COVER DETOUR boundary-open (M580): when the BX1 covers are spliced onto the
+                        // M580 ring, Clamp.out (ringNames[^1]) crosses to the first cover and Assembly.in
+                        // (processNames[0]) arrives from the last cover — OMIT the local compN→P0 close so
+                        // the boundary plug is not double-driven (EAE bridges the open ends via the syslay
+                        // cover hops). Distinct seam from the robot-tail open below, so the two compose.
+                        bool openCoverSeam = CodeGen.Translation.HandoffPlanner.CoversOnM580Ring &&
+                            string.Equals(tag, "M580", StringComparison.Ordinal);
+                        if (openCoverSeam)
+                            report.Missing.Add(
+                                $"[{tag}] cover detour: left {ringNames[^1]}.stateRprtCmd_out OPEN " +
+                                $"(crosses to BX1 covers) and {processNames[0]}.stateRptCmdAdptr_in OPEN " +
+                                "(arrives from BX1 CoverPnp_Gripper) — EAE bridges via syslay");
+                        else
+                            adapterWires.Add(new Wire($"{ringNames[^1]}.stateRprtCmd_out",
+                                $"{processNames[0]}.stateRptCmdAdptr_in"));
                         for (int i = 0; i < processNames.Count - 1; i++)
                             adapterWires.Add(new Wire($"{processNames[i]}.stateRptCmdAdptr_out",
                                 $"{processNames[i + 1]}.stateRptCmdAdptr_in"));
@@ -556,9 +574,21 @@ namespace CodeGen.Devices.Core
                     }
                     else if (ringNames.Count > 1)
                     {
-                        // BX1: self-close the broadcast loop (last → first).
-                        adapterWires.Add(new Wire($"{ringNames[^1]}.stateRprtCmd_out",
-                            $"{ringNames[0]}.stateRprtCmd_in"));
+                        // COVER DETOUR boundary-open (BX1): when the covers are commanded by the M580
+                        // ring, the BX1 cover chain (CoverPNP_Hr→Vr→Gripper) is OPEN at both ends —
+                        // Hr.in arrives from M580 Clamp and Gripper.out crosses to M580 Assembly (EAE
+                        // bridges via the syslay cover hops). OMIT the BX1 self-close so the boundary
+                        // plug is not double-driven. Off → BX1 self-closes the broadcast loop locally.
+                        bool openCoverChain = CodeGen.Translation.HandoffPlanner.CoversOnM580Ring &&
+                            string.Equals(tag, "BX1", StringComparison.Ordinal);
+                        if (openCoverChain)
+                            report.Missing.Add(
+                                $"[{tag}] cover detour: cover chain {ringNames[0]}…{ringNames[^1]} ends OPEN " +
+                                "(in from M580 Clamp, out to M580 Assembly) — EAE bridges via syslay");
+                        else
+                            // BX1: self-close the broadcast loop (last → first).
+                            adapterWires.Add(new Wire($"{ringNames[^1]}.stateRprtCmd_out",
+                                $"{ringNames[0]}.stateRprtCmd_in"));
                     }
                 }
 
