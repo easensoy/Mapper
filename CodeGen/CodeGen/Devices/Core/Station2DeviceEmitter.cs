@@ -281,7 +281,11 @@ namespace CodeGen.Devices.Core
                 equipmentJsonName: "Equipment_HMIB1X_1.json",
                 equipmentBuilder: () => BuildBX1HmiB1XEquipmentJson(
                     BX1SysdevId, solutionId, cfg.BX1TargetIp, cfg.BX1HostIp),
-                deployPluginPropertiesXml: BuildSoftDpacDeployPluginPropertiesXml(),
+                // BX1 is the only PLC that runs MQTT; with a plain mqtt:// broker the device must
+                // ALLOW insecure application config or MQTT_CONNECTION faults RC101. Enable it here
+                // (== the EAE GUI "Security -> Insecure Application -> Enable") in insecure MQTT mode.
+                deployPluginPropertiesXml: BuildSoftDpacDeployPluginPropertiesXml(
+                    cfg.MqttPublishEnabled && !cfg.MqttSecureTls),
                 simulationBindingDeployPort: 51501,
                 simulationBindingArchivePort: 51498);
 
@@ -558,8 +562,19 @@ namespace CodeGen.Devices.Core
         /// SetActiveProjectAsABootProject property the reference's BX1 uses.
         /// Required for the BX1 softdpac container to flip the deployed
         /// project into "boot" mode on next container start.
+        ///
+        /// When <paramref name="enableInsecureApp"/> is true it also emits the
+        /// <c>Configuration → SecurityApp → InsecureApplication → Enable=True</c> override —
+        /// the SAME device-property the EAE GUI writes under "Security → Insecure Application →
+        /// Enable" (verified byte-for-byte against the reference TrainingIIoT Properties.xml).
+        /// WITHOUT it, EAE's MQTT runtime is secure-by-default and a plain <c>mqtt://</c>
+        /// MQTT_CONNECTION FAULTS with ReturnCode 101 ("Secure URL required for secure
+        /// application"); WITH it, EAE generates <c>Configuration.SecurityApp.InsecureApplication.
+        /// Enable = "true"</c> in the deployed runtime.config and the plain connection reaches
+        /// ReturnCode 0. Gated on insecure MQTT mode (publish on + not <c>MqttSecureTls</c>);
+        /// secure mode (mqtts:// + real TLS) needs NO insecure override, so it is omitted there.
         /// </summary>
-        static string BuildSoftDpacDeployPluginPropertiesXml() =>
+        static string BuildSoftDpacDeployPluginPropertiesXml(bool enableInsecureApp) =>
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
             "<SystemDeviceProperties xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns=\"http://www.nxtControl.com/DeviceProperties\">\r\n" +
             "  <ComplexProperty Name=\"DeployPlugin\" Expanded=\"true\">\r\n" +
@@ -573,6 +588,13 @@ namespace CodeGen.Devices.Core
             "    <GroupProperty Name=\"Boot\" Expanded=\"true\" Enabled=\"true\">\r\n" +
             "      <Property Name=\"BootMode\" Value=\"Run\" IsPassword=\"false\" />\r\n" +
             "    </GroupProperty>\r\n" +
+            (enableInsecureApp
+                ? "    <GroupProperty Name=\"SecurityApp\" Expanded=\"true\" Enabled=\"true\">\r\n" +
+                  "      <GroupProperty Name=\"InsecureApplication\" Expanded=\"true\" Enabled=\"true\">\r\n" +
+                  "        <Property Name=\"Enable\" Value=\"True\" IsPassword=\"false\" />\r\n" +
+                  "      </GroupProperty>\r\n" +
+                  "    </GroupProperty>\r\n"
+                : string.Empty) +
             "  </GroupProperty>\r\n" +
             "</SystemDeviceProperties>";
 
