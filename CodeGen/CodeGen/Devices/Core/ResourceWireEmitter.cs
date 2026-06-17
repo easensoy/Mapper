@@ -81,10 +81,6 @@ namespace CodeGen.Devices.Core
             "CoverPNP_Hr", "CoverPNP_Vr", "CoverPnp_Gripper",
         };
 
-        private const string RingCrossGateType = "RingCrossGate";
-        private const string M580CoverRingGate = "M580_CoverRingGate";
-        private const string Bx1CoverRingGate = "BX1_CoverRingGate";
-
         private static readonly HashSet<string> SensorCatTypes =
             new(StringComparer.Ordinal) { "Sensor_Bool_CAT" };
         private static readonly HashSet<string> ActuatorCatTypes =
@@ -358,19 +354,6 @@ namespace CodeGen.Devices.Core
                 // (no Ejector/Robot there). They stay in initNames so they are still INIT'd.
                 // Off → ringNames byte-identical.
                 bool robotTail = RobotTailActive(cfg);
-                // FEED -> ASSEMBLY MERGE: when on, the M262 Feed ring and the M580 ring are spliced
-                // into one ring (BuildStation2Wiring adds Disassembly.out->PartInHopper.in +
-                // Feed_Station.out->BearingSensor.in). BOTH this M580 and this M262 sysres ring then
-                // leave their process close-back OPEN at the boundary (handled below) so EAE bridges
-                // the open ends instead of double-driving them.
-                bool feedMerge = MapperConfig.FeedAssemblyHandshake && !robotTail;
-                // PARTATASSEMBLY CROSS-RING (FeedAssemblyPartBridge): PartAtAssembly is a synthesized
-                // M262 sensor spliced into the M580 ring (Disassembly -> PartAtAssembly -> BearingSensor
-                // via two cross-device hops EAE bridges). It must NOT join the M262 Feed ring — there it
-                // would report {id 5} into M262's table (colliding with Checker) AND be driven twice.
-                // Detected from the syslay hop actually emitted (single source of truth). No-op on
-                // M580/BX1 (no PartAtAssembly there).
-                bool partBridge = PartBridgeActive(cfg);
                 // ringNames — components that expose the stateRprtCmd adapter
                 // (now INCLUDES Seven_State/Bearing_PnP); used for the report ring.
                 var ringNames = orderedComps.Where(HasRingAdapter).Select(Nm)
@@ -378,8 +361,6 @@ namespace CodeGen.Devices.Core
                     .Where(s => !(robotTail &&
                         (string.Equals(s, "Ejector", StringComparison.OrdinalIgnoreCase) ||
                          string.Equals(s, "Robot",   StringComparison.OrdinalIgnoreCase))))
-                    .Where(s => !(partBridge &&
-                        string.Equals(s, "PartAtAssembly", StringComparison.OrdinalIgnoreCase)))
                     .ToList();
                 // actNames — actuators that expose the stationAdptr adapter
                 // (still excludes Seven_State, which has no stationAdptr); used
@@ -421,13 +402,6 @@ namespace CodeGen.Devices.Core
                 if (byName.ContainsKey("Disassembly") && BypassParkedM580Disassembly("Disassembly"))
                     report.Missing.Add("[M580 RES0] Disassembly parked and bypassed in init/CaS/stateRprtCmd wiring");
                 bool haveProcess = processNames.Count > 0;
-                string? ringGateName = null;
-                if (string.Equals(tag, "M580", StringComparison.Ordinal) &&
-                    byName.ContainsKey(M580CoverRingGate))
-                    ringGateName = M580CoverRingGate;
-                else if (string.Equals(tag, "BX1", StringComparison.Ordinal) &&
-                         byName.ContainsKey(Bx1CoverRingGate))
-                    ringGateName = Bx1CoverRingGate;
 
                 // Init chain: FB1.INITO→[Area]→[Station]→components…→[Process],
                 // wiring INITO(N)→INIT(N+1) so every node is reached. Anchors
@@ -448,12 +422,7 @@ namespace CodeGen.Devices.Core
                 var robotTailInit = RobotTailActive(cfg)
                     ? new HashSet<string>(StringComparer.Ordinal) { "Ejector", "Robot" }
                     : new HashSet<string>(StringComparer.Ordinal);
-                // PartAtAssembly is a cross-PLC node (its report crosses to M580); init it LAST too,
-                // after Feed -> Feed_Station, so its cross-PLC adapter bring-up never sits in the
-                // critical path to Feed_Station.INIT (same reasoning as the robot tail). M262-only.
-                if (partBridge) robotTailInit.Add("PartAtAssembly");
                 initChain.AddRange(initNames.Where(n => !robotTailInit.Contains(n)));
-                if (ringGateName != null) initChain.Add(ringGateName);
                 initChain.AddRange(processNames);   // every process is INIT-chained (before the tail)
                 initChain.AddRange(initNames.Where(n => robotTailInit.Contains(n)));  // tail inits last
                 for (int i = 0; i < initChain.Count - 1; i++)
@@ -552,25 +521,6 @@ namespace CodeGen.Devices.Core
                 // directly comp(last)→comp(0) so the components still gossip
                 // state among themselves. Process1_Generic uses the *Adptr
                 // suffix; Sensor/Actuator CATs use stateRprtCmd_*.
-                // CROSS-PLC COVER RING (task #69, MapperConfig.ExtendStateRingAcrossBx1):
-                // when the syslay carries the M580→BX1 cross-hop, this resource's ring is
-                // a PORTION of one ring spanning both PLCs, so it must be left OPEN at the
-                // device boundary — otherwise the boundary adapter socket would be driven
-                // by both this sysres close AND the EAE-bridged cross-hop. We gate on the
-                // cross-hop ACTUALLY present in the generated syslay (single source of
-                // truth) so the sysres opens iff the syslay crossed — never half-and-half.
-                //   M580: drop the Clamp→Assembly_Station close (Clamp.out crosses to BX1).
-                //   BX1 : drop the CoverPnp_Gripper→TopCoverSenosr self-close (it crosses
-                //         to Assembly_Station). The far ends are joined by the syslay hops.
-                bool crossRingActive = CrossPlcCoverRingActive(cfg);
-                bool openM580Boundary = crossRingActive && haveProcess &&
-                    string.Equals(tag, "M580", StringComparison.Ordinal) &&
-                    ringNames.Count > 0 &&
-                    string.Equals(ringNames[^1], "Clamp", StringComparison.OrdinalIgnoreCase);
-                bool openBx1Boundary = crossRingActive && !haveProcess &&
-                    string.Equals(tag, "BX1", StringComparison.Ordinal) &&
-                    ringNames.Count > 1;
-
                 if (ringNames.Count > 0)
                 {
                     for (int i = 0; i < ringNames.Count - 1; i++)
@@ -581,75 +531,30 @@ namespace CodeGen.Devices.Core
                         // Close the ring THROUGH every process in turn:
                         //   compN → P0 → P1 → … → comp0
                         // so each Process FB reads the whole component state ring.
-                        // Under the cross-PLC cover ring, the compN(=Clamp)→Process close
-                        // is OMITTED — Clamp.out crosses to BX1 (TopCoverSenosr) and the
-                        // process's in-edge arrives from BX1 (CoverPnp_Gripper) via the
-                        // syslay hop EAE bridges. The Process→comp0 close-back stays local.
-                        if (!openM580Boundary)
-                            adapterWires.Add(new Wire($"{ringNames[^1]}.stateRprtCmd_out",
-                                $"{processNames[0]}.stateRptCmdAdptr_in"));
-                        else
-                            report.Missing.Add(
-                                $"[{tag}] cross-PLC cover ring: left {ringNames[^1]}.stateRprtCmd_out " +
-                                $"OPEN (crosses to BX1 TopCoverSenosr) and {processNames[0]}" +
-                                ".stateRptCmdAdptr_in OPEN (arrives from BX1 CoverPnp_Gripper) — EAE bridges via syslay");
+                        adapterWires.Add(new Wire($"{ringNames[^1]}.stateRprtCmd_out",
+                            $"{processNames[0]}.stateRptCmdAdptr_in"));
                         for (int i = 0; i < processNames.Count - 1; i++)
                             adapterWires.Add(new Wire($"{processNames[i]}.stateRptCmdAdptr_out",
                                 $"{processNames[i + 1]}.stateRptCmdAdptr_in"));
-                        if (ringGateName != null)
-                        {
-                            adapterWires.Add(new Wire($"{processNames[^1]}.stateRptCmdAdptr_out",
-                                $"{ringGateName}.stateRprtCmd_in"));
-                            adapterWires.Add(new Wire($"{ringGateName}.stateRprtCmd_out",
-                                $"{ringNames[0]}.stateRprtCmd_in"));
-                        }
+                        // ROBOT-TAIL boundary-open (EnableRobotTaskTail): when the M580 Disassembly
+                        // tail crosses to the M262 ejector/robot, OMIT the local close-back so the
+                        // boundary socket is not double-driven (EAE bridges the open ends via the
+                        // syslay cross-hops). Off (robotTail false) -> the ring closes locally.
+                        bool openBoundary = robotTail &&
+                            string.Equals(tag, "M580", StringComparison.Ordinal);
+                        if (openBoundary)
+                            report.Missing.Add(
+                                $"[{tag}] cross-PLC ring: left {processNames[^1]}.stateRptCmdAdptr_out OPEN " +
+                                $"and {ringNames[0]}.stateRprtCmd_in OPEN — EAE bridges via syslay cross-hops");
                         else
-                        {
-                            // CROSS-PLC RING boundary-open: when a cross-PLC hop leaves this resource's
-                            // ring open at the boundary, OMIT the local close-back so the boundary
-                            // socket is not double-driven (EAE bridges the open ends via the syslay
-                            // cross-hops). Robot tail: M580 Disassembly.out crosses to M262 Ejector.
-                            // Feed merge: BOTH rings open — M580 Disassembly.out crosses to M262
-                            // PartInHopper AND M262 Feed_Station.out crosses to M580 BearingSensor.
-                            bool openBoundary =
-                                (robotTail && string.Equals(tag, "M580", StringComparison.Ordinal)) ||
-                                (feedMerge && (string.Equals(tag, "M580", StringComparison.Ordinal) ||
-                                               string.Equals(tag, "M262", StringComparison.Ordinal))) ||
-                                // PartAtAssembly cross-ring: M580 omits the Disassembly->BearingSensor
-                                // close-back (Disassembly.out crosses to M262 PartAtAssembly, and the
-                                // M580 head arrives from PartAtAssembly). M262 needs no open here —
-                                // PartAtAssembly is excluded from the Feed ring above, so the Feed
-                                // close-back is untouched and the Feed ring stays closed + local.
-                                (partBridge && string.Equals(tag, "M580", StringComparison.Ordinal));
-                            if (openBoundary)
-                                report.Missing.Add(
-                                    $"[{tag}] cross-PLC ring: left {processNames[^1]}.stateRptCmdAdptr_out OPEN " +
-                                    $"and {ringNames[0]}.stateRprtCmd_in OPEN — EAE bridges via syslay cross-hops");
-                            else
-                                adapterWires.Add(new Wire($"{processNames[^1]}.stateRptCmdAdptr_out",
-                                    $"{ringNames[0]}.stateRprtCmd_in"));
-                        }
+                            adapterWires.Add(new Wire($"{processNames[^1]}.stateRptCmdAdptr_out",
+                                $"{ringNames[0]}.stateRprtCmd_in"));
                     }
                     else if (ringNames.Count > 1)
                     {
-                        // BX1: self-close UNLESS the cross-PLC cover ring is active, in
-                        // which case the chain is OPEN (last→first omitted) — the two ends
-                        // join the M580 ring via the syslay cross-hops EAE bridges.
-                        if (ringGateName != null)
-                        {
-                            adapterWires.Add(new Wire($"{ringNames[^1]}.stateRprtCmd_out",
-                                $"{ringGateName}.stateRprtCmd_in"));
-                            adapterWires.Add(new Wire($"{ringGateName}.stateRprtCmd_out",
-                                $"{ringNames[0]}.stateRprtCmd_in"));
-                        }
-                        else if (!openBx1Boundary)
-                            adapterWires.Add(new Wire($"{ringNames[^1]}.stateRprtCmd_out",
-                                $"{ringNames[0]}.stateRprtCmd_in"));
-                        else
-                            report.Missing.Add(
-                                $"[{tag}] cross-PLC cover ring: left {ringNames[^1]}.stateRprtCmd_out " +
-                                $"OPEN (crosses to M580 Assembly_Station) and {ringNames[0]}" +
-                                ".stateRprtCmd_in OPEN (arrives from M580 Clamp) — EAE bridges via syslay");
+                        // BX1: self-close the broadcast loop (last → first).
+                        adapterWires.Add(new Wire($"{ringNames[^1]}.stateRprtCmd_out",
+                            $"{ringNames[0]}.stateRprtCmd_in"));
                     }
                 }
 
@@ -659,7 +564,7 @@ namespace CodeGen.Devices.Core
                 // M580 BearingSensor) — EAE bridges both via the syslay cross-hops. Filtered to nodes
                 // actually on THIS resource, so it is a no-op on M580/BX1 and when both flags are off.
                 // Composes Ejector->Robot (tail) with Robot->PartAtAssembly (bridge) into one chain.
-                var crossSeg = TemplateMap.M262CrossRingSegment(robotTail, partBridge)
+                var crossSeg = TemplateMap.M262CrossRingSegment(robotTail)
                     .Where(byName.ContainsKey).ToList();
                 for (int i = 0; i < crossSeg.Count - 1; i++)
                     adapterWires.Add(new Wire(
@@ -737,40 +642,7 @@ namespace CodeGen.Devices.Core
             => !string.IsNullOrEmpty(name) && byName.ContainsKey(name);
 
         /// <summary>
-        /// True when the active generated syslay actually carries the M580→BX1
-        /// cross-PLC cover-ring hop (Clamp.stateRprtCmd_out → TopCoverSenosr
-        /// .stateRprtCmd_in). This is the single source of truth that keeps the
-        /// per-resource sysres ring opening EXACTLY when SystemLayoutInjector
-        /// spliced the covers in — so the boundary adapter sockets are never both
-        /// closed locally AND bridged (which would double-drive them), nor left
-        /// dangling on both sides. Returns false (→ keep the local ring CLOSED,
-        /// i.e. today's working two-ring behaviour) when the flag is off, the
-        /// syslay is missing/unreadable, or the hop is absent.
-        /// </summary>
-        private static bool CrossPlcCoverRingActive(MapperConfig cfg)
-        {
-            if (cfg == null || !MapperConfig.ExtendStateRingAcrossBx1) return false;
-            try
-            {
-                var path = cfg.ActiveSyslayPath;
-                if (string.IsNullOrEmpty(path) || !File.Exists(path)) return false;
-                var doc = XDocument.Load(path);
-                var dns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
-                return doc.Descendants(dns + "Connection").Any(c =>
-                    string.Equals((string?)c.Attribute("Source"),
-                        "Clamp.stateRprtCmd_out", StringComparison.Ordinal) &&
-                    string.Equals((string?)c.Attribute("Destination"),
-                        "TopCoverSenosr.stateRprtCmd_in", StringComparison.Ordinal));
-            }
-            catch
-            {
-                // Any read/parse failure → safest is to keep the ring CLOSED locally.
-                return false;
-            }
-        }
-
-        /// <summary>
-        /// STAGE 5b — single source of truth (mirrors <see cref="CrossPlcCoverRingActive"/>):
+        /// STAGE 5b — single source of truth (syslay hop detector):
         /// TRUE when the generated syslay actually carries the M580→M262 robot-tail hop
         /// (Disassembly.stateRptCmdAdptr_out → Ejector.stateRprtCmd_in). When TRUE, every
         /// per-resource sysres ring is opened EXACTLY at the robot-tail boundary: the M262 ring
@@ -793,46 +665,6 @@ namespace CodeGen.Devices.Core
                         "Disassembly.stateRptCmdAdptr_out", StringComparison.Ordinal) &&
                     string.Equals((string?)c.Attribute("Destination"),
                         "Ejector.stateRprtCmd_in", StringComparison.Ordinal));
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        /// <summary>
-        /// Single source of truth (mirrors <see cref="RobotTailActive"/>) for the PartAtAssembly
-        /// cross-ring (<see cref="MapperConfig.FeedAssemblyPartBridge"/>): TRUE when the generated
-        /// syslay actually carries the M580->M262 hop
-        /// (Disassembly.stateRptCmdAdptr_out -> PartAtAssembly.stateRprtCmd_in). When TRUE, the M262
-        /// sysres keeps PartAtAssembly OUT of the Feed ring (so it never reports into M262's table)
-        /// and the M580 sysres omits the Disassembly->BearingSensor close-back — EAE bridges the two
-        /// cross-device hops. Returns false (rings closed locally) when the flag is off, the syslay is
-        /// missing/unreadable, or the hop is absent.
-        /// </summary>
-        private static bool PartBridgeActive(MapperConfig cfg)
-        {
-            if (cfg == null || !MapperConfig.FeedAssemblyPartBridge) return false;
-            try
-            {
-                var path = cfg.ActiveSyslayPath;
-                if (string.IsNullOrEmpty(path) || !File.Exists(path)) return false;
-                var doc = XDocument.Load(path);
-                var dns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
-                // Detect the segment TAIL hop (PartAtAssembly -> M580 head BearingSensor), which is
-                // present whenever PartAtAssembly is in the M262 cross-ring segment — REGARDLESS of
-                // whether the robot tail (Ejector/Robot) precedes it. PartAtAssembly is ALWAYS added
-                // last in TemplateMap.M262CrossRingSegment, so it is always the tail.
-                // BUG THIS FIXES: keying on the HEAD hop (Disassembly -> PartAtAssembly) was correct
-                // only when the bridge ran alone; with the robot tail ALSO on, the head becomes
-                // Disassembly -> Ejector, so the detector falsely returned false and the M262 sysres
-                // left PartAtAssembly on the Feed ring (id-5 collision with Checker -> Feeder stalled)
-                // while the syslay still crossed it to M580 (double-drive). The tail hop is invariant.
-                return doc.Descendants(dns + "Connection").Any(c =>
-                    string.Equals((string?)c.Attribute("Source"),
-                        "PartAtAssembly.stateRprtCmd_out", StringComparison.Ordinal) &&
-                    string.Equals((string?)c.Attribute("Destination"),
-                        "BearingSensor.stateRprtCmd_in", StringComparison.Ordinal));
             }
             catch
             {
