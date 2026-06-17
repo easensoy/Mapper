@@ -79,6 +79,65 @@ namespace CodeGen.Devices.Core
         }
 
         /// <summary>
+        /// Enforces the "exactly one .sysres per device folder" invariant: for every sysdev under
+        /// <paramref name="eaeRoot"/>/IEC61499/System, deletes any <c>.sysres</c> in the sysdev's
+        /// device folder (and its stem-named sister folder) whose stem is NOT one of the sysdev's
+        /// active <c>&lt;Resource ID&gt;</c> values.
+        ///
+        /// Why this exists: when a device is (re)created its sysres is first written under a default
+        /// id, then the <c>.hcf</c> id-realignment switches the sysdev's active Resource ID to the
+        /// <c>.hcf</c> ResourceId (e.g. BX1 default → <c>78E9…</c>) and writes the live resource
+        /// under the new id. The early per-device sweep in <c>Station2DeviceEmitter.EmitOnePlc</c>
+        /// runs BEFORE that realignment, so the old default-named shell (an empty-FBNetwork
+        /// <c>RES0</c> sysres) can linger as an orphan — which EAE then carries in its build cache
+        /// (<c>obj/System.hash</c>). This runs LATE (after every device/hcf/mirror/wire step) so the
+        /// folder ends with exactly the live resource. Idempotent and conservative: a sysdev that
+        /// declares no active resource id (malformed) is skipped, so nothing is ever deleted blind.
+        /// EAE refreshes <c>obj/System.hash</c> + <c>.obsolete</c> from the actual files on its next
+        /// Build, so this sweep only needs to remove the stray <c>.sysres</c>. Returns the count removed.
+        /// </summary>
+        public static int SweepOrphanSysres(string? eaeRoot, Action<string>? log = null)
+        {
+            if (string.IsNullOrEmpty(eaeRoot)) return 0;
+            var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
+            if (!Directory.Exists(systemDir)) return 0;
+
+            int removed = 0;
+            foreach (var sysdev in Directory.EnumerateFiles(systemDir, "*.sysdev", SearchOption.AllDirectories))
+            {
+                var activeIds = ReadActiveResourceIds(sysdev);
+                if (activeIds.Count == 0) continue;   // can't distinguish active from orphan -> leave alone
+
+                var folder = Path.Combine(
+                    Path.GetDirectoryName(sysdev)!, Path.GetFileNameWithoutExtension(sysdev));
+                if (!Directory.Exists(folder)) continue;
+
+                foreach (var sysres in Directory
+                             .EnumerateFiles(folder, "*.sysres", SearchOption.TopDirectoryOnly).ToList())
+                {
+                    var stem = Path.GetFileNameWithoutExtension(sysres);
+                    if (activeIds.Contains(stem)) continue;   // the live resource — keep
+
+                    try
+                    {
+                        File.Delete(sysres);
+                        removed++;
+                        var sister = Path.Combine(folder, stem);
+                        if (Directory.Exists(sister)) Directory.Delete(sister, recursive: true);
+                        log?.Invoke($"[Sysres][Sweep] removed orphan {Path.GetFileName(sysres)} from " +
+                            $"{Path.GetFileName(folder)} (not the sysdev's active resource).");
+                    }
+                    catch (Exception ex)
+                    {
+                        log?.Invoke($"[Sysres][Sweep][Warn] could not remove orphan " +
+                            $"{Path.GetFileName(sysres)}: {ex.Message}");
+                    }
+                }
+            }
+            return removed;
+        }
+
+        /// <summary>
         /// Locates the deployed sysdev whose root &lt;Device&gt; has the given
         /// <paramref name="deviceType"/> (e.g. "M580_dPAC", "Soft_dPAC") in the
         /// SE.DPAC namespace. Returns null if none match.
