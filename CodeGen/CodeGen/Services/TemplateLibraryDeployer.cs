@@ -232,12 +232,6 @@ namespace CodeGen.Services
                         Path.Combine(eaeProjectDir, "IEC61499", "PLC_RW_BX1.fbt"));
             }
 
-            // STAGE 4 folds the BX1 covers into Assembly_Station over a plain cross-device
-            // adapter ring (ExtendStateRingAcrossBx1) that EAE compiles into CrossComm — NO
-            // custom FB to deploy. (The RingCrossGate FB variant was abandoned per the
-            // user's "no extra FBs"; its FB types are deleted and FoldCoversIntoAssembly
-            // stays FALSE, so nothing is staged here.)
-
             DeployDataTypes(libPath, eaeProjectDir, result);
             PatchKnownArraySizeBugs(eaeProjectDir, result);
             PatchProcessRuntimeCompatibility(eaeProjectDir, result);
