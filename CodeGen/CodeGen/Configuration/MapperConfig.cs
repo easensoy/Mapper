@@ -188,22 +188,6 @@ namespace CodeGen.Configuration
         public const int RobotActuatorId         = 19;
 
         /// <summary>
-        /// MATERIAL-GATE Feed -> Assembly sequencing (chosen 2026-06-12; default ON). Assembly's
-        /// recipe row 0 holds on <c>WAIT(BearingSensor, 1)</c> — the bearing the Feed station
-        /// physically delivers trips the sensor, then Assembly runs. BearingSensor is a
-        /// <c>Sensor_Bool_CAT</c> on the M580 ring, so this is M580-LOCAL: no cross-PLC link, no new
-        /// FB, no stretched stateRprtCmd ring (unlike the removed cross-PLC bridge experiments).
-        /// It is the natural production sequencing — the next station starts when the part arrives.
-        /// State 1 = BearingSensor On (a Sensor_Bool_CAT publishes the Control.xml State_Number
-        /// verbatim). CAVEAT: relies on the sensor going off->on when Feed delivers (a change the CAT
-        /// publishes into state_table). A prior attempt "deadlocked" only in the SIM, where no
-        /// physical part ever arrived so the sensor never changed; on the rig the delivered bearing
-        /// trips it. Set false if the rig sensor doesn't trip — then Assembly runs immediately (no
-        /// handoff). The wait state (1) is rig-tunable if the sensor reports a different value.
-        /// </summary>
-        public static bool AssemblyWaitForFeedPart = true;
-
-        /// <summary>
         /// Real M262 rig proximity sensors the digital twin does NOT model, but the physical SMC rig
         /// wires to fixed DI channels (we copy the physical MAPPING from SMC_Rig_Expo_withClamp only,
         /// never its ids/names). ONLY the two the flow needs:
@@ -214,72 +198,41 @@ namespace CodeGen.Configuration
         /// (PartAtChecker is NOT synthesized — the twin's Checker just goes down/up; nothing in
         /// Control.xml references a part-at-checker sensor.)
         /// <para>
-        /// Synthesized as <c>Sensor_Bool_CAT</c> on M262 with project-generated FB ids (FBIdGenerator)
-        /// and these explicit state ids. ID NOTE (per the cross-PLC collision review): the 20-slot
-        /// state_table is FULL — every id 0..19 is claimed somewhere, and the only ids free on the
-        /// M580 table (the would-be consumer) are {0,4,5,6} = the M262 Feed ids. So a globally-unique
-        /// id is IMPOSSIBLE at the current table size. While these sensors are EXPOSED-ONLY (off every
-        /// ring — current state), the id never indexes any state_table, so it is an inert label; we
-        /// park it at 20/21 (ABOVE the 20-slot table) so it cannot be mistaken for, or collide with,
-        /// any ring participant on any PLC. WHEN the cross-PLC handoff is wired (Assembly waits on
-        /// PartAtAssembly, robot on PartAtExit), re-id to the M580-free in-table slots 5/6 and splice
-        /// them onto the M262→M580 cross ring ONLY (never the M262 Feed ring) — then 5/6 are free on
-        /// M580 while Checker/Transfer keep 5/6 on M262's separate table. Bound in
-        /// <c>HcfPatchService</c>; gated on <see cref="EnableRobotTaskTail"/>.
+        /// Synthesized as <c>Sensor_Bool_CAT</c> on M262 with a project-generated FB id (FBIdGenerator)
+        /// and an explicit state_table id chosen to collide with nothing on either consumer PLC.
         /// </para>
         /// </summary>
-        // ONE entry — PartAtAssembly on DI08 with the M580-free in-table id 5. Emitted + HCF-bound
-        // ONLY when EnableRobotTaskTail is on (the SystemLayoutInjector synth-emit loop + the
-        // HcfPatchService DI08 bind both gate on it); with the tail off it is inert. The future
-        // Feed->Assembly handoff (HandoffPlanner, Phase 4) will consume it — Assembly starting on
-        // PartAtAssembly TRUE — replacing today's M580-local BearingSensor material gate. PartAtExit
-        // (DI09, the robot gate) is intentionally omitted.
+        // ONE entry — PartAtAssembly on DI08, state_table id 3. Id 3 is FREE on both the M262 ring
+        // (PartInHopper 0 / Feeder 4 / Checker 5 / Transfer 6 / Ejector 7 / Feed_Station 10 / Robot 19)
+        // and the M580 ring (BearingSensor 1 / ShaftSensor 2 / bearing 8,9 / shaft 10-12 / Clamp 13 /
+        // Assembly 17 / Disassembly 18), so it collides with NOTHING on either PLC's state_table. (The
+        // only other id-3 is TopCoverSenosr on BX1 — a SEPARATE state_table, no collision; the 20-slot
+        // table is full so one cross-PLC id reuse is unavoidable for a synthetic sensor.) PartAtAssembly
+        // is kept OFF the M262 Feed ring (ResourceWireEmitter excludes it) and rides the M262->M580
+        // cross-device segment, so its report lands ONLY in M580 state_table[3] — which the HandoffPlanner
+        // makes Assembly's row-0 WAIT(3,1). Emitted + HCF-bound when HandoffPlanner.DischargeActive.
+        // PartAtExit (DI09, the robot gate) is intentionally omitted.
         public static readonly (string Name, string Pin, int Id)[] M262SynthSensors =
             new[]
             {
-                ("PartAtAssembly", "DI08", 5),
+                ("PartAtAssembly", "DI08", 3),
             };
 
         /// <summary>
-        /// STAGE 5b — the UR3e robot + M262 ejector tail for Disassembly. ENABLED 2026-06-11 (user
-        /// request) for the rig test. When TRUE the FULL bundle activates: (1) ONLY the real UR3e
-        /// (<see cref="CodeGen.Mapping.TemplateMap.IsRobotTaskArm"/> — narrow; every gripper stays
-        /// Five_State) resolves to <c>Robot_Task_CAT</c>; (2) <c>Robot_Task_CAT</c> +
-        /// <c>Robot_Task_Core</c> templates are deployed; (3) exactly one Robot FB is emitted on M262;
-        /// (4) the stateRprtCmd ring extends to the M262 ejector+robot (boundary-open: they leave the
-        /// Feed ring; a local <c>Ejector.stateRprtCmd_out→Robot.stateRprtCmd_in</c> segment + the two
-        /// M580↔M262 cross-hops carry the tail); (5) HCF <c>DO04=RobotCommands_StartTask</c>,
-        /// <c>DI10=RobotStatus_Task_Complete</c>; (6) the Disassembly recipe appends
-        /// unclamp(clamp=3)→ejector→robot→END. FLAG-OFF is byte-identical Stage 5a.
-        /// IMPORTANT: with this ON the M580 Disassembly ring opens toward M262, so ALL THREE PLCs
-        /// (M580+M262+BX1) MUST be deployed together — M580+BX1 alone leaves the ring open and stalls.
-        /// NOT runtime-safe until EAE Clean/Build/Deploy confirms the CAT compiles + live M580↔M262
-        /// adapter bridging (rig-only unknowns). Revert: set false (one rebuild = Stage 5a).
-        ///
-        /// 2026-06-12 — SET FALSE (architecture decision). The robot-tail design stretched the live
-        /// stateRprtCmd ring THROUGH M262 (Disassembly.out→Ejector→Robot→m580 head), so the M580
-        /// ring could not close unless M262 was up — M580+BX1 alone stalled. Investigation confirmed
-        /// EAE's ONLY cross-PLC transport is the cross-device adapter (the reference's
-        /// ReliableCrossComm; no PUBLISH/SUBSCRIBE or cross-PLC symlinks), the CaS/station adapter
-        /// carries mode/cycle/fault (not a process sentinel), and the Process engines have NO spare
-        /// ports — so a cross-PLC (process_id,state) handoff for the tail needs one minimal bridge FB.
-        /// The user chose the no-new-FB path: keep M580/BX1 closed + local (this flag OFF = Stage 5a),
-        /// M262 Feed closed + local, and DEFER the M262 ejector/robot tail + auto-sequencing until a
-        /// bridge FB is approved. Re-enabling this flag re-introduces the M262-coupling and must NOT
-        /// be done without that bridge.
-        ///
-        /// 2026-06-15 — RE-ENABLED (true). The M262&lt;-&gt;M580 cross-device adapter transport is now
-        /// RIG-PROVEN (the PartAtAssembly bridge runs end-to-end on the rig), which was the ONLY
-        /// blocker. The tail needs NO new FB — it rides the SAME proven transport as PartAtAssembly,
-        /// and the two COMPOSE on one ordered M262 segment (TemplateMap.M262CrossRingSegment):
-        /// Disassembly -&gt; Ejector -&gt; Robot -&gt; PartAtAssembly -&gt; BearingSensor. The HCF binds
-        /// DO03=Ejector.OutputToWork, DO04=Robot.RobotCommands_StartTask, DI10=Robot.RobotStatus_Task_
-        /// Complete; the Disassembly recipe appends unclamp -&gt; ejector -&gt; robot -&gt; END. All three
-        /// PLCs (M262+M580+BX1) must deploy together (the M580 ring opens toward M262). The Robot_Task_
-        /// CAT compile is the one remaining EAE-only check. Revert: set false (one rebuild) -&gt; tail
-        /// gone, PartAtAssembly bridge stays (independent flag).
+        /// The Disassembly DISCHARGE tail — the M262 Ejector + UR3e Robot, commanded by Disassembly
+        /// over the cross-device segment after the clamp reaches home. NOW A THIN ALIAS to the single
+        /// source of truth (<see cref="CodeGen.Translation.HandoffPlanner.DischargeActive"/>) so the
+        /// proven gated machinery reads ONE decision: (1) only the real UR3e
+        /// (<see cref="CodeGen.Mapping.TemplateMap.IsRobotTaskArm"/>) resolves to <c>Robot_Task_CAT</c>
+        /// — grippers stay Five_State; (2) the Robot FB is emitted on M262 (no stationAdptr); (3) HCF
+        /// <c>DO03=Ejector.OutputToWork</c>, <c>DO04=Robot.RobotCommands_StartTask</c>,
+        /// <c>DI10=Robot.RobotStatus_Task_Complete</c>; (4) the Disassembly recipe runs unclamp -&gt;
+        /// WAIT clamp home -&gt; ejector -&gt; robot; (5) the M262 segment splices onto the M580 ring at
+        /// the Disassembly seam (<see cref="CodeGen.Mapping.TemplateMap.M262CrossRingSegment"/>). Flip
+        /// via HandoffPlanner.CrossPlcDischargeActive. RIG-VERIFY: the M262&lt;-&gt;M580 cross-device
+        /// adapter transport (only M580&lt;-&gt;BX1 is rig-proven; generation is headless-verified).
         /// </summary>
-        public static bool EnableRobotTaskTail = false; // 2026-06-16: M580 Disassembly ring closes LOCALLY (Disassembly.out->BearingSensor.in); the M262 Ejector/Robot tail re-attaches via ONE isolated cross-PLC pub/sub done-bit (NOT the unbridgeable cross-device adapter ring). Tail deferred until that bridge is built.
+        public static bool EnableRobotTaskTail => CodeGen.Translation.HandoffPlanner.DischargeActive;
 
         /// <summary>
         /// When TRUE, Cover_Station runs a MINIMAL proof-of-life recipe (CoverPNP_Vr
