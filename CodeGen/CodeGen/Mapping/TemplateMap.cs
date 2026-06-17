@@ -102,21 +102,16 @@ namespace CodeGen.Mapping
         /// The ordered M262 nodes spliced into the M580 Assembly/Disassembly stateRprtCmd ring as ONE
         /// cross-PLC segment (Disassembly.out -> seg[0] -> ... -> seg[^1] -> M580 head) via two
         /// cross-device adapter hops EAE bridges (the rig-proven M580&lt;-&gt;BX1 cover-ring mechanism).
-        /// Two independent features share this seam, so they COMPOSE here instead of fighting over it:
-        ///   - robotTail (EnableRobotTaskTail): the Disassembly Ejector + UR3e Robot tail.
-        ///   - partBridge (FeedAssemblyPartBridge): the PartAtAssembly Feed-&gt;Assembly handoff sensor.
-        /// Order: Ejector, Robot, then PartAtAssembly — so the rig-proven robot-tail order
-        /// (Disassembly-&gt;Ejector-&gt;Robot) is preserved and the sensor tacks on before the return hop.
-        /// Ring order is functionally irrelevant (broadcast) but fixed for determinism. Empty when both
-        /// features are off (no segment; the ring closes locally Disassembly-&gt;head). Single source of
-        /// truth for BuildStation2Wiring (cross-hops), BuildFeedStationWiring + ResourceWireEmitter
-        /// (intra-M262 chain + Feed-ring exclusion).
+        /// robotTail (EnableRobotTaskTail): the Disassembly Ejector + UR3e Robot tail, in the
+        /// rig-proven order (Disassembly-&gt;Ejector-&gt;Robot). Empty when the tail is off (the ring
+        /// closes locally Disassembly-&gt;head). Single source of truth for BuildFeedStationWiring +
+        /// ResourceWireEmitter (intra-M262 chain + Feed-ring exclusion). The Phase-4 HandoffPlanner
+        /// will own where the segment's ends attach to the M580 ring.
         /// </summary>
-        public static System.Collections.Generic.List<string> M262CrossRingSegment(bool robotTail, bool partBridge)
+        public static System.Collections.Generic.List<string> M262CrossRingSegment(bool robotTail)
         {
             var seg = new System.Collections.Generic.List<string>();
             if (robotTail) { seg.Add("Ejector"); seg.Add("Robot"); }
-            if (partBridge) seg.Add("PartAtAssembly");
             return seg;
         }
 
