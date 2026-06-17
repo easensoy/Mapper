@@ -979,6 +979,35 @@ namespace CodeGen.Translation.Process
                 AddWait(shaftHrId, 0);
             }
 
+            // BX1 COVER PLACE (HandoffPlanner.CoversOnM580Ring): after the shaft is set, the cover P&P
+            // places the top cover. The covers are spliced onto the M580 ring (the cross-device cover
+            // detour), so Assembly commands them directly — the proven 8-step pick/place matching the
+            // Control.xml Assembly cover states (Cover_PnP down→GripCover→up→advance→down→ReleaseCover→
+            // up→returned). Gated + id-resolved: with the detour off (covers BX1-local under
+            // Cover_Station) or a cover-less fixture, the ids don't resolve and it cleanly skips.
+            if (CodeGen.Translation.HandoffPlanner.CoversOnM580Ring &&
+                TryGetComponentId(arrays, allComponents, "coverpnp_vr", out var coverVrId) &&
+                TryGetComponentId(arrays, allComponents, "coverpnp_hr", out var coverHrId) &&
+                TryGetComponentId(arrays, allComponents, "coverpnp_gripper", out var coverGripperId))
+            {
+                AddCmd("coverpnp_vr", 1);        // 1. lower (Work) onto the cover
+                AddWait(coverVrId, 2);
+                AddCmd("coverpnp_gripper", 1);   // 2. grip / pick the cover
+                AddWait(coverGripperId, 2);
+                AddCmd("coverpnp_vr", 3);        // 3. lift the cover up (Home)
+                AddWait(coverVrId, 0);
+                AddCmd("coverpnp_hr", 1);        // 4. advance horizontally (Work) over the assembly
+                AddWait(coverHrId, 2);
+                AddCmd("coverpnp_vr", 1);        // 5. lower (Work) to place the cover
+                AddWait(coverVrId, 2);
+                AddCmd("coverpnp_gripper", 3);   // 6. release the cover
+                AddWait(coverGripperId, 0);
+                AddCmd("coverpnp_vr", 3);        // 7. lift away (Home)
+                AddWait(coverVrId, 0);
+                AddCmd("coverpnp_hr", 3);        // 8. return horizontally (Home)
+                AddWait(coverHrId, 0);
+            }
+
             // Release the clamp at the very end. TWIN-CORRECTION (Stage 5a): the twin does
             // NOT open the clamp in Assembly — it closes at Assembly start and stays closed
             // through assembly AND disassembly, opening only at Disassembly's Unclamping step
@@ -1103,10 +1132,24 @@ namespace CodeGen.Translation.Process
             const int HandshakeSentinel = 7;
             AddWait(MapperConfig.AssemblyProcessId, HandshakeSentinel);
 
-            // Covers run on the BX1-local Cover_Station, NOT commanded by Disassembly (M580 cannot
-            // reach the BX1 covers without a cross-PLC ring). The cover ids resolved in the `ok`
-            // precondition above stay (so cover-less fixtures still park) but are intentionally
-            // unused here — 3 benign unused-variable warnings.
+            // BX1 COVER REMOVE (HandoffPlanner.CoversOnM580Ring): covers come OFF FIRST, before the
+            // shaft — the reverse of the Assembly cover place (Control.xml Disassembly cover_pnp_*
+            // states: hr_forward→down→grasp→up→hr_back→down_place→release→up_place). The covers are
+            // spliced onto the M580 ring (cross-device cover detour), so Disassembly commands them
+            // directly. Gated: with the detour off (covers BX1-local under Cover_Station) the M580 ring
+            // cannot reach the covers, so this is skipped and Disassembly starts at the shaft. The cover
+            // ids were resolved in the `ok` precondition above.
+            if (CodeGen.Translation.HandoffPlanner.CoversOnM580Ring)
+            {
+                AddCmd("coverpnp_hr", 1);      AddWait(coverHrId, 2);       // advance over the cover
+                AddCmd("coverpnp_vr", 1);      AddWait(coverVrId, 2);       // lower onto it
+                AddCmd("coverpnp_gripper", 1); AddWait(coverGripperId, 2);  // grasp / pick the cover off
+                AddCmd("coverpnp_vr", 3);      AddWait(coverVrId, 0);       // lift the cover up
+                AddCmd("coverpnp_hr", 3);      AddWait(coverHrId, 0);       // return horizontally
+                AddCmd("coverpnp_vr", 1);      AddWait(coverVrId, 2);       // lower to set the cover aside
+                AddCmd("coverpnp_gripper", 3); AddWait(coverGripperId, 0);  // release
+                AddCmd("coverpnp_vr", 3);      AddWait(coverVrId, 0);       // lift away (Home)
+            }
 
             // SHAFT OUT (reverse).
             AddCmd("shaft_hr", 1);      AddWait(shaftHrId, 2);
