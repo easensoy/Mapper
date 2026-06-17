@@ -236,7 +236,6 @@ namespace CodeGen.Devices.Core
                 "Station_CAT",
                 "Process1_Generic",
                 "CaSAdptrTerminator",
-                "RingCrossGate",
                 "Robot_Task_CAT",
                 // MQTT_CONNECTION — the single shared event-buffer FB injected
                 // by SystemLayoutInjector when MqttPublishEnabled is true. Without
