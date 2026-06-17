@@ -1099,6 +1099,24 @@ namespace MapperUI
                     AppendActivity($"[Test Runtime][Sync][Warn] final sysres parameter sync failed: {ex.Message}");
                 }
 
+                // Sweep orphan .sysres shells. The device-create + .hcf-id-realignment path can leave a
+                // default-named "RES0" sysres (empty FBNetwork) under the OLD id once the active resource
+                // id switches to the .hcf ResourceId (e.g. BX1 78E9…) — an orphan EAE carries in its build
+                // cache. Runs LATE (after every device/hcf/mirror/wire step) so each device folder ends with
+                // exactly its live resource. No-op when the tree is already clean.
+                try
+                {
+                    var eaeRootSweep = CodeGen.Devices.Core.EaeProjectLayout.DeriveEaeProjectRoot(Cfg());
+                    var swept = await Task.Run(() =>
+                        CodeGen.Devices.Core.EaeProjectLayout.SweepOrphanSysres(eaeRootSweep, AppendActivity));
+                    if (swept > 0)
+                        AppendActivity($"[Sysres][Sweep] removed {swept} orphan .sysres shell(s); EAE refreshes obj/System.hash on the next Build.");
+                }
+                catch (Exception ex)
+                {
+                    AppendActivity($"[Sysres][Sweep][Warn] orphan sysres sweep failed: {ex.Message}");
+                }
+
                 // HARD syslay<->sysres<->hcf parity guard. The deployable per-device sysres MUST be a
                 // faithful projection of the syslay (the design canvas). If a Robot/PartAtAssembly FB,
                 // a process recipe, or a discharge hcf binding is on the syslay but missing/stale on the
