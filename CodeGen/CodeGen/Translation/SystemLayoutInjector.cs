@@ -1712,6 +1712,13 @@ namespace CodeGen.Translation
                 if (config.SimulatorFullSystem)
                     brokerUrl = System.Text.RegularExpressions.Regex.Replace(
                         brokerUrl, @"://[^:/]+", "://127.0.0.1");
+                // MQTT mode drives the URL SCHEME (MapperConfig.MqttSecureTls), so the URL can never
+                // contradict the mode: insecure demo => mqtt:// (needs EAE "Insecure Application" on the
+                // BX1 device, else MQTT_CONNECTION ReturnCode 101); secure => mqtts:// (needs a TLS broker
+                // listener, else RC100 on a plain 1883 broker). The host:port stays from MqttBrokerUrl.
+                string mqttScheme = config.MqttSecureTls ? "mqtts" : "mqtt";
+                brokerUrl = System.Text.RegularExpressions.Regex.Replace(
+                    brokerUrl, @"^[A-Za-z][A-Za-z0-9+.\-]*://", mqttScheme + "://");
 
                 // PER-RESOURCE MqttConn — one MQTT_CONNECTION per PLC (BX1 +
                 // M262 + M580), NO standalone bridge FBs (no MqttFmt_/MqttPub_
@@ -1741,6 +1748,15 @@ namespace CodeGen.Translation
                         ["URL"] = SyslayBuilder.FormatString(brokerUrl),
                         ["ClientIdentifier"] = SyslayBuilder.FormatString(clientId),
                     };
+                    // SECURE mode (mqtts://) only: emit the TLS validation params so a real handshake
+                    // can complete. INSECURE demo mode (mqtt://) emits none of these — it keeps the
+                    // reference-exact 4 params and relies on the device's "Insecure Application" setting.
+                    if (config.MqttSecureTls)
+                    {
+                        p["ValidateCert"] = config.MqttValidateCert.ToString();
+                        if (!string.IsNullOrWhiteSpace(config.MqttCaCert))
+                            p["CACert"] = SyslayBuilder.FormatString(config.MqttCaCert);
+                    }
                     builder.AddFB(FBIdGenerator.GenerateFBId(fbName), fbName,
                         "MQTT_CONNECTION", "Runtime.NetConnectivity", x, y, p);
                 }
