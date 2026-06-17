@@ -18,3 +18,27 @@ __pycache__/
 venv/
 *.egg-info/
 .env
+
+# --- VueOneMapper: throwaway/runtime/local noise (keep git status trustworthy) ---
+# Throwaway verification harnesses (gate, dis, devlife, rigrepro, verify*)
+/_gate/
+/_dis/
+/_devlife/
+/_rigrepro/
+/_verify*/
+# Local, machine-specific config (read from CWD at runtime; never committed)
+mapper_config.json
+# MQTT broker runtime artefacts + secrets (certs/keys/data MUST stay out)
+MQTT/certs/
+MQTT/data/
+MQTT/*.log
+MQTT/*.jsonl
+# Runtime state-transition-table dumps (Control_<timestamp>/ generated per run)
+/StateTransitionTables/
+# Generated capability docs
+/docgen/
+# Backups + scratch (template-library .bak/.bak_* snapshots, Old templates, scratch dirs)
+*.bak
+*.bak_*
+Template Library/Old templates/
+Template Library/CAT/ziNbkEz9
