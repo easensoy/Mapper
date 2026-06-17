@@ -283,10 +283,18 @@ namespace CodeGen.Translation
             // close-back at the boundary (ResourceWireEmitter). The M580 bearing/shaft/clamp ring
             // itself is NOT stretched — only a short segment hangs off the Disassembly node. Off →
             // the ring closes locally Disassembly → first sensor (BX1 covers stay BX1-local either way).
-            var ring = new List<(string Name, string Type)>(m580)
-            {
-                (AssemblyProc, "Process1_Generic")
-            };
+            var ring = new List<(string Name, string Type)>(m580);
+            // COVER DETOUR (HandoffPlanner.CoversOnM580Ring): splice the BX1 cover actuators onto the
+            // M580 ring between the last M580 actuator (Clamp) and Assembly_Station — Clamp.out crosses
+            // to the first cover (M580→BX1), the covers chain locally, and the last cover crosses to
+            // Assembly (BX1→M580). EAE bridges the two cross-device hops (the proven STAGE-4 mechanism).
+            // This sits at a DIFFERENT seam than the discharge segment (Disassembly→ejector/robot below),
+            // so the two compose with only M580↔BX1 and M580↔M262 boundaries — never M262↔BX1. The M580
+            // sysres opens this seam (ResourceWireEmitter) so the boundary plug is never double-driven.
+            // Empty when the detour is off → byte-identical.
+            foreach (var cover in HandoffPlanner.CoverDetour)
+                ring.Add((cover, "Five_State_Actuator_CAT"));
+            ring.Add((AssemblyProc, "Process1_Generic"));
             if (threadDisassembly)   // … → Assembly_Station → Disassembly → (close back / segment)
                 ring.Add((disassemblyFbName, "Process1_Generic"));
             if (ring.Count > 1)
@@ -378,7 +386,14 @@ namespace CodeGen.Translation
             // (no stateRprtCmd port).
             var ring = new List<(string Name, string Type)>();
             foreach (var s in contents.Sensors)    if (IsBx1(s.Name)) ring.Add((s.Name, "Sensor_Bool_CAT"));
-            foreach (var a in contents.Actuators)  if (IsBx1(a.Name)) ring.Add((a.Name, "Five_State_Actuator_CAT"));
+            // COVER DETOUR: when the covers are on the M580 ring (HandoffPlanner.CoversOnM580Ring) they
+            // are wired by BuildStation2Wiring — keep them OUT of the BX1 ring so they are not
+            // double-wired; their ring ends arrive/leave via the cross-device hops (Hr.in from M580
+            // Clamp, Gripper.out to M580 Assembly). TopCoverSenosr stays a BX1 sensor (INIT-only,
+            // off-ring; its id would clash on the M580 state_table). Off → unchanged.
+            foreach (var a in contents.Actuators)
+                if (IsBx1(a.Name) && !HandoffPlanner.IsCoverDetourActuator(a.Name))
+                    ring.Add((a.Name, "Five_State_Actuator_CAT"));
 
             // stateRprtCmd ring (BX1-LOCAL, two shapes):
             //  • DeployBx1CoverEngine (default): splice the local Cover_Station engine into the
