@@ -1143,6 +1143,28 @@ namespace MapperUI
                     AppendActivity($"[Parity][Error] {ex.Message}");
                 }
 
+                // MQTT connection matrix + impossible-config flags. Prints every generated
+                // MQTT_CONNECTION's URL / ConnectionID / ClientIdentifier / ValidateCert and flags
+                // configs that cannot reach ReturnCode 0 (mqtts:// to a plain port = RC100; plain
+                // mqtt:// = RC101 unless EAE "Insecure Application" is enabled on the device).
+                try
+                {
+                    var eaeRootMqtt = CodeGen.Devices.Core.EaeProjectLayout.DeriveEaeProjectRoot(Cfg());
+                    var (mqttRows, mqttFindings) = await Task.Run(() =>
+                        CodeGen.Devices.Core.MqttConnectionValidator.Inspect(eaeRootMqtt));
+                    foreach (var r in mqttRows)
+                        AppendActivity($"[MQTT] {r.Resource}.{r.Fb}: URL={r.Url} ConnectionID={r.ConnectionID} " +
+                                       $"ClientIdentifier={r.ClientIdentifier} ValidateCert={r.ValidateCert}");
+                    foreach (var f in mqttFindings)
+                        AppendActivity($"[MQTT] {f}");
+                    if (mqttFindings.Any(f => f.Impossible))
+                        AppendActivity("[MQTT] IMPOSSIBLE config flagged — it will NOT reach ReturnCode 0. Fix the URL/mode.");
+                }
+                catch (Exception ex)
+                {
+                    AppendActivity($"[MQTT][Error] {ex.Message}");
+                }
+
                 TouchDfbprojToTriggerEaeReload();
 
                 AppendActivity($"Generated: {path}");
