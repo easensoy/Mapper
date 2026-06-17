@@ -637,8 +637,13 @@ namespace CodeGen.Configuration
         ///     <c>mqtts://</c> against a plain broker on port 1883 — EAE
         ///     accepts the scheme name and uses plain transport on the port,
         ///     no actual TLS negotiation occurs.</item>
-        /// </list></summary>
-        public string MqttBrokerUrl { get; set; } = "mqtt://192.168.1.50:1883";
+        /// </list>
+        /// Default is <c>mqtts://</c> (the workaround above): EAE 24.1 returns
+        /// MQTT_CONNECTION ReturnCode 101 ("Secure URL required for secure application")
+        /// for a plain <c>mqtt://</c> URL, so the connection never opens and every
+        /// embedded MQTT_PUBLISH logs "No active connection". The proven reference
+        /// (TrainingIIoT) uses <c>mqtts://&lt;host&gt;:1883</c> against a plain broker.</summary>
+        public string MqttBrokerUrl { get; set; } = "mqtts://192.168.1.50:1883";
 
         /// <summary>MQTT_CONNECTION.ClientIdentifier — one per runtime/resource.
         /// Default SMC_BX1 (was SMC_M262): BX1 is the only Soft-dPAC that runs MQTT, so a key-less
