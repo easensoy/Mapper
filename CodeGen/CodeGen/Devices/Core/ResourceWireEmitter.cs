@@ -358,9 +358,13 @@ namespace CodeGen.Devices.Core
                 // (now INCLUDES Seven_State/Bearing_PnP); used for the report ring.
                 var ringNames = orderedComps.Where(HasRingAdapter).Select(Nm)
                     .Where(s => s.Length > 0)
+                    // Cross-device segment nodes (Ejector/Robot tail + PartAtAssembly) are driven by
+                    // the M262->M580 segment, NOT the M262 Feed ring — keep them off it so they are
+                    // never double-driven. Mirrors TemplateMap.M262CrossRingSegment.
                     .Where(s => !(robotTail &&
-                        (string.Equals(s, "Ejector", StringComparison.OrdinalIgnoreCase) ||
-                         string.Equals(s, "Robot",   StringComparison.OrdinalIgnoreCase))))
+                        (string.Equals(s, "Ejector",        StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(s, "Robot",          StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(s, "PartAtAssembly", StringComparison.OrdinalIgnoreCase))))
                     .ToList();
                 // actNames — actuators that expose the stationAdptr adapter
                 // (still excludes Seven_State, which has no stationAdptr); used
