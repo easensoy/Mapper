@@ -625,25 +625,49 @@ namespace CodeGen.Configuration
         /// </summary>
         public bool MqttPublishEnabled { get; set; } = true;
 
-        /// <summary>Broker endpoint for MQTT_CONNECTION.URL. EAE 24.1's
-        /// <c>CMQTTClientStateMgr.validateEndpoint</c> has two gates:
-        /// <list type="number">
-        ///   <item>Scheme must be one of <c>mqtt://</c> / <c>mqtts://</c> / <c>ws://</c>
-        ///     / <c>wss://</c> — <c>tcp://</c> trips "The URI scheme is not MQTT".</item>
-        ///   <item>The runtime defaults to <b>secure-by-default</b>: plain
-        ///     <c>mqtt://</c> trips "Insecure configuration prohibited; TLSconfig"
-        ///     unless a TLS cert is wired. The proven workaround (matches the
-        ///     reference TrainingIIoT MQTT_CONNECTION) is to use scheme
-        ///     <c>mqtts://</c> against a plain broker on port 1883 — EAE
-        ///     accepts the scheme name and uses plain transport on the port,
-        ///     no actual TLS negotiation occurs.</item>
+        /// <summary>Broker host:port for MQTT_CONNECTION.URL. The SCHEME is set by
+        /// <see cref="MqttSecureTls"/>, not by what you write here — the host:port is taken
+        /// from this value, the scheme is forced to match the mode so the URL and the mode can
+        /// never drift. EAE 24.1's <c>MQTT_CONNECTION</c> is SECURE-BY-DEFAULT, and its own
+        /// doc.xml defines the two failure codes RUNTIME-PROVEN on this rig:
+        /// <list type="bullet">
+        ///   <item><b>ReturnCode 101</b> ("URL error: Secure URL required for secure application")
+        ///     — a plain <c>mqtt://</c> URL is rejected UNLESS the device has
+        ///     <c>Security → Insecure Application → Enable</c> set in EAE.</item>
+        ///   <item><b>ReturnCode 100</b> ("TLS error") — an <c>mqtts://</c> URL forces a TLS
+        ///     handshake; against a PLAIN broker (mosquitto on 1883, no certfile) the handshake
+        ///     fails. (Earlier note claimed mqtts:// "uses plain transport on the port" — the
+        ///     RUNTIME disproved it: mqtts://…:1883 gave RC100, not RC0.)</item>
         /// </list>
-        /// Default is <c>mqtts://</c> (the workaround above): EAE 24.1 returns
-        /// MQTT_CONNECTION ReturnCode 101 ("Secure URL required for secure application")
-        /// for a plain <c>mqtt://</c> URL, so the connection never opens and every
-        /// embedded MQTT_PUBLISH logs "No active connection". The proven reference
-        /// (TrainingIIoT) uses <c>mqtts://&lt;host&gt;:1883</c> against a plain broker.</summary>
-        public string MqttBrokerUrl { get; set; } = "mqtts://192.168.1.50:1883";
+        /// Two clean paths to ReturnCode 0:
+        /// <list type="number">
+        ///   <item><b>Insecure demo</b> (<see cref="MqttSecureTls"/>=false, the default): scheme
+        ///     <c>mqtt://</c> against the plain broker; you MUST enable "Insecure Application" on
+        ///     the BX1 device in EAE, else RC101.</item>
+        ///   <item><b>Secure</b> (<see cref="MqttSecureTls"/>=true): scheme <c>mqtts://</c> against
+        ///     a TLS-enabled mosquitto listener (certfile/keyfile, conventionally port 8883) with
+        ///     <see cref="MqttCaCert"/> + <see cref="MqttValidateCert"/> set.</item>
+        /// </list>
+        /// NEVER use mqtts:// against a plain 1883 broker — <see cref="MqttConnectionValidator"/>
+        /// flags that as an impossible config.</summary>
+        public string MqttBrokerUrl { get; set; } = "mqtt://192.168.1.50:1883";
+
+        /// <summary>MQTT transport mode. FALSE (default) = INSECURE demo: scheme <c>mqtt://</c>,
+        /// no TLS — requires EAE "Security → Insecure Application → Enable" on the BX1 device to
+        /// reach ReturnCode 0. TRUE = SECURE: scheme <c>mqtts://</c> + <see cref="MqttCaCert"/> /
+        /// <see cref="MqttValidateCert"/>, which needs a TLS-enabled broker listener. The scheme
+        /// in the generated MQTT_CONNECTION.URL is derived from THIS flag (the host:port comes
+        /// from <see cref="MqttBrokerUrl"/>), so the URL can never contradict the mode.</summary>
+        public bool MqttSecureTls { get; set; } = false;
+
+        /// <summary>Secure mode only (<see cref="MqttSecureTls"/>=true): CA certificate (PEM text
+        /// or path) for MQTT_CONNECTION.CACert. Empty = not emitted. Ignored in insecure demo mode.</summary>
+        public string MqttCaCert { get; set; } = "";
+
+        /// <summary>Secure mode only: MQTT_CONNECTION.ValidateCert (USINT). 0 = no validation
+        /// (self-signed demo TLS); higher = server cert / hostname validation. Only emitted when
+        /// <see cref="MqttSecureTls"/>=true. Insecure demo mode leaves the FB default untouched.</summary>
+        public int MqttValidateCert { get; set; } = 0;
 
         /// <summary>MQTT_CONNECTION.ClientIdentifier — one per runtime/resource.
         /// Default SMC_BX1 (was SMC_M262): BX1 is the only Soft-dPAC that runs MQTT, so a key-less
