@@ -4448,57 +4448,6 @@ namespace CodeGen.Services
             }
         }
 
-        static void PatchRingCrossGateCoreSchemaOrder(string eaeProjectDir, DeployResult result)
-        {
-            var candidates = new[]
-            {
-                Path.Combine(eaeProjectDir, "IEC61499", "RingCrossGateCore.fbt"),
-                Path.Combine(eaeProjectDir, "IEC61499", "RingCrossGateCore", "RingCrossGateCore.fbt"),
-            };
-
-            foreach (var fbt in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
-            {
-                if (!File.Exists(fbt))
-                    continue;
-
-                var doc = XDocument.Load(fbt, LoadOptions.PreserveWhitespace);
-                var root = doc.Root;
-                if (root == null)
-                    continue;
-
-                var ns = root.Name.Namespace;
-                var basicFb = root.Element(ns + "BasicFB");
-                if (basicFb == null)
-                    continue;
-
-                var orderAttributes = basicFb.Elements(ns + "Attribute")
-                    .Where(e => string.Equals(
-                        (string?)e.Attribute("Name"),
-                        "FBType.Basic.Algorithm.Order",
-                        StringComparison.Ordinal))
-                    .ToList();
-
-                if (orderAttributes.Count == 0)
-                    continue;
-
-                var normalized = new XElement(orderAttributes[0]);
-                foreach (var attribute in orderAttributes)
-                    attribute.Remove();
-
-                var firstNonAttribute = basicFb.Elements()
-                    .FirstOrDefault(e => e.Name != ns + "Attribute");
-
-                if (firstNonAttribute != null)
-                    firstNonAttribute.AddBeforeSelf(normalized);
-                else
-                    basicFb.Add(normalized);
-
-                doc.Save(fbt);
-                result.PatchesApplied.Add(
-                    "RingCrossGateCore.fbt: normalized BasicFB Attribute order for EAE schema");
-            }
-        }
-
         public static DeployResult Deploy(MapperConfig cfg, List<VueOneComponent> components)
         {
             var result = new DeployResult();
