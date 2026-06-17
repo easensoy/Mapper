@@ -12,6 +12,42 @@ namespace CodeGen.Devices.Core
     {
         const string LibElNs = "https://www.se.com/LibraryElements";
 
+        /// <summary>
+        /// CAT / composite / structural FB types the mirror copies from the syslay onto a
+        /// device sysres (each carrying a <c>Mapping</c> back to the syslay FB). SINGLE SOURCE
+        /// OF TRUTH for the syslay→sysres projection: <see cref="MirrorFbsIntoSysres"/> requires
+        /// membership before it adds/updates an FB, and
+        /// <see cref="SyslaySysresParityValidator"/> requires every syslay FB of one of these
+        /// types (bucketed to a PLC via <see cref="BucketFor"/>) to be present on that PLC's
+        /// sysres. Both read THIS set so the mirror and its validator can never drift.
+        /// </summary>
+        public static readonly IReadOnlySet<string> MirroredCatTypes =
+            new HashSet<string>(StringComparer.Ordinal)
+        {
+            "Five_State_Actuator_CAT",
+            "Five_State_Actuator_No_Sensors_CAT",
+            "Seven_State_Actuator_CAT",
+            "Seven_State_Actuator_Centre_Home_CAT",
+            "Sensor_Bool_CAT",
+            "PLC_RW_M262",
+            "Area",
+            "Area_CAT",
+            "Station",
+            "Station_CAT",
+            "Process1_Generic",
+            "CaSAdptrTerminator",
+            "Robot_Task_CAT",
+            // MQTT_CONNECTION — the single shared event-buffer FB injected by
+            // SystemLayoutInjector when MqttPublishEnabled is true. Without a mirror
+            // entry it stays only on the syslay (no Mapping) and EAE never deploys it, so
+            // the embedded MQTT_PUBLISH FBs have nothing to bind their ConnectionID to.
+            "MQTT_CONNECTION",
+            // Bridge publishers (BX1-side) — only present when the cross-PLC MQTT bridge is
+            // enabled; receive M262/M580 state via cross-resource syslay wires.
+            "MqttStateFormatter",
+            "MQTT_PUBLISH_115480E69E664F878",
+        };
+
         public static List<string> ReadSyslayTopLevelFbNames(string syslayPath)
         {
             return ReadSyslayTopLevelFbs(syslayPath).Select(fb => fb.Name).ToList();
@@ -218,43 +254,12 @@ namespace CodeGen.Devices.Core
                     .Where(s => !string.IsNullOrEmpty(s)),
                 StringComparer.Ordinal);
 
-            // Mirror every CAT/composite/HMI type that EAE expects to see
-            // mapped to M262.M262_RES. Each mirrored FB carries a Mapping
-            // attribute pointing back at the syslay FB, which is how EAE
-            // shows it under Devices > M262 > M262_RES > Local.
-            var keepTypes = new HashSet<string>(StringComparer.Ordinal)
-            {
-                "Five_State_Actuator_CAT",
-                "Five_State_Actuator_No_Sensors_CAT",
-                "Seven_State_Actuator_CAT",
-                "Seven_State_Actuator_Centre_Home_CAT",
-                "Sensor_Bool_CAT",
-                "PLC_RW_M262",
-                "Area",
-                "Area_CAT",
-                "Station",
-                "Station_CAT",
-                "Process1_Generic",
-                "CaSAdptrTerminator",
-                "Robot_Task_CAT",
-                // MQTT_CONNECTION — the single shared event-buffer FB injected
-                // by SystemLayoutInjector when MqttPublishEnabled is true. Without
-                // a mirror entry it stays only on the syslay (no Mapping="…"
-                // pointer) and EAE never deploys it to a resource, so the
-                // embedded MQTT_PUBLISH FBs inside every CAT have nothing to bind
-                // their ConnectionID to and publishes silently drop. Routed to
-                // M262 via BucketFor's default fallback (name guess → Unknown
-                // → M262), matching where the embedded publishes physically run.
-                "MQTT_CONNECTION",
-                // Bridge publishers (BX1-side) that receive M262/M580 component
-                // state via cross-resource syslay wires and publish via MqttConn.
-                // Without these in keepTypes, the mirror skips them and the
-                // standalone publishers stay only on the syslay (no Mapping="…")
-                // — EAE never deploys them to the BX1 resource and the cross-PLC
-                // bridge silently does nothing.
-                "MqttStateFormatter",
-                "MQTT_PUBLISH_115480E69E664F878",
-            };
+            // Mirror every CAT/composite/HMI type that EAE expects to see mapped to a
+            // device resource. Each mirrored FB carries a Mapping attribute pointing back
+            // at the syslay FB, which is how EAE shows it under Devices > … > Local. The
+            // type set is the shared MirroredCatTypes (single source of truth, so the
+            // parity validator requires exactly what the mirror copies).
+            var keepTypes = MirroredCatTypes;
 
             // Build a Name → existing sysres FB element index so we can UPDATE
             // parameters on an FB that was mirrored on a previous run, instead
