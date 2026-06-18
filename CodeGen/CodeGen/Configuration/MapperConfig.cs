@@ -676,6 +676,15 @@ namespace CodeGen.Configuration
         public string MqttClientId { get; set; } = "SMC_BX1";
 
         /// <summary>
+        /// MQTT_CONNECTION.ConnectionID — the SHARED binding key (a STRING). Every per-resource
+        /// MQTT_CONNECTION (BX1 + M262 + M580) AND every embedded MQTT_PUBLISH carries this SAME
+        /// value, so each resource's publishers bind to its LOCAL connection and publish. The
+        /// ClientIdentifier (MqttClientId for BX1, SMC_M262 / SMC_M580 for the others) stays UNIQUE
+        /// per resource so mosquitto keeps all three connected. Default "SMC".
+        /// </summary>
+        public string MqttConnectionName { get; set; } = "SMC";
+
+        /// <summary>
         /// MQTT_CONNECTION.ConnectionID — the registry key. The single
         /// injected connection sets this, and every embedded MQTT_PUBLISH
         /// carries the same value so they bind. Default 1.
