@@ -251,9 +251,10 @@ namespace CodeGen.Devices.Core
                 equipmentJsonName: "Equipment_M580dPAC_1.json",
                 equipmentBuilder: () => BuildM580EquipmentJson(M580SysdevId, solutionId,
                                           cfg.M580TargetIp, cfg.M580BroadcastDomainUuid),
-                // M580 carries MqttConn_M580 — allow insecure app config so plain mqtt:// doesn't RC101.
-                deployPluginPropertiesXml: BuildStandardDeployPluginPropertiesXml(
-                    cfg.MqttPublishEnabled && !cfg.MqttSecureTls),
+                // M580 firmware-gates MQTT (no MQTT client runs on it), so it needs NO insecure-app
+                // override — only the BX1 Soft-dPAC does. Keep the SecurityApp group OFF the M580 device
+                // (unverified for the M580_dPAC hardware type) by passing false. BX1 keeps its override.
+                deployPluginPropertiesXml: BuildStandardDeployPluginPropertiesXml(false),
                 simulationBindingDeployPort: 51500,
                 simulationBindingArchivePort: 51497);
 
