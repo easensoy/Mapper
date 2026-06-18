@@ -274,9 +274,8 @@ namespace CodeGen.Services
             // coil the swivel is already sitting on (NO motion) -- then the stock
             // AtWork1->ToHome / AtWork2->ToHome path carries the Home command through.
             // Real sensors only (atWork1/atWork2/atHome are the physical symlinks on the
-            // rig; no SIM, no SimHopperForce). Bidirectional + gated: added on the rig
-            // (!SimulatorFullSystem), stripped on the simulator so the proven sim core
-            // stays byte-identical (the arcs are inert there anyway).
+            // rig; no SIM, no SimHopperForce). Always added on the rig (addArc: true);
+            // the bidirectional patch is no longer called with addArc=false.
             PatchSwivelAtHomeInitRecovery(eaeProjectDir, addArc: true, result);
             // 2026-06-03: Centre-Home swivel home must clear both work coils. The
             // shipped AtHome state ran 'AtHomeEnd' (current_state:=6 only), so the
@@ -347,14 +346,11 @@ namespace CodeGen.Services
             // BCNF on every pass-through so the ring still advances and state_table still
             // updates, but emit CNF only on an actual command for this actuator.
             PatchRingCommandCnfOnlyOnDestination(eaeProjectDir, result);
-            // Simulator-only interface reduction. Bidirectional normalizer:
-            // when SimulatorFullSystem is on it bakes the two constant interlock
-            // targets onto the embedded InterlockManager FB and removes their
-            // wired boundary inputs (17→15); when off it restores the wired
-            // inputs. MUST run every deploy because ExtractToEae/CopyDirToEae are
-            // copy-if-absent, so the deployed CAT persists across runs and both
-            // buttons share it. Pairs with BuildActuatorParameters'
-            // dropInterlockConstants gate (same cfg.SimulatorFullSystem flag).
+            // Interlock-constants normalizer, called with reduce=false (rig): it RESTORES
+            // the wired boundary inputs the embedded InterlockManager FB declares. MUST run
+            // every deploy because ExtractToEae/CopyDirToEae are copy-if-absent, so the
+            // deployed CAT persists across runs. (The sim reduce=true direction that baked
+            // the constants + dropped the inputs 17→15 is no longer used.)
             NormalizeFiveStateInterlockConstants(eaeProjectDir, false, result);
             PatchProcess1RecipeArraySize(eaeProjectDir, result);
             PatchProcessNameStringSize(eaeProjectDir, result);
@@ -437,9 +433,8 @@ namespace CodeGen.Services
             NormalizeFiveStateFaultEnables(eaeProjectDir, false, result);
             // Process FB recipe struct: collapse the 6 overlapping recipe arrays
             // into one Recipe : ARRAY OF RecipeStep on Process1_Generic + the
-            // ProcessRuntime engine (datatype, NOT a new FB). Now driven by
-            // (SimulatorFullSystem || UseRecipeStruct) so the HARDWARE / Test
-            // Runtime path uses the struct too, not only the simulator. The three
+            // ProcessRuntime engine (datatype, NOT a new FB). Driven by UseRecipeStruct,
+            // so the Test Runtime path uses the struct. The three
             // pieces flip together (deploy the datatype, reshape the composite,
             // reshape the engine) so the FB interface, engine ST and instance
             // parameter never disagree. Set UseRecipeStruct=false to revert the
@@ -2793,9 +2788,9 @@ namespace CodeGen.Services
         /// therefore a single persistent file shared by BOTH the Test Simulator
         /// and Test Runtime buttons. <paramref name="reduce"/>==true strips and
         /// bakes; ==false restores the wired inputs and removes the baked params.
-        /// Call it on every deploy with reduce = cfg.SimulatorFullSystem so the
-        /// CAT shape always matches the <c>&lt;Parameter&gt;</c> set
-        /// BuildActuatorParameters emits for the same flag. Idempotent both ways.
+        /// Call it on every deploy with reduce=false (rig) so the CAT shape always
+        /// matches the <c>&lt;Parameter&gt;</c> set BuildActuatorParameters emits.
+        /// Idempotent both ways.
         /// </summary>
         static void NormalizeFiveStateInterlockConstants(
             string eaeProjectDir, bool reduce, DeployResult result)
