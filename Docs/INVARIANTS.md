@@ -213,62 +213,42 @@ emit broken Mapping references.
 
 ---
 
-## I-10. The simulator's `OverrideSimActuatorsNoSensor` **only handles `Five_State_Actuator_CAT`**; `Seven_State_Actuator_CAT` needs `SimSwivelForce`
+## I-10. Simulator no-sensor / SimSwivelForce synthesis — REMOVED (2026-06-16)
 
-**Where:** `SimulatorPostProcessor.OverrideSimActuatorsNoSensor` filters
-`.Where(f => Type == "Five_State_Actuator_CAT")`. It does NOT touch
-`Seven_State_Actuator_CAT` instances.
-
-**Why it matters:** Five_State has an internal `No_Sensor_Handler` that
-self-advances the ECC via timers when sensors are not fitted. Seven_State has
-no equivalent — its ECC `ToPick → AtPick` gate waits on `atwork1 = TRUE AND
-atwork2 = FALSE`, which would never close in sim.
-
-**The fix that handles this:** `SimulatorPostProcessor.InjectSimSwivelForce`
-(added 2026-05-30) injects one `SimSwivelForce_<name>` SYMLINKMULTIVARSRC per
-Seven instance, publishing `atwork1`/`atwork2` from the actuator's own
-`current_state{1,2}_to_plc` outputs. Sensors close the instant the coil
-energises. `MainForm_simulator` calls it after the no-sensor override.
-
-**What breaks if you change it:** flip the stub flag to FALSE without
-SimSwivelForce in place and the swivel fires its coil but stalls at `ToPick`
-forever.
+The Test Simulator path and `CodeGen/Services/SimulatorPostProcessor.cs` (which
+held `OverrideSimActuatorsNoSensor` and `InjectSimSwivelForce`) were **deleted**.
+There is no sim no-sensor or swivel-force synthesis in the code today. This
+number is kept as a placeholder so the I-11..I-15 cross-references stay stable.
 
 ---
 
-## I-11. `SimulatorEndToEndHarness` is the verification gate; **never claim sim progress without it green**
+## I-11. `SimulatorEndToEndHarness` gate — REMOVED (2026-06-16)
 
-**Where:** `MapperTests/SimulatorEndToEndHarness.cs` — a single xUnit `[Fact]`
-with an 18-item checklist (A1, A2a, A2b, B1-B5×, B6, C, D, D2, E, F1-F4).
-Failure-collector pattern (one test, all reds reported in one run).
-
-**Why it matters:** the harness invokes the SAME post-gen pipeline as
-`btnGenerateFullSystemSimulator_Click` (via the shared `SimulatorPostProcessor`
-publics). Going green here means the GENERATED ARTIFACTS are sound. It does
-NOT guarantee EAE runtime success; that's a separate `needs-runtime-probe` gate
-the user must run.
-
-**Citation:** `CLAUDE.md` "How to run the harness" + "EAE verification steps".
-
-**What breaks if you change it:** a sim-affecting change that doesn't keep the
-harness green will surface as a stall on the user's next Test Simulator click.
+`MapperTests/SimulatorEndToEndHarness.cs` was **deleted** and `MapperTests` now
+runs no active tests (all quarantined under `<Compile Remove>`). The
+behaviour-preserving gate is now the **byte-identical generated-Demonstrator
+diff** (`_gate/`, golden under `C:\_gate`) — see `AGENTS.md` "How to verify a
+behaviour-preserving change". It reads a fixed base and never writes the live
+`C:\Demonstrator`.
 
 ---
 
-## I-12. The Simulator's `SimulatorFullSystem = true` **collapses all 3 PLCs into ONE SIM resource**; M580/BX1 sysdev/sysres/HCF emission is SKIPPED
+## I-12. `SimulatorFullSystem = true` 3-PLC collapse — now a DEAD code path
 
-**Where:** `MainForm_simulator.cs:61` sets the flag. The downstream pipeline
-(SystemLayoutInjector, Station2DeviceEmitter, ProcessRecipeArrayGenerator) gates
-on it and collapses every `<Component Type="Process">` into a single
-`Process1_Generic` FB in one SIM resource. M580/BX1 device emission is skipped.
+**Status (2026-06-18):** `MainForm_simulator.cs` (which set the flag) was
+**deleted**, and no UI button sets `cfg.SimulatorFullSystem = true` today. The
+collapse described below is therefore **unreachable dead code**, pending a
+careful per-file cleanup of the `SimulatorFullSystem` branches in
+`SystemLayoutInjector` / `Station2DeviceEmitter` / `ProcessRecipeArrayGenerator` /
+`TemplateLibraryDeployer`. Documented here so the dead branches are not mistaken
+for live behaviour. (`SimulatorRecipeMode` is a separate, still-LIVE flag — the
+`StateTransitionTableForm` "Data → State-Transition Table" menu feature sets it
+true to build its recipe preview; do not remove it.)
 
-**Why it matters:** the SIM resource carries the WHOLE recipe + WHOLE ring +
-WHOLE station chain in one place. Cross-process / cross-PLC `Wait1Id`
-references that would dangle on the rig (because they cross devices) resolve
-naturally on the single SIM ring.
-
-**What breaks if you change it:** the simulator deploys per-PLC artefacts that
-EAE can't run as a single soft-PLC. The single-ring resolution disappears.
+**(Historical) What it did:** the downstream pipeline gated on the flag and
+collapsed every `<Component Type="Process">` into a single `Process1_Generic` FB
+in one SIM resource (M580/BX1 device emission skipped), so cross-PLC `Wait1Id`
+references resolved on the single SIM ring.
 
 ---
 
@@ -304,14 +284,18 @@ from it = that actuator never receives commands.
 
 ---
 
-## I-15. The `MapperTests.csproj` is the **only test project in active build**; legacy tests are quarantined under `<Compile Remove>`
+## I-15. `MapperTests` runs **no active tests**; every test is quarantined under `<Compile Remove>`
 
-**Where:** `MapperTests/MapperTests.csproj` — 24 legacy `.cs` files under
-`<Compile Remove>` because they reference `CodeGen.Devices.Shared` (a namespace
-that was renamed to `CodeGen.Devices.Core`).
+**Where:** `MapperTests/MapperTests.csproj` — every legacy test `.cs` file is
+under `<Compile Remove>` because they reference `CodeGen.Devices.Shared` (a
+namespace renamed to `CodeGen.Devices.Core`), and the one formerly-active test
+(`SimulatorEndToEndHarness`) was deleted 2026-06-16. So the project builds but
+runs 0 tests — it is NOT a behaviour gate (use the `_gate` byte-identical
+Demonstrator diff instead).
 
-**Why it matters:** restoring a legacy test means removing it from the list
-AND fixing its using statements. Don't reintroduce the old `Shared` namespace.
+**Why it matters:** restoring a legacy test means removing it from the
+`<Compile Remove>` list AND fixing its using statements (`Shared` → `Core`).
+Don't reintroduce the old `Shared` namespace.
 
-**What breaks if you change it:** the .csproj fails to compile and the harness
-can't run.
+**What breaks if you change it:** a re-enabled test that still references the old
+`Shared` namespace fails to compile and breaks the `MapperTests` build.
