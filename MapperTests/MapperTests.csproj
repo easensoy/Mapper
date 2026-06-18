@@ -27,7 +27,6 @@
        legacy files, remove it from the Compile Remove list below and fix its
        using statements (Shared → Core). -->
   <ItemGroup>
-    <Compile Remove="BridgeRoundtripTests.cs" />
     <Compile Remove="CleanDemonstratorTests.cs" />
     <Compile Remove="DfbprojRegistrarTests.cs" />
     <Compile Remove="EmitDiagnostics.cs" />
