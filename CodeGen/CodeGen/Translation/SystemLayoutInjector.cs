@@ -1394,8 +1394,7 @@ namespace CodeGen.Translation
                 Dictionary<string, string> actParams;
                 if (fbType == "Five_State_Actuator_CAT")
                 {
-                    actParams = BuildActuatorParameters(actuator, assignedId, allComponents, scopedIds,
-                        dropInterlockConstants: false);
+                    actParams = BuildActuatorParameters(actuator, assignedId, allComponents, scopedIds);
                     // Override actuator_name so the runtime broadcast key uses
                     // the resolved instance name (Pusher), not the Control.xml
                     // raw name (Feeder). Without this, state_table.source_name
@@ -2140,8 +2139,7 @@ namespace CodeGen.Translation
         public static Dictionary<string, string> BuildActuatorParameters(
             VueOneComponent actuator, int assignedId,
             IReadOnlyList<VueOneComponent> allComponents,
-            IReadOnlyDictionary<string, int>? scopedIds = null,
-            bool dropInterlockConstants = false)
+            IReadOnlyDictionary<string, int>? scopedIds = null)
         {
             int toWorkMs = ResolveStateTimeMs(actuator, stateNumber: 1, fallbackMs: DefaultMotionMs);
             int toHomeMs = ResolveStateTimeMs(actuator, stateNumber: 3, fallbackMs: DefaultMotionMs);
@@ -2284,51 +2282,6 @@ namespace CodeGen.Translation
                 // it raises ERR_MEMBER_VAR_NOTFOUND at compile time. FB
                 // colouring is not controllable via syslay in EAE 24.1.)
             };
-
-            // Simulator-only interface reduction (Test Simulator button). When
-            // SimulatorFullSystem is on, TemplateLibraryDeployer
-            // .NormalizeFiveStateInterlockConstants bakes TargetWork1State (=2)
-            // and TargetHomeState (=4) directly onto the embedded
-            // InterlockManager FB inside the CAT type and DELETES the two
-            // boundary InputVars. An instance <Parameter> for a var the type no
-            // longer declares raises ERR_MEMBER_VAR_NOTFOUND, so drop the two
-            // keys here. The exact same flag drives both halves (the deployer
-            // reshapes the type, this reshapes the instance) so they can never
-            // disagree. Hardware (Test Runtime, flag off) keeps emitting them.
-            if (dropInterlockConstants)
-            {
-                actuatorParams.Remove("TargetWork1State");
-                actuatorParams.Remove("TargetHomeState");
-
-                // Simulator interface reduction: collapse the 4 parallel Rule
-                // arrays into one InterlockRule[10] (RuleTable). The CAT and the
-                // CommonInterlockEvaluator are reshaped to a single RuleTable
-                // input by TemplateLibraryDeployer's normalizers under this same
-                // flag, so the instance must emit RuleTable — emitting a
-                // now-removed array input would raise ERR_MEMBER_VAR_NOTFOUND.
-                // RuleCount stays separate (it's the Evaluate loop bound). The
-                // named-field literal syntax was verified by the StructLiteralProbe
-                // spike. Logic identical: the same numbers reach
-                // InterlockManager.Evaluate, just packaged as struct fields.
-                actuatorParams.Remove("RuleFromState");
-                actuatorParams.Remove("RuleToState");
-                actuatorParams.Remove("RuleSourceID");
-                actuatorParams.Remove("RuleBlockedState");
-                actuatorParams["RuleTable"] = SyslayBuilder.FormatRuleTable(
-                    ruleFrom, ruleTo, ruleSrc, ruleBlk, ruleCount);
-
-                // Derived fault-enable flags. The Mapper always sets
-                // enableToWorkFaultTimeout = WorkSensorFitted and
-                // enableToHomeFaultTimeout = HomeSensorFitted. Inside the CAT,
-                // FB17/FB14 already AND the enable with the same sensor-fitted
-                // input, so AND(fitted, fitted) = fitted. The simulator
-                // normalizer re-points FB17.IN2/FB14.IN2 at the sensor-fitted
-                // lines and drops these two boundary inputs, so the instance
-                // must not emit them (emitting a removed InputVar would raise
-                // ERR_MEMBER_VAR_NOTFOUND). Value and behaviour are identical.
-                actuatorParams.Remove("enableToWorkFaultTimeout");
-                actuatorParams.Remove("enableToHomeFaultTimeout");
-            }
 
             return actuatorParams;
         }
@@ -3433,8 +3386,7 @@ namespace CodeGen.Translation
                 {
                     var act = contents.Actuators[i];
                     int aid = actuatorBase + i;
-                    var actParams = BuildActuatorParameters(act, aid, allComponents,
-                        dropInterlockConstants: false);
+                    var actParams = BuildActuatorParameters(act, aid, allComponents);
 
                     ActuatorBinding? ab = null;
                     bindings?.Actuators.TryGetValue(act.Name, out ab);
