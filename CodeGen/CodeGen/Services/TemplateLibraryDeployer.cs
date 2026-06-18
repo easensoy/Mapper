@@ -1253,51 +1253,6 @@ namespace CodeGen.Services
         }
 
 
-        // Embedded InterlockRule datatype (4 INT fields) for the simulator
-        // interface reduction — the 4 parallel Rule arrays collapse to one
-        // RuleTable : InterlockRule[10]. Hand-authored WITHOUT EAE's nxtDataType
-        // signature; verified accepted by the StructLiteralProbe spike (EAE
-        // regenerates the signature on load).
-        const string InterlockRuleDt =
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
-            "<!DOCTYPE DataType SYSTEM \"../LibraryElement.dtd\">\r\n" +
-            "<DataType Namespace=\"Main\" Name=\"InterlockRule\" Comment=\"One interlock rule as a struct: FromState/ToState/SourceID/BlockedState\">\r\n" +
-            "  <Identification Standard=\"1131-3\" />\r\n" +
-            "  <VersionInfo Organization=\"WMG\" Version=\"0.1\" Author=\"easensoy\" Date=\"5/24/2026\" Remarks=\"array-of-struct packaging of the 4 Rule arrays\" />\r\n" +
-            "  <CompilerInfo />\r\n" +
-            "  <StructuredType>\r\n" +
-            "    <VarDeclaration Name=\"FromState\" Type=\"INT\" />\r\n" +
-            "    <VarDeclaration Name=\"ToState\" Type=\"INT\" />\r\n" +
-            "    <VarDeclaration Name=\"SourceID\" Type=\"INT\" />\r\n" +
-            "    <VarDeclaration Name=\"BlockedState\" Type=\"INT\" />\r\n" +
-            "  </StructuredType>\r\n" +
-            "</DataType>";
-
-        /// <summary>
-        /// Deploy the InterlockRule datatype (simulator path only) and register
-        /// it, so EAE resolves the <c>RuleTable : InterlockRule[10]</c> inputs the
-        /// normalizers add to Five_State_Actuator_CAT and CommonInterlockEvaluator.
-        /// Idempotent (copy-if-absent + dedup registration).
-        /// </summary>
-        static void DeployInterlockRuleDatatype(string eaeProjectDir, DeployResult result)
-        {
-            try
-            {
-                var dtDir = Path.Combine(eaeProjectDir, "IEC61499", "DataType");
-                Directory.CreateDirectory(dtDir);
-                var dtPath = Path.Combine(dtDir, "InterlockRule.dt");
-                if (!File.Exists(dtPath)) File.WriteAllText(dtPath, InterlockRuleDt);
-                if (!result.DataTypesDeployed.Contains("InterlockRule"))
-                    result.DataTypesDeployed.Add("InterlockRule");
-                result.PatchesApplied.Add("InterlockRule.dt deployed + registered (sim RuleTable struct)");
-                MapperLogger.Info("[Deploy] InterlockRule.dt written + registered");
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"InterlockRule.dt deploy failed: {ex.Message}");
-            }
-        }
-
         // The four parallel interlock-rule arrays that collapse into one
         // RuleTable : InterlockRule[10]. Order matches struct field order.
         static readonly string[] RuleArrayNames =
