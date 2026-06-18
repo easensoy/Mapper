@@ -384,6 +384,17 @@ namespace CodeGen.Services
                     stateDataSource: "ActuatorCore.current_state_to_process",
                     initSource: "StateHandling.INITO",
                     topicNameSource: "actuator_name", cfg, result);
+                // The UR3e robot (Robot_Task_CAT) reports through the same ring node (StateHandling /
+                // updateComponentState), but its core is StateMachine (Robot_Task_Core): StateMachine.pst_out
+                // fires on each task-state change, StateMachine.current_state_to_process carries the value,
+                // StateHandling.INITO inits, actuator_name is the per-instance topic. Publishes smc/robot/state
+                // through the M262 connection. Only instantiated when EnableRobotTaskTail emits the robot; the
+                // patch safely no-ops (warns) if the CAT is absent.
+                PatchCatMqttPublish(eaeProjectDir, "Robot_Task_CAT",
+                    stateEventSource: "StateMachine.pst_out",
+                    stateDataSource: "StateMachine.current_state_to_process",
+                    initSource: "StateHandling.INITO",
+                    topicNameSource: "actuator_name", cfg, result);
                 PatchCatMqttPublish(eaeProjectDir, "Sensor_Bool_CAT",
                     stateEventSource: "FB1.CNF",
                     stateDataSource: "FB1.Status",
