@@ -1707,20 +1707,21 @@ namespace CodeGen.Translation
                 // read RC50 and those PLCs do not publish; the per-resource
                 // MqttConn make that status visible (RC50 = firmware-gated, the
                 // expected clean result, NOT the RC101 collision).
-                void InjectMqttConn(string fbName, string clientId, int x, int y)
+                void InjectMqttConn(string fbName, string connectionId, string clientIdentifier, int x, int y)
                 {
                     var p = new Dictionary<string, string>
                     {
                         ["QI"] = SyslayBuilder.FormatBool(true),
-                        // ConnectionID UNIQUE per resource (= the per-resource clientId:
-                        // SMC_BX1 / SMC_M262 / SMC_M580). Sharing ONE ConnectionID across all
-                        // three MQTT_CONNECTION FBs made EAE bind it to ONE resource (M262 won,
-                        // RC0) while the duplicate (BX1) returned ReturnCode 101. Unique per
-                        // resource removes that collision; each resource's embedded MqttPub binds
-                        // to its LOCAL connection by this same per-resource ConnectionID.
-                        ["ConnectionID"] = SyslayBuilder.FormatString(clientId),
+                        // ConnectionID is the WITHIN-resource binding key each resource's embedded MqttPub
+                        // looks up (PatchCatMqttPublish sets the publisher ConnectionID = cfg.MqttClientId).
+                        // All three resources SHARE this value so every resource's local publishers bind to
+                        // ITS OWN connection and publish. ClientIdentifier is the BROKER-facing id and is
+                        // UNIQUE per resource — mosquitto evicts duplicate-id clients, so a shared one would
+                        // make the three PLCs fight over a single broker slot. (The old RC101 was the insecure
+                        // mqtt:// URL, NOT a shared ConnectionID — rig-proven — so sharing ConnectionID is safe.)
+                        ["ConnectionID"] = SyslayBuilder.FormatString(connectionId),
                         ["URL"] = SyslayBuilder.FormatString(brokerUrl),
-                        ["ClientIdentifier"] = SyslayBuilder.FormatString(clientId),
+                        ["ClientIdentifier"] = SyslayBuilder.FormatString(clientIdentifier),
                     };
                     // SECURE mode (mqtts://) only: emit the TLS validation params so a real handshake
                     // can complete. INSECURE demo mode (mqtt://) emits none of these — it keeps the
@@ -1738,21 +1739,28 @@ namespace CodeGen.Translation
                 var mqttEntry = CodeGen.Mapping.ComponentRegistry.Get("MqttConn");
                 int bx1X = mqttEntry?.X ?? 29000;
                 int bx1Y = mqttEntry?.Y ?? 200;
-                // BX1 ONLY. The M262/M580 dPAC firmware does NOT run an MQTT client (the MQTT
-                // runtime is Soft-dPAC/BX1-only), so a MqttConn_M262 / MqttConn_M580 can NEVER reach
-                // ReturnCode 0 — it only faults (RC101 secure-URL, or RC50 firmware-gate) and clutters
-                // the layout. The correct architecture matches the controller capability matrix:
-                // M262/M580 component state crosses to BX1 over the distributed IEC 61499 ring, and
-                // BX1's single MqttConn publishes to Mosquitto. So inject ONE MQTT_CONNECTION, on BX1.
-                // BX1's embedded MqttPub (ConnectionID 'SMC_BX1') binds it (PatchCatMqttPublish) — no
-                // bridge pairs, no cross-resource wires. BX1's INIT/CONNECT bring-up + ring-init are added
-                // by BuildBx1Wiring; it routes to the BX1 sysres via SysresFbMirror.BucketFor("MqttConn").
-                InjectMqttConn("MqttConn", config.MqttClientId, bx1X, bx1Y);
+                // One MQTT_CONNECTION per resource so M262/M580 component telemetry reaches the broker
+                // directly (not only BX1's covers). ConnectionID is SHARED (= cfg.MqttClientId) so each
+                // resource's embedded MqttPub binds to its LOCAL connection; ClientIdentifier is UNIQUE per
+                // resource so mosquitto keeps all three connected. Each MqttConn routes to its own sysres via
+                // SysresFbMirror.BucketFor. On the rig each device must allow insecure mqtt:// (Security ->
+                // Insecure Application enabled — the same one-time EAE step BX1 needed) AND run the MQTT
+                // client. BX1's INIT/CONNECT bring-up is added by BuildBx1Wiring; M262/M580's just below
+                // (Area = M262/Feed boot, Station2 = M580 boot).
+                InjectMqttConn("MqttConn", config.MqttClientId, config.MqttClientId, bx1X, bx1Y);
+                InjectMqttConn("MqttConn_M262", config.MqttClientId, "SMC_M262",
+                    LayoutGrid.ColumnBaseX(PlcAssignment.M262), 200);
+                InjectMqttConn("MqttConn_M580", config.MqttClientId, "SMC_M580",
+                    LayoutGrid.ColumnBaseX(PlcAssignment.M580), 200);
+                builder.AddEventConnection("MqttConn_M262.INITO", "MqttConn_M262.CONNECT");
+                builder.AddEventConnection("MqttConn_M580.INITO", "MqttConn_M580.CONNECT");
+                builder.AddEventConnection("Area.INITO", "MqttConn_M262.INIT");
+                builder.AddEventConnection("Station2.INITO", "MqttConn_M580.INIT");
                 report.Missing.Add(
-                    $"[MQTT] single MqttConn injected on BX1 only (SMC_BX1), ConnectionID={config.MqttClientId}, " +
-                    $"URL={brokerUrl} ({(config.SimulatorFullSystem ? "sim → loopback" : "rig → LAN IP")}); " +
-                    $"M262/M580 firmware-gate MQTT (no client) so they carry NO MqttConn — their state reaches " +
-                    $"the broker via the ring → BX1. BX1's embedded MqttPub binds + publishes; no pairs.");
+                    $"[MQTT] MqttConn injected per resource — BX1 (ClientId SMC_BX1) + M262 (SMC_M262) + " +
+                    $"M580 (SMC_M580), shared ConnectionID={config.MqttClientId} so each resource's embedded " +
+                    $"MqttPub binds locally; URL={brokerUrl}. M262/M580 publish once their device allows " +
+                    $"insecure mqtt:// (Insecure Application) and the firmware runs the MQTT client.");
             }
 
 
