@@ -2181,19 +2181,23 @@ namespace CodeGen.Translation
             // THIS actuator only — the physical coil (output bit3) still drives the
             // gripper; only the state confirmation comes from toWork/toHomeTime. The
             // M580 grippers keep their real DI sensors (see the 2026-06-04 note above).
-            if (string.Equals(actuator.Name, "CoverPnp_Gripper", StringComparison.OrdinalIgnoreCase))
+            // Covers (2026-06-18, user "cover timer 2000->1000 for each"): all three BX1 cover P&P
+            // actuators now settle in 1000ms (CoverPNP_Vr was 2000ms; CoverPNP_Hr + the gripper were
+            // already 1000ms). For the sensorless gripper this IS the settle time (grip/release advances
+            // ~1s, not ~2s). For the sensored CoverPNP_Hr/Vr it shortens toWork/toHome (faultTimeout*
+            // derive as toWorkMs*2 = 2000ms) — their P&P SPEED stays sensor-driven (the recipe WAIT
+            // clears on the physical atwork/athome DI, not the timer). M580/M262 actuators untouched.
+            if (IsBx1CoverActuator(actuator.Name))
             {
-                workSensorFitted = false;
-                homeSensorFitted = false;
-                // The sensorless gripper's grip/release acknowledgment is purely the
-                // toWork/toHome timer (no DI to confirm). 2026-06-18 (user): reduce the
-                // vacuum settle from the 2000ms DefaultMotionMs fallback to 1000ms so the
-                // cover P&P advances ~1s after grip/release instead of ~2s. Name-scoped to
-                // THIS gripper only — CoverPNP_Vr (sensor-fitted, 2000ms), CoverPNP_Hr
-                // (1000ms), and every M580/M262 actuator are untouched. faultTimeoutWork/
-                // Home derive as toWorkMs*2 (2000ms) and stay disabled (sensorless).
                 toWorkMs = 1000;
                 toHomeMs = 1000;
+                // The gripper has NO DI to confirm grip/release, so it must timer-acknowledge
+                // (sensorless); CoverPNP_Hr/Vr keep their real atwork/athome sensors.
+                if (string.Equals(actuator.Name, "CoverPnp_Gripper", StringComparison.OrdinalIgnoreCase))
+                {
+                    workSensorFitted = false;
+                    homeSensorFitted = false;
+                }
             }
 
             // STAGE 5b (gated): the M262 Ejector is reference-compatible OPEN-LOOP. The reference
