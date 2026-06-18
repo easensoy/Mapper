@@ -1740,17 +1740,17 @@ namespace CodeGen.Translation
                 int bx1X = mqttEntry?.X ?? 29000;
                 int bx1Y = mqttEntry?.Y ?? 200;
                 // One MQTT_CONNECTION per resource so M262/M580 component telemetry reaches the broker
-                // directly (not only BX1's covers). ConnectionID is SHARED (= cfg.MqttClientId) so each
-                // resource's embedded MqttPub binds to its LOCAL connection; ClientIdentifier is UNIQUE per
-                // resource so mosquitto keeps all three connected. Each MqttConn routes to its own sysres via
-                // SysresFbMirror.BucketFor. On the rig each device must allow insecure mqtt:// (Security ->
-                // Insecure Application enabled — the same one-time EAE step BX1 needed) AND run the MQTT
-                // client. BX1's INIT/CONNECT bring-up is added by BuildBx1Wiring; M262/M580's just below
-                // (Area = M262/Feed boot, Station2 = M580 boot).
-                InjectMqttConn("MqttConn", config.MqttClientId, config.MqttClientId, bx1X, bx1Y);
-                InjectMqttConn("MqttConn_M262", config.MqttClientId, "SMC_M262",
+                // directly (not only BX1's covers). ConnectionID is SHARED (= cfg.MqttConnectionName, 'SMC')
+                // so each resource's embedded MqttPub binds to its LOCAL connection; ClientIdentifier is
+                // UNIQUE per resource (SMC_BX1 / SMC_M262 / SMC_M580) so mosquitto keeps all three connected.
+                // Each MqttConn routes to its own sysres via SysresFbMirror.BucketFor. On the rig each device
+                // must allow insecure mqtt:// (Security -> Insecure Application enabled — the same one-time
+                // EAE step BX1 needed) AND run the MQTT client. BX1's INIT/CONNECT bring-up is added by
+                // BuildBx1Wiring; M262/M580's just below (Area = M262/Feed boot, Station2 = M580 boot).
+                InjectMqttConn("MqttConn", config.MqttConnectionName, config.MqttClientId, bx1X, bx1Y);
+                InjectMqttConn("MqttConn_M262", config.MqttConnectionName, "SMC_M262",
                     LayoutGrid.ColumnBaseX(PlcAssignment.M262), 200);
-                InjectMqttConn("MqttConn_M580", config.MqttClientId, "SMC_M580",
+                InjectMqttConn("MqttConn_M580", config.MqttConnectionName, "SMC_M580",
                     LayoutGrid.ColumnBaseX(PlcAssignment.M580), 200);
                 builder.AddEventConnection("MqttConn_M262.INITO", "MqttConn_M262.CONNECT");
                 builder.AddEventConnection("MqttConn_M580.INITO", "MqttConn_M580.CONNECT");
