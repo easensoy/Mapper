@@ -251,7 +251,9 @@ namespace CodeGen.Devices.Core
                 equipmentJsonName: "Equipment_M580dPAC_1.json",
                 equipmentBuilder: () => BuildM580EquipmentJson(M580SysdevId, solutionId,
                                           cfg.M580TargetIp, cfg.M580BroadcastDomainUuid),
-                deployPluginPropertiesXml: BuildStandardDeployPluginPropertiesXml(),
+                // M580 carries MqttConn_M580 — allow insecure app config so plain mqtt:// doesn't RC101.
+                deployPluginPropertiesXml: BuildStandardDeployPluginPropertiesXml(
+                    cfg.MqttPublishEnabled && !cfg.MqttSecureTls),
                 simulationBindingDeployPort: 51500,
                 simulationBindingArchivePort: 51497);
 
@@ -525,7 +527,7 @@ namespace CodeGen.Devices.Core
         /// device's .hcf with the Hardware Configuration tree. Missing file =
         /// device card appears in Solution Explorer but no Hardware Config tab.
         /// </summary>
-        static string BuildStandardDeployPluginPropertiesXml() =>
+        static string BuildStandardDeployPluginPropertiesXml(bool enableInsecureApp = false) =>
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
             "<SystemDeviceProperties xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns=\"http://www.nxtControl.com/DeviceProperties\">\r\n" +
             "  <ComplexProperty Name=\"DeployPlugin\" Expanded=\"true\">\r\n" +
@@ -538,6 +540,16 @@ namespace CodeGen.Devices.Core
             "    <GroupProperty Name=\"Boot\" Expanded=\"true\" Enabled=\"true\">\r\n" +
             "      <Property Name=\"BootMode\" Value=\"Run\" IsPassword=\"false\" />\r\n" +
             "    </GroupProperty>\r\n" +
+            // Same SecurityApp/InsecureApplication override BX1 uses (BuildSoftDpacDeployPluginPropertiesXml):
+            // M580 also carries a MqttConn_M580 MQTT_CONNECTION, so with a plain mqtt:// broker the device
+            // must allow insecure app config or it faults RC101 (secure-by-default). Gated on insecure MQTT mode.
+            (enableInsecureApp
+                ? "    <GroupProperty Name=\"SecurityApp\" Expanded=\"true\" Enabled=\"true\">\r\n" +
+                  "      <GroupProperty Name=\"InsecureApplication\" Expanded=\"true\" Enabled=\"true\">\r\n" +
+                  "        <Property Name=\"Enable\" Value=\"True\" IsPassword=\"false\" />\r\n" +
+                  "      </GroupProperty>\r\n" +
+                  "    </GroupProperty>\r\n"
+                : string.Empty) +
             "  </GroupProperty>\r\n" +
             "</SystemDeviceProperties>";
 
