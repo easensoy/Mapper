@@ -13,9 +13,11 @@ button, the new layout drives the real PLCs. No engineer hand-writes IEC 61499
 for each layout change.
 
 The generator is `CodeGen/CodeGen/` (a .NET 10 class library). The UI is
-`MapperUI/MapperUI/` (a WinForms front-end with two buttons: **Test Runtime**
-deploys to the physical rig; **Test Simulator** deploys to the EAE software
-simulator). The verification harness is `MapperTests/SimulatorEndToEndHarness.cs`.
+`MapperUI/MapperUI/` (a WinForms front-end whose **Test Runtime** button
+generates the EAE project for the physical rig). The old **Test Simulator**
+button and its `SimulatorEndToEndHarness` were removed (2026-06-16); the
+behaviour-preserving gate is now a byte-identical generated-Demonstrator diff
+(see "How to verify a behaviour-preserving change" below).
 
 ## READ THESE BEFORE GENERATING ANY CODE
 
@@ -45,28 +47,37 @@ If you propose anything that contradicts these, you are wrong. Read first.
   touch the **Test Runtime** path (`MainForm.btnTestStation1_Click` and
   everything it calls) or propose changes that only take effect on the rig until
   cleared explicitly. Sim-only work is the default scope.
-- **Verification gate:** every change that affects the simulator pipeline must
-  keep `dotnet test MapperTests --filter SimulatorEndToEndHarness` at **18/18
-  green** before you claim progress.
+- **Verification gate:** the `SimulatorEndToEndHarness` was removed and
+  `MapperTests` runs no active tests today. Prove a behaviour-preserving change
+  with the byte-identical generated-Demonstrator gate (see below) — every
+  `.syslay` / `.sysres` / `.hcf` must be byte-identical pre/post.
 - **Generation runs only via the MapperUI WinForms buttons.** After any CodeGen
   change, the user must close MapperUI, rebuild MapperUI (which recompiles
-  CodeGen), and relaunch before clicking Test Simulator. State that in any
+  CodeGen), and relaunch before clicking Test Runtime. State that in any
   status update so the user knows.
 - **Never commit unless explicitly asked.** Per global instructions, an agent
   must not create commits on its own.
 
-## How to run the verification harness
+## How to verify a behaviour-preserving change
+
+`MapperTests` runs no active tests today (all quarantined; the old
+`SimulatorEndToEndHarness` was deleted). The real gate is the byte-identical
+generated-Demonstrator diff — it reads a fixed base (`C:\_gate\base`), generates
+into `C:\_gate\work`, and NEVER writes the live `C:\Demonstrator`:
 
 ```powershell
 cd C:\VueOneMapper
-dotnet build MapperTests\MapperTests.csproj -c Debug
-dotnet test  MapperTests\MapperTests.csproj -c Debug `
-    --filter "FullyQualifiedName~SimulatorEndToEndHarness" `
-    --logger "console;verbosity=detailed"
+dotnet build _gate\Gate.csproj -c Debug
+_gate\bin\Debug\net10.0\gate.exe C:\_gate\snap_pre     # before the change
+# ...make the change, rebuild _gate (recompiles CodeGen)...
+_gate\bin\Debug\net10.0\gate.exe C:\_gate\snap_post    # after the change
+# then SHA256-diff snap_pre vs snap_post
 ```
 
-Expected: **18/18 green**. Any red is a blocker — fix it before claiming
-progress. The harness is the canonical "did I break sim?" gate.
+A behaviour-preserving change must produce a **byte-identical** snapshot (all
+`.syslay` / `.sysres` / `.hcf` identical). The gate also runs the
+`HcfReferenceValidator` + `SyslaySysresParityValidator` + `MqttConnectionValidator`
+and exits non-zero on a split-brain or parity divergence.
 
 ## What "ridiculous output" usually means here
 
