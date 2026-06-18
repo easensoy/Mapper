@@ -374,6 +374,16 @@ namespace CodeGen.Services
                     stateDataSource: "ActuatorCore.current_state_to_process",
                     initSource: "StateHandling.INITO",
                     topicNameSource: "actuator_name", cfg, result);
+                // The centre-home swivel (Bearing_PnP) uses the SAME ring-node CAT shape as Five_State:
+                // ActuatorCore.pst_out fires on each state entry, ActuatorCore.current_state_to_process
+                // carries the value, StateHandling.INITO inits, actuator_name is the per-instance topic.
+                // So it gets the identical embedded publisher and publishes smc/bearing_pnp/state. Runs
+                // before NormalizeSwivelSimSensorSource, which preserves the injected MqttPub/MqttFmt.
+                PatchCatMqttPublish(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT",
+                    stateEventSource: "ActuatorCore.pst_out",
+                    stateDataSource: "ActuatorCore.current_state_to_process",
+                    initSource: "StateHandling.INITO",
+                    topicNameSource: "actuator_name", cfg, result);
                 PatchCatMqttPublish(eaeProjectDir, "Sensor_Bool_CAT",
                     stateEventSource: "FB1.CNF",
                     stateDataSource: "FB1.Status",
@@ -2631,10 +2641,11 @@ namespace CodeGen.Services
                         new System.Xml.Linq.XAttribute("Name", n),
                         new System.Xml.Linq.XAttribute("Value", v)));
                 P(pubFb, "QI", "TRUE");
-                // ConnectionID is a STRING (the working MQTT_CONNECTION/SUBSCRIBE
-                // use $ConnectionID='SoftdPAC'); both the connection and every
-                // publisher must carry the SAME string to bind.
-                P(pubFb, "ConnectionID", Q(cfg.MqttClientId));
+                // ConnectionID is the SHARED STRING binding key — the per-resource MQTT_CONNECTION AND
+                // every embedded publisher must carry the SAME value (cfg.MqttConnectionName, e.g. 'SMC')
+                // so each resource's publishers bind to its LOCAL connection. It is deliberately NOT the
+                // per-resource ClientIdentifier (which stays unique so the broker keeps all three).
+                P(pubFb, "ConnectionID", Q(cfg.MqttConnectionName));
 
                 // Per-instance topic for both rig AND sim. RootPath is the
                 // common prefix ('smc'); Topic1 is wired from each CAT's
@@ -2691,7 +2702,7 @@ namespace CodeGen.Services
                 doc.Save(fbt);
                 result.PatchesApplied.Add(
                     $"{catName}: MQTT publish injected (fan {stateEventSource} → MqttFmt → MqttPub.PUBLISH1, " +
-                    $"ConnectionID={cfg.MqttConnectionId}, Topic=$${{PATH}}state)");
+                    $"ConnectionID={cfg.MqttConnectionName}, Topic=$${{PATH}}state)");
                 MapperLogger.Info($"[Deploy][MQTT] {catName}.fbt: MQTT_PUBLISH wired off {stateEventSource}");
             }
             catch (Exception ex)
