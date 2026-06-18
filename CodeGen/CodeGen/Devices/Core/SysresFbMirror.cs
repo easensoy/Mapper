@@ -572,12 +572,17 @@ namespace CodeGen.Devices.Core
         {
             if (string.IsNullOrEmpty(fbName)) return PlcAssignment.Unknown;
 
-            // The single MQTT connection lives on BX1 — the only PLC whose (Soft-dPAC)
-            // firmware runs an MQTT client. M262/M580 firmware gate MQTT entirely, so
-            // they carry NO MqttConn; their component state reaches the broker over the
-            // distributed IEC 61499 ring into BX1, which publishes via its embedded MqttPub.
+            // One MQTT connection per resource: the bare "MqttConn" is BX1's, "MqttConn_M262"
+            // is M262's, "MqttConn_M580" is M580's. Each routes to its own sysres so its embedded
+            // MqttPub binds to the LOCAL connection (shared ConnectionID = cfg.MqttClientId) and
+            // publishes its own components' state. BX1 (Soft-dPAC) is rig-proven; M262/M580 publish
+            // once their device allows insecure mqtt:// and the firmware runs the MQTT client.
             if (string.Equals(fbName, "MqttConn", StringComparison.Ordinal))
                 return PlcAssignment.BX1;
+            if (string.Equals(fbName, "MqttConn_M262", StringComparison.Ordinal))
+                return PlcAssignment.M262;
+            if (string.Equals(fbName, "MqttConn_M580", StringComparison.Ordinal))
+                return PlcAssignment.M580;
 
             // Standalone MQTT bridge publishers (MqttFmt_<comp>, MqttPub_<comp>)
             // also live on BX1 — they receive M262/M580 component state via
