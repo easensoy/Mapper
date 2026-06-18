@@ -1395,7 +1395,7 @@ namespace CodeGen.Translation
                 if (fbType == "Five_State_Actuator_CAT")
                 {
                     actParams = BuildActuatorParameters(actuator, assignedId, allComponents, scopedIds,
-                        dropInterlockConstants: config != null && config.SimulatorFullSystem);
+                        dropInterlockConstants: false);
                     // Override actuator_name so the runtime broadcast key uses
                     // the resolved instance name (Pusher), not the Control.xml
                     // raw name (Feeder). Without this, state_table.source_name
@@ -3336,14 +3336,12 @@ namespace CodeGen.Translation
         {
             if (string.IsNullOrEmpty(config.SyslayPath2))
                 throw new InvalidOperationException("MapperConfig.SyslayPath2 is not configured.");
-            // Tell the recipe generator whether this is the SIM or the RIG path so the
-            // Seven_State swivel HOME-FIRST preamble waits for the right state. Set fresh
-            // every generation (no session carry-over): SIM swivel boots at AtHomeInit(0)
-            // so home WAIT=0; RIG swivel boots parked at a work position and the engine's
-            // blank state_table reads 0, so home WAIT must target AtHome=6 (atHome=TRUE) or
-            // the homing is skipped. Both the Test Simulator and Test Runtime buttons enter
-            // here, so this covers both. See MapperConfig.SimulatorRecipeMode.
-            Configuration.MapperConfig.SimulatorRecipeMode = config.SimulatorFullSystem;
+            // Reset the recipe generator's preview flag for this full RIG generation.
+            // SimulatorRecipeMode is false on the rig — it is only set true transiently by
+            // the State-Transition Table preview (which restores it in a finally). Set fresh
+            // every generation so no preview run can carry over (the RIG swivel HOME-FIRST
+            // preamble waits then target the rig AtHome=6 value).
+            Configuration.MapperConfig.SimulatorRecipeMode = false;
             return GenerateFeedStationSyslayToPath(controlXmlPath, config.SyslayPath2, bindings, config, out report);
         }
 
@@ -3436,7 +3434,7 @@ namespace CodeGen.Translation
                     var act = contents.Actuators[i];
                     int aid = actuatorBase + i;
                     var actParams = BuildActuatorParameters(act, aid, allComponents,
-                        dropInterlockConstants: config.SimulatorFullSystem);
+                        dropInterlockConstants: false);
 
                     ActuatorBinding? ab = null;
                     bindings?.Actuators.TryGetValue(act.Name, out ab);
