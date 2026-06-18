@@ -1460,7 +1460,7 @@ namespace CodeGen.Services
             }
             try
             {
-                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var doc = LoadXmlWithRetry(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
                 var root = doc.Root;
                 if (root == null) return;
                 System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
@@ -1715,7 +1715,10 @@ namespace CodeGen.Services
 
                 if (changed)
                 {
-                    doc.Save(fbt);
+                    // Retry on a transient file lock (EAE briefly touching the .fbt during a
+                    // background scan) instead of hard-aborting. A persistently-open editor tab
+                    // still falls through to the abort below (the user must close it).
+                    SaveXmlWithRetry(doc, fbt);
                     result.PatchesApplied.Add(reduce
                         ? "Seven_State_Actuator_Centre_Home_CAT: simulator position model inserted (mutually-exclusive home/work sensors)"
                         : "Seven_State_Actuator_Centre_Home_CAT: simulator position model removed; physical sensor wiring restored");
@@ -1731,6 +1734,42 @@ namespace CodeGen.Services
                         ex);
 
                 result.Warnings.Add($"Centre-Home swivel sim-sensor normalize failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Loads an .fbt/.xml with a short retry on a transient file lock (EAE briefly
+        /// holding the file during a background scan). Throws the last lock exception
+        /// after the final attempt, so a persistently-open editor tab still surfaces to
+        /// the caller (which decides whether to abort or warn).
+        /// </summary>
+        static System.Xml.Linq.XDocument LoadXmlWithRetry(string path, System.Xml.Linq.LoadOptions opts)
+        {
+            for (int attempt = 1, delay = 50; ; attempt++, delay = Math.Min(delay * 2, 800))
+            {
+                try { return System.Xml.Linq.XDocument.Load(path, opts); }
+                catch (Exception ex) when ((ex is IOException || ex is UnauthorizedAccessException) && attempt < 8)
+                {
+                    System.Threading.Thread.Sleep(delay);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Saves an XDocument with a short retry on a transient file lock, using the same
+        /// default formatting as XDocument.Save(path) (so the on-disk bytes are identical
+        /// to a plain doc.Save — byte-identical generation is preserved). Throws the last
+        /// lock exception after the final attempt.
+        /// </summary>
+        static void SaveXmlWithRetry(System.Xml.Linq.XDocument doc, string path)
+        {
+            for (int attempt = 1, delay = 50; ; attempt++, delay = Math.Min(delay * 2, 800))
+            {
+                try { doc.Save(path); return; }
+                catch (Exception ex) when ((ex is IOException || ex is UnauthorizedAccessException) && attempt < 8)
+                {
+                    System.Threading.Thread.Sleep(delay);
+                }
             }
         }
 
