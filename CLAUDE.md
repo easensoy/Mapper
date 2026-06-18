@@ -8,27 +8,28 @@
 
 A C# generator that turns a VueOne digital-twin `Control.xml` into a complete EAE 24.1 IEC 61499 project for the SMC rig (M262 + M580 + BX1) and the simulator. Change the digital twin, click one button, the new layout drives the real PLCs. No engineer hand-writes IEC 61499 for each layout change.
 
-## Current focus — SEVEN_STATE END-TO-END IN TEST SIMULATOR
+## Current focus — RIG (M262 + M580 + BX1); the Test Simulator path was REMOVED
 
-The bench rig is unsafe (damaged clamp, swivel collision risk), so **all testing is in the EAE simulator**, not on the rig. The button is `btnGenerateFullSystemSimulator_Click` in `MapperUI\MapperUI\MainForm_simulator.cs`. The flag is `Cfg().SimulatorFullSystem = true`. All three PLCs collapse into one SIM resource and the single ring resolves cross-PLC waits.
+The Test Simulator path was **deleted** (2026-06-16): `MainForm_simulator.cs`,
+`CodeGen/Services/SimulatorPostProcessor.cs`, and
+`MapperTests/SimulatorEndToEndHarness.cs` no longer exist. MapperUI has one
+generation button — **Test Runtime** (`btnTestStation1_Click`) — which generates
+the full 3-PLC rig project (M262 Feed + M580 Assembly/Disassembly + BX1 covers,
+MQTT on BX1). `SimulatorFullSystem` survives only as inert config (never set
+true); `SimulatorRecipeMode` is still LIVE — the `Data → State-Transition Table`
+menu preview sets it.
 
-**Session goal (2026-05-30 onwards):** make `Bearing_PnP` actually run as the real 3-position `Seven_State_Actuator_CAT` end-to-end in the simulator (recipe cycles it Pick → Place → Home, sim sensors close on a timer, harness verifies). The prior loop landed end-to-end Assembly with the Five_State stub (13/16 green); this session removes the stub and the swivel becomes a real 3-position actuator in sim.
+**The live, dated work record is `## Status` below** — read the top bullets for
+the actual current state (recent: MQTT on BX1, covers folded into the M580
+Assembly/Disassembly flow, and conservative dead-code cleanup). The
+behaviour-preserving gate is the byte-identical generated-Demonstrator diff
+(`_gate/`, golden under `C:\_gate`); `MapperTests` runs no active tests.
 
-**The two pieces of work:**
-1. **The three deferred rig fixes** — commit surgical CAT to zip, exclude Seven from `BuildStation2Wiring.stationChain`, parameterize `process_state_name = lowercased name` on Seven instances. Small, safe, take effect when the stub flag flips.
-2. **Sim sensor synthesis for Seven_State** — the new substantial piece. Mirror the Five_State no-sensor pattern: inject a `SimSwivelForce` post-processor that publishes the actuator's `$${PATH}atwork1` / `$${PATH}atwork2` symlinks, driven off the FB's own `current_state1_to_plc` / `current_state2_to_plc` coil-drive outputs with an `E_DELAY` settle. Without it, flipping the stub stalls the swivel at `ToPick` forever (Seven_State's ECC waits on `atwork1 = TRUE AND atwork2 = FALSE` which the sim never closes today).
-
-**Scope clamp for this session:**
-- ✅ Edit `Template Library/CAT/Seven_State_Actuator_CAT.cat.zip` to commit the surgical CAT body.
-- ✅ Edit `BuildStation2Wiring` in `SystemLayoutInjector.cs`.
-- ✅ Edit `BuildMinimalActuatorParameters` Seven branch in `SystemLayoutInjector.cs`.
-- ✅ Add a new public static `CodeGen/Services/SimulatorPostProcessor.cs` (or extend the existing sim post-process scope) for `SimSwivelForce`.
-- ✅ Flip `StubSevenStateActuatorsAsFiveState = false` ONLY after the SimSwivelForce post-processor is in place and the harness is updated to verify Seven_State end-to-end.
-- ✅ Update the harness to (a) recognise `Bearing_PnP` as `Seven_State_Actuator_CAT`, (b) check `SimSwivelForce` wiring, (c) assert Pick/Place/Home CMDs in the recipe.
-- ❌ DO NOT edit the rig path (`btnTestStation1_Click`) — it inherits the rig fixes through shared code and gets verified when the rig comes back.
-- ❌ DO NOT re-add the `RecipeTestActuatorAllowlist` entries.
-- ❌ DO NOT regenerate the hand-crafted Excel under `MapperTests\TestData\SMC_Rig_IO_Bindings.xlsx`.
-- ❌ DO NOT touch `C:\Demonstrator` directly. The Mapper writes there via the pipeline; the harness writes to a temp dir.
+**Standing constraints (still in force):**
+- ❌ DO NOT touch MQTT, recipes, HCF, sysres/syslay, CATs, or Control.xml parsing without an explicit task + the byte-identical gate.
+- ❌ DO NOT regenerate the hand-crafted `MapperTests\TestData\SMC_Rig_IO_Bindings.xlsx`.
+- ❌ DO NOT touch `C:\Demonstrator` directly — the Mapper writes there via the pipeline; the `_gate` harness writes to a temp dir.
+- ⚠️ The bench rig is currently unsafe (damaged clamp, swivel collision risk) — no rig actuation without explicit safety clearance.
 
 ## Status — UPDATE EVERY LOOP ITERATION
 
@@ -200,6 +201,11 @@ Plus the new piece this session built on top: `SimulatorPostProcessor.InjectSimS
 
 ## Finish line — Assembly Station end-to-end in simulator
 
+> ⚠️ **OBSOLETE (2026-06-16).** The Test Simulator path and `SimulatorEndToEndHarness`
+> were removed; the checklist below describes the deleted harness and is kept only as
+> historical context. The behaviour-preserving gate is now the byte-identical
+> generated-Demonstrator diff (`_gate/`) — see `## Current focus`.
+
 The headless harness asserts these. Each iteration aims to turn red items green.
 
 ### A. Generation succeeds end-to-end
@@ -244,17 +250,31 @@ The headless harness asserts these. Each iteration aims to turn red items green.
 
 - [ ] Harness runs deterministic: same Control.xml + same MapperConfig → byte-identical generated `.syslay`/`.sysres`/`.hcf` two runs in a row.
 
-## How to run the harness
+## How to verify a behaviour-preserving change (the byte-identical gate)
+
+`MapperTests` runs no active tests (the `SimulatorEndToEndHarness` was deleted
+2026-06-16). Prove a change preserves generation with the `_gate` byte-identical
+Demonstrator diff — it reads a fixed base (`C:\_gate\base`), generates into
+`C:\_gate\work`, and NEVER writes the live `C:\Demonstrator`:
 
 ```powershell
 # From C:\VueOneMapper
-dotnet build MapperTests\MapperTests.csproj -c Debug
-dotnet test  MapperTests\MapperTests.csproj -c Debug --filter "FullyQualifiedName~SimulatorEndToEndHarness" --logger "console;verbosity=detailed"
+dotnet build _gate\Gate.csproj -c Debug
+_gate\bin\Debug\net10.0\gate.exe C:\_gate\snap_pre     # before the change
+# ...make the change, rebuild _gate (recompiles CodeGen)...
+_gate\bin\Debug\net10.0\gate.exe C:\_gate\snap_post    # after the change
+# then SHA256-diff snap_pre vs snap_post — must be byte-identical
 ```
 
-Or as a one-shot CLI (the harness prints PASS/FAIL per checklist item to stdout and exits non-zero on any failure, so the loop can `dotnet test` and read the exit code).
+The gate also runs HcfReferenceValidator + SyslaySysresParityValidator +
+MqttConnectionValidator and exits non-zero on a split-brain or parity divergence.
 
-## EAE verification steps (after the harness is green)
+## EAE verification steps (Test Simulator era — OBSOLETE)
+
+> ⚠️ **OBSOLETE (2026-06-16).** Describes the removed Test Simulator EAE flow (the
+> "harness green" precondition and the Test Simulator button are gone). For the
+> current rig flow: generate via **Test Runtime**, then in EAE Reload Solution →
+> clean Build → Deploy → Login. Kept below as historical context.
 
 The harness proves the generation pipeline produces the right artefacts. EAE is the only thing that proves the *runtime* actually cycles. Sequence (once per change to the generator):
 
