@@ -443,6 +443,15 @@ namespace CodeGen.Services
             // byte-identical. athome (NAME1) is untouched — it is timer-driven by the CAT's
             // ReturnToHomeHandler / No_Sensor_Handler_7SCH, so it needs no external publish.
             NormalizeSwivelSimSensorSource(eaeProjectDir, false, result);
+            // Home-sensor poll (2026-06-18, user). The centre-home swivel's atHome/atWork DIs are read by
+            // a sample-on-REQ symlink (Inputs) whose REQ had NOTHING driving it — unlike the Five_State CAT
+            // which got a poll. So the core saw the DI02 (SwivelArmAtHome) closure only intermittently and
+            // the non-spring arm coasted PAST centre before the coils cut (worse on the never-tuned AtWork1
+            // leg → the asymmetric miss the user reported). Add the SAME fast Poll E_DELAY the Five_State CAT
+            // uses (INIT->Poll.START, Poll.EO->Poll.START self-loop, Poll.EO->Inputs.REQ) at a tighter 50ms
+            // DT so the core re-samples atHome ~every 50ms and the ToHome->AtHome cut lands at centre, the
+            // same both directions. Additive: recipe/state ids/coils untouched — purely the DI re-sample rate.
+            PatchCatHomeSensorPoll(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT", pollDtMs: 50, result);
             // Same coil->sensor synthesis for the Five_State actuators (Bearing_Gripper,
             // Shaft_*, CoverPNP_*). Bearing_Gripper deploys with WorkSensorFitted=TRUE on
             // M580 and the per-PLC no-sensor sysres override has not reliably reached the
@@ -1791,6 +1800,89 @@ namespace CodeGen.Services
                 {
                     System.Threading.Thread.Sleep(delay);
                 }
+            }
+        }
+
+        /// <summary>
+        /// Adds the fast home-sensor poll to the centre-home swivel CAT. Its atHome/atWork DIs are read by
+        /// a sample-on-REQ SYMLINKMULTIVARDST ("Inputs") whose REQ was never driven, so the core re-sampled
+        /// the sensors only intermittently and the non-spring arm coasted past centre before the coils cut.
+        /// This injects the SAME poll the Five_State CAT uses — a self-looping E_DELAY ("HomePoll") firing
+        /// Inputs.REQ every <paramref name="pollDtMs"/> ms — so ToHome->AtHome (gated on atHome) cuts the
+        /// coils right at centre, the same both directions. Idempotent; purely additive (no recipe / state
+        /// id / coil change). No-op if the CAT or its Inputs FB is absent.
+        /// </summary>
+        static void PatchCatHomeSensorPoll(string eaeProjectDir, string catName, int pollDtMs, DeployResult result)
+        {
+            var fbt = Directory.EnumerateFiles(
+                    Path.Combine(eaeProjectDir, "IEC61499"),
+                    catName + ".fbt", SearchOption.AllDirectories)
+                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
+                ?? string.Empty;
+            if (string.IsNullOrEmpty(fbt))
+            {
+                result.Warnings.Add($"{catName}.fbt not found; home-sensor poll skipped.");
+                return;
+            }
+            try
+            {
+                var doc = LoadXmlWithRetry(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+                var net = root.Element(ns + "FBNetwork");
+                if (net == null) { result.Warnings.Add($"{catName}.fbt: no FBNetwork; home-sensor poll skipped."); return; }
+
+                // Idempotent: skip if the poll FB is already present.
+                if (net.Elements(ns + "FB").Any(f => (string?)f.Attribute("Name") == "HomePoll")) return;
+
+                // Need the Inputs DI symlink to re-sample.
+                if (!net.Elements(ns + "FB").Any(f => (string?)f.Attribute("Name") == "Inputs"))
+                {
+                    result.Warnings.Add($"{catName}.fbt: no 'Inputs' FB; home-sensor poll skipped.");
+                    return;
+                }
+
+                // Bump the FB IDCounter for the new FB.
+                var idAttr = root.Elements(ns + "Attribute")
+                    .FirstOrDefault(a => (string?)a.Attribute("Name") == "Configuration.FB.IDCounter");
+                int idc = 2000;
+                if (idAttr != null && int.TryParse((string?)idAttr.Attribute("Value"), out var parsed)) idc = parsed;
+                if (idAttr != null) idAttr.SetAttributeValue("Value", (idc + 1).ToString());
+
+                // HomePoll = E_DELAY with DT=pollDtMs — same shape as the Five_State CAT's Poll.
+                var pollFb = new System.Xml.Linq.XElement(ns + "FB",
+                    new System.Xml.Linq.XAttribute("ID", idc),
+                    new System.Xml.Linq.XAttribute("Name", "HomePoll"),
+                    new System.Xml.Linq.XAttribute("Type", "E_DELAY"),
+                    new System.Xml.Linq.XAttribute("x", "800"),
+                    new System.Xml.Linq.XAttribute("y", "5800"),
+                    new System.Xml.Linq.XAttribute("Namespace", "IEC61499.Standard"),
+                    new System.Xml.Linq.XElement(ns + "Parameter",
+                        new System.Xml.Linq.XAttribute("Name", "DT"),
+                        new System.Xml.Linq.XAttribute("Value", $"T#{pollDtMs}ms")));
+                var lastFb = net.Elements(ns + "FB").LastOrDefault();
+                if (lastFb != null) lastFb.AddAfterSelf(pollFb); else net.Add(pollFb);
+
+                // Wire: INIT -> HomePoll.START; HomePoll.EO -> HomePoll.START (self-loop) + Inputs.REQ.
+                var ec = net.Element(ns + "EventConnections");
+                if (ec == null) { ec = new System.Xml.Linq.XElement(ns + "EventConnections"); net.Add(ec); }
+                void Conn(string s, string d) =>
+                    ec.Add(new System.Xml.Linq.XElement(ns + "Connection",
+                        new System.Xml.Linq.XAttribute("Source", s),
+                        new System.Xml.Linq.XAttribute("Destination", d)));
+                Conn("INIT", "HomePoll.START");
+                Conn("HomePoll.EO", "HomePoll.START");
+                Conn("HomePoll.EO", "Inputs.REQ");
+
+                SaveXmlWithRetry(doc, fbt);
+                result.PatchesApplied.Add(
+                    $"{catName}: home-sensor poll added (E_DELAY {pollDtMs}ms -> Inputs.REQ; re-samples atHome so ToHome->AtHome cuts at centre)");
+                MapperLogger.Info($"[Deploy] {catName}.fbt: HomePoll E_DELAY {pollDtMs}ms -> Inputs.REQ");
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"{catName} home-sensor poll patch failed: {ex.Message}");
             }
         }
 
