@@ -2216,6 +2216,15 @@ namespace CodeGen.Translation
             {
                 workSensorFitted = false;
                 homeSensorFitted = false;
+                // The sensorless gripper's grip/release acknowledgment is purely the
+                // toWork/toHome timer (no DI to confirm). 2026-06-18 (user): reduce the
+                // vacuum settle from the 2000ms DefaultMotionMs fallback to 1000ms so the
+                // cover P&P advances ~1s after grip/release instead of ~2s. Name-scoped to
+                // THIS gripper only — CoverPNP_Vr (sensor-fitted, 2000ms), CoverPNP_Hr
+                // (1000ms), and every M580/M262 actuator are untouched. faultTimeoutWork/
+                // Home derive as toWorkMs*2 (2000ms) and stay disabled (sensorless).
+                toWorkMs = 1000;
+                toHomeMs = 1000;
             }
 
             // STAGE 5b (gated): the M262 Ejector is reference-compatible OPEN-LOOP. The reference
