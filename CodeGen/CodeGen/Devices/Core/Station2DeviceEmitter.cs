@@ -251,10 +251,12 @@ namespace CodeGen.Devices.Core
                 equipmentJsonName: "Equipment_M580dPAC_1.json",
                 equipmentBuilder: () => BuildM580EquipmentJson(M580SysdevId, solutionId,
                                           cfg.M580TargetIp, cfg.M580BroadcastDomainUuid),
-                // M580 firmware-gates MQTT (no MQTT client runs on it), so it needs NO insecure-app
-                // override — only the BX1 Soft-dPAC does. Keep the SecurityApp group OFF the M580 device
-                // (unverified for the M580_dPAC hardware type) by passing false. BX1 keeps its override.
-                deployPluginPropertiesXml: BuildStandardDeployPluginPropertiesXml(false),
+                // M580 now carries MqttConn_M580 — write the SecurityApp/InsecureApplication override so the
+                // device can accept a plain mqtt:// URL (else MQTT_CONNECTION faults RC101). EAE caches the
+                // device model, so the user still enables 'Security -> Insecure Application' on the M580 device
+                // once (the same one-time step BX1 needed); this keeps the file consistent. Insecure MQTT mode.
+                deployPluginPropertiesXml: BuildStandardDeployPluginPropertiesXml(
+                    cfg.MqttPublishEnabled && !cfg.MqttSecureTls),
                 simulationBindingDeployPort: 51500,
                 simulationBindingArchivePort: 51497);
 
