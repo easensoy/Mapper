@@ -222,36 +222,6 @@ namespace CodeGen.Translation
             return $"[{formatted}]";
         }
 
-        /// <summary>
-        /// Formats an array-of-struct literal for the InterlockRule datatype, e.g.
-        /// <c>[(FromState:=2, ToState:=2, SourceID:=6, BlockedState:=0), (...)]</c>.
-        /// Emits only the first <paramref name="count"/> rules (IEC 61131-3 partial
-        /// array init defaults the trailing slots). This is the EXACT struct-literal
-        /// syntax whose EAE acceptance the StructLiteralProbe spike verifies before
-        /// the real 4-arrays-&gt;RuleTable collapse is built. Named-field form
-        /// (Field:=value) is the standard IEC 61131-3 structured initialiser.
-        /// </summary>
-        public static string FormatRuleTable(
-            IReadOnlyList<int> from, IReadOnlyList<int> to,
-            IReadOnlyList<int> src, IReadOnlyList<int> blk, int count)
-        {
-            // Emit ALL slots (mirrors the original four INT arrays, which were
-            // always written as full 10-element literals, zero-filled past
-            // RuleCount). RuleCount still bounds the InterlockManager.Evaluate
-            // loop, so trailing zero-rows are never read — behaviour is identical.
-            // Emitting every slot also means the literal is never the empty "[]",
-            // avoiding an untested empty-struct-array edge case for actuators with
-            // RuleCount=0. (count is kept for call-site clarity; the literal spans
-            // the whole array.)
-            _ = count;
-            int n = from.Count;
-            var elems = new List<string>();
-            for (int i = 0; i < n; i++)
-                elems.Add(
-                    $"(FromState:={from[i]}, ToState:={to[i]}, " +
-                    $"SourceID:={src[i]}, BlockedState:={blk[i]})");
-            return "[" + string.Join(", ", elems) + "]";
-        }
 
         /// <summary>
         /// Formats an array-of-struct literal for the RecipeStep datatype (mixed
