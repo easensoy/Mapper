@@ -142,13 +142,12 @@ namespace CodeGen.Devices.M262
                 SetTopologyEquipmentToNoConf(eaeRoot);
             }
 
-            // The F513CAE3 DeployPlugin Properties (Boot/Deploy + the SecurityApp/InsecureApplication
-            // override that lets plain mqtt:// connect) is deploy CONFIG, not the trust certificate
-            // (trust is the sysdev + IPs, guarded above). Write it on EVERY run — even a preserved
-            // device — so the RC101 insecure-app override lands. The write is idempotent (only when the
-            // file content differs), so it touches a preserved device at most once (when adding the override).
-            propsPath = WriteM262DevicePropertiesXml(sysdevPath,
-                cfg.MqttPublishEnabled && !cfg.MqttSecureTls);
+            // The F513CAE3 DeployPlugin Properties (Boot/Deploy) is deploy CONFIG, not the trust
+            // certificate (trust is the sysdev + IPs, guarded above), so it's written on EVERY run even
+            // for a preserved device. M262 firmware-gates MQTT (no MQTT client runs on it), so it needs
+            // NO insecure-app override — only the BX1 Soft-dPAC does. Pass false to keep the SecurityApp
+            // group OFF the M262 device (unverified for the M262_dPAC hardware type).
+            propsPath = WriteM262DevicePropertiesXml(sysdevPath, false);
 
             var systemFile = FindSystemFile(eaeRoot)
                 ?? throw new FileNotFoundException(
