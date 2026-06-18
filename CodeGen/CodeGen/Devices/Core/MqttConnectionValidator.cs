@@ -85,13 +85,24 @@ namespace CodeGen.Devices.Core
                             "on this device) for a plain broker, or point mqtts:// at a TLS listener (e.g. 8883).",
                             true));
                     else if (isMqtt)
+                    {
+                        // Hard-VERIFY the device 'Insecure Application' override is actually present in the
+                        // device Properties (rather than assuming the write succeeded). Without it a plain
+                        // mqtt:// faults RC101 ('Secure URL required') — EAE is secure-by-default.
+                        bool hasOverride = DeviceHasInsecureAppOverride(sysres);
                         findings.Add(new(resLabel, name,
-                            "insecure mqtt:// — the device must allow insecure app config or MQTT_CONNECTION " +
-                            "faults ReturnCode 101 ('Secure URL required'). The Mapper now AUTO-WRITES the " +
-                            "'Security -> Insecure Application -> Enable' override into the BX1 Soft-dPAC device " +
-                            "Properties (insecure MQTT mode), so BX1 reaches ReturnCode 0 on a plain broker. " +
-                            "M262/M580 firmware-gate MQTT and do not run an MQTT client regardless.",
-                            false));
+                            hasOverride
+                                ? "insecure mqtt:// — the device 'Insecure Application' override IS present in the " +
+                                  "device Properties (F513CAE3 .Properties.xml). If MQTT_CONNECTION STILL faults RC101 " +
+                                  "after Deploy, EAE has not re-imported the externally-written Properties: Reload " +
+                                  "Solution (or restart EAE) so the Build writes InsecureApplication.Enable=true into " +
+                                  "the deployed runtime config, then redeploy this device."
+                                : "insecure mqtt:// but the device 'Insecure Application' override is MISSING from the " +
+                                  "device Properties (F513CAE3 .Properties.xml) -> MQTT_CONNECTION WILL fault RC101 " +
+                                  "('Secure URL required'). The Mapper writes this override only for the BX1 Soft-dPAC " +
+                                  "in insecure MQTT mode (cfg.MqttPublishEnabled && !cfg.MqttSecureTls).",
+                            Impossible: !hasOverride));
+                    }
                     else if (!isMqtts)
                         findings.Add(new(resLabel, name,
                             $"URL scheme is not mqtt:// / mqtts:// / ws:// / wss:// (URL='{url}') — EAE rejects it " +
@@ -106,6 +117,29 @@ namespace CodeGen.Devices.Core
         {
             var m = Regex.Match(url, @"://[^:/]+:(\d+)");
             return m.Success && int.TryParse(m.Groups[1].Value, out var n) ? n : -1;
+        }
+
+        /// <summary>
+        /// True if the device folder holding this sysres carries the 'Insecure Application' override
+        /// (Configuration -> SecurityApp -> InsecureApplication -> Enable=True) in its F513CAE3
+        /// DeployPlugin Properties — the per-device setting EAE needs to accept a plain mqtt:// URL.
+        /// </summary>
+        static bool DeviceHasInsecureAppOverride(string sysresPath)
+        {
+            try
+            {
+                var dir = Path.GetDirectoryName(sysresPath);
+                if (string.IsNullOrEmpty(dir)) return false;
+                var props = Path.Combine(dir, "F513CAE3-7194-4086-936C-02912EA0B352.Properties.xml");
+                if (!File.Exists(props)) return false;
+                return XDocument.Load(props).Descendants()
+                    .Any(e => e.Name.LocalName == "Property"
+                        && string.Equals((string?)e.Attribute("Name"), "Enable", StringComparison.Ordinal)
+                        && string.Equals((string?)e.Attribute("Value"), "True", StringComparison.OrdinalIgnoreCase)
+                        && e.Ancestors().Any(a => a.Name.LocalName == "GroupProperty"
+                            && string.Equals((string?)a.Attribute("Name"), "InsecureApplication", StringComparison.Ordinal)));
+            }
+            catch { return false; }
         }
     }
 }
