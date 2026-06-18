@@ -16,7 +16,6 @@ you cannot break) and `Docs/REVERTED_FIXES.md` (the things not to re-attempt).
    │  CodeGen (C# library)  │   ← this repo
    │  SystemInjector        │
    │  + Devices/* emitters  │
-   │  + SimulatorPostProc.  │
    └────────────────────────┘
               │  writes
               ▼
@@ -121,32 +120,19 @@ If you wire Seven into the stationChain, EAE rejects on import with
    deployed `.hcf` so EAE's Symbolic Link view resolves. Emits Form-1 GUID
    triples (`{resourceId}.{fbId}.{port}`).
 
-### `MainForm_simulator.btnGenerateFullSystemSimulator_Click` ("Test Simulator")
+### Test Simulator path — REMOVED (2026-06-16)
 
-1. Sets `cfg.SimulatorFullSystem = true` — collapses ALL 3 PLCs into ONE SIM
-   resource. M580 / BX1 sysdev / sysres / HCF emission is **skipped**.
-2. `DeployUniversalTemplatesAsync` — copies the CAT zips into the EAE project.
-3. `PrepareDemonstratorForGeneration` + `GenerateStation1TestSyslay` (same).
-4. `FinalizeM262StackAsync` (same — but only the M262 resource is the SIM resource).
-5. `M262SysresWireEmitter.Emit` — wires the SIM sysres.
-6. `HcfPatchService.PatchDeployed` — patches the .hcf.
-7. **Simulator-only post-processors** (`CodeGen/Services/SimulatorPostProcessor.cs`):
-   - `InjectSimHopperForce` — injects a SYMLINKMULTIVARSRC publishing
-     `PartInHopper.Input = TRUE` so the hopper sensor reads TRUE at startup.
-   - `OverrideSimActuatorsNoSensor` — forces `WorkSensorFitted = FALSE` /
-     `HomeSensorFitted = FALSE` on every `Five_State_Actuator_CAT` instance, so
-     the internal `No_Sensor_Handler` timer self-advances the ECC.
-   - `VerifySimActuatorsNoSensorOrAbort` — re-reads syslay + sysres, throws if
-     any Five_State lacks the no-sensor params.
-   - `InjectSimSwivelForce` — for every `Seven_State_Actuator_CAT` instance,
-     injects one `SimSwivelForce_<name>` SYMLINKMULTIVARSRC publishing
-     `atwork1` / `atwork2` from the actuator's own `current_state{1,2}_to_plc`
-     outputs (so the swivel's `ToPick → AtPick` and `ToPlace → AtPlace` gates
-     close in sim without physical sensors).
-   - `DumpSimRecipeAndInterlockArrays` — surfaces the emitted recipe + rule
-     arrays in the Activity log.
-8. EAE: Reload Solution → set Active Network Profile to **"Local Test"** → clean
-   Build → Deploy → Login → Watch.
+The `MainForm_simulator.btnGenerateFullSystemSimulator_Click` handler and
+`CodeGen/Services/SimulatorPostProcessor.cs` (the sim post-processors —
+`InjectSimHopperForce`, `OverrideSimActuatorsNoSensor`, `InjectSimSwivelForce`,
+`VerifySimActuatorsNoSensorOrAbort`, `DumpSimRecipeAndInterlockArrays`) were
+**deleted**, along with `MapperTests/SimulatorEndToEndHarness.cs`. The
+`SimulatorFullSystem` / `SimulatorRecipeMode` flags survive as inert config — the
+Test Runtime path forces them false and no UI button sets `SimulatorFullSystem`
+true, so its branches are dead code pending a later cleanup pass
+(`SimulatorRecipeMode` is still set true only by the `StateTransitionTableForm`
+debug utility). EAE's **"Local Test"** *network profile* is unrelated and can
+still run the rig project locally on the soft-dPAC (one PLC instance at a time).
 
 ## 6. The CAT instance routing decision
 
@@ -204,8 +190,7 @@ VueOneMapper/
 │   │   ├── Process/
 │   │   │   ├── ProcessRecipeArrayGenerator.cs    # the Recipe builder
 │   │   │   ├── ProcessRecipeStGenerator.cs
-│   │   │   ├── ProcessStepTableGenerator.cs
-│   │   │   └── ProcessCatGenerator.cs
+│   │   │   └── ProcessStepTableGenerator.cs
 │   │   ├── IoBindingsLoader.cs            # reads SMC_Rig_IO_Bindings.xlsx
 │   │   ├── InstanceNameResolver.cs
 │   │   ├── HcfSymbolIndex.cs              # name → PLC bucket guess
@@ -228,19 +213,15 @@ VueOneMapper/
 │   │   │   └── HcfPatchService.cs
 │   │   ├── M580/M580SymbolBinder.cs       # .hcf binding for M580 channels
 │   │   └── BX1/BX1SymbolBinder.cs
-│   ├── Services/
-│   │   ├── DemonstratorWiper.cs           # the Clean step
-│   │   ├── TemplateLibraryDeployer.cs     # extracts CAT zips into the project
-│   │   ├── SimulatorPostProcessor.cs      # the sim post-gen pipeline (public statics)
-│   │   └── …
-│   └── Bridge/                            # cross-language bridge to a future server
+│   └── Services/
+│       ├── DemonstratorWiper.cs           # the Clean step
+│       ├── TemplateLibraryDeployer.cs     # extracts CAT zips into the project
+│       └── …
 ├── MapperUI/MapperUI/                  # WinForms front-end
-│   ├── MainForm.cs                       # btnTestStation1_Click — rig path
-│   ├── MainForm_simulator.cs             # btnGenerateFullSystemSimulator_Click — sim
+│   ├── MainForm.cs                       # btnTestStation1_Click — rig path (the one button)
 │   └── MainForm.Designer.cs
-├── MapperTests/                        # xUnit verification harness
-│   ├── MapperTests.csproj                # legacy tests quarantined under <Compile Remove>
-│   ├── SimulatorEndToEndHarness.cs       # 18-item checklist — the gate
+├── MapperTests/                        # quarantined legacy tests (no active gate)
+│   ├── MapperTests.csproj                # all tests under <Compile Remove>; runs 0 tests
 │   ├── ITERATIONS.md                     # loop log
 │   └── TestData/
 │       ├── Feed_Station_Fixture.xml       # 8-component Feed-only (legacy)
