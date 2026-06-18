@@ -1110,7 +1110,7 @@ namespace CodeGen.Translation
 
             var (processOuter, processNested, processRecipe) = BuildProcessFbParameters(
                 contents.Process, allComponents, processInstanceName, processId, contents,
-                useRecipeStruct: config != null && (config.SimulatorFullSystem || config.UseRecipeStruct));
+                useRecipeStruct: config != null && config.UseRecipeStruct);
 
             // (Removed: processOuter["BackgroundColor"] = "PaleGreen" — EAE's
             // FB-type compiler rejects any Parameter Name that is not declared
@@ -1195,7 +1195,7 @@ namespace CodeGen.Translation
                 var (aOuter, aNested, aRecipe) = BuildProcessFbParameters(
                     assemblyStationProc, allComponents, assemblyName, assemblyProcessId,
                     contents: contents,        // global registry → global Wait1Id ids
-                    useRecipeStruct: config != null && (config.SimulatorFullSystem || config.UseRecipeStruct),
+                    useRecipeStruct: config != null && config.UseRecipeStruct,
                     commandFromCondition: true);
                 builder.AddFB(FBIdGenerator.GenerateFBId(assemblyStationProc.ComponentID),
                     assemblyName, "Process1_Generic", "Main", 12200, 1460,
@@ -1232,7 +1232,7 @@ namespace CodeGen.Translation
                 var (dOuter, dNested, dRecipe) = BuildProcessFbParameters(
                     disassyProc, allComponents, disassyName, disassemblyProcessId,
                     contents: contents,        // global registry → global Wait1Id ids
-                    useRecipeStruct: config != null && (config.SimulatorFullSystem || config.UseRecipeStruct),
+                    useRecipeStruct: config != null && config.UseRecipeStruct,
                     commandFromCondition: true);
                 builder.AddFB(FBIdGenerator.GenerateFBId(disassyProc.ComponentID),
                     disassyName, "Process1_Generic", "Main", 20800, 1460,
@@ -1269,7 +1269,7 @@ namespace CodeGen.Translation
                 var (cOuter, cNested, cRecipe) = BuildProcessFbParameters(
                     coverProc, allComponents, "Cover_Station", coverStationProcessId,
                     contents: contents,
-                    useRecipeStruct: config != null && (config.SimulatorFullSystem || config.UseRecipeStruct),
+                    useRecipeStruct: config != null && config.UseRecipeStruct,
                     commandFromCondition: false);
                 builder.AddFB(FBIdGenerator.GenerateFBId(coverProc.ComponentID),
                     "Cover_Station", "Process1_Generic", "Main", 31500, 1460,
@@ -3347,7 +3347,7 @@ namespace CodeGen.Translation
             }
 
             var (outer, nested, _) = BuildProcessFbParameters(process, allComponents, process.Name, 10, contents,
-                useRecipeStruct: config.SimulatorFullSystem || config.UseRecipeStruct);
+                useRecipeStruct: config.UseRecipeStruct);
             builder.AddFB(FBIdGenerator.GenerateFBId(process.ComponentID),
                 process.Name, "Process1_Generic", "Main", 3360, 1460, outer, nested);
 
@@ -3448,7 +3448,7 @@ namespace CodeGen.Translation
                     hmiName, "Station_CAT", "Main", xCol + 100, 100);
 
                 var (outer, nested, _) = BuildProcessFbParameters(proc, allComponents, proc.Name, 10 + stationIndex, contents,
-                    useRecipeStruct: config.SimulatorFullSystem || config.UseRecipeStruct);
+                    useRecipeStruct: config.UseRecipeStruct);
                 var processInstanceName = $"Process{stationIndex}";
                 builder.AddFB(FBIdGenerator.GenerateFBId(proc.ComponentID),
                     processInstanceName, "Process1_Generic", "Main", xCol + 1240, 1460, outer, nested);
