@@ -140,8 +140,15 @@ namespace CodeGen.Devices.M262
                 // because re-writing IPs invalidates the controller-side
                 // trust certificate.
                 SetTopologyEquipmentToNoConf(eaeRoot);
-                propsPath = WriteM262DevicePropertiesXml(sysdevPath);
             }
+
+            // The F513CAE3 DeployPlugin Properties (Boot/Deploy + the SecurityApp/InsecureApplication
+            // override that lets plain mqtt:// connect) is deploy CONFIG, not the trust certificate
+            // (trust is the sysdev + IPs, guarded above). Write it on EVERY run — even a preserved
+            // device — so the RC101 insecure-app override lands. The write is idempotent (only when the
+            // file content differs), so it touches a preserved device at most once (when adding the override).
+            propsPath = WriteM262DevicePropertiesXml(sysdevPath,
+                cfg.MqttPublishEnabled && !cfg.MqttSecureTls);
 
             var systemFile = FindSystemFile(eaeRoot)
                 ?? throw new FileNotFoundException(
@@ -220,7 +227,7 @@ namespace CodeGen.Devices.M262
 
         const string M262DevicePropertiesPluginGuid = "F513CAE3-7194-4086-936C-02912EA0B352";
 
-        public static string WriteM262DevicePropertiesXml(string sysdevPath)
+        public static string WriteM262DevicePropertiesXml(string sysdevPath, bool enableInsecureApp = false)
         {
             var sysdevFolder = Path.Combine(
                 Path.GetDirectoryName(sysdevPath)!,
@@ -230,7 +237,10 @@ namespace CodeGen.Devices.M262
             var propsPath = Path.Combine(sysdevFolder,
                 $"{M262DevicePropertiesPluginGuid}.Properties.xml");
 
-            const string canonical =
+            // M262 carries MqttConn_M262 — with a plain mqtt:// broker the device must allow insecure
+            // app config (Configuration -> SecurityApp -> InsecureApplication -> Enable) or
+            // MQTT_CONNECTION faults RC101. Same override BX1/M580 use; gated on insecure MQTT mode.
+            string canonical =
                 "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
                 "<SystemDeviceProperties xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" " +
                     "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" " +
@@ -245,6 +255,13 @@ namespace CodeGen.Devices.M262
                 "    <GroupProperty Name=\"Boot\" Expanded=\"true\" Enabled=\"true\">\r\n" +
                 "      <Property Name=\"BootMode\" Value=\"Run\" IsPassword=\"false\" />\r\n" +
                 "    </GroupProperty>\r\n" +
+                (enableInsecureApp
+                    ? "    <GroupProperty Name=\"SecurityApp\" Expanded=\"true\" Enabled=\"true\">\r\n" +
+                      "      <GroupProperty Name=\"InsecureApplication\" Expanded=\"true\" Enabled=\"true\">\r\n" +
+                      "        <Property Name=\"Enable\" Value=\"True\" IsPassword=\"false\" />\r\n" +
+                      "      </GroupProperty>\r\n" +
+                      "    </GroupProperty>\r\n"
+                    : string.Empty) +
                 "  </GroupProperty>\r\n" +
                 "</SystemDeviceProperties>";
 
