@@ -277,7 +277,7 @@ namespace CodeGen.Services
             // rig; no SIM, no SimHopperForce). Bidirectional + gated: added on the rig
             // (!SimulatorFullSystem), stripped on the simulator so the proven sim core
             // stays byte-identical (the arcs are inert there anyway).
-            PatchSwivelAtHomeInitRecovery(eaeProjectDir, addArc: !cfg.SimulatorFullSystem, result);
+            PatchSwivelAtHomeInitRecovery(eaeProjectDir, addArc: true, result);
             // 2026-06-03: Centre-Home swivel home must clear both work coils. The
             // shipped AtHome state ran 'AtHomeEnd' (current_state:=6 only), so the
             // work coil used to swing through centre stayed energized at "home".
@@ -299,13 +299,13 @@ namespace CodeGen.Services
             // overshoot; with the physical centre sensor working it is the correct,
             // position-accurate source. An earlier atHome-timer rewire was removed -- it
             // fought that deliberate wiring and was reverted by the normalizer anyway.
-            PatchSwivelRelaxWorkLatch(eaeProjectDir, relax: !cfg.SimulatorFullSystem, result);
+            PatchSwivelRelaxWorkLatch(eaeProjectDir, relax: true, result);
             // Seven centre-home command edge. The Place command reaches StateHandling and
             // immediately fans an interlock check into ActuatorCore.ilck_event before the
             // normal pst_event command edge is guaranteed to be visible in Watch/runtime.
             // Sample state_val on ilck_event too so AtWork1 -> ToWork2 sees the same
             // command value (3) as the interlock result. Seven-only; sim strips it back.
-            PatchSwivelInterlockEventCarriesStateVal(eaeProjectDir, add: !cfg.SimulatorFullSystem, result);
+            PatchSwivelInterlockEventCarriesStateVal(eaeProjectDir, add: true, result);
             // 2026-06-08 (Alex/Jyotsna leftover-data fix): make the ProcessRuntime engine's
             // WAIT edge-triggered so a STALE state_table slot can no longer satisfy a WAIT.
             // The ring (updateComponentState) never clears state_table -- each slot holds the
@@ -355,7 +355,7 @@ namespace CodeGen.Services
             // copy-if-absent, so the deployed CAT persists across runs and both
             // buttons share it. Pairs with BuildActuatorParameters'
             // dropInterlockConstants gate (same cfg.SimulatorFullSystem flag).
-            NormalizeFiveStateInterlockConstants(eaeProjectDir, cfg.SimulatorFullSystem, result);
+            NormalizeFiveStateInterlockConstants(eaeProjectDir, false, result);
             PatchProcess1RecipeArraySize(eaeProjectDir, result);
             PatchProcessNameStringSize(eaeProjectDir, result);
             // PatchSevenStateActuatorDataDriven removed — see CatToBasics comment.
@@ -399,18 +399,16 @@ namespace CodeGen.Services
             // CAT and the CommonInterlockEvaluator Basic FB: reduce==true (sim)
             // collapses the 4 arrays to one RuleTable; reduce==false (hardware)
             // restores the 4 arrays — so the byte-identical hardware slice is
-            // untouched. Same cfg.SimulatorFullSystem flag drives the Mapper's
-            // RuleTable emission (BuildActuatorParameters.dropInterlockConstants).
-            if (cfg.SimulatorFullSystem)
-                DeployInterlockRuleDatatype(eaeProjectDir, result);
-            NormalizeFiveStateRuleArrays(eaeProjectDir, "Five_State_Actuator_CAT.fbt", "InterlockManager", cfg.SimulatorFullSystem, result);
+            // untouched (the sim reduce==true direction + DeployInterlockRuleDatatype were
+            // dropped — they never ran on the rig).
+            NormalizeFiveStateRuleArrays(eaeProjectDir, "Five_State_Actuator_CAT.fbt", "InterlockManager", false, result);
             // Jyotsna's Centre-Home swivel CAT carries the SAME four interlock arrays wired
             // into its CommonInterlockManager (a CommonInterlockEvaluator). Collapse them to
             // the RuleTable STRUCT too — otherwise the sim build fails with 17 errors
             // ("RuleFromState does not exist in Main.CommonInterlockEvaluator", etc.) because
             // the evaluator FB was reshaped to RuleTable but this CAT still wires the arrays.
-            NormalizeFiveStateRuleArrays(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT.fbt", "CommonInterlockManager", cfg.SimulatorFullSystem, result);
-            NormalizeCommonInterlockEvaluatorRules(eaeProjectDir, cfg.SimulatorFullSystem, result);
+            NormalizeFiveStateRuleArrays(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT.fbt", "CommonInterlockManager", false, result);
+            NormalizeCommonInterlockEvaluatorRules(eaeProjectDir, false, result);
             // Simulator-only swivel sensor synthesis. The Centre-Home swivel reads
             // atWork1/atWork2 from its internal Inputs SYMLINKMULTIVARDST, which subscribes
             // '$${PATH}atwork1' / '$${PATH}atWork2'. On the rig those resolve to the physical
@@ -427,7 +425,7 @@ namespace CodeGen.Services
             // reduce==false (rig) RESTORES '$${PATH}atwork1'/'atWork2' so the hardware path is
             // byte-identical. athome (NAME1) is untouched — it is timer-driven by the CAT's
             // ReturnToHomeHandler / No_Sensor_Handler_7SCH, so it needs no external publish.
-            NormalizeSwivelSimSensorSource(eaeProjectDir, cfg.SimulatorFullSystem, result);
+            NormalizeSwivelSimSensorSource(eaeProjectDir, false, result);
             // Same coil->sensor synthesis for the Five_State actuators (Bearing_Gripper,
             // Shaft_*, CoverPNP_*). Bearing_Gripper deploys with WorkSensorFitted=TRUE on
             // M580 and the per-PLC no-sensor sysres override has not reliably reached the
@@ -435,8 +433,8 @@ namespace CodeGen.Services
             // sensor nothing publishes. This type-level repoint makes its atwork/athome read
             // its own coils, so it advances regardless of WorkSensorFitted or which .sysres
             // it lives in. Inert for the M262 no-sensor actuators (they use their timer).
-            NormalizeFiveStateSimSensorSource(eaeProjectDir, cfg.SimulatorFullSystem, result);
-            NormalizeFiveStateFaultEnables(eaeProjectDir, cfg.SimulatorFullSystem, result);
+            NormalizeFiveStateSimSensorSource(eaeProjectDir, false, result);
+            NormalizeFiveStateFaultEnables(eaeProjectDir, false, result);
             // Process FB recipe struct: collapse the 6 overlapping recipe arrays
             // into one Recipe : ARRAY OF RecipeStep on Process1_Generic + the
             // ProcessRuntime engine (datatype, NOT a new FB). Now driven by
@@ -446,7 +444,7 @@ namespace CodeGen.Services
             // reshape the engine) so the FB interface, engine ST and instance
             // parameter never disagree. Set UseRecipeStruct=false to revert the
             // runtime to the six parallel arrays.
-            bool recipeStruct = cfg.SimulatorFullSystem || cfg.UseRecipeStruct;
+            bool recipeStruct = cfg.UseRecipeStruct;
             if (recipeStruct)
                 DeployRecipeStepDatatype(eaeProjectDir, result);
             NormalizeProcess1RecipeArrays(eaeProjectDir, recipeStruct, result);
@@ -462,7 +460,7 @@ namespace CodeGen.Services
             // so they refresh on every command + step confirmation. Pure watch aid — the
             // vars are already computed by the ECC; this changes no logic. reduce==false
             // (rig) strips them so the hardware engine is byte-identical.
-            NormalizeProcessEngineDebugWatch(eaeProjectDir, cfg.SimulatorFullSystem, result);
+            NormalizeProcessEngineDebugWatch(eaeProjectDir, false, result);
             // Process-engine WAIT guard — RIG ONLY. On the rig the engine inits last
             // and its state_table boots blank, so a home WAIT races; the guard makes a
             // post-command WAIT wait for that actuator's fresh report. In the SIMULATOR
@@ -470,18 +468,15 @@ namespace CodeGen.Services
             // the guard is unnecessary AND would stall the home-preamble no-op -> the
             // sim path STRIPS the guard (original entry-check engine). Runs after the
             // recipe-array normalize so it patches the final check_wait.
-            PatchProcessRuntimeWaitGuard(eaeProjectDir, apply: !cfg.SimulatorFullSystem, result);
+            PatchProcessRuntimeWaitGuard(eaeProjectDir, apply: true, result);
             // The WAIT guard above still read the target state from the persistent
             // state_table. On repeated moves of the same actuator in one recipe
             // (shaft_vr Work -> Home -> Work), a stale table slot can look correct
             // before the second physical move has actually reported. Wire the
             // ProcessHandler's current ring message into ProcessRuntime and make
             // check_wait satisfy only on a fresh report from the waited component.
-            if (!cfg.SimulatorFullSystem)
-            {
-                PatchProcessRuntimeFreshWaitTrigger(eaeProjectDir, result);
-                PatchProcess1FreshWaitTriggerWiring(eaeProjectDir, result);
-            }
+            PatchProcessRuntimeFreshWaitTrigger(eaeProjectDir, result);
+            PatchProcess1FreshWaitTriggerWiring(eaeProjectDir, result);
 
             GenerateCfgFiles(eaeProjectDir, result);
             RegisterInDfbproj(eaeProjectDir, result);
