@@ -572,19 +572,12 @@ namespace CodeGen.Devices.Core
         {
             if (string.IsNullOrEmpty(fbName)) return PlcAssignment.Unknown;
 
-            // Per-resource MQTT connections. We publish from two resources:
-            // the bare "MqttConn" is BX1's (Cover P&P, the only PLC that runs
-            // MQTT on the rig), and "MqttConn_M262" is M262's (Feed_Station) so
-            // its embedded MqttPub binds locally and publishes directly (no
-            // cross-resource bridge FBs). On the rig M262 firmware-gates MQTT
-            // (ReturnCode 50); in the simulator the runtime is not the real
-            // firmware so it connects too. M580/Assembly has no MqttConn.
+            // The single MQTT connection lives on BX1 — the only PLC whose (Soft-dPAC)
+            // firmware runs an MQTT client. M262/M580 firmware gate MQTT entirely, so
+            // they carry NO MqttConn; their component state reaches the broker over the
+            // distributed IEC 61499 ring into BX1, which publishes via its embedded MqttPub.
             if (string.Equals(fbName, "MqttConn", StringComparison.Ordinal))
                 return PlcAssignment.BX1;
-            if (string.Equals(fbName, "MqttConn_M262", StringComparison.Ordinal))
-                return PlcAssignment.M262;
-            if (string.Equals(fbName, "MqttConn_M580", StringComparison.Ordinal))
-                return PlcAssignment.M580;
 
             // Standalone MQTT bridge publishers (MqttFmt_<comp>, MqttPub_<comp>)
             // also live on BX1 — they receive M262/M580 component state via
