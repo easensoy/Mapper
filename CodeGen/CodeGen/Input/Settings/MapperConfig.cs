@@ -8,118 +8,31 @@ namespace CodeGen.Configuration
     {
         private const string ConfigFileName = "mapper_config.json";
 
-        // Interim flag (2026-05-28): route every Seven_State actuator
-        // (Bearing_PnP swivel) to Five_State_Actuator_CAT instead.
-        // WHY: Process1_Generic commands actuators only through the stateRprtCmd
-        // ring, and Seven_State_Actuator_CAT.fbt declares NO ring port — so the
-        // recipe can neither command Bearing_PnP nor read its state, and the
-        // Assembly sequence stalls forever at the bearing step (command goes
-        // nowhere, the WAIT never satisfies). Five_State sits on the ring, so the
-        // recipe drives it (work/home) and the whole clamp->bearing->shaft
-        // sequence cycles. Trade-off: no true two-position pick/place swivel
-        // until task #69 gives Seven_State its own stateRprtCmd adapter — flip
-        // this to false in that same commit. Gated at all four Seven_State
-        // detection sites (ResolveActuatorFBType, SevenStateActuators,
-        // IsFiveStateCommandable, IsSevenStateCommandable) so the FB type and the
-        // recipe command vocabulary stay in lock-step.
-        // static readonly (not const) on purpose: the const form makes the
-        // compiler treat the real-Seven_State branches gated on this flag as dead
-        // code (CS0162). They are not dead — they are the path #69 re-enables when
-        // it flips this to false. static readonly keeps both branches live.
-        // 2026-05-29 (task #69): FLIPPED to false. Seven_State_Actuator_CAT.fbt
-        // now carries a stateRprtCmd ring node (an updateComponentState FB wired
-        // exactly like Five_State's StateHandling) so Process1_Generic commands
-        // and reads Bearing_PnP through the report ring, and ResourceWireEmitter
-        // now rings it (NoRingAdapterTypes is empty; it stays off the station
-        // chain via NoStationAdapterTypes). Bearing_PnP therefore resolves to
-        // Seven_State_Actuator_CAT, not the Five_State stub.
-        // 2026-05-29 (re-flip to TRUE): my Seven_State_Actuator_CAT surgery is
-        // unverified and on the rig it leaves Bearing_PnP stuck at INIT (the ring
-        // command is never processed -> "nothing triggered"). Reverted to the
-        // proven Five_State stub so the recipe drives Bearing_PnP and it is
-        // forceable for testing. Flip back to FALSE when Jyotsna's real
-        // Seven_State_Actuator_CAT (with interlock) lands.
-        // 2026-05-30: flipped to FALSE for the "Seven_State end-to-end in Test Simulator"
-        // session. SimulatorPostProcessor.InjectSimSwivelForce now publishes atwork1/
-        // atwork2 in sim by mirroring the actuator's own current_state{1,2}_to_plc
-        // outputs (sensors close instantly when coil energises). The 3 deferred rig
-        // fixes (committed surgical CAT in the .cat.zip + BuildStation2Wiring skips
-        // Seven from stationChain + BuildMinimalActuatorParameters parameterises
-        // process_state_name = lowercased name) all landed earlier in this session.
-        // Re-flip to TRUE only if the sim demo regresses and you can't afford to debug
-        // the Seven_State path during that demo window.
+        // Route the Seven_State swivel (Bearing_PnP) to Five_State_Actuator_CAT when true. See
+        // INVARIANTS I-4 for the six sites that must agree. static readonly (not const) so the
+        // real-Seven_State branches gated on it stay live (const would make them CS0162 dead code).
         public static readonly bool StubSevenStateActuatorsAsFiveState = false;
 
-        // RIG vs SIM behaviour for the Seven_State swivel HOME-FIRST preamble.
-        // Set from cfg.SimulatorFullSystem at the start of GenerateStation1TestSyslay
-        // (fresh every generation — no session carry-over). The recipe generator reads
-        // it to choose the home-preamble WAIT target:
-        //   SIM  (true):  the swivel boots at AtHomeInit (current_state=0) and a home
-        //                 command from there is a no-op, so the home WAIT must target 0
-        //                 (else it stalls waiting for a move that never happens).
-        //   RIG (false): the swivel boots PARKED AT A WORK position (atWork1=TRUE) and
-        //                 the process engine inits LAST, so its state_table reads the
-        //                 blank default 0 — which a WAIT-for-0 false-matches, so the
-        //                 engine thinks "already home" and SKIPS the physical homing
-        //                 (observed: swivel goes atWork1 -> atWork2, atHome never TRUE).
-        //                 The rig home WAIT must target AtHome=6 (== atHome sensor TRUE),
-        //                 a value the blank 0 cannot match, so the engine truly waits for
-        //                 the swivel to physically reach home before commanding Pick.
+        // Set true only by the StateTransitionTableForm preview. Chooses the Seven_State home-preamble
+        // WAIT target: 0 (AtHomeInit) in sim where the swivel boots home; 6 (AtHome sensor) on the rig
+        // where it boots at a work position and a WAIT-for-0 would false-match the blank state_table.
         public static bool SimulatorRecipeMode = false;
 
-        // RECIPE RUN-ONCE (2026-06-03). When true (default), each process recipe
-        // runs its sequence ONE time and then PARKS on the END row instead of
-        // looping back to step 0. The Process engine's END ECState runs
-        // EndSequence (CurrentStep := Recipe[CurrentStep].NextStep), so the END
-        // row's NextStep decides what happens after the recipe finishes: pointing
-        // it at step 0 RESTARTS the whole cycle (and with the home-first preamble
-        // now at step 0, that means Home->Pick->Place->Home->Home->Pick... forever
-        // -- the observed swivel "bounce between atWork1 and atWork2"); pointing it
-        // at ITSELF parks the engine (no further commands, actuators hold their
-        // last/home position). Set false to restore continuous looping for a
-        // production line that should keep cycling. Applied in
-        // ProcessRecipeArrayGenerator.Generate after the preamble shifts indices.
+        // When true (default), each recipe runs once and parks on its END row; false loops it to step 0.
         public static bool RecipeRunOnce = true;
 
-        // CYCLIC RESTART (2026-06-16, default ON). Make the WHOLE line cycle continuously:
-        // Feed -> Assembly -> Disassembly -> robot drops the part in the hopper -> Feed again.
-        // When TRUE the END row of every (non-Cover) recipe points back to STEP 0 instead of
-        // self-parking (overrides RecipeRunOnce above). Step 0 of each recipe is already its
-        // TRIGGER gate: Feed row0 = WAIT(PartInHopper), Assembly row0 = WAIT(PartAtAssembly),
-        // Disassembly row0 = WAIT(Assembly handshake). The engine's check_wait/leftoverSuspect
-        // logic makes each row-0 WAIT hold until a FRESH trigger message (not a stale state_table
-        // value), so the loop self-sequences with NO free-run collision: the robot dropping the
-        // finished part trips PartInHopper (off->on) -> Feed re-runs -> delivers -> PartAtAssembly
-        // (off->on) -> Assembly -> handshake -> Disassembly -> robot drops -> ... Safe because
-        // EnableSevenStateHomePreamble is OFF, so no recipe has a Home command at step 0 (which is
-        // what caused the old atWork1<->atWork2 bounce when END->0 was used naively). Set false to
-        // revert to RecipeRunOnce's single-cycle self-park.
-        public static bool EnableCyclicRestart = false;  // 2026-06-16: park each engine at END for ONE clean ordered cycle (cyclic-restart made stations loop+race); re-enable only with a Feed re-arm interlock (Feed row0 also waiting on a Disassembly done-bit).
+        // When true, every non-Cover recipe's END points back to step 0 (overrides RecipeRunOnce).
+        // Each recipe's step 0 is a trigger WAIT, so the line self-sequences off fresh trigger messages.
+        // Off (default) = one clean ordered cycle per engine.
+        public static bool EnableCyclicRestart = false;
 
-        // AUTO-RETRACT SCOPE (2026-06-04): the recipe generator's auto-retract
-        // safety net (it inserts a return-home for an actuator the twin advances but
-        // never retracts) runs ONLY for the processes listed here. It exists for the
-        // Feed_Station twin, which advances the Checker but never retracts it (leaving
-        // it energized at-work — a documented rig-recovery incident). Every OTHER
-        // process's recipe is generated VERBATIM from its Control.xml state-transition
-        // chain, with NO inserted steps — so Assembly_Station holds the Clamp exactly
-        // as the twin sequences it (engage at Clamping_Part, no release in the chain)
-        // instead of having a clamp release injected. Add a process name here only if
-        // its twin is known to omit a retract it genuinely needs.
+        // The recipe generator's auto-retract safety net runs only for these processes (the Feed_Station
+        // twin advances the Checker but never retracts it). Every other process is emitted verbatim.
         public static readonly string[] AutoRetractProcesses = new[] { "Feed_Station" };
 
-        // SEVEN_STATE HOME PREAMBLE (2026-06-04): OFF for the rig-facing Assembly
-        // recipe. Bearing_PnP is a centre-home swivel that can boot parked at Pick
-        // or Place after a manual jog / interrupted cycle. The generated process
-        // must therefore command the swivel home before issuing Pick, so the
-        // bearing transfer always starts from a known rest position.
-        // When true, ProcessRecipeArrayGenerator prepends "CMD swivel Home -> WAIT
-        // AtHomeInit=0" before the cycle. It is an operational safe-start step added
-        // by the mapper, not a Control.xml process state. The rest of the Assembly
-        // recipe is still derived from the Control.xml transition chain.
-        // Keep FALSE on the rig: if Bearing_PnP is already at home, CMD Home
-        // is a no-op and no fresh state report is produced, leaving the
-        // Process engine stuck at step 0 before the first real Pick command.
+        // When true, the Assembly recipe prepends "CMD swivel Home -> WAIT AtHomeInit=0". Keep FALSE on
+        // the rig: if Bearing_PnP is already home, CMD Home is a no-op with no fresh report, so the
+        // engine stalls at step 0.
         public static bool EnableSevenStateHomePreamble = false;
 
         /// <summary>
@@ -139,169 +52,48 @@ namespace CodeGen.Configuration
         public static bool DeployBx1CoverEngine => !CodeGen.Translation.HandoffPlanner.CoversOnM580Ring;
 
         /// <summary>
-        /// STAGE 5 (2026-06-10): unpark Disassembly_Station. Default FALSE = today's proven
-        /// state (Disassembly is a parked single-END Process, Assembly opens the clamp at its
-        /// tail). When TRUE: (a) Disassembly gets a real recipe (ApplyDisassemblyRuntimeRecipe
-        /// — reverse of Assembly: covers off → shaft out → bearing out → UNCLAMP at the end,
-        /// the twin order, M580+BX1 only — Ejector/Robot are M262 and deferred to Stage 5b);
-        /// (b) Assembly's clamp-open tail is REMOVED (the twin keeps the clamp closed through
-        /// assembly AND disassembly; it opens only at Disassembly's Unclamping step) and
-        /// Assembly instead publishes a handshake sentinel (CMD state=7) so Disassembly can
-        /// WAIT on (Assembly process_id, 7); (c) Disassembly is unparked in the M580 wiring
-        /// (ResourceWireEmitter.BypassParkedM580Disassembly + the syslay init/station/ring).
-        /// The clamp-open MUST move with the unpark — gating both on this one flag keeps it
-        /// atomic (the clamp can never be left to never-open). FALSE reverts in one rebuild.
-        /// 2026-06-10 TRUE — Stage 5a enabled. Headless-verified on the real Demonstrator:
-        /// Disassembly recipe = 46 rows (covers→shaft→bearing→unclamp + WAIT(17,7) handshake),
-        /// Assembly tail = assembly_handshake_done sentinel (no clamp-open), and the M580 sysres
-        /// threads Disassembly INTO the ring (INIT-wired, ring_in/out, Assembly→Disassembly edge).
+        /// When true, Disassembly gets its reverse recipe (covers off -> shaft -> bearing -> unclamp),
+        /// Assembly holds the clamp and publishes a handshake sentinel instead of opening it, and the
+        /// M580 wiring threads Disassembly into the ring. False = Disassembly parked + Assembly opens
+        /// the clamp at its tail.
         /// </summary>
         public static bool UnparkDisassembly = true;
 
-        /// <summary>
-        /// Process-FB <c>process_id</c> slots — the SINGLE SOURCE OF TRUTH shared by
-        /// SystemLayoutInjector (which stamps each Process FB's <c>process_id</c> parameter)
-        /// and ProcessRecipeArrayGenerator (whose Disassembly handshake WAITs on Assembly's
-        /// id). They are fixed constants BY DESIGN, not registry-resolved: every Process FB's
-        /// id must sit ABOVE the component id space so it never collides with a sensor/actuator
-        /// id in the shared <c>state_table[20]</c> (ProcessRecipeArrayGenerator.ValidateProcessIdInvariant
-        /// throws on a collision). The Disassembly↔Assembly hand-off rides the ring as a
-        /// sentinel CMD whose message carries <c>src_id = </c><see cref="AssemblyProcessId"/>;
-        /// Disassembly's row-0 WAIT(<see cref="AssemblyProcessId"/>, 7) holds on exactly that.
-        /// Centralising the literal here is what makes the handshake non-brittle — change the
-        /// slot in ONE place and both the stamp and the WAIT move together.
-        /// </summary>
-        public const int FeedStationProcessId    = 10;
-        public const int AssemblyProcessId       = 17;
-        public const int DisassemblyProcessId    = 18;
-        public const int CoverStationProcessId   = 19;
+        // Process-FB process_id slots + the robot's state_table slot; data in Config/smc-rig.yml.
+        // Each must sit above the component id space (ValidateProcessIdInvariant enforces it). The
+        // Assembly->Disassembly handshake rides AssemblyProcessId, so stamp and WAIT share one source.
+        public static int FeedStationProcessId    => RigCatalog.Current.ProcessIds.FeedStation;
+        public static int AssemblyProcessId       => RigCatalog.Current.ProcessIds.Assembly;
+        public static int DisassemblyProcessId    => RigCatalog.Current.ProcessIds.Disassembly;
+        public static int CoverStationProcessId   => RigCatalog.Current.ProcessIds.CoverStation;
 
-        /// <summary>
-        /// state_table slot the UR3e (<c>Robot_Task_CAT</c>) stamps on its ring reports (STAGE 5b).
-        /// The robot lives on M262 but its reports cross to the <b>M580</b> state_table (where the
-        /// Disassembly engine waits on it), so its id must be free <i>there</i>. The registry's
-        /// positional id (17) collides on M580 with the Assembly station
-        /// (<c>Station2_HMI</c> / <see cref="AssemblyProcessId"/>=17). In the 20-slot table, 19 is
-        /// the ONLY slot free on BOTH M262 and M580: 0..18 are taken on one PLC or the other, and 19
-        /// (<see cref="CoverStationProcessId"/>) is empty because Cover_Station was folded into
-        /// Assembly (Stage 4, <see cref="DeployBx1CoverEngine"/>=false). Used in exactly two places —
-        /// the CAT's <c>actuator_id</c> param (SystemLayoutInjector) and the Disassembly recipe's
-        /// WAIT robot rows (ProcessRecipeArrayGenerator) — so the slot the robot writes == the slot
-        /// the WAIT reads. WARNING: do not run <see cref="EnableRobotTaskTail"/> and
-        /// <see cref="DeployBx1CoverEngine"/> together — both would claim slot 19.
-        /// </summary>
-        public const int RobotActuatorId         = 19;
+        public static int RobotActuatorId         => RigCatalog.Current.RobotActuatorId;
 
-        /// <summary>
-        /// Real M262 rig proximity sensors the digital twin does NOT model, but the physical SMC rig
-        /// wires to fixed DI channels (we copy the physical MAPPING from SMC_Rig_Expo_withClamp only,
-        /// never its ids/names). ONLY the two the flow needs:
-        ///  • <b>PartAtAssembly</b> (DI08) — the Feed→Assembly handoff: Assembly_Station should start
-        ///    only after the part is reported at the assembly position.
-        ///  • <b>PartAtExit</b> (DI09) — the robot gate: the robot task should start only after the
-        ///    ejected part is at the exit.
-        /// (PartAtChecker is NOT synthesized — the twin's Checker just goes down/up; nothing in
-        /// Control.xml references a part-at-checker sensor.)
-        /// <para>
-        /// Synthesized as <c>Sensor_Bool_CAT</c> on M262 with a project-generated FB id (FBIdGenerator)
-        /// and an explicit state_table id chosen to collide with nothing on either consumer PLC.
-        /// </para>
-        /// </summary>
-        // ONE entry — PartAtAssembly on DI08, state_table id 3. Id 3 is FREE on both the M262 ring
-        // (PartInHopper 0 / Feeder 4 / Checker 5 / Transfer 6 / Ejector 7 / Feed_Station 10 / Robot 19)
-        // and the M580 ring (BearingSensor 1 / ShaftSensor 2 / bearing 8,9 / shaft 10-12 / Clamp 13 /
-        // Assembly 17 / Disassembly 18), so it collides with NOTHING on either PLC's state_table. (The
-        // only other id-3 is TopCoverSenosr on BX1 — a SEPARATE state_table, no collision; the 20-slot
-        // table is full so one cross-PLC id reuse is unavoidable for a synthetic sensor.) PartAtAssembly
-        // is kept OFF the M262 Feed ring (ResourceWireEmitter excludes it) and rides the M262->M580
-        // cross-device segment, so its report lands ONLY in M580 state_table[3] — which the HandoffPlanner
-        // makes Assembly's row-0 WAIT(3,1). Emitted + HCF-bound when HandoffPlanner.DischargeActive.
-        // PartAtExit (DI09, the robot gate) is intentionally omitted.
-        public static readonly (string Name, string Pin, int Id)[] M262SynthSensors =
-            new[]
-            {
-                ("PartAtAssembly", "DI08", 3),
-            };
+        // Real rig DI sensors the twin doesn't model; data in Config/smc-rig.yml. Kept OFF the
+        // M262 Feed ring; rides the M262->M580 cross-device segment so the report lands only in M580
+        // state_table[id], which HandoffPlanner makes Assembly's row-0 wait. Emitted + HCF-bound when
+        // HandoffPlanner.DischargeActive.
+        public static (string Name, string Pin, int Id)[] M262SynthSensors =>
+            RigCatalog.Current.SynthSensors
+                .Select(s => (s.Name, s.Pin, s.Id))
+                .ToArray();
 
-        /// <summary>
-        /// The Disassembly DISCHARGE tail — the M262 Ejector + UR3e Robot, commanded by Disassembly
-        /// over the cross-device segment after the clamp reaches home. NOW A THIN ALIAS to the single
-        /// source of truth (<see cref="CodeGen.Translation.HandoffPlanner.DischargeActive"/>) so the
-        /// proven gated machinery reads ONE decision: (1) only the real UR3e
-        /// (<see cref="CodeGen.Mapping.TemplateMap.IsRobotTaskArm"/>) resolves to <c>Robot_Task_CAT</c>
-        /// — grippers stay Five_State; (2) the Robot FB is emitted on M262 (no stationAdptr); (3) HCF
-        /// <c>DO03=Ejector.OutputToWork</c>, <c>DO04=Robot.RobotCommands_StartTask</c>,
-        /// <c>DI10=Robot.RobotStatus_Task_Complete</c>; (4) the Disassembly recipe runs unclamp -&gt;
-        /// WAIT clamp home -&gt; ejector -&gt; robot; (5) the M262 segment splices onto the M580 ring at
-        /// the Disassembly seam (<see cref="CodeGen.Mapping.TemplateMap.M262CrossRingSegment"/>). Flip
-        /// via HandoffPlanner.CrossPlcDischargeActive. RIG-VERIFY: the M262&lt;-&gt;M580 cross-device
-        /// adapter transport (only M580&lt;-&gt;BX1 is rig-proven; generation is headless-verified).
-        /// </summary>
+        /// <summary>The Disassembly Ejector+Robot discharge tail; a thin alias to
+        /// HandoffPlanner.DischargeActive (the single cross-PLC discharge decision).</summary>
         public static bool EnableRobotTaskTail => CodeGen.Translation.HandoffPlanner.DischargeActive;
 
-        /// <summary>
-        /// When TRUE, Cover_Station runs a MINIMAL proof-of-life recipe (CoverPNP_Vr
-        /// work→home only — one actuator end-to-end, no cross-component waits that could
-        /// stall on a missing sensor). Flip FALSE for the full 8-step cover pick/place
-        /// sequence (vr down → grip → up → hr advance → vr down → release → up → hr return).
-        /// 2026-06-10: FALSE — the minimal Vr cycle ran end-to-end on the rig (valve moved,
-        /// physical atwork closed the WAIT, recipe completed), so the full sequence is live.
-        /// CoverPnp_Gripper runs timer-acknowledged (no home sensor bit exists on the TM3BC
-        /// input assembly — see the BuildActuatorParameters override).
-        /// </summary>
+        /// <summary>True = Cover_Station runs the minimal CoverPNP_Vr work->home proof; false (default)
+        /// = the full 8-step cover pick/place.</summary>
         public static bool Bx1CoverMinimalCycle = false;
 
-        // TEST ISOLATION (2026-05-29, TEMPORARY): restrict ONE process's recipe to a
-        // subset of actuators so a single mechanism can be exercised on the rig
-        // without the others moving. RecipeTestProcessName = the process to restrict
-        // (empty string = apply to every process); RecipeTestActuatorAllowlist = the
-        // actuator names (lower-case, matching the recipe CmdTargetName) that may
-        // still be commanded. Every OTHER actuator's CMD/WAIT step in that process is
-        // dropped, so the actuator is PARKED — never commanded, stays where it is.
-        // EMPTY allowlist = no restriction (normal full recipe).
-        //
-        // 2026-05-29 update: cleared to restore the FULL Assembly_Station cycle for the
-        // end-to-end simulator demo. The bench rig is unsafe (clamp damaged + swivel
-        // collision risk) so testing moves to the "Test Simulator" button (Cfg
-        // .SimulatorFullSystem=true): all 3 PLCs collapse into one SIM resource, every
-        // Five_State_Actuator_CAT is forced no-sensor so the internal No_Sensor_Handler
-        // timer self-advances the ECC (toWorkTime → atwork, toHomeTime → athome), and
-        // the single ring resolves the cross-PLC/cross-process Wait1Id refs Assembly
-        // makes to BX1 cover components and Feed_Station handoffs. Bearing_PnP stays
-        // on the Five_State stub (StubSevenStateActuatorsAsFiveState above) — Iss
-        // SevenStateCommandable returns false under the stub, so the recipe commands
-        // bearing with work/home like any other Five_State actuator, and it self-
-        // advances on the timer instead of waiting for a 3-position swivel sensor the
-        // simulator has no model for. To return to the bearing-only bench test, repopu
-        // late the allowlist with { "bearing_pnp", "bearing_gripper" }.
+        // Recipe test isolation: restrict RecipeTestProcessName's recipe to RecipeTestActuatorAllowlist
+        // (empty = no restriction). Every other actuator's CMD/WAIT is dropped (parked).
         public static readonly string RecipeTestProcessName = "Assembly_Station";
-        // 2026-06-02 (TEMPORARY, bench): bearing-only isolation test on M580. Restricts
-        // the Assembly_Station recipe to Bearing_PnP + Bearing_Gripper so they actually
-        // RUN on an M580-only deploy — every other actuator's CMD/WAIT (Shaft_*, Clamp,
-        // CoverPNP_*) AND the cross-PLC Transfer wait are dropped, so the recipe no longer
-        // stalls on the Feed/Transfer (M262) prerequisites that never complete when only
-        // M580 runs. Clear back to `new string[0]` to restore the full Assembly cycle.
-        // 2026-06-03: shaft actuators added back (IO restored from backup). M580-only
-        // set: bearing + shaft, NO BX1 covers (those would stall waiting on the
-        // unconnected BX1). Clear to `new string[0]` for the full cycle incl. covers.
-        // 2026-06-04: clamp added. Assembly_Station's Clamping_Part state waits on
-        // Clamp/Clamped (Control.xml C-f021417c… line 2748), so with clamp in the
-        // allowlist the data-driven recipe keeps the clamp CMD/WAIT in its native
-        // chain position (after the bearing+shaft assembly) instead of dropping it.
-        // Clamp is M580 with real sensors (DI06=ClampAtWork, DI07=ClampAtHome).
+        // Empty = no restriction (full recipe). Populate with actuator names to park the rest.
         public static readonly string[] RecipeTestActuatorAllowlist = Array.Empty<string>();
 
-        // TEST ISOLATION (2026-06-04, TEMPORARY, bench): drop the centre-home swivel's
-        // (Bearing_PnP) cross-component interlock rules so its turn-to-Place (AtWork1 2
-        // -> AtWork2 4) is never blocked. Alex traced the swivel sticking at atWork1 to
-        // the shaft-sensor interlock rule (RuleSourceID=shaft_hr, RuleBlockedState=AtWork):
-        // the swivel refuses to turn-to-Place while shaft_hr reads AtWork. In the isolated
-        // bearing+shaft+clamp bench test the shaft is home during the swivel's Place, but
-        // the rule still fires, so the swivel never reaches atWork2 and never releases the
-        // bearing. RuleCount=0 removes the block for the test. Set false to restore the
-        // real Control.xml interlock when the full collision-aware system runs (it also
-        // re-arms the SystemLayoutInjector safety guard that refuses an inert RuleCount=0
-        // when Control.xml defines in-scope swivel interlocks).
+        // When true, drop the centre-home swivel's interlock rules so its turn-to-Place is never
+        // blocked (a bench-test isolation; false restores the Control.xml interlock + the inert-rule guard).
         public static bool DropSwivelInterlockForTest = true;
 
         public string SystemXmlPath { get; set; } = string.Empty;
