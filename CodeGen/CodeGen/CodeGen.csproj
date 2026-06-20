@@ -9,6 +9,13 @@
 
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+    <PackageReference Include="YamlDotNet" Version="16.2.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Config\config.yaml" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Config\smc-rig.yml" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Config\recipes.yml" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
