@@ -1117,6 +1117,51 @@ namespace MapperUI
                     AppendActivity($"[Sysres][Sweep][Warn] orphan sysres sweep failed: {ex.Message}");
                 }
 
+                // POST-SWEEP dfbproj strip. The orphan-sysres sweep above DELETES a stale .sysres FILE
+                // (e.g. the BX1 default-id 117867…/C9F2… shell left behind when the resource id realigned
+                // to the .hcf ResourceId 78E9…), but it does NOT touch the .dfbproj — so the now-FILELESS
+                // <Compile …\<oldId>.sysres> entry DANGLES and EAE Solution Integrity lists it as a
+                // "Missing Project File" (blocking the build). The early strip in Station2DeviceEmitter
+                // .EmitAll ran BEFORE the sweep (the file was still live then) so it kept the entry.
+                // Re-run the stale-stem strip HERE, AFTER the sweep, so every dfbproj sysres entry whose
+                // file no longer exists is removed; the live 78E9… entry (file present) stays.
+                try
+                {
+                    var eaeRootStrip = CodeGen.Devices.Core.EaeProjectLayout.DeriveEaeProjectRoot(Cfg());
+                    var dfbStrip = System.IO.Path.Combine(eaeRootStrip, "IEC61499", "IEC61499.dfbproj");
+                    int strippedLate = await Task.Run(() =>
+                        CodeGen.Devices.Core.DfbprojRegistrar.StripStaleSysresStemEntries(dfbStrip, eaeRootStrip));
+                    if (strippedLate > 0)
+                        AppendActivity(
+                            $"[Sysres][Strip] removed {strippedLate} dangling .dfbproj sysres reference(s) after the orphan sweep " +
+                            "(the realigned-away device default id, e.g. BX1 117867…).");
+                }
+                catch (Exception ex)
+                {
+                    AppendActivity($"[Sysres][Strip][Warn] post-sweep dfbproj strip failed: {ex.Message}");
+                }
+
+                // STRIP DEAD HOME-TIMER PARAMS. The Mapper no longer emits work1ToHomeTime/work2ToHomeTime
+                // (2026-06-19, user — the two work-to-home E_DELAY timers in the centre-home CAT are dead:
+                // their EO feeds only ReturnToHomeHandler events the No_Sensor ECC ignores). The syslay is
+                // clean, but the sysres mirror retained the stale T#750ms/T#100ms values from prior deploys
+                // (the rig kept showing them). Strip them deterministically here, after the mirror; the
+                // CAT's InputVar default T#0s applies and the dead timer is harmless.
+                try
+                {
+                    var eaeRootTimer = CodeGen.Devices.Core.EaeProjectLayout.DeriveEaeProjectRoot(Cfg());
+                    int timerStripped = await Task.Run(() =>
+                        CodeGen.Devices.Core.EaeProjectLayout.StripStaleHomeTimerParams(eaeRootTimer, AppendActivity));
+                    if (timerStripped > 0)
+                        AppendActivity(
+                            $"[Sysres][TimerStrip] removed {timerStripped} stale work1/work2ToHomeTime param(s) " +
+                            "from the centre-home swivel sysres (dead timers; values no longer emitted).");
+                }
+                catch (Exception ex)
+                {
+                    AppendActivity($"[Sysres][TimerStrip][Warn] home-timer param strip failed: {ex.Message}");
+                }
+
                 // HARD syslay<->sysres<->hcf parity guard. The deployable per-device sysres MUST be a
                 // faithful projection of the syslay (the design canvas). If a Robot/PartAtAssembly FB,
                 // a process recipe, or a discharge hcf binding is on the syslay but missing/stale on the
