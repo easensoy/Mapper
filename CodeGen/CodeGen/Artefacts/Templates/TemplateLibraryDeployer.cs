@@ -443,15 +443,15 @@ namespace CodeGen.Services
             // byte-identical. athome (NAME1) is untouched — it is timer-driven by the CAT's
             // ReturnToHomeHandler / No_Sensor_Handler_7SCH, so it needs no external publish.
             NormalizeSwivelSimSensorSource(eaeProjectDir, false, result);
-            // Home-sensor poll (2026-06-18, user). The centre-home swivel's atHome/atWork DIs are read by
-            // a sample-on-REQ symlink (Inputs) whose REQ had NOTHING driving it — unlike the Five_State CAT
-            // which got a poll. So the core saw the DI02 (SwivelArmAtHome) closure only intermittently and
-            // the non-spring arm coasted PAST centre before the coils cut (worse on the never-tuned AtWork1
-            // leg → the asymmetric miss the user reported). Add the SAME fast Poll E_DELAY the Five_State CAT
-            // uses (INIT->Poll.START, Poll.EO->Poll.START self-loop, Poll.EO->Inputs.REQ) at a tighter 50ms
-            // DT so the core re-samples atHome ~every 50ms and the ToHome->AtHome cut lands at centre, the
-            // same both directions. Additive: recipe/state ids/coils untouched — purely the DI re-sample rate.
-            PatchCatHomeSensorPoll(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT", pollDtMs: 50, result);
+            // Home-sensor poll REMOVED (2026-06-19, user). The HomePoll/poll-gate CAT machinery
+            // (HomePoll + PollGate1/2 + the earlier PollWindow) is gone — Bearing_PnP's home is
+            // RECIPE-ONLY now (Assembly/Disassembly command bearing_pnp Home at the end). This call
+            // only STRIPS any previously-injected poll FBs out of the deployed CAT so a re-deploy
+            // cleans the live tree; it adds nothing. RUNTIME RISK (reported, not worked around): the
+            // 'Inputs' symlink is sample-on-REQ and HomePoll was its only REQ driver, so without it the
+            // core may not re-observe atHome/atWork during a move — a CAT/interface gap to fix properly
+            // if it manifests on the rig, NOT by re-adding a polling FB. See StripCatHomeSensorPoll.
+            StripCatHomeSensorPoll(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT", result);
             // Same coil->sensor synthesis for the Five_State actuators (Bearing_Gripper,
             // Shaft_*, CoverPNP_*). Bearing_Gripper deploys with WorkSensorFitted=TRUE on
             // M580 and the per-PLC no-sensor sysres override has not reliably reached the
@@ -1812,7 +1812,23 @@ namespace CodeGen.Services
         /// coils right at centre, the same both directions. Idempotent; purely additive (no recipe / state
         /// id / coil change). No-op if the CAT or its Inputs FB is absent.
         /// </summary>
-        static void PatchCatHomeSensorPoll(string eaeProjectDir, string catName, int pollDtMs, DeployResult result)
+        // 2026-06-19: the HomePoll / poll-gate CAT patch is REMOVED per the user. Bearing_PnP's home
+        // is RECIPE-ONLY now (Assembly + Disassembly command bearing_pnp Home at the end of the bearing
+        // sequence — see ApplyAssemblyRuntimeRecipe / ApplyDisassemblyRuntimeRecipe, final rows
+        // CmdStateArr=5 / Wait1State=0). This method now ONLY STRIPS any previously-injected poll
+        // machinery (HomePoll / PollGate1 / PollGate2 / PollWindow + their event/data connections) out
+        // of the deployed CAT so a re-deploy cleans the live tree; it ADDS NOTHING and instantiates NO
+        // replacement FB. The committed .cat.zip never carried these (they were always deploy-injected),
+        // so a Clean + re-extract is already clean (Docs/INVARIANTS.md I-7).
+        //
+        // RUNTIME RISK (REPORTED, not worked around — per the user's explicit instruction): the CAT's
+        // 'Inputs' SYMLINKMULTIVARDST is sample-on-REQ and HomePoll was the ONLY driver of Inputs.REQ
+        // (commit b12f800). With the poll gone, NOTHING re-reads atHome/atWork1/atWork2 after a command,
+        // so the core may not re-observe reaching a position and ToWork->AtWork / ToHome->AtHome may not
+        // fire on the rig. If the swivel stops confirming positions, that is a CAT/interface architecture
+        // gap to fix PROPERLY (an input-change event source, or an EAE cyclic/resource task driving
+        // Inputs.REQ) — do NOT re-add a polling FB here.
+        static void StripCatHomeSensorPoll(string eaeProjectDir, string catName, DeployResult result)
         {
             var fbt = Directory.EnumerateFiles(
                     Path.Combine(eaeProjectDir, "IEC61499"),
@@ -1821,7 +1837,7 @@ namespace CodeGen.Services
                 ?? string.Empty;
             if (string.IsNullOrEmpty(fbt))
             {
-                result.Warnings.Add($"{catName}.fbt not found; home-sensor poll skipped.");
+                result.Warnings.Add($"{catName}.fbt not found; home-poll strip skipped.");
                 return;
             }
             try
@@ -1831,58 +1847,43 @@ namespace CodeGen.Services
                 if (root == null) return;
                 System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
                 var net = root.Element(ns + "FBNetwork");
-                if (net == null) { result.Warnings.Add($"{catName}.fbt: no FBNetwork; home-sensor poll skipped."); return; }
+                if (net == null) return;
 
-                // Idempotent: skip if the poll FB is already present.
-                if (net.Elements(ns + "FB").Any(f => (string?)f.Attribute("Name") == "HomePoll")) return;
+                var pollFbNames = new[] { "HomePoll", "PollWindow", "PollGate1", "PollGate2" };
+                bool Has(string n) => net.Elements(ns + "FB").Any(f => (string?)f.Attribute("Name") == n);
+                if (!pollFbNames.Any(Has)) return;   // already clean — nothing to strip, add nothing
 
-                // Need the Inputs DI symlink to re-sample.
-                if (!net.Elements(ns + "FB").Any(f => (string?)f.Attribute("Name") == "Inputs"))
+                bool RefsPoll(string? ep)
                 {
-                    result.Warnings.Add($"{catName}.fbt: no 'Inputs' FB; home-sensor poll skipped.");
-                    return;
+                    var e = ep ?? string.Empty;
+                    foreach (var n in pollFbNames)
+                        if (e.StartsWith(n + ".", StringComparison.Ordinal)) return true;
+                    return false;
                 }
 
-                // Bump the FB IDCounter for the new FB.
-                var idAttr = root.Elements(ns + "Attribute")
-                    .FirstOrDefault(a => (string?)a.Attribute("Name") == "Configuration.FB.IDCounter");
-                int idc = 2000;
-                if (idAttr != null && int.TryParse((string?)idAttr.Attribute("Value"), out var parsed)) idc = parsed;
-                if (idAttr != null) idAttr.SetAttributeValue("Value", (idc + 1).ToString());
-
-                // HomePoll = E_DELAY with DT=pollDtMs — same shape as the Five_State CAT's Poll.
-                var pollFb = new System.Xml.Linq.XElement(ns + "FB",
-                    new System.Xml.Linq.XAttribute("ID", idc),
-                    new System.Xml.Linq.XAttribute("Name", "HomePoll"),
-                    new System.Xml.Linq.XAttribute("Type", "E_DELAY"),
-                    new System.Xml.Linq.XAttribute("x", "800"),
-                    new System.Xml.Linq.XAttribute("y", "5800"),
-                    new System.Xml.Linq.XAttribute("Namespace", "IEC61499.Standard"),
-                    new System.Xml.Linq.XElement(ns + "Parameter",
-                        new System.Xml.Linq.XAttribute("Name", "DT"),
-                        new System.Xml.Linq.XAttribute("Value", $"T#{pollDtMs}ms")));
-                var lastFb = net.Elements(ns + "FB").LastOrDefault();
-                if (lastFb != null) lastFb.AddAfterSelf(pollFb); else net.Add(pollFb);
-
-                // Wire: INIT -> HomePoll.START; HomePoll.EO -> HomePoll.START (self-loop) + Inputs.REQ.
-                var ec = net.Element(ns + "EventConnections");
-                if (ec == null) { ec = new System.Xml.Linq.XElement(ns + "EventConnections"); net.Add(ec); }
-                void Conn(string s, string d) =>
-                    ec.Add(new System.Xml.Linq.XElement(ns + "Connection",
-                        new System.Xml.Linq.XAttribute("Source", s),
-                        new System.Xml.Linq.XAttribute("Destination", d)));
-                Conn("INIT", "HomePoll.START");
-                Conn("HomePoll.EO", "HomePoll.START");
-                Conn("HomePoll.EO", "Inputs.REQ");
+                foreach (var f in net.Elements(ns + "FB")
+                             .Where(f => pollFbNames.Contains((string?)f.Attribute("Name")))
+                             .ToList())
+                    f.Remove();
+                foreach (var secName in new[] { "EventConnections", "DataConnections" })
+                {
+                    var cc = net.Element(ns + secName);
+                    if (cc == null) continue;
+                    foreach (var c in cc.Elements(ns + "Connection")
+                                 .Where(c => RefsPoll((string?)c.Attribute("Source"))
+                                          || RefsPoll((string?)c.Attribute("Destination")))
+                                 .ToList())
+                        c.Remove();
+                }
 
                 SaveXmlWithRetry(doc, fbt);
                 result.PatchesApplied.Add(
-                    $"{catName}: home-sensor poll added (E_DELAY {pollDtMs}ms -> Inputs.REQ; re-samples atHome so ToHome->AtHome cuts at centre)");
-                MapperLogger.Info($"[Deploy] {catName}.fbt: HomePoll E_DELAY {pollDtMs}ms -> Inputs.REQ");
+                    $"{catName}: removed HomePoll/PollGate1/PollGate2/PollWindow poll machinery + connections (Bearing_PnP home is recipe-only now).");
+                MapperLogger.Info($"[Deploy] {catName}.fbt: stripped HomePoll/PollGate/PollWindow (poll removed; home recipe-only)");
             }
             catch (Exception ex)
             {
-                result.Warnings.Add($"{catName} home-sensor poll patch failed: {ex.Message}");
+                result.Warnings.Add($"{catName} home-poll strip failed: {ex.Message}");
             }
         }
 
