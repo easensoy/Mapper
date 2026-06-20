@@ -138,6 +138,78 @@ namespace CodeGen.Devices.Core
         }
 
         /// <summary>
+        /// Removes the dead <c>work1ToHomeTime</c> / <c>work2ToHomeTime</c> &lt;Parameter&gt; values
+        /// from every <c>Seven_State_Actuator_Centre_Home_CAT</c> instance in every deployed sysres.
+        /// The Mapper no longer SETS these (2026-06-19) — the two work-to-home E_DELAY timers in that
+        /// CAT are dead (their EO feeds only <c>ReturnToHomeHandler.Work1/Work2ToHomeTimerEvent</c>,
+        /// which the No_Sensor_Handler_7SCH ECC has NO transitions on), so the values had no effect.
+        /// But the sysres mirror retained stale values from prior deploys (the live tree kept showing
+        /// <c>T#750ms</c>/<c>T#100ms</c> even after the syslay stopped emitting them), so this strips
+        /// them deterministically. The CAT InputVar default (<c>T#0s</c>) then applies; the dead timer
+        /// is harmless. Returns the number of &lt;Parameter&gt; elements removed. Best-effort per file.
+        /// </summary>
+        public static int StripStaleHomeTimerParams(string? eaeRoot, Action<string>? log = null)
+        {
+            if (string.IsNullOrEmpty(eaeRoot)) return 0;
+            var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
+            if (!Directory.Exists(systemDir)) return 0;
+
+            var timerParamNames = new[] { "work1ToHomeTime", "work2ToHomeTime" };
+            int removed = 0;
+            foreach (var sysres in Directory.EnumerateFiles(systemDir, "*.sysres", SearchOption.AllDirectories))
+            {
+                try
+                {
+                    var doc = XDocument.Load(sysres, LoadOptions.PreserveWhitespace);
+                    var root = doc.Root;
+                    if (root == null) continue;
+                    XNamespace ns = root.GetDefaultNamespace();
+                    var net = root.Element(ns + "FBNetwork");
+                    if (net == null) continue;
+
+                    bool changed = false;
+                    foreach (var fb in net.Elements(ns + "FB")
+                                 .Where(f => (string?)f.Attribute("Type") == "Seven_State_Actuator_Centre_Home_CAT"))
+                    {
+                        foreach (var p in fb.Elements(ns + "Parameter")
+                                     .Where(p => timerParamNames.Contains((string?)p.Attribute("Name")))
+                                     .ToList())
+                        {
+                            p.Remove();
+                            changed = true;
+                            removed++;
+                        }
+                    }
+                    if (changed)
+                    {
+                        // EAE holds a WRITE lock on the per-device sysres while the project is open
+                        // (the .fbt is not locked the same way, which is why the poll strip lands but a
+                        // plain Save here did not). Retry so the strip still writes if the lock frees in a
+                        // window; if it never does, log loudly so it is not a silent no-op.
+                        for (int attempt = 0; ; attempt++)
+                        {
+                            try { doc.Save(sysres); break; }
+                            catch (IOException) when (attempt < 8)
+                            {
+                                System.Threading.Thread.Sleep(250);
+                            }
+                            catch (UnauthorizedAccessException) when (attempt < 8)
+                            {
+                                System.Threading.Thread.Sleep(250);
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    log?.Invoke($"[Sysres][TimerStrip][Warn] could NOT write {Path.GetFileName(sysres)} " +
+                        $"(EAE may hold it locked — close EAE before Test Runtime): {ex.Message}");
+                }
+            }
+            return removed;
+        }
+
+        /// <summary>
         /// Locates the deployed sysdev whose root &lt;Device&gt; has the given
         /// <paramref name="deviceType"/> (e.g. "M580_dPAC", "Soft_dPAC") in the
         /// SE.DPAC namespace. Returns null if none match.
