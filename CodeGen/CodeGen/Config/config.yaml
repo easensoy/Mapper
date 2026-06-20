@@ -1,0 +1,7 @@
+# Global generation constants. Sizes must match the deployed FBT ArraySize patches.
+recipeArraySize: 100    # Process1_Generic recipe arrays
+interlockRuleCap: 10    # interlock rule arrays (RuleFromState/ToState/SourceID/BlockedState)
+
+# Actuator settle times (ms) written into the syslay when Control.xml gives none.
+defaultMotionMs: 2000   # default toWork/toHome
+coverMotionMs: 1000     # BX1 cover P&P toWork/toHome
