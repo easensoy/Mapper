@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -9,6 +9,7 @@ using CodeGen.Configuration;
 using CodeGen.Mapping;
 using CodeGen.Models;
 using CodeGen.Translation;
+using CodeGen.Translation.Interlocks;
 using CodeGen.Translation.Process;
 
 namespace CodeGen.Translation
@@ -1046,14 +1047,10 @@ namespace CodeGen.Translation
             // ValidateProcessIdInvariant check still passes because no
             // Wait1Id of any process equals 17 or 18 (Wait1Ids only reference
             // component ids 0..16).
-            // SINGLE SOURCE OF TRUTH: these slots live in MapperConfig so the
-            // Disassembly recipe's cross-process handshake WAIT(AssemblyProcessId, 7)
-            // can never drift from the id this injector stamps onto Assembly_Station.
-            // Values are unchanged (10/17/18/19) — pure centralisation, no behaviour change.
-            const int processId = MapperConfig.FeedStationProcessId;
-            const int assemblyProcessId = MapperConfig.AssemblyProcessId;
-            const int disassemblyProcessId = MapperConfig.DisassemblyProcessId;
-            const int coverStationProcessId = MapperConfig.CoverStationProcessId;
+            int processId = MapperConfig.FeedStationProcessId;
+            int assemblyProcessId = MapperConfig.AssemblyProcessId;
+            int disassemblyProcessId = MapperConfig.DisassemblyProcessId;
+            int coverStationProcessId = MapperConfig.CoverStationProcessId;
 
             // No top-level PLC_Start FB: Area_CAT and Station_CAT each contain their own
             // internal plcStart bootstrap, so an external one would double-bootstrap and
@@ -1412,7 +1409,7 @@ namespace CodeGen.Translation
                     // BuildActuatorParameters), so the empty rule set is intentional,
                     // not a translation failure. Mirrors the swivel's
                     // DropSwivelInterlockForTest guard exemption.
-                    int inScopeInterlocks = CountInScopeInterlockConds(actuator, allComponents, scopedIds);
+                    int inScopeInterlocks = InterlockPlanner.CountInScopeConditions(actuator, allComponents, scopedIds);
                     int emittedRuleCount = int.Parse(actParams["RuleCount"],
                         System.Globalization.CultureInfo.InvariantCulture);
                     if (inScopeInterlocks > 0 && emittedRuleCount == 0)
@@ -1435,7 +1432,7 @@ namespace CodeGen.Translation
                 {
                     // Centre-home swivel (Bearing_PnP). Minimal centre-home params
                     // (Target / work-home-time / fault) PLUS the REAL interlock rules
-                    // translated from Control.xml — reusing the SAME BuildInterlockRules
+                    // translated from Control.xml — reusing the SAME InterlockPlanner.BuildRules
                     // machinery Five_State uses, since this CAT exposes the identical
                     // RuleFromState/ToState/SourceID/BlockedState[10] + RuleCount inputs
                     // wired to its CommonInterlockManager.
@@ -1453,16 +1450,16 @@ namespace CodeGen.Translation
                     actParams = BuildMinimalActuatorParameters(actuator, assignedId, fbType);
                     actParams["actuator_name"] = SyslayBuilder.FormatString(
                         displayName.ToLowerInvariant());
-                    var (chRuleCount, chFrom, chTo, chSrc, chBlk) =
-                        scopedIds != null
-                            ? BuildInterlockRules(actuator, allComponents, scopedIds)
-                            : (0, new int[InterlockRuleCap], new int[InterlockRuleCap],
-                                  new int[InterlockRuleCap], new int[InterlockRuleCap]);
+                    var chPlan = scopedIds != null
+                        ? InterlockPlanner.BuildRules(actuator, allComponents, scopedIds)
+                        : InterlockPlan.Empty(InterlockRuleCap);
+                    int chRuleCount = chPlan.Count;
+                    int[] chFrom = chPlan.From, chTo = chPlan.To, chSrc = chPlan.Src, chBlk = chPlan.Blocked;
                     // Per the Common Interlock Evaluator Mapper Guide, the core's
                     // CurrentRawState is the seven-state encoding 0..6 (0 Home, 2
                     // AtWork1, 4 AtWork2, 6 AtHome) and a rule is checked ONLY when
                     // CurrentRawState == RuleFromState AND requested target == RuleToState.
-                    // BuildInterlockRules numbers in Control.xml State_Number space; the
+                    // InterlockPlanner.BuildRules numbers in Control.xml State_Number space; the
                     // Assembly turn-to-Place (AtPick 2 -> Place 4) lands on 2 -> 4 and is
                     // correct, but the "2"-suffixed Disassembly route (AtPick2 -> AtPlace2)
                     // numbers as 12 -> 0, which can NEVER match a 0..6 CurrentRawState.
@@ -1524,7 +1521,7 @@ namespace CodeGen.Translation
                     actParams["RuleBlockedState"] = SyslayBuilder.FormatIntArray(chBlk);
                     if (scopedIds != null && !dropSwivelInterlock)
                     {
-                        int chInScope = CountInScopeInterlockConds(actuator, allComponents, scopedIds);
+                        int chInScope = InterlockPlanner.CountInScopeConditions(actuator, allComponents, scopedIds);
                         if (chInScope > 0 && chRuleCount == 0)
                             throw new InvalidOperationException(
                                 $"[Recipe] Bearing_PnP '{actuator.Name}' has {chInScope} in-scope " +
@@ -1881,7 +1878,7 @@ namespace CodeGen.Translation
         }
 
         // Default fallback timing used only when Control.xml omits or zeros out State.Time.
-        private const int DefaultMotionMs = 2000;
+        private static int DefaultMotionMs => GenerationConfig.Current.DefaultMotionMs;
 
         /// <summary>
         /// Vacuum-driven gripper instance names (suction cup, single coil, no
@@ -1928,35 +1925,13 @@ namespace CodeGen.Translation
             return TemplateMap.ResolveActuatorCatType(
                 actuator.Name ?? string.Empty,
                 actuator.States?.Count ?? 0,
-                IsBranchedSevenState(actuator));
+                TemplateMap.IsBranchedSevenState(actuator));
         }
 
-        /// <summary>
-        /// Mirrors <c>MainForm.IsBranchedSevenStateActuator</c> — detects the
-        /// 13-state "branched swivel" pattern where the resting state has at
-        /// least one outgoing PARALLEL transition AND at least one outgoing
-        /// ALTERNATIVE transition. Bearing_PnP fits this pattern. The CAT
-        /// itself runs as a 7-state ECC; the additional Control.xml states
-        /// are absorbed into the same physical motion vocabulary.
-        /// </summary>
-        private static bool IsBranchedSevenState(VueOneComponent comp)
-        {
-            if (comp?.States == null) return false;
-            foreach (var st in comp.States)
-            {
-                bool hasParallel = false;
-                bool hasAlternative = false;
-                foreach (var tr in st.Transitions)
-                {
-                    if (string.Equals(tr.TransitionType, "PARALLEL", StringComparison.OrdinalIgnoreCase))
-                        hasParallel = true;
-                    else if (string.Equals(tr.TransitionType, "ALTERNATIVE", StringComparison.OrdinalIgnoreCase))
-                        hasAlternative = true;
-                }
-                if (hasParallel && hasAlternative) return true;
-            }
-            return false;
-        }
+        // IsBranchedSevenState consolidated onto the canonical
+        // TemplateMap.IsBranchedSevenState (2026-06-18, behaviour-preserving — the
+        // former private copy was identical for all inputs; VueOneState.Transitions
+        // is never null, so TemplateMap's extra Transitions null-guard is dead code).
 
         /// <summary>
         /// Returns minimal Parameter values for actuators that are NOT plain
@@ -2011,53 +1986,17 @@ namespace CodeGen.Translation
                 // FiveStateActuator ECC has no process_state_name input.
                 dict["process_state_name"] = SyslayBuilder.FormatString(actuator.Name.ToLowerInvariant());
             }
-            // Centre-home swivel CAT (Bearing_PnP, 2026-06-02). The core publishes
-            // current_state_to_process 2=AtWork1(Pick) / 4=AtWork2(Place) / 6=AtHome;
-            // Target*State feed CommonInterlockManager at those settle values.
-            // work{1,2}ToHomeTime are the SWING-TO-CENTRE times: the core drives the
-            // opposite coil for this long, then cuts both coils (AtHome) so the arm
-            // coasts to a stop on centre. There is NO spring-centre and the physical
-            // SwivelArmAtHome (DI02) is not closing, so this timer IS what parks the
-            // arm on home -- if it is too long the arm sails PAST centre to the far
-            // work end (the observed atWork1<->atWork2 behaviour). 3000ms overshot.
-            // Use the PROVEN values from the old hardcoded Seven_State_Actuator_CAT
-            // that homed correctly: toPickTime=T#750ms (home from work1/Pick) and
-            // toPlaceTime=T#500ms (home from work2/Place). (2026-06-03.)
-            // Fault timeouts OFF so an
-            // isolated test never faults waiting for a work sensor. RuleCount=0:
-            // NO cross-PLC interlock for the ISOLATED Bearing_PnP test (Shaft_Hr /
-            // CoverPNP_Hr / Transfer are parked → no collision). The real interlock
-            // rules (block ToWork2 when those occupy the crossing) land when the
-            // full system integrates — the CAT already has RuleFromState[10] etc.
-            // wired to CommonInterlockManager, so it is purely a parameter change.
+            // Centre-home swivel CAT (Bearing_PnP): the core publishes current_state_to_process
+            // 2=AtWork1(Pick) / 4=AtWork2(Place) / 6=AtHome; Target*State feed CommonInterlockManager
+            // at those settle values. Fault timeouts OFF so an isolated test never faults on a work sensor.
             if (string.Equals(fbType, "Seven_State_Actuator_Centre_Home_CAT", StringComparison.OrdinalIgnoreCase))
             {
                 dict["TargetWork1State"] = SyslayBuilder.FormatInt(2);
                 dict["TargetWork2State"] = SyslayBuilder.FormatInt(4);
                 dict["TargetHomeState"]  = SyslayBuilder.FormatInt(6);
-                // 2026-06-03: MUST be > 0. Setting these to 0 froze the recipe -- an
-                // E_DELAY with DT=0 never fires its EO, so the swivel's home never
-                // completed, the home-preamble WAIT never satisfied, and the engine
-                // stalled on step 1 (nothing downstream ran: no grip, no release, no
-                // shaft). The timer ALSO has to be long enough for the swivel to leave
-                // the work position (atWork clears) so AtHome->AtHomeInit can fire.
-                // 750/500ms are the values proven to do both (the recipe ran end to end
-                // with them). The physical overshoot they cause is COSMETIC -- it only
-                // affects where the arm rests, not whether the recipe advances. Do NOT
-                // set these to 0.
-                dict["work1ToHomeTime"]  = SyslayBuilder.FormatTimeMs(750);
-                // 2026-06-10: set to 100ms after rig feedback that 300ms still
-                // overshoots/fails to settle at centre.
-                // past centre toward Work1. work2ToHomeTime
-                // is the atWork2(Place) -> home swing — the ONLY home leg the Assembly recipe
-                // exercises (the swivel homes from Place, never directly from Pick, so
-                // work1ToHomeTime above is unused by this recipe). Leaving atWork2 the toHome
-                // algorithm energises the WORK1 coil, so the arm swings toward the Pick(atWork1)
-                // side as it crosses centre. RIG-TUNABLE: if it overshoots toward atWork1,
-                // reduce; if it stops short of centre (or stalls because atWork2 never clears
-                // so AtHome->AtHomeInit can't fire) raise it. MUST stay > 0 (E_DELAY DT=0
-                // never fires -> freeze).
-                dict["work2ToHomeTime"]  = SyslayBuilder.FormatTimeMs(100);
+                // work1ToHomeTime / work2ToHomeTime are NOT set: the work-to-home E_DELAY timers feed
+                // only ReturnToHomeHandler events the No_Sensor_Handler_7SCH ECC has no transitions on,
+                // so they drive nothing; the home completes on the DI02 atHome sensor.
                 dict["enableToWork1FaultTimeout"] = SyslayBuilder.FormatBool(false);
                 dict["enableToWork2FaultTimeout"] = SyslayBuilder.FormatBool(false);
                 dict["faultTimeoutWork1"] = SyslayBuilder.FormatTimeMs(10000);
@@ -2069,7 +2008,7 @@ namespace CodeGen.Translation
                 // them unset renders an empty/ambiguous param. The real Bearing_PnP
                 // generation path OVERLAYS the actual Control.xml interlock rules over
                 // these defaults (the Seven_State_Actuator_Centre_Home_CAT branch at
-                // the param call-site calls BuildInterlockRules). These zeros only
+                // the param call-site calls InterlockPlanner.BuildRules). These zeros only
                 // survive for callers without a scopedIds map (legacy / tests).
                 int[] zero = new int[InterlockRuleCap];
                 dict["RuleFromState"]    = SyslayBuilder.FormatIntArray(zero);
@@ -2155,7 +2094,7 @@ namespace CodeGen.Translation
             // advances; the drive coil still energises so the swivel visibly
             // triggers. Lift this when task #69 restores the real Seven_State.
             if (Configuration.MapperConfig.StubSevenStateActuatorsAsFiveState
-                && (actuator.States.Count == 7 || IsBranchedSevenState(actuator)))
+                && (actuator.States.Count == 7 || TemplateMap.IsBranchedSevenState(actuator)))
             {
                 workSensorFitted = false;
                 homeSensorFitted = false;
@@ -2181,16 +2120,12 @@ namespace CodeGen.Translation
             // THIS actuator only — the physical coil (output bit3) still drives the
             // gripper; only the state confirmation comes from toWork/toHomeTime. The
             // M580 grippers keep their real DI sensors (see the 2026-06-04 note above).
-            // Covers (2026-06-18, user "cover timer 2000->1000 for each"): all three BX1 cover P&P
-            // actuators now settle in 1000ms (CoverPNP_Vr was 2000ms; CoverPNP_Hr + the gripper were
-            // already 1000ms). For the sensorless gripper this IS the settle time (grip/release advances
-            // ~1s, not ~2s). For the sensored CoverPNP_Hr/Vr it shortens toWork/toHome (faultTimeout*
-            // derive as toWorkMs*2 = 2000ms) — their P&P SPEED stays sensor-driven (the recipe WAIT
-            // clears on the physical atwork/athome DI, not the timer). M580/M262 actuators untouched.
+            // BX1 cover P&P actuators settle in coverMotionMs; their P&P speed stays sensor-driven
+            // (the recipe WAIT clears on the physical atwork/athome DI, not the timer).
             if (IsBx1CoverActuator(actuator.Name))
             {
-                toWorkMs = 1000;
-                toHomeMs = 1000;
+                toWorkMs = GenerationConfig.Current.CoverMotionMs;
+                toHomeMs = GenerationConfig.Current.CoverMotionMs;
                 // The gripper has NO DI to confirm grip/release, so it must timer-acknowledge
                 // (sensorless); CoverPNP_Hr/Vr keep their real atwork/athome sensors.
                 if (string.Equals(actuator.Name, "CoverPnp_Gripper", StringComparison.OrdinalIgnoreCase))
@@ -2224,10 +2159,11 @@ namespace CodeGen.Translation
             // pass-through (RuleCount=0). The real Button 2 / Button 4 path
             // passes the sensors-first map so RuleSourceID matches the recipe's
             // Wait1Id state_table indices.
-            var (ruleCount, ruleFrom, ruleTo, ruleSrc, ruleBlk) =
-                scopedIds != null
-                    ? BuildInterlockRules(actuator, allComponents, scopedIds)
-                    : (0, new int[10], new int[10], new int[10], new int[10]);
+            var rulePlan = scopedIds != null
+                ? InterlockPlanner.BuildRules(actuator, allComponents, scopedIds)
+                : InterlockPlan.Empty(InterlockRuleCap);
+            int ruleCount = rulePlan.Count;
+            int[] ruleFrom = rulePlan.From, ruleTo = rulePlan.To, ruleSrc = rulePlan.Src, ruleBlk = rulePlan.Blocked;
 
             // BX1 covers (2026-06-10, per user "block interlocks for now"): zero the
             // interlock rules on the three cover actuators so no Control.xml-derived rule
@@ -2241,8 +2177,8 @@ namespace CodeGen.Translation
             if (IsBx1CoverActuator(actuator.Name))
             {
                 ruleCount = 0;
-                ruleFrom = new int[10]; ruleTo = new int[10];
-                ruleSrc = new int[10]; ruleBlk = new int[10];
+                ruleFrom = new int[InterlockRuleCap]; ruleTo = new int[InterlockRuleCap];
+                ruleSrc = new int[InterlockRuleCap]; ruleBlk = new int[InterlockRuleCap];
             }
 
             var actuatorParams = new Dictionary<string, string>
@@ -2286,195 +2222,8 @@ namespace CodeGen.Translation
             return actuatorParams;
         }
 
-        // Rule* InputVars are ArraySize=10 in Five_State_Actuator_CAT.fbt.
-        private const int InterlockRuleCap = 10;
-
-        /// <summary>
-        /// Translate an actuator's Control.xml interlock conditions into the
-        /// InterlockManager rule arrays. VueOne stores these in a STATE-level
-        /// <c>&lt;Interlock_Condition&gt;</c> element (parsed into
-        /// <see cref="VueOneState.InterlockConditions"/>) — NOT in the
-        /// transition's Sequence_Condition. Each listed condition on a state
-        /// becomes one rule: the state's transition (FromState = the state's
-        /// State_Number; ToState = its &lt;Destination_State&gt; State_Number,
-        /// e.g. Advancing#1 → Advanced#2) is blocked while component
-        /// <c>cond.ComponentID</c> sits in the state whose StateID == cond.ID
-        /// (e.g. "NOT Checker/Down"). RuleSourceID uses the sensors-first
-        /// scoped map (== recipe Wait1Id scheme) so the runtime
-        /// InterlockManager reads the same state_table slot the recipe waits
-        /// on. Conditions referencing an OUT-of-scope component are skipped
-        /// (no state_table slot exists — same invariant as the recipe's
-        /// Wait1Id scope filter). Capped at 10.
-        /// </summary>
-        public static (int Count, int[] From, int[] To, int[] Src, int[] Blocked)
-            BuildInterlockRules(VueOneComponent actuator,
-                IReadOnlyList<VueOneComponent> allComponents,
-                IReadOnlyDictionary<string, int> scopedIds)
-        {
-            var from = new int[InterlockRuleCap];
-            var to = new int[InterlockRuleCap];
-            var src = new int[InterlockRuleCap];
-            var blk = new int[InterlockRuleCap];
-            int n = 0;
-
-            foreach (var st in actuator.States)
-            {
-                if (st.InterlockConditions.Count == 0) continue;
-
-                // ToState = where this state's transition leads (the
-                // <Interlock_Condition> blocks THAT transition, e.g.
-                // Advancing#1 -> Advanced#2 via <Destination_State>).
-                int toState = -1;
-                foreach (var tr in st.Transitions)
-                {
-                    var dest = (tr.DestinationStateID ?? string.Empty).Trim();
-                    if (dest.Length == 0) continue;
-                    var ds = actuator.States.FirstOrDefault(s =>
-                        string.Equals((s.StateID ?? string.Empty).Trim(), dest,
-                            StringComparison.OrdinalIgnoreCase));
-                    if (ds != null) { toState = ds.StateNumber; break; }
-                }
-
-                foreach (var c in st.InterlockConditions)
-                {
-                    var key = (c.ComponentID ?? string.Empty).Trim();
-                    if (key.Length == 0) continue;
-                    // Out-of-scope blocker → no state_table slot; cannot emit a
-                    // valid rule (same scoping invariant as recipe Wait1Id).
-                    if (!scopedIds.TryGetValue(key, out var srcId)) continue;
-
-                    var srcComp = allComponents.FirstOrDefault(x =>
-                        string.Equals((x.ComponentID ?? string.Empty).Trim(), key,
-                            StringComparison.OrdinalIgnoreCase));
-                    int blockedState = srcComp?.States.FirstOrDefault(s =>
-                        string.Equals((s.StateID ?? string.Empty).Trim(),
-                            (c.ID ?? string.Empty).Trim(),
-                            StringComparison.OrdinalIgnoreCase))?.StateNumber ?? -1;
-
-                    // Skip rather than emit a wrong safety rule if either end
-                    // is unresolved.
-                    if (toState < 0 || blockedState < 0) continue;
-                    if (n >= InterlockRuleCap) break;
-
-                    // RuleFromState (root-cause fix for the inert safety net).
-                    // Per the CommonInterlockEvaluator Mapper Guide, a rule
-                    // matches ONLY when CurrentRawState == RuleFromState AND
-                    // the requested target == RuleToState. At REQ_WORK1 /
-                    // REQ_HOME time the actuator is at its RESTING state
-                    // (CurrentRawState=0 AtHomeInit before an advance,
-                    // CurrentRawState=2 AtWork before a retract), NOT the
-                    // in-transit owning state number (1 Advancing, 3
-                    // Returning). The earlier code emitted FromState=
-                    // st.StateNumber which made every rule inert because
-                    // 0 never equals 1. Walk the actuator's own state
-                    // machine to find the predecessor state (the one whose
-                    // transition Destination is this owning state); that
-                    // predecessor's State_Number is the resting value the
-                    // FB will see. If no predecessor exists (owning state
-                    // is itself the start of the chain) fall back to its
-                    // own number.
-                    var ownStateId = (st.StateID ?? string.Empty).Trim();
-                    int fromState = st.StateNumber;
-                    if (ownStateId.Length > 0)
-                    {
-                        var predecessor = actuator.States.FirstOrDefault(p =>
-                            p.Transitions.Any(t =>
-                                string.Equals(
-                                    (t.DestinationStateID ?? string.Empty).Trim(),
-                                    ownStateId, StringComparison.OrdinalIgnoreCase)));
-                        if (predecessor != null)
-                            fromState = predecessor.StateNumber;
-                    }
-
-                    // RuleBlockedState: the value the SOURCE component
-                    // actually publishes on the ring. A Five_State actuator
-                    // stably holds AtHomeInit=0 and AtWork=2; AtHomeEnd=4
-                    // is the momentary publish during the ToHome ->
-                    // AtHomeInit ECC arc (data-only guard, fires in the
-                    // same run-to-stable tick), so the InterlockManager
-                    // never sees state_table[srcId].state == 4 at any
-                    // useful moment. A Control.xml reference to a home-
-                    // finished family state on an actuator (State_Number
-                    // 4: ReturnedFinished / RisingFinished etc.) must remap
-                    // to 0 to fire reliably. Sensors are unchanged because
-                    // Sensor_Bool publishes its Control.xml number.
-                    int blockedStateRuntime = blockedState;
-                    if (blockedState == 4 && srcComp != null &&
-                        string.Equals(srcComp.Type, "Actuator",
-                            StringComparison.OrdinalIgnoreCase))
-                    {
-                        blockedStateRuntime = 0;
-                    }
-
-                    // ROOT-CAUSE FIX (2026-06-05): drop "block-while-source-is-home"
-                    // rules (resolved BlockedState == 0). A source component sitting at
-                    // its home/rest state is OUT of the moving actuator's crossing, so it
-                    // must NOT block — a rule that fires while the source is home is an
-                    // INVERTED safety rule that deadlocks the recipe. This is exactly
-                    // shaft_hr's Rule 0 (block AtHomeInit->ToWork while Bearing_PnP is at
-                    // home/state 0): the recipe parks the swivel home immediately before
-                    // commanding shaft_hr to work, so that rule blocks the shaft turn
-                    // forever. The Seven_State centre-home swivel ALREADY drops this exact
-                    // case (see ~L1422); porting the filter here makes Five_State
-                    // consistent and removes the wrong rule for the rig too — the REAL
-                    // crossing hazards block on AtWork=2 (not 0), so they are kept and
-                    // still protect the actuator. Runs AFTER the StateNumber 4 -> 0 home-
-                    // family remap above, so a "block while source ReturnedFinished" rule
-                    // (which remaps to 0) is correctly dropped as well.
-                    if (blockedStateRuntime == 0) continue;
-
-                    from[n] = fromState;
-                    to[n] = toState;
-                    src[n] = srcId;
-                    blk[n] = blockedStateRuntime;
-                    n++;
-                }
-            }
-            return (n, from, to, src, blk);
-        }
-
-        /// <summary>
-        /// Count of in-scope Control.xml interlock conditions on this
-        /// actuator's STATE &lt;Interlock_Condition&gt; elements (blocking
-        /// component present in the sensors-first scoped map). Used by the
-        /// deploy-time validation: if this is &gt; 0 but the emitted
-        /// RuleCount is 0, the safety net would be silently theoretical and
-        /// generation must abort.
-        /// </summary>
-        public static int CountInScopeInterlockConds(VueOneComponent actuator,
-            IReadOnlyList<VueOneComponent> allComponents,
-            IReadOnlyDictionary<string, int> scopedIds)
-        {
-            int n = 0;
-            foreach (var st in actuator.States)
-            foreach (var c in st.InterlockConditions)
-            {
-                var key = (c.ComponentID ?? string.Empty).Trim();
-                if (key.Length == 0 || !scopedIds.ContainsKey(key)) continue;
-
-                // Mirror BuildInterlockRules' inverted-rule drop: a
-                // "block-while-source-is-home" condition (resolved BlockedState
-                // == 0, including the StateNumber 4 home-family remap) is NOT a
-                // real safety net — BuildInterlockRules discards it — so it must
-                // not count toward the inert-RuleCount guard. Otherwise the guard
-                // would falsely abort generation for an actuator whose every
-                // in-scope interlock is an inverted home-block.
-                var srcComp = allComponents.FirstOrDefault(x =>
-                    string.Equals((x.ComponentID ?? string.Empty).Trim(), key,
-                        StringComparison.OrdinalIgnoreCase));
-                int blockedState = srcComp?.States.FirstOrDefault(s =>
-                    string.Equals((s.StateID ?? string.Empty).Trim(),
-                        (c.ID ?? string.Empty).Trim(),
-                        StringComparison.OrdinalIgnoreCase))?.StateNumber ?? -1;
-                if (blockedState < 0) continue;
-                if (blockedState == 4 && srcComp != null &&
-                    string.Equals(srcComp.Type, "Actuator", StringComparison.OrdinalIgnoreCase))
-                    blockedState = 0;
-                if (blockedState == 0) continue;
-                n++;
-            }
-            return n;
-        }
+        // Must match the Rule* InputVar ArraySize in Five_State_Actuator_CAT.fbt.
+        private static int InterlockRuleCap => GenerationConfig.Current.InterlockRuleCap;
 
         /// <summary>Returns the actuator's <Time> for the given State_Number, or fallback.</summary>
         public static int ResolveStateTimeMs(VueOneComponent actuator, int stateNumber, int fallbackMs)
