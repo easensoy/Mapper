@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using CodeGen.Configuration;
 using CodeGen.Translation;
 
 namespace CodeGen.Devices.Core
@@ -49,15 +50,6 @@ namespace CodeGen.Devices.Core
         // parallel arrays. Compare whichever the process FB actually carries.
         static readonly string[] RecipeParamNames =
             { "Recipe", "StepType", "CmdTargetName", "CmdStateArr", "Wait1Id", "Wait1State", "NextStep" };
-
-        // M262 discharge channels the hcf MUST bind when the cross-PLC tail is active.
-        static readonly (string Channel, string Meaning)[] DischargeChannels =
-        {
-            ("DI08", "PartAtAssembly.Input"),
-            ("DO03", "Ejector.OutputToWork"),
-            ("DO04", "Robot.RobotCommands_StartTask"),
-            ("DI10", "Robot.RobotStatus_Task_Complete"),
-        };
 
         /// <summary>
         /// Validate that each device sysres faithfully mirrors the syslay. <paramref name="eaeRoot"/>
@@ -216,10 +208,10 @@ namespace CodeGen.Devices.Core
                 return;
             }
 
-            foreach (var (channel, meaning) in DischargeChannels)
-                if (!bound.TryGetValue(channel, out var val) || string.IsNullOrWhiteSpace(val))
+            foreach (var dc in RigCatalog.Current.DischargeChannels)
+                if (!bound.TryGetValue(dc.Channel, out var val) || string.IsNullOrWhiteSpace(val))
                     violations.Add(new("M262-HCF",
-                        $"discharge tail active but {channel} ({meaning}) is BLANK in '{Path.GetFileName(hcf)}' — " +
+                        $"discharge tail active but {dc.Channel} ({dc.Meaning}) is BLANK in '{Path.GetFileName(hcf)}' — " +
                         "the ejector/robot will not actuate on the rig"));
         }
     }
