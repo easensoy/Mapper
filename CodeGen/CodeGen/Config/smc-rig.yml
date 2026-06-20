@@ -1,0 +1,50 @@
+# SMC rig catalog — facts the generator reads instead of hardcoding them in C#.
+
+# Process FB state_table slots. Each must sit ABOVE the component id space (0..16) so it never
+# collides with a sensor/actuator id; ValidateProcessIdInvariant throws otherwise. The
+# Assembly->Disassembly handshake rides assembly as a sentinel, so the stamp and the WAIT share it.
+processIds:
+  feedStation: 10
+  assembly: 17
+  disassembly: 18
+  coverStation: 19
+
+# state_table slot the UR3e stamps on its ring reports. Its M262 registry id collides on M580 with
+# the Assembly station, so it needs a slot free on both PLCs; 19 is the only one (CoverStation's,
+# free when covers are folded into Assembly). Do not run the robot tail and the BX1 cover engine
+# together — both would claim 19.
+robotActuatorId: 19
+
+# BX1 cover P&P actuators are Mapper-synthesized (no Control.xml component), so their state_table
+# ids are fixed here rather than resolved from the registry. Recipes reference them by name.
+coverActuatorIds:
+  coverpnp_hr: 14
+  coverpnp_vr: 15
+  coverpnp_gripper: 16
+
+# Real M262 proximity sensors the digital twin does not model; the rig wires them to fixed DI
+# channels. id is the shared state_table slot — it must be free on every PLC whose ring carries
+# the report. PartAtAssembly id 3 is free on both the M262 and M580 state_tables.
+synthSensors:
+  - name: PartAtAssembly
+    pin: DI08
+    id: 3
+
+# Ordered M262 components spliced onto the M580 ring at the Disassembly seam when the cross-PLC
+# discharge is active: Ejector/Robot commands out, PartAtAssembly report back in. Order matters.
+crossRingSegment:
+  - Ejector
+  - Robot
+  - PartAtAssembly
+
+# M262 DI/DO channels the .hcf MUST bind when the cross-PLC discharge tail is active, else the
+# ejector/robot never actuate. The parity validator checks each is bound and non-blank.
+dischargeChannels:
+  - channel: DI08
+    meaning: PartAtAssembly.Input
+  - channel: DO03
+    meaning: Ejector.OutputToWork
+  - channel: DO04
+    meaning: Robot.RobotCommands_StartTask
+  - channel: DI10
+    meaning: Robot.RobotStatus_Task_Complete
