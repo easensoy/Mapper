@@ -112,12 +112,8 @@ namespace CodeGen.Mapping
         /// source for BuildStation2Wiring (the two cross-hops), BuildFeedStationWiring +
         /// ResourceWireEmitter (intra-M262 chain + Feed-ring exclusion).
         /// </summary>
-        public static System.Collections.Generic.List<string> M262CrossRingSegment(bool discharge)
-        {
-            var seg = new System.Collections.Generic.List<string>();
-            if (discharge) { seg.Add("Ejector"); seg.Add("Robot"); seg.Add("PartAtAssembly"); }
-            return seg;
-        }
+        public static List<string> M262CrossRingSegment(bool discharge) =>
+            discharge ? new List<string>(RigCatalog.Current.CrossRingSegment) : new List<string>();
 
         /// <summary>
         /// Actuator CAT routing, factored out so callers that already know
@@ -164,8 +160,9 @@ namespace CodeGen.Mapping
         /// shape that routes to <c>Seven_State_Actuator_CAT</c> when the stub flag
         /// is off, even though the raw state count is 13 rather than 7.
         ///
-        /// Source-of-truth definition lives in <c>SystemLayoutInjector.IsBranchedSevenState</c>;
-        /// callers that don't want to import SystemLayoutInjector can pass the
+        /// This is the single canonical definition (consolidated 2026-06-18):
+        /// <c>SystemInjector.ResolveActuatorFBType</c> and
+        /// <c>RecipeCommandVocabulary</c> both call it; callers may also pass the
         /// precomputed bool to <see cref="CatTypeOf"/>.
         /// </summary>
         public static bool IsBranchedSevenState(VueOneComponent component)
@@ -173,7 +170,9 @@ namespace CodeGen.Mapping
             if (component is null || component.States is null) return false;
             // A resting state with BOTH a PARALLEL outgoing transition AND an
             // ALTERNATIVE outgoing transition (Bearing_PnP's 13-state shape).
-            // Matches SystemLayoutInjector.IsBranchedSevenState byte-for-byte.
+            // Canonical home (former SystemInjector/recipe copies removed 2026-06-18).
+            // The per-state Transitions null-guard below is defensive only —
+            // VueOneState.Transitions is always a non-null list (= new()).
             foreach (var state in component.States)
             {
                 bool hasParallel = false, hasAlternative = false;
