@@ -1,0 +1,159 @@
+# Recipe row data. Block selection / gating / END handling stays in the station classes
+# (CoverRecipe / DisassemblyRecipe / AssemblyRecipe); only the rows live here.
+# A step is exactly one of: cmd | waitId | waitRef | waitConfig (+ state).
+#   cmd        -> AddCmd(cmd, state)
+#   waitId     -> AddWait(<literal id>, state)
+#   waitRef    -> AddWait(TryGetComponentId(name), state)
+#   waitConfig -> AddWait(<named id from smc-rig.yml: process ids, robot, covers>, state)
+# Five_State convention: Work = cmd1 -> wait AtWork(2); Home = cmd3 -> wait AtHomeInit(0).
+
+recipes:
+  - name: Cover_Station
+    blocks:
+      full:
+        - { cmd: coverpnp_vr, state: 1 }
+        - { waitConfig: coverpnp_vr, state: 2 }
+        - { cmd: coverpnp_gripper, state: 1 }
+        - { waitConfig: coverpnp_gripper, state: 2 }
+        - { cmd: coverpnp_vr, state: 3 }
+        - { waitConfig: coverpnp_vr, state: 0 }
+        - { cmd: coverpnp_hr, state: 1 }
+        - { waitConfig: coverpnp_hr, state: 2 }
+        - { cmd: coverpnp_vr, state: 1 }
+        - { waitConfig: coverpnp_vr, state: 2 }
+        - { cmd: coverpnp_gripper, state: 3 }
+        - { waitConfig: coverpnp_gripper, state: 0 }
+        - { cmd: coverpnp_vr, state: 3 }
+        - { waitConfig: coverpnp_vr, state: 0 }
+        - { cmd: coverpnp_hr, state: 3 }
+        - { waitConfig: coverpnp_hr, state: 0 }
+      minimal:
+        - { cmd: coverpnp_vr, state: 1 }
+        - { waitConfig: coverpnp_vr, state: 2 }
+        - { cmd: coverpnp_vr, state: 3 }
+        - { waitConfig: coverpnp_vr, state: 0 }
+
+  - name: Disassembly
+    blocks:
+      handshake:
+        - { waitConfig: AssemblyProcessId, state: 7 }
+      coverRemove:
+        - { cmd: coverpnp_hr, state: 1 }
+        - { waitRef: coverpnp_hr, state: 2 }
+        - { cmd: coverpnp_vr, state: 1 }
+        - { waitRef: coverpnp_vr, state: 2 }
+        - { cmd: coverpnp_gripper, state: 1 }
+        - { waitRef: coverpnp_gripper, state: 2 }
+        - { cmd: coverpnp_vr, state: 3 }
+        - { waitRef: coverpnp_vr, state: 0 }
+        - { cmd: coverpnp_hr, state: 3 }
+        - { waitRef: coverpnp_hr, state: 0 }
+        - { cmd: coverpnp_vr, state: 1 }
+        - { waitRef: coverpnp_vr, state: 2 }
+        - { cmd: coverpnp_gripper, state: 3 }
+        - { waitRef: coverpnp_gripper, state: 0 }
+        - { cmd: coverpnp_vr, state: 3 }
+        - { waitRef: coverpnp_vr, state: 0 }
+      shaftOut:
+        - { cmd: shaft_hr, state: 1 }
+        - { waitRef: shaft_hr, state: 2 }
+        - { cmd: shaft_vr, state: 1 }
+        - { waitRef: shaft_vr, state: 2 }
+        - { cmd: shaft_gripper, state: 1 }
+        - { waitRef: shaft_gripper, state: 2 }
+        - { cmd: shaft_vr, state: 3 }
+        - { waitRef: shaft_vr, state: 0 }
+        - { cmd: shaft_hr, state: 3 }
+        - { waitRef: shaft_hr, state: 0 }
+        - { cmd: shaft_vr, state: 1 }
+        - { waitRef: shaft_vr, state: 2 }
+        - { cmd: shaft_gripper, state: 3 }
+        - { waitRef: shaft_gripper, state: 0 }
+        - { cmd: shaft_vr, state: 3 }
+        - { waitRef: shaft_vr, state: 0 }
+      # Reverse swivel: collect at AtWork2 (cmd3), deposit at AtWork1 (cmd1), then DIRECT home (cmd5).
+      # SAFETY: no reposition to AtWork2 after release — the empty swing toward the ejector is a
+      # collision risk without a clamp. Do not re-add it.
+      bearingOut:
+        - { cmd: bearing_pnp, state: 3 }
+        - { waitRef: bearing_pnp, state: 4 }
+        - { cmd: bearing_gripper, state: 1 }
+        - { waitRef: bearing_gripper, state: 2 }
+        - { cmd: bearing_pnp, state: 1 }
+        - { waitRef: bearing_pnp, state: 2 }
+        - { cmd: bearing_gripper, state: 3 }
+        - { waitRef: bearing_gripper, state: 0 }
+        - { cmd: bearing_pnp, state: 5 }
+        - { waitRef: bearing_pnp, state: 0 }
+      unclamp:
+        - { cmd: clamp, state: 3 }
+        - { waitRef: clamp, state: 0 }
+      ejector:
+        - { cmd: ejector, state: 1 }
+        - { waitRef: ejector, state: 2 }
+        - { cmd: ejector, state: 3 }
+        - { waitRef: ejector, state: 0 }
+      robot:
+        - { cmd: robot, state: 1 }
+        - { waitConfig: RobotActuatorId, state: 2 }
+        - { cmd: robot, state: 2 }
+        - { waitConfig: RobotActuatorId, state: 0 }
+
+  - name: Assembly_Station
+    blocks:
+      homePreamble:
+        - { cmd: bearing_pnp, state: 5 }
+        - { waitRef: bearing_pnp, state: 0 }
+      clampClose:
+        - { cmd: clamp, state: 1 }
+        - { waitRef: clamp, state: 2 }
+      bearing:
+        - { cmd: bearing_pnp, state: 1 }
+        - { waitRef: bearing_pnp, state: 2 }
+        - { cmd: bearing_gripper, state: 1 }
+        - { waitRef: bearing_gripper, state: 2 }
+        - { cmd: bearing_pnp, state: 3 }
+        - { waitRef: bearing_pnp, state: 4 }
+        - { cmd: bearing_gripper, state: 3 }
+        - { waitRef: bearing_gripper, state: 0 }
+        - { cmd: bearing_pnp, state: 5 }
+        - { waitRef: bearing_pnp, state: 0 }
+      shaft:
+        - { cmd: shaft_vr, state: 1 }
+        - { waitRef: shaft_vr, state: 2 }
+        - { cmd: shaft_gripper, state: 1 }
+        - { waitRef: shaft_gripper, state: 2 }
+        - { cmd: shaft_vr, state: 3 }
+        - { waitRef: shaft_vr, state: 0 }
+        - { cmd: shaft_hr, state: 1 }
+        - { waitRef: shaft_hr, state: 2 }
+        - { cmd: shaft_vr, state: 1 }
+        - { waitRef: shaft_vr, state: 2 }
+        - { cmd: shaft_gripper, state: 3 }
+        - { waitRef: shaft_gripper, state: 0 }
+        - { cmd: shaft_vr, state: 3 }
+        - { waitRef: shaft_vr, state: 0 }
+        - { cmd: shaft_hr, state: 3 }
+        - { waitRef: shaft_hr, state: 0 }
+      coverPlace:
+        - { cmd: coverpnp_vr, state: 1 }
+        - { waitRef: coverpnp_vr, state: 2 }
+        - { cmd: coverpnp_gripper, state: 1 }
+        - { waitRef: coverpnp_gripper, state: 2 }
+        - { cmd: coverpnp_vr, state: 3 }
+        - { waitRef: coverpnp_vr, state: 0 }
+        - { cmd: coverpnp_hr, state: 1 }
+        - { waitRef: coverpnp_hr, state: 2 }
+        - { cmd: coverpnp_vr, state: 1 }
+        - { waitRef: coverpnp_vr, state: 2 }
+        - { cmd: coverpnp_gripper, state: 3 }
+        - { waitRef: coverpnp_gripper, state: 0 }
+        - { cmd: coverpnp_vr, state: 3 }
+        - { waitRef: coverpnp_vr, state: 0 }
+        - { cmd: coverpnp_hr, state: 3 }
+        - { waitRef: coverpnp_hr, state: 0 }
+      clampOpen:
+        - { cmd: clamp, state: 3 }
+        - { waitRef: clamp, state: 0 }
+      handshake:
+        - { cmd: assembly_handshake_done, state: 7 }
