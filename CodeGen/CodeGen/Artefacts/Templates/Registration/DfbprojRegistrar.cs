@@ -324,6 +324,59 @@ namespace CodeGen.Devices.Core
         }
 
         /// <summary>
+        /// Idempotently ensures the four APPLICATION dfbproj entries exist — the
+        /// <c>.sysapp</c> (SystemApplication) + the <c>000000.syslay</c> (SystemLayer) under
+        /// &lt;Compile&gt;, and the aspmap/opcua companions under &lt;Content&gt; — matching
+        /// the shape the project ships with. Companion to
+        /// <see cref="CodeGen.Devices.Core.ApplicationShellEmitter.EnsureApplicationShell"/>,
+        /// which recreates an application the Clean wiper deleted (mirroring how
+        /// <see cref="RegisterSystemDevice"/> re-registers a recreated device). The
+        /// zero/one UUIDs are the Mapper's fixed application convention. Returns the count added.
+        /// </summary>
+        public static int RegisterApplicationShell(string dfbprojPath)
+        {
+            if (!File.Exists(dfbprojPath)) return 0;
+            var xml = XDocument.Load(dfbprojPath);
+            var ns = xml.Root!.GetDefaultNamespace();
+            var (cg, _) = Groups(xml, ns);
+            int added = 0;
+
+            const string SystemId   = "00000000-0000-0000-0000-000000000000";
+            const string AppId      = "00000000-0000-0000-0000-000000000001";
+            const string SystemFile = SystemId + ".system";
+            const string SyslayFile = SystemId + ".syslay";
+            string sysappRel = $@"System\{SystemId}\{AppId}.sysapp";
+            string syslayRel = $@"System\{SystemId}\{AppId}\{SystemId}.syslay";
+            string aspmapRel = $@"System\{SystemId}\{AppId}\{SystemId}\aspmap.xml";
+            string opcuaRel  = $@"System\{SystemId}\{AppId}\{SystemId}\opcua.xml";
+
+            Add(cg, ns, "Compile", sysappRel, ref added,
+                new XElement(ns + "DependentUpon", SystemFile),
+                new XElement(ns + "IEC61499Type", "SystemApplication"));
+
+            Add(cg, ns, "Compile", syslayRel, ref added,
+                new XElement(ns + "DependentUpon", AppId + ".sysapp"),
+                new XElement(ns + "IEC61499Type", "SystemLayer"));
+
+            // aspmap/opcua are <Content> — a separate ItemGroup from Compile/None.
+            var content = xml.Descendants(ns + "ItemGroup")
+                .FirstOrDefault(g => g.Elements(ns + "Content").Any()) ?? AddGroup(xml, ns);
+
+            Add(content, ns, "Content", aspmapRel, ref added,
+                new XElement(ns + "DependentUpon", SyslayFile),
+                new XElement(ns + "Plugin", "AvevaServerPlugin"),
+                new XElement(ns + "IEC61499Type", "CAT_ASPMAP"));
+
+            Add(content, ns, "Content", opcuaRel, ref added,
+                new XElement(ns + "DependentUpon", SyslayFile),
+                new XElement(ns + "Plugin", "OPCUAConfigurator"),
+                new XElement(ns + "IEC61499Type", "CAT_OPCUA"));
+
+            if (added > 0) xml.Save(dfbprojPath);
+            return added;
+        }
+
+        /// <summary>
         /// Strips every &lt;Content&gt;/&lt;None&gt;/&lt;Compile&gt; entry from the
         /// .dfbproj whose Include path references a 14-17 hex-char sysres-stem
         /// directory that no longer has a matching <c>.sysres</c> file on disk.
