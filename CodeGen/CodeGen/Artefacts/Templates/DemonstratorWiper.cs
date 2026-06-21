@@ -221,9 +221,12 @@ namespace CodeGen.Services
         {
             // Preserve the layer ID if we can read it; otherwise generate a placeholder.
             string layerId = TryReadAttr(path, "Layer", "ID") ?? "00000000-0000-0000-0000-000000000000";
+            // Clean BLANKS the layer name — SMC_Rig is the Mapper's output (SyslayBuilder writes
+            // Name="SMC_Rig" on Test Runtime), so Clean leaves no name behind (not SMC_Rig, not a
+            // placeholder). The layer is identified by ID; Test Runtime restores the SMC_Rig name.
             return
                 "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
-                $"<Layer ID=\"{layerId}\" Name=\"Default\" Comment=\"\" IsDefault=\"true\" " +
+                $"<Layer ID=\"{layerId}\" Name=\"\" Comment=\"\" IsDefault=\"true\" " +
                 "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns=\"https://www.se.com/LibraryElements\">\n" +
                 "  <SubAppNetwork />\n" +
                 "</Layer>\n";
@@ -247,7 +250,10 @@ namespace CodeGen.Services
         static string BuildEmptySysapp(string path)
         {
             string id   = TryReadAttr(path, "Application", "ID")   ?? "00000000-0000-0000-0000-000000000001";
-            string name = TryReadAttr(path, "Application", "Name") ?? "APP1";
+            // Clean BLANKS the application name — WMG is the Mapper's output (M262SysdevEmitter.
+            // AlignApplicationName sets Name="WMG" on Test Runtime), so Clean leaves no name behind
+            // (not WMG, not a placeholder). The app is identified by ID; Test Runtime restores WMG.
+            string name = "";
             return
                 "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
                 "<Application xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" " +
