@@ -56,15 +56,25 @@ namespace CodeGen.Devices.Core
                 foreach (var fb in doc.Descendants().Where(e => e.Name.LocalName == "FB"))
                 {
                     var type = (string?)fb.Attribute("Type") ?? string.Empty;
-                    if (!type.StartsWith("MQTT_CONNECTION", StringComparison.Ordinal)) continue;
+                    bool isTelemetry = type.Equals("Telemetry_CAT", StringComparison.Ordinal);
+                    if (!type.StartsWith("MQTT_CONNECTION", StringComparison.Ordinal) && !isTelemetry) continue;
                     var name = (string?)fb.Attribute("Name") ?? string.Empty;
 
-                    var p = fb.Elements().Where(e => e.Name.LocalName == "Parameter")
-                        .Where(e => !string.IsNullOrEmpty((string?)e.Attribute("Name")))
-                        .GroupBy(e => (string)e.Attribute("Name")!, StringComparer.OrdinalIgnoreCase)
-                        .ToDictionary(g => g.Key,
-                                      g => (((string?)g.First().Attribute("Value")) ?? string.Empty).Trim().Trim('\''),
-                                      StringComparer.OrdinalIgnoreCase);
+                    // Raw MQTT_CONNECTION exposes URL/ConnectionID/... as separate <Parameter>s.
+                    // Telemetry_CAT wraps them in one Config:TelemetryConfig struct literal — parse it
+                    // so the identical URL/ConnectionID/ClientIdentifier checks apply to the wrapped form.
+                    var p = isTelemetry
+                        ? ParseStructLiteral(fb.Elements()
+                            .Where(e => e.Name.LocalName == "Parameter" &&
+                                        string.Equals((string?)e.Attribute("Name"), "Config", StringComparison.Ordinal))
+                            .Select(e => (string?)e.Attribute("Value") ?? string.Empty)
+                            .FirstOrDefault() ?? string.Empty)
+                        : fb.Elements().Where(e => e.Name.LocalName == "Parameter")
+                            .Where(e => !string.IsNullOrEmpty((string?)e.Attribute("Name")))
+                            .GroupBy(e => (string)e.Attribute("Name")!, StringComparer.OrdinalIgnoreCase)
+                            .ToDictionary(g => g.Key,
+                                          g => (((string?)g.First().Attribute("Value")) ?? string.Empty).Trim().Trim('\''),
+                                          StringComparer.OrdinalIgnoreCase);
 
                     string url = p.GetValueOrDefault("URL", string.Empty);
                     string cid = p.GetValueOrDefault("ConnectionID", string.Empty);
@@ -117,6 +127,17 @@ namespace CodeGen.Devices.Core
         {
             var m = Regex.Match(url, @"://[^:/]+:(\d+)");
             return m.Success && int.TryParse(m.Groups[1].Value, out var n) ? n : -1;
+        }
+
+        // Parse a TelemetryConfig struct literal — "(QI:=TRUE, ConnectionID:='SMC', URL:='mqtt://...',
+        // ClientIdentifier:='SMC_M262', ValidateCert:=0, CACert:='')" — into a member->value dict with
+        // single quotes stripped, so a Telemetry_CAT Config reads like the raw FB's flat parameters.
+        static Dictionary<string, string> ParseStructLiteral(string literal)
+        {
+            var d = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (Match m in Regex.Matches(literal ?? string.Empty, @"(\w+)\s*:=\s*('[^']*'|[^,)]+)"))
+                d[m.Groups[1].Value] = m.Groups[2].Value.Trim().Trim('\'');
+            return d;
         }
 
         /// <summary>
