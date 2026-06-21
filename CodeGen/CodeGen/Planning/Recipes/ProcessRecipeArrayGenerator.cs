@@ -334,23 +334,6 @@ namespace CodeGen.Translation.Process
             // than empty arrays which would crash bounds checks).
             if (arrays.StepType.Count == 0)
             {
-                // Cover_Station is a SYNTHESIZED, STATELESS engine — its recipe comes from
-                // ApplyCoverRuntimeRecipe (the BX1 cover pick/place cycle), NOT a state walk,
-                // so the walk legitimately yields 0 steps. Fill it from the cover recipe HERE
-                // instead of collapsing to an empty END — otherwise Cover_Station deploys with
-                // a single StepType=9 and sits "Resting in END" commanding nothing, so the
-                // cover never moves (regression observed 2026-06-09: the degenerate-case early
-                // return at this line pre-empted the ApplyCoverRuntimeRecipe call near the end
-                // of Generate). ApplyCoverRuntimeRecipe bails on its Name guard for every
-                // non-Cover_Station process, so the genuine every-state-skipped degenerate
-                // path below is unchanged for them.
-                CoverRecipe.Apply(process, arrays, allComponents, stationContents);
-                if (arrays.StepType.Count > 0)
-                {
-                    ValidateProcessIdInvariant(arrays, processId);
-                    return arrays;
-                }
-
                 arrays.Warnings.Add(
                     "Every source state was skipped or unsatisfiable — collapsing the recipe " +
                     "to a single END row at index 0. Engine will halt immediately.");
@@ -687,7 +670,6 @@ namespace CodeGen.Translation.Process
             }
 
             AssemblyRecipe.Apply(process, arrays, allComponents);
-            CoverRecipe.Apply(process, arrays, allComponents, stationContents);
 
             // RUN-ONCE: park on the END row after one cycle instead of looping.
             // (2026-06-03 — MapperConfig.RecipeRunOnce, default ON.) The END
@@ -701,11 +683,7 @@ namespace CodeGen.Translation.Process
             // a clean single Home->Pick->Place->Home. Done HERE (after the preamble
             // prepend has shifted every index) so endIdx is the FINAL END index.
             // Flip RecipeRunOnce off to restore continuous looping.
-            // Cover_Station runs a CONTINUOUS cover cycle (its END loops to step 0), so it
-            // is exempted from the run-once self-park that the other engines use.
-            bool isCoverStation = string.Equals((process.Name ?? string.Empty).Trim(),
-                "Cover_Station", StringComparison.OrdinalIgnoreCase);
-            if (!isCoverStation && arrays.StepType.Count > 0)
+            if (arrays.StepType.Count > 0)
             {
                 int endIdx = arrays.StepType.Count - 1;
                 if (arrays.StepType[endIdx] == StepType.End)
