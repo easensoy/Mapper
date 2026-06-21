@@ -42,6 +42,10 @@ namespace CodeGen.Devices.Core
             // entry it stays only on the syslay (no Mapping) and EAE never deploys it, so
             // the embedded MQTT_PUBLISH FBs have nothing to bind their ConnectionID to.
             "MQTT_CONNECTION",
+            // Telemetry_CAT — the composite wrapper around MQTT_CONNECTION (cfg.UseTelemetryCat,
+            // default). Mirrored per resource (Telemetry_M262/M580/BX1) for the same reason: its
+            // internal MQTT_CONNECTION must reach the sysres so the embedded MqttPub binds locally.
+            "Telemetry_CAT",
             // Bridge publishers (BX1-side) — only present when the cross-PLC MQTT bridge is
             // enabled; receive M262/M580 state via cross-resource syslay wires.
             "MqttStateFormatter",
@@ -577,11 +581,16 @@ namespace CodeGen.Devices.Core
             // MqttPub binds to the LOCAL connection (shared ConnectionID = cfg.MqttClientId) and
             // publishes its own components' state. BX1 (Soft-dPAC) is rig-proven; M262/M580 publish
             // once their device allows insecure mqtt:// and the firmware runs the MQTT client.
-            if (string.Equals(fbName, "MqttConn", StringComparison.Ordinal))
+            // Telemetry_CAT wraps the raw MQTT_CONNECTION (cfg.UseTelemetryCat, default); the
+            // Telemetry_* instance routes to the SAME resource as the MqttConn* it replaces.
+            if (string.Equals(fbName, "MqttConn", StringComparison.Ordinal) ||
+                string.Equals(fbName, "Telemetry_BX1", StringComparison.Ordinal))
                 return PlcAssignment.BX1;
-            if (string.Equals(fbName, "MqttConn_M262", StringComparison.Ordinal))
+            if (string.Equals(fbName, "MqttConn_M262", StringComparison.Ordinal) ||
+                string.Equals(fbName, "Telemetry_M262", StringComparison.Ordinal))
                 return PlcAssignment.M262;
-            if (string.Equals(fbName, "MqttConn_M580", StringComparison.Ordinal))
+            if (string.Equals(fbName, "MqttConn_M580", StringComparison.Ordinal) ||
+                string.Equals(fbName, "Telemetry_M580", StringComparison.Ordinal))
                 return PlcAssignment.M580;
 
             // Standalone MQTT bridge publishers (MqttFmt_<comp>, MqttPub_<comp>)
