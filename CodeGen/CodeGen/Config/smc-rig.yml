@@ -7,12 +7,9 @@ processIds:
   feedStation: 10
   assembly: 17
   disassembly: 18
-  coverStation: 19
 
 # state_table slot the UR3e stamps on its ring reports. Its M262 registry id collides on M580 with
-# the Assembly station, so it needs a slot free on both PLCs; 19 is the only one (CoverStation's,
-# free when covers are folded into Assembly). Do not run the robot tail and the BX1 cover engine
-# together — both would claim 19.
+# the Assembly station, so it needs a slot free on both PLCs; 19 is the only one.
 robotActuatorId: 19
 
 # BX1 cover P&P actuators are Mapper-synthesized (no Control.xml component), so their state_table
