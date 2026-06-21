@@ -365,13 +365,16 @@ namespace CodeGen.Translation
             // MqttConn.INIT dangling at the head; runtime resolves it through
             // the sysres bridge.
             bool mqttEnabled = config != null && config.MqttPublishEnabled;
+            // Telemetry_CAT (config.UseTelemetryCat, default) names BX1's connection Telemetry_BX1;
+            // the raw-FB revert keeps "MqttConn". The INITO->CONNECT self-loop passes through the wrapper.
+            string bx1Conn = (config != null && config.UseTelemetryCat) ? "Telemetry_BX1" : "MqttConn";
             if (mqttEnabled)
-                builder.AddEventConnection("MqttConn.INITO", "MqttConn.CONNECT");
+                builder.AddEventConnection($"{bx1Conn}.INITO", $"{bx1Conn}.CONNECT");
 
-            // INIT chain — MqttConn first (broker up before any embedded
+            // INIT chain — the connection first (broker up before any embedded
             // MqttPub fires), then BX1 sensors, then BX1 actuators.
             var initChain = new List<string>();
-            if (mqttEnabled) initChain.Add("MqttConn");
+            if (mqttEnabled) initChain.Add(bx1Conn);
             foreach (var s in contents.Sensors)    if (IsBx1(s.Name)) initChain.Add(s.Name);
             foreach (var a in contents.Actuators)  if (IsBx1(a.Name)) initChain.Add(a.Name);
             for (int i = 0; i < initChain.Count - 1; i++)
