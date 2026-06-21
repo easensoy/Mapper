@@ -1013,6 +1013,10 @@ namespace MapperUI
                         int n = await Task.Run(() =>
                             CodeGen.Devices.BX1.Bx1IoBrokerInjector.InjectBx1IoBroker(Cfg(), syslayPath, report));
                         AppendActivity($"[BX1][Broker] BX1_IO injected into {n} artefact(s).");
+                        // Re-fit the syslay layout so the just-injected BX1_IO (registered at
+                        // BX1 col 3) is gridded and the BX1 frame re-fits to enclose it.
+                        await Task.Run(() =>
+                            ResourceWireEmitter.ApplyLayoutToSyslay(syslayPath, report));
                     }
                     catch (Exception ex)
                     {
@@ -1441,7 +1445,11 @@ namespace MapperUI
                     var vr = Validate(comp, validator, cfg);
                     _validationRows.Add(vr);
 
-                    int idx = dgvComponents.Rows.Add(comp.Name, comp.Type, vr.TemplateName);
+                    // Device (PLC) assignment for this component (from the canonical registry).
+                    // Resource name (e.g. M262_RES) is EAE-internal and intentionally NOT shown.
+                    var reg = CodeGen.Mapping.ComponentRegistry.Get(comp.Name);
+                    string dev = reg?.Plc.ToString() ?? "";
+                    int idx = dgvComponents.Rows.Add(comp.Name, comp.Type, vr.TemplateName, dev);
                     var row = dgvComponents.Rows[idx];
                     Color bg = (rowIdx++ % 2 == 0) ? RowEven : RowOdd;
                     row.DefaultCellStyle.BackColor = bg;
@@ -1449,6 +1457,20 @@ namespace MapperUI
                     row.Cells[2].Style.ForeColor = vr.IsValid ? ColorTranslated : ColorDiscarded;
                     row.Cells[2].Style.BackColor = bg;
                 }
+
+                // Device/resource summary in the group title (M262/M580/BX1 + mapped component counts).
+                int cM262 = 0, cM580 = 0, cBx1 = 0;
+                foreach (System.Windows.Forms.DataGridViewRow r in dgvComponents.Rows)
+                {
+                    switch (r.Cells[3].Value?.ToString())
+                    {
+                        case "M262": cM262++; break;
+                        case "M580": cM580++; break;
+                        case "BX1":  cBx1++;  break;
+                    }
+                }
+                grpMappingInfo.Text =
+                    $"Mapping Information   —   M262: {cM262} · M580: {cM580} · BX1: {cBx1} mapped component(s)";
 
                 UpdateDetectedInfo();
 
