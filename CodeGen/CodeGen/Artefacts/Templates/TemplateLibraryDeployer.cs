@@ -6,6 +6,7 @@ using System.Linq;
 using System.Xml.Linq;
 using CodeGen.Configuration;
 using CodeGen.Models;
+using CodeGen.Translation.Interlocks;
 using CodeGen.Devices.M262;
 using CodeGen.Devices.Core;
 
@@ -118,7 +119,10 @@ namespace CodeGen.Services
             // signals from the core's current_state_to_process so the sim never presents
             // impossible sensor combinations like atHome=TRUE and atWork1=TRUE.
             "SevenStateCentreHomeActuator", "No_Sensor_Handler_7SCH", "FaultLatch_7SCH",
-            "actuatorStateEvents_7SCH", "SimCentreHomeSensor_7SCH",
+            "actuatorStateEvents_7SCH",
+            // SimCentreHomeSensor_7SCH REMOVED (simulator-only; we no longer ship simulator code).
+            // The rig path never instantiated it (NormalizeSwivelSimSensorSource reduce=false strips it);
+            // it is no longer deployed and any stale copy is swept in DeployUniversalArchitecture.
         };
 
         static readonly string[] UniversalHmiCats = new[]
@@ -180,6 +184,10 @@ namespace CodeGen.Services
 
             foreach (var name in UniversalBasics)
                 DeployArtifact(libPath, "Basic", name, eaeProjectDir, result, isBasic: true);
+
+            // Retire the simulator-only SimCentreHomeSensor_7SCH: delete any stale copy a prior sim
+            // deploy left + strip its dfbproj entries so EAE shows no Missing Project Files.
+            SweepRetiredType(eaeProjectDir, "SimCentreHomeSensor_7SCH", result);
 
             foreach (var name in UniversalAdapters)
                 DeployArtifact(libPath, "Adapter", name, eaeProjectDir, result, isBasic: true);
@@ -248,6 +256,14 @@ namespace CodeGen.Services
             // patch long ago (above); the new CAT was missed. Masked in the simulator
             // (no-sensor timers advance state, coils unused), fatal on the rig.
             PatchCatSymlinkQi(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT", result);
+            // Remove the dead 'state_out' boundary event (it fed the removed cross-resource MQTT
+            // bridge; nothing consumes it). Visual/interface cleanup only — no control-logic change.
+            StripSevenStateStateOut(eaeProjectDir, result);
+            // VISUAL-only: keep each CAT's HMI/OPCUA section frame from spilling into the section
+            // below (pull IThis inside, fix the frame). Self-skips CATs without an HMI/OPCUA frame.
+            foreach (var hmiCat in new[] { "Five_State_Actuator_CAT", "Seven_State_Actuator_Centre_Home_CAT",
+                                           "Sensor_Bool_CAT", "Robot_Task_CAT" })
+                FixCatHmiOpcuaFrame(eaeProjectDir, hmiCat, result);
             PatchActuatorModeInitialValue(eaeProjectDir, "FiveStateActuator.fbt", result);
             // 2026-06-02: the centre-home swivel core needs the SAME auto-mode default.
             // Without it SevenStateCentreHomeActuator powers up at mode=0, its ECC sits
@@ -409,23 +425,49 @@ namespace CodeGen.Services
                 // in this file but no longer called.)
             }
 
-            // Simulator interface reduction (the 4 Rule arrays -> 1 RuleTable).
-            // The struct-literal capability was proven by the StructLiteralProbe
-            // spike (now removed). Deploy the InterlockRule datatype on the sim
-            // path, then run the two bidirectional normalizers that reshape the
-            // CAT and the CommonInterlockEvaluator Basic FB: reduce==true (sim)
-            // collapses the 4 arrays to one RuleTable; reduce==false (hardware)
-            // restores the 4 arrays — so the byte-identical hardware slice is
-            // untouched (the sim reduce==true direction + DeployInterlockRuleDatatype were
-            // dropped — they never ran on the rig).
-            NormalizeFiveStateRuleArrays(eaeProjectDir, "Five_State_Actuator_CAT.fbt", "InterlockManager", false, result);
-            // Jyotsna's Centre-Home swivel CAT carries the SAME four interlock arrays wired
-            // into its CommonInterlockManager (a CommonInterlockEvaluator). Collapse them to
-            // the RuleTable STRUCT too — otherwise the sim build fails with 17 errors
-            // ("RuleFromState does not exist in Main.CommonInterlockEvaluator", etc.) because
-            // the evaluator FB was reshaped to RuleTable but this CAT still wires the arrays.
-            NormalizeFiveStateRuleArrays(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT.fbt", "CommonInterlockManager", false, result);
-            NormalizeCommonInterlockEvaluatorRules(eaeProjectDir, false, result);
+            // Interlock interface: the four parallel Rule arrays + standalone RuleCount -> ONE
+            // encapsulated input RuleTable : InterlockTable (= { Count : INT; Rules : ARRAY OF
+            // InterlockRule }). The InterlockRule + InterlockTable datatypes + the three bidirectional
+            // normalizers (both actuator CATs + the shared CommonInterlockEvaluator Basic FB) flip
+            // together with the instance param (InterlockEmitter), driven by interlock.yaml useStruct.
+            // The Centre-Home swivel carries the SAME interface wired into its CommonInterlockManager,
+            // so it must reshape too. false restores the four arrays + scalar RuleCount.
+            bool interlockStruct = InterlockConfig.Current.UseStruct;
+            if (interlockStruct)
+            {
+                DeployInterlockRuleDatatype(eaeProjectDir, result);
+                DeployInterlockTableDatatype(eaeProjectDir, result);
+            }
+            NormalizeFiveStateRuleArrays(eaeProjectDir, "Five_State_Actuator_CAT.fbt", "InterlockManager", interlockStruct, result);
+            NormalizeFiveStateRuleArrays(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT.fbt", "CommonInterlockManager", interlockStruct, result);
+            NormalizeCommonInterlockEvaluatorRules(eaeProjectDir, interlockStruct, result);
+
+            // Actuator target states -> one Target : TargetStates struct that flows WHOLE into the
+            // interlock evaluator (a custom FB). useTargetStruct flips the CAT inputs, the evaluator,
+            // and the instance param (TargetEmitter) together. false restores the scalar inputs.
+            // (Timers stay scalar: toWorkTime/toHomeTime/enable feed standard E_DELAY/AND FBs that EAE
+            // cannot source from a struct member.)
+            bool targetStruct = InterlockConfig.Current.UseTargetStruct;
+            if (targetStruct)
+                DeployTargetStatesDatatype(eaeProjectDir, result);
+            NormalizeTargetStates(eaeProjectDir, "Five_State_Actuator_CAT.fbt", "InterlockManager",
+                new[] { "TargetWork1State", "TargetHomeState" }, targetStruct, result);
+            NormalizeTargetStates(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT.fbt", "CommonInterlockManager",
+                new[] { "TargetWork1State", "TargetWork2State", "TargetHomeState" }, targetStruct, result);
+            NormalizeCommonInterlockEvaluatorTargets(eaeProjectDir, targetStruct, result);
+
+            // Telemetry: wrap each resource-level MQTT_CONNECTION in the Telemetry_CAT composite
+            // (Config:TelemetryConfig in / Health:TelemetryHealth out). Deploy the two structs + the
+            // composite TYPE together so EAE resolves them; the syslay/sysres then carry Telemetry_*
+            // instances (SystemLayoutInjector.InjectMqttConn, same gate). false leaves them undeployed
+            // and emits the raw MQTT_CONNECTION instead — the one-rebuild revert if EAE rejects the
+            // wrapper's member-level struct connections (Config.QI->Conn.QI).
+            if (cfg.UseTelemetryCat)
+            {
+                DeployTelemetryConfigDatatype(eaeProjectDir, result);
+                DeployTelemetryHealthDatatype(eaeProjectDir, result);
+                DeployArtifact(libPath, "Composite", "Telemetry_CAT", eaeProjectDir, result, isBasic: false);
+            }
             // Simulator-only swivel sensor synthesis. The Centre-Home swivel reads
             // atWork1/atWork2 from its internal Inputs SYMLINKMULTIVARDST, which subscribes
             // '$${PATH}atwork1' / '$${PATH}atWork2'. On the rig those resolve to the physical
@@ -1278,6 +1320,561 @@ namespace CodeGen.Services
         }
 
 
+        // InterlockRule datatype (4 INT fields) — the STRUCT the four parallel Rule arrays collapse
+        // into (RuleTable : ARRAY OF InterlockRule). EAE regenerates the nxtDataType signature on load.
+        const string InterlockRuleDt =
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
+            "<!DOCTYPE DataType SYSTEM \"../LibraryElement.dtd\">\r\n" +
+            "<DataType Namespace=\"Main\" Name=\"InterlockRule\" Comment=\"One interlock rule as a struct: FromState/ToState/SourceID/BlockedState\">\r\n" +
+            "  <Identification Standard=\"1131-3\" />\r\n" +
+            "  <VersionInfo Organization=\"WMG\" Version=\"0.1\" Author=\"easensoy\" Date=\"5/24/2026\" Remarks=\"array-of-struct packaging of the 4 Rule arrays\" />\r\n" +
+            "  <CompilerInfo />\r\n" +
+            "  <StructuredType>\r\n" +
+            "    <VarDeclaration Name=\"FromState\" Type=\"INT\" />\r\n" +
+            "    <VarDeclaration Name=\"ToState\" Type=\"INT\" />\r\n" +
+            "    <VarDeclaration Name=\"SourceID\" Type=\"INT\" />\r\n" +
+            "    <VarDeclaration Name=\"BlockedState\" Type=\"INT\" />\r\n" +
+            "  </StructuredType>\r\n" +
+            "</DataType>";
+
+        /// <summary>
+        /// Deploy the InterlockRule datatype (one rule's four INT fields). Registered via the
+        /// DataTypesDeployed loop (same path as RecipeStep). Idempotent (copy-if-absent).
+        /// </summary>
+        static void DeployInterlockRuleDatatype(string eaeProjectDir, DeployResult result)
+        {
+            try
+            {
+                var dtDir = Path.Combine(eaeProjectDir, "IEC61499", "DataType");
+                Directory.CreateDirectory(dtDir);
+                var dtPath = Path.Combine(dtDir, "InterlockRule.dt");
+                if (!File.Exists(dtPath)) File.WriteAllText(dtPath, InterlockRuleDt);
+                if (!result.DataTypesDeployed.Contains("InterlockRule"))
+                    result.DataTypesDeployed.Add("InterlockRule");
+                result.PatchesApplied.Add("InterlockRule.dt deployed + registered");
+                MapperLogger.Info("[Deploy] InterlockRule.dt written + registered");
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"InterlockRule.dt deploy failed: {ex.Message}");
+            }
+        }
+
+        // InterlockTable: the encapsulated interlock interface — Count : INT + Rules : ARRAY OF
+        // InterlockRule. Rules' ArraySize comes from interlock.yaml ruleArraySize (no magic number).
+        static string BuildInterlockTableDt() =>
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
+            "<!DOCTYPE DataType SYSTEM \"../LibraryElement.dtd\">\r\n" +
+            "<DataType Namespace=\"Main\" Name=\"InterlockTable\" Comment=\"Encapsulated interlock interface: Count + the InterlockRule array\">\r\n" +
+            "  <Identification Standard=\"1131-3\" />\r\n" +
+            "  <VersionInfo Organization=\"WMG\" Version=\"0.1\" Author=\"easensoy\" Date=\"6/21/2026\" Remarks=\"single STRUCT input wrapping the rule count and rules\" />\r\n" +
+            "  <CompilerInfo />\r\n" +
+            "  <StructuredType>\r\n" +
+            "    <VarDeclaration Name=\"Count\" Type=\"INT\" />\r\n" +
+            $"    <VarDeclaration Name=\"Rules\" Type=\"InterlockRule\" ArraySize=\"{InterlockConfig.Current.RuleArraySize}\" Namespace=\"Main\" />\r\n" +
+            "  </StructuredType>\r\n" +
+            "</DataType>";
+
+        /// <summary>
+        /// Deploy the InterlockTable datatype so EAE resolves the single <c>RuleTable : InterlockTable</c>
+        /// input the normalizers expose on the actuator CATs + CommonInterlockEvaluator. Registered via
+        /// the DataTypesDeployed loop. Idempotent (copy-if-absent).
+        /// </summary>
+        static void DeployInterlockTableDatatype(string eaeProjectDir, DeployResult result)
+        {
+            try
+            {
+                var dtDir = Path.Combine(eaeProjectDir, "IEC61499", "DataType");
+                Directory.CreateDirectory(dtDir);
+                var dtPath = Path.Combine(dtDir, "InterlockTable.dt");
+                if (!File.Exists(dtPath)) File.WriteAllText(dtPath, BuildInterlockTableDt());
+                if (!result.DataTypesDeployed.Contains("InterlockTable"))
+                    result.DataTypesDeployed.Add("InterlockTable");
+                result.PatchesApplied.Add("InterlockTable.dt deployed + registered (encapsulated interlock input)");
+                MapperLogger.Info("[Deploy] InterlockTable.dt written + registered");
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"InterlockTable.dt deploy failed: {ex.Message}");
+            }
+        }
+
+        // TargetStates: the actuator target states folded into one struct.
+        const string TargetStatesDt =
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
+            "<!DOCTYPE DataType SYSTEM \"../LibraryElement.dtd\">\r\n" +
+            "<DataType Namespace=\"Main\" Name=\"TargetStates\" Comment=\"Actuator target states: Work1/Work2/Home\">\r\n" +
+            "  <Identification Standard=\"1131-3\" />\r\n" +
+            "  <VersionInfo Organization=\"WMG\" Version=\"0.1\" Author=\"easensoy\" Date=\"6/21/2026\" Remarks=\"single STRUCT input wrapping the target states\" />\r\n" +
+            "  <CompilerInfo />\r\n" +
+            "  <StructuredType>\r\n" +
+            "    <VarDeclaration Name=\"Work1\" Type=\"INT\" />\r\n" +
+            "    <VarDeclaration Name=\"Work2\" Type=\"INT\" />\r\n" +
+            "    <VarDeclaration Name=\"Home\" Type=\"INT\" />\r\n" +
+            "  </StructuredType>\r\n" +
+            "</DataType>";
+
+        /// <summary>Deploy the TargetStates datatype so EAE resolves the <c>Target : TargetStates</c>
+        /// input the normalizers expose. Registered via the DataTypesDeployed loop. Idempotent.</summary>
+        static void DeployTargetStatesDatatype(string eaeProjectDir, DeployResult result)
+        {
+            try
+            {
+                var dtDir = Path.Combine(eaeProjectDir, "IEC61499", "DataType");
+                Directory.CreateDirectory(dtDir);
+                var dtPath = Path.Combine(dtDir, "TargetStates.dt");
+                if (!File.Exists(dtPath)) File.WriteAllText(dtPath, TargetStatesDt);
+                if (!result.DataTypesDeployed.Contains("TargetStates"))
+                    result.DataTypesDeployed.Add("TargetStates");
+                result.PatchesApplied.Add("TargetStates.dt deployed + registered (encapsulated target input)");
+                MapperLogger.Info("[Deploy] TargetStates.dt written + registered");
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"TargetStates.dt deploy failed: {ex.Message}");
+            }
+        }
+
+        // TelemetryConfig: the resource-telemetry connection inputs folded into one struct —
+        // matches MQTT_CONNECTION's QI/ConnectionID/URL/ClientIdentifier/ValidateCert/CACert types.
+        const string TelemetryConfigDt =
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
+            "<!DOCTYPE DataType SYSTEM \"../LibraryElement.dtd\">\r\n" +
+            "<DataType Namespace=\"Main\" Name=\"TelemetryConfig\" Comment=\"Telemetry connection config: wraps the MQTT_CONNECTION inputs\">\r\n" +
+            "  <Identification Standard=\"1131-3\" />\r\n" +
+            "  <VersionInfo Organization=\"WMG\" Version=\"0.1\" Author=\"easensoy\" Date=\"6/21/2026\" Remarks=\"single STRUCT input for Telemetry_CAT\" />\r\n" +
+            "  <CompilerInfo />\r\n" +
+            "  <StructuredType>\r\n" +
+            "    <VarDeclaration Name=\"QI\" Type=\"BOOL\" />\r\n" +
+            "    <VarDeclaration Name=\"ConnectionID\" Type=\"STRING\" />\r\n" +
+            "    <VarDeclaration Name=\"URL\" Type=\"STRING\" />\r\n" +
+            "    <VarDeclaration Name=\"ClientIdentifier\" Type=\"STRING\" />\r\n" +
+            "    <VarDeclaration Name=\"ValidateCert\" Type=\"USINT\" />\r\n" +
+            "    <VarDeclaration Name=\"CACert\" Type=\"STRING\" />\r\n" +
+            "  </StructuredType>\r\n" +
+            "</DataType>";
+
+        /// <summary>Deploy the TelemetryConfig datatype (the Telemetry_CAT Config input).
+        /// Registered via the DataTypesDeployed loop. Idempotent (copy-if-absent).</summary>
+        static void DeployTelemetryConfigDatatype(string eaeProjectDir, DeployResult result)
+        {
+            try
+            {
+                var dtDir = Path.Combine(eaeProjectDir, "IEC61499", "DataType");
+                Directory.CreateDirectory(dtDir);
+                var dtPath = Path.Combine(dtDir, "TelemetryConfig.dt");
+                if (!File.Exists(dtPath)) File.WriteAllText(dtPath, TelemetryConfigDt);
+                if (!result.DataTypesDeployed.Contains("TelemetryConfig"))
+                    result.DataTypesDeployed.Add("TelemetryConfig");
+                result.PatchesApplied.Add("TelemetryConfig.dt deployed + registered");
+                MapperLogger.Info("[Deploy] TelemetryConfig.dt written + registered");
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"TelemetryConfig.dt deploy failed: {ex.Message}");
+            }
+        }
+
+        // TelemetryHealth: the MQTT_CONNECTION status outputs folded into one struct.
+        const string TelemetryHealthDt =
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
+            "<!DOCTYPE DataType SYSTEM \"../LibraryElement.dtd\">\r\n" +
+            "<DataType Namespace=\"Main\" Name=\"TelemetryHealth\" Comment=\"Telemetry connection health: wraps the MQTT_CONNECTION status outputs\">\r\n" +
+            "  <Identification Standard=\"1131-3\" />\r\n" +
+            "  <VersionInfo Organization=\"WMG\" Version=\"0.1\" Author=\"easensoy\" Date=\"6/21/2026\" Remarks=\"single STRUCT output for Telemetry_CAT\" />\r\n" +
+            "  <CompilerInfo />\r\n" +
+            "  <StructuredType>\r\n" +
+            "    <VarDeclaration Name=\"IsConnected\" Type=\"BOOL\" />\r\n" +
+            "    <VarDeclaration Name=\"ReturnCode\" Type=\"USINT\" />\r\n" +
+            "    <VarDeclaration Name=\"Status\" Type=\"STRING\" />\r\n" +
+            "    <VarDeclaration Name=\"NetworkState\" Type=\"STRING\" />\r\n" +
+            "    <VarDeclaration Name=\"SecurityState\" Type=\"STRING\" />\r\n" +
+            "    <VarDeclaration Name=\"ProtocolState\" Type=\"STRING\" />\r\n" +
+            "  </StructuredType>\r\n" +
+            "</DataType>";
+
+        /// <summary>
+        /// Strip the dead <c>state_out</c> boundary event from the deployed Seven-State centre-home
+        /// CAT: the <c>&lt;Event Name="state_out"&gt;</c> (EventOutputs), its <c>&lt;Output&gt;</c> pin,
+        /// and the <c>ActuatorCore.pst_out → state_out</c> connection. It fed the removed cross-resource
+        /// MQTT bridge and has no consumer. Interface/visual cleanup only — the internal
+        /// ActuatorCore.current_state_to_process (interlock + MqttFmt) is untouched. Idempotent.
+        /// </summary>
+        static void StripSevenStateStateOut(string eaeProjectDir, DeployResult result)
+        {
+            try
+            {
+                var fbt = Path.Combine(eaeProjectDir, "IEC61499",
+                    "Seven_State_Actuator_Centre_Home_CAT", "Seven_State_Actuator_Centre_Home_CAT.fbt");
+                if (!File.Exists(fbt)) return;
+                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                int removed = 0;
+                bool Is(System.Xml.Linq.XElement e, string local, string name) =>
+                    e.Name.LocalName == local &&
+                    string.Equals((string?)e.Attribute("Name"), name, StringComparison.Ordinal);
+                foreach (var e in doc.Descendants().Where(e => Is(e, "Event", "state_out")).ToList())
+                    { e.Remove(); removed++; }
+                foreach (var o in doc.Descendants().Where(e => Is(e, "Output", "state_out")).ToList())
+                    { o.Remove(); removed++; }
+                foreach (var c in doc.Descendants().Where(e => e.Name.LocalName == "Connection" &&
+                             string.Equals((string?)e.Attribute("Destination"), "state_out", StringComparison.Ordinal)).ToList())
+                    { c.Remove(); removed++; }
+                if (removed > 0)
+                {
+                    doc.Save(fbt, System.Xml.Linq.SaveOptions.DisableFormatting);
+                    result.PatchesApplied.Add($"Seven_State_Actuator_Centre_Home_CAT: stripped dead state_out ({removed} node(s))");
+                    MapperLogger.Info($"[Deploy] Seven_State state_out stripped ({removed} node(s))");
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"StripSevenStateStateOut failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// VISUAL-only: keep the "HMI &amp; OPCUA Connectivity" section frame from spilling into the
+        /// section below it. Sets the frame MoveStyle="None" (it was "AnyContained" and auto-grew over
+        /// the next section when the IThis faceplate overflowed), caps its height to ~30 above the next
+        /// section, and pulls the IThis FB up near the frame top so it sits inside. No wiring change.
+        /// </summary>
+        static void FixCatHmiOpcuaFrame(string eaeProjectDir, string catName, DeployResult result)
+        {
+            try
+            {
+                var fbt = Path.Combine(eaeProjectDir, "IEC61499", catName, catName + ".fbt");
+                if (!File.Exists(fbt)) return;
+                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var net = doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "FBNetwork");
+                if (net == null) return;
+                var ns = net.Name.Namespace;
+                double Dv(System.Xml.Linq.XElement e, string a) =>
+                    double.TryParse((string?)e.Attribute(a), out var v) ? v : 0;
+                var frames = net.Elements(ns + "Frame").ToList();
+                var hmi = frames.FirstOrDefault(fr =>
+                    ((string?)fr.Elements(ns + "Parameter")
+                        .FirstOrDefault(p => (string?)p.Attribute("Name") == "Text")?.Attribute("Value") ?? "")
+                        .IndexOf("OPCUA", StringComparison.OrdinalIgnoreCase) >= 0);
+                if (hmi == null) return;   // CAT has no HMI/OPCUA section (Sensor_Bool/Robot_Task) — nothing to do
+                double fy = Dv(hmi, "Y"), fh = Dv(hmi, "Height");
+                double nextY = frames.Select(fr => Dv(fr, "Y")).Where(y => y > fy + 100)
+                    .DefaultIfEmpty(fy + fh + 1500).Min();
+                int newH = (int)System.Math.Max(fh, nextY - fy - 30);
+                hmi.SetAttributeValue("Height", newH.ToString());
+                var ms = hmi.Elements(ns + "Parameter").FirstOrDefault(p => (string?)p.Attribute("Name") == "MoveStyle");
+                if (ms != null) ms.SetAttributeValue("Value", "None");
+                var ithis = net.Elements(ns + "FB").FirstOrDefault(f => (string?)f.Attribute("Name") == "IThis");
+                if (ithis != null) ithis.SetAttributeValue("y", ((int)(fy + 40)).ToString());
+                doc.Save(fbt, System.Xml.Linq.SaveOptions.DisableFormatting);
+                result.PatchesApplied.Add($"{catName}: HMI/OPCUA frame fixed (MoveStyle=None, H={newH}, IThis inside)");
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"FixCatHmiOpcuaFrame({catName}) failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>Deploy the TelemetryHealth datatype (the Telemetry_CAT Health output).
+        /// Registered via the DataTypesDeployed loop. Idempotent (copy-if-absent).</summary>
+        static void DeployTelemetryHealthDatatype(string eaeProjectDir, DeployResult result)
+        {
+            try
+            {
+                var dtDir = Path.Combine(eaeProjectDir, "IEC61499", "DataType");
+                Directory.CreateDirectory(dtDir);
+                var dtPath = Path.Combine(dtDir, "TelemetryHealth.dt");
+                if (!File.Exists(dtPath)) File.WriteAllText(dtPath, TelemetryHealthDt);
+                if (!result.DataTypesDeployed.Contains("TelemetryHealth"))
+                    result.DataTypesDeployed.Add("TelemetryHealth");
+                result.PatchesApplied.Add("TelemetryHealth.dt deployed + registered");
+                MapperLogger.Info("[Deploy] TelemetryHealth.dt written + registered");
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"TelemetryHealth.dt deploy failed: {ex.Message}");
+            }
+        }
+
+        // Scalar target InputVar -> TargetStates field, and the Input-pin coords used on restore.
+        static readonly Dictionary<string, string> TargetVarToField = new()
+        {
+            ["TargetWork1State"] = "Work1",
+            ["TargetWork2State"] = "Work2",
+            ["TargetHomeState"]  = "Home",
+        };
+        static readonly Dictionary<string, (string X, string Y)> TargetVarCoords = new()
+        {
+            ["TargetWork1State"] = ("1380", "2092"),
+            ["TargetWork2State"] = ("1440", "2172"),
+            ["TargetHomeState"]  = ("1380", "2192"),
+        };
+        // Which evaluator event originally sampled which target member (for the scalar restore).
+        static readonly Dictionary<string, string> EvaluatorEventToTargetVar = new()
+        {
+            ["INIT"]      = "TargetWork1State",
+            ["REQ_WORK2"] = "TargetWork2State",
+            ["REQ_HOME"]  = "TargetHomeState",
+        };
+
+        /// <summary>
+        /// Fold an actuator CAT's target InputVars (<paramref name="targetInputs"/>) into one
+        /// <c>Target : TargetStates</c> that flows whole into the interlock evaluator instance
+        /// <paramref name="interlockFbName"/>. Bidirectional + idempotent; reduce==false restores the
+        /// scalar inputs.
+        /// </summary>
+        static void NormalizeTargetStates(
+            string eaeProjectDir, string catFileName, string interlockFbName,
+            string[] targetInputs, bool reduce, DeployResult result)
+        {
+            var fbt = Directory.EnumerateFiles(Path.Combine(eaeProjectDir, "IEC61499"),
+                    catFileName, SearchOption.AllDirectories)
+                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal)) ?? string.Empty;
+            if (string.IsNullOrEmpty(fbt))
+            {
+                result.Warnings.Add($"{catFileName} not found; Target normalize skipped.");
+                return;
+            }
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+                var iface = root.Element(ns + "InterfaceList");
+                var net = root.Element(ns + "FBNetwork");
+                if (iface == null || net == null)
+                {
+                    result.Warnings.Add($"{catFileName}: missing InterfaceList/FBNetwork; Target normalize skipped.");
+                    return;
+                }
+                var inputVars = iface.Element(ns + "InputVars");
+                var initEvent = iface.Element(ns + "EventInputs")?.Elements(ns + "Event")
+                    .FirstOrDefault(e => e.Elements(ns + "With").Any(w =>
+                        targetInputs.Contains((string?)w.Attribute("Var")) || (string?)w.Attribute("Var") == "Target"))
+                    ?? iface.Element(ns + "EventInputs")?.Elements(ns + "Event")
+                        .FirstOrDefault(e => (string?)e.Attribute("Name") == "INIT");
+                var dataConns = net.Element(ns + "DataConnections");
+                bool changed = false;
+
+                if (reduce)
+                {
+                    var tgtVar = inputVars?.Elements(ns + "VarDeclaration").FirstOrDefault(v => (string?)v.Attribute("Name") == "Target");
+                    if (tgtVar == null && inputVars != null)
+                    {
+                        var t = new System.Xml.Linq.XElement(ns + "VarDeclaration",
+                            new System.Xml.Linq.XAttribute("Name", "Target"),
+                            new System.Xml.Linq.XAttribute("Type", "TargetStates"),
+                            new System.Xml.Linq.XAttribute("Namespace", "Main"));
+                        var first = inputVars.Elements(ns + "VarDeclaration").FirstOrDefault(v => targetInputs.Contains((string?)v.Attribute("Name")));
+                        if (first != null) first.AddBeforeSelf(t); else inputVars.Add(t);
+                        changed = true;
+                    }
+                    foreach (var a in targetInputs)
+                    {
+                        changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == a);
+                        changed |= RemoveElems(initEvent?.Elements(ns + "With"), w => (string?)w.Attribute("Var") == a);
+                        changed |= RemoveElems(net.Elements(ns + "Input"), i => (string?)i.Attribute("Name") == a);
+                        changed |= RemoveElems(dataConns?.Elements(ns + "Connection"), c => (string?)c.Attribute("Source") == a);
+                    }
+                    if (initEvent != null && !initEvent.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == "Target"))
+                    {
+                        initEvent.Add(new System.Xml.Linq.XElement(ns + "With", new System.Xml.Linq.XAttribute("Var", "Target")));
+                        changed = true;
+                    }
+                    if (!net.Elements(ns + "Input").Any(i => (string?)i.Attribute("Name") == "Target"))
+                    {
+                        var pin = new System.Xml.Linq.XElement(ns + "Input",
+                            new System.Xml.Linq.XAttribute("Name", "Target"),
+                            new System.Xml.Linq.XAttribute("x", "1380"),
+                            new System.Xml.Linq.XAttribute("y", "2092"),
+                            new System.Xml.Linq.XAttribute("Type", "Data"));
+                        var lastInput = net.Elements(ns + "Input").LastOrDefault();
+                        if (lastInput != null) lastInput.AddAfterSelf(pin); else net.Add(pin);
+                        changed = true;
+                    }
+                    if (dataConns != null && !dataConns.Elements(ns + "Connection").Any(c => (string?)c.Attribute("Source") == "Target"))
+                    {
+                        dataConns.Add(new System.Xml.Linq.XElement(ns + "Connection",
+                            new System.Xml.Linq.XAttribute("Source", "Target"),
+                            new System.Xml.Linq.XAttribute("Destination", interlockFbName + ".Target")));
+                        changed = true;
+                    }
+                }
+                else
+                {
+                    changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == "Target");
+                    changed |= RemoveElems(initEvent?.Elements(ns + "With"), w => (string?)w.Attribute("Var") == "Target");
+                    changed |= RemoveElems(net.Elements(ns + "Input"), i => (string?)i.Attribute("Name") == "Target");
+                    changed |= RemoveElems(dataConns?.Elements(ns + "Connection"), c => (string?)c.Attribute("Source") == "Target");
+                    foreach (var a in targetInputs)
+                    {
+                        if (inputVars != null && !inputVars.Elements(ns + "VarDeclaration").Any(v => (string?)v.Attribute("Name") == a))
+                        {
+                            inputVars.Add(new System.Xml.Linq.XElement(ns + "VarDeclaration",
+                                new System.Xml.Linq.XAttribute("Name", a), new System.Xml.Linq.XAttribute("Type", "INT")));
+                            changed = true;
+                        }
+                        if (initEvent != null && !initEvent.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == a))
+                        {
+                            initEvent.Add(new System.Xml.Linq.XElement(ns + "With", new System.Xml.Linq.XAttribute("Var", a)));
+                            changed = true;
+                        }
+                        if (!net.Elements(ns + "Input").Any(i => (string?)i.Attribute("Name") == a))
+                        {
+                            var (x, y) = TargetVarCoords[a];
+                            var pin = new System.Xml.Linq.XElement(ns + "Input",
+                                new System.Xml.Linq.XAttribute("Name", a),
+                                new System.Xml.Linq.XAttribute("x", x), new System.Xml.Linq.XAttribute("y", y),
+                                new System.Xml.Linq.XAttribute("Type", "Data"));
+                            var lastInput = net.Elements(ns + "Input").LastOrDefault();
+                            if (lastInput != null) lastInput.AddAfterSelf(pin); else net.Add(pin);
+                            changed = true;
+                        }
+                        if (dataConns != null && !dataConns.Elements(ns + "Connection").Any(c => (string?)c.Attribute("Source") == a))
+                        {
+                            dataConns.Add(new System.Xml.Linq.XElement(ns + "Connection",
+                                new System.Xml.Linq.XAttribute("Source", a),
+                                new System.Xml.Linq.XAttribute("Destination", interlockFbName + "." + a)));
+                            changed = true;
+                        }
+                    }
+                }
+
+                if (changed)
+                {
+                    doc.Save(fbt);
+                    var catLabel = Path.GetFileNameWithoutExtension(catFileName);
+                    result.PatchesApplied.Add(reduce
+                        ? $"{catLabel}: target states -> Target : TargetStates (encapsulated)"
+                        : $"{catLabel}: Target -> scalar target states (legacy)");
+                    MapperLogger.Info($"[Deploy] {catLabel} Target normalize: reduce={reduce}");
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"{catFileName} Target normalize failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Fold the CommonInterlockEvaluator's three target InputVars into one
+        /// <c>Target : TargetStates</c> and rewrite the Work1/Work2/Home algorithms to read
+        /// Target.Work1/Work2/Home. Bidirectional + idempotent.
+        /// </summary>
+        static void NormalizeCommonInterlockEvaluatorTargets(
+            string eaeProjectDir, bool reduce, DeployResult result)
+        {
+            var fbt = Directory.EnumerateFiles(Path.Combine(eaeProjectDir, "IEC61499"),
+                    "CommonInterlockEvaluator.fbt", SearchOption.AllDirectories)
+                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal)) ?? string.Empty;
+            if (string.IsNullOrEmpty(fbt))
+            {
+                result.Warnings.Add("CommonInterlockEvaluator.fbt not found; Target normalize skipped.");
+                return;
+            }
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+                var iface = root.Element(ns + "InterfaceList");
+                var basic = root.Element(ns + "BasicFB");
+                if (iface == null || basic == null)
+                {
+                    result.Warnings.Add("CommonInterlockEvaluator.fbt: missing InterfaceList/BasicFB; Target normalize skipped.");
+                    return;
+                }
+                var inputVars = iface.Element(ns + "InputVars");
+                var eventInputs = iface.Element(ns + "EventInputs");
+                var targetVars = TargetVarToField.Keys.ToArray();
+                bool changed = false;
+
+                if (reduce)
+                {
+                    var tgtVar = inputVars?.Elements(ns + "VarDeclaration").FirstOrDefault(v => (string?)v.Attribute("Name") == "Target");
+                    if (tgtVar == null && inputVars != null)
+                    {
+                        var t = new System.Xml.Linq.XElement(ns + "VarDeclaration",
+                            new System.Xml.Linq.XAttribute("Name", "Target"),
+                            new System.Xml.Linq.XAttribute("Type", "TargetStates"),
+                            new System.Xml.Linq.XAttribute("Namespace", "Main"));
+                        var first = inputVars.Elements(ns + "VarDeclaration").FirstOrDefault(v => targetVars.Contains((string?)v.Attribute("Name")));
+                        if (first != null) first.AddBeforeSelf(t); else inputVars.Add(t);
+                        changed = true;
+                    }
+                    foreach (var a in targetVars)
+                        changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == a);
+                    foreach (var ev in eventInputs?.Elements(ns + "Event") ?? Enumerable.Empty<System.Xml.Linq.XElement>())
+                    {
+                        if (!ev.Elements(ns + "With").Any(w => targetVars.Contains((string?)w.Attribute("Var")) || (string?)w.Attribute("Var") == "Target")) continue;
+                        foreach (var a in targetVars)
+                            changed |= RemoveElems(ev.Elements(ns + "With"), w => (string?)w.Attribute("Var") == a);
+                        if (!ev.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == "Target"))
+                        {
+                            ev.Add(new System.Xml.Linq.XElement(ns + "With", new System.Xml.Linq.XAttribute("Var", "Target")));
+                            changed = true;
+                        }
+                    }
+                }
+                else
+                {
+                    changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == "Target");
+                    if (inputVars != null)
+                        foreach (var a in targetVars)
+                            if (!inputVars.Elements(ns + "VarDeclaration").Any(v => (string?)v.Attribute("Name") == a))
+                            {
+                                inputVars.Add(new System.Xml.Linq.XElement(ns + "VarDeclaration",
+                                    new System.Xml.Linq.XAttribute("Name", a), new System.Xml.Linq.XAttribute("Type", "INT")));
+                                changed = true;
+                            }
+                    foreach (var ev in eventInputs?.Elements(ns + "Event") ?? Enumerable.Empty<System.Xml.Linq.XElement>())
+                    {
+                        if (!ev.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == "Target")) continue;
+                        changed |= RemoveElems(ev.Elements(ns + "With"), w => (string?)w.Attribute("Var") == "Target");
+                        // Restore only the member this event originally sampled (INIT→Work1, REQ_WORK2→Work2, REQ_HOME→Home).
+                        var evName = (string?)ev.Attribute("Name");
+                        if (evName != null && EvaluatorEventToTargetVar.TryGetValue(evName, out var tv)
+                            && !ev.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == tv))
+                        {
+                            ev.Add(new System.Xml.Linq.XElement(ns + "With", new System.Xml.Linq.XAttribute("Var", tv)));
+                            changed = true;
+                        }
+                    }
+                }
+
+                // Work1/Work2/Home algorithms: TargetWorkNState <-> Target.<field>.
+                foreach (var alg in basic.Elements(ns + "Algorithm"))
+                {
+                    var stEl = alg.Element(ns + "ST");
+                    if (stEl == null) continue;
+                    var st = stEl.Value;
+                    var before = st;
+                    foreach (var kv in TargetVarToField)
+                        st = reduce ? st.Replace(kv.Key, "Target." + kv.Value)
+                                    : st.Replace("Target." + kv.Value, kv.Key);
+                    if (st != before)
+                    {
+                        stEl.ReplaceNodes(new System.Xml.Linq.XCData(st));
+                        changed = true;
+                    }
+                }
+
+                if (changed)
+                {
+                    doc.Save(fbt);
+                    result.PatchesApplied.Add(reduce
+                        ? "CommonInterlockEvaluator: target states -> Target : TargetStates + algorithms (encapsulated)"
+                        : "CommonInterlockEvaluator: Target -> scalar target states + algorithms (legacy)");
+                    MapperLogger.Info($"[Deploy] CommonInterlockEvaluator Target normalize: reduce={reduce}");
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"CommonInterlockEvaluator Target normalize failed: {ex.Message}");
+            }
+        }
+
         // The four parallel interlock-rule arrays that collapse into one
         // RuleTable : InterlockRule[10]. Order matches struct field order.
         static readonly string[] RuleArrayNames =
@@ -1353,26 +1950,43 @@ namespace CodeGen.Services
                 var dataConns = net.Element(ns + "DataConnections");
 
                 bool changed = false;
+                // The CAT-level interlock inputs the encapsulated form removes (4 arrays + scalar count).
+                var scalarAndArrays = RuleArrayNames.Concat(new[] { "RuleCount" }).ToArray();
+                string cap = InterlockConfig.Current.RuleArraySize.ToString();
 
                 if (reduce)
                 {
-                    foreach (var a in RuleArrayNames)
+                    // Encapsulated interface: ONE input RuleTable : InterlockTable (= Count + Rules[]).
+                    // Place RuleTable where the interlock block was (before RuleCount), then strip the
+                    // 4 arrays + standalone RuleCount. An existing flat RuleTable (InterlockRule[]) is
+                    // retyped in place to InterlockTable.
+                    var rtVar = inputVars?.Elements(ns + "VarDeclaration").FirstOrDefault(v => (string?)v.Attribute("Name") == "RuleTable");
+                    if (rtVar != null)
+                    {
+                        if ((string?)rtVar.Attribute("Type") != "InterlockTable" || rtVar.Attribute("ArraySize") != null)
+                        {
+                            rtVar.SetAttributeValue("Type", "InterlockTable");
+                            rtVar.SetAttributeValue("Namespace", "Main");
+                            rtVar.Attribute("ArraySize")?.Remove();
+                            changed = true;
+                        }
+                    }
+                    else if (inputVars != null)
+                    {
+                        var rt = new System.Xml.Linq.XElement(ns + "VarDeclaration",
+                            new System.Xml.Linq.XAttribute("Name", "RuleTable"),
+                            new System.Xml.Linq.XAttribute("Type", "InterlockTable"),
+                            new System.Xml.Linq.XAttribute("Namespace", "Main"));
+                        var rc = inputVars.Elements(ns + "VarDeclaration").FirstOrDefault(v => (string?)v.Attribute("Name") == "RuleCount");
+                        if (rc != null) rc.AddBeforeSelf(rt); else inputVars.Add(rt);
+                        changed = true;
+                    }
+                    foreach (var a in scalarAndArrays)
                     {
                         changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == a);
                         changed |= RemoveElems(initEvent?.Elements(ns + "With"), w => (string?)w.Attribute("Var") == a);
                         changed |= RemoveElems(net.Elements(ns + "Input"), i => (string?)i.Attribute("Name") == a);
                         changed |= RemoveElems(dataConns?.Elements(ns + "Connection"), c => (string?)c.Attribute("Source") == a);
-                    }
-                    if (inputVars != null && !inputVars.Elements(ns + "VarDeclaration").Any(v => (string?)v.Attribute("Name") == "RuleTable"))
-                    {
-                        var rc = inputVars.Elements(ns + "VarDeclaration").FirstOrDefault(v => (string?)v.Attribute("Name") == "RuleCount");
-                        var rt = new System.Xml.Linq.XElement(ns + "VarDeclaration",
-                            new System.Xml.Linq.XAttribute("Name", "RuleTable"),
-                            new System.Xml.Linq.XAttribute("Type", "InterlockRule"),
-                            new System.Xml.Linq.XAttribute("ArraySize", "10"),
-                            new System.Xml.Linq.XAttribute("Namespace", "Main"));
-                        if (rc != null) rc.AddBeforeSelf(rt); else inputVars.Add(rt);
-                        changed = true;
                     }
                     if (initEvent != null && !initEvent.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == "RuleTable"))
                     {
@@ -1400,6 +2014,7 @@ namespace CodeGen.Services
                 }
                 else
                 {
+                    // Restore the legacy interface: scalar RuleCount + the 4 INT arrays; drop RuleTable.
                     changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == "RuleTable");
                     changed |= RemoveElems(initEvent?.Elements(ns + "With"), w => (string?)w.Attribute("Var") == "RuleTable");
                     changed |= RemoveElems(net.Elements(ns + "Input"), i => (string?)i.Attribute("Name") == "RuleTable");
@@ -1407,19 +2022,21 @@ namespace CodeGen.Services
 
                     var coords = new Dictionary<string, (string X, string Y)>
                     {
+                        ["RuleCount"] = ("1440", "1492"),
                         ["RuleFromState"] = ("1320", "2052"),
                         ["RuleToState"] = ("1320", "1752"),
                         ["RuleSourceID"] = ("1300", "1852"),
                         ["RuleBlockedState"] = ("1320", "1952"),
                     };
-                    foreach (var a in RuleArrayNames)
+                    foreach (var a in scalarAndArrays)
                     {
                         if (inputVars != null && !inputVars.Elements(ns + "VarDeclaration").Any(v => (string?)v.Attribute("Name") == a))
                         {
-                            inputVars.Add(new System.Xml.Linq.XElement(ns + "VarDeclaration",
+                            var vd = new System.Xml.Linq.XElement(ns + "VarDeclaration",
                                 new System.Xml.Linq.XAttribute("Name", a),
-                                new System.Xml.Linq.XAttribute("Type", "INT"),
-                                new System.Xml.Linq.XAttribute("ArraySize", "10")));
+                                new System.Xml.Linq.XAttribute("Type", "INT"));
+                            if (a != "RuleCount") vd.SetAttributeValue("ArraySize", cap);
+                            inputVars.Add(vd);
                             changed = true;
                         }
                         if (initEvent != null && !initEvent.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == a))
@@ -1454,8 +2071,8 @@ namespace CodeGen.Services
                     doc.Save(fbt);
                     var catLabel = Path.GetFileNameWithoutExtension(catFileName);
                     result.PatchesApplied.Add(reduce
-                        ? $"{catLabel}: 4 Rule arrays -> RuleTable (sim interface reduced)"
-                        : $"{catLabel}: RuleTable -> 4 Rule arrays (hardware interface)");
+                        ? $"{catLabel}: 4 arrays + RuleCount -> RuleTable : InterlockTable (encapsulated)"
+                        : $"{catLabel}: RuleTable -> 4 arrays + RuleCount (legacy interface)");
                     MapperLogger.Info($"[Deploy] {catLabel} RuleTable normalize: reduce={reduce}");
                 }
             }
@@ -2076,32 +2693,44 @@ namespace CodeGen.Services
                 var eventInputs = iface.Element(ns + "EventInputs");
 
                 bool changed = false;
+                var scalarAndArrays = RuleArrayNames.Concat(new[] { "RuleCount" }).ToArray();
+                string cap = InterlockConfig.Current.RuleArraySize.ToString();
 
                 if (reduce)
                 {
-                    foreach (var a in RuleArrayNames)
-                        changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == a);
-                    if (inputVars != null && !inputVars.Elements(ns + "VarDeclaration").Any(v => (string?)v.Attribute("Name") == "RuleTable"))
+                    // ONE input RuleTable : InterlockTable. Retype a flat RuleTable if present, else
+                    // insert before RuleCount; then strip the 4 arrays + scalar RuleCount.
+                    var rtVar = inputVars?.Elements(ns + "VarDeclaration").FirstOrDefault(v => (string?)v.Attribute("Name") == "RuleTable");
+                    if (rtVar != null)
                     {
-                        var rc = inputVars.Elements(ns + "VarDeclaration").FirstOrDefault(v => (string?)v.Attribute("Name") == "RuleCount");
+                        if ((string?)rtVar.Attribute("Type") != "InterlockTable" || rtVar.Attribute("ArraySize") != null)
+                        {
+                            rtVar.SetAttributeValue("Type", "InterlockTable");
+                            rtVar.SetAttributeValue("Namespace", "Main");
+                            rtVar.Attribute("ArraySize")?.Remove();
+                            changed = true;
+                        }
+                    }
+                    else if (inputVars != null)
+                    {
                         var rt = new System.Xml.Linq.XElement(ns + "VarDeclaration",
                             new System.Xml.Linq.XAttribute("Name", "RuleTable"),
-                            new System.Xml.Linq.XAttribute("Type", "InterlockRule"),
-                            new System.Xml.Linq.XAttribute("ArraySize", "10"),
+                            new System.Xml.Linq.XAttribute("Type", "InterlockTable"),
                             new System.Xml.Linq.XAttribute("Namespace", "Main"));
-                        if (rc != null) rc.AddAfterSelf(rt); else inputVars.Add(rt);
+                        var rc = inputVars.Elements(ns + "VarDeclaration").FirstOrDefault(v => (string?)v.Attribute("Name") == "RuleCount");
+                        if (rc != null) rc.AddBeforeSelf(rt); else inputVars.Add(rt);
                         changed = true;
                     }
+                    foreach (var a in scalarAndArrays)
+                        changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == a);
                     foreach (var ev in eventInputs?.Elements(ns + "Event") ?? Enumerable.Empty<System.Xml.Linq.XElement>())
                     {
-                        if (!ev.Elements(ns + "With").Any(w => RuleArrayNames.Contains((string?)w.Attribute("Var")))) continue;
-                        foreach (var a in RuleArrayNames)
+                        if (!ev.Elements(ns + "With").Any(w => scalarAndArrays.Contains((string?)w.Attribute("Var")) || (string?)w.Attribute("Var") == "RuleTable")) continue;
+                        foreach (var a in scalarAndArrays)
                             changed |= RemoveElems(ev.Elements(ns + "With"), w => (string?)w.Attribute("Var") == a);
                         if (!ev.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == "RuleTable"))
                         {
-                            var rcWith = ev.Elements(ns + "With").FirstOrDefault(w => (string?)w.Attribute("Var") == "RuleCount");
-                            var rtWith = new System.Xml.Linq.XElement(ns + "With", new System.Xml.Linq.XAttribute("Var", "RuleTable"));
-                            if (rcWith != null) rcWith.AddAfterSelf(rtWith); else ev.Add(rtWith);
+                            ev.Add(new System.Xml.Linq.XElement(ns + "With", new System.Xml.Linq.XAttribute("Var", "RuleTable")));
                             changed = true;
                         }
                     }
@@ -2110,20 +2739,21 @@ namespace CodeGen.Services
                 {
                     changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == "RuleTable");
                     if (inputVars != null)
-                        foreach (var a in RuleArrayNames)
+                        foreach (var a in scalarAndArrays)
                             if (!inputVars.Elements(ns + "VarDeclaration").Any(v => (string?)v.Attribute("Name") == a))
                             {
-                                inputVars.Add(new System.Xml.Linq.XElement(ns + "VarDeclaration",
-                                    new System.Xml.Linq.XAttribute("ArraySize", "10"),
+                                var vd = new System.Xml.Linq.XElement(ns + "VarDeclaration",
                                     new System.Xml.Linq.XAttribute("Name", a),
-                                    new System.Xml.Linq.XAttribute("Type", "INT")));
+                                    new System.Xml.Linq.XAttribute("Type", "INT"));
+                                if (a != "RuleCount") vd.SetAttributeValue("ArraySize", cap);
+                                inputVars.Add(vd);
                                 changed = true;
                             }
                     foreach (var ev in eventInputs?.Elements(ns + "Event") ?? Enumerable.Empty<System.Xml.Linq.XElement>())
                     {
                         if (!ev.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == "RuleTable")) continue;
                         changed |= RemoveElems(ev.Elements(ns + "With"), w => (string?)w.Attribute("Var") == "RuleTable");
-                        foreach (var a in RuleArrayNames)
+                        foreach (var a in scalarAndArrays)
                             if (!ev.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == a))
                             {
                                 ev.Add(new System.Xml.Linq.XElement(ns + "With", new System.Xml.Linq.XAttribute("Var", a)));
@@ -2132,7 +2762,7 @@ namespace CodeGen.Services
                     }
                 }
 
-                // Evaluate ST: swap array indexing <-> struct member access.
+                // Evaluate ST: RuleCount<->RuleTable.Count and RuleX[i]<->RuleTable.Rules[i].X.
                 var stEl = basic.Elements(ns + "Algorithm")
                     .FirstOrDefault(a => (string?)a.Attribute("Name") == "Evaluate")?
                     .Element(ns + "ST");
@@ -2140,11 +2770,21 @@ namespace CodeGen.Services
                 {
                     var st = stEl.Value;
                     var before = st;
-                    foreach (var a in RuleArrayNames)
+                    if (reduce)
                     {
-                        var arr = a + "[i]";
-                        var str = "RuleTable[i]." + RuleArrayToField[a];
-                        st = reduce ? st.Replace(arr, str) : st.Replace(str, arr);
+                        st = st.Replace("RuleCount", "RuleTable.Count");
+                        st = st.Replace("RuleTable[i].", "RuleTable.Rules[i].");          // migrate a flat RuleTable[i].X form
+                        foreach (var a in RuleArrayNames)
+                            st = st.Replace(a + "[i]", "RuleTable.Rules[i]." + RuleArrayToField[a]);
+                    }
+                    else
+                    {
+                        st = st.Replace("RuleTable.Count", "RuleCount");
+                        foreach (var a in RuleArrayNames)
+                        {
+                            st = st.Replace("RuleTable.Rules[i]." + RuleArrayToField[a], a + "[i]");
+                            st = st.Replace("RuleTable[i]." + RuleArrayToField[a], a + "[i]"); // legacy flat
+                        }
                     }
                     if (st != before)
                     {
@@ -2157,8 +2797,8 @@ namespace CodeGen.Services
                 {
                     doc.Save(fbt);
                     result.PatchesApplied.Add(reduce
-                        ? "CommonInterlockEvaluator: 4 Rule arrays -> RuleTable + Evaluate ST rewritten (sim)"
-                        : "CommonInterlockEvaluator: RuleTable -> 4 Rule arrays + Evaluate ST restored (hardware)");
+                        ? "CommonInterlockEvaluator: 4 arrays + RuleCount -> RuleTable : InterlockTable + Evaluate ST (encapsulated)"
+                        : "CommonInterlockEvaluator: RuleTable -> 4 arrays + RuleCount + Evaluate ST (legacy)");
                     MapperLogger.Info($"[Deploy] CommonInterlockEvaluator RuleTable normalize: reduce={reduce}");
                 }
             }
@@ -2691,13 +3331,21 @@ namespace CodeGen.Services
                     result.PatchesApplied.Add(
                         $"{catName}: removed stale MQTT patch ({removedFbs} FB(s), {removedWires} wire(s)) before re-emit");
 
-                // Bump the FB IDCounter so the two new FBs get unique IDs.
+                // Allocate the two new FB IDs from MAX existing FB ID + 1, NOT from the stale
+                // Configuration.FB.IDCounter alone: the interlock refactor added FBs (e.g.
+                // CommonInterlockManager=62) past the counter, so an IDCounter-only allocation
+                // collided MqttFmt/MqttPub with them (and StatusScan=11 in Robot_Task). The
+                // old MqttFmt/MqttPub were already removed above, so the max-scan excludes them.
                 var idAttr = root.Elements(ns + "Attribute")
                     .FirstOrDefault(a => (string?)a.Attribute("Name") == "Configuration.FB.IDCounter");
-                int idc = 1000;
+                int idc = 0;
                 if (idAttr != null && int.TryParse((string?)idAttr.Attribute("Value"), out var parsed)) idc = parsed;
-                int fmtId = idc, pubId = idc + 1;
-                if (idAttr != null) idAttr.SetAttributeValue("Value", (idc + 2).ToString());
+                int maxFbId = net.Elements(ns + "FB")
+                    .Select(f => int.TryParse((string?)f.Attribute("ID"), out var v) ? v : 0)
+                    .DefaultIfEmpty(0).Max();
+                int baseId = Math.Max(maxFbId + 1, idc);   // never collide, never go backwards
+                int fmtId = baseId, pubId = baseId + 1;
+                if (idAttr != null) idAttr.SetAttributeValue("Value", (baseId + 2).ToString());
 
                 string Q(string s) => "'" + s + "'";   // ST string literal
 
@@ -2775,6 +3423,23 @@ namespace CodeGen.Services
                 var lastFb = net.Elements(ns + "FB").LastOrDefault();
                 if (lastFb != null) { lastFb.AddAfterSelf(pubFb); lastFb.AddAfterSelf(fmtFb); }
                 else { net.Add(fmtFb); net.Add(pubFb); }
+
+                // VISUAL grouping only (no wiring change): a light-blue frame around MqttFmt+MqttPub.
+                // They sit at x>=8000, RIGHT of every existing section frame (which end at x=7900),
+                // so this never overlaps Core/Faults/Interlock/HMI-OPCUA/Mode. Idempotent re-patch.
+                System.Xml.Linq.XElement Fp(string n, string v) => new System.Xml.Linq.XElement(ns + "Parameter",
+                    new System.Xml.Linq.XAttribute("Name", n), new System.Xml.Linq.XAttribute("Value", v));
+                net.Elements(ns + "Frame")
+                   .Where(fr => (string?)fr.Attribute("Name") == "FRAME_MQTT").Remove();
+                net.Add(new System.Xml.Linq.XElement(ns + "Frame",
+                    new System.Xml.Linq.XAttribute("Name", "FRAME_MQTT"),
+                    new System.Xml.Linq.XAttribute("X", "7920"),
+                    new System.Xml.Linq.XAttribute("Y", "2360"),
+                    new System.Xml.Linq.XAttribute("Width", "1840"),
+                    new System.Xml.Linq.XAttribute("Height", "1080"),
+                    Fp("BackgroundColor", "LightBlue"), Fp("TextColor", "Black"),
+                    Fp("Font", "Microsoft Sans Serif, 10pt"), Fp("TextAlignment", "TopRight"),
+                    Fp("MoveStyle", "AnyContained"), Fp("Text", "MQTT"), Fp("NxtLayerIdentifier", "")));
 
                 // Ensure connection containers exist.
                 var ec = net.Element(ns + "EventConnections");
@@ -4432,6 +5097,45 @@ namespace CodeGen.Services
             catch (Exception ex)
             {
                 result.Warnings.Add($"ArraySize verification crashed: {ex.Message}");
+            }
+        }
+
+        // Retire an FB type we no longer ship (e.g. the simulator-only SimCentreHomeSensor_7SCH):
+        // delete its top-level .fbt/.doc.xml/.meta.xml/.Basic.export and strip its dfbproj entries so
+        // EAE shows no dangling Missing Project Files. Idempotent — a no-op once the type is gone.
+        static void SweepRetiredType(string eaeProjectDir, string typeName, DeployResult result)
+        {
+            try
+            {
+                var iec = Path.Combine(eaeProjectDir, "IEC61499");
+                int filesGone = 0;
+                foreach (var p in new[]
+                {
+                    Path.Combine(iec, typeName + ".fbt"),
+                    Path.Combine(iec, typeName + ".doc.xml"),
+                    Path.Combine(iec, typeName + ".meta.xml"),
+                    Path.Combine(eaeProjectDir, typeName + ".Basic.export"),
+                })
+                    if (File.Exists(p)) { File.Delete(p); filesGone++; }
+
+                var dfbproj = Path.Combine(iec, "IEC61499.dfbproj");
+                int entriesGone = 0;
+                if (File.Exists(dfbproj))
+                {
+                    var doc = System.Xml.Linq.XDocument.Load(dfbproj, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                    foreach (var el in doc.Descendants()
+                        .Where(e => (e.Name.LocalName == "Compile" || e.Name.LocalName == "None")
+                            && ((string?)e.Attribute("Include"))?.StartsWith(typeName + ".", StringComparison.Ordinal) == true)
+                        .ToList())
+                    { el.Remove(); entriesGone++; }
+                    if (entriesGone > 0) doc.Save(dfbproj);
+                }
+                if (filesGone > 0 || entriesGone > 0)
+                    result.PatchesApplied.Add($"retired {typeName}: {filesGone} file(s) + {entriesGone} dfbproj entry(ies) removed");
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"retire {typeName} failed: {ex.Message}");
             }
         }
 
