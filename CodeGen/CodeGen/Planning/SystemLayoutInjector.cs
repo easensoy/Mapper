@@ -1368,137 +1368,17 @@ namespace CodeGen.Translation
                     actParams["actuator_name"] = SyslayBuilder.FormatString(
                         displayName.ToLowerInvariant());
 
-                    // Change 2 validation (SAFETY): if Control.xml gives this
-                    // actuator an in-scope interlock (a NOT-condition referencing
-                    // an in-scope component) but no rule was emitted, the safety
-                    // net would be silently theoretical — refuse to generate.
-                    // EXEMPT the BX1 covers: their rules are DELIBERATELY zeroed
-                    // (user "block interlocks for now", 2026-06-10 — see the drop in
-                    // BuildActuatorParameters), so the empty rule set is intentional,
-                    // not a translation failure. Mirrors the swivel's
-                    // DropSwivelInterlockForTest guard exemption.
-                    int inScopeInterlocks = InterlockPlanner.CountInScopeConditions(actuator, allComponents, scopedIds);
-                    int emittedRuleCount = int.Parse(actParams["RuleCount"],
-                        System.Globalization.CultureInfo.InvariantCulture);
-                    if (inScopeInterlocks > 0 && emittedRuleCount == 0)
-                    {
-                        if (IsBx1CoverActuator(actuator.Name))
-                            report.Bound.Add((actuator.Name,
-                                "cover interlock rules DELIBERATELY dropped (BX1 local cycle test)"));
-                        else
-                            throw new InvalidOperationException(
-                                $"[Recipe] Actuator '{actuator.Name}' has {inScopeInterlocks} in-scope " +
-                                "Control.xml interlock condition(s) but emitted RuleCount=0 — refusing to " +
-                                "generate code whose InterlockManager passes everything through (false " +
-                                "safety net). Interlock rule translation failed for this actuator.");
-                    }
-                    if (emittedRuleCount > 0)
-                        report.Bound.Add((actuator.Name,
-                            $"interlock RuleCount={emittedRuleCount}"));
+                    InterlockEmitter.GuardFiveState(actParams, actuator, allComponents, scopedIds, report.Bound);
                 }
                 else if (string.Equals(fbType, "Seven_State_Actuator_Centre_Home_CAT", StringComparison.Ordinal))
                 {
-                    // Centre-home swivel (Bearing_PnP). Minimal centre-home params
-                    // (Target / work-home-time / fault) PLUS the REAL interlock rules
-                    // translated from Control.xml — reusing the SAME InterlockPlanner.BuildRules
-                    // machinery Five_State uses, since this CAT exposes the identical
-                    // RuleFromState/ToState/SourceID/BlockedState[10] + RuleCount inputs
-                    // wired to its CommonInterlockManager.
-                    //
-                    // For Bearing_PnP the rules come out as: block the turn-to-Place
-                    // (CurrentRawState = AtWork1 2, target = AtWork2 4) while any
-                    // crossing occupant is present — Shaft_Hr=AtWork, CoverPNP_Hr=
-                    // Advanced, Transfer=ReturnedFinished. RuleSourceID is the sensors-
-                    // first state_table index, so those cross-PLC source states resolve
-                    // over the broadcast bus. (The "2"-suffixed Disassembly interlock
-                    // on TurningPlace2 maps to From=AtPick2's Control number, which is
-                    // outside the core's 0..6 range, so that rule is inert until a
-                    // dedicated Control->core state remap lands — the Assembly turn-to-
-                    // Place interlock being tested now is correct.)
+                    // Centre-home swivel (Bearing_PnP): minimal centre-home params + the interlock
+                    // rules (InterlockEmitter — same CommonInterlockManager inputs as Five_State).
                     actParams = BuildMinimalActuatorParameters(actuator, assignedId, fbType);
                     actParams["actuator_name"] = SyslayBuilder.FormatString(
                         displayName.ToLowerInvariant());
-                    var chPlan = scopedIds != null
-                        ? InterlockPlanner.BuildRules(actuator, allComponents, scopedIds)
-                        : InterlockPlan.Empty(InterlockRuleCap);
-                    int chRuleCount = chPlan.Count;
-                    int[] chFrom = chPlan.From, chTo = chPlan.To, chSrc = chPlan.Src, chBlk = chPlan.Blocked;
-                    // Per the Common Interlock Evaluator Mapper Guide, the core's
-                    // CurrentRawState is the seven-state encoding 0..6 (0 Home, 2
-                    // AtWork1, 4 AtWork2, 6 AtHome) and a rule is checked ONLY when
-                    // CurrentRawState == RuleFromState AND requested target == RuleToState.
-                    // InterlockPlanner.BuildRules numbers in Control.xml State_Number space; the
-                    // Assembly turn-to-Place (AtPick 2 -> Place 4) lands on 2 -> 4 and is
-                    // correct, but the "2"-suffixed Disassembly route (AtPick2 -> AtPlace2)
-                    // numbers as 12 -> 0, which can NEVER match a 0..6 CurrentRawState.
-                    // Drop those provably-inert rules so RuleCount = the number of VALID
-                    // rules (the guide's definition). The kept Assembly rules already
-                    // cover BOTH recipe directions, since the core reports CurrentRawState=2
-                    // at the pick position regardless of which process commanded it.
-                    {
-                        int kept = 0;
-                        int[] f = new int[InterlockRuleCap], t = new int[InterlockRuleCap];
-                        int[] s = new int[InterlockRuleCap], b = new int[InterlockRuleCap];
-                        for (int ri = 0; ri < chRuleCount && ri < InterlockRuleCap; ri++)
-                        {
-                            if (chFrom[ri] < 0 || chFrom[ri] > 6 || chTo[ri] < 0 || chTo[ri] > 6) continue;
-                            // Drop "block-when-source-is-home" rules (RuleBlockedState == 0).
-                            // A source component sitting at its home/rest state is OUT of the
-                            // swivel's crossing, so the swivel is SAFE to move — it must not be
-                            // blocked. (Per user 2026-06-02: Bearing_PnP must be free to move
-                            // when Transfer is at home / ReturnedFinished.) The Transfer rule
-                            // came out Blocked=0 via the ReturnedFinished 4->0 home-family remap,
-                            // so keeping it would FALSELY block the turn-to-Place whenever
-                            // Transfer is home — including the M580-only test, where Transfer
-                            // isn't running and its state_table slot reads 0. The real crossing
-                            // hazards (Shaft_Hr=AtWork, CoverPNP_Hr=Advanced) block on state 2,
-                            // not 0, so those rules are kept and still protect the swivel.
-                            if (chBlk[ri] == 0) continue;
-                            f[kept] = chFrom[ri]; t[kept] = chTo[ri];
-                            s[kept] = chSrc[ri];  b[kept] = chBlk[ri];
-                            kept++;
-                        }
-                        chRuleCount = kept; chFrom = f; chTo = t; chSrc = s; chBlk = b;
-                    }
-                    // TEST ISOLATION (2026-06-04, bench): drop the swivel's cross-
-                    // component interlock so its turn-to-Place (AtWork1 2 -> AtWork2 4)
-                    // is never blocked. Alex traced the swivel sticking at atWork1 to
-                    // the shaft-sensor rule (RuleSourceID=shaft_hr, Blocked=AtWork): the
-                    // swivel refuses to Place while shaft_hr reads AtWork, so in the
-                    // isolated bearing+shaft test it never reaches atWork2 and never
-                    // releases the bearing. RuleCount=0 frees it. Flip
-                    // MapperConfig.DropSwivelInterlockForTest=false to restore the real
-                    // Control.xml interlock (and the inert-safety-net guard below).
-                    bool dropSwivelInterlock = MapperConfig.DropSwivelInterlockForTest;
-                    if (dropSwivelInterlock)
-                    {
-                        chRuleCount = 0;
-                        chFrom = new int[InterlockRuleCap];
-                        chTo   = new int[InterlockRuleCap];
-                        chSrc  = new int[InterlockRuleCap];
-                        chBlk  = new int[InterlockRuleCap];
-                    }
-                    actParams["RuleCount"]        = SyslayBuilder.FormatInt(chRuleCount);
-                    // Emit the four RuleFromState/ToState/SourceID/BlockedState INT[10]
-                    // arrays that the CommonInterlockManager declares. (A sim-only
-                    // RuleTable : InterlockRule[10] collapse, gated on the now-dead
-                    // SimulatorFullSystem flag, was dropped — it never ran on the rig.)
-                    actParams["RuleFromState"]    = SyslayBuilder.FormatIntArray(chFrom);
-                    actParams["RuleToState"]      = SyslayBuilder.FormatIntArray(chTo);
-                    actParams["RuleSourceID"]     = SyslayBuilder.FormatIntArray(chSrc);
-                    actParams["RuleBlockedState"] = SyslayBuilder.FormatIntArray(chBlk);
-                    if (scopedIds != null && !dropSwivelInterlock)
-                    {
-                        int chInScope = InterlockPlanner.CountInScopeConditions(actuator, allComponents, scopedIds);
-                        if (chInScope > 0 && chRuleCount == 0)
-                            throw new InvalidOperationException(
-                                $"[Recipe] Bearing_PnP '{actuator.Name}' has {chInScope} in-scope " +
-                                "interlock condition(s) but emitted RuleCount=0 — refusing to ship an " +
-                                "inert safety net for the swivel that is the cross-process intersection.");
-                    }
-                    report.Bound.Add((actuator.Name, dropSwivelInterlock
-                        ? "centre-home interlock DROPPED for bench test (DropSwivelInterlockForTest=true; swivel free to turn-to-Place)"
-                        : $"centre-home interlock RuleCount={chRuleCount} (blocks turn-to-Place when the crossing is occupied)"));
+                    InterlockEmitter.ApplyCentreHome(actParams, actuator, allComponents, scopedIds);
+                    InterlockEmitter.GuardCentreHome(actParams, actuator, allComponents, scopedIds, report.Bound);
                 }
                 else
                 {
@@ -1674,6 +1554,22 @@ namespace CodeGen.Translation
                 // expected clean result, NOT the RC101 collision).
                 void InjectMqttConn(string fbName, string connectionId, string clientIdentifier, int x, int y)
                 {
+                    if (config.UseTelemetryCat)
+                    {
+                        // Wrap the MQTT_CONNECTION in the Telemetry_CAT composite: ONE Config:TelemetryConfig
+                        // input carries the IDENTICAL QI/ConnectionID/URL/ClientIdentifier (ValidateCert/CACert
+                        // default 0/'' in insecure mode = the prior implicit FB defaults). Health:TelemetryHealth
+                        // is an OUTPUT (no instance param). The wrapped MQTT_CONNECTION keeps the same ConnectionID,
+                        // so each resource's embedded MqttPub still binds to it (behaviour equivalent).
+                        var cfgLit = SyslayBuilder.FormatTelemetryConfig(
+                            true, connectionId, brokerUrl, clientIdentifier,
+                            config.MqttSecureTls ? config.MqttValidateCert : 0,
+                            config.MqttSecureTls ? (config.MqttCaCert ?? string.Empty) : string.Empty);
+                        builder.AddFB(FBIdGenerator.GenerateFBId(fbName), fbName,
+                            "Telemetry_CAT", "Main", x, y,
+                            new Dictionary<string, string> { ["Config"] = cfgLit });
+                        return;
+                    }
                     var p = new Dictionary<string, string>
                     {
                         ["QI"] = SyslayBuilder.FormatBool(true),
@@ -1701,31 +1597,37 @@ namespace CodeGen.Translation
                         "MQTT_CONNECTION", "Runtime.NetConnectivity", x, y, p);
                 }
 
-                var mqttEntry = CodeGen.Mapping.ComponentRegistry.Get("MqttConn");
+                // Telemetry_CAT (cfg.UseTelemetryCat, default) wraps each resource's MQTT_CONNECTION; the
+                // instances are named Telemetry_M262/M580/BX1. The raw-FB revert keeps the MqttConn* names.
+                bool tele = config.UseTelemetryCat;
+                string bx1Name  = tele ? "Telemetry_BX1"  : "MqttConn";
+                string m262Name = tele ? "Telemetry_M262" : "MqttConn_M262";
+                string m580Name = tele ? "Telemetry_M580" : "MqttConn_M580";
+
+                var mqttEntry = CodeGen.Mapping.ComponentRegistry.Get(bx1Name);
                 int bx1X = mqttEntry?.X ?? 29000;
                 int bx1Y = mqttEntry?.Y ?? 200;
-                // One MQTT_CONNECTION per resource so M262/M580 component telemetry reaches the broker
-                // directly (not only BX1's covers). ConnectionID is SHARED (= cfg.MqttConnectionName, 'SMC')
-                // so each resource's embedded MqttPub binds to its LOCAL connection; ClientIdentifier is
-                // UNIQUE per resource (SMC_BX1 / SMC_M262 / SMC_M580) so mosquitto keeps all three connected.
-                // Each MqttConn routes to its own sysres via SysresFbMirror.BucketFor. On the rig each device
-                // must allow insecure mqtt:// (Security -> Insecure Application enabled — the same one-time
-                // EAE step BX1 needed) AND run the MQTT client. BX1's INIT/CONNECT bring-up is added by
-                // BuildBx1Wiring; M262/M580's just below (Area = M262/Feed boot, Station2 = M580 boot).
-                InjectMqttConn("MqttConn", config.MqttConnectionName, config.MqttClientId, bx1X, bx1Y);
-                InjectMqttConn("MqttConn_M262", config.MqttConnectionName, "SMC_M262",
+                // One connection per resource so M262/M580 component telemetry reaches the broker directly
+                // (not only BX1's covers). ConnectionID is SHARED (= cfg.MqttConnectionName, 'SMC') so each
+                // resource's embedded MqttPub binds to its LOCAL connection; ClientIdentifier is UNIQUE per
+                // resource (SMC_BX1 / SMC_M262 / SMC_M580) so mosquitto keeps all three connected. Each
+                // routes to its own sysres via SysresFbMirror.BucketFor. On the rig each device must allow
+                // insecure mqtt:// (Security -> Insecure Application enabled) AND run the MQTT client. BX1's
+                // INIT/CONNECT bring-up is added by BuildBx1Wiring; M262/M580's just below (Area = M262/Feed
+                // boot, Station2 = M580 boot). The INIT->INITO->CONNECT order is preserved through the wrapper.
+                InjectMqttConn(bx1Name, config.MqttConnectionName, config.MqttClientId, bx1X, bx1Y);
+                InjectMqttConn(m262Name, config.MqttConnectionName, config.MqttClientM262,
                     LayoutGrid.ColumnBaseX(PlcAssignment.M262), 200);
-                InjectMqttConn("MqttConn_M580", config.MqttConnectionName, "SMC_M580",
+                InjectMqttConn(m580Name, config.MqttConnectionName, config.MqttClientM580,
                     LayoutGrid.ColumnBaseX(PlcAssignment.M580), 200);
-                builder.AddEventConnection("MqttConn_M262.INITO", "MqttConn_M262.CONNECT");
-                builder.AddEventConnection("MqttConn_M580.INITO", "MqttConn_M580.CONNECT");
-                builder.AddEventConnection("Area.INITO", "MqttConn_M262.INIT");
-                builder.AddEventConnection("Station2.INITO", "MqttConn_M580.INIT");
+                builder.AddEventConnection($"{m262Name}.INITO", $"{m262Name}.CONNECT");
+                builder.AddEventConnection($"{m580Name}.INITO", $"{m580Name}.CONNECT");
+                builder.AddEventConnection("Area.INITO", $"{m262Name}.INIT");
+                builder.AddEventConnection("Station2.INITO", $"{m580Name}.INIT");
                 report.Missing.Add(
-                    $"[MQTT] MqttConn injected per resource — BX1 (ClientId SMC_BX1) + M262 (SMC_M262) + " +
-                    $"M580 (SMC_M580), shared ConnectionID={config.MqttClientId} so each resource's embedded " +
-                    $"MqttPub binds locally; URL={brokerUrl}. M262/M580 publish once their device allows " +
-                    $"insecure mqtt:// (Insecure Application) and the firmware runs the MQTT client.");
+                    $"[MQTT] {(tele ? "Telemetry_CAT" : "MQTT_CONNECTION")} injected per resource — BX1 " +
+                    $"(ClientId SMC_BX1) + M262 (SMC_M262) + M580 (SMC_M580), shared ConnectionID=" +
+                    $"{config.MqttConnectionName} so each resource's embedded MqttPub binds locally; URL={brokerUrl}.");
             }
 
 
@@ -1959,9 +1861,7 @@ namespace CodeGen.Translation
             // at those settle values. Fault timeouts OFF so an isolated test never faults on a work sensor.
             if (string.Equals(fbType, "Seven_State_Actuator_Centre_Home_CAT", StringComparison.OrdinalIgnoreCase))
             {
-                dict["TargetWork1State"] = SyslayBuilder.FormatInt(2);
-                dict["TargetWork2State"] = SyslayBuilder.FormatInt(4);
-                dict["TargetHomeState"]  = SyslayBuilder.FormatInt(6);
+                TargetEmitter.Apply(dict, work1: 2, work2: 4, home: 6);
                 // work1ToHomeTime / work2ToHomeTime are NOT set: the work-to-home E_DELAY timers feed
                 // only ReturnToHomeHandler events the No_Sensor_Handler_7SCH ECC has no transitions on,
                 // so they drive nothing; the home completes on the DI02 atHome sensor.
@@ -1969,20 +1869,9 @@ namespace CodeGen.Translation
                 dict["enableToWork2FaultTimeout"] = SyslayBuilder.FormatBool(false);
                 dict["faultTimeoutWork1"] = SyslayBuilder.FormatTimeMs(10000);
                 dict["faultTimeoutWork2"] = SyslayBuilder.FormatTimeMs(10000);
-                dict["RuleCount"] = SyslayBuilder.FormatInt(0);
-                // Emit the four interlock Rule arrays EXPLICITLY (zero-filled) as a
-                // safe DEFAULT — the CAT declares them RuleFromState/ToState/SourceID/
-                // BlockedState : INT[10] wired to CommonInterlockManager, so leaving
-                // them unset renders an empty/ambiguous param. The real Bearing_PnP
-                // generation path OVERLAYS the actual Control.xml interlock rules over
-                // these defaults (the Seven_State_Actuator_Centre_Home_CAT branch at
-                // the param call-site calls InterlockPlanner.BuildRules). These zeros only
-                // survive for callers without a scopedIds map (legacy / tests).
-                int[] zero = new int[InterlockRuleCap];
-                dict["RuleFromState"]    = SyslayBuilder.FormatIntArray(zero);
-                dict["RuleToState"]      = SyslayBuilder.FormatIntArray(zero);
-                dict["RuleSourceID"]     = SyslayBuilder.FormatIntArray(zero);
-                dict["RuleBlockedState"] = SyslayBuilder.FormatIntArray(zero);
+                // Zeroed rule defaults; the real Bearing_PnP path overlays them via
+                // InterlockEmitter.ApplyCentreHome. These survive only for callers without a scoped map.
+                InterlockEmitter.ApplyZero(dict);
             }
             // Vacuum_Gripper_CAT + Five_State_Actuator_No_Sensors_CAT (the other
             // non-5-state cases that still route through this minimal path)
@@ -2122,33 +2011,6 @@ namespace CodeGen.Translation
             // timer-acknowledging Shaft_Vr/Shaft_Gripper can release the shaft before
             // the fresh physical down/grip motion has actually completed.
 
-            // InterlockManager rule arrays from this actuator's own Control.xml
-            // NOT-conditions. scopedIds==null only for legacy/test callers →
-            // pass-through (RuleCount=0). The real Button 2 / Button 4 path
-            // passes the sensors-first map so RuleSourceID matches the recipe's
-            // Wait1Id state_table indices.
-            var rulePlan = scopedIds != null
-                ? InterlockPlanner.BuildRules(actuator, allComponents, scopedIds)
-                : InterlockPlan.Empty(InterlockRuleCap);
-            int ruleCount = rulePlan.Count;
-            int[] ruleFrom = rulePlan.From, ruleTo = rulePlan.To, ruleSrc = rulePlan.Src, ruleBlk = rulePlan.Blocked;
-
-            // BX1 covers (2026-06-10, per user "block interlocks for now"): zero the
-            // interlock rules on the three cover actuators so no Control.xml-derived rule
-            // can ever block the local pick/place cycle. CoverPNP_Hr carried one rule
-            // (Src=10, an M580 component that never publishes on the BX1-local ring →
-            // its observed state is permanently 0 → inert but misleading in Watch);
-            // Vr/gripper carried none. Narrow + name-scoped; M580/M262 untouched.
-            // The RuleCount=0 safety guard at the Five_State call site exempts these
-            // names (the drop is deliberate, not a translation failure). Delete this
-            // block to restore the Control.xml rules once the cycle is proven.
-            if (IsBx1CoverActuator(actuator.Name))
-            {
-                ruleCount = 0;
-                ruleFrom = new int[InterlockRuleCap]; ruleTo = new int[InterlockRuleCap];
-                ruleSrc = new int[InterlockRuleCap]; ruleBlk = new int[InterlockRuleCap];
-            }
-
             var actuatorParams = new Dictionary<string, string>
             {
                 ["actuator_name"] = SyslayBuilder.FormatString(actuator.Name.ToLowerInvariant()),
@@ -2161,37 +2023,17 @@ namespace CodeGen.Translation
                 ["faultTimeoutHome"] = SyslayBuilder.FormatTimeMs(toHomeMs * 2),
                 ["enableToWorkFaultTimeout"] = SyslayBuilder.FormatBool(workSensorFitted),
                 ["enableToHomeFaultTimeout"] = SyslayBuilder.FormatBool(homeSensorFitted),
-
-                // InterlockManager (CommonInterlockEvaluator) InputVars — the
-                // new Five_State_Actuator_CAT embeds an InterlockManager FB
-                // that needs these wired on every instance. TargetWork1State/
-                // TargetHomeState follow the OSDA / Five_State convention and
-                // match the recipe's Wait1State semantics (2 = atwork, 4 =
-                // athome).
-                ["TargetWork1State"] = SyslayBuilder.FormatInt(2),
-                ["TargetHomeState"] = SyslayBuilder.FormatInt(4),
-                // InterlockManager rule arrays — Control.xml NOT-conditions on
-                // this actuator's transitions. RuleSourceID is the sensors-
-                // first state_table index (same scheme as the recipe Wait1Id).
-                ["RuleCount"] = SyslayBuilder.FormatInt(ruleCount),
-                ["RuleFromState"] = SyslayBuilder.FormatIntArray(ruleFrom),
-                ["RuleToState"] = SyslayBuilder.FormatIntArray(ruleTo),
-                ["RuleSourceID"] = SyslayBuilder.FormatIntArray(ruleSrc),
-                ["RuleBlockedState"] = SyslayBuilder.FormatIntArray(ruleBlk),
-
-                // (Removed: ["BackgroundColor"] = "Plum" — EAE's FB-type
-                // compiler rejects any <Parameter Name="..."> whose name is
-                // not declared as an InputVar on the FBType. BackgroundColor
-                // is not an InputVar on Five_State_Actuator_CAT, so emitting
-                // it raises ERR_MEMBER_VAR_NOTFOUND at compile time. FB
-                // colouring is not controllable via syslay in EAE 24.1.)
             };
+
+            // Target states feeding the embedded InterlockManager (Work1=atwork 2, Home=athome 4;
+            // Five_State has no Work2). Struct or scalar per useTargetStruct.
+            TargetEmitter.Apply(actuatorParams, work1: 2, work2: null, home: 4);
+
+            // InterlockManager rule arrays — Control.xml NOT-conditions, sensors-first source ids.
+            InterlockEmitter.ApplyFiveState(actuatorParams, actuator, allComponents, scopedIds);
 
             return actuatorParams;
         }
-
-        // Must match the Rule* InputVar ArraySize in Five_State_Actuator_CAT.fbt.
-        private static int InterlockRuleCap => GenerationConfig.Current.InterlockRuleCap;
 
         /// <summary>Returns the actuator's <Time> for the given State_Number, or fallback.</summary>
         public static int ResolveStateTimeMs(VueOneComponent actuator, int stateNumber, int fallbackMs)
