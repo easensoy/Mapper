@@ -356,8 +356,10 @@ namespace CodeGen.Devices.BX1
             var dc = net.Element(Ns + "DataConnections")  ?? AddSection(net, "DataConnections");
 
             // --- Stage 1: the broker FB (forced id so the copied .hcf matches) ---
+            // Syslay X aligned to the BX1 registry col-3 position (ColumnBaseX 26000 + 3*2000)
+            // so the broker sits right after the (tightened) cover columns, not 3000 east of them.
             AddFbIfAbsent(net, BrokerFbId, BrokerFbName, BrokerFbType, "Main", isSysres,
-                isSysres ? 9500 : 33000, 5800, ifaceParams: null, name1: null, name2: null);
+                isSysres ? 9500 : 32000, 5800, ifaceParams: null, name1: null, name2: null);
             if (hasGripper)
                 AddEvent(ec, "CoverPnp_Gripper.INITO", $"{BrokerFbName}.INIT");
 
