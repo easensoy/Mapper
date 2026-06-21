@@ -36,22 +36,6 @@ namespace CodeGen.Configuration
         public static bool EnableSevenStateHomePreamble = false;
 
         /// <summary>
-        /// Master gate for the LOCAL BX1 cover command engine (Cover_Station). When TRUE,
-        /// a Process1_Generic engine named Cover_Station is instantiated on the BX1 SubApp +
-        /// sysres, spliced into the BX1 cover stateRprtCmd ring (the sysres ring auto-splices
-        /// any Process FB it finds), and carries the cover pick/place recipe — so BX1 cycles
-        /// its own covers with NO M580 dependency and NO cross-PLC ring. When FALSE, any
-        /// already-deployed Cover_Station instance is SWEPT from the BX1 sysres before wiring
-        /// (Station2WireEmitter) so a leftover cannot be re-discovered by the ring type-scan.
-        ///
-        /// This is the INVERSE of <see cref="CodeGen.Translation.HandoffPlanner.CoversOnM580Ring"/>:
-        /// the covers are EITHER commanded by their own local engine (this TRUE) OR folded into the
-        /// M580 Assembly/Disassembly flow over the cross-PLC cover detour (CoversOnM580Ring TRUE) —
-        /// never both. Reading the planner keeps the one decision in one place (DRY).
-        /// </summary>
-        public static bool DeployBx1CoverEngine => !CodeGen.Translation.HandoffPlanner.CoversOnM580Ring;
-
-        /// <summary>
         /// When true, Disassembly gets its reverse recipe (covers off -> shaft -> bearing -> unclamp),
         /// Assembly holds the clamp and publishes a handshake sentinel instead of opening it, and the
         /// M580 wiring threads Disassembly into the ring. False = Disassembly parked + Assembly opens
@@ -65,7 +49,6 @@ namespace CodeGen.Configuration
         public static int FeedStationProcessId    => RigCatalog.Current.ProcessIds.FeedStation;
         public static int AssemblyProcessId       => RigCatalog.Current.ProcessIds.Assembly;
         public static int DisassemblyProcessId    => RigCatalog.Current.ProcessIds.Disassembly;
-        public static int CoverStationProcessId   => RigCatalog.Current.ProcessIds.CoverStation;
 
         public static int RobotActuatorId         => RigCatalog.Current.RobotActuatorId;
 
@@ -81,10 +64,6 @@ namespace CodeGen.Configuration
         /// <summary>The Disassembly Ejector+Robot discharge tail; a thin alias to
         /// HandoffPlanner.DischargeActive (the single cross-PLC discharge decision).</summary>
         public static bool EnableRobotTaskTail => CodeGen.Translation.HandoffPlanner.DischargeActive;
-
-        /// <summary>True = Cover_Station runs the minimal CoverPNP_Vr work->home proof; false (default)
-        /// = the full 8-step cover pick/place.</summary>
-        public static bool Bx1CoverMinimalCycle = false;
 
         // Recipe test isolation: restrict RecipeTestProcessName's recipe to RecipeTestActuatorAllowlist
         // (empty = no restriction). Every other actuator's CMD/WAIT is dropped (parked).
@@ -140,7 +119,7 @@ namespace CodeGen.Configuration
         /// so EAE's Physical Devices canvas shows the controller pre-populated. Operator
         /// can still override in EAE before deploy if the rig moves networks.
         /// </summary>
-        public string M262TargetIp { get; set; } = "192.168.1.10";
+        public string M262TargetIp { get; set; } = DeviceConfig.Current.M262.TargetIp;
 
         /// <summary>
         /// Subnet/network parameters used by the M262 topology emitter so the
@@ -148,9 +127,9 @@ namespace CodeGen.Configuration
         /// a configured IP. Driven from the rig wiring — defaults are the SMC rig
         /// 192.168.1.0/24.
         /// </summary>
-        public string M262SubnetAddress { get; set; } = "192.168.1.0";
-        public string M262SubnetMask { get; set; } = "255.255.255.0";
-        public string M262Gateway { get; set; } = "192.168.1.254";
+        public string M262SubnetAddress { get; set; } = DeviceConfig.Current.M262.SubnetAddress;
+        public string M262SubnetMask { get; set; } = DeviceConfig.Current.M262.SubnetMask;
+        public string M262Gateway { get; set; } = DeviceConfig.Current.M262.Gateway;
         public string M262LogicalNetworkName { get; set; } = "DeviceNetwork_1";
 
         /// <summary>
@@ -163,7 +142,7 @@ namespace CodeGen.Configuration
         /// because its IP is concrete, so the IP is the discriminator.
         /// Default matches the reference SMC_Rig_Expo_withClamp rig wiring.
         /// </summary>
-        public string M580TargetIp { get; set; } = "192.168.1.20";
+        public string M580TargetIp { get; set; } = DeviceConfig.Current.M580.TargetIp;
 
         /// <summary>
         /// BroadcastDomain UUID the M580 seGmac0 IP-Address endpoint binds to.
@@ -193,12 +172,12 @@ namespace CodeGen.Configuration
         /// follows reference; override if you commission a rig on a strictly
         /// matching subnet later.
         /// </summary>
-        public string DefaultNetworkSubnetAddress { get; set; } = "192.168.0.0";
+        public string DefaultNetworkSubnetAddress { get; set; } = DeviceConfig.Current.DefaultNetwork.SubnetAddress;
 
         /// <summary>
         /// Subnet mask for the "Default Network" BroadcastDomain JSON.
         /// </summary>
-        public string DefaultNetworkSubnetMask { get; set; } = "255.255.255.0";
+        public string DefaultNetworkSubnetMask { get; set; } = DeviceConfig.Current.DefaultNetwork.SubnetMask;
 
         /// <summary>
         /// Gateway address for the "Default Network" BroadcastDomain JSON.
@@ -210,7 +189,7 @@ namespace CodeGen.Configuration
         /// reference; override only if you commission a rig with an actual
         /// gateway set on the device.
         /// </summary>
-        public string DefaultNetworkGateway { get; set; } = "192.168.0.254";
+        public string DefaultNetworkGateway { get; set; } = DeviceConfig.Current.DefaultNetwork.Gateway;
 
         /// <summary>
         /// UUID of the "Default Network" BroadcastDomain. Matches the live
@@ -228,7 +207,7 @@ namespace CodeGen.Configuration
         /// where the BX1 softdpac runtime listens on 192.168.1.151 (the
         /// HMIB1X_1 panel hosts it; 192.168.1.209 is the panel itself).
         /// </summary>
-        public string BX1TargetIp { get; set; } = "192.168.1.151";
+        public string BX1TargetIp { get; set; } = DeviceConfig.Current.Bx1.TargetIp;
 
         /// <summary>
         /// IPV4 address of the HMIB1X industrial panel that HOSTS the BX1 softdpac
@@ -239,7 +218,7 @@ namespace CodeGen.Configuration
         /// makes BX1 a REMOTE HMIB1X panel rather than a local Workstation (whose
         /// runtime EAE resolves to 127.0.0.1 — the "cannot connect to BX1" error).
         /// </summary>
-        public string BX1HostIp { get; set; } = "192.168.1.209";
+        public string BX1HostIp { get; set; } = DeviceConfig.Current.Bx1.HostIp;
 
         /// <summary>
         /// ISOLATION (2026-06-08): emit the BX1 EtherNet/IP remote-I/O coupler
@@ -615,10 +594,10 @@ namespace CodeGen.Configuration
             M262HcfTemplatePath = @"C:\VueOneMapper\IO\M262IO.hcf",
             M580HcfTemplatePath = @"C:\VueOneMapper\IO\M580IO.hcf",
             BX1HcfTemplatePath = @"C:\VueOneMapper\IO\BX1IO.ethernetip.hcf",
-            M262TargetIp = "192.168.1.10",
-            M262SubnetAddress = "192.168.1.0",
-            M262SubnetMask = "255.255.255.0",
-            M262Gateway = "192.168.1.254",
+            M262TargetIp = DeviceConfig.Current.M262.TargetIp,
+            M262SubnetAddress = DeviceConfig.Current.M262.SubnetAddress,
+            M262SubnetMask = DeviceConfig.Current.M262.SubnetMask,
+            M262Gateway = DeviceConfig.Current.M262.Gateway,
             M262LogicalNetworkName = "DeviceNetwork_1",
             ResourceName = "M262_RES",
         };
