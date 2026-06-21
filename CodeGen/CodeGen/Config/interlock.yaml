@@ -1,0 +1,23 @@
+# Interlock generation policy. The rules themselves come from Control.xml via InterlockPlanner;
+# this file is generation-side policy only (array size, STRUCT interface, centre-home raw-state range).
+
+# Size of the generated interlock arrays (the RuleTable / its restore-mode parallel arrays).
+ruleArraySize: 10
+
+# STRUCT interface: actuator FBs expose one RuleTable : ARRAY OF InterlockRule instead of the four
+# parallel Rule* arrays. The instance param, the CAT InterfaceList, and the CommonInterlockEvaluator
+# flip together. false restores the four arrays (older interface, identical rules).
+useStruct: true
+
+# Fold the actuator target states (TargetWork1State/TargetWork2State/TargetHomeState) into one
+# Target : TargetStates struct that flows whole into the interlock evaluator. false restores the
+# three scalar inputs (identical effective values). (Timers stay scalar — they feed standard E_DELAY/
+# AND FBs, which EAE cannot source from a struct member.)
+useTargetStruct: true
+
+# The centre-home swivel (Bearing_PnP) core reports CurrentRawState in 0..6 (0 Home, 2 AtWork1,
+# 4 AtWork2, 6 AtHome); a rule whose From/To falls outside this range can never match, so it is
+# dropped as inert.
+centreHome:
+  minState: 0
+  maxState: 6
