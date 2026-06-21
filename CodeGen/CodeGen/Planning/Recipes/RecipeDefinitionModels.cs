@@ -25,7 +25,7 @@ namespace CodeGen.Translation.Process
 
     /// <summary>
     /// One process recipe: a Process name plus named row-BLOCKS. The station class
-    /// (CoverRecipe / AssemblyRecipe / DisassemblyRecipe) owns the orchestration — which blocks to
+    /// (AssemblyRecipe / DisassemblyRecipe) owns the orchestration — which blocks to
     /// emit, in what order, under which MapperConfig / HandoffPlanner gate — and pulls the row data
     /// from here. Blocks (not one flat list) so a station can conditionally include a block
     /// (e.g. the cover detour, the ejector/robot tail) without the rows moving back into C#.
