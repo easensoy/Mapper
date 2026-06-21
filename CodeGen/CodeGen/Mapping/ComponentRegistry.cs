@@ -123,14 +123,12 @@ namespace CodeGen.Mapping
                 M580("Clamp",            column: 5, row: LayoutRow.Actuator, owner: "Assembly_Station"),
                 M580("Stn2_Term",        column: 6, row: LayoutRow.Actuator, owner: ""),
 
-                // ── BX1 — Cover PnP (BX1_RES, frame X=28200, columns 0..2). The covers
-                //    are driven by a LOCAL Cover_Station Process engine on BX1, not
-                //    cross-PLC from M580, so the ProcessOwner stays "Cover_Station".
-                BX1("Cover_Station",     column: 1, row: LayoutRow.Process,  owner: "Cover_Station"),
-                BX1("TopCoverSenosr",    column: 0, row: LayoutRow.Process,  owner: "Cover_Station"),
-                BX1("CoverPNP_Hr",       column: 0, row: LayoutRow.Actuator, owner: "Cover_Station"),
-                BX1("CoverPNP_Vr",       column: 1, row: LayoutRow.Actuator, owner: "Cover_Station"),
-                BX1("CoverPnp_Gripper",  column: 2, row: LayoutRow.Actuator, owner: "Cover_Station"),
+                // ── BX1 — Cover PnP (BX1_RES). The covers fold into the M580 Assembly/Disassembly flow
+                //    over the cross-device detour; they have no BX1 Process engine of their own.
+                BX1("TopCoverSenosr",    column: 0, row: LayoutRow.Process,  owner: ""),
+                BX1("CoverPNP_Hr",       column: 0, row: LayoutRow.Actuator, owner: ""),
+                BX1("CoverPNP_Vr",       column: 1, row: LayoutRow.Actuator, owner: ""),
+                BX1("CoverPnp_Gripper",  column: 2, row: LayoutRow.Actuator, owner: ""),
 
                 // MqttConn — MQTT broker FB, hosted on BX1 (Soft dPAC) because M262/
                 // M580 have no MQTT runtime client (ReturnCode 50). Floats at the top
