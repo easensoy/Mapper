@@ -368,8 +368,7 @@ namespace CodeGen.Devices.Core
                     // COVER DETOUR: TopCoverSenosr stays OFF the ring (its id 3 would collide with
                     // PartAtAssembly on the M580 state_table once the covers join the M580 ring; the
                     // recipe never waits on it). It still INITs via the fan-out above. BX1-only effect.
-                    .Where(s => !(CodeGen.Translation.HandoffPlanner.CoversOnM580Ring &&
-                        string.Equals(s, "TopCoverSenosr", StringComparison.OrdinalIgnoreCase)))
+                    .Where(s => !string.Equals(s, "TopCoverSenosr", StringComparison.OrdinalIgnoreCase))
                     .ToList();
                 // actNames — actuators that expose the stationAdptr adapter
                 // (still excludes Seven_State, which has no stationAdptr); used
@@ -545,8 +544,7 @@ namespace CodeGen.Devices.Core
                         // (processNames[0]) arrives from the last cover — OMIT the local compN→P0 close so
                         // the boundary plug is not double-driven (EAE bridges the open ends via the syslay
                         // cover hops). Distinct seam from the robot-tail open below, so the two compose.
-                        bool openCoverSeam = CodeGen.Translation.HandoffPlanner.CoversOnM580Ring &&
-                            string.Equals(tag, "M580", StringComparison.Ordinal);
+                        bool openCoverSeam = string.Equals(tag, "M580", StringComparison.Ordinal);
                         if (openCoverSeam)
                             report.Missing.Add(
                                 $"[{tag}] cover detour: left {ringNames[^1]}.stateRprtCmd_out OPEN " +
@@ -579,8 +577,7 @@ namespace CodeGen.Devices.Core
                         // Hr.in arrives from M580 Clamp and Gripper.out crosses to M580 Assembly (EAE
                         // bridges via the syslay cover hops). OMIT the BX1 self-close so the boundary
                         // plug is not double-driven. Off → BX1 self-closes the broadcast loop locally.
-                        bool openCoverChain = CodeGen.Translation.HandoffPlanner.CoversOnM580Ring &&
-                            string.Equals(tag, "BX1", StringComparison.Ordinal);
+                        bool openCoverChain = string.Equals(tag, "BX1", StringComparison.Ordinal);
                         if (openCoverChain)
                             report.Missing.Add(
                                 $"[{tag}] cover detour: cover chain {ringNames[0]}…{ringNames[^1]} ends OPEN " +
