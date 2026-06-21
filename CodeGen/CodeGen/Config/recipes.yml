@@ -8,31 +8,6 @@
 # Five_State convention: Work = cmd1 -> wait AtWork(2); Home = cmd3 -> wait AtHomeInit(0).
 
 recipes:
-  - name: Cover_Station
-    blocks:
-      full:
-        - { cmd: coverpnp_vr, state: 1 }
-        - { waitConfig: coverpnp_vr, state: 2 }
-        - { cmd: coverpnp_gripper, state: 1 }
-        - { waitConfig: coverpnp_gripper, state: 2 }
-        - { cmd: coverpnp_vr, state: 3 }
-        - { waitConfig: coverpnp_vr, state: 0 }
-        - { cmd: coverpnp_hr, state: 1 }
-        - { waitConfig: coverpnp_hr, state: 2 }
-        - { cmd: coverpnp_vr, state: 1 }
-        - { waitConfig: coverpnp_vr, state: 2 }
-        - { cmd: coverpnp_gripper, state: 3 }
-        - { waitConfig: coverpnp_gripper, state: 0 }
-        - { cmd: coverpnp_vr, state: 3 }
-        - { waitConfig: coverpnp_vr, state: 0 }
-        - { cmd: coverpnp_hr, state: 3 }
-        - { waitConfig: coverpnp_hr, state: 0 }
-      minimal:
-        - { cmd: coverpnp_vr, state: 1 }
-        - { waitConfig: coverpnp_vr, state: 2 }
-        - { cmd: coverpnp_vr, state: 3 }
-        - { waitConfig: coverpnp_vr, state: 0 }
-
   - name: Disassembly
     blocks:
       handshake:
