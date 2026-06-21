@@ -71,10 +71,6 @@ namespace CodeGen.Configuration
         // Empty = no restriction (full recipe). Populate with actuator names to park the rest.
         public static readonly string[] RecipeTestActuatorAllowlist = Array.Empty<string>();
 
-        // When true, drop the centre-home swivel's interlock rules so its turn-to-Place is never
-        // blocked (a bench-test isolation; false restores the Control.xml interlock + the inert-rule guard).
-        public static bool DropSwivelInterlockForTest = true;
-
         public string SystemXmlPath { get; set; } = string.Empty;
         public string MappingRulesPath { get; set; } = string.Empty;
         public string TemplateLibraryPath { get; set; } = string.Empty;
@@ -419,41 +415,35 @@ namespace CodeGen.Configuration
         ///     a TLS-enabled mosquitto listener (certfile/keyfile, conventionally port 8883) with
         ///     <see cref="MqttCaCert"/> + <see cref="MqttValidateCert"/> set.</item>
         /// </list>
-        /// NEVER use mqtts:// against a plain 1883 broker — <see cref="MqttConnectionValidator"/>
-        /// flags that as an impossible config.</summary>
-        public string MqttBrokerUrl { get; set; } = "mqtt://192.168.1.50:1883";
+        /// flags that as an impossible config. From Config/telemetry.yml.</summary>
+        public string MqttBrokerUrl { get; set; } = TelemetrySettings.Current.BrokerUrl;
 
-        /// <summary>MQTT transport mode. FALSE (default) = INSECURE demo: scheme <c>mqtt://</c>,
-        /// no TLS — requires EAE "Security → Insecure Application → Enable" on the BX1 device to
-        /// reach ReturnCode 0. TRUE = SECURE: scheme <c>mqtts://</c> + <see cref="MqttCaCert"/> /
-        /// <see cref="MqttValidateCert"/>, which needs a TLS-enabled broker listener. The scheme
-        /// in the generated MQTT_CONNECTION.URL is derived from THIS flag (the host:port comes
-        /// from <see cref="MqttBrokerUrl"/>), so the URL can never contradict the mode.</summary>
-        public bool MqttSecureTls { get; set; } = false;
+        /// <summary>FALSE = insecure mqtt:// demo (needs the device "Insecure Application" override);
+        /// TRUE = mqtts:// + TLS. The URL scheme is derived from this. From Config/telemetry.yml.</summary>
+        public bool MqttSecureTls { get; set; } = TelemetrySettings.Current.SecureTls;
 
-        /// <summary>Secure mode only (<see cref="MqttSecureTls"/>=true): CA certificate (PEM text
-        /// or path) for MQTT_CONNECTION.CACert. Empty = not emitted. Ignored in insecure demo mode.</summary>
-        public string MqttCaCert { get; set; } = "";
+        /// <summary>Secure mode CA certificate (MQTT_CONNECTION.CACert). From Config/telemetry.yml.</summary>
+        public string MqttCaCert { get; set; } = TelemetrySettings.Current.CaCert;
 
-        /// <summary>Secure mode only: MQTT_CONNECTION.ValidateCert (USINT). 0 = no validation
-        /// (self-signed demo TLS); higher = server cert / hostname validation. Only emitted when
-        /// <see cref="MqttSecureTls"/>=true. Insecure demo mode leaves the FB default untouched.</summary>
-        public int MqttValidateCert { get; set; } = 0;
+        /// <summary>Secure mode MQTT_CONNECTION.ValidateCert (USINT). From Config/telemetry.yml.</summary>
+        public int MqttValidateCert { get; set; } = TelemetrySettings.Current.ValidateCert;
 
-        /// <summary>MQTT_CONNECTION.ClientIdentifier — one per runtime/resource.
-        /// Default SMC_BX1 (was SMC_M262): BX1 is the only Soft-dPAC that runs MQTT, so a key-less
-        /// config must NOT make BX1's MqttConn clash with M262's id. No live RC101 (deployed ids are
-        /// already unique per resource); this only removes the latent default trap.</summary>
-        public string MqttClientId { get; set; } = "SMC_BX1";
+        /// <summary>BX1 broker ClientIdentifier (unique per resource). From Config/telemetry.yml.</summary>
+        public string MqttClientId { get; set; } = TelemetrySettings.Current.ClientBx1;
 
-        /// <summary>
-        /// MQTT_CONNECTION.ConnectionID — the SHARED binding key (a STRING). Every per-resource
-        /// MQTT_CONNECTION (BX1 + M262 + M580) AND every embedded MQTT_PUBLISH carries this SAME
-        /// value, so each resource's publishers bind to its LOCAL connection and publish. The
-        /// ClientIdentifier (MqttClientId for BX1, SMC_M262 / SMC_M580 for the others) stays UNIQUE
-        /// per resource so mosquitto keeps all three connected. Default "SMC".
-        /// </summary>
-        public string MqttConnectionName { get; set; } = "SMC";
+        /// <summary>M262 broker ClientIdentifier. From Config/telemetry.yml.</summary>
+        public string MqttClientM262 { get; set; } = TelemetrySettings.Current.ClientM262;
+
+        /// <summary>M580 broker ClientIdentifier. From Config/telemetry.yml.</summary>
+        public string MqttClientM580 { get; set; } = TelemetrySettings.Current.ClientM580;
+
+        /// <summary>Shared MQTT_CONNECTION.ConnectionID — the binding key every resource's connection
+        /// AND its embedded MQTT_PUBLISH carries, so publishers bind locally. From Config/telemetry.yml.</summary>
+        public string MqttConnectionName { get; set; } = TelemetrySettings.Current.ConnectionName;
+
+        /// <summary>Wrap each MQTT_CONNECTION in the Telemetry_CAT composite (Config/Health structs)
+        /// instead of the raw FB. From Config/telemetry.yml. FALSE = raw MQTT_CONNECTION revert.</summary>
+        public bool UseTelemetryCat { get; set; } = TelemetrySettings.Current.UseTelemetryCat;
 
         /// <summary>
         /// MQTT_CONNECTION.ConnectionID — the registry key. The single
