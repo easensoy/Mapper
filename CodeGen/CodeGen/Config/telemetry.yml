@@ -1,0 +1,22 @@
+# Telemetry / MQTT connection settings (consumed by CodeGen.Configuration.TelemetrySettings).
+# Values match the prior hard-coded defaults exactly, so behaviour is unchanged.
+
+# Wrap each resource MQTT_CONNECTION in the Telemetry_CAT composite (Config/Health structs).
+# false -> emit the raw MQTT_CONNECTION FBs instead.
+useTelemetryCat: true
+
+# Broker URL. The scheme (mqtt:// vs mqtts://) is derived from secureTls, not from this string.
+brokerUrl: mqtt://192.168.1.50:1883
+
+# false = insecure demo (mqtt://, device "Insecure Application" enabled). true = mqtts:// + TLS.
+secureTls: false
+caCert: ""
+validateCert: 0
+
+# Shared ConnectionID binding key (every resource's MQTT_CONNECTION + embedded MQTT_PUBLISH).
+connectionName: SMC
+
+# Per-resource broker ClientIdentifier (unique so mosquitto keeps all three connected).
+clientBx1: SMC_BX1
+clientM262: SMC_M262
+clientM580: SMC_M580
