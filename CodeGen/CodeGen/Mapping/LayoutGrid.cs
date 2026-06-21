@@ -15,8 +15,10 @@ namespace CodeGen.Mapping
     /// </summary>
     public static class LayoutGrid
     {
-        /// <summary>Horizontal pitch between columns (≥ widest FB body + margin).</summary>
-        public const int ColumnPitchX = 2500;
+        /// <summary>Horizontal pitch between columns. The data-driven actuator CATs render ~1400 wide
+        /// (long port labels like enableToWorkFaultTimeout), so 1700 leaves a ~300 gap with no overlap.
+        /// Horizontal compaction comes from closing the inter-zone gaps (origins below), not a tiny pitch.</summary>
+        public const int ColumnPitchX = 1700;
 
         /// <summary>Top edge of every frame on the syslay canvas.</summary>
         public const int FrameOriginY = 1700;
@@ -34,12 +36,14 @@ namespace CodeGen.Mapping
         /// </summary>
         public const int FrameRightPadding = 600;
 
-        /// <summary>Left edge of the coloured frame for each PLC zone on the syslay.</summary>
+        /// <summary>Left edge of the coloured frame for each PLC zone on the syslay. Origins are pulled
+        /// close so the three coloured zones sit next to each other (≈250 white gap) — the M580/BX1
+        /// origins follow the prior zone's fitted right edge (pitch 1700 + FbEstWidth ~1400 + padding).</summary>
         public static int FrameOriginX(PlcAssignment plc) => plc switch
         {
             PlcAssignment.M262 => 1800,
-            PlcAssignment.M580 => 11800,
-            PlcAssignment.BX1  => 28200,
+            PlcAssignment.M580 => 10800,
+            PlcAssignment.BX1  => 23200,
             _ => 0,
         };
 
@@ -47,29 +51,27 @@ namespace CodeGen.Mapping
         public static int ColumnBaseX(PlcAssignment plc) => plc switch
         {
             PlcAssignment.M262 => 2000,
-            PlcAssignment.M580 => 12200,
-            PlcAssignment.BX1  => 29000,
+            PlcAssignment.M580 => 11000,   // M262 zone fits within ~1800..10400; M580 starts right after
+            PlcAssignment.BX1  => 23400,   // M580 zone fits ..~23000; BX1 starts right after
             _ => 0,
         };
 
         /// <summary>
-        /// Y for each (PLC, Row) pair. M262 and M580 share the upper rows
-        /// (HMI=2000, Station=2900, Process/Sensor=4000); their actuator rows
-        /// differ (M262=5400, M580=6500) because M580 has the wider process row
-        /// above. BX1 has no Station/Process rows — its sensor row sits at 4000
-        /// and its actuator row at 6500 (matches M580's grid; the BX1 sysres
-        /// translation pulls these down to a local 2000/4500).
+        /// Y for each row, UNIFIED across PLCs so the three zones read as one hierarchy. Rows are
+        /// spaced to clear the EAE-rendered FB body in the row above (the rendered heights are
+        /// smaller than the old FbEstHeight model assumed — Process1_Generic ≈800, Five_State ≈1400),
+        /// so the gaps are kept TIGHT to avoid a sparse canvas:
+        ///   Floating 200 (MqttConn) · HMI 1300 · Station 2000 · Process/Sensor 2900 · Actuator 4000.
+        /// Process at 2900 ends ≈3700 (rendered Process1_Generic), clearing the actuator row at 4000.
         /// </summary>
-        public static int RowY(PlcAssignment plc, LayoutRow row) => (plc, row) switch
+        public static int RowY(PlcAssignment plc, LayoutRow row) => row switch
         {
-            (_, LayoutRow.Floating) => 200,
-            (_, LayoutRow.Hmi)      => 2000,
-            (_, LayoutRow.Station)  => 2900,
-            (_, LayoutRow.Process)  => 4000,
-            (_, LayoutRow.Sensor)   => 4000,
-            (PlcAssignment.M262, LayoutRow.Actuator) => 5400,
-            (PlcAssignment.M580, LayoutRow.Actuator) => 6500,
-            (PlcAssignment.BX1,  LayoutRow.Actuator) => 6500,
+            LayoutRow.Floating => 200,
+            LayoutRow.Hmi      => 1200,    // HMI faceplates + Telemetry_CAT (~800 tall) share this row
+            LayoutRow.Station  => 2100,    // far enough below HMI that the taller Telemetry_CAT clears it
+            LayoutRow.Process  => 2900,
+            LayoutRow.Sensor   => 2900,
+            LayoutRow.Actuator => 4100,   // each row clears the rendered FB above
             _ => 0,
         };
 
