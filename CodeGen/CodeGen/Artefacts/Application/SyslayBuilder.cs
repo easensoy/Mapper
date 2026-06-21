@@ -30,7 +30,7 @@ namespace CodeGen.Translation
 
             _layer = new XElement(Ns + "Layer",
                 new XAttribute("ID", _layerId),
-                new XAttribute("Name", "Default"),
+                new XAttribute("Name", "SMC_Rig"),
                 new XAttribute("Comment", string.Empty),
                 new XAttribute("IsDefault", "true"),
                 new XAttribute(XNamespace.Xmlns + "xsi", Xsi.NamespaceName),
@@ -209,6 +209,49 @@ namespace CodeGen.Translation
                 values.Select(v => v.ToString(System.Globalization.CultureInfo.InvariantCulture)));
             return $"[{formatted}]";
         }
+
+        /// <summary>
+        /// Formats an InterlockRule array-of-struct literal, e.g.
+        /// <c>[(FromState:=2, ToState:=4, SourceID:=6, BlockedState:=2), ...]</c>. Emits every slot
+        /// (matching the full zero-filled INT arrays it replaces); RuleCount still bounds the
+        /// evaluator loop, so the trailing zero-rows are never read.
+        /// </summary>
+        public static string FormatRuleTable(
+            IReadOnlyList<int> from, IReadOnlyList<int> to,
+            IReadOnlyList<int> src, IReadOnlyList<int> blk)
+        {
+            var elems = new List<string>();
+            for (int i = 0; i < from.Count; i++)
+                elems.Add($"(FromState:={from[i]}, ToState:={to[i]}, SourceID:={src[i]}, BlockedState:={blk[i]})");
+            return "[" + string.Join(", ", elems) + "]";
+        }
+
+        /// <summary>
+        /// Formats an <c>InterlockTable</c> nested-struct literal:
+        /// <c>(Count:=N, Rules:=[(FromState:=…, …), …])</c> — one INT count plus the InterlockRule
+        /// array. The whole interlock interface as a single value.
+        /// </summary>
+        public static string FormatInterlockTable(
+            IReadOnlyList<int> from, IReadOnlyList<int> to,
+            IReadOnlyList<int> src, IReadOnlyList<int> blk, int count)
+            => $"(Count:={count}, Rules:={FormatRuleTable(from, to, src, blk)})";
+
+        /// <summary>
+        /// Formats a <c>TargetStates</c> struct literal: <c>(Work1:=N, Work2:=N, Home:=N)</c>.
+        /// </summary>
+        public static string FormatTargetStates(int work1, int work2, int home)
+            => $"(Work1:={work1}, Work2:={work2}, Home:={home})";
+
+        /// <summary>
+        /// Formats a TelemetryConfig STRUCT literal for a Telemetry_CAT instance's Config input,
+        /// e.g. (QI:=TRUE, ConnectionID:='SMC', URL:='mqtt://...', ClientIdentifier:='SMC_M262',
+        /// ValidateCert:=0, CACert:=''). Member types match MQTT_CONNECTION's wrapped inputs.
+        /// </summary>
+        public static string FormatTelemetryConfig(bool qi, string connectionId, string url,
+            string clientIdentifier, int validateCert, string caCert)
+            => $"(QI:={FormatBool(qi)}, ConnectionID:={FormatString(connectionId)}, " +
+               $"URL:={FormatString(url)}, ClientIdentifier:={FormatString(clientIdentifier)}, " +
+               $"ValidateCert:={validateCert}, CACert:={FormatString(caCert)})";
 
         /// <summary>
         /// Formats a STRING array as an EAE square-bracket literal of single-quoted entries,
