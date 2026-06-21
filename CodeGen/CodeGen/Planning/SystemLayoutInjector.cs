@@ -2160,6 +2160,15 @@ namespace CodeGen.Translation
         {
             var report = new CleanupReport();
 
+            // The Mapper owns the APPLICATION lifecycle the same way it owns DEVICES:
+            // Clean DELETES the application (.sysapp + content folder) so EAE shows nothing
+            // under "Applications" (like an empty Devices tree), and this recreates it
+            // (create-IF-ABSENT — a strict no-op when the app is present) BEFORE the
+            // SyslayPath2 check below, which would otherwise throw on the missing layout.
+            CodeGen.Devices.Core.ApplicationShellEmitter.EnsureApplicationShell(
+                DeriveDemonstratorEaeRoot(config),
+                line => report.DeviceCleanupLog.Add(line));
+
             if (string.IsNullOrEmpty(config.SyslayPath2) || !File.Exists(config.SyslayPath2))
                 throw new FileNotFoundException(
                     $"Demonstrator syslay not configured or missing: '{config.SyslayPath2}'");
