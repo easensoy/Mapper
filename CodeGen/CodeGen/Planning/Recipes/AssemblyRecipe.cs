@@ -60,8 +60,7 @@ namespace CodeGen.Translation.Process
             if (hasShaft)
                 RecipeStepEmitter.Emit(b, def.Block("shaft"), arrays, allComponents);
 
-            if (CodeGen.Translation.HandoffPlanner.CoversOnM580Ring &&
-                ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, "coverpnp_vr", out _) &&
+            if (ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, "coverpnp_vr", out _) &&
                 ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, "coverpnp_hr", out _) &&
                 ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, "coverpnp_gripper", out _))
                 RecipeStepEmitter.Emit(b, def.Block("coverPlace"), arrays, allComponents);
