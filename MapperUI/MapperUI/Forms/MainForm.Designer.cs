@@ -47,6 +47,7 @@ namespace MapperUI
             this.colComponent = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.colType = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.colTemplate = new System.Windows.Forms.DataGridViewTextBoxColumn();
+            this.colDevice = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.grpGenerationEngine = new System.Windows.Forms.GroupBox();
             this.pnlEngineHeader = new System.Windows.Forms.Panel();
             this.lblEngineLabel = new System.Windows.Forms.Label();
@@ -143,9 +144,9 @@ namespace MapperUI
             this.btnTestStation1.FlatAppearance.BorderSize = 0;
             this.btnTestStation1.Font = new System.Drawing.Font("Segoe UI", 8.5F, System.Drawing.FontStyle.Bold);
             this.btnTestStation1.ForeColor = System.Drawing.Color.White;
-            this.btnTestStation1.Location = new System.Drawing.Point(1083, 28);
-            this.btnTestStation1.Size = new System.Drawing.Size(170, 25);
-            this.btnTestStation1.Text = "Test Runtime";
+            this.btnTestStation1.Location = new System.Drawing.Point(1043, 28);
+            this.btnTestStation1.Size = new System.Drawing.Size(210, 25);
+            this.btnTestStation1.Text = "Generate IEC61499 Code";
             this.btnTestStation1.UseVisualStyleBackColor = false;
             this.btnTestStation1.Click += new System.EventHandler(this.btnTestStation1_Click);
 
@@ -242,7 +243,7 @@ namespace MapperUI
             this.dgvComponents.BackgroundColor = System.Drawing.SystemColors.Window;
             this.dgvComponents.ColumnHeadersHeightSizeMode = System.Windows.Forms.DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             this.dgvComponents.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
-                this.colComponent, this.colType, this.colTemplate });
+                this.colComponent, this.colType, this.colTemplate, this.colDevice });
             this.dgvComponents.Dock = System.Windows.Forms.DockStyle.Fill;
             this.dgvComponents.ReadOnly = true;
             this.dgvComponents.RowHeadersVisible = true;
@@ -260,7 +261,10 @@ namespace MapperUI
             this.colType.ReadOnly = true;
             this.colTemplate.HeaderText = "Template";
             this.colTemplate.ReadOnly = true;
-            this.colTemplate.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill;
+            this.colTemplate.Width = 150;
+            this.colDevice.HeaderText = "Device";
+            this.colDevice.ReadOnly = true;
+            this.colDevice.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill;
 
 
             this.grpGenerationEngine.Controls.Add(this.txtActivityLog);
@@ -415,6 +419,7 @@ namespace MapperUI
         private System.Windows.Forms.DataGridViewTextBoxColumn colComponent;
         private System.Windows.Forms.DataGridViewTextBoxColumn colType;
         private System.Windows.Forms.DataGridViewTextBoxColumn colTemplate;
+        private System.Windows.Forms.DataGridViewTextBoxColumn colDevice;
         private System.Windows.Forms.GroupBox grpGenerationEngine;
         private System.Windows.Forms.Panel pnlEngineHeader;
         private System.Windows.Forms.Label lblEngineLabel;
