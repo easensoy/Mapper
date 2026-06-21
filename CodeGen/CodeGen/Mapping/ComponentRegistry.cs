@@ -74,7 +74,7 @@ namespace CodeGen.Mapping
     /// </summary>
     public static class ComponentRegistry
     {
-        /// <summary>All 28 canonical entries, keyed by component name (case-sensitive).</summary>
+        /// <summary>All canonical entries, keyed by component name (case-sensitive).</summary>
         public static IReadOnlyDictionary<string, ComponentEntry> ByName { get; } = Build();
 
         private static IReadOnlyDictionary<string, ComponentEntry> Build()
@@ -99,14 +99,14 @@ namespace CodeGen.Mapping
                 M262("PartInHopper",  column: 0, row: LayoutRow.Process,  owner: "Feed_Station"),
                 M262("PartAtChecker", column: 1, row: LayoutRow.Process,  owner: "Feed_Station"),
                 M262("Feed_Station",  column: 2, row: LayoutRow.Process,  owner: "Feed_Station"),
+                M262("PartAtAssembly", column: 3, row: LayoutRow.Sensor,   owner: "Feed_Station"), // synth discharge sensor (DI08)
                 M262("Feeder",        column: 0, row: LayoutRow.Actuator, owner: "Feed_Station"),
                 M262("Checker",       column: 1, row: LayoutRow.Actuator, owner: "Feed_Station"),
                 M262("Transfer",      column: 2, row: LayoutRow.Actuator, owner: "Feed_Station"),
                 M262("Ejector",       column: 3, row: LayoutRow.Actuator, owner: "Feed_Station"),
-                // Stn1_Term shares column 3 with Ejector (matches the deployed
-                // CanonicalLayout — the terminator is visually compact so the
-                // overlap is harmless on the canvas).
-                M262("Stn1_Term",     column: 3, row: LayoutRow.Actuator, owner: ""),
+                M262("Robot",         column: 4, row: LayoutRow.Actuator, owner: ""),  // UR3e discharge tail (commanded cross-PLC by Disassembly)
+                // Stn1_Term on the Station row (its own column) — no longer overlapping Ejector.
+                M262("Stn1_Term",     column: 3, row: LayoutRow.Station,  owner: ""),
 
                 // ── M580 — Assembly + Disassembly (RES0, frame X=11800, cols 0..6) ─
                 M580("Station2_HMI",     column: 0, row: LayoutRow.Hmi,      owner: ""),
@@ -129,12 +129,26 @@ namespace CodeGen.Mapping
                 BX1("CoverPNP_Hr",       column: 0, row: LayoutRow.Actuator, owner: ""),
                 BX1("CoverPNP_Vr",       column: 1, row: LayoutRow.Actuator, owner: ""),
                 BX1("CoverPnp_Gripper",  column: 2, row: LayoutRow.Actuator, owner: ""),
+                BX1("BX1_IO",            column: 3, row: LayoutRow.Actuator, owner: ""),  // EtherNet/IP cover-IO broker
 
                 // MqttConn — MQTT broker FB, hosted on BX1 (Soft dPAC) because M262/
                 // M580 have no MQTT runtime client (ReturnCode 50). Floats at the top
                 // of BX1's zone (Y=200) above the Station1/Station2 frames. Routed to
                 // BX1_RES by SysresFbMirror.BucketFor.
                 BX1("MqttConn",          column: 0, row: LayoutRow.Floating, owner: ""),
+                // The per-resource MQTT connections float above each PLC's HMI row. Registering them
+                // (not just MqttConn) keeps them on the canonical grid so the per-PLC sysres
+                // translateToOrigin moves them WITH the rest of the zone (else a fixed position
+                // collides with the translated Station HMI).
+                M262("MqttConn_M262",    column: 0, row: LayoutRow.Floating, owner: ""),
+                M580("MqttConn_M580",    column: 0, row: LayoutRow.Floating, owner: ""),
+                // Telemetry_CAT instances (cfg.UseTelemetryCat, default) sit on the HMI row NEXT TO the
+                // Station/Area HMI faceplates (filling the otherwise-empty top band, not floating alone):
+                // M262 col 2 (after Area_HMI/Station1_HMI), M580 col 1 (after Station2_HMI), BX1 col 0
+                // (BX1 has no faceplate). Registered alongside the raw MqttConn* (revert path).
+                M262("Telemetry_M262",   column: 2, row: LayoutRow.Hmi,      owner: ""),
+                M580("Telemetry_M580",   column: 1, row: LayoutRow.Hmi,      owner: ""),
+                BX1 ("Telemetry_BX1",    column: 0, row: LayoutRow.Hmi,      owner: ""),
             };
             return rows.ToDictionary(r => r.Name, r => r, StringComparer.Ordinal);
         }
