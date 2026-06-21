@@ -1050,7 +1050,6 @@ namespace CodeGen.Translation
             int processId = MapperConfig.FeedStationProcessId;
             int assemblyProcessId = MapperConfig.AssemblyProcessId;
             int disassemblyProcessId = MapperConfig.DisassemblyProcessId;
-            int coverStationProcessId = MapperConfig.CoverStationProcessId;
 
             // No top-level PLC_Start FB: Area_CAT and Station_CAT each contain their own
             // internal plcStart bootstrap, so an external one would double-bootstrap and
@@ -1243,37 +1242,6 @@ namespace CodeGen.Translation
                 report.Missing.Add(
                     "[Recipe] Disassembly Process not found in Control.xml — " +
                     "BX1 zone will have actuators but no Disassembly Process FB.");
-            }
-
-            // Cover_Station — LOCAL BX1 cover command engine (MapperConfig.DeployBx1CoverEngine).
-            // The covers live on the BX1 Soft-dPAC in a self-closed stateRprtCmd ring with NO
-            // engine, so nothing ever commands them and they never move. There is no Cover
-            // Process in Control.xml, so synthesize a stateless Process1_Generic shell here;
-            // its recipe is filled by ProcessRecipeArrayGenerator.ApplyCoverRuntimeRecipe (the
-            // cover pick/place sequence), NOT by walking States. BuildBx1Wiring splices it into
-            // the BX1 cover ring on the syslay; ResourceWireEmitter auto-splices it on the BX1
-            // sysres (it closes the ring through any Process FB it finds). BX1-local: no M580
-            // dependency, no cross-PLC ring.
-            if (MapperConfig.DeployBx1CoverEngine)
-            {
-                var coverProc = new VueOneComponent
-                {
-                    Name = "Cover_Station",
-                    Type = "Process",
-                    ComponentID = "C-cover-station-synth",
-                    States = new List<VueOneState>(),
-                };
-                var (cOuter, cNested, cRecipe) = BuildProcessFbParameters(
-                    coverProc, allComponents, "Cover_Station", coverStationProcessId,
-                    contents: contents,
-                    useRecipeStruct: config != null && config.UseRecipeStruct,
-                    commandFromCondition: false);
-                builder.AddFB(FBIdGenerator.GenerateFBId(coverProc.ComponentID),
-                    "Cover_Station", "Process1_Generic", "Main", 31500, 1460,
-                    cOuter, cNested);
-                crossProcInstances.Add("Cover_Station");
-                ReportStation2Recipe(report, "Cover_Station", cRecipe, "BX1");
-                AppendProcessRecipeComment(builder, "Cover_Station", cRecipe);
             }
 
             // Cross-process synchronisation REMOVED 2026-05-26: the prior code
