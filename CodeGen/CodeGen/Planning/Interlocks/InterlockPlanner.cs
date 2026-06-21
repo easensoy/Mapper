@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using CodeGen.Configuration;
 using CodeGen.Models;
 
 namespace CodeGen.Translation.Interlocks
@@ -15,7 +14,7 @@ namespace CodeGen.Translation.Interlocks
             IReadOnlyList<VueOneComponent> allComponents,
             IReadOnlyDictionary<string, int> scopedIds)
         {
-            int cap = GenerationConfig.Current.InterlockRuleCap;
+            int cap = InterlockConfig.Current.RuleArraySize;
             var from = new int[cap];
             var to = new int[cap];
             var src = new int[cap];
