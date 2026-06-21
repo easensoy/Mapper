@@ -141,6 +141,9 @@ namespace CodeGen.Devices.Core
             new("Area_HMI.AreaHMIAdptrOUT",        "Area.AreaHMIAdptrIN"),
             new("Station1_HMI.StationHMIAdptrOUT", "Station1.StationHMIAdptrIN"),
             new("Area.AreaAdptrOUT",               "Station1.AreaAdptrIN"),
+            // Close the area adapter chain onto the Area terminator — present in the syslay but
+            // previously dropped from the M262 sysres, leaving Area_Term with zero connections.
+            new("Station1.AreaAdptrOUT",           "Area_Term.CasAdptrIN"),
         };
 
         // Endpoints whose LHS is one of these built-in FBs are emitted with
@@ -467,14 +470,18 @@ namespace CodeGen.Devices.Core
                 // after the resource comes up.
                 foreach (var mqttKv in byName)
                 {
-                    if (!string.Equals((string?)mqttKv.Value.Attribute("Type"),
-                            "MQTT_CONNECTION", StringComparison.Ordinal))
+                    var mqttType = (string?)mqttKv.Value.Attribute("Type");
+                    // Raw MQTT_CONNECTION OR the Telemetry_CAT wrapper (UseTelemetryCat) — both need
+                    // the same bring-up on their OWN sysres (the syslay wires don't reach the sysres).
+                    if (!string.Equals(mqttType, "MQTT_CONNECTION", StringComparison.Ordinal) &&
+                        !string.Equals(mqttType, "Telemetry_CAT", StringComparison.Ordinal))
                         continue;
                     var mqttName = mqttKv.Key;
-                    // INIT off the resource boot: Area.INITO when present (M262),
-                    // else FB1.INITO. BX1 has no Area, so without the FB1 fallback
-                    // the MqttConn.INIT never fires and the broker never opens.
-                    var mqttInit = Present(anchors.AreaFb, byName) ? anchors.AreaFb! : "FB1";
+                    // INIT off the resource boot anchor: Area (M262), else Station (M580=Station2),
+                    // else FB1 (BX1, which has neither). Self INITO -> CONNECT opens the broker once.
+                    var mqttInit = Present(anchors.AreaFb, byName) ? anchors.AreaFb!
+                                 : Present(anchors.StationFb, byName) ? anchors.StationFb!
+                                 : "FB1";
                     eventWires.Add(new Wire($"{mqttInit}.INITO", $"{mqttName}.INIT"));
                     eventWires.Add(new Wire($"{mqttName}.INITO", $"{mqttName}.CONNECT"));
                 }
@@ -836,7 +843,10 @@ namespace CodeGen.Devices.Core
                 {
                     OmitXmlDeclaration = false,
                     Indent = true,
-                    Encoding = new UTF8Encoding(false),
+                    // Emit the UTF-8 BOM so re-running this (e.g. the post-broker re-fit)
+                    // leaves the syslay byte-identical to the broker's own save (which writes
+                    // a BOM) — no spurious encoding diff vs the prior generated syslay.
+                    Encoding = new UTF8Encoding(true),
                 };
                 using var fs = new FileStream(syslayPath, FileMode.Create, FileAccess.Write, FileShare.Read);
                 using var w = XmlWriter.Create(fs, settings);
@@ -855,40 +865,40 @@ namespace CodeGen.Devices.Core
         {
             { "FRAME_Station1",      PlcAssignment.M262 },
             { "FRAME_Station2_M580", PlcAssignment.M580 },
-            { "FRAME_Station2_BX1",  PlcAssignment.BX1  },
+            { "FRAME_BX1",           PlcAssignment.BX1  },  // matches the emitted frame name so BX1 is fitted tight too
         };
 
-        // EAE renders an FB body's height from its INTERFACE port-row count (the
-        // size is not stored in the file): height ≈ maxPortRows × ~150 + header.
-        // These constants are derived from the ACTUAL port counts of the deployed
-        // CATs (measured from the .fbt InterfaceList), NOT guessed — that is what
-        // makes the frame sizing and the row spacing below reliable rather than a
-        // perpetual under-estimate:
-        //   Five_State_Actuator_CAT  = 18 rows  -> ~3050   (the tall data-driven
-        //                                                    actuator: Rule[10]×4 +
-        //                                                    Target + fault + name/id)
-        //   Seven_State_Actuator_CAT = 10 rows  -> ~1850
-        //   Process1_Generic         =  9 rows  -> ~1700
-        //   Sensor_Bool_CAT          =  3 rows  -> ~800
-        //   Station/Area composites  =  2 rows  -> ~650
-        //   *_CAT faceplates / terminators (adapter-only) -> small
-        private const int FbEstWidth = 900;
+        // Per-Type body-height ALLOWANCE for fitting a zone <Frame> below its lowest
+        // FB. EAE renders the actual body from the interface port-row count, but the
+        // earlier port-count×150 model OVER-estimated what EAE draws (a Five_State
+        // rendered ~1400, not 3050) — which padded every frame ~2× too tall (the
+        // "unused space at the bottom" the user flagged in EAE). These values are
+        // re-calibrated to the OBSERVED EAE render scale (a Five_State actuator and
+        // its frame measured against the canvas), kept ~15-20% above the rendered
+        // size so the frame still ENCLOSES the body (no overflow) without a sparse
+        // empty band. Lower = tighter; raise a type only if EAE shows it overflowing.
+        // Body-width allowance for fitting the frame's RIGHT edge past the FB. The data-driven
+        // actuator CATs render ~1400 wide (long port labels), so 900 left them spilling out the
+        // right of the coloured frame (the user's "code outside the background"); 1400 encloses them.
+        private const int FbEstWidth = 1400;
         private static int FbEstHeight(string type) => type switch
         {
-            "Five_State_Actuator_CAT"            => 3050,   // 18 port rows
-            "Five_State_Actuator_No_Sensors_CAT" => 3050,
-            "Vacuum_Gripper_CAT"                 => 3050,
-            "Seven_State_Actuator_CAT"           => 1850,   // 10 port rows
-            "Seven_State_Actuator_Centre_Home_CAT" => 3050, // 16 INIT data inputs + 4 adapters
-            "Process1_Generic"                   => 1700,   //  9 port rows
-            "Sensor_Bool_CAT"                    => 800,    //  3 port rows
-            "Area" or "Station"                  => 650,    //  2 port rows
+            "Five_State_Actuator_CAT"            => 1800,   // rendered ~1400
+            "Five_State_Actuator_No_Sensors_CAT" => 1800,
+            "Vacuum_Gripper_CAT"                 => 1800,
+            "Seven_State_Actuator_CAT"           => 1500,
+            "Seven_State_Actuator_Centre_Home_CAT" => 1800,
+            "Robot_Task_CAT"                     => 1500,
+            "Process1_Generic"                   => 1000,   // rendered ~800
+            "Sensor_Bool_CAT"                    => 650,
+            "Area" or "Station"                  => 600,
             "Area_CAT" or "Station_CAT"          => 500,    //  HMI faceplate
             "CaSAdptrTerminator"                 => 450,
-            "PLC_RW_M580" or "PLC_RW_BX1" or "PLC_RW_M262" => 1500,
+            "PLC_RW_M580" or "PLC_RW_BX1" or "PLC_RW_M262" => 1200,
             "DPAC_FULLINIT" or "plcStart"        => 500,
             "MQTT_CONNECTION"                    => 600,
-            _                                     => 1500,
+            "Telemetry_CAT"                      => 800,   // Config + Health structs + 7 events
+            _                                     => 1100,
         };
 
         /// <summary>
@@ -904,7 +914,10 @@ namespace CodeGen.Devices.Core
         private static void ResizeFramesToFitFbs(XElement net, XNamespace ns,
             SystemInjector.BindingApplicationReport report)
         {
-            const int padLeft = 420, padTop = 600, padRight = 460, padBottom = 520;
+            // Generous margins so the stateRprtCmd-ring / INIT-chain WIRES that loop left of and
+            // around the FB bodies stay inside the coloured frame (the user's "no code outside the
+            // background"). Left is widest because the ring wires loop out the FBs' left edges.
+            const int padLeft = 500, padTop = 220, padRight = 250, padBottom = 260;
             var inv = System.Globalization.CultureInfo.InvariantCulture;
 
             var fbs = new List<(string Name, double X, double Y, string Type)>();
