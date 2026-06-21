@@ -284,7 +284,7 @@ namespace CodeGen.Translation
             // itself is NOT stretched — only a short segment hangs off the Disassembly node. Off →
             // the ring closes locally Disassembly → first sensor (BX1 covers stay BX1-local either way).
             var ring = new List<(string Name, string Type)>(m580);
-            // COVER DETOUR (HandoffPlanner.CoversOnM580Ring): splice the BX1 cover actuators onto the
+            // COVER DETOUR: splice the BX1 cover actuators onto the
             // M580 ring between the last M580 actuator (Clamp) and Assembly_Station — Clamp.out crosses
             // to the first cover (M580→BX1), the covers chain locally, and the last cover crosses to
             // Assembly (BX1→M580). EAE bridges the two cross-device hops (the proven STAGE-4 mechanism).
@@ -374,10 +374,6 @@ namespace CodeGen.Translation
             if (mqttEnabled) initChain.Add("MqttConn");
             foreach (var s in contents.Sensors)    if (IsBx1(s.Name)) initChain.Add(s.Name);
             foreach (var a in contents.Actuators)  if (IsBx1(a.Name)) initChain.Add(a.Name);
-            // Cover_Station engine inits LAST in the BX1 chain (after the covers), so
-            // CoverPnp_Gripper.INITO → Cover_Station.INIT — the engine is ready once the
-            // actuators it commands are initialised.
-            if (MapperConfig.DeployBx1CoverEngine) initChain.Add("Cover_Station");
             for (int i = 0; i < initChain.Count - 1; i++)
                 builder.AddEventConnection($"{initChain[i]}.INITO", $"{initChain[i + 1]}.INIT");
 
@@ -386,39 +382,16 @@ namespace CodeGen.Translation
             // (no stateRprtCmd port).
             var ring = new List<(string Name, string Type)>();
             foreach (var s in contents.Sensors)    if (IsBx1(s.Name)) ring.Add((s.Name, "Sensor_Bool_CAT"));
-            // COVER DETOUR: when the covers are on the M580 ring (HandoffPlanner.CoversOnM580Ring) they
-            // are wired by BuildStation2Wiring — keep them OUT of the BX1 ring so they are not
-            // double-wired; their ring ends arrive/leave via the cross-device hops (Hr.in from M580
-            // Clamp, Gripper.out to M580 Assembly). TopCoverSenosr stays a BX1 sensor (INIT-only,
-            // off-ring; its id would clash on the M580 state_table). Off → unchanged.
+            // COVER DETOUR: the covers are on the M580 ring (wired by BuildStation2Wiring) — keep them
+            // OUT of the BX1 ring so they are not double-wired. TopCoverSenosr stays a BX1 sensor
+            // (INIT-only, off-ring; its id would clash on the M580 state_table).
             foreach (var a in contents.Actuators)
                 if (IsBx1(a.Name) && !HandoffPlanner.IsCoverDetourActuator(a.Name))
                     ring.Add((a.Name, "Five_State_Actuator_CAT"));
 
-            // stateRprtCmd ring (BX1-LOCAL, two shapes):
-            //  • DeployBx1CoverEngine (default): splice the local Cover_Station engine into the
-            //    cover ring so it BOTH commands the covers and receives their reports —
-            //      …CoverPnp_Gripper.stateRprtCmd_out → Cover_Station.stateRptCmdAdptr_in
-            //      Cover_Station.stateRptCmdAdptr_out → TopCoverSenosr.stateRprtCmd_in
-            //    (mirrors how Assembly_Station sits in the M580 ring; ResourceWireEmitter
-            //    auto-splices the same way on the BX1 sysres). No cross-PLC ring.
-            //  • no engine: the original BX1 self-closed broadcast loop (last -> first).
-            if (MapperConfig.DeployBx1CoverEngine && ring.Count > 1)
+            // BX1-local stateRprtCmd ring: self-closed broadcast loop (last -> first).
+            if (ring.Count > 1)
             {
-                for (int i = 0; i < ring.Count - 1; i++)
-                    builder.AddAdapterConnection(
-                        $"{ring[i].Name}.{StateRprtOut(ring[i].Type)}",
-                        $"{ring[i + 1].Name}.{StateRprtIn(ring[i + 1].Type)}");
-                builder.AddAdapterConnection(
-                    $"{ring[^1].Name}.{StateRprtOut(ring[^1].Type)}",
-                    $"Cover_Station.{StateRprtIn("Process1_Generic")}");
-                builder.AddAdapterConnection(
-                    $"Cover_Station.{StateRprtOut("Process1_Generic")}",
-                    $"{ring[0].Name}.{StateRprtIn(ring[0].Type)}");
-            }
-            else if (ring.Count > 1)
-            {
-                // Original BX1 self-closed broadcast loop (last -> first).
                 for (int i = 0; i < ring.Count - 1; i++)
                     builder.AddAdapterConnection(
                         $"{ring[i].Name}.{StateRprtOut(ring[i].Type)}",
