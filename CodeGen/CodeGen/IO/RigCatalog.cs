@@ -25,7 +25,6 @@ namespace CodeGen.Configuration
         public int FeedStation { get; set; }
         public int Assembly { get; set; }
         public int Disassembly { get; set; }
-        public int CoverStation { get; set; }
     }
 
     public sealed class SynthSensor
