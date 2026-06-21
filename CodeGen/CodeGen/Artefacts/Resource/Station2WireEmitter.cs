@@ -84,13 +84,9 @@ namespace CodeGen.Devices.Core
                 var synced = SysresFbMirror.SyncProcessRecipesFromSyslay(cfg.ActiveSyslayPath, bx1);
                 if (synced > 0)
                     report.Missing.Add($"[Wire][BX1] synced {synced} Process recipe(s) from syslay to sysres");
-                // STAGE 4: when the local cover engine is retired (DeployBx1CoverEngine=false),
-                // sweep any ALREADY-DEPLOYED Cover_Station FB out of the BX1 sysres BEFORE
-                // wiring. ResourceWireEmitter discovers Process FBs by type-scan and would
-                // re-splice a leftover Cover_Station into the ring + re-INIT it with its frozen
-                // looping recipe, fighting Assembly_Station's cross-PLC cover commands.
-                if (!MapperConfig.DeployBx1CoverEngine)
-                    SweepCoverStationFromSysres(bx1, report);
+                // Sweep any leftover Cover_Station FB (from an old BX1-local deploy) out of the BX1
+                // sysres before wiring; ResourceWireEmitter would otherwise re-splice it by type-scan.
+                SweepCoverStationFromSysres(bx1, report);
                 ResourceWireEmitter.EmitForResource(cfg, bx1, BX1Anchors, report);
                 paramSynced = SysresFbMirror.SyncMirroredFbParametersFromSyslay(cfg.ActiveSyslayPath, bx1);
                 if (paramSynced > 0)
