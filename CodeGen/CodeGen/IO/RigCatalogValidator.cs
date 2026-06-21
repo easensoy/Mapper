@@ -16,7 +16,6 @@ namespace CodeGen.Configuration
                 ("feedStation", c.ProcessIds.FeedStation),
                 ("assembly", c.ProcessIds.Assembly),
                 ("disassembly", c.ProcessIds.Disassembly),
-                ("coverStation", c.ProcessIds.CoverStation),
             };
             foreach (var g in processIds.GroupBy(p => p.Id).Where(g => g.Count() > 1))
                 errors.Add($"processIds collide on slot {g.Key}: {string.Join(", ", g.Select(p => p.Name))}");
