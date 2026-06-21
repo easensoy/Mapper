@@ -14,6 +14,7 @@
 
   <ItemGroup>
     <None Update="Config\config.yaml" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Config\device.yml" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Config\smc-rig.yml" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Config\recipes.yml" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
