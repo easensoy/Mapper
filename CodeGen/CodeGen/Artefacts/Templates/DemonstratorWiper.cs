@@ -123,6 +123,17 @@ namespace CodeGen.Services
             //     project root + the application (.sysapp + its folder) stay.
             DeleteLogicalDevices(iec, report);
 
+            // 1c. Delete the APPLICATION (the .sysapp + its content folder) so EAE shows
+            //     nothing under "Applications" — exactly like the now-empty Devices tree
+            //     (user directive 2026-06-22: "I don't want to see anything under
+            //     applications, the same as Devices"). Runs BEFORE StripDfbproj so the
+            //     now-missing .sysapp/.syslay/aspmap/opcua entries are pruned. The Mapper
+            //     recreates the shell on the next Generate via
+            //     ApplicationShellEmitter.EnsureApplicationShell (wired into
+            //     PrepareDemonstratorForGeneration), mirroring the device bootstrap.
+            CodeGen.Devices.Core.ApplicationShellEmitter.DeleteApplicationShell(
+                iec, line => report.Steps.Add(line));
+
             // 2. Delete Mapper-deployed FB type files (.fbt, .adp, .dt, etc.) at IEC61499/ root.
             DeleteFlatTypeFiles(iec, report);
 
