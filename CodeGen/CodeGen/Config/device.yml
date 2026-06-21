@@ -1,0 +1,15 @@
+# Deployment-target device network facts for the SMC Demonstrator.
+m262:
+  targetIp: 192.168.1.10
+  subnetAddress: 192.168.1.0
+  subnetMask: 255.255.255.0
+  gateway: 192.168.1.254
+m580:
+  targetIp: 192.168.1.20
+bx1:
+  targetIp: 192.168.1.151
+  hostIp: 192.168.1.209
+defaultNetwork:
+  subnetAddress: 192.168.0.0
+  subnetMask: 255.255.255.0
+  gateway: 192.168.0.254
