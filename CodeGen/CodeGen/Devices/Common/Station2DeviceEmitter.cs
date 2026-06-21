@@ -46,20 +46,16 @@ namespace CodeGen.Devices.Core
         // Sysres IDs are 16-hex chars (EAE convention). Stable, deterministic.
         const string M580ResourceId  = "3E5C2B7F1A4D6C8E";
         const string BX1ResourceId   = "C9F2A4B7E1D3F5A8";
-        // M580 resource name: TEMPORARY back-to-"RES0" override.
+        // M580 resource name — per-PLC, consistent with M262_RES / BX1_RES (no RES0 in the tree).
         //
-        // The compile error "Device M580 contains 2 instances of
-        // Runtime.Management.EMB_RES_ECO" returned on the rig even after
-        // the stale-sysres sweep + duplicate-Layer-ID syslay sweep + inline
-        // <Resources> block fixes were all in place. The exact second
-        // instance source for M580 specifically has not yet been
-        // root-caused, but renaming the sysres to "RES0" reliably makes the
-        // error disappear (observed across multiple cycles on the rig).
-        // M262 + BX1 stay on per-PLC names ("M262_RES" / "BX1_RES") which
-        // also compile cleanly. M580 alone uses "RES0" until the second-
-        // instance source can be pinned down — keep this as a known
-        // temporary asymmetry, not the long-term design.
-        const string M580ResourceName = "RES0";
+        // History: an EAE compile error "Device M580 contains 2 instances of
+        // Runtime.Management.EMB_RES_ECO" once forced a temporary "RES0" override. The root cause was a
+        // stale RES0-named orphan .sysres left behind when a resource ID flipped (the same orphan that bit
+        // M262), NOT a structural duplicate. Here the M580 ResourceId is a stable const, so the rename
+        // touches only the Name attribute (no filename flip → no orphan), and SweepOrphanSysres clears any
+        // pre-existing orphan on a Clean. The .hcf binds via Form-1 GUID triples (<resId>.<fbId>.<port>),
+        // so it carries no name dependency. EAE compile is the rig-only confirmation; revert = "RES0".
+        const string M580ResourceName = "M580_RES";
         const string BX1ResourceName  = "BX1_RES";
 
         // Topology Equipment UUIDs — stable so the JSON Equipment entries
@@ -405,6 +401,12 @@ namespace CodeGen.Devices.Core
                 File.WriteAllText(sysresPath, BuildSysresXml(resourceId, resourceName));
                 result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, sysresPath));
             }
+            else
+            {
+                // Re-align an EXISTING resource's Name (e.g. a prior-deploy "RES0" -> "M580_RES")
+                // without disturbing its FBNetwork — the file is preserved to keep mirrored FB content.
+                AlignSysresResourceName(sysresPath, resourceName, deviceName, result);
+            }
 
             // 3. HCF — copy verbatim from IO folder, then re-root the XML if
             //    it uses the newer <HwConfigExportedConfiguration> form so
@@ -649,6 +651,24 @@ namespace CodeGen.Devices.Core
             "  <FBNetwork>\r\n" +
             "  </FBNetwork>\r\n" +
             "</Resource>\r\n";
+
+        // Set an existing .sysres root Resource Name (idempotent — no-op when already correct),
+        // preserving its FBNetwork. Used to migrate a prior-deploy "RES0" M580 sysres to "M580_RES".
+        static void AlignSysresResourceName(string sysresPath, string resourceName, string deviceName, EmitResult result)
+        {
+            try
+            {
+                var doc = XDocument.Load(sysresPath, LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                var current = (string?)root.Attribute("Name");
+                if (string.Equals(current, resourceName, StringComparison.Ordinal)) return;
+                root.SetAttributeValue("Name", resourceName);
+                doc.Save(sysresPath);
+                result.Warnings.Add($"{deviceName}: sysres resource Name '{current}' -> '{resourceName}'.");
+            }
+            catch { /* best-effort — emit pipeline continues even if the sysres rewrite fails */ }
+        }
 
         /// <summary>Empty SystemDeviceProperties (E0601B81 plugin) — shipped pre-empty
         /// so the project compiles cold. Shared with M262SysdevEmitter's bootstrap.</summary>
