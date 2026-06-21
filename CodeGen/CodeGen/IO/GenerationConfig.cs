@@ -3,7 +3,6 @@ namespace CodeGen.Configuration
     public sealed class GenerationConfig
     {
         public int RecipeArraySize { get; set; }
-        public int InterlockRuleCap { get; set; }
         public int DefaultMotionMs { get; set; }
         public int CoverMotionMs { get; set; }
 
