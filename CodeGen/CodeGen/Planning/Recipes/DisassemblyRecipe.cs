@@ -51,8 +51,7 @@ namespace CodeGen.Translation.Process
 
             RecipeStepEmitter.Emit(b, def.Block("handshake"), arrays, allComponents);
 
-            if (CodeGen.Translation.HandoffPlanner.CoversOnM580Ring)
-                RecipeStepEmitter.Emit(b, def.Block("coverRemove"), arrays, allComponents);
+            RecipeStepEmitter.Emit(b, def.Block("coverRemove"), arrays, allComponents);
 
             RecipeStepEmitter.Emit(b, def.Block("shaftOut"), arrays, allComponents);
             RecipeStepEmitter.Emit(b, def.Block("bearingOut"), arrays, allComponents);
