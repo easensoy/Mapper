@@ -12,7 +12,7 @@ namespace CodeGen.Devices.M262
     public static class M262SysdevEmitter
     {
         const string LibElNs = "https://www.se.com/LibraryElements";
-        const string ApplicationName = "APP1";
+        const string ApplicationName = "WMG";
         const string DeviceName = "M262";
         // Default kept for back-compat with the unused ReplaceMappingsBlock helper;
         // the live Emit path now reads cfg.ResourceName and passes it through.
@@ -86,6 +86,10 @@ namespace CodeGen.Devices.M262
             var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg)
                 ?? throw new InvalidOperationException(
                     "Cannot derive EAE project root from MapperConfig.SyslayPath/SyslayPath2.");
+
+            // Align the application shell Name to ApplicationName (e.g. APP1 -> WMG) so the app reads WMG
+            // on every Test Runtime, not only after a Clean. The app is identified by ID, not Name.
+            AlignApplicationName(eaeRoot);
 
             var resourceName = string.IsNullOrWhiteSpace(cfg.ResourceName)
                 ? DefaultResourceName
@@ -415,6 +419,31 @@ namespace CodeGen.Devices.M262
         /// tree, so it must match what the .sysdev's &lt;Resource&gt; entry says or EAE
         /// flags the project as inconsistent. Idempotent — safe to re-run.
         /// </summary>
+        // Set every .sysapp root Application Name to ApplicationName (idempotent). The application is
+        // identified by its ID, so renaming the display Name is safe.
+        static void AlignApplicationName(string eaeRoot)
+        {
+            try
+            {
+                var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
+                if (!Directory.Exists(systemDir)) return;
+                foreach (var sysapp in Directory.EnumerateFiles(systemDir, "*.sysapp", SearchOption.AllDirectories))
+                {
+                    try
+                    {
+                        var doc = XDocument.Load(sysapp, LoadOptions.PreserveWhitespace);
+                        var root = doc.Root;
+                        if (root == null) continue;
+                        if (string.Equals((string?)root.Attribute("Name"), ApplicationName, StringComparison.Ordinal)) continue;
+                        root.SetAttributeValue("Name", ApplicationName);
+                        doc.Save(sysapp);
+                    }
+                    catch { /* best-effort per file */ }
+                }
+            }
+            catch { /* best-effort */ }
+        }
+
         static void RenameSysresName(string sysresPath, string resourceName)
         {
             try
