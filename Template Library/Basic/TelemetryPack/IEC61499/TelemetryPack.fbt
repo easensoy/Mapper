@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="b2c3d4e5-1a2b-4c3d-8e9f-0a1b2c3d4e02" Name="TelemetryPack" Comment="Telemetry_CAT helper: packs the MQTT_CONNECTION status scalars into the TelemetryHealth struct (scalar in + ST member access -> whole-struct out — no struct-member connections, which EAE rejects)" Namespace="Main">
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="WMG" Version="0.1" Author="easensoy" Date="6/22/2026" Remarks="IsConnected/ReturnCode/Status/NetworkState/SecurityState/ProtocolState -> Health:TelemetryHealth" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="REQ" Comment="Pack request">
+        <With Var="IsConnected" />
+        <With Var="ReturnCode" />
+        <With Var="Status" />
+        <With Var="NetworkState" />
+        <With Var="SecurityState" />
+        <With Var="ProtocolState" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="CNF" Comment="Pack confirm">
+        <With Var="Health" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="IsConnected" Type="BOOL" />
+      <VarDeclaration Name="ReturnCode" Type="USINT" />
+      <VarDeclaration Name="Status" Type="STRING" />
+      <VarDeclaration Name="NetworkState" Type="STRING" />
+      <VarDeclaration Name="SecurityState" Type="STRING" />
+      <VarDeclaration Name="ProtocolState" Type="STRING" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="Health" Type="TelemetryHealth" Namespace="Main" Comment="Resource telemetry connection health" />
+    </OutputVars>
+  </InterfaceList>
+  <BasicFB>
+    <Attribute Name="FBType.Basic.Algorithm.Order" Value="REQ" />
+    <ECC>
+      <ECState Name="START" Comment="Initial State" x="500" y="400" />
+      <ECState Name="REQ" Comment="Pack" x="1000" y="400">
+        <ECAction Algorithm="REQ" Output="CNF" />
+      </ECState>
+      <ECTransition Source="START" Destination="REQ" Condition="REQ" x="750" y="300" />
+      <ECTransition Source="REQ" Destination="START" Condition="1" x="750" y="500" />
+    </ECC>
+    <Algorithm Name="REQ" Comment="Copy each status scalar into the Health struct">
+      <ST><![CDATA[Health.IsConnected := IsConnected;
+Health.ReturnCode := ReturnCode;
+Health.Status := Status;
+Health.NetworkState := NetworkState;
+Health.SecurityState := SecurityState;
+Health.ProtocolState := ProtocolState;]]></ST>
+    </Algorithm>
+  </BasicFB>
+</FBType>
