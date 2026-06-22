@@ -35,7 +35,10 @@ namespace CodeGen.Translation.Interlocks
         {
             int emitted = EmittedCount(p);
             int inScope = InScope(actuator, allComponents, scopedIds);
-            if (inScope > 0 && emitted == 0)
+            // BX1 covers are deliberately zeroed (FiveStatePlan), so a cover with an in-scope Control.xml
+            // condition but RuleCount=0 is intentional, not a failed translation — exempt it from the guard.
+            bool isCover = CodeGen.Translation.HandoffPlanner.IsCoverDetourActuator(actuator.Name);
+            if (inScope > 0 && emitted == 0 && !isCover)
                 throw new InvalidOperationException(
                     $"[Recipe] Actuator '{actuator.Name}' has {inScope} in-scope Control.xml interlock " +
                     "condition(s) but emitted RuleCount=0 — refusing to generate code whose InterlockManager " +
@@ -81,9 +84,18 @@ namespace CodeGen.Translation.Interlocks
         private static InterlockPlan FiveStatePlan(VueOneComponent actuator,
             IReadOnlyList<VueOneComponent> allComponents,
             IReadOnlyDictionary<string, int>? scopedIds)
-            => scopedIds != null
+        {
+            // BX1 cover P&P actuators ship with NO interlock — matching the proven Ground Truth where the
+            // M580->BX1 cover handoff works. The cover's only Control.xml rule (block CoverPNP_Hr's advance
+            // while Shaft_Hr is at work) became observable once covers moved onto the cross-PLC ring, and it
+            // can stall the cover; the recipe already sequences covers vs shaft, so the rule is redundant.
+            // 2026-06-22: re-instated this zeroing (the "stop zeroing cover interlocks" change broke covers).
+            if (CodeGen.Translation.HandoffPlanner.IsCoverDetourActuator(actuator.Name))
+                return InterlockPlan.Empty(Cap);
+            return scopedIds != null
                 ? InterlockPlanner.BuildRules(actuator, allComponents, scopedIds)
                 : InterlockPlan.Empty(Cap);
+        }
 
         private static InterlockPlan CentreHomePlan(VueOneComponent actuator,
             IReadOnlyList<VueOneComponent> allComponents,
