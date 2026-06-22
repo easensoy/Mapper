@@ -256,9 +256,10 @@ namespace CodeGen.Services
             // patch long ago (above); the new CAT was missed. Masked in the simulator
             // (no-sensor timers advance state, coils unused), fatal on the rig.
             PatchCatSymlinkQi(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT", result);
-            // Remove the dead 'state_out' boundary event (it fed the removed cross-resource MQTT
-            // bridge; nothing consumes it). Visual/interface cleanup only — no control-logic change.
-            StripSevenStateStateOut(eaeProjectDir, result);
+            // A stale deploy can leave the boundary 'current_state_to_process' (still referenced by the
+            // _HMI) orphaned after the old 'state_out' event was removed — EAE rejects the unWITHed var.
+            // Re-pair state_out WITH current_state_to_process (no control-logic change; no-op on a clean CAT).
+            EnsureSevenStateStateOut(eaeProjectDir, result);
             // VISUAL-only: keep each CAT's HMI/OPCUA section frame from spilling into the section
             // below (pull IThis inside, fix the frame). Self-skips CATs without an HMI/OPCUA frame.
             foreach (var hmiCat in new[] { "Five_State_Actuator_CAT", "Seven_State_Actuator_Centre_Home_CAT",
@@ -467,6 +468,15 @@ namespace CodeGen.Services
                 DeployTelemetryConfigDatatype(eaeProjectDir, result);
                 DeployTelemetryHealthDatatype(eaeProjectDir, result);
                 DeployArtifact(libPath, "Composite", "Telemetry_CAT", eaeProjectDir, result, isBasic: false);
+            }
+            else
+            {
+                // Flag OFF: SWEEP any previously-deployed Telemetry_CAT.fbt + its datatypes. EAE
+                // compiles every type in the dfbproj even when no instance uses it, so a lingering
+                // Telemetry_CAT.fbt (member-level Config/Health connections EAE rejects) would still
+                // error. Removing the type + datatypes + dfbproj entries clears those errors; the
+                // syslay/sysres carry raw MQTT_CONNECTION instances (InjectMqttConn, same gate).
+                SweepTelemetryCat(eaeProjectDir, result);
             }
             // Simulator-only swivel sensor synthesis. The Centre-Home swivel reads
             // atWork1/atWork2 from its internal Inputs SYMLINKMULTIVARDST, which subscribes
@@ -1494,13 +1504,18 @@ namespace CodeGen.Services
             "</DataType>";
 
         /// <summary>
-        /// Strip the dead <c>state_out</c> boundary event from the deployed Seven-State centre-home
-        /// CAT: the <c>&lt;Event Name="state_out"&gt;</c> (EventOutputs), its <c>&lt;Output&gt;</c> pin,
-        /// and the <c>ActuatorCore.pst_out → state_out</c> connection. It fed the removed cross-resource
-        /// MQTT bridge and has no consumer. Interface/visual cleanup only — the internal
-        /// ActuatorCore.current_state_to_process (interlock + MqttFmt) is untouched. Idempotent.
+        /// Repairs the deployed Seven-State centre-home CAT's boundary state output. A stale deploy
+        /// (from the old cross-resource MQTT bridge) left a boundary OutputVar
+        /// <c>current_state_to_process</c> WITH-associated to a <c>state_out</c> event. An earlier
+        /// cleanup removed <c>state_out</c> but kept <c>current_state_to_process</c> — orphaning it
+        /// (no WITH clause), which EAE rejects ("input variable that does not appear in any WITH clause
+        /// cannot be connected"). The _HMI faceplate still references <c>current_state_to_process</c>
+        /// (so it must NOT be removed). This RE-ADDS <c>state_out</c> (WITH current_state_to_process) +
+        /// the <c>ActuatorCore.pst_out → state_out</c> event connection, restoring the consistent,
+        /// compiling pre-cleanup state. Idempotent; a no-op on a fresh committed CAT (no boundary var)
+        /// and once already consistent (state_out present).
         /// </summary>
-        static void StripSevenStateStateOut(string eaeProjectDir, DeployResult result)
+        static void EnsureSevenStateStateOut(string eaeProjectDir, DeployResult result)
         {
             try
             {
@@ -1508,27 +1523,45 @@ namespace CodeGen.Services
                     "Seven_State_Actuator_Centre_Home_CAT", "Seven_State_Actuator_Centre_Home_CAT.fbt");
                 if (!File.Exists(fbt)) return;
                 var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                int removed = 0;
-                bool Is(System.Xml.Linq.XElement e, string local, string name) =>
-                    e.Name.LocalName == local &&
-                    string.Equals((string?)e.Attribute("Name"), name, StringComparison.Ordinal);
-                foreach (var e in doc.Descendants().Where(e => Is(e, "Event", "state_out")).ToList())
-                    { e.Remove(); removed++; }
-                foreach (var o in doc.Descendants().Where(e => Is(e, "Output", "state_out")).ToList())
-                    { o.Remove(); removed++; }
-                foreach (var c in doc.Descendants().Where(e => e.Name.LocalName == "Connection" &&
-                             string.Equals((string?)e.Attribute("Destination"), "state_out", StringComparison.Ordinal)).ToList())
-                    { c.Remove(); removed++; }
-                if (removed > 0)
-                {
-                    doc.Save(fbt, System.Xml.Linq.SaveOptions.DisableFormatting);
-                    result.PatchesApplied.Add($"Seven_State_Actuator_Centre_Home_CAT: stripped dead state_out ({removed} node(s))");
-                    MapperLogger.Info($"[Deploy] Seven_State state_out stripped ({removed} node(s))");
-                }
+                var root = doc.Root;
+                if (root == null) return;
+                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+                var iface = root.Element(ns + "InterfaceList");
+                var net = root.Element(ns + "FBNetwork");
+                if (iface == null || net == null) return;
+
+                // Only repair a stale-bridge CAT that still carries the boundary current_state_to_process.
+                var outputVars = iface.Element(ns + "OutputVars");
+                bool hasBoundaryVar = outputVars?.Elements(ns + "VarDeclaration")
+                    .Any(v => (string?)v.Attribute("Name") == "current_state_to_process") == true;
+                if (!hasBoundaryVar) return;   // fresh committed CAT -> nothing to repair
+
+                var eventOutputs = iface.Element(ns + "EventOutputs");
+                if (eventOutputs == null) return;
+                if (eventOutputs.Elements(ns + "Event").Any(e => (string?)e.Attribute("Name") == "state_out"))
+                    return;   // already consistent
+
+                // Re-pair: state_out WITH current_state_to_process, driven by ActuatorCore.pst_out.
+                eventOutputs.Add(new System.Xml.Linq.XElement(ns + "Event",
+                    new System.Xml.Linq.XAttribute("Name", "state_out"),
+                    new System.Xml.Linq.XAttribute("Comment", "Re-paired with current_state_to_process so the boundary var has a WITH clause (HMI reads it)"),
+                    new System.Xml.Linq.XElement(ns + "With",
+                        new System.Xml.Linq.XAttribute("Var", "current_state_to_process"))));
+
+                var ec = net.Element(ns + "EventConnections");
+                if (ec == null) { ec = new System.Xml.Linq.XElement(ns + "EventConnections"); net.Add(ec); }
+                if (!ec.Elements(ns + "Connection").Any(c => (string?)c.Attribute("Destination") == "state_out"))
+                    ec.Add(new System.Xml.Linq.XElement(ns + "Connection",
+                        new System.Xml.Linq.XAttribute("Source", "ActuatorCore.pst_out"),
+                        new System.Xml.Linq.XAttribute("Destination", "state_out")));
+
+                doc.Save(fbt, System.Xml.Linq.SaveOptions.DisableFormatting);
+                result.PatchesApplied.Add("Seven_State_Actuator_Centre_Home_CAT: re-paired state_out WITH current_state_to_process (HMI keeps the var)");
+                MapperLogger.Info("[Deploy] Seven_State state_out re-paired (current_state_to_process valid again)");
             }
             catch (Exception ex)
             {
-                result.Warnings.Add($"StripSevenStateStateOut failed: {ex.Message}");
+                result.Warnings.Add($"EnsureSevenStateStateOut failed: {ex.Message}");
             }
         }
 
@@ -3424,22 +3457,13 @@ namespace CodeGen.Services
                 if (lastFb != null) { lastFb.AddAfterSelf(pubFb); lastFb.AddAfterSelf(fmtFb); }
                 else { net.Add(fmtFb); net.Add(pubFb); }
 
-                // VISUAL grouping only (no wiring change): a light-blue frame around MqttFmt+MqttPub.
-                // They sit at x>=8000, RIGHT of every existing section frame (which end at x=7900),
-                // so this never overlaps Core/Faults/Interlock/HMI-OPCUA/Mode. Idempotent re-patch.
-                System.Xml.Linq.XElement Fp(string n, string v) => new System.Xml.Linq.XElement(ns + "Parameter",
-                    new System.Xml.Linq.XAttribute("Name", n), new System.Xml.Linq.XAttribute("Value", v));
+                // FRAME_MQTT removed 2026-06-22: a <Frame> carrying <Parameter> children (the syslay
+                // frame style) is INVALID inside a CAT (FBType) FBNetwork — EAE rejected it with
+                // ERR_XML_UNKNOWN_TAG 'FBType.FBNetwork.Frame.Parameter'. It was visual-only (no wiring),
+                // so it simply goes. Keep the removal below so a re-deploy onto a CAT that still carries
+                // a stale FRAME_MQTT cleans it out.
                 net.Elements(ns + "Frame")
                    .Where(fr => (string?)fr.Attribute("Name") == "FRAME_MQTT").Remove();
-                net.Add(new System.Xml.Linq.XElement(ns + "Frame",
-                    new System.Xml.Linq.XAttribute("Name", "FRAME_MQTT"),
-                    new System.Xml.Linq.XAttribute("X", "7920"),
-                    new System.Xml.Linq.XAttribute("Y", "2360"),
-                    new System.Xml.Linq.XAttribute("Width", "1840"),
-                    new System.Xml.Linq.XAttribute("Height", "1080"),
-                    Fp("BackgroundColor", "LightBlue"), Fp("TextColor", "Black"),
-                    Fp("Font", "Microsoft Sans Serif, 10pt"), Fp("TextAlignment", "TopRight"),
-                    Fp("MoveStyle", "AnyContained"), Fp("Text", "MQTT"), Fp("NxtLayerIdentifier", "")));
 
                 // Ensure connection containers exist.
                 var ec = net.Element(ns + "EventConnections");
@@ -5103,6 +5127,56 @@ namespace CodeGen.Services
         // Retire an FB type we no longer ship (e.g. the simulator-only SimCentreHomeSensor_7SCH):
         // delete its top-level .fbt/.doc.xml/.meta.xml/.Basic.export and strip its dfbproj entries so
         // EAE shows no dangling Missing Project Files. Idempotent — a no-op once the type is gone.
+        /// <summary>
+        /// Removes a previously-deployed Telemetry_CAT wrapper (when useTelemetryCat=false): the
+        /// composite <c>Telemetry_CAT.fbt</c> + <c>.composite.offline.xml</c> and the two datatypes
+        /// <c>TelemetryConfig.dt</c> / <c>TelemetryHealth.dt</c>, plus their .dfbproj entries. Without
+        /// this the stale member-level type keeps compile-erroring even with no instance using it.
+        /// Idempotent — a no-op once they are gone.
+        /// </summary>
+        static void SweepTelemetryCat(string eaeProjectDir, DeployResult result)
+        {
+            try
+            {
+                var iec = Path.Combine(eaeProjectDir, "IEC61499");
+                int filesGone = 0;
+                foreach (var rel in new[]
+                {
+                    "Telemetry_CAT.fbt",
+                    "Telemetry_CAT.composite.offline.xml",
+                    Path.Combine("DataType", "TelemetryConfig.dt"),
+                    Path.Combine("DataType", "TelemetryHealth.dt"),
+                })
+                {
+                    var p = Path.Combine(iec, rel);
+                    if (File.Exists(p)) { File.Delete(p); filesGone++; }
+                }
+
+                var dfbproj = Path.Combine(iec, "IEC61499.dfbproj");
+                int entriesGone = 0;
+                if (File.Exists(dfbproj))
+                {
+                    var doc = System.Xml.Linq.XDocument.Load(dfbproj, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                    bool Match(string? inc) => inc != null &&
+                        (inc.Equals("Telemetry_CAT.fbt", StringComparison.OrdinalIgnoreCase) ||
+                         inc.Equals("Telemetry_CAT.composite.offline.xml", StringComparison.OrdinalIgnoreCase) ||
+                         inc.EndsWith("TelemetryConfig.dt", StringComparison.OrdinalIgnoreCase) ||
+                         inc.EndsWith("TelemetryHealth.dt", StringComparison.OrdinalIgnoreCase));
+                    foreach (var el in doc.Descendants()
+                        .Where(e => (e.Name.LocalName == "Compile" || e.Name.LocalName == "None")
+                            && Match((string?)e.Attribute("Include"))).ToList())
+                    { el.Remove(); entriesGone++; }
+                    if (entriesGone > 0) doc.Save(dfbproj);
+                }
+                if (filesGone > 0 || entriesGone > 0)
+                    result.PatchesApplied.Add($"Telemetry_CAT retired (useTelemetryCat=false): {filesGone} file(s) + {entriesGone} dfbproj entry(ies) removed");
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"SweepTelemetryCat failed: {ex.Message}");
+            }
+        }
+
         static void SweepRetiredType(string eaeProjectDir, string typeName, DeployResult result)
         {
             try
