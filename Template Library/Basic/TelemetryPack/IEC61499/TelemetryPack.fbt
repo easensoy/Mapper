@@ -22,10 +22,10 @@
     <InputVars>
       <VarDeclaration Name="IsConnected" Type="BOOL" />
       <VarDeclaration Name="ReturnCode" Type="USINT" />
-      <VarDeclaration Name="Status" Type="STRING" />
-      <VarDeclaration Name="NetworkState" Type="STRING" />
-      <VarDeclaration Name="SecurityState" Type="STRING" />
-      <VarDeclaration Name="ProtocolState" Type="STRING" />
+      <VarDeclaration Name="Status" Type="STRING[255]" />
+      <VarDeclaration Name="NetworkState" Type="STRING[80]" />
+      <VarDeclaration Name="SecurityState" Type="STRING[80]" />
+      <VarDeclaration Name="ProtocolState" Type="STRING[80]" />
     </InputVars>
     <OutputVars>
       <VarDeclaration Name="Health" Type="TelemetryHealth" Namespace="Main" Comment="Resource telemetry connection health" />
