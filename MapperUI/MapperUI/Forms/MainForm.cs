@@ -1115,6 +1115,13 @@ namespace MapperUI
                         CodeGen.Devices.Core.EaeProjectLayout.SweepOrphanSysres(eaeRootSweep, AppendActivity));
                     if (swept > 0)
                         AppendActivity($"[Sysres][Sweep] removed {swept} orphan .sysres shell(s); EAE refreshes obj/System.hash on the next Build.");
+                    // Enforce EAE's "max 1 resource per device" at the file level — drops any stray
+                    // second <Resource> a sysdev accumulated during resource churn (the file-level guard
+                    // behind "Device M580 contains 2 instances of EMB_RES_ECO"). No-op on a clean tree.
+                    var deduped = await Task.Run(() =>
+                        CodeGen.Devices.Core.EaeProjectLayout.DedupeSysdevResources(eaeRootSweep, AppendActivity));
+                    if (deduped > 0)
+                        AppendActivity($"[Sysdev][Dedupe] removed {deduped} extra <Resource> entry(ies); each device now declares exactly one resource.");
                 }
                 catch (Exception ex)
                 {
