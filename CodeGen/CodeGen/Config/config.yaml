@@ -3,4 +3,7 @@ recipeArraySize: 100    # Process1_Generic recipe arrays
 
 # Actuator settle times (ms) written into the syslay when Control.xml gives none.
 defaultMotionMs: 2000   # default toWork/toHome
-coverMotionMs: 1000     # BX1 cover P&P toWork/toHome
+# BX1 cover P&P toWork/toHome. 2000ms (= the proven Ground-Truth value, fault watchdog 2x = 4000ms).
+# Reverted from 1000ms 2026-06-22: the covers are sensor-driven across the M580->BX1 ring + EtherNet/IP,
+# and a 2000ms fault window was too tight for that round-trip -> the cover faulted before AtWork -> stall.
+coverMotionMs: 2000
