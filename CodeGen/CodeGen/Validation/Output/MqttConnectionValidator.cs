@@ -56,12 +56,12 @@ namespace CodeGen.Devices.Core
                 foreach (var fb in doc.Descendants().Where(e => e.Name.LocalName == "FB"))
                 {
                     var type = (string?)fb.Attribute("Type") ?? string.Empty;
-                    bool isTelemetry = type.Equals("Telemetry_CAT", StringComparison.Ordinal);
+                    bool isTelemetry = type.Equals("Telemetry", StringComparison.Ordinal);
                     if (!type.StartsWith("MQTT_CONNECTION", StringComparison.Ordinal) && !isTelemetry) continue;
                     var name = (string?)fb.Attribute("Name") ?? string.Empty;
 
                     // Raw MQTT_CONNECTION exposes URL/ConnectionID/... as separate <Parameter>s.
-                    // Telemetry_CAT wraps them in one Config:TelemetryConfig struct literal — parse it
+                    // Telemetry wraps them in one Config:TelemetryConfig struct literal — parse it
                     // so the identical URL/ConnectionID/ClientIdentifier checks apply to the wrapped form.
                     var p = isTelemetry
                         ? ParseStructLiteral(fb.Elements()
