@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
-<FBType GUID="b2c3d4e5-1a2b-4c3d-8e9f-0a1b2c3d4e01" Name="TelemetryUnpack" Comment="Telemetry_CAT helper: unpacks the TelemetryConfig struct into MQTT_CONNECTION scalar inputs (whole-struct in + ST member access — no struct-member connections, which EAE rejects)" Namespace="Main">
+<FBType GUID="b2c3d4e5-1a2b-4c3d-8e9f-0a1b2c3d4e01" Name="TelemetryUnpack" Comment="Telemetry helper: unpacks the TelemetryConfig struct into MQTT_CONNECTION scalar inputs (whole-struct in + ST member access — no struct-member connections, which EAE rejects)" Namespace="Main">
   <Identification Standard="61499-2" />
   <VersionInfo Organization="WMG" Version="0.1" Author="easensoy" Date="6/22/2026" Remarks="Config:TelemetryConfig -> QI/ConnectionID/URL/ClientIdentifier/ValidateCert/CACert scalars" />
   <InterfaceList>
