@@ -471,10 +471,10 @@ namespace CodeGen.Devices.Core
                 foreach (var mqttKv in byName)
                 {
                     var mqttType = (string?)mqttKv.Value.Attribute("Type");
-                    // Raw MQTT_CONNECTION OR the Telemetry_CAT wrapper (UseTelemetryCat) — both need
+                    // Raw MQTT_CONNECTION OR the Telemetry wrapper (UseTelemetryCat) — both need
                     // the same bring-up on their OWN sysres (the syslay wires don't reach the sysres).
                     if (!string.Equals(mqttType, "MQTT_CONNECTION", StringComparison.Ordinal) &&
-                        !string.Equals(mqttType, "Telemetry_CAT", StringComparison.Ordinal))
+                        !string.Equals(mqttType, "Telemetry", StringComparison.Ordinal))
                         continue;
                     var mqttName = mqttKv.Key;
                     // INIT off the resource boot anchor: Area (M262), else Station (M580=Station2),
@@ -897,7 +897,7 @@ namespace CodeGen.Devices.Core
             "PLC_RW_M580" or "PLC_RW_BX1" or "PLC_RW_M262" => 1200,
             "DPAC_FULLINIT" or "plcStart"        => 500,
             "MQTT_CONNECTION"                    => 600,
-            "Telemetry_CAT"                      => 800,   // Config + Health structs + 7 events
+            "Telemetry"                          => 800,   // Config + Health structs + 7 events
             _                                     => 1100,
         };
 

@@ -42,10 +42,10 @@ namespace CodeGen.Devices.Core
             // entry it stays only on the syslay (no Mapping) and EAE never deploys it, so
             // the embedded MQTT_PUBLISH FBs have nothing to bind their ConnectionID to.
             "MQTT_CONNECTION",
-            // Telemetry_CAT — the composite wrapper around MQTT_CONNECTION (cfg.UseTelemetryCat,
+            // Telemetry — the composite wrapper around MQTT_CONNECTION (cfg.UseTelemetryCat,
             // default). Mirrored per resource (Telemetry_M262/M580/BX1) for the same reason: its
             // internal MQTT_CONNECTION must reach the sysres so the embedded MqttPub binds locally.
-            "Telemetry_CAT",
+            "Telemetry",
             // Bridge publishers (BX1-side) — only present when the cross-PLC MQTT bridge is
             // enabled; receive M262/M580 state via cross-resource syslay wires.
             "MqttStateFormatter",
