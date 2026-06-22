@@ -15,13 +15,14 @@ namespace CodeGen.Mapping
     public static class ControllerMap
     {
         /// <summary>
-        /// EAE resource name per PLC: M262 → M262_RES, M580 → M580_RES, BX1 → BX1_RES.
+        /// EAE resource name per PLC: M262 → M262_RES, M580 → RES0 (the EAE default, matching the
+        /// authored M580IO.hcf 'RES0.M580IO.*' symlinks), BX1 → BX1_RES.
         /// Returns empty string for <see cref="PlcAssignment.Unknown"/>.
         /// </summary>
         public static string ResourceForPlc(PlcAssignment plc) => plc switch
         {
             PlcAssignment.M262 => "M262_RES",
-            PlcAssignment.M580 => "M580_RES",
+            PlcAssignment.M580 => "RES0",
             PlcAssignment.BX1  => "BX1_RES",
             _ => string.Empty,
         };
