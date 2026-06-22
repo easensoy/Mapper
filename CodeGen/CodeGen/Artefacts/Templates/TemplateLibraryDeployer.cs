@@ -1332,9 +1332,11 @@ namespace CodeGen.Services
             try
             {
                 var dst = Path.Combine(eaeProjectDir, "IEC61499", "MqttStateFormatter.fbt");
-                if (File.Exists(dst)) { result.PatchesApplied.Add("MqttStateFormatter.fbt already present"); return; }
+                // ALWAYS overwrite (was copy-if-absent): the const is deterministic + the type is
+                // Mapper-owned, and a re-deploy onto a tree that still holds the OLD unsized-payload
+                // version must pick up the sized [255] payload (else the WRN_UNSIZED_STRING marker stays).
                 File.WriteAllText(dst, MqttStateFormatterFbt);
-                result.PatchesApplied.Add("MqttStateFormatter.fbt deployed (INT→STRING payload)");
+                result.PatchesApplied.Add("MqttStateFormatter.fbt deployed (INT→STRING[255] payload)");
                 MapperLogger.Info("[Deploy][MQTT] MqttStateFormatter.fbt written to IEC61499/");
             }
             catch (Exception ex)
@@ -3840,7 +3842,7 @@ namespace CodeGen.Services
             "      <VarDeclaration Name=\"state\" Type=\"INT\" Comment=\"current_state_to_process\" />\r\n" +
             "    </InputVars>\r\n" +
             "    <OutputVars>\r\n" +
-            "      <VarDeclaration Name=\"payload\" Type=\"STRING\" Comment=\"MQTT payload (state as text)\" />\r\n" +
+            "      <VarDeclaration Name=\"payload\" Type=\"STRING[255]\" Comment=\"MQTT payload (state as text). Sized [255] so EAE does not flag WRN_UNSIZED_STRING (the yellow pin marker) inside every actuator/sensor CAT.\" />\r\n" +
             "    </OutputVars>\r\n" +
             "  </InterfaceList>\r\n" +
             "  <BasicFB>\r\n" +
