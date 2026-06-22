@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="b2c3d4e5-1a2b-4c3d-8e9f-0a1b2c3d4e01" Name="TelemetryUnpack" Comment="Telemetry_CAT helper: unpacks the TelemetryConfig struct into MQTT_CONNECTION scalar inputs (whole-struct in + ST member access — no struct-member connections, which EAE rejects)" Namespace="Main">
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="WMG" Version="0.1" Author="easensoy" Date="6/22/2026" Remarks="Config:TelemetryConfig -> QI/ConnectionID/URL/ClientIdentifier/ValidateCert/CACert scalars" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="REQ" Comment="Unpack request">
+        <With Var="Config" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="CNF" Comment="Unpack confirm">
+        <With Var="QI" />
+        <With Var="ConnectionID" />
+        <With Var="URL" />
+        <With Var="ClientIdentifier" />
+        <With Var="ValidateCert" />
+        <With Var="CACert" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="Config" Type="TelemetryConfig" Namespace="Main" Comment="Resource telemetry connection config" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="QI" Type="BOOL" />
+      <VarDeclaration Name="ConnectionID" Type="STRING" />
+      <VarDeclaration Name="URL" Type="STRING" />
+      <VarDeclaration Name="ClientIdentifier" Type="STRING" />
+      <VarDeclaration Name="ValidateCert" Type="USINT" />
+      <VarDeclaration Name="CACert" Type="STRING" />
+    </OutputVars>
+  </InterfaceList>
+  <BasicFB>
+    <Attribute Name="FBType.Basic.Algorithm.Order" Value="REQ" />
+    <ECC>
+      <ECState Name="START" Comment="Initial State" x="500" y="400" />
+      <ECState Name="REQ" Comment="Unpack" x="1000" y="400">
+        <ECAction Algorithm="REQ" Output="CNF" />
+      </ECState>
+      <ECTransition Source="START" Destination="REQ" Condition="REQ" x="750" y="300" />
+      <ECTransition Source="REQ" Destination="START" Condition="1" x="750" y="500" />
+    </ECC>
+    <Algorithm Name="REQ" Comment="Copy each Config struct member to its scalar output">
+      <ST><![CDATA[QI := Config.QI;
+ConnectionID := Config.ConnectionID;
+URL := Config.URL;
+ClientIdentifier := Config.ClientIdentifier;
+ValidateCert := Config.ValidateCert;
+CACert := Config.CACert;]]></ST>
+    </Algorithm>
+  </BasicFB>
+</FBType>
