@@ -138,6 +138,59 @@ namespace CodeGen.Devices.Core
         }
 
         /// <summary>
+        /// Enforces EAE's "max 1 resource per device" limit at the FILE level: for every sysdev whose
+        /// <c>&lt;Resources&gt;</c> lists more than one <c>&lt;Resource&gt;</c>, keeps the one whose ID has a
+        /// matching <c>{ID}.sysres</c> on disk (else the first) and removes the rest, then re-saves.
+        /// This is the file-level guard behind EAE's "Device X contains 2 instances of
+        /// Runtime.Management.EMB_RES_ECO" error: heavy resource churn (a RES0→M580_RES rename, an id
+        /// flip) with EAE open can leave a stray second <c>&lt;Resource&gt;</c> in a sysdev, which EAE then
+        /// caches. Running this on every Generate means the project EAE re-reads always declares exactly
+        /// one resource per device. Idempotent (no-op on an already-single sysdev). Returns the count removed.
+        /// </summary>
+        public static int DedupeSysdevResources(string? eaeRoot, Action<string>? log = null)
+        {
+            if (string.IsNullOrEmpty(eaeRoot)) return 0;
+            var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
+            if (!Directory.Exists(systemDir)) return 0;
+
+            int removed = 0;
+            foreach (var sysdev in Directory.EnumerateFiles(systemDir, "*.sysdev", SearchOption.AllDirectories))
+            {
+                try
+                {
+                    var doc = XDocument.Load(sysdev, LoadOptions.PreserveWhitespace);
+                    var root = doc.Root;
+                    if (root == null) continue;
+                    XNamespace ns = root.GetDefaultNamespace();
+                    var resources = root.Element(ns + "Resources");
+                    if (resources == null) continue;
+                    var resList = resources.Elements(ns + "Resource").ToList();
+                    if (resList.Count <= 1) continue;   // already single -> nothing to do
+
+                    var folder = Path.Combine(
+                        Path.GetDirectoryName(sysdev)!, Path.GetFileNameWithoutExtension(sysdev));
+                    var onDisk = Directory.Exists(folder)
+                        ? new HashSet<string>(Directory
+                            .EnumerateFiles(folder, "*.sysres", SearchOption.TopDirectoryOnly)
+                            .Select(f => Path.GetFileNameWithoutExtension(f)), StringComparer.Ordinal)
+                        : new HashSet<string>(StringComparer.Ordinal);
+                    // Keep the <Resource> whose ID has a live .sysres (else the first); drop the rest.
+                    var keeper = resList.FirstOrDefault(r => onDisk.Contains((string?)r.Attribute("ID") ?? ""))
+                                 ?? resList[0];
+                    foreach (var r in resList.Where(r => r != keeper)) { r.Remove(); removed++; }
+                    doc.Save(sysdev);
+                    log?.Invoke($"[Sysdev][Dedupe] {Path.GetFileName(sysdev)}: removed {resList.Count - 1} " +
+                        $"extra <Resource>, kept {(string?)keeper.Attribute("Name")} ({(string?)keeper.Attribute("ID")}).");
+                }
+                catch (Exception ex)
+                {
+                    log?.Invoke($"[Sysdev][Dedupe][Warn] {Path.GetFileName(sysdev)}: {ex.Message}");
+                }
+            }
+            return removed;
+        }
+
+        /// <summary>
         /// Removes the dead <c>work1ToHomeTime</c> / <c>work2ToHomeTime</c> &lt;Parameter&gt; values
         /// from every <c>Seven_State_Actuator_Centre_Home_CAT</c> instance in every deployed sysres.
         /// The Mapper no longer SETS these (2026-06-19) — the two work-to-home E_DELAY timers in that
