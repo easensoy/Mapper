@@ -24,11 +24,11 @@
     </InputVars>
     <OutputVars>
       <VarDeclaration Name="QI" Type="BOOL" />
-      <VarDeclaration Name="ConnectionID" Type="STRING" />
-      <VarDeclaration Name="URL" Type="STRING" />
-      <VarDeclaration Name="ClientIdentifier" Type="STRING" />
+      <VarDeclaration Name="ConnectionID" Type="STRING[80]" />
+      <VarDeclaration Name="URL" Type="STRING[255]" />
+      <VarDeclaration Name="ClientIdentifier" Type="STRING[80]" />
       <VarDeclaration Name="ValidateCert" Type="USINT" />
-      <VarDeclaration Name="CACert" Type="STRING" />
+      <VarDeclaration Name="CACert" Type="STRING[255]" />
     </OutputVars>
   </InterfaceList>
   <BasicFB>
