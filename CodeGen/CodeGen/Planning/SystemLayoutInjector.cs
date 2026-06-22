@@ -1556,7 +1556,7 @@ namespace CodeGen.Translation
                 {
                     if (config.UseTelemetryCat)
                     {
-                        // Wrap the MQTT_CONNECTION in the Telemetry_CAT composite: ONE Config:TelemetryConfig
+                        // Wrap the MQTT_CONNECTION in the Telemetry composite: ONE Config:TelemetryConfig
                         // input carries the IDENTICAL QI/ConnectionID/URL/ClientIdentifier (ValidateCert/CACert
                         // default 0/'' in insecure mode = the prior implicit FB defaults). Health:TelemetryHealth
                         // is an OUTPUT (no instance param). The wrapped MQTT_CONNECTION keeps the same ConnectionID,
@@ -1566,7 +1566,7 @@ namespace CodeGen.Translation
                             config.MqttSecureTls ? config.MqttValidateCert : 0,
                             config.MqttSecureTls ? (config.MqttCaCert ?? string.Empty) : string.Empty);
                         builder.AddFB(FBIdGenerator.GenerateFBId(fbName), fbName,
-                            "Telemetry_CAT", "Main", x, y,
+                            "Telemetry", "Main", x, y,
                             new Dictionary<string, string> { ["Config"] = cfgLit });
                         return;
                     }
@@ -1597,7 +1597,7 @@ namespace CodeGen.Translation
                         "MQTT_CONNECTION", "Runtime.NetConnectivity", x, y, p);
                 }
 
-                // Telemetry_CAT (cfg.UseTelemetryCat, default) wraps each resource's MQTT_CONNECTION; the
+                // Telemetry (cfg.UseTelemetryCat, default) wraps each resource's MQTT_CONNECTION; the
                 // instances are named Telemetry_M262/M580/BX1. The raw-FB revert keeps the MqttConn* names.
                 bool tele = config.UseTelemetryCat;
                 string bx1Name  = tele ? "Telemetry_BX1"  : "MqttConn";
@@ -1625,7 +1625,7 @@ namespace CodeGen.Translation
                 builder.AddEventConnection("Area.INITO", $"{m262Name}.INIT");
                 builder.AddEventConnection("Station2.INITO", $"{m580Name}.INIT");
                 report.Missing.Add(
-                    $"[MQTT] {(tele ? "Telemetry_CAT" : "MQTT_CONNECTION")} injected per resource — BX1 " +
+                    $"[MQTT] {(tele ? "Telemetry" : "MQTT_CONNECTION")} injected per resource — BX1 " +
                     $"(ClientId SMC_BX1) + M262 (SMC_M262) + M580 (SMC_M580), shared ConnectionID=" +
                     $"{config.MqttConnectionName} so each resource's embedded MqttPub binds locally; URL={brokerUrl}.");
             }
