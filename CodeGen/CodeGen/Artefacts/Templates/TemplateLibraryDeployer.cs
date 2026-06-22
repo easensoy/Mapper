@@ -470,19 +470,23 @@ namespace CodeGen.Services
             // them undeployed + emits the raw MQTT_CONNECTION instead (one-rebuild revert).
             if (cfg.UseTelemetryCat)
             {
-                DeployTelemetryConfigDatatype(eaeProjectDir, result);
-                DeployTelemetryHealthDatatype(eaeProjectDir, result);
-                // Force-refresh the FB TYPEs (DeployArtifact is copy-if-absent): a re-deploy onto a tree
-                // that still holds an older Telemetry_CAT.fbt / helper FB would otherwise keep the stale
-                // wiring. Deleting them first lets the current versions land. Datatypes are unchanged so
-                // they need no refresh.
+                // Force-refresh FIRST: DeployArtifact AND the datatype writers are copy-if-absent, so a
+                // re-deploy onto a tree that still holds an OLDER Telemetry_CAT.fbt / helper FB / unsized
+                // .dt would keep the stale version (the unsized STRING[15] .dt is exactly what triggered
+                // ERR_CONST_INIT on the 24-char URL). Delete all of them first so the current (sized)
+                // versions land.
                 var iecDir = Path.Combine(eaeProjectDir, "IEC61499");
-                foreach (var stale in new[] { "Telemetry_CAT.fbt", "Telemetry_CAT.composite.offline.xml",
-                                              "TelemetryUnpack.fbt", "TelemetryPack.fbt" })
+                foreach (var stale in new[] {
+                    "Telemetry_CAT.fbt", "Telemetry_CAT.composite.offline.xml",
+                    "TelemetryUnpack.fbt", "TelemetryPack.fbt",
+                    Path.Combine("DataType", "TelemetryConfig.dt"),
+                    Path.Combine("DataType", "TelemetryHealth.dt") })
                 {
                     var p = Path.Combine(iecDir, stale);
                     if (File.Exists(p)) { try { File.Delete(p); } catch { /* locked -> copy-if-absent keeps the old */ } }
                 }
+                DeployTelemetryConfigDatatype(eaeProjectDir, result);
+                DeployTelemetryHealthDatatype(eaeProjectDir, result);
                 DeployArtifact(libPath, "Basic", "TelemetryUnpack", eaeProjectDir, result, isBasic: true);
                 DeployArtifact(libPath, "Basic", "TelemetryPack", eaeProjectDir, result, isBasic: true);
                 DeployArtifact(libPath, "Composite", "Telemetry_CAT", eaeProjectDir, result, isBasic: false);
@@ -1473,12 +1477,15 @@ namespace CodeGen.Services
             "  <VersionInfo Organization=\"WMG\" Version=\"0.1\" Author=\"easensoy\" Date=\"6/21/2026\" Remarks=\"single STRUCT input for Telemetry_CAT\" />\r\n" +
             "  <CompilerInfo />\r\n" +
             "  <StructuredType>\r\n" +
+            // STRING members are explicitly sized: an unsized STRING defaults to STRING[15] in EAE,
+            // and the 24-char URL 'mqtt://192.168.1.50:1883' then triggers ERR_CONST_INIT on the struct
+            // initializer. Sizes must match TelemetryUnpack's output vars (the ST copy must not truncate).
             "    <VarDeclaration Name=\"QI\" Type=\"BOOL\" />\r\n" +
-            "    <VarDeclaration Name=\"ConnectionID\" Type=\"STRING\" />\r\n" +
-            "    <VarDeclaration Name=\"URL\" Type=\"STRING\" />\r\n" +
-            "    <VarDeclaration Name=\"ClientIdentifier\" Type=\"STRING\" />\r\n" +
+            "    <VarDeclaration Name=\"ConnectionID\" Type=\"STRING[80]\" />\r\n" +
+            "    <VarDeclaration Name=\"URL\" Type=\"STRING[255]\" />\r\n" +
+            "    <VarDeclaration Name=\"ClientIdentifier\" Type=\"STRING[80]\" />\r\n" +
             "    <VarDeclaration Name=\"ValidateCert\" Type=\"USINT\" />\r\n" +
-            "    <VarDeclaration Name=\"CACert\" Type=\"STRING\" />\r\n" +
+            "    <VarDeclaration Name=\"CACert\" Type=\"STRING[255]\" />\r\n" +
             "  </StructuredType>\r\n" +
             "</DataType>";
 
@@ -1512,12 +1519,14 @@ namespace CodeGen.Services
             "  <VersionInfo Organization=\"WMG\" Version=\"0.1\" Author=\"easensoy\" Date=\"6/21/2026\" Remarks=\"single STRUCT output for Telemetry_CAT\" />\r\n" +
             "  <CompilerInfo />\r\n" +
             "  <StructuredType>\r\n" +
+            // STRING members explicitly sized (unsized -> STRING[15] default + WRN_UNSIZED_STRING).
+            // Sizes match TelemetryPack's input vars so the ST copy from the MQTT status outputs is exact.
             "    <VarDeclaration Name=\"IsConnected\" Type=\"BOOL\" />\r\n" +
             "    <VarDeclaration Name=\"ReturnCode\" Type=\"USINT\" />\r\n" +
-            "    <VarDeclaration Name=\"Status\" Type=\"STRING\" />\r\n" +
-            "    <VarDeclaration Name=\"NetworkState\" Type=\"STRING\" />\r\n" +
-            "    <VarDeclaration Name=\"SecurityState\" Type=\"STRING\" />\r\n" +
-            "    <VarDeclaration Name=\"ProtocolState\" Type=\"STRING\" />\r\n" +
+            "    <VarDeclaration Name=\"Status\" Type=\"STRING[255]\" />\r\n" +
+            "    <VarDeclaration Name=\"NetworkState\" Type=\"STRING[80]\" />\r\n" +
+            "    <VarDeclaration Name=\"SecurityState\" Type=\"STRING[80]\" />\r\n" +
+            "    <VarDeclaration Name=\"ProtocolState\" Type=\"STRING[80]\" />\r\n" +
             "  </StructuredType>\r\n" +
             "</DataType>";
 
