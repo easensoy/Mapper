@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
-<FBType GUID="b2c3d4e5-1a2b-4c3d-8e9f-0a1b2c3d4e02" Name="TelemetryPack" Comment="Telemetry_CAT helper: packs the MQTT_CONNECTION status scalars into the TelemetryHealth struct (scalar in + ST member access -> whole-struct out — no struct-member connections, which EAE rejects)" Namespace="Main">
+<FBType GUID="b2c3d4e5-1a2b-4c3d-8e9f-0a1b2c3d4e02" Name="TelemetryPack" Comment="Telemetry helper: packs the MQTT_CONNECTION status scalars into the TelemetryHealth struct (scalar in + ST member access -> whole-struct out — no struct-member connections, which EAE rejects)" Namespace="Main">
   <Identification Standard="61499-2" />
   <VersionInfo Organization="WMG" Version="0.1" Author="easensoy" Date="6/22/2026" Remarks="IsConnected/ReturnCode/Status/NetworkState/SecurityState/ProtocolState -> Health:TelemetryHealth" />
   <InterfaceList>
