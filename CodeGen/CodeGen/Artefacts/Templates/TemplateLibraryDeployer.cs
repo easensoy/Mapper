@@ -457,47 +457,39 @@ namespace CodeGen.Services
                 new[] { "TargetWork1State", "TargetWork2State", "TargetHomeState" }, targetStruct, result);
             NormalizeCommonInterlockEvaluatorTargets(eaeProjectDir, targetStruct, result);
 
-            // Telemetry: wrap each resource-level MQTT_CONNECTION in the Telemetry_CAT composite
-            // (Config:TelemetryConfig in / Health:TelemetryHealth out). The composite carries TWO helper
+            // Telemetry: wrap each resource-level MQTT_CONNECTION in the 'Telemetry' composite
+            // (Config:TelemetryConfig in / Health:TelemetryHealth out). It is a plain composite FB (no
+            // HMI faceplate), so it lives in the Composite folder + is named 'Telemetry', NOT a CAT
+            // (renamed from the misleading 'Telemetry_CAT' 2026-06-22). The composite carries TWO helper
             // Basic FBs — TelemetryUnpack (Config struct -> the 6 MQTT_CONNECTION scalar inputs) and
             // TelemetryPack (the 6 status outputs -> Health struct) — so EVERY internal connection is
             // whole-struct or scalar-to-scalar. The earlier version wired Config.QI->Conn.QI directly
             // (struct-member connections), which EAE rejects (ERR_NOT_ADAPTER: a STRUCT connects whole,
             // not per-member); the helper FBs do the member split in ST, where it is legal + precedented
-            // (the recipe engine reads Recipe[i].StepType the same way). Deploy the 2 structs + the 2
-            // helper Basic FBs + the composite TYPE together so EAE resolves them; the syslay/sysres then
-            // carry Telemetry_* instances (SystemLayoutInjector.InjectMqttConn, same gate). false leaves
-            // them undeployed + emits the raw MQTT_CONNECTION instead (one-rebuild revert).
+            // (the recipe engine reads Recipe[i].StepType the same way). The syslay/sysres carry
+            // Telemetry_* instances (SystemLayoutInjector.InjectMqttConn, same gate). false leaves them
+            // undeployed + emits the raw MQTT_CONNECTION instead (one-rebuild revert).
             if (cfg.UseTelemetryCat)
             {
-                // Force-refresh FIRST: DeployArtifact AND the datatype writers are copy-if-absent, so a
-                // re-deploy onto a tree that still holds an OLDER Telemetry_CAT.fbt / helper FB / unsized
-                // .dt would keep the stale version (the unsized STRING[15] .dt is exactly what triggered
-                // ERR_CONST_INIT on the 24-char URL). Delete all of them first so the current (sized)
-                // versions land.
-                var iecDir = Path.Combine(eaeProjectDir, "IEC61499");
-                foreach (var stale in new[] {
-                    "Telemetry_CAT.fbt", "Telemetry_CAT.composite.offline.xml",
-                    "TelemetryUnpack.fbt", "TelemetryPack.fbt",
-                    Path.Combine("DataType", "TelemetryConfig.dt"),
-                    Path.Combine("DataType", "TelemetryHealth.dt") })
-                {
-                    var p = Path.Combine(iecDir, stale);
-                    if (File.Exists(p)) { try { File.Delete(p); } catch { /* locked -> copy-if-absent keeps the old */ } }
-                }
+                // Clean slate FIRST: SweepTelemetryCat removes ALL telemetry artifacts (files + dfbproj
+                // entries) for the current 'Telemetry' name AND the legacy 'Telemetry_CAT' name + the
+                // helper FBs + the datatypes. This (a) migrates the rename away and (b) defeats the
+                // copy-if-absent staleness — an older unsized .dt (which triggered ERR_CONST_INIT on the
+                // 24-char URL) or member-level composite would otherwise survive a re-deploy. Then deploy
+                // fresh; the dfbproj registration loop re-adds the entries with the current names.
+                SweepTelemetryCat(eaeProjectDir, result);
                 DeployTelemetryConfigDatatype(eaeProjectDir, result);
                 DeployTelemetryHealthDatatype(eaeProjectDir, result);
                 DeployArtifact(libPath, "Basic", "TelemetryUnpack", eaeProjectDir, result, isBasic: true);
                 DeployArtifact(libPath, "Basic", "TelemetryPack", eaeProjectDir, result, isBasic: true);
-                DeployArtifact(libPath, "Composite", "Telemetry_CAT", eaeProjectDir, result, isBasic: false);
+                DeployArtifact(libPath, "Composite", "Telemetry", eaeProjectDir, result, isBasic: false);
             }
             else
             {
-                // Flag OFF: SWEEP any previously-deployed Telemetry_CAT.fbt + its datatypes. EAE
-                // compiles every type in the dfbproj even when no instance uses it, so a lingering
-                // Telemetry_CAT.fbt (member-level Config/Health connections EAE rejects) would still
-                // error. Removing the type + datatypes + dfbproj entries clears those errors; the
-                // syslay/sysres carry raw MQTT_CONNECTION instances (InjectMqttConn, same gate).
+                // Flag OFF: SWEEP any previously-deployed Telemetry wrapper + helpers + datatypes. EAE
+                // compiles every type in the dfbproj even when no instance uses it, so a lingering type
+                // would still error. Removing the files + dfbproj entries clears that; the syslay/sysres
+                // carry raw MQTT_CONNECTION instances (InjectMqttConn, same gate).
                 SweepTelemetryCat(eaeProjectDir, result);
             }
             // Simulator-only swivel sensor synthesis. The Centre-Home swivel reads
@@ -1474,7 +1466,7 @@ namespace CodeGen.Services
             "<!DOCTYPE DataType SYSTEM \"../LibraryElement.dtd\">\r\n" +
             "<DataType Namespace=\"Main\" Name=\"TelemetryConfig\" Comment=\"Telemetry connection config: wraps the MQTT_CONNECTION inputs\">\r\n" +
             "  <Identification Standard=\"1131-3\" />\r\n" +
-            "  <VersionInfo Organization=\"WMG\" Version=\"0.1\" Author=\"easensoy\" Date=\"6/21/2026\" Remarks=\"single STRUCT input for Telemetry_CAT\" />\r\n" +
+            "  <VersionInfo Organization=\"WMG\" Version=\"0.1\" Author=\"easensoy\" Date=\"6/21/2026\" Remarks=\"single STRUCT input for Telemetry\" />\r\n" +
             "  <CompilerInfo />\r\n" +
             "  <StructuredType>\r\n" +
             // STRING members are explicitly sized: an unsized STRING defaults to STRING[15] in EAE,
@@ -1516,7 +1508,7 @@ namespace CodeGen.Services
             "<!DOCTYPE DataType SYSTEM \"../LibraryElement.dtd\">\r\n" +
             "<DataType Namespace=\"Main\" Name=\"TelemetryHealth\" Comment=\"Telemetry connection health: wraps the MQTT_CONNECTION status outputs\">\r\n" +
             "  <Identification Standard=\"1131-3\" />\r\n" +
-            "  <VersionInfo Organization=\"WMG\" Version=\"0.1\" Author=\"easensoy\" Date=\"6/21/2026\" Remarks=\"single STRUCT output for Telemetry_CAT\" />\r\n" +
+            "  <VersionInfo Organization=\"WMG\" Version=\"0.1\" Author=\"easensoy\" Date=\"6/21/2026\" Remarks=\"single STRUCT output for Telemetry\" />\r\n" +
             "  <CompilerInfo />\r\n" +
             "  <StructuredType>\r\n" +
             // STRING members explicitly sized (unsized -> STRING[15] default + WRN_UNSIZED_STRING).
@@ -5155,11 +5147,13 @@ namespace CodeGen.Services
         // delete its top-level .fbt/.doc.xml/.meta.xml/.Basic.export and strip its dfbproj entries so
         // EAE shows no dangling Missing Project Files. Idempotent — a no-op once the type is gone.
         /// <summary>
-        /// Removes a previously-deployed Telemetry_CAT wrapper (when useTelemetryCat=false): the
-        /// composite <c>Telemetry_CAT.fbt</c> + <c>.composite.offline.xml</c> and the two datatypes
-        /// <c>TelemetryConfig.dt</c> / <c>TelemetryHealth.dt</c>, plus their .dfbproj entries. Without
-        /// this the stale member-level type keeps compile-erroring even with no instance using it.
-        /// Idempotent — a no-op once they are gone.
+        /// Removes deployed Telemetry wrapper artifacts (files + .dfbproj entries): the composite
+        /// (BOTH the current <c>Telemetry.fbt</c> AND the legacy <c>Telemetry_CAT.fbt</c> name — the
+        /// type was renamed Telemetry_CAT -> Telemetry, so a re-deploy must migrate the old name away),
+        /// their <c>.composite.offline.xml</c>, the two helper FBs <c>TelemetryUnpack/TelemetryPack.fbt</c>,
+        /// and the two datatypes <c>TelemetryConfig/TelemetryHealth.dt</c>. Called on the flag-OFF path
+        /// (retire telemetry entirely) AND at the top of the flag-ON path (clean slate before a fresh
+        /// deploy, so the rename + the sized .dt land without stale orphans). Idempotent.
         /// </summary>
         static void SweepTelemetryCat(string eaeProjectDir, DeployResult result)
         {
@@ -5169,7 +5163,9 @@ namespace CodeGen.Services
                 int filesGone = 0;
                 foreach (var rel in new[]
                 {
-                    "Telemetry_CAT.fbt",
+                    "Telemetry.fbt",
+                    "Telemetry.composite.offline.xml",
+                    "Telemetry_CAT.fbt",                    // legacy name (pre-rename) — migrate away
                     "Telemetry_CAT.composite.offline.xml",
                     "TelemetryUnpack.fbt",
                     "TelemetryPack.fbt",
@@ -5187,7 +5183,9 @@ namespace CodeGen.Services
                 {
                     var doc = System.Xml.Linq.XDocument.Load(dfbproj, System.Xml.Linq.LoadOptions.PreserveWhitespace);
                     bool Match(string? inc) => inc != null &&
-                        (inc.Equals("Telemetry_CAT.fbt", StringComparison.OrdinalIgnoreCase) ||
+                        (inc.Equals("Telemetry.fbt", StringComparison.OrdinalIgnoreCase) ||
+                         inc.Equals("Telemetry.composite.offline.xml", StringComparison.OrdinalIgnoreCase) ||
+                         inc.Equals("Telemetry_CAT.fbt", StringComparison.OrdinalIgnoreCase) ||
                          inc.Equals("Telemetry_CAT.composite.offline.xml", StringComparison.OrdinalIgnoreCase) ||
                          inc.Equals("TelemetryUnpack.fbt", StringComparison.OrdinalIgnoreCase) ||
                          inc.Equals("TelemetryPack.fbt", StringComparison.OrdinalIgnoreCase) ||
@@ -5200,7 +5198,7 @@ namespace CodeGen.Services
                     if (entriesGone > 0) doc.Save(dfbproj);
                 }
                 if (filesGone > 0 || entriesGone > 0)
-                    result.PatchesApplied.Add($"Telemetry_CAT retired (useTelemetryCat=false): {filesGone} file(s) + {entriesGone} dfbproj entry(ies) removed");
+                    result.PatchesApplied.Add($"Telemetry artifacts swept: {filesGone} file(s) + {entriesGone} dfbproj entry(ies) removed");
             }
             catch (Exception ex)
             {
