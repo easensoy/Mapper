@@ -46,16 +46,14 @@ namespace CodeGen.Devices.Core
         // Sysres IDs are 16-hex chars (EAE convention). Stable, deterministic.
         const string M580ResourceId  = "3E5C2B7F1A4D6C8E";
         const string BX1ResourceId   = "C9F2A4B7E1D3F5A8";
-        // M580 resource name — per-PLC, consistent with M262_RES / BX1_RES (no RES0 in the tree).
-        //
-        // History: an EAE compile error "Device M580 contains 2 instances of
-        // Runtime.Management.EMB_RES_ECO" once forced a temporary "RES0" override. The root cause was a
-        // stale RES0-named orphan .sysres left behind when a resource ID flipped (the same orphan that bit
-        // M262), NOT a structural duplicate. Here the M580 ResourceId is a stable const, so the rename
-        // touches only the Name attribute (no filename flip → no orphan), and SweepOrphanSysres clears any
-        // pre-existing orphan on a Clean. The .hcf binds via Form-1 GUID triples (<resId>.<fbId>.<port>),
-        // so it carries no name dependency. EAE compile is the rig-only confirmation; revert = "RES0".
-        const string M580ResourceName = "M580_RES";
+        // M580 resource name — "RES0" (the EAE default + what the authored M580IO.hcf symlinks use:
+        // 'RES0.M580IO.<sym>'). 2026-06-22: reverted from the custom "M580_RES" back to "RES0" after the
+        // "Device M580 contains 2 instances of Runtime.Management.EMB_RES_ECO" error kept recurring for
+        // months. A custom resource name mismatches both the authored .hcf AND EAE's expected default
+        // resource (EAE can end up tracking its own default RES0 *plus* the custom name = 2), so RES0 is
+        // the consistent, default-matching choice. The ResourceId stays the stable const below (no
+        // filename flip → no orphan); SweepOrphanSysres + DedupeSysdevResources keep it to one resource.
+        const string M580ResourceName = "RES0";
         const string BX1ResourceName  = "BX1_RES";
 
         // Topology Equipment UUIDs — stable so the JSON Equipment entries
@@ -223,14 +221,13 @@ namespace CodeGen.Devices.Core
             var bx1HcfPath = ResolveBx1HcfPath(cfg);
             var bx1Ident = ReadHcfResourceIdentity(bx1HcfPath);
 
-            // M580 resource name is FIXED to "M580_RES" via M580ResourceName,
-            // matching M262 (cfg.ResourceName = "M262_RES") and BX1 below for
-            // a consistent device tree. M580SymbolBinder rewrites every
-            // .hcf channel to a Form 1 GUID triple (<resId>.<fbId>.<port>),
-            // so the .hcf carries no name-prefix dependency on the sysres.
-            // The EMB_RES_ECO double-count error that briefly forced "RES0"
-            // is now blocked at root by CompileCachePurger's duplicate-Layer-ID
-            // .syslay sweep, so per-PLC names are safe again.
+            // M580 resource name is FIXED to "RES0" via M580ResourceName — the EAE default and what the
+            // authored M580IO.hcf symlinks use ('RES0.M580IO.*'). 2026-06-22: reverted from the custom
+            // "M580_RES" because the "Device M580 contains 2 instances of EMB_RES_ECO" error kept
+            // recurring; the default name avoids EAE tracking its own default RES0 alongside a custom one.
+            // M580SymbolBinder still rewrites every .hcf channel to a Form 1 GUID triple
+            // (<resId>.<fbId>.<port>), so binding is name-agnostic; AlignSysresResourceName migrates a
+            // prior-deploy "M580_RES" sysres back to "RES0" on the next Generate.
             var m580ResourceName = M580ResourceName;
             var bx1ResourceId = bx1Ident.GuidId ?? BX1ResourceId;
             if (!string.Equals(bx1ResourceId, BX1ResourceId, StringComparison.Ordinal))
@@ -403,7 +400,7 @@ namespace CodeGen.Devices.Core
             }
             else
             {
-                // Re-align an EXISTING resource's Name (e.g. a prior-deploy "RES0" -> "M580_RES")
+                // Re-align an EXISTING resource's Name (e.g. a prior-deploy "M580_RES" -> "RES0")
                 // without disturbing its FBNetwork — the file is preserved to keep mirrored FB content.
                 AlignSysresResourceName(sysresPath, resourceName, deviceName, result);
             }
@@ -653,7 +650,7 @@ namespace CodeGen.Devices.Core
             "</Resource>\r\n";
 
         // Set an existing .sysres root Resource Name (idempotent — no-op when already correct),
-        // preserving its FBNetwork. Used to migrate a prior-deploy "RES0" M580 sysres to "M580_RES".
+        // preserving its FBNetwork. Used to migrate a prior-deploy "M580_RES" M580 sysres back to "RES0".
         static void AlignSysresResourceName(string sysresPath, string resourceName, string deviceName, EmitResult result)
         {
             try
