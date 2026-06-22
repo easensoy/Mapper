@@ -146,13 +146,13 @@ namespace CodeGen.Devices.M580
 
                 var (resId, resName) = HcfBindingSupport.ReadSysresIdentity(folder);
                 if (string.IsNullOrEmpty(resId)) { Log("skipped, deployed sysres ID not resolvable"); return; }
-                // resName is the live Resource Name attribute (e.g. "M580_RES").
+                // resName is the live Resource Name attribute (e.g. "RES0").
                 // It is what EAE's $${PATH} macro resolves to as the leading
                 // segment of every per-instance symlink the CAT body declares —
-                // so the symlink-form binding we emit below ("M580_RES.X.Y")
+                // so the symlink-form binding we emit below ("RES0.X.Y")
                 // matches the symlink the CAT already publishes for the same
                 // FB instance and EAE renders it in the Symbolic Link view.
-                if (string.IsNullOrWhiteSpace(resName)) resName = "M580_RES";
+                if (string.IsNullOrWhiteSpace(resName)) resName = "RES0";
 
                 var compId = HcfBindingSupport.BuildComponentIdMap(folder);
                 if (compId.Count == 0)
