@@ -458,15 +458,33 @@ namespace CodeGen.Services
             NormalizeCommonInterlockEvaluatorTargets(eaeProjectDir, targetStruct, result);
 
             // Telemetry: wrap each resource-level MQTT_CONNECTION in the Telemetry_CAT composite
-            // (Config:TelemetryConfig in / Health:TelemetryHealth out). Deploy the two structs + the
-            // composite TYPE together so EAE resolves them; the syslay/sysres then carry Telemetry_*
-            // instances (SystemLayoutInjector.InjectMqttConn, same gate). false leaves them undeployed
-            // and emits the raw MQTT_CONNECTION instead — the one-rebuild revert if EAE rejects the
-            // wrapper's member-level struct connections (Config.QI->Conn.QI).
+            // (Config:TelemetryConfig in / Health:TelemetryHealth out). The composite carries TWO helper
+            // Basic FBs — TelemetryUnpack (Config struct -> the 6 MQTT_CONNECTION scalar inputs) and
+            // TelemetryPack (the 6 status outputs -> Health struct) — so EVERY internal connection is
+            // whole-struct or scalar-to-scalar. The earlier version wired Config.QI->Conn.QI directly
+            // (struct-member connections), which EAE rejects (ERR_NOT_ADAPTER: a STRUCT connects whole,
+            // not per-member); the helper FBs do the member split in ST, where it is legal + precedented
+            // (the recipe engine reads Recipe[i].StepType the same way). Deploy the 2 structs + the 2
+            // helper Basic FBs + the composite TYPE together so EAE resolves them; the syslay/sysres then
+            // carry Telemetry_* instances (SystemLayoutInjector.InjectMqttConn, same gate). false leaves
+            // them undeployed + emits the raw MQTT_CONNECTION instead (one-rebuild revert).
             if (cfg.UseTelemetryCat)
             {
                 DeployTelemetryConfigDatatype(eaeProjectDir, result);
                 DeployTelemetryHealthDatatype(eaeProjectDir, result);
+                // Force-refresh the FB TYPEs (DeployArtifact is copy-if-absent): a re-deploy onto a tree
+                // that still holds an older Telemetry_CAT.fbt / helper FB would otherwise keep the stale
+                // wiring. Deleting them first lets the current versions land. Datatypes are unchanged so
+                // they need no refresh.
+                var iecDir = Path.Combine(eaeProjectDir, "IEC61499");
+                foreach (var stale in new[] { "Telemetry_CAT.fbt", "Telemetry_CAT.composite.offline.xml",
+                                              "TelemetryUnpack.fbt", "TelemetryPack.fbt" })
+                {
+                    var p = Path.Combine(iecDir, stale);
+                    if (File.Exists(p)) { try { File.Delete(p); } catch { /* locked -> copy-if-absent keeps the old */ } }
+                }
+                DeployArtifact(libPath, "Basic", "TelemetryUnpack", eaeProjectDir, result, isBasic: true);
+                DeployArtifact(libPath, "Basic", "TelemetryPack", eaeProjectDir, result, isBasic: true);
                 DeployArtifact(libPath, "Composite", "Telemetry_CAT", eaeProjectDir, result, isBasic: false);
             }
             else
@@ -5144,6 +5162,8 @@ namespace CodeGen.Services
                 {
                     "Telemetry_CAT.fbt",
                     "Telemetry_CAT.composite.offline.xml",
+                    "TelemetryUnpack.fbt",
+                    "TelemetryPack.fbt",
                     Path.Combine("DataType", "TelemetryConfig.dt"),
                     Path.Combine("DataType", "TelemetryHealth.dt"),
                 })
@@ -5160,6 +5180,8 @@ namespace CodeGen.Services
                     bool Match(string? inc) => inc != null &&
                         (inc.Equals("Telemetry_CAT.fbt", StringComparison.OrdinalIgnoreCase) ||
                          inc.Equals("Telemetry_CAT.composite.offline.xml", StringComparison.OrdinalIgnoreCase) ||
+                         inc.Equals("TelemetryUnpack.fbt", StringComparison.OrdinalIgnoreCase) ||
+                         inc.Equals("TelemetryPack.fbt", StringComparison.OrdinalIgnoreCase) ||
                          inc.EndsWith("TelemetryConfig.dt", StringComparison.OrdinalIgnoreCase) ||
                          inc.EndsWith("TelemetryHealth.dt", StringComparison.OrdinalIgnoreCase));
                     foreach (var el in doc.Descendants()
