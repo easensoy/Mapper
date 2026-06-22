@@ -3,7 +3,11 @@
 
 # Wrap each resource MQTT_CONNECTION in the Telemetry_CAT composite (Config/Health structs).
 # false -> emit the raw MQTT_CONNECTION FBs instead.
-useTelemetryCat: true
+# 2026-06-22: set FALSE. EAE rejects the wrapper's member-level struct connections
+# (Config.QI->Conn.QI ... ERR_NOT_ADAPTER: a STRUCT var connects whole, not per-member; feeding it
+# into MQTT_CONNECTION's scalar inputs needs either member connections (EAE forbids) or a demux FB
+# (a NEW FB, disallowed)). So we ship the proven raw MQTT_CONNECTION — same standard FB, no wrapper.
+useTelemetryCat: false
 
 # Broker URL. The scheme (mqtt:// vs mqtts://) is derived from secureTls, not from this string.
 brokerUrl: mqtt://192.168.1.50:1883
