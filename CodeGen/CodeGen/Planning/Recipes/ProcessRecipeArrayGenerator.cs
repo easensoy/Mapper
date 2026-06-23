@@ -175,7 +175,7 @@ namespace CodeGen.Translation.Process
             // gates on a same-PLC process is PARKED (single END): cross-process state is not
             // published, so the gate can never be satisfied and free-running would collide on the
             // shared actuators. Cross-PLC gates (Feed/Assembly) are not parked.
-            if (MapperConfig.UnparkDisassembly &&
+            if (MapperConfig.UnparkDisassembly && !MapperConfig.DataDrivenRecipes &&
                 string.Equals((process.Name ?? string.Empty).Trim(), "Disassembly",
                     StringComparison.OrdinalIgnoreCase))
             {
@@ -187,7 +187,8 @@ namespace CodeGen.Translation.Process
                 return arrays;
             }
 
-            if (ShouldParkOnIntraPlcProcessHandoff(process, states, allComponents))
+            if (!MapperConfig.DataDrivenRecipes &&
+                ShouldParkOnIntraPlcProcessHandoff(process, states, allComponents))
             {
                 arrays.Warnings.Add(
                     $"[Recipe] Process '{process.Name}' PARKED: its initial state gates on a " +
@@ -669,7 +670,10 @@ namespace CodeGen.Translation.Process
                 }
             }
 
-            AssemblyRecipe.Apply(process, arrays, allComponents);
+            // DataDrivenRecipes: skip the hardcoded overwrite so the generic walk's derived recipe
+            // (already produced above from the Assembly_Station Control.xml state machine) stands.
+            if (!MapperConfig.DataDrivenRecipes)
+                AssemblyRecipe.Apply(process, arrays, allComponents);
 
             // RUN-ONCE: park on the END row after one cycle instead of looping.
             // (2026-06-03 — MapperConfig.RecipeRunOnce, default ON.) The END
