@@ -43,6 +43,18 @@ namespace CodeGen.Configuration
         /// </summary>
         public static bool UnparkDisassembly = true;
 
+        /// <summary>
+        /// When true, Assembly_Station + Disassembly recipes are DERIVED from their Control.xml process
+        /// state machines (the generic ProcessRecipeArrayGenerator walk, commandFromCondition=true — the
+        /// SAME walk Feed_Station already uses), instead of replayed from the hardcoded blocks in
+        /// Config/recipes.yml. The walk already RUNS for these stations (BuildProcessFbParameters passes
+        /// commandFromCondition:true); the hardcoded AssemblyRecipe/DisassemblyRecipe.Apply calls merely
+        /// overwrite its result. This flag suppresses those overwrites so the data-driven recipe stands.
+        /// Default FALSE = byte-identical (the hardcoded recipe wins) while the derived recipe is being
+        /// brought up to parity with the rig-proven one; flip to TRUE once the gate diff proves a match.
+        /// </summary>
+        public static bool DataDrivenRecipes = false;
+
         // Process-FB process_id slots + the robot's state_table slot; data in Config/smc-rig.yml.
         // Each must sit above the component id space (ValidateProcessIdInvariant enforces it). The
         // Assembly->Disassembly handshake rides AssemblyProcessId, so stamp and WAIT share one source.
