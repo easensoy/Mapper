@@ -6,10 +6,10 @@ namespace MapperUI
     internal static class Program
     {
         [STAThread]
-        static void Main()
+        static void Main(string[] args)
         {
             ApplicationConfiguration.Initialize();
-            Application.Run(new MainForm());
+            Application.Run(new MainForm(args));
         }
     }
 }
