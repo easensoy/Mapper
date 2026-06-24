@@ -68,10 +68,13 @@ namespace CodeGen.Translation.Interlocks
                             fromState = predecessor.StateNumber;
                     }
 
-                    // Home-family State_Number 4 publishes only momentarily; remap to the stable 0.
+                    // Home-family State_Number 4 (Five_State ReturnedFinished) publishes only momentarily;
+                    // remap to the stable 0. EXCLUDES the centre-home swivel (Bearing_PnP), whose State 4 is
+                    // "Place" — a real work position, not home — so "block while Bearing_PnP at Place" survives.
                     int blockedStateRuntime = blockedState;
                     if (blockedState == 4 && srcComp != null &&
-                        string.Equals(srcComp.Type, "Actuator", StringComparison.OrdinalIgnoreCase))
+                        string.Equals(srcComp.Type, "Actuator", StringComparison.OrdinalIgnoreCase) &&
+                        !CodeGen.Mapping.TemplateMap.IsBranchedSevenState(srcComp))
                         blockedStateRuntime = 0;
 
                     // Drop "block-while-source-is-home" (Blocked==0): a source at rest is out of the
@@ -110,7 +113,8 @@ namespace CodeGen.Translation.Interlocks
                         StringComparison.OrdinalIgnoreCase))?.StateNumber ?? -1;
                 if (blockedState < 0) continue;
                 if (blockedState == 4 && srcComp != null &&
-                    string.Equals(srcComp.Type, "Actuator", StringComparison.OrdinalIgnoreCase))
+                    string.Equals(srcComp.Type, "Actuator", StringComparison.OrdinalIgnoreCase) &&
+                    !CodeGen.Mapping.TemplateMap.IsBranchedSevenState(srcComp))
                     blockedState = 0;
                 if (blockedState == 0) continue;
                 n++;
