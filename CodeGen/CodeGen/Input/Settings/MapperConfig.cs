@@ -22,9 +22,11 @@ namespace CodeGen.Configuration
         public static bool RecipeRunOnce = true;
 
         // When true, every non-Cover recipe's END points back to step 0 (overrides RecipeRunOnce).
-        // Each recipe's step 0 is a trigger WAIT, so the line self-sequences off fresh trigger messages.
-        // Off (default) = one clean ordered cycle per engine.
-        public static bool EnableCyclicRestart = false;
+        // Each recipe's step 0 is a trigger WAIT, so the line self-sequences off fresh trigger messages:
+        // robot drops the part in the hopper -> PartInHopper goes TRUE -> Feed_Station (parked at its
+        // step-0 WAIT(PartInHopper)) re-fires the pusher -> the whole cycle repeats.
+        // 2026-06-24: enabled so the line runs continuously (was run-once / park-on-END).
+        public static bool EnableCyclicRestart = true;
 
         // The recipe generator's auto-retract safety net runs only for these processes (the Feed_Station
         // twin advances the Checker but never retracts it). Every other process is emitted verbatim.
