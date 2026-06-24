@@ -35,10 +35,10 @@ namespace CodeGen.Translation.Interlocks
         {
             int emitted = EmittedCount(p);
             int inScope = InScope(actuator, allComponents, scopedIds);
-            // BX1 covers are deliberately zeroed (FiveStatePlan), so a cover with an in-scope Control.xml
-            // condition but RuleCount=0 is intentional, not a failed translation — exempt it from the guard.
-            bool isCover = CodeGen.Translation.HandoffPlanner.IsCoverDetourActuator(actuator.Name);
-            if (inScope > 0 && emitted == 0 && !isCover)
+            // Covers are no longer zeroed — they emit their Control.xml interlock like any other actuator,
+            // so the guard applies to them too (an in-scope condition with RuleCount=0 is a real
+            // translation gap, not an intentional cover exemption).
+            if (inScope > 0 && emitted == 0)
                 throw new InvalidOperationException(
                     $"[Recipe] Actuator '{actuator.Name}' has {inScope} in-scope Control.xml interlock " +
                     "condition(s) but emitted RuleCount=0 — refusing to generate code whose InterlockManager " +
@@ -85,13 +85,11 @@ namespace CodeGen.Translation.Interlocks
             IReadOnlyList<VueOneComponent> allComponents,
             IReadOnlyDictionary<string, int>? scopedIds)
         {
-            // BX1 cover P&P actuators ship with NO interlock — matching the proven Ground Truth where the
-            // M580->BX1 cover handoff works. The cover's only Control.xml rule (block CoverPNP_Hr's advance
-            // while Shaft_Hr is at work) became observable once covers moved onto the cross-PLC ring, and it
-            // can stall the cover; the recipe already sequences covers vs shaft, so the rule is redundant.
-            // 2026-06-22: re-instated this zeroing (the "stop zeroing cover interlocks" change broke covers).
-            if (CodeGen.Translation.HandoffPlanner.IsCoverDetourActuator(actuator.Name))
-                return InterlockPlan.Empty(Cap);
+            // Every Five_State actuator — including the BX1 covers — emits whatever interlock the
+            // Control.xml defines. The covers were previously zeroed here, which stripped CoverPNP_Hr's
+            // real safety rule ("block advance while Shaft_Hr / Bearing_PnP is at work") and let the
+            // covers move while the swivel/shaft were still working. The interlock source is cross-PLC
+            // (M580 -> BX1), so the source state must reach BX1 for the rule to clear — verify on sim/rig.
             return scopedIds != null
                 ? InterlockPlanner.BuildRules(actuator, allComponents, scopedIds)
                 : InterlockPlan.Empty(Cap);
