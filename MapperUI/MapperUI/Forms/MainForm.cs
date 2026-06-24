@@ -34,6 +34,8 @@ namespace MapperUI
         StateTransitionTableForm? _stateTransitionTableForm;
         Process? _llmProcess;
         System.Windows.Forms.Timer? _healthTimer;
+        readonly string? _startupControlXmlPath;
+        readonly bool _startupShowMappingRules;
 
         static readonly HttpClient _http = new()
         {
@@ -100,8 +102,13 @@ namespace MapperUI
         const string SymPass = "\u2713";
         const string SymFail = "\u2717";
 
-        public MainForm()
+        public MainForm() : this(Array.Empty<string>())
         {
+        }
+
+        public MainForm(string[] args)
+        {
+            ParseStartupArgs(args, out _startupControlXmlPath, out _startupShowMappingRules);
             InitializeComponent();
             btnGenerateCode.Enabled = false;
         }
@@ -114,6 +121,47 @@ namespace MapperUI
             ValidatePortNamesOnStartup();
             LogInputFolderContents();
             lblStatus.Text = "Ready";
+
+            if (!string.IsNullOrWhiteSpace(_startupControlXmlPath))
+                BeginInvoke(new Action(async () => await LoadStartupControlXmlAsync()));
+        }
+
+        static void ParseStartupArgs(string[] args, out string? controlXmlPath, out bool showMappingRules)
+        {
+            controlXmlPath = null;
+            showMappingRules = false;
+
+            for (int i = 0; i < args.Length; i++)
+            {
+                string arg = args[i];
+                if (arg.Equals("--control", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+                {
+                    controlXmlPath = args[++i];
+                }
+                else if (arg.Equals("--show-mapping-rules", StringComparison.OrdinalIgnoreCase))
+                {
+                    showMappingRules = true;
+                }
+                else if (controlXmlPath == null && arg.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))
+                {
+                    controlXmlPath = arg;
+                }
+            }
+        }
+
+        async Task LoadStartupControlXmlAsync()
+        {
+            try
+            {
+                await LoadControlXmlFromPathAsync(_startupControlXmlPath!);
+                if (_startupShowMappingRules)
+                    btnMappingRules_Click(this, EventArgs.Empty);
+                AppendActivity("[VueOne] MapperUI opened from VueOne Generate IEC61499 Code.");
+            }
+            catch (Exception ex)
+            {
+                ShowError("Could not load startup Control.xml:\n" + ex.Message);
+            }
         }
 
         void ValidatePortNamesOnStartup()
@@ -403,10 +451,20 @@ namespace MapperUI
                 Title = "Open VueOne Control.xml"
             };
             if (dlg.ShowDialog() != DialogResult.OK) return;
-            txtModelPath.Text = dlg.FileName;
-            _loadedControlXmlPath = dlg.FileName;
+            await LoadControlXmlFromPathAsync(dlg.FileName);
+        }
+
+        async Task LoadControlXmlFromPathAsync(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                throw new ArgumentException("Control.xml path is empty.", nameof(path));
+            if (!File.Exists(path))
+                throw new FileNotFoundException("Control.xml not found.", path);
+
+            txtModelPath.Text = path;
+            _loadedControlXmlPath = path;
             btnTestStation1.Enabled = true;
-            await LoadAndValidateAsync(dlg.FileName);
+            await LoadAndValidateAsync(path);
             menuItemStateTransitionTable.Enabled = _loadedComponents.Count > 0;
         }
 
