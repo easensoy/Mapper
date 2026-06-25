@@ -7,3 +7,9 @@ defaultMotionMs: 2000   # default toWork/toHome
 # Reverted from 1000ms 2026-06-22: the covers are sensor-driven across the M580->BX1 ring + EtherNet/IP,
 # and a 2000ms fault window was too tight for that round-trip -> the cover faulted before AtWork -> stall.
 coverMotionMs: 2000
+# CoverPnp_Gripper grip/release ack only (sensorless, timer-driven). Separate from coverMotionMs
+# so the gripper acknowledges faster without lowering the sensor-driven Hr/Vr cover axes.
+# 2026-06-25: lowered 1000->200 to remove the perceptible gripper delay (vacuum grip/release is
+# near-instant). Cannot be 0 — the sensorless gripper needs the timer to report AtWork so the
+# recipe's WAIT gripper=2 satisfies. Raise slightly if the cover drops before the vacuum holds.
+coverGripperAckMs: 200
