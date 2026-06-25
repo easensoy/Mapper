@@ -1250,11 +1250,31 @@ namespace MapperUI
                         AppendActivity($"[Parity] FAIL — {parity.Count} sysres/hcf divergence(s) from the syslay (the deployable LAGS the design):");
                         foreach (var v in parity)
                             AppendActivity($"  [Parity][DIVERGENCE] {v}");
+
+                        var resynced = await Task.Run(() =>
+                            RuntimeArtifactVerifier.SyncMappedSysresParametersFromSyslay(path, Cfg(), AppendActivity));
+                        if (resynced > 0)
+                            AppendActivity($"[Parity] retry sync updated {resynced} mapped sysres FB parameter set(s); re-validating.");
+
+                        parity = await Task.Run(() =>
+                            CodeGen.Devices.Core.SyslaySysresParityValidator.Validate(eaeRoot, path));
+                        if (parity.Count == 0)
+                        {
+                            AppendActivity("[Parity] PASS after retry sync — deployable sysres now mirrors the syslay.");
+                        }
+                        else
+                        {
+                            foreach (var v in parity)
+                                AppendActivity($"  [Parity][STILL-DIVERGED] {v}");
+                            throw new InvalidOperationException(
+                                "Generated deployable sysres still lags the syslay. Close EAE, rerun Generate IEC61499 Code, and do not deploy this stale tree.");
+                        }
                     }
                 }
                 catch (Exception ex)
                 {
                     AppendActivity($"[Parity][Error] {ex.Message}");
+                    throw;
                 }
 
                 // MQTT connection matrix + impossible-config flags. Prints every generated
