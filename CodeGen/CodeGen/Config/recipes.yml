@@ -46,9 +46,6 @@ recipes:
         - { waitRef: shaft_gripper, state: 0 }
         - { cmd: shaft_vr, state: 3 }
         - { waitRef: shaft_vr, state: 0 }
-      # Reverse swivel: collect at AtWork2 (cmd3), deposit at AtWork1 (cmd1), then DIRECT home (cmd5).
-      # SAFETY: no reposition to AtWork2 after release — the empty swing toward the ejector is a
-      # collision risk without a clamp. Do not re-add it.
       bearingOut:
         - { cmd: bearing_pnp, state: 3 }
         - { waitRef: bearing_pnp, state: 4 }
@@ -58,6 +55,8 @@ recipes:
         - { waitRef: bearing_pnp, state: 2 }
         - { cmd: bearing_gripper, state: 3 }
         - { waitRef: bearing_gripper, state: 0 }
+        - { cmd: bearing_pnp, state: 3 }
+        - { waitRef: bearing_pnp, state: 4 }
         - { cmd: bearing_pnp, state: 5 }
         - { waitRef: bearing_pnp, state: 0 }
       unclamp:
