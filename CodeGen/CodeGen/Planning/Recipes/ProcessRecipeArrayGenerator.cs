@@ -58,6 +58,10 @@ namespace CodeGen.Translation.Process
         /// <summary>Generic generator warnings (lookup misses on StateID etc.).</summary>
         public List<string> Warnings { get; } = new();
 
+        /// <summary>Per-process latch: TRUE once the Robot_Task handshake has been emitted, so the
+        /// data-driven walk emits it once (not per robot state) and never generic-walks the robot.</summary>
+        public bool RobotTaskEmitted { get; set; }
+
         /// <summary>
         /// StateID-based Control.xml transition chain used to derive this recipe.
         /// Kept as generated metadata so the syslay/report can show the exact
