@@ -37,6 +37,19 @@ namespace CodeGen.Configuration
         // engine stalls at step 0.
         public static bool EnableSevenStateHomePreamble = false;
 
+        // CENTRE-HOME OVERSHOOT FIX (2026-06-25, ENABLED per user request). The Centre-Home swivel
+        // reaches home by driving the OPPOSITE coil until the DI02 centre sensor trips, then
+        // DE-ENERGISING both coils. On a 3-position cylinder that VENTS when de-energised the arm coasts
+        // PAST centre and rests off-centre (Codex/rig: "between AtWork2 and home"). With this TRUE, the
+        // deployed CAT's 'atHome' algorithm instead HOLDS both coils (outputToWork1/2 := TRUE) so a
+        // cylinder WITH a mechanical mid-stop is driven into and held at centre (catches the overshoot)
+        // -- so Disassembly (homes from AtWork1) ends at the SAME centre as Assembly (homes from
+        // AtWork2). 'toHome' (the drive) is untouched; only the hold-at-centre changes. Bidirectional:
+        // set FALSE to restore the proven de-energise. SAFETY: if the cylinder has NO mid-stop, both-on
+        // drives toward an extreme instead -- test with the e-stop ready, abort if it heads toward Work2
+        // (then set FALSE and use the braking-pulse fallback). See PatchSwivelAtHomeBothCoils.
+        public static bool SwivelHomeHoldBothCoils = false;
+
         /// <summary>
         /// When true, Disassembly gets its reverse recipe (covers off -> shaft -> bearing -> unclamp),
         /// Assembly holds the clamp and publishes a handshake sentinel instead of opening it, and the
