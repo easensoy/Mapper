@@ -1983,12 +1983,15 @@ namespace CodeGen.Translation
             {
                 toWorkMs = GenerationConfig.Current.CoverMotionMs;
                 toHomeMs = GenerationConfig.Current.CoverMotionMs;
-                // The gripper has NO DI to confirm grip/release, so it must timer-acknowledge
-                // (sensorless); CoverPNP_Hr/Vr keep their real atwork/athome sensors.
+                // The gripper has NO DI to confirm grip/release, so it timer-acknowledges
+                // (sensorless) on its own faster ack time; CoverPNP_Hr/Vr keep their real
+                // atwork/athome sensors + coverMotionMs.
                 if (string.Equals(actuator.Name, "CoverPnp_Gripper", StringComparison.OrdinalIgnoreCase))
                 {
                     workSensorFitted = false;
                     homeSensorFitted = false;
+                    int ackMs = GenerationConfig.Current.CoverGripperAckMs;
+                    if (ackMs > 0) { toWorkMs = ackMs; toHomeMs = ackMs; }
                 }
             }
 
