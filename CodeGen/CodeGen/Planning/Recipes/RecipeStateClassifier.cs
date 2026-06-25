@@ -501,6 +501,35 @@ namespace CodeGen.Translation.Process.Recipes
                     continue;
                 }
 
+                // Robot / UR3e is a TASK component (Robot_Task_CAT): one StartTask runs the whole
+                // pick/place/home program and completion is the real DI10 Task_Complete bit, not a
+                // per-state walk. Emit the proven task handshake ONCE (same sequence as the hardcoded
+                // DisassemblyRecipe recipes.yml robot block) and fold the other robot states into it,
+                // so the data-driven path never generic-walks the robot (wrong id / Partplace=4 it
+                // never reports).
+                if (CodeGen.Mapping.TemplateMap.IsRobotTaskArm(target))
+                {
+                    if (!arrays.RobotTaskEmitted)
+                    {
+                        arrays.RobotTaskEmitted = true;
+                        string robotName = (target.Name ?? string.Empty).Trim().ToLowerInvariant();
+                        int robotId = CodeGen.Configuration.MapperConfig.RobotActuatorId;
+                        AddCmdWaitRows(result.Rows, robotName, 1, robotId, 2); // StartTask -> WAIT done
+                        AddCmdWaitRows(result.Rows, robotName, 2, robotId, 0); // reset     -> WAIT ready
+                        arrays.Warnings.Add(
+                            $"[Recipe] '{state.Name}': robot '{target.Name}' emitted as the Robot_Task " +
+                            $"handshake (cmd1 start -> WAIT id{robotId}=2 done -> cmd2 reset -> WAIT id{robotId}=0 " +
+                            "ready); generic robot walk suppressed (Robot_Task_CAT, real DI10 completion).");
+                    }
+                    else
+                    {
+                        arrays.SkippedConditions.Add(
+                            $"state '{state.Name}': robot '{target.Name}' folded into the single Robot_Task " +
+                            "handshake; this robot state contributes no generic row.");
+                    }
+                    continue;
+                }
+
                 if (testActuatorAllowlist != null
                     && !string.Equals(target.Type, "Process", StringComparison.OrdinalIgnoreCase)
                     && !testActuatorAllowlist.Contains((target.Name ?? string.Empty).Trim().ToLowerInvariant()))
