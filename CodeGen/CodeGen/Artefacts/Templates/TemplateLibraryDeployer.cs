@@ -302,6 +302,14 @@ namespace CodeGen.Services
             // model, so both simulator and hardware can use Jyotsna's coil-clearing
             // 'atHome' algorithm and publish output_event at AtHome.
             PatchSwivelAtHomeCoilClear(eaeProjectDir, clearCoils: true, result);
+            // 2026-06-25: CENTRE-HOME OVERSHOOT FIX (gated MapperConfig.SwivelHomeHoldBothCoils, default
+            // OFF). The de-energise-at-centre above lets a venting 3-position swivel coast PAST the DI02
+            // centre sensor and rest off-centre ("between AtWork2 and home"). The root cause is the CAT
+            // home, not the recipe: cmd5 -> ToHome fires the OPPOSITE coil until atHome, then both coils
+            // go FALSE and the freed arm coasts. When the flag is ON, hold BOTH coils at home so a
+            // cylinder with a mechanical mid-stop is driven into + held at centre. Default OFF = today's
+            // proven de-energise (byte-identical). Bidirectional: OFF re-asserts FALSE/FALSE.
+            PatchSwivelAtHomeBothCoils(eaeProjectDir, MapperConfig.SwivelHomeHoldBothCoils, result);
             // 2026-06-04 (Alex fix): the Centre-Home core's work-arrival latches required
             // the two physical work sensors to be perfectly mutually exclusive
             // (ToWork1->AtWork1 needed atWork1=TRUE AND atWork2=FALSE, ToWork2->AtWork2 the
@@ -4581,6 +4589,74 @@ namespace CodeGen.Services
             }
         }
 
+        /// <summary>
+        /// CENTRE-HOME OVERSHOOT FIX (2026-06-25, gated <see cref="MapperConfig.SwivelHomeHoldBothCoils"/>,
+        /// default OFF). Rewrites the 'atHome' algorithm's two coil outputs in the deployed
+        /// SevenStateCentreHomeActuator.fbt. The shipped form DE-ENERGISES both coils at centre
+        /// (outputToWork1/2 := FALSE), so a 3-position swivel that VENTS on de-energise coasts past the
+        /// DI02 centre sensor and rests off-centre. When holdBothCoils is TRUE this sets both coils TRUE:
+        /// for a cylinder WITH a mechanical mid-stop, both ports pressurised drive the arm into + hold it
+        /// at the centre stop, catching the overshoot. Bidirectional + idempotent (OFF re-asserts FALSE,
+        /// so a flag-OFF deploy restores the proven de-energise even after a prior flag-ON deploy). The
+        /// AtHome ECState must already point at the 'atHome' algorithm (PatchSwivelAtHomeCoilClear,
+        /// clearCoils:true, runs just before this) — this only flips the coil VALUES inside it.
+        /// SAFETY: if the cylinder has NO mid-stop, both-on instead drives toward an extreme — enable
+        /// only on the rig with the e-stop ready, and abort if the arm heads toward Work2.
+        /// </summary>
+        static void PatchSwivelAtHomeBothCoils(string eaeProjectDir, bool holdBothCoils, DeployResult result)
+        {
+            var fbt = Path.Combine(eaeProjectDir, "IEC61499", "SevenStateCentreHomeActuator.fbt");
+            if (!File.Exists(fbt))
+            {
+                fbt = Directory.EnumerateFiles(
+                        Path.Combine(eaeProjectDir, "IEC61499"),
+                        "SevenStateCentreHomeActuator.fbt", SearchOption.AllDirectories)
+                    .FirstOrDefault() ?? string.Empty;
+                if (string.IsNullOrEmpty(fbt)) return;
+            }
+
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+
+                var atHomeAlgo = root.Descendants(ns + "Algorithm")
+                    .FirstOrDefault(a => (string?)a.Attribute("Name") == "atHome");
+                var st = atHomeAlgo?.Element(ns + "ST");
+                if (st == null)
+                {
+                    result.Warnings.Add(
+                        "SevenStateCentreHomeActuator.fbt: no 'atHome' algorithm ST; home-hold patch skipped.");
+                    return;
+                }
+
+                string coil = holdBothCoils ? "TRUE" : "FALSE";
+                string body = st.Value;
+                string newBody = System.Text.RegularExpressions.Regex.Replace(
+                    body, @"outputToWork1:=\s*(?:TRUE|FALSE);", $"outputToWork1:= {coil};");
+                newBody = System.Text.RegularExpressions.Regex.Replace(
+                    newBody, @"outputToWork2:=\s*(?:TRUE|FALSE);", $"outputToWork2:= {coil};");
+                if (newBody == body) return; // idempotent (incl. the byte-identical flag-OFF default)
+
+                st.ReplaceNodes(new System.Xml.Linq.XCData(newBody));
+                doc.Save(fbt);
+
+                result.PatchesApplied.Add(
+                    $"SevenStateCentreHomeActuator.fbt: home 'atHome' coils -> {coil}/{coil} " +
+                    (holdBothCoils ? "(HOLD at mid-stop -- centre-home overshoot fix)" : "(de-energise -- default)"));
+                MapperLogger.Info(
+                    $"[Deploy] SevenStateCentreHomeActuator.fbt: home coils -> {coil}/{coil} " +
+                    (holdBothCoils ? "(both-coils hold at centre)" : "(de-energise)"));
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add(
+                    $"SevenStateCentreHomeActuator.fbt home-hold patch failed: {ex.Message}");
+            }
+        }
+
         // Seven_State_Actuator_CAT data-driven patch removed 2026-05-21.
 
         static void PatchKnownArraySizeBugs(string eaeProjectDir, DeployResult result)
@@ -4646,7 +4722,7 @@ namespace CodeGen.Services
                 if (File.Exists(enginePath))
                 {
                     PatchProcessRuntimeEngine(enginePath, result);
-                    PatchProcessRuntimeEccDeadEnd(enginePath, result);
+                    PatchProcessRuntimeEccDeadEnd(enginePath, MapperConfig.EnableCyclicRestart, result);
                     PatchProcessRuntimeStartBypass(enginePath, result);
                     PatchProcessRuntimeEndSequenceNoOp(enginePath, result);
                 }
@@ -4690,7 +4766,7 @@ namespace CodeGen.Services
 
             try
             {
-                PatchProcessRuntimeEccDeadEnd(enginePath, result);
+                PatchProcessRuntimeEccDeadEnd(enginePath, MapperConfig.EnableCyclicRestart, result);
                 PatchProcessRuntimeStartBypass(enginePath, result);
                 PatchProcessRuntimeEndSequenceNoOp(enginePath, result);
             }
@@ -4712,7 +4788,7 @@ namespace CodeGen.Services
         /// recipe-array idempotency gate so it applies even on FBTs that
         /// were already recipe-patched.
         /// </summary>
-        static void PatchProcessRuntimeEccDeadEnd(string fbtPath, DeployResult result)
+        static void PatchProcessRuntimeEccDeadEnd(string fbtPath, bool cyclic, DeployResult result)
         {
             var doc = System.Xml.Linq.XDocument.Load(fbtPath, System.Xml.Linq.LoadOptions.PreserveWhitespace);
             var root = doc.Root!;
@@ -4733,11 +4809,22 @@ namespace CodeGen.Services
                 return;
             }
 
-            // Idempotency: already has an END self-transition?
-            bool alreadyLooped = ecc.Elements(ns + "ECTransition").Any(t =>
-                (string?)t.Attribute("Source") == "END" &&
-                (string?)t.Attribute("Destination") == "END");
-            if (alreadyLooped) return;
+            // CYCLIC RESTART (2026-06-25): the END row's NextStep is 0 when EnableCyclicRestart is on,
+            // so routing END -> ADVANCE makes ADVANCE's AdvanceStep (CurrentStep := Recipe[CurrentStep]
+            // .NextStep) wrap the engine back to step 0 -> the recipe re-runs and the line loops
+            // (Feed -> Assembly -> Disassembly -> robot drop -> Feed...). Run-once keeps END -> END, a
+            // dead-end so the engine PARKS at END. Either destination gives END an outgoing transition,
+            // so WRN_ECC_DEAD_END is satisfied. The no-op EndSequence is LEFT as-is: ADVANCE does the
+            // pointer advance, so EndSequence must NOT also advance or it would skip step 0. The re-armed
+            // step-0 WAIT (check_wait/leftoverSuspect) still holds the loop until a FRESH trigger, so the
+            // line never re-runs without its trigger.
+            string dest = cyclic ? "ADVANCE" : "END";
+
+            var endTrans = ecc.Elements(ns + "ECTransition")
+                .Where(t => (string?)t.Attribute("Source") == "END").ToList();
+            // Idempotent: exactly the intended END transition already present.
+            if (endTrans.Count == 1 && (string?)endTrans[0].Attribute("Destination") == dest) return;
+            foreach (var et in endTrans) et.Remove();
 
             // Append after the last ECTransition, mirroring the self-closed
             // WAIT_STEP→WAIT_STEP shape (no Attribute child, has x/y).
@@ -4748,7 +4835,7 @@ namespace CodeGen.Services
             var ey = (string?)endState.Attribute("y") ?? "968.8892";
             var loop = new System.Xml.Linq.XElement(ns + "ECTransition",
                 new System.Xml.Linq.XAttribute("Source", "END"),
-                new System.Xml.Linq.XAttribute("Destination", "END"),
+                new System.Xml.Linq.XAttribute("Destination", dest),
                 new System.Xml.Linq.XAttribute("Condition", "1"),
                 new System.Xml.Linq.XAttribute("x", ex),
                 new System.Xml.Linq.XAttribute("y", ey));
@@ -4756,8 +4843,12 @@ namespace CodeGen.Services
             else ecc.Add(loop);
 
             doc.Save(fbtPath);
-            result.PatchesApplied.Add("ProcessRuntime_Generic_v1: added END->END self-transition (WRN_ECC_DEAD_END fix)");
-            MapperLogger.Info("[Deploy] Patched ProcessRuntime_Generic_v1.fbt END dead-end (added END->END Condition=1)");
+            result.PatchesApplied.Add(
+                $"ProcessRuntime_Generic_v1: END -> {dest} " +
+                (cyclic ? "(CYCLIC restart: AdvanceStep wraps CurrentStep to the END row's NextStep=0)"
+                        : "(run-once dead-end: engine parks at END)"));
+            MapperLogger.Info(
+                $"[Deploy] Patched ProcessRuntime_Generic_v1.fbt END -> {dest} ({(cyclic ? "cyclic loop" : "park")})");
         }
 
         /// <summary>
