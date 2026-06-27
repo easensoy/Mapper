@@ -73,8 +73,8 @@ namespace CodeGen.Translation
         /// Rig-canonical name aliases used when the xlsx Instance_Name_Overrides
         /// sheet does not provide one. Intentionally EMPTY today.
         ///
-        /// <para>The Feeder → Pusher alias was removed on 2026-05-21 because
-        /// renaming the FB instance broke the symbolic-link PATH expansion:
+        /// <para>An FB-instance alias (e.g. Feeder → Pusher) must NOT be used,
+        /// because renaming the FB instance breaks the symbolic-link PATH expansion:
         /// every CAT's <c>SYMLINKMULTIVARDST/SRC</c> uses
         /// <c>$${PATH}athome</c> / <c>$${PATH}atwork</c> / <c>$${PATH}OutputToWork</c>
         /// macros that resolve to <c>{ResourceName}.{InstancePath}.{Pin}</c>
