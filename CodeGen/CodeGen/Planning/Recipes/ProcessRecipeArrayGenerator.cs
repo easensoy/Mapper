@@ -371,7 +371,7 @@ namespace CodeGen.Translation.Process
             //     a rig collision). Index discipline is handled per-insertion
             //     (NextStep values >= the insert point are rebased by +2).
             //
-            // SCOPE (2026-06-04): runs ONLY for processes in
+            // SCOPE: runs ONLY for processes in
             // MapperConfig.AutoRetractProcesses (default Feed_Station). Other
             // processes — e.g. Assembly_Station — are generated VERBATIM from their
             // Control.xml state-transition chain: the bearing/shaft retract via their
@@ -564,7 +564,7 @@ namespace CodeGen.Translation.Process
             //    fires for actuators the recipe actually commands, so Feed_Station's
             //    recipe is unchanged when it commands none via this path.
             //
-            // 2026-06-04 DISABLED BY DEFAULT (follow the twin). CurrentStep=0 stall
+            // DISABLED BY DEFAULT (follow the twin). CurrentStep=0 stall
             // traced here: with the swivel parked at atWork1 holding the bearing, the
             // hardcoded "CMD Home -> WAIT AtHomeInit=0" hangs at step 0 and the cycle
             // never starts. The twin has no home-first step — the bearing Pick command
@@ -680,7 +680,7 @@ namespace CodeGen.Translation.Process
                 AssemblyRecipe.Apply(process, arrays, allComponents);
 
             // RUN-ONCE: park on the END row after one cycle instead of looping.
-            // (2026-06-03 — MapperConfig.RecipeRunOnce, default ON.) The END
+            // (MapperConfig.RecipeRunOnce, default ON.) The END
             // ECState runs EndSequence (CurrentStep := Recipe[CurrentStep].NextStep),
             // so the END row's NextStep decides what happens when the recipe
             // finishes. It was 0 -> the engine jumps to step 0; with the home-first
@@ -963,14 +963,6 @@ namespace CodeGen.Translation.Process
                     $"{arrays.StepType[n - 1]}, expected 9.");
         }
 
-        // The recipe STATE CLASSIFIER moved to Recipes/RecipeStateClassifier.cs (2026-06-18,
-        // behaviour-preserving verbatim move): ClassKind/StateClassification/RecipeRow +
-        // ClassifyState, ClassifyConditionDrivenState, AddCmdWaitRows, RemapSettledWaitState,
-        // StateNameSuggestsMotion, ResolveStateNumber, ResolveTransientCmdState,
-        // BuildFallForwardMap, ResolveDestRow (+ the MotionVerbs/MotionVerbToStateNames tables).
-        // Generate calls + its StateClassification/ClassKind references resolve via
-        // `using static CodeGen.Translation.Process.Recipes.RecipeStateClassifier`.
-
         /// <summary>
         /// True when <paramref name="process"/>'s initial state has a transition
         /// gate that references ANOTHER process on the SAME PLC (an intra-PLC
@@ -1006,17 +998,6 @@ namespace CodeGen.Translation.Process
             }
             return false;
         }
-
-        // OrderStatesByTransitionChain, BuildTransitionTable, and IsInitialisationState
-        // moved to Recipes/TransitionChainParser.cs (2026-06-18, behaviour-preserving —
-        // pure functions over VueOneState). Call-sites resolve via
-        // `using static CodeGen.Translation.Process.Recipes.TransitionChainParser`.
-
-        // Recipe command/state mapping vocabulary (IsFiveStateCommandable,
-        // IsSevenStateCommandable, MapSevenStateCommandFromConditionName,
-        // IsGripperTarget, MapGripperCommandFromStepName) moved VERBATIM to
-        // RecipeCommandVocabulary (2026-06-18, behaviour-preserving). Call-sites
-        // resolve via `using static CodeGen.Translation.Process.Recipes.RecipeCommandVocabulary`.
 
     }
 }
