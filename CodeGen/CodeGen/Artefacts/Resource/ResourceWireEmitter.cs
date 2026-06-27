@@ -96,7 +96,7 @@ namespace CodeGen.Devices.Core
                 // NO stationAdptr port, so it stays off the CaSBus station chain
                 // (listed in NoStationAdapterTypes below).
                 "Seven_State_Actuator_CAT",
-                // Centre-home swivel (Bearing_PnP, 2026-06-02). Unlike the old
+                // Centre-home swivel (Bearing_PnP). Unlike the old
                 // Seven CAT it HAS stationAdptr_in/out + stateRprtCmd_in/out, so
                 // it is treated like any Five_State actuator: INIT-chained, on the
                 // report ring AND on the CaSBus station chain (NOT listed in
@@ -671,12 +671,8 @@ namespace CodeGen.Devices.Core
         /// PartAtAssembly (they become a separate cross-device segment) and the M580 ring omits the
         /// Disassembly→BearingSensor close-back — so no boundary adapter plug is driven twice.
         ///
-        /// Previously this RE-READ the generated syslay from disk and pattern-matched the hop to
-        /// decide. That made the sysres wiring depend on file state + emit order — if the syslay on
-        /// disk lagged (stale tree / a 2nd Test Runtime), the sysres ring stayed closed while the
-        /// syslay was open: the exact syslay↔sysres divergence Codex caught. Reading the planner
-        /// removes the disk/order dependency — the sysres ring topology now follows the SAME
-        /// decision that shaped the syslay, deterministically.
+        /// Reading the planner removes the disk/order dependency: the sysres ring topology
+        /// follows the SAME decision that shaped the syslay, deterministically.
         /// </summary>
         private static bool RobotTailActive(MapperConfig cfg)
             => CodeGen.Translation.HandoffPlanner.DischargeActive;
@@ -819,8 +815,7 @@ namespace CodeGen.Devices.Core
                 // BX1 right). translateToOrigin=false.
                 ApplyCanonicalLayout(byName, report, "Syslay", translateToOrigin: false);
                 // Grow each coloured zone frame to fully enclose its FBs so
-                // nothing overflows the frame edges (the user's "positioning is
-                // terrible / overflow" report). Runs AFTER the FBs are placed.
+                // nothing overflows the frame edges. Runs AFTER the FBs are placed.
                 ResizeFramesToFitFbs(net, ns, report);
                 var settings = new XmlWriterSettings
                 {
@@ -852,17 +847,13 @@ namespace CodeGen.Devices.Core
         };
 
         // Per-Type body-height ALLOWANCE for fitting a zone <Frame> below its lowest
-        // FB. EAE renders the actual body from the interface port-row count, but the
-        // earlier port-count×150 model OVER-estimated what EAE draws (a Five_State
-        // rendered ~1400, not 3050) — which padded every frame ~2× too tall (the
-        // "unused space at the bottom" the user flagged in EAE). These values are
+        // FB. EAE renders the actual body from the interface port-row count. These values are
         // re-calibrated to the OBSERVED EAE render scale (a Five_State actuator and
         // its frame measured against the canvas), kept ~15-20% above the rendered
         // size so the frame still ENCLOSES the body (no overflow) without a sparse
         // empty band. Lower = tighter; raise a type only if EAE shows it overflowing.
         // Body-width allowance for fitting the frame's RIGHT edge past the FB. The data-driven
-        // actuator CATs render ~1400 wide (long port labels), so 900 left them spilling out the
-        // right of the coloured frame (the user's "code outside the background"); 1400 encloses them.
+        // actuator CATs render ~1400 wide (long port labels), so 1400 encloses them.
         private const int FbEstWidth = 1400;
         private static int FbEstHeight(string type) => type switch
         {
@@ -898,8 +889,8 @@ namespace CodeGen.Devices.Core
             SystemInjector.BindingApplicationReport report)
         {
             // Generous margins so the stateRprtCmd-ring / INIT-chain WIRES that loop left of and
-            // around the FB bodies stay inside the coloured frame (the user's "no code outside the
-            // background"). Left is widest because the ring wires loop out the FBs' left edges.
+            // around the FB bodies stay inside the coloured frame. Left is widest because
+            // the ring wires loop out the FBs' left edges.
             const int padLeft = 500, padTop = 220, padRight = 250, padBottom = 260;
             var inv = System.Globalization.CultureInfo.InvariantCulture;
 
