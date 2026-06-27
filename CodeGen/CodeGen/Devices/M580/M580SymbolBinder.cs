@@ -106,8 +106,8 @@ namespace CodeGen.Devices.M580
             }
             else
             {
-                // Centre-home swivel CAT (Seven_State_Actuator_Centre_Home_CAT,
-                // 2026-06-02). Sensor symlinks the CAT subscribes to: athome /
+                // Centre-home swivel CAT (Seven_State_Actuator_Centre_Home_CAT).
+                // Sensor symlinks the CAT subscribes to: athome /
                 // atwork1 / atWork2 — note the CAPITAL W on atWork2, matching the
                 // CAT's Inputs SYMLINKMULTIVARDST NAME3 '$${PATH}atWork2'. Drive
                 // coils the CAT publishes: OutputToWork1 (toward Work1 = Pick) and
