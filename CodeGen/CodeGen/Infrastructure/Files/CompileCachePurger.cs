@@ -93,12 +93,10 @@ namespace CodeGen.Devices.Core
             // .syslay files declare the SAME Layer ID, EAE double-counts every
             // Resource the Layer references — surfaces at compile time as
             // "Device <name> contains 2 instances of Runtime.Management.EMB_RES_ECO".
-            // Observed 2026-05-27: sysapp folder carried both the canonical
-            // 00000000-0000-0000-0000-000000000000.syslay AND a 238-byte
-            // empty stub 2240693B1370B496.syslay — same Layer ID 2240693B1370B496
-            // in both. The stub appears after a partial compile / EAE crash and
-            // re-emerges on subsequent compiles. Keep the canonical (zero-GUID
-            // filename); drop any other .syslay whose Layer ID matches its sibling.
+            // An empty stub .syslay sharing a sibling's Layer ID can appear after
+            // a partial compile / EAE crash and re-emerges on subsequent compiles.
+            // Keep the canonical (zero-GUID filename); drop any other .syslay whose
+            // Layer ID matches its sibling.
             var systemDir = Path.Combine(iec, "System");
             if (Directory.Exists(systemDir))
             {
