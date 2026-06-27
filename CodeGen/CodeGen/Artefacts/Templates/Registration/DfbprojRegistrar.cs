@@ -232,12 +232,10 @@ namespace CodeGen.Devices.Core
             // AND a DependentUpon pointer at the parent .system file. EAE's
             // TopologyManager binds Logical Device -> System through that
             // pointer; without it the sysdev compiles but stays orphaned and
-            // EAE's Deploy & Diagnostic tab silently filters it out (observed
-            // 2026-05-27 — M262 sysdev was registered WITH DependentUpon and
-            // appeared in D&D; M580 + BX1 sysdevs were registered WITHOUT and
-            // disappeared even though their Equipment JSON, Properties.xml,
-            // Simulation.Binding.xml and sysres were all valid). The .system
-            // file's name is the zero UUID by Mapper convention.
+            // EAE's Deploy & Diagnostic tab silently filters it out even when its
+            // Equipment JSON, Properties.xml, Simulation.Binding.xml and sysres
+            // are all valid. The .system file's name is the zero UUID by Mapper
+            // convention.
             const string SystemFileName = "00000000-0000-0000-0000-000000000000.system";
             Add(cg, ns, "Compile", sysdevRel, ref added,
                 new XElement(ns + "DependentUpon", SystemFileName),
