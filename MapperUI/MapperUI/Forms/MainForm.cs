@@ -54,10 +54,9 @@ namespace MapperUI
             "PartInHopper", "PartAtChecker",
 
             // Station 2 (M580) — Assembly_Station core
-            // Bearing_PnP restored 2026-05-21 alongside Seven_State_Actuator_CAT
-            // — Mapper Validator now passes Control.xml for the 13-state
-            // PARALLEL+ALTERNATIVE branched actuator (assembly + disassembly
-            // sweep). Routed via ResolveActuatorFBType / validator below.
+            // Bearing_PnP — the 13-state PARALLEL+ALTERNATIVE branched actuator
+            // (assembly + disassembly sweep). Routed via ResolveActuatorFBType /
+            // validator below.
             "Bearing_PnP",
             "Bearing_Gripper",
             "Shaft_Hr", "Shaft_Vr", "Shaft_Gripper",
@@ -1681,10 +1680,10 @@ namespace MapperUI
                     return Fail(comp, "No template found",
                         $"Robot '{comp.Name}' has {comp.States.Count} states — expected 5 (gripper) or 7 (task arm)");
                 case "actuator":
-                    // Seven_State_Actuator_CAT routing restored 2026-05-21 for
-                    // Bearing_PnP. The branched 13-state pattern (assembly path
-                    // PARALLEL out of ReturnedHome + disassembly path ALTERNATIVE
-                    // out of the same state) collapses onto Seven_State's 7-state
+                    // Seven_State_Actuator_CAT routing for Bearing_PnP. The
+                    // branched 13-state pattern (assembly path PARALLEL out of
+                    // ReturnedHome + disassembly path ALTERNATIVE out of the same
+                    // state) collapses onto Seven_State's 7-state
                     // ECC because the physical actuator has only three positions
                     // (Pick, Place, Home) plus two work coils. Detection is by
                     // IsBranchedSevenStateActuator (PARALLEL ∧ ALTERNATIVE on the
