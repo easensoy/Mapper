@@ -1209,11 +1209,9 @@ namespace MapperUI
                     AppendActivity($"[Sysres][Strip][Warn] post-sweep dfbproj strip failed: {ex.Message}");
                 }
 
-                // STRIP DEAD HOME-TIMER PARAMS. The Mapper no longer emits work1ToHomeTime/work2ToHomeTime
-                // (2026-06-19, user — the two work-to-home E_DELAY timers in the centre-home CAT are dead:
-                // their EO feeds only ReturnToHomeHandler events the No_Sensor ECC ignores). The syslay is
-                // clean, but the sysres mirror retained the stale T#750ms/T#100ms values from prior deploys
-                // (the rig kept showing them). Strip them deterministically here, after the mirror; the
+                // STRIP DEAD HOME-TIMER PARAMS. The two work-to-home E_DELAY timers in the
+                // centre-home CAT are dead: their EO feeds only ReturnToHomeHandler events the
+                // No_Sensor ECC ignores. Strip them deterministically here, after the mirror; the
                 // CAT's InputVar default T#0s applies and the dead timer is harmless.
                 try
                 {
