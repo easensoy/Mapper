@@ -114,9 +114,7 @@ namespace CodeGen.Devices.Core
             // M262 Feed-Station path gets this via the same helper (the M262
             // deployed "{resId}/" folder carries opcua.xml + EAE-generated
             // offline.xml/opcuaclient.xml; only opcua.xml is Mapper-written).
-            // The M580/BX1 resources previously skipped it — exactly the gap
-            // that made the prior mirror attempt fail integrity with "Missing
-            // Project Files". Reuse the M262 helper so the folder name (sysres
+            // Reuse the M262 helper so the folder name (sysres
             // stem) and the UID convention match the working M262 output. The
             // sister files offline.xml/opcuaclient.xml/symlink.xml are left for
             // EAE to generate on open, mirroring the M262 behaviour.
