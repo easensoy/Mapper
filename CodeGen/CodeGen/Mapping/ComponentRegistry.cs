@@ -105,7 +105,7 @@ namespace CodeGen.Mapping
                 M262("Transfer",      column: 2, row: LayoutRow.Actuator, owner: "Feed_Station"),
                 M262("Ejector",       column: 3, row: LayoutRow.Actuator, owner: "Feed_Station"),
                 M262("Robot",         column: 4, row: LayoutRow.Actuator, owner: ""),  // UR3e discharge tail (commanded cross-PLC by Disassembly)
-                // Stn1_Term on the Station row (its own column) — no longer overlapping Ejector.
+                // Stn1_Term on the Station row (its own column).
                 M262("Stn1_Term",     column: 3, row: LayoutRow.Station,  owner: ""),
 
                 // ── M580 — Assembly + Disassembly (RES0, frame X=11800, cols 0..6) ─
