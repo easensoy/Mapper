@@ -23,9 +23,8 @@ namespace CodeGen.Devices.M262
     ///         PLC's .hcf from EAE into this folder, then Mapper just relays
     ///         the file to the Demonstrator. Any transform Mapper applies risks
     ///         silently dropping channel bindings the user authored on purpose
-    ///         (the regression that produced the 169-byte empty M262 .hcf on
-    ///         2026-05-21 was exactly this — a filter pass clearing pins whose
-    ///         owning component name didn't match a hard-coded map).</item>
+    ///         (e.g. a filter pass that clears pins whose owning component name
+    ///         doesn't match a hard-coded map).</item>
     ///   <item>Symmetric with M580 + BX1: both of those are verbatim-copied by
     ///         <see cref="Station2DeviceEmitter"/>. M262 deserves the same
     ///         simple behaviour.</item>
@@ -238,10 +237,9 @@ namespace CodeGen.Devices.M262
         /// <summary>
         /// No-op kept for back-compat with <c>M262HcfDocument</c>. The
         /// per-pin rewrite path was retired in favour of pure verbatim
-        /// <c>File.Copy</c> on 2026-05-21 after a filter pass produced a
-        /// 169-byte empty-shell M262 .hcf (channel bindings silently
-        /// dropped because their owning components weren't in a
-        /// hard-coded signal-to-component map).
+        /// <c>File.Copy</c> (a filter pass could silently drop channel
+        /// bindings whose owning components weren't in a hard-coded
+        /// signal-to-component map).
         /// </summary>
         internal static int OverwriteHcfParameterValuesInMemory(XDocument doc, IoBindings bindings,
             HashSet<string> syslayFbNames, HwConfigCopyResult result, string resourceId,
