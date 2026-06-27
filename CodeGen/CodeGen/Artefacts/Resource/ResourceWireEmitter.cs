@@ -439,16 +439,10 @@ namespace CodeGen.Devices.Core
                 for (int i = 0; i < initChain.Count - 1; i++)
                     eventWires.Add(new Wire($"{initChain[i]}.INITO", $"{initChain[i + 1]}.INIT"));
 
-                // MqttConn (MQTT_CONNECTION) bring-up. Added 2026-05-26 after the
-                // PLC published nothing to the broker on a full rig cycle —
-                // mosquitto logged only the desktop subscriber's connection,
-                // never the M262 (192.168.1.10). The syslay already carries
-                // Area.INITO → MqttConn.INIT and MqttConn.INITO → MqttConn.CONNECT
-                // (SystemLayoutInjector lines 1444-1445), and SysresFbMirror
-                // mirrors the MqttConn FB instance onto whichever resource gets
-                // it (M262 by default), but the wires that pull MqttConn out of
-                // reset were never emitted onto the sysres FBNetwork — they
-                // exist on the syslay only. At runtime EAE executes each
+                // MqttConn (MQTT_CONNECTION) bring-up. The syslay carries
+                // <boot>.INITO → MqttConn.INIT and MqttConn.INITO → MqttConn.CONNECT,
+                // but the wires that pull MqttConn out of reset must also be
+                // emitted onto the sysres FBNetwork. At runtime EAE executes each
                 // resource's sysres event graph, so a wire that lives only on
                 // the syslay never fires: MqttConn.INIT never sees the event,
                 // the broker connection never opens, and every embedded
@@ -456,11 +450,11 @@ namespace CodeGen.Devices.Core
                 // Sensor_Bool_CAT, Process1_Generic) binds-by-ConnectionID to
                 // an unopened connection and silently drops every publish.
                 // Re-emitting the same two wires onto whichever sysres carries
-                // MqttConn (M262 only in this rig) makes the runtime fire
-                // INIT and self-fire CONNECT exactly once, after Area has come
-                // up, so the broker connection is established before the first
-                // state-change publish. Skipped cleanly when MqttConn is not
-                // on this resource (MqttPublishEnabled=false, or M580/BX1).
+                // MqttConn makes the runtime fire INIT and self-fire CONNECT
+                // exactly once, after the boot anchor has come up, so the broker
+                // connection is established before the first state-change publish.
+                // Skipped cleanly when MqttConn is not on this resource
+                // (MqttPublishEnabled=false, or no MQTT_CONNECTION here).
                 // Find the MQTT_CONNECTION FB on THIS resource by TYPE, not by
                 // the fixed name "MqttConn" — each resource now has its own
                 // (MqttConn on BX1, MqttConn_M262 on M262, MqttConn_M580 on
@@ -485,17 +479,6 @@ namespace CodeGen.Devices.Core
                     eventWires.Add(new Wire($"{mqttInit}.INITO", $"{mqttName}.INIT"));
                     eventWires.Add(new Wire($"{mqttName}.INITO", $"{mqttName}.CONNECT"));
                 }
-
-                // Cross-process synchronisation REMOVED 2026-05-26: the prior
-                // code emitted Process[i].state_update → Process[j].state_change
-                // wires on the resource between every Process pair (M580 linked
-                // Assembly_Station ↔ Disassembly). Process1_Generic.fbt declares
-                // only INIT/INITO events — no state_update / state_change — so
-                // EAE rejected those wires (ERR_NO_SUCH_EVENT) and the project
-                // failed to compile, leaving the runtime offline (Pusher did not
-                // trigger). Recipe behaviour is unchanged: cross-process
-                // HandShake conditions were already dropped as out-of-scope
-                // refs, so the wires were purely speculative.
 
                 var adapterWires = new List<Wire>(anchors.HmiAdapterWires);
 
