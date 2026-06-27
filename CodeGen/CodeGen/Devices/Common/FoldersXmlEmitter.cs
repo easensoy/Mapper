@@ -14,13 +14,12 @@ namespace CodeGen.Devices.Core
     /// registered in IEC61499.dfbproj but is NOT listed in Folders.xml
     /// gets silently dropped from D&amp;D enumeration.
     ///
-    /// <para>Observed 2026-05-27: Demonstrator's Folders.xml listed only
-    /// the M262 GUID (<c>00000000-...000002</c>). Both M580
-    /// (<c>...000003</c>) and BX1 (<c>...000004</c>) were missing, so EAE's
-    /// Deploy &amp; Diagnostic tab showed only M262 despite every other
-    /// project file being structurally identical. Reference
-    /// SMC_Rig_Expo_withClamp/General/Folders.xml lists every PLC sysdev
-    /// GUID under the SystemDevice Root folder; mirror that.</para>
+    /// <para>If only the M262 GUID (<c>00000000-...000002</c>) is listed and
+    /// M580 (<c>...000003</c>) / BX1 (<c>...000004</c>) are missing, EAE's
+    /// Deploy &amp; Diagnostic tab shows only M262 despite every other project
+    /// file being structurally identical. The reference
+    /// SMC_Rig_Expo_withClamp/General/Folders.xml lists every PLC sysdev GUID
+    /// under the SystemDevice Root folder; mirror that.</para>
     ///
     /// <para>Idempotent — adds only the items that are not already in the
     /// SystemDevice Root folder. Save is skipped when nothing changed so an
