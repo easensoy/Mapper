@@ -167,25 +167,31 @@ namespace CodeGen.Translation.Process.Recipes
             var cond = inScopeConds.FirstOrDefault();
             if (cond == null)
             {
-                // Every condition on this transition was out of scope. Drop the row
-                // ENTIRELY (RowCount=0). The fall-forward map below ensures any
-                // NextStep that pointed at this state lands on the next surviving
-                // state's first row instead.
-                //
-                // Important: emitting a placeholder StepType=9 here would halt the
-                // engine on the first tick (StepType=9 means END to the runtime ECC),
-                // which is the bug this whole revision fixes. Skipped means SKIPPED.
+                // In-scope actuator motion gated only by a cross-process wait: keep the command
+                // (derived from the state name) and settle on the actuator's own state.
+                if (!commandFromCondition && allConds.Any() && StateNameSuggestsMotion(state.Name))
+                {
+                    var mover = ResolveInScopeMotionActuator(state.Name, allComponents, scopedRegistry);
+                    if (mover != null)
+                    {
+                        int moverCmd = ResolveTransientCmdState(state.Name, mover, 2, arrays);
+                        return new StateClassification
+                        {
+                            Kind = ClassKind.MotionPair,
+                            RowCount = 2,
+                            CmdTargetName = (mover.Name ?? string.Empty).Trim().ToLowerInvariant(),
+                            CmdState = moverCmd,
+                            WaitId = scopedRegistry[mover.ComponentID.Trim()],
+                            WaitState = moverCmd == 1 ? 2 : moverCmd == 3 ? 0 : 2,
+                        };
+                    }
+                }
                 if (allConds.Any())
                 {
                     arrays.SkippedConditions.Add(
-                        $"state '{state.Name}': all transition conditions out of scope — " +
-                        "row dropped from recipe; downstream NextStep pointers will skip past it.");
+                        $"state '{state.Name}': all transition conditions out of scope — row dropped.");
                     return new StateClassification { Kind = ClassKind.Skipped, RowCount = 0 };
                 }
-                // Genuine no-transition state. Truly the end of this Process.
-                // RowCount=0: no in-loop END — predecessors route to the single
-                // appended final END via the fall-forward map (centralised-END
-                // invariant; see the trans==null branch above).
                 return new StateClassification { Kind = ClassKind.End, RowCount = 0 };
             }
 
@@ -478,6 +484,26 @@ namespace CodeGen.Translation.Process.Recipes
                     n.Contains(verb, StringComparison.Ordinal))
                     return true;
             return false;
+        }
+
+        // Longest in-scope component whose name prefixes the state name (TransferAdvancing -> Transfer);
+        // lets a motion command survive when its only transition wait is an out-of-scope cross-process target.
+        private static VueOneComponent? ResolveInScopeMotionActuator(string? stateName,
+            IReadOnlyList<VueOneComponent> allComponents, Dictionary<string, int> scopedRegistry)
+        {
+            var n = (stateName ?? string.Empty).Trim().ToLowerInvariant();
+            if (n.Length == 0) return null;
+            VueOneComponent? best = null;
+            foreach (var c in allComponents)
+            {
+                var cn = (c.Name ?? string.Empty).Trim();
+                if (cn.Length == 0 || string.IsNullOrEmpty(c.ComponentID)) continue;
+                if (!scopedRegistry.ContainsKey(c.ComponentID.Trim())) continue;
+                if (!n.StartsWith(cn.ToLowerInvariant(), StringComparison.Ordinal)) continue;
+                if (best == null || cn.Length > (best.Name ?? string.Empty).Trim().Length)
+                    best = c;
+            }
+            return best;
         }
 
         private static StateClassification ClassifyConditionDrivenState(
