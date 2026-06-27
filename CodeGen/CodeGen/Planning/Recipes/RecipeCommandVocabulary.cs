@@ -15,11 +15,9 @@ namespace CodeGen.Translation.Process.Recipes
     /// <see cref="MapperConfig.StubSevenStateActuatorsAsFiveState"/> flag; there
     /// is no I/O, no shared state, and no <c>RecipeArrays</c> contact.
     ///
-    /// Extracted verbatim from <c>ProcessRecipeArrayGenerator</c> (2026-06-18,
-    /// behaviour-preserving) to give the recipe command/state mapping tables a
-    /// single named home. The logic is UNCHANGED and still mirrors
-    /// <c>SystemLayoutInjector.ResolveActuatorFBType</c>'s commandability rules;
-    /// branched-swivel detection is shared via <c>TemplateMap.IsBranchedSevenState</c>.
+    /// Mirrors <c>SystemLayoutInjector.ResolveActuatorFBType</c>'s commandability
+    /// rules; branched-swivel detection is shared via
+    /// <c>TemplateMap.IsBranchedSevenState</c>.
     /// </summary>
     public static class RecipeCommandVocabulary
     {
