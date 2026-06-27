@@ -6,7 +6,7 @@ namespace CodeGen.Translation.Process
     /// <summary>
     /// Disassembly orchestration (MapperConfig.UnparkDisassembly): emits the rows from
     /// Config/recipes.yml (recipe "Disassembly") under the gates below. Parks (single END) if any
-    /// cover/shaft/bearing/clamp id is missing.
+    /// cover/shaft/bearing id is missing.
     /// </summary>
     internal static class DisassemblyRecipe
     {
@@ -26,8 +26,7 @@ namespace CodeGen.Translation.Process
                 ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, "shaft_vr", out _) &
                 ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, "shaft_gripper", out _) &
                 ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, "bearing_pnp", out _) &
-                ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, "bearing_gripper", out _) &
-                ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, "clamp", out _);
+                ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, "bearing_gripper", out _);
 
             arrays.StepType.Clear();
             arrays.CmdTargetName.Clear();
@@ -42,8 +41,7 @@ namespace CodeGen.Translation.Process
             {
                 int e0 = b.Count;
                 b.AddEnd(e0);
-                arrays.Warnings.Add("[Recipe] Disassembly unpark requested but a cover/shaft/" +
-                    "bearing/clamp id did not resolve — emitted a single END (parked). No change.");
+                arrays.Warnings.Add("[Recipe] Disassembly parked: a cover/shaft/bearing id did not resolve.");
                 return;
             }
 
@@ -54,8 +52,20 @@ namespace CodeGen.Translation.Process
             RecipeStepEmitter.Emit(b, def.Block("coverRemove"), arrays, allComponents);
 
             RecipeStepEmitter.Emit(b, def.Block("shaftOut"), arrays, allComponents);
-            RecipeStepEmitter.Emit(b, def.Block("bearingOut"), arrays, allComponents);
-            RecipeStepEmitter.Emit(b, def.Block("unclamp"), arrays, allComponents);
+
+            // Bearing out: pick @ AtWork2 -> place @ AtWork1 -> (restage) -> Home.
+            // The empty restage to AtWork2 (bearingStage) is emitted ONLY when the CAT brake is
+            // OFF: without the brake the swivel must approach Home from the AtWork2 side so it
+            // coasts AWAY from the ejector. With SwivelBrakeHome ON the swivel homes directly
+            // from AtWork1 and the brake (reverse-coil pulse at centre) arrests it there, so the
+            // restage is dropped -> the user-requested AtWork2 -> AtWork1 -> Home.
+            RecipeStepEmitter.Emit(b, def.Block("bearingPick"), arrays, allComponents);
+            if (!MapperConfig.SwivelBrakeHome)
+                RecipeStepEmitter.Emit(b, def.Block("bearingStage"), arrays, allComponents);
+            RecipeStepEmitter.Emit(b, def.Block("bearingHome"), arrays, allComponents);
+
+            if (ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, "clamp", out _))
+                RecipeStepEmitter.Emit(b, def.Block("unclamp"), arrays, allComponents);
 
             // M262 ejector + robot tail, each gated on its own id resolving.
             if (MapperConfig.EnableRobotTaskTail)
@@ -69,20 +79,9 @@ namespace CodeGen.Translation.Process
             int end = b.Count;
             b.AddEnd(MapperConfig.EnableCyclicRestart ? 0 : end);
 
-            arrays.Warnings.Add(
-                $"[Recipe] Disassembly_Station emitted: WAIT(Assembly proc {MapperConfig.AssemblyProcessId}, 7) " +
-                "-> covers off (hr/vr/grip reverse, Control.xml-faithful) -> shaft out -> bearing out " +
-                "(centre-home CAT work2->work1, rig-proven mapping) -> UNCLAMP (clamp home) -> " +
-                (MapperConfig.EnableRobotTaskTail
-                    ? "EJECTOR (EjectorForward->AtWork, EjectorBack->AtHomeInit) -> ROBOT (cmd1 start->" +
-                      "WAIT done(2), cmd2 reset->WAIT ready(0)) -> END. Order is unclamp THEN eject THEN " +
-                      "robot (release before push/pick). Ejector + Robot are M262, commanded by " +
-                      "Disassembly over the stateRprtCmd ring extended to M262 (Stage 5b cross-PLC hops; " +
-                      "EAE bridges them — NOT yet rig-verified)."
-                    : "END. OMITTED — Ejector + Robot (M262 UR3e + ejector, " +
-                      "orphan to Feed_Station): commanded only when EnableRobotTaskTail is ON (which " +
-                      "extends the stateRprtCmd ring to M262). Off → left out so the M262 Feed ring is " +
-                      "untouched and the recipe never stalls on an unreachable M262 WAIT."));
+            arrays.Warnings.Add($"[Recipe] Disassembly emitted {b.Count} rows: handshake -> covers off " +
+                "-> shaft out -> bearing out" +
+                (MapperConfig.EnableRobotTaskTail ? " -> ejector -> robot" : "") + " -> END.");
         }
     }
 }
