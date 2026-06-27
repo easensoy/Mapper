@@ -13,9 +13,6 @@ namespace CodeGen.Translation.Process.Recipes
     /// Initialisation boot state. Every method is a pure function of its
     /// <see cref="VueOneState"/> arguments — no RecipeArrays, no MapperConfig, no
     /// I/O, no shared state.
-    ///
-    /// Extracted verbatim from <c>ProcessRecipeArrayGenerator</c> (2026-06-18,
-    /// behaviour-preserving). Logic UNCHANGED.
     /// </summary>
     public static class TransitionChainParser
     {
