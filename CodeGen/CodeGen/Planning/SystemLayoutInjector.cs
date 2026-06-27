@@ -937,8 +937,8 @@ namespace CodeGen.Translation
             var allowedActuators = new[]
             {
                 // Station 1 (M262)
-                // Ejector added 2026-05-26 — matches reference SMC_Rig_Expo
-                // (where it is named "Rejector"). Open-loop pneumatic eject
+                // Ejector matches reference SMC_Rig_Expo (where it is named
+                // "Rejector"). Open-loop pneumatic eject
                 // arm: no athome/atwork sensors. Emitted as the UNIVERSAL
                 // Five_State_Actuator_CAT — the same CAT that drives Feeder
                 // and Transfer — because that CAT already exposes the pair
@@ -978,16 +978,14 @@ namespace CodeGen.Translation
                 "BearingSensor", "ShaftSensor",
                 "TopCoverSenosr",
             };
-            // BUG-FIX 2026-05-21: previous code drew from
-            // fullContents.Actuators / fullContents.Sensors, which
-            // StationGroupingService populates from ONLY the Feed_Station
-            // Process's own transition conditions. Station 2 actuators
-            // (Bearing_PnP, Shaft_Hr/Vr, grippers, Clamp) are referenced by
-            // Assembly_Station's transitions, so they were silently dropped
-            // and the purple M580 / green BX1 frames came out empty.
-            //
             // Source the allowed components from `allComponents` (the full
-            // Control.xml) instead. Feed_Station Process itself stays
+            // Control.xml). StationGroupingService's fullContents.Actuators /
+            // fullContents.Sensors are populated from ONLY the Feed_Station
+            // Process's own transition conditions, so Station 2 actuators
+            // (Bearing_PnP, Shaft_Hr/Vr, grippers, Clamp) — referenced by
+            // Assembly_Station's transitions — would otherwise be dropped and
+            // the purple M580 / green BX1 frames would come out empty.
+            // Feed_Station Process itself stays
             // Feed_Station — we're only widening the COMPONENT scope, not
             // the Process scope. Assembly_Station's recipe lives in its own
             // Process FB instance which is emitted by a later phase.
@@ -1243,21 +1241,6 @@ namespace CodeGen.Translation
                     "[Recipe] Disassembly Process not found in Control.xml — " +
                     "BX1 zone will have actuators but no Disassembly Process FB.");
             }
-
-            // Cross-process synchronisation REMOVED 2026-05-26: the prior code
-            // emitted Process[i].state_update → Process[j].state_change event
-            // wires across every Process pair. The deployed Process1_Generic.fbt
-            // declares ONLY INIT/INITO events — no state_update (EVENT_OUTPUT) or
-            // state_change (EVENT_INPUT) — so EAE rejected those wires with
-            // ERR_NO_SUCH_EVENT, the whole project failed to compile, and the
-            // runtime never started (Pusher / Feeder did not actuate on the rig).
-            // The reference-rig wires (SMC_Rig audit E.2) presumed a Process1_CAT
-            // variant that did expose those events; this Mapper's
-            // Process1_Generic doesn't, so the wires can't exist here. Removing
-            // them clears the three ERR_NO_SUCH_EVENT compile errors. Cross-
-            // process HandShake conditions in the recipe were already dropped as
-            // out-of-scope Process refs (the recipe ends at row 15 and loops),
-            // so no recipe behaviour changes — only the dead, dotted wires go.
 
             // Bearing_PnP routes to Seven_State_Actuator_CAT (13-state PARALLEL+
             // ALTERNATIVE branched swivel → 7-state ECC). Its recipe rows are
@@ -1635,9 +1618,9 @@ namespace CodeGen.Translation
             // Station 2 (M580) — same INIT-chain + stationAdptr chain + stateRprtCmd
             // ring shape as Feed_Station, but rooted at Station2 / Stn2_Term and
             // routing through the M580 Process FBs (Assembly_Station + Disassembly).
-            // Added 2026-05-26 to populate the shared syslay with M580 wiring — the
-            // sysres had the wires (via Station2WireEmitter), but the application
-            // canvas showed every M580 FB unconnected. Each chain is contained inside
+            // Populates the shared syslay with M580 wiring — without it the
+            // sysres has the wires (via Station2WireEmitter) but the application
+            // canvas shows every M580 FB unconnected. Each chain is contained inside
             // the M580 partition so the syslay wires render solid (no cross-PLC
             // dashed edges).
             RingWiringPlanner.BuildStation2Wiring(builder, contents, disassemblyFbName);
@@ -1722,12 +1705,10 @@ namespace CodeGen.Translation
                 LayoutGrid.FrameWidth(PlcAssignment.BX1), LayoutGrid.FrameHeight,
                 "LightGreen", "Soft dPAC   —   PLC BX1", "TopCenter",
                 "Microsoft Sans Serif, 36pt, style=Bold");
-            // Empirical observation 2026-05-21: EAE always renders <FB> z-order
-            // above <Frame> z-order, regardless of XML document order. Verified
-            // by writing TYPE_STRIP Frames at the exact (FB.x, FB.y, 580, 50)
-            // coordinates and observing the FB still painted on top. So Frames
-            // can only colour areas not covered by an FB body — they cannot
-            // recolour the EAE-rendered blue type-name strip.
+            // EAE always renders <FB> z-order above <Frame> z-order, regardless
+            // of XML document order. So Frames can only colour areas not covered
+            // by an FB body — they cannot recolour the EAE-rendered blue
+            // type-name strip.
 
             var doc = builder.Build();
             doc.Save(fullPath);
@@ -1773,9 +1754,9 @@ namespace CodeGen.Translation
         /// BuildActuatorParameters' data-driven WorkSensorFitted /
         /// HomeSensorFitted resolution flip both flags to FALSE when no
         /// other component's Sequence_Condition references the actuator's
-        /// atWork / atHome state IDs. That is the elegant single-CAT path
-        /// agreed 2026-05-26: do not multiply CAT types when a parameter
-        /// pair on the universal CAT already expresses the same intent.
+        /// atWork / atHome state IDs. That is the elegant single-CAT path:
+        /// do not multiply CAT types when a parameter pair on the universal
+        /// CAT already expresses the same intent.
         /// </summary>
         // internal (was private): RingWiringPlanner reaches it via `using static SystemInjector`.
         internal static string ResolveActuatorFBType(VueOneComponent actuator)
@@ -1820,7 +1801,7 @@ namespace CodeGen.Translation
                 ["actuator_name"] = SyslayBuilder.FormatString(actuator.Name.ToLowerInvariant()),
                 ["actuator_id"]   = SyslayBuilder.FormatInt(assignedId),
             };
-            // Seven_State_Actuator_CAT is now data-driven (2026-05-27). The CAT
+            // Seven_State_Actuator_CAT is data-driven. The CAT
             // exposes TargetPickState / TargetPlaceState / TargetHomeState inputs
             // that its ECC reads instead of hardcoded literals. Emit them
             // explicitly so the command vocabulary lives in the syslay data, not
@@ -1921,7 +1902,7 @@ namespace CodeGen.Translation
         ///   "actuator.Name + /atWork" literal substring lookup.
         /// </summary>
         /// <summary>
-        /// The three BX1 cover P&amp;P actuators driven by the local Cover_Station cycle.
+        /// The three BX1 cover P&amp;P actuators.
         /// Used by the cover-specific overrides (gripper no-sensor, interlock zeroing)
         /// and by the RuleCount=0 safety guard exemption at the Five_State call site.
         /// </summary>
