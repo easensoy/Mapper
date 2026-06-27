@@ -193,13 +193,11 @@ namespace CodeGen.Devices.Core
         /// <summary>
         /// Removes the dead <c>work1ToHomeTime</c> / <c>work2ToHomeTime</c> &lt;Parameter&gt; values
         /// from every <c>Seven_State_Actuator_Centre_Home_CAT</c> instance in every deployed sysres.
-        /// The Mapper no longer SETS these (2026-06-19) — the two work-to-home E_DELAY timers in that
-        /// CAT are dead (their EO feeds only <c>ReturnToHomeHandler.Work1/Work2ToHomeTimerEvent</c>,
-        /// which the No_Sensor_Handler_7SCH ECC has NO transitions on), so the values had no effect.
-        /// But the sysres mirror retained stale values from prior deploys (the live tree kept showing
-        /// <c>T#750ms</c>/<c>T#100ms</c> even after the syslay stopped emitting them), so this strips
-        /// them deterministically. The CAT InputVar default (<c>T#0s</c>) then applies; the dead timer
-        /// is harmless. Returns the number of &lt;Parameter&gt; elements removed. Best-effort per file.
+        /// The two work-to-home E_DELAY timers in that CAT are dead (their EO feeds only
+        /// <c>ReturnToHomeHandler.Work1/Work2ToHomeTimerEvent</c>, which the No_Sensor_Handler_7SCH
+        /// ECC has NO transitions on), so the values had no effect. The CAT InputVar default
+        /// (<c>T#0s</c>) then applies; the dead timer is harmless. Returns the number of
+        /// &lt;Parameter&gt; elements removed. Best-effort per file.
         /// </summary>
         public static int StripStaleHomeTimerParams(string? eaeRoot, Action<string>? log = null)
         {
