@@ -267,19 +267,7 @@ namespace CodeGen.Devices.Core
 
             // Build a Name → existing sysres FB element index so we can UPDATE
             // parameters on an FB that was mirrored on a previous run, instead
-            // of skipping it and leaving stale parameter values behind. Added
-            // 2026-05-26 after this exact bug: SystemLayoutInjector started
-            // emitting four new MqttConn timing parameters
-            //   KeepAlive / ConnectionTimeout
-            //   ConnectionRetryCount / ConnectionRetryTime
-            // and they reached the syslay, but the MqttConn FB instance was
-            // already on the sysres from an earlier deploy, so the mirror's
-            // existingNames/Mappings guard short-circuited and the four new
-            // <Parameter> children never got written into the resource. The
-            // M262 firmware then applied T#0s defaults for the missing TIME
-            // ports, MQTT_CONNECTION aborted every connect before the
-            // SYN-ACK could complete (ReturnCode=50), and mosquitto logged
-            // zero connection attempts from 192.168.1.10. The fix: when the
+            // of skipping it and leaving stale parameter values behind. When the
             // FB is already present, REPLACE its <Parameter> children with
             // whatever the syslay now carries — keep the FB element's ID /
             // Mapping / x / y unchanged so EAE's stable-instance tracking
