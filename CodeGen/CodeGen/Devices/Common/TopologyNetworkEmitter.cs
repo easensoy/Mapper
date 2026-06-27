@@ -151,19 +151,13 @@ namespace CodeGen.Devices.Core
                     "written but not registered with the TopologyManager build target.");
             }
 
-            // ORPHAN-WIRE SWEEP (2026-06-09 — THE topology-import 500 fix). EAE 24.1's
-            // TopologyManager resolves every Wire's source/destination Equipment UUID
-            // against the loaded Equipment_*.json. A wire pointing at a UUID that NO
-            // device declares makes the import throw HTTP 500 ("Unable to import
-            // topology / Internal Server Error") in ~150 ms BEFORE any device is
-            // parsed — aborting the WHOLE topology (empty Physical Views). This bit us
-            // when BX1 changed from the Workstation form (NIC sub-component uuid
-            // …000000000053) to HMIB1X (no …053): the stale Wire_Wire 145.json
-            // (…053 → Switch Port3) was left behind AND still registered, because the
-            // existing CleanupStaleTopologyJson sweep only ever targeted
-            // Equipment_*.json — never Wire_*.json. Generic + future-proof: delete +
-            // de-register ANY Wire_*.json whose endpoint UUID is declared by no
-            // Equipment, so any future device-form change self-heals.
+            // ORPHAN-WIRE SWEEP. EAE 24.1's TopologyManager resolves every Wire's
+            // source/destination Equipment UUID against the loaded Equipment_*.json. A wire
+            // pointing at a UUID that NO device declares makes the import throw HTTP 500 ("Unable
+            // to import topology / Internal Server Error") in ~150 ms BEFORE any device is parsed —
+            // aborting the WHOLE topology (empty Physical Views). Generic + future-proof: delete +
+            // de-register ANY Wire_*.json whose endpoint UUID is declared by no Equipment, so any
+            // future device-form change self-heals.
             SweepOrphanWires(topologyDir, Path.Combine(topologyDir, "TopologyManager.topologyproj"),
                 result, eaeRoot);
 
