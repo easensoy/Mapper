@@ -7,9 +7,7 @@ namespace CodeGen.Mapping
 {
     /// <summary>
     /// Template lens — answers "which CAT (Composite FB Type) does this Control.xml
-    /// component instantiate?". Consolidates the actuator-routing logic previously
-    /// inside <c>SystemLayoutInjector.ResolveActuatorFBType</c> plus the implicit
-    /// Sensor/Process routings spread through the same file.
+    /// component instantiate?".
     ///
     /// The actuator branch is the gated one (Bearing_PnP toggles between Five_State
     /// stub and the real Seven_State CAT via
@@ -63,7 +61,7 @@ namespace CodeGen.Mapping
         /// <c>Shaft_Gripper</c> and <c>CoverPnp_Gripper</c> are ALSO <c>Type="Robot"</c> (5-state
         /// mechanical/vacuum grippers) and MUST keep their Five_State/Vacuum CAT. The arm is
         /// identified by exact Name "Robot", its known ComponentID, or <c>VcID="UR3e"</c>; anything
-        /// named *Gripper*/*Grasp* is excluded first. Shared by every Stage 5b site so the
+        /// named *Gripper*/*Grasp* is excluded first. Shared by every call site so the
         /// narrowing is defined in exactly one place.
         /// </summary>
         public static bool IsRobotTaskArm(VueOneComponent component)
@@ -139,8 +137,8 @@ namespace CodeGen.Mapping
 
             if (!MapperConfig.StubSevenStateActuatorsAsFiveState
                 && (stateCount == 7 || isBranchedSeven))
-                // 2026-06-02: Bearing_PnP now instantiates Jyotsna's centre-home
-                // swivel CAT (3-position: Work1=Pick / Work2=Place / centre Home).
+                // Bearing_PnP instantiates the centre-home swivel CAT (3-position:
+                // Work1=Pick / Work2=Place / centre Home).
                 // It wires like Five_State (has stationAdptr + stateRprtCmd, uses
                 // updateComponentState, takes mode from the station ring) — unlike
                 // the old Seven_State_Actuator_CAT which had no stationAdptr. Command
@@ -160,7 +158,7 @@ namespace CodeGen.Mapping
         /// shape that routes to <c>Seven_State_Actuator_CAT</c> when the stub flag
         /// is off, even though the raw state count is 13 rather than 7.
         ///
-        /// This is the single canonical definition (consolidated 2026-06-18):
+        /// This is the single canonical definition:
         /// <c>SystemInjector.ResolveActuatorFBType</c> and
         /// <c>RecipeCommandVocabulary</c> both call it; callers may also pass the
         /// precomputed bool to <see cref="CatTypeOf"/>.
@@ -170,7 +168,6 @@ namespace CodeGen.Mapping
             if (component is null || component.States is null) return false;
             // A resting state with BOTH a PARALLEL outgoing transition AND an
             // ALTERNATIVE outgoing transition (Bearing_PnP's 13-state shape).
-            // Canonical home (former SystemInjector/recipe copies removed 2026-06-18).
             // The per-state Transitions null-guard below is defensive only —
             // VueOneState.Transitions is always a non-null list (= new()).
             foreach (var state in component.States)
