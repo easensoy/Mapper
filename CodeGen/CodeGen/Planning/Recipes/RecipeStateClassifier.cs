@@ -17,9 +17,6 @@ namespace CodeGen.Translation.Process.Recipes
     /// is passed by parameter; only its public Warnings/SkippedConditions members
     /// are touched). Calls the sibling Recipes helpers (RecipeCommandVocabulary /
     /// RecipeComponentLookup / TransitionChainParser).
-    ///
-    /// Extracted verbatim from ProcessRecipeArrayGenerator (2026-06-18,
-    /// behaviour-preserving). Logic UNCHANGED.
     /// </summary>
     internal static class RecipeStateClassifier
     {
@@ -403,11 +400,6 @@ namespace CodeGen.Translation.Process.Recipes
                             // state_table on each state_change) only ever sees the stable
                             // 0. Waiting on the transient 6 misses it and parks the engine
                             // forever -- exactly the Five_State AtHomeEnd=4 -> 0 remap.
-                            // The obsolete sim coil-mirror used to park at 6 because it could
-                            // leave atHome and atWork1 TRUE together. The simulator now uses
-                            // SimCentreHomeSensor_7SCH, which publishes mutually-exclusive
-                            // home/work sensors from current_state_to_process, so the same
-                            // stable AtHomeInit=0 wait is correct in both sim and hardware.
                             WaitState = sevenStateCmd == 5
                                 ? 0
                                 : sevenStateCmd + 1,
