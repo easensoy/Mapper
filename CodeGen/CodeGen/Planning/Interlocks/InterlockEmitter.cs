@@ -35,8 +35,8 @@ namespace CodeGen.Translation.Interlocks
         {
             int emitted = EmittedCount(p);
             int inScope = InScope(actuator, allComponents, scopedIds);
-            // Covers are no longer zeroed — they emit their Control.xml interlock like any other actuator,
-            // so the guard applies to them too (an in-scope condition with RuleCount=0 is a real
+            // Covers emit their Control.xml interlock like any other actuator, so the guard
+            // applies to them too (an in-scope condition with RuleCount=0 is a real
             // translation gap, not an intentional cover exemption).
             if (inScope > 0 && emitted == 0)
                 throw new InvalidOperationException(
@@ -86,10 +86,8 @@ namespace CodeGen.Translation.Interlocks
             IReadOnlyDictionary<string, int>? scopedIds)
         {
             // Every Five_State actuator — including the BX1 covers — emits whatever interlock the
-            // Control.xml defines. The covers were previously zeroed here, which stripped CoverPNP_Hr's
-            // real safety rule ("block advance while Shaft_Hr / Bearing_PnP is at work") and let the
-            // covers move while the swivel/shaft were still working. The interlock source is cross-PLC
-            // (M580 -> BX1), so the source state must reach BX1 for the rule to clear — verify on sim/rig.
+            // Control.xml defines. The interlock source is cross-PLC (M580 -> BX1), so the source
+            // state must reach BX1 for the rule to clear.
             return scopedIds != null
                 ? InterlockPlanner.BuildRules(actuator, allComponents, scopedIds)
                 : InterlockPlan.Empty(Cap);
