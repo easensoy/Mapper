@@ -250,9 +250,8 @@ namespace CodeGen.Devices.Core
             //   - .sysres : <Compile IEC61499Type=SystemResource DependentUpon=sysdev>
             //   - .hcf    : BOTH <None SystemDevice> AND <Content SystemDevice>
             // M262/M580 keep the legacy <None SystemDevice> for the .sysres + no .hcf
-            // <Content> — their working mechanism is left UNTOUCHED (user directive
-            // 2026-06-09: "don't touch M262/M580"); they have no EtherNet/IP scanner so
-            // the SystemResource registration is irrelevant to them anyway. NOTE: this
+            // <Content> — their working mechanism is left UNTOUCHED; they have no EtherNet/IP
+            // scanner so the SystemResource registration is irrelevant to them anyway. NOTE: this
             // registration is NECESSARY but not sufficient for a populated scanner — the
             // HwConfiguration TM3BC device model (Station2DeviceEmitter
             // .DeployBx1HwConfigScannerModel) is what EAE actually compiles the scanner from.
