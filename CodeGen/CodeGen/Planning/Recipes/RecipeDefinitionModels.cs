@@ -60,7 +60,7 @@ namespace CodeGen.Translation.Process
     /// </list>
     /// <c>State</c> is the cmd/wait state value (default 0). END rows (RecipeEnd) are NOT modelled
     /// here — the station class appends <c>AddEnd(...)</c> because the END NextStep is computed
-    /// (cyclic restart vs run-once self-park vs Cover_Station's continuous loop), not static data.
+    /// (cyclic restart vs run-once self-park), not static data.
     /// </summary>
     public sealed class RecipeStepDefinition
     {
