@@ -201,7 +201,7 @@ namespace CodeGen.Devices.Core
                 loaded: true,
                 parameters: new[] { ("Prio", "10"), ("Delay", "T#1000ms") });
 
-            // DEDUP (2026-06-10): the M262 component instance ids flip-flop between
+            // DEDUP: the M262 component instance ids flip-flop between
             // regens (a sysres FB ID is ComputeMirrorId(syslayId) = the syslay id with
             // its top hex bit flipped, e.g. 60AE…↔E0AE…). When the syslay id flips, the
             // mirror's add/update loop below — whose existingByName index holds only ONE
@@ -232,7 +232,7 @@ namespace CodeGen.Devices.Core
                 }
                 else if (mirrored && !syslayNames.Contains(nm))
                 {
-                    // STALE-ARTIFACT FLUSH (2026-06-12, source-of-truth fix). A previously-mirrored FB
+                    // STALE-ARTIFACT FLUSH. A previously-mirrored FB
                     // whose Name is no longer ANYWHERE in the current syslay — e.g. a Robot_Task_CAT
                     // left over after EnableRobotTaskTail flips false, or any actuator/process dropped
                     // from the twin. The dedup above only catches same-named stale-MAPPED dups; an
