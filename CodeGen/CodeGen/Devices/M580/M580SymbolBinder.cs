@@ -195,16 +195,15 @@ namespace CodeGen.Devices.M580
                         }
                         // Form 1 (direct GUID triple): "<resId>.<fbId>.<port>" — unquoted,
                         // dot-separated, GUID-headed. SAME form the M262 .hcf uses for
-                        // every PusherAtHome / Hopper / etc channel — verified by reading
-                        // the deployed M262 .hcf side-by-side with M580 on 2026-05-26:
+                        // every PusherAtHome / Hopper / etc channel, e.g.
                         //   M262 DI00 -> "1459BCD12760907D.60AEF2679BD52F88.athome"  (Form 1)
                         //   M580 DI00 -> "'M580_RES.Bearing_PnP.atwork1'"            (Form 2)
                         //
-                        // Switched BACK from Form 2 ("'<ResName>.<FBName>.<port>'", quoted,
-                        // per-instance symbolic) on 2026-05-26 because Form 2 populated only
-                        // EAE's Symbolic Link side panel — the device-tree IO view
+                        // Form 2 ("'<ResName>.<FBName>.<port>'", quoted, per-instance
+                        // symbolic) populates only EAE's Symbolic Link side panel — the
+                        // device-tree IO view
                         // (System > Devices > M580 > M580_RES > BMEXBP0400 > BMXDDM16025)
-                        // left every channel's Value column blank, because EAE's Hardware
+                        // leaves every channel's Value column blank, because EAE's Hardware
                         // Configurator parses only the Form 1 GUID triple into that view.
                         // Form 1 populates BOTH the device-tree IO view AND the symlink
                         // panel — no broker FB required, because the CAT body's
