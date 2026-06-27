@@ -36,7 +36,7 @@ namespace CodeGen.Translation
             var processInstanceName = InstanceNameResolver.Resolve(contents.Process);
             if (string.IsNullOrWhiteSpace(processInstanceName)) processInstanceName = "Process1";
 
-            // PER-PLC FILTER (added 2026-05-26 after Pusher would not actuate on the rig).
+            // PER-PLC FILTER.
             // Feed_Station lives on M262 only — Station1, Stn1_Term and the
             // Area/Station HMI adapters all belong to the M262 frame. When
             // contents.Sensors / contents.Actuators expanded to whole-system
