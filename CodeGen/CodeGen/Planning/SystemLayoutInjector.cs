@@ -529,7 +529,7 @@ namespace CodeGen.Translation
         }
 
         // ===========================================================================
-        // LEGACY / DORMANT — DO NOT REUSE FOR THE CENTRE-HOME SWIVEL (2026-06-03 note).
+        // LEGACY / DORMANT — DO NOT REUSE FOR THE CENTRE-HOME SWIVEL.
         // Reachable ONLY via the old Inject() -> InjectSyslay() entry. The live rig and
         // simulator buttons both call GenerateStation1TestSyslay(), which does NOT use
         // this method, so it never runs in production. It wires PHANTOM data pins
@@ -737,7 +737,7 @@ namespace CodeGen.Translation
         private static List<VueOneComponent> Processes(List<VueOneComponent> all) =>
             all.Where(c => c.Type?.Equals("Process", StringComparison.OrdinalIgnoreCase) == true).ToList();
 
-        // HARDENED (Stage 5b): a Type="Robot" component is NOT necessarily the UR3e — the
+        // A Type="Robot" component is NOT necessarily the UR3e — the
         // Bearing/Shaft/CoverPnp grippers are also Type="Robot" (5-state) and must NEVER be
         // emitted as Robot_Task_CAT. Use the SAME narrow predicate as the active resolver so this
         // legacy InjectGroup path can only ever select the real task arm.
@@ -965,11 +965,11 @@ namespace CodeGen.Translation
                 "CoverPNP_Hr", "CoverPNP_Vr",
                 "CoverPnp_Gripper",
             };
-            // STAGE 5b (gated): emit the real UR3e task arm on M262. ONLY "Robot" is added —
+            // Emit the real UR3e task arm on M262. ONLY "Robot" is added —
             // the Type="Robot" grippers (Bearing/Shaft/CoverPnp) are NOT here and would be
             // rejected by IsRobotTaskArm anyway. Resolves to Robot_Task_CAT, lands on M262
             // (NameBasedPlcGuess Robot→M262), gets minimal params (actuator_name='robot',
-            // actuator_id). Default-off → array unchanged → Stage 5a byte-identical.
+            // actuator_id).
             if (MapperConfig.EnableRobotTaskTail)
                 allowedActuators = allowedActuators.Append("Robot").ToArray();
             var allowedSensors = new[]
@@ -1314,10 +1314,10 @@ namespace CodeGen.Translation
                 var actuator = contents.Actuators[i];
                 int assignedId = actuatorIdStart + i;
                 var fbType = ResolveActuatorFBType(actuator);
-                // STAGE 5b: the UR3e's positional id (17) collides with the Assembly station on the
+                // The UR3e's positional id (17) collides with the Assembly station on the
                 // M580 state_table its ring reports cross to. Force the dedicated non-colliding slot
                 // so the CAT actuator_id == the recipe's WAIT robot Wait1Id (one source —
-                // MapperConfig.RobotActuatorId). Gated → Stage 5a positional ids byte-identical.
+                // MapperConfig.RobotActuatorId).
                 if (MapperConfig.EnableRobotTaskTail && TemplateMap.IsRobotTaskArm(actuator))
                     assignedId = MapperConfig.RobotActuatorId;
                 // Resolve FB instance name via the same path Process FB names use:
@@ -1629,10 +1629,10 @@ namespace CodeGen.Translation
             // cross-PLC). Emits an INIT chain + closed stateRprtCmd ring among
             // BX1's own sensor + actuators so the green band on the syslay
             // canvas shows the same wiring style as M262 / M580 instead of
-            // floating disconnected FBs (the visual gap the user flagged).
+            // floating disconnected FBs.
             RingWiringPlanner.BuildBx1Wiring(builder, contents, config);
 
-            // Phase 1: recipe arrays now ride on the Process1 syslay Parameter values written
+            // Recipe arrays now ride on the Process1 syslay Parameter values written
             // by BuildProcessFbParameters above. The deployed ProcessRuntime_Generic_v1.fbt is
             // no longer mutated at generation time. The MapperConfig parameter is retained for
             // call-site compatibility but unused here.
@@ -1778,11 +1778,6 @@ namespace CodeGen.Translation
                 actuator.States?.Count ?? 0,
                 TemplateMap.IsBranchedSevenState(actuator));
         }
-
-        // IsBranchedSevenState consolidated onto the canonical
-        // TemplateMap.IsBranchedSevenState (2026-06-18, behaviour-preserving — the
-        // former private copy was identical for all inputs; VueOneState.Transitions
-        // is never null, so TemplateMap's extra Transitions null-guard is dead code).
 
         /// <summary>
         /// Returns minimal Parameter values for actuators that are NOT plain
@@ -1938,17 +1933,7 @@ namespace CodeGen.Translation
                 homeSensorFitted = false;
             }
 
-            // 2026-06-04: SENSORLESS OVERRIDE REMOVED. It previously forced the
-            // allowlisted M580 Five_State actuators (bearing_gripper, shaft_hr/vr/gripper)
-            // to WorkSensorFitted=FALSE / HomeSensorFitted=FALSE because the M580 DIs were
-            // reading bad quality at the time. The IO is good now, so these actuators
-            // must read their REAL atwork/athome DIs (e.g. Bearing_Gripper.atwork = DI04).
-            // The override made the grip/release confirmation come from a TIMER instead
-            // of the real sensor -- which is exactly what stalled the recipe at the
-            // gripper-close WAIT (the engine never saw current_state=2 from DI04). The
-            // data-driven WorkSensorFitted/HomeSensorFitted resolution above now stands.
-
-            // BX1 cover gripper (2026-06-10): NARROW per-actuator no-sensor override —
+            // BX1 cover gripper: NARROW per-actuator no-sensor override —
             // the TM3BC input assembly has NO home-position bit for this gripper (the
             // BX1_IO broker publishes only input bit5 -> CoverPnp_Gripper.atwork, and on
             // the rig that bit reads TRUE at rest, so even its atwork semantics are
@@ -1957,7 +1942,7 @@ namespace CodeGen.Translation
             // never reaches AtHomeInit. Force the proven timer-acknowledge pattern for
             // THIS actuator only — the physical coil (output bit3) still drives the
             // gripper; only the state confirmation comes from toWork/toHomeTime. The
-            // M580 grippers keep their real DI sensors (see the 2026-06-04 note above).
+            // M580 grippers keep their real DI sensors.
             // BX1 cover P&P actuators settle in coverMotionMs; their P&P speed stays sensor-driven
             // (the recipe WAIT clears on the physical atwork/athome DI, not the timer).
             if (IsBx1CoverActuator(actuator.Name))
@@ -1976,13 +1961,13 @@ namespace CodeGen.Translation
                 }
             }
 
-            // STAGE 5b (gated): the M262 Ejector is reference-compatible OPEN-LOOP. The reference
+            // The M262 Ejector is reference-compatible OPEN-LOOP. The reference
             // uses Five_State_Actuators_No_Sensors_CAT (timer-driven, coil only); our generator
             // keeps it Five_State_Actuator_CAT, but the rig binds NO ejector athome/atwork DIs (only
             // the DO03 coil — see HcfPatchService). A sensored WAIT ejector=2 / ejector=0 would
             // stall forever on a sensor that never closes. Force sensorless so the ECC settles
             // AtWork/AtHome on the toWork/toHome timers; the coil (OutputToWork) still fires the
-            // physical push. Narrow to "Ejector", gated -> Stage 5a byte-identical.
+            // physical push.
             if (MapperConfig.EnableRobotTaskTail
                 && string.Equals(actuator.Name, "Ejector", StringComparison.OrdinalIgnoreCase))
             {
@@ -2172,18 +2157,12 @@ namespace CodeGen.Translation
 
             CleanM262SysdevResources(config, report);
 
-            // NOTE: SweepDuplicateSyslayPerSysapp + SweepOrphanSysresPerSysdev
-            // were REMOVED 2026-06-01 at user request. Both deleted .syslay /
-            // .sysres / sister folders system-wide on every Generate, and the
-            // rig session showed they disturbed EAE's topology import + the
-            // trusted-machine binding ("Unable to import topology", lost trust
-            // data). The original cleanup (CleanFile syslay SubAppNetwork +
-            // CleanFile sysres FBNetwork + CleanM262SysdevResources) is what
-            // ships now — it CLEARS network contents in place but never
-            // deletes whole device/resource files, so it cannot orphan a
-            // resource EAE relies on. If the duplicate-syslay / orphan-sysres
-            // problems resurface, re-introduce a NARROWER fix that targets
-            // only the simulator tree, never the rig device files.
+            // The cleanup (CleanFile syslay SubAppNetwork + CleanFile sysres FBNetwork +
+            // CleanM262SysdevResources) CLEARS network contents in place but never
+            // deletes whole device/resource files, so it cannot orphan a resource EAE
+            // relies on. If the duplicate-syslay / orphan-sysres problems resurface,
+            // re-introduce a NARROWER fix that targets only the simulator tree, never
+            // the rig device files.
 
             // Sweep stale cross-PLC bridge FBs (MqttFmt_<comp> / MqttPub_<comp>)
             // out of EVERY .sysres. The bridge was removed from the syslay
@@ -2196,20 +2175,11 @@ namespace CodeGen.Translation
             // CAT instance), so it cannot harm a live resource. Pure
             // contents-edit of the .sysres FBNetwork; no file deletion, no
             // device/trust touch.
-            // Re-introduced 2026-06-02 (NARROW form, per the note above): the
-            // orphan-sysres problem resurfaced as an EAE "Solution Integrity /
-            // Repair Instances" dialog on the 4 BX1 components. Cause: the BX1
-            // sysdev folder held TWO .sysres — the active BX1_RES
-            // (C9F2A4B7E1D3F5A8, referenced by the sysdev) plus a stale RES0
-            // (916E01BBCD70B5DD, referenced by nothing) left over from before
-            // BX1's resource was renamed. Both declare the same 4 CAT instances
-            // with the same FB IDs, so EAE loads both and flags the instances
-            // for repair. This deletes ONLY a .sysres whose stem (resource ID)
+            // This deletes ONLY a .sysres whose stem (resource ID)
             // is NOT referenced by its parent sysdev, AND only once every
             // referenced (active) resource's own .sysres is confirmed present —
             // so a renamed-active file can never be mistaken for an orphan.
-            // Per-sysdev, top-directory only; the broad system-wide deletes
-            // that caused the trust-loss are NOT back.
+            // Per-sysdev, top-directory only; the broad system-wide deletes are NOT back.
             SweepOrphanSysresPerSysdev(config, report);
 
             SweepBridgeFbsFromAllSysres(config, report);
@@ -2236,9 +2206,7 @@ namespace CodeGen.Translation
         ///     its matching <c>{ID}.sysres</c> present. If an active file is
         ///     missing the filename==ID convention is broken (EAE may have
         ///     renamed it) and the whole sysdev is skipped — a renamed-active
-        ///     can never be mistaken for an orphan and deleted. This is the
-        ///     guard the removed broad sweep lacked, which (combined with the
-        ///     reverted topology rewrite) caused the trusted-machine data loss.
+        ///     can never be mistaken for an orphan and deleted.
         /// </summary>
         private static void SweepOrphanSysresPerSysdev(MapperConfig config, CleanupReport report)
         {
@@ -2977,10 +2945,8 @@ namespace CodeGen.Translation
 
             BuildFullSystemWiring(builder, perStationContents);
 
-            // Phase 1: recipe arrays now travel as syslay Parameter values per Process FB
+            // Recipe arrays travel as syslay Parameter values per Process FB
             // instance. The deployed ProcessRuntime_Generic_v1.fbt is no longer mutated.
-            // (Previously this rewrote the FBT once using the first Process's recipe, which
-            // did not generalise to multi-Process projects anyway.)
 
             var doc = builder.Build();
             doc.Save(config.SyslayPath2);
