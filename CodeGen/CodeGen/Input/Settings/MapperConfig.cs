@@ -71,6 +71,25 @@ namespace CodeGen.Configuration
         public static bool UnparkDisassembly = true;
 
         /// <summary>
+        /// SAFETY (Bearing_PnP <-> CoverPNP_Hr collision). Assembly_Station and Disassembly are two
+        /// concurrent M580 processes that SHARE the physical bearing_pnp and cover_hr actuators. With
+        /// only the Assembly->Disassembly handshake, the Assembly's NEXT cycle restarts and can drive
+        /// bearing_pnp into place WHILE Disassembly is still advancing cover_hr (and vice versa) -> the
+        /// swivel and the horizontal cover enter the same volume = collision. The cross-PLC interlock
+        /// that would guard the cover side (CoverPNP_Hr on BX1) is unsound on the BX1 evaluator (it
+        /// deadlocks / reads stale M580 state), so it ships RuleCount=0 -> nothing stops the cover.
+        /// When true, the two processes are made MUTUALLY EXCLUSIVE on M580 (reliable, no cross-PLC):
+        /// Disassembly publishes a "disassembly_done=7" idle sentinel at its row 0, and Assembly WAITs
+        /// on it (DisassemblyProcessId=7) right after its material gate -- so Assembly never starts a
+        /// cycle while Disassembly is mid-cycle. Combined with the existing within-recipe ordering
+        /// (bearing homes before the cover advances; cover homes before the handshake) and the explicit
+        /// bearing-clear WAIT before every cover_hr advance, bearing_pnp and cover_hr can never be
+        /// commanded into their collision states at the same time. Default TRUE. Set FALSE to revert to
+        /// the concurrent processes (one rebuild) -- only if the M580-local handshake is shown to stall.
+        /// </summary>
+        public static bool SerializeAssemblyDisassembly = true;
+
+        /// <summary>
         /// When true, Assembly_Station + Disassembly recipes are DERIVED from their Control.xml process
         /// state machines (the generic ProcessRecipeArrayGenerator walk, commandFromCondition=true — the
         /// SAME walk Feed_Station already uses), instead of replayed from the hardcoded blocks in
