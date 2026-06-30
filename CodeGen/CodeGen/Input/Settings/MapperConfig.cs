@@ -349,7 +349,8 @@ namespace CodeGen.Configuration
         /// word). It is therefore NOT a full equivalent of the single-acting M580 clamp, which falls home
         /// mechanically on de-energise; the double-acting cover HOLDS its last coupler output when
         /// stopped. Homing it while STOPPED needs the TM3BC coupler ToHome fallback (word 16#0002), a
-        /// coupler-side Machine Expert setting outside the Mapper. BX1-only; M580/M262 I/O untouched.
+        /// setting on the coupler's own embedded web server (192.168.1.210), outside EAE/the Mapper.
+        /// BX1-only; M580/M262 I/O untouched.
         /// Set FALSE to revert to the raw broker (one rebuild) only if the gate is shown to misbehave.
         /// </summary>
         public bool Bx1CoverSafeStart { get; set; } = true;
