@@ -34,10 +34,17 @@ namespace CodeGen.Translation.Interlocks
             List<(string Component, string Detail)> bound)
         {
             int emitted = EmittedCount(p);
+            // BX1 cover-detour actuators are deliberately zeroed in FiveStatePlan (their interlocks are
+            // cross-PLC and unsound on the BX1 evaluator; the ground-truth ships covers with RuleCount=0).
+            // Exempt them from the inert-safety-net guard so the intentional RuleCount=0 is not mistaken
+            // for a failed translation.
+            if (HandoffPlanner.IsCoverDetourActuator(actuator.Name))
+            {
+                if (emitted > 0)
+                    bound.Add((actuator.Name, $"interlock RuleCount={emitted}"));
+                return;
+            }
             int inScope = InScope(actuator, allComponents, scopedIds);
-            // Covers emit their Control.xml interlock like any other actuator, so the guard
-            // applies to them too (an in-scope condition with RuleCount=0 is a real
-            // translation gap, not an intentional cover exemption).
             if (inScope > 0 && emitted == 0)
                 throw new InvalidOperationException(
                     $"[Recipe] Actuator '{actuator.Name}' has {inScope} in-scope Control.xml interlock " +
@@ -85,9 +92,19 @@ namespace CodeGen.Translation.Interlocks
             IReadOnlyList<VueOneComponent> allComponents,
             IReadOnlyDictionary<string, int>? scopedIds)
         {
-            // Every Five_State actuator — including the BX1 covers — emits whatever interlock the
-            // Control.xml defines. The interlock source is cross-PLC (M580 -> BX1), so the source
-            // state must reach BX1 for the rule to clear.
+            // BX1 cover-detour actuators (CoverPNP_Hr/Vr/Gripper) are the one exception. Their
+            // Control.xml interlocks reference M580 actuators (Shaft_Hr, Bearing_PnP), but a BX1
+            // actuator's CommonInterlockEvaluator reads the BX1 state_table, which the cross-device
+            // ring does not reliably feed with M580 states. The rule then either deadlocks (mutual
+            // shaft_hr<->coverpnp_hr, each blocking while the other is at work) or blocks on a stale
+            // cross-PLC slot, stalling the cover sequence at the M580->BX1 seam. The collision the rule
+            // guards cannot occur in the cover-detour layout (the cover replaces the shaft's horizontal
+            // motion and the recipe sequences them), and the rig-proven ground-truth ships covers with
+            // RuleCount=0. A cross-PLC interlock on a BX1 actuator is structurally unsound -> zero it.
+            if (HandoffPlanner.IsCoverDetourActuator(actuator.Name))
+                return InterlockPlan.Empty(Cap);
+
+            // Every other Five_State actuator emits whatever interlock the Control.xml defines.
             return scopedIds != null
                 ? InterlockPlanner.BuildRules(actuator, allComponents, scopedIds)
                 : InterlockPlan.Empty(Cap);
