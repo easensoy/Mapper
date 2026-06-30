@@ -48,6 +48,13 @@ namespace CodeGen.Translation.Process
             else if (ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, asmStart.SignalComponent, out var matGateBsId))
                 b.AddWait(matGateBsId, asmStart.WaitState);
 
+            // SAFETY mutual exclusion: do not begin assembling until Disassembly is idle (it has
+            // published {DisassemblyProcessId, 7} at its row 0). This keeps Assembly's bearing_pnp and
+            // Disassembly's cover_hr from ever moving in the shared collision volume at the same time.
+            // M580-local handshake, so it cannot deadlock across the M580<->BX1 seam.
+            if (MapperConfig.SerializeAssemblyDisassembly && MapperConfig.UnparkDisassembly)
+                RecipeStepEmitter.Emit(b, def.Block("disassemblyClear"), arrays, allComponents);
+
             if (MapperConfig.EnableSevenStateHomePreamble)
                 RecipeStepEmitter.Emit(b, def.Block("homePreamble"), arrays, allComponents);
 
