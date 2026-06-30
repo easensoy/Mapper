@@ -252,8 +252,10 @@ namespace CodeGen.Services
                     CodeGen.Devices.BX1.Bx1IoBrokerInjector.EmbedCoverBridgeInComposite(
                         Path.Combine(eaeProjectDir, "IEC61499", "PLC_RW_BX1.fbt"));
                 // SAFETY: insert the CoverPNP_Hr safe-start gate into the broker output path so
-                // cover_hr can never energise Work on deploy/clean/restart and is driven home if
-                // left at Work. Runs AFTER any internalize so it keys on the live bit wiring.
+                // cover_hr can never energise Work on deploy/login/restart (whenever the logic runs)
+                // and is driven home if left at Work. Does NOT cover EAE Clean/STOP (logic stops, the
+                // output word freezes) — that needs the TM3BC coupler ToHome fallback (16#0002). Runs
+                // AFTER any internalize so it keys on the live bit wiring.
                 if (cfg.Bx1CoverSafeStart &&
                     CodeGen.Devices.BX1.Bx1IoBrokerInjector.InjectCoverFailsafeIntoBrokerType(eaeProjectDir))
                     result.Warnings.Add("[Deploy][BX1] CoverPNP_Hr safe-start gate (Bx1CoverFailsafe) " +
