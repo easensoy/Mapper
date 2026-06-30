@@ -254,6 +254,82 @@ namespace CodeGen.Devices.BX1
         }
 
         /// <summary>
+        /// SAFETY (CoverPNP_Hr &lt;-&gt; Bearing_PnP swivel collision). Inserts a <c>Bx1CoverFailsafe</c>
+        /// gate into the deployed <c>PLC_RW_BX1</c> broker, between the cover coil sources and the
+        /// EtherNet/IP output-word bits. On INIT / cold / warm start the gate forces CoverPNP_Hr to
+        /// HOME (bit0 <c>ToWork</c>=0, bit1 <c>ToHome</c>=1) and the Vr/gripper coils off, and HOLDS
+        /// that until the Hr at-home sensor (input word bit0) reads TRUE — then it passes the live
+        /// cover coils through. So the broker can NEVER drive cover_hr to Work on deploy/clean/restart,
+        /// and it actively RETRACTS the cover home if it was left at Work (the double-acting Hr cylinder
+        /// needs ToHome=1 to return; both coils 0 only holds it). Keys on the
+        /// <c>EIPOutput_Bits.bit0-3</c> / <c>.REQ</c> wiring, so it patches both the external-bridge and
+        /// internalized broker forms. Idempotent. Returns true if it inserted the gate. BX1-only,
+        /// gated by <c>cfg.Bx1CoverSafeStart</c>.
+        /// </summary>
+        public static bool InjectCoverFailsafeIntoBrokerType(string eaeRoot)
+        {
+            var fbt = Path.Combine(eaeRoot, "IEC61499", "PLC_RW_BX1.fbt");
+            if (!File.Exists(fbt)) return false;
+            var doc = XDocument.Load(fbt);
+            var net = doc.Root?.Element("FBNetwork");
+            var ec = net?.Element("EventConnections");
+            var dc = net?.Element("DataConnections");
+            if (net == null || ec == null || dc == null) return false;
+            if (net.Elements("FB").Any(f => (string?)f.Attribute("Name") == "CoverFailsafe"))
+                return false; // idempotent
+
+            var idc = doc.Root!.Elements("Attribute")
+                .FirstOrDefault(a => (string?)a.Attribute("Name") == "Configuration.FB.IDCounter");
+            int nextId = (idc != null && int.TryParse((string?)idc.Attribute("Value"), out var cur)) ? cur : 30;
+
+            var fb = new XElement("FB",
+                new XAttribute("ID", nextId++), new XAttribute("Name", "CoverFailsafe"),
+                new XAttribute("Type", "Bx1CoverFailsafe"),
+                new XAttribute("x", "4600"), new XAttribute("y", "1300"),
+                new XAttribute("Namespace", "Main"));
+            var firstInput = net.Elements("Input").FirstOrDefault();
+            if (firstInput != null) firstInput.AddBeforeSelf(fb); else net.Add(fb);
+
+            // Reroute the source feeding each output bit THROUGH the gate. Key on the bit
+            // DESTINATION so it works whether the source is the broker InputVar (external bridge)
+            // or CoverCoilSubscriber.VALUE (internalized).
+            void Reroute(string bit, string fsIn, string fsOut)
+            {
+                var conn = dc.Elements("Connection").FirstOrDefault(c =>
+                    (string?)c.Attribute("Destination") == "EIPOutput_Bits." + bit);
+                if (conn == null) return;
+                var src = (string?)conn.Attribute("Source");
+                conn.Remove();
+                dc.Add(new XElement("Connection", new XAttribute("Source", src),
+                    new XAttribute("Destination", "CoverFailsafe." + fsIn)));
+                dc.Add(new XElement("Connection", new XAttribute("Source", "CoverFailsafe." + fsOut),
+                    new XAttribute("Destination", "EIPOutput_Bits." + bit)));
+            }
+            Reroute("bit0", "ToWork", "gToWork");
+            Reroute("bit1", "ToHome", "gToHome");
+            Reroute("bit2", "Vr", "gVr");
+            Reroute("bit3", "Grip", "gGrip");
+
+            // Hr at-home feedback = EIPInputs_Bool.bit0 (verified in PLC_RW_BX1).
+            dc.Add(new XElement("Connection", new XAttribute("Source", "EIPInputs_Bool.bit0"),
+                new XAttribute("Destination", "CoverFailsafe.AtHome")));
+
+            // Whatever triggered the output-word write now triggers the gate first; the gate's CNF
+            // writes the word. INIT arms the safe-start (force home) before the first scan.
+            foreach (var c in ec.Elements("Connection")
+                         .Where(c => (string?)c.Attribute("Destination") == "EIPOutput_Bits.REQ").ToList())
+                c.SetAttributeValue("Destination", "CoverFailsafe.REQ");
+            ec.Add(new XElement("Connection", new XAttribute("Source", "CoverFailsafe.CNF"),
+                new XAttribute("Destination", "EIPOutput_Bits.REQ")));
+            ec.Add(new XElement("Connection", new XAttribute("Source", "INIT"),
+                new XAttribute("Destination", "CoverFailsafe.INIT")));
+
+            idc?.SetAttributeValue("Value", nextId.ToString());
+            doc.Save(fbt);
+            return true;
+        }
+
+        /// <summary>
         /// Lays the embedded broker FBs + interface pins out in clean left-to-right columns with
         /// generous spacing so EAE renders them with no FB/pin/label/wire overlap. Deterministic,
         /// safe to re-run on every (re)deploy. BX1-only.
