@@ -10,9 +10,20 @@
 recipes:
   - name: Disassembly
     blocks:
+      # Mutual-exclusion idle sentinel (MapperConfig.SerializeAssemblyDisassembly). Emitted at row 0,
+      # BEFORE the handshake wait, so it publishes {DisassemblyProcessId, 7} = "I am idle". Assembly's
+      # disassemblyClear WAITs on this before starting a cycle, so the two processes never drive the
+      # shared bearing_pnp / cover_hr at the same time. state 7 is unique among Disassembly CMD states.
+      ready:
+        - { cmd: disassembly_done, state: 7 }
       handshake:
         - { waitConfig: AssemblyProcessId, state: 7 }
       coverRemove:
+        # SAFETY: the swivel (bearing_pnp) and the horizontal cover share the assembly volume. Never
+        # advance cover_hr unless the swivel is Home (state 0). This is M580-local (bearing_pnp is on
+        # M580, so this WAIT reads a reliable local state) and fails SAFE -- if the swivel is not home
+        # the cover waits instead of driving into it.
+        - { waitRef: bearing_pnp, state: 0 }
         - { cmd: coverpnp_hr, state: 1 }
         - { waitRef: coverpnp_hr, state: 2 }
         - { cmd: coverpnp_vr, state: 1 }
@@ -46,18 +57,25 @@ recipes:
         - { waitRef: shaft_gripper, state: 0 }
         - { cmd: shaft_vr, state: 3 }
         - { waitRef: shaft_vr, state: 0 }
-      bearingOut:
-        - { cmd: bearing_pnp, state: 3 }
+      # Bearing out, split so the empty restage to AtWork2 is its own block.
+      # DisassemblyRecipe emits bearingStage ONLY when MapperConfig.SwivelBrakeHome is OFF
+      # (no CAT brake -> the swivel must approach Home from the AtWork2 side to land clear of
+      # the ejector). With the brake ON, the swivel homes directly from AtWork1 and the brake
+      # arrests it at centre, so the restage is dropped -> AtWork2(pick) -> AtWork1(place) -> Home.
+      bearingPick:
+        - { cmd: bearing_pnp, state: 3 }        # collect @ AtWork2
         - { waitRef: bearing_pnp, state: 4 }
-        - { cmd: bearing_gripper, state: 1 }
+        - { cmd: bearing_gripper, state: 1 }    # grip
         - { waitRef: bearing_gripper, state: 2 }
-        - { cmd: bearing_pnp, state: 1 }
+        - { cmd: bearing_pnp, state: 1 }        # deposit @ AtWork1
         - { waitRef: bearing_pnp, state: 2 }
-        - { cmd: bearing_gripper, state: 3 }
+        - { cmd: bearing_gripper, state: 3 }    # release
         - { waitRef: bearing_gripper, state: 0 }
-        - { cmd: bearing_pnp, state: 3 }
+      bearingStage:
+        - { cmd: bearing_pnp, state: 3 }        # empty restage to AtWork2 (brake OFF only)
         - { waitRef: bearing_pnp, state: 4 }
-        - { cmd: bearing_pnp, state: 5 }
+      bearingHome:
+        - { cmd: bearing_pnp, state: 5 }        # Home (brake settles at centre when ON)
         - { waitRef: bearing_pnp, state: 0 }
       unclamp:
         - { cmd: clamp, state: 3 }
@@ -75,6 +93,12 @@ recipes:
 
   - name: Assembly_Station
     blocks:
+      # Mutual-exclusion gate (MapperConfig.SerializeAssemblyDisassembly). Emitted right after the
+      # material gate: Assembly will not begin a cycle until Disassembly has published its idle
+      # sentinel {DisassemblyProcessId, 7}. So Assembly's bearing_pnp work never overlaps Disassembly's
+      # cover_hr work on the shared actuators. M580-local, so it cannot recreate the cross-PLC deadlock.
+      disassemblyClear:
+        - { waitConfig: DisassemblyProcessId, state: 7 }
       homePreamble:
         - { cmd: bearing_pnp, state: 5 }
         - { waitRef: bearing_pnp, state: 0 }
@@ -116,6 +140,9 @@ recipes:
         - { waitRef: coverpnp_gripper, state: 2 }
         - { cmd: coverpnp_vr, state: 3 }
         - { waitRef: coverpnp_vr, state: 0 }
+        # SAFETY: swivel must be Home (state 0) before cover_hr advances into the shared volume.
+        # M580-local WAIT (bearing_pnp is on M580), fails SAFE -- cover holds if the swivel is not clear.
+        - { waitRef: bearing_pnp, state: 0 }
         - { cmd: coverpnp_hr, state: 1 }
         - { waitRef: coverpnp_hr, state: 2 }
         - { cmd: coverpnp_vr, state: 1 }
