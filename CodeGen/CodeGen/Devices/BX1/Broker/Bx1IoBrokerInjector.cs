@@ -259,9 +259,14 @@ namespace CodeGen.Devices.BX1
         /// EtherNet/IP output-word bits. On INIT / cold / warm start the gate forces CoverPNP_Hr to
         /// HOME (bit0 <c>ToWork</c>=0, bit1 <c>ToHome</c>=1) and the Vr/gripper coils off, and HOLDS
         /// that until the Hr at-home sensor (input word bit0) reads TRUE — then it passes the live
-        /// cover coils through. So the broker can NEVER drive cover_hr to Work on deploy/clean/restart,
-        /// and it actively RETRACTS the cover home if it was left at Work (the double-acting Hr cylinder
-        /// needs ToHome=1 to return; both coils 0 only holds it). Keys on the
+        /// cover coils through. So while the BX1 logic RUNS the broker can NEVER drive cover_hr to Work
+        /// on deploy/login/restart, and it actively RETRACTS the cover home if it was left at Work (the
+        /// double-acting Hr cylinder needs ToHome=1 to return; both coils 0 only holds it). NOTE: this
+        /// gate fires only on INIT and on the E_DELAY scan REQ — only while the logic is ALIVE. It does
+        /// NOT cover EAE Clean/STOP/fault (logic torn down, the scan stops, the output word freezes).
+        /// Homing the cover while STOPPED requires the TM3BC coupler output fallback (TM3DQ16T ToHome
+        /// channel -&gt; 1 = fallback word 16#0002), a coupler-side Machine Expert setting the Mapper
+        /// cannot emit. Keys on the
         /// <c>EIPOutput_Bits.bit0-3</c> / <c>.REQ</c> wiring, so it patches both the external-bridge and
         /// internalized broker forms. Idempotent. Returns true if it inserted the gate. BX1-only,
         /// gated by <c>cfg.Bx1CoverSafeStart</c>.
