@@ -339,6 +339,18 @@ namespace CodeGen.Configuration
         public bool Bx1BridgeInsideComposite { get; set; } = false;
 
         /// <summary>
+        /// SAFETY (default TRUE). Inserts the <c>Bx1CoverFailsafe</c> safe-start gate into the
+        /// deployed <c>PLC_RW_BX1</c> broker. On every deploy / cold / warm start the broker forces
+        /// CoverPNP_Hr to HOME (ToWork=0, ToHome=1) and the Vr/gripper coils off, and holds that until
+        /// the Hr at-home sensor is TRUE, then passes the live cover coils through. So cover_hr can
+        /// NEVER auto-energise Work on deploy/clean/restart (the swivel-collision hazard) and is
+        /// actively driven home if it was left at Work — the BX1 EtherNet/IP equivalent of the M580
+        /// clamp de-energising on stop. BX1-only; the clamp and all M580/M262 I/O are untouched.
+        /// Set FALSE to revert to the raw broker (one rebuild) only if the gate is shown to misbehave.
+        /// </summary>
+        public bool Bx1CoverSafeStart { get; set; } = true;
+
+        /// <summary>
         /// M262 resource name written into the .sysres root and the .sysdev's
         /// &lt;Resource&gt; entry. Default "M262_RES" so the EAE Deploy &amp;
         /// Diagnostic tree reads "M262 &gt; M262_RES" rather than the generic
