@@ -81,10 +81,14 @@ namespace CodeGen.Configuration
         /// Feed→Assembly material gate and the Assembly↔Disassembly handshake) are injected around it by
         /// DataDrivenHandoffInjector, so the derived recipe carries the SAME WAIT(matgate) start and
         /// assembly_handshake_done/WAIT(17,7) handshake the proven hardcoded recipe has — just over
-        /// motion read straight from the corrected Control.xml. Default TRUE = fully model-driven, no
-        /// hardcoded motion. Set FALSE to fall back to the hardcoded recipes (one rebuild).
+        /// motion read straight from the corrected Control.xml. Default reverted to FALSE: the derived
+        /// Disassembly did not complete on the rig (its cross-PLC handshake + cover chain need proving),
+        /// which left the centre-home swivel (Bearing_PnP) parked at a work position — in CoverPNP_Hr's
+        /// path. The cross-PLC bearing_pnp↔cover_hr collision guard (M580↔BX1) can't be trusted, so the
+        /// safe state is the rig-proven hardcoded recipe that reliably homes the swivel. Flip TRUE again
+        /// only after the derived Disassembly is verified end-to-end on the rig.
         /// </summary>
-        public static bool DataDrivenRecipes = true;
+        public static bool DataDrivenRecipes = false;
 
         // Process-FB process_id slots + the robot's state_table slot; data in Config/smc-rig.yml.
         // Each must sit above the component id space (ValidateProcessIdInvariant enforces it). The
