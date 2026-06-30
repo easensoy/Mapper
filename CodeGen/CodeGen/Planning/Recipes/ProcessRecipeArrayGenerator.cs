@@ -674,10 +674,18 @@ namespace CodeGen.Translation.Process
                 }
             }
 
-            // DataDrivenRecipes: skip the hardcoded overwrite so the generic walk's derived recipe
-            // (already produced above from the Assembly_Station Control.xml state machine) stands.
+            // DataDrivenRecipes: keep the generic walk's derived motion (already produced above from
+            // the Control.xml state machine) and inject ONLY the cross-station handoffs the model can't
+            // express (Feed→Assembly material gate, Assembly↔Disassembly handshake). Off → the proven
+            // hardcoded recipe overwrites the walk for Assembly_Station (Disassembly already returned
+            // above via its own gate).
             if (!MapperConfig.DataDrivenRecipes)
                 AssemblyRecipe.Apply(process, arrays, allComponents);
+            else
+            {
+                DataDrivenHandoffInjector.InjectAssembly(process, arrays, allComponents);
+                DataDrivenHandoffInjector.InjectDisassembly(process, arrays, allComponents);
+            }
 
             // RUN-ONCE: park on the END row after one cycle instead of looping.
             // (MapperConfig.RecipeRunOnce, default ON.) The END
