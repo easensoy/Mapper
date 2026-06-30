@@ -20,14 +20,11 @@ namespace CodeGen.Services
             { "Sensor_Bool_CAT",         new[] { "Sensor_Bool" } },
             { "Actuator_Fault_CAT",      new[] { "FaultLatch" } },
             { "Robot_Task_CAT",          new[] { "Robot_Task_Core" } },
-            // Seven_State_Actuator_CAT re-added per user request 2026-05-21
-            // for Bearing_PnP routing (Mapper Validator was failing the
-            // PARALLEL+ALTERNATIVE-branched 13-state actuator with "No template
-            // found"). SevenStateActuator2 is its internal "InterlockManager"
-            // sub-FB analogue (same role as CommonInterlockEvaluator for
-            // Five_State). The previous removal was driven by data-driven
-            // patch failures; with Bearing_PnP routed to the verbatim CAT
-            // (no runtime parameter graft) those failures no longer apply.
+            // Seven_State_Actuator_CAT for Bearing_PnP routing (the
+            // PARALLEL+ALTERNATIVE-branched 13-state actuator). SevenStateActuator2
+            // is its internal "InterlockManager" sub-FB analogue (same role as
+            // CommonInterlockEvaluator for Five_State). Bearing_PnP is routed to the
+            // verbatim CAT (no runtime parameter graft).
             { "Seven_State_Actuator_CAT", new[] { "SevenStateActuator", "SevenStateActuator2" } },
             // Jyotsna's new centre-home swivel (2026-06-02). Basic leaf FBs:
             // SevenStateCentreHomeActuator (core ECC), No_Sensor_Handler_7SCH
@@ -103,8 +100,7 @@ namespace CodeGen.Services
             // SevenStateActuator + SevenStateActuator2 — Basic FBs embedded by
             // Seven_State_Actuator_CAT. Both must be deployed when the CAT is in
             // scope or EAE fails with "type or namespace SevenStateActuator2
-            // does not exist". Restored 2026-05-21 alongside the CAT for
-            // Bearing_PnP routing.
+            // does not exist".
             "SevenStateActuator", "SevenStateActuator2",
             // Centre-home swivel leaf Basics (2026-06-02). SevenStateCentreHomeActuator
             // is the core ECC; No_Sensor_Handler_7SCH synthesises atHome on the
@@ -156,9 +152,15 @@ namespace CodeGen.Services
             // copy-if-absent re-extracts the fixed one. Pipeline-respecting (the deployer does it, no
             // direct Demonstrator edit), idempotent, and guarantees the deployed handler always
             // matches the committed zip. EAE recompiles the one small Basic FB on the next Build.
+            // Force-refresh BOTH the handler AND the centre-home core ECC: the ECC's atHome/AtHomeInit
+            // algorithms + AtHome->AtHomeInit transition are reshaped every deploy by the swivel patches
+            // (coil-clear / both-coils / brake). Copy-if-absent would keep a prior deploy's reshape, so a
+            // flag change (e.g. SwivelBrakeHome OFF) would not revert. Deleting first forces re-extract of
+            // the pristine zip, after which the swivel patches re-apply from a known base. Idempotent.
             foreach (var ext in new[] { ".fbt", ".doc.xml", ".meta.xml" })
+            foreach (var basic in new[] { "No_Sensor_Handler_7SCH", "SevenStateCentreHomeActuator" })
             {
-                var stale = Path.Combine(eaeProjectDir, "IEC61499", "No_Sensor_Handler_7SCH" + ext);
+                var stale = Path.Combine(eaeProjectDir, "IEC61499", basic + ext);
                 try { if (File.Exists(stale)) File.Delete(stale); }
                 catch (Exception ex)
                 { MapperLogger.Info($"[Deploy][Refresh] could not remove stale {stale}: {ex.Message}"); }
@@ -174,7 +176,14 @@ namespace CodeGen.Services
             // atWork/atHome after a CMD. DeployArtifact is COPY-IF-ABSENT, so delete the deployed CAT
             // folders first to force re-extract of the fixed zips. Pipeline-respecting (no direct
             // Demonstrator edit); PatchCatMqttPublish re-applies embedded MQTT after; EAE recompiles on Build.
-            foreach (var catRefresh in new[] { "Sensor_Bool_CAT", "Five_State_Actuator_CAT" })
+            // Seven_State_Actuator_Centre_Home_CAT added 2026-06-26: it is COPY-IF-ABSENT like the
+            // others, so any stale mutation in the DEPLOYED copy persists across Generates even when the
+            // source/zip is clean. (A deploy-time patch once rewrote its timer-gate wiring to
+            // Inputs.VALUE1 -> FB11.IN2 / FB12.IN2 instead of the correct VALUE2/VALUE3, and a plain
+            // re-Generate never repaired it because the normalizers only touch ActuatorCore.atWork1/2,
+            // not the FB11/FB12 AND-gates.) Force re-extract of the pristine zip every Generate so the
+            // deployed CAT always matches the committed template; the deployer's own patches re-apply after.
+            foreach (var catRefresh in new[] { "Sensor_Bool_CAT", "Five_State_Actuator_CAT", "Seven_State_Actuator_Centre_Home_CAT" })
             {
                 var dir = Path.Combine(eaeProjectDir, "IEC61499", catRefresh);
                 try { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
@@ -228,6 +237,10 @@ namespace CodeGen.Services
             if (cfg.DeployBx1IoBroker)
             {
                 DeployArtifact(libPath, "Basic", "changeEventM262_2", eaeProjectDir, result, isBasic: true);
+                // SAFETY: the CoverPNP_Hr safe-start gate type. Deployed leaf-first so the broker
+                // patch below can reference it.
+                if (cfg.Bx1CoverSafeStart)
+                    DeployArtifact(libPath, "Basic", "Bx1CoverFailsafe", eaeProjectDir, result, isBasic: true);
                 DeployArtifact(libPath, "Composite", "PLC_RW_BX1", eaeProjectDir, result, isBasic: false);
                 // INTERNALIZED cover bridge (cfg.Bx1BridgeInsideComposite, default): transform
                 // the just-deployed PLC_RW_BX1.fbt so the per-cover sensor/coil symlink bridge
@@ -238,6 +251,13 @@ namespace CodeGen.Services
                 if (cfg.Bx1BridgeInsideComposite)
                     CodeGen.Devices.BX1.Bx1IoBrokerInjector.EmbedCoverBridgeInComposite(
                         Path.Combine(eaeProjectDir, "IEC61499", "PLC_RW_BX1.fbt"));
+                // SAFETY: insert the CoverPNP_Hr safe-start gate into the broker output path so
+                // cover_hr can never energise Work on deploy/clean/restart and is driven home if
+                // left at Work. Runs AFTER any internalize so it keys on the live bit wiring.
+                if (cfg.Bx1CoverSafeStart &&
+                    CodeGen.Devices.BX1.Bx1IoBrokerInjector.InjectCoverFailsafeIntoBrokerType(eaeProjectDir))
+                    result.Warnings.Add("[Deploy][BX1] CoverPNP_Hr safe-start gate (Bx1CoverFailsafe) " +
+                        "inserted into PLC_RW_BX1 — cover_hr forced HOME on every start.");
             }
 
             DeployDataTypes(libPath, eaeProjectDir, result);
@@ -310,6 +330,16 @@ namespace CodeGen.Services
             // cylinder with a mechanical mid-stop is driven into + held at centre. Default OFF = today's
             // proven de-energise (byte-identical). Bidirectional: OFF re-asserts FALSE/FALSE.
             PatchSwivelAtHomeBothCoils(eaeProjectDir, MapperConfig.SwivelHomeHoldBothCoils, result);
+            // 2026-06-26: CENTRE-HOME BRAKE (gated MapperConfig.SwivelBrakeHome, default ON). Runs LAST so
+            // it owns the final atHome shape. When ON: the 'atHome' algorithm becomes a DIRECTIONAL brake
+            // (reverse the driving coil only when homing from AtWork1 -> push toward AtWork1/away from the
+            // ejector; de-energise otherwise so Assembly is untouched), AtHomeInit de-energises, the CAT
+            // gains a brakeTimer E_DELAY (DT from config.yaml bearingPnpHomeBrakeMs) and AtHome->AtHomeInit
+            // is gated on the timer (brake_done) so the reverse pulse runs for the configured time. This
+            // lets Disassembly drop the empty AtWork2 restage and home straight from AtWork1 without
+            // coasting into the ejector. OFF = no-op (the pristine de-energise home above stands).
+            PatchSwivelBrakeHome(eaeProjectDir, MapperConfig.SwivelBrakeHome,
+                GenerationConfig.Current.BearingPnpHomeBrakeMs, result);
             // 2026-06-04 (Alex fix): the Centre-Home core's work-arrival latches required
             // the two physical work sensors to be perfectly mutually exclusive
             // (ToWork1->AtWork1 needed atWork1=TRUE AND atWork2=FALSE, ToWork2->AtWork2 the
@@ -3356,14 +3386,13 @@ namespace CodeGen.Services
 
                 // Re-patchable: remove any existing MqttPub/MqttFmt FBs + their
                 // wires before re-emitting fresh. Without this, an earlier
-                // patch's stale topic/parameter shape persists across deploys
-                // because Test Simulator only PrepareDemonstratorForGeneration
-                // (which cleans .sysres FBNetwork) and does NOT invoke
-                // DemonstratorWiper.Wipe (the CAT-folder delete). So the
-                // deployed Five_State_Actuator_CAT.fbt carries the OLD MqttPub
-                // forever and the old idempotency-skip stopped the new wire
-                // shape ever reaching the runtime. Removing first guarantees
-                // each deploy reflects the latest source.
+                // patch's stale topic/parameter shape persists across deploys:
+                // the CAT folder is copy-if-absent (a deploy that doesn't invoke
+                // DemonstratorWiper.Wipe never re-copies it), so the deployed
+                // Five_State_Actuator_CAT.fbt would carry the OLD MqttPub forever
+                // and an idempotency-skip would stop the new wire shape ever
+                // reaching the runtime. Removing first guarantees each deploy
+                // reflects the latest source.
                 var staleFbs = net.Elements(ns + "FB")
                     .Where(f => (string?)f.Attribute("Name") is "MqttPub" or "MqttFmt")
                     .ToList();
@@ -3657,8 +3686,8 @@ namespace CodeGen.Services
         /// This is a BIDIRECTIONAL NORMALIZER, not a one-way strip, because the
         /// template deployer copies artefacts only when absent
         /// (ExtractToEae/CopyDirToEae are copy-if-missing). The deployed CAT is
-        /// therefore a single persistent file shared by BOTH the Test Simulator
-        /// and Test Runtime buttons. <paramref name="reduce"/>==true strips and
+        /// therefore a single persistent file reused across deploys.
+        /// <paramref name="reduce"/>==true strips and
         /// bakes; ==false restores the wired inputs and removes the baked params.
         /// Call it on every deploy with reduce=false (rig) so the CAT shape always
         /// matches the <c>&lt;Parameter&gt;</c> set BuildActuatorParameters emits.
@@ -4367,6 +4396,155 @@ namespace CodeGen.Services
         // can then accept the engine's Home command. Identified by
         // Source=AtHomeInit AND Destination in {AtWork1,AtWork2}; the stock
         // AtHomeInit arcs go to ToWork1/ToWork2 so this never collides with them.
+        // 2026-06-26: CENTRE-HOME BRAKE (gated MapperConfig.SwivelBrakeHome). See the call site. When
+        // enabled, reshapes the deployed centre-home ECC + composite into a timed reverse-coil brake at
+        // centre so the swivel can home directly from AtWork1 (Disassembly) WITHOUT coasting into the
+        // ejector. The brake is DIRECTIONAL: at AtHome the 'atHome' algorithm reverses the driving coil
+        // ONLY when homing from AtWork1 (outputToWork2 was driving) -> push toward AtWork1, AWAY from the
+        // ejector; homing from AtWork2 (Assembly) de-energises unchanged. A brakeTimer E_DELAY (DT =
+        // bearingPnpHomeBrakeMs) holds the reverse pulse, then AtHomeInit de-energises. Errs SAFE: a
+        // longer pulse only pushes further toward AtWork1, never into the ejector. No-op when disabled
+        // (the pristine de-energise home stands); the ECC/CAT are force-refreshed so a flag flip reverts.
+        static void PatchSwivelBrakeHome(string eaeProjectDir, bool enabled, int brakeMs, DeployResult result)
+        {
+            if (!enabled) return;
+            if (brakeMs <= 0) brakeMs = 500;
+
+            // ---- 1. Core ECC: SevenStateCentreHomeActuator.fbt ----
+            var ecc = Path.Combine(eaeProjectDir, "IEC61499", "SevenStateCentreHomeActuator.fbt");
+            if (!File.Exists(ecc))
+            {
+                ecc = Directory.EnumerateFiles(Path.Combine(eaeProjectDir, "IEC61499"),
+                        "SevenStateCentreHomeActuator.fbt", SearchOption.AllDirectories).FirstOrDefault() ?? string.Empty;
+                if (string.IsNullOrEmpty(ecc)) { result.Warnings.Add("Swivel brake: core ECC not found; skipped."); return; }
+            }
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(ecc, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var root = doc.Root; if (root == null) return;
+                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+
+                // a. 'atHome' -> directional brake (reverse the driving coil only when homing from AtWork1).
+                var atHomeAlgo = root.Descendants(ns + "Algorithm").FirstOrDefault(a => (string?)a.Attribute("Name") == "atHome");
+                if (atHomeAlgo == null) { result.Warnings.Add("Swivel brake: 'atHome' algorithm not found; skipped."); return; }
+                atHomeAlgo.Element(ns + "ST")?.ReplaceNodes(new XCData(
+                    "current_state_to_process := 6;\r\nIF outputToWork2 = TRUE THEN\r\n\toutputToWork1:= TRUE;\r\n\toutputToWork2:= FALSE;\r\nELSE\r\n\toutputToWork1:= FALSE;\r\n\toutputToWork2:= FALSE;\r\nEND_IF;\r\n"));
+
+                // b. 'AtHomeInit' -> de-energise after the brake pulse.
+                root.Descendants(ns + "Algorithm").FirstOrDefault(a => (string?)a.Attribute("Name") == "AtHomeInit")
+                    ?.Element(ns + "ST")?.ReplaceNodes(new XCData(
+                        "current_state_to_process := 0;\r\noutputToWork1:= FALSE;\r\noutputToWork2:= FALSE;\r\n"));
+
+                // c. interface: brake_start (output) + brake_done (input).
+                var eos = root.Descendants(ns + "EventOutputs").FirstOrDefault();
+                if (eos != null && !eos.Elements(ns + "Event").Any(e => (string?)e.Attribute("Name") == "brake_start"))
+                    eos.Add(new XElement(ns + "Event", new XAttribute("Name", "brake_start"),
+                        new XAttribute("Comment", "centre-home brake pulse start")));
+                var eis = root.Descendants(ns + "EventInputs").FirstOrDefault();
+                if (eis != null && !eis.Elements(ns + "Event").Any(e => (string?)e.Attribute("Name") == "brake_done"))
+                    eis.Add(new XElement(ns + "Event", new XAttribute("Name", "brake_done"),
+                        new XAttribute("Comment", "centre-home brake pulse elapsed")));
+
+                // d. AtHome ECState: also emit brake_start (starts the timer).
+                var atHome = root.Descendants(ns + "ECState").FirstOrDefault(s => (string?)s.Attribute("Name") == "AtHome");
+                if (atHome != null && !atHome.Elements(ns + "ECAction").Any(a => (string?)a.Attribute("Output") == "brake_start"))
+                    atHome.Add(new XElement(ns + "ECAction", new XAttribute("Output", "brake_start")));
+
+                // e. AtHome -> AtHomeInit: brake_done is now a SAFETY CAP only (the sensor arc in
+                //    (g) is the primary). Set the non-sensor arc to brake_done (idempotent: never
+                //    touches the 'atHome = FALSE' sensor arc).
+                root.Descendants(ns + "ECTransition").FirstOrDefault(t =>
+                        (string?)t.Attribute("Source") == "AtHome" && (string?)t.Attribute("Destination") == "AtHomeInit"
+                        && (string?)t.Attribute("Condition") != "atHome = FALSE")
+                    ?.SetAttributeValue("Condition", "brake_done");
+
+                // f. CRITICAL: AtHomeInit must PUBLISH the coil-off (output_event). The stock state
+                //    only emits pst_out, so AFTER the brake the reverse coil stays ENERGISED and the
+                //    arm is DRIVEN + HELD at AtWork1 — the observed overshoot at ANY brake length.
+                //    output_event drives the Output SYMLINKMULTIVARSRC, which writes both coils FALSE.
+                var atHomeInit = root.Descendants(ns + "ECState").FirstOrDefault(s => (string?)s.Attribute("Name") == "AtHomeInit");
+                if (atHomeInit != null && !atHomeInit.Elements(ns + "ECAction").Any(a => (string?)a.Attribute("Output") == "output_event"))
+                    atHomeInit.Add(new XElement(ns + "ECAction", new XAttribute("Output", "output_event")));
+
+                // g. SENSOR-STOPPED de-energise (the real fix): leave AtHome the instant the arm
+                //    crosses back OUT of the DI02 centre window (atHome=FALSE) instead of after the
+                //    fixed brake_done timer (which over-drove the arm to AtWork1). The Inputs
+                //    subscriber pushes input_event on every sensor change — the SAME path the swivel
+                //    uses to detect centre at all (the work-timers are inert T#0s) — so the ECC
+                //    re-evaluates promptly and cuts the coil NEAR CENTRE. brake_done stays as the cap
+                //    (fires only if the arm never leaves the window, e.g. the sensor mechanism fails).
+                var brakeDoneArc = root.Descendants(ns + "ECTransition").FirstOrDefault(t =>
+                    (string?)t.Attribute("Source") == "AtHome" && (string?)t.Attribute("Destination") == "AtHomeInit" &&
+                    (string?)t.Attribute("Condition") == "brake_done");
+                bool hasSensorArc = root.Descendants(ns + "ECTransition").Any(t =>
+                    (string?)t.Attribute("Source") == "AtHome" && (string?)t.Attribute("Destination") == "AtHomeInit" &&
+                    (string?)t.Attribute("Condition") == "atHome = FALSE");
+                if (brakeDoneArc != null && !hasSensorArc)
+                    brakeDoneArc.AddBeforeSelf(new XElement(ns + "ECTransition",
+                        new XAttribute("Source", "AtHome"), new XAttribute("Destination", "AtHomeInit"),
+                        new XAttribute("Condition", "atHome = FALSE"),
+                        new XAttribute("x", "1445.13"), new XAttribute("y", "2470.42")));
+
+                doc.Save(ecc);
+                result.PatchesApplied.Add("SevenStateCentreHomeActuator.fbt: SENSOR-STOPPED centre-home brake (atHome reverses the coil; AtHome->AtHomeInit on atHome=FALSE cuts at the centre-window edge; AtHomeInit now PUBLISHES output_event so the coil actually releases; brake_done = safety cap)");
+            }
+            catch (Exception ex) { result.Warnings.Add($"Swivel brake core ECC patch failed: {ex.Message}"); return; }
+
+            // ---- 2. Composite: brakeTimer E_DELAY + wiring ----
+            var cat = Directory.EnumerateFiles(Path.Combine(eaeProjectDir, "IEC61499"),
+                "Seven_State_Actuator_Centre_Home_CAT.fbt", SearchOption.AllDirectories).FirstOrDefault();
+            if (string.IsNullOrEmpty(cat) || !File.Exists(cat)) { result.Warnings.Add("Swivel brake: composite not found; skipped."); return; }
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(cat, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var root = doc.Root; if (root == null) return;
+                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+                var net = root.Descendants(ns + "FBNetwork").FirstOrDefault();
+                var actuator = net?.Elements(ns + "FB").FirstOrDefault(f => (string?)f.Attribute("Name") == "ActuatorCore");
+                if (net == null || actuator == null) { result.Warnings.Add("Swivel brake: composite ActuatorCore missing; skipped."); return; }
+
+                var existing = net.Elements(ns + "FB").FirstOrDefault(f => (string?)f.Attribute("Name") == "brakeTimer");
+                if (existing == null)
+                {
+                    int maxId = net.Elements(ns + "FB")
+                        .Select(f => int.TryParse((string?)f.Attribute("ID"), out var v) ? v : 0).DefaultIfEmpty(0).Max();
+                    int id = maxId + 1;
+                    actuator.AddAfterSelf(new XElement(ns + "FB",
+                        new XAttribute("ID", id), new XAttribute("Name", "brakeTimer"),
+                        new XAttribute("Type", "E_DELAY"), new XAttribute("x", "3100"), new XAttribute("y", "4880"),
+                        new XAttribute("Namespace", "IEC61499.Standard"),
+                        new XElement(ns + "Parameter", new XAttribute("Name", "DT"), new XAttribute("Value", $"T#{brakeMs}ms"))));
+                    var idc = root.Descendants(ns + "Attribute").FirstOrDefault(a => (string?)a.Attribute("Name") == "Configuration.FB.IDCounter");
+                    if (idc != null && int.TryParse((string?)idc.Attribute("Value"), out var c) && c <= id)
+                        idc.SetAttributeValue("Value", id + 1);
+                }
+                else
+                {
+                    existing.Elements(ns + "Parameter").FirstOrDefault(p => (string?)p.Attribute("Name") == "DT")
+                        ?.SetAttributeValue("Value", $"T#{brakeMs}ms");
+                }
+
+                var evc = net.Elements(ns + "EventConnections").FirstOrDefault();
+                if (evc != null)
+                {
+                    void AddConn(string src, string dst)
+                    {
+                        if (!evc.Elements(ns + "Connection").Any(c =>
+                                (string?)c.Attribute("Source") == src && (string?)c.Attribute("Destination") == dst))
+                            evc.Add(new XElement(ns + "Connection",
+                                new XAttribute("Source", src), new XAttribute("Destination", dst)));
+                    }
+                    AddConn("ActuatorCore.brake_start", "brakeTimer.START");
+                    AddConn("brakeTimer.EO", "ActuatorCore.brake_done");
+                }
+
+                doc.Save(cat);
+                result.PatchesApplied.Add($"Seven_State_Actuator_Centre_Home_CAT.fbt: brakeTimer E_DELAY (T#{brakeMs}ms) wired brake_start->START, EO->brake_done");
+                MapperLogger.Info($"[Deploy] centre-home BRAKE ON: reverse-coil pulse {brakeMs}ms at centre (errs toward AtWork1/away from ejector)");
+            }
+            catch (Exception ex) { result.Warnings.Add($"Swivel brake composite patch failed: {ex.Message}"); }
+        }
+
         static void PatchSwivelAtHomeInitRecovery(string eaeProjectDir, bool addArc, DeployResult result)
         {
             var fbt = Path.Combine(eaeProjectDir, "IEC61499", "SevenStateCentreHomeActuator.fbt");
@@ -4656,8 +4834,6 @@ namespace CodeGen.Services
                     $"SevenStateCentreHomeActuator.fbt home-hold patch failed: {ex.Message}");
             }
         }
-
-        // Seven_State_Actuator_CAT data-driven patch removed 2026-05-21.
 
         static void PatchKnownArraySizeBugs(string eaeProjectDir, DeployResult result)
         {
@@ -5063,14 +5239,6 @@ namespace CodeGen.Services
                     "CurrentStep := 0;\n" +
                     "CurrentStepType := 0;\n" +
                     "WaitSatisfied := FALSE;\n\n" +
-                    // PusherID := 0; removed 2026-05-26 — leftover from the
-                    // pre-recipe Pusher-id scheme. The variable was never (or no
-                    // longer) declared on ProcessRuntime_Generic_v1, so EAE
-                    // raised ERR_NO_SUCH_VAR in initializeinit and the project
-                    // failed to compile, leaving the runtime offline (Pusher
-                    // would not actuate). Per-actuator state lookups now go
-                    // through Wait1Id / state_table indexing, not a single
-                    // PusherID register, so the assignment is redundant.
                     "cmd_target_name := '';\n" +
                     "cmd_state := 0;\n\n" +
                     "PreviousStepText := '';\n" +
