@@ -1,0 +1,172 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
+  <PropertyGroup>
+    <ProjectGuid>{52218F91-EA77-4432-B182-646578DDE9E1}</ProjectGuid>
+    <ProjectTypeGuids>{72AEB29F-A91B-8B3D-40ED-1C96841A14A3}</ProjectTypeGuids>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <OutputType>Library</OutputType>
+    <RootNamespace>HwConfiguration</RootNamespace>
+    <AssemblyName>HwConfiguration</AssemblyName>
+    <CreateTemplate>true</CreateTemplate>
+    <NxtVersion>24.1.0.0</NxtVersion>
+    <ProjectType>HwConfiguration</ProjectType>
+    <TemplateName>HwConfiguration</TemplateName>
+    <TemplateCategory>HwConfigurationLibrary</TemplateCategory>
+    <ProjectFileExtension>.hwconfigproj</ProjectFileExtension>
+    <CompileBeforeSystem>True</CompileBeforeSystem>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>None</ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>
+    <LibraryName>Main</LibraryName>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Platform)' == 'AnyCPU' ">
+    <RegisterForComInterop>False</RegisterForComInterop>
+    <GenerateSerializationAssemblies>Auto</GenerateSerializationAssemblies>
+    <BaseAddress>4194304</BaseAddress>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <FileAlignment>4096</FileAlignment>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Platform)' == 'Windows' ">
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <RegisterForComInterop>False</RegisterForComInterop>
+    <GenerateSerializationAssemblies>Auto</GenerateSerializationAssemblies>
+    <BaseAddress>4194304</BaseAddress>
+    <FileAlignment>4096</FileAlignment>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+    <OutputPath>bin\$(Platform)\Debug\</OutputPath>
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>Full</DebugType>
+    <Optimize>False</Optimize>
+    <CheckForOverflowUnderflow>True</CheckForOverflowUnderflow>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+    <OutputPath>bin\$(Platform)\Release</OutputPath>
+    <DebugSymbols>false</DebugSymbols>
+    <DebugType>None</DebugType>
+    <Optimize>False</Optimize>
+    <CheckForOverflowUnderflow>False</CheckForOverflowUnderflow>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'Verify' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>Full</DebugType>
+    <CheckForOverflowUnderflow>True</CheckForOverflowUnderflow>
+    <Optimize>False</Optimize>
+    <OutputPath>bin\$(Platform)\Verify\</OutputPath>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DefineConstants>DEBUG%3bTRACE</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DefineConstants>TRACE</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|Windows' ">
+    <DefineConstants>TRACE</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="CommunicationProfile">
+      <HintPath>CommunicationProfile</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="NxtControl.ComponentModel">
+      <HintPath>NxtControl.ComponentModel</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="NxtControl.GuiFramework">
+      <HintPath>NxtControl.GuiFramework</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="SE.AppBase.HwConfiguration">
+      <Version>24.1.0.21</Version>
+      <HintPath>SE.AppBase.HwConfiguration</HintPath>
+    </Reference>
+    <Reference Include="SE.AppCommonProcess.HwConfiguration">
+      <Version>24.1.0.21</Version>
+      <HintPath>SE.AppCommonProcess.HwConfiguration</HintPath>
+    </Reference>
+    <Reference Include="SE.AppConveying.HwConfiguration">
+      <Version>24.1.0.21</Version>
+      <HintPath>SE.AppConveying.HwConfiguration</HintPath>
+    </Reference>
+    <Reference Include="SE.AppLiquidFood.HwConfiguration">
+      <Version>24.1.0.21</Version>
+      <HintPath>SE.AppLiquidFood.HwConfiguration</HintPath>
+    </Reference>
+    <Reference Include="SE.AppSequence.HwConfiguration">
+      <Version>24.1.0.21</Version>
+      <HintPath>SE.AppSequence.HwConfiguration</HintPath>
+    </Reference>
+    <Reference Include="SE.AppSingleLinePowerMonitoring.HwConfiguration">
+      <Version>24.1.0.21</Version>
+      <HintPath>SE.AppSingleLinePowerMonitoring.HwConfiguration</HintPath>
+    </Reference>
+    <Reference Include="SE.AppStateManagement.HwConfiguration">
+      <Version>24.1.0.21</Version>
+      <HintPath>SE.AppStateManagement.HwConfiguration</HintPath>
+    </Reference>
+    <Reference Include="SE.AppWWW.HwConfiguration">
+      <Version>24.1.0.21</Version>
+      <HintPath>SE.AppWWW.HwConfiguration</HintPath>
+    </Reference>
+    <Reference Include="SE.DPAC.HwConfiguration">
+      <Version>24.1.0.33</Version>
+      <HintPath>SE.DPAC.HwConfiguration</HintPath>
+    </Reference>
+    <Reference Include="SE.FieldDevice.HwConfiguration">
+      <Version>24.1.0.31</Version>
+      <HintPath>SE.FieldDevice.HwConfiguration</HintPath>
+    </Reference>
+    <Reference Include="SE.HwCommon.HwConfiguration">
+      <Version>24.1.0.19</Version>
+      <HintPath>SE.HwCommon.HwConfiguration</HintPath>
+    </Reference>
+    <Reference Include="SE.IoATV.HwConfiguration">
+      <Version>24.1.0.26</Version>
+      <HintPath>SE.IoATV.HwConfiguration</HintPath>
+    </Reference>
+    <Reference Include="SE.IoNet.HwConfiguration">
+      <Version>24.1.0.11</Version>
+      <HintPath>SE.IoNet.HwConfiguration</HintPath>
+    </Reference>
+    <Reference Include="SE.IoTMx.HwConfiguration">
+      <Version>24.1.0.19</Version>
+      <HintPath>SE.IoTMx.HwConfiguration</HintPath>
+    </Reference>
+    <Reference Include="SE.IoX80.HwConfiguration">
+      <Version>24.1.0.19</Version>
+      <HintPath>SE.IoX80.HwConfiguration</HintPath>
+    </Reference>
+    <Reference Include="SE.ModbusGateway.HwConfiguration">
+      <Version>24.1.0.17</Version>
+      <HintPath>SE.ModbusGateway.HwConfiguration</HintPath>
+    </Reference>
+    <Reference Include="Standard.IoEtherNetIP.HwConfiguration">
+      <Version>24.1.0.27</Version>
+      <HintPath>Standard.IoEtherNetIP.HwConfiguration</HintPath>
+    </Reference>
+    <Reference Include="Standard.IoModbus.HwConfiguration">
+      <Version>24.1.0.32</Version>
+      <HintPath>Standard.IoModbus.HwConfiguration</HintPath>
+    </Reference>
+    <Reference Include="Standard.IoModbusSlave.HwConfiguration">
+      <Version>24.1.0.25</Version>
+      <HintPath>Standard.IoModbusSlave.HwConfiguration</HintPath>
+    </Reference>
+    <Reference Include="Standard.OPCUAClient.HwConfiguration">
+      <Version>24.1.0.8</Version>
+      <HintPath>Standard.OPCUAClient.HwConfiguration</HintPath>
+    </Reference>
+    <Reference Include="System" />
+    <Reference Include="System.Data" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Xml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="AssemblyInfo.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="ImageStorage\ImageStorage.xml" />
+  </ItemGroup>
+  <Import Project="$(SharpDevelopBinPath)\SharpDevelop.Build.CSharp.targets" />
+</Project>
