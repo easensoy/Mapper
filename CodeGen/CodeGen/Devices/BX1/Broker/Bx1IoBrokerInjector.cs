@@ -265,8 +265,8 @@ namespace CodeGen.Devices.BX1
         /// gate fires only on INIT and on the E_DELAY scan REQ — only while the logic is ALIVE. It does
         /// NOT cover EAE Clean/STOP/fault (logic torn down, the scan stops, the output word freezes).
         /// Homing the cover while STOPPED requires the TM3BC coupler output fallback (TM3DQ16T ToHome
-        /// channel -&gt; 1 = fallback word 16#0002), a coupler-side Machine Expert setting the Mapper
-        /// cannot emit. Keys on the
+        /// channel -&gt; 1 = fallback word 16#0002), set on the coupler's OWN embedded web server
+        /// (192.168.1.210), which the Mapper cannot emit. Keys on the
         /// <c>EIPOutput_Bits.bit0-3</c> / <c>.REQ</c> wiring, so it patches both the external-bridge and
         /// internalized broker forms. Idempotent. Returns true if it inserted the gate. BX1-only,
         /// gated by <c>cfg.Bx1CoverSafeStart</c>.
