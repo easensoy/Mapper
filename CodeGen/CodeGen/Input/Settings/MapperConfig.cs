@@ -25,7 +25,6 @@ namespace CodeGen.Configuration
         // Each recipe's step 0 is a trigger WAIT, so the line self-sequences off fresh trigger messages:
         // robot drops the part in the hopper -> PartInHopper goes TRUE -> Feed_Station (parked at its
         // step-0 WAIT(PartInHopper)) re-fires the pusher -> the whole cycle repeats.
-        // 2026-06-24: enabled so the line runs continuously (was run-once / park-on-END).
         public static bool EnableCyclicRestart = true;
 
         // The recipe generator's auto-retract safety net runs only for these processes (the Feed_Station
@@ -50,6 +49,19 @@ namespace CodeGen.Configuration
         // (then set FALSE and use the braking-pulse fallback). See PatchSwivelAtHomeBothCoils.
         public static bool SwivelHomeHoldBothCoils = false;
 
+        // CENTRE-HOME BRAKE (2026-06-26, gated; see PatchSwivelBrakeHome). When TRUE the centre-home
+        // swivel (Bearing_PnP) homes DIRECTLY from AtWork1 in Disassembly (the empty AtWork2 restage is
+        // dropped from the recipe) and the deployed CAT brakes it at centre: at the DI02 edge the 'atHome'
+        // algorithm REVERSES the driving coil for bearingPnpHomeBrakeMs (toward AtWork1, AWAY from the
+        // ejector) to arrest the coast, then de-energises. The brake is DIRECTIONAL -- it only reverses
+        // when homing from AtWork1 (outputToWork2 was driving); homing from AtWork2 (Assembly) still
+        // de-energises, so Assembly is unchanged. Errs SAFE: a longer pulse only pushes further toward
+        // AtWork1, never into the ejector. Default TRUE = the user's AtWork2 -> AtWork1 -> Home request.
+        // Set FALSE to revert to the proven empty-restage staging (homes from AtWork2, no brake); the
+        // ECC/CAT are force-refreshed so FALSE deploys the pristine de-energise home. RIG-TUNE the pulse
+        // via config.yaml bearingPnpHomeBrakeMs (longer = further toward AtWork1).
+        public static bool SwivelBrakeHome = true;
+
         /// <summary>
         /// When true, Disassembly gets its reverse recipe (covers off -> shaft -> bearing -> unclamp),
         /// Assembly holds the clamp and publishes a handshake sentinel instead of opening it, and the
@@ -65,10 +77,14 @@ namespace CodeGen.Configuration
         /// Config/recipes.yml. The walk already RUNS for these stations (BuildProcessFbParameters passes
         /// commandFromCondition:true); the hardcoded AssemblyRecipe/DisassemblyRecipe.Apply calls merely
         /// overwrite its result. This flag suppresses those overwrites so the data-driven recipe stands.
-        /// Default FALSE = byte-identical (the hardcoded recipe wins) while the derived recipe is being
-        /// brought up to parity with the rig-proven one; flip to TRUE once the gate diff proves a match.
+        /// The walk derives the MOTION only; the cross-station handoffs the twin can't express (the
+        /// Feed→Assembly material gate and the Assembly↔Disassembly handshake) are injected around it by
+        /// DataDrivenHandoffInjector, so the derived recipe carries the SAME WAIT(matgate) start and
+        /// assembly_handshake_done/WAIT(17,7) handshake the proven hardcoded recipe has — just over
+        /// motion read straight from the corrected Control.xml. Default TRUE = fully model-driven, no
+        /// hardcoded motion. Set FALSE to fall back to the hardcoded recipes (one rebuild).
         /// </summary>
-        public static bool DataDrivenRecipes = false;
+        public static bool DataDrivenRecipes = true;
 
         // Process-FB process_id slots + the robot's state_table slot; data in Config/smc-rig.yml.
         // Each must sit above the component id space (ValidateProcessIdInvariant enforces it). The
@@ -294,7 +310,10 @@ namespace CodeGen.Configuration
         /// (BX1_RES.CoverPNP_Vr.OutputToWork) resolves from INSIDE a composite type; flip to
         /// FALSE + clean-rebuild to restore the external path if it doesn't.
         /// </summary>
-        public bool Bx1BridgeInsideComposite { get; set; } = true;
+        // 2026-06-26: flipped to FALSE (external bridge) — the internalized absolute-symlink path
+        // (BX1_RES.CoverPNP_Vr.OutputToWork inside PLC_RW_BX1) is the rig-unproven one; reverted to
+        // the external BX1IO_Sense_*/BX1IO_Coil_*/BX1_IO_Cycle FBs that were verified at 16#0004.
+        public bool Bx1BridgeInsideComposite { get; set; } = false;
 
         /// <summary>
         /// M262 resource name written into the .sysres root and the .sysdev's
@@ -363,9 +382,10 @@ namespace CodeGen.Configuration
         ///
         /// <para>The hardware path (Button 2 / btnTestStation1) ignores this
         /// flag — the Feed Station slice must regenerate byte-identical to
-        /// today's working output. Only the "Test Simulator" button flips
-        /// this on before running the pipeline. Default FALSE so a fresh
-        /// MapperConfig keeps the hardware path stable.</para>
+        /// today's working output. Nothing sets this flag TRUE today; it is
+        /// retained as inert config (default FALSE) so the hardware path stays
+        /// stable. The behaviour described above is what the simulator pipeline
+        /// WOULD do if it were ever re-enabled.</para>
         ///
         /// <para>Bearing_PnP (a 13-state branched actuator) is stubbed with
         /// Five_State_Actuator_CAT when this flag is on, with an activity
