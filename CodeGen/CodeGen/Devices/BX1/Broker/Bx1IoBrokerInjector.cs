@@ -528,17 +528,33 @@ namespace CodeGen.Devices.BX1
             AddEvent(ec, $"{BrokerFbName}.PLC_EVENT", $"{ScanFbName}.START"); // redundant kick (if it fires)
             AddEvent(ec, $"{ScanFbName}.EO", $"{ScanFbName}.START");          // self re-arm
             AddEvent(ec, $"{ScanFbName}.EO", $"{BrokerFbName}.REQ");          // read input word -> sensors
-            // Output write — ROBUST, NOT a serial chain. Each coil DST reads on EO
-            // INDEPENDENTLY, so one cover's not-yet-published coil symlink (e.g. an idle
-            // gripper) can't block the others. The output-word WRITE (REQ_INT_BOOL) fires
-            // off CoverPNP_Vr's read-confirm — Vr reliably publishes + is read every scan
-            // (proven live: BX1IO_Coil_CoverPNP_Vr.VALUE2 tracks the forced coil) — so the
-            // broker packs the freshly-read coil values and writes the output word every
-            // cycle. (The old serial chain gated the write on the GRIPPER's CNF at the tail,
-            // which never fired while the gripper was idle → no write for ANY cover.)
-            foreach (var c in Covers)
+            // Output write — CAUSAL CHAIN over the home-critical (non-gripper) cover coil readers so
+            // the output-word WRITE can NEVER fire before CoverPNP_Hr's ToHome/ToWork are freshly read.
+            // The old PARALLEL fan-out (EO -> every coil .REQ; write on Vr.CNF) RACED: the write could
+            // run before Hr.REQ had refreshed BX1IO_Coil_CoverPNP_Hr.VALUE1/2, leaving Cover_Pnp_Hr_ToHome
+            // STALE so EIPOutput_Bits.bit1 never carried the home command — cover_hr did not go home
+            // (while the M580 direct-I/O Shaft_Hr did). Fix: chain
+            //   EO -> Hr.REQ -> (Hr.CNF) -> Vr.REQ -> (Vr.CNF) -> BX1_IO.REQ_INT_BOOL
+            // so every coil in the write path is provably fresh before the word is packed. The gripper
+            // is refreshed in PARALLEL off EO and is NEVER a write trigger — an idle gripper can't block
+            // the write (the failure mode of the original serial chain that gated the write on the
+            // gripper's tail CNF). Idempotent: drop any prior coil-read/write triggers first so a
+            // re-deploy onto an already-wired sysres ends with EXACTLY this chain (AddEvent only
+            // de-dupes identical pairs, it never prunes the now-orphaned parallel EO->Vr.REQ).
+            foreach (var conn in ec.Elements(Ns + "Connection")
+                         .Where(c => { var d = (string?)c.Attribute("Destination") ?? "";
+                                       return (d.StartsWith("BX1IO_Coil_") && d.EndsWith(".REQ"))
+                                           || d == $"{BrokerFbName}.REQ_INT_BOOL"; }).ToList())
+                conn.Remove();
+            var writeChain = Covers.Where(c => !c.Cover.ToLowerInvariant().Contains("gripper")).ToList();
+            var parallelReads = Covers.Where(c => c.Cover.ToLowerInvariant().Contains("gripper")).ToList();
+            for (int i = 0; i < writeChain.Count; i++)
+                AddEvent(ec, i == 0 ? $"{ScanFbName}.EO" : $"BX1IO_Coil_{writeChain[i - 1].Cover}.CNF",
+                    $"BX1IO_Coil_{writeChain[i].Cover}.REQ");
+            if (writeChain.Count > 0)
+                AddEvent(ec, $"BX1IO_Coil_{writeChain[^1].Cover}.CNF", $"{BrokerFbName}.REQ_INT_BOOL");
+            foreach (var c in parallelReads)
                 AddEvent(ec, $"{ScanFbName}.EO", $"BX1IO_Coil_{c.Cover}.REQ");
-            AddEvent(ec, "BX1IO_Coil_CoverPNP_Vr.CNF", $"{BrokerFbName}.REQ_INT_BOOL");
 
             SaveWithRetry(doc, path);
             report.Missing.Add($"[BX1][Broker] BX1_IO + cover symlink bridge ({Covers.Length} covers, " +
