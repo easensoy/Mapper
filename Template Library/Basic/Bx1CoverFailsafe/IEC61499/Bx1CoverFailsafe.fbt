@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
-<FBType GUID="b7c1d2e3-4f5a-4b6c-8d7e-9f0a1b2c3d4e" Name="Bx1CoverFailsafe" Comment="BX1 cover output SAFE-START gate. On INIT/cold/warm start it forces CoverPNP_Hr to HOME (ToWork=0, ToHome=1) and CoverPNP_Vr/Gripper de-energised, and HOLDS that until the Hr at-home sensor is TRUE, then passes the live cover coils through. Guarantees cover_hr can never auto-energise Work on deploy/clean/restart and actively drives it home if left at Work." Namespace="Main">
+<FBType GUID="b7c1d2e3-4f5a-4b6c-8d7e-9f0a1b2c3d4e" Name="Bx1CoverFailsafe" Comment="BX1 cover output SAFE-START gate. On INIT/cold/warm start it forces CoverPNP_Hr to HOME (ToWork=0, ToHome=1) and CoverPNP_Vr/Gripper de-energised, and HOLDS that until the Hr at-home sensor is TRUE, then passes the live cover coils through. Guarantees cover_hr can never auto-energise Work on deploy/login/restart (whenever the logic runs) and actively drives it home if left at Work. NOTE: runtime gate only - does NOT act on EAE Clean/STOP/fault (logic stops, output word frozen). Homing while stopped needs the TM3BC coupler ToHome fallback (word 16#0002), a coupler-side setting outside the Mapper." Namespace="Main">
   <Identification Standard="61499-2" />
   <VersionInfo Organization="WMG" Version="0.1" Author="easensoy" Date="6/30/2026" Remarks="BX1 CoverPNP_Hr swivel-collision safe-start" />
   <InterfaceList>
