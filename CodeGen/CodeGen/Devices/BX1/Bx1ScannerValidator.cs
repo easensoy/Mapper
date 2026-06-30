@@ -74,9 +74,9 @@ namespace CodeGen.Devices.BX1
             // TM3BC coupler's own output fallback, and NO EAE-owned file can express it: the EtherNet/IP
             // device model (TM3BC_Ethe_*.prop.cs / .script.cs), scanner.xml, the M580Configuration.xsd
             // schema, and the compiled EIPSCANNER2.xml all carry ONLY objectid/length/ioevent per output —
-            // there is no fallback/fault/substitute field anywhere. It is a coupler-side EcoStruxure
-            // Machine Expert setting; warned loudly every Generate (it can never be auto-detected or
-            // cleared by the Mapper, so it is a WARNING, not a fatal block).
+            // there is no fallback/fault/substitute field anywhere. It is set on the coupler itself (the
+            // TM3BCEIP embedded web server at 192.168.1.210, NOT EAE/Machine Expert); warned loudly every
+            // Generate (it can never be auto-detected or cleared by the Mapper, so a WARNING, not fatal).
             if (anyCoupler)
                 EmitCoverCleanFallbackNotice(r);
 
@@ -110,14 +110,15 @@ namespace CodeGen.Devices.BX1
                 "(deploy/login/restart). It does NOT act on EAE Clean/Stop/fault: the logic stops,");
             r.Lines.Add(T + "no FB can write ToHome, and the double-acting cover HOLDS its last position " +
                 "(CoverPNP_Hr <-> Bearing_PnP swivel-collision hazard).");
-            r.Lines.Add(T + "FIX (once, on the coupler, in EcoStruxure Machine Expert): set the TM3BC / " +
-                "TM3DQ16T output FALLBACK so the fallback word = 16#0002 ->");
+            r.Lines.Add(T + "FIX (once, on the coupler's OWN embedded web server - browse to http://192.168.1.210, " +
+                "MAINTENANCE page): set the TM3DQ16T output module FALLBACK so the fallback word = 16#0002 ->");
             r.Lines.Add(T + "    bit0 CoverPNP_Hr_ToWork=0   bit1 CoverPNP_Hr_ToHome=1   " +
                 "bit2 CoverPNP_Vr=0   bit3 Cover_Gripper=0");
             r.Lines.Add(T + "=> CoverPNP_Hr_ToHome is TRUE on Clean/Stop/fault, so the cover homes like the Clamp.");
             r.Lines.Add(T + "Why not the Mapper: no EAE-owned file (device .prop.cs/.script.cs, scanner.xml, " +
                 "M580Configuration.xsd, compiled EIPSCANNER2.xml) has an output-fallback field —");
-            r.Lines.Add(T + "it is TM3BC adapter firmware config, owned by Machine Expert, not EAE/the Mapper.");
+            r.Lines.Add(T + "it is TM3BCEIP coupler config (its embedded web server, applied on EtherNet/IP " +
+                "timeout). EAE is only the scanner; the adapter owns its own output fallback.");
             r.Lines.Add(T + "**************************************************************************");
         }
 
