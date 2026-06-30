@@ -47,6 +47,12 @@ namespace CodeGen.Translation.Process
 
             var def = RecipeConfigLoader.Catalog.Recipe("Disassembly");
 
+            // Row 0: idle sentinel {DisassemblyProcessId, 7}. Published BEFORE the handshake wait so it
+            // stands while Disassembly is idle; Assembly's disassemblyClear gate reads it and will not
+            // begin a cycle until Disassembly is here (not driving the shared bearing_pnp / cover_hr).
+            if (MapperConfig.SerializeAssemblyDisassembly)
+                RecipeStepEmitter.Emit(b, def.Block("ready"), arrays, allComponents);
+
             RecipeStepEmitter.Emit(b, def.Block("handshake"), arrays, allComponents);
 
             RecipeStepEmitter.Emit(b, def.Block("coverRemove"), arrays, allComponents);
