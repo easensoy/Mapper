@@ -342,10 +342,14 @@ namespace CodeGen.Configuration
         /// SAFETY (default TRUE). Inserts the <c>Bx1CoverFailsafe</c> safe-start gate into the
         /// deployed <c>PLC_RW_BX1</c> broker. On every deploy / cold / warm start the broker forces
         /// CoverPNP_Hr to HOME (ToWork=0, ToHome=1) and the Vr/gripper coils off, and holds that until
-        /// the Hr at-home sensor is TRUE, then passes the live cover coils through. So cover_hr can
-        /// NEVER auto-energise Work on deploy/clean/restart (the swivel-collision hazard) and is
-        /// actively driven home if it was left at Work — the BX1 EtherNet/IP equivalent of the M580
-        /// clamp de-energising on stop. BX1-only; the clamp and all M580/M262 I/O are untouched.
+        /// the Hr at-home sensor is TRUE, then passes the live cover coils through. So while the BX1
+        /// logic RUNS cover_hr can NEVER auto-energise Work on deploy/login/restart (the swivel-collision
+        /// hazard) and is actively driven home if it was left at Work. NOTE: this is a START / run-time
+        /// gate only — it does NOT act on EAE Clean/STOP/fault (logic stops, no FB writes the output
+        /// word). It is therefore NOT a full equivalent of the single-acting M580 clamp, which falls home
+        /// mechanically on de-energise; the double-acting cover HOLDS its last coupler output when
+        /// stopped. Homing it while STOPPED needs the TM3BC coupler ToHome fallback (word 16#0002), a
+        /// coupler-side Machine Expert setting outside the Mapper. BX1-only; M580/M262 I/O untouched.
         /// Set FALSE to revert to the raw broker (one rebuild) only if the gate is shown to misbehave.
         /// </summary>
         public bool Bx1CoverSafeStart { get; set; } = true;
