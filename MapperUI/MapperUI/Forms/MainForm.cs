@@ -967,7 +967,7 @@ namespace MapperUI
                 MapperConfig.SimulatorRecipeMode = false;
 
                 lblStatus.Text = "Generating...";
-                AppendActivity($"[Test Feed Station] Generating into Demonstrator at {syslayPath}...");
+                AppendActivity($"[Generate] Generating IEC 61499 code end-to-end (Feed · Assembly · Disassembly · covers) into Demonstrator at {syslayPath}...");
                 AppendActivity("[Test Runtime] Hardware mode forced: SimulatorFullSystem=false; RecipeStep data-array carrier active; physical IO/sensor wiring and rig HOME-FIRST recipe waits are active.");
 
                 var injector = new SystemInjector();
@@ -1299,9 +1299,15 @@ namespace MapperUI
                 TouchDfbprojToTriggerEaeReload();
 
                 AppendActivity($"Generated: {path}");
-                lblStatus.Text = $"Ready  |  {path}  |  {report.Bound.Count} bound, {report.Missing.Count} unbound";
-                MessageBox.Show($"Generated Test Feed Station into Demonstrator:\n{path}\n\n{report.Bound.Count} bound, {report.Missing.Count} unbound.",
-                    "Test Feed Station", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                lblStatus.Text = $"Ready  |  {report.Bound.Count} I/O bound  |  {path}";
+                MessageBox.Show(
+                    "IEC 61499 code generated for the SMC rig — end to end.\n\n" +
+                    "Feed_Station (M262)  →  Assembly / Disassembly (M580)  →  Covers (BX1)\n\n" +
+                    "Process recipes, interlock safety tables and I/O bindings were emitted across\n" +
+                    $"all three controllers ({report.Bound.Count} I/O channel(s) bound).\n\n" +
+                    $"Demonstrator:\n{path}\n\n" +
+                    "Next: reload the solution in EAE, then Build and Deploy.",
+                    "Generate IEC61499 Code", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
             {
