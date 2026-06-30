@@ -1296,6 +1296,24 @@ namespace MapperUI
                     AppendActivity($"[MQTT][Error] {ex.Message}");
                 }
 
+                // SAFETY: BX1 cover safe-start scanner guard. The CoverPNP_Hr safe-start only reaches
+                // the TM3BC coupler if the scanner carries the 192.168.1.210 device; warn loudly if the
+                // source is missing it (fatal) or the compiled EIPSCANNER2.xml is empty/stale (clean Build).
+                try
+                {
+                    var eaeRootScan = CodeGen.Devices.Core.EaeProjectLayout.DeriveEaeProjectRoot(Cfg());
+                    var scan = await Task.Run(() => CodeGen.Devices.BX1.Bx1ScannerValidator.Validate(eaeRootScan));
+                    foreach (var l in scan.Lines) AppendActivity(l);
+                    if (scan.Fatal)
+                        AppendActivity("[BX1][Scanner] FATAL — the BX1 EtherNet/IP scanner would compile " +
+                            "EMPTY; the cover I/O and the CoverPNP_Hr safe-start cannot reach the coupler. " +
+                            "DO NOT deploy until fixed.");
+                }
+                catch (Exception ex)
+                {
+                    AppendActivity($"[BX1][Scanner][Error] {ex.Message}");
+                }
+
                 TouchDfbprojToTriggerEaeReload();
 
                 AppendActivity($"Generated: {path}");
