@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="b7c1d2e3-4f5a-4b6c-8d7e-9f0a1b2c3d4e" Name="Bx1CoverFailsafe" Comment="BX1 cover output SAFE-START gate. On INIT/cold/warm start it forces CoverPNP_Hr to HOME (ToWork=0, ToHome=1) and CoverPNP_Vr/Gripper de-energised, and HOLDS that until the Hr at-home sensor is TRUE, then passes the live cover coils through. Guarantees cover_hr can never auto-energise Work on deploy/clean/restart and actively drives it home if left at Work." Namespace="Main">
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="WMG" Version="0.1" Author="easensoy" Date="6/30/2026" Remarks="BX1 CoverPNP_Hr swivel-collision safe-start" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT" Comment="Arm safe-start: force the covers to the safe home pattern">
+        <With Var="ToWork" />
+        <With Var="ToHome" />
+        <With Var="Vr" />
+        <With Var="Grip" />
+        <With Var="AtHome" />
+      </Event>
+      <Event Name="REQ" Comment="Recompute the gated output bits for this scan">
+        <With Var="ToWork" />
+        <With Var="ToHome" />
+        <With Var="Vr" />
+        <With Var="Grip" />
+        <With Var="AtHome" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO" Comment="Safe-start armed">
+        <With Var="gToWork" />
+        <With Var="gToHome" />
+        <With Var="gVr" />
+        <With Var="gGrip" />
+      </Event>
+      <Event Name="CNF" Comment="Gated output bits ready">
+        <With Var="gToWork" />
+        <With Var="gToHome" />
+        <With Var="gVr" />
+        <With Var="gGrip" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="ToWork" Type="BOOL" Comment="Live CoverPNP_Hr advance coil (OutputToWork)" />
+      <VarDeclaration Name="ToHome" Type="BOOL" Comment="Live CoverPNP_Hr retract coil (OutputToHome)" />
+      <VarDeclaration Name="Vr" Type="BOOL" Comment="Live CoverPNP_Vr work coil" />
+      <VarDeclaration Name="Grip" Type="BOOL" Comment="Live CoverPnp_Gripper work coil" />
+      <VarDeclaration Name="AtHome" Type="BOOL" Comment="CoverPNP_Hr at-home sensor (input word bit0)" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="gToWork" Type="BOOL" Comment="Gated Hr advance bit (forced FALSE while safe-start is armed)" />
+      <VarDeclaration Name="gToHome" Type="BOOL" Comment="Gated Hr retract bit (forced TRUE while safe-start is armed = drive home)" />
+      <VarDeclaration Name="gVr" Type="BOOL" Comment="Gated Vr bit (forced FALSE while armed)" />
+      <VarDeclaration Name="gGrip" Type="BOOL" Comment="Gated gripper bit (forced FALSE while armed)" />
+    </OutputVars>
+  </InterfaceList>
+  <BasicFB>
+    <Attribute Name="FBType.Basic.Algorithm.Order" Value="Arm,Gate" />
+    <InternalVars>
+      <VarDeclaration Name="safe" Type="BOOL" Comment="TRUE = safe-start armed (force CoverPNP_Hr home)" />
+    </InternalVars>
+    <ECC>
+      <ECState Name="START" Comment="Initial State" x="400" y="500" />
+      <ECState Name="ARM" Comment="Arm safe-start (force home)" x="1000" y="500">
+        <ECAction Algorithm="Arm" Output="INITO" />
+      </ECState>
+      <ECState Name="GATE" Comment="Gate each scan until home reached" x="1700" y="500">
+        <ECAction Algorithm="Gate" Output="CNF" />
+      </ECState>
+      <ECTransition Source="START" Destination="ARM" Condition="INIT" x="700" y="400" />
+      <ECTransition Source="ARM" Destination="ARM" Condition="INIT" x="1000" y="800" />
+      <ECTransition Source="ARM" Destination="GATE" Condition="REQ" x="1350" y="400" />
+      <ECTransition Source="GATE" Destination="ARM" Condition="INIT" x="1350" y="650" />
+      <ECTransition Source="GATE" Destination="GATE" Condition="REQ" x="1700" y="800" />
+    </ECC>
+    <Algorithm Name="Arm" Comment="Arm safe-start: force CoverPNP_Hr to HOME, all other cover coils OFF">
+      <ST><![CDATA[safe := TRUE;
+gToWork := FALSE;
+gToHome := TRUE;
+gVr := FALSE;
+gGrip := FALSE;]]></ST>
+    </Algorithm>
+    <Algorithm Name="Gate" Comment="Hold the safe home command until Hr at-home, then pass the live cover coils through">
+      <ST><![CDATA[IF AtHome THEN
+	safe := FALSE;
+END_IF;
+IF safe THEN
+	gToWork := FALSE;
+	gToHome := TRUE;
+	gVr := FALSE;
+	gGrip := FALSE;
+ELSE
+	gToWork := ToWork;
+	gToHome := ToHome;
+	gVr := Vr;
+	gGrip := Grip;
+END_IF;]]></ST>
+    </Algorithm>
+  </BasicFB>
+</FBType>
