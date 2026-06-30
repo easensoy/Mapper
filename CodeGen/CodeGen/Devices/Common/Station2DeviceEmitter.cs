@@ -162,14 +162,12 @@ namespace CodeGen.Devices.Core
             // Clean up Topology JSONs that earlier Mapper builds wrote with
             // wrong catalog references / zero DomainTag / now-duplicate uuids.
             // EAE keeps complaining on import as long as these are present in
-            // topologyproj — observed 2026-05-27: a pre-rename Equipment_BX1.json
-            // coexisted with the current Equipment_Workstation_BX1.json, BOTH
-            // declaring uuid 11111111-2222-3333-4444-000000000050. EAE rejected
-            // the whole topology with "Unable to import topology / Internal
-            // Server Error" and every Logical Device in Deploy & Diagnostic
-            // lost its Physical Device binding. Each entry below also unhooks
-            // the file from TopologyManager.topologyproj so the build target
-            // does not list a deleted file.
+            // topologyproj — two Equipment JSONs declaring the SAME uuid make
+            // EAE reject the whole topology with "Unable to import topology /
+            // Internal Server Error" and every Logical Device in Deploy &
+            // Diagnostic loses its Physical Device binding. Each entry below
+            // also unhooks the file from TopologyManager.topologyproj so the
+            // build target does not list a deleted file.
             CleanupStaleTopologyJson(eaeRoot, "Equipment_Soft_dPAC_BX1.json", result);
             // 2026-06-08: BX1 is emitted in the REFERENCE HMIB1X form as
             // Equipment_HMIB1X_1.json — BYTE-IDENTICAL to the reference's BX1 device
@@ -185,14 +183,11 @@ namespace CodeGen.Devices.Core
             CleanupStaleTopologyJson(eaeRoot, "Equipment_BX1.json",            result);
             // EAE auto-spawns Equipment_<deviceName>_<N>.json variants when its
             // Physical Views editor wants to add a new instance of a device
-            // whose name collides with an already-loaded file. Observed
-            // 2026-05-27: deleting Equipment_M580dPAC_1.json mid-session made
-            // EAE write Equipment_M580dPAC_2.json with a random uuid + orphan
-            // logicalDeviceId 00000000-…0000 + the wrong rack (BMEXBP0800),
-            // and the Logical Devices physical-device dropdown then showed two
-            // "M580dPAC_1 \ BME D58 1020 #0" rows pointing at different files.
-            // Sweep the obvious _N variants so a Generate brings the disk back
-            // to canonical state.
+            // whose name collides with an already-loaded file (with a random
+            // uuid + orphan logicalDeviceId + the wrong rack), and the Logical
+            // Devices physical-device dropdown then shows duplicate rows pointing
+            // at different files. Sweep the obvious _N variants so a Generate
+            // brings the disk back to canonical state.
             for (int n = 2; n <= 9; n++)
                 CleanupStaleTopologyJson(eaeRoot, $"Equipment_M580dPAC_{n}.json", result);
 
@@ -301,7 +296,10 @@ namespace CodeGen.Devices.Core
                 // even though the app model shows the scanner FB and EIP_Output_Word packs
                 // correctly (split-brain root-caused 2026-06-09, verified fixed: compiled
                 // EIPSCANNER2.xml became 1200 bytes incl. 192.168.1.210). BX1-only.
-                DeployBx1HwConfigScannerModel(cfg, eaeRoot, result);
+                // NOTE: the scanner model is deployed by DeployBx1ScannerModelFinalPass from
+                // BX1HwConfigCopier.Copy — i.e. AFTER the HwConfig copiers rebuild HwConfiguration/.
+                // Doing it HERE (before the rebuild) silently no-op'd after a Clean (the folder was
+                // gone), which is exactly what left the compiled scanner EMPTY and the covers dead.
             }
             else
             {
@@ -372,13 +370,11 @@ namespace CodeGen.Devices.Core
                 catch { /* best-effort */ }
             }
             // Each .sysres has a SIBLING folder with the same stem holding its
-            // opcua.xml + offline.xml. When the resource ID changed (multiple
-            // times during dev), the old sibling folder was orphaned. Observed
-            // 2026-05-27: nine stale sister folders remained inside the M580
-            // sysdev folder. EAE doesn't fail on them but the Devices tree
-            // exposes the extras as ghost resources and Solution Integrity
-            // bloats accordingly. Sweep any sister whose stem has no matching
-            // .sysres on disk now.
+            // opcua.xml + offline.xml. When the resource ID changes the old
+            // sibling folder is orphaned. EAE doesn't fail on them but the
+            // Devices tree exposes the extras as ghost resources and Solution
+            // Integrity bloats accordingly. Sweep any sister whose stem has no
+            // matching .sysres on disk now.
             foreach (var sister in Directory.EnumerateDirectories(sysdevFolder))
             {
                 var sisterName = Path.GetFileName(sister);
@@ -467,13 +463,12 @@ namespace CodeGen.Devices.Core
             // FORCE-CLEAN write. File.WriteAllText already overwrites, but EAE
             // (or a manual user import of the reference Equipment JSON) can
             // leave the file in a hybrid state where two backplanes coexist
-            // with two RuntimeDEO blocks — observed 2026-05-27 on the deployed
-            // M580 file: it carried both BMEXBP0800 (IP 0.0.0.0) AND BMEXBP0400
-            // (IP 192.168.1.20). EAE picks the FIRST RuntimeDEO it walks, the
-            // 0.0.0.0 one, and filters M580 out of Deploy & Diagnostic because
-            // it can't ping a null IP. Explicitly deleting before write
-            // guarantees the post-condition is exactly the emitter's template:
-            // one backplane, one RuntimeDEO, the configured IP.
+            // with two RuntimeDEO blocks (e.g. BMEXBP0800 at IP 0.0.0.0 AND
+            // BMEXBP0400 at the real IP). EAE picks the FIRST RuntimeDEO it
+            // walks, the 0.0.0.0 one, and filters the device out of Deploy &
+            // Diagnostic because it can't ping a null IP. Explicitly deleting
+            // before write guarantees the post-condition is exactly the
+            // emitter's template: one backplane, one RuntimeDEO, the configured IP.
             var topologyDir = Path.Combine(eaeRoot, "Topology");
             Directory.CreateDirectory(topologyDir);
             var equipmentPath = Path.Combine(topologyDir, equipmentJsonName);
@@ -680,10 +675,9 @@ namespace CodeGen.Devices.Core
         /// <c>SMC_Rig_Expo_withClamp/Topology/Equipment_M580dPAC_1.json</c>.
         /// X80 8-slot rack (BMEXBP0800) + BMX CPS 4002 PSU + BME D58 1020 CPU
         /// with ETH0/1/2/3 ports. Catalog refs must match values EAE 24.1's
-        /// catalog actually knows — BMEXBP0400 + BMXCPS2010 were rendered as
+        /// catalog actually knows — BMEXBP0400 + BMXCPS2010 are rendered as
         /// unknown placeholder boxes (warning triangle) next to the D58 chassis,
-        /// which looked like a duplicate D58 1020 in Physical Views. Aligned
-        /// with the reference rig on 2026-05-27.
+        /// which looks like a duplicate D58 1020 in Physical Views.
         ///
         /// IP is taken from <c>cfg.M580TargetIp</c> (defaults to 192.168.1.20).
         /// The endpoint binds to <c>cfg.M580BroadcastDomainUuid</c> (defaults
@@ -1236,11 +1230,11 @@ namespace CodeGen.Devices.Core
                         "reach the coupler. Stage TM3BC_Ethe_* + EIPSolutionsV2 from the reference HwConfiguration.");
                     return;
                 }
-                if (!Directory.Exists(dstHc))
-                {
-                    result.Warnings.Add($"[BX1] no HwConfiguration project at '{dstHc}' — cannot deploy the EtherNet/IP scanner model.");
-                    return;
-                }
+                // Create if a Clean (DemonstratorWiper.DeleteHwConfiguration) wiped HwConfiguration/ —
+                // NEVER skip the scanner model. This is deployed as the authoritative LAST pass (from
+                // BX1HwConfigCopier.Copy, after the HwConfig copiers rebuild the folder), so the folder
+                // normally exists here; the create is the belt-and-braces for an empty/absent tree.
+                Directory.CreateDirectory(dstHc);
 
                 var subs = new List<string> { Path.Combine("EIPSolutionsV2", Bx1HwConfigScannerId) };
                 subs.AddRange(Bx1Tm3bcModelFolders);
@@ -1251,6 +1245,31 @@ namespace CodeGen.Devices.Core
                 }
 
                 var hwproj = Path.Combine(dstHc, "HwConfiguration.hwconfigproj");
+                // The wipe (DeleteHwConfiguration) removes the whole folder, so the EAE HwConfiguration
+                // PROJECT SHELL (.hwconfigproj + AssemblyInfo.cs + ImageStorage) can be gone here.
+                // RegisterBx1HwConfigScannerModel only ADDS to an existing project — if the shell is
+                // missing it silently no-ops, and EAE later writes its own shell WITHOUT the coupler
+                // registration -> EAE compiles an EMPTY 333-byte EIPSCANNER2.xml -> the covers never
+                // move (root cause of the cover_hr-won't-home regression). Recreate the shell from the
+                // Template Library so the scanner registration always has a project to land in.
+                if (!File.Exists(hwproj))
+                {
+                    foreach (var shell in new[] { "HwConfiguration.hwconfigproj", "AssemblyInfo.cs",
+                                                  Path.Combine("ImageStorage", "ImageStorage.xml") })
+                    {
+                        var s = Path.Combine(srcHc, shell);
+                        var d = Path.Combine(dstHc, shell);
+                        if (File.Exists(s) && !File.Exists(d))
+                        {
+                            Directory.CreateDirectory(Path.GetDirectoryName(d)!);
+                            File.Copy(s, d);
+                        }
+                    }
+                    if (!File.Exists(hwproj))
+                        result.Warnings.Add("[BX1] HwConfiguration.hwconfigproj was wiped and no shell " +
+                            "template exists in 'EtherNetIP/HwConfiguration' — the scanner cannot be " +
+                            "registered and EAE will compile an EMPTY scanner. Stage the project shell.");
+                }
                 int reg = RegisterBx1HwConfigScannerModel(hwproj);
                 result.FilesWritten.Add(Path.GetRelativePath(eaeRoot,
                     Path.Combine(dstHc, "EIPSolutionsV2", Bx1HwConfigScannerId, "scanner.xml")));
@@ -1263,6 +1282,55 @@ namespace CodeGen.Devices.Core
             {
                 result.Warnings.Add($"[BX1] EtherNet/IP HwConfiguration model deploy failed: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Deploy the BX1 EtherNet/IP scanner HwConfiguration model as the AUTHORITATIVE FINAL pass —
+        /// called from BX1HwConfigCopier.Copy, which runs AFTER the M262/M580/BX1 HwConfig copiers have
+        /// rebuilt HwConfiguration/ (a Clean wipes the whole folder via DeleteHwConfiguration). The old
+        /// in-EmitAll deploy ran BEFORE that rebuild, so post-Clean its dstHc guard found no folder and
+        /// silently no-op'd -> EAE compiled an EMPTY EIPSCANNER2.xml (333 bytes, no .210) -> the cover
+        /// I/O never reached the coupler (input word 16#0/BAD). BX1-only, gated on EmitBx1EtherNetIpDevice.
+        /// </summary>
+        public static void DeployBx1ScannerModelFinalPass(MapperConfig cfg)
+        {
+            if (cfg == null || !cfg.EmitBx1EtherNetIpDevice) return;
+            var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
+            var result = new EmitResult();
+            DeployBx1HwConfigScannerModel(cfg, eaeRoot, result);
+        }
+
+        /// <summary>
+        /// PERMANENT GUARD (2026-06-26): aborts the Generate if the BX1 EtherNet/IP scanner model is NOT
+        /// deployed when the device is on. This is THE blockage so the empty-333-byte-scanner / dead-cover
+        /// regression can never silently ship again: if scanner.xml is missing, has no 192.168.1.210
+        /// buscoupler, or the hwconfigproj has no scanner registration, EAE would compile an EMPTY scanner
+        /// and the covers would not move. Called as the last step of BX1HwConfigCopier.Copy (which both
+        /// MainForm and the gate run, after the HwConfig folder is rebuilt + the final-pass deploy).
+        /// </summary>
+        public static void ValidateBx1ScannerModelOrThrow(MapperConfig cfg)
+        {
+            if (cfg == null || !cfg.EmitBx1EtherNetIpDevice) return;
+            var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
+            var scannerXml = Path.Combine(eaeRoot, "HwConfiguration", "EIPSolutionsV2", Bx1HwConfigScannerId, "scanner.xml");
+            var hwproj = Path.Combine(eaeRoot, "HwConfiguration", "HwConfiguration.hwconfigproj");
+            var problems = new List<string>();
+            if (!File.Exists(scannerXml)) problems.Add($"scanner.xml MISSING ({scannerXml})");
+            else if (!File.ReadAllText(scannerXml).Contains("192.168.1.210"))
+                problems.Add("scanner.xml has NO 192.168.1.210 buscoupler");
+            if (!File.Exists(hwproj)) problems.Add($"HwConfiguration.hwconfigproj MISSING ({hwproj})");
+            else
+            {
+                var p = File.ReadAllText(hwproj);
+                if (!p.Contains("EIPSolutionsV2") && !p.Contains("scanner.xml"))
+                    problems.Add("HwConfiguration.hwconfigproj has NO scanner-model registration");
+            }
+            if (problems.Count > 0)
+                throw new InvalidOperationException(
+                    "[BX1][SCANNER-GUARD] EtherNet/IP scanner model NOT deployed -> EAE would compile an EMPTY " +
+                    "EIPSCANNER2.xml (333 bytes, no .210) and the covers would NOT move. Generate ABORTED to block " +
+                    "shipping the empty-scanner regression. Problems: " + string.Join("; ", problems) +
+                    ". Fix: close EAE, confirm the Template Library 'EtherNetIP/HwConfiguration' model exists, then re-run Test Runtime.");
         }
 
         /// <summary>Removes the BX1 EtherNet/IP scanner HwConfiguration model (folders +
