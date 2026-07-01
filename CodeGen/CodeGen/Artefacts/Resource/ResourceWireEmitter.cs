@@ -550,12 +550,20 @@ namespace CodeGen.Devices.Core
                         // tail crosses to the M262 ejector/robot, OMIT the local close-back so the
                         // boundary socket is not double-driven (EAE bridges the open ends via the
                         // syslay cross-hops). Off (robotTail false) -> the ring closes locally.
-                        bool openBoundary = robotTail &&
-                            string.Equals(tag, "M580", StringComparison.Ordinal);
+                        // MergeFeedRing (M262): the Feed ring joins the main ring — the Feed tail
+                        // (Feed_Station) crosses to the M580 head via the syslay, so leave the local
+                        // close-back OPEN here; the Feed head (PartInHopper) is fed by the discharge-
+                        // segment tail below (crossSeg), not by this close-back.
+                        // NB: the M262 resource carries the anchor Label "Sysres" (kept for byte-identity),
+                        // so the M262 identity check is tag == "Sysres", not "M262".
+                        bool openBoundary =
+                            (robotTail && string.Equals(tag, "M580", StringComparison.Ordinal)) ||
+                            (CodeGen.Configuration.MapperConfig.MergeFeedRing &&
+                             string.Equals(tag, "Sysres", StringComparison.Ordinal));
                         if (openBoundary)
                             report.Missing.Add(
                                 $"[{tag}] cross-PLC ring: left {processNames[^1]}.stateRptCmdAdptr_out OPEN " +
-                                $"and {ringNames[0]}.stateRprtCmd_in OPEN — EAE bridges via syslay cross-hops");
+                                $"and {ringNames[0]}.stateRprtCmd_in fed via seam — EAE bridges via syslay cross-hops");
                         else
                             adapterWires.Add(new Wire($"{processNames[^1]}.stateRptCmdAdptr_out",
                                 $"{ringNames[0]}.stateRprtCmd_in"));
@@ -591,9 +599,26 @@ namespace CodeGen.Devices.Core
                     adapterWires.Add(new Wire(
                         $"{crossSeg[i]}.stateRprtCmd_out", $"{crossSeg[i + 1]}.stateRprtCmd_in"));
                 if (crossSeg.Count > 0)
-                    report.Missing.Add(
-                        $"[{tag}] M262 cross-ring segment {string.Join("->", crossSeg)}: ends OPEN " +
-                        "(seg[0].in from M580 Disassembly, seg[^1].out to M580 BearingSensor) — EAE bridges via syslay");
+                {
+                    if (CodeGen.Configuration.MapperConfig.MergeFeedRing && ringNames.Count > 0 &&
+                        string.Equals(tag, "Sysres", StringComparison.Ordinal)) // "Sysres" = the M262 anchors' Label
+                    {
+                        // CONNECT-AT-SEAM (M262): the segment tail (PartAtAssembly) feeds the Feed head
+                        // (PartInHopper) locally, so the discharge segment + Feed chain are ONE
+                        // continuous M262 chain on this sysres. seg[0].in (from M580 Disassembly) and
+                        // Feed_Station.out (to M580 BearingSensor) stay OPEN — EAE bridges via the syslay
+                        // cross hops. No FB moves; only this seam connection is added.
+                        adapterWires.Add(new Wire(
+                            $"{crossSeg[^1]}.stateRprtCmd_out", $"{ringNames[0]}.stateRprtCmd_in"));
+                        report.Missing.Add(
+                            $"[{tag}] MergeFeedRing seam: {crossSeg[^1]}.stateRprtCmd_out -> {ringNames[0]} " +
+                            "(Feed head, local); seg[0].in + Feed_Station.out OPEN — EAE bridges via syslay");
+                    }
+                    else
+                        report.Missing.Add(
+                            $"[{tag}] M262 cross-ring segment {string.Join("->", crossSeg)}: ends OPEN " +
+                            "(seg[0].in from M580 Disassembly, seg[^1].out to M580 BearingSensor) — EAE bridges via syslay");
+                }
 
                 foreach (var w in eventWires)   Process(w, emittedEvents,   "event");
                 foreach (var w in DataWires)    Process(w, emittedData,     "data");
