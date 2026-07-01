@@ -418,6 +418,7 @@ namespace CodeGen.Services
             NormalizeFiveStateInterlockConstants(eaeProjectDir, false, result);
             PatchProcess1RecipeArraySize(eaeProjectDir, result);
             PatchProcessNameStringSize(eaeProjectDir, result);
+            PatchCheckWaitLevelTriggered(eaeProjectDir, result);
             // PatchSevenStateActuatorDataDriven removed — see CatToBasics comment.
 
             // MQTT event-driven state publishing (no-loss fix). Deploy-time,
@@ -900,6 +901,59 @@ namespace CodeGen.Services
                 {
                     result.Warnings.Add(
                         $"process_name STRING-size patch failed on {Path.GetFileName(fbtPath)}: {ex.Message}");
+                }
+            }
+        }
+
+        /// <summary>
+        /// LIVENESS fix for the recipe engine's WAIT check. The shipped
+        /// <c>ProcessRuntime_Generic_v1.check_wait</c> was EDGE-triggered: it satisfied a WAIT only
+        /// when <c>last_state_msg</c> (the transient stateRprtCmd ring message) CURRENTLY equalled
+        /// <c>{Wait1Id, Wait1State}</c>. A one-shot sensor/handoff report — e.g. the level sensor
+        /// <c>PartAtAssembly</c> reporting <c>{3,1}</c> — that arrived BEFORE the WAIT armed, or that
+        /// scrolled out of <c>last_state_msg</c> as other components reported, was never re-seen; with
+        /// no polling there is no second edge, so the WAIT hung forever even though
+        /// <c>state_table[3].state = 1</c> was persisted and correct (the exact "Assembly clamp never
+        /// triggers" stall). Fix: satisfy on the PERSISTED <c>state_table</c> value (LEVEL-triggered),
+        /// still gated by <c>NOT leftoverSuspect</c> so the anti-leftover protection for actuator
+        /// command-then-wait pairs is unchanged (a stale slot value still cannot satisfy until the
+        /// actuator actually transitions this step — <c>leftoverSuspect</c> is set only in the
+        /// command-arm branch and cleared only by a fresh transition away). Idempotent deploy-time
+        /// patch of the deployed engine .fbt; runs on hardware AND sim. Recipe emission unchanged.
+        /// </summary>
+        static void PatchCheckWaitLevelTriggered(string eaeProjectDir, DeployResult result)
+        {
+            const string oldExpr =
+                "WaitSatisfied := (last_state_msg.src_id = Recipe[CurrentStep].Wait1Id) AND (last_state_msg.state = Recipe[CurrentStep].Wait1State) AND (NOT leftoverSuspect);";
+            const string newExpr =
+                "WaitSatisfied := (state_table[Recipe[CurrentStep].Wait1Id].state = Recipe[CurrentStep].Wait1State) AND (NOT leftoverSuspect);";
+            var iecDir = Path.Combine(eaeProjectDir, "IEC61499");
+            if (!Directory.Exists(iecDir)) return;
+            foreach (var fbtPath in Directory.EnumerateFiles(iecDir, "ProcessRuntime_Generic_v1.fbt", SearchOption.AllDirectories))
+            {
+                try
+                {
+                    var doc = System.Xml.Linq.XDocument.Load(fbtPath, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                    var root = doc.Root;
+                    if (root == null) continue;
+                    System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+                    var checkWait = root.Descendants(ns + "Algorithm")
+                        .FirstOrDefault(a => string.Equals((string?)a.Attribute("Name"), "check_wait", StringComparison.Ordinal));
+                    var st = checkWait?.Element(ns + "ST");
+                    var cdata = st?.Nodes().OfType<System.Xml.Linq.XCData>().FirstOrDefault();
+                    if (cdata == null || !cdata.Value.Contains(oldExpr)) continue;   // already patched / unexpected shape
+                    cdata.Value = cdata.Value.Replace(oldExpr, newExpr);
+                    doc.Save(fbtPath);
+                    result.PatchesApplied.Add(
+                        $"{Path.GetFileName(fbtPath)}: check_wait -> LEVEL-triggered on state_table " +
+                        "(sensor/handoff WAITs satisfy on the persisted state, not a one-shot ring edge; anti-leftover kept for actuator waits)");
+                    MapperLogger.Info(
+                        $"[Deploy] {Path.GetFileName(fbtPath)}: check_wait made level-triggered (fixes missed one-shot sensor/handoff reports).");
+                }
+                catch (Exception ex)
+                {
+                    result.Warnings.Add(
+                        $"check_wait level-trigger patch failed on {Path.GetFileName(fbtPath)}: {ex.Message}");
                 }
             }
         }
