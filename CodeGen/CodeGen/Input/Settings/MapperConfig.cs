@@ -99,6 +99,19 @@ namespace CodeGen.Configuration
         /// </summary>
         public static bool SerializeAssemblyDisassembly = false;
 
+        // MERGE FEED RING (gated, default OFF -> byte-identical). When true the isolated M262 Feed ring
+        // is merged into the one main cross-PLC state-report ring so Feed_Station and Disassembly can see
+        // each other's state. This makes two cross-process Control.xml conditions the generator otherwise
+        // drops satisfiable: Feed holds Transfer advanced until Disassembly homes the bearing, and
+        // Disassembly waits for Transfer to return before the ejector. Feed_Station's process_id is
+        // re-id'd off the (now-shared) Shaft_Hr id-10 slot to a free state_table slot.
+        public static bool MergeFeedRing = false;
+
+        // The state Disassembly stamps on its own process_id ({DisassemblyProcessId, this}) once the
+        // bearing is home, so Feed's TransferAdvancing WAIT can key on it. Distinct from the handshake's
+        // 7. Emitter (DisassemblyRecipe) and consumer (RecipeStateClassifier) share this one value.
+        public const int MergeFeedRingBearingHomeState = 6;
+
         /// <summary>
         /// When true, Assembly_Station + Disassembly recipes are DERIVED from their Control.xml process
         /// state machines (the generic ProcessRecipeArrayGenerator walk, commandFromCondition=true — the
