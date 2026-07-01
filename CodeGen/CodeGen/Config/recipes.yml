@@ -19,11 +19,16 @@ recipes:
       handshake:
         - { waitConfig: AssemblyProcessId, state: 7 }
       coverRemove:
-        # SAFETY: the swivel (bearing_pnp) and the horizontal cover share the assembly volume. Never
-        # advance cover_hr unless the swivel is Home (state 0). This is M580-local (bearing_pnp is on
-        # M580, so this WAIT reads a reliable local state) and fails SAFE -- if the swivel is not home
-        # the cover waits instead of driving into it.
-        - { waitRef: bearing_pnp, state: 0 }
+        # Disassembly starts cover removal IMMEDIATELY after the Assembly->Disassembly handshake
+        # (row 0 = WAIT AssemblyProcessId=7). NO bearing_pnp clear-gate here -- the swivel is already
+        # Home when Disassembly begins: Assembly homes bearing_pnp in its bearing block and only THEN
+        # places the cover + handshakes, and Disassembly's own bearing block runs LATER (after the
+        # covers), so the swivel never moves before cover_hr. Matches the rig-proven Ground Truth
+        # (WAIT(17,7) -> CMD coverpnp_hr directly). An explicit stable-state WAIT(bearing_pnp=0) here
+        # stalled Disassembly: it is a passive handoff gate on a swivel that never moves again, so the
+        # engine's anti-leftover guard could hold it until the next Assembly cycle re-cycled the bearing
+        # ("Disassembly dead, then wakes up after some time"). The Assembly-side coverPlace clear-gate
+        # stays (there the swivel is a live actor in the same cycle).
         - { cmd: coverpnp_hr, state: 1 }
         - { waitRef: coverpnp_hr, state: 2 }
         - { cmd: coverpnp_vr, state: 1 }
