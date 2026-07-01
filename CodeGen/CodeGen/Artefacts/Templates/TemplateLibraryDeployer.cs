@@ -238,9 +238,16 @@ namespace CodeGen.Services
             {
                 DeployArtifact(libPath, "Basic", "changeEventM262_2", eaeProjectDir, result, isBasic: true);
                 // SAFETY: the CoverPNP_Hr safe-start gate type. Deployed leaf-first so the broker
-                // patch below can reference it.
+                // patch below can reference it. FORCE-REFRESH: DeployArtifact/CopyDirToEae is
+                // copy-if-absent and the broker injector is idempotent, so a CORRECTED safety gate
+                // would otherwise never reach an already-generated tree — delete the deployed type
+                // first so the current source (e.g. the AtHome-AND-NOT-ToWork release) always lands.
                 if (cfg.Bx1CoverSafeStart)
+                {
+                    var fsFbt = Path.Combine(eaeProjectDir, "IEC61499", "Bx1CoverFailsafe.fbt");
+                    if (File.Exists(fsFbt)) { try { File.Delete(fsFbt); } catch { /* locked -> keep existing */ } }
                     DeployArtifact(libPath, "Basic", "Bx1CoverFailsafe", eaeProjectDir, result, isBasic: true);
+                }
                 DeployArtifact(libPath, "Composite", "PLC_RW_BX1", eaeProjectDir, result, isBasic: false);
                 // INTERNALIZED cover bridge (cfg.Bx1BridgeInsideComposite, default): transform
                 // the just-deployed PLC_RW_BX1.fbt so the per-cover sensor/coil symlink bridge
