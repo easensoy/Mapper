@@ -84,10 +84,20 @@ namespace CodeGen.Configuration
         /// cycle while Disassembly is mid-cycle. Combined with the existing within-recipe ordering
         /// (bearing homes before the cover advances; cover homes before the handshake) and the explicit
         /// bearing-clear WAIT before every cover_hr advance, bearing_pnp and cover_hr can never be
-        /// commanded into their collision states at the same time. Default TRUE. Set FALSE to revert to
-        /// the concurrent processes (one rebuild) -- only if the M580-local handshake is shown to stall.
+        /// commanded into their collision states at the same time.
+        /// NOW FALSE (2026-07-01): the idle sentinel made Disassembly's recipe START with a CMD
+        /// (row 0 = disassembly_done=7). A fresh ProcessEngine processes a leading WAIT at startup but
+        /// does not publish a leading CMD, so the sentinel {DisassemblyProcessId,7} was never emitted and
+        /// Assembly's disassemblyClear WAIT(DisassemblyProcessId,7) hung forever -> the clamp never fired
+        /// ("Assembly doesn't trigger after Feed"). The rig-proven Ground Truth (Demonstrator_20260617
+        /// WorkingEndtoEnd) has NO sentinel: Assembly runs straight from the material gate to the clamp,
+        /// and Assembly->Disassembly serialization is carried by the existing one-way handshake (Assembly
+        /// publishes assembly_handshake_done=7 at the end; Disassembly WAITs on it before coverRemove) PLUS
+        /// the within-recipe bearing_pnp=0 clear-gate before every cover_hr advance -- both independent of
+        /// this flag, so the collision safety stands. Leave FALSE to match the Ground Truth; only set TRUE
+        /// again if a *published* idle sentinel is wired (a leading WAIT, not a leading CMD).
         /// </summary>
-        public static bool SerializeAssemblyDisassembly = true;
+        public static bool SerializeAssemblyDisassembly = false;
 
         /// <summary>
         /// When true, Assembly_Station + Disassembly recipes are DERIVED from their Control.xml process
