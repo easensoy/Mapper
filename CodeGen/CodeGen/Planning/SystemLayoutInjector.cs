@@ -895,6 +895,13 @@ namespace CodeGen.Translation
             var reader = new CodeGen.IO.SystemXmlReader();
             var allComponents = reader.ReadAllComponents(controlXmlPath);
 
+            // Control.xml-driven: merge the M262 Feed ring into the one main cross-PLC ring ONLY when a
+            // Feed process has a cross-controller sequence gate (the no-clamp Transfer-hold). Clamp
+            // models, whose Feed never waits on an M580 process, stay decoupled -> byte-identical. The
+            // classifier owns the detection so the recipe and the ring wiring read one decision.
+            Configuration.MapperConfig.MergeFeedRing =
+                Process.Recipes.RecipeStateClassifier.FeedRingMergeNeeded(allComponents);
+
             var process = FindStation1Process(allComponents);
             if (process == null)
                 throw new InvalidOperationException(
@@ -1045,9 +1052,17 @@ namespace CodeGen.Translation
             // ValidateProcessIdInvariant check still passes because no
             // Wait1Id of any process equals 17 or 18 (Wait1Ids only reference
             // component ids 0..16).
-            int processId = MapperConfig.FeedStationProcessId;
             int assemblyProcessId = MapperConfig.AssemblyProcessId;
             int disassemblyProcessId = MapperConfig.DisassemblyProcessId;
+            // Feed_Station keeps its normal process_id (slot 10), which equals Shaft_Hr's component id.
+            // Under MergeFeedRing the two share state_table[10] on the one ring, but it is harmless: the
+            // Transfer-hold keeps Feed WAITing (issuing no CMDs -> no stamps to slot 10) throughout
+            // Assembly + Disassembly's Shaft_Hr moves, and Feed's CMD states (1=Work, 3=Home) never equal
+            // Shaft_Hr's WAIT targets (0=Home, 2=AtWork), so a stray stamp can neither falsely satisfy nor
+            // block a Shaft_Hr WAIT (level-triggered -> Shaft_Hr's own report always wins). The 20-slot
+            // state_table also has no free slot above the component space once Assembly/Disassembly/Robot
+            // take 17/18/19, so no clean re-id is possible anyway.
+            int processId = MapperConfig.FeedStationProcessId;
 
             // No top-level PLC_Start FB: Area_CAT and Station_CAT each contain their own
             // internal plcStart bootstrap, so an external one would double-bootstrap and
