@@ -145,6 +145,10 @@ namespace CodeGen.Translation.Process.Recipes
             // CoverPnp_Gripper/AtReleasePos AND CoverPNP_Hr/ReturnedHome, causing
             // auto-retract to guess the missing home command at the wrong point.
             var inScopeConds = new List<VueOneCondition>();
+            // MergeFeedRing: the id of a dropped cross-PROCESS-state condition, resolved to a
+            // WAIT on that process's sentinel slot. Stays -1 (no sentinel) unless the flag is on
+            // and a dropped condition targets a Process with a known process_id.
+            int crossProcessWaitId = -1;
             foreach (var c in allConds)
             {
                 if (string.IsNullOrEmpty(c.ComponentID)) continue;
@@ -159,6 +163,11 @@ namespace CodeGen.Translation.Process.Recipes
                     $"state '{state.Name}' references out-of-scope component " +
                     $"ComponentID={c.ComponentID} " +
                     $"(name={(target?.Name ?? "?")}, type={(target?.Type ?? "?")})");
+                if (CodeGen.Configuration.MapperConfig.MergeFeedRing && crossProcessWaitId < 0 &&
+                    target != null &&
+                    string.Equals(target.Type, "Process", StringComparison.OrdinalIgnoreCase) &&
+                    ProcessSentinelId(target.Name) is int pid)
+                    crossProcessWaitId = pid;
             }
 
             var cond = inScopeConds.FirstOrDefault();
@@ -172,6 +181,31 @@ namespace CodeGen.Translation.Process.Recipes
                     if (mover != null)
                     {
                         int moverCmd = ResolveTransientCmdState(state.Name, mover, 2, arrays);
+                        int moverWaitState = moverCmd == 1 ? 2 : moverCmd == 3 ? 0 : 2;
+                        // MergeFeedRing: the state's only leave-condition is a cross-process gate
+                        // (Feed's TransferAdvancing -> Disassembly/bearing_pnp_home_pos). Keep the
+                        // motion (CMD mover -> WAIT mover) AND append a WAIT on the referenced
+                        // process's sentinel so Feed holds until Disassembly reports it. Off (or no
+                        // process condition) -> the plain MotionPair below (byte-identical).
+                        if (crossProcessWaitId >= 0)
+                        {
+                            var rows = new StateClassification { Kind = ClassKind.MotionPair };
+                            AddCmdWaitRows(rows.Rows,
+                                (mover.Name ?? string.Empty).Trim().ToLowerInvariant(),
+                                moverCmd, scopedRegistry[mover.ComponentID.Trim()], moverWaitState);
+                            rows.Rows.Add(new RecipeRow
+                            {
+                                StepType = 2,
+                                WaitId = crossProcessWaitId,
+                                WaitState = CodeGen.Configuration.MapperConfig.MergeFeedRingBearingHomeState,
+                            });
+                            rows.RowCount = rows.Rows.Count;
+                            arrays.Warnings.Add(
+                                $"[Recipe] MergeFeedRing: '{state.Name}' keeps its motion and now WAITs on " +
+                                $"the cross-process sentinel (id {crossProcessWaitId}, state " +
+                                $"{CodeGen.Configuration.MapperConfig.MergeFeedRingBearingHomeState}) before proceeding.");
+                            return rows;
+                        }
                         return new StateClassification
                         {
                             Kind = ClassKind.MotionPair,
@@ -179,7 +213,7 @@ namespace CodeGen.Translation.Process.Recipes
                             CmdTargetName = (mover.Name ?? string.Empty).Trim().ToLowerInvariant(),
                             CmdState = moverCmd,
                             WaitId = scopedRegistry[mover.ComponentID.Trim()],
-                            WaitState = moverCmd == 1 ? 2 : moverCmd == 3 ? 0 : 2,
+                            WaitState = moverWaitState,
                         };
                     }
                 }
@@ -465,6 +499,51 @@ namespace CodeGen.Translation.Process.Recipes
                 WaitId = waitId,
                 WaitState = settledStateWait,
             };
+        }
+
+        // The state_table slot a Process stamps ({process_id, sentinel}) — the WAIT id a cross-process
+        /// <summary>
+        /// Control.xml-driven merge trigger: true iff an M262 (Feed) process has a MOTION state whose
+        /// leave-condition targets a Process carrying a mergeable sentinel — i.e. Feed waits on another
+        /// controller mid-sequence (the no-clamp Transfer-hold: Feed_Station/TransferAdvancing ->
+        /// Disassembly/bearing_pnp_home_pos). Models without such a gate (the clamp model, whose Feed
+        /// never waits on Disassembly) return false, so the Feed ring stays decoupled -> byte-identical.
+        /// The recipe classifier and the ring wiring both read this one decision.
+        /// </summary>
+        public static bool FeedRingMergeNeeded(IReadOnlyList<VueOneComponent> allComponents)
+        {
+            foreach (var proc in allComponents)
+            {
+                if (!string.Equals(proc.Type, "Process", StringComparison.OrdinalIgnoreCase)) continue;
+                if (CodeGen.Translation.HcfSymbolIndex.NameBasedPlcGuess(proc.Name)
+                    != CodeGen.Translation.PlcAssignment.M262) continue;
+                foreach (var st in proc.States)
+                {
+                    if (!StateNameSuggestsMotion(st.Name)) continue;
+                    foreach (var tr in st.Transitions)
+                        foreach (var c in tr.Conditions)
+                        {
+                            if (string.IsNullOrEmpty(c.ComponentID)) continue;
+                            var target = LookupComponent(c.ComponentID, allComponents);
+                            if (target != null &&
+                                string.Equals(target.Type, "Process", StringComparison.OrdinalIgnoreCase) &&
+                                ProcessSentinelId(target.Name) is int)
+                                return true;
+                        }
+                }
+            }
+            return false;
+        }
+
+        // condition resolves to. Only the processes that publish a mergeable sentinel are mapped;
+        // returns null for any other name so the caller falls back to the normal drop.
+        private static int? ProcessSentinelId(string? processName)
+        {
+            var n = (processName ?? string.Empty).Trim();
+            if (string.Equals(n, "Disassembly", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(n, "Disassembly_Station", StringComparison.OrdinalIgnoreCase))
+                return CodeGen.Configuration.MapperConfig.DisassemblyProcessId;
+            return null;
         }
 
         private static bool StateNameSuggestsMotion(string? stateName)
