@@ -155,11 +155,26 @@ namespace CodeGen.Translation
                     builder.AddAdapterConnection(
                         $"{ringComponents[i].Name}.{StateRprtOut(ringComponents[i].Type)}",
                         $"{ringComponents[i + 1].Name}.{StateRprtIn(ringComponents[i + 1].Type)}");
-                // Close the M262 Feed ring locally (last -> first). The Feed ring is its own
-                // closed loop; there is no cross-PLC ring splice.
-                builder.AddAdapterConnection(
-                    $"{ringComponents[^1].Name}.{StateRprtOut(ringComponents[^1].Type)}",
-                    $"{ringComponents[0].Name}.{StateRprtIn(ringComponents[0].Type)}");
+                if (MapperConfig.MergeFeedRing)
+                {
+                    // CONNECT-AT-SEAM: do NOT close the Feed ring locally. The Feed tail (Feed_Station)
+                    // crosses to the M580 head (first M580 sensor) so the M262 Feed chain joins the ONE
+                    // main cross-PLC ring; its head (PartInHopper) is fed by the discharge-segment tail
+                    // (BuildStation2Wiring). No FB moves — only the ring close-back is redirected.
+                    var m580Head = contents.Sensors.FirstOrDefault(
+                        s => HcfSymbolIndex.NameBasedPlcGuess(s.Name) == PlcAssignment.M580);
+                    if (m580Head != null)
+                        builder.AddAdapterConnection(
+                            $"{ringComponents[^1].Name}.{StateRprtOut(ringComponents[^1].Type)}",
+                            $"{m580Head.Name}.{StateRprtIn("Sensor_Bool_CAT")}");
+                }
+                else
+                {
+                    // Close the M262 Feed ring locally (last -> first) — its own closed loop.
+                    builder.AddAdapterConnection(
+                        $"{ringComponents[^1].Name}.{StateRprtOut(ringComponents[^1].Type)}",
+                        $"{ringComponents[0].Name}.{StateRprtIn(ringComponents[0].Type)}");
+                }
             }
 
             // STAGE 5b robot tail: the local intra-M262 chain of the Ejector->Robot segment.
@@ -309,9 +324,23 @@ namespace CodeGen.Translation
                     builder.AddAdapterConnection(
                         $"{ring[^1].Name}.{StateRprtOut(ring[^1].Type)}",
                         $"{seg[0]}.stateRprtCmd_in");
-                    builder.AddAdapterConnection(
-                        $"{seg[^1]}.stateRprtCmd_out",
-                        $"{ring[0].Name}.{StateRprtIn(ring[0].Type)}");
+                    if (MapperConfig.MergeFeedRing)
+                    {
+                        // CONNECT-AT-SEAM: the discharge-segment tail feeds the M262 Feed head
+                        // (PartInHopper) instead of the M580 head, so the segment + Feed chain form one
+                        // continuous loop; the Feed tail reaches the M580 head via the cross hop added in
+                        // BuildFeedStationWiring. No FB moves — only this close target is redirected.
+                        var m262Head = contents.Sensors.FirstOrDefault(
+                            s => HcfSymbolIndex.NameBasedPlcGuess(s.Name) == PlcAssignment.M262);
+                        if (m262Head != null)
+                            builder.AddAdapterConnection(
+                                $"{seg[^1]}.stateRprtCmd_out",
+                                $"{m262Head.Name}.{StateRprtIn("Sensor_Bool_CAT")}");
+                    }
+                    else
+                        builder.AddAdapterConnection(
+                            $"{seg[^1]}.stateRprtCmd_out",
+                            $"{ring[0].Name}.{StateRprtIn(ring[0].Type)}");
                 }
                 else
                 {
