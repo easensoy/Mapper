@@ -82,9 +82,22 @@ recipes:
       bearingHome:
         - { cmd: bearing_pnp, state: 5 }        # Home (brake settles at centre when ON)
         - { waitRef: bearing_pnp, state: 0 }
+      # MergeFeedRing only: publish {DisassemblyProcessId, 6} once the bearing is home so Feed's
+      # TransferAdvancing WAIT can key on it (Feed holds Transfer advanced until the swivel clears).
+      # The CMD's src_id is the emitting process (Disassembly=18); the target label is a pure sentinel.
+      bearingHomeSentinel:
+        - { cmd: disassembly_bearing_home, state: 6 }
       unclamp:
         - { cmd: clamp, state: 3 }
         - { waitRef: clamp, state: 0 }
+      # MergeFeedRing only: the discharge must wait for Transfer to RETURN before the ejector pushes
+      # (Control.xml Transfer/ReturnedFinished). Its State_Number is 4 (home-finished family), but the
+      # runtime remaps that to the stable AtHomeInit 0: AtHomeEnd=4 is transient (overwritten 4->0 in the
+      # same run-to-stable tick), so a WAIT on 4 is missed by the engine and must target 0 -- exactly the
+      # remap RecipeStateClassifier applies to the Feed side's own transfer=3 -> WAIT 0. Cross-PLC once
+      # the Feed ring is merged (Transfer is M262; on the merged ring it reports to shared state_table[6]).
+      transferReturned:
+        - { waitRef: transfer, state: 0 }
       ejector:
         - { cmd: ejector, state: 1 }
         - { waitRef: ejector, state: 2 }
