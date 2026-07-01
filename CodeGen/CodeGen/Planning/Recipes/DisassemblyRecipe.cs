@@ -70,12 +70,21 @@ namespace CodeGen.Translation.Process
                 RecipeStepEmitter.Emit(b, def.Block("bearingStage"), arrays, allComponents);
             RecipeStepEmitter.Emit(b, def.Block("bearingHome"), arrays, allComponents);
 
+            // MergeFeedRing: stamp {DisassemblyProcessId, 6} so Feed's TransferAdvancing WAIT releases
+            // the swivel is home. Emitted straight after bearingHome, before anything else moves.
+            if (MapperConfig.MergeFeedRing)
+                RecipeStepEmitter.Emit(b, def.Block("bearingHomeSentinel"), arrays, allComponents);
+
             if (ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, "clamp", out _))
                 RecipeStepEmitter.Emit(b, def.Block("unclamp"), arrays, allComponents);
 
             // M262 ejector + robot tail, each gated on its own id resolving.
             if (MapperConfig.EnableRobotTaskTail)
             {
+                // MergeFeedRing: wait for Transfer to return (ReturnedFinished=4) before the ejector.
+                if (MapperConfig.MergeFeedRing &&
+                    ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, "transfer", out _))
+                    RecipeStepEmitter.Emit(b, def.Block("transferReturned"), arrays, allComponents);
                 if (ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, "ejector", out _))
                     RecipeStepEmitter.Emit(b, def.Block("ejector"), arrays, allComponents);
                 if (ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, "robot", out _))
