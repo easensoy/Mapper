@@ -1171,16 +1171,24 @@ namespace CodeGen.Services
         }
 
         /// <summary>
-        /// Tightens the rig WAIT semantics from "the state_table slot currently has
-        /// the requested value" to "the ring message that woke the engine is a fresh
-        /// report from the waited component with the requested value".
+        /// Installs the rig WAIT semantics as LEVEL-triggered on the persisted state_table,
+        /// guarded by an anti-leftover suspect flag. WaitSatisfied is true when
+        /// state_table[Wait1Id].state = Wait1State AND NOT leftoverSuspect.
         ///
-        /// This matters for repeated actuator targets in one recipe, especially
-        /// Shaft_Vr Work -> Home -> Work. If the persistent state_table still carries
-        /// the first Work report when the second Work wait is armed, the release row can
-        /// be reached before the second physical down stroke really reports. Feeding the
-        /// current ProcessHandler.component_state_out into the engine makes WAITs edge-
-        /// true on the actual reporting component instead of table history.
+        /// Why level, not edge: a WAIT must satisfy on the PERSISTED component state, not on
+        /// a live one-shot ring edge. A one-shot report — a cross-PLC sensor like
+        /// PartAtAssembly, or a STABLE actuator state like Bearing_PnP AtHomeInit (id 8,
+        /// state 0) that never re-publishes (no poll drives Inputs.REQ) — arrives once and
+        /// is gone from last_state_msg; with pure edge-triggering the WAIT then hangs forever
+        /// even though state_table holds the correct value (e.g. the coverPlace bearing
+        /// clear-gate WAIT(8,0) that stalls CoverPNP_Hr). Reading state_table fixes that.
+        ///
+        /// The anti-leftover half is retained for the repeated-target case (Shaft_Vr
+        /// Work -> Home -> Work): the arm branch marks leftoverSuspect when the target slot
+        /// ALREADY equals the wait target at arm time (a stale value from a prior cycle,
+        /// before the actuator has moved this step), and the ELSE branch clears it the moment
+        /// the waited component reports a DIFFERENT state (it has genuinely transitioned away),
+        /// so a stale slot cannot satisfy the WAIT but a fresh arrival at the target does.
         /// </summary>
         static void PatchProcessRuntimeFreshWaitTrigger(string eaeProjectDir, DeployResult result)
         {
@@ -1258,7 +1266,7 @@ namespace CodeGen.Services
                         $"\tIF (last_state_msg.src_id = {waitId}) AND (last_state_msg.state <> {waitState}) THEN\r\n" +
                         "\t\tleftoverSuspect := FALSE;\r\n" +
                         "\tEND_IF;\r\n" +
-                        $"\tWaitSatisfied := (last_state_msg.src_id = {waitId}) AND (last_state_msg.state = {waitState}) AND (NOT leftoverSuspect);\r\n" +
+                        $"\tWaitSatisfied := (state_table[{waitId}].state = {waitState}) AND (NOT leftoverSuspect);\r\n" +
                         "END_IF;\r\n" +
                         "\r\n" +
                         "PreviousStepText := ThisStepText;\r\n" +
@@ -1273,8 +1281,8 @@ namespace CodeGen.Services
                 {
                     doc.Save(fbt);
                     result.PatchesApplied.Add(
-                        "ProcessRuntime_Generic_v1: WAIT now requires the triggering ring message to be from the waited component (fresh-report guard)");
-                    MapperLogger.Info("[Deploy] ProcessRuntime_Generic_v1: WAIT fresh-report trigger guard applied");
+                        "ProcessRuntime_Generic_v1: check_wait LEVEL-triggered on state_table (WAIT satisfies on the persisted component state, not a one-shot ring edge; anti-leftover suspect flag retained for repeated actuator targets)");
+                    MapperLogger.Info("[Deploy] ProcessRuntime_Generic_v1: check_wait made level-triggered on state_table (anti-leftover retained)");
                 }
             }
             catch (Exception ex)
