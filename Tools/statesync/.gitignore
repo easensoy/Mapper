@@ -1,0 +1,4 @@
+# generated runtime artefacts - regenerate from Control.xml, never committed
+sync-map.generated.json
+*.generated.json
+visual-components-topics.txt
