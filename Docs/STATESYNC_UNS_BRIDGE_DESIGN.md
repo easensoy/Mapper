@@ -3,6 +3,8 @@
 **Date:** 2026-07-02 · **Status:** DESIGN ONLY — no code implemented, per task scope.
 **Goal:** synchronise the physical SMC rig (EAE controllers = source of truth) with two *state followers* — VueOne STD and Visual Components 5.0 — from the same ordered MQTT event stream. One-way digital shadow; **no control feedback into the PLCs**.
 
+> **Re-verification (2026-07-02):** every load-bearing fact below was independently re-confirmed against source this session — Mapper MQTT emission (`TemplateLibraryDeployer.cs`, 4 CATs, `{state:N}` unquoted, `smc/<name>`, QoS1/retain=FALSE), the MQTT corpus + logger (`smc/#` on 127.0.0.1:1883, regex `state\s*:\s*(-?\d+)`), the VueOne socket (`AsyncSocketServer` 51000/52000/56000, `"EOM"` framing at `syncSocket.cs:740-752`, `enum MsgTypes{ STATUSUPDATE=1 }` at `RfArgs.cs:43-44`, `VcComponentArg` fields), the VC install (Premium OLP 5.0, `Plugin.MQTT.dll`+MQTTnet), and the `_vc` Control.xml Transfer state table (ComponentID `C-c9b8c68c-…`, 0=ReturnedHome…4=ReturnedFinished). **Two corrections applied vs the original draft:** embedded VC Python is **3.13.3** (not 3.12.2); and the sync-map now separates `twinName` (`<Name>`, for the VueOne socket) from `vcId` (`<VcID>`, the Visual Components component name) — they are *different strings* (e.g. `Transfer` vs `TransferComp`).
+
 **Frozen surfaces (untouched by this design):** PLC control logic, recipes, interlocks, HCF, CATs, MQTT_CONNECTION, MqttStateFormatter, EAE runtime, `C:\Demonstrator`. The bridge is a *consumer* of what already exists.
 
 ---
@@ -94,7 +96,7 @@ So the bridge's VueOne output is simply: connect to `127.0.0.1:51000`, and per s
 | **No wildcard subscriptions** (`+`/`#` unsupported) | every topic added explicitly per connection | ~20 explicit `uns/v1/.../state` topics — trivial, listed by sync-map |
 | JSON field access | Variable Formula Editor, dot/index notation: `Payload.state` | our envelope fields map directly (`Payload.state`, `Payload.seq`) |
 | Variable pairing | Connectivity variable groups, *Server to simulation*: message field → **component property / behavior property / signal** (`VC_INTEGER` etc.) | pair `Payload.state` onto an Integer property per component |
-| Integer → motion | **no native "int → predefined state/animation" mapping**; standard pattern = Integer property/signal + a small **Python 3 script behavior** (VC 5.0 runs CPython **3.12.2**, pip-capable) dispatching the pose/servo move per state value | one reusable dispatch script per component type (five-state cylinder, 7-state swivel, gripper, sensor) |
+| Integer → motion | **no native "int → predefined state/animation" mapping**; standard pattern = Integer property/signal + a small **Python 3 script behavior** (this install embeds CPython **3.13.3** — verified `Python 3\python.exe --version`; a legacy Python 2.7 also ships alongside — pip-capable) dispatching the pose/servo move per state value | one reusable dispatch script per component type (five-state cylinder, 7-state swivel, gripper, sensor) |
 | Known pitfall | pairing a joint that a servo-controller behavior also owns → "two things fighting" rubber-banding (forum t/6891) | bind the joint to a property expression, pair the property |
 | Update modes | event-based (on value change) or cyclic (Update Interval); run the sim at real-time speed when externally driven | event-based for state topics |
 
@@ -143,7 +145,8 @@ Single source of truth for all mapping; generated read-only from the same twin t
   "components": [
     {
       "name": "transfer",                          // runtime/topic name (lowercased actuator_name)
-      "twinName": "Transfer",                      // VueOne componentName (exact)
+      "twinName": "Transfer",                      // VueOne <Name> = socket componentName (exact)
+      "vcId": "TransferComp",                      // VueOne <VcID> = Visual Components component name (verify vs VC scene)
       "componentId": "C-c9b8c68c-5030-4d93-91ca-06310726ddc5",
       "station": "feed",                           // feed | assembly | disassembly | covers
       "plc": "M262",
@@ -157,7 +160,7 @@ Single source of truth for all mapping; generated read-only from the same twin t
         "3": { "name": "Returning",        "vueOneState": "Returning" },
         "4": { "name": "ReturnedFinished", "vueOneState": "ReturnedFinished" }
       },
-      "vcTarget": { "component": "Transfer", "variable": "state" }
+      "vcTarget": { "component": "TransferComp", "variable": "state" }
     }
   ]
 }
@@ -166,6 +169,7 @@ Single source of truth for all mapping; generated read-only from the same twin t
 Rules the generator must encode (all already known facts, not new logic):
 - **Runtime state numbers, not twin State_Numbers**, key the `states` map. For Five_State they coincide (0..4; 4 = transient AtHome the runtime re-reports as 0 — keep both entries). Bearing_PnP (Seven_State centre-home) publishes runtime 0..6 and needs its own table (0=centre/ReturnedHome, 1=ToWork1, 2=AtWork1/AtPick, 3=ToWork2, 4=AtWork2/AtPick2, 5=ToHome, 6=AtHome transient). Sensors: 0/1 (Off/On). Robot task: 0=ready,1=running,2=complete.
 - Topic strings are copied **verbatim** (incl. `TopCoverSenosr`).
+- **Two names per component, never conflated:** `twinName` = VueOne `<Name>` (the socket `componentName`, e.g. `Transfer`); `vcId` = VueOne `<VcID>` (the Visual Components component name, e.g. `TransferComp`). The VueOne follower keys on `twinName`; the VC follower binds on `vcId`. Both come straight from Control.xml — verified: Transfer's `<Name>` = `Transfer`, `<VcID>` = `TransferComp` (`SMC_Vue2VC_With_Processes_vc/Control.xml:350-351`). The VC `vcId` should still be confirmed against the actual VC scene before slice 1 (the `.vcmx` is the authority for the in-scene name).
 - `station` comes from which Process's transitions reference the component (Feed/Assembly/Disassembly), covers → `covers`.
 - Generation = a small standalone read-only script (`Tools/statesync/gen_sync_map.py`, python, parses Control.xml exactly like the investigation scripts in this design phase did). It runs on demand — **not** wired into the Mapper pipeline (no pipeline change, no gate impact). MVP slice 1 may ship a hand-written map for 4 components; the generator lands in slice 2 when the 7-state table makes hand-writing error-prone.
 
