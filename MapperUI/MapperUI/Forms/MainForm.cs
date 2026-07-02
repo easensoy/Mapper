@@ -29,6 +29,13 @@ namespace MapperUI
         MapperConfig? _mapperConfig;
         List<VueOneComponent> _loadedComponents = new();
         List<ComponentValidationRow> _validationRows = new();
+        // In-session Device-column overrides (component name -> device). Display only for now:
+        // the generation pipeline still reads the canonical ComponentRegistry. Honouring an
+        // override in generation (and the RevPi target) is a deliberate follow-up.
+        readonly Dictionary<string, string> _deviceOverrides = new(StringComparer.OrdinalIgnoreCase);
+        // True while the grid is being (re)populated, so the CellValueChanged handler ignores
+        // the programmatic value assignments and only reacts to genuine user edits.
+        bool _populatingGrid;
         SystemXmlReader? _lastReader;
         DebugConsoleForm? _debugConsole;
         StateTransitionTableForm? _stateTransitionTableForm;
@@ -1546,16 +1553,25 @@ namespace MapperUI
                 var cfg = Cfg();
                 int rowIdx = 0;
 
+                _populatingGrid = true;
+                try
+                {
                 foreach (var comp in _loadedComponents)
                 {
                     var vr = Validate(comp, validator, cfg);
                     _validationRows.Add(vr);
 
-                    // Device (PLC) assignment for this component (from the canonical registry).
+                    // Device (PLC) assignment for this component (from the canonical registry,
+                    // unless the user overrode it this session via the Device dropdown).
                     // Resource name (e.g. M262_RES) is EAE-internal and intentionally NOT shown.
                     var reg = CodeGen.Mapping.ComponentRegistry.Get(comp.Name);
-                    string dev = reg?.Plc.ToString() ?? "";
-                    int idx = dgvComponents.Rows.Add(comp.Name, comp.Type, vr.TemplateName, dev);
+                    string dev = _deviceOverrides.TryGetValue(comp.Name, out var ov)
+                        ? ov
+                        : (reg?.Plc.ToString() ?? "");
+                    // The Device cell is a combo; only its listed items are valid. An unmapped or
+                    // unknown device is stored as null (blank cell) to avoid a combo DataError.
+                    string devCell = (dev == "M262" || dev == "M580" || dev == "BX1" || dev == "RevPi") ? dev : null;
+                    int idx = dgvComponents.Rows.Add(comp.Name, comp.Type, vr.TemplateName, devCell);
                     var row = dgvComponents.Rows[idx];
                     Color bg = (rowIdx++ % 2 == 0) ? RowEven : RowOdd;
                     row.DefaultCellStyle.BackColor = bg;
@@ -1563,20 +1579,11 @@ namespace MapperUI
                     row.Cells[2].Style.ForeColor = vr.IsValid ? ColorTranslated : ColorDiscarded;
                     row.Cells[2].Style.BackColor = bg;
                 }
-
-                // Device/resource summary in the group title (M262/M580/BX1 + mapped component counts).
-                int cM262 = 0, cM580 = 0, cBx1 = 0;
-                foreach (System.Windows.Forms.DataGridViewRow r in dgvComponents.Rows)
-                {
-                    switch (r.Cells[3].Value?.ToString())
-                    {
-                        case "M262": cM262++; break;
-                        case "M580": cM580++; break;
-                        case "BX1":  cBx1++;  break;
-                    }
                 }
-                grpMappingInfo.Text =
-                    $"Mapping Information   —   M262: {cM262} · M580: {cM580} · BX1: {cBx1} mapped component(s)";
+                finally { _populatingGrid = false; }
+
+                // Device summary in the group title (M262/M580/BX1[/RevPi] + mapped counts).
+                RefreshDeviceSummary();
 
                 UpdateDetectedInfo();
 
@@ -1985,6 +1992,77 @@ namespace MapperUI
         }
 
         void dgvComponents_SelectionChanged(object sender, EventArgs e) { }
+
+        // Commit a Device combo selection immediately (on pick), so CellValueChanged fires
+        // without the user having to leave the cell.
+        void dgvComponents_CurrentCellDirtyStateChanged(object sender, EventArgs e)
+        {
+            if (dgvComponents.IsCurrentCellDirty &&
+                dgvComponents.CurrentCell is DataGridViewComboBoxCell)
+                dgvComponents.CommitEdit(DataGridViewDataErrorContexts.Commit);
+        }
+
+        // A component with no canonical device shows a blank combo; ignore the formatting error
+        // that would otherwise pop for a value not in the combo's item list.
+        void dgvComponents_DataError(object sender, DataGridViewDataErrorEventArgs e) => e.ThrowException = false;
+
+        // The user changed a component's target Device via the dropdown. Record the override,
+        // refresh the summary counts, and log it. Display only for now — see _deviceOverrides.
+        void dgvComponents_DeviceChanged(object sender, DataGridViewCellEventArgs e)
+        {
+            if (_populatingGrid || e.RowIndex < 0 || e.ColumnIndex != colDevice.Index) return;
+            var row = dgvComponents.Rows[e.RowIndex];
+            string comp = row.Cells[0].Value?.ToString() ?? "";
+            string dev = row.Cells[colDevice.Index].Value?.ToString() ?? "";
+            if (string.IsNullOrEmpty(comp)) return;
+            _deviceOverrides[comp] = dev;
+            RefreshDeviceSummary();
+            AppendActivity($"[UI] Device set: {comp} -> {dev} " +
+                "(display only; generation still uses the canonical device map — re-assignment wiring is a follow-up).");
+        }
+
+        // Recompute the per-device breakdown: refresh the Mapping Information title counts and the
+        // "Devices" panel on the right (which component sits on which controller, tracking overrides).
+        void RefreshDeviceSummary()
+        {
+            var byDevice = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var d in new[] { "M262", "M580", "BX1", "RevPi" }) byDevice[d] = new List<string>();
+            var unassigned = new List<string>();
+            foreach (DataGridViewRow r in dgvComponents.Rows)
+            {
+                string name = r.Cells[0].Value?.ToString() ?? "";
+                string dev = r.Cells[colDevice.Index].Value?.ToString() ?? "";
+                if (byDevice.TryGetValue(dev, out var list)) list.Add(name);
+                else if (!string.IsNullOrEmpty(name)) unassigned.Add(name);
+            }
+
+            grpMappingInfo.Text =
+                $"Mapping Information   —   M262: {byDevice["M262"].Count} · M580: {byDevice["M580"].Count} · BX1: {byDevice["BX1"].Count}"
+                + (byDevice["RevPi"].Count > 0 ? $" · RevPi: {byDevice["RevPi"].Count}" : "")
+                + " mapped component(s)";
+
+            if (txtDeviceSummary == null) return;
+            if (dgvComponents.Rows.Count == 0)
+            {
+                txtDeviceSummary.Text = "Load a Control.xml to see per-device component assignments.";
+                return;
+            }
+            var sb = new System.Text.StringBuilder();
+            foreach (var d in new[] { "M262", "M580", "BX1", "RevPi" })
+            {
+                var list = byDevice[d];
+                if (list.Count == 0 && d == "RevPi") continue; // hide RevPi until it is actually used
+                sb.AppendLine($"{d}  ({list.Count})");
+                foreach (var n in list) sb.AppendLine($"    {n}");
+                sb.AppendLine();
+            }
+            if (unassigned.Count > 0)
+            {
+                sb.AppendLine($"(unassigned)  ({unassigned.Count})");
+                foreach (var n in unassigned) sb.AppendLine($"    {n}");
+            }
+            txtDeviceSummary.Text = sb.ToString().TrimEnd();
+        }
 
         void UpdateDetectedInfo()
         {
