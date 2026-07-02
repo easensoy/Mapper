@@ -535,6 +535,38 @@ namespace CodeGen.Translation.Process.Recipes
             return false;
         }
 
+        /// <summary>
+        /// Resolve the Control.xml gate on a process's INITIAL transition (its Initial_State's
+        /// leave-condition) to a (state_table id, runtime state) WAIT. For the no-clamp
+        /// Assembly_Station that transition is Initialisation -> Bearing_PnP_Picking gated on
+        /// Transfer/Advanced, so this returns (transfer id 6, state 2) -- the twin's own material
+        /// gate, used under MergeFeedRing in place of the injected PartAtAssembly gate so Assembly
+        /// starts only when the part is delivered AND held (Transfer Advanced), never on a stale/early
+        /// PartAtAssembly. Returns false when the initial state has no in-scope, non-Process gated
+        /// transition (the caller then keeps the injected HandoffPlanner gate).
+        /// </summary>
+        public static bool TryGetInitialConditionGate(VueOneComponent process,
+            RecipeArrays arrays, IReadOnlyList<VueOneComponent> allComponents,
+            out int waitId, out int waitState)
+        {
+            waitId = -1; waitState = 0;
+            var initial = process.States.FirstOrDefault(s => s.InitialState);
+            if (initial == null) return false;
+            foreach (var tr in initial.Transitions)
+                foreach (var cond in tr.Conditions)
+                {
+                    if (string.IsNullOrEmpty(cond.ComponentID)) continue;
+                    if (!arrays.ComponentRegistry.TryGetValue(cond.ComponentID.Trim(), out var id)) continue;
+                    var target = LookupComponent(cond.ComponentID, allComponents);
+                    if (target == null ||
+                        string.Equals(target.Type, "Process", StringComparison.OrdinalIgnoreCase)) continue;
+                    waitId = id;
+                    waitState = ResolveStateNumber(cond, target, arrays);
+                    return true;
+                }
+            return false;
+        }
+
         // condition resolves to. Only the processes that publish a mergeable sentinel are mapped;
         // returns null for any other name so the caller falls back to the normal drop.
         private static int? ProcessSentinelId(string? processName)
