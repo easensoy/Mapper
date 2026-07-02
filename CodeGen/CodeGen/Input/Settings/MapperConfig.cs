@@ -112,6 +112,14 @@ namespace CodeGen.Configuration
         // 7. Emitter (DisassemblyRecipe) and consumer (RecipeStateClassifier) share this one value.
         public const int MergeFeedRingBearingHomeState = 6;
 
+        // The value a process publishes on its OWN process_id slot to mean "I am idle / at
+        // Initialisation". A process's state_table slot carries its last CMD state (1/3/5/7 for
+        // actuator commands + handshake), so the idle marker must be a value NO recipe ever issues as
+        // a CMD state -- 0 is safe. Assembly publishes {AssemblyProcessId, 0} at its Initialisation
+        // (AssemblyRecipe) and Feed's readiness gate WAITs on the SAME value (RecipeStateClassifier),
+        // so the two always match regardless of the twin's design-time State_Number for Initialisation.
+        public const int ProcessIdleSentinelState = 0;
+
         /// <summary>
         /// When true, Assembly_Station + Disassembly recipes are DERIVED from their Control.xml process
         /// state machines (the generic ProcessRecipeArrayGenerator walk, commandFromCondition=true — the
