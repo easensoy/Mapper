@@ -2021,47 +2021,72 @@ namespace MapperUI
                 "(display only; generation still uses the canonical device map — re-assignment wiring is a follow-up).");
         }
 
-        // Recompute the per-device breakdown: refresh the Mapping Information title counts and the
-        // "Devices" panel on the right (which component sits on which controller, tracking overrides).
+        // Recompute the per-device component counts and refresh the Mapping Information title
+        // (tracks the Device dropdown, incl. any in-session overrides).
         void RefreshDeviceSummary()
         {
-            var byDevice = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-            foreach (var d in new[] { "M262", "M580", "BX1", "RevPi" }) byDevice[d] = new List<string>();
-            var unassigned = new List<string>();
+            int cM262 = 0, cM580 = 0, cBx1 = 0, cRevPi = 0;
             foreach (DataGridViewRow r in dgvComponents.Rows)
             {
-                string name = r.Cells[0].Value?.ToString() ?? "";
-                string dev = r.Cells[colDevice.Index].Value?.ToString() ?? "";
-                if (byDevice.TryGetValue(dev, out var list)) list.Add(name);
-                else if (!string.IsNullOrEmpty(name)) unassigned.Add(name);
+                switch (r.Cells[colDevice.Index].Value?.ToString())
+                {
+                    case "M262":  cM262++;  break;
+                    case "M580":  cM580++;  break;
+                    case "BX1":   cBx1++;   break;
+                    case "RevPi": cRevPi++; break;
+                }
             }
-
             grpMappingInfo.Text =
-                $"Mapping Information   —   M262: {byDevice["M262"].Count} · M580: {byDevice["M580"].Count} · BX1: {byDevice["BX1"].Count}"
-                + (byDevice["RevPi"].Count > 0 ? $" · RevPi: {byDevice["RevPi"].Count}" : "")
+                $"Mapping Information   —   M262: {cM262} · M580: {cM580} · BX1: {cBx1}"
+                + (cRevPi > 0 ? $" · RevPi: {cRevPi}" : "")
                 + " mapped component(s)";
+        }
 
-            if (txtDeviceSummary == null) return;
-            if (dgvComponents.Rows.Count == 0)
+        // The designer anchors don't stretch the two body sections to the full window on this
+        // machine (a DPI/AutoScale artifact leaves a dead grey strip on the right). Size them to
+        // the client area explicitly on every resize so the existing sections always fill the form.
+        protected override void OnClientSizeChanged(EventArgs e)
+        {
+            base.OnClientSizeChanged(e);
+            RelayoutBody();
+        }
+
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            RelayoutBody();
+        }
+
+        void RelayoutBody()
+        {
+            if (grpValidation == null || grpMappingInfo == null) return;
+            const int margin = 12;
+            int fullW = ClientSize.Width - 2 * margin;
+            if (fullW < 200) return;
+
+            // Pin the top-right action buttons to the form's right edge.
+            if (btnCleanDemonstrator != null)
+                btnCleanDemonstrator.Left = ClientSize.Width - margin - btnCleanDemonstrator.Width;
+            if (btnTestStation1 != null && btnCleanDemonstrator != null)
+                btnTestStation1.Left = btnCleanDemonstrator.Left - 8 - btnTestStation1.Width;
+
+            // Both body sections span the full width; Mapping Information takes all remaining height.
+            grpValidation.Width = fullW;
+            grpMappingInfo.Width = fullW;
+            int statusH = statusStrip?.Height ?? 22;
+            grpMappingInfo.Height = Math.Max(160, ClientSize.Height - grpMappingInfo.Top - statusH - margin);
+
+            // Give the components grid ~58% of the Mapping split; the activity log fills the rest.
+            if (splitMain != null && splitMain.Width > 40)
             {
-                txtDeviceSummary.Text = "Load a Control.xml to see per-device component assignments.";
-                return;
+                int min1 = Math.Max(1, splitMain.Panel1MinSize);
+                int max1 = splitMain.Width - splitMain.SplitterWidth - Math.Max(1, splitMain.Panel2MinSize);
+                if (max1 > min1)
+                {
+                    int target = Math.Max(min1, Math.Min((int)(splitMain.Width * 0.58), max1));
+                    try { splitMain.SplitterDistance = target; } catch { /* transient during resize */ }
+                }
             }
-            var sb = new System.Text.StringBuilder();
-            foreach (var d in new[] { "M262", "M580", "BX1", "RevPi" })
-            {
-                var list = byDevice[d];
-                if (list.Count == 0 && d == "RevPi") continue; // hide RevPi until it is actually used
-                sb.AppendLine($"{d}  ({list.Count})");
-                foreach (var n in list) sb.AppendLine($"    {n}");
-                sb.AppendLine();
-            }
-            if (unassigned.Count > 0)
-            {
-                sb.AppendLine($"(unassigned)  ({unassigned.Count})");
-                foreach (var n in unassigned) sb.AppendLine($"    {n}");
-            }
-            txtDeviceSummary.Text = sb.ToString().TrimEnd();
         }
 
         void UpdateDetectedInfo()
