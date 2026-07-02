@@ -8,17 +8,19 @@ the same state into VueOne STD over its localhost socket. It NEVER publishes to
 `smc/#` and never sends anything toward the PLCs.
 
     smc/<component> {state:N}
-      -> uns/wmg/smc_rig/v1/<area>/<station>/<component>/state   (retained JSON, for Visual Components)
+      -> uns/wmg/smc_rig/v1/<station>/<component>/state   (retained JSON, for Visual Components)
       -> VueOne STD socket 127.0.0.1:51000   ({...}EOM, for the STD highlight)
 
-Every component/state mapping lives in sync-map.json (derived from Control.xml).
-Nothing rig-specific is hardcoded here - only the protocol facts (the state
-regex, msgType=1, and the two wire conventions confirmed against the VueOne
-source: ComponentName carries the VcID, and JSON keys are PascalCase).
+The runtime map (default sync-map.generated.json) is produced by gen_sync_map.py
+from Control.xml; this bridge is fully generic - it knows no component names. The
+only rig-independent facts baked in are the protocol details (the state regex,
+msgType=1, and the two wire conventions confirmed against the VueOne source:
+ComponentName carries the VcID, and JSON keys are PascalCase).
 
 Usage:
-    python statesync.py [sync-map.json]     # run the bridge
-    python statesync.py --selftest          # offline: print what each sample would emit (no broker/socket)
+    python statesync.py [map.json]              # run the bridge (default: sync-map.generated.json)
+    python statesync.py [map.json] --selftest   # offline: exercise the map, no broker/socket
+    python statesync.py [map.json] --list-topics # print the UNS topics (for the VC subscribe list)
 
 Dependency: paho-mqtt   (pip install paho-mqtt)
 """
@@ -57,6 +59,7 @@ class VueOneSocket:
         self.host, self.port, self.min_retry = host, port, min_retry_s
         self.sock = None
         self._last_try = 0.0
+        self.on_connect = None   # called once per successful (re)connect -> snapshot replay
 
     def _ensure(self):
         if self.sock is not None:
@@ -69,6 +72,8 @@ class VueOneSocket:
             s.settimeout(3.0)
             self.sock = s
             print("[vueone] connected {}:{}".format(self.host, self.port), flush=True)
+            if self.on_connect is not None:
+                self.on_connect()   # snapshot replay; self.sock is set, so nested sends won't re-connect
             return True
         except OSError as e:
             print("[vueone] not connected ({}); MQTT/UNS keeps running, retry >= {:.0f}s"
@@ -106,6 +111,7 @@ class Bridge:
         self.cfg, self.comps, self.ci, self.dry = cfg, comps, ci, dry
         self.prefix = cfg.get("unsPrefix", "uns/wmg/smc_rig/v1").rstrip("/")
         self.status_topic = self.prefix + "/_bridge/status"
+        self.qos = int(cfg.get("unsQos", 1))   # UNS state + status publish QoS (retain stays on)
         self.epoch = utc_iso()          # bridge start -> followers detect a restart
         self.seq = 0                    # monotonic over ALL emitted events
         self.last_state = {}            # source topic -> last int state (dup drop)
@@ -123,6 +129,7 @@ class Bridge:
             self.vueone = _DryVueOne()
         else:
             self.vueone = VueOneSocket(vc.get("host", "127.0.0.1"), int(vc.get("port", 51000)))
+            self.vueone.on_connect = self.replay_snapshot   # catch VueOne up on every (re)connect
 
     def resolve(self, topic):
         """Exact match, then a case-only fallback (sensor topics keep their <Name> case)."""
@@ -164,18 +171,19 @@ class Bridge:
             self.warned_badstate.add((key, state))
         self.emit(key, comp, state, name)
 
+    def uns_topic_for(self, comp):
+        return "{}/{}/{}/state".format(self.prefix, comp.get("station", "unassigned"), comp.get("component", ""))
+
     def emit(self, topic, comp, state, name):
-        area, station, component = comp.get("area", ""), comp.get("station", ""), comp.get("component", "")
-        uns_topic = "{}/{}/{}/{}/state".format(self.prefix, area, station, component)
+        uns_topic = self.uns_topic_for(comp)
         assert uns_topic.startswith(self.prefix), "refusing to publish outside the UNS namespace"
         self._pub(uns_topic, {
             "seq": self.seq,
             "epoch": self.epoch,
             "ts": utc_iso(ms=True),
             "sourceTopic": topic,
-            "area": area,
-            "station": station,
-            "component": component,
+            "station": comp.get("station", "unassigned"),
+            "component": comp.get("component", ""),
             "twinName": comp.get("twinName"),
             "vcId": comp.get("vcId"),
             "state": state,
@@ -184,17 +192,38 @@ class Bridge:
         }, retain=True)
         self.msgs_out += 1
         if self.vueone is not None and name is not None:
-            # ComponentName carries the VcID: VueOne matches it against aComponent.VCID
-            # (FormSystemEditor.OnEventFromVc). Actuators read StateName; sensors read
-            # Value via Convert.ToBoolean, so it must be "true"/"false".
-            self.vueone.send({
-                "ClientId": self.vc_clientid,
-                "ComponentName": comp.get("vcId"),
-                "StateName": name,
-                "Value": "true" if str(name).upper() in ("ON", "TRUE") else "false",
-                "MsgType": 1,
-            })
+            self.vueone.send(self._vueone_msg(comp, name))
         self.publish_status()
+
+    def _vueone_msg(self, comp, name):
+        # ComponentName carries the VcID: VueOne matches it against aComponent.VCID
+        # (FormSystemEditor.OnEventFromVc). Actuators read StateName; sensors read
+        # Value via Convert.ToBoolean, so it must be "true"/"false".
+        return {
+            "ClientId": self.vc_clientid,
+            "ComponentName": comp.get("vcId"),
+            "StateName": name,
+            "Value": "true" if str(name).upper() in ("ON", "TRUE") else "false",
+            "MsgType": 1,
+        }
+
+    def replay_snapshot(self):
+        """On VueOne (re)connect: push the latest known state of every seen component so
+        the STD catches up at once, without waiting for each component's next event."""
+        if self.vueone is None:
+            return
+        n = 0
+        for topic, state in list(self.last_state.items()):
+            comp = self.comps.get(topic)
+            if comp is None:
+                continue
+            name = comp.get("states", {}).get(str(state))
+            if name is None:
+                continue
+            self.vueone.send(self._vueone_msg(comp, name))
+            n += 1
+        if n:
+            print("[vueone] snapshot replayed {} component state(s)".format(n), flush=True)
 
     def publish_status(self):
         self._pub(self.status_topic, {
@@ -211,11 +240,14 @@ class Bridge:
         if self.dry:
             print("PUB {}{}  {}".format("(retained) " if retain else "", topic, line), flush=True)
         elif self.mqtt is not None:
-            self.mqtt.publish(topic, line, qos=0, retain=retain)
+            self.mqtt.publish(topic, line, qos=self.qos, retain=retain)
 
 
 def load_map(path):
-    with open(path, "r", encoding="utf-8") as f:
+    if not os.path.exists(path):
+        sys.exit("map not found: {}\n  generate it first:\n"
+                 "    python gen_sync_map.py <Control.xml> --out {}".format(path, path))
+    with open(path, "r", encoding="utf-8-sig") as f:   # tolerate a UTF-8 BOM
         cfg = json.load(f)
     comps = cfg.get("components", {})
     ci = {k.lower(): k for k in comps}   # case-insensitive fallback index
@@ -248,7 +280,7 @@ def run(cfg, bridge):
     # Last-Will so late subscribers see the bridge go offline (retained).
     client.will_set(bridge.status_topic,
                     json.dumps({"online": False, "epoch": bridge.epoch}, separators=(",", ":")),
-                    qos=0, retain=True)
+                    qos=bridge.qos, retain=True)
     for attempt in range(1, 21):
         try:
             client.connect(host, port, keepalive=60)
@@ -265,33 +297,48 @@ def run(cfg, bridge):
     client.loop_forever()
 
 
+def list_topics(cfg, comps):
+    """Print every UNS topic the bridge would publish - the Visual Components subscribe list."""
+    bridge = Bridge(cfg, comps, {}, dry=True)
+    for t in sorted({bridge.uns_topic_for(c) for c in comps.values()}):
+        print(t)
+    print(bridge.status_topic)
+
+
 def selftest(cfg, comps, ci):
+    # Fully generic: samples are derived from the loaded map, so no component name
+    # is hardcoded in the bridge or its test.
     bridge = Bridge(cfg, comps, ci, dry=True)
-    samples = [
-        ("smc/feeder", "{state:0}"),
-        ("smc/feeder", "{state:1}"),
-        ("smc/feeder", "{state:1}"),        # duplicate -> dropped
-        ("smc/checker", "{state:2}"),
-        ("smc/transfer", "{ state : 3 }"),  # tolerant parse
-        ("smc/PartInHopper", "{state:1}"),  # sensor -> Value:"true"
-        ("smc/PartInHopper", "{state:0}"),  # sensor -> Value:"false"
-        ("smc/UNMAPPED", "{state:9}"),      # unknown topic -> one warning
-        ("smc/transfer", "{state:7}"),      # out-of-range state -> stateName null
-    ]
-    print("--- selftest  epoch={}  prefix={} ---".format(bridge.epoch, bridge.prefix), flush=True)
-    for t, p in samples:
-        bridge.on_message(t, p)
+    print("--- selftest  epoch={}  prefix={}  unsQos={}  components={} ---".format(
+        bridge.epoch, bridge.prefix, bridge.qos, len(comps)), flush=True)
+    for topic, comp in list(comps.items())[:3]:
+        nums = sorted(comp.get("states", {}), key=lambda s: int(s))
+        # first state, same again (duplicate -> dropped), then the next state
+        for num in (nums[:1] + nums[:1] + nums[1:2]):
+            bridge.on_message(topic, "{state:%s}" % num)
+    bridge.on_message("smc/__unmapped__", "{state:9}")   # unknown topic -> one warning
+    if comps:
+        t0, c0 = next(iter(comps.items()))
+        bad = max([int(x) for x in c0.get("states", {})] + [0]) + 5
+        bridge.on_message(t0, "{ state : %d }" % bad)     # tolerant parse + out-of-range -> stateName null
+    print("--- simulating a VueOne (re)connect: snapshot replay of last-known states ---", flush=True)
+    bridge.replay_snapshot()
     print("--- summary in={} out={} unknownTopics={} ---"
           .format(bridge.msgs_in, bridge.msgs_out, len(bridge.warned_unknown)), flush=True)
 
 
+DEFAULT_MAP = "sync-map.generated.json"
+
 if __name__ == "__main__":
     args = sys.argv[1:]
     dry = "--selftest" in args
-    args = [a for a in args if a != "--selftest"]
-    map_path = args[0] if args else os.path.join(HERE, "sync-map.json")
+    listt = "--list-topics" in args
+    args = [a for a in args if a not in ("--selftest", "--list-topics")]
+    map_path = args[0] if args else os.path.join(HERE, DEFAULT_MAP)
     cfg, comps, ci = load_map(map_path)
-    if dry:
+    if listt:
+        list_topics(cfg, comps)
+    elif dry:
         selftest(cfg, comps, ci)
     else:
         run(cfg, Bridge(cfg, comps, ci))
