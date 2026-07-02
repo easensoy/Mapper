@@ -47,8 +47,10 @@ namespace MapperUI
             this.colComponent = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.colType = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.colTemplate = new System.Windows.Forms.DataGridViewTextBoxColumn();
-            this.colDevice = new System.Windows.Forms.DataGridViewTextBoxColumn();
+            this.colDevice = new System.Windows.Forms.DataGridViewComboBoxColumn();
             this.grpGenerationEngine = new System.Windows.Forms.GroupBox();
+            this.grpDeviceSummary = new System.Windows.Forms.GroupBox();
+            this.txtDeviceSummary = new System.Windows.Forms.TextBox();
             this.pnlEngineHeader = new System.Windows.Forms.Panel();
             this.lblEngineLabel = new System.Windows.Forms.Label();
             this.lblEngineStatusDot = new System.Windows.Forms.Label();
@@ -235,7 +237,10 @@ namespace MapperUI
 
 
             this.splitMain.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.splitMain.SplitterDistance = 380;
+            // Give the interactive components grid (with the editable Device column) the
+            // larger share; the activity log keeps the remainder. Was 380 (grid cramped,
+            // log occupied most of the right-hand space).
+            this.splitMain.SplitterDistance = 620;
 
 
             this.dgvComponents.AllowUserToAddRows = false;
@@ -245,12 +250,17 @@ namespace MapperUI
             this.dgvComponents.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] {
                 this.colComponent, this.colType, this.colTemplate, this.colDevice });
             this.dgvComponents.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.dgvComponents.ReadOnly = true;
+            // Grid is editable so the Device combo can be changed; the other three
+            // columns keep their own ReadOnly = true, so only Device is editable.
+            this.dgvComponents.ReadOnly = false;
             this.dgvComponents.RowHeadersVisible = true;
             this.dgvComponents.MultiSelect = true;
             this.dgvComponents.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
             this.dgvComponents.DefaultCellStyle.Font = new System.Drawing.Font("Segoe UI", 9F);
             this.dgvComponents.SelectionChanged += new System.EventHandler(this.dgvComponents_SelectionChanged);
+            this.dgvComponents.CellValueChanged += new System.Windows.Forms.DataGridViewCellEventHandler(this.dgvComponents_DeviceChanged);
+            this.dgvComponents.CurrentCellDirtyStateChanged += new System.EventHandler(this.dgvComponents_CurrentCellDirtyStateChanged);
+            this.dgvComponents.DataError += new System.Windows.Forms.DataGridViewDataErrorEventHandler(this.dgvComponents_DataError);
             this.splitMain.Panel1.Controls.Add(this.dgvComponents);
 
             this.colComponent.HeaderText = "Component";
@@ -261,10 +271,14 @@ namespace MapperUI
             this.colType.ReadOnly = true;
             this.colTemplate.HeaderText = "Template";
             this.colTemplate.ReadOnly = true;
-            this.colTemplate.Width = 150;
+            this.colTemplate.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill;
             this.colDevice.HeaderText = "Device";
-            this.colDevice.ReadOnly = true;
-            this.colDevice.AutoSizeMode = System.Windows.Forms.DataGridViewAutoSizeColumnMode.Fill;
+            this.colDevice.ReadOnly = false;
+            this.colDevice.Width = 110;
+            this.colDevice.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.colDevice.DisplayStyle = System.Windows.Forms.DataGridViewComboBoxDisplayStyle.DropDownButton;
+            this.colDevice.ToolTipText = "Target device/controller for this component (editable). RevPi is a future target; generation for a re-assigned device is not wired yet.";
+            this.colDevice.Items.AddRange(new object[] { "M262", "M580", "BX1", "RevPi" });
 
 
             this.grpGenerationEngine.Controls.Add(this.txtActivityLog);
@@ -273,6 +287,28 @@ namespace MapperUI
             this.grpGenerationEngine.Dock = System.Windows.Forms.DockStyle.Fill;
             this.grpGenerationEngine.Text = "Generation Engine";
             this.splitMain.Panel2.Controls.Add(this.grpGenerationEngine);
+
+            // Devices summary fills the top of the right-hand panel (above the activity log) with a
+            // live per-controller component breakdown — visible immediately, from the same mapping
+            // data, and it tracks Device-dropdown edits. Added AFTER grpGenerationEngine so it docks
+            // Top and the (Fill) generation engine takes the remainder.
+            this.txtDeviceSummary.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.txtDeviceSummary.Multiline = true;
+            this.txtDeviceSummary.ReadOnly = true;
+            this.txtDeviceSummary.BorderStyle = System.Windows.Forms.BorderStyle.None;
+            this.txtDeviceSummary.BackColor = System.Drawing.Color.White;
+            this.txtDeviceSummary.Font = new System.Drawing.Font("Consolas", 9F);
+            this.txtDeviceSummary.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
+            this.txtDeviceSummary.WordWrap = false;
+            this.txtDeviceSummary.TabStop = false;
+            this.txtDeviceSummary.Text = "Load a Control.xml to see per-device component assignments.";
+
+            this.grpDeviceSummary.Controls.Add(this.txtDeviceSummary);
+            this.grpDeviceSummary.Dock = System.Windows.Forms.DockStyle.Top;
+            this.grpDeviceSummary.Height = 170;
+            this.grpDeviceSummary.Padding = new System.Windows.Forms.Padding(6, 3, 6, 6);
+            this.grpDeviceSummary.Text = "Devices";
+            this.splitMain.Panel2.Controls.Add(this.grpDeviceSummary);
 
 
             this.pnlEngineHeader.Controls.Add(this.lblEngineLabel);
@@ -419,8 +455,10 @@ namespace MapperUI
         private System.Windows.Forms.DataGridViewTextBoxColumn colComponent;
         private System.Windows.Forms.DataGridViewTextBoxColumn colType;
         private System.Windows.Forms.DataGridViewTextBoxColumn colTemplate;
-        private System.Windows.Forms.DataGridViewTextBoxColumn colDevice;
+        private System.Windows.Forms.DataGridViewComboBoxColumn colDevice;
         private System.Windows.Forms.GroupBox grpGenerationEngine;
+        private System.Windows.Forms.GroupBox grpDeviceSummary;
+        private System.Windows.Forms.TextBox txtDeviceSummary;
         private System.Windows.Forms.Panel pnlEngineHeader;
         private System.Windows.Forms.Label lblEngineLabel;
         private System.Windows.Forms.Label lblEngineStatusDot;
