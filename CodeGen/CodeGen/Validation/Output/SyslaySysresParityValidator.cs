@@ -51,6 +51,21 @@ namespace CodeGen.Devices.Core
         static readonly string[] RecipeParamNames =
             { "Recipe", "StepType", "CmdTargetName", "CmdStateArr", "Wait1Id", "Wait1State", "NextStep" };
 
+        // Every top-level FB <Parameter> that affects RUNTIME must mirror syslay -> owning-PLC sysres
+        // byte-identically. EAE deploys the sysres, so a lagging sysres silently runs stale logic
+        // (recipe/interlock/target/timers). Divergence on any of these fails generation — no split-brain.
+        static readonly string[] RuntimeParamNames =
+        {
+            "Recipe", "StepType", "CmdTargetName", "CmdStateArr", "Wait1Id", "Wait1State", "NextStep",
+            "RuleTable", "RuleCount", "RuleFromState", "RuleToState", "RuleSourceID", "RuleBlockedState",
+            "Target", "TargetWork1State", "TargetWork2State", "TargetHomeState",
+            "actuator_id", "actuator_name", "process_id", "process_state_name",
+            "WorkSensorFitted", "HomeSensorFitted",
+            "work1ToHomeTime", "work2ToHomeTime", "toWorkTime", "toHomeTime",
+        };
+
+        static string Short(string s) => s.Length <= 48 ? s : s.Substring(0, 45) + "...";
+
         /// <summary>
         /// Validate that each device sysres faithfully mirrors the syslay. <paramref name="eaeRoot"/>
         /// is the folder containing <c>IEC61499/System</c> (same root <see cref="HcfReferenceValidator"/>
@@ -114,14 +129,19 @@ namespace CodeGen.Devices.Core
                         continue;
                     }
 
-                    if (string.Equals(fb.Type, "Process1_Generic", StringComparison.Ordinal))
+                    // Compare EVERY runtime-affecting parameter the syslay set for this FB against the
+                    // sysres. Missing or divergent => split-brain; fail generation with the exact FB/param.
+                    var slParams = fb.Parameters.ToDictionary(p => p.Name, p => p.Value, StringComparer.Ordinal);
+                    var srParams = ReadSysresParams(sfb);
+                    foreach (var n in RuntimeParamNames)
                     {
-                        var want = RecipeSignature(fb.Parameters.ToDictionary(p => p.Name, p => p.Value, StringComparer.Ordinal));
-                        var got = RecipeSignature(ReadSysresParams(sfb));
-                        if (!string.Equals(want, got, StringComparison.Ordinal))
+                        if (!slParams.TryGetValue(n, out var want)) continue;
+                        if (!srParams.TryGetValue(n, out var got))
                             violations.Add(new(label,
-                                $"recipe MISMATCH for process '{fb.Name}' — the {label} sysres recipe LAGS the syslay " +
-                                $"({DescribeRecipe(fb)} vs {DescribeRecipe(sfb)})"));
+                                $"parameter '{n}' MISSING from '{fb.Name}' ({fb.Type}) in the {label} sysres — the mirror dropped a syslay runtime parameter"));
+                        else if (!string.Equals(want, got, StringComparison.Ordinal))
+                            violations.Add(new(label,
+                                $"parameter '{n}' MISMATCH for '{fb.Name}' ({fb.Type}) — the {label} sysres LAGS the syslay: syslay='{Short(want)}' vs sysres='{Short(got)}'"));
                     }
                 }
             }
