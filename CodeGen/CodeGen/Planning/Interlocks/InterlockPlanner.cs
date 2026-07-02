@@ -77,9 +77,16 @@ namespace CodeGen.Translation.Interlocks
                         !CodeGen.Mapping.TemplateMap.IsBranchedSevenState(srcComp))
                         blockedStateRuntime = 0;
 
-                    // Drop "block-while-source-is-home" (Blocked==0): a source at rest is out of the
-                    // crossing, so blocking on it is an inverted rule that deadlocks the recipe.
-                    if (blockedStateRuntime == 0) continue;
+                    // Drop "block-while-source-is-home" (Blocked==0): a SAME-controller source at rest
+                    // is out of the collision crossing, so blocking on it is an inverted rule that would
+                    // deadlock the recipe (e.g. block Shaft_Hr while Bearing_PnP is home). EXCEPTION
+                    // (MergeFeedRing / no-clamp): a CROSS-controller source at its home/rest is a genuine
+                    // readiness gate, not a collision no-op -- Transfer (M262) at ReturnedFinished means
+                    // "the workpiece is NOT delivered", which MUST keep blocking the downstream M580
+                    // Bearing_PnP. Keep those; still drop the same-PLC inverted rules.
+                    if (blockedStateRuntime == 0 &&
+                        !IsCrossControllerReadinessGate(actuator, srcComp))
+                        continue;
 
                     from[n] = fromState;
                     to[n] = toState;
@@ -116,10 +123,19 @@ namespace CodeGen.Translation.Interlocks
                     string.Equals(srcComp.Type, "Actuator", StringComparison.OrdinalIgnoreCase) &&
                     !CodeGen.Mapping.TemplateMap.IsBranchedSevenState(srcComp))
                     blockedState = 0;
-                if (blockedState == 0) continue;
+                if (blockedState == 0 && !IsCrossControllerReadinessGate(actuator, srcComp)) continue;
                 n++;
             }
             return n;
         }
+
+        // A Blocked==0 interlock is normally an inverted "source is out of the way" no-op, but under
+        // MergeFeedRing a source on a DIFFERENT controller than the interlocked actuator is a genuine
+        // cross-station readiness gate (its home = workpiece not yet delivered) and must survive.
+        // Data-driven (NameBasedPlcGuess); off for the clamp model (MergeFeedRing false) -> byte-identical.
+        private static bool IsCrossControllerReadinessGate(VueOneComponent actuator, VueOneComponent srcComp)
+            => CodeGen.Configuration.MapperConfig.MergeFeedRing && srcComp != null &&
+               CodeGen.Translation.HcfSymbolIndex.NameBasedPlcGuess(srcComp.Name)
+                   != CodeGen.Translation.HcfSymbolIndex.NameBasedPlcGuess(actuator.Name);
     }
 }
