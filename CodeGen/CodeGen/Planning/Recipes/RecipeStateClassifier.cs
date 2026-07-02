@@ -120,6 +120,12 @@ namespace CodeGen.Translation.Process.Recipes
             // first real work step.
             if (IsInitialisationState(state))
             {
+                // MergeFeedRing: an Initialisation transition gated on ANOTHER process at a specific
+                // state (Feed_Station.Initialisation -> Assembly_Station/Initialisation) is a genuine
+                // cross-station readiness/back-pressure gate, NOT a boot tautology -- preserve it as a
+                // WAIT so Feed holds until the upstream is idle before pushing a part.
+                var readiness = TryCrossProcessReadinessGate(state, allComponents, arrays);
+                if (readiness != null) return readiness;
                 arrays.SkippedConditions.Add(
                     $"state '{state.Name}': dropped — Initialisation asserts boot " +
                     "conditions, not a work-cycle step.");
@@ -219,6 +225,10 @@ namespace CodeGen.Translation.Process.Recipes
                 }
                 if (allConds.Any())
                 {
+                    // MergeFeedRing: a non-initial state gated only by a cross-process readiness
+                    // condition keeps its WAIT (the Initialisation gate itself is handled above).
+                    var readiness = TryCrossProcessReadinessGate(state, allComponents, arrays);
+                    if (readiness != null) return readiness;
                     arrays.SkippedConditions.Add(
                         $"state '{state.Name}': all transition conditions out of scope — row dropped.");
                     return new StateClassification { Kind = ClassKind.Skipped, RowCount = 0 };
@@ -532,6 +542,101 @@ namespace CodeGen.Translation.Process.Recipes
                         }
                 }
             }
+            return false;
+        }
+
+        // MergeFeedRing: if this state's leave-condition is a cross-process gate on ANOTHER process at
+        // a specific state (a readiness/back-pressure gate), return a pure WAIT on that process's
+        // state_table slot; else null. Feed_Station.Initialisation -> Assembly_Station/Initialisation
+        // => WAIT(AssemblyProcessId, 0). Off (clamp model) -> null -> the state is handled as before.
+        private static StateClassification? TryCrossProcessReadinessGate(
+            VueOneState state, IReadOnlyList<VueOneComponent> allComponents, RecipeArrays arrays)
+        {
+            if (!CodeGen.Configuration.MapperConfig.MergeFeedRing) return null;
+            var tr = state.Transitions.FirstOrDefault();
+            foreach (var c in tr?.Conditions ?? Enumerable.Empty<VueOneCondition>())
+            {
+                var tgt = LookupComponent(c.ComponentID, allComponents);
+                if (tgt != null &&
+                    string.Equals(tgt.Type, "Process", StringComparison.OrdinalIgnoreCase) &&
+                    ProcessIdOf(tgt.Name) is int rpid)
+                {
+                    // "Process at its Initialisation" = idle. Its state_table slot carries CMD states,
+                    // not the design-time State_Number, so wait on the dedicated idle-sentinel value the
+                    // process publishes at Initialisation (shared constant), NOT ResolveStateNumber.
+                    var refState = tgt.States.FirstOrDefault(s =>
+                        string.Equals((s.StateID ?? string.Empty).Trim(),
+                            (c.ID ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase));
+                    int rstate = refState?.InitialState == true
+                        ? CodeGen.Configuration.MapperConfig.ProcessIdleSentinelState
+                        : ResolveStateNumber(c, tgt, arrays);
+                    arrays.Warnings.Add(
+                        $"[Recipe] MergeFeedRing readiness gate: '{state.Name}' WAITs on " +
+                        $"{tgt.Name} state {rstate} (id {rpid}) before proceeding.");
+                    var rg = new StateClassification { Kind = ClassKind.MotionPair };
+                    rg.Rows.Add(new RecipeRow { StepType = 2, WaitId = rpid, WaitState = rstate });
+                    rg.RowCount = rg.Rows.Count;
+                    return rg;
+                }
+            }
+            return null;
+        }
+
+        // Map a process NAME to its state_table process_id (config-backed). Resolves a cross-process
+        // readiness gate (Feed_Station.Initialisation -> Assembly_Station/Initialisation) to a WAIT slot.
+        private static int? ProcessIdOf(string? name)
+        {
+            var n = (name ?? string.Empty).Trim();
+            if (string.Equals(n, "Assembly_Station", StringComparison.OrdinalIgnoreCase))
+                return CodeGen.Configuration.MapperConfig.AssemblyProcessId;
+            if (string.Equals(n, "Disassembly", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(n, "Disassembly_Station", StringComparison.OrdinalIgnoreCase))
+                return CodeGen.Configuration.MapperConfig.DisassemblyProcessId;
+            if (string.Equals(n, "Feed_Station", StringComparison.OrdinalIgnoreCase))
+                return CodeGen.Configuration.MapperConfig.FeedStationProcessId;
+            return null;
+        }
+
+        /// <summary>
+        /// Resolve the Control.xml condition on <paramref name="componentName"/> that gates the
+        /// transition INTO the process state named <paramref name="destStateName"/> to a
+        /// (state_table id, runtime state) WAIT. Data-driven: the twin owns the timing. For
+        /// Disassembly's EjectorForward entry gated on Transfer/Returning this returns (transfer id 6,
+        /// state 3) = "eject while Transfer is returning"; on Transfer/ReturnedFinished it returns
+        /// (6, 0) = "after Transfer is home" (the transient home-finished State 4 remaps to the stable
+        /// AtHomeInit 0 for a Five_State actuator). Returns false when no such gated condition exists.
+        /// </summary>
+        public static bool TryGetTransitionGate(VueOneComponent process, string destStateName,
+            string componentName, RecipeArrays arrays, IReadOnlyList<VueOneComponent> allComponents,
+            out int waitId, out int waitState)
+        {
+            waitId = -1; waitState = 0;
+            var dest = process.States.FirstOrDefault(s =>
+                string.Equals((s.Name ?? string.Empty).Trim(), destStateName,
+                    StringComparison.OrdinalIgnoreCase));
+            if (dest == null) return false;
+            var destId = (dest.StateID ?? string.Empty).Trim();
+            foreach (var st in process.States)
+                foreach (var tr in st.Transitions)
+                {
+                    if (!string.Equals((tr.DestinationStateID ?? string.Empty).Trim(), destId,
+                            StringComparison.OrdinalIgnoreCase)) continue;
+                    foreach (var c in tr.Conditions)
+                    {
+                        var tgt = LookupComponent(c.ComponentID, allComponents);
+                        if (tgt == null ||
+                            !string.Equals((tgt.Name ?? string.Empty).Trim(), componentName,
+                                StringComparison.OrdinalIgnoreCase)) continue;
+                        if (!arrays.ComponentRegistry.TryGetValue((c.ComponentID ?? string.Empty).Trim(),
+                                out var id)) continue;
+                        int raw = ResolveStateNumber(c, tgt, arrays);
+                        waitId = id;
+                        waitState = (raw == 4 &&
+                            string.Equals(tgt.Type, "Actuator", StringComparison.OrdinalIgnoreCase) &&
+                            !CodeGen.Mapping.TemplateMap.IsBranchedSevenState(tgt)) ? 0 : raw;
+                        return true;
+                    }
+                }
             return false;
         }
 
