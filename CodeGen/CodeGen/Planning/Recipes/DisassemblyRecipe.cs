@@ -81,10 +81,14 @@ namespace CodeGen.Translation.Process
             // M262 ejector + robot tail, each gated on its own id resolving.
             if (MapperConfig.EnableRobotTaskTail)
             {
-                // MergeFeedRing: wait for Transfer to return (ReturnedFinished=4) before the ejector.
+                // MergeFeedRing: gate the ejector on the Transfer, DERIVED from the Control.xml
+                // Disassembly EjectorForward transition condition (data-driven, not hardcoded). The
+                // twin owns the timing: Transfer/Returning (3) => eject WHILE Transfer is returning;
+                // Transfer/ReturnedFinished (4->0) => eject after it is home.
                 if (MapperConfig.MergeFeedRing &&
-                    ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, "transfer", out _))
-                    RecipeStepEmitter.Emit(b, def.Block("transferReturned"), arrays, allComponents);
+                    Recipes.RecipeStateClassifier.TryGetTransitionGate(process, "EjectorForward",
+                        "Transfer", arrays, allComponents, out var ejId, out var ejState))
+                    b.AddWait(ejId, ejState);
                 if (ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, "ejector", out _))
                     RecipeStepEmitter.Emit(b, def.Block("ejector"), arrays, allComponents);
                 if (ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, "robot", out _))
