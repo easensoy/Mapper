@@ -40,6 +40,15 @@ namespace CodeGen.Translation.Process
             var b = new RecipeBuilder(arrays);
             var def = RecipeConfigLoader.Catalog.Recipe("Assembly_Station");
 
+            // MergeFeedRing: publish the Assembly idle sentinel {AssemblyProcessId, ProcessIdleSentinel}
+            // at row 0 so Feed_Station's readiness gate (which WAITs on the SAME value) is satisfiable
+            // each cycle -- Assembly declares "idle/ready" here and Feed holds until it sees it. The
+            // value is the shared idle constant (a value no recipe ever issues as a CMD state), NOT the
+            // twin's design-time State_Number, so the sentinel and the gate always match. Before the
+            // material gate; clamp model unchanged (MergeFeedRing false).
+            if (MapperConfig.MergeFeedRing)
+                b.AddCmd("assembly_idle", MapperConfig.ProcessIdleSentinelState);
+
             // Row 0 material gate. Under MergeFeedRing (the no-clamp twin) derive it from the
             // Control.xml Assembly Initialisation transition -- gated on Transfer/Advanced -> WAIT
             // (transfer id 6, state 2) -- so Assembly starts only when the part is delivered AND held
