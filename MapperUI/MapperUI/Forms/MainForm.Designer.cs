@@ -49,8 +49,6 @@ namespace MapperUI
             this.colTemplate = new System.Windows.Forms.DataGridViewTextBoxColumn();
             this.colDevice = new System.Windows.Forms.DataGridViewComboBoxColumn();
             this.grpGenerationEngine = new System.Windows.Forms.GroupBox();
-            this.grpDeviceSummary = new System.Windows.Forms.GroupBox();
-            this.txtDeviceSummary = new System.Windows.Forms.TextBox();
             this.pnlEngineHeader = new System.Windows.Forms.Panel();
             this.lblEngineLabel = new System.Windows.Forms.Label();
             this.lblEngineStatusDot = new System.Windows.Forms.Label();
@@ -288,28 +286,6 @@ namespace MapperUI
             this.grpGenerationEngine.Text = "Generation Engine";
             this.splitMain.Panel2.Controls.Add(this.grpGenerationEngine);
 
-            // Devices summary fills the top of the right-hand panel (above the activity log) with a
-            // live per-controller component breakdown — visible immediately, from the same mapping
-            // data, and it tracks Device-dropdown edits. Added AFTER grpGenerationEngine so it docks
-            // Top and the (Fill) generation engine takes the remainder.
-            this.txtDeviceSummary.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.txtDeviceSummary.Multiline = true;
-            this.txtDeviceSummary.ReadOnly = true;
-            this.txtDeviceSummary.BorderStyle = System.Windows.Forms.BorderStyle.None;
-            this.txtDeviceSummary.BackColor = System.Drawing.Color.White;
-            this.txtDeviceSummary.Font = new System.Drawing.Font("Consolas", 9F);
-            this.txtDeviceSummary.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
-            this.txtDeviceSummary.WordWrap = false;
-            this.txtDeviceSummary.TabStop = false;
-            this.txtDeviceSummary.Text = "Load a Control.xml to see per-device component assignments.";
-
-            this.grpDeviceSummary.Controls.Add(this.txtDeviceSummary);
-            this.grpDeviceSummary.Dock = System.Windows.Forms.DockStyle.Top;
-            this.grpDeviceSummary.Height = 170;
-            this.grpDeviceSummary.Padding = new System.Windows.Forms.Padding(6, 3, 6, 6);
-            this.grpDeviceSummary.Text = "Devices";
-            this.splitMain.Panel2.Controls.Add(this.grpDeviceSummary);
-
 
             this.pnlEngineHeader.Controls.Add(this.lblEngineLabel);
             this.pnlEngineHeader.Controls.Add(this.lblEngineStatusDot);
@@ -457,8 +433,6 @@ namespace MapperUI
         private System.Windows.Forms.DataGridViewTextBoxColumn colTemplate;
         private System.Windows.Forms.DataGridViewComboBoxColumn colDevice;
         private System.Windows.Forms.GroupBox grpGenerationEngine;
-        private System.Windows.Forms.GroupBox grpDeviceSummary;
-        private System.Windows.Forms.TextBox txtDeviceSummary;
         private System.Windows.Forms.Panel pnlEngineHeader;
         private System.Windows.Forms.Label lblEngineLabel;
         private System.Windows.Forms.Label lblEngineStatusDot;
