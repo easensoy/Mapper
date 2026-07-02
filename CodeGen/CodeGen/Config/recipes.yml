@@ -90,14 +90,10 @@ recipes:
       unclamp:
         - { cmd: clamp, state: 3 }
         - { waitRef: clamp, state: 0 }
-      # MergeFeedRing only: the discharge must wait for Transfer to RETURN before the ejector pushes
-      # (Control.xml Transfer/ReturnedFinished). Its State_Number is 4 (home-finished family), but the
-      # runtime remaps that to the stable AtHomeInit 0: AtHomeEnd=4 is transient (overwritten 4->0 in the
-      # same run-to-stable tick), so a WAIT on 4 is missed by the engine and must target 0 -- exactly the
-      # remap RecipeStateClassifier applies to the Feed side's own transfer=3 -> WAIT 0. Cross-PLC once
-      # the Feed ring is merged (Transfer is M262; on the merged ring it reports to shared state_table[6]).
-      transferReturned:
-        - { waitRef: transfer, state: 0 }
+      # The ejector's Transfer gate is NO LONGER hardcoded here: DisassemblyRecipe derives it from the
+      # Control.xml Disassembly EjectorForward transition condition (RecipeStateClassifier.
+      # TryGetTransitionGate). The twin owns the timing -- Transfer/Returning => eject while returning,
+      # Transfer/ReturnedFinished => eject after home.
       ejector:
         - { cmd: ejector, state: 1 }
         - { waitRef: ejector, state: 2 }
@@ -111,6 +107,9 @@ recipes:
 
   - name: Assembly_Station
     blocks:
+      # NOTE: the MergeFeedRing idle sentinel {AssemblyProcessId, ProcessIdleSentinelState} is emitted
+      # directly by AssemblyRecipe (b.AddCmd) using the shared constant, NOT from a block here -- the
+      # sentinel value must equal the value Feed's readiness gate WAITs on, so it is owned in code.
       # Mutual-exclusion gate (MapperConfig.SerializeAssemblyDisassembly). Emitted right after the
       # material gate: Assembly will not begin a cycle until Disassembly has published its idle
       # sentinel {DisassemblyProcessId, 7}. So Assembly's bearing_pnp work never overlaps Disassembly's
