@@ -977,6 +977,15 @@ namespace MapperUI
                 AppendActivity($"[Generate] Generating IEC 61499 code end-to-end (Feed · Assembly · Disassembly · covers) into Demonstrator at {syslayPath}...");
                 AppendActivity("[Test Runtime] Hardware mode forced: SimulatorFullSystem=false; RecipeStep data-array carrier active; physical IO/sensor wiring and rig HOME-FIRST recipe waits are active.");
 
+                // User directive: Generate first WIPES the Demonstrator (deep clean, same as the Clean
+                // button) then lays the fresh logic down under the hood — a brand-new-EAE-project state
+                // every Generate, so no stale FB / recipe / interlock can survive a regeneration.
+                var wipe = await Task.Run(() => CodeGen.Services.DemonstratorWiper.Wipe(@"C:\Demonstrator"));
+                AppendActivity(
+                    $"[Generate][Wipe] deep wipe: {wipe.FilesEmptied} canvas emptied, {wipe.FilesDeleted} FB-type file(s) deleted, " +
+                    $"{wipe.FoldersDeleted} type folder(s) removed, {wipe.DfbprojEntriesRemoved} dfbproj entry/entries stripped.");
+                foreach (var w in wipe.Warnings) AppendActivity($"[Generate][Wipe][!] {w}");
+
                 var injector = new SystemInjector();
                 var cleanup = await Task.Run(() => injector.PrepareDemonstratorForGeneration(Cfg()));
                 LogCleanup(cleanup);
