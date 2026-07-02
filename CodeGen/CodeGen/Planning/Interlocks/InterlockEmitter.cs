@@ -121,9 +121,12 @@ namespace CodeGen.Translation.Interlocks
         }
 
         /// <summary>
-        /// Keep only rules whose From/To fall in the core's CurrentRawState range and whose blocked
-        /// state is not the source's home/rest (Blocked==0). A "2"-suffixed Disassembly route numbers
-        /// outside the range, and a source at rest is out of the crossing — both are inert.
+        /// Keep only rules whose From/To fall in the core's CurrentRawState range (a "2"-suffixed
+        /// Disassembly route numbers outside the range and is inert). The Blocked==0 decision is NOT
+        /// re-made here: InterlockPlanner.BuildRules already dropped the inverted same-controller
+        /// home-rest rules and kept the genuine cross-controller readiness gates (MergeFeedRing).
+        /// Re-dropping Blocked==0 here would discard those kept gates (e.g. Bearing_PnP blocked while
+        /// Transfer is home / the workpiece is undelivered).
         /// </summary>
         private static InterlockPlan FilterToCentreHomeRange(InterlockPlan plan)
         {
@@ -134,7 +137,6 @@ namespace CodeGen.Translation.Interlocks
             {
                 if (plan.From[i] < r.MinState || plan.From[i] > r.MaxState ||
                     plan.To[i] < r.MinState || plan.To[i] > r.MaxState) continue;
-                if (plan.Blocked[i] == 0) continue;
                 f[kept] = plan.From[i]; t[kept] = plan.To[i];
                 s[kept] = plan.Src[i];  b[kept] = plan.Blocked[i];
                 kept++;
