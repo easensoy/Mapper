@@ -40,13 +40,26 @@ namespace CodeGen.Translation.Process
             var b = new RecipeBuilder(arrays);
             var def = RecipeConfigLoader.Catalog.Recipe("Assembly_Station");
 
-            // Row 0 material gate from the HandoffPlanner (PartAtAssembly across the cross-device
-            // segment when discharge is active, else the M580-local BearingSensor).
-            var asmStart = HandoffPlanner.AssemblyStart;
-            if (asmStart.WaitId >= 0)
-                b.AddWait(asmStart.WaitId, asmStart.WaitState);
-            else if (ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, asmStart.SignalComponent, out var matGateBsId))
-                b.AddWait(matGateBsId, asmStart.WaitState);
+            // Row 0 material gate. Under MergeFeedRing (the no-clamp twin) derive it from the
+            // Control.xml Assembly Initialisation transition -- gated on Transfer/Advanced -> WAIT
+            // (transfer id 6, state 2) -- so Assembly starts only when the part is delivered AND held
+            // by the Transfer, never on a stale/early PartAtAssembly. Otherwise (clamp model) keep the
+            // HandoffPlanner gate (PartAtAssembly across the cross-device segment, or the M580-local
+            // BearingSensor). Clamp model is unchanged: MergeFeedRing is false there.
+            if (MapperConfig.MergeFeedRing &&
+                Recipes.RecipeStateClassifier.TryGetInitialConditionGate(
+                    process, arrays, allComponents, out var gateId, out var gateState))
+            {
+                b.AddWait(gateId, gateState);
+            }
+            else
+            {
+                var asmStart = HandoffPlanner.AssemblyStart;
+                if (asmStart.WaitId >= 0)
+                    b.AddWait(asmStart.WaitId, asmStart.WaitState);
+                else if (ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, asmStart.SignalComponent, out var matGateBsId))
+                    b.AddWait(matGateBsId, asmStart.WaitState);
+            }
 
             // SAFETY mutual exclusion: do not begin assembling until Disassembly is idle (it has
             // published {DisassemblyProcessId, 7} at its row 0). This keeps Assembly's bearing_pnp and
