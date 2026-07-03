@@ -7,10 +7,9 @@ namespace CodeGen.Translation.Interlocks
 {
     /// <summary>
     /// Owns interlock translation + emission: builds the rule plan from Control.xml
-    /// (<see cref="InterlockPlanner"/>), applies generation policy (BX1 cover-zeroing, the
-    /// centre-home raw-state range filter, the bench drop), writes the RuleCount + Rule* params,
-    /// and runs the inert-safety-net guards. <see cref="SystemLayoutInjector"/> consumes the
-    /// result and holds no interlock translation of its own.
+    /// (<see cref="InterlockPlanner"/>), applies generation policy (the centre-home raw-state range
+    /// filter), writes the RuleCount + Rule* params, and runs the inert-safety-net guards.
+    /// <see cref="SystemLayoutInjector"/> consumes the result and holds no interlock translation of its own.
     /// </summary>
     public static class InterlockEmitter
     {
@@ -18,7 +17,7 @@ namespace CodeGen.Translation.Interlocks
 
         // ── Five_State_Actuator_CAT ──────────────────────────────────────────────────────────────
 
-        /// <summary>Write the rule params for a Five_State actuator (plan + BX1 cover-zeroing).</summary>
+        /// <summary>Write the rule params for a Five_State actuator (plan from Control.xml).</summary>
         public static void ApplyFiveState(Dictionary<string, string> p, VueOneComponent actuator,
             IReadOnlyList<VueOneComponent> allComponents,
             IReadOnlyDictionary<string, int>? scopedIds)
@@ -34,16 +33,10 @@ namespace CodeGen.Translation.Interlocks
             List<(string Component, string Detail)> bound)
         {
             int emitted = EmittedCount(p);
-            // BX1 cover-detour actuators are deliberately zeroed in FiveStatePlan (their interlocks are
-            // cross-PLC and unsound on the BX1 evaluator; the ground-truth ships covers with RuleCount=0).
-            // Exempt them from the inert-safety-net guard so the intentional RuleCount=0 is not mistaken
-            // for a failed translation.
-            if (HandoffPlanner.IsCoverDetourActuator(actuator.Name))
-            {
-                if (emitted > 0)
-                    bound.Add((actuator.Name, $"interlock RuleCount={emitted}"));
-                return;
-            }
+            // Every Five_State actuator (BX1 covers included) must emit the interlock its in-scope
+            // Control.xml conditions define. If conditions survive the BuildRules drops but nothing was
+            // emitted, translation failed (e.g. a source the ring cannot reach) -> HARD-FAIL instead of
+            // shipping an InterlockManager that passes everything through (a false safety net).
             int inScope = InScope(actuator, allComponents, scopedIds);
             if (inScope > 0 && emitted == 0)
                 throw new InvalidOperationException(
@@ -91,24 +84,15 @@ namespace CodeGen.Translation.Interlocks
         private static InterlockPlan FiveStatePlan(VueOneComponent actuator,
             IReadOnlyList<VueOneComponent> allComponents,
             IReadOnlyDictionary<string, int>? scopedIds)
-        {
-            // BX1 cover-detour actuators (CoverPNP_Hr/Vr/Gripper) are the one exception. Their
-            // Control.xml interlocks reference M580 actuators (Shaft_Hr, Bearing_PnP), but a BX1
-            // actuator's CommonInterlockEvaluator reads the BX1 state_table, which the cross-device
-            // ring does not reliably feed with M580 states. The rule then either deadlocks (mutual
-            // shaft_hr<->coverpnp_hr, each blocking while the other is at work) or blocks on a stale
-            // cross-PLC slot, stalling the cover sequence at the M580->BX1 seam. The collision the rule
-            // guards cannot occur in the cover-detour layout (the cover replaces the shaft's horizontal
-            // motion and the recipe sequences them), and the rig-proven ground-truth ships covers with
-            // RuleCount=0. A cross-PLC interlock on a BX1 actuator is structurally unsound -> zero it.
-            if (HandoffPlanner.IsCoverDetourActuator(actuator.Name))
-                return InterlockPlan.Empty(Cap);
-
-            // Every other Five_State actuator emits whatever interlock the Control.xml defines.
-            return scopedIds != null
+            // Every Five_State actuator -- BX1 cover-detour actuators (CoverPNP_Hr/Vr/Gripper) included --
+            // emits whatever interlock Control.xml defines. Component ids are global (sensors-first over
+            // the whole system), so a cover's cross-PLC SourceID (Bearing_PnP/Shaft_Hr on M580) indexes
+            // the SAME state_table slot the bridged cover-detour ring feeds. BuildRules drops any source
+            // that is genuinely out of scope; GuardFiveState hard-fails if in-scope conditions survive but
+            // nothing is emitted, so a cover can never be silently zeroed.
+            => scopedIds != null
                 ? InterlockPlanner.BuildRules(actuator, allComponents, scopedIds)
                 : InterlockPlan.Empty(Cap);
-        }
 
         private static InterlockPlan CentreHomePlan(VueOneComponent actuator,
             IReadOnlyList<VueOneComponent> allComponents,
