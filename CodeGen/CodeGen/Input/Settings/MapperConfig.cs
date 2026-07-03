@@ -21,11 +21,20 @@ namespace CodeGen.Configuration
         // When true (default), each recipe runs once and parks on its END row; false loops it to step 0.
         public static bool RecipeRunOnce = true;
 
-        // When true, every non-Cover recipe's END points back to step 0 (overrides RecipeRunOnce).
-        // Each recipe's step 0 is a trigger WAIT, so the line self-sequences off fresh trigger messages:
-        // robot drops the part in the hopper -> PartInHopper goes TRUE -> Feed_Station (parked at its
-        // step-0 WAIT(PartInHopper)) re-fires the pusher -> the whole cycle repeats.
-        public static bool EnableCyclicRestart = true;
+        // When true, every non-Cover recipe's END points back to step 0 (overrides RecipeRunOnce);
+        // false = each process runs ONCE and parks on its END row (the rig-proven Ground Truth,
+        // Demonstrator_20260617 WorkingEndtoEnd: Feed/Assembly/Disassembly END all self-loop).
+        //
+        // MUST STAY FALSE. Cyclic restart re-arms each recipe's step-0 trigger WAIT, and it was
+        // designed to rely on the engine's leftoverSuspect guard to HOLD that WAIT until a FRESH
+        // trigger. That guard was removed (check_wait is now pure level), so on END->0 a HELD level
+        // (e.g. Assembly's WAIT(PartAtAssembly==1) -- the part is not removed until the robot at the
+        // END of Disassembly) satisfies instantly -> Assembly re-fires and runs its shaft/bearing on
+        // the shared M580 volume WHILE Disassembly is still on it (robot vs shaft, bearing vs cover
+        // collisions). Run-once has no re-fire, so the handshake order (Feed -> Assembly -> hands off
+        // -> Disassembly -> parks) is collision-free for BOTH the clamp and no-clamp models. Re-enable
+        // ONLY with a real mutual-exclusion / fresh-trigger mechanism, never on the bare level engine.
+        public static bool EnableCyclicRestart = false;
 
         // The recipe generator's auto-retract safety net runs only for these processes (the Feed_Station
         // twin advances the Checker but never retracts it). Every other process is emitted verbatim.
