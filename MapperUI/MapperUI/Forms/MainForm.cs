@@ -901,8 +901,28 @@ namespace MapperUI
                     path = Path.Combine(AppContext.BaseDirectory, path);
                 if (!File.Exists(path))
                 {
-                    AppendActivity($"[IoBindings] Bindings file not found at {path}; symlinks will use template defaults.");
-                    return null;
+                    // The configured copy (usually bin\Input\) can go missing if the Input folder is
+                    // rewritten (VueOne export) without a MapperUI rebuild to re-copy it. Do NOT proceed
+                    // silently — a missing IO-bindings xlsx means NO actuator athome/atwork/coil bindings,
+                    // so every Five_State sensor is unbound and the recipe can never confirm motion
+                    // ("nothing triggers"). Self-heal from the project source if we can find it, else fail loud.
+                    var fileName = Path.GetFileName(path);
+                    string? recovered = null;
+                    var probe = new DirectoryInfo(AppContext.BaseDirectory);
+                    for (int up = 0; up < 6 && probe != null; up++, probe = probe.Parent)
+                    {
+                        var cand = Path.Combine(probe.FullName, "Input", fileName);
+                        if (File.Exists(cand)) { recovered = cand; break; }
+                    }
+                    if (recovered == null)
+                    {
+                        AppendActivity($"[IoBindings][ERROR] IO-bindings file '{fileName}' NOT FOUND at {path} and no project copy under any parent Input\\ folder. " +
+                            "Actuator athome/atwork/coil channels will NOT bind — the generated HCF will be blank for Feeder/Checker/Transfer and NOTHING WILL TRIGGER. " +
+                            "Restore Input\\" + fileName + " (from MapperUI\\MapperUI\\Input or MapperTests\\TestData) and regenerate.");
+                        return null;
+                    }
+                    try { File.Copy(recovered, path, overwrite: true); AppendActivity($"[IoBindings] bin copy was missing — self-healed from {recovered}"); }
+                    catch (Exception cx) { AppendActivity($"[IoBindings] using project copy {recovered} (could not restore bin copy: {cx.Message})"); path = recovered; }
                 }
                 var bindings = CodeGen.Translation.IoBindingsLoader.LoadBindings(path);
                 AppendActivity($"[IoBindings] Loaded {bindings.Actuators.Count} actuator + {bindings.Sensors.Count} sensor binding(s) from {path}");
