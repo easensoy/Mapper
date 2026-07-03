@@ -157,8 +157,11 @@ namespace CodeGen.Services
             // (coil-clear / both-coils / brake). Copy-if-absent would keep a prior deploy's reshape, so a
             // flag change (e.g. SwivelBrakeHome OFF) would not revert. Deleting first forces re-extract of
             // the pristine zip, after which the swivel patches re-apply from a known base. Idempotent.
+            // ProcessRuntime_Generic_v1 (the WAIT engine) is refreshed here too so no stale check_wait
+            // body persists across deploys (copy-if-absent) -- the clean template check_wait +
+            // NormalizeProcessRuntimeRecipeArrays give the level-triggered form every deploy.
             foreach (var ext in new[] { ".fbt", ".doc.xml", ".meta.xml" })
-            foreach (var basic in new[] { "No_Sensor_Handler_7SCH", "SevenStateCentreHomeActuator" })
+            foreach (var basic in new[] { "No_Sensor_Handler_7SCH", "SevenStateCentreHomeActuator", "ProcessRuntime_Generic_v1" })
             {
                 var stale = Path.Combine(eaeProjectDir, "IEC61499", basic + ext);
                 try { if (File.Exists(stale)) File.Delete(stale); }
@@ -166,24 +169,15 @@ namespace CodeGen.Services
                 { MapperLogger.Info($"[Deploy][Refresh] could not remove stale {stale}: {ex.Message}"); }
             }
 
-            // CAT REFRESH (2026-06-16): both ring CATs now CYCLICALLY re-read their DIs every 200ms
-            // via an E_DELAY self-loop — Sensor_Bool_CAT (Poll.EO -> FB2.REQ) and Five_State_Actuator_CAT
-            // (Poll.EO -> Inputs.REQ; re-process via the pre-existing Inputs.CNF -> InputHandler.inputEvent).
-            // The original CATs read their DI EXACTLY ONCE at INIT, which was the universal stall: the
-            // engine's check_wait is edge-triggered and at step 0 no ring token circulates, so the
-            // one-shot publish raced the engine INIT and was lost (sensors) and sensor-fitted actuators
-            // (Feeder/Transfer/grippers/shafts/clamp = WorkSensorFitted TRUE) never detected reaching
-            // atWork/atHome after a CMD. DeployArtifact is COPY-IF-ABSENT, so delete the deployed CAT
-            // folders first to force re-extract of the fixed zips. Pipeline-respecting (no direct
-            // Demonstrator edit); PatchCatMqttPublish re-applies embedded MQTT after; EAE recompiles on Build.
-            // Seven_State_Actuator_Centre_Home_CAT added 2026-06-26: it is COPY-IF-ABSENT like the
-            // others, so any stale mutation in the DEPLOYED copy persists across Generates even when the
-            // source/zip is clean. (A deploy-time patch once rewrote its timer-gate wiring to
-            // Inputs.VALUE1 -> FB11.IN2 / FB12.IN2 instead of the correct VALUE2/VALUE3, and a plain
-            // re-Generate never repaired it because the normalizers only touch ActuatorCore.atWork1/2,
-            // not the FB11/FB12 AND-gates.) Force re-extract of the pristine zip every Generate so the
-            // deployed CAT always matches the committed template; the deployer's own patches re-apply after.
-            foreach (var catRefresh in new[] { "Sensor_Bool_CAT", "Five_State_Actuator_CAT", "Seven_State_Actuator_Centre_Home_CAT" })
+            // CAT/TYPE REFRESH: DeployArtifact is COPY-IF-ABSENT, so a deployed CAT/type folder persists
+            // across Generates even when the committed zip is clean; a stale mutation from a prior deploy
+            // (or a prior version of a deploy-time patch) would never be repaired by a plain re-Generate.
+            // Delete the deployed folders first so the pristine zip is re-extracted every deploy and the
+            // deployer's own normalizers/patches re-apply from a known base. Includes Process1_Generic
+            // (whose recipe interface is reshaped to the Recipe struct each deploy). Pipeline-respecting
+            // (no direct Demonstrator edit); PatchCatMqttPublish re-applies embedded MQTT after; EAE
+            // recompiles on Build.
+            foreach (var catRefresh in new[] { "Sensor_Bool_CAT", "Five_State_Actuator_CAT", "Seven_State_Actuator_Centre_Home_CAT", "Process1_Generic" })
             {
                 var dir = Path.Combine(eaeProjectDir, "IEC61499", catRefresh);
                 try { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
@@ -369,23 +363,6 @@ namespace CodeGen.Services
             // Sample state_val on ilck_event too so AtWork1 -> ToWork2 sees the same
             // command value (3) as the interlock result. Seven-only; sim strips it back.
             PatchSwivelInterlockEventCarriesStateVal(eaeProjectDir, add: true, result);
-            // 2026-06-08 (Alex/Jyotsna leftover-data fix): make the ProcessRuntime engine's
-            // WAIT edge-triggered so a STALE state_table slot can no longer satisfy a WAIT.
-            // The ring (updateComponentState) never clears state_table -- each slot holds the
-            // last value an actuator ever reported -- and the engine's 'armed' guard only
-            // blocks the FIRST check after a command; every later state_change (from ANY
-            // actuator on the ring) re-tests state_table[Wait1Id].state == Wait1State against
-            // that persistent table. So a slot left at the wait target by a prior cycle is
-            // satisfied by the next unrelated report -> the engine races past the gripper
-            // release / gripper-home waits and commands bearing_pnp=5 (Home) the instant the
-            // swivel reaches AtWork2 -> "atWork2 then immediately returns", bearing never
-            // released. The patch arms a 'leftoverSuspect' flag when the slot ALREADY equals
-            // the target at arm time and only satisfies the WAIT on a genuine fresh transition
-            // INTO the target (actuators always pass through an intermediate state, so a
-            // stale-then-moved slot leaves the target -- clearing suspect -- and is detected
-            // on return). Engine-only, one BOOL InternalVar, no ring/wiring change; applies to
-            // every ProcessRuntime instance (Feed/Assembly/Disassembly). Idempotent.
-            PatchEngineWaitFreshReport(eaeProjectDir, result);
             // 2026-06-08 (ROOT CAUSE, confirmed by EAE watch): the shared ring relay
             // updateComponentState.REQ (a component reporting its OWN state) sets
             // src_id/source_name/state but NEVER clears dest_name. Component_State_Msg is
@@ -418,7 +395,6 @@ namespace CodeGen.Services
             NormalizeFiveStateInterlockConstants(eaeProjectDir, false, result);
             PatchProcess1RecipeArraySize(eaeProjectDir, result);
             PatchProcessNameStringSize(eaeProjectDir, result);
-            PatchCheckWaitLevelTriggered(eaeProjectDir, result);
             // PatchSevenStateActuatorDataDriven removed — see CatToBasics comment.
 
             // MQTT event-driven state publishing (no-loss fix). Deploy-time,
@@ -600,22 +576,13 @@ namespace CodeGen.Services
             // vars are already computed by the ECC; this changes no logic. reduce==false
             // (rig) strips them so the hardware engine is byte-identical.
             NormalizeProcessEngineDebugWatch(eaeProjectDir, false, result);
-            // Process-engine WAIT guard — RIG ONLY. On the rig the engine inits last
-            // and its state_table boots blank, so a home WAIT races; the guard makes a
-            // post-command WAIT wait for that actuator's fresh report. In the SIMULATOR
-            // the sim-force FBs keep state_table accurate and the swivel boots home, so
-            // the guard is unnecessary AND would stall the home-preamble no-op -> the
-            // sim path STRIPS the guard (original entry-check engine). Runs after the
-            // recipe-array normalize so it patches the final check_wait.
-            PatchProcessRuntimeWaitGuard(eaeProjectDir, apply: true, result);
-            // The WAIT guard above still read the target state from the persistent
-            // state_table. On repeated moves of the same actuator in one recipe
-            // (shaft_vr Work -> Home -> Work), a stale table slot can look correct
-            // before the second physical move has actually reported. Wire the
-            // ProcessHandler's current ring message into ProcessRuntime and make
-            // check_wait satisfy only on a fresh report from the waited component.
-            PatchProcessRuntimeFreshWaitTrigger(eaeProjectDir, result);
-            PatchProcess1FreshWaitTriggerWiring(eaeProjectDir, result);
+            // check_wait is LEVEL-triggered: WaitSatisfied := state_table[Recipe[CurrentStep].Wait1Id].state
+            // = Recipe[CurrentStep].Wait1State. That single line is the raw ProcessRuntime_Generic_v1
+            // template body; NormalizeProcessRuntimeRecipeArrays above rewrites the array index into the
+            // Recipe struct. A WAIT whose target state is already true when it arms is satisfied
+            // immediately (valid for sensor levels like PartInHopper=On, process handoffs, stable home
+            // states). The engine + Process1_Generic are force-re-extracted each deploy so no stale
+            // check_wait body persists.
 
             GenerateCfgFiles(eaeProjectDir, result);
             RegisterInDfbproj(eaeProjectDir, result);
@@ -905,58 +872,6 @@ namespace CodeGen.Services
             }
         }
 
-        /// <summary>
-        /// LIVENESS fix for the recipe engine's WAIT check. The shipped
-        /// <c>ProcessRuntime_Generic_v1.check_wait</c> was EDGE-triggered: it satisfied a WAIT only
-        /// when <c>last_state_msg</c> (the transient stateRprtCmd ring message) CURRENTLY equalled
-        /// <c>{Wait1Id, Wait1State}</c>. A one-shot sensor/handoff report — e.g. the level sensor
-        /// <c>PartAtAssembly</c> reporting <c>{3,1}</c> — that arrived BEFORE the WAIT armed, or that
-        /// scrolled out of <c>last_state_msg</c> as other components reported, was never re-seen; with
-        /// no polling there is no second edge, so the WAIT hung forever even though
-        /// <c>state_table[3].state = 1</c> was persisted and correct (the exact "Assembly clamp never
-        /// triggers" stall). Fix: satisfy on the PERSISTED <c>state_table</c> value (LEVEL-triggered),
-        /// still gated by <c>NOT leftoverSuspect</c> so the anti-leftover protection for actuator
-        /// command-then-wait pairs is unchanged (a stale slot value still cannot satisfy until the
-        /// actuator actually transitions this step — <c>leftoverSuspect</c> is set only in the
-        /// command-arm branch and cleared only by a fresh transition away). Idempotent deploy-time
-        /// patch of the deployed engine .fbt; runs on hardware AND sim. Recipe emission unchanged.
-        /// </summary>
-        static void PatchCheckWaitLevelTriggered(string eaeProjectDir, DeployResult result)
-        {
-            const string oldExpr =
-                "WaitSatisfied := (last_state_msg.src_id = Recipe[CurrentStep].Wait1Id) AND (last_state_msg.state = Recipe[CurrentStep].Wait1State) AND (NOT leftoverSuspect);";
-            const string newExpr =
-                "WaitSatisfied := (state_table[Recipe[CurrentStep].Wait1Id].state = Recipe[CurrentStep].Wait1State) AND (NOT leftoverSuspect);";
-            var iecDir = Path.Combine(eaeProjectDir, "IEC61499");
-            if (!Directory.Exists(iecDir)) return;
-            foreach (var fbtPath in Directory.EnumerateFiles(iecDir, "ProcessRuntime_Generic_v1.fbt", SearchOption.AllDirectories))
-            {
-                try
-                {
-                    var doc = System.Xml.Linq.XDocument.Load(fbtPath, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                    var root = doc.Root;
-                    if (root == null) continue;
-                    System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
-                    var checkWait = root.Descendants(ns + "Algorithm")
-                        .FirstOrDefault(a => string.Equals((string?)a.Attribute("Name"), "check_wait", StringComparison.Ordinal));
-                    var st = checkWait?.Element(ns + "ST");
-                    var cdata = st?.Nodes().OfType<System.Xml.Linq.XCData>().FirstOrDefault();
-                    if (cdata == null || !cdata.Value.Contains(oldExpr)) continue;   // already patched / unexpected shape
-                    cdata.Value = cdata.Value.Replace(oldExpr, newExpr);
-                    doc.Save(fbtPath);
-                    result.PatchesApplied.Add(
-                        $"{Path.GetFileName(fbtPath)}: check_wait -> LEVEL-triggered on state_table " +
-                        "(sensor/handoff WAITs satisfy on the persisted state, not a one-shot ring edge; anti-leftover kept for actuator waits)");
-                    MapperLogger.Info(
-                        $"[Deploy] {Path.GetFileName(fbtPath)}: check_wait made level-triggered (fixes missed one-shot sensor/handoff reports).");
-                }
-                catch (Exception ex)
-                {
-                    result.Warnings.Add(
-                        $"check_wait level-trigger patch failed on {Path.GetFileName(fbtPath)}: {ex.Message}");
-                }
-            }
-        }
 
         static void PatchProcess1RecipeArraySize(string eaeProjectDir, DeployResult result)
         {
@@ -1021,321 +936,8 @@ namespace CodeGen.Services
                 "ProcessRuntime_Generic_v1.fbt"), "ProcessRuntime_Generic_v1.fbt");
         }
 
-        /// <summary>
-        /// Anti-race guard for ProcessRuntime_Generic_v1 (the process engine).
-        /// The engine inits LAST in the resource INIT chain, so it misses the
-        /// actuators' boot-time state reports and its state_table starts blank (0).
-        /// check_wait was evaluated on ENTRY to a WAIT step, so a WAIT whose target
-        /// equals that blank value (e.g. "home" = 0) was satisfied INSTANTLY and the
-        /// engine blew through the whole recipe in one tick without any actuator
-        /// actually sequencing (rig-observed: CMDREQ pulsed for every step, swivel
-        /// never left its boot Pick position, gripper never gripped).
-        ///
-        /// Fix: an internal <c>armed</c> flag. A WAIT is NOT satisfied on its first
-        /// (entry) check_wait — only after a fresh state report arrives (the
-        /// WAIT_STEP -> WAIT_STEP "state_change" self-loop re-runs check_wait). So
-        /// the engine must observe the commanded actuator actually report before it
-        /// advances. <c>armed</c> is cleared by AdvanceStep / initializeinit so every
-        /// new WAIT re-arms. The recipe is built so each commanded step is a REAL
-        /// move that reports (the Seven_State swivel home-preamble drives it off its
-        /// boot work position; Five_State actuators boot home and their first command
-        /// moves them), so the guard never stalls on a no-op.
-        ///
-        /// Idempotent XML deploy-time patch (same pattern as PatchCatSymlinkQi):
-        /// no-op once present. The WaitSatisfied EXPRESSION is lifted verbatim from
-        /// the existing check_wait so this works for both the struct and six-array
-        /// recipe forms.
-        /// </summary>
-        static void PatchProcessRuntimeWaitGuard(string eaeProjectDir, bool apply, DeployResult result)
-        {
-            var fbt = Path.Combine(eaeProjectDir, "IEC61499", "ProcessRuntime_Generic_v1.fbt");
-            if (!File.Exists(fbt))
-            {
-                fbt = Directory.EnumerateFiles(
-                        Path.Combine(eaeProjectDir, "IEC61499"),
-                        "ProcessRuntime_Generic_v1.fbt", SearchOption.AllDirectories)
-                    .FirstOrDefault() ?? string.Empty;
-                if (string.IsNullOrEmpty(fbt)) return;
-            }
-            try
-            {
-                var doc = System.Xml.Linq.XDocument.Load(
-                    fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                var root = doc.Root;
-                if (root == null) return;
-                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
-                bool changed = false;
 
-                System.Xml.Linq.XElement? St(string algName) =>
-                    root.Descendants(ns + "Algorithm")
-                        .FirstOrDefault(a => (string?)a.Attribute("Name") == algName)
-                        ?.Element(ns + "ST");
 
-                // Set/strip the trailing `armed := TRUE/FALSE;` in an algorithm's ST.
-                bool SetArmed(System.Xml.Linq.XElement? st, string? desired)
-                {
-                    if (st == null) return false;
-                    var before = st.Value;
-                    var text = System.Text.RegularExpressions.Regex.Replace(
-                        before, @"\s*armed\s*:=\s*(?:TRUE|FALSE)\s*;", "").TrimEnd();
-                    if (desired != null) text += "\r\narmed := " + desired + ";";
-                    if (text == before) return false;
-                    st.ReplaceNodes(new System.Xml.Linq.XCData(text));
-                    return true;
-                }
-
-                var internalVars = root.Descendants(ns + "InternalVars").FirstOrDefault();
-                var armedDecl = internalVars?.Elements(ns + "VarDeclaration")
-                    .FirstOrDefault(v => (string?)v.Attribute("Name") == "armed");
-                var cw = St("check_wait");
-
-                if (apply)
-                {
-                    // RIG path. The engine inits LAST in the resource INIT chain, so it
-                    // misses the actuators' boot reports and state_table boots all-0; a
-                    // WAIT whose target is 0 (home) then passes instantly -> race.
-                    // Install an `armed` guard: armed defaults TRUE (initializeinit) so a
-                    // STANDALONE/sensor WAIT still evaluates on entry (never stalls), but
-                    // IssueCmd clears it FALSE so the WAIT that FOLLOWS a command must
-                    // wait for THAT actuator's fresh report. AdvanceStep must NOT clear it.
-                    if (internalVars != null && armedDecl == null)
-                    {
-                        internalVars.Add(new System.Xml.Linq.XElement(ns + "VarDeclaration",
-                            new System.Xml.Linq.XAttribute("Name", "armed"),
-                            new System.Xml.Linq.XAttribute("Type", "BOOL"),
-                            new System.Xml.Linq.XAttribute("Comment",
-                                "Anti-race: WAIT after a command waits for a fresh state report.")));
-                        changed = true;
-                    }
-                    if (cw != null && !cw.Value.Contains("NOT armed"))
-                    {
-                        var m = System.Text.RegularExpressions.Regex.Match(
-                            cw.Value, @"WaitSatisfied\s*:=\s*(?<expr>[^;]*);");
-                        if (m.Success)
-                        {
-                            var expr = m.Groups["expr"].Value.Trim();
-                            var tail = cw.Value.Substring(m.Index + m.Length);
-                            cw.ReplaceNodes(new System.Xml.Linq.XCData(
-                                "IF NOT armed THEN\r\n\tarmed := TRUE;\r\n\tWaitSatisfied := FALSE;\r\n" +
-                                "ELSE\r\n\tWaitSatisfied := " + expr + ";\r\nEND_IF;" + tail));
-                            changed = true;
-                        }
-                    }
-                    changed |= SetArmed(St("initializeinit"), "TRUE");
-                    changed |= SetArmed(St("IssueCmd"), "FALSE");
-                    changed |= SetArmed(St("AdvanceStep"), null);
-                    if (changed)
-                    {
-                        doc.Save(fbt);
-                        result.PatchesApplied.Add("ProcessRuntime_Generic_v1.fbt: anti-race WAIT guard applied (rig)");
-                        MapperLogger.Info("[Deploy] ProcessRuntime_Generic_v1: anti-race WAIT guard applied (rig)");
-                    }
-                }
-                else
-                {
-                    // SIMULATOR path. The sim-force FBs (SimSwivelForce / SimHopperForce
-                    // + no-sensor timers) keep the engine's state_table accurate AFTER
-                    // init, so the ORIGINAL entry-check engine is correct here. The guard
-                    // is not only unnecessary but HARMFUL in sim: the sim swivel boots
-                    // home, so the home-preamble's "CMD home" is a no-op that produces no
-                    // fresh report and the guard would stall on it. So strip the guard:
-                    // unwrap check_wait back to the plain assignment + remove every armed.
-                    if (cw != null && cw.Value.Contains("NOT armed"))
-                    {
-                        var m = System.Text.RegularExpressions.Regex.Match(cw.Value,
-                            @"IF\s+NOT\s+armed\s+THEN.*?ELSE\s*WaitSatisfied\s*:=\s*(?<expr>[^;]*);\s*END_IF;(?<tail>.*)",
-                            System.Text.RegularExpressions.RegexOptions.Singleline);
-                        if (m.Success)
-                        {
-                            cw.ReplaceNodes(new System.Xml.Linq.XCData(
-                                "WaitSatisfied := " + m.Groups["expr"].Value.Trim() + ";" + m.Groups["tail"].Value));
-                            changed = true;
-                        }
-                    }
-                    changed |= SetArmed(St("initializeinit"), null);
-                    changed |= SetArmed(St("IssueCmd"), null);
-                    changed |= SetArmed(St("AdvanceStep"), null);
-                    if (armedDecl != null) { armedDecl.Remove(); changed = true; }
-                    if (changed)
-                    {
-                        doc.Save(fbt);
-                        result.PatchesApplied.Add("ProcessRuntime_Generic_v1.fbt: WAIT guard removed (simulator uses original engine)");
-                        MapperLogger.Info("[Deploy] ProcessRuntime_Generic_v1: WAIT guard removed (sim)");
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"ProcessRuntime wait-guard patch failed: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Installs the rig WAIT semantics as LEVEL-triggered on the persisted state_table,
-        /// guarded by an anti-leftover suspect flag. WaitSatisfied is true when
-        /// state_table[Wait1Id].state = Wait1State AND NOT leftoverSuspect.
-        ///
-        /// Why level, not edge: a WAIT must satisfy on the PERSISTED component state, not on
-        /// a live one-shot ring edge. A one-shot report — a cross-PLC sensor like
-        /// PartAtAssembly, or a STABLE actuator state like Bearing_PnP AtHomeInit (id 8,
-        /// state 0) that never re-publishes (no poll drives Inputs.REQ) — arrives once and
-        /// is gone from last_state_msg; with pure edge-triggering the WAIT then hangs forever
-        /// even though state_table holds the correct value (e.g. the coverPlace bearing
-        /// clear-gate WAIT(8,0) that stalls CoverPNP_Hr). Reading state_table fixes that.
-        ///
-        /// The anti-leftover half is retained for the repeated-target case (Shaft_Vr
-        /// Work -> Home -> Work): the arm branch marks leftoverSuspect when the target slot
-        /// ALREADY equals the wait target at arm time (a stale value from a prior cycle,
-        /// before the actuator has moved this step), and the ELSE branch clears it the moment
-        /// the waited component reports a DIFFERENT state (it has genuinely transitioned away),
-        /// so a stale slot cannot satisfy the WAIT but a fresh arrival at the target does.
-        /// </summary>
-        static void PatchProcessRuntimeFreshWaitTrigger(string eaeProjectDir, DeployResult result)
-        {
-            var fbt = Path.Combine(eaeProjectDir, "IEC61499", "ProcessRuntime_Generic_v1.fbt");
-            if (!File.Exists(fbt))
-            {
-                fbt = Directory.EnumerateFiles(
-                        Path.Combine(eaeProjectDir, "IEC61499"),
-                        "ProcessRuntime_Generic_v1.fbt", SearchOption.AllDirectories)
-                    .FirstOrDefault() ?? string.Empty;
-                if (string.IsNullOrEmpty(fbt)) return;
-            }
-
-            try
-            {
-                var doc = XDocument.Load(fbt, LoadOptions.PreserveWhitespace);
-                var root = doc.Root;
-                if (root == null) return;
-                XNamespace ns = root.GetDefaultNamespace();
-                bool changed = false;
-
-                var inputVars = root.Element(ns + "InterfaceList")?.Element(ns + "InputVars");
-                if (inputVars != null &&
-                    !inputVars.Elements(ns + "VarDeclaration")
-                        .Any(v => (string?)v.Attribute("Name") == "last_state_msg"))
-                {
-                    inputVars.Add(new XElement(ns + "VarDeclaration",
-                        new XAttribute("Name", "last_state_msg"),
-                        new XAttribute("Type", "Component_State_Msg"),
-                        new XAttribute("Namespace", "Main"),
-                        new XAttribute("Comment",
-                            "Current stateRprtCmd ring message from ProcessHandler; WAITs satisfy only on this fresh report.")));
-                    changed = true;
-                }
-
-                var stateChange = root.Element(ns + "InterfaceList")
-                    ?.Element(ns + "EventInputs")
-                    ?.Elements(ns + "Event")
-                    .FirstOrDefault(e => (string?)e.Attribute("Name") == "state_change");
-                if (stateChange != null &&
-                    !stateChange.Elements(ns + "With")
-                        .Any(w => (string?)w.Attribute("Var") == "last_state_msg"))
-                {
-                    stateChange.Add(new XElement(ns + "With",
-                        new XAttribute("Var", "last_state_msg")));
-                    changed = true;
-                }
-
-                var checkWait = root.Descendants(ns + "Algorithm")
-                    .FirstOrDefault(a => (string?)a.Attribute("Name") == "check_wait");
-                var st = checkWait?.Element(ns + "ST");
-                if (st == null)
-                {
-                    result.Warnings.Add("ProcessRuntime_Generic_v1.fbt: no check_wait ST; fresh WAIT trigger skipped.");
-                }
-                else if (!st.Value.Contains("last_state_msg.src_id", StringComparison.Ordinal))
-                {
-                    var current = st.Value;
-                    var waitId = current.Contains("Recipe[CurrentStep].Wait1Id", StringComparison.Ordinal)
-                        ? "Recipe[CurrentStep].Wait1Id"
-                        : "Wait1Id[CurrentStep]";
-                    var waitState = current.Contains("Recipe[CurrentStep].Wait1State", StringComparison.Ordinal)
-                        ? "Recipe[CurrentStep].Wait1State"
-                        : "Wait1State[CurrentStep]";
-
-                    string newBody =
-                        "IF NOT armed THEN\r\n" +
-                        "\tarmed := TRUE;\r\n" +
-                        "\tWaitSatisfied := FALSE;\r\n" +
-                        "\t(* Anti-leftover: if the target slot ALREADY equals the wait target at arm\r\n" +
-                        "\t   time it is a stale value from a prior cycle (the actuator has not moved\r\n" +
-                        "\t   yet this step). Mark it suspect so a stale slot cannot satisfy the WAIT. *)\r\n" +
-                        $"\tleftoverSuspect := (state_table[{waitId}].state = {waitState});\r\n" +
-                        "ELSE\r\n" +
-                        $"\tIF (last_state_msg.src_id = {waitId}) AND (last_state_msg.state <> {waitState}) THEN\r\n" +
-                        "\t\tleftoverSuspect := FALSE;\r\n" +
-                        "\tEND_IF;\r\n" +
-                        $"\tWaitSatisfied := (state_table[{waitId}].state = {waitState}) AND (NOT leftoverSuspect);\r\n" +
-                        "END_IF;\r\n" +
-                        "\r\n" +
-                        "PreviousStepText := ThisStepText;\r\n" +
-                        "ThisStepText := 'Waiting for target state';\r\n" +
-                        "NextStepText := 'Advance when satisfied';";
-
-                    st.ReplaceNodes(new XCData(newBody));
-                    changed = true;
-                }
-
-                if (changed)
-                {
-                    doc.Save(fbt);
-                    result.PatchesApplied.Add(
-                        "ProcessRuntime_Generic_v1: check_wait LEVEL-triggered on state_table (WAIT satisfies on the persisted component state, not a one-shot ring edge; anti-leftover suspect flag retained for repeated actuator targets)");
-                    MapperLogger.Info("[Deploy] ProcessRuntime_Generic_v1: check_wait made level-triggered on state_table (anti-leftover retained)");
-                }
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"ProcessRuntime fresh WAIT trigger patch failed: {ex.Message}");
-            }
-        }
-
-        static void PatchProcess1FreshWaitTriggerWiring(string eaeProjectDir, DeployResult result)
-        {
-            var fbt = Directory.EnumerateFiles(
-                    Path.Combine(eaeProjectDir, "IEC61499"),
-                    "Process1_Generic.fbt", SearchOption.AllDirectories)
-                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
-                ?? string.Empty;
-            if (string.IsNullOrEmpty(fbt))
-            {
-                result.Warnings.Add("Process1_Generic.fbt not found; fresh WAIT trigger wiring skipped.");
-                return;
-            }
-
-            try
-            {
-                var doc = XDocument.Load(fbt, LoadOptions.PreserveWhitespace);
-                var root = doc.Root;
-                if (root == null) return;
-                XNamespace ns = root.GetDefaultNamespace();
-                var dataConns = root.Element(ns + "FBNetwork")?.Element(ns + "DataConnections");
-                if (dataConns == null)
-                {
-                    result.Warnings.Add("Process1_Generic.fbt: DataConnections not found; fresh WAIT trigger wiring skipped.");
-                    return;
-                }
-
-                if (dataConns.Elements(ns + "Connection").Any(c =>
-                        (string?)c.Attribute("Source") == "ProcessHandler.component_state_out" &&
-                        (string?)c.Attribute("Destination") == "ProcessEngine.last_state_msg"))
-                    return;
-
-                dataConns.Add(new XElement(ns + "Connection",
-                    new XAttribute("Source", "ProcessHandler.component_state_out"),
-                    new XAttribute("Destination", "ProcessEngine.last_state_msg"),
-                    new XAttribute("dx1", "80")));
-                doc.Save(fbt);
-                result.PatchesApplied.Add(
-                    "Process1_Generic: ProcessHandler.component_state_out wired to ProcessEngine.last_state_msg");
-                MapperLogger.Info("[Deploy] Process1_Generic: wired fresh WAIT trigger message into ProcessRuntime");
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"Process1_Generic fresh WAIT trigger wiring failed: {ex.Message}");
-            }
-        }
 
         /// <summary>
         /// Same QI=FALSE-by-default bug as Sensor_Bool_CAT, in
@@ -4149,105 +3751,6 @@ namespace CodeGen.Services
             }
         }
 
-        /// <summary>
-        /// 2026-06-08 (Alex/Jyotsna leftover-data fix). Makes the ProcessRuntime engine's
-        /// WAIT step edge-triggered so a STALE <c>state_table</c> slot cannot satisfy a WAIT.
-        /// The ring (<c>updateComponentState</c>) never clears <c>state_table</c>, so every
-        /// slot holds the last value an actuator ever reported; the engine's <c>armed</c>
-        /// guard only blocks the very first <c>check_wait</c> after a command, after which any
-        /// <c>state_change</c> from any actuator re-tests the persistent slot — so a slot left
-        /// at the wait target by a prior cycle is satisfied prematurely. This rewrites
-        /// <c>check_wait</c> to arm a <c>leftoverSuspect</c> flag iff the slot ALREADY equals
-        /// the target at arm time (a stale value: the actuator has not moved yet this step),
-        /// clear it the moment the slot leaves the target, and satisfy the WAIT only when the
-        /// slot equals the target AND is not suspect — i.e. only on a genuine fresh transition
-        /// INTO the target. Engine-only (one BOOL InternalVar), no ring/wiring change, applies
-        /// to every ProcessRuntime instance. Idempotent: skips if already patched.
-        /// </summary>
-        static void PatchEngineWaitFreshReport(string eaeProjectDir, DeployResult result)
-        {
-            var fbt = Path.Combine(eaeProjectDir, "IEC61499", "ProcessRuntime_Generic_v1.fbt");
-            if (!File.Exists(fbt))
-            {
-                fbt = Directory.EnumerateFiles(
-                        Path.Combine(eaeProjectDir, "IEC61499"),
-                        "ProcessRuntime_Generic_v1.fbt", SearchOption.AllDirectories)
-                    .FirstOrDefault() ?? string.Empty;
-                if (string.IsNullOrEmpty(fbt)) return;
-            }
-            try
-            {
-                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                var root = doc.Root;
-                if (root == null) return;
-                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
-
-                var checkWait = root.Descendants(ns + "Algorithm")
-                    .FirstOrDefault(a => (string?)a.Attribute("Name") == "check_wait");
-                if (checkWait == null)
-                {
-                    result.Warnings.Add("ProcessRuntime_Generic_v1.fbt: no check_wait algorithm; leftover-WAIT fix skipped.");
-                    return;
-                }
-
-                var st = checkWait.Element(ns + "ST");
-                // Idempotent: the patched body is the only place 'leftoverSuspect' appears.
-                if (st != null && st.Value.Contains("leftoverSuspect"))
-                    return;
-
-                const string newBody =
-                    "IF NOT armed THEN\r\n" +
-                    "\tarmed := TRUE;\r\n" +
-                    "\tWaitSatisfied := FALSE;\r\n" +
-                    "\t(* Anti-leftover: if the target slot ALREADY equals the wait target at arm\r\n" +
-                    "\t   time it is a stale value from a prior cycle (the actuator has not moved\r\n" +
-                    "\t   yet this step). Mark it suspect so a stale slot cannot satisfy the WAIT. *)\r\n" +
-                    "\tleftoverSuspect := (state_table[Recipe[CurrentStep].Wait1Id].state = Recipe[CurrentStep].Wait1State);\r\n" +
-                    "ELSE\r\n" +
-                    "\tIF state_table[Recipe[CurrentStep].Wait1Id].state <> Recipe[CurrentStep].Wait1State THEN\r\n" +
-                    "\t\tleftoverSuspect := FALSE;\r\n" +
-                    "\tEND_IF;\r\n" +
-                    "\tWaitSatisfied := (state_table[Recipe[CurrentStep].Wait1Id].state = Recipe[CurrentStep].Wait1State) AND (NOT leftoverSuspect);\r\n" +
-                    "END_IF;\r\n" +
-                    "\r\n" +
-                    "PreviousStepText := ThisStepText;\r\n" +
-                    "ThisStepText := 'Waiting for target state';\r\n" +
-                    "NextStepText := 'Advance when satisfied';";
-
-                bool changed = false;
-                if (st != null)
-                {
-                    st.ReplaceAll(new System.Xml.Linq.XCData(newBody));
-                    changed = true;
-                }
-
-                var basic = root.Descendants(ns + "BasicFB").FirstOrDefault();
-                var internals = basic?.Element(ns + "InternalVars");
-                if (internals != null &&
-                    !internals.Elements(ns + "VarDeclaration")
-                        .Any(v => (string?)v.Attribute("Name") == "leftoverSuspect"))
-                {
-                    internals.Add(new System.Xml.Linq.XElement(ns + "VarDeclaration",
-                        new System.Xml.Linq.XAttribute("Name", "leftoverSuspect"),
-                        new System.Xml.Linq.XAttribute("Type", "BOOL"),
-                        new System.Xml.Linq.XAttribute("Comment",
-                            "Anti-leftover: TRUE when the WAIT target slot already held the target at arm time (stale); blocks a stale slot from satisfying the WAIT until a fresh transition into the target.")));
-                    changed = true;
-                }
-
-                if (changed)
-                {
-                    doc.Save(fbt);
-                    result.PatchesApplied.Add(
-                        "ProcessRuntime_Generic_v1.fbt: WAIT made edge-triggered (anti-leftover) -- a stale state_table slot can no longer satisfy a WAIT; only a fresh transition into the target.");
-                    MapperLogger.Info("[Deploy] ProcessRuntime_Generic_v1.fbt: check_wait edge-triggered (leftover-data fix)");
-                }
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"ProcessRuntime_Generic_v1.fbt WAIT anti-leftover patch failed: {ex.Message}");
-            }
-        }
 
         /// <summary>
         /// 2026-06-08 ROOT-CAUSE fix (confirmed live: the swivel's component_state_in read
@@ -5063,8 +4566,8 @@ namespace CodeGen.Services
             // dead-end so the engine PARKS at END. Either destination gives END an outgoing transition,
             // so WRN_ECC_DEAD_END is satisfied. The no-op EndSequence is LEFT as-is: ADVANCE does the
             // pointer advance, so EndSequence must NOT also advance or it would skip step 0. The re-armed
-            // step-0 WAIT (check_wait/leftoverSuspect) still holds the loop until a FRESH trigger, so the
-            // line never re-runs without its trigger.
+            // step-0 WAIT (level-triggered check_wait) still holds the loop until its target state is
+            // true, so the line never re-runs without its condition.
             string dest = cyclic ? "ADVANCE" : "END";
 
             var endTrans = ecc.Elements(ns + "ECTransition")
