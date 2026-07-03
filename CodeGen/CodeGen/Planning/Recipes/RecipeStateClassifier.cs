@@ -672,6 +672,56 @@ namespace CodeGen.Translation.Process.Recipes
             return false;
         }
 
+        /// <summary>
+        /// Like <see cref="TryGetInitialConditionGate"/>, but returns the gate component's HOME and
+        /// ADVANCED settled state numbers so the caller can reconstruct the twin's rising EDGE. The
+        /// no-clamp Assembly's initial transition is gated on Transfer/Advancing — a *transition*,
+        /// not a held state. The Five_State runtime collapses that transient to the settled Advanced,
+        /// and MergeFeedRing then HOLDS the Transfer advanced through BOTH Assembly and Disassembly,
+        /// so a single WAIT(Transfer=Advanced) is a level that stays true and lets Assembly's next
+        /// cyclic pass drive bearing_pnp WHILE Disassembly is still on the shared M580 swivel.
+        /// Emitting WAIT(home) → WAIT(advanced) makes Assembly re-arm only after the Transfer has
+        /// fully cycled (Disassembly finished → Feed returned it home → Feed re-advanced for the next
+        /// part), so Assembly runs exactly once per part and can never overlap Disassembly. home /
+        /// advanced are read from the gate component's OWN States (ReturnedHome/AtHomeInit → home;
+        /// Advanced/AtWork → advanced), so this stays data-driven, not hardcoded.
+        /// </summary>
+        public static bool TryGetInitialConditionEdgeGate(VueOneComponent process,
+            RecipeArrays arrays, IReadOnlyList<VueOneComponent> allComponents,
+            out int waitId, out int homeState, out int advancedState)
+        {
+            waitId = -1; homeState = 0; advancedState = 2;
+            var initial = process.States.FirstOrDefault(s => s.InitialState);
+            if (initial == null) return false;
+            foreach (var tr in initial.Transitions)
+                foreach (var cond in tr.Conditions)
+                {
+                    if (string.IsNullOrEmpty(cond.ComponentID)) continue;
+                    if (!arrays.ComponentRegistry.TryGetValue(cond.ComponentID.Trim(), out var id)) continue;
+                    var target = LookupComponent(cond.ComponentID, allComponents);
+                    if (target == null ||
+                        string.Equals(target.Type, "Process", StringComparison.OrdinalIgnoreCase)) continue;
+                    waitId = id;
+                    homeState = ResolveStateByNameFamily(target, HomeStateNames, 0);
+                    advancedState = ResolveStateByNameFamily(target, AdvancedStateNames, 2);
+                    return true;
+                }
+            return false;
+        }
+
+        // Runtime home / advanced settled-state name families for the Transfer-edge reconstruction.
+        private static readonly string[] HomeStateNames = { "ReturnedHome", "AtHomeInit", "Home" };
+        private static readonly string[] AdvancedStateNames = { "Advanced", "AtWork", "AtWork1" };
+
+        private static int ResolveStateByNameFamily(VueOneComponent comp, string[] names, int fallback)
+        {
+            foreach (var want in names)
+                foreach (var s in comp.States)
+                    if (string.Equals((s.Name ?? string.Empty).Trim(), want, StringComparison.OrdinalIgnoreCase))
+                        return s.StateNumber;
+            return fallback;
+        }
+
         // condition resolves to. Only the processes that publish a mergeable sentinel are mapped;
         // returns null for any other name so the caller falls back to the normal drop.
         private static int? ProcessSentinelId(string? processName)
