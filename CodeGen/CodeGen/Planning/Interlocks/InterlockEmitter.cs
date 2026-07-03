@@ -101,7 +101,7 @@ namespace CodeGen.Translation.Interlocks
             var plan = scopedIds != null
                 ? InterlockPlanner.BuildRules(actuator, allComponents, scopedIds)
                 : InterlockPlan.Empty(Cap);
-            return FilterToCentreHomeRange(plan);
+            return WithReverseCrossings(FilterToCentreHomeRange(plan));
         }
 
         /// <summary>
@@ -126,6 +126,38 @@ namespace CodeGen.Translation.Interlocks
                 kept++;
             }
             return new InterlockPlan(kept, f, t, s, b);
+        }
+
+        /// <summary>
+        /// The centre-home swivel physically crosses the shared work volume in BOTH directions:
+        /// Work1->Work2 while placing (Assembly), Work2->Work1 while depositing (Disassembly). Control.xml
+        /// states the collision interlock on both crossing states (TurningPlace + TurningPlace2), but the
+        /// branch-2 (Disassembly) State_Numbers do not match the runtime CAT's flat Work1(2)/Work2(4)/Home
+        /// space, so BuildRules yields only the Assembly crossing (From->To) plus an inert out-of-range
+        /// branch-2 rule the range filter drops. Emit the reverse (To->From) of every surviving crossing
+        /// rule so the interlock blocks the crossing WHICHEVER way the swivel travels -- the Disassembly
+        /// move (e.g. Work2->Work1 while CoverPNP_Hr is at work) is now guarded by the same source +
+        /// blocked-state as the Assembly move. (An interlock can only guard a source whose state actually
+        /// reaches this evaluator on the ring; a source never reported cannot be guarded -- that is
+        /// transport, not translation.)
+        /// </summary>
+        private static InterlockPlan WithReverseCrossings(InterlockPlan plan)
+        {
+            int cap = Cap, n = 0;
+            int[] f = new int[cap], t = new int[cap], s = new int[cap], b = new int[cap];
+            void Add(int fr, int to, int src, int blk)
+            {
+                for (int j = 0; j < n; j++)
+                    if (f[j] == fr && t[j] == to && s[j] == src && b[j] == blk) return; // dedup
+                if (n >= cap) return;
+                f[n] = fr; t[n] = to; s[n] = src; b[n] = blk; n++;
+            }
+            for (int i = 0; i < plan.Count && i < cap; i++)
+                Add(plan.From[i], plan.To[i], plan.Src[i], plan.Blocked[i]);
+            for (int i = 0; i < plan.Count && i < cap; i++)
+                if (plan.From[i] != plan.To[i])                      // a crossing, not a self-loop
+                    Add(plan.To[i], plan.From[i], plan.Src[i], plan.Blocked[i]);
+            return new InterlockPlan(n, f, t, s, b);
         }
 
         // ── Param IO ─────────────────────────────────────────────────────────────────────────────
