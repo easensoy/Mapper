@@ -50,16 +50,24 @@ namespace CodeGen.Translation.Process
                 b.AddCmd("assembly_idle", MapperConfig.ProcessIdleSentinelState);
 
             // Row 0 material gate. Under MergeFeedRing (the no-clamp twin) derive it from the
-            // Control.xml Assembly Initialisation transition -- gated on Transfer/Advanced -> WAIT
-            // (transfer id 6, state 2) -- so Assembly starts only when the part is delivered AND held
-            // by the Transfer, never on a stale/early PartAtAssembly. Otherwise (clamp model) keep the
-            // HandoffPlanner gate (PartAtAssembly across the cross-device segment, or the M580-local
-            // BearingSensor). Clamp model is unchanged: MergeFeedRing is false there.
+            // Control.xml Assembly Initialisation transition, which gates on Transfer/ADVANCING -- a
+            // rising EDGE, not a held state. Reconstruct that edge over the Transfer's STABLE states:
+            // WAIT(Transfer home) -> WAIT(Transfer advanced). MergeFeedRing HOLDS the Transfer
+            // advanced through BOTH Assembly and Disassembly, so a single WAIT(advanced) is a level
+            // that re-fires every cyclic loop and lets Assembly's next pass drive bearing_pnp WHILE
+            // Disassembly is still removing the cover on the shared M580 swivel (the observed
+            // collision). Requiring HOME first means Assembly can only re-arm after the Transfer has
+            // cycled -- Disassembly done -> Feed returned it home -> Feed re-advanced for the next
+            // part -- so Assembly runs exactly once per part and is mutually exclusive with
+            // Disassembly by construction. Otherwise (clamp model) keep the HandoffPlanner gate
+            // (PartAtAssembly across the cross-device segment, or the M580-local BearingSensor).
+            // Clamp model is unchanged: MergeFeedRing is false there.
             if (MapperConfig.MergeFeedRing &&
-                Recipes.RecipeStateClassifier.TryGetInitialConditionGate(
-                    process, arrays, allComponents, out var gateId, out var gateState))
+                Recipes.RecipeStateClassifier.TryGetInitialConditionEdgeGate(
+                    process, arrays, allComponents, out var gateId, out var gateHome, out var gateAdvanced))
             {
-                b.AddWait(gateId, gateState);
+                b.AddWait(gateId, gateHome);      // Transfer home -- arm the edge (previous part cleared)
+                b.AddWait(gateId, gateAdvanced);  // Transfer advanced -- the part is delivered and held
             }
             else
             {
