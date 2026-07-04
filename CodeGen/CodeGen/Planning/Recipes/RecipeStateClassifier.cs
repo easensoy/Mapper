@@ -277,7 +277,7 @@ namespace CodeGen.Translation.Process.Recipes
                     testActuatorAllowlist);
             }
 
-            // Bug-1 dispatch (kept from previous Phase 2): on source-state name, not target type.
+            // Dispatch on the source-state name, not the target type.
             if (StateNameSuggestsMotion(state.Name))
             {
                 // CmdState is the TRANSIENT state number the actuator's own ECC
