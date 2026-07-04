@@ -1226,8 +1226,8 @@ namespace CodeGen.Translation
             // y=1460. Now emitted on the hardware path too (was sim-only).
             // Captured so BuildStation2Wiring can thread the SAME Disassembly FB into the
             // syslay init/CaS/ring chains that ResourceWireEmitter threads on the sysres
-            // (STAGE 5a, MapperConfig.UnparkDisassembly). Null when there is no Disassembly
-            // Process — then the syslay stays Assembly-only, matching the parked sysres.
+            // (MapperConfig.UnparkDisassembly). Null when there is no Disassembly Process —
+            // then the syslay stays Assembly-only, matching the parked sysres.
             string disassemblyFbName = null;
             var disassyProc = allComponents.FirstOrDefault(c =>
                 string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase) &&
@@ -1455,8 +1455,8 @@ namespace CodeGen.Translation
                     });
             }
 
-            // STAGE 5b (gated): the two real M262 rig proximity sensors the digital twin does NOT
-            // model — PartAtAssembly (DI08, the Feed→Assembly handoff) and PartAtExit (DI09, the robot
+            // Gated: the two real M262 rig proximity sensors the digital twin does NOT model —
+            // PartAtAssembly (DI08, the Feed→Assembly handoff) and PartAtExit (DI09, the robot
             // gate). The physical SMC rig wires them; HcfPatchService binds them. Synthesized as
             // Sensor_Bool_CAT with EXPLICIT ids (from MapperConfig.M262SynthSensors) so they never
             // shift the Feed actuator ids (actuatorIdStart was already fixed from the REAL sensor
@@ -1510,25 +1510,9 @@ namespace CodeGen.Translation
             // unchanged when MQTT is off.
             if (config != null && config.MqttPublishEnabled)
             {
-                // Reference-exact MQTT_CONNECTION (TrainingIIoT 953A76D7B5F530F1.sysres:
-                // only QI / ConnectionID / URL / ClientIdentifier). The Soft-dPAC
-                // defaults cover the rest — the reference connects with just these
-                // four — so the earlier QueueDepth/KeepAlive/timeout params are dropped
-                // to match the proven shape and avoid unverified port names.
-                // Broker host depends on the path. The SIMULATOR runtime runs
-                // on this PC and CANNOT reach the PC's own LAN IP
-                // (192.168.1.50) — connecting to it stalls/times out (the same
-                // loopback-via-LAN-IP failure mosquitto_sub -h 192.168.1.50
-                // hits on this machine), which surfaces as IsConnected=FALSE /
-                // ReturnCode 50 on MqttConn. 127.0.0.1 connects reliably and
-                // gave IsConnected=TRUE in sim. The RIG keeps the configured
-                // LAN IP so the M262/M580/BX1 hardware reaches the broker over
-                // the network. So: sim → rewrite host to 127.0.0.1; rig →
-                // cfg.MqttBrokerUrl verbatim.
+                // MQTT_CONNECTION carries only QI / ConnectionID / URL / ClientIdentifier; the Soft-dPAC
+                // defaults cover the rest.
                 string brokerUrl = config.MqttBrokerUrl;
-                if (config.SimulatorFullSystem)
-                    brokerUrl = System.Text.RegularExpressions.Regex.Replace(
-                        brokerUrl, @"://[^:/]+", "://127.0.0.1");
                 // MQTT mode drives the URL SCHEME (MapperConfig.MqttSecureTls), so the URL can never
                 // contradict the mode: insecure demo => mqtt:// (needs EAE "Insecure Application" on the
                 // BX1 device, else MQTT_CONNECTION ReturnCode 101); secure => mqtts:// (needs a TLS broker
@@ -1782,10 +1766,9 @@ namespace CodeGen.Translation
             // Five_State_Actuator_No_Sensors_CAT; else → Five_State_Actuator_CAT.
             // See Docs/INVARIANTS.md I-4 for the 6 sites that must agree on this.
             if (actuator == null) return "Five_State_Actuator_CAT";
-            // STAGE 5b foundation: ONLY the real UR3e task arm resolves to Robot_Task_CAT — the
-            // Bearing/Shaft/CoverPnp grippers are also Type="Robot" and must stay Five_State/Vacuum.
-            // The narrowing lives in ONE shared predicate (TemplateMap.IsRobotTaskArm). Gated so the
-            // proven path is byte-identical when off.
+            // ONLY the real UR3e task arm resolves to Robot_Task_CAT — the Bearing/Shaft/CoverPnp
+            // grippers are also Type="Robot" and must stay Five_State/Vacuum. The narrowing lives in ONE
+            // shared predicate (TemplateMap.IsRobotTaskArm).
             if (MapperConfig.EnableRobotTaskTail && TemplateMap.IsRobotTaskArm(actuator))
                 return "Robot_Task_CAT";
             return TemplateMap.ResolveActuatorCatType(
@@ -2659,9 +2642,8 @@ namespace CodeGen.Translation
                 StationContents? contents = null, bool useRecipeStruct = false,
                 bool commandFromCondition = false)
         {
-            // Phase 1+: recipe arrays travel as syslay Parameter values on the
-            // Process1_Generic instance; Process1_Generic.fbt exposes 8 InputVars
-            // (process_name, process_id, plus the 6 array inputs).
+            // Recipe arrays travel as syslay Parameter values on the Process1_Generic instance;
+            // Process1_Generic.fbt exposes 8 InputVars (process_name, process_id, plus the 6 array inputs).
             //
             // The Recipe return slot exposes the in-scope ComponentRegistry,
             // SkippedConditions and Warnings so the caller (typically
@@ -2765,9 +2747,7 @@ namespace CodeGen.Translation
             }
         }
 
-        // Phase 1: ResolveProcessRuntimeFbtPath / RewriteProcessRuntimeRecipe / FbtRewriter
-        // were all deleted. Recipes now ride on syslay Parameter values (see
-        // BuildProcessFbParameters above).
+        // Recipes ride on syslay Parameter values (see BuildProcessFbParameters above).
 
         public string GenerateProcessFBSyslay(MapperConfig config, string controlXmlPath,
             string? processName, out BindingApplicationReport report)
@@ -2797,8 +2777,7 @@ namespace CodeGen.Translation
                 $"Button 1 / Process FB only. Process: {process.Name}. " +
                 "Demonstrator was cleaned of universal-architecture instances before this generation.");
 
-            // Phase 1: recipe arrays travel as syslay Parameter values. Compute the station
-            // grouping up-front so BuildProcessFbParameters can serialise the recipe.
+            // Compute the station grouping up-front so BuildProcessFbParameters can serialise the recipe.
             StationContents? contents = null;
             try
             {
