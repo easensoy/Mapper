@@ -6,6 +6,7 @@ namespace CodeGen.Configuration
         public int DefaultMotionMs { get; set; }
         public int CoverMotionMs { get; set; }
         public int CoverGripperAckMs { get; set; }
+        public int BearingPnpHomeBrakeMs { get; set; }
 
         private static readonly YamlConfigFile<GenerationConfig> _file = new("Config", "config.yaml");
 
