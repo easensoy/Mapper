@@ -11,12 +11,12 @@ namespace CodeGen.Devices.BX1
     /// <summary>
     /// BX1 EtherNet/IP cover-I/O broker injection.
     ///
-    /// <para><b>Stage 1</b> — instantiates the <c>BX1_IO</c> (<c>PLC_RW_BX1</c>) composite
+    /// <para><b>Broker instance</b> — instantiates the <c>BX1_IO</c> (<c>PLC_RW_BX1</c>) composite
     /// (id <c>F6C04A4BA6FA8593</c>, the id the copied BX1 <c>.hcf</c> binds to) on the BX1
     /// resource so the EtherNet/IP word symlinks (<c>BX1_RES.BX1_IO.EIP_Input/Output_Word_1</c>)
     /// resolve.</para>
     ///
-    /// <para><b>Stage 2</b> — the symlink bridge. The broker exposes the cover I/O as
+    /// <para><b>Symlink bridge</b> — the broker exposes the cover I/O as
     /// top-level FB ports (sensor OutputVars <c>CoverPnp*AtWork/AtHome</c>/<c>CoverPnpSensor</c>;
     /// coil InputVars <c>Cover_Pnp_*</c>/<c>Cover_Gripper_Q</c>; change events
     /// <c>CoverPnp*Event</c>). Our ring-model covers read/write their I/O via symlinks
@@ -69,7 +69,7 @@ namespace CodeGen.Devices.BX1
                            Event = "CoverPnpHrEvent",  CoilToHome = "Cover_Pnp_Hr_ToHome",  CoilToWork = "Cover_Pnp_Hr_ToWork" },
             new CoverMap { Cover = "CoverPNP_Vr",      SensorFromHome = "CoverPnpVrAtHome", SensorFromWork = "CoverPnpVrAtWork",
                            Event = "CoverPnpVrEvent",  CoilToHome = null,                   CoilToWork = "Cover_Pnp_Vr_Q" },
-            // Gripper: 1 physical sensor (gripped) -> atwork; no home sensor (handled in Stage 3).
+            // Gripper: 1 physical sensor (gripped) -> atwork; no home sensor.
             new CoverMap { Cover = "CoverPnp_Gripper", SensorFromHome = null,               SensorFromWork = "CoverPnpSensor",
                            Event = "CoverSensorEvent", CoilToHome = null,                   CoilToWork = "Cover_Gripper_Q" },
         };
@@ -436,7 +436,7 @@ namespace CodeGen.Devices.BX1
             var ec = net.Element(Ns + "EventConnections") ?? AddSection(net, "EventConnections");
             var dc = net.Element(Ns + "DataConnections")  ?? AddSection(net, "DataConnections");
 
-            // --- Stage 1: the broker FB (forced id so the copied .hcf matches) ---
+            // --- The broker FB (forced id so the copied .hcf matches) ---
             // Syslay X aligned to the BX1 registry col-3 position (ColumnBaseX 26000 + 3*2000)
             // so the broker sits right after the (tightened) cover columns, not 3000 east of them.
             AddFbIfAbsent(net, BrokerFbId, BrokerFbName, BrokerFbType, "Main", isSysres,
@@ -474,7 +474,7 @@ namespace CodeGen.Devices.BX1
                 return true;
             }
 
-            // --- Stage 2: the EXTERNAL symlink bridge + scan cycle (legacy fallback path) ---
+            // --- The EXTERNAL symlink bridge + scan cycle (default when Bx1BridgeInsideComposite=false) ---
             int xSrc = isSysres ? 11000 : 35000;
             int xDst = isSysres ? 13000 : 37000;
             int slot = 0;
