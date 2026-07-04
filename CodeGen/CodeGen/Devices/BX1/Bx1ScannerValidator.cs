@@ -67,8 +67,8 @@ namespace CodeGen.Devices.BX1
             }
 
             // (c) STANDING SAFETY NOTICE — the EAE Clean/Stop/fault cover-home gap the Mapper CANNOT close.
-            // Investigated exhaustively (2026-06-30): the IEC-side Bx1CoverFailsafe gate homes CoverPNP_Hr
-            // only while the BX1 logic RUNS. On EAE Clean/Stop/fault the logic is torn down and no FB can
+            // The IEC-side Bx1CoverFailsafe gate homes CoverPNP_Hr only while the BX1 logic RUNS. On EAE
+            // Clean/Stop/fault the logic is torn down and no FB can
             // write ToHome, so the DOUBLE-ACTING cover HOLDS its last coupler output (CoverPNP_Hr <->
             // Bearing_PnP swivel-collision hazard). The ONLY mechanism that homes it while stopped is the
             // TM3BC coupler's own output fallback, and NO EAE-owned file can express it: the EtherNet/IP
