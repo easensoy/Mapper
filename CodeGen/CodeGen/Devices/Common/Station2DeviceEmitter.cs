@@ -47,12 +47,11 @@ namespace CodeGen.Devices.Core
         const string M580ResourceId  = "3E5C2B7F1A4D6C8E";
         const string BX1ResourceId   = "C9F2A4B7E1D3F5A8";
         // M580 resource name — "RES0" (the EAE default + what the authored M580IO.hcf symlinks use:
-        // 'RES0.M580IO.<sym>'). 2026-06-22: reverted from the custom "M580_RES" back to "RES0" after the
-        // "Device M580 contains 2 instances of Runtime.Management.EMB_RES_ECO" error kept recurring for
-        // months. A custom resource name mismatches both the authored .hcf AND EAE's expected default
-        // resource (EAE can end up tracking its own default RES0 *plus* the custom name = 2), so RES0 is
-        // the consistent, default-matching choice. The ResourceId stays the stable const below (no
-        // filename flip → no orphan); SweepOrphanSysres + DedupeSysdevResources keep it to one resource.
+        // 'RES0.M580IO.<sym>'). A custom resource name mismatches both the authored .hcf AND EAE's
+        // expected default (EAE can end up tracking its own default RES0 *plus* the custom name = the
+        // "M580 contains 2 instances of EMB_RES_ECO" error), so RES0 is the consistent choice. The
+        // ResourceId stays the stable const below (no filename flip → no orphan); SweepOrphanSysres +
+        // DedupeSysdevResources keep it to one resource.
         const string M580ResourceName = "RES0";
         const string BX1ResourceName  = "BX1_RES";
 
@@ -169,16 +168,10 @@ namespace CodeGen.Devices.Core
             // also unhooks the file from TopologyManager.topologyproj so the
             // build target does not list a deleted file.
             CleanupStaleTopologyJson(eaeRoot, "Equipment_Soft_dPAC_BX1.json", result);
-            // 2026-06-08: BX1 is emitted in the REFERENCE HMIB1X form as
-            // Equipment_HMIB1X_1.json — BYTE-IDENTICAL to the reference's BX1 device
-            // (host panel .209 + nested Softdpac container .151), reference uuids,
-            // identifier "HMIB1X_1". Sweep BOTH the old Workstation form AND the
-            // interim "Equipment_BX1.json" name. The interim "BX1" equipment
-            // identifier COLLIDED with the BX1 sysdev Name "BX1" (every working
-            // device keeps equipment-identifier != sysdev-name: M580dPAC_1 != M580,
-            // reference HMIB1X_1 != BX1) — the cause of the topology-import 500.
-            // Equipment_HMIB1X_1.json is now the ACTIVE file (no longer cleaned here;
-            // EmitOnePlc force-cleans it just before re-writing).
+            // BX1 is emitted in the HMIB1X form as Equipment_HMIB1X_1.json (host panel .209 + nested
+            // Softdpac container .151), identifier "HMIB1X_1". Invariant: the equipment identifier must
+            // differ from the sysdev Name (a "BX1"=="BX1" collision caused a topology-import 500), which
+            // is why the identifier is HMIB1X_1, not BX1. Sweep the old Workstation + interim "BX1" forms.
             CleanupStaleTopologyJson(eaeRoot, "Equipment_Workstation_BX1.json", result);
             CleanupStaleTopologyJson(eaeRoot, "Equipment_BX1.json",            result);
             // EAE auto-spawns Equipment_<deviceName>_<N>.json variants when its
@@ -217,9 +210,8 @@ namespace CodeGen.Devices.Core
             var bx1Ident = ReadHcfResourceIdentity(bx1HcfPath);
 
             // M580 resource name is FIXED to "RES0" via M580ResourceName — the EAE default and what the
-            // authored M580IO.hcf symlinks use ('RES0.M580IO.*'). 2026-06-22: reverted from the custom
-            // "M580_RES" because the "Device M580 contains 2 instances of EMB_RES_ECO" error kept
-            // recurring; the default name avoids EAE tracking its own default RES0 alongside a custom one.
+            // authored M580IO.hcf symlinks use ('RES0.M580IO.*'). A custom name makes EAE track its own
+            // default RES0 alongside it (the "M580 contains 2 instances of EMB_RES_ECO" error).
             // M580SymbolBinder still rewrites every .hcf channel to a Form 1 GUID triple
             // (<resId>.<fbId>.<port>), so binding is name-agnostic; AlignSysresResourceName migrates a
             // prior-deploy "M580_RES" sysres back to "RES0" on the next Generate.
@@ -291,11 +283,9 @@ namespace CodeGen.Devices.Core
                 // the deployed scanner XML (that is build output EAE re-emits each compile).
                 // Without the TM3BC_Ethe_* device-model folders + the EIPSolutionsV2 scanner
                 // config registered in HwConfiguration.hwconfigproj, EAE's HwConfiguration
-                // model has no TM3BC device, so the Deploy export is an EMPTY scanner (333
-                // bytes, no .210 buscoupler) and the cover I/O never reaches the coupler —
-                // even though the app model shows the scanner FB and EIP_Output_Word packs
-                // correctly (split-brain root-caused 2026-06-09, verified fixed: compiled
-                // EIPSCANNER2.xml became 1200 bytes incl. 192.168.1.210). BX1-only.
+                // model has no TM3BC device, so the Deploy export is an EMPTY scanner (no .210
+                // buscoupler) and the cover I/O never reaches the coupler — even though the app
+                // model shows the scanner FB and EIP_Output_Word packs correctly. BX1-only.
                 // NOTE: the scanner model is deployed by DeployBx1ScannerModelFinalPass from
                 // BX1HwConfigCopier.Copy — i.e. AFTER the HwConfig copiers rebuild HwConfiguration/.
                 // Doing it HERE (before the rebuild) silently no-op'd after a Clean (the folder was
@@ -1301,11 +1291,10 @@ namespace CodeGen.Devices.Core
         }
 
         /// <summary>
-        /// PERMANENT GUARD (2026-06-26): aborts the Generate if the BX1 EtherNet/IP scanner model is NOT
-        /// deployed when the device is on. This is THE blockage so the empty-333-byte-scanner / dead-cover
-        /// regression can never silently ship again: if scanner.xml is missing, has no 192.168.1.210
-        /// buscoupler, or the hwconfigproj has no scanner registration, EAE would compile an EMPTY scanner
-        /// and the covers would not move. Called as the last step of BX1HwConfigCopier.Copy (which both
+        /// Guard: aborts the Generate if the BX1 EtherNet/IP scanner model is NOT deployed when the
+        /// device is on. If scanner.xml is missing, has no 192.168.1.210 buscoupler, or the hwconfigproj
+        /// has no scanner registration, EAE would compile an EMPTY scanner and the covers would not move.
+        /// Called as the last step of BX1HwConfigCopier.Copy (which both
         /// MainForm and the gate run, after the HwConfig folder is rebuilt + the final-pass deploy).
         /// </summary>
         public static void ValidateBx1ScannerModelOrThrow(MapperConfig cfg)
