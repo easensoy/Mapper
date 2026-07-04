@@ -344,9 +344,9 @@ namespace CodeGen.Devices.M262
             // sysres. One DRY predicate, used by every code-side binding below.
             bool PinBlank(string p) => !effective.TryGetValue(p, out var v)
                 || string.IsNullOrEmpty(v.Comp) || !fbIdByName.ContainsKey(v.Comp);
-            // STAGE 5b (gated): bind the UR3e task arm's two channels — but ONLY when the Robot
-            // FB is actually on THIS resource's sysres (so it's a no-op on M580/BX1 and when the
-            // robot isn't emitted). DO04 drives the start-task pulse, DI10 reads task-complete.
+            // Gated: bind the UR3e task arm's two channels — but ONLY when the Robot FB is actually on
+            // THIS resource's sysres (so it's a no-op on M580/BX1 and when the robot isn't emitted).
+            // DO04 drives the start-task pulse, DI10 reads task-complete.
             // The port names are the symlinks Robot_Task_CAT publishes/subscribes, so Sym()
             // emits {resId}.{robotFbId}.RobotCommands_StartTask / .RobotStatus_Task_Complete —
             // exactly the reference SMC_Rig_Expo binding form. The xlsx has no robot row, so
@@ -362,8 +362,7 @@ namespace CodeGen.Devices.M262
                 }
                 report.Missing.Add("[Hcf][5b] bound DO04=Robot.RobotCommands_StartTask, DI10=Robot.RobotStatus_Task_Complete");
             }
-            // STAGE 5b (gated): the M262 Ejector is reference-compatible OPEN-LOOP (the reference
-            // uses Five_State_Actuators_No_Sensors_CAT — coil only, no sensors). Bind its output
+            // Gated: the M262 Ejector is OPEN-LOOP (coil only, no sensors). Bind its output
             // coil to DO03 so it physically actuates; it has NO athome/atwork DIs (its WAITs are
             // timer-driven — see the sensorless override in SystemLayoutInjector). Only when the
             // Ejector FB is on THIS resource's sysres (no-op on M580/BX1). xlsx untouched.
@@ -373,8 +372,8 @@ namespace CodeGen.Devices.M262
                 effective["DO03"] = ("Ejector", "OutputToWork");
                 report.Missing.Add("[Hcf][5b] bound DO03=Ejector.OutputToWork (open-loop, no sensor DIs)");
             }
-            // STAGE 5b (gated): the three synthesized M262 rig proximity sensors the twin doesn't
-            // model — bind each to its fixed physical DI channel (the rig wiring). Only when the
+            // Gated: the three synthesized M262 rig proximity sensors the twin doesn't model — bind
+            // each to its fixed physical DI channel (the rig wiring). Only when the
             // synthesized FB is actually on THIS resource's sysres (so it's a no-op on M580/BX1).
             // Sym() resolves to {resId}.{generatedFbId}.Input — project-generated id, never copied.
             foreach (var (synthName, synthPin, _) in MapperConfig.M262SynthSensors)
@@ -456,8 +455,7 @@ namespace CodeGen.Devices.M262
             // TM262L01MDESE8T — wholesale replace-or-append, no per-pin pass.
             UpsertConfigurationBaseItem(items, "TM262L01MDESE8T", BuildTm262Block(), report);
 
-            // TM3 modules: replace-or-append the shell, then upsert the 16
-            // DI/DO ParameterValues per the user's per-pin spec.
+            // TM3 modules: replace-or-append the shell, then upsert the 16 DI/DO ParameterValues per-pin.
             UpsertModuleWithPins(items, "TM3DI16_G", BuildTm3Di16Shell, "DI", Sym, report);
             UpsertModuleWithPins(items, "TM3DQ16T_G", BuildTm3Dq16Shell, "DO", Sym, report);
 
@@ -623,7 +621,7 @@ namespace CodeGen.Devices.M262
         }
 
         // ---- Block builders. Each returns a fresh detached XElement matching
-        //      the canonical Alex-shaped .hcf template that EAE accepts. ----
+        //      the canonical .hcf template shape that EAE accepts. ----
 
         private static XElement BuildBmtm3Shell() => new XElement("ConfigurationBaseItem",
             new XElement("Name", "BMTM3"),
