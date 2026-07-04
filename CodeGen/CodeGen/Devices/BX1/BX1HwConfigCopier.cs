@@ -22,7 +22,15 @@ namespace CodeGen.Devices.BX1
             var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
             var template = HwConfigVerbatimCopier.ResolveTemplatePath(
                 cfg.BX1HcfTemplatePath, cfg.IoFolderPath, "BX1IO.hcf");
-            return HwConfigVerbatimCopier.Deploy(eaeRoot, "Soft_dPAC", "SE.DPAC", template);
+            var copied = HwConfigVerbatimCopier.Deploy(eaeRoot, "Soft_dPAC", "SE.DPAC", template);
+            // FINAL pass: now that HwConfiguration/ is rebuilt (a Clean wipes it; the in-EmitAll deploy
+            // ran before this rebuild and silently no-op'd, leaving an EMPTY EIPSCANNER2.xml so the cover
+            // I/O never reached the coupler), deploy the BX1 EtherNet/IP scanner HwConfiguration model.
+            Station2DeviceEmitter.DeployBx1ScannerModelFinalPass(cfg);
+            // PERMANENT GUARD: abort the Generate if the scanner model did not land (empty scanner =
+            // dead covers). Throws -> the gate exits non-zero + MainForm surfaces the error.
+            Station2DeviceEmitter.ValidateBx1ScannerModelOrThrow(cfg);
+            return copied;
         }
     }
 }
