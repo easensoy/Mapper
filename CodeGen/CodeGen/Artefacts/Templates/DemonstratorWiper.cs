@@ -15,8 +15,7 @@ namespace CodeGen.Services
     ///
     /// This wiper takes the project to a brand-new-EAE-project state with NO
     /// devices — the Mapper recreates every logical + physical device on the next
-    /// Test Runtime (user directive 2026-06-16: "no devices at first — Clean wipes,
-    /// Mapper creates"):
+    /// Test Runtime:
     ///   * IEC61499/        — only the dfbproj shell + System/ folder
     ///   * System/          — the .system project root + the application (.sysapp +
     ///                       its folder) kept; the dPAC LOGICAL DEVICES (every
@@ -35,9 +34,7 @@ namespace CodeGen.Services
     ///                       JSON + their topologyproj registrations) DELETED —
     ///                       recreated by M262TopologyEmitter / Station2DeviceEmitter
     ///                       / TopologyNetworkEmitter / BroadcastDomainEmitter. The
-    ///                       .solutionData (trust/identity) + topologyproj shell
-    ///                       stay. (Reverses the older "topology hand-curated /
-    ///                       untouched" rule per the user directive above.)
+    ///                       .solutionData (trust/identity) + topologyproj shell stay.
     ///   * General/         — UNTOUCHED (project metadata)
     ///   * HMI/, AvevaOMI/  — UNTOUCHED (other project sections)
     ///
@@ -70,6 +67,7 @@ namespace CodeGen.Services
         {
             "Area_CAT", "Station_CAT", "Five_State_Actuator_CAT",
             "Sensor_Bool_CAT", "Process1_Generic", "Seven_State_Actuator_CAT",
+            "Seven_State_Actuator_Centre_Home_CAT",
             "Robot_Task_CAT", "Actuator_Fault_CAT", "PLC_RW_M262",
             "DataType",
             "Configuration", "Languages", "License", "Log", "SnapshotCompiles",
@@ -118,16 +116,14 @@ namespace CodeGen.Services
             //     folder) so the Mapper recreates them from scratch. Runs BEFORE
             //     StripDfbproj so the now-missing sysdev/sysres/.hcf/Properties
             //     entries are pruned from the dfbproj automatically (it keeps a
-            //     System/* entry only if File.Exists). User directive 2026-06-16:
-            //     "no devices at first — Clean wipes, Mapper creates." The .system
-            //     project root + the application (.sysapp + its folder) stay.
+            //     System/* entry only if File.Exists). The .system project root + the
+            //     application (.sysapp + its folder) stay.
             DeleteLogicalDevices(iec, report);
 
             // 1c. Delete the APPLICATION (the .sysapp + its content folder) so EAE shows
-            //     nothing under "Applications" — exactly like the now-empty Devices tree
-            //     (user directive 2026-06-22: "I don't want to see anything under
-            //     applications, the same as Devices"). Runs BEFORE StripDfbproj so the
-            //     now-missing .sysapp/.syslay/aspmap/opcua entries are pruned. The Mapper
+            //     nothing under "Applications" — exactly like the now-empty Devices tree.
+            //     Runs BEFORE StripDfbproj so the now-missing .sysapp/.syslay/aspmap/opcua
+            //     entries are pruned. The Mapper
             //     recreates the shell on the next Generate via
             //     ApplicationShellEmitter.EnsureApplicationShell (wired into
             //     PrepareDemonstratorForGeneration), mirroring the device bootstrap.
@@ -161,13 +157,11 @@ namespace CodeGen.Services
             // 7. Delete the PHYSICAL DEVICES — Topology Equipment (PLCs, the L2
             //    switch, the EtherNet/IP coupler), the Wires connecting them, and
             //    the BroadcastDomains — plus their TopologyManager.topologyproj
-            //    registrations. Reverses the prior "Topology hand-curated /
-            //    untouched" rule per the user directive 2026-06-16 ("no physical
-            //    devices as well"). Every one is Mapper-regenerated on the next
-            //    Test Runtime (M262TopologyEmitter / Station2DeviceEmitter /
+            //    registrations. Every one is Mapper-regenerated on the next Test
+            //    Runtime (M262TopologyEmitter / Station2DeviceEmitter /
             //    TopologyNetworkEmitter / BroadcastDomainEmitter), so the wipe is
-            //    safe. The project .solutionData (trust/identity) + the
-            //    topologyproj shell stay.
+            //    safe. The project .solutionData (trust/identity) + the topologyproj
+            //    shell stay.
             DeletePhysicalDevices(iec, report);
 
             // Sysdev <Resource> dedup lives in
