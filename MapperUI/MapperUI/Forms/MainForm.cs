@@ -51,9 +51,7 @@ namespace MapperUI
         };
 
         // Components in scope for the Test Runtime button. Feed Station
-        // (M262) + Assembly Station (M580 + BX1). Disassembly Process is
-        // intentionally NOT in scope yet — Phase 2 will add the Robot +
-        // Ejector + Disassembly recipe later.
+        // (M262) + Assembly Station (M580 + BX1).
         static readonly HashSet<string> _allowedInstances = new(StringComparer.OrdinalIgnoreCase)
         {
             // Station 1 (M262) — Feed_Station Process
@@ -989,13 +987,12 @@ namespace MapperUI
                 if (!TryResolveDemonstratorPath(out var syslayPath)) return;
                 EnsureM262SysdevReady();  // logs preserve-vs-bootstrap; never aborts (Mapper owns the device)
 
-                Cfg().SimulatorFullSystem = false;
                 Cfg().UseRecipeStruct = true;
                 MapperConfig.SimulatorRecipeMode = false;
 
                 lblStatus.Text = "Generating...";
                 AppendActivity($"[Generate] Generating IEC 61499 code end-to-end (Feed · Assembly · Disassembly · covers) into Demonstrator at {syslayPath}...");
-                AppendActivity("[Test Runtime] Hardware mode forced: SimulatorFullSystem=false; RecipeStep data-array carrier active; physical IO/sensor wiring and rig HOME-FIRST recipe waits are active.");
+                AppendActivity("[Test Runtime] RecipeStep data-array carrier active; physical IO/sensor wiring and rig HOME-FIRST recipe waits are active.");
 
                 // User directive: Generate first WIPES the Demonstrator (deep clean, same as the Clean
                 // button) then lays the fresh logic down under the hood — a brand-new-EAE-project state
@@ -1094,7 +1091,7 @@ namespace MapperUI
                     AppendActivity($"[Wire][Stn2][Error] {ex.Message}");
                 }
 
-                // BX1 EtherNet/IP cover-I/O broker (Stage 1): instantiate BX1_IO
+                // BX1 EtherNet/IP cover-I/O broker: instantiate BX1_IO
                 // (PLC_RW_BX1, id F6C04A4BA6FA8593) on the BX1 SubApp + sysres so the
                 // .hcf's EIP_Input/Output_Word_1 symlinks resolve. Runs after the
                 // Station-2 sysres mirror + wire emit so the cover FBs already exist.
