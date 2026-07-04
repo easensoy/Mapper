@@ -84,9 +84,8 @@ namespace CodeGen.Mapping
         /// (<c>SystemLayoutInjector.BuildFeedStationWiring</c> + <c>BuildStation2Wiring</c>) and the
         /// sysres (<c>ResourceWireEmitter.NoStationAdapterTypes</c>) all read this set. Stitching one
         /// of these into a station chain dangles <c>stationAdptr_in/out</c> against ports that don't
-        /// exist → EAE rejects the resource (the Stage 5b "nothing triggers" bug). Seven_State (the
-        /// old, non-centre-home swivel) has the ring node but no stationAdptr; Robot_Task_CAT (UR3e)
-        /// the same.
+        /// exist → EAE rejects the resource. Seven_State (the old, non-centre-home swivel) has the ring
+        /// node but no stationAdptr; Robot_Task_CAT (UR3e) the same.
         /// </summary>
         public static readonly System.Collections.Generic.IReadOnlySet<string> NoStationAdapterCatTypes =
             new System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal)
