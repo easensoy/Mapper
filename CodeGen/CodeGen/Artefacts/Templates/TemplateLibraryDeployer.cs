@@ -26,13 +26,10 @@ namespace CodeGen.Services
             // CommonInterlockEvaluator for Five_State). Bearing_PnP is routed to the
             // verbatim CAT (no runtime parameter graft).
             { "Seven_State_Actuator_CAT", new[] { "SevenStateActuator", "SevenStateActuator2" } },
-            // Jyotsna's new centre-home swivel (2026-06-02). Basic leaf FBs:
-            // SevenStateCentreHomeActuator (core ECC), No_Sensor_Handler_7SCH
-            // (synthesises atHome on the work->home timer), FaultLatch_7SCH
-            // (leaf inside the faultDetection_7SCH composite). The composite
-            // faultDetection_7SCH itself ships via UniversalComposites; the
-            // shared CommonInterlockEvaluator + updateComponentState are already
-            // in UniversalBasics.
+            // Centre-home swivel Basic leaf FBs: SevenStateCentreHomeActuator (core ECC),
+            // No_Sensor_Handler_7SCH (synthesises atHome on the work->home timer), FaultLatch_7SCH
+            // (leaf inside faultDetection_7SCH). The composite faultDetection_7SCH ships via
+            // UniversalComposites; CommonInterlockEvaluator + updateComponentState via UniversalBasics.
             { "Seven_State_Actuator_Centre_Home_CAT",
               new[] { "SevenStateCentreHomeActuator", "No_Sensor_Handler_7SCH", "FaultLatch_7SCH",
                       "actuatorStateEvents_7SCH" } },
@@ -55,9 +52,8 @@ namespace CodeGen.Services
             // PARALLEL+ALTERNATIVE branched). Deployed verbatim from the
             // Template Library — no runtime data-driven patching.
             "Seven_State_Actuator_CAT",
-            // Jyotsna's centre-home swivel CAT (2026-06-02) — Bearing_PnP now
-            // instantiates this instead of the old Seven CAT (TemplateMap).
-            // Deployed always so EAE can resolve the type on import.
+            // Centre-home swivel CAT — Bearing_PnP instantiates this (TemplateMap). Deployed always so
+            // EAE can resolve the type on import.
             "Seven_State_Actuator_Centre_Home_CAT",
         };
 
@@ -88,37 +84,24 @@ namespace CodeGen.Services
             "FaultLatch", "actuatorStateEvents",
             "updateComponentState", "updateComponentState_Sensor",
             "No_Sensor_Handler",
-            // Embedded by Jyotsna's new Five_State_Actuator_CAT as its
-            // "InterlockManager" sub-FB (Type=Main:CommonInterlockEvaluator,
-            // a true Basic FB). Must be deployed or EAE fails to open the
-            // project: "type or namespace 'Main:CommonInterlockEvaluator'
-            // does not exist".
+            // Embedded by Five_State_Actuator_CAT as its "InterlockManager" sub-FB
+            // (Type=Main:CommonInterlockEvaluator). Must be deployed or EAE cannot resolve the type.
             "CommonInterlockEvaluator",
-            // Event-change handlers referenced by PLC_RW_M262's internal FB2/FB3
-            // instances. Sourced from C:\SMC_Rig_Expo_20260112-165857725.sln\IEC61499.
+            // Event-change handlers referenced by PLC_RW_M262's internal FB2/FB3 instances.
             "changeEventProcess1", "changeEventProcess2",
             // SevenStateActuator + SevenStateActuator2 — Basic FBs embedded by
             // Seven_State_Actuator_CAT. Both must be deployed when the CAT is in
             // scope or EAE fails with "type or namespace SevenStateActuator2
             // does not exist".
             "SevenStateActuator", "SevenStateActuator2",
-            // Centre-home swivel leaf Basics (2026-06-02). SevenStateCentreHomeActuator
-            // is the core ECC; No_Sensor_Handler_7SCH synthesises atHome on the
-            // work->home timer; FaultLatch_7SCH + actuatorStateEvents_7SCH are the
-            // leaves inside faultDetection_7SCH. actuatorStateEvents_7SCH was MISSING
-            // from Jyotsna's delivery (faultDetection_7SCH instantiates it as
-            // 'ActuatorEvents' but no .fbt shipped -> EAE: "type 'Main:actuatorStateEvents_7SCH'
-            // does not exist"); reconstructed from the non-7SCH actuatorStateEvents
-            // as the two-work variant (state 1 -> toWork1_Event, state 3 -> toWork2_Event).
-            // SimCentreHomeSensor_7SCH is simulator-only wiring inserted into the CAT by
-            // NormalizeSwivelSimSensorSource; it derives mutually-exclusive atHome/atWork
-            // signals from the core's current_state_to_process so the sim never presents
-            // impossible sensor combinations like atHome=TRUE and atWork1=TRUE.
+            // Centre-home swivel leaf Basics: SevenStateCentreHomeActuator (core ECC),
+            // No_Sensor_Handler_7SCH (synthesises atHome on the work->home timer), FaultLatch_7SCH +
+            // actuatorStateEvents_7SCH (leaves inside faultDetection_7SCH). actuatorStateEvents_7SCH is
+            // the two-work variant (state 1 -> toWork1_Event, state 3 -> toWork2_Event).
             "SevenStateCentreHomeActuator", "No_Sensor_Handler_7SCH", "FaultLatch_7SCH",
             "actuatorStateEvents_7SCH",
-            // SimCentreHomeSensor_7SCH REMOVED (simulator-only; we no longer ship simulator code).
-            // The rig path never instantiated it (NormalizeSwivelSimSensorSource reduce=false strips it);
-            // it is no longer deployed and any stale copy is swept in DeployUniversalArchitecture.
+            // SimCentreHomeSensor_7SCH is not deployed (simulator-only); any stale copy is swept in
+            // DeployUniversalArchitecture.
         };
 
         static readonly string[] UniversalHmiCats = new[]
@@ -143,23 +126,13 @@ namespace CodeGen.Services
             if (string.IsNullOrWhiteSpace(eaeProjectDir))
                 throw new InvalidOperationException("Cannot determine EAE project directory from syslay path.");
 
-            // HANDLER REFRESH (2026-06-16): the centre-home swivel's No_Sensor_Handler_7SCH was
-            // changed to a SENSOR-DRIVEN home — its START->AtHome transition now gates on the
-            // physical atHome sensor ('inputEvent AND atHomeInput = TRUE') instead of the open-loop
-            // work1/work2ToHomeTimer that overshot centre (the swivel-never-homes bug). DeployArtifact
-            // below is COPY-IF-ABSENT, so a previously-deployed (timer) handler would never be
-            // refreshed from the Template Library zip. Delete the deployed handler files first so the
-            // copy-if-absent re-extracts the fixed one. Pipeline-respecting (the deployer does it, no
-            // direct Demonstrator edit), idempotent, and guarantees the deployed handler always
-            // matches the committed zip. EAE recompiles the one small Basic FB on the next Build.
-            // Force-refresh BOTH the handler AND the centre-home core ECC: the ECC's atHome/AtHomeInit
-            // algorithms + AtHome->AtHomeInit transition are reshaped every deploy by the swivel patches
-            // (coil-clear / both-coils / brake). Copy-if-absent would keep a prior deploy's reshape, so a
-            // flag change (e.g. SwivelBrakeHome OFF) would not revert. Deleting first forces re-extract of
-            // the pristine zip, after which the swivel patches re-apply from a known base. Idempotent.
-            // ProcessRuntime_Generic_v1 (the WAIT engine) is refreshed here too so no stale check_wait
-            // body persists across deploys (copy-if-absent) -- the clean template check_wait +
-            // NormalizeProcessRuntimeRecipeArrays give the level-triggered form every deploy.
+            // DeployArtifact below is COPY-IF-ABSENT, so force-refresh the artefacts that are reshaped
+            // every deploy by later patches: delete them first so the pristine zip re-extracts and the
+            // patches re-apply from a known base. This covers No_Sensor_Handler_7SCH (sensor-driven
+            // home) + SevenStateCentreHomeActuator (its atHome/AtHomeInit ECC is reshaped by the
+            // coil-clear/both-coils/brake patches, so a flag change would not otherwise revert) +
+            // ProcessRuntime_Generic_v1 (the WAIT engine, so no stale check_wait body persists;
+            // NormalizeProcessRuntimeRecipeArrays then gives the level-triggered form). Idempotent.
             foreach (var ext in new[] { ".fbt", ".doc.xml", ".meta.xml" })
             foreach (var basic in new[] { "No_Sensor_Handler_7SCH", "SevenStateCentreHomeActuator", "ProcessRuntime_Generic_v1" })
             {
@@ -204,21 +177,11 @@ namespace CodeGen.Services
             foreach (var name in UniversalCats)
                 DeployArtifact(libPath, "CAT", name, eaeProjectDir, result, isBasic: false, isCat: true);
 
-            // STAGE 5b foundation (gated, MapperConfig.EnableRobotTaskTail): make the UR3e robot
-            // type resolvable. Robot_Task_CAT is the task-handshake CAT (StartTask DO04 / Task_Complete
-            // DI10); its core state machine is the Robot_Task_Core Basic FB — deploy the core first so
-            // the composite resolves on import. Default-off deploys NEITHER → byte-identical.
-            // ROBOT_TASK_CAT ALWAYS DEPLOYED (2026-06-17): the UR3e robot is a real Control.xml
-            // component, so its CAT type + Robot_Task_Core core must ALWAYS be present. The old
-            // EnableRobotTaskTail gate conflated THREE separate concerns — type DEPLOY, robot
-            // INSTANCE emission, and cross-PLC RING membership — so turning the tail OFF (to decouple
-            // the M580 ring) ALSO deleted the deployed CAT while the dfbproj still referenced it ->
-            // EAE Solution Integrity "Missing Project Files" (Robot_Task_CAT.cfg/.fbt/...). Deploying
-            // the type unconditionally fixes that. The robot INSTANCE + its M262-local sub-sequence +
-            // the cross-PLC handoff are gated/wired SEPARATELY (the conflation is split out in the
-            // HandoffPlanner / RingWiringGenerator refactor). An unused-but-defined CAT type is
-            // harmless; EAE compiles the HMI faceplate against it. (DemonstratorWiper still deletes the
-            // folder on Clean; this re-creates it on the next deploy — consistent.)
+            // Robot_Task_CAT (UR3e task-handshake CAT: StartTask DO04 / Task_Complete DI10) + its
+            // Robot_Task_Core Basic FB are ALWAYS deployed: the UR3e is a real Control.xml component, so
+            // its type must resolve on import even when the robot INSTANCE / ring membership are gated
+            // off separately (a defined-but-unused CAT type is harmless). Deploy the core first so the
+            // composite resolves. DemonstratorWiper deletes the folder on Clean; this re-creates it.
             DeployArtifact(libPath, "Basic", "Robot_Task_Core", eaeProjectDir, result, isBasic: true);
             DeployArtifact(libPath, "CAT", "Robot_Task_CAT", eaeProjectDir, result, isBasic: false, isCat: true);
 
@@ -268,16 +231,9 @@ namespace CodeGen.Services
             PatchProcessRuntimeCompatibility(eaeProjectDir, result);
             PatchSensorBoolCatDstQi(eaeProjectDir, result);
             PatchCatSymlinkQi(eaeProjectDir, "Five_State_Actuator_CAT", result);
-            // 2026-06-02: the new centre-home swivel CAT has the SAME symlink FBs
-            // (Inputs SYMLINKMULTIVARDST + Output SYMLINKMULTIVARSRC) but ships with
-            // QI unset -> defaults FALSE -> the FBs are DISABLED. On the rig that
-            // islands the core from its IO: the coil commands never reach the DO
-            // channels (all 1970/never-written) and the physical atwork/athome
-            // sensors never reach the core (reads FALSE while the channel is TRUE).
-            // The symbolic links themselves resolve fine ($${PATH} -> RES0.Bearing_PnP.*
-            // bound to DO17/DI00 etc.) — it's purely the QI gate. Five_State got this
-            // patch long ago (above); the new CAT was missed. Masked in the simulator
-            // (no-sensor timers advance state, coils unused), fatal on the rig.
+            // The centre-home swivel CAT's symlink FBs (Inputs SYMLINKMULTIVARDST + Output
+            // SYMLINKMULTIVARSRC) ship with QI unset -> FALSE -> disabled, which islands the core from
+            // its IO (coil commands never reach the DO channels, sensors never reach the core). Set QI.
             PatchCatSymlinkQi(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT", result);
             // A stale deploy can leave the boundary 'current_state_to_process' (still referenced by the
             // _HMI) orphaned after the old 'state_out' event was removed — EAE rejects the unWITHed var.
@@ -289,109 +245,46 @@ namespace CodeGen.Services
                                            "Sensor_Bool_CAT", "Robot_Task_CAT" })
                 FixCatHmiOpcuaFrame(eaeProjectDir, hmiCat, result);
             PatchActuatorModeInitialValue(eaeProjectDir, "FiveStateActuator.fbt", result);
-            // 2026-06-02: the centre-home swivel core needs the SAME auto-mode default.
-            // Without it SevenStateCentreHomeActuator powers up at mode=0, its ECC sits
-            // in AtHomeInit, and it ignores every recipe command — which stalls the whole
-            // Assembly recipe on the first Bearing_PnP step (so even Bearing_Gripper,
-            // which is downstream in the recipe, never gets commanded). Symptom on the
-            // rig: all coil outputs read 1970/never-written while inputs read fine.
+            // The centre-home swivel core needs the same auto-mode default; without it its ECC powers up
+            // in AtHomeInit and ignores every recipe command (stalling the Assembly recipe on step 1).
             PatchActuatorModeInitialValue(eaeProjectDir, "SevenStateCentreHomeActuator.fbt", result);
-            // 2026-06-03: Rig swivel "boots at AtHomeInit, ignores the Home command,
-            // never reaches atHome" fix. The Centre-Home core's ECC has INIT->AtWork1
-            // (fires only if atWork1=TRUE at the *instant* INIT runs) but AtHomeInit has
-            // NO sensor-recovery arc and NO Home exit -- its only exits are Pick
-            // (state_val=1 -> ToWork1) and Place (state_val=3 -> ToWork2). On the rig the
-            // swivel's DI is frequently not live the moment the core runs INIT, so atWork1
-            // reads FALSE -> INIT->AtHomeInit. A scan later the IO comes alive and
-            // atWork1=TRUE (swivel is physically parked at Pick) but nothing re-evaluates:
-            // the core is frozen in AtHomeInit, and the engine's home-preamble
-            // CMD bearing_pnp=5 lands on a state with no matching transition -> dead, so
-            // the whole Assembly recipe stalls on step 1 (Feed_Station, all Five_State,
-            // runs fine -- this is Seven_State-specific). Add a sensor-recovery arc that
-            // mirrors INIT->AtWork1 but from AtHomeInit: if a work sensor says we're
-            // actually at a work position, correct the logical state to match reality.
-            // Pure logic correction -- the AtWork1/AtWork2 entry algo re-energises the
-            // coil the swivel is already sitting on (NO motion) -- then the stock
-            // AtWork1->ToHome / AtWork2->ToHome path carries the Home command through.
-            // Real sensors only (atWork1/atWork2/atHome are the physical symlinks on the
-            // rig; no SIM, no SimHopperForce). Always added on the rig (addArc: true);
-            // the bidirectional patch is no longer called with addArc=false.
+            // AtHomeInit has no sensor-recovery arc: if the swivel's DI is not live the instant INIT runs
+            // the core falls to AtHomeInit and freezes there even after a work sensor comes true. Add an
+            // arc that corrects the logical state to match a physical work position, so the stock
+            // AtWork->ToHome path can then carry the Home command. Real DI symlinks only; always on the rig.
             PatchSwivelAtHomeInitRecovery(eaeProjectDir, addArc: true, result);
-            // 2026-06-03: Centre-Home swivel home must clear both work coils. The
-            // shipped AtHome state ran 'AtHomeEnd' (current_state:=6 only), so the
-            // work coil used to swing through centre stayed energized at "home".
-            // With the old simulator coil-mirror this was hidden by accepting the
-            // transient 6. The simulator now has a proper state-derived position
-            // model, so both simulator and hardware can use Jyotsna's coil-clearing
-            // 'atHome' algorithm and publish output_event at AtHome.
+            // Home must clear both work coils (the coil used to swing through centre would otherwise stay
+            // energised at "home") and publish output_event at AtHome.
             PatchSwivelAtHomeCoilClear(eaeProjectDir, clearCoils: true, result);
-            // 2026-06-25: CENTRE-HOME OVERSHOOT FIX (gated MapperConfig.SwivelHomeHoldBothCoils, default
-            // OFF). The de-energise-at-centre above lets a venting 3-position swivel coast PAST the DI02
-            // centre sensor and rest off-centre ("between AtWork2 and home"). The root cause is the CAT
-            // home, not the recipe: cmd5 -> ToHome fires the OPPOSITE coil until atHome, then both coils
-            // go FALSE and the freed arm coasts. When the flag is ON, hold BOTH coils at home so a
-            // cylinder with a mechanical mid-stop is driven into + held at centre. Default OFF = today's
-            // proven de-energise (byte-identical). Bidirectional: OFF re-asserts FALSE/FALSE.
+            // Gated SwivelHomeHoldBothCoils (default OFF): ON holds both coils at home so a cylinder with
+            // a mechanical mid-stop is driven into + held at centre instead of coasting past DI02; OFF
+            // de-energises at centre. Bidirectional.
             PatchSwivelAtHomeBothCoils(eaeProjectDir, MapperConfig.SwivelHomeHoldBothCoils, result);
-            // 2026-06-26: CENTRE-HOME BRAKE (gated MapperConfig.SwivelBrakeHome, default ON). Runs LAST so
-            // it owns the final atHome shape. When ON: the 'atHome' algorithm becomes a DIRECTIONAL brake
-            // (reverse the driving coil only when homing from AtWork1 -> push toward AtWork1/away from the
-            // ejector; de-energise otherwise so Assembly is untouched), AtHomeInit de-energises, the CAT
-            // gains a brakeTimer E_DELAY (DT from config.yaml bearingPnpHomeBrakeMs) and AtHome->AtHomeInit
-            // is gated on the timer (brake_done) so the reverse pulse runs for the configured time. This
-            // lets Disassembly drop the empty AtWork2 restage and home straight from AtWork1 without
-            // coasting into the ejector. OFF = no-op (the pristine de-energise home above stands).
+            // Gated SwivelBrakeHome (default ON, runs LAST so it owns the final atHome shape): the atHome
+            // algorithm becomes a DIRECTIONAL brake (reverse the driving coil only when homing from
+            // AtWork1 -> away from the ejector; de-energise otherwise so Assembly is untouched) with a
+            // brakeTimer E_DELAY (DT from config.yaml bearingPnpHomeBrakeMs), so Disassembly can home
+            // straight from AtWork1 without coasting into the ejector. OFF = the de-energise home stands.
             PatchSwivelBrakeHome(eaeProjectDir, MapperConfig.SwivelBrakeHome,
                 GenerationConfig.Current.BearingPnpHomeBrakeMs, result);
-            // 2026-06-04 (Alex fix): the Centre-Home core's work-arrival latches required
-            // the two physical work sensors to be perfectly mutually exclusive
-            // (ToWork1->AtWork1 needed atWork1=TRUE AND atWork2=FALSE, ToWork2->AtWork2 the
-            // mirror), so a brief transit overlap of DI00/DI01 blocked the AtWork latch --
-            // which gates the gripper-release. Relax them to fire on atWorkN=TRUE alone.
-            // Bidirectional + gated: relaxed on the rig, strict on the simulator.
-            //
-            // NB: atHome is INTENTIONALLY driven by the real DI02 on the rig (wired below
-            // by NormalizeSwivelSimSensorSource), NOT the ReturnToHomeHandler timer output.
-            // The timer can fire before the arm reaches centre and stop Home short or
-            // overshoot; with the physical centre sensor working it is the correct,
-            // position-accurate source. An earlier atHome-timer rewire was removed -- it
-            // fought that deliberate wiring and was reverted by the normalizer anyway.
+            // Relax the work-arrival latches to fire on atWorkN=TRUE alone (a brief DI00/DI01 transit
+            // overlap otherwise blocked the AtWork latch that gates gripper-release). atHome is
+            // INTENTIONALLY driven by the real DI02, not the ReturnToHomeHandler timer (position-accurate).
             PatchSwivelRelaxWorkLatch(eaeProjectDir, relax: true, result);
-            // Seven centre-home command edge. The Place command reaches StateHandling and
-            // immediately fans an interlock check into ActuatorCore.ilck_event before the
-            // normal pst_event command edge is guaranteed to be visible in Watch/runtime.
-            // Sample state_val on ilck_event too so AtWork1 -> ToWork2 sees the same
-            // command value (3) as the interlock result. Seven-only; sim strips it back.
+            // The Place command fans an interlock check into ActuatorCore.ilck_event before the pst_event
+            // command edge is visible; sample state_val on ilck_event too so AtWork1 -> ToWork2 sees the
+            // same command value (3). Seven-only.
             PatchSwivelInterlockEventCarriesStateVal(eaeProjectDir, add: true, result);
-            // 2026-06-08 (ROOT CAUSE, confirmed by EAE watch): the shared ring relay
-            // updateComponentState.REQ (a component reporting its OWN state) sets
-            // src_id/source_name/state but NEVER clears dest_name. Component_State_Msg is
-            // a reused struct, so once a command (dest_name='bearing_pnp') has been
-            // relayed through a component, that component's very next state REPORT inherits
-            // the stale dest_name. The report (e.g. source_name='BearingSensor', state=0)
-            // then satisfies the target actuator's BREQ match dest_name==name and
-            // overwrites its state_cmd with the REPORTING component's state. On the rig
-            // this clobbers Bearing_PnP's Place command (state_cmd:=3) back to 0 on the
-            // next BearingSensor report -> the swivel never leaves AtWork1, never reaches
-            // AtWork2, never reports 4 -> the gripper-release step is never reached. Fix:
-            // REQ clears dest_name so a report carries NO command target and cannot
-            // spuriously re-command anyone.
+            // updateComponentState.REQ must clear dest_name: Component_State_Msg is a reused struct, so a
+            // report inheriting a stale dest_name would match a target actuator's BREQ and overwrite its
+            // state_cmd with the reporting component's state (clobbering e.g. Bearing_PnP's Place).
             PatchRingReportClearDest(eaeProjectDir, result);
-            // 2026-06-10: updateComponentState originally emitted CNF on every BREQ
-            // pass-through, even when component_state_in.dest_name did NOT match this
-            // actuator. Since StateHandling.CNF is wired to ActuatorCore.pst_event, an
-            // unrelated ring report could re-fire the actuator with its last retained
-            // command value. Live symptom: Shaft_Gripper finished a cycle with
-            // state_cmd/state_val=3 (release), then on the next cycle it gripped and an
-            // unrelated report immediately replayed that stale release at AtWork. Keep
-            // BCNF on every pass-through so the ring still advances and state_table still
-            // updates, but emit CNF only on an actual command for this actuator.
+            // Emit CNF only on an actual command for this actuator (BCNF stays on every pass-through so
+            // the ring advances): an unrelated ring report would otherwise re-fire the actuator with its
+            // last retained command value.
             PatchRingCommandCnfOnlyOnDestination(eaeProjectDir, result);
-            // Interlock-constants normalizer, called with reduce=false (rig): it RESTORES
-            // the wired boundary inputs the embedded InterlockManager FB declares. MUST run
-            // every deploy because ExtractToEae/CopyDirToEae are copy-if-absent, so the
-            // deployed CAT persists across runs. (The sim reduce=true direction that baked
-            // the constants + dropped the inputs 17→15 is no longer used.)
+            // reduce=false (rig): RESTORE the wired boundary inputs the embedded InterlockManager FB
+            // declares. Must run every deploy (ExtractToEae/CopyDirToEae are copy-if-absent).
             NormalizeFiveStateInterlockConstants(eaeProjectDir, false, result);
             PatchProcess1RecipeArraySize(eaeProjectDir, result);
             PatchProcessNameStringSize(eaeProjectDir, result);
@@ -441,13 +334,8 @@ namespace CodeGen.Services
                     stateDataSource: "FB1.Status",
                     initSource: "StateHandling.INITO",
                     topicNameSource: "name", cfg, result);
-                // PatchCatExposeState call REMOVED 2026-06-01 with the bridge.
-                // It only existed to expose state_out at the Five_State CAT
-                // boundary for the cross-resource bridge wires; with the bridge
-                // gone there's no consumer, so we don't modify the CAT boundary.
-                // The embedded MqttPub (above) taps ActuatorCore.pst_out
-                // INTERNALLY and needs no boundary exposure. (Method retained
-                // in this file but no longer called.)
+                // The CAT boundary is not modified for MQTT: the embedded MqttPub (above) taps
+                // ActuatorCore.pst_out internally and needs no state_out exposure.
             }
 
             // Interlock interface: the four parallel Rule arrays + standalone RuleCount -> ONE
@@ -482,17 +370,13 @@ namespace CodeGen.Services
             NormalizeCommonInterlockEvaluatorTargets(eaeProjectDir, targetStruct, result);
 
             // Telemetry: wrap each resource-level MQTT_CONNECTION in the 'Telemetry' composite
-            // (Config:TelemetryConfig in / Health:TelemetryHealth out). It is a plain composite FB (no
-            // HMI faceplate), so it lives in the Composite folder + is named 'Telemetry', NOT a CAT
-            // (renamed from the misleading 'Telemetry_CAT' 2026-06-22). The composite carries TWO helper
-            // Basic FBs — TelemetryUnpack (Config struct -> the 6 MQTT_CONNECTION scalar inputs) and
-            // TelemetryPack (the 6 status outputs -> Health struct) — so EVERY internal connection is
-            // whole-struct or scalar-to-scalar. The earlier version wired Config.QI->Conn.QI directly
-            // (struct-member connections), which EAE rejects (ERR_NOT_ADAPTER: a STRUCT connects whole,
-            // not per-member); the helper FBs do the member split in ST, where it is legal + precedented
-            // (the recipe engine reads Recipe[i].StepType the same way). The syslay/sysres carry
-            // Telemetry_* instances (SystemLayoutInjector.InjectMqttConn, same gate). false leaves them
-            // undeployed + emits the raw MQTT_CONNECTION instead (one-rebuild revert).
+            // (Config:TelemetryConfig in / Health:TelemetryHealth out). A plain composite FB (no HMI
+            // faceplate) in the Composite folder. It carries TWO helper Basic FBs — TelemetryUnpack
+            // (Config struct -> the 6 MQTT_CONNECTION scalar inputs) and TelemetryPack (the 6 status
+            // outputs -> Health struct) — so EVERY internal connection is whole-struct or
+            // scalar-to-scalar. EAE constraint: a STRUCT connects whole, not per-member (ERR_NOT_ADAPTER),
+            // so the member split is done in ST inside the helper FBs. false emits the raw
+            // MQTT_CONNECTION instead.
             if (cfg.UseTelemetryCat)
             {
                 // Clean slate FIRST: SweepTelemetryCat removes ALL telemetry artifacts (files + dfbproj
@@ -533,14 +417,11 @@ namespace CodeGen.Services
             // byte-identical. athome (NAME1) is untouched — it is timer-driven by the CAT's
             // ReturnToHomeHandler / No_Sensor_Handler_7SCH, so it needs no external publish.
             NormalizeSwivelSimSensorSource(eaeProjectDir, false, result);
-            // Home-sensor poll REMOVED (2026-06-19, user). The HomePoll/poll-gate CAT machinery
-            // (HomePoll + PollGate1/2 + the earlier PollWindow) is gone — Bearing_PnP's home is
-            // RECIPE-ONLY now (Assembly/Disassembly command bearing_pnp Home at the end). This call
-            // only STRIPS any previously-injected poll FBs out of the deployed CAT so a re-deploy
-            // cleans the live tree; it adds nothing. RUNTIME RISK (reported, not worked around): the
-            // 'Inputs' symlink is sample-on-REQ and HomePoll was its only REQ driver, so without it the
-            // core may not re-observe atHome/atWork during a move — a CAT/interface gap to fix properly
-            // if it manifests on the rig, NOT by re-adding a polling FB. See StripCatHomeSensorPoll.
+            // Bearing_PnP's home is recipe-only (Assembly/Disassembly command bearing_pnp Home at the
+            // end). This only STRIPS any previously-injected HomePoll/poll-gate FBs from the deployed CAT
+            // so a re-deploy cleans the live tree; it adds nothing. Note: the 'Inputs' symlink is
+            // sample-on-REQ, so if the core fails to re-observe atHome/atWork during a move, fix the
+            // CAT/interface, not by re-adding a polling FB.
             StripCatHomeSensorPoll(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT", result);
             // Same coil->sensor synthesis for the Five_State actuators (Bearing_Gripper,
             // Shaft_*, CoverPNP_*). Bearing_Gripper deploys with WorkSensorFitted=TRUE on
@@ -1236,16 +1117,11 @@ namespace CodeGen.Services
             "</DataType>";
 
         /// <summary>
-        /// Repairs the deployed Seven-State centre-home CAT's boundary state output. A stale deploy
-        /// (from the old cross-resource MQTT bridge) left a boundary OutputVar
-        /// <c>current_state_to_process</c> WITH-associated to a <c>state_out</c> event. An earlier
-        /// cleanup removed <c>state_out</c> but kept <c>current_state_to_process</c> — orphaning it
-        /// (no WITH clause), which EAE rejects ("input variable that does not appear in any WITH clause
-        /// cannot be connected"). The _HMI faceplate still references <c>current_state_to_process</c>
-        /// (so it must NOT be removed). This RE-ADDS <c>state_out</c> (WITH current_state_to_process) +
-        /// the <c>ActuatorCore.pst_out → state_out</c> event connection, restoring the consistent,
-        /// compiling pre-cleanup state. Idempotent; a no-op on a fresh committed CAT (no boundary var)
-        /// and once already consistent (state_out present).
+        /// Repairs the deployed Seven-State centre-home CAT's boundary state output. A stale deploy can
+        /// leave the boundary OutputVar <c>current_state_to_process</c> orphaned (no WITH clause), which
+        /// EAE rejects. The _HMI faceplate still references it (so it must NOT be removed). This re-adds
+        /// <c>state_out</c> (WITH current_state_to_process) + the <c>ActuatorCore.pst_out → state_out</c>
+        /// event connection. Idempotent; a no-op on a fresh committed CAT and once already consistent.
         /// </summary>
         static void EnsureSevenStateStateOut(string eaeProjectDir, DeployResult result)
         {
@@ -1848,15 +1724,11 @@ namespace CodeGen.Services
         }
 
         /// <summary>
-        /// Simulator-only centre-home swivel position synthesis. The earlier sim patch
-        /// pointed the CAT's atHome and atWork1 subscriptions at the same OutputToWork1
-        /// coil symlink, which made EAE Watch show an impossible physical state:
-        /// atHome=TRUE and atWork1=TRUE. This normalizer now leaves the physical Inputs
-        /// block on the real sensor symlinks and, in simulator mode only, inserts a small
-        /// SimCentreHomeSensor_7SCH Basic inside the CAT. That helper derives mutually
-        /// exclusive atHome/atWork1/atWork2 from ActuatorCore.current_state_to_process
-        /// on ActuatorCore.pst_out, then feeds the normal ActuatorCore.input_event path.
-        /// Hardware mode removes the helper and restores Jyotsna's physical wiring.
+        /// Simulator-only centre-home swivel position synthesis. Leaves the physical Inputs block on the
+        /// real sensor symlinks and, in simulator mode only, inserts a small SimCentreHomeSensor_7SCH
+        /// Basic inside the CAT that derives mutually-exclusive atHome/atWork1/atWork2 from
+        /// ActuatorCore.current_state_to_process on pst_out, then feeds the normal input_event path.
+        /// Hardware mode removes the helper and restores the physical sensor wiring.
         /// </summary>
         static void NormalizeSwivelSimSensorSource(string eaeProjectDir, bool reduce, DeployResult result)
         {
@@ -2194,22 +2066,13 @@ namespace CodeGen.Services
         /// coils right at centre, the same both directions. Idempotent; purely additive (no recipe / state
         /// id / coil change). No-op if the CAT or its Inputs FB is absent.
         /// </summary>
-        // 2026-06-19: the HomePoll / poll-gate CAT patch is REMOVED per the user. Bearing_PnP's home
-        // is RECIPE-ONLY now (Assembly + Disassembly command bearing_pnp Home at the end of the bearing
-        // sequence — see ApplyAssemblyRuntimeRecipe / ApplyDisassemblyRuntimeRecipe, final rows
-        // CmdStateArr=5 / Wait1State=0). This method now ONLY STRIPS any previously-injected poll
-        // machinery (HomePoll / PollGate1 / PollGate2 / PollWindow + their event/data connections) out
-        // of the deployed CAT so a re-deploy cleans the live tree; it ADDS NOTHING and instantiates NO
-        // replacement FB. The committed .cat.zip never carried these (they were always deploy-injected),
-        // so a Clean + re-extract is already clean (Docs/INVARIANTS.md I-7).
-        //
-        // RUNTIME RISK (REPORTED, not worked around — per the user's explicit instruction): the CAT's
-        // 'Inputs' SYMLINKMULTIVARDST is sample-on-REQ and HomePoll was the ONLY driver of Inputs.REQ
-        // (commit b12f800). With the poll gone, NOTHING re-reads atHome/atWork1/atWork2 after a command,
-        // so the core may not re-observe reaching a position and ToWork->AtWork / ToHome->AtHome may not
-        // fire on the rig. If the swivel stops confirming positions, that is a CAT/interface architecture
-        // gap to fix PROPERLY (an input-change event source, or an EAE cyclic/resource task driving
-        // Inputs.REQ) — do NOT re-add a polling FB here.
+        // Bearing_PnP's home is recipe-only. This method ONLY STRIPS any previously-injected poll
+        // machinery (HomePoll / PollGate1 / PollGate2 / PollWindow + their connections) from the deployed
+        // CAT so a re-deploy cleans the live tree; it adds nothing and instantiates no replacement FB.
+        // The committed .cat.zip never carried these (always deploy-injected). Note: the CAT's 'Inputs'
+        // SYMLINKMULTIVARDST is sample-on-REQ; if the core fails to re-observe positions after a command,
+        // fix the CAT/interface (an input-change event or a cyclic task driving Inputs.REQ), not by
+        // re-adding a polling FB.
         static void StripCatHomeSensorPoll(string eaeProjectDir, string catName, DeployResult result)
         {
             var fbt = Directory.EnumerateFiles(
@@ -3020,17 +2883,11 @@ namespace CodeGen.Services
         /// <param name="stateDataSource">INT state value to publish
         /// (<c>ActuatorCore.current_state_to_process</c> / <c>FB1.Status</c>).</param>
         /// <param name="initSource">Existing INITO event to seed MqttFmt/MqttPub INIT.</param>
-        /// <param name="topicNameSource">CAT-level STRING InputVar carrying the
-        /// per-instance component name — Five_State_Actuator_CAT exposes
-        /// <c>actuator_name</c>, Sensor_Bool_CAT exposes <c>name</c>. Wired as
-        /// a DATA input into <c>MqttPub.Topic1</c> at runtime so each instance
-        /// publishes to <c>RootPath/&lt;component_name&gt;</c> instead of every
-        /// instance sharing the same literal topic. The earlier approach of
-        /// <c>'smc/$${PATH}'</c> failed: EAE 24.1's MQTT_PUBLISH does NOT
-        /// resolve the <c>${PATH}</c> placeholder at runtime, so every
-        /// instance published to the literal string <c>smc/${PATH}/state</c>
-        /// — making the bridge work but leaving every component
-        /// indistinguishable on the broker.</param>
+        /// <param name="topicNameSource">CAT-level STRING InputVar carrying the per-instance component
+        /// name — Five_State_Actuator_CAT exposes <c>actuator_name</c>, Sensor_Bool_CAT exposes
+        /// <c>name</c>. Wired as a DATA input into <c>MqttPub.Topic1</c> so each instance publishes to
+        /// <c>RootPath/&lt;component_name&gt;</c>. EAE constraint: MQTT_PUBLISH does NOT resolve a
+        /// <c>$${PATH}</c> placeholder at runtime, so the topic must be a concrete per-instance name.</param>
         static void PatchCatMqttPublish(string eaeProjectDir, string catName,
             string stateEventSource, string stateDataSource, string initSource,
             string topicNameSource,
@@ -3057,15 +2914,9 @@ namespace CodeGen.Services
                 var net = root.Element(ns + "FBNetwork");
                 if (net == null) { result.Warnings.Add($"{catName}.fbt: no FBNetwork; MQTT patch skipped."); return; }
 
-                // Re-patchable: remove any existing MqttPub/MqttFmt FBs + their
-                // wires before re-emitting fresh. Without this, an earlier
-                // patch's stale topic/parameter shape persists across deploys:
-                // the CAT folder is copy-if-absent (a deploy that doesn't invoke
-                // DemonstratorWiper.Wipe never re-copies it), so the deployed
-                // Five_State_Actuator_CAT.fbt would carry the OLD MqttPub forever
-                // and an idempotency-skip would stop the new wire shape ever
-                // reaching the runtime. Removing first guarantees each deploy
-                // reflects the latest source.
+                // Re-patchable: remove any existing MqttPub/MqttFmt FBs + their wires before re-emitting
+                // fresh, so a stale topic/parameter shape can't persist across deploys (the CAT folder is
+                // copy-if-absent). Removing first guarantees each deploy reflects the latest source.
                 var staleFbs = net.Elements(ns + "FB")
                     .Where(f => (string?)f.Attribute("Name") is "MqttPub" or "MqttFmt")
                     .ToList();
@@ -3164,20 +3015,11 @@ namespace CodeGen.Services
                 P(pubFb, "ConnectionID", Q(cfg.MqttConnectionName));
 
                 // Per-instance topic for both rig AND sim. RootPath is the
-                // common prefix ('smc'); Topic1 is wired from each CAT's
-                // per-instance name InputVar (see DataConnection below) so
-                // each instance publishes to <prefix>/<lowercased_name> —
-                // smc/coverpnp_hr, smc/bearing_pnp, smc/topcoversenosr, etc.
-                // The earlier sim-only gate kept the rig on the literal
-                // 'smc/$${PATH}' + Topic1='state' pair, but EAE 24.1 doesn't
-                // resolve $${PATH} at runtime (proven in sim test), so the
-                // rig publishers were all hitting the same literal topic
-                // 'smc/${PATH}/state' anyway — making per-component
-                // breakdown impossible. Per-instance is strictly better and
-                // affects the embedded MqttPub topic only, no other CAT
-                // behaviour. M262/M580 publishers still hit ReturnCode 50
-                // (firmware-gated MQTT on those PLCs); only BX1 (Soft dPAC)
-                // actually pushes to the broker in runtime.
+                // common prefix ('smc'); Topic1 is wired from each CAT's per-instance name InputVar (see
+                // DataConnection below) so each instance publishes to <prefix>/<lowercased_name>
+                // (smc/coverpnp_hr, smc/bearing_pnp, ...). EAE constraint: $${PATH} is not resolved at
+                // runtime, so the topic must be concrete. Runtime note: M262/M580 firmware gate MQTT
+                // (ReturnCode 50); only BX1 (Soft dPAC) actually pushes to the broker.
                 P(pubFb, "RootPath", Q(cfg.MqttTopicRoot));
                 // Topic1 intentionally NOT a parameter — wired below.
                 P(pubFb, "QoS1", cfg.MqttQoS.ToString());
@@ -3188,11 +3030,9 @@ namespace CodeGen.Services
                 if (lastFb != null) { lastFb.AddAfterSelf(pubFb); lastFb.AddAfterSelf(fmtFb); }
                 else { net.Add(fmtFb); net.Add(pubFb); }
 
-                // FRAME_MQTT removed 2026-06-22: a <Frame> carrying <Parameter> children (the syslay
-                // frame style) is INVALID inside a CAT (FBType) FBNetwork — EAE rejected it with
-                // ERR_XML_UNKNOWN_TAG 'FBType.FBNetwork.Frame.Parameter'. It was visual-only (no wiring),
-                // so it simply goes. Keep the removal below so a re-deploy onto a CAT that still carries
-                // a stale FRAME_MQTT cleans it out.
+                // EAE constraint: a <Frame> carrying <Parameter> children (the syslay frame style) is
+                // invalid inside a CAT (FBType) FBNetwork (ERR_XML_UNKNOWN_TAG). Strip any stale
+                // FRAME_MQTT so a re-deploy cleans it out.
                 net.Elements(ns + "Frame")
                    .Where(fr => (string?)fr.Attribute("Name") == "FRAME_MQTT").Remove();
 
@@ -3215,12 +3055,9 @@ namespace CodeGen.Services
                 // Data.
                 Conn(dc, stateDataSource, "MqttFmt.state");
                 Conn(dc, "MqttFmt.payload", "MqttPub.Payload1");
-                // Per-instance topic suffix — wires the CAT's per-instance
-                // name InputVar (Five_State.actuator_name / Sensor_Bool.name)
-                // into MqttPub.Topic1. Runtime concatenates RootPath/Topic1,
-                // so each instance publishes to <MqttTopicRoot>/<name>.
-                // Applies to BOTH rig and sim — the earlier sim-only gate
-                // was a safety clamp now lifted (see RootPath branch).
+                // Per-instance topic suffix — wire the CAT's per-instance name InputVar
+                // (Five_State.actuator_name / Sensor_Bool.name) into MqttPub.Topic1. Runtime concatenates
+                // RootPath/Topic1, so each instance publishes to <MqttTopicRoot>/<name>.
                 Conn(dc, topicNameSource, "MqttPub.Topic1");
 
                 doc.Save(fbt);
@@ -3232,117 +3069,6 @@ namespace CodeGen.Services
             catch (Exception ex)
             {
                 result.Warnings.Add($"{catName} MQTT publish patch failed: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Additive deploy-time patch: expose a CAT's internal post-update state
-        /// at the COMPOSITE BOUNDARY (Event <c>state_out</c> + INT
-        /// <c>current_state_to_process</c>) so a cross-resource consumer can read
-        /// it through the syslay. Used by the BX1-side MQTT bridge: each
-        /// <c>MqttPub_&lt;comp&gt;</c> on BX1 wires to <c>&lt;comp&gt;.state_out</c>
-        /// (event) and <c>&lt;comp&gt;.current_state_to_process</c> (data) on the
-        /// remote M262/M580 component, and EAE bridges the cross-resource events
-        /// at deploy. Nothing existing is removed — the internal source event
-        /// keeps all its current targets (EAE allows event multi-fan-out, and
-        /// <c>current_state_to_process</c> already fans to several consumers).
-        /// Idempotent: skips if <c>state_out</c> already exists in EventOutputs.
-        /// </summary>
-        static void PatchCatExposeState(string eaeProjectDir, string catName,
-            string internalEventSource, string internalDataSource,
-            DeployResult result)
-        {
-            var fbt = Directory.EnumerateFiles(
-                    Path.Combine(eaeProjectDir, "IEC61499"),
-                    catName + ".fbt", SearchOption.AllDirectories)
-                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
-                ?? string.Empty;
-            if (string.IsNullOrEmpty(fbt))
-            {
-                result.Warnings.Add($"{catName}.fbt not found; expose-state patch skipped.");
-                return;
-            }
-
-            try
-            {
-                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                var root = doc.Root;
-                if (root == null) return;
-                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
-
-                var iface = root.Element(ns + "InterfaceList");
-                var net = root.Element(ns + "FBNetwork");
-                if (iface == null || net == null)
-                {
-                    result.Warnings.Add($"{catName}.fbt: missing InterfaceList/FBNetwork; expose-state skipped.");
-                    return;
-                }
-
-                var eventOutputs = iface.Element(ns + "EventOutputs");
-                if (eventOutputs == null)
-                {
-                    eventOutputs = new System.Xml.Linq.XElement(ns + "EventOutputs");
-                    var eventInputs = iface.Element(ns + "EventInputs");
-                    if (eventInputs != null) eventInputs.AddAfterSelf(eventOutputs);
-                    else iface.AddFirst(eventOutputs);
-                }
-
-                // Idempotent.
-                if (eventOutputs.Elements(ns + "Event")
-                        .Any(e => (string?)e.Attribute("Name") == "state_out"))
-                {
-                    result.PatchesApplied.Add($"{catName}: state_out already exposed at boundary (skipped)");
-                    return;
-                }
-
-                // 1) EventOutput state_out WITH current_state_to_process.
-                eventOutputs.Add(new System.Xml.Linq.XElement(ns + "Event",
-                    new System.Xml.Linq.XAttribute("Name", "state_out"),
-                    new System.Xml.Linq.XAttribute("Comment", "Post-update state for the cross-resource MQTT bridge"),
-                    new System.Xml.Linq.XElement(ns + "With",
-                        new System.Xml.Linq.XAttribute("Var", "current_state_to_process"))));
-
-                // 2) OutputVar current_state_to_process : INT. Create OutputVars
-                //    section if absent (DTD order: after InputVars, before Sockets).
-                var outputVars = iface.Element(ns + "OutputVars");
-                if (outputVars == null)
-                {
-                    outputVars = new System.Xml.Linq.XElement(ns + "OutputVars");
-                    var inputVars = iface.Element(ns + "InputVars");
-                    if (inputVars != null) inputVars.AddAfterSelf(outputVars);
-                    else eventOutputs.AddAfterSelf(outputVars);
-                }
-                if (!outputVars.Elements(ns + "VarDeclaration")
-                        .Any(v => (string?)v.Attribute("Name") == "current_state_to_process"))
-                    outputVars.Add(new System.Xml.Linq.XElement(ns + "VarDeclaration",
-                        new System.Xml.Linq.XAttribute("Name", "current_state_to_process"),
-                        new System.Xml.Linq.XAttribute("Type", "INT"),
-                        new System.Xml.Linq.XAttribute("Comment", "Exposed component state for cross-resource MQTT bridge")));
-
-                // 3) Internal fan-out from the existing state sources to the
-                //    boundary. Additive — the internal sources keep all current
-                //    targets (EAE allows event multi-fan-out, data multi-fan-out).
-                var ec = net.Element(ns + "EventConnections");
-                if (ec == null) { ec = new System.Xml.Linq.XElement(ns + "EventConnections"); net.Add(ec); }
-                var dc = net.Element(ns + "DataConnections");
-                if (dc == null) { dc = new System.Xml.Linq.XElement(ns + "DataConnections"); net.Add(dc); }
-                ec.Add(new System.Xml.Linq.XElement(ns + "Connection",
-                    new System.Xml.Linq.XAttribute("Source", internalEventSource),
-                    new System.Xml.Linq.XAttribute("Destination", "state_out")));
-                dc.Add(new System.Xml.Linq.XElement(ns + "Connection",
-                    new System.Xml.Linq.XAttribute("Source", internalDataSource),
-                    new System.Xml.Linq.XAttribute("Destination", "current_state_to_process")));
-
-                doc.Save(fbt);
-                result.PatchesApplied.Add(
-                    $"{catName}: state exposed at boundary ({internalEventSource} → state_out, " +
-                    $"{internalDataSource} → current_state_to_process)");
-                MapperLogger.Info(
-                    $"[Deploy][MQTT bridge] {catName}.fbt: state_out / current_state_to_process exposed at composite boundary");
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"{catName} expose-state patch failed: {ex.Message}");
             }
         }
 
@@ -3632,11 +3358,10 @@ namespace CodeGen.Services
             }
         }
 
-        // 2026-06-04: relax the swivel core's work-arrival latches so a brief overlap of
-        // the two physical work sensors (or a slightly noisy DI) no longer blocks the
-        // latch. ToWork1->AtWork1 / ToWork2->AtWork2 fire on atWorkN=TRUE alone instead
-        // of "atWorkN=TRUE AND atWorkOther=FALSE". Bidirectional: relax on the rig,
-        // restore the strict mutually-exclusive guard on the simulator. Idempotent.
+        // Relax the swivel core's work-arrival latches so a brief overlap of the two work sensors no
+        // longer blocks the latch: ToWork1->AtWork1 / ToWork2->AtWork2 fire on atWorkN=TRUE alone
+        // instead of "atWorkN=TRUE AND atWorkOther=FALSE". relax=true on the rig, strict on the
+        // simulator. Idempotent.
         static void PatchSwivelRelaxWorkLatch(string eaeProjectDir, bool relax, DeployResult result)
         {
             var fbt = Path.Combine(eaeProjectDir, "IEC61499", "SevenStateCentreHomeActuator.fbt");
@@ -3753,18 +3478,13 @@ namespace CodeGen.Services
 
 
         /// <summary>
-        /// 2026-06-08 ROOT-CAUSE fix (confirmed live: the swivel's component_state_in read
-        /// (src_id:=1, source_name:='BearingSensor', dest_name:='bearing_pnp', state:=0)).
-        /// The shared ring relay <c>updateComponentState.REQ</c> (a component reporting its
-        /// OWN state) sets src_id/source_name/state but never clears <c>dest_name</c>.
-        /// <c>Component_State_Msg</c> is a reused struct, so once a command
-        /// (dest_name=&lt;target&gt;) has been relayed, the next REPORT inherits that stale
-        /// dest_name and spuriously satisfies the target actuator's BREQ match
-        /// (dest_name==name), overwriting its <c>state_cmd</c> with the reporting
-        /// component's state. This clobbers Bearing_PnP's Place command (state_cmd:=3)
-        /// back to 0 on the next BearingSensor report. Fix: REQ clears
-        /// component_state_out.dest_name so a report carries no command target. Idempotent;
-        /// applies to every updateComponentState instance (the shared relay).
+        /// The shared ring relay <c>updateComponentState.REQ</c> (a component reporting its OWN state)
+        /// sets src_id/source_name/state but never clears <c>dest_name</c>. <c>Component_State_Msg</c> is
+        /// a reused struct, so a report inheriting a stale dest_name spuriously satisfies the target
+        /// actuator's BREQ match (dest_name==name) and overwrites its <c>state_cmd</c> with the reporting
+        /// component's state (clobbering e.g. Bearing_PnP's Place). Fix: REQ clears
+        /// component_state_out.dest_name so a report carries no command target. Idempotent; applies to
+        /// every updateComponentState instance.
         /// </summary>
         static void PatchRingReportClearDest(string eaeProjectDir, DeployResult result)
         {
@@ -3957,28 +3677,18 @@ namespace CodeGen.Services
             }
         }
 
-        // (PatchSwivelAtHomeTimerWiring removed 2026-06-04: atHome is intentionally the
-        // real DI02 on the rig, wired by NormalizeSwivelSimSensorSource -- the timer
-        // output can fire before the arm reaches centre and stop Home short or overshoot,
-        // so it must NOT drive the core's atHome when the physical centre sensor works.)
-
-        // 2026-06-03: see the detailed rationale at the call site in
-        // DeployUniversalArchitecture. Adds (rig) or strips (sim) two
-        // sensor-recovery ECTransitions on the Centre-Home swivel core so a
-        // swivel that powered up before its IO went live (frozen in AtHomeInit
-        // while physically at a work position) re-syncs to AtWork1/AtWork2 and
-        // can then accept the engine's Home command. Identified by
-        // Source=AtHomeInit AND Destination in {AtWork1,AtWork2}; the stock
-        // AtHomeInit arcs go to ToWork1/ToWork2 so this never collides with them.
-        // 2026-06-26: CENTRE-HOME BRAKE (gated MapperConfig.SwivelBrakeHome). See the call site. When
-        // enabled, reshapes the deployed centre-home ECC + composite into a timed reverse-coil brake at
-        // centre so the swivel can home directly from AtWork1 (Disassembly) WITHOUT coasting into the
-        // ejector. The brake is DIRECTIONAL: at AtHome the 'atHome' algorithm reverses the driving coil
-        // ONLY when homing from AtWork1 (outputToWork2 was driving) -> push toward AtWork1, AWAY from the
-        // ejector; homing from AtWork2 (Assembly) de-energises unchanged. A brakeTimer E_DELAY (DT =
-        // bearingPnpHomeBrakeMs) holds the reverse pulse, then AtHomeInit de-energises. Errs SAFE: a
-        // longer pulse only pushes further toward AtWork1, never into the ejector. No-op when disabled
-        // (the pristine de-energise home stands); the ECC/CAT are force-refreshed so a flag flip reverts.
+        // Adds (rig) or strips (sim) two sensor-recovery ECTransitions on the Centre-Home swivel core so
+        // a swivel that powered up before its IO went live (frozen in AtHomeInit while physically at a
+        // work position) re-syncs to AtWork1/AtWork2 and can then accept the Home command. Identified by
+        // Source=AtHomeInit AND Destination in {AtWork1,AtWork2}; the stock AtHomeInit arcs go to
+        // ToWork1/ToWork2, so this never collides with them.
+        //
+        // Gated SwivelBrakeHome: reshapes the deployed centre-home ECC + composite into a timed
+        // reverse-coil brake at centre so the swivel can home directly from AtWork1 (Disassembly) without
+        // coasting into the ejector. Directional: at AtHome the algorithm reverses the driving coil only
+        // when homing from AtWork1 (away from the ejector); homing from AtWork2 (Assembly) de-energises
+        // unchanged. A brakeTimer E_DELAY (DT = bearingPnpHomeBrakeMs) holds the reverse pulse, then
+        // AtHomeInit de-energises. No-op when disabled; the ECC/CAT are force-refreshed so a flag flip reverts.
         static void PatchSwivelBrakeHome(string eaeProjectDir, bool enabled, int brakeMs, DeployResult result)
         {
             if (!enabled) return;
@@ -4146,23 +3856,14 @@ namespace CodeGen.Services
                     return;
                 }
 
-                // SELF-HOME ON POWER-UP (2026-06-03, supersedes the earlier "re-sync to
-                // AtWork" recovery). Jyotsna's core latches whatever work position it
-                // physically booted at: INIT -> AtWork1 (atWork1 TRUE) or INIT -> ToWork2
-                // (atWork2 TRUE). The swivel has NO spring-centre (both coils off => it
-                // holds position -- confirmed on the rig), so the ONLY way to make HOME
-                // its initial state is to DRIVE it home at power-up. On the rig (addArc)
-                // redirect every "booted at a work position" boot path to ToHome, so the
-                // actuator swings itself home the instant it powers up, before the engine
-                // even starts -- home becomes its permanent initial positioning state,
-                // independent of the recipe. Covers both the IO-ready boot (INIT -> work)
-                // and the IO-late boot (INIT -> AtHomeInit, then a work sensor comes TRUE
-                // -> AtHomeInit -> ToHome). On the sim (!addArc) restore INIT -> work
-                // states (inert there: coils are FALSE at sim boot so atwork is FALSE and
-                // INIT -> AtHomeInit fires) and strip the self-home arcs, leaving the
-                // proven sim core unchanged. Idempotent + bidirectional. NOTE: the arm
-                // physically moves (swings home) at power-up -- safe direction (toward
-                // centre), but the rig swing path must be clear before a cold download.
+                // SELF-HOME ON POWER-UP. The core latches whatever work position it physically booted at
+                // (INIT -> AtWork1 / INIT -> ToWork2). The swivel has no spring-centre (both coils off =>
+                // it holds position), so the only way to make HOME its initial state is to DRIVE it home
+                // at power-up. On the rig (addArc) redirect every "booted at a work position" boot path to
+                // ToHome so the arm swings itself home before the engine starts. On the sim (!addArc)
+                // restore INIT -> work states and strip the self-home arcs. Idempotent + bidirectional.
+                // SAFETY: the arm physically swings home at power-up (toward centre), so the swing path
+                // must be clear before a cold download.
                 var initArcs = ecc.Elements(ns + "ECTransition")
                     .Where(t => (string?)t.Attribute("Source") == "INIT").ToList();
                 bool IsSelfHomeArc(System.Xml.Linq.XElement t) =>
@@ -4198,18 +3899,12 @@ namespace CodeGen.Services
                     return;
                 }
 
-                // RIG: drive home on power-up via INIT ONLY. (2026-06-03 -- the
-                // AtHomeInit -> ToHome "self-home" arc is now REMOVED, not added.)
-                // That arc re-fired whenever the swivel sat in AtHomeInit and a work
-                // sensor momentarily read TRUE -- and the rig DI00/DI01 are noisy /
-                // bad-quality, so it re-homed over and over: observed as
-                // current_state=5 (ToHome) with state_val=0 and the arm cycling
-                // atWork1<->atWork2, never settling. INIT -> ToHome below already homes
-                // the swivel on every power-up; once it reaches AtHomeInit it MUST stay
-                // there until the recipe commands Pick/Place, so AtHomeInit must have NO
-                // self-driving exit. So: redirect INIT to ToHome, and strip every
-                // AtHomeInit -> {ToHome, AtWork1, AtWork2} arc we ever added. The stock
-                // AtHomeInit -> ToWork1/ToWork2 (state_val Pick/Place) arcs stay intact.
+                // RIG: drive home on power-up via INIT only; do NOT add an AtHomeInit -> ToHome self-home
+                // arc (with noisy DI00/DI01 it re-fires and the arm cycles atWork1<->atWork2, never
+                // settling). Once the swivel reaches AtHomeInit it must stay there until the recipe
+                // commands Pick/Place, so AtHomeInit must have no self-driving exit: redirect INIT to
+                // ToHome and strip every AtHomeInit -> {ToHome, AtWork1, AtWork2} arc added here. The
+                // stock AtHomeInit -> ToWork1/ToWork2 (Pick/Place) arcs stay intact.
                 bool changed = false;
 
                 // 1. INIT -> AtWork1 / INIT -> ToWork2  ==>  INIT -> ToHome (boot self-home).
@@ -4244,11 +3939,9 @@ namespace CodeGen.Services
             }
         }
 
-        // 2026-06-03: see the detailed rationale at the call site. Wires the AtHome
-        // ECState to the coil-clearing 'atHome' algorithm and makes AtHome publish
-        // output_event, so the Output SYMLINKMULTIVARSRC writes both work coils FALSE.
-        // Both algorithms already exist in the core; this only swaps which one the
-        // AtHome state runs and whether the coil-clear event is emitted.
+        // Wires the AtHome ECState to the coil-clearing 'atHome' algorithm and makes AtHome publish
+        // output_event, so the Output SYMLINKMULTIVARSRC writes both work coils FALSE. Both algorithms
+        // already exist in the core; this only swaps which one the AtHome state runs.
         static void PatchSwivelAtHomeCoilClear(string eaeProjectDir, bool clearCoils, DeployResult result)
         {
             var fbt = Path.Combine(eaeProjectDir, "IEC61499", "SevenStateCentreHomeActuator.fbt");
@@ -4342,16 +4035,12 @@ namespace CodeGen.Services
         }
 
         /// <summary>
-        /// CENTRE-HOME OVERSHOOT FIX (2026-06-25, gated <see cref="MapperConfig.SwivelHomeHoldBothCoils"/>,
-        /// default OFF). Rewrites the 'atHome' algorithm's two coil outputs in the deployed
-        /// SevenStateCentreHomeActuator.fbt. The shipped form DE-ENERGISES both coils at centre
-        /// (outputToWork1/2 := FALSE), so a 3-position swivel that VENTS on de-energise coasts past the
-        /// DI02 centre sensor and rests off-centre. When holdBothCoils is TRUE this sets both coils TRUE:
-        /// for a cylinder WITH a mechanical mid-stop, both ports pressurised drive the arm into + hold it
-        /// at the centre stop, catching the overshoot. Bidirectional + idempotent (OFF re-asserts FALSE,
-        /// so a flag-OFF deploy restores the proven de-energise even after a prior flag-ON deploy). The
-        /// AtHome ECState must already point at the 'atHome' algorithm (PatchSwivelAtHomeCoilClear,
-        /// clearCoils:true, runs just before this) — this only flips the coil VALUES inside it.
+        /// Gated <see cref="MapperConfig.SwivelHomeHoldBothCoils"/> (default OFF). Rewrites the 'atHome'
+        /// algorithm's two coil outputs in the deployed SevenStateCentreHomeActuator.fbt. OFF de-energises
+        /// both coils at centre (a venting 3-position swivel then coasts past DI02 and rests off-centre);
+        /// TRUE sets both coils TRUE so a cylinder with a mechanical mid-stop is driven into + held at the
+        /// centre stop. Bidirectional + idempotent. The AtHome ECState must already point at the 'atHome'
+        /// algorithm (PatchSwivelAtHomeCoilClear runs just before this) — this only flips the coil VALUES.
         /// SAFETY: if the cylinder has NO mid-stop, both-on instead drives toward an extreme — enable
         /// only on the rig with the e-stop ready, and abort if the arm heads toward Work2.
         /// </summary>
@@ -4450,46 +4139,6 @@ namespace CodeGen.Services
             }
         }
 
-        /// <summary>
-        /// Phase 1 recipe-arrays-as-InputVars patch. Mutates the deployed
-        /// ProcessRuntime_Generic_v1.fbt and Process1_Generic.fbt so the recipe arrays
-        /// (StepType, CmdTargetName, CmdStateArr, Wait1Id, Wait1State, NextStep) are
-        /// exposed as InputVars on both the engine FB and its outer composite, and the
-        /// engine's initialize algorithm no longer hardcodes the 3-step Pusher demo
-        /// recipe. The Mapper then writes the per-Process recipe as syslay Parameter
-        /// values on the Process1 instance via SystemLayoutInjector.BuildProcessFbParameters.
-        ///
-        /// Idempotent: re-deploying skips files that already declare the array InputVars.
-        /// </summary>
-        static void PatchProcessFbsForRecipeAsInputVars(string eaeProjectDir, DeployResult result)
-        {
-            var iec = Path.Combine(eaeProjectDir, "IEC61499");
-            var enginePath = Path.Combine(iec, "ProcessRuntime_Generic_v1.fbt");
-            var compositePath = Path.Combine(iec, "Process1_Generic", "Process1_Generic.fbt");
-
-            try
-            {
-                if (File.Exists(enginePath))
-                {
-                    PatchProcessRuntimeEngine(enginePath, result);
-                    PatchProcessRuntimeEccDeadEnd(enginePath, MapperConfig.EnableCyclicRestart, result);
-                    PatchProcessRuntimeStartBypass(enginePath, result);
-                    PatchProcessRuntimeEndSequenceNoOp(enginePath, result);
-                }
-                else
-                    result.Warnings.Add("ProcessRuntime_Generic_v1.fbt not deployed; recipe-as-input patch skipped.");
-
-                if (File.Exists(compositePath))
-                    PatchProcess1GenericComposite(compositePath, result);
-                else
-                    result.Warnings.Add("Process1_Generic.fbt not deployed; recipe-as-input patch skipped.");
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"Recipe-as-input FBT patch failed: {ex.Message}");
-            }
-        }
-
         // ArraySize matches ProcessRecipeArrayGenerator.RecipeArraySize (100) so the
         // create-default agrees with what PatchProcess1RecipeArraySize / Normalize*
         // force onto every recipe-array InputVar — no 64->100 transient. Station-2
@@ -4559,11 +4208,10 @@ namespace CodeGen.Services
                 return;
             }
 
-            // CYCLIC RESTART (2026-06-25): the END row's NextStep is 0 when EnableCyclicRestart is on,
-            // so routing END -> ADVANCE makes ADVANCE's AdvanceStep (CurrentStep := Recipe[CurrentStep]
-            // .NextStep) wrap the engine back to step 0 -> the recipe re-runs and the line loops
-            // (Feed -> Assembly -> Disassembly -> robot drop -> Feed...). Run-once keeps END -> END, a
-            // dead-end so the engine PARKS at END. Either destination gives END an outgoing transition,
+            // When EnableCyclicRestart is on the END row's NextStep is 0, so routing END -> ADVANCE makes
+            // AdvanceStep (CurrentStep := Recipe[CurrentStep].NextStep) wrap the engine back to step 0 and
+            // the recipe re-runs. Run-once keeps END -> END, a dead-end so the engine PARKS at END. Either
+            // destination gives END an outgoing transition,
             // so WRN_ECC_DEAD_END is satisfied. The no-op EndSequence is LEFT as-is: ADVANCE does the
             // pointer advance, so EndSequence must NOT also advance or it would skip step 0. The re-armed
             // step-0 WAIT (level-triggered check_wait) still holds the loop until its target state is
@@ -4741,177 +4389,6 @@ namespace CodeGen.Services
                 "ProcessRuntime_Generic_v1: EndSequence replaced with no-op (CurrentStep pinned at END row, stops Watch cycling)");
             MapperLogger.Info(
                 "[Deploy] Patched ProcessRuntime_Generic_v1.fbt EndSequence (no-op so CurrentStep stays at the END row once reached)");
-        }
-
-        static void PatchProcessRuntimeEngine(string fbtPath, DeployResult result)
-        {
-            var doc = System.Xml.Linq.XDocument.Load(fbtPath, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-            var root = doc.Root!;
-            System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
-
-            var initEvent = root.Descendants(ns + "Event")
-                .FirstOrDefault(e => (string?)e.Attribute("Name") == "INIT");
-            var inputVars = root.Descendants(ns + "InputVars").FirstOrDefault();
-            var internalVars = root.Descendants(ns + "InternalVars").FirstOrDefault();
-            var initAlgo = root.Descendants(ns + "Algorithm")
-                .FirstOrDefault(a => (string?)a.Attribute("Name") == "initializeinit");
-
-            if (initEvent == null || inputVars == null || initAlgo == null)
-            {
-                result.Warnings.Add("ProcessRuntime_Generic_v1.fbt: expected INIT event / InputVars / initializeinit not found; recipe-as-input patch skipped.");
-                return;
-            }
-
-            var existingInputVarNames = new HashSet<string>(
-                inputVars.Elements(ns + "VarDeclaration")
-                    .Select(v => (string?)v.Attribute("Name") ?? string.Empty),
-                StringComparer.Ordinal);
-
-            // Idempotency check: if every recipe array is already an InputVar, this FBT was patched before.
-            if (RecipeArrayDecls.All(d => existingInputVarNames.Contains(d.Name)))
-                return;
-
-            // 1. Promote recipe arrays from InternalVars to InputVars (move if present, else add fresh).
-            foreach (var decl in RecipeArrayDecls)
-            {
-                var existingInternal = internalVars?
-                    .Elements(ns + "VarDeclaration")
-                    .FirstOrDefault(v => (string?)v.Attribute("Name") == decl.Name);
-                existingInternal?.Remove();
-
-                if (!existingInputVarNames.Contains(decl.Name))
-                {
-                    var newDecl = new System.Xml.Linq.XElement(ns + "VarDeclaration",
-                        new System.Xml.Linq.XAttribute("Name", decl.Name),
-                        new System.Xml.Linq.XAttribute("Type", decl.Type),
-                        new System.Xml.Linq.XAttribute("ArraySize", decl.ArraySize));
-                    if (decl.Comment != null)
-                        newDecl.Add(new System.Xml.Linq.XAttribute("Comment", decl.Comment));
-                    inputVars.Add(newDecl);
-                }
-            }
-
-            // 2. Add <With Var=...> entries on INIT for the new arrays (skip duplicates).
-            var existingWithVars = new HashSet<string>(
-                initEvent.Elements(ns + "With")
-                    .Select(w => (string?)w.Attribute("Var") ?? string.Empty),
-                StringComparer.Ordinal);
-            foreach (var decl in RecipeArrayDecls)
-            {
-                if (existingWithVars.Contains(decl.Name)) continue;
-                initEvent.Add(new System.Xml.Linq.XElement(ns + "With",
-                    new System.Xml.Linq.XAttribute("Var", decl.Name)));
-            }
-
-            // 3. Strip the recipe-population block from initializeinit. The replacement only
-            //    initialises engine state — recipe values now arrive via InputVars.
-            var stElement = initAlgo.Descendants(ns + "ST").FirstOrDefault();
-            if (stElement != null)
-            {
-                stElement.RemoveNodes();
-                stElement.Add(new System.Xml.Linq.XCData(
-                    "CurrentStep := 0;\n" +
-                    "CurrentStepType := 0;\n" +
-                    "WaitSatisfied := FALSE;\n\n" +
-                    "cmd_target_name := '';\n" +
-                    "cmd_state := 0;\n\n" +
-                    "PreviousStepText := '';\n" +
-                    "ThisStepText := 'Initialised';\n" +
-                    "NextStepText := '';"));
-            }
-
-            doc.Save(fbtPath);
-            result.PatchesApplied.Add("ProcessRuntime_Generic_v1: recipe arrays InternalVars->InputVars; INIT With clauses added; initializeinit stripped of recipe ST");
-            MapperLogger.Info("[Deploy] Patched ProcessRuntime_Generic_v1.fbt for recipe-as-input architecture");
-        }
-
-        static void PatchProcess1GenericComposite(string fbtPath, DeployResult result)
-        {
-            var doc = System.Xml.Linq.XDocument.Load(fbtPath, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-            var root = doc.Root!;
-            System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
-
-            var initEvent = root.Descendants(ns + "Event")
-                .FirstOrDefault(e => (string?)e.Attribute("Name") == "INIT");
-            var inputVars = root.Descendants(ns + "InputVars").FirstOrDefault();
-            var fbNetwork = root.Descendants(ns + "FBNetwork").FirstOrDefault();
-            var dataConnections = fbNetwork?.Descendants(ns + "DataConnections").FirstOrDefault();
-
-            if (initEvent == null || inputVars == null || fbNetwork == null || dataConnections == null)
-            {
-                result.Warnings.Add("Process1_Generic.fbt: expected INIT event / InputVars / FBNetwork / DataConnections not found; recipe-as-input patch skipped.");
-                return;
-            }
-
-            var existingInputVarNames = new HashSet<string>(
-                inputVars.Elements(ns + "VarDeclaration")
-                    .Select(v => (string?)v.Attribute("Name") ?? string.Empty),
-                StringComparer.Ordinal);
-
-            // Idempotency check.
-            if (RecipeArrayDecls.All(d => existingInputVarNames.Contains(d.Name)))
-                return;
-
-            // 1. Add 6 InputVars on the outer composite.
-            foreach (var decl in RecipeArrayDecls)
-            {
-                if (existingInputVarNames.Contains(decl.Name)) continue;
-                var newDecl = new System.Xml.Linq.XElement(ns + "VarDeclaration",
-                    new System.Xml.Linq.XAttribute("Name", decl.Name),
-                    new System.Xml.Linq.XAttribute("Type", decl.Type),
-                    new System.Xml.Linq.XAttribute("ArraySize", decl.ArraySize));
-                if (decl.Comment != null)
-                    newDecl.Add(new System.Xml.Linq.XAttribute("Comment", decl.Comment));
-                inputVars.Add(newDecl);
-            }
-
-            // 2. <With Var=...> on INIT.
-            var existingWithVars = new HashSet<string>(
-                initEvent.Elements(ns + "With")
-                    .Select(w => (string?)w.Attribute("Var") ?? string.Empty),
-                StringComparer.Ordinal);
-            foreach (var decl in RecipeArrayDecls)
-            {
-                if (existingWithVars.Contains(decl.Name)) continue;
-                initEvent.Add(new System.Xml.Linq.XElement(ns + "With",
-                    new System.Xml.Linq.XAttribute("Var", decl.Name)));
-            }
-
-            // 3. Graphic <Input Name="..." Type="Data"/> stubs inside FBNetwork (sibling of FBs and connections).
-            var existingInputStubs = new HashSet<string>(
-                fbNetwork.Elements(ns + "Input")
-                    .Select(i => (string?)i.Attribute("Name") ?? string.Empty),
-                StringComparer.Ordinal);
-            int stubY = 3200;
-            foreach (var decl in RecipeArrayDecls)
-            {
-                if (existingInputStubs.Contains(decl.Name)) { stubY += 100; continue; }
-                fbNetwork.Add(new System.Xml.Linq.XElement(ns + "Input",
-                    new System.Xml.Linq.XAttribute("Name", decl.Name),
-                    new System.Xml.Linq.XAttribute("x", "200"),
-                    new System.Xml.Linq.XAttribute("y", stubY.ToString(System.Globalization.CultureInfo.InvariantCulture)),
-                    new System.Xml.Linq.XAttribute("Type", "Data")));
-                stubY += 100;
-            }
-
-            // 4. DataConnections: outer-input -> ProcessEngine.<input>.
-            var existingDataConns = new HashSet<(string, string)>(
-                dataConnections.Elements(ns + "Connection")
-                    .Select(c => ((string?)c.Attribute("Source") ?? string.Empty,
-                                  (string?)c.Attribute("Destination") ?? string.Empty)));
-            foreach (var decl in RecipeArrayDecls)
-            {
-                var src = decl.Name;
-                var dst = "ProcessEngine." + decl.Name;
-                if (existingDataConns.Contains((src, dst))) continue;
-                dataConnections.Add(new System.Xml.Linq.XElement(ns + "Connection",
-                    new System.Xml.Linq.XAttribute("Source", src),
-                    new System.Xml.Linq.XAttribute("Destination", dst)));
-            }
-
-            doc.Save(fbtPath);
-            result.PatchesApplied.Add("Process1_Generic: 6 array InputVars + INIT With clauses + Input stubs + DataConnections to ProcessEngine");
-            MapperLogger.Info("[Deploy] Patched Process1_Generic.fbt for recipe-as-input architecture");
         }
 
         static void VerifyArraySizeConsistency(string eaeProjectDir, DeployResult result)
@@ -5406,22 +4883,12 @@ namespace CodeGen.Services
             //   into the .dfbproj's compile path.
             changed += DfbprojRegistrar.RegisterReference(dfbproj, "SE.IoX80",   "24.1.0.19");
 
-            // BX1 PHYSICAL-DEVICE LIBRARIES (2026-06-08, the actual topology-import fix).
-            // EAE's topology server resolves every Equipment's catalogReference
-            // (HMIB1X_V01.00_01.00, GenericEthernetIPFieldDevice_V01.00_01.00, …)
-            // against the solution's <Reference> libraries. The Demonstrator declared
-            // only 6 libraries; the reference SMC_Rig_Expo_withClamp declares 22 —
-            // and the BX1 HMIB1X + EtherNet/IP catalog types live in the MISSING ones
-            // (SE.HwCommon / SE.FieldDevice / SE.IoNet / Standard.IoEtherNetIP). With
-            // the library unreferenced, importing an HMIB1X equipment fails the WHOLE
-            // topology with "Unable to import topology / verify file format / Internal
-            // Server Error" (the Workstation form imported only because its catalog WAS
-            // in a referenced library). Declaring the full reference set here makes the
-            // Demonstrator's library references identical to the working reference, so
-            // every catalog type resolves. Versions match the reference's exactly; all
-            // ship with EAE 24.1 (the reference uses them). Idempotent — existing refs
-            // are left alone. Also clears the log's "SE.HwCommon.SchneiderGreen not
-            // found" and the "SeqHeads/PhaseConnects not found" (SE.AppSequence) noise.
+            // BX1 physical-device libraries. EAE constraint: the topology server resolves every
+            // Equipment's catalogReference (HMIB1X_V01.00_01.00, GenericEthernetIPFieldDevice_V01.00_01.00,
+            // …) against the solution's <Reference> libraries, and the BX1 HMIB1X + EtherNet/IP catalog
+            // types live in SE.HwCommon / SE.FieldDevice / SE.IoNet / Standard.IoEtherNetIP; if any is
+            // unreferenced the WHOLE topology import fails ("Unable to import topology"). Declare the full
+            // reference set so every catalog type resolves. Idempotent — existing refs are left alone.
             changed += DfbprojRegistrar.RegisterReference(dfbproj, "SE.HwCommon",                  "24.1.0.19");
             changed += DfbprojRegistrar.RegisterReference(dfbproj, "SE.FieldDevice",               "24.1.0.31");
             changed += DfbprojRegistrar.RegisterReference(dfbproj, "SE.IoNet",                     "24.1.0.11");
