@@ -12,8 +12,7 @@ using static CodeGen.Translation.Process.Recipes.RecipeStateClassifier;
 namespace CodeGen.Translation.Process
 {
     /// <summary>
-    /// Phase 2 (revised again): emits six parallel arrays consumed by
-    /// ProcessRuntime_Generic_v1's ECC.
+    /// Emits six parallel recipe arrays consumed by ProcessRuntime_Generic_v1's ECC.
     ///
     /// Encoding: 1 = CMD, 2 = WAIT, 9 = END.
     ///
@@ -111,11 +110,6 @@ namespace CodeGen.Translation.Process
             }
             return map;
         }
-
-        // Legacy delegation — kept so any caller that still passes StationContents works,
-        // and so older test code links cleanly. Sensors-then-actuators is the same scheme.
-        public static StationComponentMap BuildComponentMap(StationContents contents)
-            => ProcessRecipeStGenerator.BuildComponentMap(contents);
 
         /// <param name="commandFromCondition">
         /// OPT-IN Station-2 path. When <c>false</c> (the default — Feed_Station /
