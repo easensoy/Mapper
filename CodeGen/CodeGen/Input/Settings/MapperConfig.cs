@@ -8,9 +8,9 @@ namespace CodeGen.Configuration
     {
         private const string ConfigFileName = "mapper_config.json";
 
-        // Route the Seven_State swivel (Bearing_PnP) to Five_State_Actuator_CAT when true. See
-        // INVARIANTS I-4 for the six sites that must agree. static readonly (not const) so the
-        // real-Seven_State branches gated on it stay live (const would make them CS0162 dead code).
+        // Route the Seven_State swivel (Bearing_PnP) to Five_State_Actuator_CAT when true. static
+        // readonly (not const) so the real-Seven_State branches gated on it stay live (const would
+        // make them CS0162 dead code).
         public static readonly bool StubSevenStateActuatorsAsFiveState = false;
 
         // Set true only by the StateTransitionTableForm preview. Chooses the Seven_State home-preamble
@@ -22,18 +22,9 @@ namespace CodeGen.Configuration
         public static bool RecipeRunOnce = true;
 
         // When true, every non-Cover recipe's END points back to step 0 (overrides RecipeRunOnce);
-        // false = each process runs ONCE and parks on its END row (the rig-proven Ground Truth,
-        // Demonstrator_20260617 WorkingEndtoEnd: Feed/Assembly/Disassembly END all self-loop).
-        //
-        // MUST STAY FALSE. Cyclic restart re-arms each recipe's step-0 trigger WAIT, and it was
-        // designed to rely on the engine's leftoverSuspect guard to HOLD that WAIT until a FRESH
-        // trigger. That guard was removed (check_wait is now pure level), so on END->0 a HELD level
-        // (e.g. Assembly's WAIT(PartAtAssembly==1) -- the part is not removed until the robot at the
-        // END of Disassembly) satisfies instantly -> Assembly re-fires and runs its shaft/bearing on
-        // the shared M580 volume WHILE Disassembly is still on it (robot vs shaft, bearing vs cover
-        // collisions). Run-once has no re-fire, so the handshake order (Feed -> Assembly -> hands off
-        // -> Disassembly -> parks) is collision-free for BOTH the clamp and no-clamp models. Re-enable
-        // ONLY with a real mutual-exclusion / fresh-trigger mechanism, never on the bare level engine.
+        // false = each process runs once and parks on its END row.
+        // Must stay false: cyclic restart re-fires each recipe's step-0 trigger on a held level and
+        // overlaps processes on shared actuators; re-enable only with a real mutual-exclusion mechanism.
         public static bool EnableCyclicRestart = false;
 
         // The recipe generator's auto-retract safety net runs only for these processes (the Feed_Station
@@ -45,30 +36,20 @@ namespace CodeGen.Configuration
         // engine stalls at step 0.
         public static bool EnableSevenStateHomePreamble = false;
 
-        // CENTRE-HOME OVERSHOOT FIX (2026-06-25, ENABLED per user request). The Centre-Home swivel
-        // reaches home by driving the OPPOSITE coil until the DI02 centre sensor trips, then
-        // DE-ENERGISING both coils. On a 3-position cylinder that VENTS when de-energised the arm coasts
-        // PAST centre and rests off-centre (Codex/rig: "between AtWork2 and home"). With this TRUE, the
-        // deployed CAT's 'atHome' algorithm instead HOLDS both coils (outputToWork1/2 := TRUE) so a
-        // cylinder WITH a mechanical mid-stop is driven into and held at centre (catches the overshoot)
-        // -- so Disassembly (homes from AtWork1) ends at the SAME centre as Assembly (homes from
-        // AtWork2). 'toHome' (the drive) is untouched; only the hold-at-centre changes. Bidirectional:
-        // set FALSE to restore the proven de-energise. SAFETY: if the cylinder has NO mid-stop, both-on
-        // drives toward an extreme instead -- test with the e-stop ready, abort if it heads toward Work2
-        // (then set FALSE and use the braking-pulse fallback). See PatchSwivelAtHomeBothCoils.
+        // When TRUE, the deployed CAT's 'atHome' algorithm HOLDS both coils (outputToWork1/2 := TRUE)
+        // so a Centre-Home swivel cylinder WITH a mechanical mid-stop is driven into and held at centre
+        // (catches the coast-past-centre overshoot); FALSE de-energises both coils at centre. 'toHome'
+        // (the drive) is untouched; only the hold-at-centre changes. SAFETY: if the cylinder has NO
+        // mid-stop, both-on drives toward an extreme instead. See PatchSwivelAtHomeBothCoils.
         public static bool SwivelHomeHoldBothCoils = false;
 
-        // CENTRE-HOME BRAKE (2026-06-26, gated; see PatchSwivelBrakeHome). When TRUE the centre-home
-        // swivel (Bearing_PnP) homes DIRECTLY from AtWork1 in Disassembly (the empty AtWork2 restage is
-        // dropped from the recipe) and the deployed CAT brakes it at centre: at the DI02 edge the 'atHome'
-        // algorithm REVERSES the driving coil for bearingPnpHomeBrakeMs (toward AtWork1, AWAY from the
-        // ejector) to arrest the coast, then de-energises. The brake is DIRECTIONAL -- it only reverses
-        // when homing from AtWork1 (outputToWork2 was driving); homing from AtWork2 (Assembly) still
-        // de-energises, so Assembly is unchanged. Errs SAFE: a longer pulse only pushes further toward
-        // AtWork1, never into the ejector. Default TRUE = the user's AtWork2 -> AtWork1 -> Home request.
-        // Set FALSE to revert to the proven empty-restage staging (homes from AtWork2, no brake); the
-        // ECC/CAT are force-refreshed so FALSE deploys the pristine de-energise home. RIG-TUNE the pulse
-        // via config.yaml bearingPnpHomeBrakeMs (longer = further toward AtWork1).
+        // When TRUE the centre-home swivel (Bearing_PnP) homes DIRECTLY from AtWork1 in Disassembly and
+        // the deployed CAT brakes it at centre: at the DI02 edge the 'atHome' algorithm REVERSES the
+        // driving coil for bearingPnpHomeBrakeMs (toward AtWork1, away from the ejector) to arrest the
+        // coast, then de-energises. The brake is directional (only when homing from AtWork1) so Assembly
+        // (homes from AtWork2) is unchanged, and errs safe (a longer pulse only pushes toward AtWork1).
+        // FALSE homes from AtWork2 with no brake. Rig-tune the pulse via config.yaml bearingPnpHomeBrakeMs.
+        // See PatchSwivelBrakeHome.
         public static bool SwivelBrakeHome = true;
 
         /// <summary>
@@ -80,31 +61,12 @@ namespace CodeGen.Configuration
         public static bool UnparkDisassembly = true;
 
         /// <summary>
-        /// SAFETY (Bearing_PnP <-> CoverPNP_Hr collision). Assembly_Station and Disassembly are two
-        /// concurrent M580 processes that SHARE the physical bearing_pnp and cover_hr actuators. With
-        /// only the Assembly->Disassembly handshake, the Assembly's NEXT cycle restarts and can drive
-        /// bearing_pnp into place WHILE Disassembly is still advancing cover_hr (and vice versa) -> the
-        /// swivel and the horizontal cover enter the same volume = collision. The cross-PLC interlock
-        /// that would guard the cover side (CoverPNP_Hr on BX1) is unsound on the BX1 evaluator (it
-        /// deadlocks / reads stale M580 state), so it ships RuleCount=0 -> nothing stops the cover.
-        /// When true, the two processes are made MUTUALLY EXCLUSIVE on M580 (reliable, no cross-PLC):
-        /// Disassembly publishes a "disassembly_done=7" idle sentinel at its row 0, and Assembly WAITs
-        /// on it (DisassemblyProcessId=7) right after its material gate -- so Assembly never starts a
-        /// cycle while Disassembly is mid-cycle. Combined with the existing within-recipe ordering
-        /// (bearing homes before the cover advances; cover homes before the handshake) and the explicit
-        /// bearing-clear WAIT before every cover_hr advance, bearing_pnp and cover_hr can never be
-        /// commanded into their collision states at the same time.
-        /// NOW FALSE (2026-07-01): the idle sentinel made Disassembly's recipe START with a CMD
-        /// (row 0 = disassembly_done=7). A fresh ProcessEngine processes a leading WAIT at startup but
-        /// does not publish a leading CMD, so the sentinel {DisassemblyProcessId,7} was never emitted and
-        /// Assembly's disassemblyClear WAIT(DisassemblyProcessId,7) hung forever -> the clamp never fired
-        /// ("Assembly doesn't trigger after Feed"). The rig-proven Ground Truth (Demonstrator_20260617
-        /// WorkingEndtoEnd) has NO sentinel: Assembly runs straight from the material gate to the clamp,
-        /// and Assembly->Disassembly serialization is carried by the existing one-way handshake (Assembly
-        /// publishes assembly_handshake_done=7 at the end; Disassembly WAITs on it before coverRemove) PLUS
-        /// the within-recipe bearing_pnp=0 clear-gate before every cover_hr advance -- both independent of
-        /// this flag, so the collision safety stands. Leave FALSE to match the Ground Truth; only set TRUE
-        /// again if a *published* idle sentinel is wired (a leading WAIT, not a leading CMD).
+        /// Assembly_Station and Disassembly are concurrent M580 processes sharing the physical
+        /// bearing_pnp and cover_hr. FALSE (current): serialized by the one-way handshake (Assembly
+        /// publishes assembly_handshake_done=7; Disassembly WAITs on it before coverRemove) plus the
+        /// within-recipe ordering + the bearing-clear WAIT before every cover_hr advance. TRUE would
+        /// add a mutual-exclusion idle sentinel; only re-enable it wired as a leading WAIT, since a
+        /// fresh ProcessEngine does not publish a leading CMD.
         /// </summary>
         public static bool SerializeAssemblyDisassembly = false;
 
@@ -138,14 +100,8 @@ namespace CodeGen.Configuration
         /// overwrite its result. This flag suppresses those overwrites so the data-driven recipe stands.
         /// The walk derives the MOTION only; the cross-station handoffs the twin can't express (the
         /// Feed→Assembly material gate and the Assembly↔Disassembly handshake) are injected around it by
-        /// DataDrivenHandoffInjector, so the derived recipe carries the SAME WAIT(matgate) start and
-        /// assembly_handshake_done/WAIT(17,7) handshake the proven hardcoded recipe has — just over
-        /// motion read straight from the corrected Control.xml. Default reverted to FALSE: the derived
-        /// Disassembly did not complete on the rig (its cross-PLC handshake + cover chain need proving),
-        /// which left the centre-home swivel (Bearing_PnP) parked at a work position — in CoverPNP_Hr's
-        /// path. The cross-PLC bearing_pnp↔cover_hr collision guard (M580↔BX1) can't be trusted, so the
-        /// safe state is the rig-proven hardcoded recipe that reliably homes the swivel. Flip TRUE again
-        /// only after the derived Disassembly is verified end-to-end on the rig.
+        /// DataDrivenHandoffInjector. FALSE (current) keeps the hardcoded recipes; the derived
+        /// Disassembly is not yet verified end-to-end on the rig.
         /// </summary>
         public static bool DataDrivenRecipes = false;
 
@@ -235,44 +191,24 @@ namespace CodeGen.Configuration
         public string M262LogicalNetworkName { get; set; } = "DeviceNetwork_1";
 
         /// <summary>
-        /// IPV4 address of the M580 controller on the rig network. Written into
-        /// the M580 Equipment JSON the Topology emitter produces, on the
-        /// seGmac0 endpoint. Without a real IP (i.e. the prior hard-coded
-        /// "0.0.0.0" placeholder) EAE's Deploy &amp; Diagnostic tab refuses to
-        /// list the device — the M262 in the same project IS listed despite
-        /// having the same "00000000-0000-0000-0000-000000000000" domain UUID
-        /// because its IP is concrete, so the IP is the discriminator.
-        /// Default matches the reference SMC_Rig_Expo_withClamp rig wiring.
+        /// IPV4 address of the M580 controller, written into the M580 Equipment JSON's seGmac0 endpoint.
+        /// EAE constraint: a device with no concrete IP is not listed in Deploy &amp; Diagnostic, so this
+        /// must be a real address, not a placeholder.
         /// </summary>
         public string M580TargetIp { get; set; } = DeviceConfig.Current.M580.TargetIp;
 
         /// <summary>
-        /// BroadcastDomain UUID the M580 seGmac0 IP-Address endpoint binds to.
-        /// Mapper used to emit the all-zeros NOCONF UUID here so EAE left the
-        /// device on "no broadcast domain" — but that hides the Logical Network
-        /// / Subnet / Gateway columns in EAE's hardware property editor, and the
-        /// user expects the M580 panel to read "Default Network / 192.168.0.0 /
-        /// 255.255.255.0 / 192.168.0.254" matching the Workstation NIC and the
-        /// BroadcastDomain_Default Network.json file that EAE 24.1 ships with
-        /// every fresh Demonstrator. Pin the M580 endpoint to the live
-        /// "Default Network" broadcast domain UUID
-        /// 2131fbdd-0a41-4e41-abfb-a14a5ca9218d (matches the value in
-        /// Topology/BroadcastDomain_Default Network.json on the rig). M262 is
-        /// intentionally left on NOCONF per user — don't touch the M262 file.
+        /// BroadcastDomain UUID the M580 seGmac0 endpoint binds to. Pinned to the live "Default Network"
+        /// domain (matches Topology/BroadcastDomain_Default Network.json) so EAE shows the Logical
+        /// Network / Subnet / Gateway columns. M262 is intentionally left on NOCONF — do not touch it.
         /// </summary>
         public string M580BroadcastDomainUuid { get; set; }
             = "2131fbdd-0a41-4e41-abfb-a14a5ca9218d";
 
         /// <summary>
-        /// Subnet base address the "Default Network" BroadcastDomain JSON
-        /// declares. Pinned to the reference SMC_Rig_Expo_withClamp value
-        /// (192.168.0.0/24) so EAE sees a byte-identical topology when the
-        /// user opens that solution to Take Ownership of the M580. The rig's
-        /// device-side IP (192.168.1.20) sits OUTSIDE this /24 — EAE tolerates
-        /// the mismatch (the reference ships this way and works), the connect
-        /// dialog just highlights the subnet/gateway rows in yellow. Default
-        /// follows reference; override if you commission a rig on a strictly
-        /// matching subnet later.
+        /// Subnet base address the "Default Network" BroadcastDomain JSON declares (192.168.0.0/24).
+        /// The device-side M580 IP (192.168.1.20) sits outside this /24; EAE tolerates the mismatch
+        /// (only highlights the subnet/gateway rows in the connect dialog).
         /// </summary>
         public string DefaultNetworkSubnetAddress { get; set; } = DeviceConfig.Current.DefaultNetwork.SubnetAddress;
 
@@ -282,14 +218,8 @@ namespace CodeGen.Configuration
         public string DefaultNetworkSubnetMask { get; set; } = DeviceConfig.Current.DefaultNetwork.SubnetMask;
 
         /// <summary>
-        /// Gateway address for the "Default Network" BroadcastDomain JSON.
-        /// Pinned to the reference SMC_Rig_Expo_withClamp value (192.168.0.254)
-        /// so the Demonstrator topology mirrors the SMC_Rig_Expo solution
-        /// exactly. The physical M580 reports 0.0.0.0 for its own gateway —
-        /// EAE flags this row yellow in the connect dialog but tolerates it
-        /// (the reference shipped this way and works). Default follows
-        /// reference; override only if you commission a rig with an actual
-        /// gateway set on the device.
+        /// Gateway address for the "Default Network" BroadcastDomain JSON (192.168.0.254). The physical
+        /// M580 reports 0.0.0.0 for its gateway; EAE flags the row but tolerates it.
         /// </summary>
         public string DefaultNetworkGateway { get; set; } = DeviceConfig.Current.DefaultNetwork.Gateway;
 
@@ -323,40 +253,20 @@ namespace CodeGen.Configuration
         public string BX1HostIp { get; set; } = DeviceConfig.Current.Bx1.HostIp;
 
         /// <summary>
-        /// ISOLATION (2026-06-08): emit the BX1 EtherNet/IP remote-I/O coupler
-        /// (Equipment_EtherNetIPDevice_1.json + its FDT Content) only when TRUE.
-        /// A DtmDeviceDEO forces EAE's FDT framework to LOAD an FdtProject.prj on
-        /// topology import; an FDT project copied verbatim from another solution can
-        /// make EAE's topology server throw an immediate 500 ("Unable to import
-        /// topology / Internal Server Error"). The BX1 HMIB1X login does NOT need
-        /// this device (it is the covers' physical I/O, a separate concern), so it
-        /// is held OUT by default until the HMIB1X import + login is confirmed
-        /// working. When FALSE the emitter also SWEEPS any previously-deployed copy
-        /// (equipment JSON + Content files + topologyproj registrations) so the
-        /// topology imports clean. Flip to TRUE once a DTM-import path is proven.
+        /// Emit the BX1 EtherNet/IP remote-I/O coupler (Equipment_EtherNetIPDevice_1.json + its FDT
+        /// Content). The BX1 softdpac's EtherNet/IP scanner in the .hcf references it; without the
+        /// topology device the physical-devices section is incomplete. When FALSE the emitter also
+        /// sweeps any previously-deployed copy so the topology imports clean.
+        /// EAE constraint: an FDT project copied verbatim from another solution can make the topology
+        /// server throw a 500 on import.
         /// </summary>
-        // 2026-06-09: re-enabled. The topology-import 500 was an ORPHANED WIRE
-        // (Wire_Wire 145.json → the dead Workstation NIC uuid …053), now auto-swept
-        // by TopologyNetworkEmitter.SweepOrphanWires — NOT this device. With that
-        // fixed + the SE.FieldDevice/Standard.IoEtherNetIP libraries referenced, the
-        // EtherNet/IP cover-I/O coupler imports cleanly, so it is emitted again (the
-        // BX1 softdpac's EtherNet/IP scanner in the .hcf references it; without the
-        // topology device the physical-devices section is incomplete).
         public bool EmitBx1EtherNetIpDevice { get; set; } = true;
 
         /// <summary>
-        /// Master gate for the BX1 EtherNet/IP cover-I/O broker (BX1_IO). When TRUE:
-        ///   (Stage 1) deploys PLC_RW_BX1 + changeEventM262_2 and instantiates the
-        ///     BX1_IO broker (id F6C04A4BA6FA8593) on the BX1 sysres + SubApp, wiring
-        ///     its INIT — so the .hcf EtherNet/IP symlinks (RES0.BX1_IO.EIP_Input_Word_1
-        ///     / _Output_Word_1) resolve instead of showing red/unresolved;
-        ///   (Stage 2) bridges the broker's word I/O to OUR ring-model covers'
-        ///     symlinks (RES0.&lt;cover&gt;.athome/atwork in; .OutputToWork/OutputToHome out)
-        ///     — no cover CAT changes, our Five_State_Actuator_CAT already exposes them;
-        ///   (Stage 3) a local BX1 cover pick/place cycle drives the covers.
-        /// FALSE = today's working compile (no broker). The BX1 EtherNet/IP cover-I/O broker is
-        /// wholly separate from the cover stateRprtCmd ring — the broker bridges physical I/O
-        /// words; the ring carries process state.
+        /// Deploy the BX1 EtherNet/IP cover-I/O broker (BX1_IO, PLC_RW_BX1 + changeEventM262_2) so the
+        /// .hcf EtherNet/IP word symlinks resolve, bridge the broker's I/O words to the covers'
+        /// athome/atwork/OutputTo* symlinks, and drive the local cover cycle. The broker (physical I/O
+        /// words) is separate from the cover stateRprtCmd ring (process state).
         /// </summary>
         public bool DeployBx1IoBroker { get; set; } = true;
 
@@ -366,51 +276,30 @@ namespace CodeGen.Configuration
         /// (Bx1IoBrokerInjector.EmbedCoverBridgeInComposite generates them from the cover↔bit
         /// map at deploy time), so the generated BX1 sysres/syslay carries ONLY the single
         /// <c>BX1_IO</c> instance — no BX1IO_Sense_*/BX1IO_Coil_*/BX1_IO_Cycle FBs.
-        /// FALSE = the proven EXTERNAL bridge: Bx1IoBrokerInjector injects the 6 symlink FBs
-        /// + E_DELAY into the resource (the path verified live at EIP_Output_Word=16#0004).
-        /// BX1-only — M262/M580 unaffected. The one EAE-runtime unknown the internalized path
-        /// rests on is whether a SYMLINKMULTIVAR with an ABSOLUTE cross-instance NAME
-        /// (BX1_RES.CoverPNP_Vr.OutputToWork) resolves from INSIDE a composite type; flip to
-        /// FALSE + clean-rebuild to restore the external path if it doesn't.
+        /// FALSE (current) = the proven EXTERNAL bridge: Bx1IoBrokerInjector injects the 6 symlink FBs
+        /// + E_DELAY into the resource. BX1-only — M262/M580 unaffected. EAE-runtime unknown for the
+        /// internalized path: whether a SYMLINKMULTIVAR with an ABSOLUTE cross-instance NAME
+        /// (BX1_RES.CoverPNP_Vr.OutputToWork) resolves from INSIDE a composite type.
         /// </summary>
-        // 2026-06-26: flipped to FALSE (external bridge) — the internalized absolute-symlink path
-        // (BX1_RES.CoverPNP_Vr.OutputToWork inside PLC_RW_BX1) is the rig-unproven one; reverted to
-        // the external BX1IO_Sense_*/BX1IO_Coil_*/BX1_IO_Cycle FBs that were verified at 16#0004.
         public bool Bx1BridgeInsideComposite { get; set; } = false;
 
         /// <summary>
-        /// SAFETY (default TRUE). Inserts the <c>Bx1CoverFailsafe</c> safe-start gate into the
-        /// deployed <c>PLC_RW_BX1</c> broker. On every deploy / cold / warm start the broker forces
-        /// CoverPNP_Hr to HOME (ToWork=0, ToHome=1) and the Vr/gripper coils off, and holds that until
-        /// the Hr at-home sensor is TRUE, then passes the live cover coils through. So while the BX1
-        /// logic RUNS cover_hr can NEVER auto-energise Work on deploy/login/restart (the swivel-collision
-        /// hazard) and is actively driven home if it was left at Work. NOTE: this is a START / run-time
-        /// gate only — it does NOT act on EAE Clean/STOP/fault (logic stops, no FB writes the output
-        /// word). It is therefore NOT a full equivalent of the single-acting M580 clamp, which falls home
-        /// mechanically on de-energise; the double-acting cover HOLDS its last coupler output when
-        /// stopped. Homing it while STOPPED needs the TM3BC coupler ToHome fallback (word 16#0002), a
-        /// setting on the coupler's own embedded web server (192.168.1.210), outside EAE/the Mapper.
-        /// BX1-only; M580/M262 I/O untouched.
-        /// Set FALSE to revert to the raw broker (one rebuild) only if the gate is shown to misbehave.
+        /// SAFETY (default TRUE). Inserts the <c>Bx1CoverFailsafe</c> safe-start gate into the deployed
+        /// <c>PLC_RW_BX1</c> broker: on every deploy/cold/warm start the broker forces CoverPNP_Hr HOME
+        /// (ToWork=0, ToHome=1) + Vr/gripper coils off and holds until the Hr at-home sensor is TRUE,
+        /// then passes the live coils through — so while the BX1 logic RUNS cover_hr can never
+        /// auto-energise Work (swivel-collision hazard). Run-time only: it does NOT act on EAE
+        /// Clean/STOP/fault. Hardware invariant: the double-acting cover holds its last coupler output
+        /// when stopped, so homing it while STOPPED needs the TM3BC coupler ToHome fallback (word
+        /// 16#0002) set on the coupler's own web server (192.168.1.210), outside EAE. BX1-only.
         /// </summary>
         public bool Bx1CoverSafeStart { get; set; } = true;
 
         /// <summary>
-        /// M262 resource name written into the .sysres root and the .sysdev's
-        /// &lt;Resource&gt; entry. Default "M262_RES" so the EAE Deploy &amp;
-        /// Diagnostic tree reads "M262 &gt; M262_RES" rather than the generic
-        /// Schneider default "RES0", making the device-target binding
-        /// self-evident in multi-runtime projects (the M580 + BX1 sysres are
-        /// equivalently named M580_RES / BX1_RES — see
+        /// M262 resource name written into the .sysres root and the .sysdev's &lt;Resource&gt; entry.
+        /// "M262_RES" so the EAE Deploy &amp; Diagnostic tree reads "M262 &gt; M262_RES" rather than the
+        /// generic "RES0" (M580/BX1 are equivalently M580_RES / BX1_RES — see
         /// Station2DeviceEmitter.M580ResourceName / BX1ResourceName).
-        ///
-        /// <para>An earlier attempt forced this to "RES0" on the hypothesis
-        /// that EAE 24.1's catalog templates rendered a phantom RES0 alongside
-        /// any custom-named sysres, surfacing "Device &lt;name&gt; contains 2
-        /// instances of Runtime.Management.EMB_RES_ECO" at compile. The real
-        /// root cause turned out to be a duplicate-Layer-ID .syslay stub
-        /// (handled by CompileCachePurger's sweep), not the resource name.
-        /// Per-PLC names are now safe and resumed.</para>
         /// </summary>
         public string ResourceName { get; set; } = "M262_RES";
 
@@ -448,74 +337,22 @@ namespace CodeGen.Configuration
         public string BX1HcfTemplatePath { get; set; } = string.Empty;
 
         /// <summary>
-        /// When TRUE, the simulator pipeline collapses the entire SMC rig
-        /// (Feed_Station + Assembly_Station + Disassembly + Robot orchestrator)
-        /// into a SINGLE resource (one SIM device, one sysres, one syslay).
-        /// All 4 Processes, all 13 actuators and all 4 sensors live on one
-        /// flat FBNetwork with a single CaSBus init chain and a single
-        /// stateRptCmd ring. No cross-device SIFB channels, no M580/BX1
-        /// sysdev/hcf, no commdesc.xml. Cross-process handshakes that the
-        /// hardware path drops (because Feed_Station/HandShake waits on
-        /// Disassembly/handshake which lives on a different PLC) are
-        /// preserved here by wiring Process[i].state_update directly into
-        /// Process[j].state_change on the shared canvas.
-        ///
-        /// <para>The hardware path (Button 2 / btnTestStation1) ignores this
-        /// flag — the Feed Station slice must regenerate byte-identical to
-        /// today's working output. Nothing sets this flag TRUE today; it is
-        /// retained as inert config (default FALSE) so the hardware path stays
-        /// stable. The behaviour described above is what the simulator pipeline
-        /// WOULD do if it were ever re-enabled.</para>
-        ///
-        /// <para>Bearing_PnP (a 13-state branched actuator) is stubbed with
-        /// Five_State_Actuator_CAT when this flag is on, with an activity
-        /// warning that the assembly/disassembly branch selection is
-        /// approximated — the rest of the system still generates and runs.</para>
-        /// </summary>
-        public bool SimulatorFullSystem { get; set; } = false;
-
-        /// <summary>
-        /// Emit the Process recipe as one <c>Recipe : ARRAY OF RecipeStep</c>
-        /// struct input instead of the six parallel arrays (StepType,
-        /// CmdTargetName, CmdStateArr, Wait1Id, Wait1State, NextStep) — on the
-        /// HARDWARE / Test Runtime path, not just the simulator. The exact same
-        /// machinery the simulator already uses (DeployRecipeStepDatatype +
-        /// NormalizeProcess1RecipeArrays + NormalizeProcessRuntimeRecipeArrays +
-        /// BuildProcessFbParameters useRecipeStruct) is driven by
-        /// <c>(SimulatorFullSystem || UseRecipeStruct)</c>, so the FB interface,
-        /// the engine ST and the instance parameter stay in lock-step. The
-        /// RecipeStep struct's CmdTargetName is STRING[150] (not the simulator's
-        /// old STRING[15]) so long names like 'coverpnp_gripper' don't overflow.
-        /// Default TRUE: runtime and simulator both use the single RecipeStep
-        /// array input. Recipe content/ordering is generated upstream; the
-        /// carrier mechanism stays stable.
+        /// Emit the Process recipe as one <c>Recipe : ARRAY OF RecipeStep</c> struct input instead of
+        /// the six parallel arrays. Drives DeployRecipeStepDatatype + the Normalize*RecipeArrays +
+        /// BuildProcessFbParameters so the FB interface, engine ST and instance parameter stay in
+        /// lock-step. CmdTargetName is STRING[150] so long names (coverpnp_gripper) do not overflow.
         /// </summary>
         public bool UseRecipeStruct { get; set; } = true;
 
-        // ============================================================
-        // MQTT event-driven state publishing (no-loss fix)
-        // ------------------------------------------------------------
-        // The OPC UA / WebSocket HMI paths sit downstream of the runtime
-        // sampler (200 ms M262/BX1, 100 ms M580), so brief states (ToWork=1,
-        // AtWork=2, ToHome=3, AtHomeEnd=4) shorter than the sample interval
-        // are aliased out and never reach the client. MQTT_PUBLISH is a
-        // function block inside the scan: it fires on the actuator's pst_out
-        // the same scan the state changes, before any sampler, so nothing is
-        // lost. These fields drive the single shared MQTT_CONNECTION the
-        // Mapper injects; every embedded MQTT_PUBLISH binds to it by matching
-        // ConnectionID value (no wire between them).
-        // ============================================================
+        // MQTT event-driven state publishing. MQTT_PUBLISH fires in-scan on the actuator's pst_out,
+        // before any HMI sampler, so brief states are not aliased out. These fields drive the single
+        // shared MQTT_CONNECTION; every embedded MQTT_PUBLISH binds to it by matching ConnectionID.
 
         /// <summary>
-        /// Master opt-in for the MQTT mechanism: ONE MqttConn (MQTT_CONNECTION) at the top level + the
-        /// FORMATTER (MqttStateFormatter) + PUBLISH (MQTT_PUBLISH) EMBEDDED INSIDE each CAT
-        /// (PatchCatMqttPublish). NO standalone bridge — the per-component MqttFmt_/MqttPub_ bridge was
-        /// deleted 2026-06-16 (it cluttered the syslay); the embedded-CAT mechanism is the only one.
-        /// DEFAULT TRUE (2026-06-16): the user wants MQTT on, and a
-        /// mapper_config.json that OMITS this key was silently defaulting it to false at runtime (the
-        /// repo-root config lacks the key) — which is why no MQTT was generated. Defaulting TRUE means
-        /// a key-less config still enables MQTT; a config can still set it false explicitly to opt out.
-        /// If the broker is down the MqttConn just buffers/retries (harmless), so default-on is safe.
+        /// Master opt-in for MQTT: one MQTT_CONNECTION per resource + the FORMATTER (MqttStateFormatter)
+        /// and PUBLISH (MQTT_PUBLISH) embedded INSIDE each CAT (PatchCatMqttPublish). No standalone
+        /// bridge. Default TRUE (a key-less mapper_config.json still enables MQTT); a broker outage just
+        /// buffers/retries, so default-on is safe.
         /// </summary>
         public bool MqttPublishEnabled { get; set; } = true;
 
@@ -529,9 +366,7 @@ namespace CodeGen.Configuration
         ///     — a plain <c>mqtt://</c> URL is rejected UNLESS the device has
         ///     <c>Security → Insecure Application → Enable</c> set in EAE.</item>
         ///   <item><b>ReturnCode 100</b> ("TLS error") — an <c>mqtts://</c> URL forces a TLS
-        ///     handshake; against a PLAIN broker (mosquitto on 1883, no certfile) the handshake
-        ///     fails. (Earlier note claimed mqtts:// "uses plain transport on the port" — the
-        ///     RUNTIME disproved it: mqtts://…:1883 gave RC100, not RC0.)</item>
+        ///     handshake; against a PLAIN broker (mosquitto on 1883, no certfile) the handshake fails.</item>
         /// </list>
         /// Two clean paths to ReturnCode 0:
         /// <list type="number">
@@ -604,17 +439,9 @@ namespace CodeGen.Configuration
 
         /// <summary>
         /// MQTT_CONNECTION.KeepAlive in milliseconds. The MQTT keepalive ping
-        /// interval — the client tells the broker "I'm still here" this often,
-        /// and the broker disconnects clients that miss two periods. Default
-        /// 60000 ms = 60 s (standard MQTT 3.1.1 recommendation).
-        /// <para>Was left empty by Mapper for months because passing an INT
-        /// constant to the TIME port raised ERR_CAST_CONSTANT at compile
-        /// time. The fix is to format it as a TIME literal (<c>T#60000ms</c>)
-        /// via <c>SyslayBuilder.FormatTimeMs</c>, not as a bare int. Without
-        /// any value at all the M262 firmware applied <c>T#0s</c> as default,
-        /// which made the connection give up before the first SYN-ACK and
-        /// produced the rig symptom "broker never sees a connection attempt
-        /// from 192.168.1.10".</para>
+        /// interval. Default 60000 ms = 60 s. EAE constraint: this must reach the TIME port as a TIME
+        /// literal (<c>T#60000ms</c> via <c>SyslayBuilder.FormatTimeMs</c>), not a bare INT (raises
+        /// ERR_CAST_CONSTANT); an unset value defaults to T#0s and aborts the connect.
         /// </summary>
         public int MqttKeepAliveMs { get; set; } = 60000;
 
@@ -690,8 +517,7 @@ namespace CodeGen.Configuration
             TemplateLibraryPath = @"C:\VueOneMapper\Template Library",
             ActuatorTemplatePath = @"C:\Station1\IEC61499\Five_State_Actuator_CAT\Five_State_Actuator_CAT.fbt",
             SensorTemplatePath = @"C:\Station1\IEC61499\Sensor_Bool_CAT\Sensor_Bool_CAT.fbt",
-            // Process1_Generic.fbt is the new outer composite template (Phase 1+2);
-            // the legacy Process1_CAT.fbt is no longer deployed by Mapper.
+            // Process1_Generic.fbt is the outer composite process template.
             ProcessCATTemplatePath = @"C:\Station1\IEC61499\Process1_Generic\Process1_Generic.fbt",
             RobotTemplatePath = @"C:\SMC_Rig\IEC61499\Robot_Task_CAT\Robot_Task_CAT.fbt",
             RobotBasicTemplatePath = @"C:\SMC_Rig\IEC61499\Robot_Task_Core.fbt",
