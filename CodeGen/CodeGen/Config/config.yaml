@@ -3,13 +3,14 @@ recipeArraySize: 100    # Process1_Generic recipe arrays
 
 # Actuator settle times (ms) written into the syslay when Control.xml gives none.
 defaultMotionMs: 2000   # default toWork/toHome
-# BX1 cover P&P toWork/toHome. 2000ms (= the proven Ground-Truth value, fault watchdog 2x = 4000ms).
-# Reverted from 1000ms 2026-06-22: the covers are sensor-driven across the M580->BX1 ring + EtherNet/IP,
-# and a 2000ms fault window was too tight for that round-trip -> the cover faulted before AtWork -> stall.
+# BX1 cover P&P toWork/toHome. Fault watchdog is 2x this. The covers are sensor-driven across the
+# M580->BX1 ring + EtherNet/IP; too small a window faults before AtWork -> stall.
 coverMotionMs: 2000
-# CoverPnp_Gripper grip/release ack only (sensorless, timer-driven). Separate from coverMotionMs
-# so the gripper acknowledges faster without lowering the sensor-driven Hr/Vr cover axes.
-# 2026-06-25: lowered 1000->200 to remove the perceptible gripper delay (vacuum grip/release is
-# near-instant). Cannot be 0 — the sensorless gripper needs the timer to report AtWork so the
-# recipe's WAIT gripper=2 satisfies. Raise slightly if the cover drops before the vacuum holds.
+# CoverPnp_Gripper grip/release ack (sensorless, timer-driven), separate from coverMotionMs so the
+# gripper acks faster. Must be > 0 so the timer reports AtWork and the recipe's WAIT gripper=2 satisfies.
 coverGripperAckMs: 200
+# Centre-home swivel (Bearing_PnP) Home reverse-brake pulse (ms), gated MapperConfig.SwivelBrakeHome.
+# At the DI02 centre edge the CAT reverses the driving coil (toward AtWork1, away from the ejector) to
+# arrest the home-drive coast, then de-energises. SAFE direction is UP: a longer pulse always errs
+# toward AtWork1 / away from the ejector. If the arm rests toward AtWork2, raise; toward AtWork1, lower.
+bearingPnpHomeBrakeMs: 160
