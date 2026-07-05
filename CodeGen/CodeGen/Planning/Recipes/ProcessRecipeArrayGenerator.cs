@@ -11,10 +11,7 @@ using static CodeGen.Translation.Process.Recipes.RecipeStateClassifier;
 
 namespace CodeGen.Translation.Process
 {
-    // Six parallel recipe arrays consumed by ProcessRuntime_Generic_v1's ECC.
-    // StepType encoding: 1 = CMD, 2 = WAIT, 9 = END.
-    // Wait1Id values MUST come from the same sensors+actuators SystemLayoutInjector emits as FB
-    // instances; out-of-scope conditions are skipped (nothing publishes their state on the ring).
+    // Six parallel recipe arrays for ProcessRuntime_Generic_v1's ECC. StepType 1=CMD/2=WAIT/9=END; Wait1Id from in-scope sensors+actuators (out-of-scope conditions skipped).
     public sealed class RecipeArrays
     {
         public List<int> StepType       { get; } = new();
@@ -71,8 +68,7 @@ namespace CodeGen.Translation.Process
             int processId = 10, bool commandFromCondition = false)
         {
             var arrays = new RecipeArrays();
-            // Step order MUST follow the transition chain, not State_Number (incrementally-built
-            // models leave State_Number=0 on later states, which OrderBy would sort to the front).
+            // Step order follows the transition chain, not State_Number (incrementally-authored models leave State_Number=0).
             var states = OrderStatesByTransitionChain(process.States);
             foreach (var line in BuildTransitionTable(process.States, states))
                 arrays.TransitionTable.Add(line);
@@ -96,7 +92,6 @@ namespace CodeGen.Translation.Process
                     LookupComponent(kv.Key, allComponents) is { } c &&
                     (NameEquals(c.Name, "Feeder") || NameEquals(c.Name, "Pusher"))).Value;
 
-            // Disassembly gets its reverse recipe directly; other same-PLC-gated processes park below.
             if (MapperConfig.UnparkDisassembly && !MapperConfig.DataDrivenRecipes &&
                 string.Equals((process.Name ?? string.Empty).Trim(), "Disassembly",
                     StringComparison.OrdinalIgnoreCase))
@@ -130,8 +125,7 @@ namespace CodeGen.Translation.Process
                 return arrays;
             }
 
-            // TEST ISOLATION: when RecipeTestActuatorAllowlist targets this process, restrict the
-            // recipe to those actuators (every other actuator's CMD/WAIT is parked). Null = no restriction.
+            // TEST ISOLATION: restrict this process's recipe to RecipeTestActuatorAllowlist (others parked); null = no restriction.
             HashSet<string>? testActuatorAllowlist = null;
             if (!MapperConfig.SimulatorRecipeMode &&
                 MapperConfig.RecipeTestActuatorAllowlist != null &&
@@ -156,8 +150,7 @@ namespace CodeGen.Translation.Process
             foreach (var state in states)
                 classifications.Add(ClassifyState(state, allComponents, arrays, scopedRegistry, commandFromCondition, testActuatorAllowlist));
 
-            // Row layout: skipped states contribute RowCount=0; the StateID->firstRow map covers only
-            // surviving states; NextStep to a skipped state falls forward via stateIdToFallForwardRow.
+            // Skipped states contribute RowCount=0; NextStep to a skipped state falls forward via stateIdToFallForwardRow.
             var stateIdToFirstRow = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             int rowIndex = 0;
             for (int i = 0; i < states.Count; i++)
@@ -206,7 +199,7 @@ namespace CodeGen.Translation.Process
                         arrays.CmdStateArr.Add(c.CmdState);
                         arrays.Wait1Id.Add(0);
                         arrays.Wait1State.Add(0);
-                        arrays.NextStep.Add(arrays.StepType.Count);   // → our own WAIT row
+                        arrays.NextStep.Add(arrays.StepType.Count);
 
                         arrays.StepType.Add(StepType.Wait);
                         arrays.CmdTargetName.Add(string.Empty);
@@ -226,14 +219,11 @@ namespace CodeGen.Translation.Process
                         break;
 
                     case ClassKind.End:
-                        // Unreachable: terminals are RowCount=0 and skipped above. The single END is
-                        // only the appended final row (ValidateSingleEndMarker rejects a mid-array END).
                         break;
                 }
             }
 
-            // Degenerate case — every source state skipped: emit a single END so the engine has a
-            // recipe to halt on (empty arrays would crash bounds checks).
+            // Every source state skipped: emit a single END (empty arrays would crash bounds checks).
             if (arrays.StepType.Count == 0)
             {
                 arrays.Warnings.Add(
@@ -251,10 +241,7 @@ namespace CodeGen.Translation.Process
                 return arrays;
             }
 
-            // AUTO-RETRACT (safety): any actuator advanced (CmdState=1) but never retracted (CmdState=3)
-            // gets a retract+wait-athome pair inserted after its own atwork WAIT, so it homes before the
-            // recipe proceeds (a stranded-atwork actuator is a rig collision hazard). Scoped to
-            // MapperConfig.AutoRetractProcesses (default Feed_Station); others run verbatim from the twin.
+            // AUTO-RETRACT (safety, AutoRetractProcesses-scoped): advanced-but-never-retracted actuator gets a retract+wait-athome pair after its atwork WAIT (stranded-atwork = collision).
             if (MapperConfig.AutoRetractProcesses != null &&
                 MapperConfig.AutoRetractProcesses.Any(p =>
                     string.Equals((p ?? string.Empty).Trim(),
@@ -275,11 +262,11 @@ namespace CodeGen.Translation.Process
                     if (arrays.StepType[i] != StepType.Cmd) continue;
                     var tgt = (arrays.CmdTargetName[i] ?? string.Empty).Trim();
                     if (tgt.Length == 0) continue;
-                    if (arrays.CmdStateArr[i] == 1)                    // toWork
+                    if (arrays.CmdStateArr[i] == 1)
                     {
                         if (advanced.Add(tgt)) advancedOrder.Add(tgt);
                     }
-                    else if (arrays.CmdStateArr[i] == 3)               // toHome
+                    else if (arrays.CmdStateArr[i] == 3)
                     {
                         retracted.Add(tgt);
                     }
@@ -289,9 +276,8 @@ namespace CodeGen.Translation.Process
 
                 if (stranded.Count > 0)
                 {
-                    // Insert each stranded actuator's retract+wait-athome pair right after its own
-                    // atwork WAIT (inserting 2 rows at p rebases every NextStep value >= p by +2).
-                    foreach (var act in stranded)               // advance order
+                    // Inserting 2 rows at p rebases every NextStep value >= p by +2.
+                    foreach (var act in stranded)
                     {
                         actuatorNameToId.TryGetValue(act, out var actId);
 
@@ -302,7 +288,7 @@ namespace CodeGen.Translation.Process
                                 string.Equals(
                                     (arrays.CmdTargetName[i] ?? string.Empty).Trim(),
                                     act, StringComparison.OrdinalIgnoreCase))
-                                advCmdIdx = i;                  // keep last
+                                advCmdIdx = i;   // keep last
 
                         int atworkWaitIdx = -1;
                         if (advCmdIdx >= 0)
@@ -315,7 +301,6 @@ namespace CodeGen.Translation.Process
 
                         if (atworkWaitIdx < 0)
                         {
-                            // Shape not recognised — append the retract at the end (actuator still homes).
                             atworkWaitIdx = arrays.StepType.Count - 1;
                             arrays.Warnings.Add(
                                 $"[Recipe] auto-retract for '{act}': atwork WAIT not " +
@@ -331,7 +316,6 @@ namespace CodeGen.Translation.Process
                                 arrays.NextStep[i] += 2;
                         if (origTarget >= insertAt) origTarget += 2;
 
-                        // retract CMD (toHome) → its own wait-athome
                         arrays.StepType.Insert(insertAt, 1);
                         arrays.CmdTargetName.Insert(insertAt, act);
                         arrays.CmdStateArr.Insert(insertAt, 3);
@@ -339,8 +323,7 @@ namespace CodeGen.Translation.Process
                         arrays.Wait1State.Insert(insertAt, 0);
                         arrays.NextStep.Insert(insertAt, insertAt + 1);
 
-                        // WAIT athome must target the stable AtHomeInit=0, not the transient AtHomeEnd=4
-                        // (the ECC overwrites 4->0 in one tick, so waiting on 4 parks the engine forever).
+                        // WAIT athome targets stable AtHomeInit=0, not transient AtHomeEnd=4 (waiting on 4 parks the engine forever).
                         arrays.StepType.Insert(insertAt + 1, 2);
                         arrays.CmdTargetName.Insert(insertAt + 1, string.Empty);
                         arrays.CmdStateArr.Insert(insertAt + 1, 0);
@@ -359,18 +342,15 @@ namespace CodeGen.Translation.Process
                 }
             }
 
-            // Append the single final END row (StepType=9 must appear ONLY here).
+            // Single final END (StepType=9 only here).
             arrays.StepType.Add(StepType.End);
             arrays.CmdTargetName.Add(string.Empty);
             arrays.CmdStateArr.Add(0);
             arrays.Wait1Id.Add(0);
             arrays.Wait1State.Add(0);
-            arrays.NextStep.Add(0);   // engine never reads NextStep after StepType=9
+            arrays.NextStep.Add(0);
 
-            // HOME-FIRST PREAMBLE (safe-start): prepend, per commanded actuator, a "CMD Home -> WAIT
-            // home" so the cycle starts from a known all-home state. DISABLED BY DEFAULT (follow the
-            // twin — the bearing Pick command already handles whatever position the swivel boots in;
-            // flip EnableSevenStateHomePreamble to restore).
+            // HOME-FIRST preamble (EnableSevenStateHomePreamble, default off): prepend "CMD Home -> WAIT home" per commanded actuator for a known all-home start.
             if (MapperConfig.EnableSevenStateHomePreamble)
             {
                 var homeOrder = new List<(string name, int id, int homeCmd)>();
@@ -384,26 +364,23 @@ namespace CodeGen.Translation.Process
                         string.Equals((c.Name ?? string.Empty).Trim(), tgt,
                             StringComparison.OrdinalIgnoreCase));
                     if (comp == null) continue;
-                    // Home ONLY the Seven_State swivel (it boots parked at a work position). Five_State
-                    // actuators boot home; a redundant home CMD would be a no-op the engine waits on forever.
+                    // Home ONLY the Seven_State swivel (boots at a work position); a Five_State home CMD would be a no-op the engine waits on forever.
                     if (!IsSevenStateCommandable(comp)) continue;
                     if (!scopedRegistry.TryGetValue((comp.ComponentID ?? string.Empty).Trim(), out var id))
                         continue;
-                    homeOrder.Add((tgt, id, 5));   // Seven_State Home = state_val 5, settles AtHomeInit=0
+                    homeOrder.Add((tgt, id, 5));   // Home = state_val 5, settles AtHomeInit=0
                 }
 
                 if (homeOrder.Count > 0)
                 {
                     int rowsPerHome = MapperConfig.SimulatorRecipeMode ? 2 : 3;
                     int shift = rowsPerHome * homeOrder.Count;
-                    // Rebase every NextStep by `shift` EXCEPT the END row's own (must stay 0, else its
-                    // END->END self-loop walks CurrentStep off into the cycle rows).
+                    // Rebase every NextStep by shift EXCEPT the END row's own (must stay 0).
                     for (int i = 0; i < arrays.NextStep.Count; i++)
                         if (arrays.StepType[i] != StepType.End)
                             arrays.NextStep[i] += shift;
 
-                    // Rig proof waits on the physical AtHome pulse (6) first so a blank state_table can't
-                    // false-pass; sim stays at 0 (its synthetic swivel boots settled with no AtHome pulse).
+                    // Rig waits on the physical AtHome pulse (6) first so a blank state_table can't false-pass; sim boots settled -> 0.
                     int sevenHomePreambleProofWait = MapperConfig.SimulatorRecipeMode ? 0 : 6;
 
                     int pos = 0;
@@ -431,7 +408,7 @@ namespace CodeGen.Translation.Process
                             arrays.CmdTargetName.Insert(pos, string.Empty);
                             arrays.CmdStateArr.Insert(pos, 0);
                             arrays.Wait1Id.Insert(pos, id);
-                            // Rig-only second WAIT on the settled AtHomeInit=0 after the AtHome pulse.
+                            // Rig-only second WAIT on settled AtHomeInit=0 after the AtHome pulse.
                             arrays.Wait1State.Insert(pos, 0);
                             arrays.NextStep.Insert(pos, pos + 1);
                             pos++;
@@ -447,8 +424,7 @@ namespace CodeGen.Translation.Process
                 }
             }
 
-            // DataDrivenRecipes on: keep the generic walk + inject only the cross-station handoffs the
-            // model can't express. Off: the hardcoded recipe overwrites the walk for Assembly_Station.
+            // DataDrivenRecipes: on = generic walk + injected handoffs; off = hardcoded AssemblyRecipe overwrites the walk.
             if (!MapperConfig.DataDrivenRecipes)
                 AssemblyRecipe.Apply(process, arrays, allComponents);
             else
@@ -457,26 +433,23 @@ namespace CodeGen.Translation.Process
                 DataDrivenHandoffInjector.InjectDisassembly(process, arrays, allComponents);
             }
 
-            // RecipeRunOnce (default ON): point the END row's NextStep at ITSELF so the engine parks
-            // after one cycle instead of looping. Done after the preamble shift so endIdx is final.
+            // END NextStep: EnableCyclicRestart -> 0 (loop to the trigger gate); else RecipeRunOnce -> self-loop (park). After the preamble shift so endIdx is final.
             if (arrays.StepType.Count > 0)
             {
                 int endIdx = arrays.StepType.Count - 1;
                 if (arrays.StepType[endIdx] == StepType.End)
                 {
                     if (MapperConfig.EnableCyclicRestart)
-                        // CYCLIC: END jumps to step 0 (the trigger gate), overriding run-once self-park.
                         arrays.NextStep[endIdx] = 0;
                     else if (MapperConfig.RecipeRunOnce)
-                        arrays.NextStep[endIdx] = endIdx;   // self-loop = park (run once)
+                        arrays.NextStep[endIdx] = endIdx;
                 }
             }
 
             ValidateProcessIdInvariant(arrays, processId);
             ValidateSingleEndMarker(arrays);
 
-            // Recipe-length guard: EAE silently truncates an over-long array literal (ArraySize=
-            // RecipeArraySize), so ProcessEngine would stall on StepType=0. Refuse rather than truncate.
+            // Refuse an over-long recipe: EAE silently truncates the array literal (ArraySize=RecipeArraySize) -> engine stalls on StepType=0.
             if (arrays.StepType.Count > RecipeArraySize)
                 throw new InvalidOperationException(
                     $"[Recipe] Recipe length {arrays.StepType.Count} exceeds template " +
@@ -523,10 +496,9 @@ namespace CodeGen.Translation.Process
 
             int afterHome = arrays.NextStep[homeWait];
 
-            // Every CMD flows through its OWN wait -- the Place CMD waits for AtWork2 before the
-            // gripper releases, proving the swivel is at place (no CMD may jump over its own WAIT).
-            arrays.NextStep[placeCmd] = placeWait;   // CMD -> its OWN wait (no skip)
-            arrays.NextStep[placeWait] = releaseCmd; // AtPlace settled -> release
+            // Every CMD flows through its OWN wait (Place CMD waits AtWork2 before the gripper releases — no CMD jumps its WAIT).
+            arrays.NextStep[placeCmd] = placeWait;
+            arrays.NextStep[placeWait] = releaseCmd;
             arrays.NextStep[releaseCmd] = releaseWait;
             arrays.NextStep[releaseWait] = homeCmd;
             arrays.NextStep[homeCmd] = homeWait;
@@ -683,7 +655,7 @@ namespace CodeGen.Translation.Process
 
         private static void ValidateSingleEndMarker(RecipeArrays arrays)
         {
-            // StepType=9 must appear EXACTLY once and ONLY at the final row (else the ECC halts early).
+            // StepType=9 exactly once and only at the final row (else the ECC halts early).
             int n = arrays.StepType.Count;
             if (n == 0)
                 throw new InvalidOperationException("Recipe generator produced an empty StepType array.");
@@ -702,9 +674,7 @@ namespace CodeGen.Translation.Process
                     $"{arrays.StepType[n - 1]}, expected 9.");
         }
 
-        // True when the process's initial state gates on ANOTHER process on the SAME PLC (an
-        // unsatisfiable intra-PLC handoff — park it rather than free-run into a shared-actuator
-        // collision). Cross-PLC process gates return false (boot coordination; free-run to start).
+        // True when the initial state gates on another process on the SAME PLC (unsatisfiable intra-PLC handoff -> park, avoiding a shared-actuator collision); cross-PLC gates return false.
         private static bool ShouldParkOnIntraPlcProcessHandoff(
             VueOneComponent process, List<VueOneState> orderedStates,
             IReadOnlyList<VueOneComponent> allComponents)
@@ -719,12 +689,11 @@ namespace CodeGen.Translation.Process
                 var target = LookupComponent(cond.ComponentID, allComponents);
                 if (target == null) continue;
                 if (!string.Equals(target.Type, "Process", StringComparison.OrdinalIgnoreCase)) continue;
-                // Never park on a self-reference (a process gating on its own state).
                 if (string.Equals((target.ComponentID ?? string.Empty).Trim(),
                                   (process.ComponentID ?? string.Empty).Trim(),
-                                  StringComparison.OrdinalIgnoreCase)) continue;
+                                  StringComparison.OrdinalIgnoreCase)) continue;   // never park on a self-reference
                 if (SysresFbMirror.BucketFor(target.Name ?? string.Empty) == myPlc)
-                    return true;   // same-PLC upstream process -> park
+                    return true;   // same-PLC upstream -> park
             }
             return false;
         }
