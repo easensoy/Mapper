@@ -357,8 +357,9 @@ namespace CodeGen.Translation.Process.Recipes
             foreach (var proc in allComponents)
             {
                 if (!string.Equals(proc.Type, "Process", StringComparison.OrdinalIgnoreCase)) continue;
+                // Feed process runs on M262 or RevPi (byte-identical for M262 — nothing guesses RevPi there).
                 if (CodeGen.Translation.HcfSymbolIndex.NameBasedPlcGuess(proc.Name)
-                    != CodeGen.Translation.PlcAssignment.M262) continue;
+                    is not (CodeGen.Translation.PlcAssignment.M262 or CodeGen.Translation.PlcAssignment.RevPi)) continue;
                 foreach (var st in proc.States)
                 {
                     if (!StateNameSuggestsMotion(st.Name)) continue;
