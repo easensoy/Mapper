@@ -11,12 +11,8 @@ namespace CodeGen.Devices.Core
 {
     public static class Station2WireEmitter
     {
-        // ── Station-2 structural anchors. The M580 carries the full
-        //    Assembly_Station slice (Station + Process + Terminator); the BX1
-        //    carries only the cover pick-and-place actuators + sensor with NO
-        //    Station/Process/Terminator of its own in this increment, so its
-        //    anchors are all null and EmitForResource gives it just the INIT
-        //    fan-out + the report ring among the BX1 components.
+        // M580 carries the full Assembly_Station slice; BX1 has no
+        // Station/Process/Terminator (null anchors -> INIT fan-out + report ring only).
         private static readonly ResourceWireEmitter.ResourceAnchors M580Anchors = new(
             Label:        "M580",
             AreaFb:       null,                 // Area lives on the M262 only
@@ -25,7 +21,6 @@ namespace CodeGen.Devices.Core
             TerminatorFb: "Stn2_Term",
             HmiAdapterWires: new[]
             {
-                // Station2 faceplate; no Area on this resource so no Area ring.
                 new ResourceWireEmitter.Wire("Station2_HMI.StationHMIAdptrOUT", "Station2.StationHMIAdptrIN"),
             });
 
@@ -37,15 +32,6 @@ namespace CodeGen.Devices.Core
             TerminatorFb: null,
             HmiAdapterWires: Array.Empty<ResourceWireEmitter.Wire>());
 
-        /// <summary>
-        /// Wires the deployed M580 + BX1 sysres FBNetworks (each located by
-        /// device Type) with the SAME proven topology core as the M262, using
-        /// each PLC's own structural anchors. Additive — does NOT touch the
-        /// M262 sysres or the shared application syslay. The M580 gets the full
-        /// init chain + CaS station chain + report ring; the BX1 (no Station FB)
-        /// gets the init fan-out + report ring only. Returns true if at least
-        /// one resource was located and wired.
-        /// </summary>
         public static void EmitStation2Resources(MapperConfig cfg,
             SystemInjector.BindingApplicationReport report)
         {
@@ -84,8 +70,8 @@ namespace CodeGen.Devices.Core
                 var synced = SysresFbMirror.SyncProcessRecipesFromSyslay(cfg.ActiveSyslayPath, bx1);
                 if (synced > 0)
                     report.Missing.Add($"[Wire][BX1] synced {synced} Process recipe(s) from syslay to sysres");
-                // Sweep any leftover Cover_Station FB (from an old BX1-local deploy) out of the BX1
-                // sysres before wiring; ResourceWireEmitter would otherwise re-splice it by type-scan.
+                // Sweep any leftover Cover_Station FB before wiring; ResourceWireEmitter
+                // would otherwise re-splice it by type-scan.
                 SweepCoverStationFromSysres(bx1, report);
                 ResourceWireEmitter.EmitForResource(cfg, bx1, BX1Anchors, report);
                 paramSynced = SysresFbMirror.SyncMirroredFbParametersFromSyslay(cfg.ActiveSyslayPath, bx1);
@@ -98,12 +84,8 @@ namespace CodeGen.Devices.Core
             else report.Missing.Add("[Wire][BX1] skipped, BX1 sysres not found");
         }
 
-        /// <summary>
-        /// Removes a stale <c>Cover_Station</c> Process FB (and every connection that names
-        /// it) from a BX1 sysres so the retired scaffold cannot be re-discovered and re-wired
-        /// by <see cref="ResourceWireEmitter.EmitForResource"/>. Idempotent — a no-op when the
-        /// FB is absent. The recipe/wiring for the covers now lives on M580's Assembly_Station.
-        /// </summary>
+        // Removes a stale Cover_Station Process FB + its connections from a BX1 sysres so
+        // ResourceWireEmitter.EmitForResource cannot re-discover and re-wire it. Idempotent.
         private static void SweepCoverStationFromSysres(string sysresPath,
             SystemInjector.BindingApplicationReport report)
         {
@@ -120,7 +102,7 @@ namespace CodeGen.Devices.Core
 
                 var fbs = net.Elements().Where(e => e.Name.LocalName == "FB" &&
                     string.Equals((string?)e.Attribute("Name"), target, StringComparison.Ordinal)).ToList();
-                if (fbs.Count == 0) return;   // nothing deployed — no-op
+                if (fbs.Count == 0) return;
                 foreach (var fb in fbs) fb.Remove();
 
                 int conns = 0;
