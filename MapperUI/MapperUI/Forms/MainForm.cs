@@ -29,12 +29,10 @@ namespace MapperUI
         MapperConfig? _mapperConfig;
         List<VueOneComponent> _loadedComponents = new();
         List<ComponentValidationRow> _validationRows = new();
-        // In-session Device-column overrides (component name -> device). Display only for now:
-        // the generation pipeline still reads the canonical ComponentRegistry. Honouring an
-        // override in generation (and the RevPi target) is a deliberate follow-up.
+        // In-session Device-column overrides (component name -> device); display only —
+        // generation still reads the canonical ComponentRegistry.
         readonly Dictionary<string, string> _deviceOverrides = new(StringComparer.OrdinalIgnoreCase);
-        // True while the grid is being (re)populated, so the CellValueChanged handler ignores
-        // the programmatic value assignments and only reacts to genuine user edits.
+        // True while the grid is being (re)populated, so CellValueChanged ignores programmatic writes.
         bool _populatingGrid;
         SystemXmlReader? _lastReader;
         DebugConsoleForm? _debugConsole;
@@ -50,18 +48,14 @@ namespace MapperUI
             Timeout = TimeSpan.FromMinutes(10),
         };
 
-        // Components in scope for the Test Runtime button. Feed Station
-        // (M262) + Assembly Station (M580 + BX1).
+        // Components in scope for the Test Runtime button: Feed Station (M262) + Assembly (M580 + BX1).
         static readonly HashSet<string> _allowedInstances = new(StringComparer.OrdinalIgnoreCase)
         {
-            // Station 1 (M262) — Feed_Station Process
+            // Station 1 (M262) — Feed_Station
             "Feeder", "Checker", "Transfer",
             "PartInHopper", "PartAtChecker",
 
-            // Station 2 (M580) — Assembly_Station core
-            // Bearing_PnP — the 13-state PARALLEL+ALTERNATIVE branched actuator
-            // (assembly + disassembly sweep). Routed via ResolveActuatorFBType /
-            // validator below.
+            // Station 2 (M580) — Assembly_Station
             "Bearing_PnP",
             "Bearing_Gripper",
             "Shaft_Hr", "Shaft_Vr", "Shaft_Gripper",
@@ -74,14 +68,9 @@ namespace MapperUI
             "TopCoverSenosr",
         };
 
-        /// <summary>
-        /// Vacuum-driven gripper instances (suction cups, single coil, no
-        /// athome/atwork sensor pair). Reference SMC_Rig_Expo_withClamp maps
-        /// CoverGripper to Vacuum_Gripper_CAT.fbt; bearing/shaft grippers are
-        /// mechanical fingers and use Five_State_Actuator_CAT instead.
-        /// Detection is by exact name since Control.xml Type=Robot does not
-        /// distinguish vacuum from mechanical.
-        /// </summary>
+        // Vacuum-driven grippers (suction, single coil, no athome/atwork pair) route to
+        // Vacuum_Gripper_CAT; mechanical grippers use Five_State. Detected by exact name since
+        // Control.xml Type=Robot doesn't distinguish them.
         static readonly HashSet<string> _vacuumGripperNames = new(StringComparer.OrdinalIgnoreCase)
         {
             "CoverPnp_Gripper",
@@ -434,9 +423,7 @@ namespace MapperUI
             }
             catch (Exception ex)
             {
-                // Never let the State-Transition Table take down MapperUI with an unhandled popup.
-                // Surface the real cause (and the missing file name, if it's a FileNotFound) so it
-                // can be fixed, instead of the generic "Unhandled exception" dialog.
+                // Surface the real cause (incl. a missing file name) instead of an unhandled popup.
                 var fnf = ex as System.IO.FileNotFoundException
                           ?? ex.InnerException as System.IO.FileNotFoundException;
                 ShowError(
@@ -511,20 +498,12 @@ namespace MapperUI
             }
         }
 
-        /// <summary>
-        /// Re-runs the M262 stack AFTER the syslay has been (re)written by
-        /// SystemInjector. This is mandatory because the upstream order is:
-        ///   1. DeployUniversalTemplatesAsync -> M262SysdevEmitter.Emit (mirrors FBs to .sysres)
-        ///   2. PrepareDemonstratorForGeneration -> CLEANS .sysres, wiping the mirror
-        ///   3. GenerateStation1TestSyslay -> writes new .syslay only
-        /// Without this re-run after step 3, .sysres ends up empty and the .hcf
-        /// pin symlinks blank, leaving every FB unmapped on the EAE canvas.
-        /// </summary>
+        // MANDATORY re-run of the M262 stack AFTER the syslay is (re)written: Prepare cleans the
+        // .sysres (wiping the earlier FB mirror), so without this the .sysres ends up empty and the
+        // .hcf pin symlinks blank, leaving every FB unmapped on the EAE canvas.
         async Task FinalizeM262StackAsync()
         {
-            // Trust-preservation guard. Evaluated once up-front so both the
-            // sysdev and topology branches see the same decision even if the
-            // sysdev gets touched mid-flow.
+            // Evaluated once up-front so the sysdev and topology branches see the same decision.
             bool m262DeviceExists = await Task.Run(() =>
                 M262SysdevEmitter.M262SysdevAlreadyExists(Cfg()));
 
@@ -551,13 +530,9 @@ namespace MapperUI
             {
                 AppendActivity($"[M262][Error] sysdev emit: {ex.Message}");
             }
-            // Topology emit always runs. The trust binding lives in
-            // solutionData (CsConfHash + CertThumbprint), which the emitter
-            // now preserves byte-for-byte if already present. Equipment JSON
-            // carries only visual device placement on Physical Views and
-            // MUST be (re)written every run, otherwise the M262dPAC never
-            // appears on the canvas after a Demonstrator wipe — even if a
-            // .sysdev with the right GUID is already on disk.
+            // Topology always runs: the trust binding (solutionData) is preserved if present, but
+            // Equipment JSON (visual placement) MUST be re-written every run or the M262dPAC never
+            // appears on the canvas after a Demonstrator wipe.
             try
             {
                 if (!string.IsNullOrEmpty(sysdevId))
@@ -581,9 +556,7 @@ namespace MapperUI
             if (m262DeviceExists)
                 AppendActivity("[Device] M262 sysdev preserved (trust binding intact)");
 
-            // Station 2 — M580 + BX1 sysdev + sysres + HCF copy + Topology
-            // Equipment JSON. New per-PLC artefacts modelled on
-            // SMC_Rig_Expo_withClamp's reference layout. Idempotent re-runs.
+            // Station 2 — M580 + BX1 sysdev + sysres + HCF copy + Topology Equipment JSON. Idempotent.
             try
             {
                 var stn2 = await Task.Run(() => Station2DeviceEmitter.EmitAll(Cfg()));
@@ -601,14 +574,9 @@ namespace MapperUI
                 AppendActivity($"[Stn2][Error] Station 2 emit: {ex.Message}");
             }
 
-            // Purge EAE's per-device compile cache (IEC61499\bin\,
-            // IEC61499\obj\, snapshot.xml). EAE caches compile state
-            // structurally — when a sysres is renamed or a stale sysres is
-            // removed, the cache still records the OLD layout and surfaces
-            // stale "Device contains 2 instances of EMB_RES_ECO"-class errors
-            // even after the disk is clean. EAE's own Clean button does not
-            // flush these. Runs early so the subsequent emitters write into a
-            // freshly-clean cache.
+            // Purge EAE's per-device compile cache (bin/obj/snapshot.xml): it caches the OLD layout
+            // structurally and surfaces stale "2 instances of EMB_RES_ECO"-class errors that EAE's own
+            // Clean doesn't flush. Runs early so later emitters write into a clean cache.
             try
             {
                 var purge = await Task.Run(() => CodeGen.Devices.Core.CompileCachePurger.Purge(Cfg()));
@@ -621,11 +589,8 @@ namespace MapperUI
                 AppendActivity($"[Topology][Error] cache purge: {ex.Message}");
             }
 
-            // Folders.xml registration — register M580 + BX1 sysdev GUIDs in
-            // the SystemDevice Root folder. EAE seeds Solution Explorer's
-            // SystemDevice node + Deploy & Diagnostic enumeration from this
-            // file; a sysdev that's not listed here gets silently dropped from
-            // D&D even with a valid sysdev + Equipment JSON + dfbproj entry.
+            // Folders.xml — register M580 + BX1 sysdev GUIDs; a sysdev not listed here is silently
+            // dropped from EAE's Solution Explorer + Deploy & Diagnostic even if otherwise valid.
             try
             {
                 var fx = await Task.Run(() => CodeGen.Devices.Core.FoldersXmlEmitter.Register(Cfg()));
@@ -637,10 +602,8 @@ namespace MapperUI
                 AppendActivity($"[Topology][Error] Folders.xml register: {ex.Message}");
             }
 
-            // BroadcastDomain JSON — pin the Default Network subnet + gateway
-            // to the live rig values (cfg.DefaultNetworkSubnetAddress / Mask /
-            // Gateway). The M580 endpoint binds to this domain so a mismatch
-            // shows red in EAE's connect-to-device verification dialog.
+            // BroadcastDomain JSON — pin the Default Network subnet/gateway to the live rig values; the
+            // M580 endpoint binds this domain, so a mismatch shows red in EAE's connect dialog.
             try
             {
                 var bd = await Task.Run(() => CodeGen.Devices.Core.BroadcastDomainEmitter.Emit(Cfg()));
@@ -652,17 +615,10 @@ namespace MapperUI
                 AppendActivity($"[Topology][Error] BroadcastDomain emit: {ex.Message}");
             }
 
-            // Topology self-consistency guard (RIG path). Station2DeviceEmitter just
-            // wrote Equipment_BX1.json, whose softdpac container binds to the
-            // softdpacDeviceNet domain (db72f221 = DeviceNetwork_1). That domain is
-            // NOT one of the always-emitted ones (Default Network / NoConf), so
-            // without a BroadcastDomain_DeviceNetwork_1.json on disk the BX1 Equipment
-            // points at a DANGLING domain UUID and EAE rejects the WHOLE topology
-            // import ("Unable to import topology / verify file format / Internal
-            // Server Error"). EnsureReferencedDomains scans every Equipment_*.json and
-            // creates + registers any referenced-but-undeclared domain at
-            // 192.168.1.0/24 (matching the reference's DeviceNetwork_1). The sim path
-            // already ran this; the rig path never did — that was the root cause.
+            // Topology self-consistency guard: the BX1 Equipment binds a non-default domain
+            // (DeviceNetwork_1); without its BroadcastDomain JSON on disk EAE rejects the whole
+            // topology import. EnsureReferencedDomains creates + registers any referenced-but-
+            // undeclared domain at 192.168.1.0/24.
             try
             {
                 var dom = await Task.Run(() =>
@@ -675,13 +631,9 @@ namespace MapperUI
                 AppendActivity($"[Topology][Error] domain consistency: {ex.Message}");
             }
 
-            // Strip stale sister-folder dfbproj <Content>/<None>/<Compile>
-            // entries — entries whose Include= references a hex-stem folder
-            // that no longer has a matching .sysres on disk. Without this
-            // step, EAE's Solution Integrity dialog lists every opcua.xml /
-            // offline.xml / opcuaclient.xml that used to live in those folders
-            // as a "missing project file" — confusing the user even when the
-            // sweep correctly removed the actual folders.
+            // Strip stale dfbproj <Content>/<None>/<Compile> entries whose Include= references a
+            // hex-stem folder with no matching .sysres on disk (else EAE Solution Integrity lists the
+            // orphaned opcua/offline/opcuaclient files as missing project files).
             try
             {
                 var eae = CodeGen.Devices.Core.EaeProjectLayout.DeriveEaeProjectRoot(Cfg());
@@ -698,13 +650,9 @@ namespace MapperUI
                 AppendActivity($"[Topology][Error] dfbproj stem sweep: {ex.Message}");
             }
 
-            // Topology network — emit Equipment_Switch_1.json + the Wire JSON
-            // files connecting M262 ↔ Switch_1 ↔ M580. Reference rig has all
-            // three PLCs cabled into one L2 switch on the Physical Views
-            // diagram; without these files the deployed Demonstrator shows
-            // every PLC icon floating in isolation with no declared path
-            // between them. Runs AFTER Station2DeviceEmitter so the M262 +
-            // M580 Equipment UUIDs the wires reference are already on disk.
+            // Topology network — Equipment_Switch_1.json + Wire JSON cabling M262 <-> Switch_1 <->
+            // M580 (else every PLC icon floats in isolation). Runs AFTER Station2DeviceEmitter so the
+            // M262/M580 Equipment UUIDs the wires reference are on disk.
             try
             {
                 var net = await Task.Run(() => CodeGen.Devices.Core.TopologyNetworkEmitter.Emit(Cfg()));
@@ -719,13 +667,9 @@ namespace MapperUI
                 AppendActivity($"[Topology][Error] network emit: {ex.Message}");
             }
 
-            // Station 2 — mirror the Station-2 FBs from the .syslay onto the
-            // M580/BX1 resources (each bucketed by M262SysdevEmitter.BucketFor)
-            // and emit the per-resource opcua.xml metadata folder beside each
-            // sysres. Runs AFTER Station2DeviceEmitter.EmitAll has written the
-            // sysdev/sysres shells. Without this the M580/BX1 .sysres files stay
-            // empty and the "{resId}/" folder is missing, so EAE's Solution
-            // Integrity reports "Repair Instances" / "Missing Project Files".
+            // Mirror the Station-2 FBs from the syslay onto the M580/BX1 resources + emit the
+            // per-resource opcua.xml folder. Runs AFTER the sysdev/sysres shells exist; else the
+            // .sysres stay empty and EAE reports "Repair Instances" / "Missing Project Files".
             try
             {
                 var s2 = await Task.Run(() => Station2SysresMirror.EmitStation2Sysres(Cfg()));
@@ -736,9 +680,8 @@ namespace MapperUI
                 AppendActivity($"[Stn2][Error] sysres mirror: {ex.Message}");
             }
 
-            // Backfill the opcua.xml companion files EAE's Solution Integrity
-            // requires in every resource/companion folder (current + stale).
-            // Non-destructive sweep; only fills files that are missing.
+            // Backfill the opcua.xml companions EAE Solution Integrity requires in every resource
+            // folder. Non-destructive; only fills missing files.
             try
             {
                 var eae = CodeGen.Devices.Core.EaeProjectLayout.DeriveEaeProjectRoot(Cfg());
@@ -765,13 +708,9 @@ namespace MapperUI
                 AppendActivity($"[M262][Error] hcf patch: {ex.Message}");
             }
 
-            // M580 HCF — authoritative final pass. Copies the user-authored
-            // IO-folder M580IO.hcf verbatim into the deployed M580 sysdev folder
-            // (re-rooted to DeviceHwConfigurationItems with the resource ID).
-            // Runs AFTER Station2DeviceEmitter so it refills the .hcf even when
-            // DemonstratorWiper left a 169-byte empty shell or the emit-time copy
-            // was skipped because the template path was unresolved. The
-            // 'RES0.M580IO.<sym>' channel symlinks are preserved byte-for-byte.
+            // M580 HCF — authoritative final pass: copies the authored IO-folder M580IO.hcf verbatim
+            // (re-rooted with the resource ID). Runs AFTER Station2DeviceEmitter so it refills the .hcf
+            // even after a wipe left an empty shell. Channel symlinks preserved byte-for-byte.
             try
             {
                 var hcf = await Task.Run(() => M580HwConfigCopier.Copy(Cfg()));
@@ -784,12 +723,9 @@ namespace MapperUI
                 AppendActivity($"[M580][Error] hcf deploy: {ex.Message}");
             }
 
-            // BX1 HCF — authoritative final pass (same rationale as M580). The
-            // BX1IO.hcf is an EtherNet/IP scanner whose TM3 module input/output
-            // words route through single VTQWORD symlinks
-            // ('{resId}.{fb}.EIP_*_Word_1'); bit decoding lives inside the BX1
-            // SIFB, not the .hcf. Carried verbatim. Without this the BX1 device
-            // showed an empty hardware config after a wipe.
+            // BX1 HCF — authoritative final pass (same rationale as M580). Carried verbatim; the
+            // EtherNet/IP scanner's TM3 words route through VTQWORD symlinks and bit decoding lives
+            // inside the BX1 SIFB, not the .hcf.
             try
             {
                 var hcf = await Task.Run(() => BX1HwConfigCopier.Copy(Cfg()));
@@ -802,14 +738,9 @@ namespace MapperUI
                 AppendActivity($"[BX1][Error] hcf deploy: {ex.Message}");
             }
 
-            // Final dfbproj hygiene. After a device wipe the dfbproj can still
-            // reference per-resource EAE compile artifacts (opcua/offline/
-            // opcuaclient/symlink) that were deleted with the device folders —
-            // EAE's Solution Integrity then lists them as Missing Project Files.
-            // All device files (sysdev/sysres/hcf/Properties/Simulation.Binding)
-            // are written by now, so the only still-missing System files are those
-            // EAE-owned artifacts; strip their dangling refs (EAE regenerates +
-            // re-registers them on the next Build). Never touches the device files.
+            // Final dfbproj hygiene: after a wipe the dfbproj can still reference EAE-owned compile
+            // artifacts (opcua/offline/opcuaclient/symlink) deleted with the device folders. Strip
+            // their dangling refs (EAE regenerates them on Build); never touches the device files.
             try
             {
                 var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(Cfg());
@@ -829,15 +760,9 @@ namespace MapperUI
             }
         }
 
-        /// <summary>
-        /// Pre-flight note for Button 2. The Mapper now OWNS the M262 logical
-        /// device: when an M262 <c>.sysdev</c> already exists it is preserved
-        /// (trust binding kept); when it is ABSENT (e.g. right after Clean
-        /// Demonstrator) <see cref="M262SysdevEmitter"/> BOOTSTRAPS it from
-        /// scratch with the same sysdev GUID + resource id (so trust keyed by
-        /// the device GUID is preserved). No longer an abort — the user does
-        /// not hand-add the device in EAE. Always returns true; just logs.
-        /// </summary>
+        // The Mapper owns the M262 logical device: an existing .sysdev is preserved (trust binding
+        // kept), an absent one is bootstrapped with the same sysdev GUID + resource id. Always
+        // returns true; just logs.
         bool EnsureM262SysdevReady()
         {
             bool exists = false;
@@ -899,11 +824,9 @@ namespace MapperUI
                     path = Path.Combine(AppContext.BaseDirectory, path);
                 if (!File.Exists(path))
                 {
-                    // The configured copy (usually bin\Input\) can go missing if the Input folder is
-                    // rewritten (VueOne export) without a MapperUI rebuild to re-copy it. Do NOT proceed
-                    // silently — a missing IO-bindings xlsx means NO actuator athome/atwork/coil bindings,
-                    // so every Five_State sensor is unbound and the recipe can never confirm motion
-                    // ("nothing triggers"). Self-heal from the project source if we can find it, else fail loud.
+                    // A missing IO-bindings xlsx means NO actuator athome/atwork/coil bindings, so
+                    // every Five_State sensor is unbound and nothing triggers. Do NOT proceed silently:
+                    // self-heal from the project source if found, else fail loud.
                     var fileName = Path.GetFileName(path);
                     string? recovered = null;
                     var probe = new DirectoryInfo(AppContext.BaseDirectory);
@@ -994,9 +917,8 @@ namespace MapperUI
                 AppendActivity($"[Generate] Generating IEC 61499 code end-to-end (Feed · Assembly · Disassembly · covers) into Demonstrator at {syslayPath}...");
                 AppendActivity("[Test Runtime] RecipeStep data-array carrier active; physical IO/sensor wiring and rig HOME-FIRST recipe waits are active.");
 
-                // User directive: Generate first WIPES the Demonstrator (deep clean, same as the Clean
-                // button) then lays the fresh logic down under the hood — a brand-new-EAE-project state
-                // every Generate, so no stale FB / recipe / interlock can survive a regeneration.
+                // Generate first WIPES the Demonstrator (deep clean) then lays fresh logic down, so no
+                // stale FB / recipe / interlock survives a regeneration.
                 var wipe = await Task.Run(() => CodeGen.Services.DemonstratorWiper.Wipe(@"C:\Demonstrator"));
                 AppendActivity(
                     $"[Generate][Wipe] deep wipe: {wipe.FilesEmptied} canvas emptied, {wipe.FilesDeleted} FB-type file(s) deleted, " +
@@ -1007,10 +929,8 @@ namespace MapperUI
                 var cleanup = await Task.Run(() => injector.PrepareDemonstratorForGeneration(Cfg()));
                 LogCleanup(cleanup);
 
-                // Deploy templates after cleanup. The cleanup step deletes flat
-                // root-level Basic FB files such as FiveStateActuator.fbt; deploying
-                // before it lets the patched FiveState core disappear from the
-                // generated EAE project.
+                // Deploy templates AFTER cleanup: cleanup deletes flat root-level Basic FB files
+                // (e.g. FiveStateActuator.fbt), so deploying before it would drop the patched core.
                 await DeployUniversalTemplatesAsync();
 
                 var bindings = TryLoadBindings();
@@ -1020,22 +940,11 @@ namespace MapperUI
                 LogBindingsReport(report);
                 await FinalizeM262StackAsync();
 
-                // Patch the deployed M262 .hcf so EAE picks up the symbolic-link
-                // bindings on reload. Each rewritten pin lands in
-                // report.HcfPinAssignments which we mirror to the Activity panel
-                // as one '[Hcf] <pin> <- <value>' line. Skip reasons are already
-                // in report.Missing (logged by LogBindingsReport above) but we
-                // refresh the missing-tail here to surface the [Hcf] entries
-                // added by the patch itself.
-                // Emit the canonical event + data wires into the M262 sysres
-                // FBNetwork (init chain + adapter wires + Pusher I/O bindings).
-                // Without these, EAE deploys but nothing initialises and the
-                // pusher never moves.
+                // Emit the canonical event + data wires into the M262 sysres FBNetwork (init chain +
+                // adapter wires + Pusher I/O bindings); without these EAE deploys but nothing inits.
                 int wireCountBefore = report.Missing.Count;
                 await Task.Run(() => M262SysresWireEmitter.Emit(Cfg(), report));
-                // Layout grid is sysres-only — syslay coordinates left
-                // untouched so the user can lay out the application canvas
-                // freely without Mapper overwriting on every Button 2.
+                // Layout grid is sysres-only — syslay coordinates left untouched.
                 for (int i = wireCountBefore; i < report.Missing.Count; i++)
                 {
                     var line = report.Missing[i];
@@ -1043,25 +952,11 @@ namespace MapperUI
                         AppendActivity(line);
                 }
 
-                // Station 2 — wire the M580 + BX1 sysres FBNetworks with the
-                // same proven topology (init chain + CaS station chain + state
-                // report ring) using each PLC's own structural FBs. Additive:
-                // does NOT touch the M262 sysres or the shared syslay, so the
-                // M262 Feed-Station wiring above stays byte-identical. The M580
-                // gets the full chain (Station2/Assembly_Station/Stn2_Term); the
-                // BX1 has no Station FB this increment so it gets only the INIT
-                // fan-out + report ring among its cover actuators.
-                //
-                // FIRST re-mirror the Station-2 FBs from the freshly regenerated
-                // syslay onto the M580/BX1 sysres, so each component's CAT type is
-                // synced on EVERY Test Runtime (e.g. Bearing_PnP flipping
-                // Seven_State <-> Five_State). This path previously only RE-WIRED
-                // Station 2 and never re-mirrored the FBs, so the M580 Bearing_PnP
-                // kept a stale Type that mismatched the Five_State syslay -> EAE
-                // "Solution Integrity: Found References to Missing Instances:
-                // Bearing_PnP". The mirror MUST run before the wiring (it creates/
-                // updates the FBs the wiring connects). Same call the full-system
-                // path uses (~line 607).
+                // Station 2 — FIRST re-mirror the Station-2 FBs from the regenerated syslay onto the
+                // M580/BX1 sysres so each component's CAT type is synced every Test Runtime (e.g.
+                // Bearing_PnP flipping Seven_State <-> Five_State); a stale Type trips EAE's "Found
+                // References to Missing Instances". The mirror MUST run before the wiring (it creates
+                // the FBs the wiring connects).
                 try
                 {
                     var s2m = await Task.Run(() => Station2SysresMirror.EmitStation2Sysres(Cfg()));
@@ -1091,11 +986,9 @@ namespace MapperUI
                     AppendActivity($"[Wire][Stn2][Error] {ex.Message}");
                 }
 
-                // BX1 EtherNet/IP cover-I/O broker: instantiate BX1_IO
-                // (PLC_RW_BX1, id F6C04A4BA6FA8593) on the BX1 SubApp + sysres so the
-                // .hcf's EIP_Input/Output_Word_1 symlinks resolve. Runs after the
-                // Station-2 sysres mirror + wire emit so the cover FBs already exist.
-                // Gated; local to BX1, so the M580 run is unaffected.
+                // BX1 EtherNet/IP cover-I/O broker: instantiate BX1_IO (PLC_RW_BX1) on the BX1
+                // SubApp + sysres so the .hcf's EIP_Input/Output_Word_1 symlinks resolve. Runs after
+                // the Station-2 mirror/wire so the cover FBs exist. Gated; local to BX1.
                 if (Cfg().DeployBx1IoBroker)
                 {
                     try
@@ -1124,18 +1017,10 @@ namespace MapperUI
                         AppendActivity(line);
                 }
 
-                // Station 2 — bind the deployed M580 + BX1 .hcf channel symlinks
-                // (symbol binding only; wiring + recipes untouched). Runs LAST so
-                // it patches the deployed copy after M580HwConfigCopier.Copy /
-                // BX1HwConfigCopier.Copy (in FinalizeM262StackAsync above) wrote it
-                // and after EmitStation2Resources mirrored the Station-2 FBs onto
-                // the resources. Approach (B): the IO-bindings xlsx has no
-                // Station-2 pin rows, so we can't direct-bind channel→FB.port like
-                // M262; instead we unquote each symlink and re-align its resource
-                // head to the deployed sysres ID so EAE's Symbolic Link view treats
-                // it as a link (full resolution still needs the M580IO / BX1 EIP
-                // broker FB on the resource — logged by the binder). Does NOT touch
-                // the M262 HcfPatchService. Try/catch per spec.
+                // Station 2 — bind the deployed M580 + BX1 .hcf channel symlinks (symbol binding
+                // only). Runs LAST, after the HcfCopier + Station-2 mirror. The IO-bindings xlsx has
+                // no Station-2 pin rows, so instead of direct-binding channel->FB.port (as M262) each
+                // symlink is unquoted and its resource head re-aligned to the deployed sysres ID.
                 try
                 {
                     int bindBefore = report.Missing.Count;
@@ -1156,12 +1041,9 @@ namespace MapperUI
                     AppendActivity($"[HcfBind][Error] {ex.Message}");
                 }
 
-                // SPLIT-BRAIN GUARD: every deployed .hcf DI/DO binding MUST resolve to an FB + pin
-                // that actually exists on the SAME resource's sysres. A legacy symbolic name
-                // ('RES0.M262IO.x' / 'RES0.Robot_Pick_And_Place1.x') or a GUID triple pointing at an
-                // FB absent from the resource means the device I/O can never resolve. Validate the
-                // final generated tree and report every offending channel loudly so a regression can
-                // never ship silently.
+                // SPLIT-BRAIN GUARD: every deployed .hcf DI/DO binding MUST resolve to an FB + pin on
+                // the SAME resource's sysres; a legacy symbolic name or a GUID triple pointing at an
+                // absent FB never resolves. Validate the final tree and report loudly.
                 try
                 {
                     var eaeRoot = CodeGen.Devices.Core.EaeProjectLayout.DeriveEaeProjectRoot(Cfg());
@@ -1193,11 +1075,9 @@ namespace MapperUI
                     AppendActivity($"[Test Runtime][Sync][Warn] final sysres parameter sync failed: {ex.Message}");
                 }
 
-                // Sweep orphan .sysres shells. The device-create + .hcf-id-realignment path can leave a
-                // default-named "RES0" sysres (empty FBNetwork) under the OLD id once the active resource
-                // id switches to the .hcf ResourceId (e.g. BX1 78E9…) — an orphan EAE carries in its build
-                // cache. Runs LATE (after every device/hcf/mirror/wire step) so each device folder ends with
-                // exactly its live resource. No-op when the tree is already clean.
+                // Sweep orphan .sysres shells: the device-create + .hcf-id-realignment path can leave an
+                // empty "RES0" sysres under the OLD id once the active id switches to the .hcf
+                // ResourceId. Runs LATE so each device folder ends with exactly its live resource.
                 try
                 {
                     var eaeRootSweep = CodeGen.Devices.Core.EaeProjectLayout.DeriveEaeProjectRoot(Cfg());
@@ -1205,9 +1085,8 @@ namespace MapperUI
                         CodeGen.Devices.Core.EaeProjectLayout.SweepOrphanSysres(eaeRootSweep, AppendActivity));
                     if (swept > 0)
                         AppendActivity($"[Sysres][Sweep] removed {swept} orphan .sysres shell(s); EAE refreshes obj/System.hash on the next Build.");
-                    // Enforce EAE's "max 1 resource per device" at the file level — drops any stray
-                    // second <Resource> a sysdev accumulated during resource churn (the file-level guard
-                    // behind "Device M580 contains 2 instances of EMB_RES_ECO"). No-op on a clean tree.
+                    // Enforce EAE's "max 1 resource per device" at the file level (the guard behind
+                    // "Device M580 contains 2 instances of EMB_RES_ECO"). No-op on a clean tree.
                     var deduped = await Task.Run(() =>
                         CodeGen.Devices.Core.EaeProjectLayout.DedupeSysdevResources(eaeRootSweep, AppendActivity));
                     if (deduped > 0)
@@ -1218,14 +1097,10 @@ namespace MapperUI
                     AppendActivity($"[Sysres][Sweep][Warn] orphan sysres sweep failed: {ex.Message}");
                 }
 
-                // POST-SWEEP dfbproj strip. The orphan-sysres sweep above DELETES a stale .sysres FILE
-                // (e.g. the BX1 default-id 117867…/C9F2… shell left behind when the resource id realigned
-                // to the .hcf ResourceId 78E9…), but it does NOT touch the .dfbproj — so the now-FILELESS
-                // <Compile …\<oldId>.sysres> entry DANGLES and EAE Solution Integrity lists it as a
-                // "Missing Project File" (blocking the build). The early strip in Station2DeviceEmitter
-                // .EmitAll ran BEFORE the sweep (the file was still live then) so it kept the entry.
-                // Re-run the stale-stem strip HERE, AFTER the sweep, so every dfbproj sysres entry whose
-                // file no longer exists is removed; the live 78E9… entry (file present) stays.
+                // POST-SWEEP dfbproj strip: the orphan-sysres sweep deletes a stale .sysres FILE but
+                // not its <Compile …\<oldId>.sysres> dfbproj entry, which then dangles as a Missing
+                // Project File. Re-run the stale-stem strip AFTER the sweep so fileless entries go; the
+                // live entry stays.
                 try
                 {
                     var eaeRootStrip = CodeGen.Devices.Core.EaeProjectLayout.DeriveEaeProjectRoot(Cfg());
@@ -1242,9 +1117,8 @@ namespace MapperUI
                     AppendActivity($"[Sysres][Strip][Warn] post-sweep dfbproj strip failed: {ex.Message}");
                 }
 
-                // STRIP DEAD HOME-TIMER PARAMS. The two work-to-home E_DELAY timers in the
-                // centre-home CAT are dead: their EO feeds only ReturnToHomeHandler events the
-                // No_Sensor ECC ignores. Strip them deterministically here, after the mirror; the
+                // Strip the dead work1/work2ToHomeTime params: the centre-home CAT's two work-to-home
+                // E_DELAY timers feed only ReturnToHomeHandler events the No_Sensor ECC ignores. The
                 // CAT's InputVar default T#0s applies and the dead timer is harmless.
                 try
                 {
@@ -1261,13 +1135,10 @@ namespace MapperUI
                     AppendActivity($"[Sysres][TimerStrip][Warn] home-timer param strip failed: {ex.Message}");
                 }
 
-                // HARD syslay<->sysres<->hcf parity guard. The deployable per-device sysres MUST be a
-                // faithful projection of the syslay (the design canvas). If a Robot/PartAtAssembly FB,
-                // a process recipe, or a discharge hcf binding is on the syslay but missing/stale on the
-                // sysres, EAE deploys the OLD logic and the demo silently runs the wrong sequence. Surface
-                // it LOUDLY here (the HcfReferenceValidator above only proves bindings that EXIST resolve;
-                // this proves required FBs/recipes are PRESENT). A FAIL almost always means EAE held a
-                // sysres locked during the sync — close EAE and re-run Test Runtime.
+                // HARD syslay<->sysres<->hcf parity guard: the deployable sysres MUST be a faithful
+                // projection of the syslay; an FB/recipe/binding present on the syslay but missing on
+                // the sysres makes EAE deploy the OLD logic silently. A FAIL usually means EAE held a
+                // sysres locked during the sync — close EAE and re-run.
                 try
                 {
                     var eaeRoot = CodeGen.Devices.Core.EaeProjectLayout.DeriveEaeProjectRoot(Cfg());
@@ -1307,10 +1178,8 @@ namespace MapperUI
                     throw;
                 }
 
-                // MQTT connection matrix + impossible-config flags. Prints every generated
-                // MQTT_CONNECTION's URL / ConnectionID / ClientIdentifier / ValidateCert and flags
-                // configs that cannot reach ReturnCode 0 (mqtts:// to a plain port = RC100; plain
-                // mqtt:// = RC101 unless EAE "Insecure Application" is enabled on the device).
+                // MQTT connection matrix: prints each MQTT_CONNECTION's URL/ConnectionID/ClientId/
+                // ValidateCert and flags configs that cannot reach ReturnCode 0.
                 try
                 {
                     var eaeRootMqtt = CodeGen.Devices.Core.EaeProjectLayout.DeriveEaeProjectRoot(Cfg());
@@ -1329,9 +1198,8 @@ namespace MapperUI
                     AppendActivity($"[MQTT][Error] {ex.Message}");
                 }
 
-                // SAFETY: BX1 cover safe-start scanner guard. The CoverPNP_Hr safe-start only reaches
-                // the TM3BC coupler if the scanner carries the 192.168.1.210 device; warn loudly if the
-                // source is missing it (fatal) or the compiled EIPSCANNER2.xml is empty/stale (clean Build).
+                // SAFETY: BX1 cover safe-start reaches the TM3BC coupler only if the scanner carries the
+                // 192.168.1.210 device; warn loudly if the source is missing it or EIPSCANNER2.xml is empty.
                 try
                 {
                     var eaeRootScan = CodeGen.Devices.Core.EaeProjectLayout.DeriveEaeProjectRoot(Cfg());
@@ -1377,14 +1245,11 @@ namespace MapperUI
 
                 var demoRepo = @"C:\Demonstrator";
 
-                // EAE is intentionally NOT killed. If it has files open, individual
-                // file operations may fail with sharing-violation warnings — those are
-                // surfaced in the activity log; everything that can be wiped, is.
+                // EAE is intentionally NOT killed; any files it holds open surface as sharing-violation
+                // warnings in the activity log, and everything else is wiped.
 
-                // Step 1 — git reset (tracked → HEAD) + git clean (drop untracked).
-                // Only runs if the demonstrator dir is a git repo. Recreated EAE
-                // projects often aren't tracked under git — in that case skip
-                // the reset/clean and rely on DemonstratorWiper alone.
+                // Step 1 — git reset --hard + clean, only if the demonstrator dir is a git repo
+                // (recreated EAE projects often aren't; then rely on DemonstratorWiper alone).
                 if (Directory.Exists(Path.Combine(demoRepo, ".git")))
                 {
                     var (resetCode, resetOut) = await Task.Run(() => RunGit(demoRepo, "reset --hard"));
@@ -1400,8 +1265,7 @@ namespace MapperUI
                     AppendActivity($"[Clean] {demoRepo} is not a git repo — skipping git reset/clean. Wiper still runs.");
                 }
 
-                // Step 2 — deep wipe of FB types + canvas contents (HEAD has FBs in it; reset alone
-                // doesn't give us a fresh-project state). Topology/, General/, HMI/ are NOT touched.
+                // Step 2 — deep wipe of FB types + canvas contents. Topology/, General/, HMI/ untouched.
                 var report = await Task.Run(() => CodeGen.Services.DemonstratorWiper.Wipe(demoRepo));
                 foreach (var step in report.Steps) AppendActivity($"[Clean] {step}");
                 foreach (var w in report.Warnings) AppendActivity($"[Clean][!] {w}");
@@ -1412,10 +1276,8 @@ namespace MapperUI
                     $"{report.DfbprojEntriesRemoved} dfbproj entry/entries stripped, " +
                     $"{report.HwConfigFilesDeleted} HwConfiguration file(s) cleared.");
 
-                // After the wipe, run the syslay/sysres cleanup + M262 sysdev
-                // Resource-dedup step. The dedup lives in SystemInjector so the
-                // same [CleanDevice] logic runs on Button 1/2 — wiring it here
-                // means Clean Demonstrator gets it too without duplicating code.
+                // After the wipe, run the syslay/sysres cleanup + M262 sysdev Resource-dedup (shared
+                // with Generate via SystemInjector, so Clean gets it without duplicating code).
                 try
                 {
                     var injector = new SystemInjector();
@@ -1587,15 +1449,12 @@ namespace MapperUI
                     var vr = Validate(comp, validator, cfg);
                     _validationRows.Add(vr);
 
-                    // Device (PLC) assignment for this component (from the canonical registry,
-                    // unless the user overrode it this session via the Device dropdown).
-                    // Resource name (e.g. M262_RES) is EAE-internal and intentionally NOT shown.
+                    // Device (PLC) assignment from the registry, unless overridden this session.
                     var reg = CodeGen.Mapping.ComponentRegistry.Get(comp.Name);
                     string dev = _deviceOverrides.TryGetValue(comp.Name, out var ov)
                         ? ov
                         : (reg?.Plc.ToString() ?? "");
-                    // The Device cell is a combo; only its listed items are valid. An unmapped or
-                    // unknown device is stored as null (blank cell) to avoid a combo DataError.
+                    // Combo cell: an unmapped/unknown device is stored as null (blank) to avoid a DataError.
                     string devCell = (dev == "M262" || dev == "M580" || dev == "BX1" || dev == "RevPi") ? dev : null;
                     int idx = dgvComponents.Rows.Add(comp.Name, comp.Type, vr.TemplateName, devCell);
                     var row = dgvComponents.Rows[idx];
@@ -1721,11 +1580,8 @@ namespace MapperUI
             {
                 case "process": return Pass(comp, tName);
                 case "robot":
-                    // Type=Robot is Control.xml's *category* (manipulator), not a
-                    // template choice. Reference SMC_Rig_Expo_withClamp maps:
-                    //   CoverGripper            -> Vacuum_Gripper_CAT.fbt (suction)
-                    //   Bearing_Gripper / Shaft -> Five_State_Actuator_CAT.fbt (fingers)
-                    //   Robot_Pick_And_Place1   -> Robot_Task_CAT.fbt (full arm, 7 states)
+                    // Type=Robot is a category, not a template: vacuum gripper -> Vacuum_Gripper_CAT,
+                    // 5-state finger gripper -> Five_State, 7-state task arm -> Robot_Task_CAT.
                     if (_vacuumGripperNames.Contains(comp.Name))
                         return Pass(comp, "Vacuum_Gripper_CAT.fbt");
                     if (comp.States.Count == 5)
@@ -1735,15 +1591,9 @@ namespace MapperUI
                     return Fail(comp, "No template found",
                         $"Robot '{comp.Name}' has {comp.States.Count} states — expected 5 (gripper) or 7 (task arm)");
                 case "actuator":
-                    // Seven_State_Actuator_CAT routing for Bearing_PnP. The
-                    // branched 13-state pattern (assembly path PARALLEL out of
-                    // ReturnedHome + disassembly path ALTERNATIVE out of the same
-                    // state) collapses onto Seven_State's 7-state
-                    // ECC because the physical actuator has only three positions
-                    // (Pick, Place, Home) plus two work coils. Detection is by
-                    // IsBranchedSevenStateActuator (PARALLEL ∧ ALTERNATIVE on the
-                    // resting state) so the rule is name-agnostic — any future
-                    // 7+ state branched actuator routes the same way.
+                    // Bearing_PnP's branched 13-state pattern collapses onto Seven_State's 7-state ECC
+                    // (three positions + two coils). Detected name-agnostically via
+                    // IsBranchedSevenStateActuator (PARALLEL ∧ ALTERNATIVE on the resting state).
                     if (comp.States.Count == 7 || IsBranchedSevenStateActuator(comp))
                         return Pass(comp, "Seven_State_Actuator_CAT.fbt");
                     if (comp.States.Count == 4)
@@ -1781,19 +1631,8 @@ namespace MapperUI
         static ComponentValidationRow Fail(VueOneComponent c, string t, string r) =>
             new() { Component = c, TemplateName = t, IsValid = false, FailReason = r };
 
-        /// <summary>
-        /// Detects the 13-state "branched swivel" pattern used by Bearing_PnP:
-        /// the resting state (typically ReturnedHome) has at least one outgoing
-        /// PARALLEL transition AND at least one outgoing ALTERNATIVE transition,
-        /// each gated by a different Process condition. The PARALLEL chain runs
-        /// 7 main states (assembly: ReturnedHome → TurningPick → AtPick →
-        /// TurningPlace → Place → TurningHome → AtHome); the ALTERNATIVE chain
-        /// runs 6 reversed states (disassembly: TurningPick2 → AtPick2 →
-        /// TurningPlace2 → AtPlace2 → TurningHome2 → AtHome2). The physical
-        /// actuator has only three positions (Pick, Place, Home) plus two work
-        /// coils, so it fits Seven_State_Actuator_CAT regardless of how many
-        /// logical Control.xml states it carries.
-        /// </summary>
+        // True when a resting state has BOTH an outgoing PARALLEL and an outgoing ALTERNATIVE
+        // transition (the branched-swivel pattern that routes to Seven_State_Actuator_CAT).
         static bool IsBranchedSevenStateActuator(VueOneComponent comp)
         {
             foreach (var st in comp.States)
@@ -2019,8 +1858,7 @@ namespace MapperUI
 
         void dgvComponents_SelectionChanged(object sender, EventArgs e) { }
 
-        // Commit a Device combo selection immediately (on pick), so CellValueChanged fires
-        // without the user having to leave the cell.
+        // Commit a Device combo selection on pick so CellValueChanged fires without leaving the cell.
         void dgvComponents_CurrentCellDirtyStateChanged(object sender, EventArgs e)
         {
             if (dgvComponents.IsCurrentCellDirty &&
@@ -2028,12 +1866,10 @@ namespace MapperUI
                 dgvComponents.CommitEdit(DataGridViewDataErrorContexts.Commit);
         }
 
-        // A component with no canonical device shows a blank combo; ignore the formatting error
-        // that would otherwise pop for a value not in the combo's item list.
+        // A blank/unlisted combo value would raise a formatting error; swallow it.
         void dgvComponents_DataError(object sender, DataGridViewDataErrorEventArgs e) => e.ThrowException = false;
 
-        // The user changed a component's target Device via the dropdown. Record the override,
-        // refresh the summary counts, and log it. Display only for now — see _deviceOverrides.
+        // Record a Device dropdown override + refresh the summary. Display only — see _deviceOverrides.
         void dgvComponents_DeviceChanged(object sender, DataGridViewCellEventArgs e)
         {
             if (_populatingGrid || e.RowIndex < 0 || e.ColumnIndex != colDevice.Index) return;
@@ -2047,8 +1883,7 @@ namespace MapperUI
                 "(display only; generation still uses the canonical device map — re-assignment wiring is a follow-up).");
         }
 
-        // Recompute the per-device component counts and refresh the Mapping Information title
-        // (tracks the Device dropdown, incl. any in-session overrides).
+        // Recompute per-device counts and refresh the Mapping Information title.
         void RefreshDeviceSummary()
         {
             int cM262 = 0, cM580 = 0, cBx1 = 0, cRevPi = 0;
@@ -2068,9 +1903,8 @@ namespace MapperUI
                 + " mapped component(s)";
         }
 
-        // The designer anchors don't stretch the two body sections to the full window on this
-        // machine (a DPI/AutoScale artifact leaves a dead grey strip on the right). Size them to
-        // the client area explicitly on every resize so the existing sections always fill the form.
+        // Designer anchors don't stretch the body sections to full width on some DPI/AutoScale
+        // configs; size them to the client area explicitly on every resize.
         protected override void OnClientSizeChanged(EventArgs e)
         {
             base.OnClientSizeChanged(e);
