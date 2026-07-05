@@ -222,7 +222,7 @@ namespace CodeGen.Devices.BX1
                 var conn = dc.Elements("Connection").FirstOrDefault(c =>
                     (string?)c.Attribute("Destination") == "EIPOutput_Bits." + bit);
                 if (conn == null) return;
-                var src = (string?)conn.Attribute("Source");
+                var src = (string?)conn.Attribute("Source") ?? string.Empty;
                 conn.Remove();
                 dc.Add(new XElement("Connection", new XAttribute("Source", src),
                     new XAttribute("Destination", "CoverFailsafe." + fsIn)));
