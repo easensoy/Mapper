@@ -1383,25 +1383,13 @@ namespace CodeGen.Services
                     return;
                 }
 
-                // Remove matching elements via instance Remove() (no
-                // IEnumerable<XElement>.Remove() extension — this file has no
-                // `using System.Xml.Linq`). Returns true if anything was removed.
-                bool RemoveWhere(IEnumerable<System.Xml.Linq.XElement>? src,
-                    Func<System.Xml.Linq.XElement, bool> pred)
-                {
-                    if (src == null) return false;
-                    var hits = src.Where(pred).ToList();
-                    foreach (var h in hits) h.Remove();
-                    return hits.Count > 0;
-                }
-
                 bool changed = false;
 
                 foreach (var c in consts)
                 {
                     // Restore the wired interface: drop any baked InterlockManager param + re-add the
                     // VarDecl / INIT With / Input pin / DataConnection.
-                    changed |= RemoveWhere(interlock.Elements(ns + "Parameter"),
+                    changed |= RemoveElems(interlock.Elements(ns + "Parameter"),
                         p => (string?)p.Attribute("Name") == c.Name);
 
                     if (inputVars != null &&
