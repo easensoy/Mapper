@@ -1296,26 +1296,32 @@ namespace CodeGen.Translation
                 }
 
                 bool tele = config.UseTelemetryCat;
+                // The Feed controller's connection follows the Feed station onto M262 or RevPi (FB name +
+                // ClientIdentifier). ConnectionID stays the shared 'SMC' so the embedded MqttPub topic/
+                // payload is byte-for-byte unchanged. Byte-identical for M262 (suffix M262, ClientM262).
+                bool feedRevPi = MapperConfig.FeedStationController == FeedController.RevPi;
+                string feedSuffix = feedRevPi ? "RevPi" : "M262";
+                string feedClientId = feedRevPi ? config.MqttClientRevPi : config.MqttClientM262;
                 string bx1Name  = tele ? "Telemetry_BX1"  : "MqttConn";
-                string m262Name = tele ? "Telemetry_M262" : "MqttConn_M262";
+                string feedName = tele ? $"Telemetry_{feedSuffix}" : $"MqttConn_{feedSuffix}";
                 string m580Name = tele ? "Telemetry_M580" : "MqttConn_M580";
 
                 var mqttEntry = CodeGen.Mapping.ComponentRegistry.Get(bx1Name);
                 int bx1X = mqttEntry?.X ?? 29000;
                 int bx1Y = mqttEntry?.Y ?? 200;
-                // Each conn is routed to its own sysres via SysresFbMirror.BucketFor; BX1 bring-up is in BuildBx1Wiring, M262/M580 below.
+                // Each conn is routed to its own sysres via SysresFbMirror.BucketFor; BX1 bring-up is in BuildBx1Wiring, Feed/M580 below.
                 InjectMqttConn(bx1Name, config.MqttConnectionName, config.MqttClientId, bx1X, bx1Y);
-                InjectMqttConn(m262Name, config.MqttConnectionName, config.MqttClientM262,
+                InjectMqttConn(feedName, config.MqttConnectionName, feedClientId,
                     LayoutGrid.ColumnBaseX(PlcAssignment.M262), 200);
                 InjectMqttConn(m580Name, config.MqttConnectionName, config.MqttClientM580,
                     LayoutGrid.ColumnBaseX(PlcAssignment.M580), 200);
-                builder.AddEventConnection($"{m262Name}.INITO", $"{m262Name}.CONNECT");
+                builder.AddEventConnection($"{feedName}.INITO", $"{feedName}.CONNECT");
                 builder.AddEventConnection($"{m580Name}.INITO", $"{m580Name}.CONNECT");
-                builder.AddEventConnection("Area.INITO", $"{m262Name}.INIT");
+                builder.AddEventConnection("Area.INITO", $"{feedName}.INIT");
                 builder.AddEventConnection("Station2.INITO", $"{m580Name}.INIT");
                 report.Missing.Add(
                     $"[MQTT] {(tele ? "Telemetry" : "MQTT_CONNECTION")} injected per resource — BX1 " +
-                    $"(ClientId SMC_BX1) + M262 (SMC_M262) + M580 (SMC_M580), shared ConnectionID=" +
+                    $"(ClientId SMC_BX1) + Feed:{feedSuffix} ({feedClientId}) + M580 (SMC_M580), shared ConnectionID=" +
                     $"{config.MqttConnectionName} so each resource's embedded MqttPub binds locally; URL={brokerUrl}.");
             }
 
