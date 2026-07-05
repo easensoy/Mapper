@@ -7,7 +7,7 @@ namespace CodeGen.Translation.Process.Recipes
 {
     public static class RecipeComponentLookup
     {
-        public static VueOneComponent? LookupComponent(string componentId,
+        public static VueOneComponent? LookupComponent(string? componentId,
             IReadOnlyList<VueOneComponent> all)
         {
             if (string.IsNullOrEmpty(componentId)) return null;
