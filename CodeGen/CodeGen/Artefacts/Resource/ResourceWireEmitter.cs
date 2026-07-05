@@ -601,7 +601,13 @@ namespace CodeGen.Devices.Core
             {
                 var fname = (string?)frame.Attribute("Name") ?? string.Empty;
                 if (!FrameBucket.TryGetValue(fname, out var bucket)) continue;
-                var inZone = fbs.Where(f => SysresFbMirror.BucketFor(f.Name) == bucket).ToList();
+                // RevPi Feed FBs live in the M262 (Feed) zone frame — byte-identical for M262 (none guess RevPi).
+                var inZone = fbs.Where(f =>
+                {
+                    var b = SysresFbMirror.BucketFor(f.Name);
+                    if (b == PlcAssignment.RevPi) b = PlcAssignment.M262;
+                    return b == bucket;
+                }).ToList();
                 if (inZone.Count == 0) continue;
 
                 double minX = inZone.Min(f => f.X);
