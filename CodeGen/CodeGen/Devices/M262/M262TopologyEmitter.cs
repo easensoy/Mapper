@@ -15,13 +15,8 @@ namespace CodeGen.Devices.M262
         const string DefaultRuntimeUuid        = "11111111-2222-3333-4444-000000000030";
         const string RuntimeDeoTypeId          = "b0723d05-50bb-4c15-94a4-d8b5981bcb56";
 
-        /// <summary>
-        /// Zero UUID flag used by EAE Topology to mean "NOCONF" — the device's
-        /// IP endpoint is statically bound but not associated with any
-        /// BroadcastDomain. Both Ethernet endpoints (ETH1 + ETH2) point at
-        /// this UUID so the M262dPAC appears in Physical Views with its IP
-        /// but no DefaultNetwork / DeviceNetwork_1 association.
-        /// </summary>
+        // Zero UUID = EAE Topology "NOCONF": the IP endpoint is statically bound but not associated
+        // with any BroadcastDomain, so the M262dPAC shows its IP in Physical Views with no network.
         const string NoConfDomainUuid          = "00000000-0000-0000-0000-000000000000";
 
         public static TopologyEmitResult Emit(MapperConfig cfg, string sysdevId)
@@ -61,28 +56,21 @@ namespace CodeGen.Devices.M262
             var equipmentFile     = Path.Combine(topologyDir, "Equipment_M262dPAC_1.json");
             var solutionDataFile  = Path.Combine(topologyDir, $"{solutionId}.solutionData");
 
-            // Equipment JSON is the visual device placement on Physical Views.
-            // It carries no security/trust information so it is safe (and
-            // necessary) to (re)write every Test Runtime — otherwise the M262
-            // never appears on the canvas after the Demonstrator wipe.
+            // Equipment JSON (visual placement) carries no trust info, so it is safe and necessary to
+            // rewrite every Test Runtime — else the M262 never appears after the Demonstrator wipe.
             File.WriteAllText(equipmentFile, BuildEquipmentJson(cfg, sysdevId, solutionId));
             result.FilesWritten.Add(Path.GetFileName(equipmentFile));
 
-            // solutionData carries the CsConfHash + CertThumbprint chain which
-            // is the actual security trust binding to the runtime. If a valid
-            // one already exists, preserve it byte-for-byte — overwriting
-            // would invalidate the trust on the next deploy.
+            // solutionData carries the CsConfHash + CertThumbprint trust binding; preserve an existing
+            // one byte-for-byte — overwriting invalidates the trust on the next deploy.
             if (!File.Exists(solutionDataFile))
             {
                 File.WriteAllText(solutionDataFile, BuildSolutionDataJson(solutionId));
                 result.FilesWritten.Add(Path.GetFileName(solutionDataFile));
             }
 
-            // NOCONF mode: the M262dPAC sits in Physical Views with its
-            // static IP (cfg.M262TargetIp) but is NOT associated with any
-            // BroadcastDomain. So no BroadcastDomain_*.json is written and
-            // any pre-existing emitted broadcast domain is removed from
-            // disk + de-registered from topologyproj.
+            // NOCONF mode: no BroadcastDomain_*.json is written; remove any pre-existing one from disk
+            // and de-register it from topologyproj.
             DeleteEmittedBroadcastDomain(topologyDir, cfg);
 
             var topologyProj = Path.Combine(topologyDir, "TopologyManager.topologyproj");
@@ -94,8 +82,6 @@ namespace CodeGen.Devices.M262
                     Path.GetFileName(solutionDataFile),
                 });
 
-                // Strip any stale BroadcastDomain_*.json registrations that an
-                // earlier (pre-NOCONF) Mapper run added.
                 UnregisterBroadcastDomainFromTopologyProj(topologyProj, cfg);
             }
             else
@@ -254,11 +240,6 @@ namespace CodeGen.Devices.M262
               ]
             }
             """;
-
-        // BuildBroadcastDomainJson removed: NOCONF mode does not emit
-        // BroadcastDomain_*.json. The MapperConfig subnet/mask/gateway/
-        // network-name fields are kept for any future non-NOCONF override
-        // but are not consumed by the current emit path.
 
         static string BuildSolutionDataJson(string solutionId)
         {
