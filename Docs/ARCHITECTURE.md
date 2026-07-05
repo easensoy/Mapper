@@ -42,9 +42,9 @@ The Mapper's job ends when the on-disk project is correct.
 | M580 | Modicon M580 dPAC    | **Assembly + Disassembly** — Bearing_PnP, Shaft_Hr/Vr, grippers, clamp, sensors |
 | BX1  | Soft-dPAC (PC-hosted)| **Cover PnP** — CoverPNP_Hr/Vr, cover gripper, MQTT bridge |
 
-The simulator collapses ALL three into ONE SIM resource (`SimulatorFullSystem
-= true`). On the rig they are three separate `.sysres` files bound to three
-separate physical devices.
+On the rig they are three separate `.sysres` files bound to three separate
+physical devices. (The old Test-Simulator 3-PLC collapse and its
+`SimulatorFullSystem` flag were removed — see I-12.)
 
 ## 3. The CAT library (function block types we instantiate)
 
@@ -126,12 +126,10 @@ The `MainForm_simulator.btnGenerateFullSystemSimulator_Click` handler and
 `CodeGen/Services/SimulatorPostProcessor.cs` (the sim post-processors —
 `InjectSimHopperForce`, `OverrideSimActuatorsNoSensor`, `InjectSimSwivelForce`,
 `VerifySimActuatorsNoSensorOrAbort`, `DumpSimRecipeAndInterlockArrays`) were
-**deleted**, along with `MapperTests/SimulatorEndToEndHarness.cs`. The
-`SimulatorFullSystem` / `SimulatorRecipeMode` flags survive as inert config — the
-Test Runtime path forces them false and no UI button sets `SimulatorFullSystem`
-true, so its branches are dead code pending a later cleanup pass
-(`SimulatorRecipeMode` is still set true only by the `StateTransitionTableForm`
-debug utility). EAE's **"Local Test"** *network profile* is unrelated and can
+**deleted**, along with `MapperTests/SimulatorEndToEndHarness.cs`. The `SimulatorFullSystem` flag and all
+its branches were deleted (see I-12); only `SimulatorRecipeMode` survives, set
+true solely by the `StateTransitionTableForm` debug utility to build its recipe
+preview. EAE's **"Local Test"** *network profile* is unrelated and can
 still run the rig project locally on the soft-dPAC (one PLC instance at a time).
 
 ## 6. The CAT instance routing decision
@@ -189,7 +187,6 @@ VueOneMapper/
 │   │   ├── SyslayBuilder.cs              # low-level XML helpers
 │   │   ├── Process/
 │   │   │   ├── ProcessRecipeArrayGenerator.cs    # the Recipe builder
-│   │   │   ├── ProcessRecipeStGenerator.cs
 │   │   │   └── ProcessStepTableGenerator.cs
 │   │   ├── IoBindingsLoader.cs            # reads SMC_Rig_IO_Bindings.xlsx
 │   │   ├── InstanceNameResolver.cs
