@@ -5,6 +5,7 @@ namespace CodeGen.Configuration
         public DeviceNet M262 { get; set; } = new();
         public DeviceNet M580 { get; set; } = new();
         public DeviceNet Bx1 { get; set; } = new();
+        public DeviceNet RevPi { get; set; } = new() { TargetIp = "192.168.1.6", HostIp = "192.168.1.2" };
         public DeviceNet DefaultNetwork { get; set; } = new();
 
         private static readonly YamlConfigFile<DeviceConfig> _file = new("Config", "device.yml");
