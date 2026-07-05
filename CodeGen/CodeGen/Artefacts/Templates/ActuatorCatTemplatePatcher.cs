@@ -732,11 +732,9 @@ namespace CodeGen.Services
             }
         }
 
-        // Deploy-time normalizer for the centre-home swivel's sensor source. reduce=false (the rig path,
-        // the only call today) keeps the physical Inputs on the real sensor symlinks. reduce=true inserted
-        // a SimCentreHomeSensor_7SCH Basic deriving atHome/atWork1/atWork2 from current_state_to_process
-        // (vestigial sim-position synthesis).
-        internal static void NormalizeSwivelSimSensorSource(string eaeProjectDir, bool reduce, DeployResult result)
+        // Keeps the centre-home swivel's Inputs block on the real physical sensor symlinks and strips any
+        // sim-position wiring (hard-fails if SimCentreHomeSensor_7SCH survives — the rig can't use it).
+        internal static void NormalizeSwivelSimSensorSource(string eaeProjectDir, DeployResult result)
         {
             var fbt = Directory.EnumerateFiles(
                     Path.Combine(eaeProjectDir, "IEC61499"),
@@ -890,36 +888,6 @@ namespace CodeGen.Services
                     }
                 }
 
-                void AddSimPosition()
-                {
-                    var fb = net.Elements(ns + "FB")
-                        .FirstOrDefault(f => (string?)f.Attribute("Name") == simFbName);
-                    if (fb == null)
-                    {
-                        var nextId = net.Elements(ns + "FB")
-                            .Select(f => int.TryParse((string?)f.Attribute("ID"), out var id) ? id : 0)
-                            .DefaultIfEmpty(0)
-                            .Max() + 1;
-                        fb = new XElement(ns + "FB",
-                            new XAttribute("ID", nextId),
-                            new XAttribute("Name", simFbName),
-                            new XAttribute("Type", "SimCentreHomeSensor_7SCH"),
-                            new XAttribute("x", "6200"),
-                            new XAttribute("y", "4040"),
-                            new XAttribute("Namespace", "Main"));
-                    }
-                    else
-                    {
-                        fb.Remove();
-                    }
-
-                    var firstNonFb = net.Elements()
-                        .FirstOrDefault(e => e.Name.LocalName != "FB");
-                    if (firstNonFb != null) firstNonFb.AddBeforeSelf(fb);
-                    else net.Add(fb);
-                    changed = true;
-                }
-
                 // Always leave the actual Inputs block subscribed to the real physical
                 // sensor names. In sim mode the block is no longer the source of the
                 // core's position pins; in hardware mode these connections are restored.
@@ -938,48 +906,20 @@ namespace CodeGen.Services
                     "FaultHandling.atHome", "FaultHandling.atWork1", "FaultHandling.atWork2",
                     "SimPosition.CurrentState");
 
-                if (reduce)
-                {
-                    AddSimPosition();
+                RemoveSimPosition();
 
-                    RemoveEvent("Inputs.INITO", "ActuatorCore.INIT");
-                    AddEvent("Inputs.INITO", "SimPosition.INIT");
-                    AddEvent("SimPosition.INITO", "ActuatorCore.INIT");
-                    AddEvent("ActuatorCore.pst_out", "SimPosition.REQ");
-                    AddEvent("SimPosition.CNF", "FB1.EI");
-
-                    AddData("ActuatorCore.current_state_to_process", "SimPosition.CurrentState");
-                    AddData("SimPosition.atHome", "ActuatorCore.atHome");
-                    AddData("SimPosition.atWork1", "ActuatorCore.atWork1");
-                    AddData("SimPosition.atWork2", "ActuatorCore.atWork2");
-                    AddData("SimPosition.atHome", "IThis.atHome");
-                    AddData("SimPosition.atWork1", "IThis.atWork1");
-                    AddData("SimPosition.atWork2", "IThis.atWork2");
-                    AddData("SimPosition.atHome", "FaultHandling.atHome");
-                    AddData("SimPosition.atWork1", "FaultHandling.atWork1");
-                    AddData("SimPosition.atWork2", "FaultHandling.atWork2");
-                }
-                else
-                {
-                    RemoveSimPosition();
-
-                    AddEvent("Inputs.INITO", "ActuatorCore.INIT");
-                    // Hardware/Test Runtime must use the real atHome input. The
-                    // ReturnToHomeHandler also raises atHomeOutput from work->home
-                    // timers, which is useful only for synthetic/no-sensor behaviour;
-                    // using it on the rig can make a Home command stop on a timer
-                    // instead of the centre sensor, or miss the centre and continue
-                    // toward the opposite work position.
-                    AddData("Inputs.VALUE1", "ActuatorCore.atHome");
-                    AddData("Inputs.VALUE2", "ActuatorCore.atWork1");
-                    AddData("Inputs.VALUE3", "ActuatorCore.atWork2");
-                    AddData("Inputs.VALUE1", "IThis.atHome");
-                    AddData("Inputs.VALUE2", "IThis.atWork1");
-                    AddData("Inputs.VALUE3", "IThis.atWork2");
-                    AddData("Inputs.VALUE1", "FaultHandling.atHome");
-                    AddData("Inputs.VALUE2", "FaultHandling.atWork1");
-                    AddData("Inputs.VALUE3", "FaultHandling.atWork2");
-                }
+                AddEvent("Inputs.INITO", "ActuatorCore.INIT");
+                // Rig must use the real atHome input: the ReturnToHomeHandler raises atHomeOutput from
+                // work->home timers, which on the rig can stop a Home on a timer instead of the centre sensor.
+                AddData("Inputs.VALUE1", "ActuatorCore.atHome");
+                AddData("Inputs.VALUE2", "ActuatorCore.atWork1");
+                AddData("Inputs.VALUE3", "ActuatorCore.atWork2");
+                AddData("Inputs.VALUE1", "IThis.atHome");
+                AddData("Inputs.VALUE2", "IThis.atWork1");
+                AddData("Inputs.VALUE3", "IThis.atWork2");
+                AddData("Inputs.VALUE1", "FaultHandling.atHome");
+                AddData("Inputs.VALUE2", "FaultHandling.atWork1");
+                AddData("Inputs.VALUE3", "FaultHandling.atWork2");
 
                 bool hasSimPosition =
                     net.Elements(ns + "FB").Any(f =>
@@ -996,7 +936,7 @@ namespace CodeGen.Services
                            destination.StartsWith(simFbName + ".", StringComparison.Ordinal);
                 }
 
-                if (!reduce && hasSimPosition)
+                if (hasSimPosition)
                 {
                     throw new InvalidOperationException(
                         "Hardware/Test Runtime cannot use simulator centre-home wiring: " +
@@ -1009,21 +949,16 @@ namespace CodeGen.Services
                     // background scan) instead of hard-aborting. A persistently-open editor tab
                     // still falls through to the abort below (the user must close it).
                     SaveXmlWithRetry(doc, fbt);
-                    result.PatchesApplied.Add(reduce
-                        ? "Seven_State_Actuator_Centre_Home_CAT: simulator position model inserted (mutually-exclusive home/work sensors)"
-                        : "Seven_State_Actuator_Centre_Home_CAT: simulator position model removed; physical sensor wiring restored");
-                    MapperLogger.Info($"[Deploy] Centre-Home swivel sim-sensor source normalize: reduce={reduce}");
+                    result.PatchesApplied.Add("Seven_State_Actuator_Centre_Home_CAT: simulator position model removed; physical sensor wiring restored");
+                    MapperLogger.Info("[Deploy] Centre-Home swivel sim-sensor source normalize: physical sensor wiring restored");
                 }
             }
             catch (Exception ex)
             {
-                if (!reduce)
-                    throw new InvalidOperationException(
-                        "Hardware/Test Runtime cannot continue because the centre-home swivel CAT could not be restored to physical sensor wiring. " +
-                        "Close any open Seven_State_Actuator_Centre_Home_CAT editor tab in EAE and regenerate.",
-                        ex);
-
-                result.Warnings.Add($"Centre-Home swivel sim-sensor normalize failed: {ex.Message}");
+                throw new InvalidOperationException(
+                    "Hardware/Test Runtime cannot continue because the centre-home swivel CAT could not be restored to physical sensor wiring. " +
+                    "Close any open Seven_State_Actuator_Centre_Home_CAT editor tab in EAE and regenerate.",
+                    ex);
             }
         }
 
@@ -1093,12 +1028,9 @@ namespace CodeGen.Services
             }
         }
 
-        // Deploy-time normalizer for the Five_State CAT's internal Inputs SYMLINKMULTIVARDST source.
-        // reduce=false (the rig path, the only call today) restores '$${PATH}athome'/'$${PATH}atwork' so
-        // sensored actuators read their real sensors. reduce=true repointed athome/atwork at the OWN
-        // drive-coil symlinks ('$${PATH}OutputTo*') so they follow the coils when nothing publishes the
-        // physical sensors (vestigial sim path; inert for no-sensor instances, which use InputHandler's timer).
-        internal static void NormalizeFiveStateSimSensorSource(string eaeProjectDir, bool reduce, DeployResult result)
+        // Restores the Five_State CAT's internal Inputs SYMLINKMULTIVARDST to the physical sensor symlinks
+        // ('$${PATH}athome'/'$${PATH}atwork') so sensored actuators read their real sensors.
+        internal static void NormalizeFiveStateSimSensorSource(string eaeProjectDir, DeployResult result)
         {
             var fbt = Directory.EnumerateFiles(
                     Path.Combine(eaeProjectDir, "IEC61499"),
@@ -1127,8 +1059,8 @@ namespace CodeGen.Services
 
                 var want = new[]
                 {
-                    ("NAME1", reduce ? "'$${PATH}OutputToHome'" : "'$${PATH}athome'"),
-                    ("NAME2", reduce ? "'$${PATH}OutputToWork'" : "'$${PATH}atwork'"),
+                    ("NAME1", "'$${PATH}athome'"),
+                    ("NAME2", "'$${PATH}atwork'"),
                 };
                 bool changed = false;
                 foreach (var (pn, val) in want)
@@ -1142,10 +1074,8 @@ namespace CodeGen.Services
                 if (changed)
                 {
                     doc.Save(fbt);
-                    result.PatchesApplied.Add(reduce
-                        ? "Five_State_Actuator_CAT: Inputs athome/atwork -> coil symlinks (sim sensor synthesis)"
-                        : "Five_State_Actuator_CAT: Inputs athome/atwork -> physical sensor symlinks (hardware)");
-                    MapperLogger.Info($"[Deploy] Five_State sim-sensor source normalize: reduce={reduce}");
+                    result.PatchesApplied.Add("Five_State_Actuator_CAT: Inputs athome/atwork -> physical sensor symlinks (hardware)");
+                    MapperLogger.Info("[Deploy] Five_State sim-sensor source normalize: physical sensor symlinks restored");
                 }
             }
             catch (Exception ex)
@@ -1305,18 +1235,15 @@ namespace CodeGen.Services
             }
         }
 
-        // Interface reduction on Five_State_Actuator_CAT: drop the two derived fault-enable inputs
-        // (enableToWorkFaultTimeout/enableToHomeFaultTimeout). The Mapper always sets each = its
-        // sensor-fitted flag and FB17/FB14 already AND the enable with the same flag, so re-pointing
-        // FB17.IN2/FB14.IN2 at the fitted lines gives AND(fitted,fitted)=fitted: identical, two fewer pins.
-        // Bidirectional + idempotent; reduce==false (the rig path today) restores the inputs.
+        // Restores Five_State_Actuator_CAT's two wired fault-enable inputs (enableToWorkFaultTimeout/
+        // enableToHomeFaultTimeout) as VarDecl + INIT With + Input pin + the FB17/FB14.IN2 connection.
         internal static void NormalizeFiveStateFaultEnables(
-            string eaeProjectDir, bool reduce, DeployResult result)
+            string eaeProjectDir, DeployResult result)
         {
             var map = new[]
             {
-                new { Enable = "enableToWorkFaultTimeout", Dest = "FB17.IN2", Fitted = "WorkSensorFitted", X = "1280", Y = "5772" },
-                new { Enable = "enableToHomeFaultTimeout", Dest = "FB14.IN2", Fitted = "HomeSensorFitted", X = "1260", Y = "5292" },
+                new { Enable = "enableToWorkFaultTimeout", Dest = "FB17.IN2", X = "1280", Y = "5772" },
+                new { Enable = "enableToHomeFaultTimeout", Dest = "FB14.IN2", X = "1260", Y = "5292" },
             };
 
             var fbt = Directory.EnumerateFiles(
@@ -1352,63 +1279,48 @@ namespace CodeGen.Services
 
                 foreach (var m in map)
                 {
-                    // Re-point the AND-gate IN2: reduce -> sensor-fitted, restore -> enable input.
-                    var wanted = reduce ? m.Fitted : m.Enable;
+                    // Point the AND-gate IN2 at the wired enable input.
                     var conn = dataConns?.Elements(ns + "Connection")
                         .FirstOrDefault(c => (string?)c.Attribute("Destination") == m.Dest);
-                    if (conn != null && (string?)conn.Attribute("Source") != wanted)
+                    if (conn != null && (string?)conn.Attribute("Source") != m.Enable)
                     {
-                        conn.SetAttributeValue("Source", wanted);
+                        conn.SetAttributeValue("Source", m.Enable);
                         changed = true;
                     }
 
-                    if (reduce)
+                    if (inputVars != null &&
+                        !inputVars.Elements(ns + "VarDeclaration").Any(v => (string?)v.Attribute("Name") == m.Enable))
                     {
-                        changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"),
-                            v => (string?)v.Attribute("Name") == m.Enable);
-                        changed |= RemoveElems(initEvent?.Elements(ns + "With"),
-                            w => (string?)w.Attribute("Var") == m.Enable);
-                        changed |= RemoveElems(net.Elements(ns + "Input"),
-                            i => (string?)i.Attribute("Name") == m.Enable);
+                        inputVars.Add(new System.Xml.Linq.XElement(ns + "VarDeclaration",
+                            new System.Xml.Linq.XAttribute("Name", m.Enable),
+                            new System.Xml.Linq.XAttribute("Type", "BOOL")));
+                        changed = true;
                     }
-                    else
+                    if (initEvent != null &&
+                        !initEvent.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == m.Enable))
                     {
-                        if (inputVars != null &&
-                            !inputVars.Elements(ns + "VarDeclaration").Any(v => (string?)v.Attribute("Name") == m.Enable))
-                        {
-                            inputVars.Add(new System.Xml.Linq.XElement(ns + "VarDeclaration",
-                                new System.Xml.Linq.XAttribute("Name", m.Enable),
-                                new System.Xml.Linq.XAttribute("Type", "BOOL")));
-                            changed = true;
-                        }
-                        if (initEvent != null &&
-                            !initEvent.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == m.Enable))
-                        {
-                            initEvent.Add(new System.Xml.Linq.XElement(ns + "With",
-                                new System.Xml.Linq.XAttribute("Var", m.Enable)));
-                            changed = true;
-                        }
-                        if (!net.Elements(ns + "Input").Any(i => (string?)i.Attribute("Name") == m.Enable))
-                        {
-                            var pin = new System.Xml.Linq.XElement(ns + "Input",
-                                new System.Xml.Linq.XAttribute("Name", m.Enable),
-                                new System.Xml.Linq.XAttribute("x", m.X),
-                                new System.Xml.Linq.XAttribute("y", m.Y),
-                                new System.Xml.Linq.XAttribute("Type", "Data"));
-                            var lastInput = net.Elements(ns + "Input").LastOrDefault();
-                            if (lastInput != null) lastInput.AddAfterSelf(pin); else net.Add(pin);
-                            changed = true;
-                        }
+                        initEvent.Add(new System.Xml.Linq.XElement(ns + "With",
+                            new System.Xml.Linq.XAttribute("Var", m.Enable)));
+                        changed = true;
+                    }
+                    if (!net.Elements(ns + "Input").Any(i => (string?)i.Attribute("Name") == m.Enable))
+                    {
+                        var pin = new System.Xml.Linq.XElement(ns + "Input",
+                            new System.Xml.Linq.XAttribute("Name", m.Enable),
+                            new System.Xml.Linq.XAttribute("x", m.X),
+                            new System.Xml.Linq.XAttribute("y", m.Y),
+                            new System.Xml.Linq.XAttribute("Type", "Data"));
+                        var lastInput = net.Elements(ns + "Input").LastOrDefault();
+                        if (lastInput != null) lastInput.AddAfterSelf(pin); else net.Add(pin);
+                        changed = true;
                     }
                 }
 
                 if (changed)
                 {
                     doc.Save(fbt);
-                    result.PatchesApplied.Add(reduce
-                        ? "Five_State_Actuator_CAT: fault-enable inputs derived from sensor-fitted (sim — 2 inputs removed)"
-                        : "Five_State_Actuator_CAT: fault-enable inputs restored as wired inputs (hardware)");
-                    MapperLogger.Info($"[Deploy] Five_State_Actuator_CAT fault-enable normalize: reduce={reduce}");
+                    result.PatchesApplied.Add("Five_State_Actuator_CAT: fault-enable inputs restored as wired inputs (hardware)");
+                    MapperLogger.Info("[Deploy] Five_State_Actuator_CAT fault-enable normalize: wired inputs restored");
                 }
             }
             catch (Exception ex)
@@ -1417,22 +1329,15 @@ namespace CodeGen.Services
             }
         }
 
-        // Interface reduction for Five_State_Actuator_CAT's InterlockManager constants (TargetWork1State=2,
-        // TargetHomeState=4 — identical on every instance, hardcoded by BuildActuatorParameters). reduce=true
-        // deletes those two boundary inputs and bakes the constants onto the embedded InterlockManager FB
-        // (17->15 pins, no runtime value change). Bidirectional (the deployed CAT is a single reused file);
-        // reduce=false (the rig path, the only call today) restores the wired inputs. Idempotent both ways.
+        // Restores Five_State_Actuator_CAT's TargetWork1State/TargetHomeState as wired inputs (VarDecl +
+        // INIT With + Input pin + InterlockManager DataConnection), stripping any baked-on params. Idempotent.
         internal static void NormalizeFiveStateInterlockConstants(
-            string eaeProjectDir, bool reduce, DeployResult result)
+            string eaeProjectDir, DeployResult result)
         {
-            // Values mirror BuildActuatorParameters EXACTLY (2 = AtWork settled,
-            // 4 = AtHome end-of-cycle latch) so the reduction changes the
-            // interface only, never behaviour. Re-add coordinates mirror the
-            // stock template (EAE recomputes layout on load regardless).
             var consts = new[]
             {
-                new { Name = "TargetWork1State", Value = "2", X = "1380", Y = "2092" },
-                new { Name = "TargetHomeState",  Value = "4", X = "1380", Y = "2192" },
+                new { Name = "TargetWork1State", X = "1380", Y = "2092" },
+                new { Name = "TargetHomeState",  X = "1380", Y = "2192" },
             };
 
             var fbt = Directory.EnumerateFiles(
@@ -1494,90 +1399,64 @@ namespace CodeGen.Services
 
                 foreach (var c in consts)
                 {
-                    if (reduce)
-                    {
-                        changed |= RemoveWhere(inputVars?.Elements(ns + "VarDeclaration"),
-                            v => (string?)v.Attribute("Name") == c.Name);
-                        changed |= RemoveWhere(initEvent?.Elements(ns + "With"),
-                            w => (string?)w.Attribute("Var") == c.Name);
-                        changed |= RemoveWhere(net.Elements(ns + "Input"),
-                            i => (string?)i.Attribute("Name") == c.Name);
-                        changed |= RemoveWhere(dataConns?.Elements(ns + "Connection"),
-                            x => (string?)x.Attribute("Source") == c.Name);
+                    // Restore the wired interface: drop any baked InterlockManager param + re-add the
+                    // VarDecl / INIT With / Input pin / DataConnection.
+                    changed |= RemoveWhere(interlock.Elements(ns + "Parameter"),
+                        p => (string?)p.Attribute("Name") == c.Name);
 
-                        bool hasParam = interlock.Elements(ns + "Parameter")
-                            .Any(p => (string?)p.Attribute("Name") == c.Name);
-                        if (!hasParam)
-                        {
-                            interlock.Add(new System.Xml.Linq.XElement(ns + "Parameter",
-                                new System.Xml.Linq.XAttribute("Name", c.Name),
-                                new System.Xml.Linq.XAttribute("Value", c.Value)));
-                            changed = true;
-                        }
+                    if (inputVars != null &&
+                        !inputVars.Elements(ns + "VarDeclaration")
+                            .Any(v => (string?)v.Attribute("Name") == c.Name))
+                    {
+                        inputVars.Add(new System.Xml.Linq.XElement(ns + "VarDeclaration",
+                            new System.Xml.Linq.XAttribute("Name", c.Name),
+                            new System.Xml.Linq.XAttribute("Type", "INT")));
+                        changed = true;
                     }
-                    else
+                    if (initEvent != null &&
+                        !initEvent.Elements(ns + "With")
+                            .Any(w => (string?)w.Attribute("Var") == c.Name))
                     {
-                        // Restore the wired interface (hardware / Button 3).
-                        changed |= RemoveWhere(interlock.Elements(ns + "Parameter"),
-                            p => (string?)p.Attribute("Name") == c.Name);
-
-                        if (inputVars != null &&
-                            !inputVars.Elements(ns + "VarDeclaration")
-                                .Any(v => (string?)v.Attribute("Name") == c.Name))
-                        {
-                            inputVars.Add(new System.Xml.Linq.XElement(ns + "VarDeclaration",
-                                new System.Xml.Linq.XAttribute("Name", c.Name),
-                                new System.Xml.Linq.XAttribute("Type", "INT")));
-                            changed = true;
-                        }
-                        if (initEvent != null &&
-                            !initEvent.Elements(ns + "With")
-                                .Any(w => (string?)w.Attribute("Var") == c.Name))
-                        {
-                            initEvent.Add(new System.Xml.Linq.XElement(ns + "With",
-                                new System.Xml.Linq.XAttribute("Var", c.Name)));
-                            changed = true;
-                        }
-                        if (!net.Elements(ns + "Input")
-                                .Any(i => (string?)i.Attribute("Name") == c.Name))
-                        {
-                            var pin = new System.Xml.Linq.XElement(ns + "Input",
-                                new System.Xml.Linq.XAttribute("Name", c.Name),
-                                new System.Xml.Linq.XAttribute("x", c.X),
-                                new System.Xml.Linq.XAttribute("y", c.Y),
-                                new System.Xml.Linq.XAttribute("Type", "Data"));
-                            var lastInput = net.Elements(ns + "Input").LastOrDefault();
-                            if (lastInput != null) lastInput.AddAfterSelf(pin);
-                            else net.Add(pin);
-                            changed = true;
-                        }
-                        if (dataConns != null &&
-                            !dataConns.Elements(ns + "Connection")
-                                .Any(x => (string?)x.Attribute("Source") == c.Name))
-                        {
-                            dataConns.Add(new System.Xml.Linq.XElement(ns + "Connection",
-                                new System.Xml.Linq.XAttribute("Source", c.Name),
-                                new System.Xml.Linq.XAttribute("Destination",
-                                    "InterlockManager." + c.Name)));
-                            changed = true;
-                        }
+                        initEvent.Add(new System.Xml.Linq.XElement(ns + "With",
+                            new System.Xml.Linq.XAttribute("Var", c.Name)));
+                        changed = true;
+                    }
+                    if (!net.Elements(ns + "Input")
+                            .Any(i => (string?)i.Attribute("Name") == c.Name))
+                    {
+                        var pin = new System.Xml.Linq.XElement(ns + "Input",
+                            new System.Xml.Linq.XAttribute("Name", c.Name),
+                            new System.Xml.Linq.XAttribute("x", c.X),
+                            new System.Xml.Linq.XAttribute("y", c.Y),
+                            new System.Xml.Linq.XAttribute("Type", "Data"));
+                        var lastInput = net.Elements(ns + "Input").LastOrDefault();
+                        if (lastInput != null) lastInput.AddAfterSelf(pin);
+                        else net.Add(pin);
+                        changed = true;
+                    }
+                    if (dataConns != null &&
+                        !dataConns.Elements(ns + "Connection")
+                            .Any(x => (string?)x.Attribute("Source") == c.Name))
+                    {
+                        dataConns.Add(new System.Xml.Linq.XElement(ns + "Connection",
+                            new System.Xml.Linq.XAttribute("Source", c.Name),
+                            new System.Xml.Linq.XAttribute("Destination",
+                                "InterlockManager." + c.Name)));
+                        changed = true;
                     }
                 }
 
                 if (changed)
                 {
                     doc.Save(fbt);
-                    result.PatchesApplied.Add(reduce
-                        ? "Five_State_Actuator_CAT: interlock constants baked onto InterlockManager " +
-                          "(sim interface reduced — TargetWork1State=2, TargetHomeState=4)"
-                        : "Five_State_Actuator_CAT: interlock constants restored as wired inputs (hardware interface)");
+                    result.PatchesApplied.Add("Five_State_Actuator_CAT: interlock constants restored as wired inputs (hardware interface)");
                     MapperLogger.Info(
-                        $"[Deploy] Five_State_Actuator_CAT interlock-constant normalize: reduce={reduce}");
+                        "[Deploy] Five_State_Actuator_CAT interlock-constant normalize: wired inputs restored");
                 }
                 else
                 {
                     result.PatchesApplied.Add(
-                        $"Five_State_Actuator_CAT: interlock interface already {(reduce ? "reduced" : "wired")} (no change)");
+                        "Five_State_Actuator_CAT: interlock interface already wired (no change)");
                 }
             }
             catch (Exception ex)
