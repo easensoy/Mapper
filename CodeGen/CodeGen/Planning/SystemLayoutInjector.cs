@@ -1124,6 +1124,7 @@ namespace CodeGen.Translation
             var perPlcCount = new Dictionary<PlcAssignment, int>
             {
                 [PlcAssignment.M262] = 0,
+                [PlcAssignment.RevPi] = 0,   // RevPi hosts the Feed station in M262's stead
                 [PlcAssignment.M580] = 0,
                 [PlcAssignment.BX1]  = 0,
                 [PlcAssignment.Unknown] = 0,
@@ -1191,6 +1192,7 @@ namespace CodeGen.Translation
             var perPlcSensorCount = new Dictionary<PlcAssignment, int>
             {
                 [PlcAssignment.M262] = 0,
+                [PlcAssignment.RevPi] = 0,
                 [PlcAssignment.M580] = 0,
                 [PlcAssignment.BX1]  = 0,
                 [PlcAssignment.Unknown] = 0,
