@@ -497,11 +497,11 @@ namespace CodeGen.Devices.Core
             if (string.Equals(fbName, "MqttConn", StringComparison.Ordinal) ||
                 string.Equals(fbName, "Telemetry_BX1", StringComparison.Ordinal))
                 return PlcAssignment.BX1;
-            // The Feed controller's MQTT connection follows the Feed station onto M262 or RevPi.
+            // M262's MQTT connection (M262 mode only; RevPi mode emits Telemetry_RevPi/MqttConn_RevPi,
+            // which route to RevPi via the Feed-controller fallback below).
             if (string.Equals(fbName, "MqttConn_M262", StringComparison.Ordinal) ||
                 string.Equals(fbName, "Telemetry_M262", StringComparison.Ordinal))
-                return MapperConfig.FeedStationController == FeedController.RevPi
-                    ? PlcAssignment.RevPi : PlcAssignment.M262;
+                return PlcAssignment.M262;
             if (string.Equals(fbName, "MqttConn_M580", StringComparison.Ordinal) ||
                 string.Equals(fbName, "Telemetry_M580", StringComparison.Ordinal))
                 return PlcAssignment.M580;
