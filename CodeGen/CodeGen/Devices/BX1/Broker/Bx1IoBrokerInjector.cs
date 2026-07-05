@@ -8,10 +8,8 @@ using CodeGen.Translation;
 
 namespace CodeGen.Devices.BX1
 {
-    // BX1 EtherNet/IP cover-I/O broker injection. Broker id F6C04A4BA6FA8593 is the id the copied
-    // BX1 .hcf binds to. Bit map (from PLC_RW_BX1): IN bit0=Hr athome,1=Hr atwork,2=Vr athome,
-    // 3=Vr atwork,5=gripper; OUT bit0=Hr OutputToWork,1=Hr OutputToHome,2=Vr OutputToWork,3=gripper.
-    // Gated by cfg.DeployBx1IoBroker. Idempotent.
+    // BX1 EtherNet/IP cover-I/O broker injection (gated by cfg.DeployBx1IoBroker). Broker id
+    // F6C04A4BA6FA8593 is the id the copied BX1 .hcf binds to; the IN/OUT bit map is on CoverSensors/CoverCoils below.
     public static class Bx1IoBrokerInjector
     {
         static readonly XNamespace Ns = "https://www.se.com/LibraryElements";
@@ -42,21 +40,19 @@ namespace CodeGen.Devices.BX1
                            Event = "CoverPnpHrEvent",  CoilToHome = "Cover_Pnp_Hr_ToHome",  CoilToWork = "Cover_Pnp_Hr_ToWork" },
             new CoverMap { Cover = "CoverPNP_Vr",      SensorFromHome = "CoverPnpVrAtHome", SensorFromWork = "CoverPnpVrAtWork",
                            Event = "CoverPnpVrEvent",  CoilToHome = null,                   CoilToWork = "Cover_Pnp_Vr_Q" },
-            // Gripper: 1 physical sensor (gripped) -> atwork; no home sensor.
+            // Gripper: 1 sensor (gripped) -> atwork; no home sensor.
             new CoverMap { Cover = "CoverPnp_Gripper", SensorFromHome = null,               SensorFromWork = "CoverPnpSensor",
                            Event = "CoverSensorEvent", CoilToHome = null,                   CoilToWork = "Cover_Gripper_Q" },
         };
 
-        // Internalized cover-I/O broker (cfg.Bx1BridgeInsideComposite). Two ordered tables:
-        // index = VALUE index = NAME index = wiring order. Bit positions are fixed by the
-        // PLC_RW_BX1 WordToBits/BitsToWord core: IN bit0=Hr athome,1=Hr atwork,2=Vr athome,
-        // 3=Vr atwork,5=gripper atwork; OUT bit0=Hr OutputToWork,1=Hr OutputToHome,
-        // 2=Vr OutputToWork,3=gripper OutputToWork.
+        // Bit positions fixed by the PLC_RW_BX1 WordToBits/BitsToWord core (index = VALUE = NAME = wiring order):
+        // IN bit0=Hr athome,1=Hr atwork,2=Vr athome,3=Vr atwork,5=gripper atwork;
+        // OUT bit0=Hr OutputToWork,1=Hr OutputToHome,2=Vr OutputToWork,3=gripper OutputToWork.
         static readonly (string Sym, int Bit)[] CoverSensors =
         {
             ("CoverPNP_Hr.athome", 0), ("CoverPNP_Hr.atwork", 1),
             ("CoverPNP_Vr.athome", 2), ("CoverPNP_Vr.atwork", 3),
-            ("CoverPnp_Gripper.atwork", 5),     // gripper has no home sensor
+            ("CoverPnp_Gripper.atwork", 5),
         };
         static readonly (string Sym, int Bit)[] CoverCoils =
         {
@@ -64,10 +60,9 @@ namespace CodeGen.Devices.BX1
             ("CoverPNP_Vr.OutputToWork", 2), ("CoverPnp_Gripper.OutputToWork", 3),
         };
 
-        // EAE compiler-generates SYMLINKMULTIVAR{SRC,DST}_<hash> per BOOL arity; the hash is
-        // GUI-computed (not derivable). Only these arities exist, so a publisher/subscriber must
-        // use the smallest available arity >= its value count (surplus VALUEs are inert). SRC and
-        // DST of the same arity share the hash. 5-BOOL does not exist -> the 5-sensor publisher uses 7.
+        // EAE generates SYMLINKMULTIVAR{SRC,DST}_<hash> per BOOL arity; the hash is GUI-computed (not
+        // derivable), SRC/DST of one arity share it. Only these arities exist -> pick the smallest >= the
+        // value count (surplus VALUEs inert); 5-BOOL does not exist, so the 5-sensor publisher uses 7.
         static readonly (int Arity, string Hash)[] BoolSymlinkTypes =
         {
             (1, "1559B0FF8170C9BA0"), (2, "277E97BEC1451D2C"), (3, "151ACB50A2F8223B2"),
@@ -75,11 +70,9 @@ namespace CodeGen.Devices.BX1
             (15, "2217C9CA39686140D"),
         };
 
-        // Transforms the deployed PLC_RW_BX1.fbt into the internalized broker: one CoverSensorPublisher
-        // (SYMLINKMULTIVARSRC) + one CoverCoilSubscriber (SYMLINKMULTIVARDST) + one ScanCycle (E_DELAY).
-        // New FBs are inserted BEFORE Input/Output/connections (EAE FBNetwork ordering). Idempotent.
-        // BX1-only. EAE-runtime unknown: whether ABSOLUTE cross-instance symlink names resolve from
-        // inside a composite.
+        // Transforms the deployed PLC_RW_BX1.fbt into the internalized broker (CoverSensorPublisher +
+        // CoverCoilSubscriber + ScanCycle); new FBs inserted BEFORE Input/Output/connections. Idempotent.
+        // EAE-runtime unknown: whether ABSOLUTE cross-instance symlink names resolve from inside a composite.
         public static void EmbedCoverBridgeInComposite(string fbtPath, string resourceName = "BX1_RES")
         {
             if (!File.Exists(fbtPath)) return;
@@ -87,8 +80,6 @@ namespace CodeGen.Devices.BX1
             var doc = XDocument.Load(fbtPath);
             var net = doc.Root?.Element("FBNetwork");
             if (net == null) return;
-            // Already embedded? Re-apply the layout only (deploy is copy-if-absent, so this is the
-            // only path an already-embedded file picks up layout changes).
             if (net.Elements("FB").Any(f => (string?)f.Attribute("Name") == "CoverSensorPublisher"))
             { ApplyBrokerLayout(net); doc.Save(fbtPath); return; }
 
@@ -96,8 +87,7 @@ namespace CodeGen.Devices.BX1
             var dc = net.Element("DataConnections");
             if (ec == null || dc == null) return;
 
-            // Sweep any prior per-cover embed (Sense_*/Coil_*/ScanCycle) + its wires so a re-deploy
-            // cleanly replaces it with the consolidated broker.
+            // Sweep any prior per-cover embed (Sense_*/Coil_*/ScanCycle) + its wires.
             static string FbOf(string? ep) =>
                 ep == null ? "" : (ep.Contains('.') ? ep[..ep.IndexOf('.')] : ep);
             bool IsStale(string n) =>
@@ -162,9 +152,8 @@ namespace CodeGen.Devices.BX1
                     : $"{resourceName}.{BrokerFbName}.CoverCoilSpare{i + 1}";
             AddFb("CoverCoilSubscriber", cType, cArity, cNames, 5000, 700);
 
-            // ScanCycle (E_DELAY) symlink-refresh heartbeat: the cover CAT publishes coils via an
-            // internal symlink with no boundary event, so CoverCoilSubscriber must be REQ'd each
-            // cycle to re-pack the output word — without it the EtherNet/IP output word freezes.
+            // ScanCycle (E_DELAY) heartbeat: the cover CAT publishes coils via an internal symlink with no
+            // boundary event, so CoverCoilSubscriber must be REQ'd each cycle or the output word freezes.
             var scan = new XElement("FB",
                 new XAttribute("ID", nextId++), new XAttribute("Name", "ScanCycle"),
                 new XAttribute("Type", "E_DELAY"), new XAttribute("x", "700"),
@@ -186,8 +175,7 @@ namespace CodeGen.Devices.BX1
             for (int i = 0; i < CoverCoils.Length; i++)
                 Da($"CoverCoilSubscriber.VALUE{i + 1}", $"EIPOutput_Bits.bit{CoverCoils[i].Bit}");
 
-            // Remove the superseded cover-InputVar -> BitsToWord connections (two data sources per
-            // bit is an EAE error; output bits now come from the subscriber).
+            // Remove the superseded cover-InputVar -> BitsToWord connections (two data sources per bit is an EAE error).
             var inputVarSources = new[] { "Cover_Pnp_Hr_ToWork", "Cover_Pnp_Hr_ToHome", "Cover_Pnp_Vr_Q", "Cover_Gripper_Q" };
             foreach (var conn in dc.Elements("Connection").Where(c =>
                          ((string?)c.Attribute("Destination"))?.StartsWith("EIPOutput_Bits.bit") == true &&
@@ -199,14 +187,11 @@ namespace CodeGen.Devices.BX1
             doc.Save(fbtPath);
         }
 
-        // SAFETY (CoverPNP_Hr <-> Bearing_PnP swivel collision). Inserts a Bx1CoverFailsafe gate that,
-        // on INIT/cold/warm start, forces CoverPNP_Hr HOME (bit0 ToWork=0, bit1 ToHome=1) and Vr/gripper
-        // coils off, and HOLDS until the Hr at-home sensor (input bit0) reads TRUE — so while the logic
-        // RUNS the broker can never drive cover_hr to Work on deploy/login/restart (double-acting Hr
-        // needs ToHome=1 to return; both coils 0 only holds). Fires only while the logic is alive — does
-        // NOT cover EAE Clean/STOP/fault; homing while STOPPED needs the TM3BC coupler output fallback
-        // (TM3DQ16T ToHome channel -> 1 = word 16#0002) set on the coupler's web server (192.168.1.210),
-        // which the Mapper cannot emit. Idempotent. BX1-only, gated by cfg.Bx1CoverSafeStart.
+        // SAFETY (cover safe-start, CoverPNP_Hr <-> Bearing_PnP swivel collision; gated by cfg.Bx1CoverSafeStart).
+        // Inserts a Bx1CoverFailsafe gate that on start forces CoverPNP_Hr HOME (bit0 ToWork=0, bit1 ToHome=1,
+        // double-acting Hr needs ToHome=1 to return) and holds until the Hr at-home sensor (input bit0). Fires
+        // only while the logic RUNS — NOT on EAE Clean/STOP/fault; homing while stopped needs the TM3BC coupler
+        // output fallback word 16#0002 (TM3DQ16T ToHome channel -> 1), set on the coupler's web server, which the Mapper can't emit.
         public static bool InjectCoverFailsafeIntoBrokerType(string eaeRoot)
         {
             var fbt = Path.Combine(eaeRoot, "IEC61499", "PLC_RW_BX1.fbt");
@@ -217,7 +202,7 @@ namespace CodeGen.Devices.BX1
             var dc = net?.Element("DataConnections");
             if (net == null || ec == null || dc == null) return false;
             if (net.Elements("FB").Any(f => (string?)f.Attribute("Name") == "CoverFailsafe"))
-                return false; // idempotent
+                return false;
 
             var idc = doc.Root!.Elements("Attribute")
                 .FirstOrDefault(a => (string?)a.Attribute("Name") == "Configuration.FB.IDCounter");
@@ -231,8 +216,7 @@ namespace CodeGen.Devices.BX1
             var firstInput = net.Elements("Input").FirstOrDefault();
             if (firstInput != null) firstInput.AddBeforeSelf(fb); else net.Add(fb);
 
-            // Reroute each output bit's source through the gate, keyed on the bit destination so it
-            // works for both the external-bridge and internalized forms.
+            // Reroute each output bit's source through the gate, keyed on the bit dest (works for both bridge forms).
             void Reroute(string bit, string fsIn, string fsOut)
             {
                 var conn = dc.Elements("Connection").FirstOrDefault(c =>
@@ -250,12 +234,10 @@ namespace CodeGen.Devices.BX1
             Reroute("bit2", "Vr", "gVr");
             Reroute("bit3", "Grip", "gGrip");
 
-            // Hr at-home feedback = EIPInputs_Bool.bit0.
             dc.Add(new XElement("Connection", new XAttribute("Source", "EIPInputs_Bool.bit0"),
                 new XAttribute("Destination", "CoverFailsafe.AtHome")));
 
-            // The output-word write trigger now fires the gate first; the gate's CNF writes the word.
-            // INIT arms the safe-start (force home) before the first scan.
+            // The output-word write trigger fires the gate first; the gate's CNF writes the word.
             foreach (var c in ec.Elements("Connection")
                          .Where(c => (string?)c.Attribute("Destination") == "EIPOutput_Bits.REQ").ToList())
                 c.SetAttributeValue("Destination", "CoverFailsafe.REQ");
@@ -269,8 +251,7 @@ namespace CodeGen.Devices.BX1
             return true;
         }
 
-        // Lays the embedded broker FBs + pins out in left-to-right columns (EAE renders by x/y).
-        // Deterministic, safe to re-run on every (re)deploy. BX1-only.
+        // Lays the embedded broker FBs + pins out in left-to-right columns; deterministic, safe to re-run.
         static void ApplyBrokerLayout(XElement net)
         {
             var fbXY = new Dictionary<string, (int x, int y)>
@@ -290,16 +271,15 @@ namespace CodeGen.Devices.BX1
                     fb.SetAttributeValue("x", p.x.ToString());
                     fb.SetAttributeValue("y", p.y.ToString());
                 }
-            int py = 300;   // Input pins: far-left edge.
+            int py = 300;
             foreach (var pin in net.Elements("Input"))
             { pin.SetAttributeValue("x", "0"); pin.SetAttributeValue("y", py.ToString()); py += 450; }
-            py = 300;       // Output pins: far-right edge.
+            py = 300;
             foreach (var pin in net.Elements("Output"))
             { pin.SetAttributeValue("x", "9400"); pin.SetAttributeValue("y", py.ToString()); py += 450; }
         }
 
-        // Injects the BX1_IO broker + the cover symlink bridge into the BX1 SubApp (syslay) and the
-        // BX1 sysres. Returns the number of files touched. Idempotent.
+        // Injects the BX1_IO broker + cover symlink bridge into the BX1 SubApp (syslay) and sysres; returns files touched.
         public static int InjectBx1IoBroker(MapperConfig cfg, string syslayPath,
             SystemInjector.BindingApplicationReport report)
         {
@@ -322,7 +302,6 @@ namespace CodeGen.Devices.BX1
                     }
                     catch (IOException)
                     {
-                        // The deployed .sysres/.syslay is LOCKED (EAE has BX1_RES open) — surface the fix.
                         report.Missing.Add($"[BX1][Broker] FAILED to write the cover bridge to the BX1 " +
                             $"{label} — the file is LOCKED. Close the BX1 / BX1_RES view in EAE " +
                             "(or close EAE) before clicking Test Runtime, then re-run.");
@@ -363,12 +342,10 @@ namespace CodeGen.Devices.BX1
             if (hasGripper)
                 AddEvent(ec, "CoverPnp_Gripper.INITO", $"{BrokerFbName}.INIT");
 
-            // INTERNALIZED (cfg.Bx1BridgeInsideComposite, default): the bridge + scan live inside the
-            // PLC_RW_BX1 composite, so the resource carries only BX1_IO — emit no external bridge here.
+            // INTERNALIZED (cfg.Bx1BridgeInsideComposite, default): the bridge lives inside the PLC_RW_BX1
+            // composite, so the resource carries only BX1_IO — sweep any external bridge a prior deploy left.
             if (internalized)
             {
-                // Sweep any external bridge FBs/connections a prior external-path deploy left, so the
-                // resource ends with only BX1_IO. BX1_IO + its INIT are kept.
                 static string FbOf(string? ep) =>
                     ep == null ? "" : (ep.Contains('.') ? ep[..ep.IndexOf('.')] : ep);
                 bool IsExtBridge(string n) =>
@@ -410,9 +387,8 @@ namespace CodeGen.Devices.BX1
                 if (c.CoilToHome != null) AddData(dc, $"{dstName}.VALUE1", $"{BrokerFbName}.{c.CoilToHome}");
                 if (c.CoilToWork != null) AddData(dc, $"{dstName}.VALUE2", $"{BrokerFbName}.{c.CoilToWork}");
 
-                // INIT the bridge symlink FBs: a SYMLINKMULTIVAR{SRC,DST} only registers its symlink
-                // (QI=TRUE) when its INIT fires, else it stays DISABLED and ignores every scan REQ.
-                // Fan from CoverPnp_Gripper.INITO so every bridge FB is registered before the first EO.
+                // A SYMLINKMULTIVAR{SRC,DST} registers its symlink (QI=TRUE) only when its INIT fires, else it
+                // stays DISABLED and ignores every scan REQ — fan from CoverPnp_Gripper.INITO before the first EO.
                 if (hasGripper)
                 {
                     AddEvent(ec, "CoverPnp_Gripper.INITO", $"{srcName}.INIT");
@@ -421,23 +397,18 @@ namespace CodeGen.Devices.BX1
                 slot++;
             }
 
-            // Scan cycle: E_DELAY self-loop.
             AddFbIfAbsent(net, Hex16($"{ScanFbName}|{fileTag}"), ScanFbName, "E_DELAY", "IEC61499.Standard",
                 isSysres, isSysres ? 15000 : 39000, 1300, ifaceParams: null, name1: null, name2: null,
                 extraParams: new[] { ("DT", ScanPeriod) });
-            // Kick from a reliable event: the broker's PLC_EVENT does not fire on a plain INIT.
-            // CoverPnp_Gripper.INITO also drives BX1_IO.INIT (init-chain tail), so the broker is ready
-            // when the E_DELAY's first EO fires. PLC_EVENT kept as a redundant kick.
+            // Kick the scan from CoverPnp_Gripper.INITO (also drives BX1_IO.INIT, so the broker is ready at
+            // the first EO); the broker's PLC_EVENT does not fire on a plain INIT (kept as a redundant kick).
             if (hasGripper)
                 AddEvent(ec, "CoverPnp_Gripper.INITO", $"{ScanFbName}.START");
-            AddEvent(ec, $"{BrokerFbName}.PLC_EVENT", $"{ScanFbName}.START"); // redundant kick
-            AddEvent(ec, $"{ScanFbName}.EO", $"{ScanFbName}.START");          // self re-arm
-            AddEvent(ec, $"{ScanFbName}.EO", $"{BrokerFbName}.REQ");          // read input word -> sensors
-            // Output write: CAUSAL CHAIN over the non-gripper coil readers (EO -> Hr.REQ -> Hr.CNF ->
-            // Vr.REQ -> Vr.CNF -> BX1_IO.REQ_INT_BOOL) so no coil is stale when the word is packed — a
-            // parallel fan-out RACES and can leave CoverPNP_Hr's home command stale. The gripper is
-            // refreshed in parallel and is never a write trigger. Idempotent: drop prior coil-read/write
-            // triggers first (AddEvent only de-dupes identical pairs).
+            AddEvent(ec, $"{BrokerFbName}.PLC_EVENT", $"{ScanFbName}.START");
+            AddEvent(ec, $"{ScanFbName}.EO", $"{ScanFbName}.START");
+            AddEvent(ec, $"{ScanFbName}.EO", $"{BrokerFbName}.REQ");
+            // Output write via a CAUSAL CHAIN over the non-gripper coil readers so no coil is stale when the
+            // word is packed — a parallel fan-out RACES and can leave CoverPNP_Hr's home command stale.
             foreach (var conn in ec.Elements(Ns + "Connection")
                          .Where(c => { var d = (string?)c.Attribute("Destination") ?? "";
                                        return (d.StartsWith("BX1IO_Coil_") && d.EndsWith(".REQ"))
@@ -527,8 +498,7 @@ namespace CodeGen.Devices.BX1
             return sec;
         }
 
-        // Saves with a few short retries so a transient EAE file lock doesn't drop the write;
-        // re-throws IOException if still locked so the caller can prompt closing EAE.
+        // Saves with a few short retries for a transient EAE file lock; re-throws IOException if still locked.
         static void SaveWithRetry(XDocument doc, string path)
         {
             const int attempts = 6;
@@ -540,7 +510,7 @@ namespace CodeGen.Devices.BX1
                     System.Threading.Thread.Sleep(250);
                 }
             }
-            doc.Save(path); // final attempt — let the IOException propagate to the caller
+            doc.Save(path);
         }
 
         static string Hex16(string seed)
