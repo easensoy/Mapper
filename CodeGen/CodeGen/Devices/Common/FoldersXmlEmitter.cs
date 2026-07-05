@@ -12,9 +12,10 @@ namespace CodeGen.Devices.Core
     public static class FoldersXmlEmitter
     {
         // Must match the IDs the sysdev/dfbproj/Equipment JSON path uses.
-        const string M262SysdevId = "00000000-0000-0000-0000-000000000002";
-        const string M580SysdevId = "00000000-0000-0000-0000-000000000003";
-        const string BX1SysdevId  = "00000000-0000-0000-0000-000000000004";
+        const string M262SysdevId  = "00000000-0000-0000-0000-000000000002";
+        const string M580SysdevId  = "00000000-0000-0000-0000-000000000003";
+        const string BX1SysdevId   = "00000000-0000-0000-0000-000000000004";
+        const string RevPiSysdevId = "00000000-0000-0000-0000-000000000005"; // RevPiDeviceEmitter
 
         public sealed class EmitResult
         {
@@ -79,7 +80,10 @@ namespace CodeGen.Devices.Core
                      .Where(s => s.Length > 0),
                 StringComparer.OrdinalIgnoreCase);
 
-            foreach (var sysdevId in new[] { M262SysdevId, M580SysdevId, BX1SysdevId })
+            // The Feed station runs on M262 (default) or RevPi — register whichever is emitted.
+            var feedSysdevId = MapperConfig.FeedStationController == FeedController.RevPi
+                ? RevPiSysdevId : M262SysdevId;
+            foreach (var sysdevId in new[] { feedSysdevId, M580SysdevId, BX1SysdevId })
             {
                 if (existing.Contains(sysdevId)) continue;
                 items.Add(new XElement(ns + "item", sysdevId));
