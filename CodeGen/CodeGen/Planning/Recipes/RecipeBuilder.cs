@@ -1,17 +1,13 @@
 namespace CodeGen.Translation.Process
 {
-    /// <summary>
-    /// Shared low-level recipe-array writer. Owns the common CMD / WAIT / END append
-    /// operations. NextStep auto-chains to row+1 for CMD/WAIT; the END row's NextStep
-    /// is supplied by the caller (cyclic 0 vs self-park = the END row's own index).
-    /// </summary>
+    // Shared recipe-array writer. NextStep auto-chains to row+1 for CMD/WAIT; the END row's NextStep
+    // is caller-supplied (cyclic 0 vs self-park = the END row's own index).
     internal sealed class RecipeBuilder
     {
         private readonly RecipeArrays _a;
 
         public RecipeBuilder(RecipeArrays arrays) { _a = arrays; }
 
-        /// <summary>Row index the NEXT appended step will occupy (= current row count).</summary>
         public int Count => _a.StepType.Count;
 
         public void AddCmd(string target, int cmdState)
