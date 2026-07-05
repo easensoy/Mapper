@@ -54,6 +54,31 @@ namespace CodeGen.Services
             => Directory.EnumerateFiles(Path.Combine(eaeProjectDir, "IEC61499"), fbtFileName, SearchOption.AllDirectories)
                 .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal)) ?? string.Empty;
 
+        // Locate the deployed <fbtFileName>, load it, and hand (doc, root, ns, path) to `edit` — which mutates,
+        // saves via doc.Save(path), and logs. Wraps the file-lock retry and warn-on-exception scaffold shared
+        // by the deploy-time patchers. Absent .fbt: warn notFoundNote (if given) and no-op. Null root: no-op.
+        internal static void EditDeployedFbt(string eaeProjectDir, string fbtFileName, string failNote,
+            DeployResult result, Action<XDocument, XElement, XNamespace, string> edit, string? notFoundNote = null)
+        {
+            var fbt = FindDeployedFbt(eaeProjectDir, fbtFileName);
+            if (string.IsNullOrEmpty(fbt))
+            {
+                if (notFoundNote != null) result.Warnings.Add(notFoundNote);
+                return;
+            }
+            try
+            {
+                var doc = LoadXmlWithRetry(fbt, LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                edit(doc, root, root.GetDefaultNamespace(), fbt);
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"{failNote}: {ex.Message}");
+            }
+        }
+
         // Write IEC61499/DataType/<name>.dt (copy-if-absent) and record it in DataTypesDeployed so the
         // dfbproj registers the type. patchNote appends to the PatchesApplied log line.
         internal static void DeployDatatype(string eaeProjectDir, string name, string dtXml,
