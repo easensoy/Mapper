@@ -7,20 +7,9 @@ using System.Xml.Linq;
 
 namespace CodeGen.Devices.Core
 {
-    /// <summary>
-    /// Post-generation MQTT sanity check. EAE 24.1's <c>MQTT_CONNECTION</c> is secure-by-default and
-    /// its doc.xml defines two failure codes that are easy to ship by accident:
-    /// <list type="bullet">
-    ///   <item><b>ReturnCode 101</b> — a plain <c>mqtt://</c> URL with no device "Insecure Application"
-    ///     override ("Secure URL required").</item>
-    ///   <item><b>ReturnCode 100</b> — an <c>mqtts://</c> URL pointed at a NON-TLS port (e.g. mosquitto
-    ///     on 1883): the TLS handshake fails ("TLS error"). This is the impossible config to catch.</item>
-    /// </list>
-    /// This validator reads every deployed <c>MQTT_CONNECTION</c>, prints its URL / ConnectionID /
-    /// ClientIdentifier / ValidateCert (the connection matrix), and flags impossible / insecure configs
-    /// so the operator knows exactly what the device will report before deploying. It does NOT change
-    /// anything; the pipeline + gate just print its output.
-    /// </summary>
+    // Post-generation MQTT sanity check (prints only, changes nothing). Flags the two easy-to-ship
+    // EAE-secure-by-default faults: RC101 (plain mqtt:// with no device 'Insecure Application' override)
+    // and RC100 (mqtts:// pointed at a non-TLS port, e.g. mosquitto on 1883 -> TLS handshake fails).
     public static class MqttConnectionValidator
     {
         public sealed record Row(
@@ -33,7 +22,7 @@ namespace CodeGen.Devices.Core
                 (Impossible ? "[IMPOSSIBLE] " : "[INFO] ") + $"{Resource}.{Fb}: {Detail}";
         }
 
-        /// <summary>Ports conventionally served as PLAIN MQTT (no TLS). mqtts:// against these fails.</summary>
+        // Plain-MQTT ports (no TLS); mqtts:// against these fails with RC100.
         static readonly HashSet<int> PlainMqttPorts = new() { 1883, 1884 };
 
         public static (List<Row> Rows, List<Finding> Findings) Inspect(string? eaeRoot)
@@ -60,9 +49,8 @@ namespace CodeGen.Devices.Core
                     if (!type.StartsWith("MQTT_CONNECTION", StringComparison.Ordinal) && !isTelemetry) continue;
                     var name = (string?)fb.Attribute("Name") ?? string.Empty;
 
-                    // Raw MQTT_CONNECTION exposes URL/ConnectionID/... as separate <Parameter>s.
-                    // Telemetry wraps them in one Config:TelemetryConfig struct literal — parse it
-                    // so the identical URL/ConnectionID/ClientIdentifier checks apply to the wrapped form.
+                    // Raw MQTT_CONNECTION has separate <Parameter>s; Telemetry wraps them in one
+                    // Config:TelemetryConfig struct literal — parse it so the same checks apply.
                     var p = isTelemetry
                         ? ParseStructLiteral(fb.Elements()
                             .Where(e => e.Name.LocalName == "Parameter" &&
@@ -96,8 +84,7 @@ namespace CodeGen.Devices.Core
                             true));
                     else if (isMqtt)
                     {
-                        // Hard-VERIFY the device 'Insecure Application' override is actually present in the
-                        // device Properties (rather than assuming the write succeeded). Without it a plain
+                        // Verify the device 'Insecure Application' override is present; without it a plain
                         // mqtt:// faults RC101 ('Secure URL required') — EAE is secure-by-default.
                         bool hasOverride = DeviceHasInsecureAppOverride(sysres);
                         findings.Add(new(resLabel, name,
@@ -129,9 +116,7 @@ namespace CodeGen.Devices.Core
             return m.Success && int.TryParse(m.Groups[1].Value, out var n) ? n : -1;
         }
 
-        // Parse a TelemetryConfig struct literal — "(QI:=TRUE, ConnectionID:='SMC', URL:='mqtt://...',
-        // ClientIdentifier:='SMC_M262', ValidateCert:=0, CACert:='')" — into a member->value dict with
-        // single quotes stripped, so a Telemetry_CAT Config reads like the raw FB's flat parameters.
+        // Parse a TelemetryConfig struct literal into a member->value dict (single quotes stripped).
         static Dictionary<string, string> ParseStructLiteral(string literal)
         {
             var d = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -140,11 +125,8 @@ namespace CodeGen.Devices.Core
             return d;
         }
 
-        /// <summary>
-        /// True if the device folder holding this sysres carries the 'Insecure Application' override
-        /// (Configuration -> SecurityApp -> InsecureApplication -> Enable=True) in its F513CAE3
-        /// DeployPlugin Properties — the per-device setting EAE needs to accept a plain mqtt:// URL.
-        /// </summary>
+        // True if the device carries the 'Insecure Application' override (InsecureApplication.Enable=True)
+        // in its F513CAE3 Properties — the per-device setting EAE needs to accept a plain mqtt:// URL.
         static bool DeviceHasInsecureAppOverride(string sysresPath)
         {
             try
