@@ -8,16 +8,9 @@ using static CodeGen.Translation.Process.Recipes.TransitionChainParser;
 
 namespace CodeGen.Translation.Process.Recipes
 {
-    /// <summary>
-    /// Recipe state classifier: the two-pass Pass-1 classification + Pass-2 row
-    /// navigation that turns the ordered VueOneStates of a Process into per-state
-    /// classifications (CMD/WAIT rows) the Generate emit loop serialises. Owns the
-    /// classifier nested types (ClassKind/StateClassification/RecipeRow) and the
-    /// motion-verb tables. Every method takes its inputs as arguments (RecipeArrays
-    /// is passed by parameter; only its public Warnings/SkippedConditions members
-    /// are touched). Calls the sibling Recipes helpers (RecipeCommandVocabulary /
-    /// RecipeComponentLookup / TransitionChainParser).
-    /// </summary>
+    // Pass-1 classification + Pass-2 row navigation: turns a Process's ordered VueOneStates into
+    // per-state CMD/WAIT classifications the Generate emit loop serialises. Owns the classifier nested
+    // types (ClassKind/StateClassification/RecipeRow) and the motion-verb tables.
     internal static class RecipeStateClassifier
     {
         // Motion-in-progress verbs per the Phase-2 spec. "checking" included
@@ -290,29 +283,11 @@ namespace CodeGen.Translation.Process.Recipes
                 // templates (Seven_State_Actuator_CAT, future custom CATs).
                 int cmdState = ResolveTransientCmdState(state.Name, inScopeTarget, waitState, arrays);
 
-                // RUNTIME-SETTLED WAIT STATE (root-cause fix for the recipe
-                // stalling mid-cycle). The engine compares Wait1State against
-                // what the actuator PUBLISHES on the stateRptCmd ring, which is
-                // the Five_State ECC's current_state_to_process encoding
-                // (AtHomeInit=0, ToWork=1, AtWork=2, ToHome=3, AtHomeEnd=4) —
-                // NOT the raw Control.xml <State_Number>. After a to-work
-                // command the actuator STABLY HOLDS AtWork=2. After a to-home
-                // command it transitions ToHome -> AtHomeEnd (publishes 4
-                // momentarily) -> AtHomeInit (publishes 0, where it stably
-                // rests) because the AtHome -> AtHomeInit ECC arc is
-                // data-conditioned (atwork=FALSE AND athome=TRUE) and fires
-                // in the same run-to-stable tick as the AtHome entry. The
-                // engine's check_wait re-samples state_table on each
-                // state_change, and by the time it evaluates a Wait1State=4,
-                // state_table has already been overwritten 4 -> 0. So athome
-                // waits MUST target the stably-held AtHomeInit=0, not the
-                // transient AtHomeEnd=4. Emitting the Control.xml StateNumber
-                // only matched by accident for components numbering their
-                // advanced state 2; Checker's RisingFinished is 4, unreachable
-                // from a single ToWork command. Map by command direction so
-                // every Five_State actuator wait targets the value the
-                // actuator stably holds: AtWork=2 after ToWork, AtHomeInit=0
-                // after ToHome.
+                // RUNTIME-SETTLED WAIT STATE: the engine compares Wait1State against the Five_State ECC's
+                // published current_state_to_process (AtHomeInit=0/ToWork=1/AtWork=2/ToHome=3/AtHomeEnd=4),
+                // NOT the raw Control.xml State_Number. The actuator only stably HOLDS AtWork=2 (after
+                // ToWork) or AtHomeInit=0 (after ToHome); AtHomeEnd=4 is transient (overwritten 4->0 in
+                // one run-to-stable tick, missed by check_wait), so map by command direction.
                 int settledWait =
                     cmdState == 1 ? 2 :          // ToWork -> actuator stably holds AtWork
                     cmdState == 3 ? 0 :          // ToHome -> actuator settles at AtHomeInit
@@ -352,29 +327,13 @@ namespace CodeGen.Translation.Process.Recipes
             {
                 if (IsFiveStateCommandable(inScopeTarget))
                 {
-                    // GRIPPER GRIP/RELEASE DIRECTION (derive from the Assembly STEP
-                    // name, not the WAIT condition). A mechanical gripper's
-                    // Control.xml WAIT condition is the SAME for both the grip step
-                    // and the release step -- "Bearing_Gripper/ReturnedHome" (the
-                    // twin waits for the gripper's internal open/close cycle to
-                    // settle home each time), so the condition target State_Number
-                    // is 0 in BOTH cases and the generic
-                    // "(waitState 1|2 -> toWork else toHome)" rule collapses both to
-                    // toHome=3. The gripper would then OPEN twice and never grip the
-                    // bearing -- the exact bug observed on the rig. The Assembly STEP
-                    // NAME does encode intent ("Gripping_Part" vs
-                    // "BearingPnPOpenGripper"), so for a gripper target we take the
-                    // command from the step name: a grip/close step commands toWork
-                    // (cmd 1 -> Five_State AtWork=2; M580SymbolBinder maps
-                    // closed=atwork and the single OutputToWork coil energises the
-                    // close valve), a release/open step commands toHome (cmd 3 ->
-                    // AtHomeInit=0; open=athome). Non-gripper Five_State targets
-                    // (clamps, shaft cylinders) keep the condition-derived command.
-                    // NOTE (R-12, coil direction unverified on the rig): if the
-                    // physical gripper grips/releases the OPPOSITE way to this
-                    // (energise OutputToWork opens it), that is a binder/coil wiring
-                    // inversion -- swap Bearing_Gripper_Q / the open+closed sensor
-                    // pair in M580SymbolBinder, NOT the recipe, so sim stays correct.
+                    // GRIPPER GRIP/RELEASE DIRECTION from the Assembly STEP name, not the WAIT condition:
+                    // a gripper's WAIT condition is the same (ReturnedHome, State_Number 0) for both grip
+                    // and release, so the generic rule would open it twice. Grip/close step -> toWork
+                    // (cmd 1, AtWork=2, closes the OutputToWork valve); release/open -> toHome (cmd 3,
+                    // AtHomeInit=0). Non-gripper Five_State targets keep the condition-derived command.
+                    // R-12 (coil direction unverified on the rig): if the gripper grips/releases the
+                    // OPPOSITE way, swap Bearing_Gripper_Q / the sensor pair in M580SymbolBinder, NOT here.
                     int gripperCmd = IsGripperTarget(inScopeTarget)
                         ? MapGripperCommandFromStepName(state.Name)
                         : -1;
@@ -405,18 +364,10 @@ namespace CodeGen.Translation.Process.Recipes
                         WaitState = condSettledWait,
                     };
                 }
-                // Seven_State (Bearing_PnP) — Seven_State_Actuator_Centre_Home_CAT.
-                // The core takes state_val as a target slot and, once settled,
-                // publishes current_state_to_process = the slot's AT-value (cmd+1):
-                //   state_val=1 (Work1/Pick)  -> ToWork1 -> AtWork1 publishes 2
-                //   state_val=3 (Work2/Place) -> ToWork2 -> AtWork2 publishes 4
-                //   state_val=5 (Home/centre) -> ToHome  -> AtHome  publishes 6,
-                //                                     then AtHomeInit publishes 0
-                // Control.xml's State_Number for the wait target does NOT line up
-                // with the core's published value, so we read the WAIT condition's
-                // Name suffix ("Bearing_PnP/AtPick" -> "AtPick") and pattern-match
-                // Pick/Place/Home to the CMD slot (CmdState) and its settle value
-                // (WaitState = CmdState + 1).
+                // Seven_State Centre-Home core: state_val is a target slot, settle publishes cmd+1
+                // (1/Pick->AtWork1(2), 3/Place->AtWork2(4), 5/Home->AtHome(6)->AtHomeInit(0)). The
+                // Control.xml State_Number doesn't line up, so pattern-match the WAIT condition Name
+                // suffix (Pick/Place/Home) to the CMD slot + its settle value.
                 if (IsSevenStateCommandable(inScopeTarget))
                 {
                     int sevenStateCmd = MapSevenStateCommandFromConditionName(cond.Name);
@@ -433,17 +384,9 @@ namespace CodeGen.Translation.Process.Recipes
                             CmdTargetName = (inScopeTarget.Name ?? string.Empty).Trim().ToLowerInvariant(),
                             CmdState = sevenStateCmd,
                             WaitId = waitId,
-                            // Centre-Home core settle value once stable:
-                            //   pick  1 -> AtWork1     publishes 2
-                            //   place 3 -> AtWork2     publishes 4
-                            //   home  5 -> AtHomeInit  publishes 0  (NOT AtHome=6)
-                            // Home is the exception: the ECC takes AtHome -> AtHomeInit
-                            // on (atWork1=FALSE AND atWork2=FALSE AND atHome=TRUE) in the
-                            // same run-to-stable tick as the AtHome entry, so current_state
-                            // is overwritten 6 -> 0 and the engine (which re-samples
-                            // state_table on each state_change) only ever sees the stable
-                            // 0. Waiting on the transient 6 misses it and parks the engine
-                            // forever -- exactly the Five_State AtHomeEnd=4 -> 0 remap.
+                            // Centre-Home settle value: pick 1->AtWork1(2), place 3->AtWork2(4),
+                            // home 5->AtHomeInit(0) NOT AtHome(6) — 6 is transient (overwritten 6->0 in
+                            // one run-to-stable tick, missed by check_wait), the Seven_State analogue of 4->0.
                             WaitState = sevenStateCmd == 5
                                 ? 0
                                 : sevenStateCmd + 1,
@@ -473,20 +416,9 @@ namespace CodeGen.Translation.Process.Recipes
                 };
             }
 
-            // SETTLED WAIT runtime encoding (complementary to the MotionPair
-            // fix above). A settled wait on a Five_State actuator must target
-            // the value the actuator STABLY HOLDS, not the transient
-            // Control.xml State_Number. The actuator only stably holds
-            // AtHomeInit (runtime 0) and AtWork (runtime 2). AtHomeEnd
-            // (runtime 4) is the momentary publish during the ToHome ->
-            // AtHomeInit transition, so any settled wait reached after the
-            // return completes sees 0, not 4. Concretely, Feed_Station's
-            // WaitingReleaseSt2 waits on Feeder/ReturnedFinished
-            // (State_Number 4); by the time it is reached feeder has long
-            // settled to AtHomeInit 0 and the ==4 wait would park forever.
-            // Remap actuator settled waits on the home-finished family
-            // (State_Number 4) to the resting AtHomeInit (0). Sensors are
-            // untouched (Sensor_Bool_CAT publishes the Control.xml number).
+            // SETTLED WAIT runtime encoding (same 4->0 rule as MotionPair): remap an actuator settled
+            // wait on the home-finished family (State_Number 4) to the resting AtHomeInit 0 — 4 is
+            // transient and a wait reached after the return sees 0. Sensors untouched (publish the raw number).
             int settledStateWait = waitState;
             if (string.Equals(inScopeTarget.Type, "Actuator",
                     StringComparison.OrdinalIgnoreCase) &&
@@ -511,15 +443,10 @@ namespace CodeGen.Translation.Process.Recipes
             };
         }
 
-        // The state_table slot a Process stamps ({process_id, sentinel}) — the WAIT id a cross-process
-        /// <summary>
-        /// Control.xml-driven merge trigger: true iff an M262 (Feed) process has a MOTION state whose
-        /// leave-condition targets a Process carrying a mergeable sentinel — i.e. Feed waits on another
-        /// controller mid-sequence (the no-clamp Transfer-hold: Feed_Station/TransferAdvancing ->
-        /// Disassembly/bearing_pnp_home_pos). Models without such a gate (the clamp model, whose Feed
-        /// never waits on Disassembly) return false, so the Feed ring stays decoupled -> byte-identical.
-        /// The recipe classifier and the ring wiring both read this one decision.
-        /// </summary>
+        // Control.xml-driven merge trigger: true iff an M262 (Feed) process has a MOTION state whose
+        // leave-condition targets a Process carrying a mergeable sentinel (no-clamp Transfer-hold). The
+        // clamp model (Feed never waits on Disassembly) returns false -> Feed ring decoupled ->
+        // byte-identical. Read by both the recipe classifier and the ring wiring.
         public static bool FeedRingMergeNeeded(IReadOnlyList<VueOneComponent> allComponents)
         {
             foreach (var proc in allComponents)
@@ -597,15 +524,10 @@ namespace CodeGen.Translation.Process.Recipes
             return null;
         }
 
-        /// <summary>
-        /// Resolve the Control.xml condition on <paramref name="componentName"/> that gates the
-        /// transition INTO the process state named <paramref name="destStateName"/> to a
-        /// (state_table id, runtime state) WAIT. Data-driven: the twin owns the timing. For
-        /// Disassembly's EjectorForward entry gated on Transfer/Returning this returns (transfer id 6,
-        /// state 3) = "eject while Transfer is returning"; on Transfer/ReturnedFinished it returns
-        /// (6, 0) = "after Transfer is home" (the transient home-finished State 4 remaps to the stable
-        /// AtHomeInit 0 for a Five_State actuator). Returns false when no such gated condition exists.
-        /// </summary>
+        // Resolve the Control.xml condition on componentName that gates the transition INTO destStateName
+        // to a (state_table id, runtime state) WAIT (the twin owns the timing). The transient
+        // home-finished State 4 remaps to the stable AtHomeInit 0 for a Five_State actuator. False if no
+        // such gated condition exists.
         public static bool TryGetTransitionGate(VueOneComponent process, string destStateName,
             string componentName, RecipeArrays arrays, IReadOnlyList<VueOneComponent> allComponents,
             out int waitId, out int waitState)
@@ -640,16 +562,10 @@ namespace CodeGen.Translation.Process.Recipes
             return false;
         }
 
-        /// <summary>
-        /// Resolve the Control.xml gate on a process's INITIAL transition (its Initial_State's
-        /// leave-condition) to a (state_table id, runtime state) WAIT. For the no-clamp
-        /// Assembly_Station that transition is Initialisation -> Bearing_PnP_Picking gated on
-        /// Transfer/Advanced, so this returns (transfer id 6, state 2) -- the twin's own material
-        /// gate, used under MergeFeedRing in place of the injected PartAtAssembly gate so Assembly
-        /// starts only when the part is delivered AND held (Transfer Advanced), never on a stale/early
-        /// PartAtAssembly. Returns false when the initial state has no in-scope, non-Process gated
-        /// transition (the caller then keeps the injected HandoffPlanner gate).
-        /// </summary>
+        // Resolve the Control.xml gate on a process's INITIAL transition (Initial_State's leave-condition)
+        // to a (state_table id, runtime state) WAIT — the twin's own material gate, used under
+        // MergeFeedRing in place of the injected PartAtAssembly gate. False if the initial state has no
+        // in-scope non-Process gated transition (caller keeps the injected HandoffPlanner gate).
         public static bool TryGetInitialConditionGate(VueOneComponent process,
             RecipeArrays arrays, IReadOnlyList<VueOneComponent> allComponents,
             out int waitId, out int waitState)
@@ -672,20 +588,12 @@ namespace CodeGen.Translation.Process.Recipes
             return false;
         }
 
-        /// <summary>
-        /// Like <see cref="TryGetInitialConditionGate"/>, but returns the gate component's HOME and
-        /// ADVANCED settled state numbers so the caller can reconstruct the twin's rising EDGE. The
-        /// no-clamp Assembly's initial transition is gated on Transfer/Advancing — a *transition*,
-        /// not a held state. The Five_State runtime collapses that transient to the settled Advanced,
-        /// and MergeFeedRing then HOLDS the Transfer advanced through BOTH Assembly and Disassembly,
-        /// so a single WAIT(Transfer=Advanced) is a level that stays true and lets Assembly's next
-        /// cyclic pass drive bearing_pnp WHILE Disassembly is still on the shared M580 swivel.
-        /// Emitting WAIT(home) → WAIT(advanced) makes Assembly re-arm only after the Transfer has
-        /// fully cycled (Disassembly finished → Feed returned it home → Feed re-advanced for the next
-        /// part), so Assembly runs exactly once per part and can never overlap Disassembly. home /
-        /// advanced are read from the gate component's OWN States (ReturnedHome/AtHomeInit → home;
-        /// Advanced/AtWork → advanced), so this stays data-driven, not hardcoded.
-        /// </summary>
+        // Like TryGetInitialConditionGate but returns the gate component's HOME and ADVANCED settled
+        // state numbers so the caller can reconstruct the twin's rising EDGE (WAIT(home) -> WAIT(advanced)).
+        // The initial transition is gated on Transfer/Advancing (a *transition*); MergeFeedRing HOLDS the
+        // Transfer advanced through Assembly+Disassembly, so a single WAIT(Advanced) is a held level that
+        // would let Assembly re-fire while Disassembly is on the shared swivel — the edge makes Assembly
+        // re-arm only after the Transfer has fully cycled. home/advanced read from the gate's OWN States.
         public static bool TryGetInitialConditionEdgeGate(VueOneComponent process,
             RecipeArrays arrays, IReadOnlyList<VueOneComponent> allComponents,
             out int waitId, out int homeState, out int advancedState)
@@ -722,8 +630,8 @@ namespace CodeGen.Translation.Process.Recipes
             return fallback;
         }
 
-        // condition resolves to. Only the processes that publish a mergeable sentinel are mapped;
-        // returns null for any other name so the caller falls back to the normal drop.
+        // The state_table process_id a cross-process WAIT condition resolves to. Only processes that
+        // publish a mergeable sentinel are mapped; null for any other name (caller falls back to the drop).
         private static int? ProcessSentinelId(string? processName)
         {
             var n = (processName ?? string.Empty).Trim();
@@ -1001,25 +909,10 @@ namespace CodeGen.Translation.Process.Recipes
             return refState.StateNumber;
         }
 
-        /// <summary>
-        /// Resolve the transient (motion command) state number for a CMD row by
-        /// looking it up on the actuator's OWN State elements — not by arithmetic
-        /// on the wait state.
-        ///
-        /// Algorithm:
-        ///   1. Extract the motion-direction token from the source state name
-        ///      ("FeederAdvancing" -> "Advancing"; "TransferReturning" -> "Returning").
-        ///   2. Find the actuator State whose Name equals (or contains) that token.
-        ///   3. Return its State_Number.
-        ///
-        /// Falls back to (settledWaitState - 1) with a warning if no match is found —
-        /// this matches Five_State_Actuator's settled-1=transient convention but flags
-        /// it explicitly so non-Five_State CATs get visibility into the heuristic.
-        ///
-        /// Examples on Five_State_Actuator (per Feed_Station_Fixture):
-        ///   FeederAdvancing  -> Feeder.Advancing  (State_Number=1)
-        ///   FeederReturning  -> Feeder.Returning  (State_Number=3)
-        /// </summary>
+        // Resolve the transient (motion command) state number for a CMD row from the actuator's OWN State
+        // elements (motion token in the source-state name -> matching actuator State's State_Number), NOT
+        // by arithmetic on the wait state. Falls back to (settledWaitState-1) with a warning (Five_State
+        // convention) if no match — extend MotionVerbToStateNames for non-Five_State CATs.
         private static int ResolveTransientCmdState(string? sourceStateName,
             VueOneComponent actuator, int settledWaitState, RecipeArrays arrays)
         {
