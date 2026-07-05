@@ -1052,7 +1052,7 @@ namespace CodeGen.Translation
             }
 
             // disassemblyFbName is captured so BuildStation2Wiring threads the SAME FB the sysres does; null → syslay stays Assembly-only.
-            string disassemblyFbName = null;
+            string? disassemblyFbName = null;
             var disassyProc = allComponents.FirstOrDefault(c =>
                 string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase) &&
                 (string.Equals(c.Name, "Disassembly", StringComparison.Ordinal)
