@@ -528,17 +528,9 @@ namespace CodeGen.Translation
             }
         }
 
-        // ===========================================================================
-        // LEGACY / DORMANT — DO NOT REUSE FOR THE CENTRE-HOME SWIVEL.
-        // Reachable ONLY via the old Inject() -> InjectSyslay() entry. The live rig and
-        // simulator buttons both call GenerateStation1TestSyslay(), which does NOT use
-        // this method, so it never runs in production. It wires PHANTOM data pins
-        // (proc.state_update / proc.state_val / proc.<name>) that do not exist on
-        // Process1_Generic — the real command path is the stateRprtCmd adapter ring
-        // (updateComponentState), and Bearing_PnP is now Seven_State_Actuator_Centre_Home_CAT
-        // with command vocabulary 1/3/5 (Pick/Place/Home), not the old 1/2/0. If you ever
-        // resurrect Inject(), rewire through the ring; do not extend these phantom edges.
-        // ===========================================================================
+        // LEGACY / DORMANT — reachable only via the old Inject() path (never runs in production).
+        // Wires PHANTOM data pins that do not exist on Process1_Generic; the real command path is
+        // the stateRprtCmd adapter ring. Do not reuse for the centre-home swivel.
         private static void WireSevenStateActuators(XElement net, List<string> actuators,
             string proc, SystemInjectionResult result)
         {
@@ -737,10 +729,8 @@ namespace CodeGen.Translation
         private static List<VueOneComponent> Processes(List<VueOneComponent> all) =>
             all.Where(c => c.Type?.Equals("Process", StringComparison.OrdinalIgnoreCase) == true).ToList();
 
-        // A Type="Robot" component is NOT necessarily the UR3e — the
-        // Bearing/Shaft/CoverPnp grippers are also Type="Robot" (5-state) and must NEVER be
-        // emitted as Robot_Task_CAT. Use the SAME narrow predicate as the active resolver so this
-        // legacy InjectGroup path can only ever select the real task arm.
+        // Type="Robot" is not necessarily the UR3e — the Bearing/Shaft/CoverPnp grippers are also
+        // Type="Robot" and must never be Robot_Task_CAT; IsRobotTaskArm selects only the real arm.
         private static List<VueOneComponent> Robots(List<VueOneComponent> all, MapperConfig config) =>
             all.Where(c => TemplateMap.IsRobotTaskArm(c)).ToList();
 
@@ -812,9 +802,6 @@ namespace CodeGen.Translation
         {
             public List<(string Component, string Detail)> Bound { get; } = new();
             public List<string> Missing { get; } = new();
-            /// <summary>Each <c>(Pin, Value)</c> entry rewritten in the .hcf —
-            /// e.g. <c>("DI00", "RES0.M262IO.PusherAtHome")</c>. Surfaced into
-            /// the Activity panel as one <c>[Hcf]</c> line per pin.</summary>
             public List<(string Pin, string Value)> HcfPinAssignments { get; } = new();
         }
 
@@ -895,10 +882,8 @@ namespace CodeGen.Translation
             var reader = new CodeGen.IO.SystemXmlReader();
             var allComponents = reader.ReadAllComponents(controlXmlPath);
 
-            // Control.xml-driven: merge the M262 Feed ring into the one main cross-PLC ring ONLY when a
-            // Feed process has a cross-controller sequence gate (the no-clamp Transfer-hold). Clamp
-            // models, whose Feed never waits on an M580 process, stay decoupled -> byte-identical. The
-            // classifier owns the detection so the recipe and the ring wiring read one decision.
+            // Merge the M262 Feed ring into the main cross-PLC ring only when a Feed process has a
+            // cross-controller sequence gate (the no-clamp Transfer-hold); else stays decoupled.
             Configuration.MapperConfig.MergeFeedRing =
                 Process.Recipes.RecipeStateClassifier.FeedRingMergeNeeded(allComponents);
 
@@ -910,58 +895,13 @@ namespace CodeGen.Translation
             var grouping = new StationGroupingService();
             var fullContents = grouping.GroupStationContents(process, allComponents);
 
-            // Button 2 scope: the Feed Station slice — Feeder + Checker +
-            // Transfer actuators and PartInHopper + PartAtChecker sensors.
-            // Transfer moves a part Station1→Station2; its Control.xml wait
-            // conditions (TransferAdvancing/Returning/Returned) reference only
-            // the Transfer actuator itself, so no extra sensor is required to
-            // unlock those recipe rows. Process/Assembly_Station references
-            // (WaitingReleaseSt2, HandShake) stay out of scope; Button 3 emits
-            // the full grouping.
-            //
-            // Order is FIXED by these arrays (sensors: PartInHopper then
-            // PartAtChecker; actuators: Feeder, Checker, Transfer) — not by
-            // Control.xml appearance order — so the combined sensors-first
-            // component map is deterministic. With PartAtChecker present:
-            // PartInHopper=0, PartAtChecker=1, Feeder=2, Checker=3, Transfer=4;
-            // without it (today's rig build): PartInHopper=0, Feeder=1,
-            // Checker=2, Transfer=3. The FB id/actuator_id params
-            // (sensorIdStart=0, actuatorIdStart=Sensors.Count) and the recipe's
-            // Wait1Id (ProcessRecipeArrayGenerator.BuildScopedComponentMap)
-            // both derive from this same ordered list, so they stay in
-            // lock-step with the runtime state_table. Components absent from
-            // Control.xml are skipped gracefully (whatever subset is present).
-            // Scope for the Test Runtime button — Feed Station (M262) +
-            // Assembly Station (M580 + BX1). Ordering matters: this list
-            // dictates state_table[] index allocation (sensors first, then
-            // actuators), the FB id parameter, and the recipe Wait1Id lookup.
-            // Disassembly Process is intentionally NOT scoped yet.
-            //
-            // Station 1 (M262): Feeder, Checker, Transfer + PartInHopper, PartAtChecker
-            // Station 2 (M580): Bearing_PnP, Bearing_Gripper, Shaft_Hr, Shaft_Vr,
-            //                   Shaft_Gripper, Clamp + BearingSensor, ShaftSensor
-            // Soft dPAC (BX1):  CoverPNP_Hr, CoverPNP_Vr, CoverPnp_Gripper + TopCoverSenosr
+            // Ordering of these arrays is load-bearing: it dictates state_table[] index allocation
+            // (sensors first, then actuators), the FB id/actuator_id params, and the recipe Wait1Id
+            // lookup, keeping them in lock-step with the runtime state_table. Absent components are
+            // skipped. Disassembly Process is intentionally not scoped yet.
             var allowedActuators = new[]
             {
                 // Station 1 (M262)
-                // Ejector matches reference SMC_Rig_Expo (where it is named
-                // "Rejector"). Open-loop pneumatic eject
-                // arm: no athome/atwork sensors. Emitted as the UNIVERSAL
-                // Five_State_Actuator_CAT — the same CAT that drives Feeder
-                // and Transfer — because that CAT already exposes the pair
-                //   WorkSensorFitted : BOOL
-                //   HomeSensorFitted : BOOL
-                // as InputVars on the FBType. BuildActuatorParameters'
-                // data-driven resolution counts how many other Control.xml
-                // components' Sequence_Conditions wait on each actuator's
-                // atWork (StateNumber=2) / atHome (StateNumber=0 or 4)
-                // StateIDs; Ejector has zero such references, so the
-                // resolver flips both fitted-flags to FALSE automatically.
-                // The CAT's internal ECC then skips the sensor-wait branch
-                // and runs the open-loop motion-time fallback, which is the
-                // exact behaviour the reference's separate No_Sensors_CAT
-                // would have provided. No extra CAT type, no new library
-                // packaging, no .fbt to deploy.
                 "Feeder", "Checker", "Transfer", "Ejector",
                 // Station 2 (M580)
                 "Bearing_PnP",
@@ -972,11 +912,7 @@ namespace CodeGen.Translation
                 "CoverPNP_Hr", "CoverPNP_Vr",
                 "CoverPnp_Gripper",
             };
-            // Emit the real UR3e task arm on M262. ONLY "Robot" is added —
-            // the Type="Robot" grippers (Bearing/Shaft/CoverPnp) are NOT here and would be
-            // rejected by IsRobotTaskArm anyway. Resolves to Robot_Task_CAT, lands on M262
-            // (NameBasedPlcGuess Robot→M262), gets minimal params (actuator_name='robot',
-            // actuator_id).
+            // Only the real UR3e task arm is added (grippers are rejected by IsRobotTaskArm).
             if (MapperConfig.EnableRobotTaskTail)
                 allowedActuators = allowedActuators.Append("Robot").ToArray();
             var allowedSensors = new[]
@@ -985,26 +921,9 @@ namespace CodeGen.Translation
                 "BearingSensor", "ShaftSensor",
                 "TopCoverSenosr",
             };
-            // Source the allowed components from `allComponents` (the full
-            // Control.xml). StationGroupingService's fullContents.Actuators /
-            // fullContents.Sensors are populated from ONLY the Feed_Station
-            // Process's own transition conditions, so Station 2 actuators
-            // (Bearing_PnP, Shaft_Hr/Vr, grippers, Clamp) — referenced by
-            // Assembly_Station's transitions — would otherwise be dropped and
-            // the purple M580 / green BX1 frames would come out empty.
-            // Feed_Station Process itself stays
-            // Feed_Station — we're only widening the COMPONENT scope, not
-            // the Process scope. Assembly_Station's recipe lives in its own
-            // Process FB instance which is emitted by a later phase.
-            // Grippers (Bearing_Gripper / Shaft_Gripper / CoverPnp_Gripper) carry
-            // VueOne Type="Robot", not "Actuator" — a strict Type=="Actuator"
-            // filter silently dropped all three, leaving the assembly recipe with
-            // no grasp/release step and the M580/BX1 frames missing their grippers.
-            // Accept Actuator OR Robot here; ResolveActuatorFBType still routes the
-            // 5-state mechanical grippers to Five_State_Actuator_CAT and the 7-state
-            // Robot arm to Seven_State. Sensor ids are unaffected, and the M262
-            // actuator ids (Feeder=…, Checker, Transfer) are unchanged because the
-            // grippers sort after them, so Feed_Station's recipe is byte-identical.
+            // Source allowed components from the full Control.xml (StationGroupingService only
+            // populates the Feed_Station Process's own conditions, so Station 2 components would
+            // otherwise be dropped). Grippers carry Type="Robot", not "Actuator", so accept both.
             var contents = new StationContents(
                 fullContents.Process,
                 allowedActuators
@@ -1035,38 +954,18 @@ namespace CodeGen.Translation
 
             int sensorIdStart = 0;
             int actuatorIdStart = contents.Sensors.Count;
-            // Station-2 process_ids sit ABOVE the component id space (sensors+
-            // actuators occupy 0..N-1, N≈16) so a recipe Wait1Id can never collide
-            // with a Process FB's own process_id — the collision
-            // ProcessRecipeArrayGenerator.ValidateProcessIdInvariant throws on.
-            // Feed_Station keeps process_id 10 (no M262 component reaches id 10),
-            // so the proven M262 recipe is unchanged.
-            // process_ids must stay in [0..19] so every state_table in the
-            // runtime chain (ProcessRuntime_Generic_v1.state_table,
-            // ProcessStateBusHandler.state_table, updateComponentState.state_table,
-            // CommonInterlockEvaluator.state_table) can keep its native
-            // ARRAY[20] size without forcing every CAT to allocate ARRAY[200]+
-            // just to hold one literal process_id index slot. Max actuator_id
-            // emitted is 16 (see SystemXmlReader component ordering); 17 and
-            // 18 sit just above that and below the boundary. The
-            // ValidateProcessIdInvariant check still passes because no
-            // Wait1Id of any process equals 17 or 18 (Wait1Ids only reference
-            // component ids 0..16).
+            // process_ids must stay in [0..19] so every runtime state_table keeps its native
+            // ARRAY[20] size; they sit above the component id space (max actuator_id 16) so no
+            // Wait1Id collides with a process_id (ValidateProcessIdInvariant).
             int assemblyProcessId = MapperConfig.AssemblyProcessId;
             int disassemblyProcessId = MapperConfig.DisassemblyProcessId;
-            // Feed_Station keeps its normal process_id (slot 10), which equals Shaft_Hr's component id.
-            // Under MergeFeedRing the two share state_table[10] on the one ring, but it is harmless: the
-            // Transfer-hold keeps Feed WAITing (issuing no CMDs -> no stamps to slot 10) throughout
-            // Assembly + Disassembly's Shaft_Hr moves, and Feed's CMD states (1=Work, 3=Home) never equal
-            // Shaft_Hr's WAIT targets (0=Home, 2=AtWork), so a stray stamp can neither falsely satisfy nor
-            // block a Shaft_Hr WAIT (level-triggered -> Shaft_Hr's own report always wins). The 20-slot
-            // state_table also has no free slot above the component space once Assembly/Disassembly/Robot
-            // take 17/18/19, so no clean re-id is possible anyway.
+            // Feed_Station keeps process_id 10 (== Shaft_Hr's component id). Under MergeFeedRing they
+            // share state_table[10] harmlessly: the Transfer-hold keeps Feed WAITing (no CMD stamps)
+            // and Feed's CMD states (1/3) never equal Shaft_Hr's WAIT targets (0/2).
             int processId = MapperConfig.FeedStationProcessId;
 
-            // No top-level PLC_Start FB: Area_CAT and Station_CAT each contain their own
-            // internal plcStart bootstrap, so an external one would double-bootstrap and
-            // EAE flags it as a duplicate.
+            // No top-level PLC_Start FB: Area_CAT and Station_CAT each contain their own internal
+            // plcStart bootstrap; an external one double-bootstraps and EAE flags it as a duplicate.
 
             builder.AddFB(FBIdGenerator.GenerateFBId("Area_HMI"),
                 "Area_HMI", "Area_CAT", "Main", 240, 140);
@@ -1088,12 +987,8 @@ namespace CodeGen.Translation
             builder.AddFB(FBIdGenerator.GenerateFBId("Station1_HMI"),
                 "Station1_HMI", "Station_CAT", "Main", 2220, 100);
 
-            // Station 2 structural stack — same shape as Station 1, parented
-            // under the same Area FB. Mirrors SMC_Rig_Expo_withClamp's reference
-            // layout (Station + Station_HMI + Station_Term per station). The
-            // post-syslay CanonicalLayout pass rewrites coordinates; the
-            // values here just need to be unique so two FBs don't share an
-            // initial position. M580 frame holds Station2 graphically.
+            // Station 2 structural stack — same shape as Station 1 under the same Area FB. The
+            // post-syslay CanonicalLayout pass rewrites coordinates; these just need to be unique.
             builder.AddFB(FBIdGenerator.GenerateFBId("Station2"),
                 "Station2", "Station", "Main", 12000, 600,
                 new Dictionary<string, string>
@@ -1104,11 +999,8 @@ namespace CodeGen.Translation
             builder.AddFB(FBIdGenerator.GenerateFBId("Station2_HMI"),
                 "Station2_HMI", "Station_CAT", "Main", 12100, 100);
 
-            // Resolve the Process FB instance name via InstanceNameResolver. The resolver
-            // checks the optional Instance_Name_Overrides sheet first (if MappingRulesPath
-            // is set on the config) and otherwise applies the default convention of stripping
-            // a trailing "_process" suffix. Falls back to "Process1" only if both the override
-            // sheet AND the component's Name are blank (defensive).
+            // Resolve the Process FB instance name (Instance_Name_Overrides sheet, else the
+            // default suffix-stripping convention; "Process1" only if both are blank).
             var overrides = (config != null && !string.IsNullOrWhiteSpace(config.MappingRulesPath))
                 ? InstanceNameOverridesLoader.Load(config.MappingRulesPath)
                 : new InstanceNameOverridesLoader.Overrides();
@@ -1121,21 +1013,11 @@ namespace CodeGen.Translation
                 contents.Process, allComponents, processInstanceName, processId, contents,
                 useRecipeStruct: config != null && config.UseRecipeStruct);
 
-            // (Removed: processOuter["BackgroundColor"] = "PaleGreen" — EAE's
-            // FB-type compiler rejects any Parameter Name that is not declared
-            // as an InputVar on the FBType. BackgroundColor is not an InputVar
-            // on Process1_Generic, so emitting it raises ERR_MEMBER_VAR_NOTFOUND
-            // at compile time. Confirmed via Schneider's nxtLibraryElement.dtd
-            // and the renderer binary EngineeringEditors.dll — FB colouring is
-            // not exposed via syslay parameters.)
+            // EAE's FB-type compiler rejects any Parameter Name not declared as an InputVar on the
+            // FBType (ERR_MEMBER_VAR_NOTFOUND); FB colouring is not exposed via syslay parameters.
 
-            // Change 4: deploy-time recipe-completeness validation (SAFETY).
-            // Refuse to emit a syslay that strands an actuator atwork — every
-            // actuator with a work command (CmdState=1) must also have a
-            // return-to-home command (CmdState=3). Change 2's auto-retract
-            // makes this hold in normal operation; this is the hard backstop
-            // (the strict test: we never deploy code that leaves a cylinder
-            // out, which on the rig required killing air to recover).
+            // SAFETY: refuse to emit a syslay that strands an actuator atwork — every actuator with
+            // a work command (CmdState=1) must also have a return-to-home command (CmdState=3).
             if (processRecipe != null)
             {
                 var adv = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1157,45 +1039,20 @@ namespace CodeGen.Translation
                             : string.Empty) +
                         " — refusing to generate code that strands an actuator at work. " +
                         "(auto-retract should have inserted it; this is a recipe-generator bug.)");
-
-                // Interlock-rule validation is now a HARD per-actuator check
-                // in the actuator loop below (abort if an actuator has an
-                // in-scope Control.xml interlock but RuleCount=0). No longer a
-                // deferred TODO — interlock rules are emitted from Control.xml.
             }
 
             builder.AddFB(FBIdGenerator.GenerateFBId(contents.Process.ComponentID),
                 processInstanceName, "Process1_Generic", "Main", 3360, 1460,
                 processOuter, processNested);
 
-            // Station 2 — Assembly_Station + Disassembly Process FBs. Same FBType
-            // (Process1_Generic) as Feed_Station; the FBT is data-driven, so each
-            // instance carries its own recipe arrays. The reference
-            // SMC_Rig_Expo_withClamp hand-wires bespoke Process2_CAT/Process3_CAT;
-            // our single data-driven FBT replaces all of them.
-            //
-            // Both recipes are now built on the HARDWARE path too (Assembly was an
-            // empty placeholder, Disassembly was sim-only). They reuse the SAME
-            // global, sensors-first `contents` registry as Feed_Station, so every
-            // Wait1Id matches the global FB id stamped on the actuator/sensor
-            // instances and mirrored onto the M580/BX1 resources (this is the
-            // global-id registry that closes deferred task #25). Commands are
-            // derived from the transition CONDITIONS (commandFromCondition: true) —
-            // "command actuator X to state Y, then wait until it settles" — because
-            // the Station-2 state names (Cover_PnP_Down, Clamping_Part, …) don't
-            // encode the motion verbs Feed_Station's do. Distinct out-of-range
-            // process_ids (101/102) avoid the ValidateProcessIdInvariant collision.
-            //
-            // Cross-PLC caveat: Assembly references BX1 cover components and
-            // Disassembly references BX1 (+ skipped M262 Ejector/Robot). Those
-            // waits carry the correct global id but only resolve on a single ring
-            // (the simulator) or once the M580↔BX1 broker bridge is emitted — the
-            // same outstanding piece HcfSymbolBinder flags. Reported per process.
+            // Station 2 — Assembly_Station + Disassembly Process FBs. Same data-driven
+            // Process1_Generic FBType; each instance carries its own recipe arrays and reuses the
+            // SAME global sensors-first `contents` registry as Feed_Station so every Wait1Id matches
+            // the global FB id. Commands are derived from the transition conditions
+            // (commandFromCondition: true) because Station-2 state names don't encode motion verbs.
             var assemblyStationProc = allComponents.FirstOrDefault(c =>
                 string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(c.Name, "Assembly_Station", StringComparison.Ordinal));
-            // Track the Process FB instance names we emit so we can wire
-            // cross-process state_update → state_change events below.
             var crossProcInstances = new List<string> { processInstanceName };
             if (assemblyStationProc != null)
             {
@@ -1220,14 +1077,9 @@ namespace CodeGen.Translation
                     "Station 2 (M580) frame will have actuators but no Process FB.");
             }
 
-            // Disassembly Process FB. Same FBType (Process1_Generic) with its own
-            // recipe arrays. Sits in a third X column under the BX1 zone so the
-            // three Process FBs form a left→right Station1/Station2/Station3 row at
-            // y=1460. Now emitted on the hardware path too (was sim-only).
-            // Captured so BuildStation2Wiring can thread the SAME Disassembly FB into the
-            // syslay init/CaS/ring chains that ResourceWireEmitter threads on the sysres
-            // (MapperConfig.UnparkDisassembly). Null when there is no Disassembly Process —
-            // then the syslay stays Assembly-only, matching the parked sysres.
+            // Disassembly Process FB. Captured so BuildStation2Wiring can thread the SAME FB into
+            // the syslay init/CaS/ring chains that ResourceWireEmitter threads on the sysres. Null
+            // when there is no Disassembly Process — the syslay then stays Assembly-only.
             string disassemblyFbName = null;
             var disassyProc = allComponents.FirstOrDefault(c =>
                 string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase) &&
@@ -1257,10 +1109,7 @@ namespace CodeGen.Translation
                     "BX1 zone will have actuators but no Disassembly Process FB.");
             }
 
-            // Bearing_PnP routes to Seven_State_Actuator_CAT (13-state PARALLEL+
-            // ALTERNATIVE branched swivel → 7-state ECC). Its recipe rows are
-            // settled WAITs only — the Seven_State toWork/toHome command vocabulary
-            // is the remaining per-CAT step (flagged by the recipe generator).
+            // Bearing_PnP routes to Seven_State (13-state PARALLEL+ALTERNATIVE branched swivel).
             var bearingPnp = allComponents.FirstOrDefault(c =>
                 string.Equals(c.Type, "Actuator", StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(c.Name, "Bearing_PnP", StringComparison.Ordinal));
@@ -1269,10 +1118,7 @@ namespace CodeGen.Translation
                     $"[Recipe] Bearing_PnP ({bearingPnp.States.Count} states / PARALLEL+ALTERNATIVE " +
                     "branched) → Seven_State_Actuator_CAT; recipe emits settled WAITs (CMD vocabulary pending).");
 
-            // Surface every out-of-scope condition the recipe generator dropped so the
-            // .syslay file self-documents what's missing. Without this, an operator
-            // reading the syslay has no clue that Checker / Transfer / Assembly_Station
-            // references in Control.xml were silently filtered out by Button 2's scope.
+            // Self-document the out-of-scope conditions the recipe generator dropped.
             if (processRecipe != null && processRecipe.SkippedConditions.Count > 0)
             {
                 var prefix = $" Recipe scope: {processRecipe.SkippedConditions.Count} " +
@@ -1285,11 +1131,8 @@ namespace CodeGen.Translation
                     report.Missing.Add($"recipe: {skip}");
             }
 
-            // Defect 3: self-document the FINAL serialised recipe ordering so
-            // the collision-safe sequence (each actuator returns home before
-            // any subsequent actuator advances — Transfer never advances while
-            // Checker/Feeder is atwork) is verifiable straight from the syslay
-            // comment, without hand-decoding the six parallel arrays.
+            // Self-document the final serialised recipe ordering (collision-safe: each actuator
+            // returns home before any subsequent one advances).
             if (processRecipe != null &&
                 !string.IsNullOrWhiteSpace(processRecipe.OrderingSummary))
             {
@@ -1301,21 +1144,15 @@ namespace CodeGen.Translation
                 report.Missing.Add($"recipe ordering: {processRecipe.OrderingSummary}");
             }
 
-            // Sensors-first state_table id map (PartInHopper=0, PartAtChecker=1,
-            // Feeder=2, Checker=3, Transfer=4) — identical to the recipe's
-            // Wait1Id scheme so InterlockManager.RuleSourceID and the engine
-            // read the same state_table slots.
+            // Sensors-first state_table id map — identical to the recipe's Wait1Id scheme so
+            // InterlockManager.RuleSourceID and the engine read the same state_table slots.
             var scopedIds = ProcessRecipeArrayGenerator.BuildScopedComponentMap(
                 contents.Sensors, contents.Actuators);
 
-            // PLC partitioning index — used to position Station 2 components in
-            // the purple M580 / green BX1 zones while leaving Station 1 (M262)
-            // components untouched in the existing yellow zone. Falls back to
-            // a name-based guess when MapperConfig is null (legacy callers).
+            // PLC partitioning index (name-based guess when MapperConfig is null).
             var plcIndex = config != null
                 ? HcfSymbolIndex.Build(config)
                 : new HcfSymbolIndex();
-            // Per-PLC counters used for column index within each zone.
             var perPlcCount = new Dictionary<PlcAssignment, int>
             {
                 [PlcAssignment.M262] = 0,
@@ -1329,40 +1166,23 @@ namespace CodeGen.Translation
                 var actuator = contents.Actuators[i];
                 int assignedId = actuatorIdStart + i;
                 var fbType = ResolveActuatorFBType(actuator);
-                // The UR3e's positional id (17) collides with the Assembly station on the
-                // M580 state_table its ring reports cross to. Force the dedicated non-colliding slot
-                // so the CAT actuator_id == the recipe's WAIT robot Wait1Id (one source —
-                // MapperConfig.RobotActuatorId).
+                // The UR3e's positional id collides with the Assembly station on the M580
+                // state_table its ring reports cross to; force the dedicated non-colliding slot so
+                // the CAT actuator_id == the recipe's WAIT robot Wait1Id.
                 if (MapperConfig.EnableRobotTaskTail && TemplateMap.IsRobotTaskArm(actuator))
                     assignedId = MapperConfig.RobotActuatorId;
-                // Resolve FB instance name via the same path Process FB names use:
-                //   1. Instance_Name_Overrides xlsx sheet (ComponentID, then VueOne Name)
-                //   2. Default convention (suffix stripping)
-                //   3. Component's raw Name as the final fallback.
-                // This is the data-driven Feeder → Pusher rename — add a row to
-                // the xlsx (VueOne Name="Feeder", IEC Instance Name="Pusher") and
-                // it lands here. No hardcoded aliases.
                 var displayName = InstanceNameResolver.Resolve(actuator,
                     overrides.ByComponentId, overrides.ByVueOneName);
                 var actPlc = plcIndex.ResolveComponent(actuator.Name, bindings);
 
-                // Five-state actuators (Feeder/Checker/Transfer + Shaft/Cover
-                // single-acting cylinders + Clamp + mechanical grippers) take
-                // the full data-driven parameter block built from Control.xml.
-                // Non-5-state actuators (Bearing_PnP's branched 7+6, the
-                // vacuum gripper, Ejector's 4-state no-sensor cylinder) carry
-                // only the minimal name+id pair — their data-driven inputs
-                // (Target* / Rule* / Interlock*) will be wired in a later
-                // phase once the per-type recipe vocabulary lands.
+                // Five-state actuators take the full data-driven parameter block from Control.xml;
+                // non-5-state actuators carry only the minimal name+id pair.
                 Dictionary<string, string> actParams;
                 if (fbType == "Five_State_Actuator_CAT")
                 {
                     actParams = BuildActuatorParameters(actuator, assignedId, allComponents, scopedIds);
-                    // Override actuator_name so the runtime broadcast key uses
-                    // the resolved instance name (Pusher), not the Control.xml
-                    // raw name (Feeder). Without this, state_table.source_name
-                    // would be 'feeder' while the FB instance is 'Pusher' and
-                    // cross-FB lookups (interlock, recipe wait) would silently miss.
+                    // actuator_name uses the resolved instance name (not the Control.xml raw name)
+                    // so the runtime broadcast key matches the FB instance for cross-FB lookups.
                     actParams["actuator_name"] = SyslayBuilder.FormatString(
                         displayName.ToLowerInvariant());
 
@@ -1370,8 +1190,7 @@ namespace CodeGen.Translation
                 }
                 else if (string.Equals(fbType, "Seven_State_Actuator_Centre_Home_CAT", StringComparison.Ordinal))
                 {
-                    // Centre-home swivel (Bearing_PnP): minimal centre-home params + the interlock
-                    // rules (InterlockEmitter — same CommonInterlockManager inputs as Five_State).
+                    // Centre-home swivel (Bearing_PnP): minimal params + interlock rules.
                     actParams = BuildMinimalActuatorParameters(actuator, assignedId, fbType);
                     actParams["actuator_name"] = SyslayBuilder.FormatString(
                         displayName.ToLowerInvariant());
@@ -1393,11 +1212,8 @@ namespace CodeGen.Translation
                 if (actBinding != null) report.Bound.Add((actuator.Name, DescribeBinding(actBinding)));
                 else if (bindings != null) report.Missing.Add(actuator.Name);
 
-                // Position the FB inside its PLC zone. The post-syslay
-                // CanonicalLayout pass (M262SysresWireEmitter) will override
-                // these coordinates for known names; the initial values here
-                // just need to be inside-frame so a misnamed entry doesn't
-                // float into negative-X territory before the rewrite.
+                // Placeholder position inside the PLC zone; the post-syslay CanonicalLayout pass
+                // overrides these for known names.
                 int colInPlc = perPlcCount[actPlc]++;
                 var (zoneX, zoneY) = PlcZoneActuatorPosition(actPlc, colInPlc);
 
@@ -1441,34 +1257,14 @@ namespace CodeGen.Translation
                     sX, sY,
                     new Dictionary<string, string>
                     {
-                        // 'name' Parameter mirrors the resolved instance name so
-                        // the runtime broadcast (state_table.source_name) uses the
-                        // same identifier as the FB instance — keeps the rename
-                        // end-to-end consistent.
                         ["name"] = SyslayBuilder.FormatString(senDisplayName),
                         ["id"] = SyslayBuilder.FormatInt(assignedId),
-                        // (Removed: ["BackgroundColor"] = "LightSteelBlue" —
-                        // EAE compiler rejects with ERR_MEMBER_VAR_NOTFOUND
-                        // because BackgroundColor is not an InputVar on
-                        // Sensor_Bool_CAT. FB colouring is not exposed via
-                        // syslay parameters in EAE 24.1.)
                     });
             }
 
-            // Gated: the two real M262 rig proximity sensors the digital twin does NOT model —
-            // PartAtAssembly (DI08, the Feed→Assembly handoff) and PartAtExit (DI09, the robot
-            // gate). The physical SMC rig wires them; HcfPatchService binds them. Synthesized as
-            // Sensor_Bool_CAT with EXPLICIT ids (from MapperConfig.M262SynthSensors) so they never
-            // shift the Feed actuator ids (actuatorIdStart was already fixed from the REAL sensor
-            // count). Init-chained off the hopper sensor (a fan-out, parallel to the Feed chain) and
-            // currently OFF every report ring — exposed-only, so the proven Feed ring stays
-            // byte-identical and nothing crosses to the M580 state_table yet. See
-            // MapperConfig.M262SynthSensors for the id/consumption strategy. FB ids via FBIdGenerator,
-            // never the reference's. Off -> not emitted.
-            // Emitted for the robot tail (EnableRobotTaskTail): consumes the synthesized M262
-            // sensor. The FB + its INIT fan-off PartInHopper are added here; whether it joins a
-            // ring is decided in BuildStation2Wiring / ResourceWireEmitter (off the Feed ring).
-            // Off -> not emitted.
+            // Synthesized M262 rig proximity sensors the twin doesn't model, with EXPLICIT ids so
+            // they never shift the Feed actuator ids; init-chained off the hopper sensor and off
+            // every report ring (exposed-only) so the Feed ring stays byte-identical.
             if (MapperConfig.EnableRobotTaskTail)
             {
                 int synthY = 5200;
@@ -1491,58 +1287,34 @@ namespace CodeGen.Translation
             builder.AddFB(FBIdGenerator.GenerateFBId("Stn1_Term"),
                 "Stn1_Term", "CaSAdptrTerminator", "Main", 4780, 2360);
 
-            // Station 2 chain terminator — mirrors Stn1_Term but sits inside
-            // the M580 frame at the right edge of the Station 2 row. The
-            // post-syslay CanonicalLayout rewrite places it at (19500, 2900).
             builder.AddFB(FBIdGenerator.GenerateFBId("Stn2_Term"),
                 "Stn2_Term", "CaSAdptrTerminator", "Main", 14000, 2360);
 
             builder.AddFB(FBIdGenerator.GenerateFBId("Area_Term"),
                 "Area_Term", "CaSAdptrTerminator", "Main", 3760, 720);
 
-            // MQTT event-buffer: inject the ONE shared MQTT_CONNECTION when
-            // enabled. Every embedded MQTT_PUBLISH (patched into the CATs by
-            // TemplateLibraryDeployer) binds to it by matching ConnectionID
-            // value — no wire between them. INIT then CONNECT fire at startup
-            // so the link is up before the first publish; the connection's
-            // QueueDepth buffers messages while the broker is unreachable.
-            // Gated by MqttPublishEnabled so the hardware/sim output is
-            // unchanged when MQTT is off.
+            // MQTT: embedded MQTT_PUBLISH FBs bind to a connection by matching ConnectionID value
+            // (no wire). Gated by MqttPublishEnabled so hardware/sim output is unchanged when off.
             if (config != null && config.MqttPublishEnabled)
             {
-                // MQTT_CONNECTION carries only QI / ConnectionID / URL / ClientIdentifier; the Soft-dPAC
-                // defaults cover the rest.
                 string brokerUrl = config.MqttBrokerUrl;
-                // MQTT mode drives the URL SCHEME (MapperConfig.MqttSecureTls), so the URL can never
-                // contradict the mode: insecure demo => mqtt:// (needs EAE "Insecure Application" on the
-                // BX1 device, else MQTT_CONNECTION ReturnCode 101); secure => mqtts:// (needs a TLS broker
-                // listener, else RC100 on a plain 1883 broker). The host:port stays from MqttBrokerUrl.
+                // MqttSecureTls drives the URL scheme so it can't contradict the mode: insecure =>
+                // mqtt:// (needs the BX1 device's "Insecure Application", else RC101); secure =>
+                // mqtts:// (needs a TLS broker listener, else RC100 on plain 1883).
                 string mqttScheme = config.MqttSecureTls ? "mqtts" : "mqtt";
                 brokerUrl = System.Text.RegularExpressions.Regex.Replace(
                     brokerUrl, @"^[A-Za-z][A-Za-z0-9+.\-]*://", mqttScheme + "://");
 
-                // PER-RESOURCE MqttConn — one MQTT_CONNECTION per PLC (BX1 +
-                // M262 + M580), NO standalone bridge FBs (no MqttFmt_/MqttPub_
-                // pairs), NO cross-resource wires. Each MqttConn gets a UNIQUE
-                // ConnectionID + ClientIdentifier per resource so EAE never
-                // collides them (sharing ONE ConnectionID across the three
-                // returned ReturnCode 101 on the duplicates). BX1's embedded
-                // MqttPub (ConnectionID 'SMC_BX1') binds BX1's MqttConn, so BX1
-                // PUBLISHES its Cover P&P state through it — no bridge. On the
-                // RIG the M262/M580 dPAC firmware gates MQTT (ReturnCode 50 —
-                // the MQTT runtime is Soft-dPAC/BX1-only), so their MqttConn
-                // read RC50 and those PLCs do not publish; the per-resource
-                // MqttConn make that status visible (RC50 = firmware-gated, the
-                // expected clean result, NOT the RC101 collision).
+                // One MQTT_CONNECTION per PLC (no standalone bridge FBs, no cross-resource wires).
+                // Each gets a UNIQUE ClientIdentifier (mosquitto evicts duplicate-id clients);
+                // ConnectionID is shared so each resource's embedded MqttPub binds to its own conn.
                 void InjectMqttConn(string fbName, string connectionId, string clientIdentifier, int x, int y)
                 {
                     if (config.UseTelemetryCat)
                     {
-                        // Wrap the MQTT_CONNECTION in the Telemetry composite: ONE Config:TelemetryConfig
-                        // input carries the IDENTICAL QI/ConnectionID/URL/ClientIdentifier (ValidateCert/CACert
-                        // default 0/'' in insecure mode = the prior implicit FB defaults). Health:TelemetryHealth
-                        // is an OUTPUT (no instance param). The wrapped MQTT_CONNECTION keeps the same ConnectionID,
-                        // so each resource's embedded MqttPub still binds to it (behaviour equivalent).
+                        // Wrap the MQTT_CONNECTION in the Telemetry composite: one Config carries the
+                        // identical params; the wrapped conn keeps the same ConnectionID so the
+                        // embedded MqttPub still binds (behaviour equivalent).
                         var cfgLit = SyslayBuilder.FormatTelemetryConfig(
                             true, connectionId, brokerUrl, clientIdentifier,
                             config.MqttSecureTls ? config.MqttValidateCert : 0,
@@ -1555,20 +1327,13 @@ namespace CodeGen.Translation
                     var p = new Dictionary<string, string>
                     {
                         ["QI"] = SyslayBuilder.FormatBool(true),
-                        // ConnectionID is the WITHIN-resource binding key each resource's embedded MqttPub
-                        // looks up (PatchCatMqttPublish sets the publisher ConnectionID = cfg.MqttClientId).
-                        // All three resources SHARE this value so every resource's local publishers bind to
-                        // ITS OWN connection and publish. ClientIdentifier is the BROKER-facing id and is
-                        // UNIQUE per resource — mosquitto evicts duplicate-id clients, so a shared one would
-                        // make the three PLCs fight over a single broker slot. (The old RC101 was the insecure
-                        // mqtt:// URL, NOT a shared ConnectionID — rig-proven — so sharing ConnectionID is safe.)
+                        // ConnectionID is the within-resource binding key the embedded MqttPub looks
+                        // up (shared across resources); ClientIdentifier is the unique broker-facing id.
                         ["ConnectionID"] = SyslayBuilder.FormatString(connectionId),
                         ["URL"] = SyslayBuilder.FormatString(brokerUrl),
                         ["ClientIdentifier"] = SyslayBuilder.FormatString(clientIdentifier),
                     };
-                    // SECURE mode (mqtts://) only: emit the TLS validation params so a real handshake
-                    // can complete. INSECURE demo mode (mqtt://) emits none of these — it keeps the
-                    // reference-exact 4 params and relies on the device's "Insecure Application" setting.
+                    // SECURE mode (mqtts://) only: emit the TLS validation params for a real handshake.
                     if (config.MqttSecureTls)
                     {
                         p["ValidateCert"] = config.MqttValidateCert.ToString();
@@ -1579,8 +1344,8 @@ namespace CodeGen.Translation
                         "MQTT_CONNECTION", "Runtime.NetConnectivity", x, y, p);
                 }
 
-                // Telemetry (cfg.UseTelemetryCat, default) wraps each resource's MQTT_CONNECTION; the
-                // instances are named Telemetry_M262/M580/BX1. The raw-FB revert keeps the MqttConn* names.
+                // Telemetry (UseTelemetryCat) wraps each MQTT_CONNECTION; the raw-FB revert keeps
+                // the MqttConn* names.
                 bool tele = config.UseTelemetryCat;
                 string bx1Name  = tele ? "Telemetry_BX1"  : "MqttConn";
                 string m262Name = tele ? "Telemetry_M262" : "MqttConn_M262";
@@ -1589,14 +1354,8 @@ namespace CodeGen.Translation
                 var mqttEntry = CodeGen.Mapping.ComponentRegistry.Get(bx1Name);
                 int bx1X = mqttEntry?.X ?? 29000;
                 int bx1Y = mqttEntry?.Y ?? 200;
-                // One connection per resource so M262/M580 component telemetry reaches the broker directly
-                // (not only BX1's covers). ConnectionID is SHARED (= cfg.MqttConnectionName, 'SMC') so each
-                // resource's embedded MqttPub binds to its LOCAL connection; ClientIdentifier is UNIQUE per
-                // resource (SMC_BX1 / SMC_M262 / SMC_M580) so mosquitto keeps all three connected. Each
-                // routes to its own sysres via SysresFbMirror.BucketFor. On the rig each device must allow
-                // insecure mqtt:// (Security -> Insecure Application enabled) AND run the MQTT client. BX1's
-                // INIT/CONNECT bring-up is added by BuildBx1Wiring; M262/M580's just below (Area = M262/Feed
-                // boot, Station2 = M580 boot). The INIT->INITO->CONNECT order is preserved through the wrapper.
+                // One connection per resource, each routed to its own sysres via SysresFbMirror.BucketFor.
+                // BX1's INIT/CONNECT bring-up is added by BuildBx1Wiring; M262/M580's just below.
                 InjectMqttConn(bx1Name, config.MqttConnectionName, config.MqttClientId, bx1X, bx1Y);
                 InjectMqttConn(m262Name, config.MqttConnectionName, config.MqttClientM262,
                     LayoutGrid.ColumnBaseX(PlcAssignment.M262), 200);
@@ -1614,76 +1373,22 @@ namespace CodeGen.Translation
 
 
             RingWiringPlanner.BuildFeedStationWiring(builder, contents);
-            // Station 2 (M580) — same INIT-chain + stationAdptr chain + stateRprtCmd
-            // ring shape as Feed_Station, but rooted at Station2 / Stn2_Term and
-            // routing through the M580 Process FBs (Assembly_Station + Disassembly).
-            // Populates the shared syslay with M580 wiring — without it the
-            // sysres has the wires (via Station2WireEmitter) but the application
-            // canvas shows every M580 FB unconnected. Each chain is contained inside
-            // the M580 partition so the syslay wires render solid (no cross-PLC
-            // dashed edges).
+            // Station 2 (M580) — same INIT/stationAdptr/stateRprtCmd ring shape as Feed_Station,
+            // routed through the M580 Process FBs; populates the shared syslay with M580 wiring.
             RingWiringPlanner.BuildStation2Wiring(builder, contents, disassemblyFbName);
-            // BX1 — Cover PnP sub-station. No Station_CAT / no Process FB on BX1
-            // itself (Assembly_Station on M580 commands the BX1 actuators
-            // cross-PLC). Emits an INIT chain + closed stateRprtCmd ring among
-            // BX1's own sensor + actuators so the green band on the syslay
-            // canvas shows the same wiring style as M262 / M580 instead of
-            // floating disconnected FBs.
+            // BX1 — Cover PnP sub-station (no Process FB; Assembly_Station on M580 commands it
+            // cross-PLC). Emits an INIT chain + closed stateRprtCmd ring among BX1's own FBs.
             RingWiringPlanner.BuildBx1Wiring(builder, contents, config);
 
-            // Recipe arrays now ride on the Process1 syslay Parameter values written
-            // by BuildProcessFbParameters above. The deployed ProcessRuntime_Generic_v1.fbt is
-            // no longer mutated at generation time. The MapperConfig parameter is retained for
-            // call-site compatibility but unused here.
+            // Recipe arrays ride on the Process1 syslay Parameter values written above; the
+            // deployed ProcessRuntime_Generic_v1.fbt is no longer mutated at generation time.
             _ = config;
 
-            // Visual organisation. Two nested frames:
-            //   1. FRAME_Station1 (white outer) — full canvas envelope.
-            //   2. FRAME_M262   (light-yellow)  — PLC partition inside Station 1.
-            // Frame bounds enclose the actual FB bounding box emitted above:
-            //   HMI row at Y=2000, Area/Station1/Area_Term row at Y=2900,
-            //   Sensors + Process at Y=4000, Actuators + Stn1_Term at Y=5400
-            //   (visible bottom edge ~Y=6000 with default FB body height).
-            //   X spans 2000..9500 (Stn1_Term right edge ~10000 with default FB width).
-            // Outer  bounds (1800,1700)→(10200,6800), H=5100.
-            // Inner  bounds (1880,1880)→(10120,6720), H=4840 — inset 80 on
-            //   left/right/bottom, 180 on top to leave room for the Station 1
-            //   36pt title above the M262 18pt title.
-            // NOTE: EAE's FB type-label strip (the blue band that shows the
-            // type name on each FB) is rendered by EAE's library renderer and
-            // is NOT controllable via syslay parameters. The Schneider
-            // reference syslays (SMC_Rig_Expo_withClamp) confirm this — they
-            // set BackgroundColor only on <Frame>, never on <FB>. So we do not
-            // attempt to recolour the type strip here.
-            // Frame layout — three independent PLC frames, no combined outer
-            // envelope. Each PLC zone is self-titled and self-coloured.
-            //   Station 1 (M262)   — yellow,  holds Feed_Station logic
-            //   Station 2 (M580)   — purple,  holds swivel-arm + shaft column
-            //   Soft dPAC (BX1)    — green,   holds cover pick-and-place
-            // BX1 is the Soft dPAC host (Cover P&P) — NOT Station 2. Station 2
-            // is the M580. The three frames are visually distinct rather than
-            // wrapped in a single outer, matching the SMC_Rig_Expo_withClamp
-            // reference which colour-codes per PLC.
-            //
-            // FRAME WIDTHS MUST ENCLOSE ALL FBs that visually belong to that
-            // PLC; EAE's MoveStyle="AnyContained" auto-grows a frame to
-            // contain any FB whose body overlaps it. If a BX1-typed actuator
-            // is placed past the BX1 frame's right edge, EAE re-anchors the
-            // frame westward to "find" the missing FBs and swallows the
-            // neighbouring station frames (observed: BX1 frame grew to
-            // X=3340, W=32020 covering all of Station 1). Coordinates here
-            // are sized to the actual FB X column at deploy time:
-            //   M262 column: 2000, 4500, 7000, 9500             → frame 1800..10300
-            //   M580 column: 12200, 14700, 17200, 19700, 22200,
-            //                24700, 27200 (Stn2_Term)           → frame 11800..27800
-            //   BX1  column: 29000, 31500, 34000                → frame 28200..34800
-            // Height covers the HMI row (Y=2000) through the actuator row
-            // (Y=6500) + default FB body height (~400) → H=5300 from Y=1700.
-            // Frame X / Y / Width / Height derive from CodeGen.Mapping.LayoutGrid
-            // so the bounds always enclose every column registered in
-            // ComponentRegistry — no more drift between hand-edited Width values
-            // and the actual FB X positions (the trigger for EAE's
-            // auto-grow-and-swallow-stations bug).
+            // Three independent per-PLC frames (M262 yellow, M580 purple, BX1 green). Frame widths
+            // MUST enclose all FBs belonging to that PLC: EAE's MoveStyle="AnyContained" auto-grows
+            // a frame to contain any overlapping FB, and a FB past the right edge makes EAE re-anchor
+            // the frame westward and swallow neighbouring stations. Bounds derive from LayoutGrid so
+            // they always enclose every column in ComponentRegistry (no drift vs actual FB X).
             builder.AddFrame("FRAME_Station1",
                 LayoutGrid.FrameOriginX(PlcAssignment.M262), LayoutGrid.FrameOriginY,
                 LayoutGrid.FrameWidth(PlcAssignment.M262), LayoutGrid.FrameHeight,
@@ -1694,35 +1399,18 @@ namespace CodeGen.Translation
                 LayoutGrid.FrameWidth(PlcAssignment.M580), LayoutGrid.FrameHeight,
                 "MediumPurple", "Station 2   —   PLC M580", "TopCenter",
                 "Microsoft Sans Serif, 36pt, style=Bold");
-            // BX1 is the Soft dPAC host (Cover P&P) — NOT Station 2. Station 2
-            // is the M580 frame above. Labelling this band "Station 2 — PLC BX1"
-            // was the wrong carry-over from when this PLC sat physically next
-            // to the M580 cabinet on the rig. The frame title now matches the
-            // role, not the cabinet location.
+            // BX1 is the Soft dPAC host (Cover P&P) — NOT Station 2 (which is the M580 frame above).
             builder.AddFrame("FRAME_BX1",
                 LayoutGrid.FrameOriginX(PlcAssignment.BX1), LayoutGrid.FrameOriginY,
                 LayoutGrid.FrameWidth(PlcAssignment.BX1), LayoutGrid.FrameHeight,
                 "LightGreen", "Soft dPAC   —   PLC BX1", "TopCenter",
                 "Microsoft Sans Serif, 36pt, style=Bold");
-            // EAE always renders <FB> z-order above <Frame> z-order, regardless
-            // of XML document order. So Frames can only colour areas not covered
-            // by an FB body — they cannot recolour the EAE-rendered blue
-            // type-name strip.
 
             var doc = builder.Build();
             doc.Save(fullPath);
 
-            // EAE Solution Integrity check requires an opcua.xml inside a
-            // folder named after the syslay file's stem. Emit a minimal one
-            // (no OPCUAAttribute entries — they're only needed when specific
-            // FB attributes are exposed to OPC UA; for a regular project the
-            // root-only file passes the integrity check).
+            // EAE Solution Integrity requires an opcua.xml inside a folder named after the syslay stem.
             EnsureOpcuaXmlBesideArtefact(fullPath);
-
-            // .hcf patching lives in the MapperUI layer (HcfPatchService) — CodeGen.dll
-            // does not reference MapperUI.dll so we can't load M262HcfDocument here.
-            // MainForm.btnTestStation1_Click calls HcfPatchService.PatchDeployed(...) after
-            // GenerateStation1TestSyslay returns and consumes report.HcfPinAssignments.
 
             return fullPath;
         }
@@ -1730,45 +1418,16 @@ namespace CodeGen.Translation
         // Default fallback timing used only when Control.xml omits or zeros out State.Time.
         private static int DefaultMotionMs => GenerationConfig.Current.DefaultMotionMs;
 
-        /// <summary>
-        /// Vacuum-driven gripper instance names (suction cup, single coil, no
-        /// athome/atwork sensor pair). Drives FB type dispatch in
-        /// <see cref="ResolveActuatorFBType"/>. Mirrors MainForm's
-        /// _vacuumGripperNames so the syslay emit and the Mapping Information
-        /// grid agree on which gripper is vacuum vs mechanical.
-        /// </summary>
-        // Vacuum_Gripper_CAT is not in the Template Library yet; CoverPnp_Gripper
-        // falls through to Five_State_Actuator_CAT until that CAT is deployed.
         private static readonly HashSet<string> VacuumGripperNames =
             new(StringComparer.OrdinalIgnoreCase) { };
 
-        /// <summary>
-        /// Maps a Control.xml &lt;Component&gt; to the FB Type= attribute the
-        /// syslay should emit. Same logic as MainForm.Validate: 7-state and
-        /// PARALLEL+ALTERNATIVE-branched actuators go to Seven_State, vacuum
-        /// gripper instance names go to Vacuum_Gripper_CAT, 4-state shape
-        /// goes to Five_State_Actuator_No_Sensors_CAT, everything else
-        /// (including Ejector / Rejector — open-loop pneumatic eject arms)
-        /// falls through to the UNIVERSAL Five_State_Actuator_CAT and lets
-        /// BuildActuatorParameters' data-driven WorkSensorFitted /
-        /// HomeSensorFitted resolution flip both flags to FALSE when no
-        /// other component's Sequence_Condition references the actuator's
-        /// atWork / atHome state IDs. That is the elegant single-CAT path:
-        /// do not multiply CAT types when a parameter pair on the universal
-        /// CAT already expresses the same intent.
-        /// </summary>
-        // internal (was private): RingWiringPlanner reaches it via `using static SystemInjector`.
+        // Maps a Control.xml Component to the FB Type the syslay emits, via TemplateMap.
+        // See Docs/INVARIANTS.md I-4 for the 6 sites that must agree on this.
         internal static string ResolveActuatorFBType(VueOneComponent actuator)
         {
-            // Delegates to the canonical template lens (CodeGen.Mapping.TemplateMap).
-            // Logic: VacuumGripperNames → Vacuum_Gripper_CAT; stub OFF + (7-state OR
-            // PARALLEL+ALTERNATIVE branched) → Seven_State_Actuator_CAT; 4-state →
-            // Five_State_Actuator_No_Sensors_CAT; else → Five_State_Actuator_CAT.
-            // See Docs/INVARIANTS.md I-4 for the 6 sites that must agree on this.
             if (actuator == null) return "Five_State_Actuator_CAT";
-            // ONLY the real UR3e task arm resolves to Robot_Task_CAT — the Bearing/Shaft/CoverPnp
-            // grippers are also Type="Robot" and must stay Five_State/Vacuum. The narrowing lives in ONE
-            // shared predicate (TemplateMap.IsRobotTaskArm).
+            // Only the real UR3e task arm resolves to Robot_Task_CAT — the Bearing/Shaft/CoverPnp
+            // grippers are also Type="Robot" and must stay Five_State/Vacuum (IsRobotTaskArm).
             if (MapperConfig.EnableRobotTaskTail && TemplateMap.IsRobotTaskArm(actuator))
                 return "Robot_Task_CAT";
             return TemplateMap.ResolveActuatorCatType(
@@ -1777,15 +1436,8 @@ namespace CodeGen.Translation
                 TemplateMap.IsBranchedSevenState(actuator));
         }
 
-        /// <summary>
-        /// Returns minimal Parameter values for actuators that are NOT plain
-        /// 5-state cylinders — they only need actuator_name + actuator_id at
-        /// this phase. Their Target* / Rule* / Interlock* inputs will be
-        /// populated by a per-process recipe generator later. Without this,
-        /// the Seven_State / Vacuum_Gripper / NoSensors FBs would either
-        /// trip BuildActuatorParameters' state-number assumptions or emit
-        /// stale 5-state parameters that the new FBType rejects.
-        /// </summary>
+        // Minimal Parameter values (actuator_name + actuator_id) for actuators that are NOT plain
+        // 5-state cylinders.
         private static Dictionary<string, string> BuildMinimalActuatorParameters(
             VueOneComponent actuator, int assignedId, string fbType)
         {
@@ -1794,111 +1446,50 @@ namespace CodeGen.Translation
                 ["actuator_name"] = SyslayBuilder.FormatString(actuator.Name.ToLowerInvariant()),
                 ["actuator_id"]   = SyslayBuilder.FormatInt(assignedId),
             };
-            // Seven_State_Actuator_CAT is data-driven. The CAT
-            // exposes TargetPickState / TargetPlaceState / TargetHomeState inputs
-            // that its ECC reads instead of hardcoded literals. Emit them
-            // explicitly so the command vocabulary lives in the syslay data, not
-            // baked in the function block. The values match the SE Seven_State
-            // ECC's published-state convention (AtPick publishes 1, AtPlace 2,
-            // AtHome 0) — which is also the value ProcessRecipeArrayGenerator's
-            // MapSevenStateCommandFromConditionName emits as the CMD state, so
-            // the command and the actuator's settle value stay in lock-step.
-            // Defaults equal the CAT's InitialValue, so emitting them is a no-op
-            // on behaviour but makes the data-driven contract explicit and lets
-            // a future per-component recipe override the slot numbers per rig.
+            // Seven_State_Actuator_CAT is data-driven: the ECC reads TargetPick/Place/HomeState
+            // (AtPick=1, AtPlace=2, AtHome=0) which stay in lock-step with the CMD state emitted by
+            // MapSevenStateCommandFromConditionName.
             if (string.Equals(fbType, "Seven_State_Actuator_CAT", StringComparison.OrdinalIgnoreCase))
             {
                 dict["TargetPickState"]  = SyslayBuilder.FormatInt(1);
                 dict["TargetPlaceState"] = SyslayBuilder.FormatInt(2);
                 dict["TargetHomeState"]  = SyslayBuilder.FormatInt(0);
-                // Statically satisfy SevenStateActuator2's ECC name-gate. Every commanded
-                // transition (START→ToPick / AtPick→ToPlace / *→timerStart) carries
-                // `process_state_name = actuator_name`. The surgical ring path delivers
-                // state_val + pst_event via StateHandling/updateComponentState but does
-                // NOT deliver process_state_name (BREQ never touches it). The only wire
-                // to FB4.process_state_name in the syslay is the legacy direct one from
-                // proc.actuator_name — and Process1_Generic has no such data output, so
-                // that wire is phantom (source pin does not exist). Without this
-                // parameter, process_state_name defaults to '' and the gate
-                // '' = '<actuator>' is FALSE forever → the swivel never leaves START on
-                // a Pick/Place/state_val=Home command, only the bare `tohome` event
-                // moves it. Setting process_state_name = lowercased actuator_name as a
-                // STATIC parameter collapses the gate to its state_val arm, which
-                // ProcessRecipeArrayGenerator.MapSevenStateCommandFromConditionName
-                // already emits in lock-step with the TargetPick/Place/HomeState above
-                // (place→2, pick→1, home→0). Five_State path leaves this alone — its
-                // FiveStateActuator ECC has no process_state_name input.
+                // Statically satisfy SevenStateActuator2's ECC name-gate (process_state_name =
+                // actuator_name); the ring delivers state_val/pst_event but not process_state_name,
+                // so without this the '' = '<actuator>' gate is FALSE forever and the swivel stalls.
                 dict["process_state_name"] = SyslayBuilder.FormatString(actuator.Name.ToLowerInvariant());
             }
-            // Centre-home swivel CAT (Bearing_PnP): the core publishes current_state_to_process
-            // 2=AtWork1(Pick) / 4=AtWork2(Place) / 6=AtHome; Target*State feed CommonInterlockManager
-            // at those settle values. Fault timeouts OFF so an isolated test never faults on a work sensor.
+            // Centre-home swivel (Bearing_PnP): the core publishes current_state_to_process
+            // 2=AtWork1(Pick) / 4=AtWork2(Place) / 6=AtHome; Target*State feed the interlock manager
+            // at those settle values. Fault timeouts OFF so an isolated test never faults.
             if (string.Equals(fbType, "Seven_State_Actuator_Centre_Home_CAT", StringComparison.OrdinalIgnoreCase))
             {
                 TargetEmitter.Apply(dict, work1: 2, work2: 4, home: 6);
-                // work1ToHomeTime / work2ToHomeTime are NOT set: the work-to-home E_DELAY timers feed
-                // only ReturnToHomeHandler events the No_Sensor_Handler_7SCH ECC has no transitions on,
-                // so they drive nothing; the home completes on the DI02 atHome sensor.
                 dict["enableToWork1FaultTimeout"] = SyslayBuilder.FormatBool(false);
                 dict["enableToWork2FaultTimeout"] = SyslayBuilder.FormatBool(false);
                 dict["faultTimeoutWork1"] = SyslayBuilder.FormatTimeMs(10000);
                 dict["faultTimeoutWork2"] = SyslayBuilder.FormatTimeMs(10000);
-                // Zeroed rule defaults; the real Bearing_PnP path overlays them via
-                // InterlockEmitter.ApplyCentreHome. These survive only for callers without a scoped map.
+                // Zeroed rule defaults; the real Bearing_PnP path overlays them via ApplyCentreHome.
                 InterlockEmitter.ApplyZero(dict);
             }
-            // Vacuum_Gripper_CAT + Five_State_Actuator_No_Sensors_CAT (the other
-            // non-5-state cases that still route through this minimal path)
-            // only need the scalar actuator_name + actuator_id pair declared above.
             return dict;
         }
 
-        /// <summary>
-        /// PLC zone X/Y for actuator FB initial placement. The post-syslay
-        /// CanonicalLayout rewrite (M262SysresWireEmitter) overrides these
-        /// for known names; the initial coordinates here only need to land
-        /// inside the right colored frame so an unrecognised name still
-        /// renders visibly.
-        /// Column pitch 2500 dxa, base X chosen so the column sits inside
-        /// the matching coloured frame (FRAME_M262 ends at X=10120;
-        /// FRAME_M580 spans 12000..20300; FRAME_BX1 spans 20400..27200).
-        /// Actuators land at Y=5400 (the existing convention).
-        /// </summary>
+        // Placeholder actuator placement inside the PLC zone; the post-syslay CanonicalLayout pass
+        // rewrites every registered name to the ComponentRegistry coordinate.
         private static (int X, int Y) PlcZoneActuatorPosition(PlcAssignment plc, int colIndexInPlc)
         {
-            // Initial placeholder placement only — ApplyCanonicalLayout /
-            // ApplyLayoutToSyslay later rewrites every registered name to the
-            // ComponentRegistry coordinate. Derive from LayoutGrid so the
-            // placeholder lands inside the correct PLC frame even for names
-            // that aren't in the registry yet (single source of truth).
             return (LayoutGrid.ColumnBaseX(plc) + colIndexInPlc * LayoutGrid.ColumnPitchX,
                     LayoutGrid.RowY(plc, LayoutRow.Actuator));
         }
 
-        /// <summary>Sensor counterpart of <see cref="PlcZoneActuatorPosition"/>.</summary>
         private static (int X, int Y) PlcZoneSensorPosition(PlcAssignment plc, int colIndexInPlc)
         {
-            // Same as PlcZoneActuatorPosition — initial placeholder, later
-            // rewritten by CanonicalLayout for registered names.
             return (LayoutGrid.ColumnBaseX(plc) + colIndexInPlc * LayoutGrid.ColumnPitchX,
                     LayoutGrid.RowY(plc, LayoutRow.Sensor));
         }
 
-        /// <summary>
-        /// Builds Five_State_Actuator_CAT parameters straight from Control.xml.
-        /// - toWorkTime / toHomeTime come from the actuator's State_Number=1 (Advancing)
-        ///   and State_Number=3 (Returning) <Time> values.
-        /// - faultTimeout is 2x the corresponding motion time (watchdog factor).
-        /// - WorkSensorFitted / HomeSensorFitted are TRUE iff any other component's
-        ///   Sequence_Condition references the actuator's atWork (StateNumber=2) or
-        ///   atHome (StateNumber=0 or 4) StateID. This replaces the old fragile
-        ///   "actuator.Name + /atWork" literal substring lookup.
-        /// </summary>
-        /// <summary>
-        /// The three BX1 cover P&amp;P actuators.
-        /// Used by the cover-specific overrides (gripper no-sensor, interlock zeroing)
-        /// and by the RuleCount=0 safety guard exemption at the Five_State call site.
-        /// </summary>
+        // The three BX1 cover P&P actuators.
         internal static bool IsBx1CoverActuator(string name) =>
             name is "CoverPNP_Hr" or "CoverPNP_Vr" or "CoverPnp_Gripper";
 
@@ -1915,15 +1506,9 @@ namespace CodeGen.Translation
             bool workSensorFitted = AnyComponentReferencesStates(allComponents, actuator, atWorkIds);
             bool homeSensorFitted = AnyComponentReferencesStates(allComponents, actuator, atHomeIds);
 
-            // Interim stub (MapperConfig.StubSevenStateActuatorsAsFiveState): a
-            // Seven_State swivel (Bearing_PnP) emitted as Five_State is physically
-            // double-acting/bistable with 3 position sensors — none of which map
-            // onto the Five_State athome/atwork pair, and it won't spring back on
-            // its own. A sensored Five_State would therefore hang forever on the
-            // return step (athome never trips). Force it sensorless so the ECC
-            // settles work/home on toWork/toHome timers and the recipe always
-            // advances; the drive coil still energises so the swivel visibly
-            // triggers. Lift this when task #69 restores the real Seven_State.
+            // Stub (StubSevenStateActuatorsAsFiveState): a Seven_State swivel emitted as Five_State
+            // has no athome/atwork pair, so force it sensorless (settle on toWork/toHome timers) or
+            // a sensored return step hangs forever.
             if (Configuration.MapperConfig.StubSevenStateActuatorsAsFiveState
                 && (actuator.States.Count == 7 || TemplateMap.IsBranchedSevenState(actuator)))
             {
@@ -1931,25 +1516,13 @@ namespace CodeGen.Translation
                 homeSensorFitted = false;
             }
 
-            // BX1 cover gripper: NARROW per-actuator no-sensor override —
-            // the TM3BC input assembly has NO home-position bit for this gripper (the
-            // BX1_IO broker publishes only input bit5 -> CoverPnp_Gripper.atwork, and on
-            // the rig that bit reads TRUE at rest, so even its atwork semantics are
-            // unverified). With HomeSensorFitted=TRUE the full cover recipe's release
-            // step (CMD 3 -> WAIT 0) stalls forever: athome is never published, the ECC
-            // never reaches AtHomeInit. Force the proven timer-acknowledge pattern for
-            // THIS actuator only — the physical coil (output bit3) still drives the
-            // gripper; only the state confirmation comes from toWork/toHomeTime. The
-            // M580 grippers keep their real DI sensors.
-            // BX1 cover P&P actuators settle in coverMotionMs; their P&P speed stays sensor-driven
-            // (the recipe WAIT clears on the physical atwork/athome DI, not the timer).
+            // BX1 cover actuators settle in coverMotionMs; CoverPNP_Hr/Vr keep their real
+            // atwork/athome DIs. The gripper has no DI to confirm grip/release (the only input bit
+            // reads TRUE at rest), so it timer-acknowledges sensorless or the release WAIT stalls.
             if (IsBx1CoverActuator(actuator.Name))
             {
                 toWorkMs = GenerationConfig.Current.CoverMotionMs;
                 toHomeMs = GenerationConfig.Current.CoverMotionMs;
-                // The gripper has NO DI to confirm grip/release, so it timer-acknowledges
-                // (sensorless) on its own faster ack time; CoverPNP_Hr/Vr keep their real
-                // atwork/athome sensors + coverMotionMs.
                 if (string.Equals(actuator.Name, "CoverPnp_Gripper", StringComparison.OrdinalIgnoreCase))
                 {
                     workSensorFitted = false;
@@ -1959,13 +1532,8 @@ namespace CodeGen.Translation
                 }
             }
 
-            // The M262 Ejector is reference-compatible OPEN-LOOP. The reference
-            // uses Five_State_Actuators_No_Sensors_CAT (timer-driven, coil only); our generator
-            // keeps it Five_State_Actuator_CAT, but the rig binds NO ejector athome/atwork DIs (only
-            // the DO03 coil — see HcfPatchService). A sensored WAIT ejector=2 / ejector=0 would
-            // stall forever on a sensor that never closes. Force sensorless so the ECC settles
-            // AtWork/AtHome on the toWork/toHome timers; the coil (OutputToWork) still fires the
-            // physical push.
+            // M262 Ejector is open-loop: the rig binds only the DO03 coil, no athome/atwork DIs, so
+            // force sensorless (settle on timers) or a sensored WAIT stalls on a sensor never closing.
             if (MapperConfig.EnableRobotTaskTail
                 && string.Equals(actuator.Name, "Ejector", StringComparison.OrdinalIgnoreCase))
             {
@@ -1973,10 +1541,8 @@ namespace CodeGen.Translation
                 homeSensorFitted = false;
             }
 
-            // M580 shaft actuators must use their real work sensors. The
-            // ProcessRuntime anti-leftover guard handles stale state_table values;
-            // timer-acknowledging Shaft_Vr/Shaft_Gripper can release the shaft before
-            // the fresh physical down/grip motion has actually completed.
+            // M580 shaft actuators keep their real work sensors — timer-acknowledging them can
+            // release the shaft before the fresh physical down/grip motion has completed.
 
             var actuatorParams = new Dictionary<string, string>
             {
@@ -1993,16 +1559,14 @@ namespace CodeGen.Translation
             };
 
             // Target states feeding the embedded InterlockManager (Work1=atwork 2, Home=athome 4;
-            // Five_State has no Work2). Struct or scalar per useTargetStruct.
+            // Five_State has no Work2).
             TargetEmitter.Apply(actuatorParams, work1: 2, work2: null, home: 4);
 
-            // InterlockManager rule arrays — Control.xml NOT-conditions, sensors-first source ids.
             InterlockEmitter.ApplyFiveState(actuatorParams, actuator, allComponents, scopedIds);
 
             return actuatorParams;
         }
 
-        /// <summary>Returns the actuator's <Time> for the given State_Number, or fallback.</summary>
         public static int ResolveStateTimeMs(VueOneComponent actuator, int stateNumber, int fallbackMs)
         {
             var s = actuator.States.FirstOrDefault(st => st.StateNumber == stateNumber);
@@ -2010,7 +1574,7 @@ namespace CodeGen.Translation
             return s.Time;
         }
 
-        /// <summary>atWork = the static state at the far end of motion (5-state pattern: StateNumber=2).</summary>
+        // atWork = the static state at the far end of motion (StateNumber=2).
         public static HashSet<string> ResolveAtWorkStateIds(VueOneComponent actuator)
         {
             var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -2019,7 +1583,7 @@ namespace CodeGen.Translation
             return ids;
         }
 
-        /// <summary>atHome = static states at StateNumber=0 (Initial) and =4 (post-cycle latch).</summary>
+        // atHome = static states at StateNumber=0 (Initial) and =4 (post-cycle latch).
         public static HashSet<string> ResolveAtHomeStateIds(VueOneComponent actuator)
         {
             var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -2029,11 +1593,6 @@ namespace CodeGen.Translation
             return ids;
         }
 
-        /// <summary>
-        /// True iff any component (other than the actuator itself) has a Condition whose
-        /// referenced state ID is in the supplied set — evidence that a sensor on that
-        /// state is being read by some Process or peer state machine.
-        /// </summary>
         public static bool AnyComponentReferencesStates(
             IReadOnlyList<VueOneComponent> allComponents,
             VueOneComponent actuator,
@@ -2053,10 +1612,7 @@ namespace CodeGen.Translation
             return false;
         }
 
-        /// <summary>
-        /// Legacy literal-substring lookup. Retained for backward compatibility but no longer
-        /// used by BuildActuatorParameters (replaced by Control.xml-driven derivation above).
-        /// </summary>
+        // Legacy literal-substring lookup, no longer used by BuildActuatorParameters.
         public static bool ConditionReferences(VueOneComponent process, string actuatorName, string suffix)
         {
             var pattern = $"{actuatorName}/{suffix}";
@@ -2098,14 +1654,8 @@ namespace CodeGen.Translation
             "Station_CAT", "Area_CAT", "CaSAdptrTerminator", "Station", "Area"
         };
 
-        /// <summary>
-        /// I/O-bridge FB types that must also be stripped on the demonstrator
-        /// cleanup pass. PLC_RW_M262 (instance "M262IO") is re-emitted fresh
-        /// every run by M262SysdevEmitter.EnsureSystemFb, so leaving a stale
-        /// instance behind double-declares it on the sysres FBNetwork. Not in
-        /// UniversalCatTypes because it is not a CAT and is owned by the
-        /// device layer, but it still has to clear on regeneration.
-        /// </summary>
+        // I/O-bridge FB types stripped on the cleanup pass: PLC_RW_M262 is re-emitted fresh every
+        // run, so a stale instance double-declares it on the sysres FBNetwork.
         private static readonly HashSet<string> LegacyIoBridgeTypes = new(StringComparer.Ordinal)
         {
             "PLC_RW_M262"
@@ -2117,9 +1667,6 @@ namespace CodeGen.Translation
             public List<string> PreservedFbs { get; } = new();
             public List<string> Unmatched { get; } = new();
             public int RemovedConnections { get; set; }
-            /// <summary>Per-action [CleanDevice] log lines emitted by the
-            /// M262 sysdev Resource-dedup step. Mirrored to the Activity panel
-            /// by callers — see MainForm.LogCleanup.</summary>
             public List<string> DeviceCleanupLog { get; } = new();
         }
 
@@ -2127,11 +1674,8 @@ namespace CodeGen.Translation
         {
             var report = new CleanupReport();
 
-            // The Mapper owns the APPLICATION lifecycle the same way it owns DEVICES:
-            // Clean DELETES the application (.sysapp + content folder) so EAE shows nothing
-            // under "Applications" (like an empty Devices tree), and this recreates it
-            // (create-IF-ABSENT — a strict no-op when the app is present) BEFORE the
-            // SyslayPath2 check below, which would otherwise throw on the missing layout.
+            // The Mapper owns the application lifecycle like it owns devices: recreate the app
+            // shell (create-if-absent, no-op when present) BEFORE the SyslayPath2 check below.
             CodeGen.Devices.Core.ApplicationShellEmitter.EnsureApplicationShell(
                 DeriveDemonstratorEaeRoot(config),
                 line => report.DeviceCleanupLog.Add(line));
@@ -2142,42 +1686,13 @@ namespace CodeGen.Translation
 
             CleanFile(config.SyslayPath2, "SubAppNetwork", report);
 
-            // The configured SysresPath2 holds the *pre-rename* filename
-            // (zero-GUID stem). EAE renames the .sysres on its side to the
-            // short-hex resource ID (e.g. 1459BCD12760907D.sysres), so a
-            // bare File.Exists(config.SysresPath2) check is almost always
-            // false and the FBNetwork cleanup silently never ran — leaving
-            // a stale M262IO (and every other FB) on the sysres. Resolve
-            // the ACTUAL .sysres by globbing the sysdev folder and clean
-            // every one found.
+            // SysresPath2 holds the pre-rename (zero-GUID stem) filename; EAE renames the .sysres to
+            // the short-hex resource ID, so resolve the ACTUAL .sysres by globbing the sysdev folder.
             foreach (var sysresPath in ResolveActualSysresPaths(config))
                 CleanFile(sysresPath, "FBNetwork", report);
 
             CleanM262SysdevResources(config, report);
 
-            // The cleanup (CleanFile syslay SubAppNetwork + CleanFile sysres FBNetwork +
-            // CleanM262SysdevResources) CLEARS network contents in place but never
-            // deletes whole device/resource files, so it cannot orphan a resource EAE
-            // relies on. If the duplicate-syslay / orphan-sysres problems resurface,
-            // re-introduce a NARROWER fix that targets only the simulator tree, never
-            // the rig device files.
-
-            // Sweep stale cross-PLC bridge FBs (MqttFmt_<comp> / MqttPub_<comp>)
-            // out of EVERY .sysres. The bridge was removed from the syslay
-            // emitter, but the standard FBNetwork clean only touches the M262
-            // sysres — so bridge FBs that were mirrored onto the BX1 / M580
-            // sysres in an earlier (bridge-on) deploy LINGER there and EAE
-            // keeps deploying + displaying them. This removes those FB elements
-            // and their connections from all sysres. It deletes ONLY FBs whose
-            // name starts with MqttFmt_ or MqttPub_ (never MqttConn, never any
-            // CAT instance), so it cannot harm a live resource. Pure
-            // contents-edit of the .sysres FBNetwork; no file deletion, no
-            // device/trust touch.
-            // This deletes ONLY a .sysres whose stem (resource ID)
-            // is NOT referenced by its parent sysdev, AND only once every
-            // referenced (active) resource's own .sysres is confirmed present —
-            // so a renamed-active file can never be mistaken for an orphan.
-            // Per-sysdev, top-directory only; the broad system-wide deletes are NOT back.
             SweepOrphanSysresPerSysdev(config, report);
 
             SweepBridgeFbsFromAllSysres(config, report);
@@ -2185,27 +1700,12 @@ namespace CodeGen.Translation
             return report;
         }
 
-        /// <summary>
-        /// Delete orphan <c>.sysres</c> files — ones that physically exist in a
-        /// sysdev's resource folder but whose resource ID (the filename stem)
-        /// is referenced by no <c>&lt;Resource&gt;</c> in that sysdev. Such a
-        /// file is a leftover from a previous deploy when the resource had a
-        /// different ID/name; EAE loads it alongside the active resource and,
-        /// because both declare the same FB instances, raises a "Solution
-        /// Integrity / Repair Instances" dialog.
-        ///
-        /// Narrow + safe by construction:
-        ///   • Needs a real EAE project root (a <c>.dfbproj</c> ancestor) — the
-        ///     headless harness has none, so it is a no-op there.
-        ///   • Per sysdev, TopDirectoryOnly — never an AllDirectories sweep.
-        ///   • Acts only when the folder holds 2+ .sysres (a single file can
-        ///     never be an orphan).
-        ///   • Deletes nothing unless EVERY referenced (active) resource ID has
-        ///     its matching <c>{ID}.sysres</c> present. If an active file is
-        ///     missing the filename==ID convention is broken (EAE may have
-        ///     renamed it) and the whole sysdev is skipped — a renamed-active
-        ///     can never be mistaken for an orphan and deleted.
-        /// </summary>
+        // Delete orphan .sysres files — ones whose resource ID (filename stem) is referenced by no
+        // <Resource> in the sysdev; EAE otherwise loads them alongside the active resource and
+        // raises a "Repair Instances" dialog. Safe by construction: needs a real EAE project root
+        // (no-op in the harness), per-sysdev TopDirectoryOnly, acts only with 2+ .sysres, and
+        // deletes nothing unless every active resource ID has its matching {ID}.sysres present
+        // (else the filename==ID convention is broken and the whole sysdev is skipped).
         private static void SweepOrphanSysresPerSysdev(MapperConfig config, CleanupReport report)
         {
             void Log(string line) => report.DeviceCleanupLog.Add($"[CleanDevice] {line}");
@@ -2248,10 +1748,8 @@ namespace CodeGen.Translation
                 catch { continue; }
                 if (sysresFiles.Count <= 1) continue; // 0 or 1 file → no possible orphan
 
-                // SAFETY GATE: every active resource must have its {ID}.sysres
-                // present before we trust the filename==ID convention enough to
-                // delete anything. A missing active file means the convention is
-                // broken → skip this sysdev whole (delete nothing).
+                // SAFETY GATE: skip the whole sysdev unless every active resource has its
+                // {ID}.sysres present (else the filename==ID convention is broken).
                 bool allActivePresent = activeIds.All(id =>
                     sysresFiles.Any(f => string.Equals(
                         Path.GetFileNameWithoutExtension(f), id, StringComparison.Ordinal)));
@@ -2279,15 +1777,9 @@ namespace CodeGen.Translation
             }
         }
 
-        /// <summary>
-        /// Remove stale standalone MQTT bridge FBs (names starting
-        /// <c>MqttFmt_</c> / <c>MqttPub_</c>) and their event/data connections
-        /// from every <c>.sysres</c> under <c>IEC61499/System/&lt;sys-guid&gt;/</c>.
-        /// The bridge emitter is gone; any such FB on disk is a leftover from a
-        /// previous bridge-on deploy (typically mirrored onto the BX1 sysres).
-        /// Surgical: touches only those FB names, never MqttConn or CAT
-        /// instances; edits FBNetwork contents in place, deletes no files.
-        /// </summary>
+        // Remove stale standalone MQTT bridge FBs (names starting MqttFmt_ / MqttPub_) and their
+        // connections from every .sysres. Surgical: touches only those FB names (never MqttConn or
+        // a CAT instance); edits FBNetwork contents in place, deletes no files.
         private static void SweepBridgeFbsFromAllSysres(MapperConfig config, CleanupReport report)
         {
             var syslayDir = Path.GetDirectoryName(config.SyslayPath2);
@@ -2295,10 +1787,7 @@ namespace CodeGen.Translation
             var sysGuidDir = Path.GetDirectoryName(syslayDir);
             if (string.IsNullOrEmpty(sysGuidDir) || !Directory.Exists(sysGuidDir)) return;
 
-            // Guard: only act on a REAL EAE System folder (one that contains
-            // .sysdev files). The harness uses a flat temp syslay whose parent
-            // is the OS Temp dir — walking that recursively trips access-denied
-            // and has no business being swept. No sysdev → not a System folder.
+            // Guard: only act on a real EAE System folder (one with .sysdev files).
             try { if (!Directory.EnumerateFiles(sysGuidDir, "*.sysdev").Any()) return; }
             catch { return; }
 
@@ -2351,13 +1840,7 @@ namespace CodeGen.Translation
             }
         }
 
-        /// <summary>
-        /// Return every <c>.sysres</c> that actually exists under the M262
-        /// sysdev folder. Prefers the directory of
-        /// <see cref="MapperConfig.SysresPath2"/>; if that exact file is
-        /// present it is included, plus any sibling <c>.sysres</c> EAE may
-        /// have renamed it to. Empty if the folder can't be resolved.
-        /// </summary>
+        // Every .sysres that actually exists in the M262 sysdev folder (SysresPath2's directory).
         private static IEnumerable<string> ResolveActualSysresPaths(MapperConfig config)
         {
             if (string.IsNullOrEmpty(config.SysresPath2)) yield break;
@@ -2368,16 +1851,9 @@ namespace CodeGen.Translation
                 yield return f;
         }
 
-        /// <summary>
-        /// Detect and remove duplicate <c>&lt;Resource&gt;</c> entries from the
-        /// M262 sysdev so EAE's Devices tree only renders one M262_RES /
-        /// RES0 row under the device. The FIRST Resource in document order is
-        /// the survivor — its attributes are left untouched. Every removed
-        /// Resource also has its sibling <c>{resourceId}.sysres</c> file
-        /// deleted from the sysdev folder. The <c>.hcf</c>, BMTM3
-        /// declarations, network profiles and IP addresses, and the kept
-        /// Resource's FBNetwork contents are all left alone.
-        /// </summary>
+        // Remove duplicate <Resource> entries from the M262 sysdev (first in document order is the
+        // survivor); each removed Resource's sibling {resourceId}.sysres is deleted. The .hcf is
+        // left alone (it carries the IO bindings).
         private static void CleanM262SysdevResources(MapperConfig config, CleanupReport report)
         {
             void Log(string line) => report.DeviceCleanupLog.Add($"[CleanDevice] {line}");
@@ -2446,9 +1922,7 @@ namespace CodeGen.Translation
 
             Log($"found {count} resources");
 
-            // Sysdev folder layout: {sysdev-folder}/{sysdev-stem}/ holds the
-            // .sysres + .hcf siblings. We touch .sysres only — .hcf is left
-            // alone per spec (it carries the IO bindings).
+            // {sysdev-folder}/{sysdev-stem}/ holds the .sysres + .hcf siblings; we touch .sysres only.
             var sysdevStem = Path.GetFileNameWithoutExtension(sysdevPath);
             var sysdevDir  = Path.Combine(
                 Path.GetDirectoryName(sysdevPath)!, sysdevStem);
@@ -2457,8 +1931,7 @@ namespace CodeGen.Translation
                 sysresCount = Directory.GetFiles(
                     sysdevDir, "*.sysres", SearchOption.TopDirectoryOnly).Length;
 
-            // Fast-path guard: exactly one Resource AND exactly one .sysres
-            // file = canonical clean state, log + return.
+            // Fast-path: one Resource + one .sysres = canonical clean state.
             if (count == 1 && sysresCount == 1)
             {
                 Log("M262 sysdev clean, no duplicates");
@@ -2471,8 +1944,7 @@ namespace CodeGen.Translation
                 return;
             }
 
-            // 2+ Resources — keep the first in document order, drop the rest
-            // and their backing .sysres files.
+            // 2+ Resources — keep the first, drop the rest and their backing .sysres files.
             var keep = resources[0];
             var firstResourceId = (string?)keep.Attribute("ID")
                 ?? (string?)keep.Attribute("Name")
@@ -2486,9 +1958,7 @@ namespace CodeGen.Translation
                 var dupName = (string?)dup.Attribute("Name") ?? string.Empty;
                 var dupIdent = !string.IsNullOrEmpty(dupId) ? dupId : dupName;
 
-                // Delete the sibling .sysres file. The .hcf is explicitly
-                // NOT touched even when this Resource is removed — per spec
-                // the .hcf carries the IO bindings.
+                // Delete the sibling .sysres file (the .hcf is left alone).
                 string deletedSysresPath = string.Empty;
                 if (!string.IsNullOrEmpty(dupId) && Directory.Exists(sysdevDir))
                 {
@@ -2530,13 +2000,7 @@ namespace CodeGen.Translation
             Log($"kept resource {firstResourceId}");
         }
 
-        /// <summary>
-        /// Walks up from <c>config.SyslayPath2</c> looking for the folder
-        /// whose immediate parent contains a <c>.dfbproj</c> — same
-        /// derivation M262SysdevEmitter.DeriveEaeProjectRoot uses, kept
-        /// local here so CodeGen.dll doesn't take a back-reference on
-        /// MapperUI.dll.
-        /// </summary>
+        // Walks up from config.SyslayPath2 for the folder whose parent contains a .dfbproj.
         private static string? DeriveDemonstratorEaeRoot(MapperConfig config)
         {
             var path = config?.SyslayPath2;
@@ -2642,16 +2106,9 @@ namespace CodeGen.Translation
                 StationContents? contents = null, bool useRecipeStruct = false,
                 bool commandFromCondition = false)
         {
-            // Recipe arrays travel as syslay Parameter values on the Process1_Generic instance;
-            // Process1_Generic.fbt exposes 8 InputVars (process_name, process_id, plus the 6 array inputs).
-            //
-            // The Recipe return slot exposes the in-scope ComponentRegistry,
-            // SkippedConditions and Warnings so the caller (typically
-            // GenerateFeedStationSyslayToPath) can surface them in the .syslay
-            // top comment for self-documentation.
-            //
-            // If `contents` is null (defensive — caller should always pass it now)
-            // we emit only the two scalar parameters and Recipe comes back null.
+            // Recipe arrays travel as syslay Parameter values on the Process1_Generic instance
+            // (8 InputVars: process_name, process_id, plus the 6 array inputs). If `contents` is
+            // null, emit only the two scalar parameters and return a null Recipe.
             var outer = new Dictionary<string, string>
             {
                 ["process_name"] = SyslayBuilder.FormatString(processName),
@@ -2664,12 +2121,9 @@ namespace CodeGen.Translation
                 recipe = ProcessRecipeArrayGenerator.Generate(process, contents, allComponents, processId, commandFromCondition);
                 if (useRecipeStruct)
                 {
-                    // Simulator interface reduction: the 6 parallel recipe arrays
-                    // collapse into one Recipe : ARRAY OF RecipeStep. The deployer
-                    // normalizers reshape Process1_Generic + ProcessRuntime to a
-                    // single Recipe input under the same flag, so the instance must
-                    // emit Recipe (emitting a removed array input -> ERR_MEMBER_VAR_
-                    // NOTFOUND). Same values, one struct field per array column.
+                    // The 6 parallel recipe arrays collapse into one Recipe : ARRAY OF RecipeStep;
+                    // the deployer normalizers reshape Process1_Generic + ProcessRuntime to match
+                    // under the same flag, so the instance must emit Recipe (else ERR_MEMBER_VAR_NOTFOUND).
                     outer["Recipe"] = SyslayBuilder.FormatRecipeTable(
                         recipe.StepType, recipe.CmdTargetName, recipe.CmdStateArr,
                         recipe.Wait1Id, recipe.Wait1State, recipe.NextStep);
@@ -2689,12 +2143,6 @@ namespace CodeGen.Translation
             return (outer, nested, recipe);
         }
 
-        /// <summary>
-        /// Surfaces a Station-2 process recipe into the binding report: row count,
-        /// CMD/WAIT split, dropped (out-of-scope) conditions and generator warnings,
-        /// plus the standing cross-PLC caveat. Keeps the Assembly_Station /
-        /// Disassembly call sites terse and identical.
-        /// </summary>
         private static void ReportStation2Recipe(BindingApplicationReport report,
             string processName, RecipeArrays? recipe, string plcLabel)
         {
@@ -2803,11 +2251,8 @@ namespace CodeGen.Translation
         {
             if (string.IsNullOrEmpty(config.SyslayPath2))
                 throw new InvalidOperationException("MapperConfig.SyslayPath2 is not configured.");
-            // Reset the recipe generator's preview flag for this full RIG generation.
-            // SimulatorRecipeMode is false on the rig — it is only set true transiently by
-            // the State-Transition Table preview (which restores it in a finally). Set fresh
-            // every generation so no preview run can carry over (the RIG swivel HOME-FIRST
-            // preamble waits then target the rig AtHome=6 value).
+            // SimulatorRecipeMode is false on the rig (set true only transiently by the
+            // State-Transition Table preview); reset it fresh so no preview run can carry over.
             Configuration.MapperConfig.SimulatorRecipeMode = false;
             return GenerateFeedStationSyslayToPath(controlXmlPath, config.SyslayPath2, bindings, config, out report);
         }
@@ -2845,8 +2290,7 @@ namespace CodeGen.Translation
                     $"Multi-Process limitation: {processes.Count} Processes share one " +
                     "ProcessRuntime_Generic_v1.fbt; only the first Process's recipe is loaded.");
 
-            // No top-level PLC_Start FB: Area_CAT and Station_CAT each contain their own
-            // internal plcStart bootstrap.
+            // No top-level PLC_Start FB: Area_CAT and Station_CAT contain their own internal plcStart.
             builder.AddFB(FBIdGenerator.GenerateFBId("Area_HMI"),
                 "Area_HMI", "Area_CAT", "Main", 240, 140);
             builder.AddFB(FBIdGenerator.GenerateFBId("Area"),
@@ -2939,9 +2383,6 @@ namespace CodeGen.Translation
 
             BuildFullSystemWiring(builder, perStationContents);
 
-            // Recipe arrays travel as syslay Parameter values per Process FB
-            // instance. The deployed ProcessRuntime_Generic_v1.fbt is no longer mutated.
-
             var doc = builder.Build();
             doc.Save(config.SyslayPath2);
             return config.SyslayPath2;
@@ -2951,8 +2392,6 @@ namespace CodeGen.Translation
             List<(string StationName, StationContents Contents)> stations)
         {
             if (stations.Count == 0) return;
-
-            // No PLC_Start bootstrap edge: Area_CAT contains its own internal plcStart.
 
             var initChain = new List<string> { "Area" };
             for (int s = 0; s < stations.Count; s++)
@@ -2965,7 +2404,6 @@ namespace CodeGen.Translation
             }
             for (int i = 0; i < initChain.Count - 1; i++)
                 builder.AddEventConnection($"{initChain[i]}.INITO", $"{initChain[i + 1]}.INIT");
-            // No closing PLC_Start.ACK_FIRST edge: bootstrap is internal to Area_CAT.
 
             builder.AddAdapterConnection("Area_HMI.AreaHMIAdptrOUT", "Area.AreaHMIAdptrIN");
             for (int s = 0; s < stations.Count; s++)
@@ -3027,21 +2465,8 @@ namespace CodeGen.Translation
             return name;
         }
 
-        /// <summary>
-        /// Ensures EAE's Solution Integrity check passes by creating an
-        /// <c>opcua.xml</c> stub inside a folder named after the syslay (or
-        /// sysres) file's stem. EAE expects every artefact at
-        /// <c>IEC61499/System/{sysGuid}/{containerGuid}/{stem}.syslay</c> to
-        /// have a sibling folder <c>{stem}/</c> containing an
-        /// <c>opcua.xml</c> — the same convention the reference
-        /// <c>SMC_Rig_Expo_withClamp</c> project uses for every sysres + the
-        /// syslay. The file's <c>UID</c> attribute equals the parent folder
-        /// GUID (i.e. <c>{containerGuid}</c>), matching the reference's
-        /// pattern. The file body lists OPCUAAttribute entries only when
-        /// specific FB attributes are exposed via OPC UA; for a regular
-        /// Mapper-emitted artefact the root-only file is sufficient and
-        /// passes integrity. Idempotent — overwrites any existing file.
-        /// </summary>
+        // Creates an opcua.xml stub inside a folder named after the artefact stem, so EAE's
+        // Solution Integrity check passes (UID = parent folder GUID). Idempotent.
         public static void EnsureOpcuaXmlBesideArtefact(string artefactPath)
             => CodeGen.Artefacts.OpcuaCompanionEmitter.EmitForArtefact(artefactPath);
     }
