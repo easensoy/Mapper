@@ -41,10 +41,16 @@ namespace CodeGen.Devices.M262
                 report.Missing.Add("[Wire] skipped, M262 sysres not found");
                 return;
             }
-            ResourceWireEmitter.EmitForResource(cfg, sysresPath, M262Anchors, report);
+            EmitFeedRing(cfg, sysresPath, report);
+        }
 
-            // syslay-only: the M580/BX1 share this single application canvas, so only the M262 path
-            // mirrors layout (keeps that output unchanged).
+        // The Feed-station ring wiring (Area/Station1/Feed_Station/Stn1_Term). Applied to whichever
+        // resource hosts the Feed station — the M262 sysres (Emit) or the RevPi sysres
+        // (RevPiDeviceEmitter). The syslay layout mirror runs once here (the 3 PLCs share one canvas).
+        internal static void EmitFeedRing(MapperConfig cfg, string sysresPath,
+            SystemInjector.BindingApplicationReport report)
+        {
+            ResourceWireEmitter.EmitForResource(cfg, sysresPath, M262Anchors, report);
             ResourceWireEmitter.ApplyLayoutToSyslay(cfg.ActiveSyslayPath, report);
         }
 
