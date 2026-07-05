@@ -7,22 +7,9 @@ using System.Xml.Linq;
 
 namespace CodeGen.Devices.Core
 {
-    /// <summary>
-    /// Split-brain guard. A deployed <c>.hcf</c> binds each physical DI/DO channel to a
-    /// function-block pin. EAE resolves that binding against the SAME resource's
-    /// <c>.sysres</c> FBNetwork — so every non-blank binding MUST be a Form-1 GUID triple
-    /// <c>{resourceId}.{fbId}.{pin}</c> whose <c>{fbId}</c> is an FB actually present on that
-    /// resource and whose <c>{pin}</c> is a real port on that FB's type. If the binding is a
-    /// legacy symbolic name (<c>'RES0.M262IO.PusherAtHome'</c>, <c>'RES0.Robot_Pick_And_Place1.x'</c>)
-    /// or points at an FB/pin that does not exist on the resource, the channel is "split-brain":
-    /// the HCF references something the running application does not contain, so the I/O never
-    /// resolves on the device.
-    ///
-    /// This validator parses every <c>.hcf</c> under the project's System tree, builds the FB-id
-    /// + pin set from the matching <c>.sysres</c>, and returns one <see cref="Violation"/> per bad
-    /// binding. The generation pipeline calls it after the symbol binders and FAILS LOUDLY on any
-    /// violation; the byte-identical verification gate treats a non-empty result as a hard failure.
-    /// </summary>
+    // Split-brain guard: every non-blank HCF DI/DO binding MUST be a Form-1 GUID triple
+    // {resId}.{fbId}.{pin} whose fbId is an FB on the SAME resource's .sysres and whose pin is a
+    // real port on that FB's type; a legacy symbolic name or a missing FB/pin never resolves on the device.
     public static class HcfReferenceValidator
     {
         public sealed record Violation(string Hcf, string Channel, string Value, string Reason)
@@ -34,7 +21,6 @@ namespace CodeGen.Devices.Core
         private static readonly Regex Form1 =
             new(@"^([0-9A-Fa-f]{16})\.([0-9A-Fa-f]{16})\.([A-Za-z0-9_]+)$", RegexOptions.Compiled);
 
-        /// <summary>Validate every HCF under <paramref name="eaeRoot"/>/IEC61499/System.</summary>
         public static List<Violation> Validate(string? eaeRoot)
         {
             var violations = new List<Violation>();
@@ -42,7 +28,6 @@ namespace CodeGen.Devices.Core
             var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
             if (!Directory.Exists(systemDir)) return violations;
 
-            // Cache of FB-type -> set of interface var names (pins), parsed from the type .fbt.
             var pinsByType = new Dictionary<string, HashSet<string>?>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var resFolder in Directory.EnumerateDirectories(systemDir, "*", SearchOption.AllDirectories))
@@ -50,8 +35,7 @@ namespace CodeGen.Devices.Core
                 var hcf = Directory.EnumerateFiles(resFolder, "*.hcf", SearchOption.TopDirectoryOnly).FirstOrDefault();
                 if (hcf == null) continue;
 
-                // FB id/mapping -> type, from EVERY .sysres in this resource folder (so an orphan
-                // sysres cannot cause a false split-brain; the binding need only resolve in one).
+                // Scan EVERY .sysres in the folder so an orphan sysres can't cause a false split-brain.
                 var fbType = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var sysres in Directory.EnumerateFiles(resFolder, "*.sysres", SearchOption.TopDirectoryOnly))
                 {
@@ -67,7 +51,7 @@ namespace CodeGen.Devices.Core
                             if (!string.IsNullOrEmpty(map)) fbType[map!] = type;
                         }
                     }
-                    catch { /* unreadable sysres -> treated as carrying no FBs */ }
+                    catch { }
                 }
 
                 XDocument hdoc;
@@ -81,9 +65,9 @@ namespace CodeGen.Devices.Core
                 foreach (var pv in hdoc.Descendants().Where(e => e.Name.LocalName == "ParameterValue"))
                 {
                     var name = (string?)pv.Attribute("Name");
-                    if (name == null || !ChannelName.IsMatch(name)) continue;     // only DI/DO channels
+                    if (name == null || !ChannelName.IsMatch(name)) continue;
                     var raw = ((string?)pv.Attribute("Value") ?? string.Empty).Trim();
-                    var val = raw.Trim('\'');                                      // strip ST string quotes
+                    var val = raw.Trim('\'');
                     if (string.IsNullOrWhiteSpace(val)) continue;                 // blank = unbound, OK
 
                     var m = Form1.Match(val);
@@ -112,11 +96,8 @@ namespace CodeGen.Devices.Core
             return violations;
         }
 
-        /// <summary>
-        /// Interface var names (Input/Output) declared by the FB type's <c>.fbt</c>. Returns null
-        /// when the .fbt can't be found/parsed — pin validation is then skipped for that type (we
-        /// never raise a false split-brain just because a type file is missing).
-        /// </summary>
+        // Null when the .fbt can't be found/parsed -> pin validation skipped (no false split-brain
+        // just because a type file is missing).
         private static HashSet<string>? PinsForType(string eaeRoot, string type,
             Dictionary<string, HashSet<string>?> cache)
         {
@@ -137,9 +118,8 @@ namespace CodeGen.Devices.Core
                         var n = (string?)vd.Attribute("Name");
                         if (!string.IsNullOrEmpty(n)) pins.Add(n!);
                     }
-                    // Symlink endpoints the CAT publishes as $${PATH}<name>: the HCF binds physical
-                    // DI/DO channels to THESE (athome/atwork/Input/OutputToWork/OutputToWork1/...),
-                    // which EAE resolves per-instance — they are not InterfaceList vars.
+                    // The HCF binds DI/DO channels to $${PATH}<name> symlink endpoints (athome/atwork/
+                    // Input/OutputToWork/...), which EAE resolves per-instance — not InterfaceList vars.
                     foreach (Match sm in Regex.Matches(text, @"\$\$\{PATH\}(\w+)"))
                         pins.Add(sm.Groups[1].Value);
                 }
