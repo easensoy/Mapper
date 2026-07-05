@@ -90,9 +90,7 @@ namespace CodeGen.Services
             string eaeProjectDir, string catFileName, string interlockFbName,
             string[] targetInputs, bool reduce, DeployResult result)
         {
-            var fbt = Directory.EnumerateFiles(Path.Combine(eaeProjectDir, "IEC61499"),
-                    catFileName, SearchOption.AllDirectories)
-                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal)) ?? string.Empty;
+            var fbt = FindDeployedFbt(eaeProjectDir, catFileName);
             if (string.IsNullOrEmpty(fbt))
             {
                 result.Warnings.Add($"{catFileName} not found; Target normalize skipped.");
@@ -225,9 +223,7 @@ namespace CodeGen.Services
         internal static void NormalizeCommonInterlockEvaluatorTargets(
             string eaeProjectDir, bool reduce, DeployResult result)
         {
-            var fbt = Directory.EnumerateFiles(Path.Combine(eaeProjectDir, "IEC61499"),
-                    "CommonInterlockEvaluator.fbt", SearchOption.AllDirectories)
-                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal)) ?? string.Empty;
+            var fbt = FindDeployedFbt(eaeProjectDir, "CommonInterlockEvaluator.fbt");
             if (string.IsNullOrEmpty(fbt))
             {
                 result.Warnings.Add("CommonInterlockEvaluator.fbt not found; Target normalize skipped.");
@@ -351,11 +347,7 @@ namespace CodeGen.Services
             string eaeProjectDir, string catFileName, string interlockFbName,
             bool reduce, DeployResult result)
         {
-            var fbt = Directory.EnumerateFiles(
-                    Path.Combine(eaeProjectDir, "IEC61499"),
-                    catFileName, SearchOption.AllDirectories)
-                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
-                ?? string.Empty;
+            var fbt = FindDeployedFbt(eaeProjectDir, catFileName);
             if (string.IsNullOrEmpty(fbt))
             {
                 result.Warnings.Add($"{catFileName} not found; RuleTable normalize skipped.");
@@ -518,11 +510,7 @@ namespace CodeGen.Services
         internal static void NormalizeCommonInterlockEvaluatorRules(
             string eaeProjectDir, bool reduce, DeployResult result)
         {
-            var fbt = Directory.EnumerateFiles(
-                    Path.Combine(eaeProjectDir, "IEC61499"),
-                    "CommonInterlockEvaluator.fbt", SearchOption.AllDirectories)
-                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
-                ?? string.Empty;
+            var fbt = FindDeployedFbt(eaeProjectDir, "CommonInterlockEvaluator.fbt");
             if (string.IsNullOrEmpty(fbt))
             {
                 result.Warnings.Add("CommonInterlockEvaluator.fbt not found; RuleTable normalize skipped.");
@@ -669,11 +657,7 @@ namespace CodeGen.Services
                 new { Name = "TargetHomeState",  X = "1380", Y = "2192" },
             };
 
-            var fbt = Directory.EnumerateFiles(
-                    Path.Combine(eaeProjectDir, "IEC61499"),
-                    "Five_State_Actuator_CAT.fbt", SearchOption.AllDirectories)
-                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
-                ?? string.Empty;
+            var fbt = FindDeployedFbt(eaeProjectDir, "Five_State_Actuator_CAT.fbt");
             if (string.IsNullOrEmpty(fbt))
             {
                 result.Warnings.Add(
