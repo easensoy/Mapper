@@ -10,27 +10,9 @@ using CodeGen.Translation;
 
 namespace CodeGen.Devices.Core
 {
-    /// <summary>
-    /// Hard syslay↔sysres↔hcf parity guard. The top-level <c>.syslay</c> is the design canvas
-    /// (one shared application across all PLCs); each device <c>.sysres</c> is the deployable that
-    /// actually runs on that PLC and MUST be a faithful per-resource projection of the syslay. The
-    /// generation pipeline projects the syslay onto each sysres via
-    /// <see cref="SysresFbMirror.MirrorFbsIntoSysres"/> (FBs + parameters) and the wire emitters
-    /// (connections). If that projection lags — a stale tree, a 2nd Test Runtime, a save lock, an
-    /// emit-order bug — the deployed sysres silently DIVERGES from the syslay: the syslay shows
-    /// Assembly waiting PartAtAssembly + a Disassembly ejector/robot tail + a Robot FB on M262,
-    /// while the sysres still waits BearingSensor / ends at unclamp / has no Robot. EAE deploys the
-    /// sysres, so the demo runs the OLD logic. The <see cref="HcfReferenceValidator"/> cannot catch
-    /// this — it only checks that bindings which EXIST resolve, not that required FBs/recipes are
-    /// PRESENT.
-    ///
-    /// This validator closes that gap. For every syslay FB the mirror WOULD project onto a PLC
-    /// (<see cref="SysresFbMirror.MirroredCatTypes"/> ∩ <see cref="SysresFbMirror.BucketFor"/>), it
-    /// asserts the FB is on that PLC's sysres; for every process it asserts the recipe matches; and
-    /// when the cross-PLC discharge tail is active it asserts the M262 hcf binds the four discharge
-    /// channels. The pipeline calls it after wiring and FAILS LOUDLY on any violation, so a sysres
-    /// can never silently lag the syslay again.
-    /// </summary>
+    // syslay <-> sysres parity guard: every runtime parameter the syslay sets on an FB must mirror
+    // byte-identically onto that FB in the owning PLC's (deployed) sysres. EAE deploys the sysres,
+    // so a lagging sysres runs stale logic. Any divergence fails generation.
     public static class SyslaySysresParityValidator
     {
         public sealed record Violation(string Scope, string Detail)
@@ -38,7 +20,7 @@ namespace CodeGen.Devices.Core
             public override string ToString() => $"[{Scope}] {Detail}";
         }
 
-        // Logical PLC ↔ EAE sysdev device-type ↔ short label, in deploy order.
+        // Logical PLC <-> EAE sysdev device-type <-> short label, in deploy order.
         static readonly (string DeviceType, PlcAssignment Plc, string Label)[] Devices =
         {
             ("M262_dPAC", PlcAssignment.M262, "M262"),
@@ -46,14 +28,10 @@ namespace CodeGen.Devices.Core
             ("Soft_dPAC", PlcAssignment.BX1,  "BX1"),
         };
 
-        // Recipe is carried either as a single STRUCT param (UseRecipeStruct) or as the six
-        // parallel arrays. Compare whichever the process FB actually carries.
+        // Recipe is carried either as a single STRUCT param or as the six parallel arrays.
         static readonly string[] RecipeParamNames =
             { "Recipe", "StepType", "CmdTargetName", "CmdStateArr", "Wait1Id", "Wait1State", "NextStep" };
 
-        // Every top-level FB <Parameter> that affects RUNTIME must mirror syslay -> owning-PLC sysres
-        // byte-identically. EAE deploys the sysres, so a lagging sysres silently runs stale logic
-        // (recipe/interlock/target/timers). Divergence on any of these fails generation — no split-brain.
         static readonly string[] RuntimeParamNames =
         {
             "Recipe", "StepType", "CmdTargetName", "CmdStateArr", "Wait1Id", "Wait1State", "NextStep",
@@ -66,11 +44,6 @@ namespace CodeGen.Devices.Core
 
         static string Short(string s) => s.Length <= 48 ? s : s.Substring(0, 45) + "...";
 
-        /// <summary>
-        /// Validate that each device sysres faithfully mirrors the syslay. <paramref name="eaeRoot"/>
-        /// is the folder containing <c>IEC61499/System</c> (same root <see cref="HcfReferenceValidator"/>
-        /// takes); <paramref name="syslayPath"/> is the generated top-level syslay.
-        /// </summary>
         public static List<Violation> Validate(string? eaeRoot, string? syslayPath)
         {
             var violations = new List<Violation>();
@@ -87,8 +60,7 @@ namespace CodeGen.Devices.Core
 
             foreach (var (deviceType, plc, label) in Devices)
             {
-                // The syslay FBs the mirror WOULD project onto this PLC — the exact add/update
-                // condition in MirrorFbsIntoSysres (MirroredCatTypes ∩ this bucket).
+                // The syslay FBs the mirror would project onto this PLC (MirroredCatTypes n bucket).
                 var expected = syslayFbs
                     .Where(f => SysresFbMirror.MirroredCatTypes.Contains(f.Type) &&
                                 SysresFbMirror.BucketFor(f.Name) == plc)
@@ -129,8 +101,6 @@ namespace CodeGen.Devices.Core
                         continue;
                     }
 
-                    // Compare EVERY runtime-affecting parameter the syslay set for this FB against the
-                    // sysres. Missing or divergent => split-brain; fail generation with the exact FB/param.
                     var slParams = fb.Parameters.ToDictionary(p => p.Name, p => p.Value, StringComparer.Ordinal);
                     var srParams = ReadSysresParams(sfb);
                     foreach (var n in RuntimeParamNames)
@@ -146,9 +116,8 @@ namespace CodeGen.Devices.Core
                 }
             }
 
-            // HCF parity: when the cross-PLC discharge tail is active the M262 hcf MUST bind the
-            // four discharge channels (PartAtAssembly report + Ejector/Robot commands + Robot done),
-            // or the ejector/robot never actuate even though the recipe commands them.
+            // When the cross-PLC discharge tail is active the M262 hcf MUST bind the four discharge
+            // channels, or the ejector/robot never actuate even though the recipe commands them.
             if (CodeGen.Translation.HandoffPlanner.DischargeActive)
                 ValidateDischargeHcf(eaeRoot, violations);
 
@@ -166,8 +135,6 @@ namespace CodeGen.Devices.Core
             return d;
         }
 
-        // Stable signature of just the recipe-bearing parameters (struct or arrays), so the
-        // comparison is unaffected by unrelated params or their order.
         static string RecipeSignature(IReadOnlyDictionary<string, string> parameters)
         {
             var sb = new StringBuilder();
@@ -183,8 +150,6 @@ namespace CodeGen.Devices.Core
         static string DescribeRecipe(XElement sysresFb) =>
             DescribeRecipe(ReadSysresParams(sysresFb).TryGetValue("Recipe", out var v) ? v : null);
 
-        // Human-readable one-liner for a recipe STRUCT blob — the row-0 wait and whether the
-        // ejector/robot tail is present, the two things that diverged in the stale-tree bug.
         static string DescribeRecipe(string? recipe)
         {
             if (string.IsNullOrEmpty(recipe)) return "no-Recipe-param";
