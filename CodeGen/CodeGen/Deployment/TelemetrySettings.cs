@@ -1,11 +1,7 @@
 namespace CodeGen.Configuration
 {
-    /// <summary>
-    /// Telemetry / MQTT connection settings, loaded from <c>Config/telemetry.yml</c> so the broker
-    /// URL, TLS mode, certificates, connection name, per-resource client identifiers and the
-    /// Telemetry_CAT toggle are config-driven rather than hard-coded C# defaults. The defaults here
-    /// mirror the prior MapperConfig values exactly, so a missing/empty YAML is behaviour-identical.
-    /// </summary>
+    // Telemetry/MQTT settings from Config/telemetry.yml. The defaults here mirror the prior values, so
+    // a missing/empty YAML is behaviour-identical.
     public sealed class TelemetrySettings
     {
         public bool UseTelemetryCat { get; set; } = true;
