@@ -123,9 +123,9 @@ namespace CodeGen.Configuration
         public string BX1HostIp { get; set; } = DeviceConfig.Current.Bx1.HostIp;
 
         // Revolution Pi (Soft_dPAC) Feed-station host, used only when FeedStationController == RevPi.
-        // Defaults from Jyotsna's RevPi reference (softpac runtime .6, host NIC .2).
-        public string RevPiTargetIp { get; set; } = "192.168.1.6";
-        public string RevPiHostIp { get; set; } = "192.168.1.2";
+        // From Config/device.yml (softpac runtime .6, host NIC .2 — Jyotsna's RevPi reference).
+        public string RevPiTargetIp { get; set; } = DeviceConfig.Current.RevPi.TargetIp;
+        public string RevPiHostIp { get; set; } = DeviceConfig.Current.RevPi.HostIp;
 
         // EAE constraint: an FDT project copied verbatim from another solution can make the topology server throw a 500 on import.
         public bool EmitBx1EtherNetIpDevice { get; set; } = true;
@@ -167,6 +167,9 @@ namespace CodeGen.Configuration
         public string MqttClientId { get; set; } = TelemetrySettings.Current.ClientBx1;
 
         public string MqttClientM262 { get; set; } = TelemetrySettings.Current.ClientM262;
+
+        // Feed controller ClientIdentifier when the RevPi hosts the Feed station instead of M262.
+        public string MqttClientRevPi { get; set; } = TelemetrySettings.Current.ClientRevPi;
 
         public string MqttClientM580 { get; set; } = TelemetrySettings.Current.ClientM580;
 
