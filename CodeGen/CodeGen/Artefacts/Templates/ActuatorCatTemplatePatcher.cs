@@ -153,11 +153,7 @@ namespace CodeGen.Services
         // Restores the Five_State CAT's Inputs DST to the physical sensor symlinks ($${PATH}athome/atwork).
         internal static void NormalizeFiveStateSimSensorSource(string eaeProjectDir, DeployResult result)
         {
-            var fbt = Directory.EnumerateFiles(
-                    Path.Combine(eaeProjectDir, "IEC61499"),
-                    "Five_State_Actuator_CAT.fbt", SearchOption.AllDirectories)
-                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
-                ?? string.Empty;
+            var fbt = FindDeployedFbt(eaeProjectDir, "Five_State_Actuator_CAT.fbt");
             if (string.IsNullOrEmpty(fbt))
             {
                 result.Warnings.Add("Five_State_Actuator_CAT.fbt not found; Five_State sim-sensor normalize skipped.");
@@ -217,11 +213,7 @@ namespace CodeGen.Services
                 new { Enable = "enableToHomeFaultTimeout", Dest = "FB14.IN2", X = "1260", Y = "5292" },
             };
 
-            var fbt = Directory.EnumerateFiles(
-                    Path.Combine(eaeProjectDir, "IEC61499"),
-                    "Five_State_Actuator_CAT.fbt", SearchOption.AllDirectories)
-                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
-                ?? string.Empty;
+            var fbt = FindDeployedFbt(eaeProjectDir, "Five_State_Actuator_CAT.fbt");
             if (string.IsNullOrEmpty(fbt))
             {
                 result.Warnings.Add("Five_State_Actuator_CAT.fbt not found; fault-enable normalize skipped.");
