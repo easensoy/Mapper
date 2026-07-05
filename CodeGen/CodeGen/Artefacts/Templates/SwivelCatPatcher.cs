@@ -16,11 +16,7 @@ namespace CodeGen.Services
         // wiring; hard-fails if SimCentreHomeSensor_7SCH survives (the rig can't use sim wiring).
         internal static void NormalizeSwivelSimSensorSource(string eaeProjectDir, DeployResult result)
         {
-            var fbt = Directory.EnumerateFiles(
-                    Path.Combine(eaeProjectDir, "IEC61499"),
-                    "Seven_State_Actuator_Centre_Home_CAT.fbt", SearchOption.AllDirectories)
-                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
-                ?? string.Empty;
+            var fbt = FindDeployedFbt(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT.fbt");
             if (string.IsNullOrEmpty(fbt))
             {
                 result.Warnings.Add("Seven_State_Actuator_Centre_Home_CAT.fbt not found; swivel sim-sensor normalize skipped.");
@@ -241,11 +237,7 @@ namespace CodeGen.Services
         // if the core stops re-observing positions, fix the CAT/interface, don't re-add a polling FB.
         internal static void StripCatHomeSensorPoll(string eaeProjectDir, string catName, DeployResult result)
         {
-            var fbt = Directory.EnumerateFiles(
-                    Path.Combine(eaeProjectDir, "IEC61499"),
-                    catName + ".fbt", SearchOption.AllDirectories)
-                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
-                ?? string.Empty;
+            var fbt = FindDeployedFbt(eaeProjectDir, catName + ".fbt");
             if (string.IsNullOrEmpty(fbt))
             {
                 result.Warnings.Add($"{catName}.fbt not found; home-poll strip skipped.");
