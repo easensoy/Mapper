@@ -14,41 +14,15 @@ namespace CodeGen.Devices.M262
         const string LibElNs = "https://www.se.com/LibraryElements";
         const string ApplicationName = "WMG";
         const string DeviceName = "M262";
-        // Default kept for back-compat with the unused ReplaceMappingsBlock helper;
-        // the live Emit path now reads cfg.ResourceName and passes it through.
         const string DefaultResourceName = "RES0";
 
-        // M262 logical-device identity — used to BOOTSTRAP the sysdev from
-        // scratch when none exists (the empty-start path after Clean Demonstrator
-        // wipes the devices). The sysdev GUID + resource ID match what EAE
-        // originally created — and what the M262 .hcf Form-1 binding + the FB
-        // mirror key off — so a bootstrapped device is byte-consistent with the
-        // established layout. (M580/BX1 use the analogous constants in
-        // Station2DeviceEmitter.)
+        // GUID + resource ID must match what EAE created (the .hcf Form-1 binding + FB mirror key off them).
         const string M262SysdevId   = "00000000-0000-0000-0000-000000000002";
         const string M262ResourceId = "1459BCD12760907D";
 
-        /// <summary>
-        /// When true, the Mapper treats the M262 sysdev as user-managed: the
-        /// device file, its resource declaration, the Topology Equipment
-        /// JSON, and the SystemDeviceProperties XML are all left as-is
-        /// whenever an M262 sysdev already exists under
-        /// <c>IEC61499/System/</c>. Only application-layer content
-        /// (.sysres FBNetwork, .syslay, .hcf, dfbproj registrations) is
-        /// written. The flag preserves the trust binding EAE establishes
-        /// on first connect to the controller.
-        /// </summary>
+        // When true, an existing M262 sysdev is left as-is to preserve EAE's controller trust binding.
         public const bool PreserveExistingM262Device = true;
 
-        /// <summary>
-        /// Walks <c>{eaeRoot}/IEC61499/System/</c> and returns true if any
-        /// .sysdev declares an M262 dPAC device
-        /// (<c>Type="M262_dPAC" Namespace="SE.DPAC"</c> on the root). The
-        /// trust-preservation guard branches on this — when true, the
-        /// device-layer writes (sysdev rewrite, sysres root rename, Topology
-        /// Equipment JSON, SystemDeviceProperties XML, network profile
-        /// writes) are skipped.
-        /// </summary>
         public static bool M262SysdevAlreadyExists(MapperConfig cfg)
         {
             if (cfg == null) return false;
@@ -87,20 +61,13 @@ namespace CodeGen.Devices.M262
                 ?? throw new InvalidOperationException(
                     "Cannot derive EAE project root from MapperConfig.SyslayPath/SyslayPath2.");
 
-            // Align the application shell Name to ApplicationName (e.g. APP1 -> WMG) so the app reads WMG
-            // on every Test Runtime, not only after a Clean. The app is identified by ID, not Name.
             AlignApplicationName(eaeRoot);
 
             var resourceName = string.IsNullOrWhiteSpace(cfg.ResourceName)
                 ? DefaultResourceName
                 : cfg.ResourceName;
 
-            // Locate the M262 .sysdev. When ABSENT (e.g. right after the Clean
-            // Demonstrator button wiped the devices), BOOTSTRAP it from scratch
-            // so the Mapper owns the full logical-device lifecycle. The .system
-            // project root that Clean keeps anchors the System GUID folder the
-            // device is created in. (M580/BX1 already build from scratch in
-            // Station2DeviceEmitter.)
+            // Bootstrap the M262 sysdev from scratch when absent (the empty-start path after Clean).
             bool justBootstrapped = false;
             var sysdevPath = FindSysdev(eaeRoot);
             if (sysdevPath == null)
@@ -113,12 +80,7 @@ namespace CodeGen.Devices.M262
                         "cannot bootstrap M262 (the .system project root must exist).");
             }
 
-            // Trust-preservation guard. If the sysdev on disk is already an
-            // M262 AND we did not just create it, every device-layer write
-            // below is skipped to keep EAE's trust binding with the controller
-            // intact (only the .sysres FBNetwork mirror + dfbproj registration
-            // run). A freshly bootstrapped device needs the full setup, so
-            // justBootstrapped forces those writes to run.
+            // Preserve an existing device (skip device-layer writes) to keep EAE's controller trust intact.
             bool preserveDevice =
                 PreserveExistingM262Device && IsM262SysdevFile(sysdevPath) && !justBootstrapped;
 
@@ -127,30 +89,14 @@ namespace CodeGen.Devices.M262
             {
                 RewriteSysdev(sysdevPath, DeviceName, "M262_dPAC",
                     cfg.M262TargetIp ?? string.Empty, resourceName);
-                // While we have the EAE root, keep the .sysres root's Name
-                // attribute in sync so EAE's Deploy & Diagnostic tree doesn't
-                // show RES0 + RES0 at the same time. (Skipped when the
-                // device is preserved — the resource declaration is part of
-                // the trust-bound device record.)
                 var sysresPathForRename = EaeProjectLayout.FindSysresFor(sysdevPath);
                 if (sysresPathForRename != null)
                     RenameSysresName(sysresPathForRename, resourceName);
-                // Force every Ethernet interface on the M262 Topology
-                // equipment record to NOCONF (IP 0.0.0.0, zero domain). EAE's
-                // device card shows "Logical network: NOCONF" and
-                // "IPV4 Address: 0.0.0.0" on both ETH1 and ETH2. User wires
-                // the network manually after deploy — Mapper never bakes a
-                // default IP into Topology. Skipped under preserveDevice
-                // because re-writing IPs invalidates the controller-side
-                // trust certificate.
+                // NOCONF the M262 Ethernet interfaces (IP 0.0.0.0) — the user wires the network after deploy.
                 SetTopologyEquipmentToNoConf(eaeRoot);
             }
 
-            // The F513CAE3 DeployPlugin Properties (Boot/Deploy + the SecurityApp/InsecureApplication
-            // override) is deploy CONFIG, not the trust certificate (trust is the sysdev + IPs, guarded
-            // above), so it's written on EVERY run even for a preserved device. M262 now carries
-            // MqttConn_M262, so write the insecure-app override (so the device can accept a plain mqtt://
-            // URL once 'Security -> Insecure Application' is enabled on the M262 device in EAE). Insecure mode.
+            // DeployPlugin Properties is deploy config (not the trust certificate), so written every run.
             propsPath = WriteM262DevicePropertiesXml(sysdevPath,
                 cfg.MqttPublishEnabled && !cfg.MqttSecureTls);
 
@@ -165,16 +111,7 @@ namespace CodeGen.Devices.M262
 
             var sysresPath = EaeProjectLayout.FindSysresFor(sysdevPath);
 
-            // Sweep any extra .sysres files in the M262 sysdev folder. The
-            // canonical sysres is the one EaeProjectLayout returns above
-            // (1459BCD12760907D.sysres — Name="M262_RES"); anything else is a
-            // leftover from an older deploy that used a different resource
-            // ID/name (typically "RES0"). EAE compile rejects a sysdev that
-            // contains 2 instances of Runtime.Management.EMB_RES_ECO, so the
-            // stale file MUST go. (EAE's message log can misleadingly report the
-            // duplicate against the NEXT device in the system tree, not the one
-            // actually carrying it.) Same sweep pattern Station2DeviceEmitter
-            // already uses for M580 + BX1.
+            // Sweep stale extra .sysres files — EAE rejects a sysdev with 2 EMB_RES_ECO instances.
             if (sysresPath != null)
             {
                 var sysdevFolderForSweep = Path.GetDirectoryName(sysresPath);
@@ -193,13 +130,7 @@ namespace CodeGen.Devices.M262
 
             int sysresMirrorCount = 0;
             if (sysresPath != null && fbInstances.Count > 0)
-                // Mirror only the FBs that belong on the M262 (Feed Station).
-                // The Station-2 FBs (Shaft/Clamp/Cover/Bearing/sensors and the
-                // Station2/Assembly_Station/Stn2_Term structural FBs) now live
-                // on the M580/BX1 resources, emitted by EmitStation2Sysres. If
-                // they were left in this bucket too they would be mapped onto
-                // BOTH the M262 and a Station-2 PLC, which EAE flags as a
-                // duplicate instance mapping in Solution Integrity.
+                // Mirror only the M262 (Feed Station) FBs — Station-2 FBs live on M580/BX1.
                 sysresMirrorCount = SysresFbMirror.MirrorFbsIntoSysres(
                     sysresPath,
                     fbInstances.Where(f => SysresFbMirror.BucketFor(f.Name) == PlcAssignment.M262).ToList());
@@ -237,9 +168,7 @@ namespace CodeGen.Devices.M262
             var propsPath = Path.Combine(sysdevFolder,
                 $"{M262DevicePropertiesPluginGuid}.Properties.xml");
 
-            // M262 carries MqttConn_M262 — with a plain mqtt:// broker the device must allow insecure
-            // app config (Configuration -> SecurityApp -> InsecureApplication -> Enable) or
-            // MQTT_CONNECTION faults RC101. Same override BX1/M580 use; gated on insecure MQTT mode.
+            // A plain mqtt:// broker needs the SecurityApp -> InsecureApplication override or MQTT faults RC101.
             string canonical =
                 "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
                 "<SystemDeviceProperties xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" " +
@@ -275,12 +204,7 @@ namespace CodeGen.Devices.M262
         {
             var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
             if (!Directory.Exists(systemDir)) return null;
-            // Return the M262 device SPECIFICALLY (Type="M262_dPAC") — never a
-            // sibling M580/BX1 sysdev. Otherwise, when the real M262 sysdev is
-            // absent but the siblings still exist (a partial post-Clean state),
-            // the rewrite/preserve logic below would target the wrong device and
-            // rewrite an M580/BX1 sysdev AS M262. Returning null when no M262
-            // sysdev exists is exactly what triggers the bootstrap in Emit.
+            // Match the M262 device specifically (Type="M262_dPAC") — never a sibling M580/BX1 sysdev.
             return Directory.EnumerateFiles(systemDir, "*.sysdev", SearchOption.AllDirectories)
                 .FirstOrDefault(IsM262SysdevFile);
         }
@@ -293,24 +217,11 @@ namespace CodeGen.Devices.M262
                 .FirstOrDefault();
         }
 
-        /// <summary>
-        /// Creates the M262 logical device (.sysdev + sibling .sysres + empty
-        /// SystemDeviceProperties + Simulation.Binding) from scratch when none
-        /// exists — the empty-start path after Clean Demonstrator wipes the
-        /// devices. The System GUID folder (anchored by the kept .system project
-        /// root) must exist; returns null if it does not. Reuses
-        /// <see cref="Station2DeviceEmitter"/>'s proven builders so the
-        /// bootstrapped device matches the M580/BX1 shape exactly. The F513
-        /// DeployPlugin Properties + the Topology equipment + the .hcf are
-        /// written by the rest of the M262 pipeline (WriteM262DevicePropertiesXml,
-        /// M262TopologyEmitter, M262HwConfigCopier) once this sysdev exists.
-        /// </summary>
+        // Creates the M262 logical device from scratch when none exists (the empty-start path after Clean).
         static string? BootstrapM262Device(string eaeRoot, string resourceName)
         {
             var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
             if (!Directory.Exists(systemDir)) return null;
-            // Same System-GUID-folder discovery Station2DeviceEmitter uses: the
-            // one GUID-named directory under System/ (anchored by the .system root).
             var sysGuidDir = Directory.EnumerateDirectories(systemDir)
                 .FirstOrDefault(d =>
                 {
@@ -319,12 +230,10 @@ namespace CodeGen.Devices.M262
                 });
             if (sysGuidDir == null) return null;
 
-            // 1. .sysdev (Device + inline Resource).
             var sysdevPath = Path.Combine(sysGuidDir, $"{M262SysdevId}.sysdev");
             File.WriteAllText(sysdevPath, Station2DeviceEmitter.BuildSysdevXml(
                 M262SysdevId, DeviceName, "M262_dPAC", M262ResourceId, resourceName));
 
-            // 2. sysdev folder + .sysres (empty FBNetwork; the FB mirror fills it).
             var sysdevFolder = Path.Combine(sysGuidDir, M262SysdevId);
             Directory.CreateDirectory(sysdevFolder);
             var sysresPath = Path.Combine(sysdevFolder, $"{M262ResourceId}.sysres");
@@ -332,14 +241,11 @@ namespace CodeGen.Devices.M262
                 File.WriteAllText(sysresPath,
                     Station2DeviceEmitter.BuildSysresXml(M262ResourceId, resourceName));
 
-            // 3. Empty SystemDeviceProperties (E0601B81). The F513 DeployPlugin
-            //    Properties is written later by WriteM262DevicePropertiesXml.
             var e0601 = Path.Combine(sysdevFolder,
                 "E0601B81-4A3A-4A96-B6C2-007BDC680D59.Properties.xml");
             if (!File.Exists(e0601))
                 File.WriteAllText(e0601, Station2DeviceEmitter.BuildEmptySystemDeviceProps());
 
-            // 4. Simulation.Binding (M262 service ports: deploy 51499 / archive 51496).
             var simBind = Path.Combine(sysdevFolder, $"{M262SysdevId}.Simulation.Binding.xml");
             File.WriteAllText(simBind,
                 Station2DeviceEmitter.BuildSimulationBindingXml(M262SysdevId, 51499, 51496));
@@ -369,18 +275,13 @@ namespace CodeGen.Devices.M262
             SetAttr(root, "Namespace", "SE.DPAC");
             SetAttr(root, "Locked", "false");
 
-            // Strip any IPV4Address parameter. Emitting one makes EAE flag the
-            // device as DefaultNetwork; we want NoCONF (no preset network) so
-            // the user can wire it manually after deploy. Leaves a baseline
-            // IPV4Address in place if present in the source — but our
-            // post-Wiper sysdev never has one, so result is NoCONF.
+            // Strip any IPV4Address parameter so EAE renders the device as NoCONF (no preset network).
             foreach (var ipParam in root.Elements(ns + "Parameter")
                 .Where(e => string.Equals((string?)e.Attribute("Name"),
                     "IPV4Address", StringComparison.Ordinal)).ToList())
             {
                 ipParam.Remove();
             }
-            // targetIp arg kept for signature compatibility but no longer used.
             _ = targetIp;
 
             var resources = root.Element(ns + "Resources");
@@ -389,8 +290,6 @@ namespace CodeGen.Devices.M262
                 resources = new XElement(ns + "Resources");
                 root.Add(resources);
             }
-            // Find the existing Resource entry by Name OR by being the only Resource child;
-            // tolerates either RES0 (legacy) or the new resourceName already in place.
             var res0 = resources.Elements(ns + "Resource")
                 .FirstOrDefault(e => string.Equals((string?)e.Attribute("Name"), resourceName,
                     StringComparison.OrdinalIgnoreCase))
@@ -409,14 +308,7 @@ namespace CodeGen.Devices.M262
             doc.Save(sysdevPath);
         }
 
-        /// <summary>
-        /// Renames the .sysres root's <c>Name</c> attribute to <paramref name="resourceName"/>
-        /// (e.g. "RES0"). EAE Deploy &amp; Diagnostic shows this name in the runtime
-        /// tree, so it must match what the .sysdev's &lt;Resource&gt; entry says or EAE
-        /// flags the project as inconsistent. Idempotent — safe to re-run.
-        /// </summary>
-        // Set every .sysapp root Application Name to ApplicationName (idempotent). The application is
-        // identified by its ID, so renaming the display Name is safe.
+        // Align every .sysapp root Application Name to ApplicationName (idempotent; app is keyed by ID).
         static void AlignApplicationName(string eaeRoot)
         {
             try
@@ -481,15 +373,7 @@ namespace CodeGen.Devices.M262
             return mappings.Elements(ns + "Mapping").Count();
         }
 
-        /// <summary>
-        /// Walk <c>{eaeRoot}/Topology/</c> for any <c>Equipment_*.json</c>
-        /// describing the M262 dPAC and force every Ethernet endpoint to
-        /// <c>"ipAddress": "0.0.0.0"</c> + <c>"domain":
-        /// "00000000-0000-0000-0000-000000000000"</c>. EAE then renders the
-        /// Logical network field as NOCONF on every interface card.
-        /// Best-effort: silently skips files that can't be parsed; never
-        /// fails the run.
-        /// </summary>
+        // Force every M262 Topology Equipment Ethernet endpoint to ipAddress 0.0.0.0 + zero domain (NOCONF).
         static void SetTopologyEquipmentToNoConf(string eaeRoot)
         {
             try
@@ -502,8 +386,6 @@ namespace CodeGen.Devices.M262
                     try
                     {
                         var text = File.ReadAllText(path);
-                        // Lightweight regex rewrite — JSON layout from EAE is
-                        // stable enough to skip a full deserialise/round-trip.
                         var rewritten = System.Text.RegularExpressions.Regex.Replace(
                             text,
                             "\"ipAddress\"\\s*:\\s*\"[^\"]*\"",
@@ -539,11 +421,6 @@ namespace CodeGen.Devices.M262
         public string PropertiesXmlPath { get; set; } = string.Empty;
         public string SysresPath { get; set; } = string.Empty;
         public int SysresFbsMirrored { get; set; }
-        /// <summary>True when the trust-preservation guard skipped every
-        /// device-layer write (sysdev rewrite, sysres root rename, Topology
-        /// Equipment JSON, SystemDeviceProperties XML). Application content
-        /// — .sysres FBNetwork mirror, dfbproj registrations — still
-        /// ran.</summary>
         public bool DevicePreserved { get; set; }
     }
 }
