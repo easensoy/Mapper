@@ -6,20 +6,11 @@ using System.Xml.Linq;
 
 namespace CodeGen.Devices.Core
 {
-    /// <summary>
-    /// Shared parsing/IO helpers for the per-PLC HCF symbol binders
-    /// (<c>M580SymbolBinder</c>, <c>BX1SymbolBinder</c>). These were extracted
-    /// verbatim from the former <c>HcfSymbolBinder</c> so the M580 and BX1
-    /// binders can live in their own device namespaces while sharing the same
-    /// channel-symlink parsing and <c>.hcf</c> save behaviour.
-    /// </summary>
+    // Shared parsing/IO helpers for the per-PLC HCF symbol binders (M580SymbolBinder, BX1SymbolBinder).
     public static class HcfBindingSupport
     {
-        /// <summary>
-        /// Splits a channel value into head.mid.last. Strips a single layer of
-        /// wrapping single quotes first. Returns false for empty values, genuine
-        /// string literals (no dots / quoted scanner ids), and <c>T#…</c> durations.
-        /// </summary>
+        // Split a channel value into head.mid.last (strips wrapping quotes); false for empty values,
+        // string literals, and T#... durations.
         public static bool TrySplitSymlink(string raw, out string head, out string mid, out string last)
         {
             head = mid = last = string.Empty;
@@ -36,10 +27,8 @@ namespace CodeGen.Devices.Core
             return true;
         }
 
-        /// <summary>component instance Name -> FB id, read from the deployed
-        /// <c>.sysres</c> in the sysdev folder (the actuator/sensor CATs mirrored
-        /// there). The .hcf channel's middle segment must be this id so EAE
-        /// resolves the link to the FB instance.</summary>
+        // Component instance Name -> FB id, from the deployed .sysres. The .hcf channel's middle
+        // segment must be this id so EAE resolves the link to the FB instance.
         public static Dictionary<string, string> BuildComponentIdMap(string sysdevFolder)
         {
             var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -62,7 +51,7 @@ namespace CodeGen.Devices.Core
                         map[n!] = id!;
                 }
             }
-            catch { /* best-effort */ }
+            catch { }
             return map;
         }
 
@@ -80,13 +69,12 @@ namespace CodeGen.Devices.Core
                         (string?)root.Attribute("Namespace") == deviceNamespace)
                         return sd;
                 }
-                catch { /* skip malformed */ }
+                catch { }
             }
             return null;
         }
 
-        /// <summary>Read the deployed resource ID (prefers the .sysres root
-        /// <c>ID</c> attribute, falls back to the file stem) and Name.</summary>
+        // Read the deployed resource ID (prefers the .sysres root ID attribute, else the file stem) and Name.
         public static (string Id, string? Name) ReadSysresIdentity(string sysdevFolder)
         {
             try
@@ -104,14 +92,13 @@ namespace CodeGen.Devices.Core
                     if (!string.IsNullOrWhiteSpace(rootId)) id = rootId!;
                     name = (string?)root?.Attribute("Name");
                 }
-                catch { /* fall back to file stem */ }
+                catch { }
                 return (id, name);
             }
             catch { return (string.Empty, null); }
         }
 
-        /// <summary>Save with UTF-8 + BOM and 2-space indent, retrying if EAE
-        /// briefly holds a write lock.</summary>
+        // Save with UTF-8 + BOM, retrying if EAE briefly holds a write lock.
         public static void SaveHcf(XDocument doc, string hcfPath)
         {
             var settings = new System.Xml.XmlWriterSettings
