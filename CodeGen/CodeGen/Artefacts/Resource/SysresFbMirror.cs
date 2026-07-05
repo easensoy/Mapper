@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Xml.Linq;
+using CodeGen.Configuration;
 using CodeGen.Mapping;
 using CodeGen.Translation;
 
@@ -496,9 +497,11 @@ namespace CodeGen.Devices.Core
             if (string.Equals(fbName, "MqttConn", StringComparison.Ordinal) ||
                 string.Equals(fbName, "Telemetry_BX1", StringComparison.Ordinal))
                 return PlcAssignment.BX1;
+            // The Feed controller's MQTT connection follows the Feed station onto M262 or RevPi.
             if (string.Equals(fbName, "MqttConn_M262", StringComparison.Ordinal) ||
                 string.Equals(fbName, "Telemetry_M262", StringComparison.Ordinal))
-                return PlcAssignment.M262;
+                return MapperConfig.FeedStationController == FeedController.RevPi
+                    ? PlcAssignment.RevPi : PlcAssignment.M262;
             if (string.Equals(fbName, "MqttConn_M580", StringComparison.Ordinal) ||
                 string.Equals(fbName, "Telemetry_M580", StringComparison.Ordinal))
                 return PlcAssignment.M580;
@@ -518,7 +521,11 @@ namespace CodeGen.Devices.Core
                 return PlcAssignment.M580;
 
             var p = ControllerMap.PlcOf(fbName);
-            return p == PlcAssignment.Unknown ? PlcAssignment.M262 : p;
+            // Unknown falls back to whichever controller currently hosts the Feed station (M262 or RevPi),
+            // so nothing is dropped and no FB lands on a non-emitted device.
+            return p == PlcAssignment.Unknown
+                ? (MapperConfig.FeedStationController == FeedController.RevPi ? PlcAssignment.RevPi : PlcAssignment.M262)
+                : p;
         }
 
         static string ComputeMirrorId(string syslayId)
