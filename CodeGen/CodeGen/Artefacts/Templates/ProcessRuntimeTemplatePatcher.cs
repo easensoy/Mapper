@@ -68,19 +68,9 @@ namespace CodeGen.Services
         static readonly string[] EngineDebugVars = { "CurrentStep", "CurrentStepType", "WaitSatisfied" };
 
         internal static void NormalizeProcessEngineDebugWatch(string eaeProjectDir, DeployResult result)
-        {
-            var fbt = FindDeployedFbt(eaeProjectDir, "ProcessRuntime_Generic_v1.fbt");
-            if (string.IsNullOrEmpty(fbt))
+            => EditDeployedFbt(eaeProjectDir, "ProcessRuntime_Generic_v1.fbt", "Engine debug-watch normalize failed", result,
+                (doc, root, ns, fbt) =>
             {
-                result.Warnings.Add("ProcessRuntime_Generic_v1.fbt not found; engine debug-watch normalize skipped.");
-                return;
-            }
-            try
-            {
-                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                var root = doc.Root;
-                if (root == null) return;
-                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
                 var eventOutputs = root.Element(ns + "InterfaceList")?.Element(ns + "EventOutputs");
                 if (eventOutputs == null)
                 {
@@ -108,12 +98,7 @@ namespace CodeGen.Services
                     result.PatchesApplied.Add("ProcessRuntime_Generic_v1: debug-watch WITH entries removed (hardware)");
                     MapperLogger.Info("[Deploy] Engine debug-watch normalize: debug WITH entries stripped");
                 }
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"Engine debug-watch normalize failed: {ex.Message}");
-            }
-        }
+            }, notFoundNote: "ProcessRuntime_Generic_v1.fbt not found; engine debug-watch normalize skipped.");
 
         // Struct field name == array name so the ST rewrite is 1:1 ("StepType[CurrentStep]" -> "Recipe[CurrentStep].StepType").
         static readonly (string Name, string Type)[] RecipeArrays = new[]
@@ -149,19 +134,9 @@ namespace CodeGen.Services
         // Recipe-struct collapse on Process1_Generic (gated by UseRecipeStruct); reduce==false restores the 6 arrays.
         internal static void NormalizeProcess1RecipeArrays(
             string eaeProjectDir, bool reduce, DeployResult result)
-        {
-            var fbt = FindDeployedFbt(eaeProjectDir, "Process1_Generic.fbt");
-            if (string.IsNullOrEmpty(fbt))
+            => EditDeployedFbt(eaeProjectDir, "Process1_Generic.fbt", "Process1_Generic recipe-struct normalize failed", result,
+                (doc, root, ns, fbt) =>
             {
-                result.Warnings.Add("Process1_Generic.fbt not found; recipe-struct normalize skipped.");
-                return;
-            }
-            try
-            {
-                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                var root = doc.Root;
-                if (root == null) return;
-                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
 
                 var iface = root.Element(ns + "InterfaceList");
                 var net = root.Element(ns + "FBNetwork");
@@ -271,29 +246,14 @@ namespace CodeGen.Services
                         : "Process1_Generic: Recipe struct -> 6 recipe arrays (hardware)");
                     MapperLogger.Info($"[Deploy] Process1_Generic recipe normalize: reduce={reduce}");
                 }
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"Process1_Generic recipe-struct normalize failed: {ex.Message}");
-            }
-        }
+            }, notFoundNote: "Process1_Generic.fbt not found; recipe-struct normalize skipped.");
 
         // Recipe-struct collapse on ProcessRuntime_Generic_v1 incl. every algorithm's ST (gated by UseRecipeStruct); reduce==false restores the 6 arrays.
         internal static void NormalizeProcessRuntimeRecipeArrays(
             string eaeProjectDir, bool reduce, DeployResult result)
-        {
-            var fbt = FindDeployedFbt(eaeProjectDir, "ProcessRuntime_Generic_v1.fbt");
-            if (string.IsNullOrEmpty(fbt))
+            => EditDeployedFbt(eaeProjectDir, "ProcessRuntime_Generic_v1.fbt", "ProcessRuntime_Generic_v1 recipe-struct normalize failed", result,
+                (doc, root, ns, fbt) =>
             {
-                result.Warnings.Add("ProcessRuntime_Generic_v1.fbt not found; recipe-struct normalize skipped.");
-                return;
-            }
-            try
-            {
-                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                var root = doc.Root;
-                if (root == null) return;
-                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
 
                 var iface = root.Element(ns + "InterfaceList");
                 var basic = root.Element(ns + "BasicFB");
@@ -376,12 +336,7 @@ namespace CodeGen.Services
                         : "ProcessRuntime_Generic_v1: Recipe struct -> 6 recipe arrays + ST restored (hardware)");
                     MapperLogger.Info($"[Deploy] ProcessRuntime_Generic_v1 recipe normalize: reduce={reduce}");
                 }
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"ProcessRuntime_Generic_v1 recipe-struct normalize failed: {ex.Message}");
-            }
-        }
+            }, notFoundNote: "ProcessRuntime_Generic_v1.fbt not found; recipe-struct normalize skipped.");
 
         // END->END dead-end self-loop (run-once) silences WRN_ECC_DEAD_END; cyclic routes END->ADVANCE instead.
         internal static void PatchProcessRuntimeEccDeadEnd(string fbtPath, bool cyclic, DeployResult result)
