@@ -185,7 +185,7 @@ namespace CodeGen.Devices.Core
             return result;
         }
 
-        static void EmitOnePlc(MapperConfig cfg, string eaeRoot, string systemGuidDir,
+        internal static void EmitOnePlc(MapperConfig cfg, string eaeRoot, string systemGuidDir,
             EmitResult result, string sysdevId, string deviceName, string deviceType,
             string resourceId, string resourceName, string? hcfTemplatePath,
             string equipmentJsonName, Func<string> equipmentBuilder,
@@ -361,7 +361,7 @@ namespace CodeGen.Devices.Core
 
         // Soft_dPAC variant — adds SetActiveProjectAsABootProject; enableInsecureApp emits the
         // SecurityApp/InsecureApplication override (see above) to avoid the RC101 fault.
-        static string BuildSoftDpacDeployPluginPropertiesXml(bool enableInsecureApp) =>
+        internal static string BuildSoftDpacDeployPluginPropertiesXml(bool enableInsecureApp) =>
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
             "<SystemDeviceProperties xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns=\"http://www.nxtControl.com/DeviceProperties\">\r\n" +
             "  <ComplexProperty Name=\"DeployPlugin\" Expanded=\"true\">\r\n" +
