@@ -3,11 +3,8 @@ using CodeGen.Models;
 
 namespace CodeGen.Translation.Process
 {
-    /// <summary>
-    /// Assembly_Station orchestration: emits the rows from Config/recipes.yml (recipe
-    /// "Assembly_Station") under the gates below. Falls back to ApplyAssemblyBearingReleaseSequence
-    /// when shaft/bearing ids are missing.
-    /// </summary>
+    // Assembly_Station orchestration: emits recipes.yml rows; falls back to
+    // ApplyAssemblyBearingReleaseSequence when shaft/bearing ids are missing.
     internal static class AssemblyRecipe
     {
         public static void Apply(VueOneComponent process,
