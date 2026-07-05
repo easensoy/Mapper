@@ -9,6 +9,11 @@ m580:
 bx1:
   targetIp: 192.168.1.151
   hostIp: 192.168.1.209
+# Revolution Pi (Soft_dPAC) — used only when the Feed station targets RevPi instead of M262.
+# targetIp = the softdpac runtime; hostIp = the RevPi NIC (from Jyotsna's RevPi reference).
+revPi:
+  targetIp: 192.168.1.6
+  hostIp: 192.168.1.2
 defaultNetwork:
   subnetAddress: 192.168.0.0
   subnetMask: 255.255.255.0
