@@ -30,23 +30,7 @@ namespace CodeGen.Services
             "</DataType>";
 
         internal static void DeployInterlockRuleDatatype(string eaeProjectDir, DeployResult result)
-        {
-            try
-            {
-                var dtDir = Path.Combine(eaeProjectDir, "IEC61499", "DataType");
-                Directory.CreateDirectory(dtDir);
-                var dtPath = Path.Combine(dtDir, "InterlockRule.dt");
-                if (!File.Exists(dtPath)) File.WriteAllText(dtPath, InterlockRuleDt);
-                if (!result.DataTypesDeployed.Contains("InterlockRule"))
-                    result.DataTypesDeployed.Add("InterlockRule");
-                result.PatchesApplied.Add("InterlockRule.dt deployed + registered");
-                MapperLogger.Info("[Deploy] InterlockRule.dt written + registered");
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"InterlockRule.dt deploy failed: {ex.Message}");
-            }
-        }
+            => DeployDatatype(eaeProjectDir, "InterlockRule", InterlockRuleDt, result);
 
         // Encapsulated interlock interface (Count + Rules[]); Rules ArraySize from interlock.yaml ruleArraySize.
         static string BuildInterlockTableDt() =>
@@ -63,23 +47,7 @@ namespace CodeGen.Services
             "</DataType>";
 
         internal static void DeployInterlockTableDatatype(string eaeProjectDir, DeployResult result)
-        {
-            try
-            {
-                var dtDir = Path.Combine(eaeProjectDir, "IEC61499", "DataType");
-                Directory.CreateDirectory(dtDir);
-                var dtPath = Path.Combine(dtDir, "InterlockTable.dt");
-                if (!File.Exists(dtPath)) File.WriteAllText(dtPath, BuildInterlockTableDt());
-                if (!result.DataTypesDeployed.Contains("InterlockTable"))
-                    result.DataTypesDeployed.Add("InterlockTable");
-                result.PatchesApplied.Add("InterlockTable.dt deployed + registered (encapsulated interlock input)");
-                MapperLogger.Info("[Deploy] InterlockTable.dt written + registered");
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"InterlockTable.dt deploy failed: {ex.Message}");
-            }
-        }
+            => DeployDatatype(eaeProjectDir, "InterlockTable", BuildInterlockTableDt(), result, "(encapsulated interlock input)");
 
         const string TargetStatesDt =
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
@@ -96,23 +64,7 @@ namespace CodeGen.Services
             "</DataType>";
 
         internal static void DeployTargetStatesDatatype(string eaeProjectDir, DeployResult result)
-        {
-            try
-            {
-                var dtDir = Path.Combine(eaeProjectDir, "IEC61499", "DataType");
-                Directory.CreateDirectory(dtDir);
-                var dtPath = Path.Combine(dtDir, "TargetStates.dt");
-                if (!File.Exists(dtPath)) File.WriteAllText(dtPath, TargetStatesDt);
-                if (!result.DataTypesDeployed.Contains("TargetStates"))
-                    result.DataTypesDeployed.Add("TargetStates");
-                result.PatchesApplied.Add("TargetStates.dt deployed + registered (encapsulated target input)");
-                MapperLogger.Info("[Deploy] TargetStates.dt written + registered");
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"TargetStates.dt deploy failed: {ex.Message}");
-            }
-        }
+            => DeployDatatype(eaeProjectDir, "TargetStates", TargetStatesDt, result, "(encapsulated target input)");
 
         static readonly Dictionary<string, string> TargetVarToField = new()
         {
