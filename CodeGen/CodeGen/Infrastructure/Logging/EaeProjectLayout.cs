@@ -35,30 +35,15 @@ namespace CodeGen.Devices.Core
             if (sysresFiles.Count == 0) return null;
             if (sysresFiles.Count == 1) return sysresFiles[0];
 
-            // MORE THAN ONE .sysres in the folder => an orphan from a prior deploy
-            // sits alongside the active resource. We MUST return the ACTIVE one --
-            // the .sysres whose stem matches the resource ID the parent sysdev's
-            // <Resource ID="..."/> actually references -- NOT FirstOrDefault, which
-            // routinely returned the orphan (its GUID often sorts before the active
-            // resource's). Picking the orphan made the FB mirror + opcua-stamp write
-            // to the orphan: it populated the orphan .sysres and created an orphan
-            // "{orphanId}/" sister folder (with opcua.xml), while the ACTIVE resource
-            // stayed empty. EAE then loads that ghost sister folder and raises the
-            // "Solution Integrity / Repair Instances" dialog on the duplicated CAT
-            // instances. Matching the sysdev's active ID makes the mirror always
-            // target the live resource; the orphan is left for the stale-sysres /
-            // sister-folder sweep to delete.
+            // With >1 .sysres (an orphan alongside the live one), return the ACTIVE resource —
+            // the stem the sysdev's <Resource ID="..."/> references — not FirstOrDefault.
             var activeIds = ReadActiveResourceIds(sysdevPath);
             var active = sysresFiles.FirstOrDefault(f =>
                 activeIds.Contains(Path.GetFileNameWithoutExtension(f)));
             return active ?? sysresFiles[0];
         }
 
-        /// <summary>
-        /// The resource IDs a sysdev actually references via
-        /// <c>&lt;Resources&gt;&lt;Resource ID="..."/&gt;</c>. Used to tell the
-        /// live resource apart from an orphan .sysres left in the same folder.
-        /// </summary>
+        // The resource IDs a sysdev references via <Resources><Resource ID="..."/>.
         static HashSet<string> ReadActiveResourceIds(string sysdevPath)
         {
             var ids = new HashSet<string>(StringComparer.Ordinal);
@@ -78,24 +63,9 @@ namespace CodeGen.Devices.Core
             return ids;
         }
 
-        /// <summary>
-        /// Enforces the "exactly one .sysres per device folder" invariant: for every sysdev under
-        /// <paramref name="eaeRoot"/>/IEC61499/System, deletes any <c>.sysres</c> in the sysdev's
-        /// device folder (and its stem-named sister folder) whose stem is NOT one of the sysdev's
-        /// active <c>&lt;Resource ID&gt;</c> values.
-        ///
-        /// Why this exists: when a device is (re)created its sysres is first written under a default
-        /// id, then the <c>.hcf</c> id-realignment switches the sysdev's active Resource ID to the
-        /// <c>.hcf</c> ResourceId (e.g. BX1 default → <c>78E9…</c>) and writes the live resource
-        /// under the new id. The early per-device sweep in <c>Station2DeviceEmitter.EmitOnePlc</c>
-        /// runs BEFORE that realignment, so the old default-named shell (an empty-FBNetwork
-        /// <c>RES0</c> sysres) can linger as an orphan — which EAE then carries in its build cache
-        /// (<c>obj/System.hash</c>). This runs LATE (after every device/hcf/mirror/wire step) so the
-        /// folder ends with exactly the live resource. Idempotent and conservative: a sysdev that
-        /// declares no active resource id (malformed) is skipped, so nothing is ever deleted blind.
-        /// EAE refreshes <c>obj/System.hash</c> + <c>.obsolete</c> from the actual files on its next
-        /// Build, so this sweep only needs to remove the stray <c>.sysres</c>. Returns the count removed.
-        /// </summary>
+        // Enforces one .sysres per device folder: deletes any .sysres (+ sister folder) whose stem
+        // is not one of the sysdev's active <Resource ID> values. Conservative — a malformed sysdev
+        // (no active id) is skipped so nothing is deleted blind. Returns the count removed.
         public static int SweepOrphanSysres(string? eaeRoot, Action<string>? log = null)
         {
             if (string.IsNullOrEmpty(eaeRoot)) return 0;
@@ -137,16 +107,9 @@ namespace CodeGen.Devices.Core
             return removed;
         }
 
-        /// <summary>
-        /// Enforces EAE's "max 1 resource per device" limit at the FILE level: for every sysdev whose
-        /// <c>&lt;Resources&gt;</c> lists more than one <c>&lt;Resource&gt;</c>, keeps the one whose ID has a
-        /// matching <c>{ID}.sysres</c> on disk (else the first) and removes the rest, then re-saves.
-        /// This is the file-level guard behind EAE's "Device X contains 2 instances of
-        /// Runtime.Management.EMB_RES_ECO" error: heavy resource churn (a RES0→M580_RES rename, an id
-        /// flip) with EAE open can leave a stray second <c>&lt;Resource&gt;</c> in a sysdev, which EAE then
-        /// caches. Running this on every Generate means the project EAE re-reads always declares exactly
-        /// one resource per device. Idempotent (no-op on an already-single sysdev). Returns the count removed.
-        /// </summary>
+        // File-level guard for EAE's "max 1 resource per device": in a sysdev listing >1 <Resource>,
+        // keep the one whose ID has a matching {ID}.sysres on disk (else the first) and drop the rest.
+        // Idempotent. Returns the count removed.
         public static int DedupeSysdevResources(string? eaeRoot, Action<string>? log = null)
         {
             if (string.IsNullOrEmpty(eaeRoot)) return 0;
@@ -174,7 +137,6 @@ namespace CodeGen.Devices.Core
                             .EnumerateFiles(folder, "*.sysres", SearchOption.TopDirectoryOnly)
                             .Select(f => Path.GetFileNameWithoutExtension(f)), StringComparer.Ordinal)
                         : new HashSet<string>(StringComparer.Ordinal);
-                    // Keep the <Resource> whose ID has a live .sysres (else the first); drop the rest.
                     var keeper = resList.FirstOrDefault(r => onDisk.Contains((string?)r.Attribute("ID") ?? ""))
                                  ?? resList[0];
                     foreach (var r in resList.Where(r => r != keeper)) { r.Remove(); removed++; }
@@ -190,15 +152,8 @@ namespace CodeGen.Devices.Core
             return removed;
         }
 
-        /// <summary>
-        /// Removes the dead <c>work1ToHomeTime</c> / <c>work2ToHomeTime</c> &lt;Parameter&gt; values
-        /// from every <c>Seven_State_Actuator_Centre_Home_CAT</c> instance in every deployed sysres.
-        /// The two work-to-home E_DELAY timers in that CAT are dead (their EO feeds only
-        /// <c>ReturnToHomeHandler.Work1/Work2ToHomeTimerEvent</c>, which the No_Sensor_Handler_7SCH
-        /// ECC has NO transitions on), so the values had no effect. The CAT InputVar default
-        /// (<c>T#0s</c>) then applies; the dead timer is harmless. Returns the number of
-        /// &lt;Parameter&gt; elements removed. Best-effort per file.
-        /// </summary>
+        // Removes the dead work1ToHomeTime/work2ToHomeTime <Parameter> values from every
+        // Seven_State_Actuator_Centre_Home_CAT instance in every deployed sysres. Returns count removed.
         public static int StripStaleHomeTimerParams(string? eaeRoot, Action<string>? log = null)
         {
             if (string.IsNullOrEmpty(eaeRoot)) return 0;
@@ -233,10 +188,7 @@ namespace CodeGen.Devices.Core
                     }
                     if (changed)
                     {
-                        // EAE holds a WRITE lock on the per-device sysres while the project is open
-                        // (the .fbt is not locked the same way, which is why the poll strip lands but a
-                        // plain Save here did not). Retry so the strip still writes if the lock frees in a
-                        // window; if it never does, log loudly so it is not a silent no-op.
+                        // EAE write-locks the per-device sysres while the project is open — retry to catch a free window.
                         for (int attempt = 0; ; attempt++)
                         {
                             try { doc.Save(sysres); break; }
@@ -260,11 +212,7 @@ namespace CodeGen.Devices.Core
             return removed;
         }
 
-        /// <summary>
-        /// Locates the deployed sysdev whose root &lt;Device&gt; has the given
-        /// <paramref name="deviceType"/> (e.g. "M580_dPAC", "Soft_dPAC") in the
-        /// SE.DPAC namespace. Returns null if none match.
-        /// </summary>
+        // Locates the deployed sysdev whose root <Device> has the given Type in the SE.DPAC namespace.
         public static string? FindSysdevByDeviceType(string eaeRoot, string deviceType)
         {
             var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
