@@ -13,6 +13,7 @@ namespace CodeGen.Configuration
         public string ClientBx1 { get; set; } = "SMC_BX1";
         public string ClientM262 { get; set; } = "SMC_M262";
         public string ClientM580 { get; set; } = "SMC_M580";
+        public string ClientRevPi { get; set; } = "SMC_RevPi";
 
         private static readonly YamlConfigFile<TelemetrySettings> _file = new("Config", "telemetry.yml");
 
