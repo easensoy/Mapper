@@ -292,26 +292,10 @@ namespace CodeGen.Services
 
         // Swivel work-arrival latch: relax=true (rig) fires ToWorkN->AtWorkN on atWorkN=TRUE alone;
         // strict=false (sim) also requires atWorkOther=FALSE.
-        // Locate + load the deployed SevenStateCentreHomeActuator core .fbt, hand (doc, root, ns, path) to
-        // `edit` (which mutates, saves, and logs), wrapping the file-lock retry and warn-on-failure. No-op
-        // if the core .fbt is absent.
+        // The swivel-core patches all edit the deployed SevenStateCentreHomeActuator core .fbt.
         private static void EditSwivelCore(string eaeProjectDir, string failNote, DeployResult result,
             Action<XDocument, XElement, XNamespace, string> edit)
-        {
-            var fbt = FindDeployedFbt(eaeProjectDir, "SevenStateCentreHomeActuator.fbt");
-            if (string.IsNullOrEmpty(fbt)) return;
-            try
-            {
-                var doc = LoadXmlWithRetry(fbt, LoadOptions.PreserveWhitespace);
-                var root = doc.Root;
-                if (root == null) return;
-                edit(doc, root, root.GetDefaultNamespace(), fbt);
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"{failNote}: {ex.Message}");
-            }
-        }
+            => EditDeployedFbt(eaeProjectDir, "SevenStateCentreHomeActuator.fbt", failNote, result, edit);
 
         internal static void PatchSwivelRelaxWorkLatch(string eaeProjectDir, bool relax, DeployResult result)
             => EditSwivelCore(eaeProjectDir, "SevenStateCentreHomeActuator.fbt work-latch patch failed", result,
