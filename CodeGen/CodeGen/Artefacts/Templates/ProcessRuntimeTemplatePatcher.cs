@@ -69,11 +69,7 @@ namespace CodeGen.Services
 
         internal static void NormalizeProcessEngineDebugWatch(string eaeProjectDir, DeployResult result)
         {
-            var fbt = Directory.EnumerateFiles(
-                    Path.Combine(eaeProjectDir, "IEC61499"),
-                    "ProcessRuntime_Generic_v1.fbt", SearchOption.AllDirectories)
-                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
-                ?? string.Empty;
+            var fbt = FindDeployedFbt(eaeProjectDir, "ProcessRuntime_Generic_v1.fbt");
             if (string.IsNullOrEmpty(fbt))
             {
                 result.Warnings.Add("ProcessRuntime_Generic_v1.fbt not found; engine debug-watch normalize skipped.");
@@ -154,11 +150,7 @@ namespace CodeGen.Services
         internal static void NormalizeProcess1RecipeArrays(
             string eaeProjectDir, bool reduce, DeployResult result)
         {
-            var fbt = Directory.EnumerateFiles(
-                    Path.Combine(eaeProjectDir, "IEC61499"),
-                    "Process1_Generic.fbt", SearchOption.AllDirectories)
-                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
-                ?? string.Empty;
+            var fbt = FindDeployedFbt(eaeProjectDir, "Process1_Generic.fbt");
             if (string.IsNullOrEmpty(fbt))
             {
                 result.Warnings.Add("Process1_Generic.fbt not found; recipe-struct normalize skipped.");
@@ -290,11 +282,7 @@ namespace CodeGen.Services
         internal static void NormalizeProcessRuntimeRecipeArrays(
             string eaeProjectDir, bool reduce, DeployResult result)
         {
-            var fbt = Directory.EnumerateFiles(
-                    Path.Combine(eaeProjectDir, "IEC61499"),
-                    "ProcessRuntime_Generic_v1.fbt", SearchOption.AllDirectories)
-                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
-                ?? string.Empty;
+            var fbt = FindDeployedFbt(eaeProjectDir, "ProcessRuntime_Generic_v1.fbt");
             if (string.IsNullOrEmpty(fbt))
             {
                 result.Warnings.Add("ProcessRuntime_Generic_v1.fbt not found; recipe-struct normalize skipped.");
