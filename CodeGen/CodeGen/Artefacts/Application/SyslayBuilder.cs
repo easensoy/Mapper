@@ -86,15 +86,8 @@ namespace CodeGen.Translation
             return this;
         }
 
-        /// <summary>
-        /// Adds a coloured rectangular Frame to the SubAppNetwork. EAE uses
-        /// these to visually group FB instances on the syslay canvas (one per
-        /// Station, one per PLC, etc.). Matches the Frame XML shape the
-        /// hardcoded reference SMC_Rig_Expo_withClamp.syslay uses for its
-        /// Station 1 (LavenderBlush) and Station 2 (AliceBlue) frames plus
-        /// the nested PLC frames (Honeydew). BackgroundColor accepts any
-        /// .NET KnownColor name (LightYellow, Plum, AliceBlue etc.).
-        /// </summary>
+        // Adds a coloured rectangular Frame that visually groups FB instances on the syslay canvas
+        // (one per Station/PLC). BackgroundColor accepts any .NET KnownColor name.
         public SyslayBuilder AddFrame(string name, double x, double y,
             double width, double height,
             string backgroundColor, string text,
@@ -162,12 +155,8 @@ namespace CodeGen.Translation
             return this;
         }
 
-        /// <summary>
-        /// Append additional text to the top comment (joined with two newlines for
-        /// readability). Useful for callers that want to layer auxiliary notes —
-        /// e.g. recipe-skipped-conditions — on top of the main top-comment that
-        /// SystemLayoutInjector sets up.
-        /// </summary>
+        // Append text to the top comment (joined with two newlines) — e.g. recipe-skipped-conditions
+        // layered on the main top-comment.
         public SyslayBuilder AppendTopComment(string additionalText)
         {
             if (string.IsNullOrEmpty(additionalText)) return this;
@@ -197,12 +186,7 @@ namespace CodeGen.Translation
         public static string FormatBool(bool value) => value ? "TRUE" : "FALSE";
         public static string FormatTimeMs(int ms) => $"T#{ms.ToString(System.Globalization.CultureInfo.InvariantCulture)}ms";
 
-        /// <summary>
-        /// Formats an INT array as an EAE square-bracket literal, e.g. [1, 2, 9].
-        /// IEC 61131-3 partial initialisation: trailing array slots default to the
-        /// element type's initial value (0 for INT). Caller may pass an empty list to
-        /// emit "[]".
-        /// </summary>
+        // Formats an INT array as an EAE square-bracket literal, e.g. [1, 2, 9] (empty list -> "[]").
         public static string FormatIntArray(IEnumerable<int> values)
         {
             var formatted = string.Join(", ",
@@ -210,12 +194,8 @@ namespace CodeGen.Translation
             return $"[{formatted}]";
         }
 
-        /// <summary>
-        /// Formats an InterlockRule array-of-struct literal, e.g.
-        /// <c>[(FromState:=2, ToState:=4, SourceID:=6, BlockedState:=2), ...]</c>. Emits every slot
-        /// (matching the full zero-filled INT arrays it replaces); RuleCount still bounds the
-        /// evaluator loop, so the trailing zero-rows are never read.
-        /// </summary>
+        // InterlockRule array-of-struct literal, e.g. [(FromState:=2, ToState:=4, SourceID:=6,
+        // BlockedState:=2), ...]. Emits every slot; RuleCount bounds the evaluator so trailing zero-rows unread.
         public static string FormatRuleTable(
             IReadOnlyList<int> from, IReadOnlyList<int> to,
             IReadOnlyList<int> src, IReadOnlyList<int> blk)
@@ -226,38 +206,26 @@ namespace CodeGen.Translation
             return "[" + string.Join(", ", elems) + "]";
         }
 
-        /// <summary>
-        /// Formats an <c>InterlockTable</c> nested-struct literal:
-        /// <c>(Count:=N, Rules:=[(FromState:=…, …), …])</c> — one INT count plus the InterlockRule
-        /// array. The whole interlock interface as a single value.
-        /// </summary>
+        // InterlockTable nested-struct literal: (Count:=N, Rules:=[(FromState:=…, …), …]).
         public static string FormatInterlockTable(
             IReadOnlyList<int> from, IReadOnlyList<int> to,
             IReadOnlyList<int> src, IReadOnlyList<int> blk, int count)
             => $"(Count:={count}, Rules:={FormatRuleTable(from, to, src, blk)})";
 
-        /// <summary>
-        /// Formats a <c>TargetStates</c> struct literal: <c>(Work1:=N, Work2:=N, Home:=N)</c>.
-        /// </summary>
+        // TargetStates struct literal: (Work1:=N, Work2:=N, Home:=N).
         public static string FormatTargetStates(int work1, int work2, int home)
             => $"(Work1:={work1}, Work2:={work2}, Home:={home})";
 
-        /// <summary>
-        /// Formats a TelemetryConfig STRUCT literal for a Telemetry_CAT instance's Config input,
-        /// e.g. (QI:=TRUE, ConnectionID:='SMC', URL:='mqtt://...', ClientIdentifier:='SMC_M262',
-        /// ValidateCert:=0, CACert:=''). Member types match MQTT_CONNECTION's wrapped inputs.
-        /// </summary>
+        // TelemetryConfig STRUCT literal for a Telemetry_CAT Config input, e.g. (QI:=TRUE,
+        // ConnectionID:='SMC', URL:='mqtt://...', ClientIdentifier:='SMC_M262', ValidateCert:=0, CACert:='').
         public static string FormatTelemetryConfig(bool qi, string connectionId, string url,
             string clientIdentifier, int validateCert, string caCert)
             => $"(QI:={FormatBool(qi)}, ConnectionID:={FormatString(connectionId)}, " +
                $"URL:={FormatString(url)}, ClientIdentifier:={FormatString(clientIdentifier)}, " +
                $"ValidateCert:={validateCert}, CACert:={FormatString(caCert)})";
 
-        /// <summary>
-        /// Formats a STRING array as an EAE square-bracket literal of single-quoted entries,
-        /// e.g. ['Feeder', '', 'PartInHopper']. Single quotes inside an entry are doubled
-        /// (IEC 61131-3 STRING escaping).
-        /// </summary>
+        // STRING array as an EAE square-bracket literal of single-quoted entries, e.g.
+        // ['Feeder', '', 'PartInHopper']. Internal quotes doubled (IEC 61131-3 STRING escaping).
         public static string FormatStringArray(IEnumerable<string> values)
         {
             var formatted = string.Join(", ",
@@ -266,16 +234,9 @@ namespace CodeGen.Translation
         }
 
 
-        /// <summary>
-        /// Formats an array-of-struct literal for the RecipeStep datatype (mixed
-        /// INT + STRING fields), e.g.
-        /// <c>[(StepType:=2, CmdTargetName:='feeder', CmdStateArr:=1, Wait1Id:=0,
-        /// Wait1State:=0, NextStep:=1), ...]</c>. Emits every row (never the empty
-        /// "[]"), mirroring the six parallel arrays it replaces. The STRING member
-        /// is single-quoted with internal quotes doubled (IEC 61131-3). Replaces
-        /// FormatIntArray/FormatStringArray for the Process recipe when the
-        /// simulator RecipeStep struct is active.
-        /// </summary>
+        // RecipeStep array-of-struct literal (mixed INT + STRING), e.g. [(StepType:=2,
+        // CmdTargetName:='feeder', CmdStateArr:=1, Wait1Id:=0, Wait1State:=0, NextStep:=1), ...]. Emits
+        // every row; STRING member single-quoted, internal quotes doubled (IEC 61131-3).
         public static string FormatRecipeTable(
             IReadOnlyList<int> stepType, IReadOnlyList<string> cmdTargetName,
             IReadOnlyList<int> cmdStateArr, IReadOnlyList<int> wait1Id,
