@@ -8,9 +8,8 @@ namespace CodeGen.Models
         public string Name { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
         public string Type { get; set; } = string.Empty;
-        // VueOne <VcID> — the design-tool hardware marker (e.g. "UR3e" for the robot arm,
-        // "Swivel Arm"/"pnp"/"coverpnp" for the grippers). Used ONLY to narrowly identify the
-        // real UR3e task arm (TemplateMap.IsRobotTaskArm); empty when the XML omits it.
+        // VueOne <VcID> hardware marker; used ONLY to narrowly identify the real UR3e task arm
+        // (TemplateMap.IsRobotTaskArm). Empty when the XML omits it.
         public string VcID { get; set; } = string.Empty;
         public List<VueOneState> States { get; set; } = new();
         public string NameTag { get; set; } = "Name";
@@ -29,13 +28,8 @@ namespace CodeGen.Models
 
         public List<VueOneTransition> Transitions { get; set; } = new();
 
-        /// <summary>
-        /// State-level &lt;Interlock_Condition&gt; entries (VueOne stores
-        /// actuator interlocks here, NOT in the transition Sequence_Condition).
-        /// Each is a "block this state's transition while &lt;ComponentID&gt;
-        /// is in state &lt;ID&gt;" guard, translated to InterlockManager
-        /// Rule* arrays by SystemInjector.BuildInterlockRules.
-        /// </summary>
+        // State-level <Interlock_Condition> entries (NOT the transition Sequence_Condition): each is a
+        // "block this state's transition while <ComponentID> is in state <ID>" guard.
         public List<VueOneCondition> InterlockConditions { get; set; } = new();
     }
 
@@ -47,14 +41,8 @@ namespace CodeGen.Models
         public int Priority { get; set; }
         public List<VueOneCondition> Conditions { get; set; } = new();
 
-        /// <summary>
-        /// VueOne's &lt;Type&gt; on a transition: SINGLE (default), PARALLEL,
-        /// or ALTERNATIVE. A resting state with both PARALLEL and ALTERNATIVE
-        /// outgoing transitions is a branched actuator (e.g. Bearing_PnP's
-        /// 7+6 swivel — PARALLEL → Assembly branch, ALTERNATIVE → Disassembly
-        /// branch). Used by validators to assign Seven_State_Actuator_CAT.fbt
-        /// to 13-state branched actuators.
-        /// </summary>
+        // VueOne transition <Type>: SINGLE (default), PARALLEL, or ALTERNATIVE. A state with both
+        // PARALLEL and ALTERNATIVE outgoing transitions is a branched (13-state swivel) actuator.
         public string TransitionType { get; set; } = "SINGLE";
     }
 
