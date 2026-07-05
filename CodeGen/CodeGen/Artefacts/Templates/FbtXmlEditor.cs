@@ -48,5 +48,26 @@ namespace CodeGen.Services
             foreach (var h in hits) h.Remove();
             return hits.Count > 0;
         }
+
+        // Write IEC61499/DataType/<name>.dt (copy-if-absent) and record it in DataTypesDeployed so the
+        // dfbproj registers the type. patchNote appends to the PatchesApplied log line.
+        internal static void DeployDatatype(string eaeProjectDir, string name, string dtXml,
+            DeployResult result, string? patchNote = null)
+        {
+            try
+            {
+                var dtDir = Path.Combine(eaeProjectDir, "IEC61499", "DataType");
+                Directory.CreateDirectory(dtDir);
+                var dtPath = Path.Combine(dtDir, name + ".dt");
+                if (!File.Exists(dtPath)) File.WriteAllText(dtPath, dtXml);
+                if (!result.DataTypesDeployed.Contains(name)) result.DataTypesDeployed.Add(name);
+                result.PatchesApplied.Add($"{name}.dt deployed + registered{(patchNote is null ? "" : " " + patchNote)}");
+                MapperLogger.Info($"[Deploy] {name}.dt written + registered");
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"{name}.dt deploy failed: {ex.Message}");
+            }
+        }
     }
 }
