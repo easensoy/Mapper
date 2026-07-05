@@ -49,6 +49,11 @@ namespace CodeGen.Services
             return hits.Count > 0;
         }
 
+        // The deployed CAT/type .fbt under IEC61499/ (excluding its _HMI faceplate); "" if absent.
+        internal static string FindDeployedFbt(string eaeProjectDir, string fbtFileName)
+            => Directory.EnumerateFiles(Path.Combine(eaeProjectDir, "IEC61499"), fbtFileName, SearchOption.AllDirectories)
+                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal)) ?? string.Empty;
+
         // Write IEC61499/DataType/<name>.dt (copy-if-absent) and record it in DataTypesDeployed so the
         // dfbproj registers the type. patchNote appends to the PatchesApplied log line.
         internal static void DeployDatatype(string eaeProjectDir, string name, string dtXml,
