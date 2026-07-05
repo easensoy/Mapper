@@ -4,21 +4,10 @@ using System.Linq;
 
 namespace CodeGen.Devices.BX1
 {
-    /// <summary>
-    /// SAFETY guard for the BX1 EtherNet/IP cover scanner. The cover I/O — including the CoverPNP_Hr
-    /// safe-start gate — only reaches the TM3BC coupler if the generated scanner carries the
-    /// 192.168.1.210 device adapter. An empty scanner means the broker's "cover home" command never
-    /// reaches the coupler, so cover_hr can hold at Work (the swivel-collision hazard) and can be
-    /// neither commanded nor homed.
-    ///
-    /// This validator (a) FAILS generation if the deployed scanner SOURCE (scanner.xml the Mapper
-    /// emits) is missing the 192.168.1.210 coupler, so "generation completed" is never reported with a
-    /// scanner that EAE would compile EMPTY; (b) WARNS loudly if the compiled EIPSCANNER2.xml build
-    /// output is empty/stale — that is EAE's output, fixed by a clean Build, not by the Mapper; and
-    /// (c) emits a STANDING notice that homing CoverPNP_Hr on EAE Clean/Stop/fault needs a manual TM3BC
-    /// output-fallback setting (word 16#0002) that no EAE-owned file can express — see
-    /// EmitCoverCleanFallbackNotice. Bx1CoverFailsafe covers only the start/run-time side.
-    /// </summary>
+    // SAFETY: the BX1 cover I/O (incl. the CoverPNP_Hr safe-start) only reaches the TM3BC coupler if
+    // the scanner carries the 192.168.1.210 device adapter; an empty scanner means cover_hr can hold
+    // at Work (swivel-collision hazard) and be neither commanded nor homed. FAILS generation if the
+    // scanner source lacks the coupler; WARNS if the compiled EIPSCANNER2.xml is empty/stale.
     public static class Bx1ScannerValidator
     {
         public const string CouplerIp = "192.168.1.210";
@@ -37,7 +26,7 @@ namespace CodeGen.Devices.BX1
 
             var hwConfig = Path.Combine(eaeRoot, "HwConfiguration");
 
-            // (a) the scanner SOURCE the Mapper deploys: HwConfiguration/EIPSolutionsV2/<id>/scanner.xml.
+            // The scanner SOURCE the Mapper deploys: HwConfiguration/EIPSolutionsV2/<id>/scanner.xml.
             var sources = Directory.Exists(hwConfig)
                 ? Directory.EnumerateFiles(hwConfig, "scanner.xml", SearchOption.AllDirectories).ToList()
                 : new List<string>();
@@ -66,21 +55,14 @@ namespace CodeGen.Devices.BX1
                 }
             }
 
-            // (c) STANDING SAFETY NOTICE — the EAE Clean/Stop/fault cover-home gap the Mapper CANNOT close.
-            // The IEC-side Bx1CoverFailsafe gate homes CoverPNP_Hr only while the BX1 logic RUNS. On EAE
-            // Clean/Stop/fault the logic is torn down and no FB can
-            // write ToHome, so the DOUBLE-ACTING cover HOLDS its last coupler output (CoverPNP_Hr <->
-            // Bearing_PnP swivel-collision hazard). The ONLY mechanism that homes it while stopped is the
-            // TM3BC coupler's own output fallback, and NO EAE-owned file can express it: the EtherNet/IP
-            // device model (TM3BC_Ethe_*.prop.cs / .script.cs), scanner.xml, the M580Configuration.xsd
-            // schema, and the compiled EIPSCANNER2.xml all carry ONLY objectid/length/ioevent per output —
-            // there is no fallback/fault/substitute field anywhere. It is set on the coupler itself (the
-            // TM3BCEIP embedded web server at 192.168.1.210, NOT EAE/Machine Expert); warned loudly every
-            // Generate (it can never be auto-detected or cleared by the Mapper, so a WARNING, not fatal).
+            // SAFETY NOTICE (warn, not fatal): homing CoverPNP_Hr on EAE Clean/Stop/fault needs the
+            // TM3BC coupler's own output fallback (word 16#0002 = bit1 ToHome), set on the coupler at
+            // 192.168.1.210 — no EAE-owned file carries an output-fallback field. Bx1CoverFailsafe only
+            // covers the run-time side.
             if (anyCoupler)
                 EmitCoverCleanFallbackNotice(r);
 
-            // (b) the compiled EIPSCANNER2.xml build output (EAE's). Empty/stale = cover I/O DEAD.
+            // The compiled EIPSCANNER2.xml build output (EAE's). Empty/stale = cover I/O DEAD.
             foreach (var eip in Directory.EnumerateFiles(eaeRoot, "EIPSCANNER2.xml", SearchOption.AllDirectories))
             {
                 long len = new FileInfo(eip).Length;
@@ -95,12 +77,8 @@ namespace CodeGen.Devices.BX1
             return r;
         }
 
-        /// <summary>
-        /// Loud, standing generation-time notice for the one CoverPNP_Hr safety gap the Mapper cannot
-        /// generate: homing the double-acting cover on EAE Clean/Stop/fault. Emitted every Generate the
-        /// BX1 EtherNet/IP cover I/O is present. States the exact manual coupler setting (fallback word
-        /// 16#0002 = bit1 ToHome only) and why no EAE-owned file can carry it.
-        /// </summary>
+        // Standing generation-time notice for the CoverPNP_Hr Clean/Stop/fault safety gap
+        // (manual coupler fallback word 16#0002); emitted whenever the BX1 cover I/O is present.
         static void EmitCoverCleanFallbackNotice(Result r)
         {
             const string T = "[BX1][Cover-Clean] ";
