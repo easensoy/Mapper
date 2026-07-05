@@ -5,12 +5,6 @@ using CodeGen.Models;
 
 namespace CodeGen.Translation.Process.Recipes
 {
-    /// <summary>
-    /// Pure component / name lookup primitives for recipe generation: resolve a
-    /// Control.xml ComponentID to its <see cref="VueOneComponent"/>, and compare
-    /// names case-insensitively (trimmed). Every method is a pure function of its
-    /// arguments — no RecipeArrays, no MapperConfig, no I/O, no shared state.
-    /// </summary>
     public static class RecipeComponentLookup
     {
         public static VueOneComponent? LookupComponent(string componentId,
