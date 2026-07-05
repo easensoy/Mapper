@@ -4,30 +4,9 @@ using System.Linq;
 
 namespace CodeGen.Translation
 {
-    /// <summary>
-    /// Reads the optional <c>Instance_Name_Overrides</c> sheet from the Excel
-    /// mapping workbook and returns two override maps consumed by
-    /// <see cref="InstanceNameResolver"/>.
-    ///
-    /// Sheet shape (case-sensitive header in row 1; rows after that are data):
-    ///
-    ///   | Type     | VueOne Name           | ComponentID                                    | IEC Instance Name | Notes              |
-    ///   |----------|-----------------------|------------------------------------------------|-------------------|--------------------|
-    ///   | Process  | Feed_Station_process  |                                                | Feed_Station      | strip _process     |
-    ///   | Process  | Assembly_Station_proc | C-b455b9c6-47f7-4172-a1c1-4c43fc03b55e        | Assembly_Station  | by-id wins on tie  |
-    ///   | Actuator |                       | C-db29c7cb-08df-46da-ab6a-28d2593bd5bb        | Pusher_Inlet      | rename for clarity |
-    ///
-    /// Either VueOne Name OR ComponentID may be filled (or both — ComponentID wins
-    /// at lookup time per InstanceNameResolver's resolution order). IEC Instance Name
-    /// is the FB instance name written into the .syslay / .sysres / wiring.
-    ///
-    /// If the sheet is absent or empty, both override maps come back empty and the
-    /// resolver falls through to its default convention (strip "_process" on Process,
-    /// pass through everything else).
-    ///
-    /// Returns empty maps on any read error; never throws — overrides are an
-    /// optional convenience and the emit pipeline must keep working without them.
-    /// </summary>
+    // Reads the optional Instance_Name_Overrides sheet from the Excel mapping workbook and returns
+    // override maps consumed by InstanceNameResolver. Returns empty maps if the sheet is absent or
+    // on any read error; never throws.
     public static class InstanceNameOverridesLoader
     {
         public sealed class Overrides
@@ -55,8 +34,7 @@ namespace CodeGen.Translation
                 var rows = XlsxRuleLoader.ReadXlsxSheet(xlsxPath, SheetName);
                 if (rows.Count == 0) return result;
 
-                // Resolve column indices from the header row so the sheet is
-                // tolerant to column reordering or trailing helper columns.
+                // Resolve column indices from the header row (tolerant to column reordering).
                 var header = rows[0];
                 int colName = IndexOf(header, "VueOne Name");
                 int colId   = IndexOf(header, "ComponentID");
