@@ -8,13 +8,8 @@ using CodeGen.Devices.Core;
 
 namespace CodeGen.Services
 {
-    /// <summary>
-    /// Belt-and-suspenders sysres parameter sync: after the FB mirror + wire emitters have run,
-    /// re-reads every mapped sysres FB and refreshes its parameters from the generated syslay so a
-    /// deployable resource can never carry a stale recipe/parameter set behind the syslay. The
-    /// harder structural guarantee (every required FB/recipe is actually PRESENT on the sysres) is
-    /// enforced by <see cref="SyslaySysresParityValidator"/>.
-    /// </summary>
+    // After the FB mirror + wire emitters run, re-reads every mapped sysres FB and refreshes its
+    // parameters from the generated syslay so a deployable resource can never carry a stale recipe.
     public static class RuntimeArtifactVerifier
     {
         public static int SyncMappedSysresParametersFromSyslay(
@@ -100,12 +95,8 @@ namespace CodeGen.Services
             return synced;
         }
 
-        // Saving the sysres can fail if EAE holds the project open (the file is
-        // write-locked). Previously sysresDoc.Save() threw and the caller swallowed
-        // it, silently leaving the OLD recipe on the resource while the syslay carried
-        // the new one — the "Test Runtime ran but the recipe didn't change" trap.
-        // Retry a few times for a transient lock, then surface a loud error so the
-        // operator knows to close EAE rather than chase a phantom generator bug.
+        // Saving the sysres fails if EAE holds the project open (write lock). Retry a transient
+        // lock, then surface a loud error so the operator closes EAE rather than chase a phantom bug.
         static bool TrySaveSysresWithRetry(XDocument doc, string file, out string error)
         {
             error = string.Empty;
@@ -184,14 +175,8 @@ namespace CodeGen.Services
             return null;
         }
 
-        /// <summary>
-        /// Loads an XML artefact tolerantly: shares the file (FileShare.ReadWrite) so an
-        /// EAE solution holding the resource open does not block the read, and retries
-        /// briefly on a sharing/lock violation to ride out the transient window while
-        /// EAE syncs (or an AV/indexer touches) a freshly (re)written .sysres. A genuine
-        /// missing file rethrows immediately; a persistent lock rethrows after the
-        /// retries so the caller can report it honestly (a lock is NOT sim wiring).
-        /// </summary>
+        // Shares the file (FileShare.ReadWrite) so an EAE solution holding the resource open does not
+        // block the read, and retries briefly on a lock violation; a missing file rethrows at once.
         static XDocument LoadShared(string file)
         {
             const int attempts = 5;
