@@ -5,84 +5,42 @@ using CodeGen.Models;
 
 namespace CodeGen.Translation.Process.Recipes
 {
-    /// <summary>
-    /// Pure CAT-command vocabulary for recipe generation: given a Control.xml
-    /// component (or a Sequence_Condition / Assembly-step name), decide
-    /// commandability and the command state_val for Five_State actuators,
-    /// Seven_State (Centre_Home Pick/Place/Home) swivels, and mechanical
-    /// grippers. Every method is a pure function of its arguments — the only
-    /// external input is the static
-    /// <see cref="MapperConfig.StubSevenStateActuatorsAsFiveState"/> flag; there
-    /// is no I/O, no shared state, and no <c>RecipeArrays</c> contact.
-    ///
-    /// Mirrors <c>SystemLayoutInjector.ResolveActuatorFBType</c>'s commandability
-    /// rules; branched-swivel detection is shared via
-    /// <c>TemplateMap.IsBranchedSevenState</c>.
-    /// </summary>
+    // CAT-command vocabulary for recipe generation: decides commandability and command state_val for
+    // Five_State actuators, Seven_State (Centre_Home) swivels, and mechanical grippers. Must mirror
+    // SystemLayoutInjector.ResolveActuatorFBType's commandability rules.
     public static class RecipeCommandVocabulary
     {
-        /// <summary>
-        /// True if a condition target can be commanded with the Five_State
-        /// work/home pair (toWork=1 settles AtWork=2, toHome=3 settles
-        /// AtHomeInit=0). Mirrors <c>SystemLayoutInjector.ResolveActuatorFBType</c>:
-        /// sensors and Processes are never commandable; a 7-state or PARALLEL+
-        /// ALTERNATIVE-branched component is Seven_State (Bearing_PnP) and is NOT
-        /// Five_State-commandable; everything else (5-state cylinders + mechanical
-        /// grippers, whether VueOne Type is "Actuator" or "Robot") is. Used by the
-        /// condition-driven Station-2 classifier so we only emit work/home commands
-        /// for targets whose ECC actually understands them.
-        /// </summary>
+        // True if a target can be commanded with the Five_State work/home pair
+        // (toWork=1 settles AtWork=2, toHome=3 settles AtHomeInit=0). Sensors/Processes and
+        // 7-state / branched (Seven_State) components are not Five_State-commandable.
         public static bool IsFiveStateCommandable(VueOneComponent t)
         {
             if (t == null) return false;
             if (string.Equals(t.Type, "Sensor", StringComparison.OrdinalIgnoreCase)) return false;
             if (string.Equals(t.Type, "Process", StringComparison.OrdinalIgnoreCase)) return false;
-            // Interim stub: when on, Seven_State actuators ARE Five_State-commandable
-            // (they emit as Five_State_Actuator_CAT — see MapperConfig flag), so the
-            // recipe drives them with work/home instead of Pick/Place/Home.
+            // Stub on: Seven_State actuators emit as Five_State_Actuator_CAT, so they ARE
+            // Five_State-commandable (work/home instead of Pick/Place/Home).
             if (!MapperConfig.StubSevenStateActuatorsAsFiveState
                 && (t.States.Count == 7 || TemplateMap.IsBranchedSevenState(t))) return false;
             return true;
         }
 
-        /// <summary>
-        /// Complementary to <see cref="IsFiveStateCommandable"/>: returns true for
-        /// targets that drive a Seven_State_Actuator_CAT ECC (Bearing_PnP and any
-        /// 13-state branched-swivel actuator routed through the seven-state runtime).
-        /// Used by the condition-driven classifier to emit Pick/Place/Home CMDs on
-        /// these targets instead of falling back to a settled-WAIT-only row.
-        /// </summary>
+        // True for targets that drive a Seven_State_Actuator_CAT ECC (Bearing_PnP and any 13-state
+        // branched swivel), so the classifier emits Pick/Place/Home CMDs instead of a settled-WAIT row.
         public static bool IsSevenStateCommandable(VueOneComponent t)
         {
             if (t == null) return false;
             if (string.Equals(t.Type, "Sensor", StringComparison.OrdinalIgnoreCase)) return false;
             if (string.Equals(t.Type, "Process", StringComparison.OrdinalIgnoreCase)) return false;
-            // Interim stub: when on, nothing is Seven_State-commandable — Bearing_PnP
-            // runs as Five_State (see MapperConfig flag), so the recipe must NOT emit
-            // Pick/Place/Home state_val commands a Five_State ECC can't honour.
+            // Stub on: nothing is Seven_State-commandable (Bearing_PnP runs as Five_State), so the
+            // recipe must not emit Pick/Place/Home a Five_State ECC can't honour.
             if (MapperConfig.StubSevenStateActuatorsAsFiveState) return false;
             return t.States.Count == 7 || TemplateMap.IsBranchedSevenState(t);
         }
 
-        /// <summary>
-        /// Maps a Sequence_Condition Name (e.g. "Bearing_PnP/AtPick") to the
-        /// Seven_State_Actuator_CAT command state_val. The SE Seven_State ECC
-        /// publishes current_state_to_pocess matching state_val once settled:
-        ///   AtPick (and Picking)   -> 1
-        ///   AtPlace / Place        -> 2
-        ///   AtHome / ReturnedHome  -> 0
-        /// Returns -1 when no keyword matches so the caller can decide whether to
-        /// emit a settled-WAIT fallback or extend this table.
-        ///
-        /// <para>This keyword shim exists because the Seven_State CAT does not yet carry
-        /// TargetPick/Place/HomeState parameters; once it does, the caller can use the resolved
-        /// waitState directly the way the Five_State path does.</para>
-        ///
-        /// <para>Caveat (branched 13-state Bearing_PnP): the disassembly-side states AtPick2 / AtPlace2 /
-        /// Athome2 fall through to the same Pick / Place / Home keywords and route to the primary leg's
-        /// state_val — silently wrong, since both legs share the same target slots. Revisit when the
-        /// branched actuator gets separate state slots or is split into two CAT instances.</para>
-        /// </summary>
+        // Maps a Sequence_Condition Name (e.g. "Bearing_PnP/AtPick") to the Centre-Home swivel command
+        // state_val; -1 when no keyword matches. Branched-13-state caveat: the Disassembly AtPick2/AtPlace2
+        // names route to the same primary Work1/Work2 slots (both legs share the slots).
         public static int MapSevenStateCommandFromConditionName(string? conditionName)
         {
             if (string.IsNullOrEmpty(conditionName)) return -1;
@@ -104,14 +62,9 @@ namespace CodeGen.Translation.Process.Recipes
             return -1;
         }
 
-        /// <summary>
-        /// True when the condition target is a mechanical gripper (VueOne
-        /// Type="Robot" whose name contains "gripper"/"grasp"). Grippers deploy as
-        /// Five_State_Actuator_CAT but, unlike clamps/cylinders, their Control.xml
-        /// WAIT condition does not encode grip-vs-release direction (it is the same
-        /// "ReturnedHome" for both), so the command is taken from the Assembly STEP
-        /// name instead (see <see cref="MapGripperCommandFromStepName"/>).
-        /// </summary>
+        // A mechanical gripper (name contains "gripper"/"grasp"): deploys as Five_State but its WAIT
+        // condition doesn't encode grip-vs-release (same "ReturnedHome" both ways), so the command comes
+        // from the Assembly step name (MapGripperCommandFromStepName).
         public static bool IsGripperTarget(VueOneComponent t)
         {
             if (t == null) return false;
@@ -119,18 +72,9 @@ namespace CodeGen.Translation.Process.Recipes
             return n.Contains("gripper") || n.Contains("grasp");
         }
 
-        /// <summary>
-        /// Maps an Assembly STEP name to the Five_State gripper command:
-        ///   1 = toWork  (CLOSE / grip  — settles AtWork=2),
-        ///   3 = toHome  (OPEN  / release — settles AtHomeInit=0),
-        ///  -1 = unknown (caller falls back to the condition-derived command).
-        /// "open"/"release"/"unclamp" -> OPEN; otherwise a grip/grasp/close/hold/
-        /// pick keyword -> CLOSE. Open is checked FIRST so "BearingPnPOpenGripper"
-        /// (which also contains "gripper") routes to OPEN, while "Gripping_Part"
-        /// routes to CLOSE. This is what sequences the bearing pick-and-place
-        /// correctly: gripper CLOSES at the pick/grip step to hold the bearing,
-        /// OPENS at the place/release step to let it go.
-        /// </summary>
+        // Maps an Assembly step name to the gripper command: 1=CLOSE/grip (settles AtWork=2), 3=OPEN/release
+        // (settles AtHomeInit=0), -1=unknown. "open" checked FIRST so "BearingPnPOpenGripper" routes OPEN
+        // while "Gripping_Part" routes CLOSE — the gripper holds the bearing at pick, releases at place.
         public static int MapGripperCommandFromStepName(string? stepName)
         {
             var n = (stepName ?? string.Empty).ToLowerInvariant();
