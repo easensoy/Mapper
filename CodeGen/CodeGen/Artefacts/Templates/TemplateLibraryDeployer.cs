@@ -11,6 +11,8 @@ using CodeGen.Devices.M262;
 using CodeGen.Devices.Core;
 using static CodeGen.Services.TemplateArtifactDeployer;
 using static CodeGen.Services.FbtXmlEditor;
+using static CodeGen.Services.HmiTemplatePatcher;
+using static CodeGen.Services.TelemetryTemplatePatcher;
 
 namespace CodeGen.Services
 {
@@ -989,180 +991,6 @@ namespace CodeGen.Services
             }
         }
 
-        // TelemetryConfig: the resource-telemetry connection inputs folded into one struct —
-        // matches MQTT_CONNECTION's QI/ConnectionID/URL/ClientIdentifier/ValidateCert/CACert types.
-        const string TelemetryConfigDt =
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
-            "<!DOCTYPE DataType SYSTEM \"../LibraryElement.dtd\">\r\n" +
-            "<DataType Namespace=\"Main\" Name=\"TelemetryConfig\" Comment=\"Telemetry connection config: wraps the MQTT_CONNECTION inputs\">\r\n" +
-            "  <Identification Standard=\"1131-3\" />\r\n" +
-            "  <VersionInfo Organization=\"WMG\" Version=\"0.1\" Author=\"easensoy\" Date=\"6/21/2026\" Remarks=\"single STRUCT input for Telemetry\" />\r\n" +
-            "  <CompilerInfo />\r\n" +
-            "  <StructuredType>\r\n" +
-            // STRING members are explicitly sized: an unsized STRING defaults to STRING[15] in EAE,
-            // and the 24-char URL 'mqtt://192.168.1.50:1883' then triggers ERR_CONST_INIT on the struct
-            // initializer. Sizes must match TelemetryUnpack's output vars (the ST copy must not truncate).
-            "    <VarDeclaration Name=\"QI\" Type=\"BOOL\" />\r\n" +
-            "    <VarDeclaration Name=\"ConnectionID\" Type=\"STRING[80]\" />\r\n" +
-            "    <VarDeclaration Name=\"URL\" Type=\"STRING[255]\" />\r\n" +
-            "    <VarDeclaration Name=\"ClientIdentifier\" Type=\"STRING[80]\" />\r\n" +
-            "    <VarDeclaration Name=\"ValidateCert\" Type=\"USINT\" />\r\n" +
-            "    <VarDeclaration Name=\"CACert\" Type=\"STRING[255]\" />\r\n" +
-            "  </StructuredType>\r\n" +
-            "</DataType>";
-
-        // Deploy the TelemetryConfig datatype (the Telemetry_CAT Config input). Idempotent.
-        static void DeployTelemetryConfigDatatype(string eaeProjectDir, DeployResult result)
-        {
-            try
-            {
-                var dtDir = Path.Combine(eaeProjectDir, "IEC61499", "DataType");
-                Directory.CreateDirectory(dtDir);
-                var dtPath = Path.Combine(dtDir, "TelemetryConfig.dt");
-                if (!File.Exists(dtPath)) File.WriteAllText(dtPath, TelemetryConfigDt);
-                if (!result.DataTypesDeployed.Contains("TelemetryConfig"))
-                    result.DataTypesDeployed.Add("TelemetryConfig");
-                result.PatchesApplied.Add("TelemetryConfig.dt deployed + registered");
-                MapperLogger.Info("[Deploy] TelemetryConfig.dt written + registered");
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"TelemetryConfig.dt deploy failed: {ex.Message}");
-            }
-        }
-
-        // TelemetryHealth: the MQTT_CONNECTION status outputs folded into one struct.
-        const string TelemetryHealthDt =
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
-            "<!DOCTYPE DataType SYSTEM \"../LibraryElement.dtd\">\r\n" +
-            "<DataType Namespace=\"Main\" Name=\"TelemetryHealth\" Comment=\"Telemetry connection health: wraps the MQTT_CONNECTION status outputs\">\r\n" +
-            "  <Identification Standard=\"1131-3\" />\r\n" +
-            "  <VersionInfo Organization=\"WMG\" Version=\"0.1\" Author=\"easensoy\" Date=\"6/21/2026\" Remarks=\"single STRUCT output for Telemetry\" />\r\n" +
-            "  <CompilerInfo />\r\n" +
-            "  <StructuredType>\r\n" +
-            // STRING members explicitly sized (unsized -> STRING[15] default + WRN_UNSIZED_STRING).
-            // Sizes match TelemetryPack's input vars so the ST copy from the MQTT status outputs is exact.
-            "    <VarDeclaration Name=\"IsConnected\" Type=\"BOOL\" />\r\n" +
-            "    <VarDeclaration Name=\"ReturnCode\" Type=\"USINT\" />\r\n" +
-            "    <VarDeclaration Name=\"Status\" Type=\"STRING[255]\" />\r\n" +
-            "    <VarDeclaration Name=\"NetworkState\" Type=\"STRING[80]\" />\r\n" +
-            "    <VarDeclaration Name=\"SecurityState\" Type=\"STRING[80]\" />\r\n" +
-            "    <VarDeclaration Name=\"ProtocolState\" Type=\"STRING[80]\" />\r\n" +
-            "  </StructuredType>\r\n" +
-            "</DataType>";
-
-        // Repair the deployed Seven-State centre-home CAT's boundary state output: a stale deploy can leave
-        // the OutputVar current_state_to_process orphaned (no WITH clause), which EAE rejects. The _HMI
-        // faceplate references it (must NOT be removed), so re-add state_out (WITH current_state_to_process)
-        // + the ActuatorCore.pst_out -> state_out event connection. Idempotent.
-        static void EnsureSevenStateStateOut(string eaeProjectDir, DeployResult result)
-        {
-            try
-            {
-                var fbt = Path.Combine(eaeProjectDir, "IEC61499",
-                    "Seven_State_Actuator_Centre_Home_CAT", "Seven_State_Actuator_Centre_Home_CAT.fbt");
-                if (!File.Exists(fbt)) return;
-                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                var root = doc.Root;
-                if (root == null) return;
-                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
-                var iface = root.Element(ns + "InterfaceList");
-                var net = root.Element(ns + "FBNetwork");
-                if (iface == null || net == null) return;
-
-                // Only repair a stale-bridge CAT that still carries the boundary current_state_to_process.
-                var outputVars = iface.Element(ns + "OutputVars");
-                bool hasBoundaryVar = outputVars?.Elements(ns + "VarDeclaration")
-                    .Any(v => (string?)v.Attribute("Name") == "current_state_to_process") == true;
-                if (!hasBoundaryVar) return;   // fresh committed CAT -> nothing to repair
-
-                var eventOutputs = iface.Element(ns + "EventOutputs");
-                if (eventOutputs == null) return;
-                if (eventOutputs.Elements(ns + "Event").Any(e => (string?)e.Attribute("Name") == "state_out"))
-                    return;   // already consistent
-
-                // Re-pair: state_out WITH current_state_to_process, driven by ActuatorCore.pst_out.
-                eventOutputs.Add(new System.Xml.Linq.XElement(ns + "Event",
-                    new System.Xml.Linq.XAttribute("Name", "state_out"),
-                    new System.Xml.Linq.XAttribute("Comment", "Re-paired with current_state_to_process so the boundary var has a WITH clause (HMI reads it)"),
-                    new System.Xml.Linq.XElement(ns + "With",
-                        new System.Xml.Linq.XAttribute("Var", "current_state_to_process"))));
-
-                var ec = net.Element(ns + "EventConnections");
-                if (ec == null) { ec = new System.Xml.Linq.XElement(ns + "EventConnections"); net.Add(ec); }
-                if (!ec.Elements(ns + "Connection").Any(c => (string?)c.Attribute("Destination") == "state_out"))
-                    ec.Add(new System.Xml.Linq.XElement(ns + "Connection",
-                        new System.Xml.Linq.XAttribute("Source", "ActuatorCore.pst_out"),
-                        new System.Xml.Linq.XAttribute("Destination", "state_out")));
-
-                doc.Save(fbt, System.Xml.Linq.SaveOptions.DisableFormatting);
-                result.PatchesApplied.Add("Seven_State_Actuator_Centre_Home_CAT: re-paired state_out WITH current_state_to_process (HMI keeps the var)");
-                MapperLogger.Info("[Deploy] Seven_State state_out re-paired (current_state_to_process valid again)");
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"EnsureSevenStateStateOut failed: {ex.Message}");
-            }
-        }
-
-        // VISUAL-only: keep the "HMI & OPCUA Connectivity" section frame from spilling into the section
-        // below (MoveStyle "AnyContained"->"None", cap height, pull IThis up inside). No wiring change.
-        static void FixCatHmiOpcuaFrame(string eaeProjectDir, string catName, DeployResult result)
-        {
-            try
-            {
-                var fbt = Path.Combine(eaeProjectDir, "IEC61499", catName, catName + ".fbt");
-                if (!File.Exists(fbt)) return;
-                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                var net = doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "FBNetwork");
-                if (net == null) return;
-                var ns = net.Name.Namespace;
-                double Dv(System.Xml.Linq.XElement e, string a) =>
-                    double.TryParse((string?)e.Attribute(a), out var v) ? v : 0;
-                var frames = net.Elements(ns + "Frame").ToList();
-                var hmi = frames.FirstOrDefault(fr =>
-                    ((string?)fr.Elements(ns + "Parameter")
-                        .FirstOrDefault(p => (string?)p.Attribute("Name") == "Text")?.Attribute("Value") ?? "")
-                        .IndexOf("OPCUA", StringComparison.OrdinalIgnoreCase) >= 0);
-                if (hmi == null) return;   // CAT has no HMI/OPCUA section (Sensor_Bool/Robot_Task) — nothing to do
-                double fy = Dv(hmi, "Y"), fh = Dv(hmi, "Height");
-                double nextY = frames.Select(fr => Dv(fr, "Y")).Where(y => y > fy + 100)
-                    .DefaultIfEmpty(fy + fh + 1500).Min();
-                int newH = (int)System.Math.Max(fh, nextY - fy - 30);
-                hmi.SetAttributeValue("Height", newH.ToString());
-                var ms = hmi.Elements(ns + "Parameter").FirstOrDefault(p => (string?)p.Attribute("Name") == "MoveStyle");
-                if (ms != null) ms.SetAttributeValue("Value", "None");
-                var ithis = net.Elements(ns + "FB").FirstOrDefault(f => (string?)f.Attribute("Name") == "IThis");
-                if (ithis != null) ithis.SetAttributeValue("y", ((int)(fy + 40)).ToString());
-                doc.Save(fbt, System.Xml.Linq.SaveOptions.DisableFormatting);
-                result.PatchesApplied.Add($"{catName}: HMI/OPCUA frame fixed (MoveStyle=None, H={newH}, IThis inside)");
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"FixCatHmiOpcuaFrame({catName}) failed: {ex.Message}");
-            }
-        }
-
-        // Deploy the TelemetryHealth datatype (the Telemetry_CAT Health output). Idempotent.
-        static void DeployTelemetryHealthDatatype(string eaeProjectDir, DeployResult result)
-        {
-            try
-            {
-                var dtDir = Path.Combine(eaeProjectDir, "IEC61499", "DataType");
-                Directory.CreateDirectory(dtDir);
-                var dtPath = Path.Combine(dtDir, "TelemetryHealth.dt");
-                if (!File.Exists(dtPath)) File.WriteAllText(dtPath, TelemetryHealthDt);
-                if (!result.DataTypesDeployed.Contains("TelemetryHealth"))
-                    result.DataTypesDeployed.Add("TelemetryHealth");
-                result.PatchesApplied.Add("TelemetryHealth.dt deployed + registered");
-                MapperLogger.Info("[Deploy] TelemetryHealth.dt written + registered");
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"TelemetryHealth.dt deploy failed: {ex.Message}");
-            }
-        }
-
         // Scalar target InputVar -> TargetStates field, and the Input-pin coords used on restore.
         static readonly Dictionary<string, string> TargetVarToField = new()
         {
@@ -1447,18 +1275,6 @@ namespace CodeGen.Services
             ["RuleSourceID"] = "SourceID",
             ["RuleBlockedState"] = "BlockedState",
         };
-
-        // Remove matching elements via instance Remove() (no
-        // IEnumerable<XElement>.Remove() extension — this file has no
-        // `using System.Xml.Linq`). Returns true if anything was removed.
-        static bool RemoveElems(IEnumerable<System.Xml.Linq.XElement>? src,
-            Func<System.Xml.Linq.XElement, bool> pred)
-        {
-            if (src == null) return false;
-            var hits = src.Where(pred).ToList();
-            foreach (var h in hits) h.Remove();
-            return hits.Count > 0;
-        }
 
         // Interlock-struct reduction on an actuator CAT (gated by interlock.yaml useStruct): collapse the
         // four parallel Rule arrays (face InputVar + INIT With + boundary Input + DataConnection to the
@@ -4187,65 +4003,6 @@ namespace CodeGen.Services
             catch (Exception ex)
             {
                 result.Warnings.Add($"ArraySize verification crashed: {ex.Message}");
-            }
-        }
-
-        // Retire an FB type we no longer ship (e.g. the simulator-only SimCentreHomeSensor_7SCH):
-        // delete its top-level .fbt/.doc.xml/.meta.xml/.Basic.export and strip its dfbproj entries so
-        // EAE shows no dangling Missing Project Files. Idempotent — a no-op once the type is gone.
-        // Removes deployed Telemetry wrapper artifacts (files + .dfbproj entries): the composite (BOTH the
-        // current Telemetry.fbt AND the legacy Telemetry_CAT.fbt name, migrated away on re-deploy), its
-        // .composite.offline.xml, the helper FBs TelemetryUnpack/TelemetryPack.fbt, and the datatypes
-        // TelemetryConfig/TelemetryHealth.dt. Called on the flag-OFF path and at the top of flag-ON (clean
-        // slate before a fresh deploy). Idempotent.
-        static void SweepTelemetryCat(string eaeProjectDir, DeployResult result)
-        {
-            try
-            {
-                var iec = Path.Combine(eaeProjectDir, "IEC61499");
-                int filesGone = 0;
-                foreach (var rel in new[]
-                {
-                    "Telemetry.fbt",
-                    "Telemetry.composite.offline.xml",
-                    "Telemetry_CAT.fbt",                    // legacy name (pre-rename) — migrate away
-                    "Telemetry_CAT.composite.offline.xml",
-                    "TelemetryUnpack.fbt",
-                    "TelemetryPack.fbt",
-                    Path.Combine("DataType", "TelemetryConfig.dt"),
-                    Path.Combine("DataType", "TelemetryHealth.dt"),
-                })
-                {
-                    var p = Path.Combine(iec, rel);
-                    if (File.Exists(p)) { File.Delete(p); filesGone++; }
-                }
-
-                var dfbproj = Path.Combine(iec, "IEC61499.dfbproj");
-                int entriesGone = 0;
-                if (File.Exists(dfbproj))
-                {
-                    var doc = System.Xml.Linq.XDocument.Load(dfbproj, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                    bool Match(string? inc) => inc != null &&
-                        (inc.Equals("Telemetry.fbt", StringComparison.OrdinalIgnoreCase) ||
-                         inc.Equals("Telemetry.composite.offline.xml", StringComparison.OrdinalIgnoreCase) ||
-                         inc.Equals("Telemetry_CAT.fbt", StringComparison.OrdinalIgnoreCase) ||
-                         inc.Equals("Telemetry_CAT.composite.offline.xml", StringComparison.OrdinalIgnoreCase) ||
-                         inc.Equals("TelemetryUnpack.fbt", StringComparison.OrdinalIgnoreCase) ||
-                         inc.Equals("TelemetryPack.fbt", StringComparison.OrdinalIgnoreCase) ||
-                         inc.EndsWith("TelemetryConfig.dt", StringComparison.OrdinalIgnoreCase) ||
-                         inc.EndsWith("TelemetryHealth.dt", StringComparison.OrdinalIgnoreCase));
-                    foreach (var el in doc.Descendants()
-                        .Where(e => (e.Name.LocalName == "Compile" || e.Name.LocalName == "None")
-                            && Match((string?)e.Attribute("Include"))).ToList())
-                    { el.Remove(); entriesGone++; }
-                    if (entriesGone > 0) doc.Save(dfbproj);
-                }
-                if (filesGone > 0 || entriesGone > 0)
-                    result.PatchesApplied.Add($"Telemetry artifacts swept: {filesGone} file(s) + {entriesGone} dfbproj entry(ies) removed");
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"SweepTelemetryCat failed: {ex.Message}");
             }
         }
 
