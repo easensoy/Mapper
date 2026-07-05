@@ -133,7 +133,7 @@ namespace CodeGen.Translation.Interlocks
         // MergeFeedRing a source on a DIFFERENT controller than the interlocked actuator is a genuine
         // cross-station readiness gate (its home = workpiece not yet delivered) and must survive.
         // Data-driven (NameBasedPlcGuess); off for the clamp model (MergeFeedRing false) -> byte-identical.
-        private static bool IsCrossControllerReadinessGate(VueOneComponent actuator, VueOneComponent srcComp)
+        private static bool IsCrossControllerReadinessGate(VueOneComponent actuator, VueOneComponent? srcComp)
             => CodeGen.Configuration.MapperConfig.MergeFeedRing && srcComp != null &&
                CodeGen.Translation.HcfSymbolIndex.NameBasedPlcGuess(srcComp.Name)
                    != CodeGen.Translation.HcfSymbolIndex.NameBasedPlcGuess(actuator.Name);
