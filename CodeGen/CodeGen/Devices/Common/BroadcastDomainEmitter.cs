@@ -6,20 +6,8 @@ using CodeGen.Configuration;
 
 namespace CodeGen.Devices.Core
 {
-    /// <summary>
-    /// Writes <c>Topology/BroadcastDomain_Default Network.json</c> so its
-    /// subnet + gateway match the live rig network. EAE 24.1 ships a template
-    /// default of 192.168.0.0/24 gateway 192.168.0.254; the SMC rig is on
-    /// 192.168.1.0/24 with no gateway. When the M580 endpoint binds to this
-    /// broadcast domain (see <c>cfg.M580BroadcastDomainUuid</c>) and the domain
-    /// subnet disagrees with the device, EAE's connect-to-device verification
-    /// dialog flags the gateway / subnet rows in red.
-    ///
-    /// <para>Idempotent — overwrites the file unconditionally so a manual
-    /// EAE edit / a partial reload cannot leave a stale subnet behind. The
-    /// uuid is pinned to <c>cfg.DefaultNetworkUuid</c> so the cross-reference
-    /// from the M580 endpoint stays intact across re-emits.</para>
-    /// </summary>
+    // The broadcast-domain JSON subnet/gateway must match the device it binds to, or EAE's
+    // connect-to-device verification flags the subnet/gateway rows.
     public static class BroadcastDomainEmitter
     {
         public sealed class EmitResult
@@ -60,20 +48,9 @@ namespace CodeGen.Devices.Core
             return result;
         }
 
-        /// <summary>
-        /// Topology self-consistency guard. Scans every <c>Equipment_*.json</c>
-        /// in the Topology folder for <c>"domain": "&lt;uuid&gt;"</c> bindings
-        /// and, for any referenced UUID that has NO matching
-        /// <c>BroadcastDomain_*.json</c> on disk, creates one at
-        /// <c>192.168.1.0/24</c>. This fixes EAE's "Unable to import topology /
-        /// Internal Server Error" caused by a DANGLING broadcast-domain
-        /// reference — e.g. a DeviceNetwork_1 created in EAE's Logical Networks
-        /// Editor that got a UUID but was never persisted as a file, leaving an
-        /// Equipment pointing at a domain that doesn't exist. The null-sentinel
-        /// domain (<c>00000000-…0000</c> = NOCONF) is ignored. Only writes
-        /// BroadcastDomain JSON files — never touches Equipment / sysdev /
-        /// sysres / device-trust state, so it is safe on any path.
-        /// </summary>
+        // An Equipment referencing a broadcast-domain UUID with no declaring BroadcastDomain_*.json
+        // fails EAE's topology import — create the missing domain at 192.168.1.0/24. Only writes
+        // BroadcastDomain JSON files; never touches Equipment/sysdev/sysres/device-trust state.
         public static EmitResult EnsureReferencedDomains(MapperConfig cfg)
         {
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
@@ -91,7 +68,7 @@ namespace CodeGen.Devices.Core
             var uuidRx = new Regex("\"domain\"\\s*:\\s*\"([0-9a-fA-F-]{36})\"");
             var defRx  = new Regex("\"uuid\"\\s*:\\s*\"([0-9a-fA-F-]{36})\"");
 
-            // 1. Domain UUIDs referenced by any Equipment.
+            // Domain UUIDs referenced by any Equipment.
             var referenced = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var eq in Directory.EnumerateFiles(topologyDir, "Equipment_*.json"))
             {
@@ -105,7 +82,7 @@ namespace CodeGen.Devices.Core
                 }
             }
 
-            // 2. Domain UUIDs already defined by a BroadcastDomain file.
+            // Domain UUIDs already defined by a BroadcastDomain file.
             var defined = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var bd in Directory.EnumerateFiles(topologyDir, "BroadcastDomain_*.json"))
             {
@@ -115,7 +92,7 @@ namespace CodeGen.Devices.Core
                 if (m.Success) defined.Add(m.Groups[1].Value);
             }
 
-            // 3. Create any referenced-but-undefined domain at 192.168.1.0/24.
+            // Create any referenced-but-undefined domain at 192.168.1.0/24.
             int n = 1;
             foreach (var uuid in referenced)
             {
@@ -137,13 +114,8 @@ namespace CodeGen.Devices.Core
                 File.WriteAllText(path, json);
                 result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, path));
 
-                // Register the new domain in TopologyManager.topologyproj. The
-                // reference registers its BroadcastDomain_* entries, and some EAE
-                // import paths only honour REGISTERED topology items — so the file
-                // alone may be ignored. Registration runs AFTER the M262 emitter's
-                // BroadcastDomain strip (EnsureReferencedDomains is the last topology
-                // step), so it persists. Best-effort: the file on disk is the
-                // primary fix regardless.
+                // Some EAE import paths only honour REGISTERED topology items, so register the
+                // new domain in TopologyManager.topologyproj (the file on disk is the primary fix).
                 var topoProj = Path.Combine(topologyDir, "TopologyManager.topologyproj");
                 if (File.Exists(topoProj))
                 {
