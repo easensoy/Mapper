@@ -7,17 +7,9 @@ using static CodeGen.Services.FbtXmlEditor;
 
 namespace CodeGen.Services
 {
-    // Deploy-time patchers for the Process engine templates (Process1_Generic composite +
-    // ProcessRuntime_Generic_v1 Basic FB): process_name sizing, the recipe-struct collapse
-    // (gated by UseRecipeStruct), the RecipeStep datatype, the debug-watch strip, and the ECC
-    // dead-end / START-bypass / EndSequence fixes. Consumed via `using static` so the call sites
-    // in TemplateLibraryDeployer stay unqualified.
     internal static class ProcessRuntimeTemplatePatcher
     {
-        // Expand the process_name InputVar in Process1_Generic.fbt/ProcessRuntime_Generic_v1.fbt from the
-        // shipped STRING[15] to STRING[150]. Without it a Process instance whose name exceeds 15 chars
-        // (Assembly_Station=16, Disassembly_Station=19) fails to wire at deploy ("Cannot connect parameter
-        // to data input process_name") — the syslay string literal overflows the declared size. Idempotent.
+        // process_name InputVar must be STRING[150] or deploy fails ("Cannot connect parameter to data input process_name").
         internal static void PatchProcessNameStringSize(string eaeProjectDir, DeployResult result)
         {
             var candidates = new[]
@@ -46,17 +38,15 @@ namespace CodeGen.Services
 
                     var typeAttr = processName.Attribute("Type");
                     var current = typeAttr?.Value ?? string.Empty;
-                    // Already wide enough? STRING[150] / STRING[100] / etc.
                     if (current.StartsWith("STRING[", StringComparison.Ordinal))
                     {
-                        // Extract the inner number.
                         int lb = current.IndexOf('[');
                         int rb = current.IndexOf(']', lb + 1);
                         if (rb > lb &&
                             int.TryParse(current.Substring(lb + 1, rb - lb - 1),
                                 out var size) && size >= 150)
                         {
-                            continue;   // already fine
+                            continue;
                         }
                     }
                     processName.SetAttributeValue("Type", "STRING[150]");
@@ -75,12 +65,8 @@ namespace CodeGen.Services
             }
         }
 
-        // Debug OutputVars on the engine that have no output-event mapping out of the box.
         static readonly string[] EngineDebugVars = { "CurrentStep", "CurrentStepType", "WaitSatisfied" };
 
-        // Strip the engine's debug OutputVars (CurrentStep/CurrentStepType/WaitSatisfied) from the CMDREQ/
-        // SCNF WITH lists so the deployed engine is byte-identical (migrates an old tree that had them added
-        // for EAE Online Watch back to the shipped shape).
         internal static void NormalizeProcessEngineDebugWatch(string eaeProjectDir, DeployResult result)
         {
             var fbt = Directory.EnumerateFiles(
@@ -133,9 +119,7 @@ namespace CodeGen.Services
             }
         }
 
-        // The six parallel recipe arrays that collapse into one Recipe : ARRAY OF
-        // RecipeStep. Struct field name == array name so the engine ST rewrite is
-        // a clean 1:1 ("StepType[CurrentStep]" -> "Recipe[CurrentStep].StepType").
+        // Struct field name == array name so the ST rewrite is 1:1 ("StepType[CurrentStep]" -> "Recipe[CurrentStep].StepType").
         static readonly (string Name, string Type)[] RecipeArrays = new[]
         {
             ("StepType", "INT"),
@@ -146,8 +130,6 @@ namespace CodeGen.Services
             ("NextStep", "INT"),
         };
 
-        // Embedded RecipeStep datatype (one recipe row as a struct; mixed INT +
-        // STRING[15]). Hand-authored without nxtDataType — EAE regenerates it.
         const string RecipeStepDt =
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
             "<!DOCTYPE DataType SYSTEM \"../LibraryElement.dtd\">\r\n" +
@@ -165,9 +147,6 @@ namespace CodeGen.Services
             "  </StructuredType>\r\n" +
             "</DataType>";
 
-        // Deploy the RecipeStep datatype (the recipe-struct path, gated by UseRecipeStruct) + register it,
-        // so EAE resolves the Recipe : RecipeStep[] inputs the recipe normalizers add to Process1_Generic
-        // and ProcessRuntime_Generic_v1. Idempotent.
         internal static void DeployRecipeStepDatatype(string eaeProjectDir, DeployResult result)
         {
             try
@@ -187,9 +166,7 @@ namespace CodeGen.Services
             }
         }
 
-        // Recipe-struct reduction on Process1_Generic (composite), gated by UseRecipeStruct: collapse the
-        // 6 recipe arrays (face InputVar + INIT With + boundary Input + DataConnection to ProcessEngine)
-        // into one Recipe : RecipeStep[]. Bidirectional + idempotent; reduce==false restores the 6 arrays.
+        // Recipe-struct collapse on Process1_Generic (gated by UseRecipeStruct); reduce==false restores the 6 arrays.
         internal static void NormalizeProcess1RecipeArrays(
             string eaeProjectDir, bool reduce, DeployResult result)
         {
@@ -325,10 +302,7 @@ namespace CodeGen.Services
             }
         }
 
-        // Recipe-struct reduction on ProcessRuntime_Generic_v1 (Basic FB), gated by UseRecipeStruct:
-        // collapse the 6 recipe arrays across InputVars, the INIT event Withs, AND every algorithm's ST
-        // (StepType[CurrentStep] -> Recipe[CurrentStep].StepType, etc). Bidirectional + idempotent;
-        // reduce==false restores the 6 arrays. Logic unchanged.
+        // Recipe-struct collapse on ProcessRuntime_Generic_v1 incl. every algorithm's ST (gated by UseRecipeStruct); reduce==false restores the 6 arrays.
         internal static void NormalizeProcessRuntimeRecipeArrays(
             string eaeProjectDir, bool reduce, DeployResult result)
         {
@@ -407,7 +381,6 @@ namespace CodeGen.Services
                     }
                 }
 
-                // ST rewrite across every algorithm.
                 foreach (var alg in basic.Elements(ns + "Algorithm"))
                 {
                     var stEl = alg.Element(ns + "ST");
@@ -438,9 +411,7 @@ namespace CodeGen.Services
             }
         }
 
-        // Silence EAE's WRN_ECC_DEAD_END on the END state of ProcessRuntime_Generic_v1 by adding a
-        // self-transition END -> END with Condition="1" (the shape EAE uses for WAIT_STEP -> WAIT_STEP).
-        // Runtime behaviour unchanged. Idempotent (skips if the END->END transition is already present).
+        // END->END dead-end self-loop (run-once) silences WRN_ECC_DEAD_END; cyclic routes END->ADVANCE instead.
         internal static void PatchProcessRuntimeEccDeadEnd(string fbtPath, bool cyclic, DeployResult result)
         {
             var doc = System.Xml.Linq.XDocument.Load(fbtPath, System.Xml.Linq.LoadOptions.PreserveWhitespace);
@@ -462,24 +433,13 @@ namespace CodeGen.Services
                 return;
             }
 
-            // When EnableCyclicRestart is on the END row's NextStep is 0, so routing END -> ADVANCE makes
-            // AdvanceStep (CurrentStep := Recipe[CurrentStep].NextStep) wrap the engine back to step 0 and
-            // the recipe re-runs. Run-once keeps END -> END, a dead-end so the engine PARKS at END. Either
-            // destination gives END an outgoing transition,
-            // so WRN_ECC_DEAD_END is satisfied. The no-op EndSequence is LEFT as-is: ADVANCE does the
-            // pointer advance, so EndSequence must NOT also advance or it would skip step 0. The re-armed
-            // step-0 WAIT (level-triggered check_wait) still holds the loop until its target state is
-            // true, so the line never re-runs without its condition.
             string dest = cyclic ? "ADVANCE" : "END";
 
             var endTrans = ecc.Elements(ns + "ECTransition")
                 .Where(t => (string?)t.Attribute("Source") == "END").ToList();
-            // Idempotent: exactly the intended END transition already present.
             if (endTrans.Count == 1 && (string?)endTrans[0].Attribute("Destination") == dest) return;
             foreach (var et in endTrans) et.Remove();
 
-            // Append after the last ECTransition, mirroring the self-closed
-            // WAIT_STEP→WAIT_STEP shape (no Attribute child, has x/y).
             var lastTrans = ecc.Elements(ns + "ECTransition").LastOrDefault();
             var endState = ecc.Elements(ns + "ECState")
                 .First(s => (string?)s.Attribute("Name") == "END");
@@ -503,10 +463,7 @@ namespace CodeGen.Services
                 $"[Deploy] Patched ProcessRuntime_Generic_v1.fbt END -> {dest} ({(cyclic ? "cyclic loop" : "park")})");
         }
 
-        // Remove the START -> IDLE1 bypass transition (Condition "Mode = 1 AND CycleType <> 0"). Mode and
-        // CycleType both default InitialValue=1, so the guard is TRUE at power-up and the ECC walks straight
-        // to IDLE1, skipping INIT — so initializeinit never runs and the WITH-sampled recipe arrays aren't
-        // sampled before LoadStep. After the patch START's only outgoing transition is START -> INIT. Idempotent.
+        // START's only outgoing transition must be START->INIT (remove the Mode-guard IDLE1 bypass, else INIT never runs).
         internal static void PatchProcessRuntimeStartBypass(string fbtPath, DeployResult result)
         {
             var doc = System.Xml.Linq.XDocument.Load(fbtPath, System.Xml.Linq.LoadOptions.PreserveWhitespace);
@@ -520,13 +477,7 @@ namespace CodeGen.Services
                 return;
             }
 
-            // Normalise whitespace/entity differences: EAE writes the XML
-            // text as Condition="Mode = 1 AND CycleType &lt;&gt; 0"; once
-            // parsed the attribute value is the literal
-            //   Mode = 1 AND CycleType <> 0
-            // Match on Source=START, Destination=IDLE1 and a Condition that,
-            // with all spaces stripped, contains "CycleType<>0" — robust to
-            // spacing variants.
+            // Match Source=START, Destination=IDLE1, Condition (spaces stripped) containing "CycleType<>0".
             var bypass = ecc.Elements(ns + "ECTransition").Where(t =>
                 (string?)t.Attribute("Source") == "START" &&
                 (string?)t.Attribute("Destination") == "IDLE1" &&
@@ -539,8 +490,6 @@ namespace CodeGen.Services
 
             if (bypass.Count == 0)
             {
-                // Already removed (idempotent no-op). Still emit the
-                // verification line so a regression is visible at deploy.
                 result.PatchesApplied.Add(
                     $"ProcessRuntime_Generic_v1: START-bypass already absent; " +
                     $"START has {startOutgoing} outgoing transition(s)");
@@ -569,11 +518,7 @@ namespace CodeGen.Services
                 $"bypass; START outgoing transitions now = {startOutgoingAfter} ({string.Join(" ; ", remaining)})");
         }
 
-        // Pin CurrentStep at the END row's index by making EndSequence a no-op on the step pointer. The
-        // shipped EndSequence is identical to AdvanceStep (CurrentStep := NextStep[CurrentStep]), which
-        // combined with the END->END dead-end self-loop walks CurrentStep through the recipe forever once
-        // END is reached (END's NextStep is 0). The no-op preserves CurrentStep/CurrentStepType so END
-        // renders as a stable resting state in Watch. Idempotent via a marker comment; emitted as CDATA.
+        // Make EndSequence a no-op on the step pointer so CurrentStep stays pinned at the END row.
         internal static void PatchProcessRuntimeEndSequenceNoOp(string fbtPath, DeployResult result)
         {
             var doc = System.Xml.Linq.XDocument.Load(fbtPath, System.Xml.Linq.LoadOptions.PreserveWhitespace);
@@ -600,7 +545,6 @@ namespace CodeGen.Services
             const string noOpMarker = "(* END no-op: CurrentStep pinned *)";
             if ((st.Value ?? string.Empty).Contains(noOpMarker, StringComparison.Ordinal))
             {
-                // Already patched — idempotent no-op.
                 result.PatchesApplied.Add(
                     "ProcessRuntime_Generic_v1: EndSequence no-op already in place (CurrentStep pinned)");
                 return;
