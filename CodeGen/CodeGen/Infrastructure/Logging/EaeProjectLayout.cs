@@ -213,7 +213,15 @@ namespace CodeGen.Devices.Core
         }
 
         // Locates the deployed sysdev whose root <Device> has the given Type in the SE.DPAC namespace.
-        public static string? FindSysdevByDeviceType(string eaeRoot, string deviceType)
+        public static string? FindSysdevByDeviceType(string eaeRoot, string deviceType) =>
+            FindSysdev(eaeRoot, deviceType, deviceName: null);
+
+        // Type + Name variant — disambiguates two devices of the same Type (BX1 vs Revolution_Pi, both
+        // Soft_dPAC). deviceName == null matches on Type alone.
+        public static string? FindSysdevByDeviceTypeAndName(string eaeRoot, string deviceType, string deviceName) =>
+            FindSysdev(eaeRoot, deviceType, deviceName);
+
+        static string? FindSysdev(string eaeRoot, string deviceType, string? deviceName)
         {
             var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
             if (!Directory.Exists(systemDir)) return null;
@@ -224,7 +232,9 @@ namespace CodeGen.Devices.Core
                     var root = XDocument.Load(sd).Root;
                     if (root == null || root.Name.LocalName != "Device") continue;
                     if (string.Equals((string?)root.Attribute("Type"), deviceType, StringComparison.Ordinal) &&
-                        string.Equals((string?)root.Attribute("Namespace"), "SE.DPAC", StringComparison.Ordinal))
+                        string.Equals((string?)root.Attribute("Namespace"), "SE.DPAC", StringComparison.Ordinal) &&
+                        (deviceName == null ||
+                         string.Equals((string?)root.Attribute("Name"), deviceName, StringComparison.Ordinal)))
                         return sd;
                 }
                 catch { /* skip malformed */ }
