@@ -5,24 +5,15 @@ using System.Xml.Linq;
 
 namespace CodeGen.Devices.Core
 {
-    /// <summary>
-    /// Authoritative, pure-verbatim <c>.hcf</c> deployer for the secondary PLCs
-    /// (M580 X80, BX1 soft-dPAC). Locates the deployed sysdev of a given device
-    /// <c>Type</c>/<c>Namespace</c>, copies the user-authored IO-folder
-    /// <c>.hcf</c> into it verbatim (<c>{sysdevGuid}.hcf</c>), then re-roots it to
-    /// the <c>DeviceHwConfigurationItems</c> form EAE's build expects, stamping
-    /// the deployed resource's ID. Channel/symbol bindings are carried
-    /// byte-for-byte (only the outer root wrapper changes).
-    /// </summary>
+    // Verbatim .hcf deployer for the secondary PLCs (M580 X80, BX1 soft-dPAC): copies the
+    // user-authored IO-folder .hcf into the deployed sysdev, then re-roots it to the
+    // DeviceHwConfigurationItems form EAE expects + stamps the resource ID. Channel/symbol
+    // bindings are carried byte-for-byte; only the outer root wrapper changes.
     public static class HwConfigVerbatimCopier
     {
         private const string DefaultIoFolder = @"C:\VueOneMapper\IO";
 
-        /// <summary>
-        /// Resolves the authored <c>.hcf</c> path: prefer the configured path,
-        /// then <c>ioFolderPath</c> + conventional file name, then the well-known
-        /// IO folder. Returns <c>null</c> if none exist on disk.
-        /// </summary>
+        // Prefer the configured path, then ioFolderPath + fileName, then the default IO folder; null if none exist.
         public static string? ResolveTemplatePath(
             string? configuredPath, string? ioFolderPath, string fileName)
         {
@@ -37,11 +28,6 @@ namespace CodeGen.Devices.Core
             return File.Exists(def) ? def : null;
         }
 
-        /// <summary>
-        /// Copies <paramref name="templatePath"/> into the deployed sysdev of the
-        /// given device type, re-rooting it with the deployed resource's ID.
-        /// Best-effort — every outcome is recorded on the returned result.
-        /// </summary>
         public static HwConfigCopyResult Deploy(
             string? eaeRoot, string deviceType, string deviceNamespace, string? templatePath)
         {
@@ -80,7 +66,7 @@ namespace CodeGen.Devices.Core
                         break;
                     }
                 }
-                catch { /* skip malformed */ }
+                catch { }
             }
             if (sysdevFile == null)
             {
@@ -103,7 +89,7 @@ namespace CodeGen.Devices.Core
             {
                 if (!string.Equals(stale, hcfDest, StringComparison.OrdinalIgnoreCase))
                 {
-                    try { File.Delete(stale); } catch { /* best-effort */ }
+                    try { File.Delete(stale); } catch { }
                 }
             }
 
@@ -121,7 +107,7 @@ namespace CodeGen.Devices.Core
 
             var rewrite = HcfRootRewriter.RewriteIfNeeded(hcfDest, resourceId);
             long bytes = 0;
-            try { bytes = new FileInfo(hcfDest).Length; } catch { /* informational */ }
+            try { bytes = new FileInfo(hcfDest).Length; } catch { }
             result.Warnings.Add(rewrite.Rewrote
                 ? $"{deviceType}: .hcf deployed ({bytes} bytes), re-rooted to DeviceHwConfigurationItems (ResourceId={resourceId})."
                 : $"{deviceType}: .hcf deployed verbatim ({bytes} bytes; {rewrite.Skipped}).");
