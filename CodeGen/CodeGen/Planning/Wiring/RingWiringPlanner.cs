@@ -118,7 +118,7 @@ namespace CodeGen.Translation
 
         // M580 (Station 2) sibling of BuildFeedStationWiring; contained to the M580 bucket, M262+BX1 filtered out.
         internal static void BuildStation2Wiring(SyslayBuilder builder, StationContents contents,
-            string disassemblyFbName = null)
+            string? disassemblyFbName = null)
         {
             const string StationFb     = "Station2";
             const string StationHmiFb  = "Station2_HMI";
@@ -139,7 +139,7 @@ namespace CodeGen.Translation
             foreach (var a in contents.Actuators)
                 if (IsM580(a.Name)) initChain.Add(a.Name);
             initChain.Add(AssemblyProc);
-            if (threadDisassembly) initChain.Add(disassemblyFbName);   // Assembly_Station → Disassembly
+            if (threadDisassembly) initChain.Add(disassemblyFbName!);   // Assembly_Station → Disassembly
             for (int i = 0; i < initChain.Count - 1; i++)
                 builder.AddEventConnection($"{initChain[i]}.INITO", $"{initChain[i + 1]}.INIT");
 
@@ -159,7 +159,7 @@ namespace CodeGen.Translation
             }
             stationChain.Add((AssemblyProc, "Process1_Generic"));
             if (threadDisassembly)
-                stationChain.Add((disassemblyFbName, "Process1_Generic"));
+                stationChain.Add((disassemblyFbName!, "Process1_Generic"));
             if (stationChain.Count > 0)
             {
                 builder.AddAdapterConnection($"{StationFb}.StationAdaptrOUT",
@@ -187,7 +187,7 @@ namespace CodeGen.Translation
                 ring.Add((cover, "Five_State_Actuator_CAT"));
             ring.Add((AssemblyProc, "Process1_Generic"));
             if (threadDisassembly)
-                ring.Add((disassemblyFbName, "Process1_Generic"));
+                ring.Add((disassemblyFbName!, "Process1_Generic"));
             if (ring.Count > 1)
             {
                 for (int i = 0; i < ring.Count - 1; i++)
