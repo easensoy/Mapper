@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Xml.Linq;
+using static CodeGen.Services.FbtXmlEditor;
 
 namespace CodeGen.Services
 {
@@ -35,23 +36,7 @@ namespace CodeGen.Services
 
         // Deploy the TelemetryConfig datatype (the Telemetry_CAT Config input). Idempotent.
         internal static void DeployTelemetryConfigDatatype(string eaeProjectDir, DeployResult result)
-        {
-            try
-            {
-                var dtDir = Path.Combine(eaeProjectDir, "IEC61499", "DataType");
-                Directory.CreateDirectory(dtDir);
-                var dtPath = Path.Combine(dtDir, "TelemetryConfig.dt");
-                if (!File.Exists(dtPath)) File.WriteAllText(dtPath, TelemetryConfigDt);
-                if (!result.DataTypesDeployed.Contains("TelemetryConfig"))
-                    result.DataTypesDeployed.Add("TelemetryConfig");
-                result.PatchesApplied.Add("TelemetryConfig.dt deployed + registered");
-                MapperLogger.Info("[Deploy] TelemetryConfig.dt written + registered");
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"TelemetryConfig.dt deploy failed: {ex.Message}");
-            }
-        }
+            => DeployDatatype(eaeProjectDir, "TelemetryConfig", TelemetryConfigDt, result);
 
         // TelemetryHealth: the MQTT_CONNECTION status outputs folded into one struct.
         const string TelemetryHealthDt =
@@ -75,23 +60,7 @@ namespace CodeGen.Services
 
         // Deploy the TelemetryHealth datatype (the Telemetry_CAT Health output). Idempotent.
         internal static void DeployTelemetryHealthDatatype(string eaeProjectDir, DeployResult result)
-        {
-            try
-            {
-                var dtDir = Path.Combine(eaeProjectDir, "IEC61499", "DataType");
-                Directory.CreateDirectory(dtDir);
-                var dtPath = Path.Combine(dtDir, "TelemetryHealth.dt");
-                if (!File.Exists(dtPath)) File.WriteAllText(dtPath, TelemetryHealthDt);
-                if (!result.DataTypesDeployed.Contains("TelemetryHealth"))
-                    result.DataTypesDeployed.Add("TelemetryHealth");
-                result.PatchesApplied.Add("TelemetryHealth.dt deployed + registered");
-                MapperLogger.Info("[Deploy] TelemetryHealth.dt written + registered");
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"TelemetryHealth.dt deploy failed: {ex.Message}");
-            }
-        }
+            => DeployDatatype(eaeProjectDir, "TelemetryHealth", TelemetryHealthDt, result);
 
         // Removes deployed Telemetry wrapper artifacts (files + .dfbproj entries): the composite (BOTH the
         // current Telemetry.fbt AND the legacy Telemetry_CAT.fbt name, migrated away on re-deploy), its
