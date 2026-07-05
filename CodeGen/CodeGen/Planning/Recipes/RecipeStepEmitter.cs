@@ -5,15 +5,8 @@ using CodeGen.Models;
 
 namespace CodeGen.Translation.Process
 {
-    /// <summary>
-    /// Writes a recipe block's rows into <see cref="RecipeArrays"/> through the shared
-    /// <see cref="RecipeBuilder"/>. BEHAVIOUR-PRESERVING: AddCmd / AddWait are byte-identical to
-    /// the former hardcoded <c>b.AddCmd(...)</c> / <c>b.AddWait(...)</c> calls, in array order.
-    /// <c>WaitRef</c> ids resolve via <c>ProcessRecipeArrayGenerator.TryGetComponentId</c> (the
-    /// SAME resolution the hardcoded code used, so the same registry yields the same id);
-    /// <c>WaitConfig</c> maps a <see cref="MapperConfig"/> constant. END rows are NOT emitted here —
-    /// the station class owns AddEnd(...) since the END NextStep is computed, not data.
-    /// </summary>
+    // Writes a recipe block's rows into RecipeArrays via RecipeBuilder. Each step must set EXACTLY ONE
+    // of cmd / waitId / waitRef / waitConfig. END rows are NOT emitted here — the station owns AddEnd.
     internal static class RecipeStepEmitter
     {
         public static void Emit(RecipeBuilder b, IReadOnlyList<RecipeStepDefinition> steps,
