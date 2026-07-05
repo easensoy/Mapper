@@ -5,24 +5,12 @@ using CodeGen.Models;
 
 namespace CodeGen.Translation.Process.Recipes
 {
-    /// <summary>
-    /// Pure transition-chain parsing for recipe generation: walk a Process's
-    /// Control.xml state graph in EXECUTION order (Initial_State →
-    /// transition.DestinationStateID, NOT State_Number order), render that walk as
-    /// the human-readable transition-table metadata, and identify the
-    /// Initialisation boot state. Every method is a pure function of its
-    /// <see cref="VueOneState"/> arguments — no RecipeArrays, no MapperConfig, no
-    /// I/O, no shared state.
-    /// </summary>
+    // Pure transition-chain parsing: walk a Process's Control.xml state graph in EXECUTION order
+    // (Initial_State -> transition.DestinationStateID, NOT State_Number order). No shared state / I/O.
     public static class TransitionChainParser
     {
-        /// <summary>
-        /// True if the state is the VueOne Initialisation boot-assertion state.
-        /// Detected via InitialState=true OR Name matching "Initialisation"/
-        /// "Initialization" (case-insensitive). Used to drop the state from the
-        /// recipe regardless of whether its first condition resolves in scope —
-        /// Initialisation is a boot precondition, not a work-cycle step.
-        /// </summary>
+        // The VueOne Initialisation boot-assertion state (InitialState=true OR Name "Initialisation"/
+        // "Initialization"). Dropped from the recipe (boot precondition, not a work-cycle step).
         public static bool IsInitialisationState(VueOneState s)
         {
             if (s.InitialState) return true;
@@ -31,24 +19,10 @@ namespace CodeGen.Translation.Process.Recipes
                    n.Equals("Initialization", StringComparison.OrdinalIgnoreCase);
         }
 
-        /// <summary>
-        /// Orders a Process's states in EXECUTION order by walking the transition
-        /// chain from the initial state, rather than by State_Number.
-        ///
-        /// <para>Why: VueOne models authored incrementally leave State_Number = 0
-        /// on every state added after the first pass. Ordering by State_Number then
-        /// pulls all the 0-numbered states to the front, and because the runtime
-        /// starts at CurrentStep 0 the recipe begins mid-cycle. Observed on
-        /// Assembly_Station: the shaft-place and cover steps all carry
-        /// State_Number = 0, so the recipe started with shaft_vr instead of the
-        /// real first step (Clamping_Part). Walking Initial_State -&gt;
-        /// transition.DestinationStateID reproduces the true sequence.</para>
-        ///
-        /// <para>States not reachable from the initial chain are intentionally not
-        /// serialized. A Process recipe is a linear executable plan; appending
-        /// unreachable authoring leftovers after a loop back to Initialisation would
-        /// create motions that the Control.xml transition graph never reaches.</para>
-        /// </summary>
+        // Orders a Process's states in EXECUTION order by walking the transition chain from the initial
+        // state, NOT by State_Number. Why: incrementally-authored VueOne models leave State_Number=0 on
+        // later states, so State_Number order pulls them to the front and the recipe starts mid-cycle.
+        // States unreachable from the initial chain are intentionally not serialized.
         public static List<VueOneState> OrderStatesByTransitionChain(IList<VueOneState> states)
         {
             if (states == null || states.Count == 0) return new List<VueOneState>();
