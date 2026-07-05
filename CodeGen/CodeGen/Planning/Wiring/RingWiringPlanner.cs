@@ -21,8 +21,9 @@ namespace CodeGen.Translation
             if (string.IsNullOrWhiteSpace(processInstanceName)) processInstanceName = "Process1";
 
             // Per-PLC filter: EAE renders a resource-boundary-crossing wire as dashed/unresolved and blocks deploy; each PLC's sysres is wired separately.
-            static bool IsM262(string name) =>
-                HcfSymbolIndex.NameBasedPlcGuess(name) == PlcAssignment.M262;
+            // The Feed station runs on the M262 OR the RevPi controller (byte-identical for M262 — nothing guesses RevPi there).
+            static bool OnFeedController(string name) =>
+                HcfSymbolIndex.NameBasedPlcGuess(name) is PlcAssignment.M262 or PlcAssignment.RevPi;
 
             // Keep the robot-tail (Ejector+Robot) OUT of the INIT path to Feed_Station (a Robot bring-up stall would block it); init the tail last, mirrored in ResourceWireEmitter.
             bool robotTail = MapperConfig.EnableRobotTaskTail &&
@@ -35,12 +36,12 @@ namespace CodeGen.Translation
             initChain.Add("Area");
             initChain.Add("Station1");
             foreach (var s in contents.Sensors)
-                if (IsM262(s.Name)) initChain.Add(s.Name);
+                if (OnFeedController(s.Name)) initChain.Add(s.Name);
             foreach (var a in contents.Actuators)
-                if (IsM262(a.Name) && !IsRobotTailName(a.Name)) initChain.Add(a.Name);
+                if (OnFeedController(a.Name) && !IsRobotTailName(a.Name)) initChain.Add(a.Name);
             initChain.Add(processInstanceName);
             foreach (var a in contents.Actuators)
-                if (IsM262(a.Name) && IsRobotTailName(a.Name)) initChain.Add(a.Name);
+                if (OnFeedController(a.Name) && IsRobotTailName(a.Name)) initChain.Add(a.Name);
 
             // Area_CAT's internal plcStart fires Area.INITO via INIT, propagating through this chain.
             for (int i = 0; i < initChain.Count - 1; i++)
@@ -55,7 +56,7 @@ namespace CodeGen.Translation
             var stationChain = new List<(string Name, string Type)>();
             foreach (var a in contents.Actuators)
             {
-                if (!IsM262(a.Name)) continue;
+                if (!OnFeedController(a.Name)) continue;
                 var fbType = ResolveActuatorFBType(a);
                 if (TemplateMap.LacksStationAdapter(fbType)) continue;
                 stationChain.Add((a.Name, fbType));
@@ -78,9 +79,9 @@ namespace CodeGen.Translation
             // Report ring is M262-only, closed locally; the robot tail is kept out (its separate cross-PLC segment would double-drive Robot.stateRprtCmd_out).
             var ringComponents = new List<(string Name, string Type)>();
             foreach (var s in contents.Sensors)
-                if (IsM262(s.Name)) ringComponents.Add((s.Name, "Sensor_Bool_CAT"));
+                if (OnFeedController(s.Name)) ringComponents.Add((s.Name, "Sensor_Bool_CAT"));
             foreach (var a in contents.Actuators)
-                if (IsM262(a.Name) &&
+                if (OnFeedController(a.Name) &&
                     !(robotTail && (NameEq(a.Name, "Ejector") || NameEq(a.Name, "Robot"))))
                     ringComponents.Add((a.Name, "Five_State_Actuator_CAT"));
             ringComponents.Add((processInstanceName, "Process1_Generic"));
@@ -202,9 +203,9 @@ namespace CodeGen.Translation
                         $"{seg[0]}.stateRprtCmd_in");
                     if (MapperConfig.MergeFeedRing)
                     {
-                        // MergeFeedRing: the discharge-segment tail feeds the M262 Feed head, so segment + Feed form one loop.
+                        // MergeFeedRing: the discharge-segment tail feeds the Feed head, so segment + Feed form one loop.
                         var m262Head = contents.Sensors.FirstOrDefault(
-                            s => HcfSymbolIndex.NameBasedPlcGuess(s.Name) == PlcAssignment.M262);
+                            s => HcfSymbolIndex.NameBasedPlcGuess(s.Name) is PlcAssignment.M262 or PlcAssignment.RevPi);
                         if (m262Head != null)
                             builder.AddAdapterConnection(
                                 $"{seg[^1]}.stateRprtCmd_out",
