@@ -12,15 +12,11 @@ namespace CodeGen.Devices.Core
     {
         const string LibElNs = "https://www.se.com/LibraryElements";
 
-        /// <summary>
-        /// CAT / composite / structural FB types the mirror copies from the syslay onto a
-        /// device sysres (each carrying a <c>Mapping</c> back to the syslay FB). SINGLE SOURCE
-        /// OF TRUTH for the syslay→sysres projection: <see cref="MirrorFbsIntoSysres"/> requires
-        /// membership before it adds/updates an FB, and
-        /// <see cref="SyslaySysresParityValidator"/> requires every syslay FB of one of these
-        /// types (bucketed to a PLC via <see cref="BucketFor"/>) to be present on that PLC's
-        /// sysres. Both read THIS set so the mirror and its validator can never drift.
-        /// </summary>
+        // CAT/composite/structural FB types the mirror copies from the syslay onto a device sysres
+        // (each carrying a Mapping back to the syslay FB). SINGLE SOURCE OF TRUTH for the
+        // syslay->sysres projection: MirrorFbsIntoSysres requires membership before add/update, and
+        // SyslaySysresParityValidator requires every syslay FB of these types (bucketed via
+        // BucketFor) to be on that PLC's sysres — both read THIS set so they can never drift.
         public static readonly IReadOnlySet<string> MirroredCatTypes =
             new HashSet<string>(StringComparer.Ordinal)
         {
@@ -37,17 +33,13 @@ namespace CodeGen.Devices.Core
             "Process1_Generic",
             "CaSAdptrTerminator",
             "Robot_Task_CAT",
-            // MQTT_CONNECTION — the single shared event-buffer FB injected by
-            // SystemLayoutInjector when MqttPublishEnabled is true. Without a mirror
-            // entry it stays only on the syslay (no Mapping) and EAE never deploys it, so
-            // the embedded MQTT_PUBLISH FBs have nothing to bind their ConnectionID to.
+            // Shared MQTT_CONNECTION; without a mirror entry it never reaches the sysres so the
+            // embedded MQTT_PUBLISH FBs have nothing to bind their ConnectionID to.
             "MQTT_CONNECTION",
-            // Telemetry — the composite wrapper around MQTT_CONNECTION (cfg.UseTelemetryCat,
-            // default). Mirrored per resource (Telemetry_M262/M580/BX1) for the same reason: its
-            // internal MQTT_CONNECTION must reach the sysres so the embedded MqttPub binds locally.
+            // Telemetry: composite wrapper around MQTT_CONNECTION; mirrored per resource so its
+            // internal MQTT_CONNECTION reaches the sysres and the embedded MqttPub binds locally.
             "Telemetry",
-            // Bridge publishers (BX1-side) — only present when the cross-PLC MQTT bridge is
-            // enabled; receive M262/M580 state via cross-resource syslay wires.
+            // Bridge publishers (BX1-side) — only present when the cross-PLC MQTT bridge is enabled.
             "MqttStateFormatter",
             "MQTT_PUBLISH_115480E69E664F878",
         };
@@ -159,11 +151,8 @@ namespace CodeGen.Devices.Core
         public static int MirrorFbsIntoSysres(string sysresPath, List<SyslayFb> syslayFbs) =>
             MirrorFbsIntoSysres(sysresPath, syslayFbs, DpacFullInitFbId, PlcStartFbId);
 
-        /// <summary>
-        /// Boot-ID-parameterized mirror so each PLC resource (M262 / M580 / BX1)
-        /// gets its OWN DPAC_FULLINIT + plcStart instance with a distinct ID
-        /// (EAE FB IDs must be unique across resources).
-        /// </summary>
+        // Boot-ID-parameterized so each PLC resource gets its OWN DPAC_FULLINIT + plcStart with a
+        // distinct ID (EAE FB IDs must be unique across resources).
         public static int MirrorFbsIntoSysres(string sysresPath, List<SyslayFb> syslayFbs,
             string dpacFullInitId, string plcStartId)
         {
@@ -182,15 +171,8 @@ namespace CodeGen.Devices.Core
                 root.Add(network);
             }
 
-            // M262IO (PLC_RW_M262) is NOT emitted onto the sysres. Under the
-            // Option-A .hcf binding the TM3 channels publish symlinks directly
-            // to the consumer FB instances (Feeder.athome, PartInHopper.Input,
-            // …) — M262IO is no longer the routing bridge, so a top-level
-            // M262IO instance plus its INIT / PusherEvent / REQ_INT_BOOL
-            // event wires are dead weight that EAE flags. Removing the
-            // EnsureSystemFb(M262IO …) call here is what actually makes
-            // M262IO disappear from the generated .sysres; the cleanup pass
-            // in PrepareDemonstratorForGeneration only clears stale copies.
+            // M262IO (PLC_RW_M262) is NOT emitted onto the sysres: the .hcf channels publish symlinks
+            // direct to the consumer FBs, so an M262IO instance + its wires would be dead weight.
             EnsureSystemFb(network, ns,
                 id: dpacFullInitId, name: "FB1", type: "DPAC_FULLINIT", nsAttr: "SE.DPAC",
                 mapping: null, x: 1900, y: 140,
@@ -201,17 +183,11 @@ namespace CodeGen.Devices.Core
                 loaded: true,
                 parameters: new[] { ("Prio", "10"), ("Delay", "T#1000ms") });
 
-            // DEDUP: the M262 component instance ids flip-flop between
-            // regens (a sysres FB ID is ComputeMirrorId(syslayId) = the syslay id with
-            // its top hex bit flipped, e.g. 60AE…↔E0AE…). When the syslay id flips, the
-            // mirror's add/update loop below — whose existingByName index holds only ONE
-            // element per name — updates one copy but leaves the previous-id copy behind,
-            // so the same component ends up declared TWICE (ID/Mapping swapped). EAE then
-            // sees duplicate instances and ALL M262 I/O goes red (the .hcf binds just one
-            // {res}.{id}.{pin}). Fix: drop any same-named sysres FB whose Mapping does NOT
-            // point at a CURRENT syslay FB id; the loop then keeps exactly one per name,
-            // and HcfPatchService re-aligns the .hcf to the survivor. Name-scoped to syslay
-            // components, so FB1/FB2 and other non-mirrored FBs are never touched.
+            // DEDUP: a component's sysres FB id can flip between regens (mirror id = syslay id with its
+            // top hex bit flipped); the add/update loop below would then leave the previous-id copy
+            // behind, declaring the component TWICE and turning all M262 I/O red. Drop any same-named
+            // sysres FB whose Mapping does NOT point at a current syslay FB id. Name-scoped so FB1/FB2
+            // and non-mirrored FBs are never touched.
             var currentSyslayIds = new HashSet<string>(
                 syslayFbs.Where(f => !string.IsNullOrEmpty(f.Id)).Select(f => f.Id),
                 StringComparer.Ordinal);
@@ -226,22 +202,15 @@ namespace CodeGen.Devices.Core
                 bool mirrored = !string.IsNullOrEmpty(map);   // mirrored FBs carry a Mapping; FB1/FB2 do not
                 if (syslayNames.Contains(nm) && !currentSyslayIds.Contains(map))
                 {
-                    // DEDUP: same-named FB with a stale (non-current) mapping (the id-flip dup).
+                    // Same-named FB with a stale mapping (the id-flip dup).
                     fb.Remove();
                     deduped++;
                 }
                 else if (mirrored && !syslayNames.Contains(nm))
                 {
-                    // STALE-ARTIFACT FLUSH. A previously-mirrored FB
-                    // whose Name is no longer ANYWHERE in the current syslay — e.g. a Robot_Task_CAT
-                    // left over after EnableRobotTaskTail flips false, or any actuator/process dropped
-                    // from the twin. The dedup above only catches same-named stale-MAPPED dups; an
-                    // entirely-absent FB would otherwise survive an incremental Test Runtime forever
-                    // and make the deployed per-device sysres diverge from the syslay (the exact bug
-                    // that produced the leftover Robot). Drop it here; ResourceWireEmitter clears and
-                    // re-derives the ring from the surviving FBs, so the stale FB's wires vanish too.
-                    // Scoped to mirrored (Mapping-carrying) FBs, so FB1/FB2 and other non-mirrored
-                    // system FBs are never touched.
+                    // STALE-ARTIFACT FLUSH: a previously-mirrored FB whose Name is no longer in the
+                    // syslay (would otherwise survive incremental Test Runtimes and diverge the sysres).
+                    // Scoped to mirrored FBs, so FB1/FB2 and non-mirrored system FBs are never touched.
                     fb.Remove();
                     deduped++;
                 }
@@ -258,20 +227,11 @@ namespace CodeGen.Devices.Core
                     .Where(s => !string.IsNullOrEmpty(s)),
                 StringComparer.Ordinal);
 
-            // Mirror every CAT/composite/HMI type that EAE expects to see mapped to a
-            // device resource. Each mirrored FB carries a Mapping attribute pointing back
-            // at the syslay FB, which is how EAE shows it under Devices > … > Local. The
-            // type set is the shared MirroredCatTypes (single source of truth, so the
-            // parity validator requires exactly what the mirror copies).
             var keepTypes = MirroredCatTypes;
 
-            // Build a Name → existing sysres FB element index so we can UPDATE
-            // parameters on an FB that was mirrored on a previous run, instead
-            // of skipping it and leaving stale parameter values behind. When the
-            // FB is already present, REPLACE its <Parameter> children with
-            // whatever the syslay now carries — keep the FB element's ID /
-            // Mapping / x / y unchanged so EAE's stable-instance tracking
-            // does not see it as a new FB on every regen.
+            // Name -> existing sysres FB index so an already-mirrored FB is UPDATED (params replaced
+            // from the syslay), not skipped with stale values. Its ID/Mapping/x/y stay unchanged so
+            // EAE keeps a stable instance handle across regens.
             var existingByName = new Dictionary<string, XElement>(StringComparer.Ordinal);
             foreach (var fb in network.Elements(ns + "FB"))
             {
@@ -287,23 +247,14 @@ namespace CodeGen.Devices.Core
 
                 if (existingByName.TryGetValue(fb.Name, out var existing))
                 {
-                    // Keep ID / Mapping / x / y so EAE keeps its stable handle on
-                    // the instance across regens — but SYNC Type / Namespace to the
-                    // syslay. A component's CAT type can change between regens
-                    // (Bearing_PnP: Five_State stub -> Seven_State_Actuator_CAT when
-                    // StubSevenStateActuatorsAsFiveState flips). Leaving the stale
-                    // Type while refreshing the params left a Five_State-typed FB
-                    // carrying Seven_State params AND a syslay(Seven)/sysres(Five)
-                    // type mismatch — which EAE's Solution Integrity flags as a
-                    // missing instance ("Found References to Missing Instances:
-                    // Bearing_PnP"). Syncing the type here keeps the resource and
-                    // the layout in lock-step; ID/Mapping stay so the instance
-                    // handle is stable.
+                    // Keep ID/Mapping/x/y (stable instance handle) but SYNC Type/Namespace to the
+                    // syslay: a component's CAT type can change between regens (Bearing_PnP flips
+                    // Five_State stub <-> Seven_State), and a stale Type mismatches the syslay and
+                    // trips EAE's "Found References to Missing Instances".
                     existing.SetAttributeValue("Type",      fb.Type);
                     existing.SetAttributeValue("Namespace", fb.Namespace);
-                    // Upsert <Attribute> children (don't blanket-remove — EAE may
-                    // have added its own). Keeps a mirrored MQTT_PUBLISH's
-                    // InterfaceParams channel-count config in sync across regens.
+                    // Upsert <Attribute> children (don't blanket-remove — EAE may add its own) so a
+                    // mirrored MQTT_PUBLISH keeps its InterfaceParams channel-count config.
                     foreach (var a in fb.Attributes)
                     {
                         var existingAttr = existing.Elements(ns + "Attribute")
@@ -312,7 +263,6 @@ namespace CodeGen.Devices.Core
                         else existing.Add(new XElement(ns + "Attribute",
                             new XAttribute("Name", a.Name), new XAttribute("Value", a.Value)));
                     }
-                    // Replace parameter children to match the syslay.
                     existing.Elements(ns + "Parameter").Remove();
                     foreach (var p in fb.Parameters)
                     {
@@ -336,10 +286,8 @@ namespace CodeGen.Devices.Core
                     new XAttribute("x",         fb.X),
                     new XAttribute("y",         fb.Y));
 
-                // Carry <Attribute> children (e.g. generic-FB InterfaceParams)
-                // so a mirrored MQTT_PUBLISH keeps its channel-count config on
-                // the BX1 sysres — otherwise the numbered Topic1/Payload1/QoS1
-                // ports vanish and EAE rejects the FB on import.
+                // Carry <Attribute> children (e.g. generic-FB InterfaceParams) so a mirrored
+                // MQTT_PUBLISH keeps its channel-count config; else EAE rejects the FB on import.
                 foreach (var a in fb.Attributes)
                 {
                     fbElement.Add(new XElement(ns + "Attribute",
@@ -551,26 +499,15 @@ namespace CodeGen.Devices.Core
             network.Add(fb);
         }
 
-        /// <summary>
-        /// Decides which PLC resource a syslay FB belongs on. Primary lookup is
-        /// the canonical SMC partition table (<see cref="ControllerMap"/>); two
-        /// special cases handle FBs not in the registry — <c>MqttConn</c> is
-        /// pinned to BX1 (MQTT runtime is Soft-dPAC-only; M262/M580 return
-        /// ReturnCode 50) and the legacy <c>Disassembly_Station</c> name variant
-        /// stays on M580. Anything neither the registry nor the legacy cases
-        /// know about falls back to M262 so nothing is ever dropped.
-        /// </summary>
+        // Decides which PLC resource a syslay FB belongs on (canonical ControllerMap partition, plus
+        // MQTT/legacy special cases below). Anything unknown falls back to M262 so nothing is dropped.
         public static PlcAssignment BucketFor(string fbName)
         {
             if (string.IsNullOrEmpty(fbName)) return PlcAssignment.Unknown;
 
-            // One MQTT connection per resource: the bare "MqttConn" is BX1's, "MqttConn_M262"
-            // is M262's, "MqttConn_M580" is M580's. Each routes to its own sysres so its embedded
-            // MqttPub binds to the LOCAL connection (shared ConnectionID = cfg.MqttClientId) and
-            // publishes its own components' state. BX1 (Soft-dPAC) is rig-proven; M262/M580 publish
-            // once their device allows insecure mqtt:// and the firmware runs the MQTT client.
-            // Telemetry_CAT wraps the raw MQTT_CONNECTION (cfg.UseTelemetryCat, default); the
-            // Telemetry_* instance routes to the SAME resource as the MqttConn* it replaces.
+            // One MQTT connection per resource ("MqttConn"=BX1, "_M262"=M262, "_M580"=M580); each
+            // routes to its own sysres so the embedded MqttPub binds the LOCAL connection. Telemetry_*
+            // wraps MQTT_CONNECTION and routes to the SAME resource as the MqttConn* it replaces.
             if (string.Equals(fbName, "MqttConn", StringComparison.Ordinal) ||
                 string.Equals(fbName, "Telemetry_BX1", StringComparison.Ordinal))
                 return PlcAssignment.BX1;
@@ -581,10 +518,7 @@ namespace CodeGen.Devices.Core
                 string.Equals(fbName, "Telemetry_M580", StringComparison.Ordinal))
                 return PlcAssignment.M580;
 
-            // Standalone MQTT bridge publishers (MqttFmt_<comp>, MqttPub_<comp>)
-            // also live on BX1 — they receive M262/M580 component state via
-            // cross-resource syslay wires and publish via the BX1 broker.
-            // (Bridge currently removed; kept for when/if it's re-enabled.)
+            // Standalone MQTT bridge publishers (MqttFmt_<comp>/MqttPub_<comp>) live on BX1.
             if (fbName.StartsWith("MqttPub_", StringComparison.Ordinal) ||
                 fbName.StartsWith("MqttFmt_", StringComparison.Ordinal))
                 return PlcAssignment.BX1;
