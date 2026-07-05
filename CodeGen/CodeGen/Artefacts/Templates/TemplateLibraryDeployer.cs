@@ -400,11 +400,7 @@ namespace CodeGen.Services
             string topicNameSource,
             MapperConfig cfg, DeployResult result)
         {
-            var fbt = Directory.EnumerateFiles(
-                    Path.Combine(eaeProjectDir, "IEC61499"),
-                    catName + ".fbt", SearchOption.AllDirectories)
-                .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
-                ?? string.Empty;
+            var fbt = FindDeployedFbt(eaeProjectDir, catName + ".fbt");
             if (string.IsNullOrEmpty(fbt))
             {
                 result.Warnings.Add($"{catName}.fbt not found; MQTT publish patch skipped.");
