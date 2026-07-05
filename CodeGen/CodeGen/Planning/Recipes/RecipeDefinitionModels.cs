@@ -4,17 +4,12 @@ using System.Linq;
 
 namespace CodeGen.Translation.Process
 {
-    /// <summary>
-    /// Root of <c>Config/recipes.yml</c> — the externalized recipe catalog.
-    /// One typed model per layer so a malformed config fails with an obvious error, not a silent
-    /// wrong recipe. Loaded + cached by <see cref="RecipeConfigLoader"/>.
-    /// </summary>
+    // Root of Config/recipes.yml (loaded + cached by RecipeConfigLoader).
     public sealed class RecipeCatalog
     {
         public List<RecipeDefinition> Recipes { get; set; } = new();
 
-        /// <summary>The recipe with this Process name (case-insensitive). Throws if absent — a
-        /// missing recipe is a config error, never a silent empty recipe.</summary>
+        // The recipe with this Process name (case-insensitive); throws if absent (config error).
         public RecipeDefinition Recipe(string name) =>
             Recipes.FirstOrDefault(r =>
                 string.Equals((r.Name ?? string.Empty).Trim(), (name ?? string.Empty).Trim(),
@@ -23,13 +18,9 @@ namespace CodeGen.Translation.Process
                 $"[Recipe] No recipe definition named '{name}' in recipes.yml.");
     }
 
-    /// <summary>
-    /// One process recipe: a Process name plus named row-BLOCKS. The station class
-    /// (AssemblyRecipe / DisassemblyRecipe) owns the orchestration — which blocks to
-    /// emit, in what order, under which MapperConfig / HandoffPlanner gate — and pulls the row data
-    /// from here. Blocks (not one flat list) so a station can conditionally include a block
-    /// (e.g. the cover detour, the ejector/robot tail) without the rows moving back into C#.
-    /// </summary>
+    // One process recipe: a Process name plus named row-BLOCKS. The station class
+    // (AssemblyRecipe / DisassemblyRecipe) owns which blocks to emit + order + gate; blocks (not one
+    // flat list) so a station can conditionally include a block without the rows moving back into C#.
     public sealed class RecipeDefinition
     {
         public string Name { get; set; } = string.Empty;
@@ -37,7 +28,7 @@ namespace CodeGen.Translation.Process
         public Dictionary<string, List<RecipeStepDefinition>> Blocks { get; set; } =
             new(StringComparer.OrdinalIgnoreCase);
 
-        /// <summary>The named block's rows. Throws if absent (config error).</summary>
+        // The named block's rows; throws if absent (config error).
         public IReadOnlyList<RecipeStepDefinition> Block(string key) =>
             Blocks != null && Blocks.TryGetValue(key, out var rows) && rows != null
                 ? rows
@@ -45,23 +36,12 @@ namespace CodeGen.Translation.Process
                     $"[Recipe] Recipe '{Name}' has no block '{key}' in recipes.yml.");
     }
 
-    /// <summary>
-    /// One recipe ROW (the config row). EXACTLY ONE discriminator field must be set, and it
-    /// determines the kind of row written via <see cref="RecipeBuilder"/>:
-    /// <list type="bullet">
-    ///   <item><c>Cmd</c> — a COMMAND row (RecipeCommand): <c>AddCmd(Cmd, State)</c>.</item>
-    ///   <item><c>WaitId</c> — a WAIT row (RecipeWait) on a LITERAL id: <c>AddWait(WaitId, State)</c>
-    ///         (used for the BX1 covers, whose ids are fixed synthesized constants).</item>
-    ///   <item><c>WaitRef</c> — a WAIT row on a component resolved BY NAME via
-    ///         <c>ProcessRecipeArrayGenerator.TryGetComponentId</c> (the same resolution the
-    ///         hardcoded code used).</item>
-    ///   <item><c>WaitConfig</c> — a WAIT row on a <c>MapperConfig</c> constant
-    ///         (AssemblyProcessId / DisassemblyProcessId / RobotActuatorId).</item>
-    /// </list>
-    /// <c>State</c> is the cmd/wait state value (default 0). END rows (RecipeEnd) are NOT modelled
-    /// here — the station class appends <c>AddEnd(...)</c> because the END NextStep is computed
-    /// (cyclic restart vs run-once self-park), not static data.
-    /// </summary>
+    // One recipe ROW. EXACTLY ONE discriminator field is set:
+    //   Cmd        — a COMMAND row: AddCmd(Cmd, State).
+    //   WaitId     — a WAIT row on a LITERAL id (BX1 covers, fixed synthesized constants).
+    //   WaitRef    — a WAIT row on a component resolved BY NAME (TryGetComponentId).
+    //   WaitConfig — a WAIT row on a MapperConfig constant (AssemblyProcessId/DisassemblyProcessId/RobotActuatorId).
+    // State = cmd/wait state value. END rows are appended by the station class (NextStep is computed, not static).
     public sealed class RecipeStepDefinition
     {
         public string? Cmd { get; set; }
