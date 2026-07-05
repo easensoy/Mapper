@@ -15,21 +15,10 @@ namespace CodeGen.Devices.Core
     {
         public sealed record Wire(string Source, string Destination);
 
-        /// <summary>
-        /// Per-resource structural anchor set. Everything component-driven
-        /// (the init chain body, the CaSBus station chain, the stateRprtCmd
-        /// report ring) is built from the Sensor/Actuator CATs ACTUALLY present
-        /// in the target sysres — see <see cref="EmitForResource"/> — so only
-        /// the fixed structural FB names differ between PLCs. This record
-        /// carries those names so the proven M262 wiring core can target the
-        /// M580 (Station2/Assembly_Station/Stn2_Term) and the BX1 (no Station
-        /// FB at all in this increment) without forking the logic.
-        ///
-        /// A resource with no Station/Process/Terminator (BX1) leaves
-        /// <see cref="StationFb"/>/<see cref="ProcessFb"/>/<see cref="TerminatorFb"/>
-        /// null and the CaS station chain + report ring are skipped gracefully;
-        /// the init fan-out still runs so its actuators initialise.
-        /// </summary>
+        // Per-resource structural anchor set: only the fixed structural FB names differ between PLCs
+        // (everything component-driven is built from the CATs present in the sysres — see EmitForResource),
+        // so the proven M262 wiring core targets M580/BX1 without forking. A resource with no
+        // Station/Process/Terminator (BX1) leaves those null and the CaS chain + report ring skip gracefully.
         public sealed record ResourceAnchors(
             string Label,                 // log tag, e.g. "Sysres", "M580", "BX1"
             string? AreaFb,               // Area structural FB (null on M580/BX1)
@@ -165,23 +154,11 @@ namespace CodeGen.Devices.Core
         // no sysres-level DataConnection is needed.
         private static readonly Wire[] DataWires = Array.Empty<Wire>();
 
-        /// <summary>
-        /// Wires one deployed sysres FBNetwork using the proven M262 topology,
-        /// parameterised by <paramref name="anchors"/>:
-        ///   • bootstrap event wires (START→FB1→…)
-        ///   • init chain FB1.INITO→[Area]→[Station]→components…→[Process]
-        ///     (every present node reached; missing anchors collapse out)
-        ///   • CaSBus station chain [Station]→actuators…→[Process]→[Terminator]
-        ///   • closed stateRprtCmd report ring among all components + [Process]
-        ///   • the resource's HMI/structural adapter wires.
-        /// Components (Sensor/Actuator CATs) are discovered from the sysres
-        /// itself in <see cref="CaSBusOrder"/> then declaration order, so the
-        /// chains/ring are N-component-safe and never severed.
-        ///
-        /// A resource with no Station/Process/Terminator (BX1) gets ONLY the
-        /// init fan-out + the report ring among its own components; the CaS
-        /// station chain is skipped gracefully (no Station/Process anchor).
-        /// </summary>
+        // Wires one deployed sysres FBNetwork using the proven M262 topology, parameterised by anchors:
+        // bootstrap event wires; init chain FB1.INITO->[Area]->[Station]->components->[Process]; CaSBus
+        // station chain; closed stateRprtCmd report ring; HMI/structural adapter wires. Components are
+        // discovered from the sysres (CaSBusOrder then declaration order) so the chains/ring are
+        // N-component-safe. BX1 (no Station/Process/Terminator) gets only the init fan-out + report ring.
         public static void EmitForResource(MapperConfig cfg, string sysresPath,
             ResourceAnchors anchors, SystemInjector.BindingApplicationReport report)
         {
@@ -679,26 +656,17 @@ namespace CodeGen.Devices.Core
             }
         }
 
-        /// <summary>True when <paramref name="name"/> is non-null and an FB
-        /// with that instance name exists on the resource. Used so structural
-        /// anchors absent on a given PLC (e.g. BX1 has no Area/Station/Process)
-        /// collapse out of the init chain / station chain rather than emitting
-        /// dangling wires that fail port validation.</summary>
+        // True when name is non-null and an FB with that instance name exists on the resource, so
+        // anchors absent on a PLC (BX1 has no Area/Station/Process) collapse out instead of emitting
+        // dangling wires that fail port validation.
         private static bool Present(string? name, Dictionary<string, XElement> byName)
             => !string.IsNullOrEmpty(name) && byName.ContainsKey(name);
 
-        /// <summary>
-        /// STAGE 5b — source of truth for the cross-PLC discharge tail, read DIRECTLY from
-        /// <see cref="CodeGen.Translation.HandoffPlanner.DischargeActive"/> — the SAME authority
-        /// <c>SystemLayoutInjector.BuildStation2Wiring</c> uses to emit the syslay cross-hops
-        /// (Disassembly→Ejector / PartAtAssembly→head). When TRUE every per-resource sysres ring
-        /// is opened EXACTLY at the robot-tail boundary: the M262 ring drops Ejector+Robot+
-        /// PartAtAssembly (they become a separate cross-device segment) and the M580 ring omits the
-        /// Disassembly→BearingSensor close-back — so no boundary adapter plug is driven twice.
-        ///
-        /// Reading the planner removes the disk/order dependency: the sysres ring topology
-        /// follows the SAME decision that shaped the syslay, deterministically.
-        /// </summary>
+        // Source of truth for the cross-PLC discharge tail, read from HandoffPlanner.DischargeActive (the
+        // SAME authority BuildStation2Wiring uses for the syslay cross-hops), so the sysres ring topology
+        // follows the same decision that shaped the syslay. When TRUE every per-resource ring opens at the
+        // robot-tail boundary (M262 drops Ejector+Robot+PartAtAssembly; M580 omits the Disassembly
+        // close-back) so no boundary adapter plug is driven twice.
         private static bool RobotTailActive(MapperConfig cfg)
             => CodeGen.Translation.HandoffPlanner.DischargeActive;
 
@@ -738,18 +706,10 @@ namespace CodeGen.Devices.Core
         const int DeviceLocalCanvasOriginX = 2000;
         const int DeviceLocalCanvasOriginY = 2000;
 
-        /// <summary>
-        /// Force every FB element in <paramref name="byName"/> matching a
-        /// CanonicalLayout entry to the spec coordinates, then emit one
-        /// <c>[Layout] {Name} -&gt; x=…, y=…</c> line per placed FB. When
-        /// <paramref name="translateToOrigin"/> is true (set on M580 / BX1
-        /// sysres canvases), all matching entries are shifted as a group so
-        /// their bounding-box top-left sits at
-        /// (<see cref="DeviceLocalCanvasOriginX"/>, <see cref="DeviceLocalCanvasOriginY"/>);
-        /// relative spacing inside the bucket is preserved. The shared syslay
-        /// and the M262 sysres pass <c>translateToOrigin=false</c> so they keep
-        /// the global SubAppNetwork coordinates.
-        /// </summary>
+        // Force every FB in byName matching a CanonicalLayout entry to the spec coordinates. When
+        // translateToOrigin is true (M580/BX1 device-local canvases), the group is shifted so its
+        // bounding-box top-left sits at (DeviceLocalCanvasOriginX/Y), preserving relative spacing; the
+        // shared syslay + M262 sysres pass false to keep global SubAppNetwork coordinates.
         private static void ApplyCanonicalLayout(Dictionary<string, XElement> byName,
             SystemInjector.BindingApplicationReport report, string source,
             bool translateToOrigin)
@@ -811,12 +771,8 @@ namespace CodeGen.Devices.Core
                 (translateToOrigin ? $" (component bucket dx={dx} dy={dy} -> device-local origin; FB1/FB2 fixed)" : ""));
         }
 
-        /// <summary>
-        /// Open the syslay at <paramref name="syslayPath"/>, apply the same
-        /// CanonicalLayout coordinates to every matching FB inside
-        /// <c>SubAppNetwork</c>/<c>FBNetwork</c>, and persist. Best-effort —
-        /// silently skips if the file or root is missing.
-        /// </summary>
+        // Apply the CanonicalLayout coordinates to every matching FB in the syslay's
+        // SubAppNetwork/FBNetwork and persist (best-effort; skips if the file/root is missing).
         public static void ApplyLayoutToSyslay(string syslayPath,
             SystemInjector.BindingApplicationReport report)
         {
@@ -900,16 +856,9 @@ namespace CodeGen.Devices.Core
             _                                     => 1100,
         };
 
-        /// <summary>
-        /// Resize each coloured zone &lt;Frame&gt; so it fully ENCLOSES the FBs
-        /// that belong to its PLC (<see cref="SysresFbMirror.BucketFor"/>), with
-        /// padding and a per-Type rendered-height allowance below the lowest FB.
-        /// Fixes the overflow where tall Process/actuator bodies and out-of-dict
-        /// FBs (Disassembly) spilled past the fixed frame bounds — mirrors how the
-        /// SMC_Rig reference sizes each frame to wrap its contents. Frame origins
-        /// are clamped to ≥0 so a high FB (MqttConn at y=200) can't push a frame
-        /// off-canvas. Best-effort: a frame with no FBs in its bucket is left as-is.
-        /// </summary>
+        // Resize each coloured zone <Frame> to fully enclose the FBs its PLC owns (BucketFor), with
+        // padding and a per-Type rendered-height allowance. Frame origins clamped to >=0 so a high FB
+        // can't push a frame off-canvas. Best-effort: a frame with no FBs in its bucket is left as-is.
         private static void ResizeFramesToFitFbs(XElement net, XNamespace ns,
             SystemInjector.BindingApplicationReport report)
         {
@@ -958,13 +907,8 @@ namespace CodeGen.Devices.Core
             }
         }
 
-        /// <summary>
-        /// Locates the deployed .sysres beside the .sysdev whose root
-        /// <c>&lt;Device&gt;</c> has the given <paramref name="deviceType"/>
-        /// (e.g. "M262_dPAC", "M580_dPAC", "Soft_dPAC") in the SE.DPAC
-        /// namespace. Mirrors <c>M262SysdevEmitter.FindSysdevByDeviceType</c>
-        /// + <c>FindSysresFor</c> but returns the .sysres path directly.
-        /// </summary>
+        // Locates the deployed .sysres beside the .sysdev whose root <Device> has the given deviceType
+        // ("M262_dPAC"/"M580_dPAC"/"Soft_dPAC"), returning the .sysres path directly.
         public static string? LocateSysresByDeviceType(string eaeRoot, string deviceType)
         {
             var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
@@ -996,15 +940,9 @@ namespace CodeGen.Devices.Core
         private static bool PortExists(HashSet<string> ports, string portName)
             => ports.Count == 0 /* unknown FB type — be lenient */ || ports.Contains(portName);
 
-        /// <summary>
-        /// Locate the .fbt for <paramref name="typeName"/> under
-        /// <c>{libRoot}/{Basic|Composite|Adapter|CAT}/<typeName>/IEC61499/<typeName>.fbt</c>
-        /// and return the set of port Names declared inside its
-        /// <c>InterfaceList</c> (events, data, adapters). Returns an empty
-        /// set if the .fbt isn't found — caller treats empty as "skip
-        /// validation" so wires don't fail when the type lives outside the
-        /// Template Library (SE.DPAC.DPAC_FULLINIT, SE.AppBase.plcStart).
-        /// </summary>
+        // Locate the .fbt for typeName under {libRoot}/{Basic|Composite|Adapter|CAT}/<typeName>/IEC61499/
+        // and return the port Names in its InterfaceList. Empty set if not found — caller treats empty as
+        // "skip validation" so wires don't fail for types outside the Template Library (DPAC_FULLINIT, plcStart).
         private static HashSet<string> LoadFbtPorts(string libRoot, string typeName)
         {
             var set = new HashSet<string>(StringComparer.Ordinal);
