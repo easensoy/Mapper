@@ -233,17 +233,13 @@ behaviour-preserving change". It reads a fixed base and never writes the live
 
 ---
 
-## I-12. `SimulatorFullSystem = true` 3-PLC collapse — now a DEAD code path
+## I-12. `SimulatorFullSystem` 3-PLC collapse — REMOVED
 
-**Status (2026-06-18):** `MainForm_simulator.cs` (which set the flag) was
-**deleted**, and no UI button sets `cfg.SimulatorFullSystem = true` today. The
-collapse described below is therefore **unreachable dead code**, pending a
-careful per-file cleanup of the `SimulatorFullSystem` branches in
-`SystemLayoutInjector` / `Station2DeviceEmitter` / `ProcessRecipeArrayGenerator` /
-`TemplateLibraryDeployer`. Documented here so the dead branches are not mistaken
-for live behaviour. (`SimulatorRecipeMode` is a separate, still-LIVE flag — the
-`StateTransitionTableForm` "Data → State-Transition Table" menu feature sets it
-true to build its recipe preview; do not remove it.)
+**Status:** the `SimulatorFullSystem` flag and every branch that read it have been
+**deleted** — there is no `SimulatorFullSystem` anywhere in the code. Do not
+re-introduce a 3-PLC-collapse flag. (`SimulatorRecipeMode` is a separate,
+still-LIVE flag — the `StateTransitionTableForm` "Data → State-Transition Table"
+menu feature sets it true to build its recipe preview; do not remove it.)
 
 **(Historical) What it did:** the downstream pipeline gated on the flag and
 collapsed every `<Component Type="Process">` into a single `Process1_Generic` FB
