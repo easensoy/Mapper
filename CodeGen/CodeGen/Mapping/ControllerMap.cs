@@ -11,9 +11,10 @@ namespace CodeGen.Mapping
         // M580IO.hcf 'RES0.M580IO.*' symlinks). Unknown => empty string.
         public static string ResourceForPlc(PlcAssignment plc) => plc switch
         {
-            PlcAssignment.M262 => "M262_RES",
-            PlcAssignment.M580 => "RES0",
-            PlcAssignment.BX1  => "BX1_RES",
+            PlcAssignment.M262  => "M262_RES",
+            PlcAssignment.M580  => "RES0",
+            PlcAssignment.BX1   => "BX1_RES",
+            PlcAssignment.RevPi => "RevPi_RES",
             _ => string.Empty,
         };
 
