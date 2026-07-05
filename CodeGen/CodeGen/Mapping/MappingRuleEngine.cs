@@ -281,21 +281,9 @@ namespace CodeGen.Translation
         }
 
 
-        /// <summary>
-        /// Resolves the configured MappingRulesPath to a real file on disk and
-        /// returns the absolute path. The configured value may be either an
-        /// absolute path or a path relative to mapper_config.json (e.g. the
-        /// default <c>"Input\VueOne_IEC61499_Mapping.xlsx"</c>). Earlier code
-        /// only checked <c>File.Exists(xlsxPath)</c>, which silently relied on
-        /// the .NET current-working-directory to match the EXE folder; launching
-        /// the EXE from any other cwd (Explorer double-click is fine, but
-        /// PowerShell <c>Start-Process</c> without <c>-WorkingDirectory</c>
-        /// inherits the parent shell's cwd) made the file invisible and the
-        /// Mapper threw "Mapping rules spreadsheet not found" even though the
-        /// file was sitting right next to MapperUI.exe under <c>Input\</c>.
-        /// Probe order: the path as given → AppContext.BaseDirectory (the EXE
-        /// folder) → Path.GetFullPath against cwd. First hit wins.
-        /// </summary>
+        // Resolves MappingRulesPath (absolute or relative) to an absolute path. Probe order (first hit
+        // wins): the path as given -> AppContext.BaseDirectory (EXE folder) -> GetFullPath against cwd,
+        // so a non-EXE cwd (e.g. PowerShell Start-Process) can't hide the file next to MapperUI.exe.
         private static string ValidatePath(string xlsxPath)
         {
             if (string.IsNullOrWhiteSpace(xlsxPath))
