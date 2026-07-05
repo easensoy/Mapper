@@ -5,15 +5,8 @@ using CodeGen.Devices.Core;
 
 namespace CodeGen.Devices.BX1
 {
-    /// <summary>
-    /// Deploys the BX1 soft-dPAC's hardware configuration (<c>.hcf</c>) into the
-    /// target EAE project — pure verbatim copy of the user-authored IO-folder
-    /// export (<c>cfg.BX1HcfTemplatePath</c>, falling back to
-    /// <c>cfg.IoFolderPath\BX1IO.hcf</c> then <c>C:\VueOneMapper\IO\BX1IO.hcf</c>).
-    /// The BX1 export is an EtherNet/IP scanner (EIPSCANNER2) whose TM3 module
-    /// words route through single VTQWORD symlinks; carried verbatim. Authoritative
-    /// final pass so the config survives the wiper's empty-shell reset.
-    /// </summary>
+    // Verbatim copy of the BX1 soft-dPAC .hcf (an EtherNet/IP EIPSCANNER2 scanner) into the EAE
+    // project; authoritative final pass so the config survives the wiper's empty-shell reset.
     public static class BX1HwConfigCopier
     {
         public static HwConfigCopyResult Copy(MapperConfig cfg)
@@ -23,12 +16,10 @@ namespace CodeGen.Devices.BX1
             var template = HwConfigVerbatimCopier.ResolveTemplatePath(
                 cfg.BX1HcfTemplatePath, cfg.IoFolderPath, "BX1IO.hcf");
             var copied = HwConfigVerbatimCopier.Deploy(eaeRoot, "Soft_dPAC", "SE.DPAC", template);
-            // FINAL pass: now that HwConfiguration/ is rebuilt (a Clean wipes it; the in-EmitAll deploy
-            // ran before this rebuild and silently no-op'd, leaving an EMPTY EIPSCANNER2.xml so the cover
-            // I/O never reached the coupler), deploy the BX1 EtherNet/IP scanner HwConfiguration model.
+            // Must run AFTER HwConfiguration/ is rebuilt: an in-EmitAll deploy no-ops here, leaving an
+            // EMPTY EIPSCANNER2.xml so the cover I/O never reaches the coupler.
             Station2DeviceEmitter.DeployBx1ScannerModelFinalPass(cfg);
-            // PERMANENT GUARD: abort the Generate if the scanner model did not land (empty scanner =
-            // dead covers). Throws -> the gate exits non-zero + MainForm surfaces the error.
+            // Abort the Generate if the scanner model did not land (empty scanner = dead covers).
             Station2DeviceEmitter.ValidateBx1ScannerModelOrThrow(cfg);
             return copied;
         }
