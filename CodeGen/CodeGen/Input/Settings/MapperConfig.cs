@@ -4,6 +4,11 @@ using System.Text.Json;
 
 namespace CodeGen.Configuration
 {
+    // Which controller hosts the Feed station: the physical Modicon M262 (default) or a Revolution Pi
+    // (RevPi), a PC-hosted Soft_dPAC. RevPi is a device/topology/deployment substitution only — the Feed
+    // FB network (Process1_Generic + stateRprtCmd ring), the recipe, and the interlocks are unchanged.
+    public enum FeedController { M262, RevPi }
+
     public class MapperConfig
     {
         private const string ConfigFileName = "mapper_config.json";
@@ -11,6 +16,11 @@ namespace CodeGen.Configuration
         public static readonly bool StubSevenStateActuatorsAsFiveState = false;
 
         public static bool SimulatorRecipeMode = false;
+
+        // Feed-station controller target (single toggle for the whole Feed station). Static so the static
+        // ComponentRegistry partition reads it; set from the UI before generation. Default M262 keeps the
+        // generated project byte-identical to the M262 rig.
+        public static FeedController FeedStationController = FeedController.M262;
 
         public static bool RecipeRunOnce = true;
 
@@ -111,6 +121,11 @@ namespace CodeGen.Configuration
 
         // HMIB1X panel host IP: setting this makes BX1 a REMOTE panel not a local Workstation (whose runtime EAE resolves to 127.0.0.1 -- the "cannot connect to BX1" error).
         public string BX1HostIp { get; set; } = DeviceConfig.Current.Bx1.HostIp;
+
+        // Revolution Pi (Soft_dPAC) Feed-station host, used only when FeedStationController == RevPi.
+        // Defaults from Jyotsna's RevPi reference (softpac runtime .6, host NIC .2).
+        public string RevPiTargetIp { get; set; } = "192.168.1.6";
+        public string RevPiHostIp { get; set; } = "192.168.1.2";
 
         // EAE constraint: an FDT project copied verbatim from another solution can make the topology server throw a 500 on import.
         public bool EmitBx1EtherNetIpDevice { get; set; } = true;
