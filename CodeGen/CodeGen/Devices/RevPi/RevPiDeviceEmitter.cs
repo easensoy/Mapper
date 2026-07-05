@@ -59,7 +59,7 @@ namespace CodeGen.Devices.RevPi
                 return report;
             }
 
-            var systemGuidDir = FindSystemGuidDir(eaeRoot);
+            var systemGuidDir = EaeProjectLayout.FindSystemGuidDir(eaeRoot);
             if (systemGuidDir == null)
             {
                 report.Missing.Add("[RevPi] skipped, no System GUID folder (run a Test Runtime once first)");
@@ -121,7 +121,7 @@ namespace CodeGen.Devices.RevPi
                 report.Missing.Add("[Wire] skipped, EAE project root not derivable (RevPi)");
                 return;
             }
-            var systemGuidDir = FindSystemGuidDir(eaeRoot);
+            var systemGuidDir = EaeProjectLayout.FindSystemGuidDir(eaeRoot);
             var sysresPath = systemGuidDir == null ? null : ResolveRevPiSysresPath(systemGuidDir);
             if (sysresPath == null || !File.Exists(sysresPath))
             {
@@ -177,17 +177,6 @@ namespace CodeGen.Devices.RevPi
                 return head.Contains($"Type=\"{type}\"", StringComparison.Ordinal);
             }
             catch { return false; }
-        }
-
-        static string? FindSystemGuidDir(string eaeRoot)
-        {
-            var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
-            if (!Directory.Exists(systemDir)) return null;
-            return Directory.EnumerateDirectories(systemDir).FirstOrDefault(d =>
-            {
-                var name = Path.GetFileName(d);
-                return Guid.TryParse(name, out _) && !name.StartsWith(".");
-            });
         }
 
         // Revolution Pi topology equipment — the reference form (Workstation host + NIC + SoftdpacContainer
