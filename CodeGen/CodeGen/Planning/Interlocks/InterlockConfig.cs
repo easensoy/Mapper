@@ -2,11 +2,7 @@ using CodeGen.Configuration;
 
 namespace CodeGen.Translation.Interlocks
 {
-    /// <summary>
-    /// Interlock generation policy from <c>Config/interlock.yaml</c> — the array size, the STRUCT
-    /// interface flag, and the centre-home raw-state range. The rules come from Control.xml
-    /// (<see cref="InterlockPlanner"/>); this is generation policy only.
-    /// </summary>
+    // Interlock generation policy from Config/interlock.yaml (rules come from Control.xml via InterlockPlanner).
     public sealed class InterlockConfig
     {
         public int RuleArraySize { get; set; }
