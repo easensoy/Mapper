@@ -7,45 +7,10 @@ using System.Xml.Linq;
 
 namespace CodeGen.Services
 {
-    /// <summary>
-    /// Deep-wipe of the Demonstrator EAE project. "Clean" used to mean only
-    /// `git reset --hard` + `git clean -fd -e *.lock_sln` which still left the
-    /// FB instances on the canvases (they're tracked at HEAD) and the FB type
-    /// definitions deployed by Mapper (those are tracked too).
-    ///
-    /// This wiper takes the project to a brand-new-EAE-project state with NO
-    /// devices — the Mapper recreates every logical + physical device on the next
-    /// Test Runtime:
-    ///   * IEC61499/        — only the dfbproj shell + System/ folder
-    ///   * System/          — the .system project root + the application (.sysapp +
-    ///                       its folder) kept; the dPAC LOGICAL DEVICES (every
-    ///                       .sysdev + its device folder) DELETED — recreated by
-    ///                       M262SysdevEmitter (bootstrap) + Station2DeviceEmitter
-    ///   * .syslay          — empty SubAppNetwork
-    ///   * dfbproj          — stripped of CAT/Basic/Adapter entries AND the deleted
-    ///                       sysdev/sysres entries (System refs kept only if the
-    ///                       file still exists); Mapper re-registers devices
-    ///   * HwConfiguration/ — DELETED (TM3 module + M262 hardware-config snapshots
-    ///                       that M262HwConfigCopier replays every Button 2; without
-    ///                       wiping it, baseline entries stack on top of the
-    ///                       previously-deployed copy and EAE's Deploy &amp;
-    ///                       Diagnostic tree shows duplicate M262_RES nodes)
-    ///   * Topology/        — the PHYSICAL DEVICES (Equipment/Wire/BroadcastDomain
-    ///                       JSON + their topologyproj registrations) DELETED —
-    ///                       recreated by M262TopologyEmitter / Station2DeviceEmitter
-    ///                       / TopologyNetworkEmitter / BroadcastDomainEmitter. The
-    ///                       .solutionData (trust/identity) + topologyproj shell stay.
-    ///   * General/         — UNTOUCHED (project metadata)
-    ///   * HMI/, AvevaOMI/  — UNTOUCHED (other project sections)
-    ///
-    /// Sysdev <Resource> dedup is intentionally NOT done here — it lives in
-    /// SystemInjector.PrepareDemonstratorForGeneration (logged as
-    /// [CleanDevice] ...) so the same logic runs whether the user clicks
-    /// Clean Demonstrator (wires Prepare after this Wipe) or Button 1/2.
-    ///
-    /// Every step is best-effort (tries to swallow individual file errors) so the
-    /// caller gets a complete summary of what succeeded vs failed.
-    /// </summary>
+    // Deep-wipes the Demonstrator EAE project to a no-devices state: empties canvases, deletes
+    // Mapper-deployed FB types + logical/physical devices + HwConfiguration, and strips their dfbproj/
+    // topologyproj entries. The Mapper recreates everything on the next Test Runtime. Best-effort
+    // (per-file errors are collected, never thrown). Keeps General/HMI/.system/.solutionData.
     public static class DemonstratorWiper
     {
         public sealed class WipeReport
@@ -56,8 +21,6 @@ namespace CodeGen.Services
             public int FilesDeleted { get; set; }
             public int FoldersDeleted { get; set; }
             public int DfbprojEntriesRemoved { get; set; }
-            /// <summary>Files removed from the project's HwConfiguration/ folder
-            /// (TM3 module snapshots + M262 hardware-config exports).</summary>
             public int HwConfigFilesDeleted { get; set; }
         }
 
@@ -102,31 +65,14 @@ namespace CodeGen.Services
             }
             report.Steps.Add($"Target: {iec}");
 
-            // 1. Empty all canvases (.syslay, .sysres, .hcf, .sysapp) back
-            //    to their EAE-skeleton state — empty <SubAppNetwork/> and
-            //    <FBNetwork/> shells. This wipes Mapper-emitted FB
-            //    instances + connections (Area, Area_HMI, Station1,
-            //    PartInHopper, M262IO, FB1/FB2, all wires) while leaving
-            //    the canvas FILE itself intact for EAE to keep referencing.
-            //    The .sysdev/.system/dfbproj/Topology/General/HMI ARE the
-            //    skeleton and stay untouched.
+            // 1. Empty all canvases (.syslay/.sysres/.hcf/.sysapp) to empty-network shells, keeping the
+            //    files for EAE to reference.
             EmptyAllCanvases(iec, report);
 
-            // 1b. Delete the LOGICAL DEVICES (each dPAC's .sysdev file + its device
-            //     folder) so the Mapper recreates them from scratch. Runs BEFORE
-            //     StripDfbproj so the now-missing sysdev/sysres/.hcf/Properties
-            //     entries are pruned from the dfbproj automatically (it keeps a
-            //     System/* entry only if File.Exists). The .system project root + the
-            //     application (.sysapp + its folder) stay.
+            // 1b/1c run BEFORE StripDfbproj so the now-missing entries are pruned (dfbproj keeps a
+            //    System/* entry only if File.Exists).
             DeleteLogicalDevices(iec, report);
 
-            // 1c. Delete the APPLICATION (the .sysapp + its content folder) so EAE shows
-            //     nothing under "Applications" — exactly like the now-empty Devices tree.
-            //     Runs BEFORE StripDfbproj so the now-missing .sysapp/.syslay/aspmap/opcua
-            //     entries are pruned. The Mapper
-            //     recreates the shell on the next Generate via
-            //     ApplicationShellEmitter.EnsureApplicationShell (wired into
-            //     PrepareDemonstratorForGeneration), mirroring the device bootstrap.
             CodeGen.Devices.Core.ApplicationShellEmitter.DeleteApplicationShell(
                 iec, line => report.Steps.Add(line));
 
@@ -142,16 +88,8 @@ namespace CodeGen.Services
             // 5. Delete top-level export/scratch files in the repo root that EAE/Mapper leave behind.
             DeleteRepoRootScratch(demonstratorRepoRoot, report);
 
-            // 6. Wipe HwConfiguration/ — the TM3 module + M262 hardware-config
-            //    snapshots that M262HwConfigCopier.Copy replays from baseline
-            //    every Button 2. Leaving this folder populated stacks fresh
-            //    baseline entries on top of stale deployed ones, which EAE
-            //    surfaces as duplicate M262_RES nodes under Devices > M262.
-            //    M262HwConfigCopier recreates the folder on the next run when
-            //    cfg.M262HardwareConfigBaselinePath points at a baseline; if
-            //    it doesn't, EAE just shows an empty Hardware Configurator
-            //    until the user wires one up — strictly better than carrying
-            //    duplicated resource entries forward.
+            // 6. Wipe HwConfiguration/; leaving it populated stacks stale baseline entries and EAE
+            //    shows duplicate M262_RES nodes. M262HwConfigCopier recreates it from the baseline.
             DeleteHwConfiguration(demonstratorRepoRoot, report);
 
             // 7. Delete the PHYSICAL DEVICES — Topology Equipment (PLCs, the L2
@@ -333,14 +271,8 @@ namespace CodeGen.Services
             while (i < lines.Length)
             {
                 var line = lines[i];
-                // Include <Content> too: the device .hcf + the EAE compile
-                // artifacts (opcua.xml / offline.xml / opcuaclient.xml / symlink.xml)
-                // are registered as <Content System\…>. Without stripping these,
-                // a Clean that deletes the device folders leaves the dfbproj
-                // pointing at non-existent files → EAE's Solution Integrity lists
-                // them as Missing Project Files. ShouldKeepDfbprojEntry keeps the
-                // ones whose file still exists (e.g. the application 0001 opcua/
-                // aspmap), so widening the match is safe.
+                // <Content> included: device .hcf + EAE compile artifacts register as <Content>; a stale
+                // one left after a device-folder delete = EAE "Missing Project Files". Kept only if the file exists.
                 var m = Regex.Match(line, @"^\s*<(Compile|None|EmbeddedResource|Content)\b", RegexOptions.IgnoreCase);
                 if (m.Success)
                 {
@@ -400,14 +332,7 @@ namespace CodeGen.Services
             return false;
         }
 
-        /// <summary>
-        /// Recursively deletes the project's <c>HwConfiguration/</c> folder
-        /// (typo-preserving "Demonstator" path takes precedence, with the
-        /// canonical "Demonstrator" spelling as fallback). Best-effort —
-        /// per-file failures are logged as warnings but never abort the wipe.
-        /// On the next Button 2 run, <c>M262HwConfigCopier.Copy</c> recreates
-        /// the folder from <c>cfg.M262HardwareConfigBaselinePath</c>.
-        /// </summary>
+        // Delete HwConfiguration/; M262HwConfigCopier.Copy recreates it from the baseline next run.
         static void DeleteHwConfiguration(string repoRoot, WipeReport report)
         {
             string? found = null;
@@ -445,18 +370,7 @@ namespace CodeGen.Services
             }
         }
 
-        /// <summary>
-        /// Deletes the LOGICAL DEVICES — every dPAC <c>.sysdev</c> file plus its
-        /// same-stem device folder (which holds that device's <c>.sysres</c>,
-        /// <c>.hcf</c>, <c>opcua.xml</c>, the two Properties XMLs and
-        /// <c>Simulation.Binding.xml</c>). KEEPS the project root (<c>.system</c>),
-        /// the application (<c>.sysapp</c> + its folder), and the
-        /// <c>.cfg</c>/<c>.doc.xml</c>/<c>snapshot.xml</c> skeleton — those are not
-        /// devices; they are what the Mapper recreates devices INTO. On the next
-        /// Test Runtime <see cref="CodeGen.Devices.M262.M262SysdevEmitter"/>
-        /// (bootstrap) + <see cref="CodeGen.Devices.Core.Station2DeviceEmitter"/>
-        /// rebuild the M262/M580/BX1 logical devices from scratch.
-        /// </summary>
+        // Delete each dPAC .sysdev + its same-stem device folder; keep the .system root + application.
         static void DeleteLogicalDevices(string iecDir, WipeReport report)
         {
             var systemDir = Path.Combine(iecDir, "System");
@@ -494,15 +408,7 @@ namespace CodeGen.Services
                 "Mapper recreates M262/M580/BX1 on the next Test Runtime.");
         }
 
-        /// <summary>
-        /// Deletes the PHYSICAL DEVICES — the Topology <c>Equipment_*.json</c>
-        /// (PLCs, the L2 switch, the EtherNet/IP coupler), the <c>Wire_*.json</c>
-        /// that connect them, and the <c>BroadcastDomain_*.json</c> networks — and
-        /// prunes their <c>TopologyManager.topologyproj</c> registrations. All are
-        /// Mapper-regenerated on the next Test Runtime, so the wipe yields a clean
-        /// "no physical devices" slate. The project <c>.solutionData</c> (trust /
-        /// identity) and the topologyproj shell are kept.
-        /// </summary>
+        // Delete Topology Equipment/Wire/BroadcastDomain JSON + their topologyproj entries; keep .solutionData.
         static void DeletePhysicalDevices(string iecDir, WipeReport report)
         {
             // Topology/ is a sibling of IEC61499/ under the project folder.
@@ -533,13 +439,7 @@ namespace CodeGen.Services
                 "Mapper recreates them on the next Test Runtime.");
         }
 
-        /// <summary>
-        /// Removes <c>&lt;None Include="…"&gt;</c> entries from
-        /// <c>TopologyManager.topologyproj</c> that point at an Equipment/Wire/
-        /// BroadcastDomain JSON just deleted (file no longer on disk). Keeps every
-        /// other entry (solutionData, Content/, folders, files still present). The
-        /// Mapper re-registers the regenerated devices on the next Test Runtime.
-        /// </summary>
+        // Drop topologyproj entries pointing at a just-deleted Equipment/Wire/BroadcastDomain JSON.
         static void StripTopologyProj(string topoDir, WipeReport report)
         {
             var proj = Path.Combine(topoDir, "TopologyManager.topologyproj");
