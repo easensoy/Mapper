@@ -9,53 +9,20 @@ using CodeGen.Devices.M262;
 
 namespace CodeGen.Devices.Core
 {
-    /// <summary>
-    /// Emits Topology Physical-Views NETWORK objects — the L2 Switch_1
-    /// and the Wire JSON files that connect M262 ↔ Switch_1 ↔ M580.
-    /// EAE's Physical Views diagram shows these as the cables running between
-    /// device icons. Without them, every PLC icon sits isolated and EAE has no
-    /// declared path between them.
-    ///
-    /// <para>Reference layout (from <c>SMC_Rig_Expo_withClamp/Topology/</c>):</para>
-    /// <list type="bullet">
-    ///   <item><c>Equipment_Switch_1.json</c> — GenericL2UnmanagedSwitch8Ports
-    ///         catalog. Eight EthernetDEO ports, no IP, no interfaces.</item>
-    ///   <item><c>Wire_M262_to_Switch1.json</c> — M262.Ethernet1 → Switch_1.Port1.</item>
-    ///   <item><c>Wire_Switch1_to_M580.json</c> — Switch_1.Port2 → M580 BME D58 1020.ETH1.</item>
-    /// </list>
-    ///
-    /// <para>Wire endpoints reference the Equipment JSON's <c>uuid</c> field —
-    /// for the M580 wire the destination is the NESTED CPU UUID
-    /// (<c>BME D58 1020 #0</c>), not the M580dPAC_1 root, because that's the
-    /// device that actually owns the ETH1 port. Symmetric with the reference
-    /// (<c>Wire 171.json</c>'s <c>destinationEquipment</c> is the reference's
-    /// BME D58 CPU UUID, not the rack root).</para>
-    ///
-    /// <para>Idempotent — each write deletes any pre-existing file first then
-    /// rewrites, so a previously-merged file from a manual import cannot
-    /// survive a re-emit. Registered in <c>TopologyManager.topologyproj</c>.</para>
-    /// </summary>
+    // Emits Topology Physical-Views NETWORK objects (L2 Switch_1 + Wire JSONs) connecting
+    // M262 <-> Switch_1 <-> M580. A wire's destination for the M580 must be the nested CPU
+    // UUID that owns ETH1, not the rack root.
     public static class TopologyNetworkEmitter
     {
-        // Stable per-project UUIDs picked to avoid colliding with the M262/M580/BX1
-        // Equipment UUIDs (10/40/50 ranges). The 60+ range is the network slot.
         const string Switch1Uuid          = "11111111-2222-3333-4444-000000000060";
         const string WireM262SwitchUuid   = "11111111-2222-3333-4444-000000000061";
         const string WireSwitchM580Uuid   = "11111111-2222-3333-4444-000000000062";
 
-        // The other endpoints — these MUST match what M262TopologyEmitter +
-        // Station2DeviceEmitter actually write. Hardcoded as compile-time
-        // constants here too (not borrowed) to keep this file standalone.
+        // Endpoint UUIDs MUST match what M262TopologyEmitter + Station2DeviceEmitter write.
         const string M262EquipmentUuid    = "11111111-2222-3333-4444-000000000010";
         const string M580CpuUuid          = "11111111-2222-3333-4444-000000000044";
         const string FallbackSolutionUuid = "00000000-0000-0000-0000-000000000000";
 
-        // BX1 EtherNet/IP daisy-chain endpoints (match Station2DeviceEmitter's
-        // BX1EtherNetIpUuid + BX1EquipmentUuid, which match the reference). The
-        // reference wires the TM3BC coupler between the Switch and the HMIB1X panel:
-        // Switch Port4 -> EtherNetIPDevice Port2 (Wire 191), EtherNetIPDevice Port1
-        // -> HMIB1X LAN1 (Wire 193). We mirror that so the BX1 panel reaches the
-        // network through its coupler.
         const string Bx1EtherNetIpUuid    = "49d2ea8e-3a4f-4ead-add4-ec4ba00d5239"; // EtherNetIPDevice_1 (.210)
         const string Bx1HmiB1XUuid        = "49363b74-1a84-46c1-b4cd-93f02374daec"; // HMIB1X_1 (BX1 panel .209)
 
@@ -85,9 +52,7 @@ namespace CodeGen.Devices.Core
                 return result;
             }
 
-            // Pin DomainTag to the live SolutionId so EAE accepts the Equipment
-            // JSONs at topology-import time (a zero DomainTag triggers "Object
-            // reference not set" in EAE 24.1's TopologyManager).
+            // DomainTag must be the live SolutionId; a zero DomainTag fails topology-import.
             var solutionId = M262TopologyEmitter.ReadProjectGuid(eaeRoot) ?? FallbackSolutionUuid;
 
             ForceWriteJson(topologyDir, "Equipment_Switch_1.json", BuildSwitchJson(solutionId), result, eaeRoot);
@@ -111,13 +76,9 @@ namespace CodeGen.Devices.Core
                 "Wire_Switch1_to_M580.json",
             };
 
-            // BX1 EtherNet/IP daisy-chain (only when the coupler is emitted). Mirrors
-            // the reference: Switch Port3 -> EtherNetIPDevice Port2, and
-            // EtherNetIPDevice Port1 -> HMIB1X LAN1 — so the BX1 panel reaches the
-            // network through its TM3BC coupler and the softdpac's EtherNet/IP scanner
-            // (declared by the .hcf) has its physical-views counterpart. Both endpoints
-            // are real Equipment, so SweepOrphanWires keeps them. Switch Port3 is free
-            // (Port1=M262, Port2=M580).
+            // BX1 EtherNet/IP daisy-chain (only when the coupler is emitted): Switch Port3 ->
+            // EtherNetIPDevice Port2, EtherNetIPDevice Port1 -> HMIB1X LAN1. Both endpoints are
+            // real Equipment so SweepOrphanWires keeps them.
             if (cfg.EmitBx1EtherNetIpDevice)
             {
                 ForceWriteJson(topologyDir, "Wire_Switch1_to_EtherNetIP.json", BuildWireJson(
@@ -136,8 +97,7 @@ namespace CodeGen.Devices.Core
                 registerNames.Add("Wire_EtherNetIP_to_BX1.json");
             }
 
-            // Register in TopologyManager.topologyproj so the EAE build target picks
-            // them up.
+            // Register in TopologyManager.topologyproj so the EAE build target picks them up.
             var topologyProj = Path.Combine(topologyDir, "TopologyManager.topologyproj");
             if (File.Exists(topologyProj))
             {
@@ -151,32 +111,21 @@ namespace CodeGen.Devices.Core
                     "written but not registered with the TopologyManager build target.");
             }
 
-            // ORPHAN-WIRE SWEEP. EAE 24.1's TopologyManager resolves every Wire's
-            // source/destination Equipment UUID against the loaded Equipment_*.json. A wire
-            // pointing at a UUID that NO device declares makes the import throw HTTP 500 ("Unable
-            // to import topology / Internal Server Error") in ~150 ms BEFORE any device is parsed —
-            // aborting the WHOLE topology (empty Physical Views). Generic + future-proof: delete +
-            // de-register ANY Wire_*.json whose endpoint UUID is declared by no Equipment, so any
-            // future device-form change self-heals.
+            // A wire whose endpoint UUID is declared by NO Equipment makes EAE's TopologyManager
+            // 500 the entire import — delete + de-register any such orphan wire.
             SweepOrphanWires(topologyDir, Path.Combine(topologyDir, "TopologyManager.topologyproj"),
                 result, eaeRoot);
 
             return result;
         }
 
-        /// <summary>
-        /// Deletes + de-registers any <c>Wire_*.json</c> whose <c>sourceEquipment</c>
-        /// or <c>destinationEquipment</c> UUID is declared by NO <c>Equipment_*.json</c>
-        /// in the Topology folder (a dangling wire from a device UUID/form change). A
-        /// dangling wire endpoint makes EAE's TopologyManager 500 the entire import.
-        /// Conservative: if no equipment UUIDs are readable it sweeps nothing.
-        /// </summary>
+        // Deletes + de-registers any Wire_*.json whose endpoint UUID is declared by no Equipment.
+        // Conservative: if no equipment UUIDs are readable it sweeps nothing.
         static void SweepOrphanWires(string topologyDir, string topologyProj,
             EmitResult result, string eaeRoot)
         {
             try
             {
-                // Every UUID any Equipment declares (root + nested equipments + components).
                 var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var uuidRx = new Regex("\"uuid\"\\s*:\\s*\"([0-9a-fA-F-]{36})\"");
                 foreach (var eq in Directory.EnumerateFiles(topologyDir, "Equipment_*.json"))
@@ -235,12 +184,11 @@ namespace CodeGen.Devices.Core
                 foreach (var n in nodes) n.Remove();
                 doc.Save(topologyProj);
             }
-            catch { /* best-effort; the deleted file alone is the primary fix */ }
+            catch { }
         }
 
-        // Force-clean write — delete any pre-existing file before rewrite so a
-        // manual user import (or an EAE merge) can't leave hybrid content behind.
-        // Same defensive pattern Station2DeviceEmitter uses for the Equipment JSONs.
+        // Delete any pre-existing file before rewrite so a manual import / EAE merge can't leave
+        // hybrid content behind.
         static void ForceWriteJson(string dir, string fileName, string content,
             EmitResult result, string eaeRoot)
         {
