@@ -23,6 +23,19 @@ namespace CodeGen.Devices.Core
             return null;
         }
 
+        // The single System GUID folder (IEC61499/System/<guid>/) that holds every device's sysdev; the
+        // application + all devices live under it. null if the project root has no such folder yet.
+        public static string? FindSystemGuidDir(string eaeRoot)
+        {
+            var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
+            if (!Directory.Exists(systemDir)) return null;
+            return Directory.EnumerateDirectories(systemDir).FirstOrDefault(d =>
+            {
+                var name = Path.GetFileName(d);
+                return Guid.TryParse(name, out _) && !name.StartsWith(".");
+            });
+        }
+
         public static string? FindSysresFor(string sysdevPath)
         {
             var sysdevFolder = Path.Combine(
