@@ -275,7 +275,7 @@ namespace MapperUI
             this.colDevice.Width = 110;
             this.colDevice.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.colDevice.DisplayStyle = System.Windows.Forms.DataGridViewComboBoxDisplayStyle.DropDownButton;
-            this.colDevice.ToolTipText = "Target device/controller for this component (editable). RevPi is a future target; generation for a re-assigned device is not wired yet.";
+            this.colDevice.ToolTipText = "Feed-station controller. Set any component to RevPi to host the whole Feed station on the Revolution Pi (Soft_dPAC) instead of M262; leave all on M262 for the default rig. (M580/BX1 are fixed.)";
             this.colDevice.Items.AddRange(new object[] { "M262", "M580", "BX1", "RevPi" });
 
 
