@@ -9,19 +9,13 @@ using static CodeGen.Services.FbtXmlEditor;
 
 namespace CodeGen.Services
 {
-    // Deploy-time patchers for the actuator/sensor CATs: QI guards, the interlock/target datatype
-    // deployers + struct collapses, the centre-home swivel patches, and the ring-relay fixes.
-    // Consumed via `using static` so the call sites in TemplateLibraryDeployer stay unqualified.
-    // (The embedded MQTT publish/formatter is a separate concern and stays in TemplateLibraryDeployer.)
+    // Deploy-time patchers for the actuator/sensor CATs. Consumed via `using static`.
     internal static class ActuatorCatTemplatePatcher
     {
-        // Idempotent guard: ensure the internal SYMLINKMULTIVARDST inside the deployed Sensor_Bool_CAT.fbt
-        // carries QI=TRUE. Without QI the DST defaults FALSE (disabled subscriber -> publishes to
-        // '$${PATH}Input' silently dropped, sensor never registers on the ring). The zip already ships it;
-        // this guards a future zip re-swap. Touches only Sensor_Bool_CAT.fbt.
+        // Force QI=TRUE on Sensor_Bool_CAT's internal SYMLINKMULTIVARDST; without it the DST defaults
+        // FALSE (disabled subscriber, publishes to '$${PATH}Input' silently dropped). Idempotent.
         internal static void PatchSensorBoolCatDstQi(string eaeProjectDir, DeployResult result)
         {
-            // Sensor_Bool_CAT deploys flat-ish under IEC61499/Sensor_Bool_CAT/.
             var fbt = Path.Combine(eaeProjectDir, "IEC61499", "Sensor_Bool_CAT", "Sensor_Bool_CAT.fbt");
             if (!File.Exists(fbt))
             {
@@ -52,16 +46,12 @@ namespace CodeGen.Services
                     (string?)p.Attribute("Name") == "QI");
                 if (hasQi)
                 {
-                    // Already present (idempotent no-op) — but force the value
-                    // to TRUE in case a swap shipped QI=FALSE.
                     foreach (var p in dst.Elements(ns + "Parameter")
                                  .Where(p => (string?)p.Attribute("Name") == "QI"))
                         p.SetAttributeValue("Value", "TRUE");
                 }
                 else
                 {
-                    // Insert QI=TRUE right after the NAME1 parameter so it
-                    // sits alongside it, matching the shipped template shape.
                     var name1 = dst.Elements(ns + "Parameter")
                         .FirstOrDefault(p => (string?)p.Attribute("Name") == "NAME1");
                     var qi = new System.Xml.Linq.XElement(ns + "Parameter",
@@ -85,10 +75,8 @@ namespace CodeGen.Services
             }
         }
 
-        // Same QI=FALSE-by-default guard as Sensor_Bool_CAT, for an actuator CAT: force QI=TRUE on BOTH
-        // its internal SYMLINKMULTIVARDST ("Inputs", subscribes $${PATH}athome/atwork) and
-        // SYMLINKMULTIVARSRC ("Output", publishes $${PATH}OutputToHome/OutputToWork). Without QI the DST
-        // rejects sensor publishes and the SRC never writes the solenoid. Idempotent.
+        // Force QI=TRUE on an actuator CAT's internal SYMLINKMULTIVARDST (Inputs) + SYMLINKMULTIVARSRC
+        // (Output); without QI the DST rejects sensor publishes and the SRC never writes the solenoid.
         internal static void PatchCatSymlinkQi(string eaeProjectDir, string catName, DeployResult result)
         {
             var fbt = Path.Combine(eaeProjectDir, "IEC61499",
@@ -160,8 +148,7 @@ namespace CodeGen.Services
             }
         }
 
-        // InterlockRule datatype (4 INT fields) — the STRUCT the four parallel Rule arrays collapse
-        // into (RuleTable : ARRAY OF InterlockRule). EAE regenerates the nxtDataType signature on load.
+        // The STRUCT the four parallel Rule arrays collapse into (RuleTable : ARRAY OF InterlockRule).
         const string InterlockRuleDt =
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
             "<!DOCTYPE DataType SYSTEM \"../LibraryElement.dtd\">\r\n" +
@@ -177,8 +164,6 @@ namespace CodeGen.Services
             "  </StructuredType>\r\n" +
             "</DataType>";
 
-        // Deploy the InterlockRule datatype (one rule's four INT fields), registered via the
-        // DataTypesDeployed loop. Idempotent (copy-if-absent).
         internal static void DeployInterlockRuleDatatype(string eaeProjectDir, DeployResult result)
         {
             try
@@ -198,8 +183,7 @@ namespace CodeGen.Services
             }
         }
 
-        // InterlockTable: the encapsulated interlock interface — Count : INT + Rules : ARRAY OF
-        // InterlockRule. Rules' ArraySize comes from interlock.yaml ruleArraySize (no magic number).
+        // Encapsulated interlock interface (Count + Rules[]); Rules ArraySize from interlock.yaml ruleArraySize.
         static string BuildInterlockTableDt() =>
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
             "<!DOCTYPE DataType SYSTEM \"../LibraryElement.dtd\">\r\n" +
@@ -213,8 +197,6 @@ namespace CodeGen.Services
             "  </StructuredType>\r\n" +
             "</DataType>";
 
-        // Deploy the InterlockTable datatype so EAE resolves the single RuleTable : InterlockTable input
-        // the normalizers expose on the actuator CATs + CommonInterlockEvaluator. Idempotent.
         internal static void DeployInterlockTableDatatype(string eaeProjectDir, DeployResult result)
         {
             try
@@ -234,7 +216,6 @@ namespace CodeGen.Services
             }
         }
 
-        // TargetStates: the actuator target states folded into one struct.
         const string TargetStatesDt =
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
             "<!DOCTYPE DataType SYSTEM \"../LibraryElement.dtd\">\r\n" +
@@ -249,8 +230,6 @@ namespace CodeGen.Services
             "  </StructuredType>\r\n" +
             "</DataType>";
 
-        // Deploy the TargetStates datatype so EAE resolves the Target : TargetStates input the
-        // normalizers expose. Idempotent.
         internal static void DeployTargetStatesDatatype(string eaeProjectDir, DeployResult result)
         {
             try
@@ -270,7 +249,6 @@ namespace CodeGen.Services
             }
         }
 
-        // Scalar target InputVar -> TargetStates field, and the Input-pin coords used on restore.
         static readonly Dictionary<string, string> TargetVarToField = new()
         {
             ["TargetWork1State"] = "Work1",
@@ -283,7 +261,6 @@ namespace CodeGen.Services
             ["TargetWork2State"] = ("1440", "2172"),
             ["TargetHomeState"]  = ("1380", "2192"),
         };
-        // Which evaluator event originally sampled which target member (for the scalar restore).
         static readonly Dictionary<string, string> EvaluatorEventToTargetVar = new()
         {
             ["INIT"]      = "TargetWork1State",
@@ -291,8 +268,7 @@ namespace CodeGen.Services
             ["REQ_HOME"]  = "TargetHomeState",
         };
 
-        // Fold an actuator CAT's target InputVars into one Target : TargetStates that flows whole into the
-        // interlock evaluator instance interlockFbName. Bidirectional + idempotent; reduce==false restores scalars.
+        // Fold an actuator CAT's target InputVars into one Target : TargetStates; reduce==false restores scalars.
         internal static void NormalizeTargetStates(
             string eaeProjectDir, string catFileName, string interlockFbName,
             string[] targetInputs, bool reduce, DeployResult result)
@@ -427,8 +403,8 @@ namespace CodeGen.Services
             }
         }
 
-        // Fold the CommonInterlockEvaluator's three target InputVars into one Target : TargetStates and
-        // rewrite the Work1/Work2/Home algorithms to read Target.Work1/Work2/Home. Bidirectional + idempotent.
+        // Fold the CommonInterlockEvaluator's three target InputVars into one Target : TargetStates + rewrite
+        // the Work1/Work2/Home algorithms to Target.Work1/Work2/Home; reduce==false restores scalars.
         internal static void NormalizeCommonInterlockEvaluatorTargets(
             string eaeProjectDir, bool reduce, DeployResult result)
         {
@@ -500,7 +476,6 @@ namespace CodeGen.Services
                     {
                         if (!ev.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == "Target")) continue;
                         changed |= RemoveElems(ev.Elements(ns + "With"), w => (string?)w.Attribute("Var") == "Target");
-                        // Restore only the member this event originally sampled (INIT→Work1, REQ_WORK2→Work2, REQ_HOME→Home).
                         var evName = (string?)ev.Attribute("Name");
                         if (evName != null && EvaluatorEventToTargetVar.TryGetValue(evName, out var tv)
                             && !ev.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == tv))
@@ -511,7 +486,6 @@ namespace CodeGen.Services
                     }
                 }
 
-                // Work1/Work2/Home algorithms: TargetWorkNState <-> Target.<field>.
                 foreach (var alg in basic.Elements(ns + "Algorithm"))
                 {
                     var stEl = alg.Element(ns + "ST");
@@ -543,8 +517,7 @@ namespace CodeGen.Services
             }
         }
 
-        // The four parallel interlock-rule arrays that collapse into one
-        // RuleTable : InterlockRule[10]. Order matches struct field order.
+        // Order matches struct field order.
         static readonly string[] RuleArrayNames =
             { "RuleFromState", "RuleToState", "RuleSourceID", "RuleBlockedState" };
         static readonly Dictionary<string, string> RuleArrayToField = new()
@@ -556,9 +529,7 @@ namespace CodeGen.Services
         };
 
         // Interlock-struct reduction on an actuator CAT (gated by interlock.yaml useStruct): collapse the
-        // four parallel Rule arrays (face InputVar + INIT With + boundary Input + DataConnection to the
-        // interlock FB) into one RuleTable : InterlockRule[10]. Bidirectional + idempotent; reduce==false
-        // restores the four arrays. The deployer is copy-if-absent, so the .fbt is reshaped to the flag each deploy.
+        // four parallel Rule arrays into one RuleTable : InterlockRule[10]; reduce==false restores the arrays.
         internal static void NormalizeFiveStateRuleArrays(
             string eaeProjectDir, string catFileName, string interlockFbName,
             bool reduce, DeployResult result)
@@ -588,9 +559,7 @@ namespace CodeGen.Services
                     return;
                 }
                 var inputVars = iface.Element(ns + "InputVars");
-                // Find the event whose WITH list carries the rule data (the 4 arrays
-                // when expanded, or RuleTable when collapsed). Five_State uses INIT; the
-                // Centre-Home CAT may use a different event -- search, don't hardcode.
+                // Find the event whose WITH carries the rule data — search, don't hardcode (Centre-Home differs from INIT).
                 var initEvent = iface.Element(ns + "EventInputs")?.Elements(ns + "Event")
                     .FirstOrDefault(e => e.Elements(ns + "With").Any(w =>
                         RuleArrayNames.Contains((string?)w.Attribute("Var"))
@@ -600,16 +569,11 @@ namespace CodeGen.Services
                 var dataConns = net.Element(ns + "DataConnections");
 
                 bool changed = false;
-                // The CAT-level interlock inputs the encapsulated form removes (4 arrays + scalar count).
                 var scalarAndArrays = RuleArrayNames.Concat(new[] { "RuleCount" }).ToArray();
                 string cap = InterlockConfig.Current.RuleArraySize.ToString();
 
                 if (reduce)
                 {
-                    // Encapsulated interface: ONE input RuleTable : InterlockTable (= Count + Rules[]).
-                    // Place RuleTable where the interlock block was (before RuleCount), then strip the
-                    // 4 arrays + standalone RuleCount. An existing flat RuleTable (InterlockRule[]) is
-                    // retyped in place to InterlockTable.
                     var rtVar = inputVars?.Elements(ns + "VarDeclaration").FirstOrDefault(v => (string?)v.Attribute("Name") == "RuleTable");
                     if (rtVar != null)
                     {
@@ -664,7 +628,6 @@ namespace CodeGen.Services
                 }
                 else
                 {
-                    // Restore the legacy interface: scalar RuleCount + the 4 INT arrays; drop RuleTable.
                     changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == "RuleTable");
                     changed |= RemoveElems(initEvent?.Elements(ns + "With"), w => (string?)w.Attribute("Var") == "RuleTable");
                     changed |= RemoveElems(net.Elements(ns + "Input"), i => (string?)i.Attribute("Name") == "RuleTable");
@@ -732,8 +695,8 @@ namespace CodeGen.Services
             }
         }
 
-        // Keeps the centre-home swivel's Inputs block on the real physical sensor symlinks and strips any
-        // sim-position wiring (hard-fails if SimCentreHomeSensor_7SCH survives — the rig can't use it).
+        // Keeps the centre-home swivel's Inputs block on the real sensor symlinks and strips sim-position
+        // wiring; hard-fails if SimCentreHomeSensor_7SCH survives (the rig can't use sim wiring).
         internal static void NormalizeSwivelSimSensorSource(string eaeProjectDir, DeployResult result)
         {
             var fbt = Directory.EnumerateFiles(
@@ -888,9 +851,7 @@ namespace CodeGen.Services
                     }
                 }
 
-                // Always leave the actual Inputs block subscribed to the real physical
-                // sensor names. In sim mode the block is no longer the source of the
-                // core's position pins; in hardware mode these connections are restored.
+                // Inputs stays subscribed to the real physical sensor names.
                 SetParam(inputs, "NAME1", "'$${PATH}athome'");
                 SetParam(inputs, "NAME2", "'$${PATH}atwork1'");
                 SetParam(inputs, "NAME3", "'$${PATH}atWork2'");
@@ -909,8 +870,7 @@ namespace CodeGen.Services
                 RemoveSimPosition();
 
                 AddEvent("Inputs.INITO", "ActuatorCore.INIT");
-                // Rig must use the real atHome input: the ReturnToHomeHandler raises atHomeOutput from
-                // work->home timers, which on the rig can stop a Home on a timer instead of the centre sensor.
+                // Rig homes on the real atHome sensor, not the ReturnToHomeHandler work->home timer.
                 AddData("Inputs.VALUE1", "ActuatorCore.atHome");
                 AddData("Inputs.VALUE2", "ActuatorCore.atWork1");
                 AddData("Inputs.VALUE3", "ActuatorCore.atWork2");
@@ -945,9 +905,6 @@ namespace CodeGen.Services
 
                 if (changed)
                 {
-                    // Retry on a transient file lock (EAE briefly touching the .fbt during a
-                    // background scan) instead of hard-aborting. A persistently-open editor tab
-                    // still falls through to the abort below (the user must close it).
                     SaveXmlWithRetry(doc, fbt);
                     result.PatchesApplied.Add("Seven_State_Actuator_Centre_Home_CAT: simulator position model removed; physical sensor wiring restored");
                     MapperLogger.Info("[Deploy] Centre-Home swivel sim-sensor source normalize: physical sensor wiring restored");
@@ -962,13 +919,9 @@ namespace CodeGen.Services
             }
         }
 
-        // Bearing_PnP's home is recipe-only. This method ONLY STRIPS any previously-injected poll
-        // machinery (HomePoll / PollGate1 / PollGate2 / PollWindow + their connections) from the deployed
-        // CAT so a re-deploy cleans the live tree; it adds nothing and instantiates no replacement FB.
-        // The committed .cat.zip never carried these (always deploy-injected). Note: the CAT's 'Inputs'
-        // SYMLINKMULTIVARDST is sample-on-REQ; if the core fails to re-observe positions after a command,
-        // fix the CAT/interface (an input-change event or a cyclic task driving Inputs.REQ), not by
-        // re-adding a polling FB.
+        // Bearing_PnP home is recipe-only: strips any injected poll machinery (HomePoll/PollGate1/PollGate2/
+        // PollWindow + connections), adds nothing. The CAT's 'Inputs' SYMLINKMULTIVARDST is sample-on-REQ —
+        // if the core stops re-observing positions, fix the CAT/interface, don't re-add a polling FB.
         internal static void StripCatHomeSensorPoll(string eaeProjectDir, string catName, DeployResult result)
         {
             var fbt = Directory.EnumerateFiles(
@@ -992,7 +945,7 @@ namespace CodeGen.Services
 
                 var pollFbNames = new[] { "HomePoll", "PollWindow", "PollGate1", "PollGate2" };
                 bool Has(string n) => net.Elements(ns + "FB").Any(f => (string?)f.Attribute("Name") == n);
-                if (!pollFbNames.Any(Has)) return;   // already clean — nothing to strip, add nothing
+                if (!pollFbNames.Any(Has)) return;
 
                 bool RefsPoll(string? ep)
                 {
@@ -1028,8 +981,7 @@ namespace CodeGen.Services
             }
         }
 
-        // Restores the Five_State CAT's internal Inputs SYMLINKMULTIVARDST to the physical sensor symlinks
-        // ('$${PATH}athome'/'$${PATH}atwork') so sensored actuators read their real sensors.
+        // Restores the Five_State CAT's Inputs DST to the physical sensor symlinks ($${PATH}athome/atwork).
         internal static void NormalizeFiveStateSimSensorSource(string eaeProjectDir, DeployResult result)
         {
             var fbt = Directory.EnumerateFiles(
@@ -1087,8 +1039,7 @@ namespace CodeGen.Services
 
         // Interlock-struct reduction on the CommonInterlockEvaluator Basic FB (gated by interlock.yaml
         // useStruct): collapse the four Rule arrays into RuleTable : InterlockRule[10] across the InputVars,
-        // the three event With lists (REQ_WORK1/WORK2/HOME), AND the Evaluate ST. Bidirectional + idempotent;
-        // reduce==false restores the four arrays. Same numbers feed Evaluate either way, just as struct fields.
+        // the event With lists, AND the Evaluate ST; reduce==false restores the four arrays.
         internal static void NormalizeCommonInterlockEvaluatorRules(
             string eaeProjectDir, bool reduce, DeployResult result)
         {
@@ -1125,8 +1076,6 @@ namespace CodeGen.Services
 
                 if (reduce)
                 {
-                    // ONE input RuleTable : InterlockTable. Retype a flat RuleTable if present, else
-                    // insert before RuleCount; then strip the 4 arrays + scalar RuleCount.
                     var rtVar = inputVars?.Elements(ns + "VarDeclaration").FirstOrDefault(v => (string?)v.Attribute("Name") == "RuleTable");
                     if (rtVar != null)
                     {
@@ -1189,7 +1138,6 @@ namespace CodeGen.Services
                     }
                 }
 
-                // Evaluate ST: RuleCount<->RuleTable.Count and RuleX[i]<->RuleTable.Rules[i].X.
                 var stEl = basic.Elements(ns + "Algorithm")
                     .FirstOrDefault(a => (string?)a.Attribute("Name") == "Evaluate")?
                     .Element(ns + "ST");
@@ -1235,8 +1183,7 @@ namespace CodeGen.Services
             }
         }
 
-        // Restores Five_State_Actuator_CAT's two wired fault-enable inputs (enableToWorkFaultTimeout/
-        // enableToHomeFaultTimeout) as VarDecl + INIT With + Input pin + the FB17/FB14.IN2 connection.
+        // Restores Five_State_Actuator_CAT's two wired fault-enable inputs (VarDecl + INIT With + Input pin + FB17/FB14.IN2).
         internal static void NormalizeFiveStateFaultEnables(
             string eaeProjectDir, DeployResult result)
         {
@@ -1279,7 +1226,6 @@ namespace CodeGen.Services
 
                 foreach (var m in map)
                 {
-                    // Point the AND-gate IN2 at the wired enable input.
                     var conn = dataConns?.Elements(ns + "Connection")
                         .FirstOrDefault(c => (string?)c.Attribute("Destination") == m.Dest);
                     if (conn != null && (string?)conn.Attribute("Source") != m.Enable)
@@ -1330,7 +1276,7 @@ namespace CodeGen.Services
         }
 
         // Restores Five_State_Actuator_CAT's TargetWork1State/TargetHomeState as wired inputs (VarDecl +
-        // INIT With + Input pin + InterlockManager DataConnection), stripping any baked-on params. Idempotent.
+        // INIT With + Input pin + InterlockManager DataConnection), stripping any baked-on params.
         internal static void NormalizeFiveStateInterlockConstants(
             string eaeProjectDir, DeployResult result)
         {
@@ -1387,8 +1333,6 @@ namespace CodeGen.Services
 
                 foreach (var c in consts)
                 {
-                    // Restore the wired interface: drop any baked InterlockManager param + re-add the
-                    // VarDecl / INIT With / Input pin / DataConnection.
                     changed |= RemoveElems(interlock.Elements(ns + "Parameter"),
                         p => (string?)p.Attribute("Name") == c.Name);
 
@@ -1454,10 +1398,8 @@ namespace CodeGen.Services
             }
         }
 
-        // Force the FiveStateActuator basic FB's "mode" InputVar InitialValue=1 so every instance powers up
-        // in auto mode. Without it mode=0 at boot and no mode_event fires, so the ECC is stuck in
-        // AtHomeInit forever (rig-confirmed) — the same Mode=0 bug as the engine's Mode/CycleType.
-        // Idempotent deploy-time guard.
+        // Force the actuator's "mode" InputVar InitialValue=1 (auto); without it mode=0 at boot fires no
+        // mode_event and the ECC is stuck in AtHomeInit forever.
         internal static void PatchActuatorModeInitialValue(string eaeProjectDir, string fbtFileName, DeployResult result)
         {
             var fbt = Path.Combine(eaeProjectDir, "IEC61499", fbtFileName);
@@ -1477,7 +1419,6 @@ namespace CodeGen.Services
                 if (root == null) return;
                 System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
 
-                // The "mode" VarDeclaration inside <InputVars>.
                 var inputVars = root.Descendants(ns + "InputVars").FirstOrDefault();
                 var modeVar = inputVars?
                     .Elements(ns + "VarDeclaration")
@@ -1490,7 +1431,7 @@ namespace CodeGen.Services
                 }
 
                 var iv = (string?)modeVar.Attribute("InitialValue");
-                if (iv == "1") return; // already correct — idempotent no-op
+                if (iv == "1") return;
                 modeVar.SetAttributeValue("InitialValue", "1");
                 doc.Save(fbt);
 
@@ -1506,10 +1447,8 @@ namespace CodeGen.Services
             }
         }
 
-        // Relax the swivel core's work-arrival latches so a brief overlap of the two work sensors no
-        // longer blocks the latch: ToWork1->AtWork1 / ToWork2->AtWork2 fire on atWorkN=TRUE alone
-        // instead of "atWorkN=TRUE AND atWorkOther=FALSE". relax=true on the rig, strict on the
-        // simulator. Idempotent.
+        // Swivel work-arrival latch: relax=true (rig) fires ToWorkN->AtWorkN on atWorkN=TRUE alone;
+        // strict=false (sim) also requires atWorkOther=FALSE.
         internal static void PatchSwivelRelaxWorkLatch(string eaeProjectDir, bool relax, DeployResult result)
         {
             var fbt = Path.Combine(eaeProjectDir, "IEC61499", "SevenStateCentreHomeActuator.fbt");
@@ -1528,7 +1467,6 @@ namespace CodeGen.Services
                 if (root == null) return;
                 System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
 
-                // (Source, Destination, relaxed condition, original strict condition)
                 var latches = new[]
                 {
                     ("ToWork1", "AtWork1", "atWork1 = TRUE", "atWork1 = TRUE AND atWork2 = FALSE"),
@@ -1625,10 +1563,9 @@ namespace CodeGen.Services
         }
 
 
-        // The ring relay updateComponentState.REQ (a component reporting its OWN state) sets
-        // src_id/source_name/state but never clears dest_name. Component_State_Msg is a reused struct, so a
-        // report with a stale dest_name spuriously satisfies a target actuator's BREQ match (dest_name==name)
-        // and clobbers its state_cmd. Fix: REQ clears component_state_out.dest_name. Idempotent.
+        // Ring relay: REQ (a component reporting its OWN state) must clear component_state_out.dest_name —
+        // Component_State_Msg is a reused struct, so a stale dest_name spuriously satisfies a target
+        // actuator's BREQ match (dest_name==name) and clobbers its state_cmd.
         internal static void PatchRingReportClearDest(string eaeProjectDir, DeployResult result)
         {
             var fbt = Path.Combine(eaeProjectDir, "IEC61499", "updateComponentState.fbt");
@@ -1655,7 +1592,6 @@ namespace CodeGen.Services
                     result.Warnings.Add("updateComponentState.fbt: no REQ algorithm; report-dest-clear skipped.");
                     return;
                 }
-                // Idempotent: REQ only references dest_name once this patch is applied.
                 if (st.Value.Contains("dest_name"))
                     return;
 
@@ -1678,9 +1614,8 @@ namespace CodeGen.Services
             }
         }
 
-        // The ring relay always passes messages forward with BCNF, but must only fire CNF into the actuator
-        // core when the message is addressed to this actuator — else any unrelated report replays the last
-        // retained state_cmd through ActuatorCore.pst_event.
+        // Ring relay: BCNF always forwards, but CNF fires into the actuator core only on dest match — else an
+        // unrelated report replays the last retained state_cmd through ActuatorCore.pst_event.
         internal static void PatchRingCommandCnfOnlyOnDestination(string eaeProjectDir, DeployResult result)
         {
             var fbt = Path.Combine(eaeProjectDir, "IEC61499", "updateComponentState.fbt");
@@ -1817,24 +1752,16 @@ namespace CodeGen.Services
             }
         }
 
-        // Adds (rig) or strips (sim) two sensor-recovery ECTransitions on the Centre-Home swivel core so
-        // a swivel that powered up before its IO went live (frozen in AtHomeInit while physically at a
-        // work position) re-syncs to AtWork1/AtWork2 and can then accept the Home command. Identified by
-        // Source=AtHomeInit AND Destination in {AtWork1,AtWork2}; the stock AtHomeInit arcs go to
-        // ToWork1/ToWork2, so this never collides with them.
-        //
-        // Gated SwivelBrakeHome: reshapes the deployed centre-home ECC + composite into a timed
-        // reverse-coil brake at centre so the swivel can home directly from AtWork1 (Disassembly) without
-        // coasting into the ejector. Directional: at AtHome the algorithm reverses the driving coil only
-        // when homing from AtWork1 (away from the ejector); homing from AtWork2 (Assembly) de-energises
-        // unchanged. A brakeTimer E_DELAY (DT = bearingPnpHomeBrakeMs) holds the reverse pulse, then
-        // AtHomeInit de-energises. No-op when disabled; the ECC/CAT are force-refreshed so a flag flip reverts.
+        // Gated SwivelBrakeHome: a timed reverse-coil brake at centre so the swivel homes directly from
+        // AtWork1 (Disassembly) without coasting into the ejector. Directional — at AtHome the algorithm
+        // reverses the coil only when homing from AtWork1; from AtWork2 (Assembly) it de-energises unchanged.
+        // No-op when disabled; the ECC/CAT are force-refreshed so a flag flip reverts.
         internal static void PatchSwivelBrakeHome(string eaeProjectDir, bool enabled, int brakeMs, DeployResult result)
         {
             if (!enabled) return;
             if (brakeMs <= 0) brakeMs = 500;
 
-            // ---- 1. Core ECC: SevenStateCentreHomeActuator.fbt ----
+            // Core ECC: SevenStateCentreHomeActuator.fbt
             var ecc = Path.Combine(eaeProjectDir, "IEC61499", "SevenStateCentreHomeActuator.fbt");
             if (!File.Exists(ecc))
             {
@@ -1848,18 +1775,16 @@ namespace CodeGen.Services
                 var root = doc.Root; if (root == null) return;
                 System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
 
-                // a. 'atHome' -> directional brake (reverse the driving coil only when homing from AtWork1).
+                // 'atHome' -> directional brake (reverse the coil only when homing from AtWork1).
                 var atHomeAlgo = root.Descendants(ns + "Algorithm").FirstOrDefault(a => (string?)a.Attribute("Name") == "atHome");
                 if (atHomeAlgo == null) { result.Warnings.Add("Swivel brake: 'atHome' algorithm not found; skipped."); return; }
                 atHomeAlgo.Element(ns + "ST")?.ReplaceNodes(new XCData(
                     "current_state_to_process := 6;\r\nIF outputToWork2 = TRUE THEN\r\n\toutputToWork1:= TRUE;\r\n\toutputToWork2:= FALSE;\r\nELSE\r\n\toutputToWork1:= FALSE;\r\n\toutputToWork2:= FALSE;\r\nEND_IF;\r\n"));
 
-                // b. 'AtHomeInit' -> de-energise after the brake pulse.
                 root.Descendants(ns + "Algorithm").FirstOrDefault(a => (string?)a.Attribute("Name") == "AtHomeInit")
                     ?.Element(ns + "ST")?.ReplaceNodes(new XCData(
                         "current_state_to_process := 0;\r\noutputToWork1:= FALSE;\r\noutputToWork2:= FALSE;\r\n"));
 
-                // c. interface: brake_start (output) + brake_done (input).
                 var eos = root.Descendants(ns + "EventOutputs").FirstOrDefault();
                 if (eos != null && !eos.Elements(ns + "Event").Any(e => (string?)e.Attribute("Name") == "brake_start"))
                     eos.Add(new XElement(ns + "Event", new XAttribute("Name", "brake_start"),
@@ -1869,34 +1794,24 @@ namespace CodeGen.Services
                     eis.Add(new XElement(ns + "Event", new XAttribute("Name", "brake_done"),
                         new XAttribute("Comment", "centre-home brake pulse elapsed")));
 
-                // d. AtHome ECState: also emit brake_start (starts the timer).
                 var atHome = root.Descendants(ns + "ECState").FirstOrDefault(s => (string?)s.Attribute("Name") == "AtHome");
                 if (atHome != null && !atHome.Elements(ns + "ECAction").Any(a => (string?)a.Attribute("Output") == "brake_start"))
                     atHome.Add(new XElement(ns + "ECAction", new XAttribute("Output", "brake_start")));
 
-                // e. AtHome -> AtHomeInit: brake_done is now a SAFETY CAP only (the sensor arc in
-                //    (g) is the primary). Set the non-sensor arc to brake_done (idempotent: never
-                //    touches the 'atHome = FALSE' sensor arc).
+                // AtHome -> AtHomeInit non-sensor arc = brake_done (a safety cap only; the sensor arc below is primary).
                 root.Descendants(ns + "ECTransition").FirstOrDefault(t =>
                         (string?)t.Attribute("Source") == "AtHome" && (string?)t.Attribute("Destination") == "AtHomeInit"
                         && (string?)t.Attribute("Condition") != "atHome = FALSE")
                     ?.SetAttributeValue("Condition", "brake_done");
 
-                // f. CRITICAL: AtHomeInit must PUBLISH the coil-off (output_event). The stock state
-                //    only emits pst_out, so AFTER the brake the reverse coil stays ENERGISED and the
-                //    arm is DRIVEN + HELD at AtWork1 — the observed overshoot at ANY brake length.
-                //    output_event drives the Output SYMLINKMULTIVARSRC, which writes both coils FALSE.
+                // CRITICAL: AtHomeInit must emit output_event (drives the Output SYMLINKMULTIVARSRC to write
+                // both coils FALSE) — stock emits only pst_out, so the reverse coil stays energised and overshoots to AtWork1.
                 var atHomeInit = root.Descendants(ns + "ECState").FirstOrDefault(s => (string?)s.Attribute("Name") == "AtHomeInit");
                 if (atHomeInit != null && !atHomeInit.Elements(ns + "ECAction").Any(a => (string?)a.Attribute("Output") == "output_event"))
                     atHomeInit.Add(new XElement(ns + "ECAction", new XAttribute("Output", "output_event")));
 
-                // g. SENSOR-STOPPED de-energise (the real fix): leave AtHome the instant the arm
-                //    crosses back OUT of the DI02 centre window (atHome=FALSE) instead of after the
-                //    fixed brake_done timer (which over-drove the arm to AtWork1). The Inputs
-                //    subscriber pushes input_event on every sensor change — the SAME path the swivel
-                //    uses to detect centre at all (the work-timers are inert T#0s) — so the ECC
-                //    re-evaluates promptly and cuts the coil NEAR CENTRE. brake_done stays as the cap
-                //    (fires only if the arm never leaves the window, e.g. the sensor mechanism fails).
+                // SENSOR-STOPPED de-energise (the real fix): AtHome -> AtHomeInit on atHome=FALSE cuts the
+                // coil at the DI02 centre-window edge, not after the fixed brake_done timer (which over-drove to AtWork1).
                 var brakeDoneArc = root.Descendants(ns + "ECTransition").FirstOrDefault(t =>
                     (string?)t.Attribute("Source") == "AtHome" && (string?)t.Attribute("Destination") == "AtHomeInit" &&
                     (string?)t.Attribute("Condition") == "brake_done");
@@ -1914,7 +1829,7 @@ namespace CodeGen.Services
             }
             catch (Exception ex) { result.Warnings.Add($"Swivel brake core ECC patch failed: {ex.Message}"); return; }
 
-            // ---- 2. Composite: brakeTimer E_DELAY + wiring ----
+            // Composite: brakeTimer E_DELAY + wiring
             var cat = Directory.EnumerateFiles(Path.Combine(eaeProjectDir, "IEC61499"),
                 "Seven_State_Actuator_Centre_Home_CAT.fbt", SearchOption.AllDirectories).FirstOrDefault();
             if (string.IsNullOrEmpty(cat) || !File.Exists(cat)) { result.Warnings.Add("Swivel brake: composite not found; skipped."); return; }
@@ -1996,14 +1911,10 @@ namespace CodeGen.Services
                     return;
                 }
 
-                // SELF-HOME ON POWER-UP. The core latches whatever work position it physically booted at
-                // (INIT -> AtWork1 / INIT -> ToWork2). The swivel has no spring-centre (both coils off =>
-                // it holds position), so the only way to make HOME its initial state is to DRIVE it home
-                // at power-up. On the rig (addArc) redirect every "booted at a work position" boot path to
-                // ToHome so the arm swings itself home before the engine starts. On the sim (!addArc)
-                // restore INIT -> work states and strip the self-home arcs. Idempotent + bidirectional.
-                // SAFETY: the arm physically swings home at power-up (toward centre), so the swing path
-                // must be clear before a cold download.
+                // SELF-HOME ON POWER-UP: the swivel has no spring-centre, so the only way HOME is its
+                // initial state is to DRIVE it there — rig (addArc) redirects INIT work-position arcs to
+                // ToHome; sim (!addArc) restores INIT->work and strips the self-home arcs.
+                // SAFETY: the arm physically swings toward centre at power-up — the swing path must be clear before a cold download.
                 var initArcs = ecc.Elements(ns + "ECTransition")
                     .Where(t => (string?)t.Attribute("Source") == "INIT").ToList();
                 bool IsSelfHomeArc(System.Xml.Linq.XElement t) =>
@@ -2016,8 +1927,6 @@ namespace CodeGen.Services
 
                 if (!addArc)
                 {
-                    // SIM / restore: INIT boot arcs back to the work states; strip the
-                    // self-home arcs (and any older AtWork "re-sync" recovery arcs).
                     bool ch = false;
                     foreach (var t in initArcs)
                     {
@@ -2039,15 +1948,11 @@ namespace CodeGen.Services
                     return;
                 }
 
-                // RIG: drive home on power-up via INIT only; do NOT add an AtHomeInit -> ToHome self-home
-                // arc (with noisy DI00/DI01 it re-fires and the arm cycles atWork1<->atWork2, never
-                // settling). Once the swivel reaches AtHomeInit it must stay there until the recipe
-                // commands Pick/Place, so AtHomeInit must have no self-driving exit: redirect INIT to
-                // ToHome and strip every AtHomeInit -> {ToHome, AtWork1, AtWork2} arc added here. The
-                // stock AtHomeInit -> ToWork1/ToWork2 (Pick/Place) arcs stay intact.
+                // RIG: drive home via INIT only. AtHomeInit must have no self-driving exit (a self-home arc
+                // re-fires on noisy DIs and cycles the swivel) — redirect INIT to ToHome and strip every
+                // AtHomeInit -> {ToHome,AtWork1,AtWork2} arc; the stock AtHomeInit -> ToWork1/ToWork2 (Pick/Place) arcs stay.
                 bool changed = false;
 
-                // 1. INIT -> AtWork1 / INIT -> ToWork2  ==>  INIT -> ToHome (boot self-home).
                 foreach (var t in initArcs)
                 {
                     var dest = (string?)t.Attribute("Destination");
@@ -2055,9 +1960,6 @@ namespace CodeGen.Services
                     { t.SetAttributeValue("Destination", "ToHome"); changed = true; }
                 }
 
-                // 2. Strip every AtHomeInit -> {ToHome, AtWork1, AtWork2} arc we added
-                //    (self-home AND the older re-sync-to-work). These re-fire on noisy
-                //    sensors and cycle the swivel; AtHomeInit must be a stable rest state.
                 foreach (var t in ecc.Elements(ns + "ECTransition")
                              .Where(x => IsSelfHomeArc(x) || IsStaleWorkArc(x)).ToList())
                 { t.Remove(); changed = true; }
@@ -2079,9 +1981,8 @@ namespace CodeGen.Services
             }
         }
 
-        // Wires the AtHome ECState to the coil-clearing 'atHome' algorithm and makes AtHome publish
-        // output_event, so the Output SYMLINKMULTIVARSRC writes both work coils FALSE. Both algorithms
-        // already exist in the core; this only swaps which one the AtHome state runs.
+        // Wires AtHome to the coil-clearing 'atHome' algorithm + output_event so the Output
+        // SYMLINKMULTIVARSRC writes both work coils FALSE (swaps which existing algorithm AtHome runs).
         internal static void PatchSwivelAtHomeCoilClear(string eaeProjectDir, bool clearCoils, DeployResult result)
         {
             var fbt = Path.Combine(eaeProjectDir, "IEC61499", "SevenStateCentreHomeActuator.fbt");
@@ -2117,7 +2018,6 @@ namespace CodeGen.Services
                     return;
                 }
 
-                // Both candidate algorithms must exist before we swap.
                 var algoNames = root.Descendants(ns + "Algorithm")
                     .Select(a => (string?)a.Attribute("Name"))
                     .Where(n => n != null)
@@ -2155,7 +2055,7 @@ namespace CodeGen.Services
                     changed = true;
                 }
 
-                if (!changed) return; // idempotent
+                if (!changed) return;
                 doc.Save(fbt);
 
                 result.PatchesApplied.Add(
@@ -2174,12 +2074,9 @@ namespace CodeGen.Services
             }
         }
 
-        // Gated MapperConfig.SwivelHomeHoldBothCoils (default OFF). Rewrites the 'atHome' algorithm's two
-        // coil outputs: OFF de-energises both at centre (a venting swivel coasts past DI02, rests off-centre);
-        // TRUE holds both coils so a cylinder with a mechanical mid-stop is driven into + held at centre.
-        // Bidirectional + idempotent (only flips the coil VALUES; PatchSwivelAtHomeCoilClear runs first).
-        // SAFETY: with NO mid-stop, both-on drives toward an extreme — enable only on the rig with the
-        // e-stop ready, and abort if the arm heads toward Work2.
+        // Gated MapperConfig.SwivelHomeHoldBothCoils (default OFF): OFF de-energises both 'atHome' coils
+        // (a venting swivel rests off-centre); TRUE holds both to drive a cylinder into a mechanical mid-stop.
+        // SAFETY: with NO mid-stop, both-on drives toward an extreme — rig only, e-stop ready, abort if it heads to Work2.
         internal static void PatchSwivelAtHomeBothCoils(string eaeProjectDir, bool holdBothCoils, DeployResult result)
         {
             var fbt = Path.Combine(eaeProjectDir, "IEC61499", "SevenStateCentreHomeActuator.fbt");
@@ -2215,7 +2112,7 @@ namespace CodeGen.Services
                     body, @"outputToWork1:=\s*(?:TRUE|FALSE);", $"outputToWork1:= {coil};");
                 newBody = System.Text.RegularExpressions.Regex.Replace(
                     newBody, @"outputToWork2:=\s*(?:TRUE|FALSE);", $"outputToWork2:= {coil};");
-                if (newBody == body) return; // idempotent (incl. the byte-identical flag-OFF default)
+                if (newBody == body) return;
 
                 st.ReplaceNodes(new System.Xml.Linq.XCData(newBody));
                 doc.Save(fbt);
