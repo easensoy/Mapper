@@ -15,6 +15,9 @@ using static CodeGen.Services.HmiTemplatePatcher;
 using static CodeGen.Services.TelemetryTemplatePatcher;
 using static CodeGen.Services.ProcessRuntimeTemplatePatcher;
 using static CodeGen.Services.ActuatorCatTemplatePatcher;
+using static CodeGen.Services.RingRelayPatcher;
+using static CodeGen.Services.SwivelCatPatcher;
+using static CodeGen.Services.InterlockCatPatcher;
 
 namespace CodeGen.Services
 {
