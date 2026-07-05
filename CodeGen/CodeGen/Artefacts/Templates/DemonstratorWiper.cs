@@ -7,10 +7,10 @@ using System.Xml.Linq;
 
 namespace CodeGen.Services
 {
-    // Deep-wipes the Demonstrator EAE project to a no-devices state: empties canvases, deletes
-    // Mapper-deployed FB types + logical/physical devices + HwConfiguration, and strips their dfbproj/
-    // topologyproj entries. The Mapper recreates everything on the next Test Runtime. Best-effort
-    // (per-file errors are collected, never thrown). Keeps General/HMI/.system/.solutionData.
+    // Deep-wipes the Demonstrator EAE project to a no-devices state (empties canvases, deletes
+    // Mapper-deployed FB types + logical/physical devices + HwConfiguration + their dfbproj/
+    // topologyproj entries); the Mapper recreates everything on the next Test Runtime. Best-effort
+    // (per-file errors collected, never thrown). Keeps General/HMI/.system/.solutionData.
     public static class DemonstratorWiper
     {
         public sealed class WipeReport
@@ -24,8 +24,7 @@ namespace CodeGen.Services
             public int HwConfigFilesDeleted { get; set; }
         }
 
-        // Folder names directly under IEC61499/ that get nuked entirely (everything
-        // under them is a Mapper-deployed FB type or build cache).
+        // Folders under IEC61499/ nuked entirely (Mapper-deployed FB types or build cache).
         static readonly string[] FoldersToDelete = new[]
         {
             "Area_CAT", "Station_CAT", "Five_State_Actuator_CAT",
@@ -37,8 +36,8 @@ namespace CodeGen.Services
             "obj", "bin",
         };
 
-        // Top-level files in IEC61499/ that get nuked. The .system/.syslay/.sysres/.hcf
-        // files under System/ are NOT touched here — they're handled by the canvas-empty pass.
+        // Top-level IEC61499/ files nuked. System/ .system/.syslay/.sysres/.hcf are NOT touched here
+        // — the canvas-empty pass handles them.
         static readonly string[] FileExtensionsToDelete = new[]
         {
             ".fbt", ".adp", ".dt",
@@ -65,59 +64,37 @@ namespace CodeGen.Services
             }
             report.Steps.Add($"Target: {iec}");
 
-            // 1. Empty all canvases (.syslay/.sysres/.hcf/.sysapp) to empty-network shells, keeping the
-            //    files for EAE to reference.
             EmptyAllCanvases(iec, report);
 
-            // 1b/1c run BEFORE StripDfbproj so the now-missing entries are pruned (dfbproj keeps a
-            //    System/* entry only if File.Exists).
+            // Delete logical devices + app BEFORE StripDfbproj so the now-missing entries are pruned
+            // (dfbproj keeps a System/* entry only if File.Exists).
             DeleteLogicalDevices(iec, report);
-
             CodeGen.Devices.Core.ApplicationShellEmitter.DeleteApplicationShell(
                 iec, line => report.Steps.Add(line));
 
-            // 2. Delete Mapper-deployed FB type files (.fbt, .adp, .dt, etc.) at IEC61499/ root.
             DeleteFlatTypeFiles(iec, report);
-
-            // 3. Delete CAT folders + build caches.
             DeleteFolders(iec, report);
-
-            // 4. Strip dfbproj of <None>/<Compile> entries pointing to files that no longer exist.
             StripDfbproj(iec, report);
-
-            // 5. Delete top-level export/scratch files in the repo root that EAE/Mapper leave behind.
             DeleteRepoRootScratch(demonstratorRepoRoot, report);
 
-            // 6. Wipe HwConfiguration/; leaving it populated stacks stale baseline entries and EAE
-            //    shows duplicate M262_RES nodes. M262HwConfigCopier recreates it from the baseline.
+            // Wipe HwConfiguration/; leaving it populated stacks stale baseline entries and EAE shows
+            // duplicate M262_RES nodes. M262HwConfigCopier recreates it from the baseline.
             DeleteHwConfiguration(demonstratorRepoRoot, report);
 
-            // 7. Delete the PHYSICAL DEVICES — Topology Equipment (PLCs, the L2
-            //    switch, the EtherNet/IP coupler), the Wires connecting them, and
-            //    the BroadcastDomains — plus their TopologyManager.topologyproj
-            //    registrations. Every one is Mapper-regenerated on the next Test
-            //    Runtime (M262TopologyEmitter / Station2DeviceEmitter /
-            //    TopologyNetworkEmitter / BroadcastDomainEmitter), so the wipe is
-            //    safe. The project .solutionData (trust/identity) + the topologyproj
-            //    shell stay.
+            // Delete physical devices (Topology Equipment/Wires/BroadcastDomains + topologyproj
+            // registrations) — all Mapper-regenerated next Test Runtime. .solutionData stays.
             DeletePhysicalDevices(iec, report);
-
-            // Sysdev <Resource> dedup lives in
-            // SystemInjector.PrepareDemonstratorForGeneration — see the
-            // [CleanDevice] block there. The Clean Demonstrator button calls
-            // both this Wipe and Prepare so the dedup runs alongside.
 
             return report;
         }
 
         static string? ResolveIec61499Dir(string repoRoot)
         {
-            // Prefer /Demonstator/IEC61499 (project's actual layout — note the typo in path).
+            // Prefer /Demonstator/IEC61499 (the project's actual layout — the path typo is real).
             var preferred = Path.Combine(repoRoot, "Demonstator", "IEC61499");
             if (Directory.Exists(preferred)) return preferred;
             var alt = Path.Combine(repoRoot, "Demonstrator", "IEC61499");
             if (Directory.Exists(alt)) return alt;
-            // Fall back to a search.
             return Directory.EnumerateDirectories(repoRoot, "IEC61499", SearchOption.AllDirectories)
                 .FirstOrDefault();
         }
@@ -162,11 +139,8 @@ namespace CodeGen.Services
 
         static string BuildEmptySyslay(string path)
         {
-            // Preserve the layer ID if we can read it; otherwise generate a placeholder.
             string layerId = TryReadAttr(path, "Layer", "ID") ?? "00000000-0000-0000-0000-000000000000";
-            // Clean BLANKS the layer name — SMC_Rig is the Mapper's output (SyslayBuilder writes
-            // Name="SMC_Rig" on Test Runtime), so Clean leaves no name behind (not SMC_Rig, not a
-            // placeholder). The layer is identified by ID; Test Runtime restores the SMC_Rig name.
+            // Clean BLANKS the layer name (identified by ID); Test Runtime restores Name="SMC_Rig".
             return
                 "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
                 $"<Layer ID=\"{layerId}\" Name=\"\" Comment=\"\" IsDefault=\"true\" " +
@@ -193,9 +167,7 @@ namespace CodeGen.Services
         static string BuildEmptySysapp(string path)
         {
             string id   = TryReadAttr(path, "Application", "ID")   ?? "00000000-0000-0000-0000-000000000001";
-            // Clean BLANKS the application name — WMG is the Mapper's output (M262SysdevEmitter.
-            // AlignApplicationName sets Name="WMG" on Test Runtime), so Clean leaves no name behind
-            // (not WMG, not a placeholder). The app is identified by ID; Test Runtime restores WMG.
+            // Clean BLANKS the application name (identified by ID); Test Runtime restores Name="WMG".
             string name = "";
             return
                 "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
@@ -271,8 +243,8 @@ namespace CodeGen.Services
             while (i < lines.Length)
             {
                 var line = lines[i];
-                // <Content> included: device .hcf + EAE compile artifacts register as <Content>; a stale
-                // one left after a device-folder delete = EAE "Missing Project Files". Kept only if the file exists.
+                // <Content> included: device .hcf + EAE compile artifacts register as <Content>; a
+                // stale one after a device-folder delete = EAE "Missing Project Files". Kept if the file exists.
                 var m = Regex.Match(line, @"^\s*<(Compile|None|EmbeddedResource|Content)\b", RegexOptions.IgnoreCase);
                 if (m.Success)
                 {
@@ -321,14 +293,12 @@ namespace CodeGen.Services
         {
             if (string.IsNullOrEmpty(include)) return true;
             if (include.StartsWith("..", StringComparison.Ordinal)) return true;  // ..\General\* etc
-            // System/* references for dfbproj structural files always exist after wipe.
             if (include.StartsWith("System", StringComparison.OrdinalIgnoreCase))
             {
                 var abs = Path.Combine(iecDir, include.Replace('\\', '/').Replace('/', Path.DirectorySeparatorChar));
                 return File.Exists(abs);
             }
-            // CAT-folder paths or top-level FB type files (Area_CAT\…, *.fbt, *.adp, *.cfg) —
-            // we just deleted them all, so drop the entries.
+            // CAT folders / top-level FB type files — all just deleted, so drop the entries.
             return false;
         }
 
@@ -486,8 +456,7 @@ namespace CodeGen.Services
 
         static void DeleteRepoRootScratch(string repoRoot, WipeReport report)
         {
-            // EAE / Mapper occasionally drop *.export and *.colors scratch files at the
-            // repo root or at Demonstator/. They're regenerable; keep a clean tree.
+            // EAE/Mapper drop regenerable *.export/*.colors scratch at the repo root or Demonstator/.
             var scratchPatterns = new[] { "*.export", "*.colors" };
             int n = 0;
             foreach (var dir in new[] { repoRoot, Path.Combine(repoRoot, "Demonstator"), Path.Combine(repoRoot, "Demonstrator") })
