@@ -9,40 +9,17 @@ using CodeGen.Devices.Core;
 
 namespace CodeGen.Devices.M262
 {
-    /// <summary>
-    /// Deploys the M262 .hcf file. Pure verbatim copy from
-    /// <c>cfg.M262HcfTemplatePath</c> (the user-authored
-    /// <c>C:\VueOneMapper\IO\M262IO.hcf</c>) to the M262 sysdev folder
-    /// inside the Demonstrator. No XML parsing, no symbol rewriting, no
-    /// per-pin filtering — the file in the IO folder is the canonical
-    /// truth and is carried over byte-for-byte.
-    ///
-    /// <para>Why pure verbatim?</para>
-    /// <list type="bullet">
-    ///   <item>The IO folder is the authoring surface — the user exports each
-    ///         PLC's .hcf from EAE into this folder, then Mapper just relays
-    ///         the file to the Demonstrator. Any transform Mapper applies risks
-    ///         silently dropping channel bindings the user authored on purpose
-    ///         (e.g. a filter pass that clears pins whose owning component name
-    ///         doesn't match a hard-coded map).</item>
-    ///   <item>Symmetric with M580 + BX1: both of those are verbatim-copied by
-    ///         <see cref="Station2DeviceEmitter"/>. M262 deserves the same
-    ///         simple behaviour.</item>
-    ///   <item>Resource-name resolution (the <c>RES0.M262IO.…</c> prefix inside
-    ///         the .hcf vs the deployed sysres <c>Name</c>) is intentionally
-    ///         left untouched. If you need that prefix rewritten to match a
-    ///         non-default sysres name, do it in the IO folder authoring step
-    ///         OR rename the sysres to match the .hcf — Mapper no longer
-    ///         touches the contents.</item>
-    /// </list>
-    /// </summary>
+    // Deploys the M262 .hcf: a pure verbatim copy from cfg.M262HcfTemplatePath (the authored
+    // IO-folder file) to the M262 sysdev folder. No XML parsing / symbol rewriting / per-pin
+    // filtering — the IO-folder file is canonical and carried byte-for-byte (a transform could
+    // silently drop authored channel bindings). Symmetric with the verbatim M580/BX1 copy.
     public static class M262HwConfigCopier
     {
         public static HwConfigCopyResult Copy(MapperConfig cfg) => Copy(cfg, null);
 
         public static HwConfigCopyResult Copy(MapperConfig cfg, IoBindings? bindingsOverride)
         {
-            _ = bindingsOverride; // Verbatim copy ignores bindings — kept for back-compat.
+            _ = bindingsOverride;
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
             var result = new HwConfigCopyResult();
 
@@ -78,11 +55,9 @@ namespace CodeGen.Devices.M262
             result.ParametersOverwritten.Add(
                 $"VERBATIM {Path.GetFileName(srcHcf)} -> {Path.GetRelativePath(eaeRoot, dstHcf)}");
 
-            // PNConfiguratorBuildTask compatibility — IO-folder exports use the
-            // newer <HwConfigExportedConfiguration> root, but EAE 24.1's build
-            // task XmlSerializer expects the legacy <DeviceHwConfigurationItems>
-            // form. Re-root the file in place (idempotent — no-op if already
-            // legacy form). Channel bindings inside are untouched.
+            // PNConfiguratorBuildTask compatibility: re-root HwConfigExportedConfiguration ->
+            // the legacy DeviceHwConfigurationItems EAE 24.1's build task expects. Idempotent;
+            // channel bindings untouched.
             var sysdevFolder = Path.GetDirectoryName(dstHcf)!;
             var rewrite = HcfRootRewriter.RewriteIfNeededDeriveId(dstHcf, sysdevFolder);
             if (rewrite.Rewrote)
@@ -96,12 +71,8 @@ namespace CodeGen.Devices.M262
             return result;
         }
 
-        /// <summary>
-        /// Byte-for-byte file copy with exponential-backoff retry. EAE
-        /// occasionally holds the .hcf open for milliseconds at a time
-        /// (live deployment / online change); the retry loop survives that
-        /// without bouncing the user back to a red MessageBox.
-        /// </summary>
+        // Byte-for-byte copy with exponential-backoff retry (EAE may briefly hold the .hcf open
+        // during live deploy / online change).
         static void CopyFileWithRetry(string src, string dst, HwConfigCopyResult result)
         {
             const int MaxAttempts = 8;
@@ -130,13 +101,8 @@ namespace CodeGen.Devices.M262
             File.Copy(src, dst, overwrite: true);   // final try — let exceptions bubble
         }
 
-        // ============================================================
-        // Public helpers kept for back-compat with DemonstratorWiper /
-        // HcfPatchService / M262SysdevEmitter / disabled MapperTests.
-        // None of these touch .hcf content; they only resolve paths and
-        // patch the deprecated GUID-based ResourceId attribute when the
-        // legacy DeviceHwConfigurationItems format is in play.
-        // ============================================================
+        // Back-compat path helpers: none touch .hcf content; they resolve paths and patch the
+        // deprecated GUID ResourceId attribute in the legacy DeviceHwConfigurationItems format.
 
         public static string? FindBaselineHcf(string baselineRoot)
         {
@@ -151,10 +117,6 @@ namespace CodeGen.Devices.M262
                 .FirstOrDefault();
         }
 
-        /// <summary>
-        /// Resolves the M262 sysdev's <c>.hcf</c> path. M262 SysdevId is
-        /// <c>00000000-0000-0000-0000-000000000002</c> by Mapper convention.
-        /// </summary>
         public static string? ResolveTargetHcfPath(string eaeRoot)
         {
             var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
@@ -162,8 +124,7 @@ namespace CodeGen.Devices.M262
             var sysdev = Directory.EnumerateFiles(systemDir, "*.sysdev", SearchOption.AllDirectories)
                 .Where(p => IsM262Sysdev(p))
                 .FirstOrDefault()
-                // Fallback for old projects where the M262 sysdev wasn't
-                // tagged as M262_dPAC yet — pick the first sysdev we find.
+                // Fallback for old projects where the M262 sysdev wasn't tagged M262_dPAC yet.
                 ?? Directory.EnumerateFiles(systemDir, "*.sysdev", SearchOption.AllDirectories)
                     .FirstOrDefault();
             if (sysdev == null) return null;
@@ -187,8 +148,7 @@ namespace CodeGen.Devices.M262
         {
             var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
             if (!Directory.Exists(systemDir)) return string.Empty;
-            // Prefer the .sysres alongside an M262 sysdev so multi-PLC projects
-            // don't accidentally pick up an M580/BX1 resource ID.
+            // Prefer the .sysres beside an M262 sysdev so we don't pick up an M580/BX1 resource ID.
             foreach (var sysdev in Directory.EnumerateFiles(
                 systemDir, "*.sysdev", SearchOption.AllDirectories))
             {
@@ -205,7 +165,7 @@ namespace CodeGen.Devices.M262
                     var doc = XDocument.Load(sysres);
                     return (string?)doc.Root?.Attribute("ID") ?? string.Empty;
                 }
-                catch { /* try next */ }
+                catch { }
             }
             return string.Empty;
         }
@@ -218,7 +178,7 @@ namespace CodeGen.Devices.M262
                 var doc = XDocument.Load(hcfPath);
                 var item = doc.Descendants()
                     .FirstOrDefault(e => e.Name.LocalName == "DeviceHwConfigurationItem");
-                if (item == null) return 0;   // New HwConfigExportedConfiguration format — no ResourceId attribute to patch.
+                if (item == null) return 0;   // new format has no ResourceId attribute to patch
                 var attr = item.Attribute("ResourceId");
                 if (attr != null && string.Equals(attr.Value, newResourceId, StringComparison.Ordinal)) return 0;
                 item.SetAttributeValue("ResourceId", newResourceId);
@@ -228,19 +188,7 @@ namespace CodeGen.Devices.M262
             catch { return 0; }
         }
 
-        // ============================================================
-        // Deprecated internal API — preserved as no-op so M262HcfDocument
-        // still compiles. None of these methods are called from any
-        // active runtime path; verbatim Copy() is the entry point.
-        // ============================================================
-
-        /// <summary>
-        /// No-op kept for back-compat with <c>M262HcfDocument</c>. The
-        /// per-pin rewrite path was retired in favour of pure verbatim
-        /// <c>File.Copy</c> (a filter pass could silently drop channel
-        /// bindings whose owning components weren't in a hard-coded
-        /// signal-to-component map).
-        /// </summary>
+        // Deprecated no-op kept so M262HcfDocument compiles; verbatim Copy() is the entry point.
         internal static int OverwriteHcfParameterValuesInMemory(XDocument doc, IoBindings bindings,
             HashSet<string> syslayFbNames, HwConfigCopyResult result, string resourceId,
             string m262IoFbId)
