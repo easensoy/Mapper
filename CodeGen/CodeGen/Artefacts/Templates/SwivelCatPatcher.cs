@@ -292,24 +292,31 @@ namespace CodeGen.Services
 
         // Swivel work-arrival latch: relax=true (rig) fires ToWorkN->AtWorkN on atWorkN=TRUE alone;
         // strict=false (sim) also requires atWorkOther=FALSE.
-        internal static void PatchSwivelRelaxWorkLatch(string eaeProjectDir, bool relax, DeployResult result)
+        // Locate + load the deployed SevenStateCentreHomeActuator core .fbt, hand (doc, root, ns, path) to
+        // `edit` (which mutates, saves, and logs), wrapping the file-lock retry and warn-on-failure. No-op
+        // if the core .fbt is absent.
+        private static void EditSwivelCore(string eaeProjectDir, string failNote, DeployResult result,
+            Action<XDocument, XElement, XNamespace, string> edit)
         {
-            var fbt = Path.Combine(eaeProjectDir, "IEC61499", "SevenStateCentreHomeActuator.fbt");
-            if (!File.Exists(fbt))
-            {
-                fbt = Directory.EnumerateFiles(
-                        Path.Combine(eaeProjectDir, "IEC61499"),
-                        "SevenStateCentreHomeActuator.fbt", SearchOption.AllDirectories)
-                    .FirstOrDefault() ?? string.Empty;
-                if (string.IsNullOrEmpty(fbt)) return;
-            }
+            var fbt = FindDeployedFbt(eaeProjectDir, "SevenStateCentreHomeActuator.fbt");
+            if (string.IsNullOrEmpty(fbt)) return;
             try
             {
-                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var doc = LoadXmlWithRetry(fbt, LoadOptions.PreserveWhitespace);
                 var root = doc.Root;
                 if (root == null) return;
-                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+                edit(doc, root, root.GetDefaultNamespace(), fbt);
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"{failNote}: {ex.Message}");
+            }
+        }
 
+        internal static void PatchSwivelRelaxWorkLatch(string eaeProjectDir, bool relax, DeployResult result)
+            => EditSwivelCore(eaeProjectDir, "SevenStateCentreHomeActuator.fbt work-latch patch failed", result,
+                (doc, root, ns, fbt) =>
+            {
                 var latches = new[]
                 {
                     ("ToWork1", "AtWork1", "atWork1 = TRUE", "atWork1 = TRUE AND atWork2 = FALSE"),
@@ -335,32 +342,12 @@ namespace CodeGen.Services
                     result.PatchesApplied.Add(
                         $"SevenStateCentreHomeActuator.fbt: work-arrival latch {(relax ? "RELAXED (atWorkN=TRUE only)" : "restored (mutually exclusive)")} on {changed} transition(s)");
                 }
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"SevenStateCentreHomeActuator.fbt work-latch patch failed: {ex.Message}");
-            }
-        }
+            });
 
         internal static void PatchSwivelInterlockEventCarriesStateVal(string eaeProjectDir, bool add, DeployResult result)
-        {
-            var fbt = Path.Combine(eaeProjectDir, "IEC61499", "SevenStateCentreHomeActuator.fbt");
-            if (!File.Exists(fbt))
+            => EditSwivelCore(eaeProjectDir, "SevenStateCentreHomeActuator.fbt ilck_event state_val patch failed", result,
+                (doc, root, ns, fbt) =>
             {
-                fbt = Directory.EnumerateFiles(
-                        Path.Combine(eaeProjectDir, "IEC61499"),
-                        "SevenStateCentreHomeActuator.fbt", SearchOption.AllDirectories)
-                    .FirstOrDefault() ?? string.Empty;
-                if (string.IsNullOrEmpty(fbt)) return;
-            }
-
-            try
-            {
-                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                var root = doc.Root;
-                if (root == null) return;
-                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
-
                 var ilckEvent = root.Descendants(ns + "Event")
                     .FirstOrDefault(e => (string?)e.Attribute("Name") == "ilck_event");
                 if (ilckEvent == null)
@@ -398,12 +385,7 @@ namespace CodeGen.Services
                     MapperLogger.Info(
                         $"[Deploy] SevenStateCentreHomeActuator.fbt: ilck_event state_val sampling add={add}");
                 }
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"SevenStateCentreHomeActuator.fbt ilck_event state_val patch failed: {ex.Message}");
-            }
-        }
+            });
 
 
 
@@ -540,24 +522,9 @@ namespace CodeGen.Services
         }
 
         internal static void PatchSwivelAtHomeInitRecovery(string eaeProjectDir, bool addArc, DeployResult result)
-        {
-            var fbt = Path.Combine(eaeProjectDir, "IEC61499", "SevenStateCentreHomeActuator.fbt");
-            if (!File.Exists(fbt))
+            => EditSwivelCore(eaeProjectDir, "SevenStateCentreHomeActuator.fbt AtHomeInit sensor-recovery patch failed", result,
+                (doc, root, ns, fbt) =>
             {
-                fbt = Directory.EnumerateFiles(
-                        Path.Combine(eaeProjectDir, "IEC61499"),
-                        "SevenStateCentreHomeActuator.fbt", SearchOption.AllDirectories)
-                    .FirstOrDefault() ?? string.Empty;
-                if (string.IsNullOrEmpty(fbt)) return;
-            }
-
-            try
-            {
-                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                var root = doc.Root;
-                if (root == null) return;
-                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
-
                 var ecc = root.Descendants(ns + "ECC").FirstOrDefault();
                 if (ecc == null)
                 {
@@ -628,35 +595,14 @@ namespace CodeGen.Services
                     MapperLogger.Info(
                         "[Deploy] SevenStateCentreHomeActuator.fbt: self-homes at power-up via INIT->ToHome; AtHomeInit is now a stable rest state (no self-driving exit)");
                 }
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add(
-                    $"SevenStateCentreHomeActuator.fbt AtHomeInit sensor-recovery patch failed: {ex.Message}");
-            }
-        }
+            });
 
         // Wires AtHome to the coil-clearing 'atHome' algorithm + output_event so the Output
         // SYMLINKMULTIVARSRC writes both work coils FALSE (swaps which existing algorithm AtHome runs).
         internal static void PatchSwivelAtHomeCoilClear(string eaeProjectDir, bool clearCoils, DeployResult result)
-        {
-            var fbt = Path.Combine(eaeProjectDir, "IEC61499", "SevenStateCentreHomeActuator.fbt");
-            if (!File.Exists(fbt))
+            => EditSwivelCore(eaeProjectDir, "SevenStateCentreHomeActuator.fbt AtHome coil-clear patch failed", result,
+                (doc, root, ns, fbt) =>
             {
-                fbt = Directory.EnumerateFiles(
-                        Path.Combine(eaeProjectDir, "IEC61499"),
-                        "SevenStateCentreHomeActuator.fbt", SearchOption.AllDirectories)
-                    .FirstOrDefault() ?? string.Empty;
-                if (string.IsNullOrEmpty(fbt)) return;
-            }
-
-            try
-            {
-                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                var root = doc.Root;
-                if (root == null) return;
-                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
-
                 var atHomeState = root.Descendants(ns + "ECState")
                     .FirstOrDefault(s => (string?)s.Attribute("Name") == "AtHome");
                 if (atHomeState == null)
@@ -721,36 +667,15 @@ namespace CodeGen.Services
                 MapperLogger.Info(
                     $"[Deploy] SevenStateCentreHomeActuator.fbt: AtHome -> '{want}' " +
                     (clearCoils ? "(coils cleared and published at home)" : "(coils held)"));
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add(
-                    $"SevenStateCentreHomeActuator.fbt AtHome coil-clear patch failed: {ex.Message}");
-            }
-        }
+            });
 
         // Gated MapperConfig.SwivelHomeHoldBothCoils (default OFF): OFF de-energises both 'atHome' coils
         // (a venting swivel rests off-centre); TRUE holds both to drive a cylinder into a mechanical mid-stop.
         // SAFETY: with NO mid-stop, both-on drives toward an extreme — rig only, e-stop ready, abort if it heads to Work2.
         internal static void PatchSwivelAtHomeBothCoils(string eaeProjectDir, bool holdBothCoils, DeployResult result)
-        {
-            var fbt = Path.Combine(eaeProjectDir, "IEC61499", "SevenStateCentreHomeActuator.fbt");
-            if (!File.Exists(fbt))
+            => EditSwivelCore(eaeProjectDir, "SevenStateCentreHomeActuator.fbt home-hold patch failed", result,
+                (doc, root, ns, fbt) =>
             {
-                fbt = Directory.EnumerateFiles(
-                        Path.Combine(eaeProjectDir, "IEC61499"),
-                        "SevenStateCentreHomeActuator.fbt", SearchOption.AllDirectories)
-                    .FirstOrDefault() ?? string.Empty;
-                if (string.IsNullOrEmpty(fbt)) return;
-            }
-
-            try
-            {
-                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                var root = doc.Root;
-                if (root == null) return;
-                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
-
                 var atHomeAlgo = root.Descendants(ns + "Algorithm")
                     .FirstOrDefault(a => (string?)a.Attribute("Name") == "atHome");
                 var st = atHomeAlgo?.Element(ns + "ST");
@@ -778,12 +703,6 @@ namespace CodeGen.Services
                 MapperLogger.Info(
                     $"[Deploy] SevenStateCentreHomeActuator.fbt: home coils -> {coil}/{coil} " +
                     (holdBothCoils ? "(both-coils hold at centre)" : "(de-energise)"));
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add(
-                    $"SevenStateCentreHomeActuator.fbt home-hold patch failed: {ex.Message}");
-            }
-        }
+            });
     }
 }
