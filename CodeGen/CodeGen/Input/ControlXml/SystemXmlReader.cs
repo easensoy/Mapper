@@ -51,21 +51,9 @@ namespace CodeGen.IO
             return components;
         }
 
-        /// <summary>
-        /// Loads a VueOne Control.xml in a way that survives the declaration-
-        /// vs-actual-encoding mismatch VueOne sometimes emits. Some VueOne
-        /// builds write <c>&lt;?xml version="1.0" encoding="utf-16"?&gt;</c> at
-        /// the top of the file even when the body bytes are plain ASCII / UTF-8
-        /// (no BOM, single-byte chars). <see cref="XDocument.Load(string)"/>
-        /// trusts the declaration, tries to decode the ASCII bytes as UTF-16,
-        /// produces garbage, and silently yields an empty document — surfaced
-        /// as "No components found." in the UI.
-        ///
-        /// This loader sniffs the BOM first, falls back to UTF-8 (safe
-        /// superset for ASCII), then rewrites a lying encoding declaration to
-        /// match the bytes actually read. Pure UTF-16 files (BOM present) are
-        /// untouched.
-        /// </summary>
+        // VueOne sometimes declares encoding="utf-16" while the body bytes are plain ASCII/UTF-8;
+        // XDocument.Load trusts the declaration and yields an empty document. Sniff the BOM, fall back
+        // to UTF-8, then rewrite a lying declaration to match the bytes. Real UTF-16 (BOM) is untouched.
         private static XDocument LoadXmlTolerant(string xmlFilePath)
         {
             var bytes = File.ReadAllBytes(xmlFilePath);
@@ -74,38 +62,27 @@ namespace CodeGen.IO
 
             if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
             {
-                // UTF-16 LE with BOM — real binary UTF-16.
                 content = Encoding.Unicode.GetString(bytes, 2, bytes.Length - 2);
                 wasUtf16 = true;
             }
             else if (bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF)
             {
-                // UTF-16 BE with BOM.
                 content = Encoding.BigEndianUnicode.GetString(bytes, 2, bytes.Length - 2);
                 wasUtf16 = true;
             }
             else if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
             {
-                // UTF-8 with BOM.
                 content = Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
             }
             else
             {
-                // No BOM. Treat as UTF-8 (which is byte-identical to ASCII for
-                // single-byte characters). The VueOne case lands here even when
-                // the declaration claims utf-16 — actual bytes are ASCII.
+                // No BOM: treat as UTF-8 (byte-identical to ASCII for single-byte chars).
                 content = Encoding.UTF8.GetString(bytes);
             }
 
-            // Strip stray BOM character that survived the decode (UTF-16 BOM
-            // sometimes appears as the first char of the resulting string).
             if (content.Length > 0 && content[0] == '﻿')
                 content = content.Substring(1);
 
-            // If the byte stream is NOT actually UTF-16 but the declaration
-            // claims it is, rewrite the declaration to match — otherwise
-            // XDocument.Parse will reject the document on the encoding
-            // mismatch and the user sees "No components found".
             if (!wasUtf16)
             {
                 content = Regex.Replace(
@@ -190,9 +167,7 @@ namespace CodeGen.IO
 
         private VueOneState ParseState(XElement elem, bool isSystemFile)
         {
-            // VueOne mixes <n> (compact form) and <Name> (long form) within the same
-            // System-type file. Mirror the same try-both fallback ParseComponent uses
-            // (line 96–97) so state.Name is populated regardless of the spelling.
+            // VueOne mixes <n> and <Name> in the same file; try both so state.Name is always populated.
             var stateName = GetElementValue(elem, isSystemFile ? "n" : "Name");
             if (string.IsNullOrEmpty(stateName))
                 stateName = GetElementValue(elem, isSystemFile ? "Name" : "n");
@@ -211,11 +186,8 @@ namespace CodeGen.IO
             foreach (var transElem in elem.Elements().Where(e => e.Name.LocalName == "Transition"))
                 state.Transitions.Add(ParseTransition(transElem));
 
-            // VueOne stores actuator interlocks in a STATE-level
-            // <Interlock_Condition><ConditionValue><ConditionGroup>
-            // <Condition .../></...> block (NOT the transition's
-            // Sequence_Condition). Capture every <Condition> descendant so
-            // SystemInjector.BuildInterlockRules can translate them.
+            // VueOne stores actuator interlocks in a STATE-level <Interlock_Condition> block (NOT the
+            // transition's Sequence_Condition); capture every <Condition> descendant for translation.
             var ilk = elem.Elements()
                 .FirstOrDefault(e => e.Name.LocalName == "Interlock_Condition");
             if (ilk != null)
