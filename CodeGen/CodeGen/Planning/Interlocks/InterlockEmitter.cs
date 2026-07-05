@@ -5,38 +5,27 @@ using CodeGen.Models;
 
 namespace CodeGen.Translation.Interlocks
 {
-    /// <summary>
-    /// Owns interlock translation + emission: builds the rule plan from Control.xml
-    /// (<see cref="InterlockPlanner"/>), applies generation policy (the centre-home raw-state range
-    /// filter), writes the RuleCount + Rule* params, and runs the inert-safety-net guards.
-    /// <see cref="SystemLayoutInjector"/> consumes the result and holds no interlock translation of its own.
-    /// </summary>
+    // Owns interlock translation + emission: rule plan from Control.xml (InterlockPlanner), centre-home
+    // range filter, RuleCount/Rule* param write, and the inert-safety-net guards.
     public static class InterlockEmitter
     {
         private static int Cap => InterlockConfig.Current.RuleArraySize;
 
         // ── Five_State_Actuator_CAT ──────────────────────────────────────────────────────────────
 
-        /// <summary>Write the rule params for a Five_State actuator (plan from Control.xml).</summary>
         public static void ApplyFiveState(Dictionary<string, string> p, VueOneComponent actuator,
             IReadOnlyList<VueOneComponent> allComponents,
             IReadOnlyDictionary<string, int>? scopedIds)
             => Write(p, FiveStatePlan(actuator, allComponents, scopedIds));
 
-        /// <summary>
-        /// Refuse an inert safety net (in-scope Control.xml conditions but RuleCount=0), except the
-        /// deliberately-zeroed BX1 covers. Records the bound interlock count.
-        /// </summary>
+        // Hard-fail if in-scope Control.xml conditions survive but RuleCount=0 — never ship an
+        // InterlockManager that passes everything through (a false safety net).
         public static void GuardFiveState(Dictionary<string, string> p, VueOneComponent actuator,
             IReadOnlyList<VueOneComponent> allComponents,
             IReadOnlyDictionary<string, int>? scopedIds,
             List<(string Component, string Detail)> bound)
         {
             int emitted = EmittedCount(p);
-            // Every Five_State actuator (BX1 covers included) must emit the interlock its in-scope
-            // Control.xml conditions define. If conditions survive the BuildRules drops but nothing was
-            // emitted, translation failed (e.g. a source the ring cannot reach) -> HARD-FAIL instead of
-            // shipping an InterlockManager that passes everything through (a false safety net).
             int inScope = InScope(actuator, allComponents, scopedIds);
             if (inScope > 0 && emitted == 0)
                 throw new InvalidOperationException(
@@ -49,7 +38,6 @@ namespace CodeGen.Translation.Interlocks
 
         // ── Seven_State_Actuator_Centre_Home_CAT (Bearing_PnP) ───────────────────────────────────
 
-        /// <summary>Write the rule params for the centre-home swivel (plan + range filter + bench drop).</summary>
         public static void ApplyCentreHome(Dictionary<string, string> p, VueOneComponent actuator,
             IReadOnlyList<VueOneComponent> allComponents,
             IReadOnlyDictionary<string, int>? scopedIds)
@@ -76,7 +64,6 @@ namespace CodeGen.Translation.Interlocks
 
         // ── Default (callers without a scoped map / non-interlock minimal path) ───────────────────
 
-        /// <summary>Write a zeroed rule set (RuleCount=0 + empty arrays).</summary>
         public static void ApplyZero(Dictionary<string, string> p) => Write(p, InterlockPlan.Empty(Cap));
 
         // ── Plans ────────────────────────────────────────────────────────────────────────────────
@@ -84,12 +71,8 @@ namespace CodeGen.Translation.Interlocks
         private static InterlockPlan FiveStatePlan(VueOneComponent actuator,
             IReadOnlyList<VueOneComponent> allComponents,
             IReadOnlyDictionary<string, int>? scopedIds)
-            // Every Five_State actuator -- BX1 cover-detour actuators (CoverPNP_Hr/Vr/Gripper) included --
-            // emits whatever interlock Control.xml defines. Component ids are global (sensors-first over
-            // the whole system), so a cover's cross-PLC SourceID (Bearing_PnP/Shaft_Hr on M580) indexes
-            // the SAME state_table slot the bridged cover-detour ring feeds. BuildRules drops any source
-            // that is genuinely out of scope; GuardFiveState hard-fails if in-scope conditions survive but
-            // nothing is emitted, so a cover can never be silently zeroed.
+            // Component ids are global (sensors-first), so a cover's cross-PLC SourceID indexes the same
+            // state_table slot the bridged ring feeds; BuildRules drops genuinely out-of-scope sources.
             => scopedIds != null
                 ? InterlockPlanner.BuildRules(actuator, allComponents, scopedIds)
                 : InterlockPlan.Empty(Cap);
@@ -104,14 +87,9 @@ namespace CodeGen.Translation.Interlocks
             return WithReverseCrossings(FilterToCentreHomeRange(plan));
         }
 
-        /// <summary>
-        /// Keep only rules whose From/To fall in the core's CurrentRawState range (a "2"-suffixed
-        /// Disassembly route numbers outside the range and is inert). The Blocked==0 decision is NOT
-        /// re-made here: InterlockPlanner.BuildRules already dropped the inverted same-controller
-        /// home-rest rules and kept the genuine cross-controller readiness gates (MergeFeedRing).
-        /// Re-dropping Blocked==0 here would discard those kept gates (e.g. Bearing_PnP blocked while
-        /// Transfer is home / the workpiece is undelivered).
-        /// </summary>
+        // Keep only rules whose From/To fall in the core's CurrentRawState range. Do NOT re-drop Blocked==0
+        // here: BuildRules already dropped the inverted same-controller home-rest rules and kept the genuine
+        // cross-controller readiness gates; re-dropping would discard those kept gates.
         private static InterlockPlan FilterToCentreHomeRange(InterlockPlan plan)
         {
             var r = InterlockConfig.Current.CentreHome;
@@ -128,19 +106,9 @@ namespace CodeGen.Translation.Interlocks
             return new InterlockPlan(kept, f, t, s, b);
         }
 
-        /// <summary>
-        /// The centre-home swivel physically crosses the shared work volume in BOTH directions:
-        /// Work1->Work2 while placing (Assembly), Work2->Work1 while depositing (Disassembly). Control.xml
-        /// states the collision interlock on both crossing states (TurningPlace + TurningPlace2), but the
-        /// branch-2 (Disassembly) State_Numbers do not match the runtime CAT's flat Work1(2)/Work2(4)/Home
-        /// space, so BuildRules yields only the Assembly crossing (From->To) plus an inert out-of-range
-        /// branch-2 rule the range filter drops. Emit the reverse (To->From) of every surviving crossing
-        /// rule so the interlock blocks the crossing WHICHEVER way the swivel travels -- the Disassembly
-        /// move (e.g. Work2->Work1 while CoverPNP_Hr is at work) is now guarded by the same source +
-        /// blocked-state as the Assembly move. (An interlock can only guard a source whose state actually
-        /// reaches this evaluator on the ring; a source never reported cannot be guarded -- that is
-        /// transport, not translation.)
-        /// </summary>
+        // The centre-home swivel crosses the shared work volume BOTH ways (Work1->Work2 placing,
+        // Work2->Work1 depositing), so emit the reverse (To->From) of every surviving crossing rule to block
+        // the crossing whichever way it travels, guarded by the same source + blocked-state.
         private static InterlockPlan WithReverseCrossings(InterlockPlan plan)
         {
             int cap = Cap, n = 0;
@@ -166,7 +134,6 @@ namespace CodeGen.Translation.Interlocks
         {
             if (InterlockConfig.Current.UseStruct)
             {
-                // One encapsulated input: RuleTable : InterlockTable = (Count, Rules[]). No CAT-level RuleCount.
                 p["RuleTable"] = SyslayBuilder.FormatInterlockTable(plan.From, plan.To, plan.Src, plan.Blocked, plan.Count);
             }
             else
@@ -179,8 +146,6 @@ namespace CodeGen.Translation.Interlocks
             }
         }
 
-        // The emitted rule count, read from whichever form Write produced (the InterlockTable's Count
-        // in struct mode, the standalone RuleCount param in array mode).
         private static int EmittedCount(Dictionary<string, string> p)
         {
             if (p.TryGetValue("RuleCount", out var rc))
