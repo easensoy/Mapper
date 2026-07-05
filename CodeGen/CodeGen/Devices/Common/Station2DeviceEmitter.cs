@@ -61,7 +61,7 @@ namespace CodeGen.Devices.Core
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
             var result = new EmitResult();
 
-            var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
+            var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg)!;
             if (string.IsNullOrEmpty(eaeRoot))
             {
                 result.Warnings.Add("Cannot derive EAE project root — Station 2 emit skipped.");
@@ -965,7 +965,7 @@ namespace CodeGen.Devices.Core
         public static void DeployBx1ScannerModelFinalPass(MapperConfig cfg)
         {
             if (cfg == null || !cfg.EmitBx1EtherNetIpDevice) return;
-            var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
+            var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg)!;
             var result = new EmitResult();
             DeployBx1HwConfigScannerModel(cfg, eaeRoot, result);
         }
@@ -975,7 +975,7 @@ namespace CodeGen.Devices.Core
         public static void ValidateBx1ScannerModelOrThrow(MapperConfig cfg)
         {
             if (cfg == null || !cfg.EmitBx1EtherNetIpDevice) return;
-            var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
+            var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg)!;
             var scannerXml = Path.Combine(eaeRoot, "HwConfiguration", "EIPSolutionsV2", Bx1HwConfigScannerId, "scanner.xml");
             var hwproj = Path.Combine(eaeRoot, "HwConfiguration", "HwConfiguration.hwconfigproj");
             var problems = new List<string>();
