@@ -51,16 +51,15 @@ namespace CodeGen.Devices.Core
                 new XElement(ns + "Plugin", "OPCUAConfigurator"),
                 new XElement(ns + "IEC61499Type", "CAT_OPCUA"));
 
-            // Save only on a real change: an unconditional save bumps the .dfbproj mtime and makes
-            // EAE pop a spurious "Reload Solution" prompt.
+            // Save only on a real change (an unconditional save bumps the mtime -> spurious EAE
+            // "Reload Solution" prompt).
             if (a > 0) xml.Save(dfbprojPath);
             return a;
         }
 
-        // Registers a generated hardware-device CAT type folder (e.g. the EtherNet/IP coupler the BX1
-        // .hcf scanner instantiates). Unlike RegisterCat it does NOT register the actuator-CAT siblings
-        // (offline/opcua/HMI xml) — a hardware type has none, and registering missing files makes EAE
-        // flag Missing Project Files. Idempotent.
+        // Registers a hardware-device CAT type folder (e.g. the EtherNet/IP coupler the BX1 .hcf scanner
+        // instantiates). Unlike RegisterCat it does NOT register the actuator-CAT siblings (offline/
+        // opcua/HMI xml) — a hardware type has none, and registering missing files = Missing Project Files.
         public static int RegisterHardwareDeviceCat(string dfbprojPath, string typeName)
         {
             var hmi = typeName + "_HMI";
@@ -90,8 +89,7 @@ namespace CodeGen.Devices.Core
             return a;
         }
 
-        // Removes the Compile/None/Folder entries RegisterHardwareDeviceCat added for the named type
-        // (used when the EtherNet/IP device is held out). Idempotent. Returns the number removed.
+        // Removes the entries RegisterHardwareDeviceCat added for the named type. Idempotent.
         public static int UnregisterHardwareDeviceCat(string dfbprojPath, string typeName)
         {
             if (!File.Exists(dfbprojPath)) return 0;
@@ -126,12 +124,11 @@ namespace CodeGen.Devices.Core
             var (cg, _) = Groups(xml, ns);
             int a = 0;
             Add(cg, ns, "Compile", fileName, ref a, new XElement(ns + "IEC61499Type", type));
-            if (a > 0) xml.Save(dfbprojPath);   // only write on a real change (see RegisterCat)
+            if (a > 0) xml.Save(dfbprojPath);   // only write on a real change
             return a;
         }
 
-        // Registers a DataType (.dt) as <Compile IEC61499Type=DataType>; without it the compiler
-        // reports ERR_NO_SUCH_TYPE on every FB referencing the type even though the .dt is on disk.
+        // Register a DataType (.dt) as <Compile DataType>, else FBs referencing it fail ERR_NO_SUCH_TYPE.
         public static int RegisterDataType(string dfbprojPath, string dtRelativePath)
         {
             var xml = XDocument.Load(dfbprojPath);
@@ -139,13 +136,12 @@ namespace CodeGen.Devices.Core
             var (cg, _) = Groups(xml, ns);
             int a = 0;
             Add(cg, ns, "Compile", dtRelativePath, ref a, new XElement(ns + "IEC61499Type", "DataType"));
-            if (a > 0) xml.Save(dfbprojPath);   // only write on a real change (see RegisterCat)
+            if (a > 0) xml.Save(dfbprojPath);   // only write on a real change
             return a;
         }
 
-        // Registers an SE library <Reference> — the compiler resolves SE library types via these, so
-        // without it FBs of those types fail ERR_NO_SUCH_TYPE. Idempotent: an existing reference to the
-        // same library is left alone (a hand-pinned Version is preserved).
+        // Register an SE library <Reference>, else FBs of those types fail ERR_NO_SUCH_TYPE. Idempotent
+        // (an existing reference is left alone, preserving a hand-pinned Version).
         public static int RegisterReference(string dfbprojPath, string libraryName, string version)
         {
             var xml = XDocument.Load(dfbprojPath);
@@ -166,9 +162,8 @@ namespace CodeGen.Devices.Core
             return 1;
         }
 
-        // Registers a .sysdev (as <Compile SystemDevice>) plus its sibling .hcf/Properties.xml (as
-        // <None SystemDevice>, DependentUpon the .sysdev). Idempotent; de-duplicates repeated child
-        // elements. Returns the number of new entries added.
+        // Registers a .sysdev (<Compile SystemDevice>) plus its sibling .hcf/Properties.xml (<None
+        // SystemDevice>, DependentUpon the .sysdev). Idempotent; de-duplicates repeated children.
         public static int RegisterSystemDevice(string dfbprojPath, string eaeProjectDir, string sysdevPath)
         {
             if (!File.Exists(dfbprojPath)) return 0;
@@ -186,20 +181,18 @@ namespace CodeGen.Devices.Core
             var (cg, ng) = Groups(xml, ns);
             int added = 0;
 
-            // .sysdev goes under <Compile SystemDevice> with a DependentUpon pointer at the parent
-            // .system file — TopologyManager binds Logical Device -> System through it, else the sysdev
-            // compiles but stays orphaned and Deploy & Diagnostic filters it out.
+            // .sysdev <Compile SystemDevice> DependentUpon the parent .system — TopologyManager binds
+            // Logical Device -> System through it, else the sysdev stays orphaned and Deploy &
+            // Diagnostic filters it out.
             const string SystemFileName = "00000000-0000-0000-0000-000000000000.system";
             Add(cg, ns, "Compile", sysdevRel, ref added,
                 new XElement(ns + "DependentUpon", SystemFileName),
                 new XElement(ns + "IEC61499Type", "SystemDevice"));
 
-            // Sibling files go under <None SystemDevice>, EXCEPT the BX1 SoftPAC (sysdev id ...0004,
-            // the only PLC with an EtherNet/IP scanner): its .sysres must be <Compile SystemResource>
-            // and its .hcf ALSO <Content SystemDevice>, or EAE never compiles the resource's HWConfig
-            // and the Deploy export emits an EMPTY scanner. M262/M580 keep the legacy <None> (no
-            // scanner). Necessary but not sufficient — the HwConfiguration TM3BC device model is what
-            // EAE actually compiles the scanner from.
+            // Siblings go under <None SystemDevice>, EXCEPT the BX1 SoftPAC (sysdev id ...0004, the only
+            // EtherNet/IP-scanner PLC): its .sysres must be <Compile SystemResource> and its .hcf ALSO
+            // <Content SystemDevice>, or EAE compiles no HWConfig and the Deploy export emits an EMPTY
+            // scanner. M262/M580 keep the legacy <None>.
             bool isBx1Resource = sysdevFileName.StartsWith(
                 "00000000-0000-0000-0000-000000000004", StringComparison.OrdinalIgnoreCase);
             if (Directory.Exists(sysdevFolder))
@@ -211,7 +204,7 @@ namespace CodeGen.Devices.Core
 
                     if (ext == ".sysres" && isBx1Resource)
                     {
-                        // Migrate any stale <None> registration of this .sysres to <Compile SystemResource>.
+                        // Migrate a stale <None> registration of this .sysres to <Compile SystemResource>.
                         foreach (var stale in xml.Root!.Descendants(ns + "None")
                                      .Where(e => string.Equals((string?)e.Attribute("Include"), rel,
                                          StringComparison.OrdinalIgnoreCase)).ToList())
@@ -255,8 +248,7 @@ namespace CodeGen.Devices.Core
         }
 
         // Idempotently ensures the four APPLICATION dfbproj entries exist: .sysapp (SystemApplication)
-        // + .syslay (SystemLayer) under <Compile>, aspmap/opcua companions under <Content>. The
-        // zero/one UUIDs are the Mapper's fixed application convention. Returns the count added.
+        // + .syslay (SystemLayer) under <Compile>, aspmap/opcua companions under <Content>.
         public static int RegisterApplicationShell(string dfbprojPath)
         {
             if (!File.Exists(dfbprojPath)) return 0;
@@ -282,7 +274,7 @@ namespace CodeGen.Devices.Core
                 new XElement(ns + "DependentUpon", AppId + ".sysapp"),
                 new XElement(ns + "IEC61499Type", "SystemLayer"));
 
-            // aspmap/opcua are <Content> — a separate ItemGroup from Compile/None.
+            // aspmap/opcua go under <Content>.
             var content = xml.Descendants(ns + "ItemGroup")
                 .FirstOrDefault(g => g.Elements(ns + "Content").Any()) ?? AddGroup(xml, ns);
 
@@ -301,15 +293,13 @@ namespace CodeGen.Devices.Core
         }
 
         // Strips every Content/None/Compile entry whose Include references a sysres-stem directory (or
-        // .sysres file) that no longer exists on disk, so EAE's Solution Integrity does not flag them as
-        // missing project files. Returns the number of entries removed.
+        // .sysres file) absent on disk, so EAE's Solution Integrity doesn't flag them as missing.
         public static int StripStaleSysresStemEntries(string dfbprojPath, string eaeProjectDir)
         {
             if (!File.Exists(dfbprojPath) || !Directory.Exists(eaeProjectDir)) return 0;
             var systemDir = Path.Combine(eaeProjectDir, "IEC61499", "System");
             if (!Directory.Exists(systemDir)) return 0;
 
-            // Live sysres stems: the BaseName of every .sysres on disk under IEC61499/System/.
             var liveStems = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var sysres in Directory.EnumerateFiles(systemDir, "*.sysres",
                          SearchOption.AllDirectories))
@@ -338,18 +328,16 @@ namespace CodeGen.Devices.Core
                 string? stem = null;
                 if (include.EndsWith(".sysres", StringComparison.OrdinalIgnoreCase))
                 {
-                    // A .sysres FILE entry (stem is the filename, which the directory-stem regex misses).
+                    // A .sysres FILE entry (the directory-stem regex misses the filename stem).
                     stem = Path.GetFileNameWithoutExtension(include);
                 }
                 else
                 {
-                    // A sister-folder reference (…\<stem>\opcua.xml etc.).
-                    var m = stemRx.Match(include);
+                    var m = stemRx.Match(include);  // a sister-folder ref (…\<stem>\opcua.xml etc.)
                     if (m.Success) stem = m.Groups[1].Value;
                 }
                 if (string.IsNullOrEmpty(stem)) continue;
                 if (liveStems.Contains(stem)) continue;
-                // Stale — remove the element and its trailing whitespace.
                 var nextWs = el.NextNode as XText;
                 el.Remove();
                 if (nextWs != null) nextWs.Remove();
@@ -359,10 +347,9 @@ namespace CodeGen.Devices.Core
             return removed;
         }
 
-        // Removes dfbproj entries pointing at an EAE-owned per-resource compile artifact (opcua/
-        // offline/opcuaclient/symlink.xml under a System\…\<resId>\ folder) whose file is absent — EAE
-        // regenerates them on the next Build, so a dangling ref shows as a Missing Project File. Never
-        // touches .sysdev/.sysres/.hcf/.Properties.xml, so safe to run at any point. Returns count removed.
+        // Removes dfbproj entries pointing at an EAE-owned per-resource compile artifact (opcua/offline/
+        // opcuaclient/symlink.xml) whose file is absent — EAE regenerates them on Build, so a dangling
+        // ref = Missing Project File. Never touches .sysdev/.sysres/.hcf/.Properties.xml.
         public static int StripDanglingResourceArtifactEntries(string eaeProjectDir)
         {
             if (string.IsNullOrEmpty(eaeProjectDir)) return 0;
@@ -387,10 +374,10 @@ namespace CodeGen.Devices.Core
                 if (string.IsNullOrEmpty(include)) continue;
                 if (!include.Contains("System\\", StringComparison.OrdinalIgnoreCase) &&
                     !include.Contains("System/", StringComparison.OrdinalIgnoreCase)) continue;
-                if (!artifactRx.IsMatch(include)) continue;  // only the EAE compile artifacts
+                if (!artifactRx.IsMatch(include)) continue;
                 var abs = Path.Combine(iec,
                     include.Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar));
-                if (File.Exists(abs)) continue;  // file present — keep (EAE compiled it)
+                if (File.Exists(abs)) continue;  // file present — EAE compiled it; keep
                 var nextWs = el.NextNode as XText;
                 el.Remove();
                 if (nextWs != null) nextWs.Remove();
@@ -406,7 +393,7 @@ namespace CodeGen.Devices.Core
             foreach (var entry in group.Elements(ns + tag).ToList())
             {
                 var include = (string?)entry.Attribute("Include") ?? string.Empty;
-                // Only touch entries tied to this sysdev (same file or its folder).
+                // Only entries tied to this sysdev (same file or its folder).
                 if (!include.EndsWith(sysdevFileName, StringComparison.OrdinalIgnoreCase) &&
                     !include.Contains(Path.GetFileNameWithoutExtension(sysdevFileName),
                         StringComparison.OrdinalIgnoreCase))
@@ -422,13 +409,13 @@ namespace CodeGen.Devices.Core
         {
             var children = parent.Elements(childName).ToList();
             if (children.Count <= 1) return 0;
-            // Keep the first, drop the rest (EAE honours only the first).
+            // EAE honours only the first — keep it, drop the rest.
             for (int i = 1; i < children.Count; i++)
                 children[i].Remove();
             return children.Count - 1;
         }
 
-        // Safety-net pass: registers any .dt/.adp/.fbt in the IEC61499 folder not yet in the project so
+        // Safety-net pass: registers any .dt/.adp/.fbt in the IEC61499 folder not yet in the project, so
         // an external file drop is still picked up by the compiler.
         public static int SweepIec61499Folder(string dfbprojPath, string iec61499Dir)
         {
@@ -445,18 +432,18 @@ namespace CodeGen.Devices.Core
                 var name = Path.GetFileName(adp);
                 added += RegisterBasicFb(dfbprojPath, name, "Adapter");
             }
-            // .fbt at root only — CAT folders are already handled by RegisterCat.
+            // .fbt at root only — CAT folders are handled by RegisterCat.
             foreach (var fbt in Directory.EnumerateFiles(iec61499Dir, "*.fbt", SearchOption.TopDirectoryOnly))
             {
                 var name = Path.GetFileName(fbt);
-                // Heuristic: composite if a same-stem .composite.offline.xml exists, else Basic.
+                // Composite if a same-stem .composite.offline.xml exists, else Basic.
                 var stem = Path.GetFileNameWithoutExtension(name);
                 bool isComposite = File.Exists(Path.Combine(iec61499Dir, stem + ".composite.offline.xml"));
                 added += RegisterBasicFb(dfbprojPath, name, isComposite ? "Composite" : "Basic");
             }
 
-            // Register flat sibling files at IEC61499 root as <None> — Composite FBs fail to resolve
-            // their child FB type without the .composite.offline.xml registered.
+            // Register flat sibling files at IEC61499 root as <None> — a Composite FB fails to resolve
+            // its child FB type without the .composite.offline.xml registered.
             string[] siblingPatterns = {
                 "*.composite.offline.xml",
                 "*.doc.xml",
