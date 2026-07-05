@@ -16,11 +16,7 @@ namespace CodeGen.Translation
         string ComponentName,
         string? InputTag);
 
-    /// <summary>
-    /// One row of the (Pin -> RES0 symlink) routing table the M262 .hcf needs.
-    /// Built from optional <c>pin_di_athome</c> / <c>pin_di_atwork</c> /
-    /// <c>pin_do_outputToWork</c> columns on the Actuators sheet.
-    /// </summary>
+    // One row of the (Pin -> RES0 symlink) routing table the M262 .hcf needs.
     public record PinAssignment(string Pin, string ComponentName, string Port);
 
     public class IoBindings
@@ -28,25 +24,15 @@ namespace CodeGen.Translation
         public Dictionary<string, ActuatorBinding> Actuators { get; init; } = new(StringComparer.Ordinal);
         public Dictionary<string, SensorBinding> Sensors { get; init; } = new(StringComparer.Ordinal);
 
-        /// <summary>
-        /// Pin id (e.g. "DI00", "DO15") -> assignment. Populated only when the optional
-        /// pin_di_athome / pin_di_atwork / pin_do_outputToWork columns are present in
-        /// the IO bindings xlsx. Empty when the user hasn't added those columns yet —
-        /// in that case <see cref="ResolveSymbol"/> returns null for everything and
-        /// the .hcf is left with its baseline values.
-        /// </summary>
+        // Pin id (e.g. "DI00") -> assignment; empty when the optional pin_* columns are absent
+        // (ResolveSymbol then returns null and the .hcf keeps its baseline values).
         public Dictionary<string, PinAssignment> PinAssignments { get; init; } =
             new(StringComparer.OrdinalIgnoreCase);
 
         public string SourcePath { get; init; } = string.Empty;
 
-        /// <summary>
-        /// For a pin id like "DI00", returns <c>'RES0.&lt;component&gt;.&lt;port&gt;'</c>
-        /// (with literal single quotes — EAE's .hcf schema requires them) if the
-        /// IO bindings xlsx maps that pin to an actuator port. Returns null if the
-        /// pin has no assignment, in which case the .hcf rewriter leaves the baseline
-        /// Value attribute untouched.
-        /// </summary>
+        // Returns 'RES0.<component>.<port>' (literal quotes — EAE .hcf schema requires them) for a
+        // mapped pin, else null (the .hcf rewriter then leaves the baseline Value untouched).
         public string? ResolveSymbol(string pin)
         {
             if (string.IsNullOrWhiteSpace(pin)) return null;
@@ -106,10 +92,7 @@ namespace CodeGen.Translation
                         $"Actuators sheet column {i} expected '{expected[i]}', got '{(i < header.Count ? header[i] : "<missing>")}'");
             }
 
-            // Optional pin columns — index by header name so the user can add them in any
-            // order to the right of the existing columns. Absent columns just mean
-            // ResolveSymbol() returns null for the corresponding pin (unless the Notes
-            // column fallback below picks it up).
+            // Optional pin columns, indexed by header name; absent columns just mean no pin assignment.
             int idxPinDiAthome     = header.FindIndex(h => string.Equals(h, "pin_di_athome",      StringComparison.OrdinalIgnoreCase));
             int idxPinDiAtwork     = header.FindIndex(h => string.Equals(h, "pin_di_atwork",      StringComparison.OrdinalIgnoreCase));
             int idxPinDoToWork     = header.FindIndex(h => string.Equals(h, "pin_do_outputToWork", StringComparison.OrdinalIgnoreCase));
@@ -135,12 +118,8 @@ namespace CodeGen.Translation
                 AddPinIfPresent(bindings, idxPinDoToWork, row, name, "OutputToWork");
                 AddPinIfPresent(bindings, idxPinDoToHome, row, name, "OutputToHome");
 
-                // Notes-column fallback: when the structured pin_* columns aren't
-                // populated for this row, parse the free-text Notes for tokens like
-                // "DI00=PusherAtHome" / "DO03=ExtendRejector" and match the tag back
-                // to athome/atwork/OutputToWork/OutputToHome via the binding columns.
-                // Memory rule "Never regenerate the Excel" — this lets the existing
-                // hand-crafted Notes cell drive .hcf without xlsx schema changes.
+                // Notes-column fallback drives the .hcf from the hand-crafted Notes cell (tokens like
+                // "DI00=PusherAtHome") — NEVER regenerate the xlsx, so no schema change is possible here.
                 if (idxNotes >= 0)
                 {
                     var notes = Get(row, idxNotes);
@@ -156,13 +135,10 @@ namespace CodeGen.Translation
             if (idx < 0) return;
             var pin = NullIfEmpty(Get(row, idx));
             if (pin == null) return;
-            // Last writer wins if a pin appears in two rows — EAE's hcf schema also
-            // forbids duplicates, so this matches the runtime constraint.
+            // Last writer wins on a duplicate pin — EAE's hcf schema also forbids duplicates.
             bindings.PinAssignments[pin] = new PinAssignment(pin, componentName, port);
         }
 
-        // Tokens like "DI00=PusherAtHome" and "DO03=ExtendRejector" — pin id capture
-        // followed by the equals sign and the IO tag string used elsewhere on the row.
         private static readonly System.Text.RegularExpressions.Regex NotesPinPattern =
             new(@"\b(D[IO]\d{2})\s*=\s*([A-Za-z_][A-Za-z0-9_]*)",
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase);
@@ -172,22 +148,17 @@ namespace CodeGen.Translation
         {
             foreach (System.Text.RegularExpressions.Match m in NotesPinPattern.Matches(notes))
             {
-                var pin = m.Groups[1].Value.ToUpperInvariant(); // normalise "di00" -> "DI00"
+                var pin = m.Groups[1].Value.ToUpperInvariant();
                 var tag = m.Groups[2].Value;
 
-                // Match the captured IO tag back to one of the binding's tag columns to
-                // figure out which CAT port name (athome/atwork/OutputToWork/OutputToHome)
-                // this pin should symlink to.
                 string? port = null;
                 if (string.Equals(tag, binding.AthomeTag,        StringComparison.OrdinalIgnoreCase)) port = "athome";
                 else if (string.Equals(tag, binding.AtworkTag,        StringComparison.OrdinalIgnoreCase)) port = "atwork";
                 else if (string.Equals(tag, binding.OutputToWorkTag,  StringComparison.OrdinalIgnoreCase)) port = "OutputToWork";
                 else if (string.Equals(tag, binding.OutputToHomeTag,  StringComparison.OrdinalIgnoreCase)) port = "OutputToHome";
-                if (port == null) continue; // tag doesn't belong to this row's bindings
+                if (port == null) continue;
 
-                // Don't overwrite a structured pin_* column if it already wrote this pin —
-                // the explicit column wins over Notes free-text. AddPinIfPresent has
-                // already run above so we check first.
+                // An explicit pin_* column already ran above and wins over the Notes free-text.
                 if (bindings.PinAssignments.ContainsKey(pin)) continue;
                 bindings.PinAssignments[pin] = new PinAssignment(pin, binding.ComponentName, port);
             }
