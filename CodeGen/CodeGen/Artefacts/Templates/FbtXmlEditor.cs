@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Xml.Linq;
 
 namespace CodeGen.Services
@@ -35,6 +37,16 @@ namespace CodeGen.Services
                     System.Threading.Thread.Sleep(delay);
                 }
             }
+        }
+
+        // Remove matching elements via instance Remove() (no IEnumerable<XElement>.Remove() extension in
+        // the callers). Returns true if anything was removed.
+        internal static bool RemoveElems(IEnumerable<XElement>? src, Func<XElement, bool> pred)
+        {
+            if (src == null) return false;
+            var hits = src.Where(pred).ToList();
+            foreach (var h in hits) h.Remove();
+            return hits.Count > 0;
         }
     }
 }
