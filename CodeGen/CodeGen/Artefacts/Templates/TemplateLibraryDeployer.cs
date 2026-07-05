@@ -10,6 +10,7 @@ using CodeGen.Translation.Interlocks;
 using CodeGen.Devices.M262;
 using CodeGen.Devices.Core;
 using static CodeGen.Services.TemplateArtifactDeployer;
+using static CodeGen.Services.FbtXmlEditor;
 
 namespace CodeGen.Services
 {
@@ -446,18 +447,10 @@ namespace CodeGen.Services
                 DeployRecipeStepDatatype(eaeProjectDir, result);
             NormalizeProcess1RecipeArrays(eaeProjectDir, recipeStruct, result);
             NormalizeProcessRuntimeRecipeArrays(eaeProjectDir, recipeStruct, result);
-            // Simulator-only debug watchability. CurrentStep / CurrentStepType /
-            // WaitSatisfied are "Exposed for debug" OutputVars on ProcessRuntime_Generic_v1
-            // but are in NO output event's WITH list (EAE WRN_XML_VAR_WITHOUT_OEVENT), so
-            // EAE Online Watch can never refresh them — they sit frozen at their power-up
-            // 0/FALSE regardless of which recipe step the engine is really on. That is the
-            // "CurrentStep stuck at 0, WaitSatisfied stuck FALSE" confusion: the engine is
-            // stepping (cmd_target_name advances on CMDREQ), but the step counter never
-            // updates in Watch. Add the three to the CMDREQ + SCNF output-event WITH lists
-            // so they refresh on every command + step confirmation. Pure watch aid — the
-            // vars are already computed by the ECC; this changes no logic. reduce==false
-            // (rig) strips them so the hardware engine is byte-identical.
-            NormalizeProcessEngineDebugWatch(eaeProjectDir, false, result);
+            // Strip the debug OutputVars (CurrentStep/CurrentStepType/WaitSatisfied) from the CMDREQ/SCNF
+            // WITH lists so the deployed engine is byte-identical (migrates back a tree that had them added
+            // for EAE Online Watch).
+            NormalizeProcessEngineDebugWatch(eaeProjectDir, result);
             // check_wait is LEVEL-triggered: WaitSatisfied := state_table[Recipe[CurrentStep].Wait1Id].state
             // = Recipe[CurrentStep].Wait1State. That single line is the raw ProcessRuntime_Generic_v1
             // template body; NormalizeProcessRuntimeRecipeArrays above rewrites the array index into the
@@ -584,18 +577,10 @@ namespace CodeGen.Services
             }
         }
 
-        /// <summary>
-        /// Ensure the internal SYMLINKMULTIVARDST (FB2) inside the deployed
-        /// Sensor_Bool_CAT.fbt carries Parameter QI=TRUE. Without QI the DST
-        /// defaults QI=FALSE, which disables it as a live subscriber so every
-        /// publish to '$${PATH}Input' is silently dropped — the sensor never
-        /// registers state on the ring (runtime-confirmed root cause). The
-        /// template zip already ships QI=TRUE; this is an idempotent
-        /// deploy-time guard so a future zip re-swap that loses QI can't
-        /// silently reintroduce the bug. Adds the parameter only when the
-        /// SYMLINKMULTIVARDST FB lacks it; no-op once present. Touches only
-        /// Sensor_Bool_CAT.fbt — no event/ECC/NAME1 changes.
-        /// </summary>
+        // Idempotent guard: ensure the internal SYMLINKMULTIVARDST inside the deployed Sensor_Bool_CAT.fbt
+        // carries QI=TRUE. Without QI the DST defaults FALSE (disabled subscriber -> publishes to
+        // '$${PATH}Input' silently dropped, sensor never registers on the ring). The zip already ships it;
+        // this guards a future zip re-swap. Touches only Sensor_Bool_CAT.fbt.
         static void PatchSensorBoolCatDstQi(string eaeProjectDir, DeployResult result)
         {
             // Sensor_Bool_CAT deploys flat-ish under IEC61499/Sensor_Bool_CAT/.
@@ -662,41 +647,10 @@ namespace CodeGen.Services
             }
         }
 
-        /// <summary>
-        /// The recipe-array InputVars (StepType, CmdTargetName, CmdStateArr,
-        /// Wait1Id, Wait1State, NextStep) ship at ArraySize="10" in the
-        /// Process1_Generic.fbt and ProcessRuntime_Generic_v1.fbt templates,
-        /// but Mapper now emits up to 20 entries (Transfer widening +
-        /// auto-retract). EAE silently truncates the over-long array literal
-        /// so ProcessEngine receives a partial recipe and stalls on
-        /// StepType=0 (Unknown step). Force ArraySize="20" on all six in BOTH
-        /// deployed FBTs to match the existing state_table ArraySize=20
-        /// convention. Idempotent: SetAttributeValue replaces if present,
-        /// inserts if absent; no-op once at 20. Runs on hardware AND sim
-        /// paths. (PatchProcessRuntimeEngine's RecipeArrayDecls path is gated
-        /// off because the new template already ships the arrays as InputVars,
-        /// so this unconditional guard is the only thing that fixes the size.)
-        /// </summary>
-        /// <summary>
-        /// Expands the <c>process_name</c> InputVar inside
-        /// <c>Process1_Generic.fbt</c> from the shipped <c>STRING[15]</c> to
-        /// <c>STRING[150]</c> (the size the reference <c>Process2_CAT</c>
-        /// uses for the same field). Without this, any Process FB instance
-        /// whose name exceeds 15 characters — e.g. <c>Assembly_Station</c>
-        /// (16 chars), <c>Disassembly_Station</c> (19 chars) — fails to wire
-        /// at deploy time with EAE's runtime CreateResource:
-        /// <code>
-        /// Unable to deploy: Deploy Full Command: Error while parsing the application
-        /// CreateResource: Cannot connect parameter to data input process_name
-        /// </code>
-        /// because the string literal Mapper emits in the syslay Parameter
-        /// (<c>Value="'Assembly_Station'"</c>) overflows the InputVar's
-        /// declared size.
-        ///
-        /// <para>Idempotent — only touches the one VarDeclaration; channel
-        /// rewrites, recipe arrays, and everything else stay untouched.
-        /// Runs on hardware AND sim paths.</para>
-        /// </summary>
+        // Expand the process_name InputVar in Process1_Generic.fbt/ProcessRuntime_Generic_v1.fbt from the
+        // shipped STRING[15] to STRING[150]. Without it a Process instance whose name exceeds 15 chars
+        // (Assembly_Station=16, Disassembly_Station=19) fails to wire at deploy ("Cannot connect parameter
+        // to data input process_name") — the syslay string literal overflows the declared size. Idempotent.
         static void PatchProcessNameStringSize(string eaeProjectDir, DeployResult result)
         {
             var candidates = new[]
@@ -821,20 +775,10 @@ namespace CodeGen.Services
 
 
 
-        /// <summary>
-        /// Same QI=FALSE-by-default bug as Sensor_Bool_CAT, in
-        /// Five_State_Actuator_CAT. Its internal SYMLINKMULTIVARDST
-        /// (Name "Inputs", subscribes $${PATH}athome/atwork) and
-        /// SYMLINKMULTIVARSRC (Name "Output", publishes
-        /// $${PATH}OutputToHome/OutputToWork) both default QI=FALSE — the
-        /// DST rejects every TM3DI16 publish so the actuator never sees its
-        /// sensors, and the SRC never writes TM3DQ16 so the solenoid stays
-        /// cold even when the ECC commands it (rig-confirmed). Force QI=TRUE
-        /// on BOTH: insert after NAME1 if absent, flip FALSE→TRUE if present.
-        /// Idempotent deploy-time guard against a future zip re-swap losing
-        /// QI. Runs on hardware AND sim paths. Five_State_Actuator_CAT only —
-        /// no event/ECC/NAME1 changes; Sensor_Bool_CAT untouched here.
-        /// </summary>
+        // Same QI=FALSE-by-default guard as Sensor_Bool_CAT, for an actuator CAT: force QI=TRUE on BOTH
+        // its internal SYMLINKMULTIVARDST ("Inputs", subscribes $${PATH}athome/atwork) and
+        // SYMLINKMULTIVARSRC ("Output", publishes $${PATH}OutputToHome/OutputToWork). Without QI the DST
+        // rejects sensor publishes and the SRC never writes the solenoid. Idempotent.
         static void PatchCatSymlinkQi(string eaeProjectDir, string catName, DeployResult result)
         {
             var fbt = Path.Combine(eaeProjectDir, "IEC61499",
@@ -913,13 +857,9 @@ namespace CodeGen.Services
         // FB-network; idempotent (skip if MqttPub already present).
         // ============================================================
 
-        /// <summary>
-        /// Drops the <c>MqttStateFormatter</c> basic FB (INT state → STRING
-        /// payload via <c>INT_TO_STRING</c>) into the deployed
-        /// <c>IEC61499/</c> folder if absent. The CAT patch wires this FB
-        /// between the actuator/sensor state output and MQTT_PUBLISH.Payload1.
-        /// Idempotent.
-        /// </summary>
+        // Deploy the MqttStateFormatter basic FB (INT state -> STRING payload via INT_TO_STRING) into
+        // IEC61499/. The CAT patch wires it between the actuator/sensor state output and
+        // MQTT_PUBLISH.Payload1. Always overwrites so a re-deploy picks up the sized [255] payload.
         static void DeployMqttFormatter(string eaeProjectDir, DeployResult result)
         {
             try
@@ -956,10 +896,8 @@ namespace CodeGen.Services
             "  </StructuredType>\r\n" +
             "</DataType>";
 
-        /// <summary>
-        /// Deploy the InterlockRule datatype (one rule's four INT fields). Registered via the
-        /// DataTypesDeployed loop (same path as RecipeStep). Idempotent (copy-if-absent).
-        /// </summary>
+        // Deploy the InterlockRule datatype (one rule's four INT fields), registered via the
+        // DataTypesDeployed loop. Idempotent (copy-if-absent).
         static void DeployInterlockRuleDatatype(string eaeProjectDir, DeployResult result)
         {
             try
@@ -994,11 +932,8 @@ namespace CodeGen.Services
             "  </StructuredType>\r\n" +
             "</DataType>";
 
-        /// <summary>
-        /// Deploy the InterlockTable datatype so EAE resolves the single <c>RuleTable : InterlockTable</c>
-        /// input the normalizers expose on the actuator CATs + CommonInterlockEvaluator. Registered via
-        /// the DataTypesDeployed loop. Idempotent (copy-if-absent).
-        /// </summary>
+        // Deploy the InterlockTable datatype so EAE resolves the single RuleTable : InterlockTable input
+        // the normalizers expose on the actuator CATs + CommonInterlockEvaluator. Idempotent.
         static void DeployInterlockTableDatatype(string eaeProjectDir, DeployResult result)
         {
             try
@@ -1033,8 +968,8 @@ namespace CodeGen.Services
             "  </StructuredType>\r\n" +
             "</DataType>";
 
-        /// <summary>Deploy the TargetStates datatype so EAE resolves the <c>Target : TargetStates</c>
-        /// input the normalizers expose. Registered via the DataTypesDeployed loop. Idempotent.</summary>
+        // Deploy the TargetStates datatype so EAE resolves the Target : TargetStates input the
+        // normalizers expose. Idempotent.
         static void DeployTargetStatesDatatype(string eaeProjectDir, DeployResult result)
         {
             try
@@ -1076,8 +1011,7 @@ namespace CodeGen.Services
             "  </StructuredType>\r\n" +
             "</DataType>";
 
-        /// <summary>Deploy the TelemetryConfig datatype (the Telemetry_CAT Config input).
-        /// Registered via the DataTypesDeployed loop. Idempotent (copy-if-absent).</summary>
+        // Deploy the TelemetryConfig datatype (the Telemetry_CAT Config input). Idempotent.
         static void DeployTelemetryConfigDatatype(string eaeProjectDir, DeployResult result)
         {
             try
@@ -1117,13 +1051,10 @@ namespace CodeGen.Services
             "  </StructuredType>\r\n" +
             "</DataType>";
 
-        /// <summary>
-        /// Repairs the deployed Seven-State centre-home CAT's boundary state output. A stale deploy can
-        /// leave the boundary OutputVar <c>current_state_to_process</c> orphaned (no WITH clause), which
-        /// EAE rejects. The _HMI faceplate still references it (so it must NOT be removed). This re-adds
-        /// <c>state_out</c> (WITH current_state_to_process) + the <c>ActuatorCore.pst_out → state_out</c>
-        /// event connection. Idempotent; a no-op on a fresh committed CAT and once already consistent.
-        /// </summary>
+        // Repair the deployed Seven-State centre-home CAT's boundary state output: a stale deploy can leave
+        // the OutputVar current_state_to_process orphaned (no WITH clause), which EAE rejects. The _HMI
+        // faceplate references it (must NOT be removed), so re-add state_out (WITH current_state_to_process)
+        // + the ActuatorCore.pst_out -> state_out event connection. Idempotent.
         static void EnsureSevenStateStateOut(string eaeProjectDir, DeployResult result)
         {
             try
@@ -1174,12 +1105,8 @@ namespace CodeGen.Services
             }
         }
 
-        /// <summary>
-        /// VISUAL-only: keep the "HMI &amp; OPCUA Connectivity" section frame from spilling into the
-        /// section below it. Sets the frame MoveStyle="None" (it was "AnyContained" and auto-grew over
-        /// the next section when the IThis faceplate overflowed), caps its height to ~30 above the next
-        /// section, and pulls the IThis FB up near the frame top so it sits inside. No wiring change.
-        /// </summary>
+        // VISUAL-only: keep the "HMI & OPCUA Connectivity" section frame from spilling into the section
+        // below (MoveStyle "AnyContained"->"None", cap height, pull IThis up inside). No wiring change.
         static void FixCatHmiOpcuaFrame(string eaeProjectDir, string catName, DeployResult result)
         {
             try
@@ -1216,8 +1143,7 @@ namespace CodeGen.Services
             }
         }
 
-        /// <summary>Deploy the TelemetryHealth datatype (the Telemetry_CAT Health output).
-        /// Registered via the DataTypesDeployed loop. Idempotent (copy-if-absent).</summary>
+        // Deploy the TelemetryHealth datatype (the Telemetry_CAT Health output). Idempotent.
         static void DeployTelemetryHealthDatatype(string eaeProjectDir, DeployResult result)
         {
             try
@@ -1258,12 +1184,8 @@ namespace CodeGen.Services
             ["REQ_HOME"]  = "TargetHomeState",
         };
 
-        /// <summary>
-        /// Fold an actuator CAT's target InputVars (<paramref name="targetInputs"/>) into one
-        /// <c>Target : TargetStates</c> that flows whole into the interlock evaluator instance
-        /// <paramref name="interlockFbName"/>. Bidirectional + idempotent; reduce==false restores the
-        /// scalar inputs.
-        /// </summary>
+        // Fold an actuator CAT's target InputVars into one Target : TargetStates that flows whole into the
+        // interlock evaluator instance interlockFbName. Bidirectional + idempotent; reduce==false restores scalars.
         static void NormalizeTargetStates(
             string eaeProjectDir, string catFileName, string interlockFbName,
             string[] targetInputs, bool reduce, DeployResult result)
@@ -1398,11 +1320,8 @@ namespace CodeGen.Services
             }
         }
 
-        /// <summary>
-        /// Fold the CommonInterlockEvaluator's three target InputVars into one
-        /// <c>Target : TargetStates</c> and rewrite the Work1/Work2/Home algorithms to read
-        /// Target.Work1/Work2/Home. Bidirectional + idempotent.
-        /// </summary>
+        // Fold the CommonInterlockEvaluator's three target InputVars into one Target : TargetStates and
+        // rewrite the Work1/Work2/Home algorithms to read Target.Work1/Work2/Home. Bidirectional + idempotent.
         static void NormalizeCommonInterlockEvaluatorTargets(
             string eaeProjectDir, bool reduce, DeployResult result)
         {
@@ -1541,16 +1460,10 @@ namespace CodeGen.Services
             return hits.Count > 0;
         }
 
-        /// <summary>
-        /// Simulator interface reduction on Five_State_Actuator_CAT: collapse the
-        /// four parallel Rule arrays (face InputVar + INIT With + boundary Input +
-        /// DataConnection to InterlockManager) into a single
-        /// RuleTable : InterlockRule[10]. Bidirectional + idempotent like
-        /// NormalizeFiveStateInterlockConstants (deployer is copy-if-absent, so the
-        /// .fbt persists and must be reshaped to match the flag each deploy).
-        /// reduce==true collapses to RuleTable; reduce==false restores the four
-        /// arrays so the byte-identical hardware slice is untouched.
-        /// </summary>
+        // Interlock-struct reduction on an actuator CAT (gated by interlock.yaml useStruct): collapse the
+        // four parallel Rule arrays (face InputVar + INIT With + boundary Input + DataConnection to the
+        // interlock FB) into one RuleTable : InterlockRule[10]. Bidirectional + idempotent; reduce==false
+        // restores the four arrays. The deployer is copy-if-absent, so the .fbt is reshaped to the flag each deploy.
         static void NormalizeFiveStateRuleArrays(
             string eaeProjectDir, string catFileName, string interlockFbName,
             bool reduce, DeployResult result)
@@ -1724,13 +1637,10 @@ namespace CodeGen.Services
             }
         }
 
-        /// <summary>
-        /// Simulator-only centre-home swivel position synthesis. Leaves the physical Inputs block on the
-        /// real sensor symlinks and, in simulator mode only, inserts a small SimCentreHomeSensor_7SCH
-        /// Basic inside the CAT that derives mutually-exclusive atHome/atWork1/atWork2 from
-        /// ActuatorCore.current_state_to_process on pst_out, then feeds the normal input_event path.
-        /// Hardware mode removes the helper and restores the physical sensor wiring.
-        /// </summary>
+        // Deploy-time normalizer for the centre-home swivel's sensor source. reduce=false (the rig path,
+        // the only call today) keeps the physical Inputs on the real sensor symlinks. reduce=true inserted
+        // a SimCentreHomeSensor_7SCH Basic deriving atHome/atWork1/atWork2 from current_state_to_process
+        // (vestigial sim-position synthesis).
         static void NormalizeSwivelSimSensorSource(string eaeProjectDir, bool reduce, DeployResult result)
         {
             var fbt = Directory.EnumerateFiles(
@@ -2022,51 +1932,6 @@ namespace CodeGen.Services
             }
         }
 
-        /// <summary>
-        /// Loads an .fbt/.xml with a short retry on a transient file lock (EAE briefly
-        /// holding the file during a background scan). Throws the last lock exception
-        /// after the final attempt, so a persistently-open editor tab still surfaces to
-        /// the caller (which decides whether to abort or warn).
-        /// </summary>
-        static System.Xml.Linq.XDocument LoadXmlWithRetry(string path, System.Xml.Linq.LoadOptions opts)
-        {
-            for (int attempt = 1, delay = 50; ; attempt++, delay = Math.Min(delay * 2, 800))
-            {
-                try { return System.Xml.Linq.XDocument.Load(path, opts); }
-                catch (Exception ex) when ((ex is IOException || ex is UnauthorizedAccessException) && attempt < 8)
-                {
-                    System.Threading.Thread.Sleep(delay);
-                }
-            }
-        }
-
-        /// <summary>
-        /// Saves an XDocument with a short retry on a transient file lock, using the same
-        /// default formatting as XDocument.Save(path) (so the on-disk bytes are identical
-        /// to a plain doc.Save — byte-identical generation is preserved). Throws the last
-        /// lock exception after the final attempt.
-        /// </summary>
-        static void SaveXmlWithRetry(System.Xml.Linq.XDocument doc, string path)
-        {
-            for (int attempt = 1, delay = 50; ; attempt++, delay = Math.Min(delay * 2, 800))
-            {
-                try { doc.Save(path); return; }
-                catch (Exception ex) when ((ex is IOException || ex is UnauthorizedAccessException) && attempt < 8)
-                {
-                    System.Threading.Thread.Sleep(delay);
-                }
-            }
-        }
-
-        /// <summary>
-        /// Adds the fast home-sensor poll to the centre-home swivel CAT. Its atHome/atWork DIs are read by
-        /// a sample-on-REQ SYMLINKMULTIVARDST ("Inputs") whose REQ was never driven, so the core re-sampled
-        /// the sensors only intermittently and the non-spring arm coasted past centre before the coils cut.
-        /// This injects the SAME poll the Five_State CAT uses — a self-looping E_DELAY ("HomePoll") firing
-        /// Inputs.REQ every <paramref name="pollDtMs"/> ms — so ToHome->AtHome (gated on atHome) cuts the
-        /// coils right at centre, the same both directions. Idempotent; purely additive (no recipe / state
-        /// id / coil change). No-op if the CAT or its Inputs FB is absent.
-        /// </summary>
         // Bearing_PnP's home is recipe-only. This method ONLY STRIPS any previously-injected poll
         // machinery (HomePoll / PollGate1 / PollGate2 / PollWindow + their connections) from the deployed
         // CAT so a re-deploy cleans the live tree; it adds nothing and instantiates no replacement FB.
@@ -2133,25 +1998,11 @@ namespace CodeGen.Services
             }
         }
 
-        /// <summary>
-        /// Simulator-only: repoint the Five_State_Actuator_CAT's internal Inputs
-        /// SYMLINKMULTIVARDST so athome/atwork read the actuator's OWN drive-coil symlinks
-        /// instead of the (unpublished-in-sim) physical sensor symlinks. The core's
-        /// athome/atwork come from InputHandler (the No_Sensor_Handler), which — when
-        /// WorkSensorFitted/HomeSensorFitted=TRUE — passes the physical sensor (Inputs.VALUE*
-        /// = '$${PATH}athome'/'$${PATH}atwork', which NOTHING publishes in sim, so the ECC
-        /// stalls at ToWork). Repointing those subscriptions at '$${PATH}OutputToHome' /
-        /// '$${PATH}OutputToWork' makes athome/atwork follow the coils, so a sensored
-        /// Five_State actuator (e.g. Bearing_Gripper, which deploys with WorkSensorFitted=TRUE
-        /// on M580 and which the per-PLC no-sensor sysres override has not reliably reached)
-        /// advances the instant it energises a coil. SAFE for no-sensor instances (M262
-        /// Feed_Station, WorkSensorFitted=FALSE): InputHandler uses its TIMER for those and
-        /// IGNORES Inputs.VALUE*, so the repoint is inert for them. Type-level (applies to
-        /// every Five_State instance regardless of which .sysres it lives in) — that is why
-        /// it works on M580 where the instance-parameter override did not. Bidirectional +
-        /// idempotent: reduce==false (rig) restores '$${PATH}athome'/'$${PATH}atwork' so the
-        /// hardware path reads its real sensors.
-        /// </summary>
+        // Deploy-time normalizer for the Five_State CAT's internal Inputs SYMLINKMULTIVARDST source.
+        // reduce=false (the rig path, the only call today) restores '$${PATH}athome'/'$${PATH}atwork' so
+        // sensored actuators read their real sensors. reduce=true repointed athome/atwork at the OWN
+        // drive-coil symlinks ('$${PATH}OutputTo*') so they follow the coils when nothing publishes the
+        // physical sensors (vestigial sim path; inert for no-sensor instances, which use InputHandler's timer).
         static void NormalizeFiveStateSimSensorSource(string eaeProjectDir, bool reduce, DeployResult result)
         {
             var fbt = Directory.EnumerateFiles(
@@ -2211,16 +2062,10 @@ namespace CodeGen.Services
         // Debug OutputVars on the engine that have no output-event mapping out of the box.
         static readonly string[] EngineDebugVars = { "CurrentStep", "CurrentStepType", "WaitSatisfied" };
 
-        /// <summary>
-        /// Simulator-only watch aid: map the engine's "Exposed for debug" OutputVars
-        /// (CurrentStep / CurrentStepType / WaitSatisfied) into the CMDREQ and SCNF
-        /// output-event WITH lists so EAE Online Watch refreshes them (instead of leaving
-        /// them frozen at power-up 0/FALSE — the WRN_XML_VAR_WITHOUT_OEVENT symptom). The
-        /// vars are already computed by the ECC, so this is purely a watch/observability
-        /// change — no logic, no ST, no algorithm touched. Bidirectional + idempotent:
-        /// reduce==false (rig) strips the WITH entries so the hardware engine is byte-identical.
-        /// </summary>
-        static void NormalizeProcessEngineDebugWatch(string eaeProjectDir, bool reduce, DeployResult result)
+        // Strip the engine's debug OutputVars (CurrentStep/CurrentStepType/WaitSatisfied) from the CMDREQ/
+        // SCNF WITH lists so the deployed engine is byte-identical (migrates an old tree that had them added
+        // for EAE Online Watch back to the shipped shape).
+        static void NormalizeProcessEngineDebugWatch(string eaeProjectDir, DeployResult result)
         {
             var fbt = Directory.EnumerateFiles(
                     Path.Combine(eaeProjectDir, "IEC61499"),
@@ -2253,27 +2098,17 @@ namespace CodeGen.Services
                     if (ev == null) continue;
                     foreach (var v in EngineDebugVars)
                     {
-                        var existing = ev.Elements(ns + "With")
-                            .Where(w => (string?)w.Attribute("Var") == v).ToList();
-                        if (reduce)
-                        {
-                            if (existing.Count == 0)
-                            { ev.Add(new System.Xml.Linq.XElement(ns + "With", new System.Xml.Linq.XAttribute("Var", v))); changed = true; }
-                        }
-                        else
-                        {
-                            foreach (var w in existing) { w.Remove(); changed = true; }
-                        }
+                        foreach (var w in ev.Elements(ns + "With")
+                                     .Where(w => (string?)w.Attribute("Var") == v).ToList())
+                        { w.Remove(); changed = true; }
                     }
                 }
 
                 if (changed)
                 {
                     doc.Save(fbt);
-                    result.PatchesApplied.Add(reduce
-                        ? "ProcessRuntime_Generic_v1: CurrentStep/CurrentStepType/WaitSatisfied mapped to CMDREQ+SCNF (sim watchable)"
-                        : "ProcessRuntime_Generic_v1: debug-watch WITH entries removed (hardware)");
-                    MapperLogger.Info($"[Deploy] Engine debug-watch normalize: reduce={reduce}");
+                    result.PatchesApplied.Add("ProcessRuntime_Generic_v1: debug-watch WITH entries removed (hardware)");
+                    MapperLogger.Info("[Deploy] Engine debug-watch normalize: debug WITH entries stripped");
                 }
             }
             catch (Exception ex)
@@ -2282,15 +2117,10 @@ namespace CodeGen.Services
             }
         }
 
-        /// <summary>
-        /// Simulator interface reduction on the CommonInterlockEvaluator Basic FB:
-        /// collapse the four Rule arrays into RuleTable : InterlockRule[10] across
-        /// the InputVars, the three event &lt;With&gt; lists (REQ_WORK1/WORK2/HOME),
-        /// AND the Evaluate ST (RuleFromState[i] -> RuleTable[i].FromState, etc).
-        /// Bidirectional + idempotent. reduce==false restores the four arrays so
-        /// hardware is byte-identical. Logic is unchanged either way — the same
-        /// numbers feed the Evaluate loop, just read as struct fields.
-        /// </summary>
+        // Interlock-struct reduction on the CommonInterlockEvaluator Basic FB (gated by interlock.yaml
+        // useStruct): collapse the four Rule arrays into RuleTable : InterlockRule[10] across the InputVars,
+        // the three event With lists (REQ_WORK1/WORK2/HOME), AND the Evaluate ST. Bidirectional + idempotent;
+        // reduce==false restores the four arrays. Same numbers feed Evaluate either way, just as struct fields.
         static void NormalizeCommonInterlockEvaluatorRules(
             string eaeProjectDir, bool reduce, DeployResult result)
         {
@@ -2437,17 +2267,11 @@ namespace CodeGen.Services
             }
         }
 
-        /// <summary>
-        /// Simulator interface reduction on Five_State_Actuator_CAT: drop the two
-        /// derived fault-enable inputs (enableToWorkFaultTimeout /
-        /// enableToHomeFaultTimeout). The Mapper always sets each equal to its
-        /// sensor-fitted flag, and the CAT's FB17/FB14 already AND the enable with
-        /// the SAME sensor-fitted input — so re-pointing FB17.IN2/FB14.IN2 at the
-        /// sensor-fitted lines gives AND(fitted, fitted) = fitted: identical
-        /// behaviour, two fewer pins, no new FB and no event-timing change.
-        /// Bidirectional + idempotent. reduce==false restores the inputs so the
-        /// hardware path is byte-identical.
-        /// </summary>
+        // Interface reduction on Five_State_Actuator_CAT: drop the two derived fault-enable inputs
+        // (enableToWorkFaultTimeout/enableToHomeFaultTimeout). The Mapper always sets each = its
+        // sensor-fitted flag and FB17/FB14 already AND the enable with the same flag, so re-pointing
+        // FB17.IN2/FB14.IN2 at the fitted lines gives AND(fitted,fitted)=fitted: identical, two fewer pins.
+        // Bidirectional + idempotent; reduce==false (the rig path today) restores the inputs.
         static void NormalizeFiveStateFaultEnables(
             string eaeProjectDir, bool reduce, DeployResult result)
         {
@@ -2587,11 +2411,9 @@ namespace CodeGen.Services
             "  </StructuredType>\r\n" +
             "</DataType>";
 
-        /// <summary>
-        /// Deploy the RecipeStep datatype (simulator path) + register it, so EAE
-        /// resolves the Recipe : RecipeStep[] inputs the recipe normalizers add to
-        /// Process1_Generic and ProcessRuntime_Generic_v1. Idempotent.
-        /// </summary>
+        // Deploy the RecipeStep datatype (the recipe-struct path, gated by UseRecipeStruct) + register it,
+        // so EAE resolves the Recipe : RecipeStep[] inputs the recipe normalizers add to Process1_Generic
+        // and ProcessRuntime_Generic_v1. Idempotent.
         static void DeployRecipeStepDatatype(string eaeProjectDir, DeployResult result)
         {
             try
@@ -2611,12 +2433,9 @@ namespace CodeGen.Services
             }
         }
 
-        /// <summary>
-        /// Simulator interface reduction on Process1_Generic (composite): collapse
-        /// the 6 recipe arrays (face InputVar + INIT With + boundary Input +
-        /// DataConnection to ProcessEngine) into one Recipe : RecipeStep[].
-        /// Bidirectional + idempotent; reduce==false restores the 6 arrays.
-        /// </summary>
+        // Recipe-struct reduction on Process1_Generic (composite), gated by UseRecipeStruct: collapse the
+        // 6 recipe arrays (face InputVar + INIT With + boundary Input + DataConnection to ProcessEngine)
+        // into one Recipe : RecipeStep[]. Bidirectional + idempotent; reduce==false restores the 6 arrays.
         static void NormalizeProcess1RecipeArrays(
             string eaeProjectDir, bool reduce, DeployResult result)
         {
@@ -2752,13 +2571,10 @@ namespace CodeGen.Services
             }
         }
 
-        /// <summary>
-        /// Simulator interface reduction on ProcessRuntime_Generic_v1 (Basic FB):
-        /// collapse the 6 recipe arrays across InputVars, the INIT event Withs, AND
-        /// every algorithm's ST ("StepType[CurrentStep]" ->
-        /// "Recipe[CurrentStep].StepType", etc.). Bidirectional + idempotent;
-        /// reduce==false restores the 6 arrays. Logic unchanged.
-        /// </summary>
+        // Recipe-struct reduction on ProcessRuntime_Generic_v1 (Basic FB), gated by UseRecipeStruct:
+        // collapse the 6 recipe arrays across InputVars, the INIT event Withs, AND every algorithm's ST
+        // (StepType[CurrentStep] -> Recipe[CurrentStep].StepType, etc). Bidirectional + idempotent;
+        // reduce==false restores the 6 arrays. Logic unchanged.
         static void NormalizeProcessRuntimeRecipeArrays(
             string eaeProjectDir, bool reduce, DeployResult result)
         {
@@ -2868,27 +2684,14 @@ namespace CodeGen.Services
             }
         }
 
-        /// <summary>
-        /// Additive deploy-time patch: fan an <c>MQTT_PUBLISH</c> off the
-        /// CAT's POST-UPDATE state-change event so every transition is
-        /// published the same scan it happens — before any OPC UA / WebSocket
-        /// sampler runs (those sit downstream of the 200/100 ms sampling floor
-        /// and alias brief states out; this does not). Nothing existing is
-        /// removed: the state event keeps all its current targets and we only
-        /// add one fan-out (EAE allows multi-fan-out from an event output).
-        /// </summary>
-        /// <param name="stateEventSource">Post-update event that carries the new
-        /// state. Actuator: <c>ActuatorCore.pst_out</c> (fires on entry to all
-        /// five states, after the algorithm writes current_state_to_process).
-        /// Sensor: <c>FB1.CNF</c> (fires after Status is written).</param>
-        /// <param name="stateDataSource">INT state value to publish
-        /// (<c>ActuatorCore.current_state_to_process</c> / <c>FB1.Status</c>).</param>
-        /// <param name="initSource">Existing INITO event to seed MqttFmt/MqttPub INIT.</param>
-        /// <param name="topicNameSource">CAT-level STRING InputVar carrying the per-instance component
-        /// name — Five_State_Actuator_CAT exposes <c>actuator_name</c>, Sensor_Bool_CAT exposes
-        /// <c>name</c>. Wired as a DATA input into <c>MqttPub.Topic1</c> so each instance publishes to
-        /// <c>RootPath/&lt;component_name&gt;</c>. EAE constraint: MQTT_PUBLISH does NOT resolve a
-        /// <c>$${PATH}</c> placeholder at runtime, so the topic must be a concrete per-instance name.</param>
+        // Additive deploy-time patch: fan an MQTT_PUBLISH off the CAT's POST-UPDATE state-change event so
+        // every transition publishes the same scan it happens (before OPC UA/WebSocket samplers that alias
+        // brief states out). Purely additive — the state event keeps its targets, one fan-out added.
+        // Params: stateEventSource = post-update event (actuator ActuatorCore.pst_out / sensor FB1.CNF);
+        // stateDataSource = INT state (current_state_to_process / FB1.Status); initSource = INITO to seed
+        // MqttFmt/MqttPub INIT; topicNameSource = CAT STRING InputVar with the per-instance name
+        // (actuator_name / name) wired into MqttPub.Topic1 — MQTT_PUBLISH does NOT resolve $${PATH} at
+        // runtime, so the topic must be a concrete per-instance name.
         static void PatchCatMqttPublish(string eaeProjectDir, string catName,
             string stateEventSource, string stateDataSource, string initSource,
             string topicNameSource,
@@ -3073,26 +2876,11 @@ namespace CodeGen.Services
             }
         }
 
-        /// <summary>
-        /// Simulator-only interface reduction for Five_State_Actuator_CAT. The
-        /// InterlockManager constants TargetWork1State (=2, AtWork) and
-        /// TargetHomeState (=4, AtHome end-of-cycle latch) are IDENTICAL on every
-        /// actuator instance — <c>BuildActuatorParameters</c> hardcodes them. On
-        /// the simulator path we delete those two boundary inputs from the CAT
-        /// and bake the constants straight onto the embedded InterlockManager FB
-        /// as <c>&lt;Parameter&gt;</c>, shrinking the wired instance interface
-        /// from 17 to 15 WITHOUT changing any runtime value.
-        ///
-        /// This is a BIDIRECTIONAL NORMALIZER, not a one-way strip, because the
-        /// template deployer copies artefacts only when absent
-        /// (ExtractToEae/CopyDirToEae are copy-if-missing). The deployed CAT is
-        /// therefore a single persistent file reused across deploys.
-        /// <paramref name="reduce"/>==true strips and
-        /// bakes; ==false restores the wired inputs and removes the baked params.
-        /// Call it on every deploy with reduce=false (rig) so the CAT shape always
-        /// matches the <c>&lt;Parameter&gt;</c> set BuildActuatorParameters emits.
-        /// Idempotent both ways.
-        /// </summary>
+        // Interface reduction for Five_State_Actuator_CAT's InterlockManager constants (TargetWork1State=2,
+        // TargetHomeState=4 — identical on every instance, hardcoded by BuildActuatorParameters). reduce=true
+        // deletes those two boundary inputs and bakes the constants onto the embedded InterlockManager FB
+        // (17->15 pins, no runtime value change). Bidirectional (the deployed CAT is a single reused file);
+        // reduce=false (the rig path, the only call today) restores the wired inputs. Idempotent both ways.
         static void NormalizeFiveStateInterlockConstants(
             string eaeProjectDir, bool reduce, DeployResult result)
         {
@@ -3298,19 +3086,10 @@ namespace CodeGen.Services
             "  </BasicFB>\r\n" +
             "</FBType>\r\n";
 
-        /// <summary>
-        /// Same Mode=0-by-default class of bug as ProcessRuntime_Generic_v1's
-        /// Mode/CycleType (fixed via InitialValue=1). The FiveStateActuator
-        /// basic FB's "mode" InputVar has no InitialValue, so it powers up 0.
-        /// Every AtHomeInit/AtWork exit ECTransition requires mode = 1/2/3
-        /// (auto/cycle/setup); no mode_event fires at boot, so with mode=0
-        /// the actuator ECC is stuck in AtHomeInit forever (rig-confirmed).
-        /// Force the mode InputVar's InitialValue=1 so every actuator
-        /// instance powers up in auto mode. Idempotent deploy-time guard
-        /// (insert the attribute if absent, set to 1 if present). Runs every
-        /// deploy so a future zip re-swap losing it is auto-fixed.
-        /// FiveStateActuator basic FB only — no CAT/ECC/recipe changes.
-        /// </summary>
+        // Force the FiveStateActuator basic FB's "mode" InputVar InitialValue=1 so every instance powers up
+        // in auto mode. Without it mode=0 at boot and no mode_event fires, so the ECC is stuck in
+        // AtHomeInit forever (rig-confirmed) — the same Mode=0 bug as the engine's Mode/CycleType.
+        // Idempotent deploy-time guard.
         static void PatchActuatorModeInitialValue(string eaeProjectDir, string fbtFileName, DeployResult result)
         {
             var fbt = Path.Combine(eaeProjectDir, "IEC61499", fbtFileName);
@@ -3478,15 +3257,10 @@ namespace CodeGen.Services
         }
 
 
-        /// <summary>
-        /// The shared ring relay <c>updateComponentState.REQ</c> (a component reporting its OWN state)
-        /// sets src_id/source_name/state but never clears <c>dest_name</c>. <c>Component_State_Msg</c> is
-        /// a reused struct, so a report inheriting a stale dest_name spuriously satisfies the target
-        /// actuator's BREQ match (dest_name==name) and overwrites its <c>state_cmd</c> with the reporting
-        /// component's state (clobbering e.g. Bearing_PnP's Place). Fix: REQ clears
-        /// component_state_out.dest_name so a report carries no command target. Idempotent; applies to
-        /// every updateComponentState instance.
-        /// </summary>
+        // The ring relay updateComponentState.REQ (a component reporting its OWN state) sets
+        // src_id/source_name/state but never clears dest_name. Component_State_Msg is a reused struct, so a
+        // report with a stale dest_name spuriously satisfies a target actuator's BREQ match (dest_name==name)
+        // and clobbers its state_cmd. Fix: REQ clears component_state_out.dest_name. Idempotent.
         static void PatchRingReportClearDest(string eaeProjectDir, DeployResult result)
         {
             var fbt = Path.Combine(eaeProjectDir, "IEC61499", "updateComponentState.fbt");
@@ -3536,12 +3310,9 @@ namespace CodeGen.Services
             }
         }
 
-        /// <summary>
-        /// The ring relay must always pass messages forward with BCNF, but it must only
-        /// fire CNF into the actuator core when the message is truly addressed to this
-        /// actuator. Otherwise any unrelated state report replays the last retained
-        /// state_cmd through ActuatorCore.pst_event.
-        /// </summary>
+        // The ring relay always passes messages forward with BCNF, but must only fire CNF into the actuator
+        // core when the message is addressed to this actuator — else any unrelated report replays the last
+        // retained state_cmd through ActuatorCore.pst_event.
         static void PatchRingCommandCnfOnlyOnDestination(string eaeProjectDir, DeployResult result)
         {
             var fbt = Path.Combine(eaeProjectDir, "IEC61499", "updateComponentState.fbt");
@@ -4035,16 +3806,12 @@ namespace CodeGen.Services
             }
         }
 
-        /// <summary>
-        /// Gated <see cref="MapperConfig.SwivelHomeHoldBothCoils"/> (default OFF). Rewrites the 'atHome'
-        /// algorithm's two coil outputs in the deployed SevenStateCentreHomeActuator.fbt. OFF de-energises
-        /// both coils at centre (a venting 3-position swivel then coasts past DI02 and rests off-centre);
-        /// TRUE sets both coils TRUE so a cylinder with a mechanical mid-stop is driven into + held at the
-        /// centre stop. Bidirectional + idempotent. The AtHome ECState must already point at the 'atHome'
-        /// algorithm (PatchSwivelAtHomeCoilClear runs just before this) — this only flips the coil VALUES.
-        /// SAFETY: if the cylinder has NO mid-stop, both-on instead drives toward an extreme — enable
-        /// only on the rig with the e-stop ready, and abort if the arm heads toward Work2.
-        /// </summary>
+        // Gated MapperConfig.SwivelHomeHoldBothCoils (default OFF). Rewrites the 'atHome' algorithm's two
+        // coil outputs: OFF de-energises both at centre (a venting swivel coasts past DI02, rests off-centre);
+        // TRUE holds both coils so a cylinder with a mechanical mid-stop is driven into + held at centre.
+        // Bidirectional + idempotent (only flips the coil VALUES; PatchSwivelAtHomeCoilClear runs first).
+        // SAFETY: with NO mid-stop, both-on drives toward an extreme — enable only on the rig with the
+        // e-stop ready, and abort if the arm heads toward Work2.
         static void PatchSwivelAtHomeBothCoils(string eaeProjectDir, bool holdBothCoils, DeployResult result)
         {
             var fbt = Path.Combine(eaeProjectDir, "IEC61499", "SevenStateCentreHomeActuator.fbt");
@@ -4176,18 +3943,9 @@ namespace CodeGen.Services
             }
         }
 
-        /// <summary>
-        /// Silence EAE's WRN_ECC_DEAD_END on the <c>END</c> state of
-        /// ProcessRuntime_Generic_v1 by adding a self-transition
-        /// <c>END → END</c> with <c>Condition="1"</c> — the same shape EAE
-        /// itself uses for the existing <c>WAIT_STEP → WAIT_STEP</c> loop.
-        /// Runtime behaviour is unchanged (END already terminates the
-        /// sequence; this just makes the dead-end explicit so the compiler
-        /// stops warning). Idempotent: skips if an END→END transition is
-        /// already present. Runs outside PatchProcessRuntimeEngine's
-        /// recipe-array idempotency gate so it applies even on FBTs that
-        /// were already recipe-patched.
-        /// </summary>
+        // Silence EAE's WRN_ECC_DEAD_END on the END state of ProcessRuntime_Generic_v1 by adding a
+        // self-transition END -> END with Condition="1" (the shape EAE uses for WAIT_STEP -> WAIT_STEP).
+        // Runtime behaviour unchanged. Idempotent (skips if the END->END transition is already present).
         static void PatchProcessRuntimeEccDeadEnd(string fbtPath, bool cyclic, DeployResult result)
         {
             var doc = System.Xml.Linq.XDocument.Load(fbtPath, System.Xml.Linq.LoadOptions.PreserveWhitespace);
@@ -4250,20 +4008,10 @@ namespace CodeGen.Services
                 $"[Deploy] Patched ProcessRuntime_Generic_v1.fbt END -> {dest} ({(cyclic ? "cyclic loop" : "park")})");
         }
 
-        /// <summary>
-        /// Remove the START -> IDLE1 bypass transition whose Condition is
-        /// "Mode = 1 AND CycleType &lt;&gt; 0". Mode/CycleType both default
-        /// to InitialValue=1, so that guard is TRUE at power-up and the ECC
-        /// walks START -> IDLE1 directly, skipping the INIT state — so
-        /// initializeinit never runs and the WITH-sampled recipe arrays are
-        /// never sampled before LoadStep executes (Audit 1 root cause).
-        /// After this patch the only outgoing transition from START is
-        /// START -> INIT (Condition "INIT"). Idempotent: matches the
-        /// Destination + Condition rather than a fixed element, and is a
-        /// no-op once the transition is gone. Runs outside
-        /// PatchProcessRuntimeEngine's recipe-array idempotency gate so it
-        /// applies even to already-recipe-patched FBTs.
-        /// </summary>
+        // Remove the START -> IDLE1 bypass transition (Condition "Mode = 1 AND CycleType <> 0"). Mode and
+        // CycleType both default InitialValue=1, so the guard is TRUE at power-up and the ECC walks straight
+        // to IDLE1, skipping INIT — so initializeinit never runs and the WITH-sampled recipe arrays aren't
+        // sampled before LoadStep. After the patch START's only outgoing transition is START -> INIT. Idempotent.
         static void PatchProcessRuntimeStartBypass(string fbtPath, DeployResult result)
         {
             var doc = System.Xml.Linq.XDocument.Load(fbtPath, System.Xml.Linq.LoadOptions.PreserveWhitespace);
@@ -4326,25 +4074,11 @@ namespace CodeGen.Services
                 $"bypass; START outgoing transitions now = {startOutgoingAfter} ({string.Join(" ; ", remaining)})");
         }
 
-        /// <summary>
-        /// Pin CurrentStep at the END row's index by making EndSequence a
-        /// no-op on the step pointer. The shipped EndSequence is implemented
-        /// identically to AdvanceStep — it executes
-        ///   CurrentStep := NextStep[CurrentStep];
-        ///   CurrentStepType := StepType[CurrentStep];
-        /// which, combined with the END -> END dead-end self-loop we add in
-        /// PatchProcessRuntimeEccDeadEnd, walks CurrentStep through the
-        /// recipe forever once END is reached (the END row's NextStep is 0,
-        /// so the first re-entry wraps CurrentStep back to 0 and every
-        /// subsequent state_change tick advances it again). The Watch then
-        /// shows CurrentStep cycling and CurrentStepType flipping between
-        /// recipe values even though no command is reissued (END has no
-        /// transition back to ISSUE_CMD). Replacing the EndSequence body
-        /// with a no-op preserves CurrentStep and CurrentStepType so END
-        /// renders as a stable resting state in the Watch. Idempotent via
-        /// a marker comment; emits the patch as a CDATA section so it
-        /// matches the surrounding Algorithm bodies in the FBT.
-        /// </summary>
+        // Pin CurrentStep at the END row's index by making EndSequence a no-op on the step pointer. The
+        // shipped EndSequence is identical to AdvanceStep (CurrentStep := NextStep[CurrentStep]), which
+        // combined with the END->END dead-end self-loop walks CurrentStep through the recipe forever once
+        // END is reached (END's NextStep is 0). The no-op preserves CurrentStep/CurrentStepType so END
+        // renders as a stable resting state in Watch. Idempotent via a marker comment; emitted as CDATA.
         static void PatchProcessRuntimeEndSequenceNoOp(string fbtPath, DeployResult result)
         {
             var doc = System.Xml.Linq.XDocument.Load(fbtPath, System.Xml.Linq.LoadOptions.PreserveWhitespace);
@@ -4459,15 +4193,11 @@ namespace CodeGen.Services
         // Retire an FB type we no longer ship (e.g. the simulator-only SimCentreHomeSensor_7SCH):
         // delete its top-level .fbt/.doc.xml/.meta.xml/.Basic.export and strip its dfbproj entries so
         // EAE shows no dangling Missing Project Files. Idempotent — a no-op once the type is gone.
-        /// <summary>
-        /// Removes deployed Telemetry wrapper artifacts (files + .dfbproj entries): the composite
-        /// (BOTH the current <c>Telemetry.fbt</c> AND the legacy <c>Telemetry_CAT.fbt</c> name — the
-        /// type was renamed Telemetry_CAT -> Telemetry, so a re-deploy must migrate the old name away),
-        /// their <c>.composite.offline.xml</c>, the two helper FBs <c>TelemetryUnpack/TelemetryPack.fbt</c>,
-        /// and the two datatypes <c>TelemetryConfig/TelemetryHealth.dt</c>. Called on the flag-OFF path
-        /// (retire telemetry entirely) AND at the top of the flag-ON path (clean slate before a fresh
-        /// deploy, so the rename + the sized .dt land without stale orphans). Idempotent.
-        /// </summary>
+        // Removes deployed Telemetry wrapper artifacts (files + .dfbproj entries): the composite (BOTH the
+        // current Telemetry.fbt AND the legacy Telemetry_CAT.fbt name, migrated away on re-deploy), its
+        // .composite.offline.xml, the helper FBs TelemetryUnpack/TelemetryPack.fbt, and the datatypes
+        // TelemetryConfig/TelemetryHealth.dt. Called on the flag-OFF path and at the top of flag-ON (clean
+        // slate before a fresh deploy). Idempotent.
         static void SweepTelemetryCat(string eaeProjectDir, DeployResult result)
         {
             try
