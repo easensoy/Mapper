@@ -16,13 +16,8 @@ namespace CodeGen.Translation
 
     public static class PortNameValidator
     {
-        /// <summary>
-        /// The single inbound adapter port on <c>CaSAdptrTerminator</c>.
-        /// Note the casing: <c>Cas</c> (lowercase 's'), NOT <c>CaS</c> — the
-        /// FB *type* is "CaSAdptrTerminator" with a capital S but the *port*
-        /// is "CasAdptrIN". Defined once here so every emitter references the
-        /// same literal and the capitalisation can't drift again.
-        /// </summary>
+        // Casing invariant: the FB TYPE is "CaSAdptrTerminator" (capital S) but the PORT is
+        // "CasAdptrIN" (lowercase s). Defined once so the capitalisation can't drift.
         public const string CaSAdptrTerminatorInPort = "CasAdptrIN";
 
         private static readonly Dictionary<string, string[]> ExpectedPorts = new(StringComparer.Ordinal)
@@ -33,10 +28,8 @@ namespace CodeGen.Translation
             ["Five_State_Actuator_CAT"] = new[] { "stationAdptr_in", "stateRprtCmd_in", "stationAdptr_out", "stateRprtCmd_out" },
             ["Sensor_Bool_CAT"] = new[] { "stateRprtCmd_in", "stateRprtCmd_out" },
             ["Process1_Generic"] = new[] { "stateRptCmdAdptr_in", "stationAdptr_in", "stateRptCmdAdptr_out", "stationAdptr_out" },
-            // STAGE 5b: the UR3e task arm. RING ports ONLY (the StateHandling node grafted into
-            // its .fbt) — NO stationAdptr (it is in ResourceWireEmitter.NoStationAdapterTypes,
-            // off the CaSBus chain). If a future edit adds a stationAdptr port or drops a ring
-            // port, this validator flags it.
+            // The UR3e task arm: RING ports ONLY, NO stationAdptr (it is in
+            // ResourceWireEmitter.NoStationAdapterTypes, off the CaSBus chain).
             ["Robot_Task_CAT"] = new[] { "stateRprtCmd_in", "stateRprtCmd_out" },
         };
 
