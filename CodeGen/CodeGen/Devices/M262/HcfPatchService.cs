@@ -9,33 +9,8 @@ using CodeGen.Translation;
 
 namespace CodeGen.Devices.M262
 {
-    /// <summary>
-    /// Patches the deployed M262 <c>.hcf</c> after Button-2 / Generate so EAE
-    /// picks up the symbolic-link bindings on reload.
-    ///
-    /// Reads the EXISTING .hcf on disk (NOT the baseline — that's the Deploy
-    /// Universal Architecture flow's job via <see cref="M262HwConfigCopier.Copy"/>),
-    /// resolves <c>resourceId</c> + <c>m262IoFbId</c> from the deployed M262
-    /// sysres, rewrites the TM3 module ParameterValues against the in-scope
-    /// syslay FB names + IO bindings, and saves.
-    ///
-    /// Lives in CodeGen.Devices.M262 alongside M262HcfDocument /
-    /// M262HwConfigCopier / M262SysdevEmitter, which it cross-references.
-    /// </summary>
     public static class HcfPatchService
     {
-        /// <summary>
-        /// Run the patch. Each pin actually rewritten is appended to
-        /// <paramref name="report"/>.<see cref="SystemInjector.BindingApplicationReport.HcfPinAssignments"/>;
-        /// every skip reason / warning is appended to
-        /// <see cref="SystemInjector.BindingApplicationReport.Missing"/>.
-        /// </summary>
-        /// <summary>
-        /// Convenience overload — reads in-scope FB names from the just-emitted
-        /// syslay file (every &lt;FB Name="..."/&gt; inside &lt;SubAppNetwork&gt;).
-        /// Suitable for MainForm.btnTestStation1_Click which already knows the
-        /// syslay path it asked the injector to write.
-        /// </summary>
         public static void PatchDeployed(MapperConfig? config,
             string syslayPath, IoBindings? bindings,
             SystemInjector.BindingApplicationReport report)
@@ -44,7 +19,6 @@ namespace CodeGen.Devices.M262
             PatchDeployed(config, syslayFbNames, bindings, report);
         }
 
-        /// <summary>Core overload — caller supplies the in-scope FB-name set directly.</summary>
         public static void PatchDeployed(MapperConfig? config,
             HashSet<string> syslayFbNames,
             IoBindings? bindings,
@@ -65,10 +39,6 @@ namespace CodeGen.Devices.M262
                     return;
                 }
 
-                // 1. Walk Demonstrator System tree, find the M262 sysdev
-                //    (root Device with Type="M262_dPAC" Namespace="SE.DPAC")
-                //    and read the embedded M262_RES resource GUID from
-                //    <Resources><Resource Name="M262_RES" ID="..."/></Resources>.
                 var loc = LocateM262SysdevAndResource(eaeRoot);
                 if (loc == null)
                 {
@@ -78,12 +48,8 @@ namespace CodeGen.Devices.M262
                 }
                 var (sysdevDir, resourceId, sysresPath) = loc.Value;
 
-                // 2. Build a {component-name → fb-id} map from the M262 sysres
-                //    FBNetwork. Each TM3 channel publishes its symlink directly
-                //    to the consumer's FB instance (e.g. "Feeder.athome",
-                //    "PartInHopper.Input"), matching the actuator/sensor CATs'
-                //    SYMLINKMULTIVARDST $${PATH}<port> expansion. There is no
-                //    M262IO / PLC_RW_M262 broker FB — the CATs are the I/O.
+                // TM3 channels bind their symlink directly to the consumer FB instance
+                // (e.g. "Feeder.athome") — no M262IO/PLC_RW_M262 broker FB; the CATs are the I/O.
                 var fbIdByName = ReadFbIdByName(sysresPath);
                 if (fbIdByName.Count == 0)
                 {
@@ -92,9 +58,7 @@ namespace CodeGen.Devices.M262
                     return;
                 }
 
-                // 3. Target file: {Demonstrator}/IEC61499/System/{system-guid}/
-                //    {sysdev-guid}/{sysdev-guid}.hcf — file STEM = sysdev guid
-                //    (folder name), NOT the resource guid.
+                // .hcf file STEM = sysdev guid (folder name), NOT the resource guid.
                 var sysdevGuid = Path.GetFileName(sysdevDir);
                 var hcfPath = Path.Combine(sysdevDir, sysdevGuid + ".hcf");
 
@@ -119,14 +83,6 @@ namespace CodeGen.Devices.M262
             }
         }
 
-        /// <summary>
-        /// If the deployed <c>.hcf</c> has no TM3 modules (e.g. empty shell left by
-        /// DemonstratorWiper), pick the richest <c>.hcf</c> from the baseline —
-        /// the one with the most <c>TM3DI16_G</c>/<c>TM3DQ16T_G</c> module
-        /// entries — and copy it over the deployed path. Sets the
-        /// <c>ResourceId</c> attribute to match the deployed sysres so EAE's
-        /// IO Mapping table resolves. Best-effort; logs to <c>report.Missing</c>.
-        /// </summary>
         private static void EnsureDeployedHcfPopulated(string hcfPath, MapperConfig config,
             string eaeRoot, SystemInjector.BindingApplicationReport report)
         {
@@ -172,12 +128,6 @@ namespace CodeGen.Devices.M262
             }
         }
 
-        /// <summary>
-        /// Scan every <c>.hcf</c> under the baseline tree, count
-        /// TM3DI16_G/TM3DQ16T_G module names, and return the file with the
-        /// highest count. Avoids picking a sibling .hcf that belongs to a
-        /// different (non-M262) device.
-        /// </summary>
         private static string? PickRichestBaselineHcf(string baselineRoot)
         {
             string? best = null;
@@ -197,15 +147,6 @@ namespace CodeGen.Devices.M262
             return best;
         }
 
-        /// <summary>
-        /// Walk <c>{eaeRoot}/IEC61499/System/</c> for a <c>.sysdev</c> whose
-        /// root <c>Device</c> element has <c>Type="M262_dPAC"</c> and
-        /// <c>Namespace="SE.DPAC"</c>, find the embedded
-        /// <c>&lt;Resource Name="M262_RES"&gt;</c>, and return the sysdev
-        /// folder, the resource's GUID, plus the sibling <c>.sysres</c> file
-        /// path (named <c>{resourceId}.sysres</c>). Returns <c>null</c> if
-        /// nothing matches.
-        /// </summary>
         private static (string sysdevDir, string resourceId, string sysresPath)? LocateM262SysdevAndResource(string eaeRoot)
         {
             var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
@@ -222,29 +163,20 @@ namespace CodeGen.Devices.M262
                     if (type != "M262_dPAC" || nspace != "SE.DPAC") continue;
                     XNamespace ns = root.GetDefaultNamespace();
                     var resources = root.Element(ns + "Resources");
-                    // Take whichever Resource lives inside the M262 sysdev —
-                    // M262SysdevEmitter renames it per cfg.ResourceName (RES0
-                    // by default, but historically also M262_RES / EcoRT_0).
-                    // Filtering by name brittle; the M262 device always has
-                    // exactly one resource child.
+                    // The M262 device always has exactly one resource child.
                     var m262Res = resources?.Elements(ns + "Resource").FirstOrDefault();
                     if (m262Res == null) continue;
 
-                    // Sysdev sits at {sys-guid}/{sysdev-guid}.sysdev; the .hcf
-                    // and .sysres live one level deeper under {sysdev-guid}/.
+                    // .hcf and .sysres live one level deeper under {sysdev-guid}/.
                     var sysdevStem = Path.GetFileNameWithoutExtension(sysdev);
                     var sysdevDir = Path.Combine(Path.GetDirectoryName(sysdev)!, sysdevStem);
                     Directory.CreateDirectory(sysdevDir);
                     var sysresPath = Directory.EnumerateFiles(sysdevDir, "*.sysres").FirstOrDefault()
                         ?? Path.Combine(sysdevDir, "RES0.sysres");
 
-                    // The sysdev's <Resource ID> ships as zeros (or as a
-                    // long-dashed GUID). EAE's .hcf ResourceId convention is
-                    // a 16-char hex value matching the sysres root ID. If the
-                    // sysdev's ID is zero/empty, mint a deterministic short
-                    // hex from the sysdev path and persist it to BOTH the
-                    // sysdev <Resource> and the sysres root <Resource ID="">
-                    // so all three carry the same non-zero GUID.
+                    // EAE's .hcf ResourceId is a 16-char hex matching the sysres root ID; if the
+                    // sysdev ID is zero/empty, mint one and persist it to sysdev + sysres so all
+                    // three carry the same non-zero GUID.
                     var resourceId = (string?)m262Res.Attribute("ID") ?? string.Empty;
                     if (IsZeroOrEmptyId(resourceId))
                     {
@@ -260,14 +192,6 @@ namespace CodeGen.Devices.M262
             return null;
         }
 
-        /// <summary>
-        /// Look up the M262IO FB by <c>Type="PLC_RW_M262"</c> on the sysres
-        /// FBNetwork (there is exactly one) and return its <c>ID</c>. Does
-        /// NOT inject — if the FB is missing, returns empty so the caller
-        /// can abort the .hcf write with a hard error log. Filtering by Type
-        /// (not Name) avoids ever picking up an actuator/sensor FB ID by
-        /// accident even if someone renamed the M262IO instance.
-        /// </summary>
         private static string EnsureM262IoFb(string sysresPath, string resourceId,
             SystemInjector.BindingApplicationReport report)
         {
@@ -303,29 +227,16 @@ namespace CodeGen.Devices.M262
 
         private static readonly XNamespace XsiNs = "http://www.w3.org/2001/XMLSchema-instance";
 
-        /// <summary>
-        /// Idempotent merge into the deployed .hcf — BMTM3 + TM262L01MDESE8T +
-        /// TM3DI16_G (all 16 channels with Latch=32/Filter=4) + TM3DQ16T_G.
-        /// Each top-level <c>ConfigurationBaseItem</c> block is replaced
-        /// in-place if it already exists, appended once if not. Inside
-        /// TM3DI16_G/TM3DQ16T_G, each <c>ParameterValue</c> (DI00..DI15,
-        /// DO00..DO15) is removed by Name attribute before being re-added so
-        /// running Button-2 twice yields a byte-identical .hcf. ParameterValue
-        /// targets use the component-style symlink convention
-        /// <c>{resourceId}.{componentFbId}.{port}</c>.
-        /// </summary>
+        // Idempotent merge into the deployed .hcf. ParameterValue targets use the symlink
+        // convention {resourceId}.{componentFbId}.{port}.
         private static void WriteHcfMerged(string hcfPath, string resourceId,
             IoBindings? bindings, Dictionary<string, string> fbIdByName,
             List<string> sensorNames,
             SystemInjector.BindingApplicationReport report)
         {
-            // Effective pin -> (component, port) map. Seed from the xlsx
-            // actuator PinAssignments, then auto-assign every Sensor_Bool_CAT
-            // instance's "Input" port to the next free DI channel. The xlsx
-            // has no sensor pin column, so without this sensors (e.g.
-            // PartInHopper.Input) never reach the .hcf and show unconnected
-            // in EAE's Symbolic Links. Deterministic: sensors fill the
-            // lowest-numbered free DI slots in name order.
+            // Effective pin -> (component, port). Seed from the xlsx actuator PinAssignments,
+            // then auto-assign each Sensor_Bool_CAT "Input" to the next free DI (xlsx has no
+            // sensor pin column); sensors fill the lowest free DI slots in name order.
             var effective = new Dictionary<string, (string Comp, string Port)>(StringComparer.OrdinalIgnoreCase);
             var usedDi = new HashSet<int>();
             if (bindings != null)
@@ -337,20 +248,12 @@ namespace CodeGen.Devices.M262
                         int.TryParse(kv.Key.Substring(2), out var di)) usedDi.Add(di);
                 }
             }
-            // The xlsx pre-seeds DI/DO channels with EMPTY values, so a plain
-            // effective.ContainsKey(pin) check wrongly treats a blank channel as already taken —
-            // that is exactly why DO03/DI08/DI09 stayed blank in the generated HCF. A pin is truly
-            // free to bind in code when it is absent, empty, OR points at a component not on this
-            // sysres. One DRY predicate, used by every code-side binding below.
+            // The xlsx pre-seeds DI/DO channels with EMPTY values, so a pin is truly free to
+            // bind in code when it is absent, empty, OR points at a component not on this sysres.
             bool PinBlank(string p) => !effective.TryGetValue(p, out var v)
                 || string.IsNullOrEmpty(v.Comp) || !fbIdByName.ContainsKey(v.Comp);
-            // Gated: bind the UR3e task arm's two channels — but ONLY when the Robot FB is actually on
-            // THIS resource's sysres (so it's a no-op on M580/BX1 and when the robot isn't emitted).
-            // DO04 drives the start-task pulse, DI10 reads task-complete.
-            // The port names are the symlinks Robot_Task_CAT publishes/subscribes, so Sym()
-            // emits {resId}.{robotFbId}.RobotCommands_StartTask / .RobotStatus_Task_Complete —
-            // exactly the reference SMC_Rig_Expo binding form. The xlsx has no robot row, so
-            // these are added in code (xlsx untouched).
+            // UR3e task arm (only when the Robot FB is on this resource's sysres): DO04 = start-task
+            // pulse, DI10 = task-complete.
             if (MapperConfig.EnableRobotTaskTail && fbIdByName.ContainsKey("Robot"))
             {
                 if (!effective.ContainsKey("DO04"))
@@ -362,24 +265,18 @@ namespace CodeGen.Devices.M262
                 }
                 report.Missing.Add("[Hcf][5b] bound DO04=Robot.RobotCommands_StartTask, DI10=Robot.RobotStatus_Task_Complete");
             }
-            // Gated: the M262 Ejector is OPEN-LOOP (coil only, no sensors). Bind its output
-            // coil to DO03 so it physically actuates; it has NO athome/atwork DIs (its WAITs are
-            // timer-driven — see the sensorless override in SystemLayoutInjector). Only when the
-            // Ejector FB is on THIS resource's sysres (no-op on M580/BX1). xlsx untouched.
+            // M262 Ejector is open-loop (coil only, no DIs): bind DO03 = OutputToWork, only when
+            // the Ejector FB is on this resource's sysres.
             if (MapperConfig.EnableRobotTaskTail && fbIdByName.ContainsKey("Ejector")
                 && PinBlank("DO03"))
             {
                 effective["DO03"] = ("Ejector", "OutputToWork");
                 report.Missing.Add("[Hcf][5b] bound DO03=Ejector.OutputToWork (open-loop, no sensor DIs)");
             }
-            // Gated: the three synthesized M262 rig proximity sensors the twin doesn't model — bind
-            // each to its fixed physical DI channel (the rig wiring). Only when the
-            // synthesized FB is actually on THIS resource's sysres (so it's a no-op on M580/BX1).
-            // Sym() resolves to {resId}.{generatedFbId}.Input — project-generated id, never copied.
+            // Synthesized M262 rig proximity sensors (not in the twin): bind each to its fixed
+            // physical DI channel, only when the synthesized FB is on this resource's sysres.
             foreach (var (synthName, synthPin, _) in MapperConfig.M262SynthSensors)
             {
-                // Bound for the robot tail (EnableRobotTaskTail): the synthesized M262 rig sensors
-                // read their DI channel and report state across to M580.
                 if (!MapperConfig.EnableRobotTaskTail) break;
                 if (!fbIdByName.ContainsKey(synthName) || !PinBlank(synthPin)) continue;
                 effective[synthPin] = (synthName, "Input");
@@ -424,9 +321,7 @@ namespace CodeGen.Devices.M262
             var doc = LoadOrCreateHcf(hcfPath);
             var root = doc.Root!;
 
-            // DeviceHwConfigurationItem is the single child of the root that
-            // carries the ResourceId attribute every nested ParameterValue
-            // symlink ultimately resolves against.
+            // DeviceHwConfigurationItem carries the ResourceId every nested ParameterValue resolves against.
             var devItem = root.Elements()
                 .FirstOrDefault(e => e.Name.LocalName == "DeviceHwConfigurationItem");
             if (devItem == null)
@@ -440,9 +335,6 @@ namespace CodeGen.Devices.M262
                 devItem.SetAttributeValue("ResourceId", resourceId);
             }
 
-            // BMTM3 (outer ConfigurationBaseItem). Replace-or-append, then
-            // re-locate the live element so its <Items/> child can host the
-            // three nested blocks.
             UpsertConfigurationBaseItem(devItem, "BMTM3", BuildBmtm3Shell(), report);
             var bmtm3 = FindChildBlock(devItem, "BMTM3")!;
             var items = bmtm3.Elements().FirstOrDefault(e => e.Name.LocalName == "Items");
@@ -452,22 +344,16 @@ namespace CodeGen.Devices.M262
                 bmtm3.Add(items);
             }
 
-            // TM262L01MDESE8T — wholesale replace-or-append, no per-pin pass.
             UpsertConfigurationBaseItem(items, "TM262L01MDESE8T", BuildTm262Block(), report);
 
-            // TM3 modules: replace-or-append the shell, then upsert the 16 DI/DO ParameterValues per-pin.
             UpsertModuleWithPins(items, "TM3DI16_G", BuildTm3Di16Shell, "DI", Sym, report);
             UpsertModuleWithPins(items, "TM3DQ16T_G", BuildTm3Dq16Shell, "DO", Sym, report);
 
             SaveHcfWithRetry(doc, hcfPath, report);
         }
 
-        /// <summary>
-        /// Load the existing .hcf, or mint a fresh skeleton with the
-        /// xmlns:xsd / xmlns:xsi prefix declarations EAE expects on the root.
-        /// Also patches the root if either prefix decl is missing on a loaded
-        /// file so subsequent <c>xsi:type</c> attributes serialise cleanly.
-        /// </summary>
+        // Load the existing .hcf, or mint a skeleton with the xmlns:xsd/xmlns:xsi prefix
+        // declarations EAE expects on the root (also patched onto a loaded file if missing).
         private static XDocument LoadOrCreateHcf(string hcfPath)
         {
             XDocument? doc = null;
@@ -501,14 +387,6 @@ namespace CodeGen.Devices.M262
             return doc;
         }
 
-        /// <summary>
-        /// Find the immediate <c>ConfigurationBaseItem</c> child of
-        /// <paramref name="parent"/> whose child <c>&lt;Name&gt;</c> equals
-        /// <paramref name="blockName"/>. If present, replace it in place via
-        /// <see cref="XElement.ReplaceWith(object)"/>; otherwise append the
-        /// fresh element once. Logs <c>[Hcf] replaced existing X block</c> or
-        /// <c>[Hcf] appended new X block</c> to <paramref name="report"/>.
-        /// </summary>
         private static void UpsertConfigurationBaseItem(XElement parent, string blockName,
             XElement freshBlock, SystemInjector.BindingApplicationReport report)
         {
@@ -536,15 +414,6 @@ namespace CodeGen.Devices.M262
                     c.Name.LocalName == "Name" &&
                     (c.Value ?? string.Empty).Trim() == blockName));
 
-        /// <summary>
-        /// Replace-or-append the TM3 module block, then for each pin
-        /// (DI00..DI15 or DO00..DO15) remove any existing same-Name
-        /// <c>ParameterValue</c> from the block's <c>ParameterValues</c>
-        /// container before adding the fresh entry. The "replaced" vs "new"
-        /// classification in the log line is computed from a snapshot of the
-        /// PRE-replace pin set so the user can see which pins were already
-        /// configured on disk.
-        /// </summary>
         private static void UpsertModuleWithPins(XElement items, string blockName,
             Func<XElement> shellFactory, string pinPrefix,
             Func<string, string> sym, SystemInjector.BindingApplicationReport report)
@@ -582,9 +451,6 @@ namespace CodeGen.Devices.M262
                 report.Missing.Add($"[Hcf] appended new {blockName} block");
             }
 
-            // Locate the freshly-inserted block's <ParameterValues> container
-            // (shellFactory always emits an empty one between ItemProperties
-            // and PreviousItem so insertion order is canonical).
             var freshPv = fresh.Elements()
                 .FirstOrDefault(e => e.Name.LocalName == "ParameterValues");
             if (freshPv == null)
@@ -601,11 +467,7 @@ namespace CodeGen.Devices.M262
                 var pin = $"{pinPrefix}{i:D2}";
                 var value = sym(pin);
 
-                // Per the Bug 2 spec: defensively remove any same-Name
-                // ParameterValue from this container before adding the fresh
-                // entry. The freshly-built shell is empty on the first run,
-                // so this is a no-op then — but it guarantees idempotency
-                // even if a future caller starts from a pre-populated shell.
+                // Remove any same-Name ParameterValue before re-adding, for idempotency.
                 freshPv.Elements()
                     .Where(e => e.Name.LocalName == "ParameterValue" &&
                                 (string?)e.Attribute("Name") == pin)
@@ -620,8 +482,7 @@ namespace CodeGen.Devices.M262
             }
         }
 
-        // ---- Block builders. Each returns a fresh detached XElement matching
-        //      the canonical .hcf template shape that EAE accepts. ----
+        // Block builders — each returns a detached XElement matching the .hcf shape EAE accepts.
 
         private static XElement BuildBmtm3Shell() => new XElement("ConfigurationBaseItem",
             new XElement("Name", "BMTM3"),
@@ -727,10 +588,7 @@ namespace CodeGen.Devices.M262
             return el;
         }
 
-        /// <summary>
-        /// Save with EAE-friendly settings (UTF-8 no BOM, 2-space indent) and
-        /// retry up to 8 times if EAE briefly holds a write lock.
-        /// </summary>
+        // UTF-8 no BOM (EAE requirement); retries up to 8 times if EAE briefly holds a write lock.
         private static void SaveHcfWithRetry(XDocument doc, string hcfPath,
             SystemInjector.BindingApplicationReport report)
         {
@@ -765,11 +623,6 @@ namespace CodeGen.Devices.M262
             }
         }
 
-        /// <summary>
-        /// Read every <c>&lt;FB Name="..." ID="..."/&gt;</c> on the sysres
-        /// FBNetwork into a Name → ID map so .hcf ParameterValues can resolve
-        /// component instance IDs (Feeder, PartInHopper, …) by name.
-        /// </summary>
         private static Dictionary<string, string> ReadFbIdByName(string sysresPath)
         {
             var map = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -794,16 +647,7 @@ namespace CodeGen.Devices.M262
             return map;
         }
 
-        /// <summary>
-        /// FB instance names on the sysres whose Type is a Sensor_Bool_CAT.
-        /// Sensors expose their physical pin as the <c>Input</c> port but the
-        /// IO-bindings xlsx only carries actuator pin columns
-        /// (pin_di_athome/atwork/outputToWork), so sensors never get a
-        /// PinAssignment and were left off the .hcf entirely — the
-        /// <c>{res}.PartInHopper.Input</c> symlink had no TM3 channel and
-        /// showed unconnected in EAE's Symbolic Links. WriteHcfMerged
-        /// auto-binds each of these to the next free DI channel.
-        /// </summary>
+        // FB instance names on the sysres whose Type is Sensor_Bool_CAT.
         private static List<string> ReadSensorNames(string sysresPath)
         {
             var list = new List<string>();
@@ -829,9 +673,6 @@ namespace CodeGen.Devices.M262
             return list;
         }
 
-        /// <summary>Reads &lt;FB Name="..." /&gt; values from a syslay file's
-        /// &lt;SubAppNetwork&gt; root. Returns an empty set if the file can't
-        /// be parsed.</summary>
         private static HashSet<string> ReadSyslayFbNames(string syslayPath)
         {
             var names = new HashSet<string>(StringComparer.Ordinal);
@@ -862,11 +703,8 @@ namespace CodeGen.Devices.M262
             doc.Save(w);
         }
 
-        /// <summary>Rewrite the .sysres root <c>ID</c> attribute so it matches
-        /// the resource GUID we just minted on the sysdev. EAE resolves
-        /// symlinks by ID equality across sysdev → sysres → .hcf; if any of
-        /// the three carries zeros while the others don't, the lookup fails
-        /// and the Symbolic Links view goes red.</summary>
+        // EAE resolves symlinks by ID equality across sysdev -> sysres -> .hcf; all three must
+        // carry the same non-zero ID or the Symbolic Links view goes red.
         private static void PropagateResourceIdToSysres(string sysresPath, string newId)
         {
             try
@@ -890,12 +728,8 @@ namespace CodeGen.Devices.M262
             return true;
         }
 
-        /// <summary>
-        /// Deterministic 16-char uppercase hex ID derived from a seed string,
-        /// matching the format EAE writes into baseline .sysres / .hcf files
-        /// (e.g. <c>54EB0B3D5D16444D</c>). Same input → same ID across runs,
-        /// so the .hcf ResourceId stays stable between Button-2 invocations.
-        /// </summary>
+        // Deterministic 16-char uppercase hex ID matching the format EAE writes into baseline
+        // .sysres/.hcf files; same seed -> same ID so the ResourceId stays stable across runs.
         private static string NewShortHexId(string seed)
         {
             using var sha = System.Security.Cryptography.SHA1.Create();
