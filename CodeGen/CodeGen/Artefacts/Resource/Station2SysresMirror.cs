@@ -11,14 +11,9 @@ namespace CodeGen.Devices.Core
 {
     public static class Station2SysresMirror
     {
-        /// <summary>
-        /// Mirrors the Station-2 FBs from the syslay onto the M580 and BX1
-        /// resources (each bucketed by <see cref="BucketFor"/>), so those PLCs
-        /// carry their own actuators/sensors/station/process FBs instead of empty
-        /// shells. Runs AFTER <c>Station2DeviceEmitter.EmitAll</c> has written the
-        /// sysdev/sysres shells. Each resource gets its own DPAC_FULLINIT/plcStart
-        /// boot pair with a distinct ID. Returns (M580 count, BX1 count).
-        /// </summary>
+        // Mirrors the Station-2 FBs from the syslay onto the M580 and BX1 resources (bucketed by
+        // BucketFor), so those PLCs carry their own FBs not empty shells. Runs AFTER
+        // Station2DeviceEmitter.EmitAll wrote the sysdev/sysres shells. Returns (M580 count, BX1 count).
         public static (int M580, int BX1) EmitStation2Sysres(MapperConfig cfg)
         {
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
@@ -40,26 +35,13 @@ namespace CodeGen.Devices.Core
             return (m580, bx1);
         }
 
-        // Where the M262 sysres puts its leftmost / topmost FB. Mirroring
-        // M580/BX1 to the SAME canvas origin keeps every PLC's local sysres
-        // view compact next to FB1 (DPAC_FULLINIT @ x=1900) and FB2 (plcStart
-        // @ x=820) — no horizontal panning needed to find the component chain.
+        // Canvas origin every PLC's local sysres mirrors to, next to FB1/FB2.
         const int CanvasOriginX = 2000;
         const int CanvasOriginY = 2000;
 
-        /// <summary>
-        /// Returns a copy of <paramref name="bucket"/> with the FBs translated
-        /// so their bounding box's top-left corner lands at
-        /// (<see cref="CanvasOriginX"/>, <see cref="CanvasOriginY"/>) on the
-        /// destination sysres. The syslay carries global coordinates (M262 at
-        /// x=2000-9500, M580 at x=12200-27200, BX1 at x=29000+) — SAME coords
-        /// land verbatim on each sysres unless translated, which leaves the
-        /// M580/BX1 chains far off to the right of their own FB1/FB2 on each
-        /// device-local canvas. Translation is X-only by default; Y is also
-        /// floored to <see cref="CanvasOriginY"/> when the min Y of the bucket
-        /// is more than CanvasOriginY higher than the syslay's M262 reference
-        /// row. Preserves relative spacing between the bucket's FBs exactly.
-        /// </summary>
+        // Copy of bucket translated so its bounding box's top-left lands at (CanvasOriginX, CanvasOriginY)
+        // on the destination sysres — the syslay's global coords (M580 at x=12200+) would otherwise land
+        // off-screen on each device-local canvas. Preserves relative spacing exactly.
         static List<SysresFbMirror.SyslayFb> TranslateBucketToCanvasOrigin(
             List<SysresFbMirror.SyslayFb> bucket)
         {
@@ -85,11 +67,6 @@ namespace CodeGen.Devices.Core
             string dpacFullInitId, string plcStartId)
         {
             if (bucket.Count == 0) return 0;
-            // Pull the bucket back to the canvas origin so the M580/BX1 sysres
-            // canvas opens with the component chain RIGHT BESIDE FB1/FB2 instead
-            // of way off to the right (the syslay's global coordinate system
-            // puts M580 at x=12200+, which on the M580-local canvas leaves
-            // everything off-screen by default).
             bucket = TranslateBucketToCanvasOrigin(bucket);
             var sysdev = EaeProjectLayout.FindSysdevByDeviceType(eaeRoot, deviceType);
             if (sysdev == null) return 0;
@@ -97,40 +74,19 @@ namespace CodeGen.Devices.Core
             if (sysres == null) return 0;
             var added = SysresFbMirror.MirrorFbsIntoSysres(sysres, bucket, dpacFullInitId, plcStartId);
 
-            // Force-reposition existing mirrored FBs. SysresFbMirror's "FB already
-            // exists by name → only update parameters, keep x/y untouched" branch
-            // (kept that way deliberately so EAE's stable-instance tracking does
-            // not see a moved FB as new on every regen) means existing M580/BX1
-            // sysres FBs hang on to the OLD global-syslay coordinates from prior
-            // deploys (x=12200+ for M580). Sweep the sysres after mirror and stamp
-            // the just-computed canvas-origin x/y onto matching FBs by name — FB1
-            // (DPAC_FULLINIT) and FB2 (plcStart) are skipped because the mirror
-            // owns their positions through EnsureSystemFb.
+            // SysresFbMirror keeps x/y untouched on an existing FB (so EAE doesn't see it as new), so
+            // existing M580/BX1 FBs keep OLD global-syslay coords — restamp the canvas-origin x/y here.
             ApplyTranslatedPositionsToSysres(sysres, bucket);
 
-            // EAE Solution Integrity requires every deployed resource to have a
-            // sibling "{resId}/" metadata folder containing at minimum an
-            // opcua.xml whose UID equals the parent sysdev-folder GUID. The
-            // M262 Feed-Station path gets this via the same helper (the M262
-            // deployed "{resId}/" folder carries opcua.xml + EAE-generated
-            // offline.xml/opcuaclient.xml; only opcua.xml is Mapper-written).
-            // Reuse the M262 helper so the folder name (sysres
-            // stem) and the UID convention match the working M262 output. The
-            // sister files offline.xml/opcuaclient.xml/symlink.xml are left for
-            // EAE to generate on open, mirroring the M262 behaviour.
+            // EAE Solution Integrity requires a sibling "{resId}/" folder with an opcua.xml whose UID =
+            // the parent sysdev-folder GUID (same helper as the M262 path).
             SystemInjector.EnsureOpcuaXmlBesideArtefact(sysres);
 
             return added;
         }
 
-        /// <summary>
-        /// Rewrites every &lt;FB Name="…"&gt; element's x / y attributes on the
-        /// sysres to match the (already-translated-to-canvas-origin) coords in
-        /// <paramref name="translatedBucket"/>. Idempotent — only saves the file
-        /// when at least one position actually changed. FBs not present in the
-        /// bucket (FB1/FB2 boot pair, MqttConn, anything outside the M580 / BX1
-        /// scope) are left alone.
-        /// </summary>
+        // Restamps each <FB> x/y on the sysres from translatedBucket (idempotent: saves only on change).
+        // FBs not in the bucket (FB1/FB2, MqttConn, out-of-scope) are left alone.
         static void ApplyTranslatedPositionsToSysres(string sysresPath,
             List<SysresFbMirror.SyslayFb> translatedBucket)
         {
