@@ -291,7 +291,7 @@ namespace CodeGen.Services
             PatchRingCommandCnfOnlyOnDestination(eaeProjectDir, result);
             // reduce=false (rig): RESTORE the wired boundary inputs the embedded InterlockManager FB
             // declares. Must run every deploy (ExtractToEae/CopyDirToEae are copy-if-absent).
-            NormalizeFiveStateInterlockConstants(eaeProjectDir, false, result);
+            NormalizeFiveStateInterlockConstants(eaeProjectDir, result);
             PatchProcess1RecipeArraySize(eaeProjectDir, result);
             PatchProcessNameStringSize(eaeProjectDir, result);
             // PatchSevenStateActuatorDataDriven removed — see CatToBasics comment.
@@ -422,7 +422,7 @@ namespace CodeGen.Services
             // reduce==false (rig) RESTORES '$${PATH}atwork1'/'atWork2' so the hardware path is
             // byte-identical. athome (NAME1) is untouched — it is timer-driven by the CAT's
             // ReturnToHomeHandler / No_Sensor_Handler_7SCH, so it needs no external publish.
-            NormalizeSwivelSimSensorSource(eaeProjectDir, false, result);
+            NormalizeSwivelSimSensorSource(eaeProjectDir, result);
             // Bearing_PnP's home is recipe-only (Assembly/Disassembly command bearing_pnp Home at the
             // end). This only STRIPS any previously-injected HomePoll/poll-gate FBs from the deployed CAT
             // so a re-deploy cleans the live tree; it adds nothing. Note: the 'Inputs' symlink is
@@ -436,8 +436,8 @@ namespace CodeGen.Services
             // sensor nothing publishes. This type-level repoint makes its atwork/athome read
             // its own coils, so it advances regardless of WorkSensorFitted or which .sysres
             // it lives in. Inert for the M262 no-sensor actuators (they use their timer).
-            NormalizeFiveStateSimSensorSource(eaeProjectDir, false, result);
-            NormalizeFiveStateFaultEnables(eaeProjectDir, false, result);
+            NormalizeFiveStateSimSensorSource(eaeProjectDir, result);
+            NormalizeFiveStateFaultEnables(eaeProjectDir, result);
             // Process FB recipe struct: collapse the 6 overlapping recipe arrays
             // into one Recipe : ARRAY OF RecipeStep on Process1_Generic + the
             // ProcessRuntime engine (datatype, NOT a new FB). Driven by UseRecipeStruct,
