@@ -89,19 +89,9 @@ namespace CodeGen.Services
         internal static void NormalizeTargetStates(
             string eaeProjectDir, string catFileName, string interlockFbName,
             string[] targetInputs, bool reduce, DeployResult result)
-        {
-            var fbt = FindDeployedFbt(eaeProjectDir, catFileName);
-            if (string.IsNullOrEmpty(fbt))
+            => EditDeployedFbt(eaeProjectDir, catFileName, $"{catFileName} Target normalize failed", result,
+                (doc, root, ns, fbt) =>
             {
-                result.Warnings.Add($"{catFileName} not found; Target normalize skipped.");
-                return;
-            }
-            try
-            {
-                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                var root = doc.Root;
-                if (root == null) return;
-                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
                 var iface = root.Element(ns + "InterfaceList");
                 var net = root.Element(ns + "FBNetwork");
                 if (iface == null || net == null)
@@ -211,30 +201,15 @@ namespace CodeGen.Services
                         : $"{catLabel}: Target -> scalar target states (legacy)");
                     MapperLogger.Info($"[Deploy] {catLabel} Target normalize: reduce={reduce}");
                 }
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"{catFileName} Target normalize failed: {ex.Message}");
-            }
-        }
+            }, notFoundNote: $"{catFileName} not found; Target normalize skipped.");
 
         // Fold the CommonInterlockEvaluator's three target InputVars into one Target : TargetStates + rewrite
         // the Work1/Work2/Home algorithms to Target.Work1/Work2/Home; reduce==false restores scalars.
         internal static void NormalizeCommonInterlockEvaluatorTargets(
             string eaeProjectDir, bool reduce, DeployResult result)
-        {
-            var fbt = FindDeployedFbt(eaeProjectDir, "CommonInterlockEvaluator.fbt");
-            if (string.IsNullOrEmpty(fbt))
+            => EditDeployedFbt(eaeProjectDir, "CommonInterlockEvaluator.fbt", "CommonInterlockEvaluator Target normalize failed", result,
+                (doc, root, ns, fbt) =>
             {
-                result.Warnings.Add("CommonInterlockEvaluator.fbt not found; Target normalize skipped.");
-                return;
-            }
-            try
-            {
-                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                var root = doc.Root;
-                if (root == null) return;
-                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
                 var iface = root.Element(ns + "InterfaceList");
                 var basic = root.Element(ns + "BasicFB");
                 if (iface == null || basic == null)
@@ -323,12 +298,7 @@ namespace CodeGen.Services
                         : "CommonInterlockEvaluator: Target -> scalar target states + algorithms (legacy)");
                     MapperLogger.Info($"[Deploy] CommonInterlockEvaluator Target normalize: reduce={reduce}");
                 }
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"CommonInterlockEvaluator Target normalize failed: {ex.Message}");
-            }
-        }
+            }, notFoundNote: "CommonInterlockEvaluator.fbt not found; Target normalize skipped.");
 
         // Order matches struct field order.
         static readonly string[] RuleArrayNames =
@@ -346,19 +316,9 @@ namespace CodeGen.Services
         internal static void NormalizeFiveStateRuleArrays(
             string eaeProjectDir, string catFileName, string interlockFbName,
             bool reduce, DeployResult result)
-        {
-            var fbt = FindDeployedFbt(eaeProjectDir, catFileName);
-            if (string.IsNullOrEmpty(fbt))
+            => EditDeployedFbt(eaeProjectDir, catFileName, $"{catFileName} RuleTable normalize failed", result,
+                (doc, root, ns, fbt) =>
             {
-                result.Warnings.Add($"{catFileName} not found; RuleTable normalize skipped.");
-                return;
-            }
-            try
-            {
-                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                var root = doc.Root;
-                if (root == null) return;
-                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
 
                 var iface = root.Element(ns + "InterfaceList");
                 var net = root.Element(ns + "FBNetwork");
@@ -497,31 +457,16 @@ namespace CodeGen.Services
                         : $"{catLabel}: RuleTable -> 4 arrays + RuleCount (legacy interface)");
                     MapperLogger.Info($"[Deploy] {catLabel} RuleTable normalize: reduce={reduce}");
                 }
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"Five_State_Actuator_CAT RuleTable normalize failed: {ex.Message}");
-            }
-        }
+            }, notFoundNote: $"{catFileName} not found; RuleTable normalize skipped.");
 
         // Interlock-struct reduction on the CommonInterlockEvaluator Basic FB (gated by interlock.yaml
         // useStruct): collapse the four Rule arrays into RuleTable : InterlockRule[10] across the InputVars,
         // the event With lists, AND the Evaluate ST; reduce==false restores the four arrays.
         internal static void NormalizeCommonInterlockEvaluatorRules(
             string eaeProjectDir, bool reduce, DeployResult result)
-        {
-            var fbt = FindDeployedFbt(eaeProjectDir, "CommonInterlockEvaluator.fbt");
-            if (string.IsNullOrEmpty(fbt))
+            => EditDeployedFbt(eaeProjectDir, "CommonInterlockEvaluator.fbt", "CommonInterlockEvaluator RuleTable normalize failed", result,
+                (doc, root, ns, fbt) =>
             {
-                result.Warnings.Add("CommonInterlockEvaluator.fbt not found; RuleTable normalize skipped.");
-                return;
-            }
-            try
-            {
-                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                var root = doc.Root;
-                if (root == null) return;
-                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
 
                 var iface = root.Element(ns + "InterfaceList");
                 var basic = root.Element(ns + "BasicFB");
@@ -639,39 +584,20 @@ namespace CodeGen.Services
                         : "CommonInterlockEvaluator: RuleTable -> 4 arrays + RuleCount + Evaluate ST (legacy)");
                     MapperLogger.Info($"[Deploy] CommonInterlockEvaluator RuleTable normalize: reduce={reduce}");
                 }
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"CommonInterlockEvaluator RuleTable normalize failed: {ex.Message}");
-            }
-        }
+            }, notFoundNote: "CommonInterlockEvaluator.fbt not found; RuleTable normalize skipped.");
 
         // Restores Five_State_Actuator_CAT's TargetWork1State/TargetHomeState as wired inputs (VarDecl +
         // INIT With + Input pin + InterlockManager DataConnection), stripping any baked-on params.
         internal static void NormalizeFiveStateInterlockConstants(
             string eaeProjectDir, DeployResult result)
-        {
-            var consts = new[]
+            => EditDeployedFbt(eaeProjectDir, "Five_State_Actuator_CAT.fbt", "Five_State_Actuator_CAT interlock-constant normalize failed", result,
+                (doc, root, ns, fbt) =>
             {
-                new { Name = "TargetWork1State", X = "1380", Y = "2092" },
-                new { Name = "TargetHomeState",  X = "1380", Y = "2192" },
-            };
-
-            var fbt = FindDeployedFbt(eaeProjectDir, "Five_State_Actuator_CAT.fbt");
-            if (string.IsNullOrEmpty(fbt))
-            {
-                result.Warnings.Add(
-                    "Five_State_Actuator_CAT.fbt not found; interlock-constant normalize skipped.");
-                return;
-            }
-
-            try
-            {
-                var doc = System.Xml.Linq.XDocument.Load(
-                    fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                var root = doc.Root;
-                if (root == null) return;
-                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+                var consts = new[]
+                {
+                    new { Name = "TargetWork1State", X = "1380", Y = "2092" },
+                    new { Name = "TargetHomeState",  X = "1380", Y = "2192" },
+                };
 
                 var iface = root.Element(ns + "InterfaceList");
                 var net = root.Element(ns + "FBNetwork");
@@ -757,12 +683,6 @@ namespace CodeGen.Services
                     result.PatchesApplied.Add(
                         "Five_State_Actuator_CAT: interlock interface already wired (no change)");
                 }
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add(
-                    $"Five_State_Actuator_CAT interlock-constant normalize failed: {ex.Message}");
-            }
-        }
+            }, notFoundNote: "Five_State_Actuator_CAT.fbt not found; interlock-constant normalize skipped.");
     }
 }
