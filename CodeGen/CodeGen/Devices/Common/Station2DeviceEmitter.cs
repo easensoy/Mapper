@@ -69,14 +69,7 @@ namespace CodeGen.Devices.Core
             }
 
             var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
-            var systemGuidDir = Directory.Exists(systemDir)
-                ? Directory.EnumerateDirectories(systemDir)
-                    .FirstOrDefault(d =>
-                    {
-                        var name = Path.GetFileName(d);
-                        return Guid.TryParse(name, out _) && !name.StartsWith(".");
-                    })
-                : null;
+            var systemGuidDir = EaeProjectLayout.FindSystemGuidDir(eaeRoot);
             if (systemGuidDir == null)
             {
                 result.Warnings.Add(
