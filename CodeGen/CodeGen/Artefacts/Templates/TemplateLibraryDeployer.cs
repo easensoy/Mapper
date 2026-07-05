@@ -371,64 +371,6 @@ namespace CodeGen.Services
 
 
 
-        static void PatchProcess1RecipeArraySize(string eaeProjectDir, DeployResult result)
-        {
-            string[] recipeArrays =
-            {
-                "StepType", "CmdTargetName", "CmdStateArr",
-                "Wait1Id", "Wait1State", "NextStep",
-            };
-
-            void PatchOne(string fbtPath, string label)
-            {
-                if (!File.Exists(fbtPath))
-                {
-                    fbtPath = Directory.EnumerateFiles(
-                            Path.Combine(eaeProjectDir, "IEC61499"),
-                            Path.GetFileName(fbtPath), SearchOption.AllDirectories)
-                        .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal))
-                        ?? string.Empty;
-                    if (string.IsNullOrEmpty(fbtPath)) return;
-                }
-                try
-                {
-                    var doc = System.Xml.Linq.XDocument.Load(
-                        fbtPath, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                    var root = doc.Root;
-                    if (root == null) return;
-                    System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
-
-                    var target = CodeGen.Translation.Process.ProcessRecipeArrayGenerator
-                        .RecipeArraySize.ToString();
-                    int changed = 0;
-                    foreach (var vd in root.Descendants(ns + "VarDeclaration"))
-                    {
-                        var nm = (string?)vd.Attribute("Name") ?? string.Empty;
-                        if (Array.IndexOf(recipeArrays, nm) < 0) continue;
-                        if ((string?)vd.Attribute("ArraySize") == target) continue;
-                        vd.SetAttributeValue("ArraySize", target);
-                        changed++;
-                    }
-                    if (changed > 0)
-                    {
-                        doc.Save(fbtPath);
-                        result.PatchesApplied.Add(
-                            $"{label}: forced ArraySize={target} on {changed} recipe array InputVar(s)");
-                        MapperLogger.Info(
-                            $"[Deploy] {label}: recipe arrays ArraySize -> {target} ({changed} changed)");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    result.Warnings.Add($"{label} recipe ArraySize guard failed: {ex.Message}");
-                }
-            }
-
-            PatchOne(Path.Combine(eaeProjectDir, "IEC61499", "Process1_Generic",
-                "Process1_Generic.fbt"), "Process1_Generic.fbt");
-            PatchOne(Path.Combine(eaeProjectDir, "IEC61499",
-                "ProcessRuntime_Generic_v1.fbt"), "ProcessRuntime_Generic_v1.fbt");
-        }
 
 
 
@@ -635,74 +577,6 @@ namespace CodeGen.Services
             "</FBType>\r\n";
 
 
-        static void PatchKnownArraySizeBugs(string eaeProjectDir, DeployResult result)
-        {
-            var fbtPath = Path.Combine(eaeProjectDir, "IEC61499", "ProcessRuntime_Generic_v1.fbt");
-            if (!File.Exists(fbtPath)) return;
-
-            var text = File.ReadAllText(fbtPath);
-            const string oldDecl =
-                "<VarDeclaration Name=\"state_table\" Type=\"Component_State\" Namespace=\"Main\" ArraySize=\"1\" />";
-            const string newDecl =
-                "<VarDeclaration Name=\"state_table\" Type=\"Component_State\" Namespace=\"Main\" ArraySize=\"20\" />";
-
-            if (text.Contains(newDecl)) return;
-            if (!text.Contains(oldDecl))
-            {
-                result.Warnings.Add(
-                    "ProcessRuntime_Generic_v1.fbt: state_table declaration not found in expected " +
-                    "shape (ArraySize=\"1\"). Skipping ArraySize patch — verify by hand.");
-                return;
-            }
-            File.WriteAllText(fbtPath, text.Replace(oldDecl, newDecl));
-            result.PatchesApplied.Add("ProcessRuntime_Generic_v1.state_table ArraySize 1 -> 20");
-            MapperLogger.Info("[Deploy] Patched ProcessRuntime_Generic_v1.state_table ArraySize 1 -> 20");
-
-            // Fix the shipped check_wait typo (RHS Wait1Id -> Wait1State) or no wait can ever be satisfied.
-            const string brokenCheckWait =
-                "WaitSatisfied := state_table[Wait1Id[CurrentStep]].state = Wait1Id[CurrentStep];";
-            const string fixedCheckWait =
-                "WaitSatisfied := state_table[Wait1Id[CurrentStep]].state = Wait1State[CurrentStep];";
-            text = File.ReadAllText(fbtPath);
-            if (text.Contains(brokenCheckWait))
-            {
-                File.WriteAllText(fbtPath, text.Replace(brokenCheckWait, fixedCheckWait));
-                result.PatchesApplied.Add("ProcessRuntime_Generic_v1.check_wait typo Wait1Id -> Wait1State");
-                MapperLogger.Info("[Deploy] Patched ProcessRuntime_Generic_v1.check_wait typo (Wait1Id -> Wait1State on RHS)");
-            }
-        }
-
-        // ArraySize must match ProcessRecipeArrayGenerator.RecipeArraySize (100) so declared and emitted stay in lock-step.
-        static readonly (string Name, string Type, string ArraySize, string? Comment)[] RecipeArrayDecls = new[]
-        {
-            ("StepType",      "INT",         "100", "Phase 1: recipe arrays now external. 1=command, 2=wait, 9=end. Mapper writes literal at instance level via Process1_Generic."),
-            ("CmdTargetName", "STRING[15]",  "100", (string?)null),
-            ("CmdStateArr",   "INT",         "100", (string?)null),
-            ("Wait1Id",       "INT",         "100", (string?)null),
-            ("Wait1State",    "INT",         "100", (string?)null),
-            ("NextStep",      "INT",         "100", (string?)null),
-        };
-
-        static void PatchProcessRuntimeCompatibility(string eaeProjectDir, DeployResult result)
-        {
-            var enginePath = Path.Combine(eaeProjectDir, "IEC61499", "ProcessRuntime_Generic_v1.fbt");
-            if (!File.Exists(enginePath))
-            {
-                result.Warnings.Add("ProcessRuntime_Generic_v1.fbt not deployed; runtime compatibility patch skipped.");
-                return;
-            }
-
-            try
-            {
-                PatchProcessRuntimeEccDeadEnd(enginePath, MapperConfig.EnableCyclicRestart, result);
-                PatchProcessRuntimeStartBypass(enginePath, result);
-                PatchProcessRuntimeEndSequenceNoOp(enginePath, result);
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"ProcessRuntime_Generic_v1 compatibility patch failed: {ex.Message}");
-            }
-        }
 
 
         static void VerifyArraySizeConsistency(string eaeProjectDir, DeployResult result)
