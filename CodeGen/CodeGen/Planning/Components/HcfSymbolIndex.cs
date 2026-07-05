@@ -8,9 +8,6 @@ using CodeGen.Mapping;
 
 namespace CodeGen.Translation
 {
-    /// <summary>
-    /// Three-PLC partitioning identifier produced by <see cref="HcfSymbolIndex"/>.
-    /// </summary>
     public enum PlcAssignment
     {
         Unknown = 0,
@@ -19,41 +16,18 @@ namespace CodeGen.Translation
         BX1 = 3,
     }
 
-    /// <summary>
-    /// Reverse index from a symlink symbol (e.g. <c>RES0.M262IO.PusherAtHome</c>) back
-    /// to the PLC that owns the .hcf binding. Built once at the start of each Test
-    /// Runtime click by reading the three exported HCF templates in
-    /// <see cref="MapperConfig.IoFolderPath"/>. Used by <see cref="SystemLayoutInjector"/>
-    /// and the frame layout code to decide which coloured PLC zone each component sits in.
-    /// <para>
-    /// Authority order:
-    /// <list type="number">
-    ///   <item>Exact symbol match in the parsed HCF (M262IO.hcf or M580IO.hcf — these carry
-    ///         individual <c>&lt;ParameterValue Name="DI00" Value="'RES0.M262IO.…'"/&gt;</c>
-    ///         channel bindings).</item>
-    ///   <item>Symbol prefix fallback: <c>RES0.M262IO.*</c> → M262, <c>RES0.M580IO.*</c> → M580,
-    ///         <c>RES0.BX1IO.*</c> → BX1. Catches symbols defined in IoBindings.xlsx whose
-    ///         corresponding channel is not yet wired into the HCF (notably the BX1 case
-    ///         where the HCF only carries EIP word routing, not per-symbol bindings).</item>
-    ///   <item>Hard-coded component-name fallback (<see cref="NameBasedPlcGuess"/>) for
-    ///         components that have no binding row in IoBindings.xlsx — e.g. when the
-    ///         operator has not yet filled in their pin columns. Lets the syslay still
-    ///         render with the right colour even before IO is wired.</item>
-    /// </list>
-    /// </para>
-    /// </summary>
+    // Reverse index from a symlink symbol (e.g. RES0.M262IO.PusherAtHome) to the PLC that
+    // owns the .hcf binding. Resolution order: exact HCF match, then symbol prefix
+    // (RES0.M262IO.*/M580IO.*/BX1IO.*), then NameBasedPlcGuess.
     public class HcfSymbolIndex
     {
         private readonly Dictionary<string, PlcAssignment> _symbolToPlc =
             new(StringComparer.OrdinalIgnoreCase);
 
-        /// <summary>HCF file paths that were successfully loaded, keyed by PLC.</summary>
         public Dictionary<PlcAssignment, string> LoadedHcfs { get; } = new();
 
-        /// <summary>Diagnostics — files Mapper tried to load but couldn't, or that were empty.</summary>
         public List<string> Warnings { get; } = new();
 
-        /// <summary>Builds the index from MapperConfig's three HCF template paths.</summary>
         public static HcfSymbolIndex Build(MapperConfig cfg)
         {
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
@@ -85,11 +59,8 @@ namespace CodeGen.Translation
             }
 
             int added = 0;
-            // EAE's .hcf wraps every channel binding in
-            //   <ParameterValue Name="DI00" Value="'RES0.M262IO.PusherAtHome'"/>
-            // The Value attribute carries the single-quoted symlink. Walk the
-            // whole document; any ParameterValue whose Value looks like a
-            // single-quoted RES* symbol is indexed against the PLC.
+            // EAE's .hcf binds each channel as <ParameterValue Name="DI00" Value="'RES0.M262IO.PusherAtHome'"/>;
+            // index any single-quoted RES* Value against the PLC.
             foreach (var pv in doc.Descendants()
                 .Where(e => string.Equals(e.Name.LocalName, "ParameterValue", StringComparison.Ordinal)))
             {
@@ -100,8 +71,7 @@ namespace CodeGen.Translation
                 if (trimmed[0] != '\'' || trimmed[^1] != '\'') continue;
                 var sym = trimmed.Substring(1, trimmed.Length - 2);
                 if (string.IsNullOrWhiteSpace(sym)) continue;
-                // Ignore EIP word-level routing (BX1 has things like
-                // "78E9CD3D27851B64.F6C04A4BA6FA8593.EIP_Input_Word_1" without RES* prefix).
+                // Ignore EIP word-level routing (BX1 uses non-RES*-prefixed GUID triples).
                 if (!sym.StartsWith("RES", StringComparison.OrdinalIgnoreCase)) continue;
                 _symbolToPlc[sym] = plc;
                 added++;
@@ -115,28 +85,21 @@ namespace CodeGen.Translation
                     "name will be used for components on this PLC.");
         }
 
-        /// <summary>Direct symbol lookup. Returns Unknown if not in any parsed HCF.</summary>
         public PlcAssignment ResolveSymbol(string symbol)
         {
             if (string.IsNullOrWhiteSpace(symbol)) return PlcAssignment.Unknown;
-            // Strip any leading/trailing single quotes that may come from .hcf Value strings.
             var sym = symbol.Trim().Trim('\'');
             if (_symbolToPlc.TryGetValue(sym, out var plc)) return plc;
 
-            // Prefix fallback: RES0.M262IO.* → M262 etc. Catches bindings declared in
-            // IoBindings.xlsx whose channel isn't actually written into the .hcf yet.
+            // Prefix fallback for bindings not yet written into the .hcf.
             if (sym.Contains(".M262IO.", StringComparison.OrdinalIgnoreCase)) return PlcAssignment.M262;
             if (sym.Contains(".M580IO.", StringComparison.OrdinalIgnoreCase)) return PlcAssignment.M580;
             if (sym.Contains(".BX1IO.",  StringComparison.OrdinalIgnoreCase)) return PlcAssignment.BX1;
             return PlcAssignment.Unknown;
         }
 
-        /// <summary>
-        /// Looks up the PLC that owns a given component by tracing one of its IO bindings
-        /// (atwork preferred, then athome, then OutputToWork, then OutputToHome, then the
-        /// Sensor InputTag). Falls back to <see cref="NameBasedPlcGuess"/> when no binding
-        /// is registered for the component in IoBindings.xlsx.
-        /// </summary>
+        // Owns a component by tracing an IO binding (atwork/athome/OutputToWork/OutputToHome,
+        // then Sensor InputTag); falls back to NameBasedPlcGuess when none is registered.
         public PlcAssignment ResolveComponent(string componentName, IoBindings? bindings)
         {
             if (string.IsNullOrWhiteSpace(componentName)) return PlcAssignment.Unknown;
@@ -166,26 +129,17 @@ namespace CodeGen.Translation
             return NameBasedPlcGuess(componentName);
         }
 
-        /// <summary>
-        /// Hard-coded fallback used when a component has no row in IoBindings.xlsx.
-        /// Primary partition comes from <see cref="ControllerMap"/> (the canonical
-        /// SMC component registry); the small alias / Robot list below handles
-        /// names that aren't registered (Robot* arms, Rejector synonym for Ejector,
-        /// typo-free TopCoverSensor) so the syslay renders with the right colour
-        /// even before the bindings sheet is filled in.
-        /// </summary>
+        // Fallback when a component has no row in IoBindings.xlsx: primary partition from
+        // ControllerMap, then the alias/Robot list below for unregistered names.
         public static PlcAssignment NameBasedPlcGuess(string componentName)
         {
             if (string.IsNullOrWhiteSpace(componentName)) return PlcAssignment.Unknown;
 
-            // Primary: the canonical SMC partition table.
             var fromRegistry = ControllerMap.PlcOf(componentName);
             if (fromRegistry != PlcAssignment.Unknown) return fromRegistry;
 
-            // Fallbacks for names not registered in CodeGen.Mapping.ComponentRegistry:
-            //   • Rejector — synonym of Ejector (M262 Feed Station).
-            //   • TopCoverSensor — typo-free variant of TopCoverSenosr (BX1).
-            //   • Robot / Robot_Pick_And_Place1 — RobotStatus channel is on M262IO.
+            // Rejector=Ejector synonym (M262); TopCoverSensor variant of TopCoverSenosr (BX1);
+            // Robot RobotStatus channel is on M262IO.
             var n = componentName.Trim();
             if (Eq(n, "Rejector")) return PlcAssignment.M262;
             if (Eq(n, "TopCoverSensor")) return PlcAssignment.BX1;
