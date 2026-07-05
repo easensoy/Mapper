@@ -5,6 +5,7 @@ using CodeGen.Validation;
 using CodeGen.Devices.M262;
 using CodeGen.Devices.M580;
 using CodeGen.Devices.BX1;
+using CodeGen.Devices.RevPi;
 using CodeGen.Devices.Core;
 using CodeGen.Services;
 using CodeGen.Translation;
@@ -503,52 +504,67 @@ namespace MapperUI
                 M262SysdevEmitter.M262SysdevAlreadyExists(Cfg()));
 
             string sysdevId = string.Empty;
-            try
+            if (MapperConfig.FeedStationController == FeedController.RevPi)
             {
-                var sysdev = await Task.Run(() => M262SysdevEmitter.Emit(Cfg()));
-                if (sysdev.DevicePreserved)
+                // RevPi hosts the Feed station: emit the Soft_dPAC device + mirror the Feed FBs onto it.
+                // M262 sysdev/topology are NOT emitted (any prior M262 device is removed by the emitter).
+                try
                 {
-                    AppendActivity(
-                        "[Device] M262 sysdev exists, skipping device creation and " +
-                        "config writes to preserve trust binding");
-                    AppendActivity(
-                        $"[M262] .sysres mirrored {sysdev.SysresFbsMirrored} FB(s) to {sysdev.SysresPath} (application-layer only)");
+                    SystemInjector.BindingApplicationReport rr = new();
+                    await Task.Run(() => RevPiDeviceEmitter.EmitDevice(Cfg(), rr));
+                    foreach (var m in rr.Missing) AppendActivity(m);
                 }
-                else
-                {
-                    AppendActivity(
-                        $"[M262] sysdev re-emitted; .sysres mirrored {sysdev.SysresFbsMirrored} FBs to {sysdev.SysresPath}");
-                }
-                sysdevId = ReadSysdevId(sysdev.SysdevPath);
+                catch (Exception ex) { AppendActivity($"[RevPi][Error] device emit: {ex.Message}"); }
             }
-            catch (Exception ex)
+            else
             {
-                AppendActivity($"[M262][Error] sysdev emit: {ex.Message}");
-            }
-            // Topology always runs: solutionData (trust) is preserved, but Equipment JSON (placement)
-            // MUST be re-written every run or the M262dPAC never re-appears after a wipe.
-            try
-            {
-                if (!string.IsNullOrEmpty(sysdevId))
+                try
                 {
-                    var topo = await Task.Run(() => M262TopologyEmitter.Emit(Cfg(), sysdevId));
-                    AppendActivity($"[M262] topology emitted: {topo.FilesWritten.Count} JSON file(s), {topo.TopologyProjEntriesAdded} topologyproj entries added");
-                    if (m262DeviceExists)
-                        AppendActivity("[Device] solutionData preserved (existing trust binding kept intact)");
-                    foreach (var w in topo.Warnings)
-                        AppendActivity($"[M262][Warn] topology: {w}");
+                    var sysdev = await Task.Run(() => M262SysdevEmitter.Emit(Cfg()));
+                    if (sysdev.DevicePreserved)
+                    {
+                        AppendActivity(
+                            "[Device] M262 sysdev exists, skipping device creation and " +
+                            "config writes to preserve trust binding");
+                        AppendActivity(
+                            $"[M262] .sysres mirrored {sysdev.SysresFbsMirrored} FB(s) to {sysdev.SysresPath} (application-layer only)");
+                    }
+                    else
+                    {
+                        AppendActivity(
+                            $"[M262] sysdev re-emitted; .sysres mirrored {sysdev.SysresFbsMirrored} FBs to {sysdev.SysresPath}");
+                    }
+                    sysdevId = ReadSysdevId(sysdev.SysdevPath);
                 }
-                else
+                catch (Exception ex)
                 {
-                    AppendActivity("[M262][Warn] topology emit skipped — sysdevId was empty");
+                    AppendActivity($"[M262][Error] sysdev emit: {ex.Message}");
                 }
+                // Topology always runs: solutionData (trust) is preserved, but Equipment JSON (placement)
+                // MUST be re-written every run or the M262dPAC never re-appears after a wipe.
+                try
+                {
+                    if (!string.IsNullOrEmpty(sysdevId))
+                    {
+                        var topo = await Task.Run(() => M262TopologyEmitter.Emit(Cfg(), sysdevId));
+                        AppendActivity($"[M262] topology emitted: {topo.FilesWritten.Count} JSON file(s), {topo.TopologyProjEntriesAdded} topologyproj entries added");
+                        if (m262DeviceExists)
+                            AppendActivity("[Device] solutionData preserved (existing trust binding kept intact)");
+                        foreach (var w in topo.Warnings)
+                            AppendActivity($"[M262][Warn] topology: {w}");
+                    }
+                    else
+                    {
+                        AppendActivity("[M262][Warn] topology emit skipped — sysdevId was empty");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    AppendActivity($"[M262][Error] topology emit: {ex.Message}");
+                }
+                if (m262DeviceExists)
+                    AppendActivity("[Device] M262 sysdev preserved (trust binding intact)");
             }
-            catch (Exception ex)
-            {
-                AppendActivity($"[M262][Error] topology emit: {ex.Message}");
-            }
-            if (m262DeviceExists)
-                AppendActivity("[Device] M262 sysdev preserved (trust binding intact)");
 
             // Station 2 — M580 + BX1 sysdev + sysres + HCF + Topology Equipment JSON. Idempotent.
             try
@@ -688,6 +704,7 @@ namespace MapperUI
                 AppendActivity($"[Artefacts][Error] opcua sweep: {ex.Message}");
             }
 
+            if (MapperConfig.FeedStationController != FeedController.RevPi)
             try
             {
                 var hcf = await Task.Run(() => M262HwConfigCopier.Copy(Cfg()));
@@ -903,6 +920,14 @@ namespace MapperUI
                 Cfg().UseRecipeStruct = true;
                 MapperConfig.SimulatorRecipeMode = false;
 
+                // Feed-station controller (single toggle): RevPi if the user set any Device dropdown to
+                // RevPi, else M262. RevPi relocates the whole Feed station onto a Soft_dPAC; M262 not emitted.
+                bool revpiTarget = _deviceOverrides.Values.Any(v =>
+                    string.Equals(v, "RevPi", StringComparison.OrdinalIgnoreCase));
+                MapperConfig.FeedStationController = revpiTarget ? FeedController.RevPi : FeedController.M262;
+                if (revpiTarget)
+                    AppendActivity("[Target] Feed station -> Revolution Pi (Soft_dPAC); M262 device will not be emitted.");
+
                 lblStatus.Text = "Generating...";
                 AppendActivity($"[Generate] Generating IEC 61499 code end-to-end (Feed · Assembly · Disassembly · covers) into Demonstrator at {syslayPath}...");
                 AppendActivity("[Test Runtime] RecipeStep data-array carrier active; physical IO/sensor wiring and rig HOME-FIRST recipe waits are active.");
@@ -932,7 +957,10 @@ namespace MapperUI
                 // Emit the event + data wires into the M262 sysres FBNetwork (init chain + adapter wires
                 // + Pusher I/O bindings); without these EAE deploys but nothing inits.
                 int wireCountBefore = report.Missing.Count;
-                await Task.Run(() => M262SysresWireEmitter.Emit(Cfg(), report));
+                if (MapperConfig.FeedStationController == FeedController.RevPi)
+                    await Task.Run(() => RevPiDeviceEmitter.WireResource(Cfg(), report));
+                else
+                    await Task.Run(() => M262SysresWireEmitter.Emit(Cfg(), report));
                 for (int i = wireCountBefore; i < report.Missing.Count; i++)
                 {
                     var line = report.Missing[i];
@@ -995,8 +1023,9 @@ namespace MapperUI
                 }
 
                 int hcfCountBefore = report.Missing.Count;
-                await Task.Run(() => HcfPatchService.PatchDeployed(
-                    Cfg(), path, bindings, report));
+                if (MapperConfig.FeedStationController != FeedController.RevPi)
+                    await Task.Run(() => HcfPatchService.PatchDeployed(
+                        Cfg(), path, bindings, report));
                 for (int i = hcfCountBefore; i < report.Missing.Count; i++)
                 {
                     var line = report.Missing[i];
