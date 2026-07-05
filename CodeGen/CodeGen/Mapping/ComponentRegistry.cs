@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using CodeGen.Configuration;
 using CodeGen.Translation;
 
 namespace CodeGen.Mapping
@@ -34,8 +35,34 @@ namespace CodeGen.Mapping
     // A new Control.xml component = one row in Build(); positions/bucket/ownership follow.
     public static class ComponentRegistry
     {
-        // All canonical entries, keyed by component name (case-sensitive).
-        public static IReadOnlyDictionary<string, ComponentEntry> ByName { get; } = Build();
+        // All canonical entries for the active Feed-station controller, keyed by component name.
+        // M262 mode = the canonical partition (byte-identical). RevPi mode relocates every M262 component
+        // onto the RevPi resource, unchanged canvas coordinates — a device substitution, nothing else.
+        public static IReadOnlyDictionary<string, ComponentEntry> ByName => Cached(MapperConfig.FeedStationController);
+
+        private static readonly Dictionary<FeedController, IReadOnlyDictionary<string, ComponentEntry>> _cache = new();
+
+        private static IReadOnlyDictionary<string, ComponentEntry> Cached(FeedController target)
+        {
+            if (_cache.TryGetValue(target, out var cached)) return cached;
+            var m262 = Build();
+            var result = target == FeedController.RevPi ? RelocateFeedToRevPi(m262) : m262;
+            _cache[target] = result;
+            return result;
+        }
+
+        // Move every M262 (Feed-station) entry onto the RevPi resource, keeping its canvas X/Y so the Feed
+        // station renders in the same band. M580/BX1/Boot rows are untouched.
+        private static IReadOnlyDictionary<string, ComponentEntry> RelocateFeedToRevPi(
+            IReadOnlyDictionary<string, ComponentEntry> src)
+        {
+            var revPiResource = ControllerMap.ResourceForPlc(PlcAssignment.RevPi);
+            return src.Values
+                .Select(e => e.Plc == PlcAssignment.M262
+                    ? e with { Plc = PlcAssignment.RevPi, Resource = revPiResource }
+                    : e)
+                .ToDictionary(r => r.Name, r => r, StringComparer.Ordinal);
+        }
 
         private static IReadOnlyDictionary<string, ComponentEntry> Build()
         {
