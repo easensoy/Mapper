@@ -148,23 +148,7 @@ namespace CodeGen.Services
             "</DataType>";
 
         internal static void DeployRecipeStepDatatype(string eaeProjectDir, DeployResult result)
-        {
-            try
-            {
-                var dtDir = Path.Combine(eaeProjectDir, "IEC61499", "DataType");
-                Directory.CreateDirectory(dtDir);
-                var dtPath = Path.Combine(dtDir, "RecipeStep.dt");
-                if (!File.Exists(dtPath)) File.WriteAllText(dtPath, RecipeStepDt);
-                if (!result.DataTypesDeployed.Contains("RecipeStep"))
-                    result.DataTypesDeployed.Add("RecipeStep");
-                result.PatchesApplied.Add("RecipeStep.dt deployed + registered (sim Recipe struct)");
-                MapperLogger.Info("[Deploy] RecipeStep.dt written + registered");
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"RecipeStep.dt deploy failed: {ex.Message}");
-            }
-        }
+            => DeployDatatype(eaeProjectDir, "RecipeStep", RecipeStepDt, result, "(sim Recipe struct)");
 
         // Recipe-struct collapse on Process1_Generic (gated by UseRecipeStruct); reduce==false restores the 6 arrays.
         internal static void NormalizeProcess1RecipeArrays(
