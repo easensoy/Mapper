@@ -19,7 +19,9 @@ validateCert: 0
 # Shared ConnectionID binding key (every resource's MQTT_CONNECTION + embedded MQTT_PUBLISH).
 connectionName: SMC
 
-# Per-resource broker ClientIdentifier (unique so mosquitto keeps all three connected).
+# Per-resource broker ClientIdentifier (unique so mosquitto keeps all connected).
 clientBx1: SMC_BX1
 clientM262: SMC_M262
 clientM580: SMC_M580
+# Feed controller when the RevPi hosts the Feed station instead of M262.
+clientRevPi: SMC_RevPi
