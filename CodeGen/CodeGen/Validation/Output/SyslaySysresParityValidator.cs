@@ -20,13 +20,22 @@ namespace CodeGen.Devices.Core
             public override string ToString() => $"[{Scope}] {Detail}";
         }
 
-        // Logical PLC <-> EAE sysdev device-type <-> short label, in deploy order.
-        static readonly (string DeviceType, PlcAssignment Plc, string Label)[] Devices =
+        // Logical PLC <-> EAE sysdev (Type + optional Name) <-> short label, in deploy order. The Feed
+        // station is hosted on M262 (default) or the RevPi Soft_dPAC; M580/BX1 are fixed. A non-null Name
+        // disambiguates two devices of the same Type (BX1 vs Revolution_Pi, both Soft_dPAC).
+        static IEnumerable<(string DeviceType, string? DeviceName, PlcAssignment Plc, string Label)> Devices()
         {
-            ("M262_dPAC", PlcAssignment.M262, "M262"),
-            ("M580_dPAC", PlcAssignment.M580, "M580"),
-            ("Soft_dPAC", PlcAssignment.BX1,  "BX1"),
-        };
+            yield return MapperConfig.FeedStationController == FeedController.RevPi
+                ? ("Soft_dPAC", "Revolution_Pi", PlcAssignment.RevPi, "RevPi")
+                : ("M262_dPAC", null,            PlcAssignment.M262,  "M262");
+            yield return ("M580_dPAC", null,  PlcAssignment.M580, "M580");
+            yield return ("Soft_dPAC", "BX1", PlcAssignment.BX1,  "BX1");
+        }
+
+        static string? LocateSysdev(string eaeRoot, string deviceType, string? deviceName) =>
+            deviceName == null
+                ? EaeProjectLayout.FindSysdevByDeviceType(eaeRoot, deviceType)
+                : EaeProjectLayout.FindSysdevByDeviceTypeAndName(eaeRoot, deviceType, deviceName);
 
         // Recipe is carried either as a single STRUCT param or as the six parallel arrays.
         static readonly string[] RecipeParamNames =
@@ -58,7 +67,7 @@ namespace CodeGen.Devices.Core
                 return violations;
             }
 
-            foreach (var (deviceType, plc, label) in Devices)
+            foreach (var (deviceType, deviceName, plc, label) in Devices())
             {
                 // The syslay FBs the mirror would project onto this PLC (MirroredCatTypes n bucket).
                 var expected = syslayFbs
@@ -67,7 +76,7 @@ namespace CodeGen.Devices.Core
                     .ToList();
                 if (expected.Count == 0) continue;
 
-                var sysdev = EaeProjectLayout.FindSysdevByDeviceType(eaeRoot, deviceType);
+                var sysdev = LocateSysdev(eaeRoot, deviceType, deviceName);
                 var sysres = sysdev == null ? null : EaeProjectLayout.FindSysresFor(sysdev);
                 if (string.IsNullOrEmpty(sysres) || !File.Exists(sysres))
                 {
@@ -116,10 +125,17 @@ namespace CodeGen.Devices.Core
                 }
             }
 
-            // When the cross-PLC discharge tail is active the M262 hcf MUST bind the four discharge
-            // channels, or the ejector/robot never actuate even though the recipe commands them.
+            // When the cross-PLC discharge tail is active the Feed controller's IO must carry it. On M262
+            // that is the four .hcf channels (ejector/robot/part-sensor); on RevPi the discharge tail is
+            // FB-hosted on the RevPi sysres (its physical Modbus IO, PLC_RW_REVPI, is the documented
+            // follow-up), so the RevPi path asserts the discharge FBs landed on the RevPi sysres.
             if (CodeGen.Translation.HandoffPlanner.DischargeActive)
-                ValidateDischargeHcf(eaeRoot, violations);
+            {
+                if (MapperConfig.FeedStationController == FeedController.RevPi)
+                    ValidateDischargeRevPi(eaeRoot, violations);
+                else
+                    ValidateDischargeHcf(eaeRoot, violations);
+            }
 
             return violations;
         }
@@ -198,6 +214,43 @@ namespace CodeGen.Devices.Core
                     violations.Add(new("M262-HCF",
                         $"discharge tail active but {dc.Channel} ({dc.Meaning}) is BLANK in '{Path.GetFileName(hcf)}' — " +
                         "the ejector/robot will not actuate on the rig"));
+        }
+
+        // RevPi hosts the discharge tail on its own sysres (the physical Modbus IO — PLC_RW_REVPI — is the
+        // documented follow-up, so there is no .hcf to bind yet). Assert each discharge FB (the FB-name part
+        // of the discharge-channel Meanings — Ejector/Robot/PartAtAssembly) landed on the RevPi sysres.
+        static void ValidateDischargeRevPi(string eaeRoot, List<Violation> violations)
+        {
+            var sysdev = EaeProjectLayout.FindSysdevByDeviceTypeAndName(eaeRoot, "Soft_dPAC", "Revolution_Pi");
+            var sysres = sysdev == null ? null : EaeProjectLayout.FindSysresFor(sysdev);
+            if (string.IsNullOrEmpty(sysres) || !File.Exists(sysres))
+            {
+                violations.Add(new("RevPi-Discharge", "discharge tail active but the RevPi sysres was not found"));
+                return;
+            }
+
+            HashSet<string> fbNames;
+            try
+            {
+                var doc = XDocument.Load(sysres);
+                XNamespace ns = doc.Root!.GetDefaultNamespace();
+                fbNames = doc.Descendants(ns + "FB")
+                    .Select(e => (string?)e.Attribute("Name"))
+                    .Where(n => !string.IsNullOrEmpty(n))
+                    .Select(n => n!)
+                    .ToHashSet(StringComparer.Ordinal);
+            }
+            catch (Exception ex)
+            {
+                violations.Add(new("RevPi-Discharge", $"unreadable RevPi sysres '{Path.GetFileName(sysres)}': {ex.Message}"));
+                return;
+            }
+
+            foreach (var fb in RigCatalog.Current.DischargeChannels
+                         .Select(dc => dc.Meaning.Split('.')[0]).Distinct(StringComparer.Ordinal))
+                if (!fbNames.Contains(fb))
+                    violations.Add(new("RevPi-Discharge",
+                        $"discharge tail active but '{fb}' is not on the RevPi sysres — the discharge tail did not land on the Feed controller"));
         }
     }
 }
