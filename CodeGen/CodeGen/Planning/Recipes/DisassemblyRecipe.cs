@@ -3,11 +3,8 @@ using CodeGen.Models;
 
 namespace CodeGen.Translation.Process
 {
-    /// <summary>
-    /// Disassembly orchestration (MapperConfig.UnparkDisassembly): emits the rows from
-    /// Config/recipes.yml (recipe "Disassembly") under the gates below. Parks (single END) if any
-    /// cover/shaft/bearing id is missing.
-    /// </summary>
+    // Disassembly orchestration (MapperConfig.UnparkDisassembly): emits Config/recipes.yml recipe
+    // "Disassembly" under the gates below. Parks (single END) if any cover/shaft/bearing id is missing.
     internal static class DisassemblyRecipe
     {
         public static void Apply(VueOneComponent process,
@@ -47,9 +44,8 @@ namespace CodeGen.Translation.Process
 
             var def = RecipeConfigLoader.Catalog.Recipe("Disassembly");
 
-            // Row 0: idle sentinel {DisassemblyProcessId, 7}. Published BEFORE the handshake wait so it
-            // stands while Disassembly is idle; Assembly's disassemblyClear gate reads it and will not
-            // begin a cycle until Disassembly is here (not driving the shared bearing_pnp / cover_hr).
+            // Row 0 idle sentinel {DisassemblyProcessId, 7}, before the handshake wait: Assembly's
+            // disassemblyClear gate reads it and holds until Disassembly is idle (not on the shared swivel).
             if (MapperConfig.SerializeAssemblyDisassembly)
                 RecipeStepEmitter.Emit(b, def.Block("ready"), arrays, allComponents);
 
@@ -59,12 +55,10 @@ namespace CodeGen.Translation.Process
 
             RecipeStepEmitter.Emit(b, def.Block("shaftOut"), arrays, allComponents);
 
-            // Bearing out: pick @ AtWork2 -> place @ AtWork1 -> (restage) -> Home.
-            // The empty restage to AtWork2 (bearingStage) is emitted ONLY when the CAT brake is
-            // OFF: without the brake the swivel must approach Home from the AtWork2 side so it
-            // coasts AWAY from the ejector. With SwivelBrakeHome ON the swivel homes directly
-            // from AtWork1 and the brake (reverse-coil pulse at centre) arrests it there, so the
-            // restage is dropped -> the user-requested AtWork2 -> AtWork1 -> Home.
+            // Bearing out: pick @ AtWork2 -> place @ AtWork1 -> (restage) -> Home. The empty restage
+            // (bearingStage) is emitted ONLY when SwivelBrakeHome is OFF: without the brake the swivel
+            // must approach Home from the AtWork2 side so it coasts AWAY from the ejector. With the
+            // brake ON it homes directly from AtWork1 and the reverse-coil pulse arrests it at centre.
             RecipeStepEmitter.Emit(b, def.Block("bearingPick"), arrays, allComponents);
             if (!MapperConfig.SwivelBrakeHome)
                 RecipeStepEmitter.Emit(b, def.Block("bearingStage"), arrays, allComponents);
