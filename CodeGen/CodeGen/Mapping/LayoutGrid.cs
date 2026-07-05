@@ -21,9 +21,10 @@ namespace CodeGen.Mapping
         // Left edge of each PLC zone; origins follow the prior zone's fitted right edge (~250 gap).
         public static int FrameOriginX(PlcAssignment plc) => plc switch
         {
-            PlcAssignment.M262 => 1800,
-            PlcAssignment.M580 => 10800,
-            PlcAssignment.BX1  => 23200,
+            PlcAssignment.M262  => 1800,
+            PlcAssignment.RevPi => 1800,   // RevPi hosts the Feed station in M262's band
+            PlcAssignment.M580  => 10800,
+            PlcAssignment.BX1   => 23200,
             _ => 0,
         };
 
@@ -31,9 +32,10 @@ namespace CodeGen.Mapping
         // after the prior zone's fitted right edge.
         public static int ColumnBaseX(PlcAssignment plc) => plc switch
         {
-            PlcAssignment.M262 => 2000,
-            PlcAssignment.M580 => 11000,
-            PlcAssignment.BX1  => 23400,
+            PlcAssignment.M262  => 2000,
+            PlcAssignment.RevPi => 2000,
+            PlcAssignment.M580  => 11000,
+            PlcAssignment.BX1   => 23400,
             _ => 0,
         };
 
@@ -61,9 +63,10 @@ namespace CodeGen.Mapping
         // MoveStyle="None" on every Frame, EAE renders them at exactly these bounds (no auto-grow).
         public static int FrameWidth(PlcAssignment plc) => plc switch
         {
-            PlcAssignment.M262 => 8500,    // 1800..10300 (gap 1500 to M580 origin)
-            PlcAssignment.M580 => 16000,   // 11800..27800 (gap 400 to BX1 origin)
-            PlcAssignment.BX1  => 6600,    // 28200..34800 (last zone)
+            PlcAssignment.M262  => 8500,    // 1800..10300 (gap 1500 to M580 origin)
+            PlcAssignment.RevPi => 8500,
+            PlcAssignment.M580  => 16000,   // 11800..27800 (gap 400 to BX1 origin)
+            PlcAssignment.BX1   => 6600,    // 28200..34800 (last zone)
             _ => 0,
         };
 
