@@ -14,6 +14,7 @@ namespace CodeGen.Translation
         M262 = 1,
         M580 = 2,
         BX1 = 3,
+        RevPi = 4,   // Revolution Pi (Soft_dPAC) — the alternate Feed-station host to M262
     }
 
     // Reverse index from a symlink symbol (e.g. RES0.M262IO.PusherAtHome) to the PLC that
