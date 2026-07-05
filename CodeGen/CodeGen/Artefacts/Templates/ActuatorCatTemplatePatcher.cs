@@ -152,19 +152,9 @@ namespace CodeGen.Services
 
         // Restores the Five_State CAT's Inputs DST to the physical sensor symlinks ($${PATH}athome/atwork).
         internal static void NormalizeFiveStateSimSensorSource(string eaeProjectDir, DeployResult result)
-        {
-            var fbt = FindDeployedFbt(eaeProjectDir, "Five_State_Actuator_CAT.fbt");
-            if (string.IsNullOrEmpty(fbt))
+            => EditDeployedFbt(eaeProjectDir, "Five_State_Actuator_CAT.fbt", "Five_State sim-sensor normalize failed", result,
+                (doc, root, ns, fbt) =>
             {
-                result.Warnings.Add("Five_State_Actuator_CAT.fbt not found; Five_State sim-sensor normalize skipped.");
-                return;
-            }
-            try
-            {
-                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                var root = doc.Root;
-                if (root == null) return;
-                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
                 var net = root.Element(ns + "FBNetwork");
                 var inputs = net?.Elements(ns + "FB")
                     .FirstOrDefault(f => (string?)f.Attribute("Name") == "Inputs");
@@ -194,37 +184,21 @@ namespace CodeGen.Services
                     result.PatchesApplied.Add("Five_State_Actuator_CAT: Inputs athome/atwork -> physical sensor symlinks (hardware)");
                     MapperLogger.Info("[Deploy] Five_State sim-sensor source normalize: physical sensor symlinks restored");
                 }
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"Five_State sim-sensor normalize failed: {ex.Message}");
-            }
-        }
+            }, notFoundNote: "Five_State_Actuator_CAT.fbt not found; Five_State sim-sensor normalize skipped.");
 
 
 
         // Restores Five_State_Actuator_CAT's two wired fault-enable inputs (VarDecl + INIT With + Input pin + FB17/FB14.IN2).
         internal static void NormalizeFiveStateFaultEnables(
             string eaeProjectDir, DeployResult result)
-        {
-            var map = new[]
+            => EditDeployedFbt(eaeProjectDir, "Five_State_Actuator_CAT.fbt", "Five_State_Actuator_CAT fault-enable normalize failed", result,
+                (doc, root, ns, fbt) =>
             {
-                new { Enable = "enableToWorkFaultTimeout", Dest = "FB17.IN2", X = "1280", Y = "5772" },
-                new { Enable = "enableToHomeFaultTimeout", Dest = "FB14.IN2", X = "1260", Y = "5292" },
-            };
-
-            var fbt = FindDeployedFbt(eaeProjectDir, "Five_State_Actuator_CAT.fbt");
-            if (string.IsNullOrEmpty(fbt))
-            {
-                result.Warnings.Add("Five_State_Actuator_CAT.fbt not found; fault-enable normalize skipped.");
-                return;
-            }
-            try
-            {
-                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                var root = doc.Root;
-                if (root == null) return;
-                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+                var map = new[]
+                {
+                    new { Enable = "enableToWorkFaultTimeout", Dest = "FB17.IN2", X = "1280", Y = "5772" },
+                    new { Enable = "enableToHomeFaultTimeout", Dest = "FB14.IN2", X = "1260", Y = "5292" },
+                };
 
                 var iface = root.Element(ns + "InterfaceList");
                 var net = root.Element(ns + "FBNetwork");
@@ -284,12 +258,7 @@ namespace CodeGen.Services
                     result.PatchesApplied.Add("Five_State_Actuator_CAT: fault-enable inputs restored as wired inputs (hardware)");
                     MapperLogger.Info("[Deploy] Five_State_Actuator_CAT fault-enable normalize: wired inputs restored");
                 }
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"Five_State_Actuator_CAT fault-enable normalize failed: {ex.Message}");
-            }
-        }
+            }, notFoundNote: "Five_State_Actuator_CAT.fbt not found; fault-enable normalize skipped.");
 
 
         // Force the actuator's "mode" InputVar InitialValue=1 (auto); without it mode=0 at boot fires no
