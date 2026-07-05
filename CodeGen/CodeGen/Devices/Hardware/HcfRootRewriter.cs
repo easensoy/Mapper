@@ -6,44 +6,9 @@ using System.Xml.Linq;
 
 namespace CodeGen.Devices.Core
 {
-    /// <summary>
-    /// Transforms a newly-exported <c>.hcf</c> from Schneider's
-    /// <c>HwConfigExportedConfiguration</c> root into the legacy
-    /// <c>DeviceHwConfigurationItems</c> form that EAE 24.1's
-    /// <c>PNConfiguratorBuildTask</c> expects.
-    ///
-    /// <para>Why this exists</para>
-    /// <para>When the IO folder under <c>C:\VueOneMapper\IO\</c> holds .hcf
-    /// files exported from a newer EAE/Hardware Configurator, the file's
-    /// root is <c>&lt;HwConfigExportedConfiguration ... &gt;</c>. The
-    /// PNConfiguratorBuildTask in EAE 24.1's build pipeline runs an
-    /// <c>XmlSerializer</c> against the .hcf at project-compile time and
-    /// throws:</para>
-    /// <code>
-    /// System.InvalidOperationException: There is an error in XML
-    /// document (1, 40). ---&gt; &lt;HwConfigExportedConfiguration
-    /// xmlns=''&gt; was not expected.
-    /// </code>
-    /// <para>because its XML-serializer schema declares the root as
-    /// <c>DeviceHwConfigurationItems</c> (with each device wrapped in
-    /// a <c>&lt;DeviceHwConfigurationItem ResourceId="…"&gt;</c>).</para>
-    ///
-    /// <para>The transform</para>
-    /// <list type="number">
-    ///   <item>Detect root by LocalName. No-op when already
-    ///         <c>DeviceHwConfigurationItems</c> — file copied straight from
-    ///         the legacy baseline or a previous Mapper run.</item>
-    ///   <item>Strip the <c>&lt;ContainsResourceName&gt;</c> metadata element
-    ///         (legacy format has no equivalent).</item>
-    ///   <item>Wrap every remaining child of the root in
-    ///         <c>&lt;DeviceHwConfigurationItem ResourceId="{id}"/&gt;</c>.</item>
-    ///   <item>Rename the root to <c>DeviceHwConfigurationItems</c>.</item>
-    /// </list>
-    /// <para>Channel ParameterValue contents (the <c>DI00..DO15</c> symlink
-    /// bindings authored by the user) are NOT touched — only the outer
-    /// wrapper changes. Idempotent: rerunning on an already-transformed
-    /// .hcf does nothing.</para>
-    /// </summary>
+    // EAE 24.1's PNConfiguratorBuildTask expects the legacy DeviceHwConfigurationItems root; a newer
+    // exporter's HwConfigExportedConfiguration root fails XmlSerializer at compile. Re-root to the legacy
+    // form. Idempotent; channel ParameterValue (DI00..DO15 symlink) contents are untouched.
     public static class HcfRootRewriter
     {
         public static RewriteResult RewriteIfNeeded(string hcfPath, string resourceId)
@@ -66,7 +31,6 @@ namespace CodeGen.Devices.Core
             var root = doc.Root;
             if (root == null) { result.Skipped = "no root"; return result; }
 
-            // Already in the legacy form → nothing to do.
             if (string.Equals(root.Name.LocalName, "DeviceHwConfigurationItems",
                 StringComparison.Ordinal))
             {
@@ -74,7 +38,6 @@ namespace CodeGen.Devices.Core
                 return result;
             }
 
-            // Only transform the new HwConfigExportedConfiguration form.
             if (!string.Equals(root.Name.LocalName, "HwConfigExportedConfiguration",
                 StringComparison.Ordinal))
             {
@@ -82,29 +45,23 @@ namespace CodeGen.Devices.Core
                 return result;
             }
 
-            // 1. Collect children, skipping the legacy-incompatible
-            //    <ContainsResourceName>true</ContainsResourceName> metadata.
             var keep = root.Elements()
                 .Where(e => !string.Equals(e.Name.LocalName,
                     "ContainsResourceName", StringComparison.Ordinal))
                 .ToList();
 
-            // 2. Build the new root carrying the two well-known xmlns
-            //    prefixes EAE writes on every .hcf it owns.
             var newRoot = new XElement("DeviceHwConfigurationItems",
                 new XAttribute(XNamespace.Xmlns + "xsd", "http://www.w3.org/2001/XMLSchema"),
                 new XAttribute(XNamespace.Xmlns + "xsi", "http://www.w3.org/2001/XMLSchema-instance"));
 
-            // 3. Wrap children in <DeviceHwConfigurationItem ResourceId="…">.
-            //    The hex resource ID matches the .sysres file stem so EAE's
-            //    runtime resolver finds the correct M262/M580/BX1 resource.
+            // ResourceId (hex) must match the .sysres file stem so EAE's runtime resolves the resource.
             var wrapper = new XElement("DeviceHwConfigurationItem",
                 new XAttribute("ResourceId", resourceId ?? string.Empty));
             foreach (var child in keep)
-                wrapper.Add(new XElement(child));   // detach + clone so original tree is unaffected
+                wrapper.Add(new XElement(child));   // clone so original tree is unaffected
             newRoot.Add(wrapper);
 
-            // 4. Save with UTF-8 + BOM to match Schneider's own exporter.
+            // UTF-8 + BOM to match Schneider's own exporter.
             var settings = new System.Xml.XmlWriterSettings
             {
                 Indent = true,
@@ -143,11 +100,7 @@ namespace CodeGen.Devices.Core
             return result;
         }
 
-        /// <summary>
-        /// Convenience overload — derives the resource ID from the .sysres
-        /// file's stem (EAE convention: the sysres file is named after the
-        /// resource ID, e.g. <c>1459BCD12760907D.sysres</c>).
-        /// </summary>
+        // Derives the resource ID from the .sysres file stem (EAE names the sysres after the resource ID).
         public static RewriteResult RewriteIfNeededDeriveId(string hcfPath, string sysdevFolder)
         {
             var sysresFile = Directory.Exists(sysdevFolder)
