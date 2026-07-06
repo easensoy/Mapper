@@ -1,0 +1,280 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<DeviceHwConfigurationItems xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <DeviceHwConfigurationItem ResourceId="D090B4163A62A815">
+    <ConfigurationBaseItem>
+      <Name>MODBUS</Name>
+      <ID>B9A55187A5E4CDD8</ID>
+      <Type>
+        <Name>MODBUS</Name>
+        <Namespace>Standard.IoModbus</Namespace>
+      </Type>
+      <ItemProperties>
+        <ItemProperty>
+          <Name>busid</Name>
+          <Value xsi:type="xsd:string">MODBUS</Value>
+          <HWParameters>
+            <string>BUS_ID</string>
+          </HWParameters>
+        </ItemProperty>
+        <ItemProperty>
+          <Name>protocol</Name>
+          <Value xsi:type="xsd:string">modbus</Value>
+        </ItemProperty>
+        <ItemProperty>
+          <Name>buscycletime</Name>
+          <Value xsi:type="xsd:string">T#80ms</Value>
+          <HWParameters>
+            <string>busCycleTime</string>
+          </HWParameters>
+        </ItemProperty>
+        <ItemProperty>
+          <Name>enableSymlinkOC</Name>
+          <Value xsi:type="xsd:string">TRUE</Value>
+          <HWParameters>
+            <string>enableSymlinkOC</string>
+          </HWParameters>
+        </ItemProperty>
+        <ItemProperty>
+          <Name>buscycletolerance</Name>
+          <Value xsi:type="xsd:string">10</Value>
+          <HWParameters>
+            <string>busCycleTolerance</string>
+          </HWParameters>
+        </ItemProperty>
+        <ItemProperty>
+          <Name>buscycleactionwhenmissed</Name>
+          <Value xsi:type="xsd:string">1</Value>
+          <HWParameters>
+            <string>busCycleActionWhenMissed</string>
+          </HWParameters>
+        </ItemProperty>
+        <ItemProperty>
+          <Name>alignwithrespriority</Name>
+          <Value xsi:type="xsd:string">TRUE</Value>
+          <HWParameters>
+            <string>alignWithResPriority</string>
+          </HWParameters>
+        </ItemProperty>
+        <ItemProperty>
+          <Name>connectinfo.mastertype</Name>
+          <Value xsi:type="xsd:string">master</Value>
+        </ItemProperty>
+        <ItemProperty>
+          <Name>connectinfo.transportprotocol</Name>
+          <Value xsi:type="xsd:string">tcp</Value>
+        </ItemProperty>
+        <ItemProperty>
+          <Name>connectinfo.interframedelay</Name>
+          <Value xsi:type="xsd:unsignedShort">10</Value>
+        </ItemProperty>
+        <ItemProperty>
+          <Name>logging.enabled</Name>
+          <Value xsi:type="xsd:boolean">false</Value>
+        </ItemProperty>
+        <ItemProperty>
+          <Name>logging.filename</Name>
+          <Value xsi:type="xsd:string">modbus.log</Value>
+        </ItemProperty>
+      </ItemProperties>
+      <ParameterValues>
+        <ParameterValue Name="autoStart" Value="TRUE" Comment="If TRUE, the initial event is taken from an E_RESTART block; if FALSE, the function block can be initialized using an event chain with name HW_INIT" />
+        <ParameterValue Name="BUS_ID" Value="'MODBUS'" Comment="Modbus Client BusMaster Instance Name" />
+        <ParameterValue Name="enableSymlinkOC" Value="TRUE" Comment="if TRUE, Symlink variables are relearnt during OnlineChange" />
+        <ParameterValue Name="phase" Value="T#0ms" Comment="Delay before starting the bus events at application start to avoid same phase. Please apply a different phase for each bus master to avoid having all events processed in the same time phase." />
+        <ParameterValue Name="busCycleTime" Value="T#80ms" Comment="Time interval at which the I/O scanning operation will be performed" />
+        <ParameterValue Name="busCycleTolerance" Value="10" Comment="Tolerance expressed as percentage of the bus cycle time. Missed cycle count is incremented if elapsed time since previous cycle time is not within limits of bus cycle time with tolerance." />
+        <ParameterValue Name="busCycleActionWhenMissed" Value="1" Comment="Action to trigger on missed bus cycle. INFO to log warning with lower impact on performances (indicates how many bus cycle(s) were missed) ; DEBUG to log detailed warning with higher impact on performance (indicates exact drift for each missed cycle) ; ERROR_HALT to log an error and move to Error Halt state" />
+        <ParameterValue Name="alignWithResPriority" Value="TRUE" Comment="Set to true to align priority of Modbus worker threads with resource priority" />
+      </ParameterValues>
+      <MasterConfigFileName>${ProjectDir}\${SystemName}\RuntimeData\${DeviceName}\boot\${busid}.xml</MasterConfigFileName>
+      <Items>
+        <ConfigurationBaseItem>
+          <Name>MODBUSGENTCPS</Name>
+          <ID>F096E14CFF7327A7</ID>
+          <Type>
+            <Name>MODBUSGENTCPS</Name>
+            <Namespace>Standard.IoModbus</Namespace>
+          </Type>
+          <ItemProperties>
+            <ItemProperty>
+              <Name>connectinfo.transportprotocol</Name>
+              <Value xsi:type="xsd:string">tcp</Value>
+            </ItemProperty>
+            <ItemProperty>
+              <Name>connectinfo.stationid</Name>
+              <Value xsi:type="xsd:unsignedShort">1</Value>
+            </ItemProperty>
+            <ItemProperty>
+              <Name>connectinfo.responsetimeout</Name>
+              <Value xsi:type="xsd:unsignedShort">500</Value>
+            </ItemProperty>
+            <ItemProperty>
+              <Name>connectinfo.fallbackValue</Name>
+              <Value xsi:type="xsd:string">HOLD</Value>
+            </ItemProperty>
+            <ItemProperty>
+              <Name>connectinfo.tcp.ipaddress</Name>
+              <Value xsi:type="xsd:string">172.18.0.1</Value>
+            </ItemProperty>
+            <ItemProperty>
+              <Name>connectinfo.tcp.port</Name>
+              <Value xsi:type="xsd:unsignedShort">502</Value>
+            </ItemProperty>
+            <ItemProperty>
+              <Name>connectinfo.HA.secondaryheartbeat</Name>
+              <Value xsi:type="xsd:string">Enabled-Automatic</Value>
+            </ItemProperty>
+            <ItemProperty>
+              <Name>connectinfo.HA.heartbeataddress</Name>
+              <Value xsi:type="xsd:unsignedShort">0</Value>
+            </ItemProperty>
+            <ItemProperty>
+              <Name>diagnostics</Name>
+              <Value xsi:type="xsd:string">enabled</Value>
+            </ItemProperty>
+          </ItemProperties>
+          <ParameterValues>
+            <ParameterValue Name="SLAVE_BUS_ID" Value="'MODBUSGENTCPS'" Comment="Unique name referring Server connection" />
+            <ParameterValue Name="connStatus" Value="" Comment="connection status string, &quot;online&quot;/&quot;offline&quot;" />
+            <ParameterValue Name="connStatusInt" Value="" Comment="connection status int, 1-online, 0-offline" />
+            <ParameterValue Name="connDisable" Value="" Comment="connection control , Flase:connect(default), True:disconnect" />
+          </ParameterValues>
+          <MasterConfigFileName />
+          <PreviousItem>
+            <Name>MODBUS</Name>
+            <PortName>busOut</PortName>
+          </PreviousItem>
+          <Items>
+            <ConfigurationBaseItem>
+              <Name>MB_R_UINT</Name>
+              <ID>DB40C5F6FB625F0A</ID>
+              <Type>
+                <Name>MB_R_UINT</Name>
+                <Namespace>SE.ModbusGateway</Namespace>
+              </Type>
+              <ItemProperties>
+                <ItemProperty>
+                  <Name>input.addresstype</Name>
+                  <Value xsi:type="xsd:string">register</Value>
+                </ItemProperty>
+                <ItemProperty>
+                  <Name>input.datatype</Name>
+                  <Value xsi:type="xsd:string">input</Value>
+                </ItemProperty>
+                <ItemProperty>
+                  <Name>input.length</Name>
+                  <Value xsi:type="xsd:unsignedByte">1</Value>
+                </ItemProperty>
+                <ItemProperty>
+                  <Name>input.addressautocalculation</Name>
+                  <Value xsi:type="xsd:string">enable</Value>
+                </ItemProperty>
+                <ItemProperty>
+                  <Name>input.address</Name>
+                  <Value xsi:type="xsd:unsignedShort">0</Value>
+                </ItemProperty>
+                <ItemProperty>
+                  <Name>input.ioevent</Name>
+                  <Value xsi:type="xsd:string">cyclic</Value>
+                </ItemProperty>
+              </ItemProperties>
+              <ParameterValues>
+                <ParameterValue Name="MSB" Value="FALSE" />
+                <ParameterValue Name="LinkName" Value="D090B4163A62A815.A6B61E2425DB1C30.MB_Read_Inputs" />
+                <ParameterValue Name="reqReadLinkName" Value="" Comment="This SYMLINK is functional when requestread is enabled" />
+              </ParameterValues>
+              <MasterConfigFileName />
+              <PreviousItem>
+                <Name>MODBUSGENTCPS</Name>
+                <PortName>slotBus</PortName>
+              </PreviousItem>
+              <Items />
+            </ConfigurationBaseItem>
+            <ConfigurationBaseItem>
+              <Name>MB_W_UINT</Name>
+              <ID>47D33CA14A8387A2</ID>
+              <Type>
+                <Name>MB_W_UINT</Name>
+                <Namespace>SE.ModbusGateway</Namespace>
+              </Type>
+              <ItemProperties>
+                <ItemProperty>
+                  <Name>output.addresstype</Name>
+                  <Value xsi:type="xsd:string">register</Value>
+                </ItemProperty>
+                <ItemProperty>
+                  <Name>output.datatype</Name>
+                  <Value xsi:type="xsd:string">output</Value>
+                </ItemProperty>
+                <ItemProperty>
+                  <Name>output.length</Name>
+                  <Value xsi:type="xsd:unsignedByte">1</Value>
+                </ItemProperty>
+                <ItemProperty>
+                  <Name>output.addressautocalculation</Name>
+                  <Value xsi:type="xsd:string">enable</Value>
+                </ItemProperty>
+                <ItemProperty>
+                  <Name>output.address</Name>
+                  <Value xsi:type="xsd:unsignedShort">0</Value>
+                </ItemProperty>
+                <ItemProperty>
+                  <Name>output.ioevent</Name>
+                  <Value xsi:type="xsd:string">cyclic</Value>
+                </ItemProperty>
+                <ItemProperty>
+                  <Name>output.modbusfunction</Name>
+                  <Value xsi:type="xsd:string">(Default)</Value>
+                </ItemProperty>
+              </ItemProperties>
+              <ParameterValues>
+                <ParameterValue Name="MSB" Value="FALSE" />
+                <ParameterValue Name="LinkName" Value="D090B4163A62A815.A6B61E2425DB1C30.MB_Write_Outputs" />
+              </ParameterValues>
+              <MasterConfigFileName />
+              <PreviousItem>
+                <Name>MB_R_UINT</Name>
+                <PortName>BUSOUT</PortName>
+              </PreviousItem>
+              <Items />
+            </ConfigurationBaseItem>
+            <ConfigurationBaseItem>
+              <Name>MODBUSGENTCPS_END_1</Name>
+              <CanDelete>false</CanDelete>
+              <PartOfCatTemplate>true</PartOfCatTemplate>
+              <ID>C61F0BF899B2FA5D</ID>
+              <Type>
+                <Name>MODBUSSLOTEND</Name>
+                <Namespace>Standard.IoModbus</Namespace>
+              </Type>
+              <ItemProperties />
+              <ParameterValues />
+              <PreviousItem>
+                <Name>MB_W_UINT</Name>
+                <PortName>BUSOUT</PortName>
+              </PreviousItem>
+              <Items />
+            </ConfigurationBaseItem>
+          </Items>
+        </ConfigurationBaseItem>
+        <ConfigurationBaseItem>
+          <Name>MODBUS_END_1</Name>
+          <CanDelete>false</CanDelete>
+          <PartOfCatTemplate>true</PartOfCatTemplate>
+          <ID>2CB424BAEC25DA85</ID>
+          <Type>
+            <Name>MODBUSSLAVEND</Name>
+            <Namespace>Standard.IoModbus</Namespace>
+          </Type>
+          <ItemProperties />
+          <ParameterValues />
+          <PreviousItem>
+            <Name>MODBUSGENTCPS</Name>
+            <PortName>busOut</PortName>
+          </PreviousItem>
+          <Items />
+        </ConfigurationBaseItem>
+      </Items>
+    </ConfigurationBaseItem>
+  </DeviceHwConfigurationItem>
+</DeviceHwConfigurationItems>
