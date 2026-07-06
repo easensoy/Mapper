@@ -1469,6 +1469,20 @@ namespace CodeGen.Translation
                 homeSensorFitted = false;
             }
 
+            // Grippers (bearing/shaft) grip a PART: their "atwork" is a grip-detect that only asserts when a
+            // part is actually held, NOT a position DI that always toggles on arrival (why feeder/transfer,
+            // both WorkSensorFitted=TRUE, confirm fine while the gripper stalls at WAIT gripper=AtWork). So
+            // timer-acknowledge the close (a fast, bounded motion) -- the same reason CoverPnp_Gripper is
+            // already sensorless. Position actuators (shaft_hr/vr) keep their real sensors. Scoped to the
+            // no-clamp (_vc) path so the clamp/M262 output stays byte-identical.
+            if (MapperConfig.MergeFeedRing
+                && actuator.Name.IndexOf("Gripper", StringComparison.OrdinalIgnoreCase) >= 0
+                && !IsBx1CoverActuator(actuator.Name))
+            {
+                workSensorFitted = false;
+                homeSensorFitted = false;
+            }
+
             // M580 shaft actuators keep real work sensors (timer-ack could release before the physical motion completes).
 
             var actuatorParams = new Dictionary<string, string>
