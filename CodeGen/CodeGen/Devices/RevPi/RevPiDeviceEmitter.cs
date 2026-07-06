@@ -89,7 +89,19 @@ namespace CodeGen.Devices.RevPi
                     cfg.MqttPublishEnabled && !cfg.MqttSecureTls),
                 simulationBindingDeployPort: 51502,
                 simulationBindingArchivePort: 51499);
-            foreach (var w in shell.Warnings) report.Missing.Add($"[RevPi] {w}");
+            // No HCF is intentional (see below), so don't surface EmitOnePlc's generic "template not found".
+            foreach (var w in shell.Warnings)
+                if (!w.Contains("HCF template not found", StringComparison.Ordinal))
+                    report.Missing.Add($"[RevPi] {w}");
+            // RevPi has NO .hcf BY DESIGN: on the reference (Revolution_Pi.hcf) the Feed IO is a Standard.
+            // IoModbus master bridged through a PLC_RW_REVPI broker FB (RevPI_IO) + a symlink bridge — a
+            // separate IO-bridge slice this Mapper has not built (and NOT the reference's direct-wire
+            // Process1_CAT model, which INVARIANTS I-1 / R-4 forbid). Emitting a standalone Modbus hcf here
+            // would dangle (it references a broker FB we don't emit), so the device carries no hcf until
+            // that follow-up lands. Validators are HCF-optional: HcfReferenceValidator checks only the .hcf
+            // files that exist, and the parity validator's RevPi discharge path asserts FB-hosting, not a hcf.
+            report.Missing.Add("[RevPi] no HCF by design — the Feed physical IO is the Modbus PLC_RW_REVPI " +
+                "bridge (documented follow-up); the device is emitted without a hardware-config file.");
 
             // 2. Mirror the RevPi (ex-Feed-station) FBs onto the RevPi sysres — same mechanism M262 uses,
             //    filtered to PlcAssignment.RevPi.
@@ -134,9 +146,13 @@ namespace CodeGen.Devices.RevPi
         static string ResolveRevPiSysresPath(string systemGuidDir) =>
             Path.Combine(systemGuidDir, RevPiSysdevId, $"{RevPiResourceId}.sysres");
 
-        // Delete the M262 device (sysdev + its same-stem folder with sysres/hcf/Properties) + the M262
-        // topology equipment, so no M262 lingers when RevPi hosts the Feed station. Dangling dfbproj/sysres
-        // refs are cleaned by the later StripStaleSysresStemEntries / SweepOrphanSysres pipeline steps.
+        const string M262SysdevId       = "00000000-0000-0000-0000-000000000002";
+        const string M262EquipmentJson  = "Equipment_M262dPAC_1.json";
+
+        // Remove the M262 device COMPLETELY when the RevPi hosts the Feed station: the sysdev + its folder
+        // (sysres/hcf/Properties), the topology equipment JSON, AND every project reference to it —
+        // IEC61499.dfbproj entries, the TopologyManager.topologyproj equipment entry, and the Folders.xml
+        // registration — so EAE Solution Integrity reports no missing M262 project files. Idempotent.
         static void SweepM262Device(string eaeRoot, SystemInjector.BindingApplicationReport report)
         {
             try
@@ -153,20 +169,46 @@ namespace CodeGen.Devices.RevPi
                         report.Missing.Add("[RevPi] removed the M262 device (RevPi now hosts the Feed station)");
                     }
                 }
-                var m262Equipment = Path.Combine(eaeRoot, "Topology", "Equipment_M262dPAC_1.json");
+                var m262Equipment = Path.Combine(eaeRoot, "Topology", M262EquipmentJson);
                 if (File.Exists(m262Equipment)) { try { File.Delete(m262Equipment); } catch { } }
 
-                // Drop the M262 sysdev GUID from General/Folders.xml so EAE shows no phantom device node.
+                // IEC61499.dfbproj: drop every entry referencing the M262 sysdev (sysdev + siblings).
+                var dfbproj = Path.Combine(eaeRoot, "IEC61499", "IEC61499.dfbproj");
+                int dfbGone = DfbprojRegistrar.UnregisterSystemDevice(dfbproj, M262SysdevId);
+                if (dfbGone > 0) report.Missing.Add($"[RevPi] stripped {dfbGone} M262 entry(ies) from IEC61499.dfbproj");
+
+                // TopologyManager.topologyproj: drop the M262 equipment registration.
+                int topoGone = RemoveTopologyProjEntry(eaeRoot, M262EquipmentJson);
+                if (topoGone > 0) report.Missing.Add($"[RevPi] stripped the M262 equipment entry from TopologyManager.topologyproj");
+
+                // General/Folders.xml: drop the M262 sysdev GUID so EAE shows no phantom device node.
                 var folders = Path.Combine(eaeRoot, "General", "Folders.xml");
                 if (File.Exists(folders))
                 {
                     var doc = System.Xml.Linq.XDocument.Load(folders, System.Xml.Linq.LoadOptions.PreserveWhitespace);
                     var stale = doc.Descendants().Where(e => e.Name.LocalName == "item" &&
-                        string.Equals((e.Value ?? "").Trim(), "00000000-0000-0000-0000-000000000002", StringComparison.OrdinalIgnoreCase)).ToList();
+                        string.Equals((e.Value ?? "").Trim(), M262SysdevId, StringComparison.OrdinalIgnoreCase)).ToList();
                     if (stale.Count > 0) { foreach (var s in stale) s.Remove(); doc.Save(folders); }
                 }
             }
             catch (Exception ex) { report.Missing.Add($"[RevPi] M262 sweep warning: {ex.Message}"); }
+        }
+
+        // Remove a single <None Include="<jsonName>"> entry from TopologyManager.topologyproj (idempotent).
+        static int RemoveTopologyProjEntry(string eaeRoot, string jsonName)
+        {
+            var topoProj = Path.Combine(eaeRoot, "Topology", "TopologyManager.topologyproj");
+            if (!File.Exists(topoProj)) return 0;
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(topoProj, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var stale = doc.Descendants().Where(e => e.Name.LocalName == "None" &&
+                    string.Equals((string?)e.Attribute("Include"), jsonName, StringComparison.OrdinalIgnoreCase)).ToList();
+                foreach (var s in stale) s.Remove();
+                if (stale.Count > 0) doc.Save(topoProj);
+                return stale.Count;
+            }
+            catch { return 0; }
         }
 
         static bool IsDeviceType(string sysdevPath, string type)
