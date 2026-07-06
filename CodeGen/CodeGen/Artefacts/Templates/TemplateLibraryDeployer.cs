@@ -172,6 +172,14 @@ namespace CodeGen.Services
             PatchCatSymlinkQi(eaeProjectDir, "Five_State_Actuator_CAT", result);
             // QI=TRUE on the SYMLINKMULTIVARDST/SRC or the subscriber is dropped and the core is islanded from its IO.
             PatchCatSymlinkQi(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT", result);
+            // Restore the load-bearing input re-sample Poll (E_DELAY self-loop @200ms -> the input DST REQ)
+            // the Ground Truth CATs carry but the committed zip lacks. Inputs/FB2 are sample-on-REQ, so
+            // without it a SETTLED sensor-fitted actuator/sensor never re-reads its DI once the ring goes
+            // quiet -> it cannot report reaching AtWork -> the recipe stalls at that WAIT (Bearing_Gripper
+            // closes but never confirms; a manual bump re-fires the ring and unsticks it). NOT the centre-
+            // home swivel -- its poll is deliberately off (input_event climb).
+            EnsureCatInputPoll(eaeProjectDir, "Five_State_Actuator_CAT", "Inputs.REQ", result);
+            EnsureCatInputPoll(eaeProjectDir, "Sensor_Bool_CAT", "FB2.REQ", result);
             EnsureSevenStateStateOut(eaeProjectDir, result);
             foreach (var hmiCat in new[] { "Five_State_Actuator_CAT", "Seven_State_Actuator_Centre_Home_CAT",
                                            "Sensor_Bool_CAT", "Robot_Task_CAT" })
@@ -398,6 +406,42 @@ namespace CodeGen.Services
 
 
 
+
+        // Restore the input re-sample Poll (E_DELAY self-loop @200ms driving the input DST REQ) into a CAT:
+        // INIT->Poll.START, Poll.EO->Poll.START, Poll.EO-><reqDest>. Idempotent (skips if Poll present). The
+        // GT CATs have this; the committed zip does not, so a settled sensor-fitted actuator/sensor cannot
+        // re-observe reaching AtWork and the recipe stalls at that WAIT.
+        static void EnsureCatInputPoll(string eaeProjectDir, string catName, string reqDest, DeployResult result)
+        {
+            FbtXmlEditor.EditDeployedFbt(eaeProjectDir, catName + ".fbt",
+                $"[Deploy] {catName} input-Poll restore failed", result, (doc, root, ns, path) =>
+            {
+                var net = root.Descendants(ns + "FBNetwork").FirstOrDefault();
+                if (net == null) return;
+                if (net.Elements(ns + "FB").Any(f => (string?)f.Attribute("Name") == "Poll")) return;
+
+                int nextId = net.Elements(ns + "FB")
+                    .Select(f => int.TryParse((string?)f.Attribute("ID"), out var v) ? v : 0)
+                    .DefaultIfEmpty(0).Max() + 1;
+                var poll = new XElement(ns + "FB",
+                    new XAttribute("ID", nextId), new XAttribute("Name", "Poll"),
+                    new XAttribute("Type", "E_DELAY"), new XAttribute("x", "800"), new XAttribute("y", "2580"),
+                    new XAttribute("Namespace", "IEC61499.Standard"),
+                    new XElement(ns + "Parameter", new XAttribute("Name", "DT"), new XAttribute("Value", "T#200ms")));
+
+                var ec = net.Element(ns + "EventConnections");
+                if (ec == null) { ec = new XElement(ns + "EventConnections"); net.Add(ec); }
+                ec.AddBeforeSelf(poll);
+                void Ev(string s, string d) => ec.Add(new XElement(ns + "Connection",
+                    new XAttribute("Source", s), new XAttribute("Destination", d)));
+                Ev("INIT", "Poll.START");
+                Ev("Poll.EO", "Poll.START");
+                Ev("Poll.EO", reqDest);
+
+                FbtXmlEditor.SaveXmlWithRetry(doc, path);
+                result.Warnings.Add($"[Deploy] {catName}: restored input re-sample Poll (E_DELAY @200ms -> {reqDest}).");
+            });
+        }
 
         // Fan an MQTT_PUBLISH off the CAT's post-update state event (additive). MQTT_PUBLISH does NOT resolve $${PATH} at runtime → topicNameSource must be a concrete per-instance name.
         static void PatchCatMqttPublish(string eaeProjectDir, string catName,
