@@ -247,6 +247,25 @@ namespace CodeGen.Devices.Core
             return added;
         }
 
+        // Inverse of RegisterSystemDevice: remove every dfbproj entry whose Include references the given
+        // sysdev id (the .sysdev + everything under its <id>\ folder). Used when a device is deleted (e.g.
+        // M262 when the RevPi replaces it) so EAE Solution Integrity sees no missing project files.
+        // Idempotent; returns the count removed.
+        public static int UnregisterSystemDevice(string dfbprojPath, string sysdevId)
+        {
+            if (!File.Exists(dfbprojPath) || string.IsNullOrEmpty(sysdevId)) return 0;
+            var xml = XDocument.Load(dfbprojPath);
+            var tags = new[] { "Compile", "None", "Content", "EmbeddedResource" };
+            var stale = xml.Root!.Descendants()
+                .Where(e => tags.Contains(e.Name.LocalName))
+                .Where(e => ((string?)e.Attribute("Include") ?? string.Empty)
+                    .Contains(sysdevId, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            foreach (var e in stale) e.Remove();
+            if (stale.Count > 0) xml.Save(dfbprojPath);
+            return stale.Count;
+        }
+
         // Idempotently ensures the four APPLICATION dfbproj entries exist: .sysapp (SystemApplication)
         // + .syslay (SystemLayer) under <Compile>, aspmap/opcua companions under <Content>.
         public static int RegisterApplicationShell(string dfbprojPath)
