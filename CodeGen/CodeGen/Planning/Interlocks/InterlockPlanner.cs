@@ -129,13 +129,19 @@ namespace CodeGen.Translation.Interlocks
             return n;
         }
 
-        // A Blocked==0 interlock is normally an inverted "source is out of the way" no-op, but under
-        // MergeFeedRing a source on a DIFFERENT controller than the interlocked actuator is a genuine
-        // cross-station readiness gate (its home = workpiece not yet delivered) and must survive.
-        // Data-driven (NameBasedPlcGuess); off for the clamp model (MergeFeedRing false) -> byte-identical.
+        // A Blocked==0 interlock is normally an inverted "source is out of the way" no-op. Under
+        // MergeFeedRing the ONE genuine exception is the upstream Feed transport (Transfer on M262/RevPi):
+        // its home = "workpiece not yet delivered", which must keep blocking the downstream M580/BX1
+        // work while Transfer holds the part. The source must be on the FEED controller -- a collision
+        // partner that merely lives on a different PLC (e.g. Bearing_PnP on M580 vs a BX1 cover) is NOT a
+        // readiness gate: it returns home BEFORE the interlocked actuator moves, so keeping its Blocked==0
+        // rule deadlocks (cover_hr blocked while the swivel is safely home). Data-driven; off for the
+        // clamp model (MergeFeedRing false) -> byte-identical.
         private static bool IsCrossControllerReadinessGate(VueOneComponent actuator, VueOneComponent? srcComp)
             => CodeGen.Configuration.MapperConfig.MergeFeedRing && srcComp != null &&
                CodeGen.Translation.HcfSymbolIndex.NameBasedPlcGuess(srcComp.Name)
-                   != CodeGen.Translation.HcfSymbolIndex.NameBasedPlcGuess(actuator.Name);
+                   != CodeGen.Translation.HcfSymbolIndex.NameBasedPlcGuess(actuator.Name) &&
+               CodeGen.Translation.HcfSymbolIndex.NameBasedPlcGuess(srcComp.Name)
+                   is CodeGen.Translation.PlcAssignment.M262 or CodeGen.Translation.PlcAssignment.RevPi;
     }
 }
