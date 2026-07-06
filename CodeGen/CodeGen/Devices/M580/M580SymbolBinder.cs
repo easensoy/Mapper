@@ -111,7 +111,7 @@ namespace CodeGen.Devices.M580
                 try { doc = XDocument.Load(hcfPath); }
                 catch (Exception ex) { Log($"skipped, .hcf parse failed: {ex.GetType().Name}: {ex.Message}"); return; }
 
-                int bound = 0, already = 0, unmapped = 0, missingComp = 0, literals = 0;
+                int bound = 0, already = 0, unmapped = 0, missingComp = 0, literals = 0, blanked = 0;
                 var compFbIds   = new HashSet<string>(compId.Values, StringComparer.OrdinalIgnoreCase);
                 var compFbNames = new HashSet<string>(compId.Keys,   StringComparer.OrdinalIgnoreCase);
 
@@ -131,10 +131,17 @@ namespace CodeGen.Devices.M580
                     {
                         if (!compId.TryGetValue(map.Comp, out var fbId))
                         {
+                            // Component (e.g. Clamp in the no-clamp _vc twin) not on this resource: the .hcf
+                            // template still declares its channels as symbolic 'RES0.M580IO.<name>', which EAE
+                            // CANNOT convert at compile ("HW Configuration could not convert the symbolic
+                            // value") and fails the build. Blank the channel (unconfigured IO) so the compile
+                            // succeeds. Clamp model is unaffected: the Clamp FB is present -> binds normally.
                             missingComp++;
+                            pv.SetAttributeValue("Value", "");
+                            blanked++;
                             report.Missing.Add(
                                 $"[HcfBind][M580] {chan}: '{last}' -> component '{map.Comp}' " +
-                                "not present on the M580 resource — left as-is");
+                                "not on the M580 resource — blanked (unconfigured; was dangling symbolic)");
                             continue;
                         }
                         // Form 1 direct GUID triple "<resId>.<fbId>.<port>" (as M262 uses): populates
@@ -163,7 +170,7 @@ namespace CodeGen.Devices.M580
                         $"[HcfBind][M580] {chan}: symlink '{last}' not in the M580 channel map — left as-is");
                 }
 
-                if (bound > 0) HcfBindingSupport.SaveHcf(doc, hcfPath);
+                if (bound > 0 || blanked > 0) HcfBindingSupport.SaveHcf(doc, hcfPath);
                 Log($"GUID-bound {bound} channel(s) to CAT ports (resource '{resName}' / {resId}); {already} already bound, " +
                     $"{unmapped} unmapped, {missingComp} missing-component, {literals} literal/empty. " +
                     "Form 1 direct GUID triple ('<resId>.<fbId>.<port>') — populates EAE's " +
