@@ -21,10 +21,10 @@ namespace CodeGen.Devices.RevPi
     // Active only when MapperConfig.FeedStationController == RevPi; ComponentRegistry has by then
     // relocated the Feed components onto PlcAssignment.RevPi, so SysresFbMirror.BucketFor routes them here.
     //
-    // NOTE (rig IO): the physical Feed IO on a Revolution Pi is a Modbus word broker (PLC_RW_REVPI) in the
-    // reference. That IO bridge is coupled to the reference's direct-wire Process1_CAT model (which this
-    // Mapper must NOT adopt — see INVARIANTS I-1 / REVERTED_FIXES R-4), so it is a separate follow-up. The
-    // device is emitted WITHOUT a Modbus HCF here (EmitOnePlc handles a null template gracefully).
+    // Physical Feed IO: the reference's Modbus word broker (PLC_RW_REVPI + a Modbus master .hcf). The
+    // reference wires that broker to Jyotsna's direct-wire Process1_CAT actuator PINS (which this Mapper
+    // must NOT adopt — INVARIANTS I-1 / REVERTED_FIXES R-4). Our Five_State CAT binds IO via symlinks, so
+    // RevPiIoBrokerInjector bridges the broker to the Feed actuators' symlinks (the proven BX1 pattern).
     public static class RevPiDeviceEmitter
     {
         // Sysdev GUID follows the M262/M580/BX1 (…002/003/004) series; resource id is the reference
@@ -73,7 +73,7 @@ namespace CodeGen.Devices.RevPi
             SweepM262Device(eaeRoot, report);
 
             // 1. Soft_dPAC shell — sysdev + sysres skeleton + Properties + Simulation.Binding + topology
-            //    equipment + topologyproj + dfbproj. No HCF (Feed IO is the Modbus follow-up).
+            //    equipment + topologyproj + dfbproj + the Modbus .hcf (the reference RevPi IO mechanism).
             var shell = new Station2DeviceEmitter.EmitResult();
             Station2DeviceEmitter.EmitOnePlc(cfg, eaeRoot, systemGuidDir, shell,
                 sysdevId: RevPiSysdevId,
@@ -81,7 +81,7 @@ namespace CodeGen.Devices.RevPi
                 deviceType: "Soft_dPAC",
                 resourceId: RevPiResourceId,
                 resourceName: RevPiResourceName,
-                hcfTemplatePath: null,
+                hcfTemplatePath: ModbusHcfTemplatePath(cfg),
                 equipmentJsonName: EquipmentJsonName,
                 equipmentBuilder: () => BuildRevPiEquipmentJson(RevPiSysdevId, solutionId,
                                           cfg.RevPiHostIp, cfg.RevPiTargetIp),
@@ -89,19 +89,7 @@ namespace CodeGen.Devices.RevPi
                     cfg.MqttPublishEnabled && !cfg.MqttSecureTls),
                 simulationBindingDeployPort: 51502,
                 simulationBindingArchivePort: 51499);
-            // No HCF is intentional (see below), so don't surface EmitOnePlc's generic "template not found".
-            foreach (var w in shell.Warnings)
-                if (!w.Contains("HCF template not found", StringComparison.Ordinal))
-                    report.Missing.Add($"[RevPi] {w}");
-            // RevPi has NO .hcf BY DESIGN: on the reference (Revolution_Pi.hcf) the Feed IO is a Standard.
-            // IoModbus master bridged through a PLC_RW_REVPI broker FB (RevPI_IO) + a symlink bridge — a
-            // separate IO-bridge slice this Mapper has not built (and NOT the reference's direct-wire
-            // Process1_CAT model, which INVARIANTS I-1 / R-4 forbid). Emitting a standalone Modbus hcf here
-            // would dangle (it references a broker FB we don't emit), so the device carries no hcf until
-            // that follow-up lands. Validators are HCF-optional: HcfReferenceValidator checks only the .hcf
-            // files that exist, and the parity validator's RevPi discharge path asserts FB-hosting, not a hcf.
-            report.Missing.Add("[RevPi] no HCF by design — the Feed physical IO is the Modbus PLC_RW_REVPI " +
-                "bridge (documented follow-up); the device is emitted without a hardware-config file.");
+            foreach (var w in shell.Warnings) report.Missing.Add($"[RevPi] {w}");
 
             // 2. Mirror the RevPi (ex-Feed-station) FBs onto the RevPi sysres — same mechanism M262 uses,
             //    filtered to PlcAssignment.RevPi.
@@ -114,6 +102,8 @@ namespace CodeGen.Devices.RevPi
                     .ToList();
                 int mirrored = SysresFbMirror.MirrorFbsIntoSysres(sysresPath, feedFbs);
                 report.Missing.Add($"[RevPi] sysdev emitted; .sysres mirrored {mirrored} Feed FB(s) to {sysresPath}");
+                // The Modbus IO broker is injected in WireResource — AFTER the Feed ring wiring, which
+                // rebuilds the sysres FBNetwork connections and would otherwise wipe the broker's wires.
             }
             else
             {
@@ -141,10 +131,18 @@ namespace CodeGen.Devices.RevPi
                 return;
             }
             M262SysresWireEmitter.EmitFeedRing(cfg, sysresPath, report);
+
+            // Modbus IO broker + symlink bridge — AFTER the Feed ring so its connections survive.
+            RevPiIoBrokerInjector.Inject(sysresPath, cfg.ActiveSyslayPath, RevPiResourceName, report);
         }
 
         static string ResolveRevPiSysresPath(string systemGuidDir) =>
             Path.Combine(systemGuidDir, RevPiSysdevId, $"{RevPiResourceId}.sysres");
+
+        // The reference RevPi Modbus master .hcf (Standard.IoModbus), staged in the template library. Its
+        // ResourceId (D090…) + MB_Read/Write LinkNames (…A6B61E2425DB1C30…) resolve to RevPI_IO on RevPi_RES.
+        static string ModbusHcfTemplatePath(MapperConfig cfg) =>
+            Path.Combine(cfg.TemplateLibraryPath ?? string.Empty, "RevPi", "RevPiIO.modbus.hcf");
 
         const string M262SysdevId       = "00000000-0000-0000-0000-000000000002";
         const string M262EquipmentJson  = "Equipment_M262dPAC_1.json";
