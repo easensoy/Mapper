@@ -74,10 +74,10 @@ namespace CodeGen.Translation.Process
             if (MapperConfig.SerializeAssemblyDisassembly && MapperConfig.UnparkDisassembly)
                 RecipeStepEmitter.Emit(b, def.Block("disassemblyClear"), arrays, allComponents);
 
-            // No-clamp (_vc): home the swivel AFTER the part gate (Transfer advanced = part delivered),
-            // so Bearing_PnP establishes centre home only once the part is present, then picks -- never
-            // before delivery. Clamp model unchanged (MergeFeedRing false, flag false).
-            if (MapperConfig.EnableSevenStateHomePreamble || MapperConfig.MergeFeedRing)
+            // No home preamble: the Ground Truth (rig-proven) goes STRAIGHT from the part gate to
+            // bearing_pnp=1 (Pick) -- an extra bearing_pnp=5 (Home) here makes the swivel do a spurious
+            // first move toward home/atWork1 (no pick) before the real Pick, the observed double motion.
+            if (MapperConfig.EnableSevenStateHomePreamble)
                 RecipeStepEmitter.Emit(b, def.Block("homePreamble"), arrays, allComponents);
 
             bool hasClamp = ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, "clamp", out _);
