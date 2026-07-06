@@ -84,31 +84,11 @@ namespace CodeGen.Translation.Interlocks
             var plan = scopedIds != null
                 ? InterlockPlanner.BuildRules(actuator, allComponents, scopedIds)
                 : InterlockPlan.Empty(Cap);
-            return WithPartAtAssemblyGate(WithReverseCrossings(FilterToCentreHomeRange(plan)), actuator);
-        }
-
-        // No-clamp (_vc): the swivel must not turn OUT of home into the shared work volume until the part
-        // is physically at assembly. The twin only interlocks the Work1<->Work2 crossing, NOT the initial
-        // pick-out-of-home, so nothing hard-blocks Home->Work1 -- the recipe WAIT(PartAtAssembly) holds the
-        // COMMAND but a boot/init turn is unguarded. Add ECC-level rules: Home(0)->Work1(2) AND
-        // Home(0)->Work2(4) blocked while PartAtAssembly (a Feed-controller sensor on the merged ring) is
-        // absent (state 0). Releases the instant PartAtAssembly reports present -- same signal the recipe
-        // gate already waits on, so it cannot deadlock where that gate does not. Clamp model unchanged.
-        private static InterlockPlan WithPartAtAssemblyGate(InterlockPlan plan, VueOneComponent actuator)
-        {
-            if (!CodeGen.Configuration.MapperConfig.MergeFeedRing) return plan;
-            if (actuator.Name == null ||
-                actuator.Name.IndexOf("Bearing", StringComparison.OrdinalIgnoreCase) < 0) return plan;
-            var pa = HandoffPlanner.PartAtAssembly;
-            if (pa.Name == null) return plan;
-
-            int cap = Cap, n = 0;
-            int[] f = new int[cap], t = new int[cap], s = new int[cap], b = new int[cap];
-            for (int i = 0; i < plan.Count && n < cap; i++)
-            { f[n] = plan.From[i]; t[n] = plan.To[i]; s[n] = plan.Src[i]; b[n] = plan.Blocked[i]; n++; }
-            foreach (int work in new[] { 2, 4 })   // Home -> Work1 / Work2 blocked while the part is absent
-                if (n < cap) { f[n] = 0; t[n] = work; s[n] = pa.Id; b[n] = 0; n++; }
-            return new InterlockPlan(n, f, t, s, b);
+            // Ground-truth-faithful: only the twin's Work1<->Work2 crossing rules (+ their reverses). Do NOT
+            // add a synthetic Home->Work block on a cross-station sensor (PartAtAssembly) -- that sensor can be
+            // transient, so it would refuse the swivel's commanded pick after the recipe gate already passed
+            // (bearing_pnp "does not move"). Assembly start is the recipe gate's job, not the interlock's.
+            return WithReverseCrossings(FilterToCentreHomeRange(plan));
         }
 
         // Keep only rules whose From/To fall in the core's CurrentRawState range. Do NOT re-drop Blocked==0
