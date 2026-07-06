@@ -46,20 +46,17 @@ namespace CodeGen.Translation.Process
             if (MapperConfig.MergeFeedRing)
                 b.AddCmd("assembly_idle", MapperConfig.ProcessIdleSentinelState);
 
-            // Row 0 material gate. Under MergeFeedRing (the no-clamp twin) Transfer REPLACES the clamp:
-            // Feed advances the Transfer and HOLDS it at work through Assembly+Disassembly, so Assembly
-            // must start from Transfer ADVANCED (the part is delivered and held), a single level wait.
-            // Do NOT require Transfer HOME first -- Feed holds it advanced and never cycles it home until
-            // Disassembly is done, so a home-first gate deadlocks Assembly (the observed "only Feed
-            // works"). Run-once order (EnableCyclicRestart=false) already keeps Assembly and Disassembly
-            // from overlapping, so no edge gate is needed for mutual exclusion. Otherwise (clamp model)
-            // keep the HandoffPlanner gate (PartAtAssembly / the M580-local BearingSensor). Clamp model
-            // is unchanged: MergeFeedRing is false there.
+            // Row 0 material gate: WAIT until the part is PHYSICALLY at assembly (PartAtAssembly sensor),
+            // never merely until Transfer has advanced. In the merged _vc model Feed advances Transfer
+            // mid-cycle (transfer=1 -> WAIT advanced) then HOLDS it while waiting on Disassembly, so a
+            // Transfer-advanced gate lets Bearing_PnP move WHILE Feed is still in progress and the part has
+            // not settled. PartAtAssembly is on the merged ring and reaches M580 exactly as Transfer does,
+            // so gating on it holds the swivel until the part is truly present. Clamp model already gates
+            // on PartAtAssembly via HandoffPlanner -> unchanged (MergeFeedRing false there).
             if (MapperConfig.MergeFeedRing &&
-                Recipes.RecipeStateClassifier.TryGetInitialConditionEdgeGate(
-                    process, arrays, allComponents, out var gateId, out _, out var gateAdvanced))
+                ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, "PartAtAssembly", out var partId))
             {
-                b.AddWait(gateId, gateAdvanced);  // Transfer advanced = part delivered and held (clamp's job)
+                b.AddWait(partId, 1);  // PartAtAssembly = TRUE (part present) -- swivel must not move before this
             }
             else
             {
