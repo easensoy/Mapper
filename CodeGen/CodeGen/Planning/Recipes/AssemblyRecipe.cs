@@ -46,25 +46,20 @@ namespace CodeGen.Translation.Process
             if (MapperConfig.MergeFeedRing)
                 b.AddCmd("assembly_idle", MapperConfig.ProcessIdleSentinelState);
 
-            // Row 0 material gate. Under MergeFeedRing (the no-clamp twin) derive it from the
-            // Control.xml Assembly Initialisation transition, which gates on Transfer/ADVANCING -- a
-            // rising EDGE, not a held state. Reconstruct that edge over the Transfer's STABLE states:
-            // WAIT(Transfer home) -> WAIT(Transfer advanced). MergeFeedRing HOLDS the Transfer
-            // advanced through BOTH Assembly and Disassembly, so a single WAIT(advanced) is a level
-            // that re-fires every cyclic loop and lets Assembly's next pass drive bearing_pnp WHILE
-            // Disassembly is still removing the cover on the shared M580 swivel (the observed
-            // collision). Requiring HOME first means Assembly can only re-arm after the Transfer has
-            // cycled -- Disassembly done -> Feed returned it home -> Feed re-advanced for the next
-            // part -- so Assembly runs exactly once per part and is mutually exclusive with
-            // Disassembly by construction. Otherwise (clamp model) keep the HandoffPlanner gate
-            // (PartAtAssembly across the cross-device segment, or the M580-local BearingSensor).
-            // Clamp model is unchanged: MergeFeedRing is false there.
+            // Row 0 material gate. Under MergeFeedRing (the no-clamp twin) Transfer REPLACES the clamp:
+            // Feed advances the Transfer and HOLDS it at work through Assembly+Disassembly, so Assembly
+            // must start from Transfer ADVANCED (the part is delivered and held), a single level wait.
+            // Do NOT require Transfer HOME first -- Feed holds it advanced and never cycles it home until
+            // Disassembly is done, so a home-first gate deadlocks Assembly (the observed "only Feed
+            // works"). Run-once order (EnableCyclicRestart=false) already keeps Assembly and Disassembly
+            // from overlapping, so no edge gate is needed for mutual exclusion. Otherwise (clamp model)
+            // keep the HandoffPlanner gate (PartAtAssembly / the M580-local BearingSensor). Clamp model
+            // is unchanged: MergeFeedRing is false there.
             if (MapperConfig.MergeFeedRing &&
                 Recipes.RecipeStateClassifier.TryGetInitialConditionEdgeGate(
-                    process, arrays, allComponents, out var gateId, out var gateHome, out var gateAdvanced))
+                    process, arrays, allComponents, out var gateId, out _, out var gateAdvanced))
             {
-                b.AddWait(gateId, gateHome);      // Transfer home -- arm the edge (previous part cleared)
-                b.AddWait(gateId, gateAdvanced);  // Transfer advanced -- the part is delivered and held
+                b.AddWait(gateId, gateAdvanced);  // Transfer advanced = part delivered and held (clamp's job)
             }
             else
             {
