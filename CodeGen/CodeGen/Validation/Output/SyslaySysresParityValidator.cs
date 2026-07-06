@@ -251,6 +251,20 @@ namespace CodeGen.Devices.Core
                 if (!fbNames.Contains(fb))
                     violations.Add(new("RevPi-Discharge",
                         $"discharge tail active but '{fb}' is not on the RevPi sysres — the discharge tail did not land on the Feed controller"));
+
+            // RevPi Feed IO = the Modbus broker RevPI_IO (PLC_RW_REVPI) on the sysres + the Modbus .hcf whose
+            // MB_Read/Write LinkNames resolve to it. Without both, the Feed actuators have no physical IO.
+            const string BrokerFbId = "A6B61E2425DB1C30";   // == RevPiIoBrokerInjector.BrokerFbId
+            if (!fbNames.Contains("RevPI_IO"))
+                violations.Add(new("RevPi-IO", "the RevPI_IO Modbus broker (PLC_RW_REVPI) is not on the RevPi sysres"));
+            var revpiFolder = Path.GetDirectoryName(sysres);
+            var hcf = revpiFolder != null && Directory.Exists(revpiFolder)
+                ? Directory.EnumerateFiles(revpiFolder, "*.hcf").FirstOrDefault() : null;
+            if (hcf == null)
+                violations.Add(new("RevPi-IO", "the RevPi Modbus .hcf is missing"));
+            else if (!File.ReadAllText(hcf).Contains(BrokerFbId, StringComparison.Ordinal))
+                violations.Add(new("RevPi-IO",
+                    "the RevPi .hcf's Modbus LinkNames do not resolve to the RevPI_IO broker FB — the Feed IO would not bind"));
         }
     }
 }
