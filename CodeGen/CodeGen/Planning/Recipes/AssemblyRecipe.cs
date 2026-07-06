@@ -77,7 +77,10 @@ namespace CodeGen.Translation.Process
             if (MapperConfig.SerializeAssemblyDisassembly && MapperConfig.UnparkDisassembly)
                 RecipeStepEmitter.Emit(b, def.Block("disassemblyClear"), arrays, allComponents);
 
-            if (MapperConfig.EnableSevenStateHomePreamble)
+            // No-clamp (_vc): home the swivel AFTER the part gate (Transfer advanced = part delivered),
+            // so Bearing_PnP establishes centre home only once the part is present, then picks -- never
+            // before delivery. Clamp model unchanged (MergeFeedRing false, flag false).
+            if (MapperConfig.EnableSevenStateHomePreamble || MapperConfig.MergeFeedRing)
                 RecipeStepEmitter.Emit(b, def.Block("homePreamble"), arrays, allComponents);
 
             bool hasClamp = ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, "clamp", out _);
