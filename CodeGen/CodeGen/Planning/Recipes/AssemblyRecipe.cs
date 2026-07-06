@@ -67,6 +67,19 @@ namespace CodeGen.Translation.Process
                     b.AddWait(matGateBsId, asmStart.WaitState);
             }
 
+            // Transport-holding barrier (the no-clamp replacement for the clamp's close+wait): the twin's
+            // Assembly Initialisation gates on the transport that holds the part (Control.xml: Transfer/
+            // Advancing). PartAtAssembly can go TRUE while that transport is still ADVANCING (state 1), so
+            // the swivel would pick before the part is settled -- exactly what the clamp wait prevented.
+            // Add WAIT(transport = its SETTLED/Advanced state) so the pick waits until the holding device
+            // has finished moving and is stably holding. Derived from Control.xml (the Initialisation
+            // condition component + its settled state), so it adapts to any twin -- NOT a hardcoded recipe.
+            // Clamp model has no MergeFeedRing and uses its own clamp close+wait barrier instead.
+            if (MapperConfig.MergeFeedRing &&
+                Recipes.RecipeStateClassifier.TryGetInitialConditionEdgeGate(
+                    process, arrays, allComponents, out var holdId, out _, out var holdSettled))
+                b.AddWait(holdId, holdSettled);  // WAIT transport = Advanced (settled + holding the part)
+
             // SAFETY mutual exclusion: do not begin assembling until Disassembly is idle (it has
             // published {DisassemblyProcessId, 7} at its row 0). This keeps Assembly's bearing_pnp and
             // Disassembly's cover_hr from ever moving in the shared collision volume at the same time.
