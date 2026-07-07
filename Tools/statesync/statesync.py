@@ -193,6 +193,12 @@ class Bridge:
         self.msgs_out += 1
         if self.vueone is not None and name is not None:
             self.vueone.send(self._vueone_msg(comp, name))
+            # Some states carry a second twin name for the other process phase (the
+            # centre-home swivel's work positions are AtPick/Place in assembly but
+            # AtPlace2/AtPick2 in disassembly). Send those too; only the process
+            # currently waiting on that name advances (they run sequentially).
+            for alias in comp.get("stateAliases", {}).get(str(state), []):
+                self.vueone.send(self._vueone_msg(comp, alias))
         self.publish_status()
 
     def _vueone_msg(self, comp, name):
@@ -221,6 +227,8 @@ class Bridge:
             if name is None:
                 continue
             self.vueone.send(self._vueone_msg(comp, name))
+            for alias in comp.get("stateAliases", {}).get(str(state), []):
+                self.vueone.send(self._vueone_msg(comp, alias))
             n += 1
         if n:
             print("[vueone] snapshot replayed {} component state(s)".format(n), flush=True)
