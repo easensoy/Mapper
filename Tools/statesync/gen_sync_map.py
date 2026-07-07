@@ -63,11 +63,11 @@ SEVEN_STATE_VOCAB = {"0": "ReturnedHome", "1": "ToWork1", "2": "AtPick",
 # Disassembly reuses the SAME two swivel work positions as assembly under DIFFERENT
 # twin names: work1 (runtime 2) = AtPick (assembly) / AtPlace2 (disassembly),
 # work2 (runtime 4) = Place (assembly) / AtPick2 (disassembly). The runtime reports
-# only work1/work2, so for those two states the bridge ALSO emits the disassembly
-# VOState name to VueOne; assembly and disassembly run sequentially, so whichever
-# process is waiting on the swivel advances and the other name is a no-op. Emitted
-# only when the twin actually gates on these names.
-SEVEN_STATE_ALIASES = {"2": ["AtPlace2"], "4": ["AtPick2"]}
+# only work1/work2; the bridge picks the ONE correct name per stroke (state_name),
+# keyed on which way the swivel leaves home (VueOne holds one state per component,
+# so both names can't be sent). `disStates` = the disassembly-phase names for those
+# two states; emitted only when the twin actually gates on them.
+SEVEN_STATE_DIS = {"2": "AtPlace2", "4": "AtPick2"}
 ROBOT_TASK_VOCAB = {"0": "HomeInitial", "1": "StartTask", "2": "Complete"}
 FIVE_STATE_NUMS = {"0", "1", "2", "3", "4"}
 SENSOR_NUMS = {"0", "1"}
@@ -178,10 +178,9 @@ def parse(xml_path):
                 "catKind": kind, "states": smap}
         if kind == "seven_state":
             g = gated.get(cid, set())
-            al = {k: [a for a in v if a in g] for k, v in SEVEN_STATE_ALIASES.items()}
-            al = {k: v for k, v in al.items() if v}
-            if al:
-                comp["stateAliases"] = al
+            dis = {k: v for k, v in SEVEN_STATE_DIS.items() if v in g}
+            if dis:
+                comp["disStates"] = dis
         comps.append(comp)
     model = root.findtext("System/Name") or root.findtext("Name") or "?"
     has_clamp = any(x["name"].lower() == "clamp" for x in comps)
@@ -236,8 +235,8 @@ def main():
             "catKind": c["catKind"],
             "states": c["states"],
         }
-        if c.get("stateAliases"):
-            out["components"][topic]["stateAliases"] = c["stateAliases"]
+        if c.get("disStates"):
+            out["components"][topic]["disStates"] = c["disStates"]
         kinds[c["catKind"]] = kinds.get(c["catKind"], 0) + 1
 
     text = json.dumps(out, indent=2) + "\n"
