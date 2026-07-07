@@ -30,7 +30,8 @@ Derivation rules (single source of truth here, matching the Mapper):
     the CAT cores (SevenStateCentreHomeActuator.fbt / Robot_Task_Core.fbt):
         seven_state (Bearing_PnP)  -> 0..6, named with the TWIN VOStates so VueOne resolves
                                       them {ReturnedHome,ToWork1,AtPick,TurningPlace,Place,ToHome,AtHome}
-        robot_task  (UR3e Robot)   -> 0..2  {HomeInitial,StartTask,Complete}
+        robot_task  (UR3e Robot)   -> 0..2, named with the TWIN VOStates the disassembly
+                                      STD gates on {Home Pos,PickPart,Partplace}
     For five_state and sensor CATs the Control.xml numbers ALREADY equal the
     runtime set (0..4 / 0..1), so their Control.xml (twin) names are kept - which
     also lets VueOne resolve them. Control.xml states outside the runtime set are
@@ -68,7 +69,13 @@ SEVEN_STATE_VOCAB = {"0": "ReturnedHome", "1": "ToWork1", "2": "AtPick",
 # so both names can't be sent). `disStates` = the disassembly-phase names for those
 # two states; emitted only when the twin actually gates on them.
 SEVEN_STATE_DIS = {"2": "AtPlace2", "4": "AtPick2"}
-ROBOT_TASK_VOCAB = {"0": "HomeInitial", "1": "StartTask", "2": "Complete"}
+# The rig's Robot_Task_Core publishes 0/1/2 = HomeInitial/StartTask/Complete (a 2-bit
+# task handshake), but the twin's Robot STD is a pick->drop->home sequence gated on its
+# own VOState names. VueOne matches by name, so map the runtime task states to the twin
+# names the disassembly steps wait on: StartTask(1)=robot running->PickPart,
+# Complete(2)=part placed->Partplace, HomeInitial(0)=Home Pos. (RobotDropPart's
+# OR(Partplace,PickPart) means it advances as soon as PickPart arrives.)
+ROBOT_TASK_VOCAB = {"0": "Home Pos", "1": "PickPart", "2": "Partplace"}
 FIVE_STATE_NUMS = {"0", "1", "2", "3", "4"}
 SENSOR_NUMS = {"0", "1"}
 
