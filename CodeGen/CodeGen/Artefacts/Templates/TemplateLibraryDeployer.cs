@@ -101,8 +101,12 @@ namespace CodeGen.Services
                 throw new InvalidOperationException("Cannot determine EAE project directory from syslay path.");
 
             // ExtractToEae is copy-if-absent, so force-re-extract the artefacts reshaped by later patches (delete first).
+            // CommonInterlockEvaluator is the shared interlock FB the CATs connect to; it MUST refresh together with
+            // them (all flip to/from the RuleTable/Target struct as one), or a stale evaluator drifts out of sync
+            // with a freshly-reshaped CAT -> EAE "member 'RuleCount'/'TargetWork1State' does not exist" errors. It
+            // was the only interlock artefact left copy-if-absent.
             foreach (var ext in new[] { ".fbt", ".doc.xml", ".meta.xml" })
-            foreach (var basic in new[] { "No_Sensor_Handler_7SCH", "SevenStateCentreHomeActuator", "ProcessRuntime_Generic_v1" })
+            foreach (var basic in new[] { "No_Sensor_Handler_7SCH", "SevenStateCentreHomeActuator", "ProcessRuntime_Generic_v1", "CommonInterlockEvaluator" })
             {
                 var stale = Path.Combine(eaeProjectDir, "IEC61499", basic + ext);
                 try { if (File.Exists(stale)) File.Delete(stale); }
