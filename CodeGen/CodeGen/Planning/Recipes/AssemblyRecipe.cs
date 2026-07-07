@@ -46,19 +46,12 @@ namespace CodeGen.Translation.Process
             if (MapperConfig.MergeFeedRing)
                 b.AddCmd("assembly_idle", MapperConfig.ProcessIdleSentinelState);
 
-            // Row 0 material gate: WAIT until the part is PHYSICALLY at assembly (PartAtAssembly sensor),
-            // never merely until Transfer has advanced. In the merged _vc model Feed advances Transfer
-            // mid-cycle (transfer=1 -> WAIT advanced) then HOLDS it while waiting on Disassembly, so a
-            // Transfer-advanced gate lets Bearing_PnP move WHILE Feed is still in progress and the part has
-            // not settled. PartAtAssembly is on the merged ring and reaches M580 exactly as Transfer does,
-            // so gating on it holds the swivel until the part is truly present. Clamp model already gates
-            // on PartAtAssembly via HandoffPlanner -> unchanged (MergeFeedRing false there).
-            if (MapperConfig.MergeFeedRing &&
-                ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, "PartAtAssembly", out var partId))
-            {
-                b.AddWait(partId, 1);  // PartAtAssembly = TRUE (part present) -- swivel must not move before this
-            }
-            else
+            // Assembly-start gate. Clamp model (MergeFeedRing false): HandoffPlanner -- WAIT(PartAtAssembly)
+            // then the clamp close+wait firmly fixes the part. No-clamp _vc: the twin gates Assembly on the
+            // holding transport (Control.xml Assembly Initialisation -> Transfer/Advancing), emitted just
+            // below as a fresh rising edge -- so NO separate PartAtAssembly level here (it can hold TRUE
+            // across cycles; the fresh Transfer edge is the valid, model-derived handoff).
+            if (!MapperConfig.MergeFeedRing)
             {
                 var asmStart = HandoffPlanner.AssemblyStart;
                 if (asmStart.WaitId >= 0)
@@ -67,18 +60,24 @@ namespace CodeGen.Translation.Process
                     b.AddWait(matGateBsId, asmStart.WaitState);
             }
 
-            // Transport-holding barrier (the no-clamp replacement for the clamp's close+wait): the twin's
-            // Assembly Initialisation gates on the transport that holds the part (Control.xml: Transfer/
-            // Advancing). PartAtAssembly can go TRUE while that transport is still ADVANCING (state 1), so
-            // the swivel would pick before the part is settled -- exactly what the clamp wait prevented.
-            // Add WAIT(transport = its SETTLED/Advanced state) so the pick waits until the holding device
-            // has finished moving and is stably holding. Derived from Control.xml (the Initialisation
-            // condition component + its settled state), so it adapts to any twin -- NOT a hardcoded recipe.
-            // Clamp model has no MergeFeedRing and uses its own clamp close+wait barrier instead.
+            // Transport-holding barrier -- the no-clamp replacement for the clamp's close+wait, derived from
+            // the twin's Assembly Initialisation condition (Control.xml: Transfer/Advancing). Emit a FRESH
+            // RISING EDGE: WAIT the transport's advance-start state (the transient it passes through each
+            // cycle -> can NEVER be a stale held level) THEN its settled/holding state. A bare WAIT(Advanced)
+            // level missed this: the transport HOLDS Advanced all cycle, so a held Advanced let Bearing_PnP
+            // pick before the part freshly settled -> the swivel never landed cleanly at AtWork1, its atwork
+            // DI never re-toggled, and the gripper never grasped (the "manual lift/drop" that fixed it was
+            // just a hand-made sensor edge). Requiring the fresh advance-start first makes the settled wait a
+            // fresh landing. Fully model-derived (component + both states from Control.xml); clamp path keeps
+            // its own clamp close+wait.
             if (MapperConfig.MergeFeedRing &&
                 Recipes.RecipeStateClassifier.TryGetInitialConditionEdgeGate(
-                    process, arrays, allComponents, out var holdId, out _, out var holdSettled))
-                b.AddWait(holdId, holdSettled);  // WAIT transport = Advanced (settled + holding the part)
+                    process, arrays, allComponents, out var holdId, out var holdAdvancing, out var holdSettled))
+            {
+                if (holdAdvancing != holdSettled)
+                    b.AddWait(holdId, holdAdvancing);  // fresh advance-start (Transfer/Advancing) -- not stale
+                b.AddWait(holdId, holdSettled);        // settled + holding the part (Transfer/Advanced)
+            }
 
             // SAFETY mutual exclusion: do not begin assembling until Disassembly is idle (it has
             // published {DisassemblyProcessId, 7} at its row 0). This keeps Assembly's bearing_pnp and
