@@ -121,9 +121,36 @@ def classify(comp, name, ctype, vcid, cid):
     return "five_state", control_states(comp, FIVE_STATE_NUMS, name, "five_state")
 
 
+def hold_transient_terminal(states, gated_names):
+    """VueOne is level-based; some actuators only FLASH through their terminal
+    'finished' state (runtime 4, e.g. ReturnedFinished) on the way to rest (runtime
+    0) - the rig remaps 4->0. A twin gate that ANDs several such finished-states
+    (Feed's HandShake: Feeder/ReturnedFinished AND Transfer/ReturnedFinished AND
+    Checker/ReturnedHome) can never see them coincide, because each component
+    flashes 4 at a different time, so the follower deadlocks there. If a component
+    is gated on its terminal (state-4) name but NEVER on its rest (state-0) name,
+    name state 0 with the terminal name too -> VueOne holds 'finished' at rest,
+    exactly like the rig's 4->0 remap. Skipped when the state-0 name is itself used
+    by a gate (Checker/ReturnedHome, Shaft_*, CoverPNP_*), so those keep both."""
+    if "4" in states and "0" in states:
+        term, rest = states["4"], states["0"]
+        if term in gated_names and rest not in gated_names:
+            s = dict(states)
+            s["0"] = term
+            return s
+    return states
+
+
 def parse(xml_path):
     """Return (publishable components in doc order, processes[(name, referenced_ids)])."""
     root = ET.parse(xml_path).getroot()
+    # component-id -> set of state names any process transition gates on (part after '/')
+    gated = {}
+    for cond in root.iter("Condition"):
+        gcid = (cond.get("ComponentID") or "").strip()
+        gnm = cond.get("Name") or ""
+        if gcid and "/" in gnm:
+            gated.setdefault(gcid, set()).add(gnm.split("/", 1)[1].strip())
     comps, processes = [], []
     for c in root.iter("Component"):
         cid = (c.findtext("ComponentID") or "").strip()
@@ -138,6 +165,7 @@ def parse(xml_path):
         if ctype.lower() not in PUBLISHABLE or not c.findall("State") or not name:
             continue
         kind, smap = classify(c, name, ctype, vcid, cid)
+        smap = hold_transient_terminal(smap, gated.get(cid, set()))
         comps.append({"id": cid, "name": name, "vcId": vcid, "type": ctype,
                       "catKind": kind, "states": smap})
     model = root.findtext("System/Name") or root.findtext("Name") or "?"
