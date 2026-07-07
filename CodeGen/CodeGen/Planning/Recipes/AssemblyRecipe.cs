@@ -48,17 +48,23 @@ namespace CodeGen.Translation.Process
 
             // Assembly-start gate. Clamp model (MergeFeedRing false): HandoffPlanner -- WAIT(PartAtAssembly)
             // then the clamp close+wait firmly fixes the part. No-clamp _vc: the twin gates Assembly on the
-            // holding transport (Control.xml Assembly Initialisation -> Transfer/Advancing), emitted just
-            // below as a fresh rising edge -- so NO separate PartAtAssembly level here (it can hold TRUE
-            // across cycles; the fresh Transfer edge is the valid, model-derived handoff).
-            if (!MapperConfig.MergeFeedRing)
+            // holding transport (Control.xml Assembly Initialisation -> Transfer/Advancing), emitted below as
+            // a fresh rising edge, THEN the PartAtAssembly material-presence safety gate.
+            // PartAtAssembly material-presence gate (the physical part-present confirmation). Resolved via
+            // HandoffPlanner.AssemblyStart -- WaitId>=0 is the rig synth sensor id (PartAtAssembly, id 3 from
+            // Config/smc-rig.yml synthSensors; the twin does not model it), WaitId<0 falls back to a real ring
+            // component by name. One resolver, reused by both models so the id lives in exactly one place.
+            void EmitMaterialGate()
             {
-                var asmStart = HandoffPlanner.AssemblyStart;
-                if (asmStart.WaitId >= 0)
-                    b.AddWait(asmStart.WaitId, asmStart.WaitState);
-                else if (ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, asmStart.SignalComponent, out var matGateBsId))
-                    b.AddWait(matGateBsId, asmStart.WaitState);
+                var mg = HandoffPlanner.AssemblyStart;
+                if (mg.WaitId >= 0)
+                    b.AddWait(mg.WaitId, mg.WaitState);
+                else if (ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, mg.SignalComponent, out var mgId))
+                    b.AddWait(mgId, mg.WaitState);
             }
+
+            if (!MapperConfig.MergeFeedRing)
+                EmitMaterialGate();  // clamp: PartAtAssembly BEFORE the clamp close+wait
 
             // Transport-holding barrier -- the no-clamp replacement for the clamp's close+wait, derived from
             // the twin's Assembly Initialisation condition (Control.xml: Transfer/Advancing). Emit a FRESH
@@ -78,6 +84,16 @@ namespace CodeGen.Translation.Process
                     b.AddWait(holdId, holdAdvancing);  // fresh advance-start (Transfer/Advancing) -- not stale
                 b.AddWait(holdId, holdSettled);        // settled + holding the part (Transfer/Advanced)
             }
+
+            // Material-presence SAFETY gate (no-clamp _vc only): after the transport has freshly advanced and
+            // settled, hold Bearing_PnP until the physical part is CONFIRMED present at the assembly position.
+            // Deliberately AFTER the Transfer edge -- the edge's advance-start (Transfer/Advancing) is a
+            // transient that must be caught first (a PartAtAssembly-first order would miss it), and a settled
+            // transport does not by itself prove a part is present (it could settle empty). Same PartAtAssembly
+            // material sensor the clamp model gates on (via the shared EmitMaterialGate above). No Bearing_PnP
+            // motion before this.
+            if (MapperConfig.MergeFeedRing)
+                EmitMaterialGate();  // no-clamp: PartAtAssembly AFTER the fresh Transfer edge, before bearing_pnp
 
             // SAFETY mutual exclusion: do not begin assembling until Disassembly is idle (it has
             // published {DisassemblyProcessId, 7} at its row 0). This keeps Assembly's bearing_pnp and
