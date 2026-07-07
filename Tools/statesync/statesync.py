@@ -320,6 +320,11 @@ def run(cfg, bridge):
         return
     print("[statesync] up. epoch={}  UNS prefix={}  vueone={}"
           .format(bridge.epoch, bridge.prefix, "on" if bridge.vueone else "off"), flush=True)
+    # Connect to VueOne NOW (don't wait for the first rig state). If VueOne's socket
+    # server isn't up yet, this just logs "not connected" and _ensure() retries on the
+    # first event - but on a normal restart it connects immediately, no dead air.
+    if bridge.vueone is not None:
+        bridge.vueone._ensure()
     client.loop_forever()
 
 
