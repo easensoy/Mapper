@@ -28,7 +28,8 @@ Derivation rules (single source of truth here, matching the Mapper):
     CAT RUNTIME state, which for two CAT types does NOT match the raw Control.xml
     state numbers. This generator uses the CAT runtime vocabulary, extracted from
     the CAT cores (SevenStateCentreHomeActuator.fbt / Robot_Task_Core.fbt):
-        seven_state (Bearing_PnP)  -> 0..6  {AtHomeInit,ToWork1,AtWork1,ToWork2,AtWork2,ToHome,AtHome}
+        seven_state (Bearing_PnP)  -> 0..6, named with the TWIN VOStates so VueOne resolves
+                                      them {ReturnedHome,ToWork1,AtPick,TurningPlace,Place,ToHome,AtHome}
         robot_task  (UR3e Robot)   -> 0..2  {HomeInitial,StartTask,Complete}
     For five_state and sensor CATs the Control.xml numbers ALREADY equal the
     runtime set (0..4 / 0..1), so their Control.xml (twin) names are kept - which
@@ -46,9 +47,19 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 TOPIC_ROOT = "smc"                                # = MapperConfig.MqttTopicRoot default
 PUBLISHABLE = ("actuator", "sensor", "robot")     # component Types that get an MQTT CAT
 
-# CAT runtime vocabularies (what current_state_to_process publishes) - from the CAT cores.
-SEVEN_STATE_VOCAB = {"0": "AtHomeInit", "1": "ToWork1", "2": "AtWork1",
-                     "3": "ToWork2", "4": "AtWork2", "5": "ToHome", "6": "AtHome"}
+# CAT runtime vocabularies. KEYS = the runtime state number the rig publishes
+# (current_state_to_process). VALUES = the TWIN's VOState.Name, because VueOne's
+# ResolveIncomingState matches the incoming StateName against VOState.Name - so a
+# generic runtime name (AtWork1) that the twin doesn't have resolves to null and the
+# STD stalls. The seven-state swivel's runtime numbers 0/2/3/4 coincide with the twin
+# Bearing_PnP State_Numbers, whose names are ReturnedHome/AtPick/TurningPlace/Place
+# (Control.xml). 1/5/6 are transients not gated by any STD transition.
+# NOTE: the twin distinguishes the disassembly pick (AtPick2, #12) from the assembly
+# pick (AtPick, #2), but the runtime CAT collapses both to work1/work2 (2/4) - so these
+# assembly names are correct for the Assembly STD; a disassembly-swivel step may need
+# its own handling (the runtime cannot tell the two picks apart).
+SEVEN_STATE_VOCAB = {"0": "ReturnedHome", "1": "ToWork1", "2": "AtPick",
+                     "3": "TurningPlace", "4": "Place", "5": "ToHome", "6": "AtHome"}
 ROBOT_TASK_VOCAB = {"0": "HomeInitial", "1": "StartTask", "2": "Complete"}
 FIVE_STATE_NUMS = {"0", "1", "2", "3", "4"}
 SENSOR_NUMS = {"0", "1"}
