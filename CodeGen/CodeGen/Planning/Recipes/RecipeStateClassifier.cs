@@ -482,12 +482,21 @@ namespace CodeGen.Translation.Process.Recipes
             return false;
         }
 
-        // MergeFeedRing Transfer-hold: returns the gate's HOME+ADVANCED states to rebuild the rising EDGE (WAIT(home)->WAIT(advanced)) so Assembly re-arms only after the Transfer fully cycles.
+        // MergeFeedRing Transfer-hold: resolve the twin's Assembly-start gate on the holding transport as a
+        // fresh RISING EDGE. The gate's transport is the Initialisation condition's component (Control.xml,
+        // e.g. Transfer). Both states are read from that actuator's OWN Control.xml states (NOT the
+        // condition's literal state, which varies between twin revisions -- Advancing vs Advanced):
+        //   settledState   = its settled/holding position (Advanced/AtWork) -- HELD all cycle, so a bare
+        //                    level wait on it is stale-prone.
+        //   advancingState = the transient it passes through to REACH that position (Advancing/ToWork) --
+        //                    only present while it is freshly moving, so it can never be a stale held level.
+        // The caller emits WAIT(advancingState) -> WAIT(settledState): the fresh advance-start guarantees the
+        // following settled wait is a FRESH landing, so Bearing_PnP cannot pick on a stale held Advanced.
         public static bool TryGetInitialConditionEdgeGate(VueOneComponent process,
             RecipeArrays arrays, IReadOnlyList<VueOneComponent> allComponents,
-            out int waitId, out int homeState, out int advancedState)
+            out int waitId, out int advancingState, out int settledState)
         {
-            waitId = -1; homeState = 0; advancedState = 2;
+            waitId = -1; advancingState = 1; settledState = 2;
             var initial = process.States.FirstOrDefault(s => s.InitialState);
             if (initial == null) return false;
             foreach (var tr in initial.Transitions)
@@ -499,8 +508,9 @@ namespace CodeGen.Translation.Process.Recipes
                     if (target == null ||
                         string.Equals(target.Type, "Process", StringComparison.OrdinalIgnoreCase)) continue;
                     waitId = id;
-                    homeState = ResolveStateByNameFamily(target, HomeStateNames, 0);
-                    advancedState = ResolveStateByNameFamily(target, AdvancedStateNames, 2);
+                    settledState = ResolveStateByNameFamily(target, AdvancedStateNames, 2);
+                    advancingState = ResolveStateByNameFamily(target, AdvancingStateNames,
+                        settledState > 0 ? settledState - 1 : settledState);
                     return true;
                 }
             return false;
@@ -508,6 +518,8 @@ namespace CodeGen.Translation.Process.Recipes
 
         private static readonly string[] HomeStateNames = { "ReturnedHome", "AtHomeInit", "Home" };
         private static readonly string[] AdvancedStateNames = { "Advanced", "AtWork", "AtWork1" };
+        // The transient a transport passes through to reach its Advanced/AtWork position (ToWork move).
+        private static readonly string[] AdvancingStateNames = { "Advancing", "ToWork", "Extending" };
 
         private static int ResolveStateByNameFamily(VueOneComponent comp, string[] names, int fallback)
         {
