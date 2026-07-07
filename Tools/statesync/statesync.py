@@ -55,10 +55,16 @@ class VueOneSocket:
     object, "}EOM", no trailing newline.
     """
 
-    def __init__(self, host, port, min_retry_s=5.0):
+    def __init__(self, host, port, min_retry_s=5.0, min_send_ms=0.0):
         self.host, self.port, self.min_retry = host, port, min_retry_s
         self.sock = None
         self._last_try = 0.0
+        # Pace sends: VueOne's sim BackgroundWorker and its socket handler touch the
+        # same collections with no lock, so a burst of updates (esp. the robot cascade)
+        # can trip "Collection was modified" in VueOne. A min gap between sends gives
+        # its sim thread time to finish a cycle before the next state lands. 0 = off.
+        self.min_send = float(min_send_ms) / 1000.0
+        self._last_send = 0.0
         self.on_connect = None   # called once per successful (re)connect -> snapshot replay
 
     def _ensure(self):
@@ -83,9 +89,14 @@ class VueOneSocket:
     def send(self, obj):
         if not self._ensure():
             return False
+        if self.min_send:
+            dt = time.time() - self._last_send
+            if dt < self.min_send:
+                time.sleep(self.min_send - dt)
         line = json.dumps(obj, separators=(",", ":")) + "EOM"
         try:
             self.sock.sendall(line.encode("ascii", "replace"))
+            self._last_send = time.time()
             return True
         except OSError as e:
             print("[vueone] send failed ({}); dropping socket, will reconnect".format(e), flush=True)
@@ -130,7 +141,8 @@ class Bridge:
         elif dry:
             self.vueone = _DryVueOne()
         else:
-            self.vueone = VueOneSocket(vc.get("host", "127.0.0.1"), int(vc.get("port", 51000)))
+            self.vueone = VueOneSocket(vc.get("host", "127.0.0.1"), int(vc.get("port", 51000)),
+                                       min_send_ms=float(vc.get("sendMinIntervalMs", 20)))
             self.vueone.on_connect = self.replay_snapshot   # catch VueOne up on every (re)connect
 
     def resolve(self, topic):
