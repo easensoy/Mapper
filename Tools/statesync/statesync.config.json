@@ -3,5 +3,5 @@
   "broker": { "host": "192.168.1.50", "port": 1883 },
   "unsPrefix": "uns/wmg/smc_rig/v1",
   "unsQos": 1,
-  "vueone": { "enabled": true, "host": "127.0.0.1", "port": 51000, "clientId": "VC" }
+  "vueone": { "enabled": true, "host": "127.0.0.1", "port": 51000, "clientId": "VC", "sendMinIntervalMs": 20 }
 }
