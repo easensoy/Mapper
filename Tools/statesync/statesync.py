@@ -115,6 +115,8 @@ class Bridge:
         self.epoch = utc_iso()          # bridge start -> followers detect a restart
         self.seq = 0                    # monotonic over ALL emitted events
         self.last_state = {}            # source topic -> last int state (dup drop)
+        self._sw_prev = {}              # phase-aware naming: last state per swivel topic
+        self._sw_phase = {}             # topic -> "asm" | "dis" (held until next home departure)
         self.warned_unknown = set()
         self.warned_case = set()
         self.warned_badstate = set()
@@ -145,6 +147,30 @@ class Bridge:
             return k, self.comps[k]
         return None, None
 
+    def state_name(self, key, comp, state, track=True):
+        """Twin VOState name for a runtime state. Phase-aware for the centre-home
+        swivel: its two work positions carry DIFFERENT twin names in assembly vs
+        disassembly (work1=AtPick/AtPlace2, work2=Place/AtPick2) but the runtime
+        reports only work1(2)/work2(4). VueOne holds one state per component, so we
+        send the single correct name, chosen from the swivel's own motion: leaving
+        home (0/6) toward work1 (state 1) = assembly stroke, toward work2 (state 3)
+        = disassembly stroke; the phase holds until it next departs home. Components
+        without `disStates` (everything else) just use their base name."""
+        dis = comp.get("disStates")
+        if dis:
+            if track:
+                if self._sw_prev.get(key) in (0, 6):
+                    if state == 1:
+                        self._sw_phase[key] = "asm"
+                    elif state == 3:
+                        self._sw_phase[key] = "dis"
+                self._sw_prev[key] = state
+            if self._sw_phase.get(key) == "dis":
+                alt = dis.get(str(state))
+                if alt is not None:
+                    return alt
+        return comp.get("states", {}).get(str(state))
+
     def on_message(self, topic, payload):
         self.msgs_in += 1
         if topic.startswith(self.prefix):
@@ -165,7 +191,7 @@ class Bridge:
             return  # consecutive duplicate -> not an event
         self.last_state[key] = state
         self.seq += 1
-        name = comp.get("states", {}).get(str(state))
+        name = self.state_name(key, comp, state)
         if name is None and (key, state) not in self.warned_badstate:
             print("[warn] {} state {} not in sync-map; publishing stateName=null".format(key, state), flush=True)
             self.warned_badstate.add((key, state))
@@ -193,12 +219,6 @@ class Bridge:
         self.msgs_out += 1
         if self.vueone is not None and name is not None:
             self.vueone.send(self._vueone_msg(comp, name))
-            # Some states carry a second twin name for the other process phase (the
-            # centre-home swivel's work positions are AtPick/Place in assembly but
-            # AtPlace2/AtPick2 in disassembly). Send those too; only the process
-            # currently waiting on that name advances (they run sequentially).
-            for alias in comp.get("stateAliases", {}).get(str(state), []):
-                self.vueone.send(self._vueone_msg(comp, alias))
         self.publish_status()
 
     def _vueone_msg(self, comp, name):
@@ -223,12 +243,10 @@ class Bridge:
             comp = self.comps.get(topic)
             if comp is None:
                 continue
-            name = comp.get("states", {}).get(str(state))
+            name = self.state_name(topic, comp, state, track=False)
             if name is None:
                 continue
             self.vueone.send(self._vueone_msg(comp, name))
-            for alias in comp.get("stateAliases", {}).get(str(state), []):
-                self.vueone.send(self._vueone_msg(comp, alias))
             n += 1
         if n:
             print("[vueone] snapshot replayed {} component state(s)".format(n), flush=True)
