@@ -372,6 +372,22 @@ def selftest(cfg, comps, ci):
 
 DEFAULT_MAP = "sync-map.generated.json"
 
+_GUARD_SOCK = None
+
+
+def _acquire_single_instance(port=51999):
+    global _GUARD_SOCK
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(("127.0.0.1", port))
+        s.listen(1)
+        _GUARD_SOCK = s
+        return True
+    except OSError:
+        s.close()
+        return False
+
+
 if __name__ == "__main__":
     args = sys.argv[1:]
     dry = "--selftest" in args
@@ -384,4 +400,9 @@ if __name__ == "__main__":
     elif dry:
         selftest(cfg, comps, ci)
     else:
+        if not _acquire_single_instance():
+            print("[statesync] another instance is already running; exiting", flush=True)
+            sys.exit(0)
+        if os.environ.get("STATESYNC_NO_VUEONE_SOCKET") == "1":
+            cfg.setdefault("vueone", {})["enabled"] = False
         run(cfg, Bridge(cfg, comps, ci))
