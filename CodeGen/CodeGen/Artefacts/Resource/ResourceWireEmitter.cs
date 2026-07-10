@@ -349,7 +349,9 @@ namespace CodeGen.Devices.Core
                     else if (ringNames.Count > 1)
                     {
                         // Cover detour (BX1): when covers are commanded by the M580 ring the BX1 cover chain is OPEN at both ends — OMIT the self-close (EAE bridges via syslay). Off -> BX1 self-closes the broadcast loop locally.
-                        bool openCoverChain = string.Equals(tag, "BX1", StringComparison.Ordinal);
+                        // Partial RevPi: the Feeder/Checker segment is commanded by the M262 Feed_Station ring, so it too is OPEN at both ends (in from PartAtAssembly, out to Transfer/Feed_Station) — EAE bridges via syslay.
+                        bool openCoverChain = string.Equals(tag, "BX1", StringComparison.Ordinal)
+                            || (MapperConfig.PartialRevPi && string.Equals(tag, "RevPi", StringComparison.Ordinal));
                         if (openCoverChain)
                             report.Missing.Add(
                                 $"[{tag}] cover detour: cover chain {ringNames[0]}…{ringNames[^1]} ends OPEN " +
