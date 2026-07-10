@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 
 namespace CodeGen.Configuration
@@ -21,6 +23,19 @@ namespace CodeGen.Configuration
         // ComponentRegistry partition reads it; set from the UI before generation. Default M262 keeps the
         // generated project byte-identical to the M262 rig.
         public static FeedController FeedStationController = FeedController.M262;
+
+        // PARTIAL controller swap: the specific Feed-input components relocated onto the RevPi (Soft_dPAC)
+        // while M262 KEEPS the rest (Transfer/Ejector/Robot/Feed_Station/PartAtAssembly). Empty = no partial
+        // swap (default -> byte-identical M262). The UI restricts the set to {Feeder, Checker}; PartInHopper
+        // is auto-added because its sensor is physically read by the RevPI_IO Modbus coupler. This is the
+        // 4-controller coexistence mode, DISTINCT from FeedStationController==RevPi (the whole-feed swap that
+        // deletes M262). Names are compared case-insensitively.
+        public static IReadOnlySet<string> RevPiComponents =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Partial-RevPi coexistence: some Feed components on RevPi, M262 KEPT. Never true in the full swap.
+        public static bool PartialRevPi =>
+            FeedStationController == FeedController.M262 && RevPiComponents.Count > 0;
 
         public static bool RecipeRunOnce = true;
 
