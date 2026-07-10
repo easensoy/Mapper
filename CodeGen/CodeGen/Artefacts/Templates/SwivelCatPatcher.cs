@@ -290,6 +290,49 @@ namespace CodeGen.Services
             }
         }
 
+        // Sensor_Bool_CAT samples its Input only at INIT (FB2's single trigger). On M262/M580 the HCF-bound
+        // DI is I/O-scan event-driven so the sensor re-reports on change; on BX1 the input arrives via the
+        // software broker (no I/O event), so a broker-fed sensor (TopCoverSenosr) would freeze at its boot
+        // value. Inject a Poll (E_DELAY self-loop -> FB2.REQ, T#200ms) that re-samples periodically.
+        // Sensor_Bool's ECC is CHANGE-GATED (fires CNF only when Input flips), so it publishes/reports ONLY
+        // on change -> no MQTT spam and the HCF sensors are unaffected. Idempotent. DT via a Parameter child
+        // on a non-self-closing FB (the proven form; the old self-closing form tripped ERR_XML_UNKNOWN_TAG).
+        internal static void EnsureSensorBoolPoll(string eaeProjectDir, DeployResult result)
+            => EditDeployedFbt(eaeProjectDir, "Sensor_Bool_CAT.fbt", "Sensor_Bool_CAT poll inject failed", result,
+                (doc, root, ns, fbt) =>
+            {
+                var net = root.Element(ns + "FBNetwork");
+                if (net == null) return;
+                if (net.Elements(ns + "FB").Any(f => (string?)f.Attribute("Name") == "Poll")) return; // idempotent
+
+                var idc = root.Elements(ns + "Attribute")
+                    .FirstOrDefault(a => (string?)a.Attribute("Name") == "Configuration.FB.IDCounter");
+                int nextId = (idc != null && int.TryParse((string?)idc.Attribute("Value"), out var cur)) ? cur : 8;
+                idc?.SetAttributeValue("Value", (nextId + 1).ToString());
+
+                net.Add(new XElement(ns + "FB",
+                    new XAttribute("ID", nextId.ToString()), new XAttribute("Name", "Poll"),
+                    new XAttribute("Type", "E_DELAY"),
+                    new XAttribute("x", "600"), new XAttribute("y", "1500"),
+                    new XAttribute("Namespace", "IEC61499.Standard"),
+                    new XElement(ns + "Parameter", new XAttribute("Name", "DT"), new XAttribute("Value", "T#200ms"))));
+
+                var ec = net.Element(ns + "EventConnections");
+                if (ec != null)
+                {
+                    void Wire(string src, string dst) => ec.Add(new XElement(ns + "Connection",
+                        new XAttribute("Source", src), new XAttribute("Destination", dst)));
+                    Wire("INIT", "Poll.START");
+                    Wire("Poll.EO", "Poll.START");
+                    Wire("Poll.EO", "FB2.REQ");
+                }
+
+                doc.Save(fbt);
+                result.PatchesApplied.Add(
+                    "Sensor_Bool_CAT: injected re-sample Poll (E_DELAY T#200ms -> FB2.REQ); change-gated so it publishes only on change (broker-fed BX1 sensors re-report).");
+                MapperLogger.Info("[Deploy] Sensor_Bool_CAT.fbt: injected re-sample Poll (broker-fed sensors re-report on change)");
+            }, notFoundNote: "Sensor_Bool_CAT.fbt not found; poll inject skipped.");
+
         // Swivel work-arrival latch: relax=true (rig) fires ToWorkN->AtWorkN on atWorkN=TRUE alone;
         // strict=false (sim) also requires atWorkOther=FALSE.
         // The swivel-core patches all edit the deployed SevenStateCentreHomeActuator core .fbt.
