@@ -80,10 +80,14 @@ namespace CodeGen.Devices.Core
                      .Where(s => s.Length > 0),
                 StringComparer.OrdinalIgnoreCase);
 
-            // The Feed station runs on M262 (default) or RevPi — register whichever is emitted.
-            var feedSysdevId = MapperConfig.FeedStationController == FeedController.RevPi
-                ? RevPiSysdevId : M262SysdevId;
-            foreach (var sysdevId in new[] { feedSysdevId, M580SysdevId, BX1SysdevId })
+            // The Feed station runs on M262 (default) or is FULLY swapped to RevPi (M262 deleted). In
+            // PARTIAL mode (Feeder/Checker on RevPi, M262 keeps the rest) BOTH coexist -> register both.
+            var feedSysdevIds = MapperConfig.FeedStationController == FeedController.RevPi
+                ? new[] { RevPiSysdevId }
+                : MapperConfig.PartialRevPi
+                    ? new[] { M262SysdevId, RevPiSysdevId }
+                    : new[] { M262SysdevId };
+            foreach (var sysdevId in feedSysdevIds.Concat(new[] { M580SysdevId, BX1SysdevId }))
             {
                 if (existing.Contains(sysdevId)) continue;
                 items.Add(new XElement(ns + "item", sysdevId));
