@@ -416,6 +416,9 @@ namespace CodeGen.Devices.BX1
                 AddEvent(ec, "CoverPnp_Gripper.INITO", $"{tcSrc}.INIT");
                 AddEvent(ec, $"{BrokerFbName}.CoverSensorEvent", $"{tcSrc}.REQ");
                 AddData(dc, $"{BrokerFbName}.CoverPnpSensor", $"{tcSrc}.VALUE1");
+                // After the SRC publishes the fresh bit into the sensor's Input, fire the sensor's RD re-read
+                // (Sensor_Bool_CAT gains RD via EnsureSensorBoolReadEvent) so it re-samples + re-reports on change.
+                AddEvent(ec, $"{tcSrc}.CNF", $"{tcName}.RD");
             }
 
             AddFbIfAbsent(net, Hex16($"{ScanFbName}|{fileTag}"), ScanFbName, "E_DELAY", "IEC61499.Standard",
