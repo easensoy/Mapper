@@ -47,6 +47,13 @@ namespace CodeGen.Devices.RevPi
 
         const string EquipmentJsonName = "Equipment_Revolution_Pi.json";
 
+        // Partial swap: RevPi has no Feed_Station process, so it wires like BX1 (no Area/Station/Process/
+        // Terminator anchors, tag "RevPi") -> the feed segment inits off FB1 and the report ring is left
+        // OPEN at the seam so EAE bridges it to the M262 Feed ring via the shared syslay.
+        static readonly ResourceWireEmitter.ResourceAnchors RevPiPartialAnchors = new(
+            Label: "RevPi", AreaFb: null, StationFb: null, ProcessFb: null,
+            TerminatorFb: null, HmiAdapterWires: Array.Empty<ResourceWireEmitter.Wire>());
+
         // Device stage (mirrors M262SysdevEmitter.Emit + M262TopologyEmitter.Emit): emit the Soft_dPAC
         // shell + topology + dfbproj, then mirror the Feed-station FBs onto the RevPi sysres.
         public static SystemInjector.BindingApplicationReport EmitDevice(MapperConfig cfg,
@@ -68,9 +75,11 @@ namespace CodeGen.Devices.RevPi
 
             string solutionId = M262TopologyEmitter.ReadProjectGuid(eaeRoot) ?? NoConfDomainUuid;
 
-            // 0. No stale M262: RevPi replaces it. (A real Test Runtime deep-wipes all devices first, so
-            //    this is usually a no-op; it makes a target switch without a Clean self-healing too.)
-            SweepM262Device(eaeRoot, report);
+            // 0. Full swap only: RevPi REPLACES M262, so remove it (a real Test Runtime deep-wipes all
+            //    devices first, so this is usually a no-op; it self-heals a target switch without a Clean).
+            //    PARTIAL mode (Feeder/Checker on RevPi, M262 keeps the rest) MUST keep M262 -> skip the sweep.
+            if (!MapperConfig.PartialRevPi)
+                SweepM262Device(eaeRoot, report);
 
             // 1. Soft_dPAC shell — sysdev + sysres skeleton + Properties + Simulation.Binding + topology
             //    equipment + topologyproj + dfbproj + the Modbus .hcf (the reference RevPi IO mechanism).
@@ -130,7 +139,12 @@ namespace CodeGen.Devices.RevPi
                 report.Missing.Add("[Wire] skipped, RevPi sysres not found");
                 return;
             }
-            M262SysresWireEmitter.EmitFeedRing(cfg, sysresPath, report);
+            if (MapperConfig.PartialRevPi)
+                // Partial swap: RevPi hosts only Feeder/Checker/PartInHopper (no Feed_Station). RevPi-local
+                // anchors leave the report ring OPEN at the seam -> EAE bridges it to the M262 Feed ring.
+                ResourceWireEmitter.EmitForResource(cfg, sysresPath, RevPiPartialAnchors, report);
+            else
+                M262SysresWireEmitter.EmitFeedRing(cfg, sysresPath, report);
 
             // Modbus IO broker + symlink bridge — AFTER the Feed ring so its connections survive.
             RevPiIoBrokerInjector.Inject(sysresPath, cfg.ActiveSyslayPath, RevPiResourceName, report);
