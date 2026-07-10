@@ -35,19 +35,29 @@ namespace CodeGen.Mapping
     // A new Control.xml component = one row in Build(); positions/bucket/ownership follow.
     public static class ComponentRegistry
     {
-        // All canonical entries for the active Feed-station controller, keyed by component name.
-        // M262 mode = the canonical partition (byte-identical). RevPi mode relocates every M262 component
-        // onto the RevPi resource, unchanged canvas coordinates — a device substitution, nothing else.
-        public static IReadOnlyDictionary<string, ComponentEntry> ByName => Cached(MapperConfig.FeedStationController);
+        // All canonical entries for the active routing mode, keyed by component name.
+        // M262 mode = the canonical partition (byte-identical). Full-RevPi relocates EVERY M262 component
+        // onto the RevPi resource (device substitution, M262 deleted). Partial-RevPi relocates only the
+        // named subset (RevPiComponents), M262 kept — unchanged canvas coordinates in every mode.
+        public static IReadOnlyDictionary<string, ComponentEntry> ByName => Cached();
 
-        private static readonly Dictionary<FeedController, IReadOnlyDictionary<string, ComponentEntry>> _cache = new();
+        private static readonly Dictionary<string, IReadOnlyDictionary<string, ComponentEntry>> _cache = new();
 
-        private static IReadOnlyDictionary<string, ComponentEntry> Cached(FeedController target)
+        // Routing-mode token: "M262" (default) | "RevPi-full" (whole-feed swap, M262 deleted) |
+        // "RevPi-partial:<sorted set>" (only the named components on RevPi, M262 kept). One authority.
+        private static IReadOnlyDictionary<string, ComponentEntry> Cached()
         {
-            if (_cache.TryGetValue(target, out var cached)) return cached;
+            string key = MapperConfig.FeedStationController == FeedController.RevPi ? "RevPi-full"
+                : MapperConfig.RevPiComponents.Count > 0
+                    ? "RevPi-partial:" + string.Join(",", MapperConfig.RevPiComponents.OrderBy(n => n, StringComparer.Ordinal))
+                    : "M262";
+            if (_cache.TryGetValue(key, out var cached)) return cached;
             var m262 = Build();
-            var result = target == FeedController.RevPi ? RelocateFeedToRevPi(m262) : m262;
-            _cache[target] = result;
+            IReadOnlyDictionary<string, ComponentEntry> result =
+                MapperConfig.FeedStationController == FeedController.RevPi ? RelocateFeedToRevPi(m262)
+                : MapperConfig.RevPiComponents.Count > 0 ? RelocateSelectedToRevPi(m262, MapperConfig.RevPiComponents)
+                : m262;
+            _cache[key] = result;
             return result;
         }
 
@@ -59,6 +69,20 @@ namespace CodeGen.Mapping
             var revPiResource = ControllerMap.ResourceForPlc(PlcAssignment.RevPi);
             return src.Values
                 .Select(e => e.Plc == PlcAssignment.M262
+                    ? e with { Plc = PlcAssignment.RevPi, Resource = revPiResource }
+                    : e)
+                .ToDictionary(r => r.Name, r => r, StringComparer.Ordinal);
+        }
+
+        // Partial swap: move ONLY the named M262 components onto the RevPi resource; every other component
+        // (Transfer/Ejector/Robot/Feed_Station/PartAtAssembly + M580/BX1/Boot) stays put. Names not in the
+        // M262 partition are ignored. Canvas X/Y unchanged so the relocated FBs render in the same band.
+        private static IReadOnlyDictionary<string, ComponentEntry> RelocateSelectedToRevPi(
+            IReadOnlyDictionary<string, ComponentEntry> src, IReadOnlySet<string> selected)
+        {
+            var revPiResource = ControllerMap.ResourceForPlc(PlcAssignment.RevPi);
+            return src.Values
+                .Select(e => (e.Plc == PlcAssignment.M262 && selected.Contains(e.Name))
                     ? e with { Plc = PlcAssignment.RevPi, Resource = revPiResource }
                     : e)
                 .ToDictionary(r => r.Name, r => r, StringComparer.Ordinal);
