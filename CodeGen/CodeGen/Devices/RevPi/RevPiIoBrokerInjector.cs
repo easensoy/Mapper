@@ -127,12 +127,18 @@ namespace CodeGen.Devices.RevPi
                 new XAttribute("y", "7400"), new XAttribute("Namespace", "IEC61499.Standard"),
                 new XElement(N("Parameter"), new XAttribute("Name", "DT"), new XAttribute("Value", ScanPeriod))));
 
-            // 5. Wiring. INIT off the Feed process; scan drives the Modbus cycle; the broker's sensor event
-            //    republishes the sensor symlinks.
-            Ev("Feed_Station.INITO", $"{BrokerFbName}.INIT");
-            Ev("Feed_Station.INITO", "RevPiSensorPublisher.INIT");
-            Ev("Feed_Station.INITO", "RevPiCoilSubscriber.INIT");
-            Ev("Feed_Station.INITO", $"{ScanFbName}.START");
+            // 5. Wiring. INIT off the resource's local boot chain; scan drives the Modbus cycle; the broker's
+            //    sensor event republishes the sensor symlinks. Full swap: Feed_Station (on RevPi) inits the
+            //    broker. Partial swap: Feed_Station is on M262, so anchor off a LOCAL RevPi component present
+            //    in BOTH this sysres and the shared syslay (PartInHopper) -> no cross-device INIT wire.
+            bool Has(string nm) => net.Elements(N("FB")).Any(f => (string?)f.Attribute("Name") == nm);
+            string initSrc = !CodeGen.Configuration.MapperConfig.PartialRevPi && Has("Feed_Station")
+                ? "Feed_Station"
+                : new[] { "PartInHopper", "Feeder", "Checker", "FB1" }.FirstOrDefault(Has) ?? "FB1";
+            Ev($"{initSrc}.INITO", $"{BrokerFbName}.INIT");
+            Ev($"{initSrc}.INITO", "RevPiSensorPublisher.INIT");
+            Ev($"{initSrc}.INITO", "RevPiCoilSubscriber.INIT");
+            Ev($"{initSrc}.INITO", $"{ScanFbName}.START");
             Ev($"{ScanFbName}.EO", $"{ScanFbName}.START");
             Ev($"{ScanFbName}.EO", "RevPiCoilSubscriber.REQ");
             Ev($"{ScanFbName}.EO", $"{BrokerFbName}.REQ_INT_BOOL");
