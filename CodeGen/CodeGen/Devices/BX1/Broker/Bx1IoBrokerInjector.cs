@@ -21,6 +21,8 @@ namespace CodeGen.Devices.BX1
         const string Sym2BoolSrc = "SYMLINKMULTIVARSRC_277E97BEC1451D2C";
         const string Sym2BoolDst = "SYMLINKMULTIVARDST_277E97BEC1451D2C";
         const string TwoBoolIfaceParams = "Runtime.System#I:=2;VALUE${I}:BOOL,BOOL";
+        const string Sym1BoolSrc = "SYMLINKMULTIVARSRC_1559B0FF8170C9BA0";
+        const string OneBoolIfaceParams = "Runtime.System#I:=1;VALUE${I}:BOOL";
         const string ScanFbName = "BX1_IO_Cycle";
         const string ScanPeriod = "T#50ms";
 
@@ -395,6 +397,25 @@ namespace CodeGen.Devices.BX1
                     AddEvent(ec, "CoverPnp_Gripper.INITO", $"{dstName}.INIT");
                 }
                 slot++;
+            }
+
+            // Route the cover-detect input (BX1_IO.CoverPnpSensor = input-word bit5, already the gripper grip-
+            // detect and the only cover-present bit the coupler carries) to the TOP-COVER sensor so it reports
+            // over MQTT. The passive Sensor_Bool_CAT re-reads via its deploy-injected Poll (EnsureSensorBoolPoll);
+            // here we only publish bit5 into the sensor's Input, boot-INIT'd + fired on the CoverSensorEvent change.
+            var topCoverFb = net.Elements(Ns + "FB").FirstOrDefault(f =>
+                (string?)f.Attribute("Type") == "Sensor_Bool_CAT" &&
+                ((string?)f.Attribute("Name") ?? "").ToLowerInvariant().Contains("cover"));
+            if (topCoverFb != null && hasGripper)
+            {
+                var tcName = (string)topCoverFb.Attribute("Name")!;
+                const string tcSrc = "BX1IO_Sense_TopCover";
+                AddFbIfAbsent(net, Hex16($"{tcSrc}|{fileTag}"), tcSrc, Sym1BoolSrc, "Main", isSysres,
+                    xSrc, 1500 + slot * 500, OneBoolIfaceParams,
+                    $"'{resourceName}.{tcName}.Input'", null);
+                AddEvent(ec, "CoverPnp_Gripper.INITO", $"{tcSrc}.INIT");
+                AddEvent(ec, $"{BrokerFbName}.CoverSensorEvent", $"{tcSrc}.REQ");
+                AddData(dc, $"{BrokerFbName}.CoverPnpSensor", $"{tcSrc}.VALUE1");
             }
 
             AddFbIfAbsent(net, Hex16($"{ScanFbName}|{fileTag}"), ScanFbName, "E_DELAY", "IEC61499.Standard",
