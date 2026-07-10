@@ -260,6 +260,9 @@ namespace CodeGen.Services
             }
             NormalizeSwivelSimSensorSource(eaeProjectDir, result);
             StripCatHomeSensorPoll(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT", result);
+            // Broker-fed BX1 sensors (TopCoverSenosr) have no I/O-scan event, so give every Sensor_Bool_CAT a
+            // change-gated re-sample Poll so it re-reports on change (HCF-driven M262/M580 sensors unaffected).
+            EnsureSensorBoolPoll(eaeProjectDir, result);
             NormalizeFiveStateSimSensorSource(eaeProjectDir, result);
             NormalizeFiveStateFaultEnables(eaeProjectDir, result);
             // Recipe-struct collapse on Process1_Generic + engine (gated by UseRecipeStruct); false reverts to the 6 arrays.
