@@ -47,6 +47,13 @@ namespace CodeGen.Devices.RevPi
 
         const string EquipmentJsonName = "Equipment_Revolution_Pi.json";
 
+        // RevPi's OWN boot FB IDs — MUST differ from M262's (the SysresFbMirror defaults 593A…/3DB1…), else
+        // in the PARTIAL swap the coexisting M262 + RevPi resources share an FB ID. EAE indexes FBs by ID in
+        // its global system model, so a shared boot-FB ID across resources throws "An item with the same key
+        // has already been added" on load. M580/BX1 already pass their own (Station2SysresMirror); do the same.
+        const string RevPiDpacFullInitFbId = "9C4E7A1F5B3D8062";
+        const string RevPiPlcStartFbId     = "A5D8F2B60E4C1937";
+
         // Partial swap: RevPi has no Feed_Station process, so it wires like BX1 (no Area/Station/Process/
         // Terminator anchors, tag "RevPi") -> the feed segment inits off FB1 and the report ring is left
         // OPEN at the seam so EAE bridges it to the M262 Feed ring via the shared syslay.
@@ -109,7 +116,8 @@ namespace CodeGen.Devices.RevPi
                 var feedFbs = SysresFbMirror.ReadTopLevelFbsWithSystemModelFallback(syslayPath)
                     .Where(f => SysresFbMirror.BucketFor(f.Name) == PlcAssignment.RevPi)
                     .ToList();
-                int mirrored = SysresFbMirror.MirrorFbsIntoSysres(sysresPath, feedFbs);
+                int mirrored = SysresFbMirror.MirrorFbsIntoSysres(sysresPath, feedFbs,
+                    RevPiDpacFullInitFbId, RevPiPlcStartFbId);
                 report.Missing.Add($"[RevPi] sysdev emitted; .sysres mirrored {mirrored} Feed FB(s) to {sysresPath}");
                 // EAE Solution Integrity FAILS TO LOAD a resource whose {resId}/opcua.xml companion folder
                 // is absent ("Unable to load file: missing or corrupted"). SysresFbMirror — unlike
