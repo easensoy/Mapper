@@ -164,9 +164,11 @@ namespace CodeGen.Services
                         "inserted into PLC_RW_BX1 — cover_hr forced HOME on every start.");
             }
 
-            // RevPi Feed-station Modbus IO broker type (the reference PLC_RW_REVPI). Only when the RevPi
-            // hosts the Feed station — M262 mode never deploys it, so M262 output stays byte-identical.
-            if (MapperConfig.FeedStationController == FeedController.RevPi)
+            // RevPi Feed-station Modbus IO broker type (the reference PLC_RW_REVPI). Deployed whenever the
+            // RevPi is used — the FULL swap (RevPi hosts the whole Feed station) OR the PARTIAL swap
+            // (Feeder/Checker on RevPi). Without it EAE cannot instantiate the RevPI_IO broker
+            // (ERR_NO_SUCH_TYPE). Pure M262 mode never deploys it, so M262 output stays byte-identical.
+            if (MapperConfig.FeedStationController == FeedController.RevPi || MapperConfig.PartialRevPi)
                 DeployArtifact(libPath, "Composite", "PLC_RW_REVPI", eaeProjectDir, result, isBasic: false);
 
             DeployDataTypes(libPath, eaeProjectDir, result);
