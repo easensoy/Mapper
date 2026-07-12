@@ -566,6 +566,20 @@ namespace MapperUI
                     AppendActivity("[Device] M262 sysdev preserved (trust binding intact)");
             }
 
+            // Partial swap: RevPi coexists WITH M262 — emit the Soft_dPAC device (Feeder/Checker + the
+            // RevPI_IO Modbus broker) too, AFTER the M262 device so the System GUID folder exists. M262 is
+            // NOT swept in partial mode (RevPiDeviceEmitter skips the sweep when PartialRevPi).
+            if (MapperConfig.PartialRevPi)
+            {
+                try
+                {
+                    SystemInjector.BindingApplicationReport rr = new();
+                    await Task.Run(() => RevPiDeviceEmitter.EmitDevice(Cfg(), rr));
+                    foreach (var m in rr.Missing) AppendActivity(m);
+                }
+                catch (Exception ex) { AppendActivity($"[RevPi][Error] partial device emit: {ex.Message}"); }
+            }
+
             // Station 2 — M580 + BX1 sysdev + sysres + HCF + Topology Equipment JSON. Idempotent.
             try
             {
@@ -920,13 +934,31 @@ namespace MapperUI
                 Cfg().UseRecipeStruct = true;
                 MapperConfig.SimulatorRecipeMode = false;
 
-                // Feed-station controller (single toggle): RevPi if the user set any Device dropdown to
-                // RevPi, else M262. RevPi relocates the whole Feed station onto a Soft_dPAC; M262 not emitted.
-                bool revpiTarget = _deviceOverrides.Values.Any(v =>
-                    string.Equals(v, "RevPi", StringComparison.OrdinalIgnoreCase));
-                MapperConfig.FeedStationController = revpiTarget ? FeedController.RevPi : FeedController.M262;
-                if (revpiTarget)
-                    AppendActivity("[Target] Feed station -> Revolution Pi (Soft_dPAC); M262 device will not be emitted.");
+                // Per-component controller choice: every Feed component DEFAULTS to M262. The user can move
+                // Feeder and/or Checker to RevPi via the Device dropdown — ONLY those two are swappable (the
+                // RevPi Modbus coupler physically wires only Feeder/Checker/Hopper). The chosen components
+                // deploy on a Revolution Pi (Soft_dPAC) while M262 KEEPS everything else -> a 4-controller
+                // project (M262+RevPi+M580+BX1). PartInHopper follows automatically (its sensor is on the
+                // RevPi coupler). No RevPi picks -> RevPiComponents empty -> pure M262 (byte-identical).
+                var revpiComponents = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var kv in _deviceOverrides)
+                {
+                    if (!string.Equals(kv.Value, "RevPi", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (string.Equals(kv.Key, "Feeder", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(kv.Key, "Checker", StringComparison.OrdinalIgnoreCase))
+                        revpiComponents.Add(kv.Key);
+                    else
+                        AppendActivity($"[Target][!] '{kv.Key}' cannot move to RevPi (only Feeder/Checker are swappable) — kept on M262.");
+                }
+                if (revpiComponents.Count > 0) revpiComponents.Add("PartInHopper");
+                MapperConfig.FeedStationController = FeedController.M262;   // M262 stays the Feed host; RevPi coexists
+                MapperConfig.RevPiComponents = revpiComponents;
+                if (revpiComponents.Count > 0)
+                {
+                    var picked = revpiComponents.Where(c =>
+                        !string.Equals(c, "PartInHopper", StringComparison.OrdinalIgnoreCase));
+                    AppendActivity($"[Target] Per-component controller: {string.Join(", ", picked)} + PartInHopper -> Revolution Pi (Soft_dPAC); M262 keeps the rest (4 controllers).");
+                }
 
                 lblStatus.Text = "Generating...";
                 AppendActivity($"[Generate] Generating IEC 61499 code end-to-end (Feed · Assembly · Disassembly · covers) into Demonstrator at {syslayPath}...");
@@ -960,7 +992,12 @@ namespace MapperUI
                 if (MapperConfig.FeedStationController == FeedController.RevPi)
                     await Task.Run(() => RevPiDeviceEmitter.WireResource(Cfg(), report));
                 else
+                {
                     await Task.Run(() => M262SysresWireEmitter.Emit(Cfg(), report));
+                    // Partial swap: also wire the RevPi feed segment (Feeder/Checker ring + Modbus broker).
+                    if (MapperConfig.PartialRevPi)
+                        await Task.Run(() => RevPiDeviceEmitter.WireResource(Cfg(), report));
+                }
                 for (int i = wireCountBefore; i < report.Missing.Count; i++)
                 {
                     var line = report.Missing[i];
