@@ -25,6 +25,9 @@ namespace CodeGen.Devices.Core
 
         const string Bx1EtherNetIpUuid    = "49d2ea8e-3a4f-4ead-add4-ec4ba00d5239"; // EtherNetIPDevice_1 (.210)
         const string Bx1HmiB1XUuid        = "49363b74-1a84-46c1-b4cd-93f02374daec"; // HMIB1X_1 (BX1 panel .209)
+        // RevPi NIC_2 uuid — MUST match RevPiDeviceEmitter.RevPiNicUuid. The RevPi connects to the switch via
+        // its NIC (reference Wire 275: NIC_2[Port1] -> Switch); without this wire the Revolution_Pi floats.
+        const string RevPiNicUuid         = "11111111-2222-3333-4444-000000000051";
 
         public sealed class EmitResult
         {
@@ -95,6 +98,20 @@ namespace CodeGen.Devices.Core
                     destinationPortIdentifier:  "LAN1"), result, eaeRoot);
                 registerNames.Add("Wire_Switch1_to_EtherNetIP.json");
                 registerNames.Add("Wire_EtherNetIP_to_BX1.json");
+            }
+
+            // RevPi (full OR partial swap) connects to the switch via its NIC_2, mirroring the reference
+            // (Wire 275: NIC_2[Port1] -> Switch). Switch Port4 is free (Port1=M262, Port2=M580, Port3=BX1
+            // EtherNet/IP). Without this the Revolution_Pi floats unconnected in Physical Views.
+            if (MapperConfig.FeedStationController == FeedController.RevPi || MapperConfig.PartialRevPi)
+            {
+                ForceWriteJson(topologyDir, "Wire_RevPi_to_Switch1.json", BuildWireJson(
+                    identifier:                 "RevPi_to_Switch1",
+                    sourceEquipmentUuid:        RevPiNicUuid,
+                    sourcePortIdentifier:       "Port1",
+                    destinationEquipmentUuid:   Switch1Uuid,
+                    destinationPortIdentifier:  "Port4"), result, eaeRoot);
+                registerNames.Add("Wire_RevPi_to_Switch1.json");
             }
 
             // Register in TopologyManager.topologyproj so the EAE build target picks them up.
