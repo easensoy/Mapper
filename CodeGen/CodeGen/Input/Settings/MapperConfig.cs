@@ -37,6 +37,12 @@ namespace CodeGen.Configuration
         public static bool PartialRevPi =>
             FeedStationController == FeedController.M262 && RevPiComponents.Count > 0;
 
+        // TRUE = the RevPi Modbus symlink bridge (sensor publisher + coil subscriber + scan heartbeat) lives
+        // INSIDE the PLC_RW_REVPI composite, so the sysres instantiates only RevPI_IO (tight/DRY). FALSE = the
+        // bridge is 3 external FBs beside RevPI_IO (the shape BX1 ships). Same FM3 nested-absolute-symlink
+        // design proven in software for BX1; rig-verifiable. Revert to FALSE if EAE can't resolve them.
+        public static bool RevPiBridgeInsideComposite = true;
+
         public static bool RecipeRunOnce = true;
 
         // Must stay false: cyclic restart re-fires each recipe's step-0 trigger on a held level and overlaps processes on shared actuators.
