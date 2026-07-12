@@ -110,9 +110,6 @@ namespace CodeGen.Configuration
 
         public string IoBindingsPath { get; set; } = "Input/SMC_Rig_IO_Bindings.xlsx";
 
-        // TM3 module slot/topology layout is fixed by physical rig wiring: copied verbatim; only the channel ParameterValue strings are overwritten from IoBindings.
-        public string M262HardwareConfigBaselinePath { get; set; } = string.Empty;
-
         public string M262TargetIp { get; set; } = DeviceConfig.Current.M262.TargetIp;
 
         public string M262SubnetAddress { get; set; } = DeviceConfig.Current.M262.SubnetAddress;
@@ -266,7 +263,6 @@ namespace CodeGen.Configuration
             SyslayPathSim = @"C:\DemonstratorSim\Demonstrator\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000001\00000000-0000-0000-0000-000000000000.syslay",
             SysresPathSim = @"C:\DemonstratorSim\Demonstrator\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000002\00000000-0000-0000-0000-000000000000.sysres",
             IoBindingsPath = @"Input\SMC_Rig_IO_Bindings.xlsx",
-            M262HardwareConfigBaselinePath = string.Empty,
             IoFolderPath = @"C:\VueOneMapper\IO",
             M262HcfTemplatePath = @"C:\VueOneMapper\IO\M262IO.hcf",
             M580HcfTemplatePath = @"C:\VueOneMapper\IO\M580IO.hcf",
