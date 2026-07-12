@@ -231,26 +231,16 @@ namespace CodeGen.Services
                     topicNameSource: "name", cfg, result);
             }
 
-            // Interlock interface -> RuleTable:InterlockTable struct (gated by interlock.yaml useStruct); false restores the 4 arrays + scalar RuleCount.
+            // Interlock/target interface -> struct (gated by interlock.yaml useStruct/useTargetStruct; false
+            // restores the arrays/scalars). Both actuator CATs + the shared CommonInterlockEvaluator flip
+            // TOGETHER; the normalizer saves retry through transient EAE locks (SaveXmlWithRetry), and the guard
+            // ABORTS if they still drift into a stale scalar/struct mix — the recurring "TargetWork1State does
+            // not exist in CommonInterlockEvaluator" build errors (EAE holding a CAT .fbt locked so its reshape
+            // couldn't save while the evaluator's did). Aborting beats shipping a tree that fails EAE Build.
             bool interlockStruct = InterlockConfig.Current.UseStruct;
-            if (interlockStruct)
-            {
-                DeployInterlockRuleDatatype(eaeProjectDir, result);
-                DeployInterlockTableDatatype(eaeProjectDir, result);
-            }
-            NormalizeFiveStateRuleArrays(eaeProjectDir, "Five_State_Actuator_CAT.fbt", "InterlockManager", interlockStruct, result);
-            NormalizeFiveStateRuleArrays(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT.fbt", "CommonInterlockManager", interlockStruct, result);
-            NormalizeCommonInterlockEvaluatorRules(eaeProjectDir, interlockStruct, result);
-
-            // Actuator target states -> Target:TargetStates struct (gated by useTargetStruct); false restores the scalar inputs.
             bool targetStruct = InterlockConfig.Current.UseTargetStruct;
-            if (targetStruct)
-                DeployTargetStatesDatatype(eaeProjectDir, result);
-            NormalizeTargetStates(eaeProjectDir, "Five_State_Actuator_CAT.fbt", "InterlockManager",
-                new[] { "TargetWork1State", "TargetHomeState" }, targetStruct, result);
-            NormalizeTargetStates(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT.fbt", "CommonInterlockManager",
-                new[] { "TargetWork1State", "TargetWork2State", "TargetHomeState" }, targetStruct, result);
-            NormalizeCommonInterlockEvaluatorTargets(eaeProjectDir, targetStruct, result);
+            ApplyInterlockNormalizers(eaeProjectDir, interlockStruct, targetStruct, result);
+            AssertInterlockInterfaceConsistent(eaeProjectDir, interlockStruct, targetStruct, result);
 
             // Wrap each resource MQTT_CONNECTION in the 'Telemetry' composite (gated by UseTelemetryCat); false emits the raw MQTT_CONNECTION.
             if (cfg.UseTelemetryCat)
