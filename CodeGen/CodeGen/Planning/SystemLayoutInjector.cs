@@ -1319,6 +1319,18 @@ namespace CodeGen.Translation
                 builder.AddEventConnection($"{m580Name}.INITO", $"{m580Name}.CONNECT");
                 builder.AddEventConnection("Area.INITO", $"{feedName}.INIT");
                 builder.AddEventConnection("Station2.INITO", $"{m580Name}.INIT");
+                // Partial swap: the RevPi ALSO hosts Feeder/Checker (embedded MqttPub bind ConnectionID
+                // 'SMC'), so it needs its OWN local connection alongside the M262 Feed connection — else
+                // those publishers have no active connection. INIT off a RevPi-local component (PartInHopper)
+                // so there is no cross-device INIT wire. Full swap already puts the one Feed conn on RevPi.
+                if (MapperConfig.PartialRevPi)
+                {
+                    string revpiName = tele ? "Telemetry_RevPi" : "MqttConn_RevPi";
+                    InjectMqttConn(revpiName, config.MqttConnectionName, config.MqttClientRevPi,
+                        LayoutGrid.ColumnBaseX(PlcAssignment.RevPi), 200);
+                    builder.AddEventConnection($"{revpiName}.INITO", $"{revpiName}.CONNECT");
+                    builder.AddEventConnection("PartInHopper.INITO", $"{revpiName}.INIT");
+                }
                 report.Missing.Add(
                     $"[MQTT] {(tele ? "Telemetry" : "MQTT_CONNECTION")} injected per resource — BX1 " +
                     $"(ClientId SMC_BX1) + Feed:{feedSuffix} ({feedClientId}) + M580 (SMC_M580), shared ConnectionID=" +
