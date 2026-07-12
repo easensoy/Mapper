@@ -83,70 +83,6 @@ namespace CodeGen.Devices.M262
             }
         }
 
-        private static void EnsureDeployedHcfPopulated(string hcfPath, MapperConfig config,
-            string eaeRoot, SystemInjector.BindingApplicationReport report)
-        {
-            try
-            {
-                var doc = XDocument.Load(hcfPath);
-                int tmCount = doc.Descendants()
-                    .Count(e => e.Name.LocalName == "Name" &&
-                                (e.Value == "TM3DI16_G" || e.Value == "TM3DQ16T_G"));
-                if (tmCount > 0) return; // already populated
-
-                var baseline = config.M262HardwareConfigBaselinePath;
-                if (string.IsNullOrWhiteSpace(baseline) || !Directory.Exists(baseline))
-                {
-                    report.Missing.Add(
-                        "[Hcf] deployed .hcf is empty and M262HardwareConfigBaselinePath is not set — " +
-                        "cannot reseed. EAE Hardware Configurator will stay empty.");
-                    return;
-                }
-
-                var srcHcf = PickRichestBaselineHcf(baseline);
-                if (srcHcf == null)
-                {
-                    report.Missing.Add("[Hcf] deployed .hcf is empty and no usable baseline .hcf found.");
-                    return;
-                }
-
-                var seed = XDocument.Load(srcHcf);
-                var sysresId = M262HwConfigCopier.ReadTargetSysresId(eaeRoot);
-                if (!string.IsNullOrEmpty(sysresId))
-                {
-                    var item = seed.Descendants()
-                        .FirstOrDefault(e => e.Name.LocalName == "DeviceHwConfigurationItem");
-                    item?.SetAttributeValue("ResourceId", sysresId);
-                }
-                seed.Save(hcfPath);
-                report.Missing.Add(
-                    $"[Hcf] deployed .hcf was empty — reseeded from baseline '{Path.GetFileName(srcHcf)}'.");
-            }
-            catch (Exception ex)
-            {
-                report.Missing.Add($"[Hcf] reseed failed: {ex.GetType().Name}: {ex.Message}");
-            }
-        }
-
-        private static string? PickRichestBaselineHcf(string baselineRoot)
-        {
-            string? best = null;
-            int bestCount = 0;
-            foreach (var path in Directory.EnumerateFiles(baselineRoot, "*.hcf", SearchOption.AllDirectories))
-            {
-                try
-                {
-                    var doc = XDocument.Load(path);
-                    int count = doc.Descendants()
-                        .Count(e => e.Name.LocalName == "Name" &&
-                                    (e.Value == "TM3DI16_G" || e.Value == "TM3DQ16T_G"));
-                    if (count > bestCount) { bestCount = count; best = path; }
-                }
-                catch { /* skip malformed */ }
-            }
-            return best;
-        }
-
         private static (string sysdevDir, string resourceId, string sysresPath)? LocateM262SysdevAndResource(string eaeRoot)
         {
             var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
@@ -190,39 +126,6 @@ namespace CodeGen.Devices.M262
                 catch { /* skip malformed */ }
             }
             return null;
-        }
-
-        private static string EnsureM262IoFb(string sysresPath, string resourceId,
-            SystemInjector.BindingApplicationReport report)
-        {
-            try
-            {
-                if (!File.Exists(sysresPath)) return string.Empty;
-                var doc = XDocument.Load(sysresPath, LoadOptions.PreserveWhitespace);
-                var root = doc.Root;
-                if (root == null) return string.Empty;
-                XNamespace ns = root.GetDefaultNamespace();
-                var fbNet = root.Element(ns + "FBNetwork");
-                if (fbNet == null) return string.Empty;
-
-                var m262Io = fbNet.Elements(ns + "FB")
-                    .FirstOrDefault(e => (string?)e.Attribute("Type") == "PLC_RW_M262");
-                if (m262Io == null) return string.Empty;
-
-                var fbId = (string?)m262Io.Attribute("ID") ?? string.Empty;
-                if (IsZeroOrEmptyId(fbId))
-                {
-                    fbId = NewShortHexId("M262IO|" + resourceId);
-                    m262Io.SetAttributeValue("ID", fbId);
-                    SaveXml(doc, sysresPath);
-                }
-                return fbId;
-            }
-            catch (Exception ex)
-            {
-                report.Missing.Add($"[Hcf] EnsureM262IoFb failed: {ex.GetType().Name}: {ex.Message}");
-                return string.Empty;
-            }
         }
 
         private static readonly XNamespace XsiNs = "http://www.w3.org/2001/XMLSchema-instance";
