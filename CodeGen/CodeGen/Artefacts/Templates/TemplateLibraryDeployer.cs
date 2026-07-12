@@ -169,7 +169,14 @@ namespace CodeGen.Services
             // (Feeder/Checker on RevPi). Without it EAE cannot instantiate the RevPI_IO broker
             // (ERR_NO_SUCH_TYPE). Pure M262 mode never deploys it, so M262 output stays byte-identical.
             if (MapperConfig.FeedStationController == FeedController.RevPi || MapperConfig.PartialRevPi)
+            {
                 DeployArtifact(libPath, "Composite", "PLC_RW_REVPI", eaeProjectDir, result, isBasic: false);
+                // Internalize the Modbus symlink bridge INTO PLC_RW_REVPI so the RevPi sysres instantiates only
+                // RevPI_IO (tight/DRY). The RevPiIoBrokerInjector then emits just the RevPI_IO instance.
+                if (MapperConfig.RevPiBridgeInsideComposite)
+                    CodeGen.Devices.RevPi.RevPiIoBrokerInjector.EmbedBridgeInComposite(
+                        Path.Combine(eaeProjectDir, "IEC61499", "PLC_RW_REVPI.fbt"));
+            }
 
             DeployDataTypes(libPath, eaeProjectDir, result);
             PatchKnownArraySizeBugs(eaeProjectDir, result);
