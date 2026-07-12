@@ -111,6 +111,11 @@ namespace CodeGen.Devices.RevPi
                     .ToList();
                 int mirrored = SysresFbMirror.MirrorFbsIntoSysres(sysresPath, feedFbs);
                 report.Missing.Add($"[RevPi] sysdev emitted; .sysres mirrored {mirrored} Feed FB(s) to {sysresPath}");
+                // EAE Solution Integrity FAILS TO LOAD a resource whose {resId}/opcua.xml companion folder
+                // is absent ("Unable to load file: missing or corrupted"). SysresFbMirror — unlike
+                // Station2SysresMirror (BX1/M580) — does not create it, so create it here beside the sysres.
+                CodeGen.Artefacts.OpcuaCompanionEmitter.EmitForArtefact(sysresPath);
+                report.Missing.Add($"[RevPi] opcua companion created beside {Path.GetFileName(sysresPath)}");
                 // The Modbus IO broker is injected in WireResource — AFTER the Feed ring wiring, which
                 // rebuilds the sysres FBNetwork connections and would otherwise wipe the broker's wires.
             }
