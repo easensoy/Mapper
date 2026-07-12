@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Xml.Linq;
 using CodeGen.Configuration;
 using CodeGen.Devices.Core;
 using CodeGen.Devices.M262;
@@ -87,6 +88,12 @@ namespace CodeGen.Devices.RevPi
             //    PARTIAL mode (Feeder/Checker on RevPi, M262 keeps the rest) MUST keep M262 -> skip the sweep.
             if (!MapperConfig.PartialRevPi)
                 SweepM262Device(eaeRoot, report);
+            else
+                // PARTIAL swap: the relocated components (Feeder/Checker/PartInHopper) move to the RevPi
+                // sysres, so a stale copy MUST NOT linger on the M262 sysres — a duplicate instance trips
+                // EAE "Repair Instances" + the "same key already added" load error. The M262 mirror drops
+                // them via the routing bucket, but this guarantees it even over a stale in-place tree.
+                SweepRelocatedFromM262Sysres(systemGuidDir, report);
 
             // 1. Soft_dPAC shell — sysdev + sysres skeleton + Properties + Simulation.Binding + topology
             //    equipment + topologyproj + dfbproj + the Modbus .hcf (the reference RevPi IO mechanism).
@@ -106,6 +113,11 @@ namespace CodeGen.Devices.RevPi
                 simulationBindingDeployPort: 51502,
                 simulationBindingArchivePort: 51499);
             foreach (var w in shell.Warnings) report.Missing.Add($"[RevPi] {w}");
+
+            // Guarantee the Modbus .hcf is on disk — the dfbproj registers it, so a missing file is EAE
+            // "Missing Project Files". EmitOnePlc force-copies it, but a stale in-place tree can carry the
+            // device folder without it; re-copy defensively.
+            EnsureRevPiHcf(cfg, systemGuidDir, report);
 
             // 2. Mirror the RevPi (ex-Feed-station) FBs onto the RevPi sysres — same mechanism M262 uses,
             //    filtered to PlcAssignment.RevPi.
@@ -170,6 +182,68 @@ namespace CodeGen.Devices.RevPi
         // ResourceId (D090…) + MB_Read/Write LinkNames (…A6B61E2425DB1C30…) resolve to RevPI_IO on RevPi_RES.
         static string ModbusHcfTemplatePath(MapperConfig cfg) =>
             Path.Combine(cfg.TemplateLibraryPath ?? string.Empty, "RevPi", "RevPiIO.modbus.hcf");
+
+        // Remove the relocated Feed components (RevPiComponents) from the M262 sysres so the partial swap
+        // never leaves a duplicate instance on M262 (the RevPi sysres now hosts them). No-op once they're
+        // already gone (the normal mirror-driven case); the guarantee is for a stale in-place tree.
+        static void SweepRelocatedFromM262Sysres(string systemGuidDir,
+            SystemInjector.BindingApplicationReport report)
+        {
+            var names = MapperConfig.RevPiComponents;
+            if (names.Count == 0) return;
+            var m262Dir = Path.Combine(systemGuidDir, M262SysdevId);
+            var sysres = Directory.Exists(m262Dir)
+                ? Directory.EnumerateFiles(m262Dir, "*.sysres").FirstOrDefault() : null;
+            if (sysres == null) return;
+            try
+            {
+                var doc = XDocument.Load(sysres, LoadOptions.PreserveWhitespace);
+                var ns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
+                var net = doc.Root?.Element(ns + "FBNetwork");
+                if (net == null) return;
+                var stale = net.Elements(ns + "FB")
+                    .Where(f => names.Contains((string?)f.Attribute("Name") ?? "")).ToList();
+                foreach (var fb in stale) fb.Remove();
+                foreach (var grp in new[] { "EventConnections", "DataConnections", "AdapterConnections" })
+                    net.Element(ns + grp)?.Elements(ns + "Connection")
+                        .Where(c => names.Any(nm =>
+                            ((string?)c.Attribute("Source") ?? "").StartsWith(nm + ".", StringComparison.Ordinal) ||
+                            ((string?)c.Attribute("Destination") ?? "").StartsWith(nm + ".", StringComparison.Ordinal)))
+                        .ToList().ForEach(c => c.Remove());
+                if (stale.Count > 0)
+                {
+                    doc.Save(sysres);
+                    report.Missing.Add($"[RevPi][Partial] swept {stale.Count} relocated Feed FB(s) " +
+                        $"({string.Join(", ", names)}) off the M262 sysres — prevents duplicate-instance " +
+                        "'Repair Instances' / 'same key already added'.");
+                }
+            }
+            catch (Exception ex)
+            {
+                report.Missing.Add($"[RevPi][Partial] M262 sysres sweep error: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+
+        // Re-copy the Modbus .hcf if a stale tree lost it (EmitOnePlc already force-copies on a fresh emit).
+        static void EnsureRevPiHcf(MapperConfig cfg, string systemGuidDir,
+            SystemInjector.BindingApplicationReport report)
+        {
+            var dest = Path.Combine(systemGuidDir, RevPiSysdevId, $"{RevPiSysdevId}.hcf");
+            if (File.Exists(dest)) return;
+            var template = ModbusHcfTemplatePath(cfg);
+            if (!File.Exists(template))
+            {
+                report.Missing.Add($"[RevPi] Modbus .hcf template not found at {template}.");
+                return;
+            }
+            try
+            {
+                File.Copy(template, dest, overwrite: true);
+                HcfRootRewriter.RewriteIfNeeded(dest, RevPiResourceId);
+                report.Missing.Add($"[RevPi] Modbus .hcf was missing — re-copied ({RevPiSysdevId}.hcf); clears 'Missing Project Files'.");
+            }
+            catch (Exception ex) { report.Missing.Add($"[RevPi] hcf re-copy error: {ex.Message}"); }
+        }
 
         const string M262SysdevId       = "00000000-0000-0000-0000-000000000002";
         const string M262EquipmentJson  = "Equipment_M262dPAC_1.json";
