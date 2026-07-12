@@ -304,6 +304,26 @@ namespace CodeGen.Devices.M262
                 report.Missing.Add($"[Hcf] auto-bound {pin} = {sensor}.Input (sensor not in xlsx pin columns)");
             }
 
+            // INVARIANT (user: "by default Feeder/Checker belong to M262; only touch their IO if the user moves
+            // that component to RevPi"). Every Feed component that has an expected M262 channel and is NOT
+            // explicitly on RevPi MUST be on this sysres, else its M262 IO silently blanks. If one is missing
+            // it is a stale partial-RevPi leftover (a component routed off M262 with no RevPi device to host it)
+            // -> flag it LOUDLY so it is never silently shipped. A plain Clean + re-Generate restores it (pure
+            // M262 puts the component back on the M262 sysres and this HCF re-binds it).
+            var expectedM262 = new HashSet<string>(
+                (bindings?.PinAssignments.Values.Select(v => v.ComponentName) ?? Enumerable.Empty<string>())
+                    .Concat(sensorNames)
+                    .Where(c => !string.IsNullOrEmpty(c)),
+                StringComparer.OrdinalIgnoreCase);
+            foreach (var comp in expectedM262)
+            {
+                if (MapperConfig.RevPiComponents.Contains(comp)) continue;   // explicitly on RevPi -> blank is correct
+                if (fbIdByName.ContainsKey(comp)) continue;                  // present -> it will bind
+                report.Missing.Add($"[Hcf][M262][ORPHAN] '{comp}' is M262-default but MISSING from the M262 " +
+                    "sysres, so its M262 IO is left blank. This is a stale partial-RevPi leftover — Clean " +
+                    "Demonstrator and re-Generate (M262 keeps Feeder/Checker/Hopper unless you set them to RevPi).");
+            }
+
             string Sym(string pin)
             {
                 if (!effective.TryGetValue(pin, out var pa)) return string.Empty;
