@@ -194,7 +194,7 @@ namespace CodeGen.Services
 
                 if (changed)
                 {
-                    doc.Save(fbt);
+                    SaveXmlWithRetry(doc, fbt);
                     var catLabel = Path.GetFileNameWithoutExtension(catFileName);
                     result.PatchesApplied.Add(reduce
                         ? $"{catLabel}: target states -> Target : TargetStates (encapsulated)"
@@ -292,7 +292,7 @@ namespace CodeGen.Services
 
                 if (changed)
                 {
-                    doc.Save(fbt);
+                    SaveXmlWithRetry(doc, fbt);
                     result.PatchesApplied.Add(reduce
                         ? "CommonInterlockEvaluator: target states -> Target : TargetStates + algorithms (encapsulated)"
                         : "CommonInterlockEvaluator: Target -> scalar target states + algorithms (legacy)");
@@ -450,7 +450,7 @@ namespace CodeGen.Services
 
                 if (changed)
                 {
-                    doc.Save(fbt);
+                    SaveXmlWithRetry(doc, fbt);
                     var catLabel = Path.GetFileNameWithoutExtension(catFileName);
                     result.PatchesApplied.Add(reduce
                         ? $"{catLabel}: 4 arrays + RuleCount -> RuleTable : InterlockTable (encapsulated)"
@@ -578,7 +578,7 @@ namespace CodeGen.Services
 
                 if (changed)
                 {
-                    doc.Save(fbt);
+                    SaveXmlWithRetry(doc, fbt);
                     result.PatchesApplied.Add(reduce
                         ? "CommonInterlockEvaluator: 4 arrays + RuleCount -> RuleTable : InterlockTable + Evaluate ST (encapsulated)"
                         : "CommonInterlockEvaluator: RuleTable -> 4 arrays + RuleCount + Evaluate ST (legacy)");
@@ -673,7 +673,7 @@ namespace CodeGen.Services
 
                 if (changed)
                 {
-                    doc.Save(fbt);
+                    SaveXmlWithRetry(doc, fbt);
                     result.PatchesApplied.Add("Five_State_Actuator_CAT: interlock constants restored as wired inputs (hardware interface)");
                     MapperLogger.Info(
                         "[Deploy] Five_State_Actuator_CAT interlock-constant normalize: wired inputs restored");
@@ -684,5 +684,100 @@ namespace CodeGen.Services
                         "Five_State_Actuator_CAT: interlock interface already wired (no change)");
                 }
             }, notFoundNote: "Five_State_Actuator_CAT.fbt not found; interlock-constant normalize skipped.");
+
+        // The interlock struct/target normalizers as one unit — both actuator CATs + the shared evaluator flip
+        // TOGETHER. Extracted so the consistency guard can re-run it as a self-heal.
+        internal static void ApplyInterlockNormalizers(
+            string eaeProjectDir, bool interlockStruct, bool targetStruct, DeployResult result)
+        {
+            if (interlockStruct)
+            {
+                DeployInterlockRuleDatatype(eaeProjectDir, result);
+                DeployInterlockTableDatatype(eaeProjectDir, result);
+            }
+            NormalizeFiveStateRuleArrays(eaeProjectDir, "Five_State_Actuator_CAT.fbt", "InterlockManager", interlockStruct, result);
+            NormalizeFiveStateRuleArrays(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT.fbt", "CommonInterlockManager", interlockStruct, result);
+            NormalizeCommonInterlockEvaluatorRules(eaeProjectDir, interlockStruct, result);
+
+            if (targetStruct)
+                DeployTargetStatesDatatype(eaeProjectDir, result);
+            NormalizeTargetStates(eaeProjectDir, "Five_State_Actuator_CAT.fbt", "InterlockManager",
+                new[] { "TargetWork1State", "TargetHomeState" }, targetStruct, result);
+            NormalizeTargetStates(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT.fbt", "CommonInterlockManager",
+                new[] { "TargetWork1State", "TargetWork2State", "TargetHomeState" }, targetStruct, result);
+            NormalizeCommonInterlockEvaluatorTargets(eaeProjectDir, targetStruct, result);
+        }
+
+        // Guard: every data member an actuator CAT connects to its interlock FB MUST exist as an InputVar on
+        // the shared CommonInterlockEvaluator (the exact EAE ERR_MEMBER_VAR_NOTFOUND condition). A mismatch =
+        // a stale scalar/struct interlock mix (e.g. EAE held a CAT .fbt locked so its reshape could not save
+        // while the evaluator's did). One self-heal re-run (the lock may have released); if it persists, ABORT
+        // the Generate so the broken tree is never deployed — an actionable message beats cryptic build errors.
+        internal static void AssertInterlockInterfaceConsistent(
+            string eaeProjectDir, bool interlockStruct, bool targetStruct, DeployResult result)
+        {
+            var missing = FindInterlockInterfaceMismatches(eaeProjectDir);
+            if (missing.Count == 0) return;
+
+            MapperLogger.Info("[Interlock][Guard] interface mismatch detected; re-running the interlock normalizers to self-heal.");
+            ApplyInterlockNormalizers(eaeProjectDir, interlockStruct, targetStruct, result);
+            missing = FindInterlockInterfaceMismatches(eaeProjectDir);
+            if (missing.Count == 0)
+            {
+                result.PatchesApplied.Add("[Interlock][Guard] scalar/struct interface mismatch self-healed on re-run.");
+                return;
+            }
+            throw new InvalidOperationException(
+                "Interlock CAT/evaluator interface MISMATCH — the actuator CAT(s) connect member(s) the " +
+                "CommonInterlockEvaluator does not have: " + string.Join("; ", missing) + ". This is a stale " +
+                "scalar/struct interlock mix, almost always because EAE was holding a CAT .fbt open/locked during " +
+                "Generate so the struct reshape could not be written. CLOSE EAE (at least every CAT editor tab), " +
+                "then Generate again. Generation ABORTED so the broken tree is never deployed.");
+        }
+
+        // Every data member each actuator CAT connects into its interlock FB, checked against the evaluator's
+        // InputVars. Read-only (no locks). Returns human-readable mismatch strings (empty = consistent).
+        static List<string> FindInterlockInterfaceMismatches(string eaeProjectDir)
+        {
+            var mismatches = new List<string>();
+            var evalPath = FindDeployedFbt(eaeProjectDir, "CommonInterlockEvaluator.fbt");
+            if (string.IsNullOrEmpty(evalPath)) return mismatches;   // absent -> nothing to check
+            HashSet<string> evalInputs;
+            try
+            {
+                var ed = XDocument.Load(evalPath);
+                var ens = ed.Root!.GetDefaultNamespace();
+                evalInputs = ed.Root.Element(ens + "InterfaceList")?.Element(ens + "InputVars")?
+                    .Elements(ens + "VarDeclaration").Select(v => (string?)v.Attribute("Name") ?? "")
+                    .Where(n => n.Length > 0).ToHashSet() ?? new HashSet<string>();
+            }
+            catch { return mismatches; }                             // unreadable -> don't false-abort
+            if (evalInputs.Count == 0) return mismatches;
+
+            foreach (var (cat, fb) in new[] {
+                ("Five_State_Actuator_CAT.fbt", "InterlockManager"),
+                ("Seven_State_Actuator_Centre_Home_CAT.fbt", "CommonInterlockManager") })
+            {
+                var catPath = FindDeployedFbt(eaeProjectDir, cat);
+                if (string.IsNullOrEmpty(catPath)) continue;
+                try
+                {
+                    var cd = XDocument.Load(catPath);
+                    var cns = cd.Root!.GetDefaultNamespace();
+                    var dataConns = cd.Root.Element(cns + "FBNetwork")?.Element(cns + "DataConnections");
+                    if (dataConns == null) continue;
+                    foreach (var conn in dataConns.Elements(cns + "Connection"))
+                    {
+                        var dest = (string?)conn.Attribute("Destination") ?? "";
+                        if (!dest.StartsWith(fb + ".", StringComparison.Ordinal)) continue;
+                        var member = dest[(fb.Length + 1)..];
+                        if (member.Length > 0 && !evalInputs.Contains(member))
+                            mismatches.Add($"{Path.GetFileNameWithoutExtension(cat)} connects '{member}' -> {fb}");
+                    }
+                }
+                catch { /* unreadable CAT -> skip (don't false-abort) */ }
+            }
+            return mismatches;
+        }
     }
 }
