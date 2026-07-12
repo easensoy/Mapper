@@ -505,6 +505,11 @@ namespace CodeGen.Devices.Core
             if (string.Equals(fbName, "MqttConn_M580", StringComparison.Ordinal) ||
                 string.Equals(fbName, "Telemetry_M580", StringComparison.Ordinal))
                 return PlcAssignment.M580;
+            // RevPi's own connection — partial swap emits it explicitly alongside Telemetry_M262 (full swap
+            // routes it here via the Feed-controller fallback below, but partial keeps M262 as the controller).
+            if (string.Equals(fbName, "MqttConn_RevPi", StringComparison.Ordinal) ||
+                string.Equals(fbName, "Telemetry_RevPi", StringComparison.Ordinal))
+                return PlcAssignment.RevPi;
 
             // Standalone MQTT bridge publishers (MqttFmt_<comp>/MqttPub_<comp>) live on BX1.
             if (fbName.StartsWith("MqttPub_", StringComparison.Ordinal) ||
