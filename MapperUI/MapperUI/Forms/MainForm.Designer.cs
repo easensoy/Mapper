@@ -63,7 +63,6 @@ namespace MapperUI
             this.btnGeneratePusherTest = new System.Windows.Forms.Button();
             this.btnGenerateFeedStation = new System.Windows.Forms.Button();
             this.btnTestStation1 = new System.Windows.Forms.Button();
-            this.btnCleanDemonstrator = new System.Windows.Forms.Button();
             this.statusStrip = new System.Windows.Forms.StatusStrip();
             this.lblStatus = new System.Windows.Forms.ToolStripStatusLabel();
 
@@ -149,18 +148,6 @@ namespace MapperUI
             this.btnTestStation1.Text = "Generate IEC61499 Code";
             this.btnTestStation1.UseVisualStyleBackColor = false;
             this.btnTestStation1.Click += new System.EventHandler(this.btnTestStation1_Click);
-
-            this.btnCleanDemonstrator.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
-            this.btnCleanDemonstrator.BackColor = System.Drawing.Color.FromArgb(64, 64, 64);
-            this.btnCleanDemonstrator.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
-            this.btnCleanDemonstrator.FlatAppearance.BorderSize = 0;
-            this.btnCleanDemonstrator.Font = new System.Drawing.Font("Segoe UI", 8.5F, System.Drawing.FontStyle.Bold);
-            this.btnCleanDemonstrator.ForeColor = System.Drawing.Color.White;
-            this.btnCleanDemonstrator.Location = new System.Drawing.Point(1261, 28);
-            this.btnCleanDemonstrator.Size = new System.Drawing.Size(140, 25);
-            this.btnCleanDemonstrator.Text = "Clean Demonstrator";
-            this.btnCleanDemonstrator.UseVisualStyleBackColor = false;
-            this.btnCleanDemonstrator.Click += new System.EventHandler(this.btnCleanDemonstrator_Click);
 
             // Generate Code placeholder hidden again post-QRM. Kept in code so
             // the future "single primary action" UI is a one-line flip away.
@@ -351,7 +338,6 @@ namespace MapperUI
             this.Controls.Add(this.btnGeneratePusherTest);
             this.Controls.Add(this.btnGenerateFeedStation);
             this.Controls.Add(this.btnTestStation1);
-            this.Controls.Add(this.btnCleanDemonstrator);
             this.Controls.Add(this.btnBrowse);
             this.Controls.Add(this.lblLoadedFile);
             this.Controls.Add(this.btnMappingRules);
@@ -447,7 +433,6 @@ namespace MapperUI
         private System.Windows.Forms.Button btnGeneratePusherTest;
         private System.Windows.Forms.Button btnGenerateFeedStation;
         private System.Windows.Forms.Button btnTestStation1;
-        private System.Windows.Forms.Button btnCleanDemonstrator;
         private System.Windows.Forms.Label lblLoadedFile;
         private System.Windows.Forms.StatusStrip statusStrip;
         private System.Windows.Forms.ToolStripStatusLabel lblStatus;
