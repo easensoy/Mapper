@@ -964,13 +964,13 @@ namespace MapperUI
                 AppendActivity($"[Generate] Generating IEC 61499 code end-to-end (Feed · Assembly · Disassembly · covers) into Demonstrator at {syslayPath}...");
                 AppendActivity("[Test Runtime] RecipeStep data-array carrier active; physical IO/sensor wiring and rig HOME-FIRST recipe waits are active.");
 
-                // Generate WIPES the Demonstrator first, so no stale FB/recipe/interlock survives.
-                var wipe = await Task.Run(() => CodeGen.Services.DemonstratorWiper.Wipe(@"C:\Demonstrator"));
-                AppendActivity(
-                    $"[Generate][Wipe] deep wipe: {wipe.FilesEmptied} canvas emptied, {wipe.FilesDeleted} FB-type file(s) deleted, " +
-                    $"{wipe.FoldersDeleted} type folder(s) removed, {wipe.DfbprojEntriesRemoved} dfbproj entry/entries stripped.");
-                foreach (var w in wipe.Warnings) AppendActivity($"[Generate][Wipe][!] {w}");
+                // STEP 1 — WIPE THE DEMONSTRATOR OUT: a full clean (git reset/clean if it's a repo, then a
+                // deep FB/canvas/device wipe) — the reliable "brand-new EAE project" reset, so no stale
+                // FB/recipe/interlock or drifted RevPi tree survives. (The former separate 'Clean
+                // Demonstrator' button is folded in here: Generate now cleans first, then generates.)
+                await DeepCleanDemonstratorAsync(@"C:\Demonstrator", "Generate");
 
+                // STEP 2 — GENERATE IEC 61499 CODE.
                 var injector = new SystemInjector();
                 var cleanup = await Task.Run(() => injector.PrepareDemonstratorForGeneration(Cfg()));
                 LogCleanup(cleanup);
@@ -1285,72 +1285,39 @@ namespace MapperUI
             }
         }
 
-        async void btnCleanDemonstrator_Click(object sender, EventArgs e)
+        // Wipe the Demonstrator out: git reset --hard + clean (only when it's a git repo — recreated EAE
+        // projects often aren't; then the wiper alone runs), followed by a deep FB/canvas/device wipe that
+        // clears HwConfiguration too. Produces a brand-new-EAE-project state. Called by Generate as its
+        // first step — the former standalone 'Clean Demonstrator' button is merged into Generate, so a
+        // partial-RevPi switch (Feeder/Checker) always starts from a clean tree and can't inherit drift.
+        async Task DeepCleanDemonstratorAsync(string demoRepo, string tag)
         {
-            try
+            // EAE is intentionally NOT killed; files it holds open surface as sharing-violation warnings.
+            if (Directory.Exists(Path.Combine(demoRepo, ".git")))
             {
-                lblStatus.Text = "Cleaning Demonstrator (deep wipe)...";
-                AppendActivity("[Clean] Deep wipe — produces a brand-new-EAE-project state.");
+                var (resetCode, resetOut) = await Task.Run(() => RunGit(demoRepo, "reset --hard"));
+                AppendActivity($"[{tag}] git reset --hard -> exit {resetCode}");
+                if (!string.IsNullOrWhiteSpace(resetOut)) AppendActivity(resetOut.Trim());
 
-                var demoRepo = @"C:\Demonstrator";
-
-                // EAE is intentionally NOT killed; files it holds open surface as sharing-violation
-                // warnings and everything else is wiped.
-
-                // git reset --hard + clean, only if the demonstrator dir is a git repo (recreated EAE
-                // projects often aren't; then rely on DemonstratorWiper alone).
-                if (Directory.Exists(Path.Combine(demoRepo, ".git")))
-                {
-                    var (resetCode, resetOut) = await Task.Run(() => RunGit(demoRepo, "reset --hard"));
-                    AppendActivity($"[Clean] git reset --hard -> exit {resetCode}");
-                    if (!string.IsNullOrWhiteSpace(resetOut)) AppendActivity(resetOut.Trim());
-
-                    var (cleanCode, cleanOut) = await Task.Run(() => RunGit(demoRepo, "clean -fd -e *.lock_sln"));
-                    AppendActivity($"[Clean] git clean -fd -e *.lock_sln -> exit {cleanCode}");
-                    if (!string.IsNullOrWhiteSpace(cleanOut)) AppendActivity(cleanOut.Trim());
-                }
-                else
-                {
-                    AppendActivity($"[Clean] {demoRepo} is not a git repo — skipping git reset/clean. Wiper still runs.");
-                }
-
-                // Deep wipe of FB types + canvas contents (also deletes devices/app).
-                var report = await Task.Run(() => CodeGen.Services.DemonstratorWiper.Wipe(demoRepo));
-                foreach (var step in report.Steps) AppendActivity($"[Clean] {step}");
-                foreach (var w in report.Warnings) AppendActivity($"[Clean][!] {w}");
-                AppendActivity(
-                    $"[Clean] summary: {report.FilesEmptied} canvas(es) emptied, " +
-                    $"{report.FilesDeleted} FB-type file(s) deleted, " +
-                    $"{report.FoldersDeleted} type folder(s) removed, " +
-                    $"{report.DfbprojEntriesRemoved} dfbproj entry/entries stripped, " +
-                    $"{report.HwConfigFilesDeleted} HwConfiguration file(s) cleared.");
-
-                // After the wipe, run the syslay/sysres cleanup + M262 sysdev Resource-dedup (shared
-                // with Generate via SystemInjector).
-                try
-                {
-                    var injector = new SystemInjector();
-                    var cleanup = await Task.Run(() => injector.PrepareDemonstratorForGeneration(Cfg()));
-                    LogCleanup(cleanup);
-                }
-                catch (Exception ex)
-                {
-                    AppendActivity($"[Clean][!] Post-wipe Prepare failed: {ex.Message}");
-                }
-
-                lblStatus.Text = "Demonstrator wiped";
-                AppendActivity(
-                    "[Clean] Demonstrator now resembles a brand-new EAE project. " +
-                    "Topology preserved; HwConfiguration cleared and the M262 .sysdev " +
-                    "Resources block dedup'd — EAE's Devices tree will no longer show " +
-                    "duplicate M262_RES nodes.");
+                var (cleanCode, cleanOut) = await Task.Run(() => RunGit(demoRepo, "clean -fd -e *.lock_sln"));
+                AppendActivity($"[{tag}] git clean -fd -e *.lock_sln -> exit {cleanCode}");
+                if (!string.IsNullOrWhiteSpace(cleanOut)) AppendActivity(cleanOut.Trim());
             }
-            catch (Exception ex)
+            else
             {
-                AppendActivity($"[Error] {ex}");
-                lblStatus.Text = "Ready";
-                ShowError(ex.Message);
+                AppendActivity($"[{tag}] {demoRepo} is not a git repo — skipping git reset/clean. Wiper still runs.");
             }
+
+            // Deep wipe of FB types + canvas contents (also deletes devices/app + clears HwConfiguration).
+            var report = await Task.Run(() => CodeGen.Services.DemonstratorWiper.Wipe(demoRepo));
+            foreach (var step in report.Steps) AppendActivity($"[{tag}] {step}");
+            foreach (var w in report.Warnings) AppendActivity($"[{tag}][!] {w}");
+            AppendActivity(
+                $"[{tag}] wipe summary: {report.FilesEmptied} canvas(es) emptied, " +
+                $"{report.FilesDeleted} FB-type file(s) deleted, " +
+                $"{report.FoldersDeleted} type folder(s) removed, " +
+                $"{report.DfbprojEntriesRemoved} dfbproj entry/entries stripped, " +
+                $"{report.HwConfigFilesDeleted} HwConfiguration file(s) cleared.");
         }
 
 
@@ -1971,11 +1938,9 @@ namespace MapperUI
             int fullW = ClientSize.Width - 2 * margin;
             if (fullW < 200) return;
 
-            // Pin the top-right action buttons to the form's right edge.
-            if (btnCleanDemonstrator != null)
-                btnCleanDemonstrator.Left = ClientSize.Width - margin - btnCleanDemonstrator.Width;
-            if (btnTestStation1 != null && btnCleanDemonstrator != null)
-                btnTestStation1.Left = btnCleanDemonstrator.Left - 8 - btnTestStation1.Width;
+            // Pin the top-right action button (Generate) to the form's right edge.
+            if (btnTestStation1 != null)
+                btnTestStation1.Left = ClientSize.Width - margin - btnTestStation1.Width;
 
             // Both body sections span the full width; Mapping Information takes all remaining height.
             grpValidation.Width = fullW;
