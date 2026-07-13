@@ -106,6 +106,34 @@ namespace CodeGen.Devices.Core
                     return;
                 }
 
+                // PARTIAL RevPi (ROOT-CAUSE FIX for the recurring "Repair Instances"): the relocated Feed
+                // components (Feeder/Checker/PartInHopper) belong ONLY on the RevPi sysres. This wire pass is
+                // the LAST writer of the M262 (and M580/BX1) sysres and it PRESERVES the FB elements it reads,
+                // so a stale/EAE-locked tree that still lists them here (e.g. the early RevPi sweep couldn't
+                // save because EAE held the file) would get them re-written -> a duplicate instance across
+                // M262+RevPi -> EAE "Repair Instances". Drop them (+ their connections) here, on the FINAL
+                // write, for every NON-RevPi resource. No-op on the RevPi sysres (tag "RevPi"), on M580/BX1
+                // (they never carry Feed FBs), and when not in partial mode. Yields exactly the clean partition
+                // the gate proves valid; the M262 Feed ring then wires around the remaining components, leaving
+                // the cross-device seam open for EAE to bridge to RevPi.
+                if (MapperConfig.PartialRevPi && !string.Equals(tag, "RevPi", StringComparison.Ordinal))
+                {
+                    var relocated = MapperConfig.RevPiComponents;
+                    var dropFbs = fbNet.Elements(ns + "FB")
+                        .Where(f => relocated.Contains((string?)f.Attribute("Name") ?? "")).ToList();
+                    foreach (var fb in dropFbs) fb.Remove();
+                    foreach (var grp in new[] { "EventConnections", "DataConnections", "AdapterConnections" })
+                        fbNet.Element(ns + grp)?.Elements(ns + "Connection")
+                            .Where(c => relocated.Any(nm =>
+                                ((string?)c.Attribute("Source") ?? "").StartsWith(nm + ".", StringComparison.Ordinal) ||
+                                ((string?)c.Attribute("Destination") ?? "").StartsWith(nm + ".", StringComparison.Ordinal)))
+                            .ToList().ForEach(c => c.Remove());
+                    if (dropFbs.Count > 0)
+                        report.Missing.Add($"[Wire][{tag}] dropped {dropFbs.Count} RevPi-relocated FB(s) " +
+                            $"({string.Join(", ", relocated)}) from the final {Path.GetFileName(sysresPath)} — " +
+                            "they live on the RevPi sysres only (prevents duplicate-instance 'Repair Instances').");
+                }
+
                 var recipeSyncCount = SysresFbMirror.SyncProcessRecipesFromSyslay(
                     cfg.ActiveSyslayPath, doc);
                 if (recipeSyncCount > 0)
