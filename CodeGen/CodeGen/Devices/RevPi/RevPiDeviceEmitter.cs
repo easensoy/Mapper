@@ -197,7 +197,8 @@ namespace CodeGen.Devices.RevPi
             if (sysres == null) return;
             try
             {
-                var doc = XDocument.Load(sysres, LoadOptions.PreserveWhitespace);
+                // Load with retry too: EAE holds the .sysres briefly during a background scan.
+                var doc = CodeGen.Services.FbtXmlEditor.LoadXmlWithRetry(sysres, LoadOptions.PreserveWhitespace);
                 var ns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
                 var net = doc.Root?.Element(ns + "FBNetwork");
                 if (net == null) return;
@@ -212,7 +213,12 @@ namespace CodeGen.Devices.RevPi
                         .ToList().ForEach(c => c.Remove());
                 if (stale.Count > 0)
                 {
-                    doc.Save(sysres);
+                    // RETRY-SAVE (root-cause fix): EAE holds the M262 .sysres LOCKED while it is open (esp.
+                    // mid-build), and a bare doc.Save fails SILENTLY -> the relocated Feeder/Checker/
+                    // PartInHopper linger on M262 -> a duplicate instance across M262 + RevPi -> EAE
+                    // "Repair Instances" / "same key already added". SaveXmlWithRetry rides out a transient
+                    // lock (8 attempts, ~2.4s backoff), so an idle-EAE Generate self-heals without a manual Clean.
+                    CodeGen.Services.FbtXmlEditor.SaveXmlWithRetry(doc, sysres);
                     report.Missing.Add($"[RevPi][Partial] swept {stale.Count} relocated Feed FB(s) " +
                         $"({string.Join(", ", names)}) off the M262 sysres — prevents duplicate-instance " +
                         "'Repair Instances' / 'same key already added'.");
@@ -220,7 +226,13 @@ namespace CodeGen.Devices.RevPi
             }
             catch (Exception ex)
             {
-                report.Missing.Add($"[RevPi][Partial] M262 sysres sweep error: {ex.GetType().Name}: {ex.Message}");
+                // The save genuinely could not land after retries — EAE is holding the M262 .sysres open
+                // (a build in progress). Shipping now WOULD duplicate Feeder/Checker/PartInHopper across
+                // M262 + RevPi. Surface a LOUD, actionable message instead of a silent stale tree.
+                report.Missing.Add($"[RevPi][Partial][ACTION REQUIRED] Could NOT remove the relocated Feed FB(s) " +
+                    $"({string.Join(", ", names)}) from the M262 sysres — it is LOCKED by EAE ({ex.GetType().Name}). " +
+                    "CLOSE EAE (or stop its build), then click Generate again. Until then EAE will show duplicate " +
+                    "'Repair Instances' for these components.");
             }
         }
 
