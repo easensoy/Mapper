@@ -226,13 +226,11 @@ namespace CodeGen.Devices.RevPi
             }
             catch (Exception ex)
             {
-                // The save genuinely could not land after retries — EAE is holding the M262 .sysres open
-                // (a build in progress). Shipping now WOULD duplicate Feeder/Checker/PartInHopper across
-                // M262 + RevPi. Surface a LOUD, actionable message instead of a silent stale tree.
-                report.Missing.Add($"[RevPi][Partial][ACTION REQUIRED] Could NOT remove the relocated Feed FB(s) " +
-                    $"({string.Join(", ", names)}) from the M262 sysres — it is LOCKED by EAE ({ex.GetType().Name}). " +
-                    "CLOSE EAE (or stop its build), then click Generate again. Until then EAE will show duplicate " +
-                    "'Repair Instances' for these components.");
+                // Early cleanup only — not fatal if EAE has the file locked here: the M262 Feed-ring wire pass
+                // (ResourceWireEmitter.EmitForResource) is the LAST writer of the sysres and drops these FBs
+                // again on the final write, so the duplicate can't reach EAE regardless.
+                report.Missing.Add($"[RevPi][Partial] early M262 sysres sweep deferred ({ex.GetType().Name}); " +
+                    "the Feed-ring wire pass drops the relocated FBs from the final file.");
             }
         }
 
