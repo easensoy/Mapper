@@ -57,10 +57,20 @@ namespace CodeGen.Translation.Process
             void EmitMaterialGate()
             {
                 var mg = HandoffPlanner.AssemblyStart;
-                if (mg.WaitId >= 0)
-                    b.AddWait(mg.WaitId, mg.WaitState);
-                else if (ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, mg.SignalComponent, out var mgId))
-                    b.AddWait(mgId, mg.WaitState);
+                int id = mg.WaitId >= 0 ? mg.WaitId
+                    : (ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, mg.SignalComponent, out var mgId) ? mgId : -1);
+                if (id < 0) return;
+                // Cyclic re-arm: reconstruct the PartAtAssembly RISING EDGE so a held level cannot re-fire Assembly
+                // on the part it just processed -- wait CLEAR (the previous part has been removed by Disassembly's
+                // robot) BEFORE waiting for the new part present.
+                if (MapperConfig.EnableCyclicRestart)
+                    b.AddWait(id, 0);
+                b.AddWait(id, mg.WaitState);   // material: the new part is present
+                // Cyclic: reset the Assembly->Disassembly handshake sentinel to idle each cycle (AFTER the part is
+                // present, so it is race-free) -- gives Disassembly's WAIT(Assembly=idle) a fresh edge to catch
+                // before WAIT(Assembly=done). Idempotent with the MergeFeedRing idle at row 0.
+                if (MapperConfig.EnableCyclicRestart)
+                    b.AddCmd("assembly_idle", MapperConfig.ProcessIdleSentinelState);
             }
 
             if (!MapperConfig.MergeFeedRing)
