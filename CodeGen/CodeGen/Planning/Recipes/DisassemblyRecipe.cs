@@ -49,6 +49,15 @@ namespace CodeGen.Translation.Process
             if (MapperConfig.SerializeAssemblyDisassembly)
                 RecipeStepEmitter.Emit(b, def.Block("ready"), arrays, allComponents);
 
+            // Cyclic re-arm: the Assembly->Disassembly handshake {AssemblyProcessId, 7} is a HELD level (it never
+            // clears on its own), so END->0 would re-fire Disassembly instantly on the stale 7 (running covers/
+            // shaft/bearing on an empty assembly -> collision with the next Assembly cycle). Reconstruct a fresh
+            // edge: wait the Assembly-idle RESET ({AssemblyProcessId, ProcessIdleSentinel}, which Assembly now
+            // publishes at the start of each cycle) BEFORE the done-handshake. Held 7 -> holds here until Assembly
+            // starts its next part -> 0 -> then 7. No re-entry on a stale handshake or an empty assembly volume.
+            if (MapperConfig.EnableCyclicRestart)
+                b.AddWait(MapperConfig.AssemblyProcessId, MapperConfig.ProcessIdleSentinelState);
+
             RecipeStepEmitter.Emit(b, def.Block("handshake"), arrays, allComponents);
 
             RecipeStepEmitter.Emit(b, def.Block("coverRemove"), arrays, allComponents);
