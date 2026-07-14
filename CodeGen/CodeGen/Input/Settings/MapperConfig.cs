@@ -45,8 +45,17 @@ namespace CodeGen.Configuration
 
         public static bool RecipeRunOnce = true;
 
-        // Must stay false: cyclic restart re-fires each recipe's step-0 trigger on a held level and overlaps processes on shared actuators.
-        public static bool EnableCyclicRestart = false;
+        // Continuous line: each process loops END->0 with a GENERATED SAFE RE-ARM barrier so a held level can
+        // never instantly re-trigger it (the fresh-trigger / mutual-exclusion the bare level engine lacked):
+        //  - Feed_Station:  prepend WAIT(Robot=Home) -> WAIT(PartAtAssembly=clear) before its PartInHopper gate,
+        //                   so a 2nd part dropped mid-cycle cannot start Feed until the robot cleared the hopper
+        //                   and the shared Assembly/Disassembly volume is empty.
+        //  - Assembly:      reconstruct the PartAtAssembly rising edge (WAIT clear THEN present) so it cannot
+        //                   re-fire on the part it just processed; reset its handshake sentinel each cycle.
+        //  - Disassembly:   WAIT(Assembly=idle-reset) before WAIT(Assembly=done) so the held handshake=7 cannot
+        //                   re-fire it on a stale/empty assembly.
+        // All gates use existing sensors-first ids + the assembly_idle/handshake sentinels; no new FB, no hardcoded recipe.
+        public static bool EnableCyclicRestart = true;
 
         public static readonly string[] AutoRetractProcesses = new[] { "Feed_Station" };
 
