@@ -433,45 +433,19 @@ namespace CodeGen.Translation.Process
                 DataDrivenHandoffInjector.InjectDisassembly(process, arrays, allComponents);
             }
 
-            // CONTINUOUS-LINE SAFE RE-ARM (Feed_Station only; EnableCyclicRestart). With END->0 the Feed recipe
-            // re-waits its trigger each cycle. Prepend a safe re-arm barrier BEFORE the existing PartInHopper gate
-            // so a held level (e.g. a 2nd part dropped mid-cycle) can NEVER start Feed early: (1) Robot Home -- the
-            // robot has cleared the hopper after its discharge; (2) PartAtAssembly clear -- the previous part has
-            // left the shared Assembly/Disassembly volume. Both are existing sensors-first ids (RobotActuatorId,
-            // HandoffPlanner.AssemblyStart = PartAtAssembly), M262-local on Feed's own state_table. No new signal.
-            // Same Insert+NextStep-shift shape as the home preamble above.
-            if (MapperConfig.EnableCyclicRestart &&
-                string.Equals((process.Name ?? string.Empty).Trim(), "Feed_Station", StringComparison.OrdinalIgnoreCase) &&
-                arrays.StepType.Count > 0 && arrays.StepType[0] != StepType.End)
-            {
-                var reArm = new List<(int id, int state)>();
-                if (MapperConfig.EnableRobotTaskTail)
-                    reArm.Add((MapperConfig.RobotActuatorId, 0));          // Robot at Home (cleared the hopper)
-                int paaId = HandoffPlanner.AssemblyStart.WaitId;
-                if (paaId >= 0)
-                    reArm.Add((paaId, 0));                                 // PartAtAssembly clear (shared volume empty)
-                if (reArm.Count > 0)
-                {
-                    int shift = reArm.Count;
-                    for (int i = 0; i < arrays.NextStep.Count; i++)
-                        if (arrays.StepType[i] != StepType.End)
-                            arrays.NextStep[i] += shift;
-                    for (int p = 0; p < reArm.Count; p++)
-                    {
-                        arrays.StepType.Insert(p, StepType.Wait);
-                        arrays.CmdTargetName.Insert(p, string.Empty);
-                        arrays.CmdStateArr.Insert(p, 0);
-                        arrays.Wait1Id.Insert(p, reArm[p].id);
-                        arrays.Wait1State.Insert(p, reArm[p].state);
-                        arrays.NextStep.Insert(p, p + 1);
-                    }
-                    arrays.Warnings.Add(
-                        $"[Recipe] Feed_Station cyclic re-arm barrier prepended ({shift} WAIT): " +
-                        string.Join(" -> ", reArm.Select(r => $"WAIT(id{r.id}=={r.state})")) +
-                        " -> [existing WAIT(PartInHopper=On)]. A held level (2nd part mid-cycle) cannot start Feed " +
-                        "until the robot is home and the assembly volume is clear.");
-                }
-            }
+            // CONTINUOUS-LINE re-arm SAFETY is NOT a Feed-local barrier. The proven-safe gate is Feed's own
+            // Control.xml readiness transition "Feed leaves only when Disassembly is at Initialisation" ->
+            // WAIT(Disassembly=ProcessIdleSentinelState=0) (emitted by RecipeStateClassifier.TryCrossProcessReadinessGate,
+            // present in the rig-proven Ground Truth). That gate holds Feed until Disassembly publishes its idle
+            // sentinel, and Disassembly now publishes that sentinel ONLY after WAIT(robot=Home) at its END
+            // (DisassemblyRecipe). So Feed cannot pass the readiness gate -- and therefore cannot reach the
+            // feeder CMD -- until the robot has completed its drop and returned Home in the CURRENT cycle. A held
+            // level (a 2nd part in the hopper mid-cycle) is powerless: the readiness gate is downstream of the
+            // hopper wait in Feed's loop, so the feeder still waits for the fresh Disassembly-idle-after-robot-home.
+            // A Feed-local WAIT(robot=Home) was intentionally NOT used: robot=Home is a stale level (the robot is
+            // Home for almost the whole cycle), and the level engine never re-checks a WAIT once passed
+            // (ProcessRuntime ECC: WAIT_STEP -> ADVANCE, never back), so it could be satisfied long before the
+            // robot's final drop -- exactly the weak gate this fix removes.
 
             // END NextStep: EnableCyclicRestart -> 0 (loop to the trigger gate); else RecipeRunOnce -> self-loop (park). After the preamble shift so endIdx is final.
             if (arrays.StepType.Count > 0)
