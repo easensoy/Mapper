@@ -98,6 +98,17 @@ namespace CodeGen.Translation.Process
                     RecipeStepEmitter.Emit(b, def.Block("robot"), arrays, allComponents);
             }
 
+            // Continuous-line completion sentinel: publish Disassembly idle {DisassemblyProcessId,
+            // ProcessIdleSentinelState=0} as the LAST step, AFTER the whole tail (covers->shaft->bearing->
+            // unclamp->ejector->robot, whose final WAIT is robot=Home). The ring stamps state_table[DisassemblyId]
+            // with every CMD's state (src_id = this process's id), so after the robot tail that slot holds the
+            // robot's last cmd (2), never 0 -- so Feed's Control.xml readiness gate WAIT(Disassembly=0) could
+            // never re-arm (the "runs one cycle then Feed stops" hang) AND had no robot-home guarantee. Emitting
+            // idle=0 here makes that gate BOTH satisfiable and true only once the robot has dropped the part and
+            // returned Home. Symmetric with Assembly's assembly_idle (no new FB; a sentinel no actuator matches).
+            if (MapperConfig.EnableCyclicRestart)
+                b.AddCmd("disassembly_idle", MapperConfig.ProcessIdleSentinelState);
+
             int end = b.Count;
             b.AddEnd(MapperConfig.EnableCyclicRestart ? 0 : end);
 
