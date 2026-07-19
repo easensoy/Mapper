@@ -183,6 +183,11 @@ namespace CodeGen.Translation
 
             // Discharge (DischargeActive) splices the M262 segment at the Disassembly seam via two EAE-bridged cross-device hops, without stretching the M580 ring. Off -> ring closes locally.
             var ring = new List<(string Name, string Type)>(m580);
+            // Cover-presence sensor (TopCoverSenosr) rides the ring into Assembly's state_table so the cover
+            // pick can gate on it (clamp model). Spliced just before the cover actuators to mirror the sysres
+            // CaSBusOrder (TopCoverSenosr before CoverPNP_Hr); the report reaches Assembly wherever it sits.
+            if (MapperConfig.CoverInterlockActive)
+                ring.Add(("TopCoverSenosr", "Sensor_Bool_CAT"));
             // Cover detour splices the BX1 covers between Clamp and Assembly_Station at a DIFFERENT seam, so the two compose with only M580<->BX1 and M580<->M262 boundaries, never M262<->BX1. Empty when off.
             foreach (var cover in HandoffPlanner.CoverDetour)
                 ring.Add((cover, "Five_State_Actuator_CAT"));
@@ -249,7 +254,11 @@ namespace CodeGen.Translation
 
             // MqttConn has no stateRprtCmd port, so it stays out of the ring.
             var ring = new List<(string Name, string Type)>();
-            foreach (var s in contents.Sensors)    if (IsBx1(s.Name)) ring.Add((s.Name, "Sensor_Bool_CAT"));
+            // TopCoverSenosr moves to the M580 cover ring (clamp model); keep it off the BX1 ring so it is not double-driven.
+            foreach (var s in contents.Sensors)
+                if (IsBx1(s.Name) && !(MapperConfig.CoverInterlockActive &&
+                                       string.Equals(s.Name, "TopCoverSenosr", StringComparison.Ordinal)))
+                    ring.Add((s.Name, "Sensor_Bool_CAT"));
             // Cover-detour actuators are on the M580 ring, so keep them off the BX1 ring (TopCoverSenosr stays a BX1 sensor, off-ring).
             foreach (var a in contents.Actuators)
                 if (IsBx1(a.Name) && !HandoffPlanner.IsCoverDetourActuator(a.Name))
