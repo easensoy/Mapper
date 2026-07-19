@@ -1348,7 +1348,7 @@ namespace CodeGen.Translation
             // CycleReadyEvent/CycleReady inputs on Feed). Feed's ProcessHandler.SETRDY writes
             // state_table[DisassemblyProcessId] = the value Feed's WAIT gate keys on. Syslay-only; the sysres
             // leaves these boundary ports OPEN and EAE bridges from here (same as the ejector/robot cross-hops).
-            if (CodeGen.Configuration.MapperConfig.EnableCycleReadyHandoff && disassemblyFbName != null)
+            if (CodeGen.Configuration.MapperConfig.CycleReadyActive && disassemblyFbName != null)
             {
                 builder.AddEventConnection($"{disassemblyFbName}.CycleReadyEventOut",
                     $"{processInstanceName}.CycleReadyEvent", crossReference: true);
