@@ -12,13 +12,10 @@ namespace CodeGen.Configuration
         public List<DischargeChannel> DischargeChannels { get; set; } = new();
 
         // Part-presence gates the Assembly recipe inserts before each pick (block -> sensor + the
-        // runtime state that means "present"; active-low sensors = 0, active-high = 1).
+        // runtime state that means "present"; active-low sensors = 0, active-high = 1). TopCoverSenosr's
+        // state_table slot is NOT stored here -- it is computed per ring topology (SystemLayoutInjector
+        // -> MapperConfig.TopCoverSensorId) so the cover interlock is model-independent.
         public List<SensorInterlock> SensorInterlocks { get; set; } = new();
-
-        // TopCoverSenosr's state_table slot. It is pulled OUT of the positional sensors-first sequence
-        // (which would land it on slot 3, colliding with the PartAtAssembly synth sensor) and pinned
-        // here, like the synth/cover ids. Free on the Assembly ring in the clamp model.
-        public int TopCoverSensorId { get; set; }
 
         public static RigCatalog Current => RigCatalogLoader.Catalog;
     }
