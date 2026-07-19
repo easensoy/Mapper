@@ -105,8 +105,11 @@ namespace CodeGen.Services
             // them (all flip to/from the RuleTable/Target struct as one), or a stale evaluator drifts out of sync
             // with a freshly-reshaped CAT -> EAE "member 'RuleCount'/'TargetWork1State' does not exist" errors. It
             // was the only interlock artefact left copy-if-absent.
+            // ProcessStateBusHandler joins the refresh list: the CycleReady handoff adds SETRDY/ready_evt/CMDRDYST to
+            // it, and Process1_Generic (force-re-extracted) wires those ports -- if the handler stayed copy-if-absent a
+            // plain re-Generate would keep the stale one and EAE would fail ("port does not exist on ProcessStateBusHandler").
             foreach (var ext in new[] { ".fbt", ".doc.xml", ".meta.xml" })
-            foreach (var basic in new[] { "No_Sensor_Handler_7SCH", "SevenStateCentreHomeActuator", "ProcessRuntime_Generic_v1", "CommonInterlockEvaluator" })
+            foreach (var basic in new[] { "No_Sensor_Handler_7SCH", "SevenStateCentreHomeActuator", "ProcessRuntime_Generic_v1", "ProcessStateBusHandler", "CommonInterlockEvaluator" })
             {
                 var stale = Path.Combine(eaeProjectDir, "IEC61499", basic + ext);
                 try { if (File.Exists(stale)) File.Delete(stale); }
