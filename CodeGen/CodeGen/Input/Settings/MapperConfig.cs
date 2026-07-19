@@ -102,6 +102,22 @@ namespace CodeGen.Configuration
         // CycleReady must stand down there. MergeFeedRing is set at SystemLayoutInjector before any recipe/wiring runs.
         public static bool CycleReadyActive => EnableCycleReadyHandoff && !MergeFeedRing;
 
+        // Part-presence interlock: before each Assembly pick, WAIT for the part-presence sensor to report
+        // "present" (bearing/shaft active-low = 0, top-cover active-high = 1). The gates + polarity are
+        // data in Config/smc-rig.yml (sensorInterlocks). Rig-proven: the pnp actuator cannot start a pick
+        // while its part is absent (default-zero slots can't false-pass, since present is 0 only for the
+        // ring sensors whose absent report writes 1, and 1 for the cover). OFF = byte-identical baseline.
+        public static bool EnableSensorPresenceInterlock = true;
+
+        // The COVER half is clamp-model only. TopCoverSensorId (6) is a Feed-ring slot, free on the
+        // SEPARATE Assembly ring but colliding once MergeFeedRing merges the two rings. Bearing/shaft
+        // (ids 1/2, real Assembly-ring members) apply to both models -- they gate on the flag directly.
+        public static bool CoverInterlockActive => EnableSensorPresenceInterlock && !MergeFeedRing;
+
+        // TopCoverSenosr's state_table id -- pinned in smc-rig.yml OUT of the positional sensors-first
+        // sequence (which lands it on slot 3, colliding with the PartAtAssembly synth sensor).
+        public static int TopCoverSensorId => RigCatalog.Current.TopCoverSensorId;
+
         public static bool DataDrivenRecipes = false;
 
         // Each must sit above the component id space (ValidateProcessIdInvariant enforces it); the Assembly->Disassembly handshake rides AssemblyProcessId.
