@@ -34,6 +34,23 @@ crossRingSegment:
   - Robot
   - PartAtAssembly
 
+# Part-presence interlocks: before each Assembly pick, the recipe WAITs for the sensor to report
+# "present". Polarity is physical (not in Control.xml), so it lives here: bearing/shaft are active-low
+# (present = 0), the top-cover sensor is active-high (present = 1). block = the recipes.yml block the
+# gate sits before. Bearing/shaft ride the M580 Assembly ring already; the cover sensor also gets the
+# id below + a ring splice (clamp model only).
+topCoverSensorId: 6
+sensorInterlocks:
+  - block: bearing
+    sensor: BearingSensor
+    presentState: 0
+  - block: shaft
+    sensor: ShaftSensor
+    presentState: 0
+  - block: coverPlace
+    sensor: TopCoverSenosr
+    presentState: 1
+
 # M262 DI/DO channels the .hcf MUST bind when the cross-PLC discharge tail is active, else the
 # ejector/robot never actuate. The parity validator checks each is bound and non-blank.
 dischargeChannels:
