@@ -44,6 +44,13 @@ namespace CodeGen.Translation.Process
 
             var def = RecipeConfigLoader.Catalog.Recipe("Disassembly");
 
+            // CycleReady boot (MapperConfig.EnableCycleReadyHandoff): publish "robot clear" (7) once at boot so a
+            // cold-start Feed can proceed before the first Disassembly cycle. The END loop-back targets row 1, so
+            // this row fires only at cold start. Rides the CMDRDYST producer (cmd 'cycle_ready') -> ready_evt ->
+            // the CrossReference connection -> Feed's state_table[DisassemblyProcessId].
+            if (MapperConfig.EnableCycleReadyHandoff)
+                b.AddCmd("cycle_ready", MapperConfig.CycleReadyReadyState);
+
             // Row 0 idle sentinel {DisassemblyProcessId, 7}, before the handshake wait: Assembly's
             // disassemblyClear gate reads it and holds until Disassembly is idle (not on the shared swivel).
             if (MapperConfig.SerializeAssemblyDisassembly)
@@ -59,6 +66,12 @@ namespace CodeGen.Translation.Process
                 b.AddWait(MapperConfig.AssemblyProcessId, MapperConfig.ProcessIdleSentinelState);
 
             RecipeStepEmitter.Emit(b, def.Block("handshake"), arrays, allComponents);
+
+            // CycleReady active: the handshake fired -> a cycle is now running and the robot will be busy, so
+            // retract "robot clear" (0). Feed's WAIT(DisassemblyProcessId, 7) gate therefore HOLDS until this
+            // cycle republishes 7 after the robot has homed (below).
+            if (MapperConfig.EnableCycleReadyHandoff)
+                b.AddCmd("cycle_ready", 0);
 
             RecipeStepEmitter.Emit(b, def.Block("coverRemove"), arrays, allComponents);
 
@@ -106,11 +119,19 @@ namespace CodeGen.Translation.Process
             // never re-arm (the "runs one cycle then Feed stops" hang) AND had no robot-home guarantee. Emitting
             // idle=0 here makes that gate BOTH satisfiable and true only once the robot has dropped the part and
             // returned Home. Symmetric with Assembly's assembly_idle (no new FB; a sentinel no actuator matches).
-            if (MapperConfig.EnableCyclicRestart)
+            if (MapperConfig.EnableCycleReadyHandoff)
+                // CycleReady ready: republish "robot clear" (7) as the LAST step, AFTER the robot tail (whose
+                // final WAIT is robot=Home). This is what re-arms Feed each cycle -> the feeder can only start
+                // once the robot has dropped the part and returned Home. Reliable dedicated CrossComm transport,
+                // not the ring-transported disassembly_idle sentinel (which raced against the robot's held cmd).
+                b.AddCmd("cycle_ready", MapperConfig.CycleReadyReadyState);
+            else if (MapperConfig.EnableCyclicRestart)
                 b.AddCmd("disassembly_idle", MapperConfig.ProcessIdleSentinelState);
 
             int end = b.Count;
-            b.AddEnd(MapperConfig.EnableCyclicRestart ? 0 : end);
+            // CycleReady loops back to row 1 (skip the row-0 boot "robot clear", which fires only at cold start).
+            b.AddEnd(MapperConfig.EnableCycleReadyHandoff ? 1
+                     : MapperConfig.EnableCyclicRestart ? 0 : end);
 
             arrays.Warnings.Add($"[Recipe] Disassembly emitted {b.Count} rows: handshake -> covers off " +
                 "-> shaft out -> bearing out" +
