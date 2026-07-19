@@ -1202,6 +1202,12 @@ namespace CodeGen.Translation
             {
                 var sensor = contents.Sensors[i];
                 int assignedId = sensorIdStart + i;
+                // TopCoverSenosr rides the cover ring into the Assembly state_table; pin it OUT of the
+                // positional sequence to its own slot so its report never collides with the PartAtAssembly
+                // synth sensor at slot 3. It stays counted in contents.Sensors, so actuator ids are unshifted.
+                if (MapperConfig.CoverInterlockActive &&
+                    string.Equals(sensor.Name, "TopCoverSenosr", StringComparison.Ordinal))
+                    assignedId = MapperConfig.TopCoverSensorId;
 
                 SensorBinding? senBinding = null;
                 bindings?.Sensors.TryGetValue(sensor.Name, out senBinding);
