@@ -94,6 +94,14 @@ namespace CodeGen.Configuration
         // gate proves the robot actively reported Home, not an unwritten default-zero slot (no false-pass).
         public const int CycleReadyReadyState = 7;
 
+        // CycleReady is CLAMP-model only. It keys on state_table[DisassemblyProcessId=18]; in MergeFeedRing (no-clamp)
+        // the rings are MERGED, so Disassembly's every CMD already stamps that slot on Feed AND the no-clamp Feed
+        // recipe already reads it twice (WAIT 18==6 bearing-home, WAIT 18==0 idle). Adding cycle_ready 7/0/7 there
+        // triple-books the slot and inverts what those gates expect -> the handoff breaks. The no-clamp model already
+        // has its own robot-clear re-arm (WAIT Disassembly==0 + disassembly_idle=0 published after robot-Home), so
+        // CycleReady must stand down there. MergeFeedRing is set at SystemLayoutInjector before any recipe/wiring runs.
+        public static bool CycleReadyActive => EnableCycleReadyHandoff && !MergeFeedRing;
+
         public static bool DataDrivenRecipes = false;
 
         // Each must sit above the component id space (ValidateProcessIdInvariant enforces it); the Assembly->Disassembly handshake rides AssemblyProcessId.
