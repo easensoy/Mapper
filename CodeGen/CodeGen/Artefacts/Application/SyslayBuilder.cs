@@ -125,20 +125,30 @@ namespace CodeGen.Translation
             return this;
         }
 
-        public SyslayBuilder AddEventConnection(string source, string destination)
+        public SyslayBuilder AddEventConnection(string source, string destination, bool crossReference = false)
         {
-            _eventConnections.Add(new XElement(Ns + "Connection",
-                new XAttribute("Source", source),
-                new XAttribute("Destination", destination)));
+            _eventConnections.Add(BuildConnection(source, destination, crossReference));
             return this;
         }
 
-        public SyslayBuilder AddDataConnection(string source, string destination)
+        public SyslayBuilder AddDataConnection(string source, string destination, bool crossReference = false)
         {
-            _dataConnections.Add(new XElement(Ns + "Connection",
-                new XAttribute("Source", source),
-                new XAttribute("Destination", destination)));
+            _dataConnections.Add(BuildConnection(source, destination, crossReference));
             return this;
+        }
+
+        // crossReference=True marks a connection whose endpoints partition to different resources/PLCs; EAE
+        // generates the CrossComm proxy from it (the two Process1_Generic FBs live on M580 and M262).
+        private static XElement BuildConnection(string source, string destination, bool crossReference)
+        {
+            var conn = new XElement(Ns + "Connection",
+                new XAttribute("Source", source),
+                new XAttribute("Destination", destination));
+            if (crossReference)
+                conn.Add(new XElement(Ns + "Attribute",
+                    new XAttribute("Name", "Configuration.Connections.CrossReference"),
+                    new XAttribute("Value", "True")));
+            return conn;
         }
 
         public SyslayBuilder AddAdapterConnection(string source, string destination)
