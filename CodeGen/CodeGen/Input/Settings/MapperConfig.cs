@@ -80,6 +80,20 @@ namespace CodeGen.Configuration
         // A process's state_table slot carries its last CMD state (1/3/5/7), so the idle marker must be a value no recipe ever issues as a CMD state -- 0 is safe.
         public const int ProcessIdleSentinelState = 0;
 
+        // Robot->Feeder cross-controller handoff (rig-proven). ON: Disassembly emits a dedicated 'cycle_ready'
+        // token (7=robot clear at boot, 0=busy after the handshake, 7=clear again after WAIT robot=Home) which
+        // rides a real CrossComm connection (CycleReadyEventOut/CycleReadyOut -> Feed_Station.CycleReadyEvent/
+        // CycleReady, CrossReference=True) into Feed's state_table[DisassemblyProcessId] via ProcessStateBusHandler.
+        // SETRDY; Feed gates the feeder on WAIT(DisassemblyProcessId, CycleReadyReadyState) as its LAST wait, so
+        // the feeder can only start once the robot dropped the part and returned Home -- no collision, no stale-ring
+        // race. Needs the CycleReady ports on Process1_Generic + the multi-advance engine (both in the templates).
+        // OFF: the legacy ring-transported disassembly_idle sentinel path (recipes + syslay byte-identical).
+        public static bool EnableCycleReadyHandoff = true;
+
+        // The 'robot clear' value carried by cycle_ready. Distinct from ProcessIdleSentinelState(0) so a satisfied
+        // gate proves the robot actively reported Home, not an unwritten default-zero slot (no false-pass).
+        public const int CycleReadyReadyState = 7;
+
         public static bool DataDrivenRecipes = false;
 
         // Each must sit above the component id space (ValidateProcessIdInvariant enforces it); the Assembly->Disassembly handshake rides AssemblyProcessId.
