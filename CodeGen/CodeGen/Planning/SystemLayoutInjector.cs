@@ -946,6 +946,30 @@ namespace CodeGen.Translation
             // Feed_Station keeps process_id 10 (== Shaft_Hr); harmless under MergeFeedRing (Feed only WAITs, its CMD states 1/3 ≠ Shaft_Hr targets 0/2).
             int processId = MapperConfig.FeedStationProcessId;
 
+            // TopCoverSenosr's state_table slot -- computed, model-independent (nothing to do with the clamp).
+            // Occupy every id held by an ASSEMBLY-ring member (M580/BX1 components, the cross-PLC segment, and --
+            // when MergeFeedRing merges the rings -- the Feed components), plus the synth/cover/process ids, then
+            // take the highest free component-range slot. Clamp: the Feed ids sit on a SEPARATE ring -> {0,4,5,6}
+            // free -> 6 (the rig-proven value). Merged no-clamp: Feed ids occupied but Clamp absent -> 13.
+            if (MapperConfig.EnableSensorPresenceInterlock)
+            {
+                var occ = new HashSet<int> { assemblyProcessId, disassemblyProcessId, MapperConfig.RobotActuatorId };
+                foreach (var syn in MapperConfig.M262SynthSensors) occ.Add(syn.Id);            // PartAtAssembly (3)
+                foreach (var cid in RigCatalog.Current.CoverActuatorIds.Values) occ.Add(cid);  // covers 14/15/16
+                var cross = RigCatalog.Current.CrossRingSegment;                               // Ejector/Robot/PartAtAssembly
+                void MarkOcc(string nm, int id)
+                {
+                    if (string.Equals(nm, "TopCoverSenosr", StringComparison.Ordinal)) return; // this is the slot being placed
+                    var plc = HcfSymbolIndex.NameBasedPlcGuess(nm);
+                    if (plc is PlcAssignment.M580 or PlcAssignment.BX1 || cross.Contains(nm) || MapperConfig.MergeFeedRing)
+                        occ.Add(id);
+                }
+                for (int i = 0; i < contents.Sensors.Count; i++)   MarkOcc(contents.Sensors[i].Name, sensorIdStart + i);
+                for (int i = 0; i < contents.Actuators.Count; i++) MarkOcc(contents.Actuators[i].Name, actuatorIdStart + i);
+                for (int slot = 16; slot >= 0; slot--)
+                    if (!occ.Contains(slot)) { MapperConfig.TopCoverSensorId = slot; break; }
+            }
+
             // No top-level PLC_Start FB: Area_CAT/Station_CAT each hold their own plcStart; an external one double-bootstraps (EAE rejects).
 
             builder.AddFB(FBIdGenerator.GenerateFBId("Area_HMI"),
