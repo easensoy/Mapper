@@ -73,6 +73,28 @@ namespace CodeGen.Translation.Process
                     b.AddCmd("assembly_idle", MapperConfig.ProcessIdleSentinelState);
             }
 
+            // Part-presence interlock (Config/smc-rig.yml sensorInterlocks): before a pick block, WAIT for
+            // the gate sensor to report "present" so the pnp actuator cannot start on an absent part.
+            // Bearing/shaft resolve their id from the ring map; the cover sensor uses its pinned id (a
+            // clamp-only slot, off the positional map). Skipped silently if the flag is off or the sensor
+            // is absent -- so flag-off is byte-identical and models without a given sensor still generate.
+            void EmitSensorGate(string block)
+            {
+                if (!MapperConfig.EnableSensorPresenceInterlock) return;
+                var si = CodeGen.Configuration.RigCatalog.Current.SensorInterlocks
+                    .FirstOrDefault(s => string.Equals(s.Block, block, StringComparison.OrdinalIgnoreCase));
+                if (si == null) return;
+                int id;
+                if (string.Equals(si.Sensor, "TopCoverSenosr", StringComparison.Ordinal))
+                {
+                    if (!MapperConfig.CoverInterlockActive) return;   // cover half is clamp-model only
+                    id = MapperConfig.TopCoverSensorId;
+                }
+                else if (!ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, si.Sensor, out id))
+                    return;                                           // sensor not in this model -> no gate
+                b.AddWait(id, si.PresentState);
+            }
+
             if (!MapperConfig.MergeFeedRing)
                 EmitMaterialGate();  // clamp: PartAtAssembly BEFORE the clamp close+wait
 
@@ -122,15 +144,22 @@ namespace CodeGen.Translation.Process
             if (hasClamp)
                 RecipeStepEmitter.Emit(b, def.Block("clampClose"), arrays, allComponents);
 
+            EmitSensorGate("bearing");   // WAIT BearingSensor present, before the pick
             RecipeStepEmitter.Emit(b, def.Block("bearing"), arrays, allComponents);
 
             if (hasShaft)
+            {
+                EmitSensorGate("shaft");  // WAIT ShaftSensor present, before the first shaft move
                 RecipeStepEmitter.Emit(b, def.Block("shaft"), arrays, allComponents);
+            }
 
             if (ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, "coverpnp_vr", out _) &&
                 ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, "coverpnp_hr", out _) &&
                 ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, "coverpnp_gripper", out _))
+            {
+                EmitSensorGate("coverPlace");  // WAIT TopCoverSenosr present, before the cover pick
                 RecipeStepEmitter.Emit(b, def.Block("coverPlace"), arrays, allComponents);
+            }
 
             // The twin holds the clamp through assembly+disassembly: open it here only when Disassembly
             // is parked; otherwise publish the handshake sentinel and let Disassembly unclamp.
