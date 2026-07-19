@@ -342,6 +342,43 @@ namespace CodeGen.Translation.Process
                 }
             }
 
+            // Feed CycleReady gate (MapperConfig.EnableCycleReadyHandoff): insert WAIT(DisassemblyProcessId,
+            // CycleReadyReadyState) immediately BEFORE the feeder-to-work CMD, so the feeder is released only
+            // once Disassembly has republished "robot clear" (7) over the CrossReference connection (part
+            // dropped + robot Home). This is the LAST wait before the feeder -> no collision with the returning
+            // robot. Feed is a generic Control.xml walk (no fixed index), so locate the feeder CMD and use the
+            // mid-recipe Insert + NextStep-rebase idiom (as AUTO-RETRACT / HOME-FIRST above). Runs before the
+            // terminal END append, so END-> loop-back (row 0 = the hopper gate) is unaffected.
+            if (MapperConfig.EnableCycleReadyHandoff &&
+                string.Equals((process.Name ?? string.Empty).Trim(), "Feed_Station",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                int fIdx = FindCmd(arrays, "feeder", 1, 0);
+                if (fIdx >= 0)
+                {
+                    int insertAt = fIdx;
+                    var preds = new List<int>();
+                    for (int i = 0; i < arrays.NextStep.Count; i++)
+                        if (arrays.NextStep[i] == insertAt) preds.Add(i);
+                    for (int i = 0; i < arrays.NextStep.Count; i++)
+                        if (arrays.NextStep[i] >= insertAt) arrays.NextStep[i] += 1;
+                    arrays.StepType.Insert(insertAt, StepType.Wait);
+                    arrays.CmdTargetName.Insert(insertAt, string.Empty);
+                    arrays.CmdStateArr.Insert(insertAt, 0);
+                    arrays.Wait1Id.Insert(insertAt, MapperConfig.DisassemblyProcessId);
+                    arrays.Wait1State.Insert(insertAt, MapperConfig.CycleReadyReadyState);
+                    arrays.NextStep.Insert(insertAt, insertAt + 1);
+                    foreach (var p in preds)
+                        arrays.NextStep[p >= insertAt ? p + 1 : p] = insertAt;
+                    arrays.Warnings.Add(
+                        $"[Recipe] Feed CycleReady gate: WAIT(Disassembly={MapperConfig.DisassemblyProcessId}, " +
+                        $"{MapperConfig.CycleReadyReadyState}) inserted before the feeder CMD.");
+                }
+                else
+                    arrays.Warnings.Add(
+                        "[Recipe] Feed CycleReady gate SKIPPED: feeder-to-work CMD not found in the Feed walk.");
+            }
+
             // Single final END (StepType=9 only here).
             arrays.StepType.Add(StepType.End);
             arrays.CmdTargetName.Add(string.Empty);
