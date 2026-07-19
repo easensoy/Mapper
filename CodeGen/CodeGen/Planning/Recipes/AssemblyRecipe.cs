@@ -75,8 +75,9 @@ namespace CodeGen.Translation.Process
 
             // Part-presence interlock (Config/smc-rig.yml sensorInterlocks): before a pick block, WAIT for
             // the gate sensor to report "present" so the pnp actuator cannot start on an absent part.
-            // Bearing/shaft resolve their id from the ring map; the cover sensor uses its pinned id (a
-            // clamp-only slot, off the positional map). Skipped silently if the flag is off or the sensor
+            // Bearing/shaft resolve their id from the ring map (they already ride the Assembly ring); the
+            // cover sensor uses its COMPUTED slot (TopCoverSensorId -- the highest free Assembly-ring slot,
+            // off the positional map, model-independent). Skipped silently if the flag is off or the sensor
             // is absent -- so flag-off is byte-identical and models without a given sensor still generate.
             void EmitSensorGate(string block)
             {
@@ -87,7 +88,7 @@ namespace CodeGen.Translation.Process
                 int id;
                 if (string.Equals(si.Sensor, "TopCoverSenosr", StringComparison.Ordinal))
                 {
-                    if (!MapperConfig.CoverInterlockActive) return;   // cover half is clamp-model only
+                    if (!MapperConfig.CoverInterlockActive) return;   // cover gate rides its computed ring slot
                     id = MapperConfig.TopCoverSensorId;
                 }
                 else if (!ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, si.Sensor, out id))
