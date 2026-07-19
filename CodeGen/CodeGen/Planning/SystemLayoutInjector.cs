@@ -1342,6 +1342,20 @@ namespace CodeGen.Translation
             RingWiringPlanner.BuildStation2Wiring(builder, contents, disassemblyFbName);
             RingWiringPlanner.BuildBx1Wiring(builder, contents, config);
 
+            // CycleReady cross-controller handoff (MapperConfig.EnableCycleReadyHandoff): the dedicated CrossComm
+            // link Disassembly(M580) -> Feed_Station(M262). CrossReference=True tells EAE to auto-generate the UDP
+            // proxy; both FBs are Process1_Generic (CycleReadyEventOut/CycleReadyOut outputs on Disassembly,
+            // CycleReadyEvent/CycleReady inputs on Feed). Feed's ProcessHandler.SETRDY writes
+            // state_table[DisassemblyProcessId] = the value Feed's WAIT gate keys on. Syslay-only; the sysres
+            // leaves these boundary ports OPEN and EAE bridges from here (same as the ejector/robot cross-hops).
+            if (CodeGen.Configuration.MapperConfig.EnableCycleReadyHandoff && disassemblyFbName != null)
+            {
+                builder.AddEventConnection($"{disassemblyFbName}.CycleReadyEventOut",
+                    $"{processInstanceName}.CycleReadyEvent", crossReference: true);
+                builder.AddDataConnection($"{disassemblyFbName}.CycleReadyOut",
+                    $"{processInstanceName}.CycleReady", crossReference: true);
+            }
+
             _ = config;
 
             // Frame widths (from LayoutGrid) MUST enclose all this PLC's FBs: EAE's MoveStyle="AnyContained" auto-grows a frame westward around any FB past its right edge, swallowing neighbours.
