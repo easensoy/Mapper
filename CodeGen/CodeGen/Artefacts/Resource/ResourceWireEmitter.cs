@@ -256,7 +256,10 @@ namespace CodeGen.Devices.Core
                         (string.Equals(s, "Ejector",        StringComparison.OrdinalIgnoreCase) ||
                          string.Equals(s, "Robot",          StringComparison.OrdinalIgnoreCase) ||
                          string.Equals(s, "PartAtAssembly", StringComparison.OrdinalIgnoreCase))))
-                    .Where(s => !string.Equals(s, "TopCoverSenosr", StringComparison.OrdinalIgnoreCase))
+                    // Cover-presence interlock (clamp model): TopCoverSenosr joins the cover ring so its
+                    // report reaches Assembly's state_table. Off = kept off the ring (byte-identical baseline).
+                    .Where(s => CodeGen.Configuration.MapperConfig.CoverInterlockActive ||
+                                !string.Equals(s, "TopCoverSenosr", StringComparison.OrdinalIgnoreCase))
                     .ToList();
                 var actNames = orderedComps.Where(c => IsActuator(c) && HasStationAdapter(c))
                     .Select(Nm).Where(s => s.Length > 0).ToList();
