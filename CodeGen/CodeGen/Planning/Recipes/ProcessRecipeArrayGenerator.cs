@@ -342,14 +342,14 @@ namespace CodeGen.Translation.Process
                 }
             }
 
-            // Feed CycleReady gate (MapperConfig.EnableCycleReadyHandoff): insert WAIT(DisassemblyProcessId,
+            // Feed CycleReady gate (MapperConfig.CycleReadyActive): insert WAIT(DisassemblyProcessId,
             // CycleReadyReadyState) immediately BEFORE the feeder-to-work CMD, so the feeder is released only
             // once Disassembly has republished "robot clear" (7) over the CrossReference connection (part
             // dropped + robot Home). This is the LAST wait before the feeder -> no collision with the returning
             // robot. Feed is a generic Control.xml walk (no fixed index), so locate the feeder CMD and use the
             // mid-recipe Insert + NextStep-rebase idiom (as AUTO-RETRACT / HOME-FIRST above). Runs before the
             // terminal END append, so END-> loop-back (row 0 = the hopper gate) is unaffected.
-            if (MapperConfig.EnableCycleReadyHandoff &&
+            if (MapperConfig.CycleReadyActive &&
                 string.Equals((process.Name ?? string.Empty).Trim(), "Feed_Station",
                     StringComparison.OrdinalIgnoreCase))
             {
