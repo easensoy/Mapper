@@ -109,14 +109,18 @@ namespace CodeGen.Configuration
         // ring sensors whose absent report writes 1, and 1 for the cover). OFF = byte-identical baseline.
         public static bool EnableSensorPresenceInterlock = true;
 
-        // The COVER half is clamp-model only. TopCoverSensorId (6) is a Feed-ring slot, free on the
-        // SEPARATE Assembly ring but colliding once MergeFeedRing merges the two rings. Bearing/shaft
-        // (ids 1/2, real Assembly-ring members) apply to both models -- they gate on the flag directly.
-        public static bool CoverInterlockActive => EnableSensorPresenceInterlock && !MergeFeedRing;
+        // The cover interlock is model-independent (it has nothing to do with the clamp): it applies
+        // whenever a cover exists. The only model-sensitive piece is TopCoverSensorId, which is COMPUTED
+        // per ring topology below -- so no clamp gate.
+        public static bool CoverInterlockActive => EnableSensorPresenceInterlock;
 
-        // TopCoverSenosr's state_table id -- pinned in smc-rig.yml OUT of the positional sensors-first
-        // sequence (which lands it on slot 3, colliding with the PartAtAssembly synth sensor).
-        public static int TopCoverSensorId => RigCatalog.Current.TopCoverSensorId;
+        // TopCoverSenosr's state_table slot. NOT hardcoded: the positional sequence lands it on slot 3
+        // (colliding with the PartAtAssembly synth), and no single fixed id is free in both ring topologies
+        // (separate clamp rings free the Feed ids; a merged no-clamp ring frees only an absent component's
+        // slot). SystemLayoutInjector computes the highest component-range slot no Assembly-ring member
+        // occupies and assigns it here -- 6 for the clamp model (matches the rig-proven value), 13 for the
+        // merged no-clamp model. The default is a harmless fallback (only used if the compute path is off).
+        public static int TopCoverSensorId = 6;
 
         public static bool DataDrivenRecipes = false;
 
