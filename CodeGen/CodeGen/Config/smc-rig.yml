@@ -37,9 +37,8 @@ crossRingSegment:
 # Part-presence interlocks: before each Assembly pick, the recipe WAITs for the sensor to report
 # "present". Polarity is physical (not in Control.xml), so it lives here: bearing/shaft are active-low
 # (present = 0), the top-cover sensor is active-high (present = 1). block = the recipes.yml block the
-# gate sits before. Bearing/shaft ride the M580 Assembly ring already; the cover sensor also gets the
-# id below + a ring splice (clamp model only).
-topCoverSensorId: 6
+# gate sits before. Bearing/shaft ride the M580 Assembly ring already; the cover sensor also gets a ring
+# splice, and its state_table id is COMPUTED (a free Assembly-ring slot), so it is model-independent.
 sensorInterlocks:
   - block: bearing
     sensor: BearingSensor
