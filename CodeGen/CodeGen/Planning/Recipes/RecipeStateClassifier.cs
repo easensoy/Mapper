@@ -503,10 +503,26 @@ namespace CodeGen.Translation.Process.Recipes
                 foreach (var cond in tr.Conditions)
                 {
                     if (string.IsNullOrEmpty(cond.ComponentID)) continue;
-                    if (!arrays.ComponentRegistry.TryGetValue(cond.ComponentID.Trim(), out var id)) continue;
                     var target = LookupComponent(cond.ComponentID, allComponents);
-                    if (target == null ||
-                        string.Equals(target.Type, "Process", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (target == null) continue;
+
+                    // CROSS-PROCESS handshake gate ("<Process>/<state>", e.g. Feed_Station_process/TransferReturned):
+                    // the twin gates Assembly-start on ANOTHER process reaching a state, not on a component directly.
+                    // Resolve it to the PHYSICAL condition that ENTERS that process-state (Feed's TransferReturned is
+                    // entered on Transfer/ReturnedFinished), then derive the DELIVERY edge from the transport's own
+                    // state machine: WAIT(Transfer Returning) -> WAIT(Transfer home). So the bearing waits until the
+                    // part is DELIVERED and the transport has CLEARED -- not merely 'advanced' (mid-delivery, the
+                    // transport still in the assembly volume). Fully data-driven; no hardcoded component/state names.
+                    if (string.Equals(target.Type, "Process", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (TryResolveProcessEntryGate(target, AfterLastSlash(cond.Name), arrays, allComponents,
+                                out waitId, out advancingState, out settledState))
+                            return true;
+                        continue;   // unresolvable process gate -> no barrier (never fall back to a wrong one)
+                    }
+
+                    // Direct component gate (e.g. Transfer/Advanced): the advance edge, from name families (unchanged).
+                    if (!arrays.ComponentRegistry.TryGetValue(cond.ComponentID.Trim(), out var id)) continue;
                     waitId = id;
                     settledState = ResolveStateByNameFamily(target, AdvancedStateNames, 2);
                     advancingState = ResolveStateByNameFamily(target, AdvancingStateNames,
@@ -514,6 +530,67 @@ namespace CodeGen.Translation.Process.Recipes
                     return true;
                 }
             return false;
+        }
+
+        private static string AfterLastSlash(string? s)
+        {
+            var v = (s ?? string.Empty).Trim();
+            int i = v.LastIndexOf('/');
+            return i >= 0 ? v.Substring(i + 1).Trim() : v;
+        }
+
+        // Follow a cross-process Assembly-start gate to the transport's DELIVERY edge (see the caller). The referenced
+        // process reaches `procStateName` via a PHYSICAL transition; resolve that transition's transport condition to
+        // (id, settled state) and pair it with the transport state that ENTERS the settled state (the fresh edge).
+        private static bool TryResolveProcessEntryGate(VueOneComponent proc, string procStateName,
+            RecipeArrays arrays, IReadOnlyList<VueOneComponent> allComponents,
+            out int waitId, out int advancingState, out int settledState)
+        {
+            waitId = -1; advancingState = 1; settledState = 2;
+            var procState = proc.States.FirstOrDefault(s =>
+                string.Equals((s.Name ?? string.Empty).Trim(), procStateName, StringComparison.OrdinalIgnoreCase));
+            if (procState == null) return false;
+            var procStateId = (procState.StateID ?? string.Empty).Trim();
+            foreach (var st in proc.States)
+                foreach (var tr in st.Transitions)
+                {
+                    if (!string.Equals((tr.DestinationStateID ?? string.Empty).Trim(), procStateId,
+                            StringComparison.OrdinalIgnoreCase)) continue;
+                    foreach (var pc in tr.Conditions)
+                    {
+                        if (string.IsNullOrEmpty(pc.ComponentID)) continue;
+                        var phys = LookupComponent(pc.ComponentID, allComponents);
+                        if (phys == null ||
+                            string.Equals(phys.Type, "Process", StringComparison.OrdinalIgnoreCase)) continue;
+                        if (!arrays.ComponentRegistry.TryGetValue(pc.ComponentID.Trim(), out var id)) continue;
+                        waitId = id;
+                        int raw = ResolveStateNumber(pc, phys, arrays);
+                        // home-finished family (ReturnedFinished=4) settles to AtHomeInit=0 in one run-to-stable tick.
+                        settledState = (raw == 4 &&
+                            string.Equals(phys.Type, "Actuator", StringComparison.OrdinalIgnoreCase) &&
+                            !CodeGen.Mapping.TemplateMap.IsBranchedSevenState(phys)) ? 0 : raw;
+                        advancingState = ResolvePrecursorStateNumber(phys, pc, settledState);
+                        return true;
+                    }
+                }
+            return false;
+        }
+
+        // The transport state whose transition ENTERS the settled physical state (Returning -> ReturnedFinished),
+        // giving a fresh return edge; falls back to `fallback` (single level wait) when no predecessor exists.
+        private static int ResolvePrecursorStateNumber(VueOneComponent transport, VueOneCondition settledCond, int fallback)
+        {
+            var settledName = AfterLastSlash(settledCond.Name);
+            var settled = transport.States.FirstOrDefault(s =>
+                string.Equals((s.Name ?? string.Empty).Trim(), settledName, StringComparison.OrdinalIgnoreCase));
+            if (settled == null) return fallback;
+            var settledId = (settled.StateID ?? string.Empty).Trim();
+            foreach (var st in transport.States)
+                foreach (var tr in st.Transitions)
+                    if (string.Equals((tr.DestinationStateID ?? string.Empty).Trim(), settledId,
+                            StringComparison.OrdinalIgnoreCase))
+                        return st.StateNumber;
+            return fallback;
         }
 
         private static readonly string[] HomeStateNames = { "ReturnedHome", "AtHomeInit", "Home" };
