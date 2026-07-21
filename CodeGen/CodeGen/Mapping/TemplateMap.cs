@@ -29,6 +29,21 @@ namespace CodeGen.Mapping
             };
         }
 
+        // VueOne spells the top-cover sensor inconsistently across twin revisions: the original component name
+        // carries a typo ("TopCoverSenosr") and corrected models use "TopCoverSensor" (the VcID was always the
+        // corrected spelling). Match EITHER everywhere, because this component is matched BY NAME in the sensor
+        // allow-list, the registry, the state_table id pin and the cover ring -- so a twin rename would silently
+        // drop the sensor from all of them and take the whole cover interlock with it.
+        public static readonly string[] TopCoverSensorNames = { "TopCoverSenosr", "TopCoverSensor" };
+
+        public static bool IsTopCoverSensor(string? name)
+        {
+            var n = (name ?? string.Empty).Trim();
+            foreach (var w in TopCoverSensorNames)
+                if (n.Equals(w, System.StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
         // TRUE only for the real UR3e task arm; Type="Robot" grippers (*Gripper*/*Grasp*) are excluded.
         public static bool IsRobotTaskArm(VueOneComponent component)
         {
