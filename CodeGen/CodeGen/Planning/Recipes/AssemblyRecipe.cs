@@ -86,7 +86,7 @@ namespace CodeGen.Translation.Process
                     .FirstOrDefault(s => string.Equals(s.Block, block, StringComparison.OrdinalIgnoreCase));
                 if (si == null) return;
                 int id;
-                if (string.Equals(si.Sensor, "TopCoverSenosr", StringComparison.Ordinal))
+                if (CodeGen.Mapping.TemplateMap.IsTopCoverSensor(si.Sensor))
                 {
                     if (!MapperConfig.CoverInterlockActive) return;   // cover gate rides its computed ring slot
                     id = MapperConfig.TopCoverSensorId;
