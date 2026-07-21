@@ -907,7 +907,8 @@ namespace CodeGen.Translation
             {
                 "PartInHopper", "PartAtChecker",
                 "BearingSensor", "ShaftSensor",
-                "TopCoverSenosr",
+                // BOTH spellings: the twin's name for this one varies by revision (see TemplateMap.IsTopCoverSensor).
+                "TopCoverSenosr", "TopCoverSensor",
             };
             // Source from full Control.xml (StationGroupingService only populates Feed_Station's conditions); grippers are Type="Robot", so accept both.
             var contents = new StationContents(
@@ -959,7 +960,7 @@ namespace CodeGen.Translation
                 var cross = RigCatalog.Current.CrossRingSegment;                               // Ejector/Robot/PartAtAssembly
                 void MarkOcc(string nm, int id)
                 {
-                    if (string.Equals(nm, "TopCoverSenosr", StringComparison.Ordinal)) return; // this is the slot being placed
+                    if (CodeGen.Mapping.TemplateMap.IsTopCoverSensor(nm)) return; // this is the slot being placed
                     var plc = HcfSymbolIndex.NameBasedPlcGuess(nm);
                     if (plc is PlcAssignment.M580 or PlcAssignment.BX1 || cross.Contains(nm) || MapperConfig.MergeFeedRing)
                         occ.Add(id);
@@ -1230,7 +1231,7 @@ namespace CodeGen.Translation
                 // positional sequence to its own slot so its report never collides with the PartAtAssembly
                 // synth sensor at slot 3. It stays counted in contents.Sensors, so actuator ids are unshifted.
                 if (MapperConfig.CoverInterlockActive &&
-                    string.Equals(sensor.Name, "TopCoverSenosr", StringComparison.Ordinal))
+                    CodeGen.Mapping.TemplateMap.IsTopCoverSensor(sensor.Name))
                     assignedId = MapperConfig.TopCoverSensorId;
 
                 SensorBinding? senBinding = null;
