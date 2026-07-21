@@ -129,7 +129,9 @@ namespace CodeGen.Mapping
                 M580("Stn2_Term",        column: 6, row: LayoutRow.Actuator, owner: ""),
 
                 // BX1 — Cover PnP (BX1_RES); covers fold into the M580 flow, no BX1 Process engine.
+                // Both twin spellings registered; only the one the model actually contains is ever looked up.
                 BX1("TopCoverSenosr",    column: 0, row: LayoutRow.Process,  owner: ""),
+                BX1("TopCoverSensor",    column: 0, row: LayoutRow.Process,  owner: ""),
                 BX1("CoverPNP_Hr",       column: 0, row: LayoutRow.Actuator, owner: ""),
                 BX1("CoverPNP_Vr",       column: 1, row: LayoutRow.Actuator, owner: ""),
                 BX1("CoverPnp_Gripper",  column: 2, row: LayoutRow.Actuator, owner: ""),
