@@ -40,7 +40,7 @@ namespace CodeGen.Devices.Core
             "BearingSensor", "ShaftSensor",
             "Bearing_PnP", "Bearing_Gripper",
             "Shaft_Hr", "Shaft_Vr", "Shaft_Gripper", "Clamp",
-            "TopCoverSenosr",
+            "TopCoverSenosr", "TopCoverSensor",   // both twin spellings; the absent one is simply skipped
             "CoverPNP_Hr", "CoverPNP_Vr", "CoverPnp_Gripper",
         };
 
@@ -259,7 +259,7 @@ namespace CodeGen.Devices.Core
                     // Cover-presence interlock (clamp model): TopCoverSenosr joins the cover ring so its
                     // report reaches Assembly's state_table. Off = kept off the ring (byte-identical baseline).
                     .Where(s => CodeGen.Configuration.MapperConfig.CoverInterlockActive ||
-                                !string.Equals(s, "TopCoverSenosr", StringComparison.OrdinalIgnoreCase))
+                                !CodeGen.Mapping.TemplateMap.IsTopCoverSensor(s))
                     .ToList();
                 var actNames = orderedComps.Where(c => IsActuator(c) && HasStationAdapter(c))
                     .Select(Nm).Where(s => s.Length > 0).ToList();
