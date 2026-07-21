@@ -186,8 +186,13 @@ namespace CodeGen.Translation
             // Cover-presence sensor (TopCoverSenosr) rides the ring into Assembly's state_table so the cover
             // pick can gate on it (clamp model). Spliced just before the cover actuators to mirror the sysres
             // CaSBusOrder (TopCoverSenosr before CoverPNP_Hr); the report reaches Assembly wherever it sits.
-            if (MapperConfig.CoverInterlockActive)
-                ring.Add(("TopCoverSenosr", "Sensor_Bool_CAT"));
+            // Resolve the sensor's ACTUAL instance name from the twin (the spelling varies by revision), so a
+            // rename can never splice a dangling name onto the ring or silently drop the cover report.
+            var topCoverName = contents.Sensors
+                .Select(s => (s.Name ?? string.Empty).Trim())
+                .FirstOrDefault(CodeGen.Mapping.TemplateMap.IsTopCoverSensor);
+            if (MapperConfig.CoverInterlockActive && !string.IsNullOrEmpty(topCoverName))
+                ring.Add((topCoverName!, "Sensor_Bool_CAT"));
             // Cover detour splices the BX1 covers between Clamp and Assembly_Station at a DIFFERENT seam, so the two compose with only M580<->BX1 and M580<->M262 boundaries, never M262<->BX1. Empty when off.
             foreach (var cover in HandoffPlanner.CoverDetour)
                 ring.Add((cover, "Five_State_Actuator_CAT"));
@@ -257,7 +262,7 @@ namespace CodeGen.Translation
             // TopCoverSenosr moves to the M580 cover ring (clamp model); keep it off the BX1 ring so it is not double-driven.
             foreach (var s in contents.Sensors)
                 if (IsBx1(s.Name) && !(MapperConfig.CoverInterlockActive &&
-                                       string.Equals(s.Name, "TopCoverSenosr", StringComparison.Ordinal)))
+                                       CodeGen.Mapping.TemplateMap.IsTopCoverSensor(s.Name)))
                     ring.Add((s.Name, "Sensor_Bool_CAT"));
             // Cover-detour actuators are on the M580 ring, so keep them off the BX1 ring (TopCoverSenosr stays a BX1 sensor, off-ring).
             foreach (var a in contents.Actuators)
