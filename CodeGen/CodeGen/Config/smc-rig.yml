@@ -46,15 +46,15 @@ sensorInterlocks:
   - block: shaft
     sensor: ShaftSensor
     presentState: 0
-# NO coverPlace gate: the rig has NO independent top-cover-present input. The coupler input word exposes only
-# bit0/1 (Hr athome/atwork), bit2/3 (Vr athome/atwork) and bit5, and bit5 (CoverPnpSensor) is ALREADY wired to
-# the cover gripper's atwork -- TopCoverSenosr.Input is an ALIAS of that same bit. So it only asserts when
-# something is at the gripper face, never for a cover merely sitting in the magazine, which makes a PRE-PICK
-# WAIT(present) unsatisfiable: it hangs until the cover is physically taken out and put back (that transient
-# latches the sensor at 1, and Sensor_Bool only republishes on a flip, so it then stays 1 for the whole run).
-# To restore a real cover interlock, EITHER wire a dedicated cover-present DI to a spare coupler input (bit4/6/7
-# are free) and unpack it in PLC_RW_BX1, OR re-purpose this as a POST-grip confirmation ("did we actually pick a
-# cover?"), which is what bit5 genuinely means. Bearing/shaft keep their gates -- they have real dedicated sensors.
+  # Straight from the twin: Control.xml gates the Assembly advance into the cover block on `TopCoverSenosr/On`
+  # (the SEQUENCE condition leaving Shaft_PnP_Return_Home), i.e. Cover_Vr must not descend with no cover there.
+  # presentState 1 == "On". The sensor rides input-word bit5, which it shares with the cover gripper's atwork --
+  # that bit is a cover-PRESENCE signal at the pick position (hence CoverPnp_Gripper.WorkSensorFitted=FALSE, the
+  # gripper timer-acks instead of trusting it). Sensor_Bool only publishes on a CHANGE, so the publisher is also
+  # re-REQ'd from the cyclic scan (Bx1IoBrokerInjector) to establish this level at boot without a physical toggle.
+  - block: coverPlace
+    sensor: TopCoverSenosr
+    presentState: 1
 
 # M262 DI/DO channels the .hcf MUST bind when the cross-PLC discharge tail is active, else the
 # ejector/robot never actuate. The parity validator checks each is bound and non-blank.
