@@ -132,6 +132,34 @@ namespace CodeGen.Devices.Core
                     $"Equipment referenced it but no file declared it (dangling domain → topology " +
                     $"import failure). Pinned to 192.168.1.0/24.");
             }
+
+            // ARCHIVE COMPLETENESS. EAE's Archive packs only files REGISTERED in TopologyManager.topologyproj,
+            // so a domain written but never registered is silently dropped from the .sln archive -- notably
+            // "BroadcastDomain_Default Network.json" (written by Emit above, which does not register it). The
+            // UNARCHIVED solution then has an Equipment referencing a domain that no file declares, and EAE's
+            // TopologyManager rejects the WHOLE topology with "Unable to import topology / Internal Server
+            // Error" -- it resolves every reference before parsing any device, so one dangling domain loses
+            // the lot. It only shows up after archive/unarchive (or on another machine), because locally the
+            // unregistered file is still sitting in the folder. Register every domain file present.
+            var projPath = Path.Combine(topologyDir, "TopologyManager.topologyproj");
+            if (File.Exists(projPath))
+            {
+                var allDomains = new List<string>();
+                foreach (var bd in Directory.EnumerateFiles(topologyDir, "BroadcastDomain_*.json"))
+                {
+                    var fn = Path.GetFileName(bd);
+                    if (!string.IsNullOrEmpty(fn)) allDomains.Add(fn);
+                }
+                if (allDomains.Count > 0)
+                {
+                    try
+                    {
+                        CodeGen.Devices.M262.M262TopologyEmitter.RegisterInTopologyProj(
+                            projPath, allDomains.ToArray());
+                    }
+                    catch { /* registration best-effort; the files on disk remain the primary fix */ }
+                }
+            }
             return result;
         }
     }
