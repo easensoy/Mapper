@@ -194,7 +194,12 @@ namespace CodeGen.Services
                 FixCatHmiOpcuaFrame(eaeProjectDir, hmiCat, result);
             PatchActuatorModeInitialValue(eaeProjectDir, "FiveStateActuator.fbt", result);
             PatchActuatorModeInitialValue(eaeProjectDir, "SevenStateCentreHomeActuator.fbt", result);
-            PatchSwivelAtHomeInitRecovery(eaeProjectDir, addArc: true, result);
+            // Swivel INIT must NOT drive a move at power-up: Control.xml has Bearing_PnP Initial_State=ReturnedHome,
+            // so the twin assumes it starts home and the arm moves ONLY when the recipe commands it (after
+            // PartAtAssembly). addArc:true added a "self-home on power-up" (INIT->ToHome) that swung the arm during
+            // Feed on the first cycle if a work sensor read TRUE; addArc:false keeps the committed core's
+            // recognize-don't-drive INIT arcs (INIT->AtWork1/ToWork2/AtHomeInit) so it stays put until the recipe runs.
+            PatchSwivelAtHomeInitRecovery(eaeProjectDir, addArc: false, result);
             PatchSwivelAtHomeCoilClear(eaeProjectDir, clearCoils: true, result);
             PatchSwivelAtHomeBothCoils(eaeProjectDir, MapperConfig.SwivelHomeHoldBothCoils, result);
             // SAFE: SwivelBrakeHome runs LAST — directional brake (reverse the driving coil only when homing from AtWork1, away from the ejector).
