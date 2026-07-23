@@ -949,14 +949,17 @@ namespace CodeGen.Translation
 
             // TopCoverSenosr's state_table slot -- computed, model-independent (nothing to do with the clamp).
             // Occupy every id held by an ASSEMBLY-ring member (M580/BX1 components, the cross-PLC segment, and --
-            // when MergeFeedRing merges the rings -- the Feed components), plus the synth/cover/process ids, then
-            // take the highest free component-range slot. Clamp: the Feed ids sit on a SEPARATE ring -> {0,4,5,6}
-            // free -> 6 (the rig-proven value). Merged no-clamp: Feed ids occupied but Clamp absent -> 13.
+            // when MergeFeedRing merges the rings -- the Feed components), plus the synth/process ids, then take the
+            // highest free component-range slot. The covers are occupied by MarkOcc below at their REAL positional
+            // ids (13/14/15 no-clamp, 14/15/16 clamp) -- NOT from a fixed RigCatalog value, which drifts when Clamp is
+            // absent (RigCatalog says 14/15/16 but the covers shift down to 13/14/15) and would wrongly reserve 16.
+            // Clamp: the Feed ids sit on a SEPARATE ring -> {0,4,5,6} free -> 6 (the rig-proven value). Merged
+            // no-clamp: the Feed + M580 + cover ids fill [0..15] but nothing occupies 16 -> 16 (a truly free slot;
+            // pinning it to 6 collides with Transfer on the merged ring and deadlocks the cover-place gate).
             if (MapperConfig.EnableSensorPresenceInterlock)
             {
                 var occ = new HashSet<int> { assemblyProcessId, disassemblyProcessId, MapperConfig.RobotActuatorId };
                 foreach (var syn in MapperConfig.M262SynthSensors) occ.Add(syn.Id);            // PartAtAssembly (3)
-                foreach (var cid in RigCatalog.Current.CoverActuatorIds.Values) occ.Add(cid);  // covers 14/15/16
                 var cross = RigCatalog.Current.CrossRingSegment;                               // Ejector/Robot/PartAtAssembly
                 void MarkOcc(string nm, int id)
                 {
@@ -966,7 +969,14 @@ namespace CodeGen.Translation
                         occ.Add(id);
                 }
                 for (int i = 0; i < contents.Sensors.Count; i++)   MarkOcc(contents.Sensors[i].Name, sensorIdStart + i);
-                for (int i = 0; i < contents.Actuators.Count; i++) MarkOcc(contents.Actuators[i].Name, actuatorIdStart + i);
+                for (int i = 0; i < contents.Actuators.Count; i++)
+                {
+                    // The robot task arm is APPENDED to allowedActuators, so its LOCAL positional id here is wrong --
+                    // globally it takes RobotActuatorId (already reserved in occ above), well outside the cover range.
+                    // Marking its local slot would falsely reserve a free cover slot (the id-16 no-clamp collision).
+                    if (CodeGen.Mapping.TemplateMap.IsRobotTaskArm(contents.Actuators[i])) continue;
+                    MarkOcc(contents.Actuators[i].Name, actuatorIdStart + i);
+                }
                 for (int slot = 16; slot >= 0; slot--)
                     if (!occ.Contains(slot)) { MapperConfig.TopCoverSensorId = slot; break; }
             }
