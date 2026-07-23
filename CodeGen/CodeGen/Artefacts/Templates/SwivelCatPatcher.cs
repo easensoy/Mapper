@@ -305,25 +305,50 @@ namespace CodeGen.Services
                 var ei = root.Element(ns + "InterfaceList")?.Element(ns + "EventInputs");
                 var net = root.Element(ns + "FBNetwork");
                 if (ei == null || net == null) return;
-                if (ei.Elements(ns + "Event").Any(e => (string?)e.Attribute("Name") == "RD")) return; // idempotent
+                var ec = net.Element(ns + "EventConnections");
+                if (ec == null) return;
 
-                ei.Add(new XElement(ns + "Event", new XAttribute("Name", "RD"),
-                    new XAttribute("Comment", "Re-sample the input (for broker-fed sensors that have no I/O-scan event)")));
+                bool changed = false;
 
-                // FBNetwork boundary marker for the new event input (after the INIT marker).
-                var rdMarker = new XElement(ns + "Input", new XAttribute("Name", "RD"),
-                    new XAttribute("x", "12"), new XAttribute("y", "80"), new XAttribute("Type", "Event"));
-                var initMarker = net.Elements(ns + "Input").FirstOrDefault(i => (string?)i.Attribute("Name") == "INIT");
-                if (initMarker != null) initMarker.AddAfterSelf(rdMarker); else net.Add(rdMarker);
+                if (!ei.Elements(ns + "Event").Any(e => (string?)e.Attribute("Name") == "RD"))
+                {
+                    ei.Add(new XElement(ns + "Event", new XAttribute("Name", "RD"),
+                        new XAttribute("Comment", "Re-sample the input (for broker-fed sensors that have no I/O-scan event)")));
 
-                // RD re-fires FB2 (the DI sampler); FB2.CNF -> FB1.REQ -> change-gated publish is already wired.
-                net.Element(ns + "EventConnections")?.Add(new XElement(ns + "Connection",
-                    new XAttribute("Source", "RD"), new XAttribute("Destination", "FB2.REQ")));
+                    // FBNetwork boundary marker for the new event input (after the INIT marker).
+                    var rdMarker = new XElement(ns + "Input", new XAttribute("Name", "RD"),
+                        new XAttribute("x", "12"), new XAttribute("y", "80"), new XAttribute("Type", "Event"));
+                    var initMarker = net.Elements(ns + "Input").FirstOrDefault(i => (string?)i.Attribute("Name") == "INIT");
+                    if (initMarker != null) initMarker.AddAfterSelf(rdMarker); else net.Add(rdMarker);
+
+                    // RD re-fires FB2 (the DI sampler); FB2.CNF -> FB1.REQ.
+                    ec.Add(new XElement(ns + "Connection",
+                        new XAttribute("Source", "RD"), new XAttribute("Destination", "FB2.REQ")));
+                    changed = true;
+                }
+
+                // RD ALSO re-PUBLISHES the current level (StateHandling.REQ re-stamps state_table[id]=state_sts=FB1.Status),
+                // not just re-reads (FB2.REQ). Sensor_Bool's ECC has NO same-level self-transition, so a re-read alone
+                // re-publishes only on a CHANGE. The cover sensor's report crosses BX1->M580, where a boot-race can drop
+                // the single present-edge -> Assembly's WAIT(cover present) hangs until a physical cover out+in. Re-stamping
+                // the level on every cyclic RD keeps state_table[cover] asserted so M580 always sees present. ONLY the cover
+                // has RD wired (broker-fed, no I/O event); HCF M262/M580 sensors leave RD unwired -> unaffected. MQTT rides
+                // FB1.CNF (change) -> NOT re-fired by this, so no MQTT flood.
+                if (!ec.Elements(ns + "Connection").Any(c =>
+                        (string?)c.Attribute("Source") == "RD" &&
+                        (string?)c.Attribute("Destination") == "StateHandling.REQ"))
+                {
+                    ec.Add(new XElement(ns + "Connection",
+                        new XAttribute("Source", "RD"), new XAttribute("Destination", "StateHandling.REQ")));
+                    changed = true;
+                }
+
+                if (!changed) return; // idempotent
 
                 doc.Save(fbt);
                 result.PatchesApplied.Add(
-                    "Sensor_Bool_CAT: added scoped RD re-read event (RD -> FB2.REQ); broker-fed BX1 sensors re-report on change, HCF M262/M580 sensors unaffected (RD unwired).");
-                MapperLogger.Info("[Deploy] Sensor_Bool_CAT.fbt: added RD re-read event input (no timer)");
+                    "Sensor_Bool_CAT: RD re-read (FB2.REQ) + RD re-publish (StateHandling.REQ) so broker-fed BX1 sensors re-assert their level every scan; HCF M262/M580 sensors unaffected (RD unwired).");
+                MapperLogger.Info("[Deploy] Sensor_Bool_CAT.fbt: RD -> FB2.REQ + RD -> StateHandling.REQ (level re-assert)");
             }, notFoundNote: "Sensor_Bool_CAT.fbt not found; RD event inject skipped.");
 
         // Swivel work-arrival latch: relax=true (rig) fires ToWorkN->AtWorkN on atWorkN=TRUE alone;
