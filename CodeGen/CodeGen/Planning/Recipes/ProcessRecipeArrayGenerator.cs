@@ -308,6 +308,27 @@ namespace CodeGen.Translation.Process
                                 "at end (safe; ordering not serialised for this input).");
                         }
 
+                        // MergeFeedRing HOLD: if this actuator's atwork WAIT chains straight into a cross-process
+                        // hold gate (a WAIT on the downstream process's sentinel slot, DisassemblyProcessId), the
+                        // retract must land AFTER that hold, not before it. The Transfer is the no-clamp holding
+                        // device: it advances, then Feed BLOCKS on WAIT(DisassemblyProcessId, ...) until Disassembly
+                        // finishes the bearing -- only then may the Transfer return home. Inserting the retract before
+                        // the hold gate would send the Transfer home immediately, so it would never hold the part.
+                        // Data-driven: follows the NextStep chain past any WAIT on DisassemblyProcessId; a no-op on
+                        // the clamp model (MergeFeedRing false) and on normally-retracted actuators (their atwork WAIT
+                        // chains to the next state's row, not to a process-sentinel hold).
+                        if (MapperConfig.MergeFeedRing)
+                        {
+                            for (int guard = 0; guard < arrays.StepType.Count; guard++)
+                            {
+                                int nxt = arrays.NextStep[atworkWaitIdx];
+                                if (nxt < 0 || nxt >= arrays.StepType.Count) break;
+                                if (arrays.StepType[nxt] != StepType.Wait) break;
+                                if (arrays.Wait1Id[nxt] != MapperConfig.DisassemblyProcessId) break;
+                                atworkWaitIdx = nxt;   // defer the retract past this hold gate
+                            }
+                        }
+
                         int insertAt = atworkWaitIdx + 1;
                         int origTarget = arrays.NextStep[atworkWaitIdx];   // pre-shift
 
