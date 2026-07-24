@@ -308,25 +308,24 @@ namespace CodeGen.Translation.Process
                                 "at end (safe; ordering not serialised for this input).");
                         }
 
-                        // MergeFeedRing HOLD: if this actuator's atwork WAIT chains straight into a cross-process
-                        // hold gate (a WAIT on the downstream process's sentinel slot, DisassemblyProcessId), the
-                        // retract must land AFTER that hold, not before it. The Transfer is the no-clamp holding
-                        // device: it advances, then Feed BLOCKS on WAIT(DisassemblyProcessId, ...) until Disassembly
-                        // finishes the bearing -- only then may the Transfer return home. Inserting the retract before
-                        // the hold gate would send the Transfer home immediately, so it would never hold the part.
-                        // Data-driven: follows the NextStep chain past any WAIT on DisassemblyProcessId; a no-op on
-                        // the clamp model (MergeFeedRing false) and on normally-retracted actuators (their atwork WAIT
-                        // chains to the next state's row, not to a process-sentinel hold).
-                        if (MapperConfig.MergeFeedRing)
+                        // CROSS-PROCESS HOLD: a retract must never jump ahead of a hold gate owned by another
+                        // process. Which process releases a transport is stated by the twin itself, on the
+                        // transport's own settled state:
+                        //     clamp    Transfer Advanced -> IF Feed_Station/TransferReturning   (this process)
+                        //     no-clamp Transfer Advanced -> IF Disassembly/TransferReturning    (another process)
+                        // The walk already turns that foreign condition into a WAIT on the owning process's
+                        // sentinel slot right after the atwork WAIT, so the shape is self-describing and no
+                        // clamp test is needed: if a foreign-process hold follows, the transport is acting as
+                        // the holding device and its retract belongs AFTER the hold; if none follows, this
+                        // process owns the release and the retract stays where it was. Inserting before the
+                        // hold would send the transport home immediately and it would hold nothing.
+                        for (int guard = 0; guard < arrays.StepType.Count; guard++)
                         {
-                            for (int guard = 0; guard < arrays.StepType.Count; guard++)
-                            {
-                                int nxt = arrays.NextStep[atworkWaitIdx];
-                                if (nxt < 0 || nxt >= arrays.StepType.Count) break;
-                                if (arrays.StepType[nxt] != StepType.Wait) break;
-                                if (arrays.Wait1Id[nxt] != MapperConfig.DisassemblyProcessId) break;
-                                atworkWaitIdx = nxt;   // defer the retract past this hold gate
-                            }
+                            int nxt = arrays.NextStep[atworkWaitIdx];
+                            if (nxt < 0 || nxt >= arrays.StepType.Count) break;
+                            if (arrays.StepType[nxt] != StepType.Wait) break;
+                            if (!IsForeignProcessSentinel(arrays.Wait1Id[nxt], process)) break;
+                            atworkWaitIdx = nxt;   // defer the retract past this cross-process hold
                         }
 
                         int insertAt = atworkWaitIdx + 1;
@@ -580,6 +579,27 @@ namespace CodeGen.Translation.Process
                 "[Recipe] Assembly bearing release sequence: Bearing_PnP Place CMD -> WAIT AtPlace -> " +
                 "Bearing_Gripper release -> WAIT gripper home -> Bearing_PnP Home. Every CMD has its " +
                 "own WAIT; the place confirmation is proven before the gripper releases.");
+        }
+
+        // A state_table slot owned by a PROCESS sentinel other than the one being walked. Those slots carry
+        // cross-process handshakes (one process publishing its progress for another to gate on), never a
+        // component's motion state, so a WAIT on one is always a hold on somebody else -- which is exactly
+        // what a retract must not be reordered ahead of. The walked process is excluded so a process that
+        // gates on its own sentinel is not mistaken for a foreign hold.
+        private static bool IsForeignProcessSentinel(int waitId, VueOneComponent walkedProcess)
+        {
+            int own = ProcessSentinelIdOf(walkedProcess);
+            if (waitId == own) return false;
+            return waitId == MapperConfig.AssemblyProcessId
+                || waitId == MapperConfig.DisassemblyProcessId;
+        }
+
+        private static int ProcessSentinelIdOf(VueOneComponent process)
+        {
+            var n = (process?.Name ?? string.Empty).Trim();
+            if (n.StartsWith("Assembly", StringComparison.OrdinalIgnoreCase)) return MapperConfig.AssemblyProcessId;
+            if (n.StartsWith("Disassembly", StringComparison.OrdinalIgnoreCase)) return MapperConfig.DisassemblyProcessId;
+            return MapperConfig.FeedStationProcessId;
         }
 
         internal static bool TryGetComponentId(RecipeArrays arrays,
