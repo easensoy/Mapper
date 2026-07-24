@@ -93,38 +93,7 @@ namespace CodeGen.Translation.Process
                 }
                 else if (!ProcessRecipeArrayGenerator.TryGetComponentId(arrays, allComponents, si.Sensor, out id))
                     return;                                           // sensor not in this model -> no gate
-                b.AddWait(id, TwinPresentState(allComponents, si.Sensor) ?? si.PresentState);
-            }
-
-            // Resolve "part present" from the TWIN's own sensor state table rather than a hardcoded polarity.
-            // Control.xml declares each sensor's states (e.g. Off=0 / On=1) and Sensor_Bool publishes
-            // Status:=1 for Input=1 / Status:=0 for Input=0, so the twin's State_Number IS the runtime state
-            // this gate compares against. A configured constant silently inverts on any model that declares
-            // its sensor the other way round -- and an inverted gate is worse than none here, because
-            // state_table initialises to 0: WAIT(sensor==0) is VACUOUSLY satisfied at boot, so the interlock
-            // passes instantly and the pick proceeds with nothing under it. Falls back to the configured
-            // value only when the twin does not describe the sensor.
-            static int? TwinPresentState(IReadOnlyList<VueOneComponent> all, string sensorName)
-            {
-                bool wantCover = CodeGen.Mapping.TemplateMap.IsTopCoverSensor(sensorName);
-                var sensor = all.FirstOrDefault(c =>
-                    string.Equals(c.Type, "Sensor", StringComparison.OrdinalIgnoreCase) &&
-                    (string.Equals(c.Name, sensorName, StringComparison.OrdinalIgnoreCase) ||
-                     (wantCover && CodeGen.Mapping.TemplateMap.IsTopCoverSensor(c.Name))));
-                if (sensor == null || sensor.States.Count == 0) return null;
-                // The asserted ("something is there") state, by the twin's own naming.
-                var on = sensor.States.FirstOrDefault(s => IsAssertedStateName(s.Name));
-                return on?.StateNumber;
-            }
-
-            static bool IsAssertedStateName(string? name)
-            {
-                var n = (name ?? string.Empty).Trim();
-                return n.Equals("On", StringComparison.OrdinalIgnoreCase)
-                    || n.Equals("True", StringComparison.OrdinalIgnoreCase)
-                    || n.Equals("Present", StringComparison.OrdinalIgnoreCase)
-                    || n.Equals("Detected", StringComparison.OrdinalIgnoreCase)
-                    || n.Equals("Occupied", StringComparison.OrdinalIgnoreCase);
+                b.AddWait(id, si.PresentState);
             }
 
             if (!MapperConfig.MergeFeedRing)
