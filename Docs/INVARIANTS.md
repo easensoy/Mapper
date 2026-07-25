@@ -295,3 +295,27 @@ Don't reintroduce the old `Shared` namespace.
 
 **What breaks if you change it:** a re-enabled test that still references the old
 `Shared` namespace fails to compile and breaks the `MapperTests` build.
+
+---
+
+## I-16. Bearing_PnP startup must return the arm to its centre reference
+
+**Where:** `SwivelCatPatcher.PatchSwivelStartupToHome`, called by
+`TemplateLibraryDeployer`. It is the SOLE writer of the swivel core's `INIT`
+arcs. Full history: `Docs/BEARING_PNP_NEUTRAL_STARTUP.md`.
+
+**Why it matters:** the committed template starts a work MOVE from a startup
+sensor reading (`INIT -> AtWork1` holds the Work1 coil, `INIT -> ToWork2`
+energises the Work2 coil). Classifying the position with both coils FALSE
+instead was tried on the rig on 2026-07-25 and is ALSO wrong: an unheld
+three-position pneumatic is not homed either, so the arm drifts and the first
+recipe command finds it in an unknown place. The rig-proven Ground Truth routes
+a startup work reading to `ToHome`, which drives the arm to its centre
+reference and holds it there. The generated
+`SevenStateCentreHomeActuator.fbt` is byte-identical to that reference.
+
+**What breaks if you change it:** leaving both work coils FALSE at startup, or
+letting a second patch rewrite the same `INIT` arcs, reintroduces first-cycle
+movement that only appears on cycle one, so later cycles look correct.
+
+---
