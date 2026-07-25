@@ -189,6 +189,50 @@ namespace CodeGen.Devices.BX1
             doc.Save(fbtPath);
         }
 
+        // Decode the EtherNet/IP input word ONCE at INIT, so a cover already in place at power-on is reported
+        // without a physical remove-and-replace.
+        // EIPInputs_Bool (WordToBits) computes bit0..bit15 only on REQ, and its ONLY REQ driver is
+        // EIP_Input_Word.CNF, which fires from the composite REQ i.e. from the scan. The change detector IS
+        // already clocked at INIT (EIP_Input_Word.INITO -> FB2.Scan_Event) but it is handed UNDECODED bits, so
+        // CoverPnpSensor reads FALSE against a PreVal that is also FALSE, no change is seen, and the cover level
+        // goes unannounced until the first scan. INITO does carry the sampled word (SYMLINKMULTIVARDST declares
+        // INITO With QO, STATUS, VALUE${I}, and every INIT produces an INITO), so decoding on INITO hands the
+        // detector the real bit5 while PreVal is still FALSE.
+        // Bounded by construction: fires once per INIT and adds nothing to the scan, so it cannot reintroduce the
+        // per-scan ring publish removed earlier. Order-safe either way round the INITO fan-out - if the detector
+        // is evaluated first it simply sees the old all-FALSE bits and updates no PreVal, then the decode's CNF
+        // re-clocks it with the real ones. Idempotent, and applied on the already-embedded path too because the
+        // deployed composite is copy-if-absent and would otherwise never receive it.
+        // Applies to the deployed broker composite in BOTH bridge modes (the internals it wires — EIP_Input_Word,
+        // EIPInputs_Bool, FB2 — are part of the composite whether or not the cover bridge is embedded), so it is
+        // driven from the deployer beside DeployArtifact("PLC_RW_BX1") rather than from the embed path.
+        public static bool EnsureInitWordDecodeInComposite(string fbtPath)
+        {
+            if (!File.Exists(fbtPath)) return false;
+            var doc = XDocument.Load(fbtPath);
+            var ec = doc.Root?.Element("FBNetwork")?.Element("EventConnections");
+            var net = doc.Root?.Element("FBNetwork");
+            if (ec == null || net == null) return false;
+            // Only meaningful when the composite actually carries the word decoder and the change detector.
+            if (!net.Elements("FB").Any(f => (string?)f.Attribute("Name") == "EIPInputs_Bool") ||
+                !net.Elements("FB").Any(f => (string?)f.Attribute("Name") == "EIP_Input_Word")) return false;
+            if (!EnsureInitWordDecode(ec)) return false;
+            doc.Save(fbtPath);
+            return true;
+        }
+
+        private static bool EnsureInitWordDecode(XElement? ec)
+        {
+            if (ec == null) return false;
+            if (ec.Elements("Connection").Any(c =>
+                    (string?)c.Attribute("Source") == "EIP_Input_Word.INITO" &&
+                    (string?)c.Attribute("Destination") == "EIPInputs_Bool.REQ")) return false;
+            ec.Add(new XElement("Connection",
+                new XAttribute("Source", "EIP_Input_Word.INITO"),
+                new XAttribute("Destination", "EIPInputs_Bool.REQ")));
+            return true;
+        }
+
         // SAFETY (cover safe-start, CoverPNP_Hr <-> Bearing_PnP swivel collision; gated by cfg.Bx1CoverSafeStart).
         // Inserts a Bx1CoverFailsafe gate that on start forces CoverPNP_Hr HOME (bit0 ToWork=0, bit1 ToHome=1,
         // double-acting Hr needs ToHome=1 to return) and holds until the Hr at-home sensor (input bit0). Fires
