@@ -308,44 +308,6 @@ namespace CodeGen.Devices.M262
             return added;
         }
 
-        public static int RemoveEmittedTopology(MapperConfig cfg)
-        {
-            int removed = 0;
-            var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
-            if (eaeRoot == null) return 0;
-            var topologyDir = Path.Combine(eaeRoot, "Topology");
-            if (!Directory.Exists(topologyDir)) return 0;
-
-            var fileList = new List<string>
-            {
-                Path.Combine(topologyDir, "Equipment_M262dPAC_1.json"),
-                Path.Combine(topologyDir, $"BroadcastDomain_{cfg.M262LogicalNetworkName}.json"),
-            };
-            fileList.AddRange(Directory.EnumerateFiles(topologyDir, "*.solutionData"));
-            var files = fileList.ToArray();
-            foreach (var f in files)
-            {
-                if (File.Exists(f)) { try { File.Delete(f); removed++; } catch { } }
-            }
-
-            var topologyProj = Path.Combine(topologyDir, "TopologyManager.topologyproj");
-            if (File.Exists(topologyProj))
-            {
-                try
-                {
-                    var doc = XDocument.Load(topologyProj);
-                    var ns = doc.Root!.GetDefaultNamespace();
-                    var stale = new HashSet<string>(files.Select(Path.GetFileName)!, StringComparer.OrdinalIgnoreCase);
-                    var nodesToRemove = doc.Descendants(ns + "None")
-                        .Where(e => stale.Contains((string?)e.Attribute("Include") ?? ""))
-                        .ToList();
-                    foreach (var node in nodesToRemove) { node.Remove(); removed++; }
-                    if (nodesToRemove.Count > 0) doc.Save(topologyProj);
-                }
-                catch { }
-            }
-            return removed;
-        }
     }
 
     public class TopologyEmitResult
