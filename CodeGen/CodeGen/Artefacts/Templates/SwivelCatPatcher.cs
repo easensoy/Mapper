@@ -290,14 +290,7 @@ namespace CodeGen.Services
             }
         }
 
-        // Sensor_Bool_CAT samples its Input only at INIT (FB2's single trigger). On M262/M580 the HCF-bound
-        // DI is I/O-scan event-driven so the sensor re-reports on change; on BX1 the input arrives via the
-        // software broker (no I/O event), so a broker-fed sensor (TopCoverSenosr) would freeze at its boot
-        // value. Add a scoped re-read EVENT input RD -> FB2.REQ: the BX1 broker fires it (via the TopCover
-        // SRC's CNF) when the cover-detect bit changes, so the sensor re-samples + re-reports. Change-gated
-        // (Sensor_Bool's ECC fires CNF only when Input flips) so it publishes ONLY on change. RD is left
-        // UNWIRED on M262/M580 sensor instances -> zero behaviour change there. NO E_DELAY (a CAT E_DELAY DT
-        // <Parameter> trips ERR_XML_UNKNOWN_TAG) and no interface data var. Idempotent.
+        // Establish the initial sensor level and support explicit broker re-reads.
         internal static void EnsureSensorBoolReadEvent(string eaeProjectDir, DeployResult result)
             => EditDeployedFbt(eaeProjectDir, "Sensor_Bool_CAT.fbt", "Sensor_Bool_CAT RD event inject failed", result,
                 (doc, root, ns, fbt) =>
@@ -315,40 +308,50 @@ namespace CodeGen.Services
                     ei.Add(new XElement(ns + "Event", new XAttribute("Name", "RD"),
                         new XAttribute("Comment", "Re-sample the input (for broker-fed sensors that have no I/O-scan event)")));
 
-                    // FBNetwork boundary marker for the new event input (after the INIT marker).
                     var rdMarker = new XElement(ns + "Input", new XAttribute("Name", "RD"),
                         new XAttribute("x", "12"), new XAttribute("y", "80"), new XAttribute("Type", "Event"));
                     var initMarker = net.Elements(ns + "Input").FirstOrDefault(i => (string?)i.Attribute("Name") == "INIT");
                     if (initMarker != null) initMarker.AddAfterSelf(rdMarker); else net.Add(rdMarker);
 
-                    // RD re-fires FB2 (the DI sampler); FB2.CNF -> FB1.REQ.
                     ec.Add(new XElement(ns + "Connection",
                         new XAttribute("Source", "RD"), new XAttribute("Destination", "FB2.REQ")));
                     changed = true;
                 }
 
-                // RD ALSO re-PUBLISHES the current level (StateHandling.REQ re-stamps state_table[id]=state_sts=FB1.Status),
-                // not just re-reads (FB2.REQ). Sensor_Bool's ECC has NO same-level self-transition, so a re-read alone
-                // re-publishes only on a CHANGE. The cover sensor's report crosses BX1->M580, where a boot-race can drop
-                // the single present-edge -> Assembly's WAIT(cover present) hangs until a physical cover out+in. Re-stamping
-                // the level on every cyclic RD keeps state_table[cover] asserted so M580 always sees present. ONLY the cover
-                // has RD wired (broker-fed, no I/O event); HCF M262/M580 sensors leave RD unwired -> unaffected. MQTT rides
-                // FB1.CNF (change) -> NOT re-fired by this, so no MQTT flood.
-                if (!ec.Elements(ns + "Connection").Any(c =>
-                        (string?)c.Attribute("Source") == "RD" &&
-                        (string?)c.Attribute("Destination") == "StateHandling.REQ"))
+                // RD must NOT reach StateHandling.REQ. Sensor_Bool's ECC has no same-level self-transition
+                // (Sensor_TRUE/Sensor_FALSE are entered only on a genuine level change), so the chain
+                // RD -> FB2.REQ -> FB2.CNF -> FB1.REQ -> FB1.CNF -> StateHandling.REQ publishes onto the ring
+                // exactly when the level changes, and INITO -> FB2.REQ still establishes the level at boot.
+                // A direct RD -> StateHandling.REQ bypasses that gate and makes every cyclic re-read emit a
+                // ring frame, so a broker-fed sensor driven by a free-running scan publishes forever — the
+                // process engines then see state_change (and therefore SCNF) climb without bound while idle.
+                // Reconciled rather than merely not-added, so a tree deployed with the bypass self-heals.
+                foreach (var stale in ec.Elements(ns + "Connection")
+                             .Where(c => (string?)c.Attribute("Source") == "RD" &&
+                                         (string?)c.Attribute("Destination") == "StateHandling.REQ")
+                             .ToList())
                 {
-                    ec.Add(new XElement(ns + "Connection",
-                        new XAttribute("Source", "RD"), new XAttribute("Destination", "StateHandling.REQ")));
+                    stale.Remove();
                     changed = true;
                 }
 
-                if (!changed) return; // idempotent
+                if (!ec.Elements(ns + "Connection").Any(c =>
+                        (string?)c.Attribute("Source") == "StateHandling.INITO" &&
+                        (string?)c.Attribute("Destination") == "FB2.REQ"))
+                {
+                    ec.Add(new XElement(ns + "Connection",
+                        new XAttribute("Source", "StateHandling.INITO"),
+                        new XAttribute("Destination", "FB2.REQ")));
+                    changed = true;
+                }
+
+                if (!changed) return;
 
                 doc.Save(fbt);
                 result.PatchesApplied.Add(
-                    "Sensor_Bool_CAT: RD re-read (FB2.REQ) + RD re-publish (StateHandling.REQ) so broker-fed BX1 sensors re-assert their level every scan; HCF M262/M580 sensors unaffected (RD unwired).");
-                MapperLogger.Info("[Deploy] Sensor_Bool_CAT.fbt: RD -> FB2.REQ + RD -> StateHandling.REQ (level re-assert)");
+                    "Sensor_Bool_CAT: initial sample and explicit re-read paths established; RD re-reads the "
+                    + "input but reports only through the change gate, so a cyclic re-read emits no ring frame.");
+                MapperLogger.Info("[Deploy] Sensor_Bool_CAT.fbt: initial sample + change-gated RD re-read");
             }, notFoundNote: "Sensor_Bool_CAT.fbt not found; RD event inject skipped.");
 
         // Swivel work-arrival latch: relax=true (rig) fires ToWorkN->AtWorkN on atWorkN=TRUE alone;
@@ -566,80 +569,61 @@ namespace CodeGen.Services
             catch (Exception ex) { result.Warnings.Add($"Swivel brake composite patch failed: {ex.Message}"); }
         }
 
-        internal static void PatchSwivelAtHomeInitRecovery(string eaeProjectDir, bool addArc, DeployResult result)
-            => EditSwivelCore(eaeProjectDir, "SevenStateCentreHomeActuator.fbt AtHomeInit sensor-recovery patch failed", result,
+        // SOLE writer of the swivel core's INIT arcs, and it BLOCKS startup motion outright.
+        //
+        // Deliberate hardcode, decided at the rig: initialisation must never move the arm. The committed template
+        // acts on a startup sensor reading (INIT -> AtWork1 holds the Work1 coil, INIT -> ToWork2 energises the
+        // Work2 coil), and the reference project's INIT -> ToHome drives it to centre -- both move the arm before
+        // any recipe command. Reporting the sensed position with both coils FALSE was also tried and still left
+        // the arm unheld and un-homed. Cycles two onward are correct, so only INIT is the problem: it is reduced
+        // to a single unconditional arc into AtHomeInit, whose algorithm writes both coils FALSE and reports 0.
+        // The arm therefore stays exactly where it is until the recipe commands it, and every later cycle runs the
+        // normal ECC unchanged.
+        internal static void PatchSwivelBlockStartupMotion(string eaeProjectDir, DeployResult result)
+            => EditSwivelCore(eaeProjectDir, "SevenStateCentreHomeActuator.fbt startup-block patch failed", result,
                 (doc, root, ns, fbt) =>
             {
-                var ecc = root.Descendants(ns + "ECC").FirstOrDefault();
-                if (ecc == null)
+                var basic = root.Descendants(ns + "BasicFB").FirstOrDefault();
+                var ecc = basic?.Element(ns + "ECC");
+                if (basic == null || ecc == null)
                 {
-                    result.Warnings.Add(
-                        "SevenStateCentreHomeActuator.fbt: no <ECC>; AtHomeInit sensor-recovery skipped.");
+                    result.Warnings.Add("SevenStateCentreHomeActuator.fbt: no BasicFB/ECC; startup block skipped.");
                     return;
                 }
 
-                // SELF-HOME ON POWER-UP: the swivel has no spring-centre, so the only way HOME is its
-                // initial state is to DRIVE it there — rig (addArc) redirects INIT work-position arcs to
-                // ToHome; sim (!addArc) restores INIT->work and strips the self-home arcs.
-                // SAFETY: the arm physically swings toward centre at power-up — the swing path must be clear before a cold download.
-                var initArcs = ecc.Elements(ns + "ECTransition")
-                    .Where(t => (string?)t.Attribute("Source") == "INIT").ToList();
-                bool IsSelfHomeArc(System.Xml.Linq.XElement t) =>
-                    (string?)t.Attribute("Source") == "AtHomeInit" &&
-                    (string?)t.Attribute("Destination") == "ToHome";
-                bool IsStaleWorkArc(System.Xml.Linq.XElement t) =>
-                    (string?)t.Attribute("Source") == "AtHomeInit" &&
-                    ((string?)t.Attribute("Destination") == "AtWork1" ||
-                     (string?)t.Attribute("Destination") == "AtWork2");
-
-                if (!addArc)
-                {
-                    bool ch = false;
-                    foreach (var t in initArcs)
-                    {
-                        if ((string?)t.Attribute("Destination") != "ToHome") continue;
-                        var cond = (string?)t.Attribute("Condition") ?? string.Empty;
-                        t.SetAttributeValue("Destination",
-                            cond.Contains("atWork1 = TRUE") ? "AtWork1" : "ToWork2");
-                        ch = true;
-                    }
-                    foreach (var t in ecc.Elements(ns + "ECTransition")
-                                 .Where(x => IsSelfHomeArc(x) || IsStaleWorkArc(x)).ToList())
-                    { t.Remove(); ch = true; }
-                    if (ch)
-                    {
-                        doc.Save(fbt);
-                        result.PatchesApplied.Add(
-                            "SevenStateCentreHomeActuator.fbt: INIT boot arcs restored to work states; self-home arcs stripped (sim path)");
-                    }
-                    return;
-                }
-
-                // RIG: drive home via INIT only. AtHomeInit must have no self-driving exit (a self-home arc
-                // re-fires on noisy DIs and cycles the swivel) — redirect INIT to ToHome and strip every
-                // AtHomeInit -> {ToHome,AtWork1,AtWork2} arc; the stock AtHomeInit -> ToWork1/ToWork2 (Pick/Place) arcs stay.
                 bool changed = false;
 
-                foreach (var t in initArcs)
+                // Retire any earlier startup-classification states.
+                foreach (var name in new[] { "StartupAtWork1", "StartupAtWork2" })
                 {
-                    var dest = (string?)t.Attribute("Destination");
-                    if (dest == "AtWork1" || dest == "ToWork2")
-                    { t.SetAttributeValue("Destination", "ToHome"); changed = true; }
+                    foreach (var e in ecc.Elements(ns + "ECState")
+                                 .Where(e => (string?)e.Attribute("Name") == name).ToList())
+                    { e.Remove(); changed = true; }
+                    foreach (var a in basic.Elements(ns + "Algorithm")
+                                 .Where(a => (string?)a.Attribute("Name") == name).ToList())
+                    { a.Remove(); changed = true; }
                 }
 
-                foreach (var t in ecc.Elements(ns + "ECTransition")
-                             .Where(x => IsSelfHomeArc(x) || IsStaleWorkArc(x)).ToList())
-                { t.Remove(); changed = true; }
+                // Drop EVERY arc out of INIT: none of them may act on a startup sensor reading.
+                foreach (var e in ecc.Elements(ns + "ECTransition")
+                             .Where(e => (string?)e.Attribute("Source") == "INIT"
+                                      || (string?)e.Attribute("Destination") == "StartupAtWork1"
+                                      || (string?)e.Attribute("Destination") == "StartupAtWork2"
+                                      || (string?)e.Attribute("Source") == "StartupAtWork1"
+                                      || (string?)e.Attribute("Source") == "StartupAtWork2").ToList())
+                { e.Remove(); changed = true; }
 
-                if (changed)
-                {
-                    doc.Save(fbt);
-                    result.PatchesApplied.Add(
-                        "SevenStateCentreHomeActuator.fbt: HOME-ON-INIT (boot only) -- INIT work-position arcs redirected to ToHome; " +
-                        "ALL AtHomeInit->{ToHome,AtWork1,AtWork2} self-home/recovery arcs stripped (they re-fired on noisy sensors and cycled the swivel)");
-                    MapperLogger.Info(
-                        "[Deploy] SevenStateCentreHomeActuator.fbt: self-homes at power-up via INIT->ToHome; AtHomeInit is now a stable rest state (no self-driving exit)");
-                }
+                // One unconditional arc to the coils-off rest state, so the ECC always leaves INIT and the arm is
+                // never driven at startup. AtHomeInit reports 0; the first recipe command moves it from there.
+                ecc.Add(new XElement(ns + "ECTransition",
+                    new XAttribute("Source", "INIT"),
+                    new XAttribute("Destination", "AtHomeInit"),
+                    new XAttribute("Condition", "1")));
+
+                if (!changed) return;
+                doc.Save(fbt);
+                result.PatchesApplied.Add(
+                    "SevenStateCentreHomeActuator.fbt: startup motion blocked (INIT -> AtHomeInit only, both coils off)");
             });
 
         // Wires AtHome to the coil-clearing 'atHome' algorithm + output_event so the Output
@@ -714,7 +698,7 @@ namespace CodeGen.Services
                     (clearCoils ? "(coils cleared and published at home)" : "(coils held)"));
             });
 
-        // Gated MapperConfig.SwivelHomeHoldBothCoils (default OFF): OFF de-energises both 'atHome' coils
+        // OFF de-energises both 'atHome' coils
         // (a venting swivel rests off-centre); TRUE holds both to drive a cylinder into a mechanical mid-stop.
         // SAFETY: with NO mid-stop, both-on drives toward an extreme — rig only, e-stop ready, abort if it heads to Work2.
         internal static void PatchSwivelAtHomeBothCoils(string eaeProjectDir, bool holdBothCoils, DeployResult result)
