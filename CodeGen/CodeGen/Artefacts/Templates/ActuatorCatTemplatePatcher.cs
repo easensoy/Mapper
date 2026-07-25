@@ -348,12 +348,22 @@ namespace CodeGen.Services
                     .Select(f => int.TryParse((string?)f.Attribute("ID"), out var v) ? v : 0)
                     .DefaultIfEmpty(0).Max() + 1;
 
-                net.Add(new XElement(ns + "FB",
+                // The LibraryElements schema fixes the child order of FBNetwork: every FB must precede the
+                // Input/Frame/Output markers and the connection lists. Appending would place it last and EAE
+                // rejects the file ("SubAppNetwork has invalid child element 'FB'"), so insert after the last FB.
+                var poll = new XElement(ns + "FB",
                     new XAttribute("ID", next), new XAttribute("Name", "Poll"),
                     new XAttribute("Type", "E_DELAY"), new XAttribute("x", "800"),
                     new XAttribute("y", "2580"), new XAttribute("Namespace", "IEC61499.Standard"),
                     new XElement(ns + "Parameter",
-                        new XAttribute("Name", "DT"), new XAttribute("Value", "T#200ms"))));
+                        new XAttribute("Name", "DT"), new XAttribute("Value", "T#200ms")));
+                var lastFb = net.Elements(ns + "FB").LastOrDefault();
+                if (lastFb != null) lastFb.AddAfterSelf(poll);
+                else
+                {
+                    var first = net.Elements().FirstOrDefault();
+                    if (first != null) first.AddBeforeSelf(poll); else net.Add(poll);
+                }
                 idAttr?.SetAttributeValue("Value", (next + 1).ToString());
 
                 foreach (var (s, d) in new[] { ("INIT", "Poll.START"), ("Poll.EO", "Poll.START"), ("Poll.EO", "Inputs.REQ") })
