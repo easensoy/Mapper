@@ -53,6 +53,37 @@ namespace CodeGen.Devices.Core
 
         static string Short(string s) => s.Length <= 48 ? s : s.Substring(0, 45) + "...";
 
+        // A recipe CMD is claimed by the ONE component whose actuator_name equals its CmdTargetName: the test in
+        // updateComponentState.BREQ is `component_state_in.dest_name = name`, case-sensitive ST string equality.
+        // A target nothing answers to does not fault at runtime -- the command circles the ring unclaimed, the
+        // actuator never moves, and the engine parks on the following WAIT forever, with every other validator
+        // green. That silence is why this is checked here, across all PLCs (commands legitimately cross devices).
+        private static IEnumerable<Violation> ValidateCommandTargetsAreClaimable(List<SysresFbMirror.SyslayFb> fbs)
+        {
+            static string Unquote(string? v) => (v ?? string.Empty).Trim().Trim('\'');
+
+            var claimable = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var p in fbs.SelectMany(f => f.Parameters))
+                if (p.Name is "actuator_name" or "process_name") claimable.Add(Unquote(p.Value));
+            claimable.Add("cycle_ready");   // the runtime's own ready handshake, not a component
+
+            foreach (var fb in fbs)
+            {
+                var recipe = fb.Parameters.FirstOrDefault(p => p.Name == "Recipe")?.Value;
+                var targets = recipe != null
+                    ? Regex.Matches(recipe, @"CmdTargetName:='([^']*)'").Select(m => m.Groups[1].Value)
+                    : Regex.Matches(fb.Parameters.FirstOrDefault(p => p.Name == "CmdTargetName")?.Value ?? string.Empty,
+                        @"'([^']*)'").Select(m => m.Groups[1].Value);
+
+                foreach (var t in targets.Where(t => t.Length > 0).Distinct(StringComparer.Ordinal))
+                    if (!claimable.Contains(t))
+                        yield return new("syslay",
+                            $"'{fb.Name}' commands '{t}', which no component answers to — actuator_name is " +
+                            $"case-sensitive on the ring, so this command would be silently dropped and the " +
+                            $"recipe would park on the next WAIT. Claimable: {string.Join(", ", claimable.OrderBy(x => x, StringComparer.Ordinal))}");
+            }
+        }
+
         public static List<Violation> Validate(string? eaeRoot, string? syslayPath)
         {
             var violations = new List<Violation>();
@@ -66,6 +97,8 @@ namespace CodeGen.Devices.Core
                 violations.Add(new("syslay", $"could not read the generated syslay: {ex.Message}"));
                 return violations;
             }
+
+            violations.AddRange(ValidateCommandTargetsAreClaimable(syslayFbs));
 
             foreach (var (deviceType, deviceName, plc, label) in Devices())
             {
