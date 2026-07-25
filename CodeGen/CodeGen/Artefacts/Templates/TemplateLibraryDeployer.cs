@@ -176,9 +176,9 @@ namespace CodeGen.Services
                 DeployArtifact(libPath, "Composite", "PLC_RW_REVPI", eaeProjectDir, result, isBasic: false);
                 // Internalize the Modbus symlink bridge INTO PLC_RW_REVPI so the RevPi sysres instantiates only
                 // RevPI_IO (tight/DRY). The RevPiIoBrokerInjector then emits just the RevPI_IO instance.
-                if (MapperConfig.RevPiBridgeInsideComposite)
                     CodeGen.Devices.RevPi.RevPiIoBrokerInjector.EmbedBridgeInComposite(
                         Path.Combine(eaeProjectDir, "IEC61499", "PLC_RW_REVPI.fbt"));
+
             }
 
             DeployDataTypes(libPath, eaeProjectDir, result);
@@ -194,19 +194,15 @@ namespace CodeGen.Services
                 FixCatHmiOpcuaFrame(eaeProjectDir, hmiCat, result);
             PatchActuatorModeInitialValue(eaeProjectDir, "FiveStateActuator.fbt", result);
             PatchActuatorModeInitialValue(eaeProjectDir, "SevenStateCentreHomeActuator.fbt", result);
-            // Swivel INIT must NOT drive a move at power-up: Control.xml has Bearing_PnP Initial_State=ReturnedHome,
-            // so the twin assumes it starts home and the arm moves ONLY when the recipe commands it (after
-            // PartAtAssembly). addArc:true added a "self-home on power-up" (INIT->ToHome) that swung the arm during
-            // Feed on the first cycle if a work sensor read TRUE; addArc:false keeps the committed core's
-            // recognize-don't-drive INIT arcs (INIT->AtWork1/ToWork2/AtHomeInit) so it stays put until the recipe runs.
-            PatchSwivelAtHomeInitRecovery(eaeProjectDir, addArc: false, result);
+            PatchSwivelBlockStartupMotion(eaeProjectDir, result);
             PatchSwivelAtHomeCoilClear(eaeProjectDir, clearCoils: true, result);
-            PatchSwivelAtHomeBothCoils(eaeProjectDir, MapperConfig.SwivelHomeHoldBothCoils, result);
+            PatchSwivelAtHomeBothCoils(eaeProjectDir, false, result);
             // SAFE: SwivelBrakeHome runs LAST — directional brake (reverse the driving coil only when homing from AtWork1, away from the ejector).
-            PatchSwivelBrakeHome(eaeProjectDir, MapperConfig.SwivelBrakeHome,
+            PatchSwivelBrakeHome(eaeProjectDir, true,
                 GenerationConfig.Current.BearingPnpHomeBrakeMs, result);
             PatchSwivelRelaxWorkLatch(eaeProjectDir, relax: true, result);
             PatchSwivelInterlockEventCarriesStateVal(eaeProjectDir, add: true, result);
+            PatchRingClearCommandLatchOnInit(eaeProjectDir, result);
             PatchRingReportClearDest(eaeProjectDir, result);
             PatchRingCommandCnfOnlyOnDestination(eaeProjectDir, result);
             NormalizeFiveStateInterlockConstants(eaeProjectDir, result);
