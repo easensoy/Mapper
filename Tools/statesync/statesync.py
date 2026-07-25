@@ -27,8 +27,10 @@ Dependency: paho-mqtt   (pip install paho-mqtt)
 import json
 import os
 import re
+import queue
 import socket
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -36,6 +38,61 @@ from datetime import datetime, timezone
 # in MQTT/mqtt_to_sqlite.py. The rig payload is NOT strict JSON (unquoted key).
 STATE_RE = re.compile(r"state\s*:\s*(-?\d+)")
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+# --------------------------------------------------------------------------------------
+# VC additions (rebuilt onto the committed baseline 2026-07-25). Two blocks, both required:
+#
+# (1) `cmd` boolean -- consumed by the DIRECT CSV mapping rows (checker, transfer, clamp,
+#     bearing_gripper, shaft_gripper) which pair it straight to PushJoint_ActionSignal /
+#     IN_J1_Action. Grippers close on different states than cylinders advance, hence the
+#     per-vcId override.
+# (2) The VC COMMAND translator -- the rig only ever says "I am at state N" (one INT). VC
+#     needs WHERE to go and HOW LONG the physical stroke takes; neither is on the rig wire.
+#         position <- vc-positions.json (generated from Control.xml, the twin VueOne reads)
+#         duration <- MEASURED medians from MQTT/rig_cadence.log (n = 27..108 cycles)
+#     Only MOTION-START states (1/3/5) command; 0/2/4/6 are arrivals.
+# --------------------------------------------------------------------------------------
+FEED_CMD_VCIDS = frozenset((
+    "Pusher", "CheckerComp", "TransferComp", "Clamp", "Ejector",  # PushJoint cylinders
+    "Swivel Arm", "pnp",                                          # bearing + shaft grippers
+))
+GRIP_CMD_STATES = {"Swivel Arm": (3, 4), "pnp": (1, 2)}
+
+VC_CMD_TOPIC = "uns/wmg/smc_rig/v1/vc/command"
+
+# A motion-START state commands a move to the DESTINATION state's position -- what VueOne
+# itself sends (nState.Position, the settled state). Only Pusher happens to carry its target
+# on BOTH states; Ejector/covers/pnp carry it ONLY on the arrival state, so using
+# position[start] would command 0 = no move.
+MOTION_START_TO_DEST = {1: 2, 3: 4, 5: 6}
+
+# vcId -> {motion-start state: measured stroke ms}. Only components with NO direct CSV row,
+# so no actuator ever has two writers.
+CMD_DURATIONS = {
+    "Pusher":               {1: 705,  3: 1114},   # feeder    0.716 / 1.125
+    "Ejector":              {1: 2011, 3: 2009},   # ejector   2.011 / 2.009
+    "pnp_horizantal":       {1: 960,  3: 1075},   # shaft_hr  0.960 / 1.075
+    "pnp_vertical":         {1: 920,  3: 822},    # shaft_vr  0.920 / 0.822
+    "CoverPnp_Horizantal":  {1: 1027, 3: 1188},   # cover_hr  1.027 / 1.188
+    "CoverPnp_Vertical":    {1: 536,  3: 820},    # cover_vr  0.536 / 0.820
+    "SviwelArmComp":        {1: 1220, 3: 1356, 5: 1200},  # bearing_pnp
+}
+CMD_VCIDS = frozenset(CMD_DURATIONS)
+
+# GRIPPERS + ROBOT: driven by TAUGHT ROUTINES, not a target position. A VC gripper only
+# ATTACHES a part when the robot's taught routine runs (it fires the SignalActions grasp);
+# a boolean on IN_J1_Action just closes the jaw and carries nothing. Routine names are PROVEN
+# from the old socket dispatcher's cycle-time corpus. Consumed by vc_gripper_gateway.py, which
+# runs in its OWN script behaviour so its blocking callRoutine cannot stall the actuators.
+# Set ROUTINES_ENABLED = False to disable (then the CSV gripper booleans stay the only driver).
+ROUTINES_ENABLED = True
+CMD_ROUTINES = {
+    "Swivel Arm": {3: "CloseGripper", 1: "OpenGripper"},   # bearing gripper (closes on 3/4)
+    "pnp":        {1: "CloseGripper", 3: "OpenGripper"},   # shaft gripper   (closes on 1/2)
+    "coverpnp":   {1: "grasp",        3: "release"},       # cover gripper
+    "UR3e":       {1: "Partpick", 2: "Partplace", 0: "Home"},
+}
+ROUTINE_VCIDS = frozenset(CMD_ROUTINES) if ROUTINES_ENABLED else frozenset()
 
 
 def utc_iso(ms=False):
@@ -66,6 +123,12 @@ class VueOneSocket:
         self.min_send = float(min_send_ms) / 1000.0
         self._last_send = 0.0
         self.on_connect = None   # called once per successful (re)connect -> snapshot replay
+        # Bounded hand-off queue + daemon worker: the connect/pacing blocking happens HERE,
+        # never in the MQTT callback thread. Bounded so a dead VueOne cannot grow memory.
+        self._q = queue.Queue(maxsize=500)
+        self._thread = threading.Thread(target=self._worker)
+        self._thread.daemon = True
+        self._thread.start()
 
     def _ensure(self):
         if self.sock is not None:
@@ -87,6 +150,33 @@ class VueOneSocket:
             return False
 
     def send(self, obj):
+        """NON-BLOCKING: hand off to the worker thread and return immediately.
+
+        ROOT CAUSE FIX (measured 2026-07-25): this used to run inline, and it is called from
+        emit(), i.e. from paho's MQTT callback thread -- which processes ALL messages strictly
+        sequentially. _ensure() does a blocking socket.create_connection(timeout=3.0) and the
+        pacing does a time.sleep(), so with VueOne down the FIRST rig message after every idle
+        gap stalled the message loop. That first message is always the feeder's state 1, so the
+        feeder's remaining states queued in the socket buffer and flushed as a burst -- its
+        advance and return commands were published ~2 ms apart instead of ~718 ms, and VC then
+        queued the return behind the advance. Measured: Pusher command gap median 0.026 s and
+        57 % under 50 ms, while every mid-cycle component sat at 2-3 s and 0 %.
+        Nothing that can block may ever run in the MQTT callback thread."""
+        try:
+            self._q.put_nowait(obj)
+        except Exception:
+            pass            # queue full -> drop a highlight update; never stall the rig stream
+        return True
+
+    def _worker(self):
+        while True:
+            obj = self._q.get()
+            try:
+                self._send_blocking(obj)
+            except Exception:
+                pass
+
+    def _send_blocking(self, obj):
         if not self._ensure():
             return False
         if self.min_send:
@@ -118,7 +208,9 @@ class _DryVueOne:
 class Bridge:
     """Normalize smc/# -> retained UNS JSON + VueOne socket updates. One-way only."""
 
-    def __init__(self, cfg, comps, ci, dry=False):
+    def __init__(self, cfg, comps, ci, positions=None, dry=False):
+        self.positions = positions or {}   # vcId -> {state: joint position} (vc-positions.json)
+        self._cmd_seq = 0                  # monotonic commandId within this epoch
         self.cfg, self.comps, self.ci, self.dry = cfg, comps, ci, dry
         self.prefix = cfg.get("unsPrefix", "uns/wmg/smc_rig/v1").rstrip("/")
         self.status_topic = self.prefix + "/_bridge/status"
@@ -215,7 +307,7 @@ class Bridge:
     def emit(self, topic, comp, state, name):
         uns_topic = self.uns_topic_for(comp)
         assert uns_topic.startswith(self.prefix), "refusing to publish outside the UNS namespace"
-        self._pub(uns_topic, {
+        payload = {
             "seq": self.seq,
             "epoch": self.epoch,
             "ts": utc_iso(ms=True),
@@ -227,8 +319,19 @@ class Bridge:
             "state": state,
             "stateName": name,
             "quality": "GOOD",
-        }, retain=True)
+        }
+        vcid = comp.get("vcId")
+        if vcid in FEED_CMD_VCIDS:
+            grip = GRIP_CMD_STATES.get(vcid)
+            payload["cmd"] = (state in grip) if grip else (state in (1, 2))
+        elif comp.get("catKind") == "sensor":
+            payload["present"] = state == 1
+        self._pub(uns_topic, payload, retain=True)
         self.msgs_out += 1
+        if vcid in CMD_VCIDS:
+            self._publish_vc_command(vcid, state, name)
+        elif vcid in ROUTINE_VCIDS:
+            self._publish_vc_routine(vcid, state)
         if self.vueone is not None and name is not None:
             self.vueone.send(self._vueone_msg(comp, name))
         self.publish_status()
@@ -273,6 +376,64 @@ class Bridge:
             "unknownTopics": len(self.warned_unknown),
         }, retain=True)
 
+    def _publish_vc_command(self, vcid, state, name):
+        """Rig MOTION-START state -> VC command. Non-retained by design: a retained command
+        would re-execute on every VC connect, and it binds to motion."""
+        dur = CMD_DURATIONS.get(vcid, {}).get(state)
+        if dur is None:
+            return                      # arrival/idle state -- nothing to command
+        dest = MOTION_START_TO_DEST.get(state)
+        pos = self.positions.get(vcid, {}).get(str(dest))
+        if pos is None:
+            print("[warn] no vc-position for {} dest-state {}; no command sent".format(vcid, dest),
+                  flush=True)
+            return
+        self._cmd_seq += 1
+        cmd = {
+            "schemaVersion": 1,
+            "epoch": self.epoch,
+            "commandId": "{}#{}".format(self.epoch, self._cmd_seq),
+            "sourceSeq": self.seq,
+            "sourceTs": utc_iso(ms=True),
+            "ComponentName": vcid,
+            "ComponentId": vcid,
+            "ComponentType": "Actuator",
+            "StateName": name,
+            "ComponentPos": pos,
+            "ComponentSpeed": 0.0,      # gateway solves the profile from ExpectedDurationMs
+            "OperatorType": "equal",
+            "ExpectedDurationMs": dur,
+            "MsgType": 2,
+            "MsgTo": "VC",
+        }
+        self._pub(VC_CMD_TOPIC, cmd, retain=False)
+        print("[cmd] {} state={} -> pos={} durMs={} id={}".format(
+            vcid, state, pos, dur, cmd["commandId"]), flush=True)
+
+    def _publish_vc_routine(self, vcid, state):
+        """Gripper/robot: command a TAUGHT ROUTINE by name. StateName carries the routine, so
+        the VC side does findRoutine(StateName) and needs no state->routine map of its own."""
+        routine = CMD_ROUTINES.get(vcid, {}).get(state)
+        if routine is None:
+            return
+        self._cmd_seq += 1
+        cmd = {
+            "schemaVersion": 1,
+            "epoch": self.epoch,
+            "commandId": "{}#{}".format(self.epoch, self._cmd_seq),
+            "sourceSeq": self.seq,
+            "sourceTs": utc_iso(ms=True),
+            "ComponentName": vcid,
+            "ComponentId": vcid,
+            "ComponentType": "Robot",
+            "StateName": routine,
+            "MsgType": 2,
+            "MsgTo": "VC",
+        }
+        self._pub(VC_CMD_TOPIC, cmd, retain=False)
+        print("[cmd] {} state={} -> routine={} id={}".format(
+            vcid, state, routine, cmd["commandId"]), flush=True)
+
     def _pub(self, topic, obj, retain):
         line = json.dumps(obj, separators=(",", ":"))
         if self.dry:
@@ -290,6 +451,19 @@ def load_map(path):
     comps = cfg.get("components", {})
     ci = {k.lower(): k for k in comps}   # case-insensitive fallback index
     return cfg, comps, ci
+
+
+def load_positions(path):
+    """vcId -> {state: joint position}, generated from Control.xml. Missing file = no VC
+    commands (the UNS + cmd path still works)."""
+    if not path or not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8-sig") as f:
+            return json.load(f)
+    except (OSError, ValueError) as e:
+        print("[warn] positions not loaded ({}); VC commands disabled".format(e), flush=True)
+        return {}
 
 
 def run(cfg, bridge):
@@ -405,4 +579,5 @@ if __name__ == "__main__":
             sys.exit(0)
         if os.environ.get("STATESYNC_NO_VUEONE_SOCKET") == "1":
             cfg.setdefault("vueone", {})["enabled"] = False
-        run(cfg, Bridge(cfg, comps, ci))
+        positions = load_positions(os.path.join(HERE, "vc-positions.json"))
+        run(cfg, Bridge(cfg, comps, ci, positions))
