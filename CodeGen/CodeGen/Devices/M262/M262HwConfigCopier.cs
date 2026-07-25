@@ -101,22 +101,6 @@ namespace CodeGen.Devices.M262
             File.Copy(src, dst, overwrite: true);   // final try — let exceptions bubble
         }
 
-        // Back-compat path helpers: none touch .hcf content; they resolve paths and patch the
-        // deprecated GUID ResourceId attribute in the legacy DeviceHwConfigurationItems format.
-
-        public static string? FindBaselineHcf(string baselineRoot)
-        {
-            var systemDir = Path.Combine(baselineRoot, "IEC61499", "System");
-            if (Directory.Exists(systemDir))
-            {
-                var hit = Directory.EnumerateFiles(systemDir, "*.hcf", SearchOption.AllDirectories)
-                    .FirstOrDefault();
-                if (hit != null) return hit;
-            }
-            return Directory.EnumerateFiles(baselineRoot, "*.hcf", SearchOption.AllDirectories)
-                .FirstOrDefault();
-        }
-
         public static string? ResolveTargetHcfPath(string eaeRoot)
         {
             var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
@@ -144,49 +128,7 @@ namespace CodeGen.Devices.M262
             catch { return false; }
         }
 
-        public static string ReadTargetSysresId(string eaeRoot)
-        {
-            var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
-            if (!Directory.Exists(systemDir)) return string.Empty;
-            // Prefer the .sysres beside an M262 sysdev so we don't pick up an M580/BX1 resource ID.
-            foreach (var sysdev in Directory.EnumerateFiles(
-                systemDir, "*.sysdev", SearchOption.AllDirectories))
-            {
-                if (!IsM262Sysdev(sysdev)) continue;
-                var folder = Path.Combine(
-                    Path.GetDirectoryName(sysdev)!,
-                    Path.GetFileNameWithoutExtension(sysdev));
-                var sysres = Directory.Exists(folder)
-                    ? Directory.EnumerateFiles(folder, "*.sysres").FirstOrDefault()
-                    : null;
-                if (sysres == null) continue;
-                try
-                {
-                    var doc = XDocument.Load(sysres);
-                    return (string?)doc.Root?.Attribute("ID") ?? string.Empty;
-                }
-                catch { }
-            }
-            return string.Empty;
-        }
 
-        public static int PatchHcfResourceId(string hcfPath, string newResourceId)
-        {
-            if (!File.Exists(hcfPath) || string.IsNullOrWhiteSpace(newResourceId)) return 0;
-            try
-            {
-                var doc = XDocument.Load(hcfPath);
-                var item = doc.Descendants()
-                    .FirstOrDefault(e => e.Name.LocalName == "DeviceHwConfigurationItem");
-                if (item == null) return 0;   // new format has no ResourceId attribute to patch
-                var attr = item.Attribute("ResourceId");
-                if (attr != null && string.Equals(attr.Value, newResourceId, StringComparison.Ordinal)) return 0;
-                item.SetAttributeValue("ResourceId", newResourceId);
-                doc.Save(hcfPath);
-                return 1;
-            }
-            catch { return 0; }
-        }
 
         // Deprecated no-op kept so M262HcfDocument compiles; verbatim Copy() is the entry point.
         internal static int OverwriteHcfParameterValuesInMemory(XDocument doc, IoBindings bindings,
