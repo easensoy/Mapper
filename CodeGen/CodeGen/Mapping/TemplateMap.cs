@@ -7,27 +7,18 @@ namespace CodeGen.Mapping
 {
     public static class TemplateMap
     {
+        // The key a component answers to on the stateRprtCmd ring. `updateComponentState.BREQ` claims a command
+        // with the ST test `component_state_in.dest_name = name`, which is CASE-SENSITIVE, so the recipe's
+        // CmdTargetName and the instance's own actuator_name parameter must be produced HERE, by one function:
+        // if the two spellings ever drift the command circles the ring unclaimed, the actuator never moves and
+        // nothing reports an error -- the engine simply parks on the following WAIT forever.
+        public static string RingKey(string? name) => (name ?? string.Empty).Trim().ToLowerInvariant();
+
         // VacuumGripperNames is empty until Vacuum_Gripper_CAT is in the Template Library;
         // gripper instances otherwise fall through to Five_State_Actuator_CAT.
         public static readonly HashSet<string> VacuumGripperNames =
             new(StringComparer.OrdinalIgnoreCase) { };
 
-        public static string CatTypeOf(VueOneComponent component, bool isBranchedSeven = false)
-        {
-            if (component is null) return "Five_State_Actuator_CAT";
-            // Only the real UR3e task arm routes to Robot_Task_CAT; Type="Robot" grippers must not.
-            if (MapperConfig.EnableRobotTaskTail && IsRobotTaskArm(component))
-                return "Robot_Task_CAT";
-            return component.Type switch
-            {
-                "Process" => "Process1_Generic",
-                "Sensor"  => "Sensor_Bool_CAT",
-                _ /* Actuator, Robot, fallback */ => ResolveActuatorCatType(
-                    component.Name,
-                    component.States?.Count ?? 0,
-                    isBranchedSeven),
-            };
-        }
 
         // VueOne spells the top-cover sensor inconsistently across twin revisions: the original component name
         // carries a typo ("TopCoverSenosr") and corrected models use "TopCoverSensor" (the VcID was always the
