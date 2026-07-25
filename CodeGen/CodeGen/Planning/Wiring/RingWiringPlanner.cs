@@ -191,7 +191,7 @@ namespace CodeGen.Translation
             var topCoverName = contents.Sensors
                 .Select(s => (s.Name ?? string.Empty).Trim())
                 .FirstOrDefault(CodeGen.Mapping.TemplateMap.IsTopCoverSensor);
-            if (MapperConfig.CoverInterlockActive && !string.IsNullOrEmpty(topCoverName))
+            if (!string.IsNullOrEmpty(topCoverName))
                 ring.Add((topCoverName!, "Sensor_Bool_CAT"));
             // Cover detour splices the BX1 covers between Clamp and Assembly_Station at a DIFFERENT seam, so the two compose with only M580<->BX1 and M580<->M262 boundaries, never M262<->BX1. Empty when off.
             foreach (var cover in HandoffPlanner.CoverDetour)
@@ -261,7 +261,7 @@ namespace CodeGen.Translation
             var ring = new List<(string Name, string Type)>();
             // TopCoverSenosr moves to the M580 cover ring (clamp model); keep it off the BX1 ring so it is not double-driven.
             foreach (var s in contents.Sensors)
-                if (IsBx1(s.Name) && !(MapperConfig.CoverInterlockActive &&
+                if (IsBx1(s.Name) && !(
                                        CodeGen.Mapping.TemplateMap.IsTopCoverSensor(s.Name)))
                     ring.Add((s.Name, "Sensor_Bool_CAT"));
             // Cover-detour actuators are on the M580 ring, so keep them off the BX1 ring (TopCoverSenosr stays a BX1 sensor, off-ring).
