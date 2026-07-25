@@ -310,6 +310,64 @@ namespace CodeGen.Services
             }
         }
 
+        // Re-sample the actuator's own position sensors, so it notices it has ARRIVED.
+        // FiveStateActuator's arrival arcs carry NO event term -- 'ToWork -> AtWork [atwork = TRUE]',
+        // 'ToHome -> AtHome [athome]', 'AtHome -> AtHomeInit [atwork = FALSE AND athome = TRUE]' -- so they are
+        // only evaluated when some event reaches the core. The sensor path is Inputs.CNF -> InputHandler.inputEvent
+        // -> InputHandler.CNF -> ... -> ActuatorCore.input_event, and 'Inputs' is a SYMLINKMULTIVARDST, i.e.
+        // sample-on-REQ. With no Inputs.REQ driver the actuator can drive to a position and never observe that it
+        // got there, so its WAIT never satisfies. The motion timers are NOT a fallback here: they are gated
+        // AND(output, NOT SensorFitted), so a sensor-fitted actuator has no timer at all.
+        // The rig-proven Ground Truth (Demonstrator_20260617 WorkingEndtoEnd) carries exactly this Poll --
+        // E_DELAY DT=T#200ms, INIT -> START, EO -> START self-loop, EO -> Inputs.REQ -- and that build ran the line
+        // end to end. It was later stripped, after which the only thing re-evaluating those arcs was the 20 Hz ring
+        // event storm, which has now been removed at source; this restores the mechanism the working build used.
+        // Deliberately LOCAL: it re-reads a symlink and re-evaluates an ECC. It publishes nothing, because the ring
+        // report is driven by ActuatorCore.pst_out, which fires only on a genuine ECC state entry. So idle ring
+        // traffic stays zero and the process engines' state_change/SCNF stay still.
+        // NOT applied to the centre-home swivel (Ground Truth has no Poll there either -- see StripCatHomeSensorPoll)
+        // nor to Sensor_Bool_CAT, whose broker-fed instance already re-reads through its RD event.
+        internal static void EnsureFiveStateInputPoll(string eaeProjectDir, DeployResult result)
+            => EditDeployedFbt(eaeProjectDir, "Five_State_Actuator_CAT.fbt",
+                "Five_State_Actuator_CAT input poll inject failed", result,
+                (doc, root, ns, fbt) =>
+            {
+                var net = root.Element(ns + "FBNetwork");
+                var ec = net?.Element(ns + "EventConnections");
+                if (net == null || ec == null) return;
+                if (net.Elements(ns + "FB").Any(f => (string?)f.Attribute("Name") == "Poll")) return;
+                if (!net.Elements(ns + "FB").Any(f => (string?)f.Attribute("Name") == "Inputs"))
+                {
+                    result.Warnings.Add("Five_State_Actuator_CAT: no 'Inputs' FB; input poll skipped.");
+                    return;
+                }
+
+                var idAttr = root.Elements(ns + "Attribute")
+                    .FirstOrDefault(a => (string?)a.Attribute("Name") == "Configuration.FB.IDCounter");
+                int next = net.Elements(ns + "FB")
+                    .Select(f => int.TryParse((string?)f.Attribute("ID"), out var v) ? v : 0)
+                    .DefaultIfEmpty(0).Max() + 1;
+
+                net.Add(new XElement(ns + "FB",
+                    new XAttribute("ID", next), new XAttribute("Name", "Poll"),
+                    new XAttribute("Type", "E_DELAY"), new XAttribute("x", "800"),
+                    new XAttribute("y", "2580"), new XAttribute("Namespace", "IEC61499.Standard"),
+                    new XElement(ns + "Parameter",
+                        new XAttribute("Name", "DT"), new XAttribute("Value", "T#200ms"))));
+                idAttr?.SetAttributeValue("Value", (next + 1).ToString());
+
+                foreach (var (s, d) in new[] { ("INIT", "Poll.START"), ("Poll.EO", "Poll.START"), ("Poll.EO", "Inputs.REQ") })
+                    if (!ec.Elements(ns + "Connection").Any(c =>
+                            (string?)c.Attribute("Source") == s && (string?)c.Attribute("Destination") == d))
+                        ec.Add(new XElement(ns + "Connection",
+                            new XAttribute("Source", s), new XAttribute("Destination", d)));
+
+                doc.Save(fbt);
+                result.PatchesApplied.Add(
+                    "Five_State_Actuator_CAT: restored the 200 ms input Poll driving Inputs.REQ, so a sensor-fitted "
+                    + "actuator observes its own arrival (local re-read; publishes only on a real state change).");
+                MapperLogger.Info("[Deploy] Five_State_Actuator_CAT.fbt: input Poll -> Inputs.REQ restored");
+            }, notFoundNote: "Five_State_Actuator_CAT.fbt not found; input poll skipped.");
 
     }
 }
