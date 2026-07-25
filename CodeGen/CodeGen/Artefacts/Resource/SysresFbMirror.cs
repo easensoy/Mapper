@@ -37,10 +37,6 @@ namespace CodeGen.Devices.Core
             "MQTT_PUBLISH_115480E69E664F878",
         };
 
-        public static List<string> ReadSyslayTopLevelFbNames(string syslayPath)
-        {
-            return ReadSyslayTopLevelFbs(syslayPath).Select(fb => fb.Name).ToList();
-        }
 
         public record SyslayFbParameter(string Name, string Value);
         public record SyslayFbAttribute(string Name, string Value);
@@ -137,7 +133,6 @@ namespace CodeGen.Devices.Core
                 .ToList();
         }
 
-        public const string M262IoFbId        = "E786D6371CF444F9";
         public const string DpacFullInitFbId  = "593A8F4FDEA0A668";
         public const string PlcStartFbId      = "3DB1FB0F578E5F1E";
 
