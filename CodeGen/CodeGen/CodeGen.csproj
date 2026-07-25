@@ -17,7 +17,6 @@
     <None Update="Config\interlock.yaml" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Config\device.yml" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Config\smc-rig.yml" CopyToOutputDirectory="PreserveNewest" />
-    <None Update="Config\recipes.yml" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Config\telemetry.yml" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
