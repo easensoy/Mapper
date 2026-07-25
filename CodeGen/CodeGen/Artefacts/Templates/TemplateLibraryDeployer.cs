@@ -193,6 +193,7 @@ namespace CodeGen.Services
             PatchProcessRuntimeCompatibility(eaeProjectDir, result);
             PatchSensorBoolCatDstQi(eaeProjectDir, result);
             PatchCatSymlinkQi(eaeProjectDir, "Five_State_Actuator_CAT", result);
+            EnsureFiveStateInputPoll(eaeProjectDir, result);
             // QI=TRUE on the SYMLINKMULTIVARDST/SRC or the subscriber is dropped and the core is islanded from its IO.
             PatchCatSymlinkQi(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT", result);
             EnsureSevenStateStateOut(eaeProjectDir, result);
