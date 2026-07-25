@@ -126,35 +126,6 @@ namespace CodeGen.Validation
         public void AddWarning(string message) => Warnings.Add(message);
         public void AddInfo(string message) => InfoMessages.Add(message);
 
-        public void PrintToConsole()
-        {
-            Console.WriteLine("\n" + new string('=', 60));
-            Console.WriteLine("VALIDATION RESULTS");
-            Console.WriteLine(new string('=', 60));
 
-            PrintMessages(InfoMessages, ConsoleColor.White);
-            PrintMessages(Warnings, ConsoleColor.Yellow, "⚠ WARNING: ");
-            PrintMessages(Errors, ConsoleColor.Red, "✗ ERROR: ");
-
-            Console.ForegroundColor = ConsoleColor.White;
-            Console.WriteLine(new string('=', 60));
-
-            Console.ForegroundColor = IsValid ? ConsoleColor.Green : ConsoleColor.Red;
-            Console.WriteLine(IsValid
-                ? "VALIDATION PASSED - Ready for translation"
-                : "VALIDATION FAILED - Translation rejected");
-
-            Console.ForegroundColor = ConsoleColor.White;
-            Console.WriteLine(new string('=', 60) + "\n");
-        }
-
-        private void PrintMessages(List<string> messages, ConsoleColor color, string prefix = "")
-        {
-            if (messages.Count == 0) return;
-
-            Console.WriteLine();
-            Console.ForegroundColor = color;
-            messages.ForEach(msg => Console.WriteLine(prefix + msg));
-        }
     }
 }
