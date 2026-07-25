@@ -258,7 +258,7 @@ namespace CodeGen.Devices.Core
                          string.Equals(s, "PartAtAssembly", StringComparison.OrdinalIgnoreCase))))
                     // Cover-presence interlock (clamp model): TopCoverSenosr joins the cover ring so its
                     // report reaches Assembly's state_table. Off = kept off the ring (byte-identical baseline).
-                    .Where(s => CodeGen.Configuration.MapperConfig.CoverInterlockActive ||
+                    .Where(s => true ||
                                 !CodeGen.Mapping.TemplateMap.IsTopCoverSensor(s))
                     .ToList();
                 var actNames = orderedComps.Where(c => IsActuator(c) && HasStationAdapter(c))
