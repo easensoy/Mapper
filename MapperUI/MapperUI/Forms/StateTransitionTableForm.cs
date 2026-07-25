@@ -137,7 +137,6 @@ namespace MapperUI
             var processes = components
                 .Where(c => string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase))
                 .ToList();
-            var feedProcess = SystemInjector.FindStation1Process(components.ToList());
 
             bool previousSimulatorMode = MapperConfig.SimulatorRecipeMode;
             try
@@ -146,7 +145,7 @@ namespace MapperUI
                 foreach (var process in processes)
                 {
                     AddTransitionRows(transitionRows, process, components);
-                    AddRecipeRows(recipeRows, notes, process, components, feedProcess);
+                    AddRecipeRows(recipeRows, notes, process, components);
                 }
             }
             finally
@@ -221,18 +220,16 @@ namespace MapperUI
         }
 
         static void AddRecipeRows(DataTable table, DataTable notes,
-            VueOneComponent process, IReadOnlyList<VueOneComponent> components,
-            VueOneComponent? feedProcess)
+            VueOneComponent process, IReadOnlyList<VueOneComponent> components)
         {
             var contents = BuildGlobalContents(process, components);
-            bool commandFromCondition = !SameComponent(process, feedProcess);
             int processId = 1000 + table.Rows.Count;
 
             RecipeArrays recipe;
             try
             {
                 recipe = ProcessRecipeArrayGenerator.Generate(
-                    process, contents, components, processId, commandFromCondition);
+                    process, contents, components, processId);
             }
             catch (Exception ex)
             {
@@ -409,13 +406,6 @@ namespace MapperUI
             return components.FirstOrDefault(c =>
                 string.Equals(c.ComponentID, componentId.Trim(),
                     StringComparison.OrdinalIgnoreCase));
-        }
-
-        static bool SameComponent(VueOneComponent? left, VueOneComponent? right)
-        {
-            if (left == null || right == null) return false;
-            return string.Equals(left.ComponentID, right.ComponentID,
-                StringComparison.OrdinalIgnoreCase);
         }
 
         static string StationOf(VueOneComponent process)
