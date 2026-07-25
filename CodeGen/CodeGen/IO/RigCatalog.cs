@@ -22,7 +22,7 @@ namespace CodeGen.Configuration
 
     public sealed class SensorInterlock
     {
-        public string Block { get; set; } = string.Empty;   // recipes.yml block name (bearing/shaft/coverPlace)
+        public string Block { get; set; } = string.Empty;   // sensor-interlock block key (bearing/shaft/coverPlace)
         public string Sensor { get; set; } = string.Empty;  // Control.xml sensor instance name
         public int PresentState { get; set; }               // runtime state that means "part present"
     }
