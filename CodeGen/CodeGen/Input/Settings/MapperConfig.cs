@@ -43,24 +43,8 @@ namespace CodeGen.Configuration
         // design proven in software for BX1; rig-verifiable. Revert to FALSE if EAE can't resolve them.
         public static bool RevPiBridgeInsideComposite = true;
 
-        public static bool RecipeRunOnce = true;
-
-        // Continuous line: each process loops END->0 with a GENERATED SAFE RE-ARM barrier so a held level can
-        // never instantly re-trigger it (the fresh-trigger / mutual-exclusion the bare level engine lacked):
-        //  - Feed_Station:  prepend WAIT(Robot=Home) -> WAIT(PartAtAssembly=clear) before its PartInHopper gate,
-        //                   so a 2nd part dropped mid-cycle cannot start Feed until the robot cleared the hopper
-        //                   and the shared Assembly/Disassembly volume is empty.
-        //  - Assembly:      reconstruct the PartAtAssembly rising edge (WAIT clear THEN present) so it cannot
-        //                   re-fire on the part it just processed; reset its handshake sentinel each cycle.
-        //  - Disassembly:   WAIT(Assembly=idle-reset) before WAIT(Assembly=done) so the held handshake=7 cannot
-        //                   re-fire it on a stale/empty assembly.
-        // All gates use existing sensors-first ids + the assembly_idle/handshake sentinels; no new FB, no hardcoded recipe.
+        // Engine END->0 loop-back (ProcessRuntimeTemplatePatcher).
         public static bool EnableCyclicRestart = true;
-
-        public static readonly string[] AutoRetractProcesses = new[] { "Feed_Station" };
-
-        // Keep FALSE on the rig: if Bearing_PnP is already home, CMD Home is a no-op with no fresh report and the engine stalls at step 0.
-        public static bool EnableSevenStateHomePreamble = false;
 
         // SAFETY: both-coils-on holds the swivel at centre ONLY if the cylinder has a mechanical mid-stop; with no mid-stop it drives toward an extreme.
         public static bool SwivelHomeHoldBothCoils = false;
@@ -70,59 +54,18 @@ namespace CodeGen.Configuration
 
         public static bool UnparkDisassembly = true;
 
-        public static bool SerializeAssemblyDisassembly = false;
-
         public static bool MergeFeedRing = false;
 
-        // Distinct from the handshake's 7; emitter (DisassemblyRecipe) and consumer (RecipeStateClassifier) share this one value.
-        public const int MergeFeedRingBearingHomeState = 6;
-
-        // A process's state_table slot carries its last CMD state (1/3/5/7), so the idle marker must be a value no recipe ever issues as a CMD state -- 0 is safe.
-        public const int ProcessIdleSentinelState = 0;
-
-        // Robot->Feeder cross-controller handoff (rig-proven). ON: Disassembly emits a dedicated 'cycle_ready'
-        // token (7=robot clear at boot, 0=busy after the handshake, 7=clear again after WAIT robot=Home) which
-        // rides a real CrossComm connection (CycleReadyEventOut/CycleReadyOut -> Feed_Station.CycleReadyEvent/
-        // CycleReady, CrossReference=True) into Feed's state_table[DisassemblyProcessId] via ProcessStateBusHandler.
-        // SETRDY; Feed gates the feeder on WAIT(DisassemblyProcessId, CycleReadyReadyState) as its LAST wait, so
-        // the feeder can only start once the robot dropped the part and returned Home -- no collision, no stale-ring
-        // race. Needs the CycleReady ports on Process1_Generic + the multi-advance engine (both in the templates).
-        // OFF: the legacy ring-transported disassembly_idle sentinel path (recipes + syslay byte-identical).
+        // Emits the Disassembly->Feed CycleReady CrossReference wiring (clamp model only, see CycleReadyActive).
         public static bool EnableCycleReadyHandoff = true;
 
-        // The 'robot clear' value carried by cycle_ready. Distinct from ProcessIdleSentinelState(0) so a satisfied
-        // gate proves the robot actively reported Home, not an unwritten default-zero slot (no false-pass).
-        public const int CycleReadyReadyState = 7;
-
-        // CycleReady is CLAMP-model only. It keys on state_table[DisassemblyProcessId=18]; in MergeFeedRing (no-clamp)
-        // the rings are MERGED, so Disassembly's every CMD already stamps that slot on Feed AND the no-clamp Feed
-        // recipe already reads it twice (WAIT 18==6 bearing-home, WAIT 18==0 idle). Adding cycle_ready 7/0/7 there
-        // triple-books the slot and inverts what those gates expect -> the handoff breaks. The no-clamp model already
-        // has its own robot-clear re-arm (WAIT Disassembly==0 + disassembly_idle=0 published after robot-Home), so
-        // CycleReady must stand down there. MergeFeedRing is set at SystemLayoutInjector before any recipe/wiring runs.
+        // The merged no-clamp ring already carries Disassembly's state to Feed, so the extra wiring is clamp-only.
         public static bool CycleReadyActive => EnableCycleReadyHandoff && !MergeFeedRing;
 
-        // Part-presence interlock: before each Assembly pick, WAIT for the part-presence sensor to report
-        // "present" (bearing/shaft active-low = 0, top-cover active-high = 1). The gates + polarity are
-        // data in Config/smc-rig.yml (sensorInterlocks). Rig-proven: the pnp actuator cannot start a pick
-        // while its part is absent (default-zero slots can't false-pass, since present is 0 only for the
-        // ring sensors whose absent report writes 1, and 1 for the cover). OFF = byte-identical baseline.
-        public static bool EnableSensorPresenceInterlock = true;
 
-        // The cover interlock is model-independent (it has nothing to do with the clamp): it applies
-        // whenever a cover exists. The only model-sensitive piece is TopCoverSensorId, which is COMPUTED
-        // per ring topology below -- so no clamp gate.
-        public static bool CoverInterlockActive => EnableSensorPresenceInterlock;
 
-        // TopCoverSenosr's state_table slot. NOT hardcoded: the positional sequence lands it on slot 3
-        // (colliding with the PartAtAssembly synth), and no single fixed id is free in both ring topologies
-        // (separate clamp rings free the Feed ids; a merged no-clamp ring frees only an absent component's
-        // slot). SystemLayoutInjector computes the highest component-range slot no Assembly-ring member
-        // occupies and assigns it here -- 6 for the clamp model (matches the rig-proven value), 13 for the
-        // merged no-clamp model. The default is a harmless fallback (only used if the compute path is off).
+        // Computed per ring topology by SystemLayoutInjector; this default is a fallback.
         public static int TopCoverSensorId = 6;
-
-        public static bool DataDrivenRecipes = false;
 
         // Each must sit above the component id space (ValidateProcessIdInvariant enforces it); the Assembly->Disassembly handshake rides AssemblyProcessId.
         public static int FeedStationProcessId    => RigCatalog.Current.ProcessIds.FeedStation;
@@ -138,10 +81,6 @@ namespace CodeGen.Configuration
                 .ToArray();
 
         public static bool EnableRobotTaskTail => CodeGen.Translation.HandoffPlanner.DischargeActive;
-
-        public static readonly string RecipeTestProcessName = "Assembly_Station";
-        // Empty = no restriction (full recipe); populate with actuator names to park the rest.
-        public static readonly string[] RecipeTestActuatorAllowlist = Array.Empty<string>();
 
         public string SystemXmlPath { get; set; } = string.Empty;
         public string MappingRulesPath { get; set; } = string.Empty;
