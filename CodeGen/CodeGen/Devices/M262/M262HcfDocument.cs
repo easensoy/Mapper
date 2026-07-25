@@ -38,42 +38,6 @@ namespace CodeGen.Devices.M262
                 Doc, bindings, syslayFbNames, LastResult, resourceId, m262IoFbId);
         }
 
-        // EAE requires UTF-8 without BOM; retries briefly through EAE's file lock.
-        public void WriteHcfToDisk(string hcfPath)
-        {
-            if (string.IsNullOrWhiteSpace(hcfPath))
-                throw new ArgumentException("hcfPath is null/empty", nameof(hcfPath));
-
-            var settings = new XmlWriterSettings
-            {
-                OmitXmlDeclaration = false,
-                Indent = true,
-                Encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),  // no BOM
-                NewLineHandling = NewLineHandling.Replace,
-            };
-
-            const int MaxAttempts = 8;
-            int delayMs = 50;
-            for (int attempt = 1; attempt <= MaxAttempts; attempt++)
-            {
-                try
-                {
-                    using var fs = new FileStream(hcfPath, FileMode.Create, FileAccess.Write, FileShare.Read);
-                    using var w = XmlWriter.Create(fs, settings);
-                    Doc.Save(w);
-                    if (attempt > 1)
-                        LastResult.Warnings.Add(
-                            $".hcf write succeeded on attempt {attempt} (EAE briefly held a lock).");
-                    LastResult.HcfPath = hcfPath;
-                    return;
-                }
-                catch (IOException) when (attempt < MaxAttempts)
-                {
-                    System.Threading.Thread.Sleep(delayMs);
-                    delayMs = Math.Min(delayMs * 2, 800);
-                }
-            }
-        }
 
         public IEnumerable<(string Pin, string Value)> EnumerateOverwrittenPins()
         {
