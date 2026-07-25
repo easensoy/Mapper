@@ -157,6 +157,13 @@ namespace CodeGen.Services
                     DeployArtifact(libPath, "Basic", "Bx1CoverFailsafe", eaeProjectDir, result, isBasic: true);
                 }
                 DeployArtifact(libPath, "Composite", "PLC_RW_BX1", eaeProjectDir, result, isBasic: false);
+                // Decode the input word at INIT so a cover already in place at power-on is reported without a
+                // physical remove-and-replace. Applies in BOTH bridge modes, so it sits here rather than inside
+                // the embed path (which is skipped when the bridge is external).
+                if (CodeGen.Devices.BX1.Bx1IoBrokerInjector.EnsureInitWordDecodeInComposite(
+                        Path.Combine(eaeProjectDir, "IEC61499", "PLC_RW_BX1.fbt")))
+                    result.PatchesApplied.Add("PLC_RW_BX1: decode the EtherNet/IP input word at INIT so the cover "
+                        + "change detector sees the real bits at power-on, not one scan later.");
                 if (cfg.Bx1BridgeInsideComposite)
                     CodeGen.Devices.BX1.Bx1IoBrokerInjector.EmbedCoverBridgeInComposite(
                         Path.Combine(eaeProjectDir, "IEC61499", "PLC_RW_BX1.fbt"));
