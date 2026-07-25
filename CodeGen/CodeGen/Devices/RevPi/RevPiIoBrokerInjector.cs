@@ -115,43 +115,6 @@ namespace CodeGen.Devices.RevPi
                 : new[] { "PartInHopper", "Feeder", "Checker", "FB1" }.FirstOrDefault(Has) ?? "FB1";
             Ev($"{initSrc}.INITO", $"{BrokerFbName}.INIT");
 
-            // 3. The Modbus symlink bridge lives INSIDE PLC_RW_REVPI (EmbedBridgeInComposite) by default, so
-            //    the resource instantiates ONLY RevPI_IO. Emit the 3 external bridge FBs only when it's OFF.
-            if (!CodeGen.Configuration.MapperConfig.RevPiBridgeInsideComposite)
-            {
-                int nextId = NextFbId(root, N);
-                int uid = 40;
-                void Da(string s, string d) => dc.Add(new XElement(N("Connection"),
-                    new XAttribute("Source", s), new XAttribute("Destination", d)));
-
-                var (sArity, sType) = SymlinkBridge.Pick("SRC", Sensors.Length);
-                var sNames = Sensors.Select(s => $"{resourceName}.{s.Symlink}").ToList();
-                Add(SymlinkBridge.BuildFb(ns, nextId++, uid++, "RevPiSensorPublisher", sType, sArity, sNames,
-                    isSysres ? 13500 : 37500, 6600));
-
-                var (cArity, cType) = SymlinkBridge.Pick("DST", Coils.Length);
-                var cNames = Coils.Select(c => $"{resourceName}.{c.Symlink}").ToList();
-                Add(SymlinkBridge.BuildFb(ns, nextId++, uid++, "RevPiCoilSubscriber", cType, cArity, cNames,
-                    isSysres ? 10800 : 34800, 6600));
-
-                Add(new XElement(N("FB"),
-                    new XAttribute("ID", nextId++), new XAttribute("Name", ScanFbName),
-                    new XAttribute("Type", "E_DELAY"), new XAttribute("x", isSysres ? "9500" : "33500"),
-                    new XAttribute("y", "7400"), new XAttribute("Namespace", "IEC61499.Standard"),
-                    new XElement(N("Parameter"), new XAttribute("Name", "DT"), new XAttribute("Value", ScanPeriod))));
-
-                Ev($"{initSrc}.INITO", "RevPiSensorPublisher.INIT");
-                Ev($"{initSrc}.INITO", "RevPiCoilSubscriber.INIT");
-                Ev($"{initSrc}.INITO", $"{ScanFbName}.START");
-                Ev($"{ScanFbName}.EO", $"{ScanFbName}.START");
-                Ev($"{ScanFbName}.EO", "RevPiCoilSubscriber.REQ");
-                Ev($"{ScanFbName}.EO", $"{BrokerFbName}.REQ_INT_BOOL");
-                Ev($"{BrokerFbName}.PLC_EVENT", "RevPiSensorPublisher.REQ");
-                for (int i = 0; i < Sensors.Length; i++)
-                    Da($"{BrokerFbName}.{Sensors[i].Var}", $"RevPiSensorPublisher.VALUE{i + 1}");
-                for (int i = 0; i < Coils.Length; i++)
-                    Da($"RevPiCoilSubscriber.VALUE{i + 1}", $"{BrokerFbName}.{Coils[i].Var}");
-            }
 
             doc.Save(path);
             return true;
