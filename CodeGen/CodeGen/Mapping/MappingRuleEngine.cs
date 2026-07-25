@@ -13,8 +13,6 @@ namespace CodeGen.Translation
         public static IEnumerable<MappingRuleEntry> GetAllRules(string xlsxPath)
             => XlsxRuleLoader.LoadAll(xlsxPath);
 
-        public static IEnumerable<MappingRuleEntry> GetRulesForSheet(string xlsxPath, string sheetName)
-            => XlsxRuleLoader.LoadSheet(xlsxPath, sheetName);
 
         public static IEnumerable<MappingRuleEntry> GetRelevantRules(
             string xlsxPath, bool hasActuator5, bool hasActuator7, bool hasSensor)
