@@ -1,3 +1,4 @@
+using System;
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
@@ -327,9 +328,6 @@ namespace CodeGen.Translation
 
                 SetParam(fb, paramName, paramValue);
             }
-
-            if (catType == ProcessCatType)
-                ApplyProcessStepTableParams(fb, comp);
         }
 
         private void ApplyFallbackParams(XElement fb, VueOneComponent comp, string catType)
@@ -337,56 +335,7 @@ namespace CodeGen.Translation
             if (catType == ActuatorCatType || catType == SevenStateActuatorCatType)
             {
                 var name = FbName(comp, catType);
-                SetParam(fb, "actuator_name", $"'{name.ToLower()}'");
-            }
-            else if (catType == ProcessCatType)
-            {
-                ApplyProcessStepTableParams(fb, comp);
-            }
-        }
-
-        private void ApplyProcessStepTableParams(XElement fb, VueOneComponent comp)
-        {
-            SetParam(fb, "process_name", $"'{comp.Name}'");
-            SetParam(fb, "process_id", "10");
-
-            ProcessStepTableRules? rules = null;
-            if (!string.IsNullOrEmpty(_mappingRulesPath) && File.Exists(_mappingRulesPath))
-            {
-                var sheetName = CatTypeToSheet.TryGetValue(ProcessCatType, out var s) ? s : ProcessCatType;
-                rules = ProcessStepTableRules.LoadFromSheet(_mappingRulesPath, sheetName);
-            }
-
-            var stepTable = ProcessStepTableGenerator.Generate(comp, _allComponents, rules);
-
-            if (stepTable.Success)
-            {
-                SetParam(fb, "num_steps", stepTable.NumSteps.ToString());
-                SetParam(fb, "num_comps", stepTable.NumComps.ToString());
-                SetParam(fb, "st_type", stepTable.StepType);
-                SetParam(fb, "cmd_target", stepTable.CmdTarget);
-                SetParam(fb, "cmd_state", stepTable.CmdState);
-                SetParam(fb, "st_wait_comp", stepTable.WaitComp);
-                SetParam(fb, "st_wait_state", stepTable.WaitState);
-                SetParam(fb, "st_next", stepTable.NextStep);
-                SetParam(fb, "cr_name", stepTable.CompNames);
-                SetParam(fb, "Text", stepTable.Text);
-
-                if (_currentResult != null)
-                {
-                    _currentResult.InjectedFBs.Add(
-                        $"[StepTable] {comp.Name}: {stepTable.NumSteps} steps, {stepTable.NumComps} components");
-                    foreach (var desc in stepTable.StepDescriptions)
-                        _currentResult.InjectedFBs.Add($"  {desc}");
-                    foreach (var warn in stepTable.Warnings)
-                        _currentResult.InjectedFBs.Add($"  WARN: {warn}");
-                }
-            }
-            else
-            {
-                _currentResult?.UnsupportedComponents.Add(
-                    $"Step table generation failed for '{comp.Name}': {stepTable.ErrorMessage}");
-                SetParam(fb, "Text", BuildTextParam(comp));
+                SetParam(fb, "actuator_name", $"'{TemplateMap.RingKey(name)}'");
             }
         }
 
@@ -575,11 +524,6 @@ namespace CodeGen.Translation
         }
 
 
-        private static XElement? LoadNet(string path, string tag)
-        {
-            var doc = XDocument.Load(path);
-            return doc.Root?.Element(Ns + tag);
-        }
 
         private static IEnumerable<XElement> FbsOfType(XElement net, string type) =>
             net.Descendants()
@@ -669,15 +613,6 @@ namespace CodeGen.Translation
                 new XAttribute("Name", name),
                 new XAttribute("Value", value)));
         }
-
-        private static string BuildTextParam(VueOneComponent proc)
-        {
-            var names = proc.States.OrderBy(s => s.StateNumber).Select(s => $"'{s.Name}'").ToList();
-            int pad = Math.Max(0, 14 - names.Count);
-            if (pad > 0) names.Add($"{pad}('')");
-            return "[" + string.Join(",", names) + "]";
-        }
-
 
         private static void PatchProcessNames(List<VueOneComponent> components, string controlXmlPath)
         {
@@ -880,7 +815,7 @@ namespace CodeGen.Translation
 
             // Merge the M262 Feed ring into the cross-PLC ring only when a Feed process has a cross-controller gate.
             Configuration.MapperConfig.MergeFeedRing =
-                Process.Recipes.RecipeStateClassifier.FeedRingMergeNeeded(allComponents);
+                Process.Recipes.FeedRingMerge.Needed(allComponents);
 
             var process = FindStation1Process(allComponents);
             if (process == null)
@@ -956,30 +891,29 @@ namespace CodeGen.Translation
             // Clamp: the Feed ids sit on a SEPARATE ring -> {0,4,5,6} free -> 6 (the rig-proven value). Merged
             // no-clamp: the Feed + M580 + cover ids fill [0..15] but nothing occupies 16 -> 16 (a truly free slot;
             // pinning it to 6 collides with Transfer on the merged ring and deadlocks the cover-place gate).
-            if (MapperConfig.EnableSensorPresenceInterlock)
+            var occ = new HashSet<int> { assemblyProcessId, disassemblyProcessId, MapperConfig.RobotActuatorId };
+            foreach (var syn in MapperConfig.M262SynthSensors) occ.Add(syn.Id);            // PartAtAssembly (3)
+            var cross = RigCatalog.Current.CrossRingSegment;                               // Ejector/Robot/PartAtAssembly
+            void MarkOcc(string nm, int id)
             {
-                var occ = new HashSet<int> { assemblyProcessId, disassemblyProcessId, MapperConfig.RobotActuatorId };
-                foreach (var syn in MapperConfig.M262SynthSensors) occ.Add(syn.Id);            // PartAtAssembly (3)
-                var cross = RigCatalog.Current.CrossRingSegment;                               // Ejector/Robot/PartAtAssembly
-                void MarkOcc(string nm, int id)
-                {
-                    if (CodeGen.Mapping.TemplateMap.IsTopCoverSensor(nm)) return; // this is the slot being placed
-                    var plc = HcfSymbolIndex.NameBasedPlcGuess(nm);
-                    if (plc is PlcAssignment.M580 or PlcAssignment.BX1 || cross.Contains(nm) || MapperConfig.MergeFeedRing)
-                        occ.Add(id);
-                }
-                for (int i = 0; i < contents.Sensors.Count; i++)   MarkOcc(contents.Sensors[i].Name, sensorIdStart + i);
-                for (int i = 0; i < contents.Actuators.Count; i++)
-                {
-                    // The robot task arm is APPENDED to allowedActuators, so its LOCAL positional id here is wrong --
-                    // globally it takes RobotActuatorId (already reserved in occ above), well outside the cover range.
-                    // Marking its local slot would falsely reserve a free cover slot (the id-16 no-clamp collision).
-                    if (CodeGen.Mapping.TemplateMap.IsRobotTaskArm(contents.Actuators[i])) continue;
-                    MarkOcc(contents.Actuators[i].Name, actuatorIdStart + i);
-                }
-                for (int slot = 16; slot >= 0; slot--)
-                    if (!occ.Contains(slot)) { MapperConfig.TopCoverSensorId = slot; break; }
+                if (CodeGen.Mapping.TemplateMap.IsTopCoverSensor(nm)) return; // this is the slot being placed
+                var plc = HcfSymbolIndex.NameBasedPlcGuess(nm);
+                if (plc is PlcAssignment.M580 or PlcAssignment.BX1 || cross.Contains(nm) || MapperConfig.MergeFeedRing)
+                    occ.Add(id);
             }
+            for (int i = 0; i < contents.Sensors.Count; i++)   MarkOcc(contents.Sensors[i].Name, sensorIdStart + i);
+            for (int i = 0; i < contents.Actuators.Count; i++)
+            {
+                // The robot task arm is APPENDED to allowedActuators, so its LOCAL positional id here is wrong --
+                // globally it takes RobotActuatorId (already reserved in occ above), well outside the cover range.
+                // Marking its local slot would falsely reserve a free cover slot (the id-16 no-clamp collision).
+                if (CodeGen.Mapping.TemplateMap.IsRobotTaskArm(contents.Actuators[i])) continue;
+                MarkOcc(contents.Actuators[i].Name, actuatorIdStart + i);
+            }
+            for (int slot = 16; slot >= 0; slot--)
+                if (!occ.Contains(slot)) { MapperConfig.TopCoverSensorId = slot; break; }
+
+
 
             // No top-level PLC_Start FB: Area_CAT/Station_CAT each hold their own plcStart; an external one double-bootstraps (EAE rejects).
 
@@ -1039,6 +973,10 @@ namespace CodeGen.Translation
                     if (processRecipe.StepType[i] != 1) continue;
                     var t = (processRecipe.CmdTargetName[i] ?? string.Empty).Trim();
                     if (t.Length == 0) continue;
+                    // A process-announce CMD (a process publishing its own model-state onto its process_id slot)
+                    // is not an actuator move; the retract check applies only to real actuators.
+                    if (allComponents.Any(c => string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase)
+                        && string.Equals((c.Name ?? string.Empty).Trim(), t, StringComparison.OrdinalIgnoreCase))) continue;
                     if (processRecipe.CmdStateArr[i] == 1) adv.Add(t);
                     else if (processRecipe.CmdStateArr[i] == 3) ret.Add(t);
                 }
@@ -1057,8 +995,7 @@ namespace CodeGen.Translation
                 processInstanceName, "Process1_Generic", "Main", 3360, 1460,
                 processOuter, processNested);
 
-            // Station 2 Process FBs reuse the SAME global sensors-first `contents` so every Wait1Id matches the global FB id;
-            // commandFromCondition:true because Station-2 state names don't encode motion verbs.
+            // Station 2 Process FBs reuse the SAME global sensors-first `contents` so every Wait1Id matches the global FB id.
             var assemblyStationProc = allComponents.FirstOrDefault(c =>
                 string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(c.Name, "Assembly_Station", StringComparison.Ordinal));
@@ -1070,8 +1007,7 @@ namespace CodeGen.Translation
                 var (aOuter, aNested, aRecipe) = BuildProcessFbParameters(
                     assemblyStationProc, allComponents, assemblyName, assemblyProcessId,
                     contents: contents,
-                    useRecipeStruct: config != null && config.UseRecipeStruct,
-                    commandFromCondition: true);
+                    useRecipeStruct: config != null && config.UseRecipeStruct);
                 builder.AddFB(FBIdGenerator.GenerateFBId(assemblyStationProc.ComponentID),
                     assemblyName, "Process1_Generic", "Main", 12200, 1460,
                     aOuter, aNested);
@@ -1100,8 +1036,7 @@ namespace CodeGen.Translation
                 var (dOuter, dNested, dRecipe) = BuildProcessFbParameters(
                     disassyProc, allComponents, disassyName, disassemblyProcessId,
                     contents: contents,
-                    useRecipeStruct: config != null && config.UseRecipeStruct,
-                    commandFromCondition: true);
+                    useRecipeStruct: config != null && config.UseRecipeStruct);
                 builder.AddFB(FBIdGenerator.GenerateFBId(disassyProc.ComponentID),
                     disassyName, "Process1_Generic", "Main", 20800, 1460,
                     dOuter, dNested);
@@ -1181,9 +1116,10 @@ namespace CodeGen.Translation
                 if (fbType == "Five_State_Actuator_CAT")
                 {
                     actParams = BuildActuatorParameters(actuator, assignedId, allComponents, scopedIds);
-                    // actuator_name = resolved instance name so the runtime broadcast key matches the FB instance.
+                    // actuator_name IS the ring key this FB answers to; TemplateMap.RingKey is the one
+                    // function that also spells the recipe's CmdTargetName, so the two cannot drift.
                     actParams["actuator_name"] = SyslayBuilder.FormatString(
-                        displayName.ToLowerInvariant());
+                        TemplateMap.RingKey(displayName));
 
                     InterlockEmitter.GuardFiveState(actParams, actuator, allComponents, scopedIds, report.Bound);
                 }
@@ -1191,7 +1127,7 @@ namespace CodeGen.Translation
                 {
                     actParams = BuildMinimalActuatorParameters(actuator, assignedId, fbType);
                     actParams["actuator_name"] = SyslayBuilder.FormatString(
-                        displayName.ToLowerInvariant());
+                        TemplateMap.RingKey(displayName));
                     InterlockEmitter.ApplyCentreHome(actParams, actuator, allComponents, scopedIds);
                     InterlockEmitter.GuardCentreHome(actParams, actuator, allComponents, scopedIds, report.Bound);
                 }
@@ -1199,7 +1135,7 @@ namespace CodeGen.Translation
                 {
                     actParams = BuildMinimalActuatorParameters(actuator, assignedId, fbType);
                     actParams["actuator_name"] = SyslayBuilder.FormatString(
-                        displayName.ToLowerInvariant());
+                        TemplateMap.RingKey(displayName));
                     report.Missing.Add(
                         $"[Phase 6] {actuator.Name} ({fbType}): minimal params only — " +
                         "data-driven Target*/Rule*/Interlock* wiring deferred to recipe phase");
@@ -1240,7 +1176,7 @@ namespace CodeGen.Translation
                 // TopCoverSenosr rides the cover ring into the Assembly state_table; pin it OUT of the
                 // positional sequence to its own slot so its report never collides with the PartAtAssembly
                 // synth sensor at slot 3. It stays counted in contents.Sensors, so actuator ids are unshifted.
-                if (MapperConfig.CoverInterlockActive &&
+                if (
                     CodeGen.Mapping.TemplateMap.IsTopCoverSensor(sensor.Name))
                     assignedId = MapperConfig.TopCoverSensorId;
 
@@ -1383,7 +1319,7 @@ namespace CodeGen.Translation
             RingWiringPlanner.BuildStation2Wiring(builder, contents, disassemblyFbName);
             RingWiringPlanner.BuildBx1Wiring(builder, contents, config);
 
-            // CycleReady cross-controller handoff (MapperConfig.EnableCycleReadyHandoff): the dedicated CrossComm
+            // CycleReady cross-controller handoff: the dedicated CrossComm
             // link Disassembly(M580) -> Feed_Station(M262). CrossReference=True tells EAE to auto-generate the UDP
             // proxy; both FBs are Process1_Generic (CycleReadyEventOut/CycleReadyOut outputs on Disassembly,
             // CycleReadyEvent/CycleReady inputs on Feed). Feed's ProcessHandler.SETRDY writes
@@ -1429,8 +1365,6 @@ namespace CodeGen.Translation
         // Default fallback timing used only when Control.xml omits or zeros out State.Time.
         private static int DefaultMotionMs => GenerationConfig.Current.DefaultMotionMs;
 
-        private static readonly HashSet<string> VacuumGripperNames =
-            new(StringComparer.OrdinalIgnoreCase) { };
 
         // Component → emitted FB Type via TemplateMap; the 6 sites that must agree are INVARIANTS.md I-4.
         internal static string ResolveActuatorFBType(VueOneComponent actuator)
@@ -1451,17 +1385,17 @@ namespace CodeGen.Translation
         {
             var dict = new Dictionary<string, string>
             {
-                ["actuator_name"] = SyslayBuilder.FormatString(actuator.Name.ToLowerInvariant()),
+                ["actuator_name"] = SyslayBuilder.FormatString(TemplateMap.RingKey(actuator.Name)),
                 ["actuator_id"]   = SyslayBuilder.FormatInt(assignedId),
             };
-            // Seven_State Target Pick/Place/Home = 1/2/0 stay in lock-step with the CMD state (MapSevenStateCommandFromConditionName).
+            // Seven_State Target Pick/Place/Home = 1/2/0 stay in lock-step with the recipe CMD state.
             if (string.Equals(fbType, "Seven_State_Actuator_CAT", StringComparison.OrdinalIgnoreCase))
             {
                 dict["TargetPickState"]  = SyslayBuilder.FormatInt(1);
                 dict["TargetPlaceState"] = SyslayBuilder.FormatInt(2);
                 dict["TargetHomeState"]  = SyslayBuilder.FormatInt(0);
                 // SevenStateActuator2's ECC gates every commanded transition on process_state_name = actuator_name; the ring never delivers it, so statically param it or the swivel stalls.
-                dict["process_state_name"] = SyslayBuilder.FormatString(actuator.Name.ToLowerInvariant());
+                dict["process_state_name"] = SyslayBuilder.FormatString(TemplateMap.RingKey(actuator.Name));
             }
             // Centre-home swivel settles at current_state_to_process 2=Work1 / 4=Work2 / 6=Home; Target*State feed the interlock manager at those values.
             if (string.Equals(fbType, "Seven_State_Actuator_Centre_Home_CAT", StringComparison.OrdinalIgnoreCase))
@@ -1554,7 +1488,7 @@ namespace CodeGen.Translation
 
             var actuatorParams = new Dictionary<string, string>
             {
-                ["actuator_name"] = SyslayBuilder.FormatString(actuator.Name.ToLowerInvariant()),
+                ["actuator_name"] = SyslayBuilder.FormatString(TemplateMap.RingKey(actuator.Name)),
                 ["actuator_id"] = SyslayBuilder.FormatInt(assignedId),
                 ["WorkSensorFitted"] = SyslayBuilder.FormatBool(workSensorFitted),
                 ["HomeSensorFitted"] = SyslayBuilder.FormatBool(homeSensorFitted),
@@ -1672,7 +1606,6 @@ namespace CodeGen.Translation
         {
             public List<string> RemovedFbs { get; } = new();
             public List<string> PreservedFbs { get; } = new();
-            public List<string> Unmatched { get; } = new();
             public int RemovedConnections { get; set; }
             public List<string> DeviceCleanupLog { get; } = new();
         }
@@ -2097,8 +2030,7 @@ namespace CodeGen.Translation
                        RecipeArrays? Recipe)
             BuildProcessFbParameters(VueOneComponent process, List<VueOneComponent> allComponents,
                 string processName, int processId,
-                StationContents? contents = null, bool useRecipeStruct = false,
-                bool commandFromCondition = false)
+                StationContents? contents = null, bool useRecipeStruct = false)
         {
             // Recipe arrays travel as Process1_Generic Parameter values; if `contents` is null, emit only the two scalars and return a null Recipe.
             var outer = new Dictionary<string, string>
@@ -2110,7 +2042,7 @@ namespace CodeGen.Translation
             RecipeArrays? recipe = null;
             if (contents != null)
             {
-                recipe = ProcessRecipeArrayGenerator.Generate(process, contents, allComponents, processId, commandFromCondition);
+                recipe = ProcessRecipeArrayGenerator.Generate(process, contents, allComponents, processId);
                 if (useRecipeStruct)
                 {
                     // 6 arrays collapse into one Recipe struct; the deployer normalizers reshape the FBType to match under the same flag (else ERR_MEMBER_VAR_NOTFOUND).
