@@ -24,11 +24,6 @@ namespace CodeGen.Mapping
             return e?.Plc ?? PlcAssignment.Unknown;
         }
 
-        public static string ResourceOf(string? name)
-        {
-            var e = ComponentRegistry.Get(name);
-            return e?.Resource ?? string.Empty;
-        }
 
     }
 }
