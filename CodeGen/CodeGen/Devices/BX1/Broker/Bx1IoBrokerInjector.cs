@@ -401,9 +401,9 @@ namespace CodeGen.Devices.BX1
 
             // Route the cover-detect input (BX1_IO.CoverPnpSensor = input-word bit5, already the gripper grip-
             // detect and the only cover-present bit the coupler carries) to the TOP-COVER sensor so it reports
-            // over MQTT. The passive Sensor_Bool_CAT re-reads via its deploy-injected Poll (EnsureSensorBoolPoll);
-            // here we only publish bit5 into the sensor's Input, boot-INIT'd and fired BOTH on the CoverSensorEvent
-            // change (edge) AND on the cyclic scan (level re-assert, so a cover present at boot is seen) -- see below.
+            // over MQTT. The passive Sensor_Bool_CAT re-reads via its deploy-injected RD event
+            // (EnsureSensorBoolReadEvent); here we only publish bit5 into the sensor's Input, boot-INIT'd and
+            // fired on the CoverSensorEvent change alone -- that detector already covers boot, see below.
             var topCoverFb = net.Elements(Ns + "FB").FirstOrDefault(f =>
                 (string?)f.Attribute("Type") == "Sensor_Bool_CAT" &&
                 ((string?)f.Attribute("Name") ?? "").ToLowerInvariant().Contains("cover"));
@@ -416,15 +416,22 @@ namespace CodeGen.Devices.BX1
                     $"'{resourceName}.{tcName}.Input'", null);
                 AddEvent(ec, "CoverPnp_Gripper.INITO", $"{tcSrc}.INIT");
                 AddEvent(ec, $"{BrokerFbName}.CoverSensorEvent", $"{tcSrc}.REQ");
-                // LEVEL RE-ASSERT (the cover-present gate depends on it): CoverSensorEvent is a CHANGE detector
-                // (FB2.CoverPnpSensorEvent), so a cover ALREADY in place at power-on never produces an edge -> the
-                // publisher is never REQ'd -> Sensor_Bool never leaves START (its only exits are REQ-gated) -> it
-                // never publishes -> its state_table slot stays 0 and the Assembly cover gate WAIT(present=1) hangs
-                // until the cover is physically taken out and put back. So also fire the publisher from the CYCLIC
-                // scan, which makes the sensor establish its CURRENT level on the first scan after boot. This is
-                // free on the ring: Sensor_Bool has no same-level self-transition, so an unchanged level emits NO
-                // CNF -- level for truth, edge for scheduling (the coil subscribers are already scan-driven).
-                AddEvent(ec, $"{ScanFbName}.EO", $"{tcSrc}.REQ");
+                // The publisher is fired by the CHANGE DETECTOR ALONE, never by the free-running scan.
+                // BX1_IO.CoverSensorEvent comes from FB2 (changeEventM262_2), which is clocked on EVERY broker
+                // read (EIPInputs_Bool.CNF -> FB2.Scan_Event) but emits only when the bit differs from its
+                // retained previous value. That retained value is a plain BOOL with no InitialValue and FB2's
+                // INIT algorithm is empty, so at power-on it is FALSE: a cover ALREADY in place reads
+                // TRUE <> FALSE on the very first scan and DOES produce the event. The detector therefore
+                // covers boot establishment as well as every later change, and it does so inside the broker
+                // where it costs nothing. Also driving the publisher from the cyclic scan only re-fires it at
+                // the scan rate forever, and because SRC.CNF drives the sensor CAT's RD, every one of those
+                // fires re-reads the CAT (RD -> FB2.REQ -> FB2.CNF -> FB1.REQ) — so the sensor's event counters
+                // climb without bound while the rig is idle. Reconciled rather than merely not-added, so a tree
+                // already deployed with the cyclic wire self-heals on the next deploy.
+                foreach (var stale in ec.Elements(Ns + "Connection")
+                             .Where(c => (string?)c.Attribute("Source") == $"{ScanFbName}.EO" &&
+                                         (string?)c.Attribute("Destination") == $"{tcSrc}.REQ").ToList())
+                    stale.Remove();
                 AddData(dc, $"{BrokerFbName}.CoverPnpSensor", $"{tcSrc}.VALUE1");
                 // After the SRC publishes the fresh bit into the sensor's Input, fire the sensor's RD re-read
                 // (Sensor_Bool_CAT gains RD via EnsureSensorBoolReadEvent) so it re-samples + re-reports on change.
