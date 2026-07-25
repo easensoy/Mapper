@@ -48,9 +48,6 @@ namespace CodeGen.Services
         public static void Info(string action) => Fire(LogStep.INFO, action);
         public static void Warn(string action) => Fire(LogStep.WARN, action);
         public static void Error(string action) => Fire(LogStep.ERROR, action);
-        public static void Diff(string action) => Fire(LogStep.DIFF, action);
         public static void Write(string action) => Fire(LogStep.WRITE, action);
-        public static void Touch(string action) => Fire(LogStep.TOUCH, action);
-        public static void Remap(string action) => Fire(LogStep.REMAP, action);
     }
 }
