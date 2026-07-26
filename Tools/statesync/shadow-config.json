@@ -1,0 +1,176 @@
+{
+  "_comment": [
+    "SMC rig -> Visual Components shadow. THE single rig description.",
+    "Read by statesync.py ONLY. vc_gateway.py reads nothing - every fact it needs",
+    "travels in the command envelope, so the pasted VC script never changes when the rig does.",
+    "",
+    "DERIVATION (2026-07-26):",
+    "  station/component/twinName/vcId/states/disStates .. from Control.xml (the VueOne twin)",
+    "  execution ............................................ structural: a binary PushJoint servo",
+    "                                                         -> signal; multi-position controller",
+    "                                                         -> axis; executor+routines -> routine",
+    "  open/closed ......................................... VC joint limits PushJoint_Open/_Closed",
+    "  positions ........................................... HAND-VERIFIED against the VC joint",
+    "                                                         limits. DO NOT regenerate from the twin:",
+    "                                                         Bearing_PnP re-uses State_Number 0 five",
+    "                                                         times, so a naive extract swaps home/work",
+    "                                                         and drops states 5/6.",
+    "  durationsMs ......................................... MEASURED medians, MQTT/rig_cadence.log",
+    "                                                         (n=27..108). The swivel is PHASE-KEYED:",
+    "                                                         assembly and disassembly strokes do not",
+    "                                                         overlap and are inverted.",
+    "  routines ............................................ derivable from the twin, but pinned here",
+    "                                                         because two disagree with the twin's",
+    "                                                         state names (see _override notes).",
+    "  verify .............................................. VC scene-graph node names; not in the twin.",
+    "  presentState ........................................ PHYSICAL rig wiring, not the twin. Bearing",
+    "                                                         and shaft part-present DIs are ACTIVE-LOW."
+  ],
+
+  "site": {
+    "broker": { "host": "127.0.0.1", "port": 1883 },
+    "unsPrefix": "uns/wmg/smc_rig/v1",
+    "unsQos": 1,
+    "vueone": { "enabled": true, "host": "127.0.0.1", "port": 51000, "clientId": "VC", "sendMinIntervalMs": 20 }
+  },
+
+  "protocol": {
+    "schemaVersion": 2,
+    "motionStartToDest": { "1": 2, "3": 4, "5": 6 },
+    "commandTopic": "uns/wmg/smc_rig/v1/vc/command",
+    "eventTopic": "uns/wmg/smc_rig/v1/vc/event",
+    "routineTimeoutMs": 15000,
+    "resyncOnReady": true
+  },
+
+  "components": {
+    "smc/feeder": {
+      "station": "feed_station", "component": "feeder", "twinName": "Feeder",
+      "vcId": "Pusher", "execution": "signal", "lane": "pusher",
+      "states": { "0": "ReturnedFinished", "1": "Advancing", "2": "Advanced", "3": "Returning", "4": "ReturnedFinished" },
+      "signal": { "behaviour": "PushJoint_ActionSignal", "open": 0.0, "closed": 116.0 },
+      "durationsMs": { "1": 716, "3": 1125 }
+    },
+    "smc/checker": {
+      "station": "feed_station", "component": "checker", "twinName": "Checker",
+      "vcId": "CheckerComp", "execution": "signal", "lane": "checker",
+      "states": { "0": "ReturnedHome", "1": "Lowering", "2": "Down", "3": "Rising", "4": "RisingFinished" },
+      "signal": { "behaviour": "PushJoint_ActionSignal", "open": 0.0, "closed": 30.0 },
+      "durationsMs": { "1": 563, "3": 325 }
+    },
+    "smc/transfer": {
+      "station": "feed_station", "component": "transfer", "twinName": "Transfer",
+      "vcId": "TransferComp", "execution": "signal", "lane": "transfer",
+      "states": { "0": "ReturnedFinished", "1": "Advancing", "2": "Advanced", "3": "Returning", "4": "ReturnedFinished" },
+      "signal": { "behaviour": "PushJoint_ActionSignal", "open": 0.0, "closed": 209.0 },
+      "durationsMs": { "1": 1924, "3": 3436 }
+    },
+    "smc/clamp": {
+      "station": "assembly_station", "component": "clamp", "twinName": "Clamp",
+      "vcId": "Clamp", "execution": "signal", "lane": "clamp",
+      "states": { "0": "Home Finished", "1": "Clamp Part", "2": "Clamped", "3": "Unclamp Part", "4": "Home Finished" },
+      "signal": { "behaviour": "PushJoint_ActionSignal", "open": 0.0, "closed": 32.4827386160209 },
+      "durationsMs": { "1": 166, "3": 280 }
+    },
+    "smc/ejector": {
+      "station": "disassembly", "component": "ejector", "twinName": "Ejector",
+      "vcId": "Ejector", "execution": "signal", "lane": "ejector",
+      "states": { "0": "Home Pos", "1": "ToWork", "2": "AtWork", "3": "ToHome", "4": "AtHome" },
+      "signal": { "behaviour": "PushJoint_ActionSignal", "open": 0.0, "closed": 90.0 },
+      "durationsMs": { "1": 2011, "3": 2009 }
+    },
+
+    "smc/bearing_pnp": {
+      "station": "assembly_station", "component": "bearing_pnp", "twinName": "Bearing_PnP",
+      "vcId": "SviwelArmComp", "execution": "axis", "lane": "bearing",
+      "states": { "0": "ReturnedHome", "1": "ToWork1", "2": "AtPick", "3": "TurningPlace", "4": "Place", "5": "ToHome", "6": "AtHome" },
+      "disStates": { "2": "AtPlace2", "4": "AtPick2" },
+      "positions": { "0": 90.0, "2": 181.0, "4": 0.0, "6": 90.0 },
+      "_override_durations": "PHASE-KEYED. Measured asm/dis populations do not overlap (2.3-2.9x apart, inverted). A flat table is wrong in both phases.",
+      "durationsMs": { "asm": { "1": 441, "3": 1400, "5": 580 }, "dis": { "1": 1260, "3": 620, "5": 878 } }
+    },
+    "smc/shaft_hr": {
+      "station": "assembly_station", "component": "shaft_hr", "twinName": "Shaft_Hr",
+      "vcId": "pnp_horizantal", "execution": "axis", "lane": "shaft",
+      "states": { "0": "ReturnedHome", "1": "TurningWork", "2": "AtWork", "3": "TurningHome", "4": "ReturnedFinished" },
+      "positions": { "0": 0.0, "2": 130.0, "4": 0.0 },
+      "durationsMs": { "1": 960, "3": 1070 }
+    },
+    "smc/shaft_vr": {
+      "station": "assembly_station", "component": "shaft_vr", "twinName": "Shaft_Vr",
+      "vcId": "pnp_vertical", "execution": "axis", "lane": "shaft",
+      "states": { "0": "ReturnedHome", "1": "Advancing", "2": "Advanced", "3": "Returning", "4": "ReturnedFinished" },
+      "positions": { "0": -34.19, "2": 0.0, "4": -34.19 },
+      "durationsMs": { "1": 920, "3": 822 }
+    },
+    "smc/coverpnp_hr": {
+      "station": "assembly_station", "component": "coverpnp_hr", "twinName": "CoverPNP_Hr",
+      "vcId": "CoverPnp_Horizantal", "execution": "axis", "lane": "cover",
+      "states": { "0": "ReturnedHome", "1": "Advancing", "2": "Advanced", "3": "Returning", "4": "ReturnedFinished" },
+      "positions": { "0": 0.0, "2": 100.0, "4": 0.0 },
+      "durationsMs": { "1": 1027, "3": 1188 }
+    },
+    "smc/coverpnp_vr": {
+      "station": "assembly_station", "component": "coverpnp_vr", "twinName": "CoverPNP_Vr",
+      "vcId": "CoverPnp_Vertical", "execution": "axis", "lane": "cover",
+      "states": { "0": "ReturnedHome", "1": "Lowering", "2": "Down", "3": "Rising", "4": "RisingFinished" },
+      "positions": { "0": 0.0, "2": 25.0, "4": 0.0 },
+      "durationsMs": { "1": 515, "3": 820 }
+    },
+
+    "smc/bearing_gripper": {
+      "station": "assembly_station", "component": "bearing_gripper", "twinName": "Bearing_Gripper",
+      "vcId": "Swivel Arm", "execution": "routine", "lane": "bearing",
+      "states": { "0": "Home", "1": "open", "2": "OpenGripper", "3": "close", "4": "CloseGripper" },
+      "_override_routines": "INVERTED in this VC model, proven by runtime parent chain: OpenGripper TAKES the bearing, CloseGripper RELEASES it. Rig state 1 is the pick, so state 1 -> OpenGripper.",
+      "routines": { "1": "OpenGripper", "3": "CloseGripper" },
+      "verify": { "part": "Bearing", "carriers": ["Swivel Arm", "SviwelArmComp"], "attachedOn": [1] }
+    },
+    "smc/shaft_gripper": {
+      "station": "assembly_station", "component": "shaft_gripper", "twinName": "Shaft_Gripper",
+      "vcId": "pnp", "execution": "routine", "lane": "shaft",
+      "states": { "0": "ReturnedHome", "1": "Closing", "2": "CloseGripper", "3": "Opening", "4": "OpenGripper" },
+      "routines": { "1": "CloseGripper", "3": "OpenGripper" },
+      "verify": { "part": "Shaft", "carriers": ["pnp", "Shaft_Gripper"], "attachedOn": [1] }
+    },
+    "smc/coverpnp_gripper": {
+      "station": "assembly_station", "component": "coverpnp_gripper", "twinName": "CoverPnp_Gripper",
+      "vcId": "coverpnp", "execution": "routine", "lane": "cover",
+      "states": { "0": "AtReleasePos", "1": "GripPart", "2": "grasp", "3": "ReleasePart", "4": "release" },
+      "routines": { "1": "grasp", "3": "release" },
+      "verify": { "part": "TopCover", "carriers": ["coverpnp", "CoverPnp_Gripper"], "attachedOn": [1] }
+    },
+    "smc/robot": {
+      "station": "disassembly", "component": "robot", "twinName": "Robot",
+      "vcId": "UR3e", "execution": "routine", "lane": "robot",
+      "states": { "0": "Home Pos", "1": "PickPart", "2": "Partplace" },
+      "_override_routines": "The twin names state 1 'PickPart'; the taught VC routine is 'Partpick'. The routine name wins.",
+      "routines": { "0": "Home", "1": "Partpick", "2": "Partplace" }
+    },
+
+    "smc/PartInHopper": {
+      "station": "feed_station", "component": "partinhopper", "twinName": "PartInHopper",
+      "vcId": "Part Sensor", "execution": "sensor",
+      "states": { "0": "Off", "1": "On" }, "presentState": 1
+    },
+    "smc/BearingSensor": {
+      "station": "assembly_station", "component": "bearingsensor", "twinName": "BearingSensor",
+      "vcId": "BearingSensor", "execution": "sensor",
+      "_override_presentState": "PHYSICAL: the bearing part-present DI is ACTIVE-LOW on the rig. Do not derive this from the twin.",
+      "states": { "0": "Off", "1": "On" }, "presentState": 0
+    },
+    "smc/ShaftSensor": {
+      "station": "assembly_station", "component": "shaftsensor", "twinName": "ShaftSensor",
+      "vcId": "ShaftSensor", "execution": "sensor",
+      "_override_presentState": "PHYSICAL: ACTIVE-LOW, as BearingSensor.",
+      "states": { "0": "Off", "1": "On" }, "presentState": 0
+    },
+    "smc/TopCoverSenosr": {
+      "station": "assembly_station", "component": "topcoversenosr", "twinName": "TopCoverSenosr",
+      "vcId": "TopCoverSensor", "execution": "sensor",
+      "_override_topic": "The rig publishes BOTH smc/TopCoverSenosr (this, misspelled at source) and smc/TopCoverSensor. aliases catches the second so it is no longer discarded.",
+      "aliases": ["smc/TopCoverSensor"],
+      "states": { "0": "Off", "1": "On" }, "presentState": 1
+    }
+  }
+}
