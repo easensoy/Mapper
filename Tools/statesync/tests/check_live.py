@@ -71,6 +71,14 @@ def main():
     check("VC never publishes to a rig observation topic",
           not any("/state" in t or t.startswith("smc/") for t in vc_pubs))
 
+    # VueOne must be a pure observation subscriber: state topics only, never vc/*
+    vue = [cl for ts, cl, tops in recent
+           if cl != vc and any(t.endswith("/state") for t in tops)]
+    for cl in set(vue):
+        tops = sorted({t for ts, c, tt in recent if c == cl for t in tt})
+        bad = [t for t in tops if "/vc/" in t or "_bridge" in t]
+        check("VueOne client %s subscribes to observations only" % cl[:24], not bad, str(bad))
+
     cmds = sum(n for (c, t), n in pubs.items() if t.endswith("/vc/command"))
     evts = sum(vc_pubs.get(t, 0) for t in vc_pubs)
     check("commands flowed", cmds > 20, "%d commands" % cmds)
