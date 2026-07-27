@@ -36,9 +36,29 @@ LOG = r"C:\VueOneMapper\Tools\statesync\vc_gateway.log"
 TICK_S = 0.02
 MAX_PENDING = 30
 ZERO_EPS = 0.05
-START_GRACE_MS = 750.0          # no scope event AND never seen busy within this -> never_started
+START_GRACE_MS = 3000.0         # no start evidence within this -> complete as UNOBSERVED
 DEFAULT_TIMEOUT_MS = 15000.0
 RAMP_FRACTION = 0.10            # 10% accelerate, 80% cruise, 10% decelerate
+SIGNAL_EDGE_GRACE_MS = 400.0    # no joint movement by now -> the servo missed the edge
+SIGNAL_SLACK = 1.5              # endpoint deadline = durationMs * this + SIGNAL_SLACK_MS
+SIGNAL_SLACK_MS = 600.0
+
+# ------------------------------------------------------------ SIMULATION CLOCK
+# Elapsed MUST be measured on the simulation clock, not the wall clock.
+#   * delay() advances simulation time, so the loop's own cadence is sim time.
+#   * a stopped or paused simulation must not age an in-flight move. Measuring on
+#     datetime.now() made a 1125 ms Pusher stroke report 227029 ms after the sim was
+#     stopped mid-move and restarted 3m46s later - and timed out an innocent robot
+#     routine at 227794 ms instead of its 15000 ms limit.
+#   * it also keeps motion correct when VC runs at a non-realtime SimSpeed.
+_simFallbackMs = [0.0]
+
+
+def simNowMs():
+    try:
+        return getSimulation().SimTime * 1000.0
+    except Exception:
+        return _simFallbackMs[0]
 
 # ---------------------------------------------------------------- logging
 try:
@@ -219,6 +239,24 @@ def chainHasCarrier(partName, carriers):
     return any(c in chain for c in carriers), chain
 
 # ---------------------------------------------------- signal executor
+def stateSignals(comp, control, j):
+    """The stock <joint>_OpenState / <joint>_ClosedState feedback signals, when present.
+    Evidence only - they are unconnected in this model, so they are logged, not gated on."""
+    try:
+        name = control.Joints[j].Name
+    except Exception:
+        return None, None
+    return (comp.findBehaviour(name + "_OpenState"),
+            comp.findBehaviour(name + "_ClosedState"))
+
+
+def signalValueOf(sig):
+    try:
+        return bool(sig.Value)
+    except Exception:
+        return None
+
+
 def shapeServo(comp, control, j, distance, durationMs):
     """Speed/accel so the stock servo sweeps `distance` in `durationMs`:
     10% ramp up, 80% cruise, 10% ramp down -> total time == durationMs exactly.
@@ -264,26 +302,54 @@ def startSignal(env, lane):
     value = bool(env.get("signalValue"))
     durMs = float(env.get("durationMs") or 0)
     dist = float(env.get("strokeDistance") or 0)
-    speed = None
-    if durMs > 0:
-        speed = shapeServo(comp, control, j, dist, durMs)
+    target = float(env.get("target"))
+    tol = max(0.5, 0.01 * dist) if dist else 0.5
+    before = float(control.getJointValue(j))
+    openSig, closedSig = stateSignals(comp, control, j)
+    sigBefore = signalValueOf(sig)
+
+    if abs(before - target) <= tol:
+        try:
+            sig.signal(value)            # keep the servo's own view consistent
+        except Exception:
+            pass
+        publish(env, "completed", position=round(before, 3), durationMs=0, atTarget=True)
+        log("completed", commandId=env.get("commandId"), vcId=vcid, lane=lane,
+            execution="signal", durationMs=0, cur=round(before, 3), alreadyAtTarget=True)
+        return
+
+    speed = shapeServo(comp, control, j, dist, durMs) if durMs > 0 else None
+
+    # EDGE GUARANTEE: a VC boolean signal fires OnSignal only on a CHANGE, and the stock
+    # ServoController_Script moves only on that event. If the signal already holds the
+    # requested value the servo will never see it and the cylinder silently does not move.
+    # Forcing the edge is safe here precisely because the joint is provably NOT at target.
+    forced = False
     try:
+        if sigBefore is not None and sigBefore == value:
+            sig.signal(not value)
+            forced = True
         sig.signal(value)
     except Exception as e:
         publish(env, "failed", detail="signal:" + str(e))
         log("failed", commandId=env.get("commandId"), vcId=vcid, err=str(e)); return
 
-    if durMs <= 0:                       # snapshot: no animation expected
+    if durMs <= 0:                       # snapshot: snap, no animation expected
         publish(env, "completed", durationMs=0, snapshot=True)
         log("completed", commandId=env.get("commandId"), vcId=vcid, lane=lane,
             execution="signal", durationMs=0, snapshot=True)
         return
-    active[lane] = {"kind": "signal", "env": env, "vcId": vcid,
-                    "t0": datetime.now(), "durMs": durMs}
-    publish(env, "started", speed=speed)
+
+    active[lane] = {"kind": "signal", "env": env, "vcId": vcid, "control": control, "j": j,
+                    "sig": sig, "value": value, "start": before, "target": target, "tol": tol,
+                    "t0": simNowMs(), "durMs": durMs, "moved": False, "forced": forced,
+                    "openSig": openSig, "closedSig": closedSig,
+                    "deadline": durMs * SIGNAL_SLACK + SIGNAL_SLACK_MS}
+    publish(env, "started", position=round(before, 3), speed=speed)
     log("start", commandId=env.get("commandId"), vcId=vcid, lane=lane, execution="signal",
-        value=value, durMs=int(durMs), speed=round(speed, 2) if speed else None,
-        recv=env.get("_recv"))
+        value=value, sigBefore=sigBefore, forcedEdge=forced, jointBefore=round(before, 3),
+        target=round(target, 3), tol=round(tol, 3), durMs=int(durMs),
+        speed=round(speed, 2) if speed else None, recv=env.get("_recv"))
 
 # ------------------------------------------------------ axis executor
 def startAxis(env, lane):
@@ -308,7 +374,7 @@ def startAxis(env, lane):
         return
 
     active[lane] = {"kind": "axis", "env": env, "vcId": vcid, "control": control, "j": j,
-                    "start": start, "target": target, "t0": datetime.now(), "durMs": durMs}
+                    "start": start, "target": target, "t0": simNowMs(), "durMs": durMs}
     publish(env, "started", position=round(start, 3))
     log("start", commandId=env.get("commandId"), vcId=vcid, lane=lane, execution="axis",
         fromPos=round(start, 2), toPos=round(target, 2), durMs=int(durMs), recv=env.get("_recv"))
@@ -396,7 +462,7 @@ def startRoutine(env, lane):
     chainBefore = configureGrasp(vcid, verify.get("part")) if verify else None
 
     item = {"kind": "routine", "env": env, "vcId": vcid, "routine": name, "key": key,
-            "verify": verify, "t0": datetime.now(),
+            "verify": verify, "t0": simNowMs(),
             "scopeBase": _scopeCount.get(key, 0), "started": False,
             "timeoutMs": float(env.get("timeoutMs") or DEFAULT_TIMEOUT_MS),
             "chainBefore": chainBefore, "ex": ex}
@@ -405,6 +471,12 @@ def startRoutine(env, lane):
     except Exception as e:
         publish(env, "failed", detail="callRoutine:" + str(e))
         log("failed", commandId=env.get("commandId"), vcId=vcid, err=str(e)); return
+
+    try:                                    # a short routine can start and finish between
+        if ex.CurrentStatement is not None:  # ticks - latch the start immediately
+            item["started"] = True
+    except Exception:
+        pass
 
     active[lane] = item
     publish(env, "dispatched")
@@ -438,11 +510,11 @@ def finishRoutine(lane, item, how, elapsedMs):
 
 # ---------------------------------------------------------------- advance
 def advance():
-    now = datetime.now()
+    now = simNowMs()
     controllers, done = [], []
 
     for lane, s in list(active.items()):
-        elapsed = (now - s["t0"]).total_seconds() * 1000.0
+        elapsed = now - s["t0"]
 
         if s["kind"] == "axis":
             frac = 1.0 if s["durMs"] <= 0 else min(1.0, elapsed / s["durMs"])
@@ -458,8 +530,31 @@ def advance():
                 done.append((lane, "time", elapsed))
 
         elif s["kind"] == "signal":
-            if elapsed >= s["durMs"]:
-                done.append((lane, "time", elapsed))
+            # Completion is ENDPOINT evidence, never elapsed time. A cylinder that did not
+            # move is reported as such instead of being declared finished by the clock.
+            try:
+                cur = float(s["control"].getJointValue(s["j"]))
+            except Exception as e:
+                log("failed", commandId=s["env"].get("commandId"), vcId=s["vcId"], err=str(e))
+                done.append((lane, "error", elapsed)); continue
+            s["cur"] = cur
+            if abs(cur - s["start"]) > s["tol"]:
+                s["moved"] = True
+            if abs(cur - s["target"]) <= s["tol"]:
+                done.append((lane, "endpoint", elapsed))
+            elif not s["moved"] and not s["forced"] and elapsed >= SIGNAL_EDGE_GRACE_MS:
+                # nothing moved: the servo never saw an edge. Force one, once.
+                try:
+                    s["sig"].signal(not s["value"]); s["sig"].signal(s["value"])
+                    s["forced"] = True
+                    log("signal_edge_forced", commandId=s["env"].get("commandId"),
+                        vcId=s["vcId"], lane=lane, cur=round(cur, 3),
+                        target=round(s["target"], 3))
+                except Exception as e:
+                    log("failed", commandId=s["env"].get("commandId"), vcId=s["vcId"],
+                        err=str(e))
+            elif elapsed >= s["deadline"]:
+                done.append((lane, "no_motion" if not s["moved"] else "not_reached", elapsed))
 
         else:  # routine
             fired = _scopeCount.get(s["key"], 0) > s["scopeBase"]
@@ -484,7 +579,12 @@ def advance():
             if elapsed >= s["timeoutMs"]:
                 done.append((lane, "timeout", elapsed)); continue
             if not s["started"] and elapsed >= START_GRACE_MS:
-                done.append((lane, "never_started", elapsed)); continue
+                # No scope event, never seen busy, no material evidence. A routine that
+                # ran and finished between polls is indistinguishable from one that never
+                # ran, so this is UNKNOWN - not a failure. Report it honestly as
+                # unverified and release the lane; blocking the robot forever on a
+                # heuristic is what stranded Home behind Partplace.
+                done.append((lane, "unobserved", elapsed)); continue
 
     for c in controllers:
         try:
@@ -504,20 +604,38 @@ def advance():
             log("completed", commandId=env.get("commandId"), vcId=s["vcId"], lane=lane,
                 execution="axis", durationMs=int(elapsed), cur=round(s["target"], 2))
         elif s["kind"] == "signal":
-            publish(env, "completed", durationMs=int(elapsed))
-            log("completed", commandId=env.get("commandId"), vcId=s["vcId"], lane=lane,
-                execution="signal", durationMs=int(elapsed))
+            cur = s.get("cur", s["start"])
+            err = abs(cur - s["target"])
+            ev = {"openState": signalValueOf(s["openSig"]) if s["openSig"] else None,
+                  "closedState": signalValueOf(s["closedSig"]) if s["closedSig"] else None}
+            if how == "endpoint":
+                publish(env, "completed", position=round(cur, 3), durationMs=int(elapsed),
+                        endpointError=round(err, 3), **ev)
+                log("completed", commandId=env.get("commandId"), vcId=s["vcId"], lane=lane,
+                    execution="signal", durationMs=int(elapsed), jointBefore=round(s["start"], 3),
+                    jointAfter=round(cur, 3), target=round(s["target"], 3),
+                    endpointError=round(err, 3), forcedEdge=s["forced"], **ev)
+            elif how != "error":
+                reason = "signal_no_motion" if how == "no_motion" else "target_not_reached"
+                publish(env, "failed", detail=reason, position=round(cur, 3),
+                        durationMs=int(elapsed), endpointError=round(err, 3), **ev)
+                log("failed", commandId=env.get("commandId"), vcId=s["vcId"], lane=lane,
+                    execution="signal", reason=reason, durationMs=int(elapsed),
+                    jointBefore=round(s["start"], 3), jointAfter=round(cur, 3),
+                    target=round(s["target"], 3), endpointError=round(err, 3),
+                    forcedEdge=s["forced"], signalValue=s["value"], **ev)
         else:
             if how == "timeout":
                 publish(env, "timeout", durationMs=int(elapsed), detail="routine_timeout")
                 log("timeout", commandId=env.get("commandId"), vcId=s["vcId"], lane=lane,
                     routine=s["routine"], durationMs=int(elapsed))
                 flush(lane, "routine_timeout")
-            elif how == "never_started":
-                publish(env, "failed", durationMs=int(elapsed), detail="never_started")
-                log("failed", commandId=env.get("commandId"), vcId=s["vcId"], lane=lane,
-                    routine=s["routine"], reason="never_started", durationMs=int(elapsed))
-                flush(lane, "never_started")
+            elif how == "unobserved":
+                publish(env, "completed", durationMs=int(elapsed), verified=False,
+                        observed=False, via="unobserved")
+                log("completed", commandId=env.get("commandId"), vcId=s["vcId"], lane=lane,
+                    execution="routine", routine=s["routine"], durationMs=int(elapsed),
+                    verified=False, observed=False, via="unobserved")
             else:
                 if not finishRoutine(lane, s, how, elapsed):
                     flush(lane, "verify_failed")
@@ -535,10 +653,12 @@ STARTERS = {"signal": startSignal, "axis": startAxis, "routine": startRoutine}
 
 def OnRun():
     reset_state("run")
-    log("gateway_up", tick_ms=int(TICK_S * 1000))
+    _simFallbackMs[0] = 0.0
+    log("gateway_up", tick_ms=int(TICK_S * 1000), simClock=_clockKind())
     publish_ready("run")
     while True:
         delay(TICK_S)
+        _simFallbackMs[0] += TICK_S * 1000.0
         for lane in list(pending.keys()):
             q = pending.get(lane)
             if not q or lane in active:
@@ -548,11 +668,35 @@ def OnRun():
         advance()
 
 
+def _clockKind():
+    try:
+        getSimulation().SimTime
+        return "SimTime"
+    except Exception:
+        return "tick-accumulator"
+
+
+def abort_inflight(why):
+    """A stop or reset invalidates every in-flight item: the simulation clock will not
+    advance, the servos are frozen mid-stroke and the executors' state is unknown.
+    Fail them explicitly so no lane is left holding a command that can never finish, and
+    so the next Run/Reset resync starts from a clean slate."""
+    for lane, s in list(active.items()):
+        publish(s["env"], "failed", detail=why)
+        log("failed", commandId=s["env"].get("commandId"), vcId=s.get("vcId"), lane=lane,
+            execution=s.get("kind"), reason=why)
+    active.clear()
+
+
 def OnReset():
+    abort_inflight("simulation_reset")
     reset_state("reset")
     _hooked.clear()                 # handlers are re-assigned (not accumulated) on next use
+    _simFallbackMs[0] = 0.0
     publish_ready("reset")
 
 
 def OnStop():
-    log("gateway_down", pending=sum(len(q) for q in pending.values()), active=len(active))
+    n = len(active)
+    log("gateway_down", pending=sum(len(q) for q in pending.values()), active=n)
+    abort_inflight("simulation_stopped")
