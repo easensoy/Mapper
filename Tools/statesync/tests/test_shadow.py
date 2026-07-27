@@ -31,7 +31,7 @@ def check(name, ok, detail=""):
 class Scene(object):
     """Five signal cylinders, five axes (pnp shares one controller), four routine owners."""
 
-    def __init__(self, fire_scope=True, report_busy=True):
+    def __init__(self, fire_scope=True, report_busy=True, stuck=None, stuck_true=None):
         self.app = M.Application()
         self.gw = M.Component("0 #2")
         self.app.Components.append(self.gw)
@@ -48,9 +48,12 @@ class Scene(object):
             node = M.Node(vcid, "PushJoint", c)
             comp = M.Component(comp_name, [node], {},
                                {"PushSpeed": 100.0, "PushAcceleration": 1000.0})
-            s = M.Signal(comp, c, 0, openv, closedv)
+            s = M.Signal(comp, c, 0, openv, closedv,
+                         initial=(vcid in (stuck_true or ())),
+                         stuck=(vcid in (stuck or ())))
             comp._beh["PushJoint_ActionSignal"] = s
             self.app.Components.append(comp)
+            self.app.signals.append(s)
             self.ctl[vcid], self.sig[vcid] = c, s
 
         swivel_ctl = M.Controller(["J1"])
@@ -150,6 +153,7 @@ class Gateway(object):
         vcs.getComponent = lambda: scene.gw
         vcs.VC_STRING = M.VC_STRING
         vcs.delay = delay
+        vcs.getSimulation = lambda: M.Simulation()
         sys.modules["vcScript"] = vcs
 
         src = open(os.path.join(ROOT, "vc_gateway.py")).read()
@@ -265,7 +269,7 @@ def t_axis_during_ur3e():
     g.send(env("SviwelArmComp", "bearing", "axis", target=181.0, durationMs=441))
     g.send(env("pnp_vertical", "shaft", "axis", target=-34.19, durationMs=822))
     g.send(env("Pusher", "pusher", "signal", signalValue=True, strokeDistance=116.0,
-               durationMs=716, signalBehaviour="PushJoint_ActionSignal"))
+               target=116.0, durationMs=716, signalBehaviour="PushJoint_ActionSignal"))
     g.pump(600)
     worst, rows = 0.0, []
     for e in g.ev("completed"):
@@ -282,25 +286,52 @@ def t_axis_during_ur3e():
           "%dms" % (ur_done[0]["durationMs"] if ur_done else -1))
 
 
-def t_no_premature_completion():
+def t_unobserved_routine():
     """Executor that never fires a scope event and never reports busy - the IsEnabled trap.
-    A routine with no material evidence must report never_started, never completed."""
+    A routine with no evidence either way is UNKNOWN: it must not be reported as verified,
+    must not complete early, and must NOT strand the lane. Reporting `never_started` here
+    is what left UR3e Home queued behind Partplace forever."""
     s = Scene(fire_scope=False, report_busy=False); g = Gateway(s); g.pump(2)
     g.send(env("UR3e", "robot", "routine", routine="Home"))
-    g.pump(80)
-    comp = g.ev("completed")
-    fail = g.ev("failed")
-    ok = not comp and bool(fail) and fail[0].get("reason") == "never_started"
-    check("no premature completion (never_started detected)", ok,
-          "completed=%d failed=%s" % (len(comp), fail[0].get("reason") if fail else None))
-    fast = [e for e in g.ev("completed") if (e.get("durationMs") or 999) < 1]
-    check("no routine completes in <1ms without evidence", not fast)
+    g.pump(40)                                   # 800 ms - inside the 3000 ms grace
+    check("no completion before the observation grace", not g.ev("completed"),
+          "%d early completions" % len(g.ev("completed")))
+    g.pump(200)
+    done = g.ev("completed")
+    ok = bool(done) and done[0].get("via") == "unobserved" and \
+        done[0].get("verified") is False and done[0].get("observed") is False
+    check("unobserved routine reported honestly, not as success",
+          ok, "via=%s verified=%s observed=%s" % (
+              done[0].get("via") if done else None,
+              done[0].get("verified") if done else None,
+              done[0].get("observed") if done else None))
+    check("no routine completes in <1ms without evidence",
+          not [e for e in done if (e.get("durationMs") or 999) < 1])
+
+    g.send(env("UR3e", "robot", "routine", routine="Partpick"))
+    g.pump(20)
+    check("lane is released for the next robot command",
+          any(e["event"] == "dispatched" and e.get("routine") == "Partpick" for e in g.events))
+
+
+def t_stuck_routine_timeout():
+    """A routine that starts and never finishes must time out on the SIMULATION clock at
+    its configured limit, fail the lane explicitly, and release it."""
+    s = Scene(); g = Gateway(s); g.pump(2)
+    s.ur_ex._durations["Partplace"] = 10 ** 9         # never completes
+    g.send(env("UR3e", "robot", "routine", routine="Partplace", timeoutMs=2000))
+    g.pump(150)
+    tmo = g.ev("timeout")
+    check("stuck routine times out at its configured limit",
+          bool(tmo) and abs(tmo[0]["durationMs"] - 2000) < 100,
+          "%sms (want 2000)" % (tmo[0]["durationMs"] if tmo else None))
+    check("timed-out routine releases its lane", not g.ns["active"])
 
 
 def t_duplicate():
     s = Scene(); g = Gateway(s); g.pump(2)
     e = env("Pusher", "pusher", "signal", signalValue=True, strokeDistance=116.0,
-            durationMs=716, signalBehaviour="PushJoint_ActionSignal")
+            target=116.0, durationMs=716, signalBehaviour="PushJoint_ActionSignal")
     g.send(e); g.send(dict(e))                    # identical commandId twice
     g.pump(60)
     check("duplicate commandId executed exactly once",
@@ -313,10 +344,10 @@ def t_duplicate():
 def t_signal_executor():
     s = Scene(); g = Gateway(s); g.pump(2)
     g.send(env("Clamp", "clamp", "signal", signalValue=True, strokeDistance=32.4827386160209,
-               durationMs=166, signalBehaviour="PushJoint_ActionSignal"))
+               target=32.4827386160209, durationMs=166, signalBehaviour="PushJoint_ActionSignal"))
     g.pump(30)
     g.send(env("Clamp", "clamp", "signal", signalValue=False, strokeDistance=32.4827386160209,
-               durationMs=280, signalBehaviour="PushJoint_ActionSignal"))
+               target=0.0, durationMs=280, signalBehaviour="PushJoint_ActionSignal"))
     g.pump(40)
     starts = g.ev("start")
     check("signal executor sets the ActionSignal", len(s.sig["Clamp"].history) == 2,
@@ -339,6 +370,73 @@ def t_signal_executor():
     check("signal durations honour the rig strokes",
           len(durs) == 2 and abs(durs[0] - 166) <= 40 and abs(durs[1] - 280) <= 40,
           "actual=%s want=[166,280]" % durs)
+
+
+def t_signal_no_motion():
+    """A cylinder whose servo never moves it must be reported as signal_no_motion, NOT
+    declared complete because durationMs elapsed. This is the Ejector defect."""
+    s = Scene(stuck=("Ejector",)); g = Gateway(s); g.pump(2)
+    g.send(env("Ejector", "ejector", "signal", signalValue=True, strokeDistance=90.0,
+               target=90.0, durationMs=2011, signalBehaviour="PushJoint_ActionSignal"))
+    g.pump(400)
+    fail = [e for e in g.ev("failed") if e["vcId"] == "Ejector"]
+    check("a cylinder that never moves reports signal_no_motion",
+          bool(fail) and fail[0].get("reason") == "signal_no_motion",
+          "reason=%s" % (fail[0].get("reason") if fail else None))
+    check("no time-based completion for a dead cylinder",
+          not [e for e in g.ev("completed") if e["vcId"] == "Ejector"])
+    check("failure records the endpoint evidence",
+          bool(fail) and fail[0].get("jointAfter") is not None
+          and fail[0].get("endpointError") is not None,
+          "after=%s err=%s" % (fail[0].get("jointAfter") if fail else None,
+                               fail[0].get("endpointError") if fail else None))
+
+
+def t_signal_edge_guarantee():
+    """A VC boolean signal fires OnSignal only on a CHANGE. If the signal already holds the
+    requested value the stock servo never sees it and the cylinder silently does not move -
+    forward dead, return fine. The gateway must force the edge and still reach the endpoint."""
+    s = Scene(stuck_true=("Ejector",)); g = Gateway(s); g.pump(2)
+    check("signal starts already at the value we are about to command",
+          s.sig["Ejector"].Value is True)
+    g.send(env("Ejector", "ejector", "signal", signalValue=True, strokeDistance=90.0,
+               target=90.0, durationMs=2011, signalBehaviour="PushJoint_ActionSignal"))
+    g.pump(300)
+    done = [e for e in g.ev("completed") if e["vcId"] == "Ejector"]
+    check("forward stroke still reaches the endpoint", bool(done),
+          "after=%s err=%s" % (done[0].get("jointAfter") if done else None,
+                               done[0].get("endpointError") if done else None))
+    check("the edge was forced exactly once",
+          s.sig["Ejector"].edges >= 1 and (done and done[0].get("forcedEdge") is True),
+          "edges=%d forced=%s" % (s.sig["Ejector"].edges,
+                                  done[0].get("forcedEdge") if done else None))
+    check("endpoint reached within tolerance",
+          bool(done) and done[0]["endpointError"] <= 0.9,
+          str(done[0]["endpointError"] if done else None))
+
+
+def t_stop_safety():
+    """A stopped simulation must not age an in-flight move. Wall-clock elapsed turned a
+    1125 ms Pusher stroke into 227029 ms and timed out an innocent robot routine."""
+    s = Scene(); g = Gateway(s); g.pump(2)
+    g.send(env("Pusher", "pusher", "signal", signalValue=True, strokeDistance=116.0,
+               target=116.0, durationMs=716, signalBehaviour="PushJoint_ActionSignal"))
+    g.send(env("UR3e", "robot", "routine", routine="Partpick"))
+    g.pump(5)
+    check("both lanes in flight before the stop", len(g.ns["active"]) == 2)
+    g.ns["OnStop"]()
+    check("stop fails every in-flight item explicitly",
+          not g.ns["active"] and
+          len([e for e in g.ev("failed") if e.get("reason") == "simulation_stopped"]) == 2,
+          "%d failed" % len([e for e in g.ev("failed")
+                             if e.get("reason") == "simulation_stopped"]))
+    M.CLOCK.ms += 227000.0                       # the sim sat stopped for 3m47s
+    g.pump(5)
+    check("no phantom duration survives the stop",
+          not [e for e in g.ev("completed") if (e.get("durationMs") or 0) > 10000],
+          str([e.get("durationMs") for e in g.ev("completed")]))
+    check("gateway uses the simulation clock, not the wall clock",
+          g.ns["_clockKind"]() == "SimTime", g.ns["_clockKind"]())
 
 
 def t_lane_serialisation():
@@ -507,9 +605,11 @@ def main():
     print("\n-- gateway: concurrency ------------------------------------------------")
     t_axis_during_ur3e(); t_lane_serialisation(); t_shared_controller()
     print("\n-- gateway: honesty ----------------------------------------------------")
-    t_no_premature_completion(); t_duplicate()
+    t_unobserved_routine(); t_stuck_routine_timeout(); t_duplicate()
     print("\n-- gateway: signal contract --------------------------------------------")
-    t_signal_executor()
+    t_signal_executor(); t_signal_no_motion(); t_signal_edge_guarantee()
+    print("\n-- gateway: stop / clock safety ----------------------------------------")
+    t_stop_safety()
     print("\n-- gateway: reset / snapshot -------------------------------------------")
     t_reset(); t_snapshot_policy()
     print("\n-- statesync + wiring --------------------------------------------------")
