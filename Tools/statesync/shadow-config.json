@@ -19,6 +19,13 @@
     "                                                         (n=27..108). The swivel is PHASE-KEYED:",
     "                                                         assembly and disassembly strokes do not",
     "                                                         overlap and are inverted.",
+    "  states .............................................. THE TWIN'S state names, not the EAE CAT",
+    "                                                         runtime vocabulary. VueOne resolves an",
+    "                                                         incoming observation by stateName against",
+    "                                                         the loaded model, so a name the twin does",
+    "                                                         not carry is silently unresolvable and the",
+    "                                                         component stops following. Guarded by",
+    "                                                         tests/test_vueone_models.py.",
     "  routines ............................................ derivable from the twin, but pinned here",
     "                                                         because two disagree with the twin's",
     "                                                         state names (see _override notes).",
@@ -68,7 +75,7 @@
     "smc/clamp": {
       "station": "assembly_station", "component": "clamp", "twinName": "Clamp",
       "vcId": "Clamp", "execution": "signal", "lane": "clamp",
-      "states": { "0": "Home Finished", "1": "Clamp Part", "2": "Clamped", "3": "Unclamp Part", "4": "Home Finished" },
+      "states": { "0": "Home Pos", "1": "Clamp Part", "2": "Clamped", "3": "Unclamp Part", "4": "Home Finished" },
       "signal": { "behaviour": "PushJoint_ActionSignal", "open": 0.0, "closed": 32.4827386160209 },
       "durationsMs": { "1": 166, "3": 280 }
     },
@@ -83,7 +90,7 @@
     "smc/bearing_pnp": {
       "station": "assembly_station", "component": "bearing_pnp", "twinName": "Bearing_PnP",
       "vcId": "SviwelArmComp", "execution": "axis", "lane": "bearing",
-      "states": { "0": "ReturnedHome", "1": "ToWork1", "2": "AtPick", "3": "TurningPlace", "4": "Place", "5": "ToHome", "6": "AtHome" },
+      "states": { "0": "ReturnedHome", "1": "TurningPick", "2": "AtPick", "3": "TurningPlace", "4": "Place", "5": "TurningHome", "6": "AtHome" },
       "disStates": { "2": "AtPlace2", "4": "AtPick2" },
       "positions": { "0": 90.0, "2": 181.0, "4": 0.0, "6": 90.0 },
       "_override_durations": "PHASE-KEYED. Measured asm/dis populations do not overlap (2.3-2.9x apart, inverted). A flat table is wrong in both phases.",
@@ -143,7 +150,7 @@
     "smc/robot": {
       "station": "disassembly", "component": "robot", "twinName": "Robot",
       "vcId": "UR3e", "execution": "routine", "lane": "robot",
-      "states": { "0": "Home Pos", "1": "PickPart", "2": "Partplace" },
+      "states": { "0": "Home Pos", "1": "Partpick", "2": "Partplace" },
       "_override_routines": "The twin names state 1 'PickPart'; the taught VC routine is 'Partpick'. The routine name wins.",
       "routines": { "0": "Home", "1": "Partpick", "2": "Partplace" }
     },
