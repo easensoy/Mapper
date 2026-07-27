@@ -84,17 +84,54 @@ class Node(object):
 
 
 class Signal(object):
-    """Stock PushJoint_ActionSignal. Drives the joint through the component's own servo,
-    honouring the shaped MaxSpeed/MaxAcceleration - i.e. swept, not teleported."""
+    """Stock PushJoint_ActionSignal + ServoController_Script, modelled faithfully:
 
-    def __init__(self, comp, controller, j, openv, closedv):
+      * EDGE-TRIGGERED. `OnSignal` fires only when the value CHANGES, so signalling the
+        value the signal already holds moves nothing. This is the defect the gateway's
+        edge guarantee exists to survive.
+      * SWEPT. The servo interpolates over the trapezoid implied by the joint's
+        MaxSpeed/MaxAcceleration/MaxDeceleration, which the gateway shapes beforehand.
+      * `stuck=True` simulates a servo script that is dead: the signal is accepted but
+        the joint never moves.
+    """
+
+    def __init__(self, comp, controller, j, openv, closedv, initial=False, stuck=False):
         self.comp, self.control, self.j = comp, controller, j
         self.openv, self.closedv = openv, closedv
+        self.Value = bool(initial)
+        self.stuck = stuck
         self.history = []
+        self.edges = 0
+        self._move = None
 
     def signal(self, value):
-        self.history.append((CLOCK.ms, bool(value)))
-        self.control.moveJoint(self.j, self.closedv if value else self.openv)
+        v = bool(value)
+        self.history.append((CLOCK.ms, v))
+        if v == self.Value:
+            return                              # no change -> no OnSignal -> no motion
+        self.Value = v
+        self.edges += 1
+        if self.stuck:
+            return
+        start = self.control.getJointValue(self.j)
+        target = self.closedv if v else self.openv
+        joint = self.control.Joints[self.j]
+        d = abs(target - start)
+        sp = joint.MaxSpeed or 100.0
+        a = joint.MaxAcceleration or sp
+        de = joint.MaxDeceleration or a
+        dur = (d / sp + sp / (2.0 * a) + sp / (2.0 * de)) * 1000.0 if d else 0.0
+        self._move = (start, target, CLOCK.ms, max(dur, 1.0))
+
+    def tick(self):
+        if not self._move:
+            return
+        start, target, t0, dur = self._move
+        frac = min(1.0, (CLOCK.ms - t0) / dur)
+        self.control._values[self.j] = start + (target - start) * frac
+        self.control._targets[self.j] = self.control._values[self.j]
+        if frac >= 1.0:
+            self._move = None
 
 
 class Routine(object):
@@ -174,10 +211,20 @@ class Component(object):
         return p
 
 
+class Simulation(object):
+    """vcSimulation.SimTime - seconds. This is the clock the gateway must use: it stops
+    when the simulation stops, so a paused sim cannot age an in-flight move."""
+
+    @property
+    def SimTime(self):
+        return CLOCK.ms / 1000.0
+
+
 class Application(object):
     def __init__(self):
         self.Components = []
         self.executors = []
+        self.signals = []
 
     def findComponent(self, name):
         for c in self.Components:
@@ -188,3 +235,5 @@ class Application(object):
     def tick(self):
         for e in self.executors:
             e.tick()
+        for s in self.signals:
+            s.tick()
