@@ -115,16 +115,21 @@ class Scene(object):
             self.ur_part.Parent = self.hopper
             for c in (self.tool, self.ur_part, self.hopper):
                 self.app.Components.append(c)
-            # Partpick's motion is modelled contiguous to 4299 because that is what the
-            # gateway OBSERVES: its middle dwell never registers as 1500 ms of stillness,
-            # so the window only opens after the retract - reproducing the real 5799 ms.
-            ur_durations = {"Partpick": 4299.0, "Partplace": 5079.0, "Home": 779.0}
-            ur_motion = {"Partpick": 4299.0, "Partplace": 2479.0, "Home": 779.0}
+            # Partpick's real shape: move, dwell (GRIP at 3299), retract to 4299. The dwell
+            # is modelled with servo jitter because that is what the gateway OBSERVES - the
+            # middle never registers as 1500 ms of stillness, which is why the window only
+            # opens after the retract and the routine took the real 5799 ms.
+            # Partpick keeps the executor busy to 6665 - longer than its last motion - which
+            # is why neither the scope event nor an idle transition ever ended it in the
+            # real run and the 1500 ms settle won at 5799.
+            ur_durations = {"Partpick": 6665.0, "Partplace": 5079.0, "Home": 779.0}
+            ur_motion = {"Partpick": [(0.0, 1900.0), (3900.0, 4299.0)],
+                         "Partplace": 2479.0, "Home": 779.0}
             ur_at = {"Partpick": (3299.0, lambda: setattr(self.ur_part, "Parent", self.tool)),
                      "Partplace": (3479.0, lambda: setattr(self.ur_part, "Parent", self.hopper))}
         ur_ex = M.Executor(self.app, self.ur3e, ["Partpick", "Partplace", "Home"],
                            ur_durations, motion=ur_motion, effects_at=ur_at,
-                           controller=ur_ctl,
+                           controller=ur_ctl, jitter=0.001 if ur_part else 0.0,
                            fire_scope=fire_scope, report_busy=report_busy)
         self.ur3e._beh["Executor"] = ur_ex
         self.app.Components.append(self.ur3e)
@@ -413,11 +418,15 @@ def t_release_completes_step():
     pick = [e for e in g2.ev("completed") if e["vcId"] == "UR3e"]
     check("a grasp does NOT end the step - the retract still has to run",
           bool(pick) and pick[0]["durationMs"] > 4299,
-          "%sms (grip 3299, retract ends 4299, observed 5799)" % (
-              pick[0]["durationMs"] if pick else None))
+          "%sms (grip 3299, retract ends 4299)" % (pick[0]["durationMs"] if pick else None))
     check("...and the part is still held when the step ends",
           "Part" in (pick[0].get("carrying") or []) if pick else False,
           str(pick[0].get("carrying") if pick else None))
+    check("...but once it HAS retracted the step ends there, not 1500 ms later",
+          bool(pick) and pick[0].get("via") == "picked" and pick[0]["durationMs"] < 5000,
+          "via=%s at %sms (settle would have waited to 5799)" % (
+              pick[0].get("via") if pick else None,
+              pick[0]["durationMs"] if pick else None))
 
 
 def t_routine_chain():
