@@ -50,9 +50,22 @@ SIGNAL_SLACK_MS = 600.0
 # those delays is what left the shadow ~5.8 s behind the rig on every cycle.
 #
 # MUST EXCEED THE LONGEST TAUGHT DWELL THAT PRECEDES MOTION OR AN OUTPUT ACTION in any
-# routine the rig drives, or the routine is cut before its work is done. In this program
-# the longest such dwell is 1 s (Partpick delays either side of its gripper output), so
-# 1500 ms leaves 50% margin. Override per command with "settleMs" on the wire.
+# routine the rig drives, or the routine is cut before its work is done. That bound is now
+# MEASURED, not assumed: the UR3e's taught program (archived at
+# Docs/statesync_archive/ur3e_taught_program.xml, extracted from the layout) is
+#
+#   Partpick   joint P4 (JointSpeed 0.2) . linear P5 . Delay 1.0 . DO103=1 . DO1=1 (GRIP)
+#              . Delay 1.0 . linear P12 (retract)
+#   Partplace  linear P2 . Delay 1.0 . DO103=0 . DO1=0 (RELEASE) . Delay 1.6
+#   Home       joint P3 (JointSpeed 1.0)
+#
+# Partpick's two 1 s delays are separated only by zero-time outputs, so nominally it holds
+# still for 2 s in the MIDDLE of the routine, with the retract still to come. Observation
+# says otherwise - it completes at motion-end + 1500, i.e. that middle window never reaches
+# 1500 ms in practice - but the margin is thin and it is NOT worth 300 ms: cutting there
+# cancels the retract and drags the part. The number stays at the observed-safe 1500 ms;
+# the saving comes from the release rule below, which needs no window at all.
+# Override per command with "settleMs" on the wire.
 ROUTINE_SETTLE_MS = 1500.0
 JOINT_EPS = 1e-4                # joint units; below this the robot counts as stationary
 
@@ -520,7 +533,7 @@ def startRoutine(env, lane, chainIdx=0):
             "scopeBase": _scopeCount.get(key, 0), "started": False,
             "timeoutMs": float(env.get("timeoutMs") or DEFAULT_TIMEOUT_MS),
             "settleMs": float(env.get("settleMs") or ROUTINE_SETTLE_MS),
-            "lastJv": None, "stillSince": simNowMs(),
+            "lastJv": None, "stillSince": simNowMs(), "carried0": carriedBy(vcid),
             "chain": chain, "chainIdx": chainIdx, "t0chain": simNowMs(),
             "chainBefore": chainBefore, "ex": ex}
     if chain and chainIdx > 0:
@@ -655,8 +668,19 @@ def advance():
                 if jointsMoved(jv, s.get("lastJv")):
                     s["lastJv"] = jv
                     s["stillSince"] = now
-                elif now - s.get("stillSince", now) >= s["settleMs"]:
-                    done.append((lane, "motion_settled", elapsed)); continue
+                else:
+                    # LETTING GO IS THE LAST PHYSICAL ACT OF A PLACE. Once the robot is
+                    # stationary AND holding less than it started with, the step's work is
+                    # provably done and any remaining taught dwell has no rig counterpart -
+                    # in this program that is Partplace's trailing Delay 1.6, pure lateness.
+                    # A GRASP is deliberately NOT treated this way: it is always followed by
+                    # a retract (Partpick grips at statement 5 of 7), so completing on it
+                    # would cancel the lift and drag the part across the fixture.
+                    if s.get("carried0") is not None and \
+                            len(carriedBy(s["vcId"])) < len(s["carried0"]):
+                        done.append((lane, "released", elapsed)); continue
+                    if now - s.get("stillSince", now) >= s["settleMs"]:
+                        done.append((lane, "motion_settled", elapsed)); continue
 
             if elapsed >= s["timeoutMs"]:
                 done.append((lane, "timeout", elapsed)); continue
