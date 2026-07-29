@@ -345,40 +345,38 @@ def shapeServo(comp, control, j, distance, durationMs):
     Written to the joint (authoritative) and to the component's Push* properties
     (so the stock changeSpeed lands in the same place if it re-runs).
 
-    Also reports OVERDRIVE: how many times the shaped values exceed the ones the model
-    was AUTHORED with. That ratio is the thing to look at when a cylinder moves perfectly
-    but fails to shift the part it is supposed to push - the part is carried by physics
-    contact, and a kinematic body slammed in at many times the design acceleration
-    resolves its contact in a single solver step instead of over several. Acceleration
-    grows as 1/t^2 (the ramp is a fixed fraction of the stroke), so it overdrives far
-    faster than the speed does: halving a stroke doubles the speed but QUADRUPLES the
-    acceleration. Reported once per (component, duration) so a new setting announces
-    itself and a steady one stays silent."""
+    Reports the shaping once per (component, duration), so a new setting announces itself
+    and a steady one stays silent. The figure that matters is mmPerStep - how far the
+    pusher advances in one 20 ms simulation step. The part is carried by PHYSICS CONTACT
+    (the components hold a PhysicsEntity, Physics Type "In Physics"), so that per-step
+    advance is what decides whether the solver sees the contact at all; a cylinder can
+    arrive perfectly and still fail to shift anything.
+
+    DO NOT compare the shaped values against the PushSpeed/PushAcceleration stored in the
+    layout and call the ratio an overdrive. Those stored values are THIS SCRIPT'S OWN
+    LEFTOVERS: shapeServo writes them on every stroke, so whatever the file holds is
+    simply the last stroke before the model was saved. Proven to 4 dp on all five
+    cylinders - each equals the gateway's RETURN-stroke shaping (Pusher 114.5679,
+    Checker 102.5641, Transfer 67.5850, Clamp 128.8998). There is no authored ceiling
+    recorded anywhere in the model."""
     t = max(float(durationMs), 1.0) / 1000.0
     d = abs(float(distance))
     if d <= ZERO_EPS:
         return None
     v = d / ((1.0 - RAMP_FRACTION) * t)
     a = v / (RAMP_FRACTION * t)
-    over = {}
     for pname, val in (("PushSpeed", v), ("PushAcceleration", a)):
         pr = comp.getProperty(pname)
         if pr:
-            try:
-                was = float(pr.Value)
-                if was > ZERO_EPS:
-                    over[pname] = round(val / was, 1)
-            except Exception:
-                pass
             try:
                 pr.Value = float(val)
             except Exception:
                 pass
     key = (str(getattr(comp, "Name", "?")), int(durationMs))
-    if over and key not in _shapedSeen:
+    if key not in _shapedSeen:
         _shapedSeen.add(key)
-        log("servo_shaped", comp=key[0], durMs=key[1], speed=round(v, 2),
-            accel=round(a, 1), overdrive=over)
+        log("servo_shaped", comp=key[0], durMs=key[1], strokeMm=round(d, 2),
+            speed=round(v, 2), accel=round(a, 1), mmPerStep=round(v * TICK_S, 2))
     try:
         joint = control.Joints[j]
         for attr, val in (("MaxSpeed", v), ("MaxAcceleration", a), ("MaxDeceleration", a)):
