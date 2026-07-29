@@ -154,7 +154,7 @@ class Executor(object):
 
     def __init__(self, app, comp, routines, durations, effects=None,
                  fire_scope=True, report_busy=True, motion=None, controller=None,
-                 effects_at=None):
+                 effects_at=None, jitter=0.0):
         self.app = app
         self.comp = comp
         self.Program = Program(routines)
@@ -174,6 +174,12 @@ class Executor(object):
         # at the end of a routine - Partplace opens its gripper 1 s after the last motion and
         # then dwells another 1.6 s - so the grasp/release must be able to land mid-routine.
         self._effects_at = effects_at or {}
+        # Servo dither while the robot HOLDS position through a taught Delay. Tiny, but
+        # above the gateway's stationary threshold - which is why the middle of Partpick
+        # never registers as a still window, and why a retract has to be told apart from
+        # this by the SIZE of the excursion rather than by its presence.
+        self._jitter = jitter
+        self._sign = 1.0
         self.Controller = controller
         self._due = None
         self._effect_due = None
@@ -206,8 +212,15 @@ class Executor(object):
             if any(a <= CLOCK.ms < b for a, b in self._motion_until):
                 for i in range(len(self.Controller.Joints)):
                     self.Controller._values[i] += 0.5
-            elif CLOCK.ms >= max(b for _, b in self._motion_until):
-                self._motion_until = None
+            else:
+                # dither only while taught statements are still running; once the last
+                # motion is done the servo parks and the robot is genuinely still
+                if self._jitter and CLOCK.ms < max(b for _, b in self._motion_until):
+                    self._sign = -self._sign
+                    for i in range(len(self.Controller.Joints)):
+                        self.Controller._values[i] += self._jitter * self._sign
+                if CLOCK.ms >= max(b for _, b in self._motion_until):
+                    self._motion_until = None
         if self._effect_due is not None and CLOCK.ms >= self._effect_due[0]:
             fn = self._effect_due[1]
             self._effect_due = None
