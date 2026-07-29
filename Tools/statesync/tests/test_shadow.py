@@ -377,7 +377,7 @@ def t_routine_chain():
     done = [e for e in g.ev("completed") if e["vcId"] == "UR3e"]
     check("the chain reports ONE completion for the command", len(done) == 1,
           "%d completions" % len(done))
-    steps = [e for e in g.ev("chain_step") if e["vcId"] == "UR3e"]
+    steps = [e for e in g.ev("chain_step_start") if e["vcId"] == "UR3e"]
     check("intermediate steps logged, not published", len(steps) == 2, "%d steps" % len(steps))
     task = done[0].get("taskMs") if done else None
     check("task time is the whole chain, and matches the rig's 7827 ms",
