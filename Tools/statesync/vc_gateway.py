@@ -135,6 +135,7 @@ _jointCache = {}
 _execCache = {}
 _scopeCount = {}    # (vcId, routine) -> monotonic count of observed OnScopeExecuted
 _hooked = set()     # (vcId, routine) already carrying our handler
+_shapedSeen = set() # (component, durationMs) whose servo shaping has been reported once
 
 
 def reset_state(why):
@@ -143,6 +144,7 @@ def reset_state(why):
     lastSeq.clear()
     epochSeen[0] = None
     _scopeCount.clear()
+    _shapedSeen.clear()     # a new session re-announces what shaping it is running
     log("state_cleared", why=why)
 
 
@@ -350,11 +352,12 @@ def shapeServo(comp, control, j, distance, durationMs):
     resolves its contact in a single solver step instead of over several. Acceleration
     grows as 1/t^2 (the ramp is a fixed fraction of the stroke), so it overdrives far
     faster than the speed does: halving a stroke doubles the speed but QUADRUPLES the
-    acceleration."""
+    acceleration. Reported once per (component, duration) so a new setting announces
+    itself and a steady one stays silent."""
     t = max(float(durationMs), 1.0) / 1000.0
     d = abs(float(distance))
     if d <= ZERO_EPS:
-        return None, None
+        return None
     v = d / ((1.0 - RAMP_FRACTION) * t)
     a = v / (RAMP_FRACTION * t)
     over = {}
@@ -371,6 +374,11 @@ def shapeServo(comp, control, j, distance, durationMs):
                 pr.Value = float(val)
             except Exception:
                 pass
+    key = (str(getattr(comp, "Name", "?")), int(durationMs))
+    if over and key not in _shapedSeen:
+        _shapedSeen.add(key)
+        log("servo_shaped", comp=key[0], durMs=key[1], speed=round(v, 2),
+            accel=round(a, 1), overdrive=over)
     try:
         joint = control.Joints[j]
         for attr, val in (("MaxSpeed", v), ("MaxAcceleration", a), ("MaxDeceleration", a)):
@@ -380,7 +388,7 @@ def shapeServo(comp, control, j, distance, durationMs):
                 pass
     except Exception:
         pass
-    return v, (over or None)
+    return v
 
 
 def startSignal(env, lane):
@@ -414,7 +422,7 @@ def startSignal(env, lane):
             execution="signal", durationMs=0, cur=round(before, 3), alreadyAtTarget=True)
         return
 
-    speed, overdrive = shapeServo(comp, control, j, dist, durMs) if durMs > 0 else (None, None)
+    speed = shapeServo(comp, control, j, dist, durMs) if durMs > 0 else None
 
     # EDGE GUARANTEE: a VC boolean signal fires OnSignal only on a CHANGE, and the stock
     # ServoController_Script moves only on that event. If the signal already holds the
@@ -445,8 +453,7 @@ def startSignal(env, lane):
     log("start", commandId=env.get("commandId"), vcId=vcid, lane=lane, execution="signal",
         value=value, sigBefore=sigBefore, forcedEdge=forced, jointBefore=round(before, 3),
         target=round(target, 3), tol=round(tol, 3), durMs=int(durMs),
-        speed=round(speed, 2) if speed else None, overdrive=overdrive,
-        recv=env.get("_recv"))
+        speed=round(speed, 2) if speed else None, recv=env.get("_recv"))
 
 # ------------------------------------------------------ axis executor
 def startAxis(env, lane):
