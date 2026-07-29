@@ -31,7 +31,8 @@ def check(name, ok, detail=""):
 class Scene(object):
     """Five signal cylinders, five axes (pnp shares one controller), four routine owners."""
 
-    def __init__(self, fire_scope=True, report_busy=True, stuck=None, stuck_true=None):
+    def __init__(self, fire_scope=True, report_busy=True, stuck=None, stuck_true=None,
+                 ur_part=False):
         self.app = M.Application()
         self.gw = M.Component("0 #2")
         self.app.Components.append(self.gw)
@@ -98,9 +99,31 @@ class Scene(object):
         self.ctl["UR3e"] = ur_ctl
         # measured from the taught program: Partpick moves then dwells 2 s; Partplace has
         # NO motion at all - a gripper output and a ~5 s Delay; Home is pure motion.
+        ur_durations = {"Partpick": 6679.0, "Partplace": 4979.0, "Home": 779.0}
+        ur_motion = {"Partpick": 4679.0, "Partplace": 0.0, "Home": 779.0}
+        ur_at = {}
+        if ur_part:
+            # The real taught program, to the millisecond it was observed running:
+            #   Partpick   2299 ms motion . Delay 1.0 . GRIP . Delay 1.0 . retract  (4299)
+            #   Partplace  2479 ms motion . Delay 1.0 . RELEASE . Delay 1.6         (5079)
+            # The grip lands MID-routine with a retract still to come; the release is the
+            # last physical act. That asymmetry is what the gateway has to respect.
+            self.tool = M.Component("2F-85")
+            self.tool.Parent = self.ur3e
+            self.ur_part = M.Component("Part")
+            self.hopper = M.Component("hopper_nest")
+            self.ur_part.Parent = self.hopper
+            for c in (self.tool, self.ur_part, self.hopper):
+                self.app.Components.append(c)
+            # Partpick's motion is modelled contiguous to 4299 because that is what the
+            # gateway OBSERVES: its middle dwell never registers as 1500 ms of stillness,
+            # so the window only opens after the retract - reproducing the real 5799 ms.
+            ur_durations = {"Partpick": 4299.0, "Partplace": 5079.0, "Home": 779.0}
+            ur_motion = {"Partpick": 4299.0, "Partplace": 2479.0, "Home": 779.0}
+            ur_at = {"Partpick": (3299.0, lambda: setattr(self.ur_part, "Parent", self.tool)),
+                     "Partplace": (3479.0, lambda: setattr(self.ur_part, "Parent", self.hopper))}
         ur_ex = M.Executor(self.app, self.ur3e, ["Partpick", "Partplace", "Home"],
-                           {"Partpick": 6679.0, "Partplace": 4979.0, "Home": 779.0},
-                           motion={"Partpick": 4679.0, "Partplace": 0.0, "Home": 779.0},
+                           ur_durations, motion=ur_motion, effects_at=ur_at,
                            controller=ur_ctl,
                            fire_scope=fire_scope, report_busy=report_busy)
         self.ur3e._beh["Executor"] = ur_ex
@@ -357,10 +380,44 @@ def t_motion_settled():
     g2.send(env("UR3e", "robot", "routine", routine="Partpick"))
     g2.pump(500)
     pick = [e for e in g2.ev("completed") if e["vcId"] == "UR3e"]
-    check("a moving routine runs to its natural end", bool(pick) and pick[0]["durationMs"] > 6000,
-          "%sms (taught 6679)" % (pick[0]["durationMs"] if pick else None))
+    check("a moving routine runs to its natural end",
+          bool(pick) and pick[0]["durationMs"] > 4679,
+          "%sms (motion ends 4679, taught 6679)" % (pick[0]["durationMs"] if pick else None))
     check("carried part reported without any config",
           bool(pick) and "carrying" in pick[0], str(pick[0].get("carrying") if pick else None))
+
+
+def t_release_completes_step():
+    """Letting go is the last physical act of a place, so the shadow moves on the moment it
+    happens. Partplace then dwells another 1.6 s with nothing left to do - pure lateness
+    against a rig that has already parked. A GRASP is the opposite: Partpick grips at
+    statement 5 of 7 and still has to retract, so completing on it would drag the part."""
+    s = Scene(ur_part=True); g = Gateway(s); g.pump(2)
+    s.ur_part.Parent = s.tool            # the robot arrives at Partplace holding the part
+    g.send(env("UR3e", "robot", "routine", routine="Partplace"))
+    g.pump(400)
+    done = [e for e in g.ev("completed") if e["vcId"] == "UR3e"]
+    check("a place completes on the release, not on a still-window",
+          bool(done) and done[0].get("via") == "released",
+          "via=%s" % (done[0].get("via") if done else None))
+    check("...at the release, ahead of the settle deadline and the taught 5079 ms",
+          bool(done) and 3400 <= done[0]["durationMs"] < 3979,
+          "%sms (release 3479, settle would fire 3979)" % (done[0]["durationMs"] if done else None))
+    check("the part really did leave the gripper",
+          "Part" not in (done[0].get("carrying") or []) if done else False,
+          str(done[0].get("carrying") if done else None))
+
+    g2 = Gateway(Scene(ur_part=True)); g2.pump(2)
+    g2.send(env("UR3e", "robot", "routine", routine="Partpick"))
+    g2.pump(400)
+    pick = [e for e in g2.ev("completed") if e["vcId"] == "UR3e"]
+    check("a grasp does NOT end the step - the retract still has to run",
+          bool(pick) and pick[0]["durationMs"] > 4299,
+          "%sms (grip 3299, retract ends 4299, observed 5799)" % (
+              pick[0]["durationMs"] if pick else None))
+    check("...and the part is still held when the step ends",
+          "Part" in (pick[0].get("carrying") or []) if pick else False,
+          str(pick[0].get("carrying") if pick else None))
 
 
 def t_routine_chain():
@@ -664,7 +721,7 @@ def main():
     t_axis_during_ur3e(); t_lane_serialisation(); t_shared_controller()
     print("\n-- gateway: honesty ----------------------------------------------------")
     t_unobserved_routine(); t_stuck_routine_timeout(); t_motion_settled()
-    t_routine_chain(); t_duplicate()
+    t_release_completes_step(); t_routine_chain(); t_duplicate()
     print("\n-- gateway: signal contract --------------------------------------------")
     t_signal_executor(); t_signal_no_motion(); t_signal_edge_guarantee()
     print("\n-- gateway: stop / clock safety ----------------------------------------")
