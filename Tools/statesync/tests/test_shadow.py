@@ -429,6 +429,47 @@ def t_release_completes_step():
               pick[0]["durationMs"] if pick else None))
 
 
+def t_settle_clears_the_taught_dwell():
+    """Partpick holds still for 2000 ms in the MIDDLE - two 1 s Delays with only zero-time
+    gripper outputs between them - and the RETRACT comes after. A settle shorter than that
+    dwell fires inside it, and the next chain step's clearCallStack cancels the lift."""
+    import vc_gateway  # noqa: F401  (loaded through the Gateway harness below)
+    s = Scene(ur_part=True); g = Gateway(s); g.pump(2)
+    ns = g.ns
+    check("the settle window clears Partpick's 2000 ms mid-routine dwell",
+          ns["ROUTINE_SETTLE_MS"] > 2000.0,
+          "%sms vs a 2000ms dwell" % ns["ROUTINE_SETTLE_MS"])
+    g.send(env("UR3e", "robot", "routine", routine="Partpick"))
+    g.pump(500)
+    done = [e for e in g.ev("completed") if e["vcId"] == "UR3e"]
+    check("...so the routine reaches its own end instead of being cut",
+          bool(done) and done[0]["durationMs"] >= 4299,
+          "%sms (last motion ends 4299)" % (done[0]["durationMs"] if done else None))
+
+
+def t_robot_speed_factor():
+    """The taught program is longer than the rig's task. Motion can be scaled; taught Delay
+    cannot - which is correct, the rig's dwell is real. The lever is the joint limits."""
+    s = Scene(ur_part=True); g = Gateway(s); g.pump(2)
+    j = s.ctl["UR3e"].Joints[0]
+    j.MaxSpeed, j.MaxAcceleration, j.MaxDeceleration = 100.0, 200.0, 300.0
+    g.send(env("UR3e", "robot", "routine", routine="Home", speedFactor=1.6))
+    g.pump(60)
+    check("a speedFactor raises the robot's joint limits",
+          abs(j.MaxSpeed - 160.0) < 0.01 and abs(j.MaxAcceleration - 320.0) < 0.01,
+          "v=%.1f a=%.1f d=%.1f" % (j.MaxSpeed, j.MaxAcceleration, j.MaxDeceleration))
+    g.send(env("UR3e", "robot", "routine", routine="Home", speedFactor=1.6))
+    g.pump(60)
+    check("...applied once, never compounded",
+          abs(j.MaxSpeed - 160.0) < 0.01, "v=%.1f (compounding would give 256)" % j.MaxSpeed)
+    g.send(env("UR3e", "robot", "routine", routine="Home", speedFactor=2.0))
+    g.pump(60)
+    check("...and a changed factor re-scales from the model's own limits",
+          abs(j.MaxSpeed - 200.0) < 0.01, "v=%.1f (want 200 from base 100)" % j.MaxSpeed)
+    scaled = [e for e in g.ev("robot_speed_scaled")]
+    check("the scaling is reported", len(scaled) == 2, "%d reports" % len(scaled))
+
+
 def t_routine_chain():
     """The rig's robot is ONE atomic task: it reports start, then done+ready together at the
     end. Every routine it performs therefore belongs to the start state, and the lane must be
@@ -446,10 +487,23 @@ def t_routine_chain():
     steps = [e for e in g.ev("chain_step_start") if e["vcId"] == "UR3e"]
     check("intermediate steps logged, not published", len(steps) == 2, "%d steps" % len(steps))
     task = done[0].get("taskMs") if done else None
-    check("task time is the whole chain, and matches the rig's 7827 ms",
-          task is not None and abs(task - 7827) <= 900, "%sms vs rig 7827" % task)
+    parts = [e["durationMs"] for e in g.ev("chain_step") if e["vcId"] == "UR3e"]
+    parts.append(done[0]["durationMs"] if done else 0)
+    check("task time is the WHOLE chain, not just its last step",
+          task is not None and abs(task - sum(parts)) <= 60,
+          "task=%sms vs steps %s" % (task, parts))
     check("no command left the lane early",
           not g.ns["active"] and not g.ns["pending"].get("robot"))
+
+    # The rig match is ARITHMETIC over measured values, not something the mock can show:
+    # the mock has no notion of taught-motion-versus-taught-dwell scaling.
+    motion = 3.387 + 0.883 + 0.395 + 2.368 + 0.779   # P4 P5 P12 P2 P3, VC's own cycle times
+    dwell = 3.0            # Partpick 1+1, Partplace 1 before the release (1.6 after is cut)
+    rig = 7.827
+    check("the robot speedFactor lands the chain on the rig's task time",
+          abs((motion / 1.6 + dwell) - rig) < 0.10,
+          "%.3fs at x1.6 vs rig %.3fs (unscaled %.3fs)" % (motion / 1.6 + dwell, rig,
+                                                           motion + dwell))
 
 
 def t_duplicate():
@@ -750,7 +804,8 @@ def main():
     t_axis_during_ur3e(); t_lane_serialisation(); t_shared_controller()
     print("\n-- gateway: honesty ----------------------------------------------------")
     t_unobserved_routine(); t_stuck_routine_timeout(); t_motion_settled()
-    t_release_completes_step(); t_routine_chain(); t_duplicate()
+    t_release_completes_step(); t_settle_clears_the_taught_dwell()
+    t_robot_speed_factor(); t_routine_chain(); t_duplicate()
     print("\n-- gateway: signal contract --------------------------------------------")
     t_signal_executor(); t_signal_no_motion(); t_signal_edge_guarantee()
     print("\n-- gateway: stop / clock safety ----------------------------------------")
