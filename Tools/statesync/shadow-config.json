@@ -201,9 +201,21 @@
         "already matches the rig; the rig's whole task is 7827 ms. The gateway cuts the",
         "trailing 1.6 s (it completes a step on the release) but CANNOT cut Partpick's two",
         "1 s delays - they bracket the gripper close, and cutting them would drop the part.",
-        "Closing the last ~1.8 s needs those two Delay statements shortened in the VC model,",
-        "which is Asad's taught program, not a gateway or config change."
+        "speedFactor 1.6 is DERIVED, not tuned. Taught MOTION is P4 3.387 + P5 0.883 +",
+        "P12 0.395 + P2 2.368 + P3 0.779 = 7.812 s. Taught DWELL the shadow still serves is",
+        "3.0 s (Partpick's two 1 s Delays, and Partplace's 1 s before the release; its",
+        "trailing 1.6 s is cut by the release rule). The rig's whole task is 7.827 s, so the",
+        "motion budget is 7.827 - 3.0 = 4.827 s and the factor is 7.812 / 4.827 = 1.62.",
+        "At 1.6: Partpick 2.92 + 2.0 = 4.92, Partplace 1.48 + 1.0 = 2.48, Home 0.49,",
+        "TOTAL 7.88 s against the rig's 7.83 s.",
+        "ONLY MOTION SCALES - taught Delay statements are wall time and do not, which is",
+        "exactly right: the dwell the rig genuinely has is kept and only the travel is",
+        "matched to it. The gateway scales the robot's JOINT LIMITS, the same lever it",
+        "already uses on every cylinder, because a taught statement carries its own",
+        "JointSpeed (Partpick's first move asks 0.2) and vcServoController.Speed is capped",
+        "at 100, so the executor cannot be asked for more than it was taught."
       ],
+      "speedFactor": 1.6,
       "routines": { "1": ["Partpick", "Partplace", "Home"] }
     },
 
