@@ -503,13 +503,11 @@ def t_signal_executor():
                 target=90.0, durationMs=320, signalBehaviour="PushJoint_ActionSignal"))
     g2.pump(40)
     sh = [e for e in g2.ev("servo_shaped") if e.get("comp") == "Transfer #3"]
-    od = sh[0].get("overdrive") if sh else None
-    check("the shaping reports how far it overdrives the model",
-          bool(od) and "PushSpeed" in od and "PushAcceleration" in od, str(od))
-    # model 100 mm/s, 1000 mm/s^2 -> 90/(0.9*0.32)=312.5 (3.1x) and /0.032=9765.6 (9.8x)
-    check("...and acceleration overdrives far harder than speed",
-          bool(od) and od["PushAcceleration"] > 3 * od["PushSpeed"],
-          "speed x%s accel x%s" % (od.get("PushSpeed"), od.get("PushAcceleration")) if od else "none")
+    # 90 mm in 320 ms -> 90/(0.9*0.32) = 312.5 mm/s -> 6.25 mm per 20 ms simulation step
+    check("the shaping reports the per-step advance, the figure contact depends on",
+          bool(sh) and abs(sh[0].get("mmPerStep", 0) - 6.25) < 0.01,
+          "%s mm/step at %s mm/s" % (sh[0].get("mmPerStep") if sh else None,
+                                     sh[0].get("speed") if sh else None))
     g2.send(env("Ejector", "ejector", "signal", signalValue=False, strokeDistance=90.0,
                 target=0.0, durationMs=320, signalBehaviour="PushJoint_ActionSignal"))
     g2.pump(40)
