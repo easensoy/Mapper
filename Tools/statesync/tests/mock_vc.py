@@ -153,7 +153,7 @@ class Executor(object):
     Until then CurrentStatement is a truthy token; afterwards None and OnScopeExecuted fires."""
 
     def __init__(self, app, comp, routines, durations, effects=None,
-                 fire_scope=True, report_busy=True):
+                 fire_scope=True, report_busy=True, motion=None, controller=None):
         self.app = app
         self.comp = comp
         self.Program = Program(routines)
@@ -163,7 +163,13 @@ class Executor(object):
         self._effects = effects or {}
         self._fire_scope = fire_scope        # simulate OnScopeExecuted being unavailable
         self._report_busy = report_busy      # simulate CurrentStatement staying None
+        # motion[routine] = ms of ACTUAL joint movement at the start of the routine. The
+        # remainder of _durations[routine] is a taught Delay with the robot stationary -
+        # exactly the shape of Partplace (0 ms motion, ~5 s delay).
+        self._motion = motion or {}
+        self.Controller = controller
         self._due = None
+        self._motion_until = None
         self._routine = None
         self.blocking_calls = 0
         self.dispatches = []
@@ -171,13 +177,25 @@ class Executor(object):
     def callRoutine(self, routine, suspendScript=True, clearCallStack=True):
         if suspendScript:
             self.blocking_calls += 1         # the gateway must NEVER do this
+        if clearCallStack:                   # cancels whatever was still running
+            self._due = None
+            self._motion_until = None
         self._routine = routine
         self._due = CLOCK.ms + self._durations.get(routine.Name, 100.0)
+        self._motion_until = CLOCK.ms + self._motion.get(routine.Name,
+                                                         self._durations.get(routine.Name, 100.0))
         self.dispatches.append((CLOCK.ms, routine.Name))
         if self._report_busy:
             self.CurrentStatement = "stmt"
 
     def tick(self):
+        # drive the joints only while the routine is actually moving
+        if self.Controller is not None and self._motion_until is not None:
+            if CLOCK.ms < self._motion_until:
+                for i in range(len(self.Controller.Joints)):
+                    self.Controller._values[i] += 0.5
+            else:
+                self._motion_until = None
         if self._due is not None and CLOCK.ms >= self._due:
             r, self._due = self._routine, None
             self.CurrentStatement = None
