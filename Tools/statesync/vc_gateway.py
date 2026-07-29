@@ -75,11 +75,13 @@ JOINT_EPS = 1e-4                # joint units; below this the robot counts as st
 
 # A PICK IS OVER ONCE THE ROBOT HAS TAKEN SOMETHING AND MOVED CLEAR OF IT. After the grasp
 # the only taught motion left is the retract, so the still period that follows it is the end
-# of the routine and the full settle is 1250 ms of dead waiting. RETRACT_EPS is what makes
-# this safe: the post-grasp move must be a REAL joint excursion, not the sub-milliunit
-# jitter the servo shows while holding position through a taught Delay - that jitter is
-# exactly why the middle of Partpick never registers as 1500 ms of stillness. Below the
-# threshold nothing is claimed and the ordinary settle still applies.
+# of the routine. RETRACT_EPS is what makes this safe: the post-grasp move must be a REAL
+# joint excursion, not the sub-milliunit jitter the servo shows while holding position.
+# ⚠ THIS IS CURRENTLY A BACKSTOP, NOT THE ACTIVE PATH. With the settle clearing the taught
+# dwell the routine now runs to its own end, so idle_after_start - which is tested first -
+# fires at the same instant the retract finishes and `picked` never gets its 250 ms. It
+# earns its place if the executor ever stops reporting idle; do not delete it on the
+# evidence of an empty log.
 PICK_SETTLE_MS = 250.0
 RETRACT_EPS = 0.5               # joint units the retract must exceed to count as motion
 
@@ -149,6 +151,9 @@ def reset_state(why):
     epochSeen[0] = None
     _scopeCount.clear()
     _shapedSeen.clear()     # a new session re-announces what shaping it is running
+    # AppliedScale is deliberately NOT cleared here. It records what the MODEL is carrying,
+    # and a reset does not unwind those writes; clearing it would make the next run treat a
+    # scaled model as taught. It is only ever rewritten by an actual scaling.
     log("state_cleared", why=why)
 
 
@@ -260,12 +265,14 @@ def resolveExecutor(vcid):
     return ex
 
 
-# WHAT SCALE THE MODEL IS ALREADY CARRYING, kept in a property on this component rather
-# than in module state. Scaling writes live model values, but re-pasting this script resets
-# every module variable - so remembering "the original was X" in Python means a re-paste
-# captures the ALREADY SCALED value as the original and the next scaling compounds it
-# (x1.6 becomes x2.56). Recording the applied factor beside the model instead makes the
-# adjustment RELATIVE (multiply by new/old), which is correct however often it is re-run.
+# RETIMING IS ABSOLUTE: every write is taught_value * factor, never current_value * ratio.
+# Scaling mutates live model values, and this script is re-pasted constantly - so anything
+# that infers "the taught value" from what the model currently holds will eventually read
+# its own output. That is not hypothetical: an earlier build wrote the joint limits x1.6 and
+# recorded it nowhere, so a relative scheme starting fresh would have compounded to x2.56
+# and run the robot ~850 ms FAST. Taught joint limits therefore come from the config, and
+# taught statement values are captured ONCE into a property that lives beside the model, so
+# a re-paste or a save cannot turn a scaled value into a baseline.
 scaleProp = ensure('AppliedScale')
 
 
@@ -285,7 +292,7 @@ def _rememberScale(key, factor):
         pass
 
 
-def scaleRobotSpeed(ex, vcid, factor):
+def scaleRobotSpeed(ex, vcid, factor, taught):
     """Run a taught routine faster or slower by scaling the robot's JOINT LIMITS.
 
     A taught statement carries its own JointSpeed (Partpick's first move asks for 0.2, i.e.
@@ -305,35 +312,36 @@ def scaleRobotSpeed(ex, vcid, factor):
     is speed-limited. With accel scaled linearly Home only reached x1.35.
 
     ONLY MOTION SCALES. Taught Delay statements are wall time and do not, which is exactly
-    right: the rig's dwell is real and the shadow should keep it."""
-    if not factor or factor <= 0:
+    right: the rig's dwell is real and the shadow should keep it.
+
+    `taught` is the model's own joint limits, supplied by the caller from the config. Every
+    write is taught * factor, so running this twice, ten times, or after a re-paste lands on
+    exactly the same numbers, and factor 1.0 restores the model."""
+    if not factor or factor <= 0 or not taught:
         return None
-    key = "joints:" + str(vcid)
-    prev = float(_appliedScale().get(key, 1.0)) or 1.0
-    if abs(prev - factor) < 1e-6:
-        return factor
-    k = factor / prev
     try:
         ctrl = ex.Controller
         if ctrl is None:
             return None
         n = 0
         for jt in ctrl.Joints:
-            for attr, mult in (("MaxSpeed", k), ("MaxAcceleration", k * k),
-                               ("MaxDeceleration", k * k)):
-                try:
-                    val = float(getattr(jt, attr, 0.0) or 0.0)
-                except Exception:
+            for attr, mult in (("MaxSpeed", factor), ("MaxAcceleration", factor * factor),
+                               ("MaxDeceleration", factor * factor)):
+                base = taught.get(attr)
+                if base is None:
                     continue
-                if val > 0:
-                    try:
-                        setattr(jt, attr, val * mult)
-                        n += 1
-                    except Exception:
-                        pass
-        _rememberScale(key, factor)
-        log("robot_speed_scaled", vcId=vcid, factor=factor, wasScaledBy=prev,
-            joints=len(ctrl.Joints), limitsWritten=n)
+                try:
+                    setattr(jt, attr, float(base) * mult)
+                    n += 1
+                except Exception:
+                    pass
+        if not n:
+            log("robot_speed_scale_failed", vcId=vcid, factor=factor,
+                reason="no_joint_limit_written", taught=taught)
+            return None
+        _rememberScale("joints:" + str(vcid), factor)
+        log("robot_speed_scaled", vcId=vcid, factor=factor, joints=len(ctrl.Joints),
+            limitsWritten=n, taught=taught)
         return factor
     except Exception as e:
         log("robot_speed_scale_failed", vcId=vcid, err=str(e))
@@ -349,6 +357,42 @@ LINEAR_ACCEL_PROPS = ("Acceleration", "Deceleration",
                       "AngularAcceleration", "AngularDeceleration")
 
 
+def _stmtProp(st, name):
+    """These six are real runtime members of a statement, not saved-XML artefacts - VC's own
+    vcHelpers/Robot.py updSpeeds() writes exactly this set, branching on JOINT_MOTION versus
+    linear, which is the same dichotomy this file uses. api.xml does NOT document them on
+    vcMotionStatement, so do not "discover" they are undocumented and remove them. Some
+    statement classes expose them as attributes rather than through getProperty, so try
+    both; a missing name must read as absent, never as an error."""
+    try:
+        pr = st.getProperty(name)
+        if pr is not None:
+            return pr
+    except Exception:
+        pass
+    try:
+        if hasattr(st, name):
+            return _AttrProp(st, name)
+    except Exception:
+        pass
+    return None
+
+
+class _AttrProp(object):
+    """Adapter so an attribute-style statement member reads and writes like a vcProperty."""
+
+    def __init__(self, obj, name):
+        self._o, self._n = obj, name
+
+    def _get(self):
+        return getattr(self._o, self._n)
+
+    def _set(self, v):
+        setattr(self._o, self._n, v)
+
+    Value = property(_get, _set)
+
+
 def scaleRoutineMotion(routine, vcid, name, factor):
     """Retime the LINEAR statements of one taught routine, in the model, at runtime.
 
@@ -356,45 +400,57 @@ def scaleRoutineMotion(routine, vcid, name, factor):
     joint maximum, which scaleRobotSpeed already raised, and scaling both would compound to
     the factor squared. Delay statements are never touched.
 
-    Relative, for the same reason as the joint limits: the applied factor is recorded beside
-    the model so a re-paste of this script cannot mistake a scaled value for a taught one."""
+    ABSOLUTE, like the joint limits: the taught values are captured ONCE into a property
+    that lives beside the model, and every write is taught * factor. A re-paste of this
+    script, or a saved model, can therefore never turn a scaled value into a baseline.
+    Passing factor 1.0 puts the taught program back exactly as it was."""
     if not factor or factor <= 0 or routine is None:
         return None
     key = "stmt:%s/%s" % (vcid, name)
-    prev = float(_appliedScale().get(key, 1.0)) or 1.0
-    if abs(prev - factor) < 1e-6:
-        return factor
-    k = factor / prev
+    state = _appliedScale().get(key) or {}
+    taught = state.get("taught")
     try:
-        n = 0
-        for st in (routine.Statements or []):
-            try:
-                if st.getProperty("JointSpeed") is not None:
-                    continue                       # joint move: the joint limits own it
-            except Exception:
-                continue
-            for pn in LINEAR_SPEED_PROPS + LINEAR_ACCEL_PROPS:
-                try:
-                    pr = st.getProperty(pn)
-                    if pr is None:
-                        continue
-                    val = float(pr.Value)
-                except Exception:
-                    continue
-                if val > 0:
-                    try:
-                        pr.Value = val * (k * k if pn in LINEAR_ACCEL_PROPS else k)
-                        n += 1
-                    except Exception:
-                        pass
-        if n:
-            _rememberScale(key, factor)
-            log("routine_motion_scaled", vcId=vcid, routine=name, factor=factor,
-                wasScaledBy=prev, properties=n)
-        return factor
+        stmts = list(routine.Statements or [])
     except Exception as e:
         log("routine_motion_scale_failed", vcId=vcid, routine=name, err=str(e))
         return None
+
+    if not taught or len(taught) != len(stmts):
+        taught = []                          # first sight of this routine: record it
+        for st in stmts:
+            row = {}
+            if _stmtProp(st, "JointSpeed") is None:   # joint move: the limits own it
+                for pn in LINEAR_SPEED_PROPS + LINEAR_ACCEL_PROPS:
+                    pr = _stmtProp(st, pn)
+                    if pr is None:
+                        continue
+                    try:
+                        v = float(pr.Value)
+                    except Exception:
+                        continue
+                    if v > 0:
+                        row[pn] = v
+            taught.append(row)
+
+    if abs(float(state.get("factor", 0.0)) - factor) < 1e-6:
+        return factor                        # already at this factor, nothing to write
+
+    n = 0
+    for st, row in zip(stmts, taught):
+        for pn, base in row.items():
+            pr = _stmtProp(st, pn)
+            if pr is None:
+                continue
+            try:
+                pr.Value = float(base) * (factor * factor
+                                          if pn in LINEAR_ACCEL_PROPS else factor)
+                n += 1
+            except Exception:
+                pass
+    _rememberScale(key, {"factor": factor, "taught": taught})
+    log("routine_motion_scaled", vcId=vcid, routine=name, factor=factor,
+        statements=len(stmts), properties=n)
+    return factor
 
 
 def robotJoints(ex):
@@ -706,8 +762,12 @@ def startRoutine(env, lane, chainIdx=0):
 
     key = (vcid, name)
     hookRoutine(vcid, name, routine)
-    scaleRobotSpeed(ex, vcid, env.get("speedFactor"))
-    scaleRoutineMotion(routine, vcid, name, env.get("speedFactor"))
+    # No factor on the wire means "run it as taught". Restoring rather than doing nothing is
+    # what makes removing the setting from the config actually put the model back.
+    sf = env.get("speedFactor")
+    sf = float(sf) if sf else 1.0
+    scaleRobotSpeed(ex, vcid, sf, env.get("taughtJointLimits"))
+    scaleRoutineMotion(routine, vcid, name, sf)
     chainBefore = configureGrasp(vcid, verify.get("part")) if verify else None
 
     item = {"kind": "routine", "env": env, "vcId": vcid, "routine": name, "key": key,
