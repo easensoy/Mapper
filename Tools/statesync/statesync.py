@@ -332,11 +332,19 @@ class Bridge:
             env["target"] = pos
             return env
 
-        # routine
+        # routine. A value may be a single routine or an ORDERED CHAIN - one rig state that
+        # stands for a whole atomic task (the robot reports start, then done+ready together
+        # at the end, so every routine it performs belongs to the start state).
         routine = comp.get("routines", {}).get(str(state))
         if routine is None:
             return None
-        env["routine"] = routine
+        if isinstance(routine, list):
+            if not routine:
+                return None
+            env["chain"] = list(routine)
+            env["routine"] = routine[0]
+        else:
+            env["routine"] = routine
         env["timeoutMs"] = self.routine_timeout
         v = comp.get("verify")
         if v:
