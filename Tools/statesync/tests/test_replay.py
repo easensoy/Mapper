@@ -1,9 +1,13 @@
 """Full-cycle integration replay: a REAL recorded rig cycle driven through the REAL
 statesync translator into the REAL gateway source on a mock VC runtime.
 
-Stimulus: MQTT/rig_cadence.log - 4266 recorded `smc/<component> state=N` events with
-wall-clock timestamps. Rig events are injected at their true relative times, so this
-reproduces the actual arrival pattern, including the 4 ms bursts.
+Stimulus: tests/rig_cadence.log - one full recorded rig cycle of `smc/<component> state=N`
+events with wall-clock timestamps. Rig events are injected at their true relative times, so
+this reproduces the actual arrival pattern, including the 4 ms bursts.
+
+The fixture is COMMITTED. It used to read MQTT/rig_cadence.log, a live file outside the
+repo, and that capture was lost the moment the collector was restarted (it opened its log
+"w"; it now appends). A test must not depend on a log someone can truncate.
 
     python tests/test_replay.py
 """
@@ -20,7 +24,7 @@ import mock_vc as M                                        # noqa: E402
 from test_shadow import Scene, Gateway, check, RESULTS      # noqa: E402
 import statesync as S                                       # noqa: E402
 
-CADENCE = r"C:\VueOneMapper\MQTT\rig_cadence.log"
+CADENCE = os.path.join(HERE, "rig_cadence.log")
 LINE = re.compile(r"(\d+):(\d+):([\d.]+)\s+(\S+)\s+state=(-?\d+)")
 
 
@@ -129,10 +133,12 @@ def main():
         if any(a < re_ and b > rs and rl != e.get("lane") for rs, re_, rl in rwin):
             overlapped += 1
             worst_o = max(worst_o, abs(e["durationMs"] - st["durMs"]))
-    # The count is a property of the recipe's natural overlap (measured at ~11% of cycle
-    # time), not of the gateway; require it to be non-vacuous, and assert on the error.
+    # The count is a property of the recipe's natural overlap (~11% of cycle time), not of
+    # the gateway; require it to be non-vacuous, and assert on the error. The bound is 3
+    # because the fixture is a SINGLE recorded cycle - it scales with cycles, the error does
+    # not.
     check("motion overlapping a cross-lane routine still hits its time",
-          overlapped >= 5 and worst_o <= 250,
+          overlapped >= 3 and worst_o <= 250,
           "%d overlapping moves, worst error %dms" % (overlapped, worst_o))
 
     ids = [e["commandId"] for e in g.ev("start")] + [e["commandId"] for e in g.ev("dispatched")]
