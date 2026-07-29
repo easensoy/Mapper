@@ -260,8 +260,29 @@ def resolveExecutor(vcid):
     return ex
 
 
-_jointBase = {}     # vcId -> [(joint, maxSpeed, maxAccel, maxDecel)] as the model shipped
-_scaleSeen = {}     # vcId -> factor currently applied
+# WHAT SCALE THE MODEL IS ALREADY CARRYING, kept in a property on this component rather
+# than in module state. Scaling writes live model values, but re-pasting this script resets
+# every module variable - so remembering "the original was X" in Python means a re-paste
+# captures the ALREADY SCALED value as the original and the next scaling compounds it
+# (x1.6 becomes x2.56). Recording the applied factor beside the model instead makes the
+# adjustment RELATIVE (multiply by new/old), which is correct however often it is re-run.
+scaleProp = ensure('AppliedScale')
+
+
+def _appliedScale():
+    try:
+        return json.loads(scaleProp.Value) if scaleProp.Value else {}
+    except Exception:
+        return {}
+
+
+def _rememberScale(key, factor):
+    st = _appliedScale()
+    st[key] = factor
+    try:
+        scaleProp.Value = json.dumps(st)
+    except Exception:
+        pass
 
 
 def scaleRobotSpeed(ex, vcid, factor):
@@ -273,38 +294,106 @@ def scaleRobotSpeed(ex, vcid, factor):
     writable though - the same lever shapeServo already uses on every cylinder - and a
     statement asking for 20% of a raised limit moves proportionally faster.
 
+    THIS ONLY REACHES JOINT MOTION. A joint statement asks for a FRACTION of the joint's
+    maximum (Partpick's P4 asks 0.2), so raising the maximum speeds it up. A LINEAR
+    statement asks for an absolute mm/s of its own and is untouched by this - measured:
+    scaling the joints x1.6 left Partplace's single linear move at 2379 ms against a taught
+    2368 ms. Linear statements are handled by scaleRoutineMotion below.
+
+    Speed scales by the factor and acceleration by its SQUARE, so a move that is
+    acceleration-limited (a short one, like Home) speeds up by the same factor as one that
+    is speed-limited. With accel scaled linearly Home only reached x1.35.
+
     ONLY MOTION SCALES. Taught Delay statements are wall time and do not, which is exactly
-    right: the rig's dwell is real and the shadow should keep it. Always applied to the
-    model's ORIGINAL limits, so it is idempotent and a changed factor re-scales rather than
-    compounding."""
+    right: the rig's dwell is real and the shadow should keep it."""
     if not factor or factor <= 0:
         return None
+    key = "joints:" + str(vcid)
+    prev = float(_appliedScale().get(key, 1.0)) or 1.0
+    if abs(prev - factor) < 1e-6:
+        return factor
+    k = factor / prev
     try:
         ctrl = ex.Controller
         if ctrl is None:
             return None
-        if vcid not in _jointBase:
-            base = []
-            for jt in ctrl.Joints:
-                base.append((jt, float(getattr(jt, "MaxSpeed", 0.0) or 0.0),
-                             float(getattr(jt, "MaxAcceleration", 0.0) or 0.0),
-                             float(getattr(jt, "MaxDeceleration", 0.0) or 0.0)))
-            _jointBase[vcid] = base
-        if abs(_scaleSeen.get(vcid, 0.0) - factor) < 1e-6:
-            return factor
-        for jt, v, a, dec in _jointBase[vcid]:
-            for attr, val in (("MaxSpeed", v), ("MaxAcceleration", a), ("MaxDeceleration", dec)):
+        n = 0
+        for jt in ctrl.Joints:
+            for attr, mult in (("MaxSpeed", k), ("MaxAcceleration", k * k),
+                               ("MaxDeceleration", k * k)):
+                try:
+                    val = float(getattr(jt, attr, 0.0) or 0.0)
+                except Exception:
+                    continue
                 if val > 0:
                     try:
-                        setattr(jt, attr, val * factor)
+                        setattr(jt, attr, val * mult)
+                        n += 1
                     except Exception:
                         pass
-        _scaleSeen[vcid] = factor
-        log("robot_speed_scaled", vcId=vcid, factor=factor,
-            joints=len(_jointBase[vcid]))
+        _rememberScale(key, factor)
+        log("robot_speed_scaled", vcId=vcid, factor=factor, wasScaledBy=prev,
+            joints=len(ctrl.Joints), limitsWritten=n)
         return factor
     except Exception as e:
         log("robot_speed_scale_failed", vcId=vcid, err=str(e))
+        return None
+
+
+# A taught LINEAR statement carries its own absolute speed and acceleration, so the joint
+# limits above do not reach it. vcStatement exposes getProperty(), so those taught values
+# are writable at runtime and the taught program never has to be edited. Speeds scale by
+# the factor, accelerations by its square, for the same reason as the joint limits.
+LINEAR_SPEED_PROPS = ("MaxSpeed", "MaxAngularSpeed")
+LINEAR_ACCEL_PROPS = ("Acceleration", "Deceleration",
+                      "AngularAcceleration", "AngularDeceleration")
+
+
+def scaleRoutineMotion(routine, vcid, name, factor):
+    """Retime the LINEAR statements of one taught routine, in the model, at runtime.
+
+    A statement carrying JointSpeed is deliberately SKIPPED: it asks for a fraction of the
+    joint maximum, which scaleRobotSpeed already raised, and scaling both would compound to
+    the factor squared. Delay statements are never touched.
+
+    Relative, for the same reason as the joint limits: the applied factor is recorded beside
+    the model so a re-paste of this script cannot mistake a scaled value for a taught one."""
+    if not factor or factor <= 0 or routine is None:
+        return None
+    key = "stmt:%s/%s" % (vcid, name)
+    prev = float(_appliedScale().get(key, 1.0)) or 1.0
+    if abs(prev - factor) < 1e-6:
+        return factor
+    k = factor / prev
+    try:
+        n = 0
+        for st in (routine.Statements or []):
+            try:
+                if st.getProperty("JointSpeed") is not None:
+                    continue                       # joint move: the joint limits own it
+            except Exception:
+                continue
+            for pn in LINEAR_SPEED_PROPS + LINEAR_ACCEL_PROPS:
+                try:
+                    pr = st.getProperty(pn)
+                    if pr is None:
+                        continue
+                    val = float(pr.Value)
+                except Exception:
+                    continue
+                if val > 0:
+                    try:
+                        pr.Value = val * (k * k if pn in LINEAR_ACCEL_PROPS else k)
+                        n += 1
+                    except Exception:
+                        pass
+        if n:
+            _rememberScale(key, factor)
+            log("routine_motion_scaled", vcId=vcid, routine=name, factor=factor,
+                wasScaledBy=prev, properties=n)
+        return factor
+    except Exception as e:
+        log("routine_motion_scale_failed", vcId=vcid, routine=name, err=str(e))
         return None
 
 
@@ -618,6 +707,7 @@ def startRoutine(env, lane, chainIdx=0):
     key = (vcid, name)
     hookRoutine(vcid, name, routine)
     scaleRobotSpeed(ex, vcid, env.get("speedFactor"))
+    scaleRoutineMotion(routine, vcid, name, env.get("speedFactor"))
     chainBefore = configureGrasp(vcid, verify.get("part")) if verify else None
 
     item = {"kind": "routine", "env": env, "vcId": vcid, "routine": name, "key": key,
