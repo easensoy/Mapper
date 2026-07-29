@@ -69,6 +69,16 @@ SIGNAL_SLACK_MS = 600.0
 ROUTINE_SETTLE_MS = 1500.0
 JOINT_EPS = 1e-4                # joint units; below this the robot counts as stationary
 
+# A PICK IS OVER ONCE THE ROBOT HAS TAKEN SOMETHING AND MOVED CLEAR OF IT. After the grasp
+# the only taught motion left is the retract, so the still period that follows it is the end
+# of the routine and the full settle is 1250 ms of dead waiting. RETRACT_EPS is what makes
+# this safe: the post-grasp move must be a REAL joint excursion, not the sub-milliunit
+# jitter the servo shows while holding position through a taught Delay - that jitter is
+# exactly why the middle of Partpick never registers as 1500 ms of stillness. Below the
+# threshold nothing is claimed and the ordinary settle still applies.
+PICK_SETTLE_MS = 250.0
+RETRACT_EPS = 0.5               # joint units the retract must exceed to count as motion
+
 # ------------------------------------------------------------ SIMULATION CLOCK
 # Elapsed MUST be measured on the simulation clock, not the wall clock.
 #   * delay() advances simulation time, so the loop's own cadence is sim time.
@@ -263,6 +273,13 @@ def jointsMoved(a, b):
         if abs(a[i] - b[i]) > JOINT_EPS:
             return True
     return False
+
+
+def excursion(a, b):
+    """Largest single-joint change between two readings - how far the robot actually went."""
+    if a is None or b is None or len(a) != len(b):
+        return 0.0
+    return max(abs(a[i] - b[i]) for i in range(len(a))) if a else 0.0
 
 
 def parentChain(comp):
@@ -665,6 +682,17 @@ def advance():
             # the next dispatch (clearCallStack) cancels the remainder.
             jv = robotJoints(s["ex"])
             if jv is not None:
+                # What the robot is holding is read EVERY tick, not only while it is still:
+                # the taught grasp lands inside a dwell that the servo's own jitter still
+                # reports as motion, so a grasp seen only when stationary is never seen.
+                n0 = s.get("carried0")
+                held = len(carriedBy(s["vcId"])) if n0 is not None else None
+                if held is not None and held > len(n0) and not s.get("jvAtGrasp"):
+                    s["jvAtGrasp"] = jv
+                if s.get("jvAtGrasp") and not s.get("retracted") \
+                        and excursion(jv, s["jvAtGrasp"]) > RETRACT_EPS:
+                    s["retracted"] = True
+
                 if jointsMoved(jv, s.get("lastJv")):
                     s["lastJv"] = jv
                     s["stillSince"] = now
@@ -673,13 +701,16 @@ def advance():
                     # stationary AND holding less than it started with, the step's work is
                     # provably done and any remaining taught dwell has no rig counterpart -
                     # in this program that is Partplace's trailing Delay 1.6, pure lateness.
-                    # A GRASP is deliberately NOT treated this way: it is always followed by
-                    # a retract (Partpick grips at statement 5 of 7), so completing on it
-                    # would cancel the lift and drag the part across the fixture.
-                    if s.get("carried0") is not None and \
-                            len(carriedBy(s["vcId"])) < len(s["carried0"]):
+                    # A GRASP alone is deliberately NOT enough: it is always followed by a
+                    # retract (Partpick grips at statement 5 of 7), so completing on it
+                    # would cancel the lift and drag the part. Grasp THEN a real retract
+                    # THEN stillness is enough - there is nothing taught after the lift.
+                    if held is not None and held < len(n0):
                         done.append((lane, "released", elapsed)); continue
-                    if now - s.get("stillSince", now) >= s["settleMs"]:
+                    still = now - s.get("stillSince", now)
+                    if s.get("retracted") and still >= PICK_SETTLE_MS:
+                        done.append((lane, "picked", elapsed)); continue
+                    if still >= s["settleMs"]:
                         done.append((lane, "motion_settled", elapsed)); continue
 
             if elapsed >= s["timeoutMs"]:
