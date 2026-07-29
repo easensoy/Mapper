@@ -363,6 +363,29 @@ def t_motion_settled():
           bool(pick) and "carrying" in pick[0], str(pick[0].get("carrying") if pick else None))
 
 
+def t_routine_chain():
+    """The rig's robot is ONE atomic task: it reports start, then done+ready together at the
+    end. Every routine it performs therefore belongs to the start state, and the lane must be
+    held for the whole chain."""
+    s = Scene(); g = Gateway(s); g.pump(2)
+    g.send(env("UR3e", "robot", "routine", routine="Partpick",
+               chain=["Partpick", "Partplace", "Home"]))
+    g.pump(700)
+    order = [d[1] for d in s.ur_ex.dispatches]
+    check("the whole chain runs, in order", order == ["Partpick", "Partplace", "Home"],
+          str(order))
+    done = [e for e in g.ev("completed") if e["vcId"] == "UR3e"]
+    check("the chain reports ONE completion for the command", len(done) == 1,
+          "%d completions" % len(done))
+    steps = [e for e in g.ev("chain_step") if e["vcId"] == "UR3e"]
+    check("intermediate steps logged, not published", len(steps) == 2, "%d steps" % len(steps))
+    task = done[0].get("taskMs") if done else None
+    check("task time is the whole chain, and matches the rig's 7827 ms",
+          task is not None and abs(task - 7827) <= 900, "%sms vs rig 7827" % task)
+    check("no command left the lane early",
+          not g.ns["active"] and not g.ns["pending"].get("robot"))
+
+
 def t_duplicate():
     s = Scene(); g = Gateway(s); g.pump(2)
     e = env("Pusher", "pusher", "signal", signalValue=True, strokeDistance=116.0,
@@ -640,7 +663,8 @@ def main():
     print("\n-- gateway: concurrency ------------------------------------------------")
     t_axis_during_ur3e(); t_lane_serialisation(); t_shared_controller()
     print("\n-- gateway: honesty ----------------------------------------------------")
-    t_unobserved_routine(); t_stuck_routine_timeout(); t_motion_settled(); t_duplicate()
+    t_unobserved_routine(); t_stuck_routine_timeout(); t_motion_settled()
+    t_routine_chain(); t_duplicate()
     print("\n-- gateway: signal contract --------------------------------------------")
     t_signal_executor(); t_signal_no_motion(); t_signal_edge_guarantee()
     print("\n-- gateway: stop / clock safety ----------------------------------------")
