@@ -495,6 +495,22 @@ def t_signal_executor():
           len(durs) == 2 and abs(durs[0] - 166) <= 40 and abs(durs[1] - 280) <= 40,
           "actual=%s want=[166,280]" % durs)
 
+    # A cylinder can move perfectly and still fail to shift the part it pushes, because the
+    # part is carried by physics contact. The log has to say how far the shaping overdrives
+    # what the model was authored with, or that failure is invisible.
+    s2 = Scene(); g2 = Gateway(s2); g2.pump(2)
+    g2.send(env("Ejector", "ejector", "signal", signalValue=True, strokeDistance=90.0,
+                target=90.0, durationMs=320, signalBehaviour="PushJoint_ActionSignal"))
+    g2.pump(40)
+    st = [e for e in g2.ev("start") if e["vcId"] == "Ejector"]
+    od = st[0].get("overdrive") if st else None
+    check("the start reports how far the shaping overdrives the model",
+          bool(od) and "PushSpeed" in od and "PushAcceleration" in od, str(od))
+    # model 100 mm/s, 1000 mm/s^2 -> 90/(0.9*0.32)=312.5 (3.1x) and /0.032=9765.6 (9.8x)
+    check("...and acceleration overdrives far harder than speed",
+          bool(od) and od["PushAcceleration"] > 3 * od["PushSpeed"],
+          "speed x%s accel x%s" % (od.get("PushSpeed"), od.get("PushAcceleration")) if od else "none")
+
 
 def t_signal_no_motion():
     """A cylinder whose servo never moves it must be reported as signal_no_motion, NOT
