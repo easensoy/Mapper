@@ -210,12 +210,28 @@
         "TOTAL 7.88 s against the rig's 7.83 s.",
         "ONLY MOTION SCALES - taught Delay statements are wall time and do not, which is",
         "exactly right: the dwell the rig genuinely has is kept and only the travel is",
-        "matched to it. The gateway scales the robot's JOINT LIMITS, the same lever it",
-        "already uses on every cylinder, because a taught statement carries its own",
-        "JointSpeed (Partpick's first move asks 0.2) and vcServoController.Speed is capped",
-        "at 100, so the executor cannot be asked for more than it was taught."
+        "matched to it. TWO levers are needed because they reach different statements:",
+        "a JOINT statement asks for a FRACTION of the joint maximum (Partpick's P4 asks 0.2)",
+        "so raising the joint limits speeds it up; a LINEAR statement carries its own",
+        "absolute mm/s and is untouched by them - measured, scaling the joints x1.6 left",
+        "Partplace's single linear move at 2379 ms against a taught 2368 ms. The linear",
+        "statements are therefore retimed directly, which VC's own vcHelpers/Robot.py",
+        "updSpeeds() does with the same six properties and the same joint/linear split.",
+        "P3 Home's 0.779 s is a MEASURED gateway step time, not a taught one - the layout",
+        "records ExecutedCycleTime 0 for it because Home had not run when the model was",
+        "saved. The other four are VC's own recorded times."
       ],
       "speedFactor": 1.6,
+      "_override_taughtJointLimits": [
+        "The UR3e's joint limits AS TAUGHT, read out of layout.rsc (all six joints carry",
+        "MaxSpeed 180, MaxAcceleration 720, MaxDeceleration 720). They live here rather than",
+        "being read from the model because the gateway WRITES those limits - an earlier build",
+        "wrote them x1.6 and recorded it nowhere, so anything that infers the baseline from",
+        "the live model eventually reads its own output and compounds. Every write is",
+        "taught x speedFactor, so it lands on the same numbers however often it runs, and",
+        "removing speedFactor restores the model."
+      ],
+      "taughtJointLimits": { "MaxSpeed": 180.0, "MaxAcceleration": 720.0, "MaxDeceleration": 720.0 },
       "routines": { "1": ["Partpick", "Partplace", "Home"] }
     },
 
