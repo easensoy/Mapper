@@ -127,9 +127,27 @@ class Scene(object):
                          "Partplace": 2479.0, "Home": 779.0}
             ur_at = {"Partpick": (3299.0, lambda: setattr(self.ur_part, "Parent", self.tool)),
                      "Partplace": (3479.0, lambda: setattr(self.ur_part, "Parent", self.hopper))}
+        # the taught statements, verbatim from the extracted program: P4 is a JOINT move
+        # (JointSpeed 0.2, governed by the joint limits), P5/P12/P2 are LINEAR (their own
+        # absolute MaxSpeed/Acceleration), P3 is a JOINT move at full speed.
+        ur_stmts = {
+            "Partpick": [M.Statement(JointSpeed=0.2),
+                         M.Statement(MaxSpeed=200.0, Acceleration=200.0, Deceleration=200.0,
+                                     MaxAngularSpeed=360.0),
+                         M.Statement(Delay=1.0), M.Statement(OutputPort=1),
+                         M.Statement(Delay=1.0),
+                         M.Statement(MaxSpeed=200.0, Acceleration=1000.0,
+                                     Deceleration=1000.0, MaxAngularSpeed=360.0)],
+            "Partplace": [M.Statement(MaxSpeed=200.0, Acceleration=200.0,
+                                      Deceleration=200.0, MaxAngularSpeed=360.0),
+                          M.Statement(Delay=1.0), M.Statement(OutputPort=1),
+                          M.Statement(Delay=1.6)],
+            "Home": [M.Statement(JointSpeed=1.0)],
+        }
         ur_ex = M.Executor(self.app, self.ur3e, ["Partpick", "Partplace", "Home"],
                            ur_durations, motion=ur_motion, effects_at=ur_at,
                            controller=ur_ctl, jitter=0.001 if ur_part else 0.0,
+                           statements=ur_stmts,
                            fire_scope=fire_scope, report_busy=report_busy)
         self.ur3e._beh["Executor"] = ur_ex
         self.app.Components.append(self.ur3e)
@@ -455,9 +473,13 @@ def t_robot_speed_factor():
     j.MaxSpeed, j.MaxAcceleration, j.MaxDeceleration = 100.0, 200.0, 300.0
     g.send(env("UR3e", "robot", "routine", routine="Home", speedFactor=1.6))
     g.pump(60)
-    check("a speedFactor raises the robot's joint limits",
-          abs(j.MaxSpeed - 160.0) < 0.01 and abs(j.MaxAcceleration - 320.0) < 0.01,
-          "v=%.1f a=%.1f d=%.1f" % (j.MaxSpeed, j.MaxAcceleration, j.MaxDeceleration))
+    # speed by f, acceleration by f squared - so a short accel-limited move (Home) speeds
+    # up by the same factor as a long speed-limited one. Linear accel scaling gave x1.35.
+    check("a speedFactor raises the joint limits, accel by the SQUARE",
+          abs(j.MaxSpeed - 160.0) < 0.01 and abs(j.MaxAcceleration - 512.0) < 0.01
+          and abs(j.MaxDeceleration - 768.0) < 0.01,
+          "v=%.1f a=%.1f d=%.1f (base 100/200/300)" % (j.MaxSpeed, j.MaxAcceleration,
+                                                       j.MaxDeceleration))
     g.send(env("UR3e", "robot", "routine", routine="Home", speedFactor=1.6))
     g.pump(60)
     check("...applied once, never compounded",
@@ -468,6 +490,57 @@ def t_robot_speed_factor():
           abs(j.MaxSpeed - 200.0) < 0.01, "v=%.1f (want 200 from base 100)" % j.MaxSpeed)
     scaled = [e for e in g.ev("robot_speed_scaled")]
     check("the scaling is reported", len(scaled) == 2, "%d reports" % len(scaled))
+
+    # Joint limits do not reach a LINEAR statement - it carries its own absolute mm/s -
+    # so the taught values are retimed directly. Measured: joint-only scaling left
+    # Partplace's single linear move at 2379 ms against a taught 2368 ms.
+    s2 = Scene(ur_part=True); g2 = Gateway(s2); g2.pump(2)
+    pp = s2.ur_ex.Program.findRoutine("Partplace")
+    pk = s2.ur_ex.Program.findRoutine("Partpick")
+    g2.send(env("UR3e", "robot", "routine", routine="Partplace", speedFactor=1.6))
+    g2.pump(400)
+    lin = pp.Statements[0]
+    check("a taught LINEAR statement is retimed, speed by f and accel by f squared",
+          abs(lin.getProperty("MaxSpeed").Value - 320.0) < 0.01
+          and abs(lin.getProperty("Acceleration").Value - 512.0) < 0.01,
+          "v=%.1f a=%.1f (taught 200/200)" % (lin.getProperty("MaxSpeed").Value,
+                                              lin.getProperty("Acceleration").Value))
+    check("...and its taught Delay is left alone - the rig's dwell is real",
+          abs(pp.Statements[1].getProperty("Delay").Value - 1.0) < 1e-9
+          and abs(pp.Statements[3].getProperty("Delay").Value - 1.6) < 1e-9,
+          "%s / %s" % (pp.Statements[1].getProperty("Delay").Value,
+                       pp.Statements[3].getProperty("Delay").Value))
+    g2.send(env("UR3e", "robot", "routine", routine="Partpick", speedFactor=1.6))
+    g2.pump(500)
+    check("a JOINT statement is NOT retimed - the joint limits already own it",
+          abs(pk.Statements[0].getProperty("JointSpeed").Value - 0.2) < 1e-9,
+          "JointSpeed=%s (scaling both would compound to x2.56)"
+          % pk.Statements[0].getProperty("JointSpeed").Value)
+    g2.send(env("UR3e", "robot", "routine", routine="Partplace", speedFactor=1.6))
+    g2.pump(400)
+    check("...retiming is applied once, never compounded",
+          abs(lin.getProperty("MaxSpeed").Value - 320.0) < 0.01,
+          "v=%.1f (compounding would give 512)" % lin.getProperty("MaxSpeed").Value)
+
+    # RE-PASTING the script wipes every module variable while the MODEL keeps its scaled
+    # values. Remembering originals in Python would therefore capture a scaled value as
+    # taught and compound on the next run. The applied factor lives beside the model.
+    jointsBefore = s2.ctl["UR3e"].Joints[0].MaxSpeed
+    g3 = Gateway(s2)                      # fresh gateway module, same scene = a re-paste
+    g3.pump(2)
+    g3.send(env("UR3e", "robot", "routine", routine="Partplace", speedFactor=1.6))
+    g3.pump(400)
+    check("a RE-PASTE of the script does not compound the scaling",
+          abs(lin.getProperty("MaxSpeed").Value - 320.0) < 0.01
+          and abs(s2.ctl["UR3e"].Joints[0].MaxSpeed - jointsBefore) < 0.01,
+          "linear v=%.1f joint v=%.1f (compounding would give 512 / %.1f)"
+          % (lin.getProperty("MaxSpeed").Value, s2.ctl["UR3e"].Joints[0].MaxSpeed,
+             jointsBefore * 1.6))
+    g3.send(env("UR3e", "robot", "routine", routine="Partplace", speedFactor=1.0))
+    g3.pump(400)
+    check("...and dropping the factor puts the taught values back",
+          abs(lin.getProperty("MaxSpeed").Value - 200.0) < 0.01,
+          "v=%.1f (taught 200)" % lin.getProperty("MaxSpeed").Value)
 
 
 def t_routine_chain():
