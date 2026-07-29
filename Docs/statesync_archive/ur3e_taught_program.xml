@@ -1,0 +1,365 @@
+<subroutines>
+      <routine name="Partpick">
+        <properties>
+          <property name="Name" value="Partpick" isvisible="True" order="-10" type="System.String" constraint="AllValuesAllowed" />
+        </properties>
+        <statements>
+          <statement type="VisualComponents.Create3D.IJointMotionStatement">
+            <base name="" index="-1" />
+            <tool name="Tool_TCP" index="16" />
+            <positions>
+              <position transformation="9.51037894259693E-08;0.999999999999996;9.82764233574955E-16;0;0.939692623871026;-8.93683290896419E-08;-0.342020134849365;0;-0.342020134849364;3.25274118076519E-08;-0.939692623871031;0;7.54733994250773;-444.081113197855;82.3530175052521;1">
+                <configuration name="FRONT ABOVE NOFLIP" index="0" />
+                <properties>
+                  <property name="Name" value="P4" isvisible="True" order="-10" type="System.String" constraint="AllValuesAllowed" />
+                </properties>
+                <joints>
+                  <joint value="-61.3905615753441" />
+                  <joint value="-124.543174370712" />
+                  <joint value="-61.0517685537925" />
+                  <joint value="-94.2870131708874" />
+                  <joint value="72.528746102137" />
+                  <joint value="120.134099835012" />
+                </joints>
+                <externaljoints />
+                <positionstatus>7</positionstatus>
+              </position>
+            </positions>
+            <properties>
+              <property name="Name" value="" isvisible="False" order="-10" type="System.String" constraint="AllValuesAllowed" />
+              <property name="ExecutedCycleTime" value="3.38705832875036" isvisible="False" order="-10" type="System.Double" constraint="AllValuesAllowed" />
+              <property name="IsEnabled" value="True" isvisible="True" order="-10" type="System.Boolean" constraint="AllValuesAllowed" />
+              <property name="ExternalTCP" value="False" isvisible="True" order="40" type="System.Boolean" constraint="AllValuesAllowed" />
+              <property name="AccuracyMethod" value="1" isvisible="True" order="100" type="System.Int32" constraint="AllowedValueSetOnly">
+                <allowedvalues>
+                  <allowedvalue value="0" name="Time" localizedname="Time" />
+                  <allowedvalue value="1" name="Distance" localizedname="Distance" />
+                  <allowedvalue value="2" name="Velocity" localizedname="Velocity" />
+                </allowedvalues>
+              </property>
+              <property name="AccuracyValue" value="0" isvisible="True" order="110" type="System.Double" quantity="Distance" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="CycleTime" value="0" isvisible="True" order="50" type="System.Double" quantity="Time" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="JointForce" value="1" isvisible="True" order="90" type="System.Double" quantity="Percentage" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="JointSpeed" value="0.2" isvisible="True" order="80" type="System.Double" quantity="Percentage" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="UUID" value="d65e5c8c-7136-4b8e-b5e0-d95ef94e78bb" isvisible="False" order="120" type="System.String" constraint="AllValuesAllowed" />
+            </properties>
+          </statement>
+          <statement type="VisualComponents.Create3D.ILinearMotionStatement">
+            <base name="" index="-1" />
+            <tool name="Tool_TCP" index="16" />
+            <positions>
+              <position transformation="9.51037894259693E-08;0.999999999999996;9.82764233574956E-16;0;0.939692623871026;-8.93683290896419E-08;-0.342020134849365;0;-0.342020134849364;3.25274118076519E-08;-0.939692623871031;0;-6.05862041114801;-445.515103538864;45.8612881640115;1">
+                <configuration name="FRONT ABOVE NOFLIP" index="0" />
+                <properties>
+                  <property name="Name" value="P5" isvisible="True" order="-10" type="System.String" constraint="AllValuesAllowed" />
+                </properties>
+                <joints>
+                  <joint value="-63.0691504425316" />
+                  <joint value="-125.913383110946" />
+                  <joint value="-68.9504501944175" />
+                  <joint value="-84.4927626826062" />
+                  <joint value="72.2481369712777" />
+                  <joint value="118.397710674856" />
+                </joints>
+                <externaljoints />
+                <positionstatus>7</positionstatus>
+              </position>
+            </positions>
+            <properties>
+              <property name="Name" value="" isvisible="False" order="-10" type="System.String" constraint="AllValuesAllowed" />
+              <property name="ExecutedCycleTime" value="0.883019081191492" isvisible="False" order="-10" type="System.Double" constraint="AllValuesAllowed" />
+              <property name="IsEnabled" value="True" isvisible="True" order="-10" type="System.Boolean" constraint="AllValuesAllowed" />
+              <property name="ExternalTCP" value="False" isvisible="True" order="40" type="System.Boolean" constraint="AllValuesAllowed" />
+              <property name="AccuracyMethod" value="1" isvisible="True" order="110" type="System.Int32" constraint="AllowedValueSetOnly">
+                <allowedvalues>
+                  <allowedvalue value="0" name="Time" localizedname="Time" />
+                  <allowedvalue value="1" name="Distance" localizedname="Distance" />
+                  <allowedvalue value="2" name="Velocity" localizedname="Velocity" />
+                </allowedvalues>
+              </property>
+              <property name="AccuracyValue" value="0" isvisible="True" order="120" type="System.Double" quantity="Distance" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="CycleTime" value="0" isvisible="True" order="50" type="System.Double" quantity="Time" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="MaxSpeed" value="200" isvisible="True" order="80" type="System.Double" quantity="Speed" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="Acceleration" value="200" isvisible="True" order="90" type="System.Double" quantity="Acceleration" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="Deceleration" value="200" isvisible="True" order="100" type="System.Double" quantity="Acceleration" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="MaxAngularSpeed" value="360" isvisible="True" order="150" type="System.Double" quantity="Angular velocity" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="AngularAcceleration" value="1440" isvisible="True" order="160" type="System.Double" quantity="Angular acceleration" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="AngularDeceleration" value="1440" isvisible="True" order="170" type="System.Double" quantity="Angular acceleration" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="OrientationInterpolationMode" value="1" isvisible="True" order="130" type="System.Int32" constraint="AllowedValueSetOnly">
+                <allowedvalues>
+                  <allowedvalue value="1" name="One axis" localizedname="One axis" />
+                  <allowedvalue value="2" name="Two axis - X" localizedname="Two axis - X" />
+                  <allowedvalue value="4" name="Two axis - Y" localizedname="Two axis - Y" />
+                  <allowedvalue value="8" name="Two axis - Z" localizedname="Two axis - Z" />
+                  <allowedvalue value="16" name="Three axis - WPR" localizedname="Three axis - WPR" />
+                  <allowedvalue value="32" name="Three axis - ZYZ" localizedname="Three axis - ZYZ" />
+                  <allowedvalue value="64" name="Wrist" localizedname="Wrist" />
+                </allowedvalues>
+              </property>
+              <property name="ConfigurationMode" value="1" isvisible="True" order="140" type="System.Int32" constraint="AllowedValueSetOnly">
+                <allowedvalues>
+                  <allowedvalue value="1" name="Fixed" localizedname="Fixed" />
+                  <allowedvalue value="2" name="Follow frame" localizedname="Follow frame" />
+                  <allowedvalue value="4" name="Interpolate joint values" localizedname="Interpolate joint values" />
+                </allowedvalues>
+              </property>
+              <property name="UUID" value="32a78788-b16f-46d4-856c-71d398dd7ca4" isvisible="False" order="180" type="System.String" constraint="AllValuesAllowed" />
+            </properties>
+          </statement>
+          <statement type="VisualComponents.Create3D.IDelayStatement">
+            <properties>
+              <property name="Name" value="" isvisible="False" order="-10" type="System.String" constraint="AllValuesAllowed" />
+              <property name="ExecutedCycleTime" value="1" isvisible="False" order="-10" type="System.Double" constraint="AllValuesAllowed" />
+              <property name="IsEnabled" value="True" isvisible="True" order="-10" type="System.Boolean" constraint="AllValuesAllowed" />
+              <property name="Delay" value="1" isvisible="True" order="10" type="System.Double" quantity="Time" constraint="AllValuesAllowed" />
+              <property name="UUID" value="c03c8480-e0b2-4b1a-9b97-482b6134fab9" isvisible="False" order="20" type="System.String" constraint="AllValuesAllowed" />
+            </properties>
+          </statement>
+          <statement type="VisualComponents.Create3D.ISetDigitalOutputStatement">
+            <properties>
+              <property name="Name" value="" isvisible="False" order="-10" type="System.String" constraint="AllValuesAllowed" />
+              <property name="ExecutedCycleTime" value="0" isvisible="False" order="-10" type="System.Double" constraint="AllValuesAllowed" />
+              <property name="IsEnabled" value="True" isvisible="True" order="-10" type="System.Boolean" constraint="AllValuesAllowed" />
+              <property name="OutputPort" value="103" isvisible="True" order="10" type="System.Int32" constraint="AllValuesAllowed" />
+              <property name="OutputValue" value="True" isvisible="True" order="20" type="System.Boolean" constraint="AllValuesAllowed" />
+              <property name="UUID" value="595eea8a-c30b-4dab-bf4c-a097abc16e37" isvisible="False" order="30" type="System.String" constraint="AllValuesAllowed" />
+            </properties>
+          </statement>
+          <statement type="VisualComponents.Create3D.ISetDigitalOutputStatement">
+            <properties>
+              <property name="Name" value="" isvisible="False" order="-10" type="System.String" constraint="AllValuesAllowed" />
+              <property name="ExecutedCycleTime" value="0" isvisible="False" order="-10" type="System.Double" constraint="AllValuesAllowed" />
+              <property name="IsEnabled" value="True" isvisible="True" order="-10" type="System.Boolean" constraint="AllValuesAllowed" />
+              <property name="OutputPort" value="1" isvisible="True" order="10" type="System.Int32" constraint="AllValuesAllowed" />
+              <property name="OutputValue" value="True" isvisible="True" order="20" type="System.Boolean" constraint="AllValuesAllowed" />
+              <property name="UUID" value="64602b06-4332-41be-ba00-55798fccc809" isvisible="False" order="30" type="System.String" constraint="AllValuesAllowed" />
+            </properties>
+          </statement>
+          <statement type="VisualComponents.Create3D.IDelayStatement">
+            <properties>
+              <property name="Name" value="" isvisible="False" order="-10" type="System.String" constraint="AllValuesAllowed" />
+              <property name="ExecutedCycleTime" value="1" isvisible="False" order="-10" type="System.Double" constraint="AllValuesAllowed" />
+              <property name="IsEnabled" value="True" isvisible="True" order="-10" type="System.Boolean" constraint="AllValuesAllowed" />
+              <property name="Delay" value="1" isvisible="True" order="10" type="System.Double" quantity="Time" constraint="AllValuesAllowed" />
+              <property name="UUID" value="cc307365-6fb4-4558-a54b-963732368374" isvisible="False" order="20" type="System.String" constraint="AllValuesAllowed" />
+            </properties>
+          </statement>
+          <statement type="VisualComponents.Create3D.ILinearMotionStatement">
+            <base name="" index="-1" />
+            <tool name="Tool_TCP" index="16" />
+            <positions>
+              <position transformation="9.51037894259693E-08;0.999999999999996;9.82764233574955E-16;0;0.939692623871026;-8.93683290896419E-08;-0.342020134849365;0;-0.342020134849364;3.25274118076519E-08;-0.939692623871031;0;7.54733994250773;-444.081113197856;82.3530175052522;1">
+                <configuration name="FRONT ABOVE NOFLIP" index="0" />
+                <properties>
+                  <property name="Name" value="P12" isvisible="True" order="-10" type="System.String" constraint="AllValuesAllowed" />
+                </properties>
+                <joints>
+                  <joint value="-61.3905615753441" />
+                  <joint value="-124.543174370712" />
+                  <joint value="-61.0517685537927" />
+                  <joint value="-94.2870131708873" />
+                  <joint value="72.528746102137" />
+                  <joint value="120.134099835012" />
+                </joints>
+                <externaljoints />
+                <positionstatus>7</positionstatus>
+              </position>
+            </positions>
+            <properties>
+              <property name="Name" value="" isvisible="False" order="-10" type="System.String" constraint="AllValuesAllowed" />
+              <property name="ExecutedCycleTime" value="0.394760203540045" isvisible="False" order="-10" type="System.Double" constraint="AllValuesAllowed" />
+              <property name="IsEnabled" value="True" isvisible="True" order="-10" type="System.Boolean" constraint="AllValuesAllowed" />
+              <property name="ExternalTCP" value="False" isvisible="True" order="40" type="System.Boolean" constraint="AllValuesAllowed" />
+              <property name="AccuracyMethod" value="1" isvisible="True" order="110" type="System.Int32" constraint="AllowedValueSetOnly">
+                <allowedvalues>
+                  <allowedvalue value="0" name="Time" localizedname="Time" />
+                  <allowedvalue value="1" name="Distance" localizedname="Distance" />
+                  <allowedvalue value="2" name="Velocity" localizedname="Velocity" />
+                </allowedvalues>
+              </property>
+              <property name="AccuracyValue" value="0" isvisible="True" order="120" type="System.Double" quantity="Distance" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="CycleTime" value="0" isvisible="True" order="50" type="System.Double" quantity="Time" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="MaxSpeed" value="200" isvisible="True" order="80" type="System.Double" quantity="Speed" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="Acceleration" value="1000" isvisible="True" order="90" type="System.Double" quantity="Acceleration" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="Deceleration" value="1000" isvisible="True" order="100" type="System.Double" quantity="Acceleration" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="MaxAngularSpeed" value="360" isvisible="True" order="150" type="System.Double" quantity="Angular velocity" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="AngularAcceleration" value="1440" isvisible="True" order="160" type="System.Double" quantity="Angular acceleration" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="AngularDeceleration" value="1440" isvisible="True" order="170" type="System.Double" quantity="Angular acceleration" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="OrientationInterpolationMode" value="1" isvisible="True" order="130" type="System.Int32" constraint="AllowedValueSetOnly">
+                <allowedvalues>
+                  <allowedvalue value="1" name="One axis" localizedname="One axis" />
+                  <allowedvalue value="2" name="Two axis - X" localizedname="Two axis - X" />
+                  <allowedvalue value="4" name="Two axis - Y" localizedname="Two axis - Y" />
+                  <allowedvalue value="8" name="Two axis - Z" localizedname="Two axis - Z" />
+                  <allowedvalue value="16" name="Three axis - WPR" localizedname="Three axis - WPR" />
+                  <allowedvalue value="32" name="Three axis - ZYZ" localizedname="Three axis - ZYZ" />
+                  <allowedvalue value="64" name="Wrist" localizedname="Wrist" />
+                </allowedvalues>
+              </property>
+              <property name="ConfigurationMode" value="1" isvisible="True" order="140" type="System.Int32" constraint="AllowedValueSetOnly">
+                <allowedvalues>
+                  <allowedvalue value="1" name="Fixed" localizedname="Fixed" />
+                  <allowedvalue value="2" name="Follow frame" localizedname="Follow frame" />
+                  <allowedvalue value="4" name="Interpolate joint values" localizedname="Interpolate joint values" />
+                </allowedvalues>
+              </property>
+              <property name="UUID" value="96a11198-8580-40cb-92a9-03bbf817bbb4" isvisible="False" order="180" type="System.String" constraint="AllValuesAllowed" />
+            </properties>
+          </statement>
+        </statements>
+      </routine>
+      <routine name="Partplace">
+        <properties>
+          <property name="Name" value="Partplace" isvisible="True" order="-10" type="System.String" constraint="AllValuesAllowed" />
+        </properties>
+        <statements>
+          <statement type="VisualComponents.Create3D.ILinearMotionStatement">
+            <base name="" index="-1" />
+            <tool name="Tool_TCP" index="16" />
+            <positions>
+              <position transformation="9.51038616252529E-08;0.999999999967991;-8.0044315272236E-06;0;1.00000000000003;-9.51037894259736E-08;9.02029389272931E-09;0;9.01953264067015E-09;-8.00443152808171E-06;-0.999999999967971;0;-121.139342787749;-248.260754551707;223.723759051897;1">
+                <configuration name="FRONT ABOVE NOFLIP" index="0" />
+                <properties>
+                  <property name="Name" value="P2" isvisible="True" order="-10" type="System.String" constraint="AllValuesAllowed" />
+                </properties>
+                <joints>
+                  <joint value="-87.6919358995516" />
+                  <joint value="-80.714293357135" />
+                  <joint value="-76.8869519803933" />
+                  <joint value="-112.401329805099" />
+                  <joint value="90.0026658957238" />
+                  <joint value="92.3096806316638" />
+                </joints>
+                <externaljoints />
+                <positionstatus>7</positionstatus>
+              </position>
+            </positions>
+            <properties>
+              <property name="Name" value="" isvisible="False" order="-10" type="System.String" constraint="AllValuesAllowed" />
+              <property name="ExecutedCycleTime" value="2.36831437302783" isvisible="False" order="-10" type="System.Double" constraint="AllValuesAllowed" />
+              <property name="IsEnabled" value="True" isvisible="True" order="-10" type="System.Boolean" constraint="AllValuesAllowed" />
+              <property name="ExternalTCP" value="False" isvisible="True" order="40" type="System.Boolean" constraint="AllValuesAllowed" />
+              <property name="AccuracyMethod" value="1" isvisible="True" order="110" type="System.Int32" constraint="AllowedValueSetOnly">
+                <allowedvalues>
+                  <allowedvalue value="0" name="Time" localizedname="Time" />
+                  <allowedvalue value="1" name="Distance" localizedname="Distance" />
+                  <allowedvalue value="2" name="Velocity" localizedname="Velocity" />
+                </allowedvalues>
+              </property>
+              <property name="AccuracyValue" value="0" isvisible="True" order="120" type="System.Double" quantity="Distance" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="CycleTime" value="0" isvisible="True" order="50" type="System.Double" quantity="Time" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="MaxSpeed" value="200" isvisible="True" order="80" type="System.Double" quantity="Speed" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="Acceleration" value="200" isvisible="True" order="90" type="System.Double" quantity="Acceleration" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="Deceleration" value="200" isvisible="True" order="100" type="System.Double" quantity="Acceleration" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="MaxAngularSpeed" value="360" isvisible="True" order="150" type="System.Double" quantity="Angular velocity" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="AngularAcceleration" value="1440" isvisible="True" order="160" type="System.Double" quantity="Angular acceleration" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="AngularDeceleration" value="1440" isvisible="True" order="170" type="System.Double" quantity="Angular acceleration" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="OrientationInterpolationMode" value="1" isvisible="True" order="130" type="System.Int32" constraint="AllowedValueSetOnly">
+                <allowedvalues>
+                  <allowedvalue value="1" name="One axis" localizedname="One axis" />
+                  <allowedvalue value="2" name="Two axis - X" localizedname="Two axis - X" />
+                  <allowedvalue value="4" name="Two axis - Y" localizedname="Two axis - Y" />
+                  <allowedvalue value="8" name="Two axis - Z" localizedname="Two axis - Z" />
+                  <allowedvalue value="16" name="Three axis - WPR" localizedname="Three axis - WPR" />
+                  <allowedvalue value="32" name="Three axis - ZYZ" localizedname="Three axis - ZYZ" />
+                  <allowedvalue value="64" name="Wrist" localizedname="Wrist" />
+                </allowedvalues>
+              </property>
+              <property name="ConfigurationMode" value="1" isvisible="True" order="140" type="System.Int32" constraint="AllowedValueSetOnly">
+                <allowedvalues>
+                  <allowedvalue value="1" name="Fixed" localizedname="Fixed" />
+                  <allowedvalue value="2" name="Follow frame" localizedname="Follow frame" />
+                  <allowedvalue value="4" name="Interpolate joint values" localizedname="Interpolate joint values" />
+                </allowedvalues>
+              </property>
+              <property name="UUID" value="785fa625-a0e4-47bc-96c5-933c715b1040" isvisible="False" order="180" type="System.String" constraint="AllValuesAllowed" />
+            </properties>
+          </statement>
+          <statement type="VisualComponents.Create3D.IDelayStatement">
+            <properties>
+              <property name="Name" value="" isvisible="False" order="-10" type="System.String" constraint="AllValuesAllowed" />
+              <property name="ExecutedCycleTime" value="1" isvisible="False" order="-10" type="System.Double" constraint="AllValuesAllowed" />
+              <property name="IsEnabled" value="True" isvisible="True" order="-10" type="System.Boolean" constraint="AllValuesAllowed" />
+              <property name="Delay" value="1" isvisible="True" order="10" type="System.Double" quantity="Time" constraint="AllValuesAllowed" />
+              <property name="UUID" value="44d1f790-09d4-4fc0-947c-9d6d42e1e73a" isvisible="False" order="20" type="System.String" constraint="AllValuesAllowed" />
+            </properties>
+          </statement>
+          <statement type="VisualComponents.Create3D.ISetDigitalOutputStatement">
+            <properties>
+              <property name="Name" value="" isvisible="False" order="-10" type="System.String" constraint="AllValuesAllowed" />
+              <property name="ExecutedCycleTime" value="0" isvisible="False" order="-10" type="System.Double" constraint="AllValuesAllowed" />
+              <property name="IsEnabled" value="True" isvisible="True" order="-10" type="System.Boolean" constraint="AllValuesAllowed" />
+              <property name="OutputPort" value="103" isvisible="True" order="10" type="System.Int32" constraint="AllValuesAllowed" />
+              <property name="OutputValue" value="False" isvisible="True" order="20" type="System.Boolean" constraint="AllValuesAllowed" />
+              <property name="UUID" value="b0fb7be7-0f1a-4043-9195-35f1cb464f7b" isvisible="False" order="30" type="System.String" constraint="AllValuesAllowed" />
+            </properties>
+          </statement>
+          <statement type="VisualComponents.Create3D.ISetDigitalOutputStatement">
+            <properties>
+              <property name="Name" value="" isvisible="False" order="-10" type="System.String" constraint="AllValuesAllowed" />
+              <property name="ExecutedCycleTime" value="0" isvisible="False" order="-10" type="System.Double" constraint="AllValuesAllowed" />
+              <property name="IsEnabled" value="True" isvisible="True" order="-10" type="System.Boolean" constraint="AllValuesAllowed" />
+              <property name="OutputPort" value="1" isvisible="True" order="10" type="System.Int32" constraint="AllValuesAllowed" />
+              <property name="OutputValue" value="False" isvisible="True" order="20" type="System.Boolean" constraint="AllValuesAllowed" />
+              <property name="UUID" value="ca0e5f87-72d4-4496-bf43-13c4d9330d53" isvisible="False" order="30" type="System.String" constraint="AllValuesAllowed" />
+            </properties>
+          </statement>
+          <statement type="VisualComponents.Create3D.IDelayStatement">
+            <properties>
+              <property name="Name" value="" isvisible="False" order="-10" type="System.String" constraint="AllValuesAllowed" />
+              <property name="ExecutedCycleTime" value="1.60000000000002" isvisible="False" order="-10" type="System.Double" constraint="AllValuesAllowed" />
+              <property name="IsEnabled" value="True" isvisible="True" order="-10" type="System.Boolean" constraint="AllValuesAllowed" />
+              <property name="Delay" value="1.6" isvisible="True" order="10" type="System.Double" quantity="Time" constraint="AllValuesAllowed" />
+              <property name="UUID" value="4480778a-b7cb-4095-a36d-45e21f0c996b" isvisible="False" order="20" type="System.String" constraint="AllValuesAllowed" />
+            </properties>
+          </statement>
+        </statements>
+      </routine>
+      <routine name="Home">
+        <properties>
+          <property name="Name" value="Home" isvisible="True" order="-10" type="System.String" constraint="AllValuesAllowed" />
+        </properties>
+        <statements>
+          <statement type="VisualComponents.Create3D.IJointMotionStatement">
+            <base name="" index="-1" />
+            <tool name="" index="-1" />
+            <positions>
+              <position transformation="-1;-6.12323410840032E-17;-1.22464679914735E-16;0;1.22464679914735E-16;1.76312722611724E-31;-1;0;6.12323388307321E-17;-1;2.84013027448113E-32;0;4.13318043303511E-16;-223.15;693.95;1">
+                <configuration name="FRONT ABOVE NOFLIP" index="0" />
+                <properties>
+                  <property name="Name" value="P3" isvisible="True" order="-10" type="System.String" constraint="AllValuesAllowed" />
+                </properties>
+                <joints>
+                  <joint value="0" />
+                  <joint value="-90" />
+                  <joint value="0" />
+                  <joint value="-90" />
+                  <joint value="0" />
+                  <joint value="0" />
+                </joints>
+                <externaljoints />
+                <positionstatus>7</positionstatus>
+              </position>
+            </positions>
+            <properties>
+              <property name="Name" value="" isvisible="False" order="-10" type="System.String" constraint="AllValuesAllowed" />
+              <property name="ExecutedCycleTime" value="0" isvisible="False" order="-10" type="System.Double" constraint="AllValuesAllowed" />
+              <property name="IsEnabled" value="True" isvisible="True" order="-10" type="System.Boolean" constraint="AllValuesAllowed" />
+              <property name="ExternalTCP" value="False" isvisible="True" order="40" type="System.Boolean" constraint="AllValuesAllowed" />
+              <property name="AccuracyMethod" value="1" isvisible="True" order="100" type="System.Int32" constraint="AllowedValueSetOnly">
+                <allowedvalues>
+                  <allowedvalue value="0" name="Time" localizedname="Time" />
+                  <allowedvalue value="1" name="Distance" localizedname="Distance" />
+                  <allowedvalue value="2" name="Velocity" localizedname="Velocity" />
+                </allowedvalues>
+              </property>
+              <property name="AccuracyValue" value="0" isvisible="True" order="110" type="System.Double" quantity="Distance" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="CycleTime" value="0" isvisible="True" order="50" type="System.Double" quantity="Time" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="JointForce" value="1" isvisible="True" order="90" type="System.Double" quantity="Percentage" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="JointSpeed" value="1" isvisible="True" order="80" type="System.Double" quantity="Percentage" constraint="AllowedRangeOnly" allowedminimum="0" allowedmaximum="1.79769313486232E+308" />
+              <property name="UUID" value="482c98cd-e8af-4b60-9207-b0ec6f7bde86" isvisible="False" order="120" type="System.String" constraint="AllValuesAllowed" />
+            </properties>
+          </statement>
+        </statements>
+      </routine>
+    </subroutines>
