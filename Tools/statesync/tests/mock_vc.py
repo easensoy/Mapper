@@ -134,15 +134,28 @@ class Signal(object):
             self._move = None
 
 
+class Statement(object):
+    """A taught statement. Its speed/accel/delay values are ordinary named properties, which
+    is what lets the gateway retime a routine without editing the taught program."""
+
+    def __init__(self, **props):
+        self._props = {k: Prop(k, v) for k, v in props.items()}
+
+    def getProperty(self, name):
+        return self._props.get(name)
+
+
 class Routine(object):
-    def __init__(self, name):
+    def __init__(self, name, statements=None):
         self.Name = name
         self.OnScopeExecuted = None
+        self.Statements = list(statements or [])
 
 
 class Program(object):
-    def __init__(self, routines):
-        self._r = {n: Routine(n) for n in routines}
+    def __init__(self, routines, statements=None):
+        statements = statements or {}
+        self._r = {n: Routine(n, statements.get(n)) for n in routines}
 
     def findRoutine(self, name):
         return self._r.get(name)
@@ -154,10 +167,10 @@ class Executor(object):
 
     def __init__(self, app, comp, routines, durations, effects=None,
                  fire_scope=True, report_busy=True, motion=None, controller=None,
-                 effects_at=None, jitter=0.0):
+                 effects_at=None, jitter=0.0, statements=None):
         self.app = app
         self.comp = comp
-        self.Program = Program(routines)
+        self.Program = Program(routines, statements)
         self.IsEnabled = True
         self.CurrentStatement = None
         self._durations = durations
