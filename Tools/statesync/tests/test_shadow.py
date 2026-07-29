@@ -502,14 +502,20 @@ def t_signal_executor():
     g2.send(env("Ejector", "ejector", "signal", signalValue=True, strokeDistance=90.0,
                 target=90.0, durationMs=320, signalBehaviour="PushJoint_ActionSignal"))
     g2.pump(40)
-    st = [e for e in g2.ev("start") if e["vcId"] == "Ejector"]
-    od = st[0].get("overdrive") if st else None
-    check("the start reports how far the shaping overdrives the model",
+    sh = [e for e in g2.ev("servo_shaped") if e.get("comp") == "Transfer #3"]
+    od = sh[0].get("overdrive") if sh else None
+    check("the shaping reports how far it overdrives the model",
           bool(od) and "PushSpeed" in od and "PushAcceleration" in od, str(od))
     # model 100 mm/s, 1000 mm/s^2 -> 90/(0.9*0.32)=312.5 (3.1x) and /0.032=9765.6 (9.8x)
     check("...and acceleration overdrives far harder than speed",
           bool(od) and od["PushAcceleration"] > 3 * od["PushSpeed"],
           "speed x%s accel x%s" % (od.get("PushSpeed"), od.get("PushAcceleration")) if od else "none")
+    g2.send(env("Ejector", "ejector", "signal", signalValue=False, strokeDistance=90.0,
+                target=0.0, durationMs=320, signalBehaviour="PushJoint_ActionSignal"))
+    g2.pump(40)
+    check("...reported once per setting, not on every stroke",
+          len([e for e in g2.ev("servo_shaped") if e.get("comp") == "Transfer #3"]) == 1,
+          "%d reports" % len([e for e in g2.ev("servo_shaped") if e.get("comp") == "Transfer #3"]))
 
 
 def t_signal_no_motion():
