@@ -474,9 +474,13 @@ def configureGrasp(robotName, partName):
     return chain
 
 
-def startRoutine(env, lane):
+def startRoutine(env, lane, chainIdx=0):
+    """A command may name one routine or an ORDERED CHAIN. A chain is one atomic task: the
+    lane is held for the whole of it, so the shadow performs the entire task from the rig's
+    task-start state rather than replaying its tail after the rig has already finished."""
     vcid = env.get("vcId")
-    name = env.get("routine")
+    chain = env.get("chain")
+    name = chain[chainIdx] if chain else env.get("routine")
     verify = env.get("verify")
     ex = resolveExecutor(vcid)
     if ex is None:
@@ -517,7 +521,10 @@ def startRoutine(env, lane):
             "timeoutMs": float(env.get("timeoutMs") or DEFAULT_TIMEOUT_MS),
             "settleMs": float(env.get("settleMs") or ROUTINE_SETTLE_MS),
             "lastJv": None, "stillSince": simNowMs(),
+            "chain": chain, "chainIdx": chainIdx, "t0chain": simNowMs(),
             "chainBefore": chainBefore, "ex": ex}
+    if chain and chainIdx > 0:
+        item["t0chain"] = env.get("_t0chain", item["t0chain"])
     try:
         ex.callRoutine(routine, False)      # NON-BLOCKING. Never callRoutine(routine).
     except Exception as e:
@@ -531,21 +538,26 @@ def startRoutine(env, lane):
         pass
 
     active[lane] = item
-    publish(env, "dispatched")
+    if chainIdx == 0:
+        publish(env, "dispatched")
     log("dispatched", commandId=env.get("commandId"), vcId=vcid, lane=lane, routine=name,
+        chainStep=("%d/%d" % (chainIdx + 1, len(chain))) if chain else None,
         chainBefore=chainBefore, recv=env.get("_recv"))
 
 
-def finishRoutine(lane, item, how, elapsedMs):
+def finishRoutine(lane, item, how, elapsedMs, quiet=False):
     env, verify = item["env"], item["verify"]
+    total = int(simNowMs() - item["t0chain"]) if item.get("chain") else int(elapsedMs)
     if not verify:
         # No verify spec: report what the robot is actually holding, so the carried part
         # can be identified without anyone having to configure it first.
         carrying = carriedBy(item["vcId"])
-        publish(env, "completed", durationMs=int(elapsedMs), verified=False, via=how)
-        log("completed", commandId=env.get("commandId"), vcId=item["vcId"], lane=lane,
+        if not quiet:
+            publish(env, "completed", durationMs=total, verified=False, via=how)
+        log("completed" if not quiet else "chain_step",
+            commandId=env.get("commandId"), vcId=item["vcId"], lane=lane,
             execution="routine", routine=item["routine"], durationMs=int(elapsedMs),
-            verified=False, via=how, carrying=carrying)
+            taskMs=total, verified=False, via=how, carrying=carrying)
         return True
     attached, chain = chainHasCarrier(verify.get("part"), verify.get("carriers") or [])
     want = bool(verify.get("attached"))
@@ -704,8 +716,15 @@ def advance():
                     execution="routine", routine=s["routine"], durationMs=int(elapsed),
                     verified=False, observed=False, via="unobserved")
             else:
-                if not finishRoutine(lane, s, how, elapsed):
+                nxt = s["chainIdx"] + 1
+                more = s["chain"] and nxt < len(s["chain"])
+                if not finishRoutine(lane, s, how, elapsed, quiet=bool(more)):
                     flush(lane, "verify_failed")
+                elif more:
+                    # same atomic task: hold the lane and run the next routine. The fresh
+                    # callRoutine clears the call stack, cancelling any residual dwell.
+                    env["_t0chain"] = s["t0chain"]
+                    startRoutine(env, lane, nxt)
 
 
 def flush(lane, reason):
