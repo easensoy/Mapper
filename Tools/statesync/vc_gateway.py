@@ -43,6 +43,19 @@ SIGNAL_EDGE_GRACE_MS = 400.0    # no joint movement by now -> the servo missed t
 SIGNAL_SLACK = 1.5              # endpoint deadline = durationMs * this + SIGNAL_SLACK_MS
 SIGNAL_SLACK_MS = 600.0
 
+# A taught routine is finished, as far as the shadow is concerned, once the robot has
+# STOPPED MOVING - not when the executor finally falls idle. A routine can hold the
+# executor busy long after the last motion, sitting in a taught Delay, and the rig has no
+# equivalent: the physical robot reports one atomic task and is already parked. Waiting out
+# those delays is what left the shadow ~5.8 s behind the rig on every cycle.
+#
+# MUST EXCEED THE LONGEST TAUGHT DWELL THAT PRECEDES MOTION OR AN OUTPUT ACTION in any
+# routine the rig drives, or the routine is cut before its work is done. In this program
+# the longest such dwell is 1 s (Partpick delays either side of its gripper output), so
+# 1500 ms leaves 50% margin. Override per command with "settleMs" on the wire.
+ROUTINE_SETTLE_MS = 1500.0
+JOINT_EPS = 1e-4                # joint units; below this the robot counts as stationary
+
 # ------------------------------------------------------------ SIMULATION CLOCK
 # Elapsed MUST be measured on the simulation clock, not the wall clock.
 #   * delay() advances simulation time, so the loop's own cadence is sim time.
@@ -218,6 +231,27 @@ def resolveExecutor(vcid):
     return ex
 
 
+def robotJoints(ex):
+    """Current joint vector of the robot behind an executor, or None. vcRobotController
+    inherits vcServoController, so the executor's Controller exposes Joints/getJointValue."""
+    try:
+        ctrl = ex.Controller
+        if ctrl is None:
+            return None
+        return [float(ctrl.getJointValue(i)) for i in range(len(ctrl.Joints))]
+    except Exception:
+        return None
+
+
+def jointsMoved(a, b):
+    if a is None or b is None or len(a) != len(b):
+        return True
+    for i in range(len(a)):
+        if abs(a[i] - b[i]) > JOINT_EPS:
+            return True
+    return False
+
+
 def parentChain(comp):
     names, n = [], comp
     for _ in range(24):
@@ -237,6 +271,22 @@ def chainHasCarrier(partName, carriers):
         return None, []
     chain = parentChain(p)
     return any(c in chain for c in carriers), chain
+
+
+def carriedBy(robotName):
+    """Every component currently parented under this robot. Generic discovery: it needs no
+    config, so a robot with no verify spec still reports what it is actually holding."""
+    out = []
+    try:
+        for c in app.Components:
+            n = str(c.Name)
+            if n == robotName:
+                continue
+            if robotName in parentChain(c)[1:]:
+                out.append(n)
+    except Exception:
+        pass
+    return out
 
 # ---------------------------------------------------- signal executor
 def stateSignals(comp, control, j):
@@ -465,6 +515,8 @@ def startRoutine(env, lane):
             "verify": verify, "t0": simNowMs(),
             "scopeBase": _scopeCount.get(key, 0), "started": False,
             "timeoutMs": float(env.get("timeoutMs") or DEFAULT_TIMEOUT_MS),
+            "settleMs": float(env.get("settleMs") or ROUTINE_SETTLE_MS),
+            "lastJv": None, "stillSince": simNowMs(),
             "chainBefore": chainBefore, "ex": ex}
     try:
         ex.callRoutine(routine, False)      # NON-BLOCKING. Never callRoutine(routine).
@@ -487,10 +539,13 @@ def startRoutine(env, lane):
 def finishRoutine(lane, item, how, elapsedMs):
     env, verify = item["env"], item["verify"]
     if not verify:
+        # No verify spec: report what the robot is actually holding, so the carried part
+        # can be identified without anyone having to configure it first.
+        carrying = carriedBy(item["vcId"])
         publish(env, "completed", durationMs=int(elapsedMs), verified=False, via=how)
         log("completed", commandId=env.get("commandId"), vcId=item["vcId"], lane=lane,
             execution="routine", routine=item["routine"], durationMs=int(elapsedMs),
-            verified=False, via=how)
+            verified=False, via=how, carrying=carrying)
         return True
     attached, chain = chainHasCarrier(verify.get("part"), verify.get("carriers") or [])
     want = bool(verify.get("attached"))
@@ -576,6 +631,18 @@ def advance():
                 attached, _ = chainHasCarrier(v.get("part"), v.get("carriers") or [])
                 if attached is not None and attached == bool(v.get("attached")):
                     done.append((lane, "material_evidence", elapsed)); continue
+
+            # MOTION SETTLED: the robot has stopped. Whatever the executor is still doing
+            # is a taught delay with no counterpart on the rig, so the shadow moves on and
+            # the next dispatch (clearCallStack) cancels the remainder.
+            jv = robotJoints(s["ex"])
+            if jv is not None:
+                if jointsMoved(jv, s.get("lastJv")):
+                    s["lastJv"] = jv
+                    s["stillSince"] = now
+                elif now - s.get("stillSince", now) >= s["settleMs"]:
+                    done.append((lane, "motion_settled", elapsed)); continue
+
             if elapsed >= s["timeoutMs"]:
                 done.append((lane, "timeout", elapsed)); continue
             if not s["started"] and elapsed >= START_GRACE_MS:
