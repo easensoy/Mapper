@@ -59,14 +59,18 @@ SIGNAL_SLACK_MS = 600.0
 #   Partplace  linear P2 . Delay 1.0 . DO103=0 . DO1=0 (RELEASE) . Delay 1.6
 #   Home       joint P3 (JointSpeed 1.0)
 #
-# Partpick's two 1 s delays are separated only by zero-time outputs, so nominally it holds
-# still for 2 s in the MIDDLE of the routine, with the retract still to come. Observation
-# says otherwise - it completes at motion-end + 1500, i.e. that middle window never reaches
-# 1500 ms in practice - but the margin is thin and it is NOT worth 300 ms: cutting there
-# cancels the retract and drags the part. The number stays at the observed-safe 1500 ms;
-# the saving comes from the release rule below, which needs no window at all.
+# Partpick's two 1 s Delays are separated only by ZERO-TIME outputs, so the robot holds
+# still for a full 2000 ms in the MIDDLE of the routine with the retract still to come.
+# 1500 ms fired INSIDE that dwell and cancelled the lift on every single cycle - proven to
+# 29 ms against VC's own recorded statement times:
+#   joint P4 -> 3.387 | linear P5 -> 4.270 | Delay -> 5.270 | GRIP 5.270 | Delay -> 6.270
+#   | linear P12 RETRACT -> 6.665
+# stillness starts 4.270, +1500 = 5.770, and the observed completion was 5.799. The grip at
+# 5.270 had happened (hence the part showed as carried) but P12 never ran, and the next
+# chain step's clearCallStack cancelled it. 2200 ms clears the 2000 ms dwell by 10%, so the
+# routine now reaches its own end and completes on the executor going idle instead.
 # Override per command with "settleMs" on the wire.
-ROUTINE_SETTLE_MS = 1500.0
+ROUTINE_SETTLE_MS = 2200.0
 JOINT_EPS = 1e-4                # joint units; below this the robot counts as stationary
 
 # A PICK IS OVER ONCE THE ROBOT HAS TAKEN SOMETHING AND MOVED CLEAR OF IT. After the grasp
@@ -254,6 +258,54 @@ def resolveExecutor(vcid):
         pass
     _execCache[vcid] = ex
     return ex
+
+
+_jointBase = {}     # vcId -> [(joint, maxSpeed, maxAccel, maxDecel)] as the model shipped
+_scaleSeen = {}     # vcId -> factor currently applied
+
+
+def scaleRobotSpeed(ex, vcid, factor):
+    """Run a taught routine faster or slower by scaling the robot's JOINT LIMITS.
+
+    A taught statement carries its own JointSpeed (Partpick's first move asks for 0.2, i.e.
+    20%) and vcServoController.Speed is documented as a percentage 0-100, so there is no
+    way to ask the executor for more than it was taught. The joint limits underneath it are
+    writable though - the same lever shapeServo already uses on every cylinder - and a
+    statement asking for 20% of a raised limit moves proportionally faster.
+
+    ONLY MOTION SCALES. Taught Delay statements are wall time and do not, which is exactly
+    right: the rig's dwell is real and the shadow should keep it. Always applied to the
+    model's ORIGINAL limits, so it is idempotent and a changed factor re-scales rather than
+    compounding."""
+    if not factor or factor <= 0:
+        return None
+    try:
+        ctrl = ex.Controller
+        if ctrl is None:
+            return None
+        if vcid not in _jointBase:
+            base = []
+            for jt in ctrl.Joints:
+                base.append((jt, float(getattr(jt, "MaxSpeed", 0.0) or 0.0),
+                             float(getattr(jt, "MaxAcceleration", 0.0) or 0.0),
+                             float(getattr(jt, "MaxDeceleration", 0.0) or 0.0)))
+            _jointBase[vcid] = base
+        if abs(_scaleSeen.get(vcid, 0.0) - factor) < 1e-6:
+            return factor
+        for jt, v, a, dec in _jointBase[vcid]:
+            for attr, val in (("MaxSpeed", v), ("MaxAcceleration", a), ("MaxDeceleration", dec)):
+                if val > 0:
+                    try:
+                        setattr(jt, attr, val * factor)
+                    except Exception:
+                        pass
+        _scaleSeen[vcid] = factor
+        log("robot_speed_scaled", vcId=vcid, factor=factor,
+            joints=len(_jointBase[vcid]))
+        return factor
+    except Exception as e:
+        log("robot_speed_scale_failed", vcId=vcid, err=str(e))
+        return None
 
 
 def robotJoints(ex):
@@ -565,6 +617,7 @@ def startRoutine(env, lane, chainIdx=0):
 
     key = (vcid, name)
     hookRoutine(vcid, name, routine)
+    scaleRobotSpeed(ex, vcid, env.get("speedFactor"))
     chainBefore = configureGrasp(vcid, verify.get("part")) if verify else None
 
     item = {"kind": "routine", "env": env, "vcId": vcid, "routine": name, "key": key,
