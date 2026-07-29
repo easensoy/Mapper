@@ -153,7 +153,8 @@ class Executor(object):
     Until then CurrentStatement is a truthy token; afterwards None and OnScopeExecuted fires."""
 
     def __init__(self, app, comp, routines, durations, effects=None,
-                 fire_scope=True, report_busy=True, motion=None, controller=None):
+                 fire_scope=True, report_busy=True, motion=None, controller=None,
+                 effects_at=None):
         self.app = app
         self.comp = comp
         self.Program = Program(routines)
@@ -163,12 +164,19 @@ class Executor(object):
         self._effects = effects or {}
         self._fire_scope = fire_scope        # simulate OnScopeExecuted being unavailable
         self._report_busy = report_busy      # simulate CurrentStatement staying None
-        # motion[routine] = ms of ACTUAL joint movement at the start of the routine. The
-        # remainder of _durations[routine] is a taught Delay with the robot stationary -
-        # exactly the shape of Partplace (0 ms motion, ~5 s delay).
+        # motion[routine] is either ms of joint movement at the START of the routine, or a
+        # list of (from_ms, to_ms) segments when the motion is not contiguous. The remainder
+        # of _durations[routine] is taught Delay with the robot stationary. Partpick is the
+        # case that needs segments: it moves, dwells 1 s, grips, dwells 1 s, then RETRACTS -
+        # so its last motion is at the end, and a still-window cannot open before it.
         self._motion = motion or {}
+        # effects_at[routine] = (ms_after_start, fn). A taught SetDigitalOutput does not sit
+        # at the end of a routine - Partplace opens its gripper 1 s after the last motion and
+        # then dwells another 1.6 s - so the grasp/release must be able to land mid-routine.
+        self._effects_at = effects_at or {}
         self.Controller = controller
         self._due = None
+        self._effect_due = None
         self._motion_until = None
         self._routine = None
         self.blocking_calls = 0
@@ -179,23 +187,31 @@ class Executor(object):
             self.blocking_calls += 1         # the gateway must NEVER do this
         if clearCallStack:                   # cancels whatever was still running
             self._due = None
+            self._effect_due = None
             self._motion_until = None
         self._routine = routine
         self._due = CLOCK.ms + self._durations.get(routine.Name, 100.0)
-        self._motion_until = CLOCK.ms + self._motion.get(routine.Name,
-                                                         self._durations.get(routine.Name, 100.0))
+        at = self._effects_at.get(routine.Name)
+        self._effect_due = (CLOCK.ms + at[0], at[1]) if at else None
+        m = self._motion.get(routine.Name, self._durations.get(routine.Name, 100.0))
+        segs = m if isinstance(m, (list, tuple)) else [(0.0, m)]
+        self._motion_until = [(CLOCK.ms + a, CLOCK.ms + b) for a, b in segs]
         self.dispatches.append((CLOCK.ms, routine.Name))
         if self._report_busy:
             self.CurrentStatement = "stmt"
 
     def tick(self):
         # drive the joints only while the routine is actually moving
-        if self.Controller is not None and self._motion_until is not None:
-            if CLOCK.ms < self._motion_until:
+        if self.Controller is not None and self._motion_until:
+            if any(a <= CLOCK.ms < b for a, b in self._motion_until):
                 for i in range(len(self.Controller.Joints)):
                     self.Controller._values[i] += 0.5
-            else:
+            elif CLOCK.ms >= max(b for _, b in self._motion_until):
                 self._motion_until = None
+        if self._effect_due is not None and CLOCK.ms >= self._effect_due[0]:
+            fn = self._effect_due[1]
+            self._effect_due = None
+            fn()
         if self._due is not None and CLOCK.ms >= self._due:
             r, self._due = self._routine, None
             self.CurrentStatement = None
