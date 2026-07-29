@@ -89,17 +89,23 @@
         "directions (WorkSensorFitted=FALSE, HomeSensorFitted=FALSE, toWorkTime=toHomeTime",
         "=T#2000ms in the deployed sysres), so its published 1994/2005/2030 ms is the PLC's",
         "COUNTDOWN, not a stroke - the rig cannot see this cylinder arrive.",
-        "FORWARD 200 ms comes from the one thing the rig CAN see: PartAtAssembly clears a",
-        "median 197 ms after ejector state=1 (n=27, 152-241 ms). The part is gone by then, so",
-        "the shadow's stroke has to be over by then or it visibly lags. The earlier 600 ms was",
-        "an estimate off the sensored-cylinder speed band and ran 3x too slow against that",
-        "landmark. RETURN 340 ms = 200 x 1.69, the rig's own median fire:retract ratio on its",
-        "three extending cylinders (feeder 716:1125, transfer 1924:3436, clamp 166:280); the",
+        "The rig's one visible landmark is PartAtAssembly clearing a median 197 ms after",
+        "ejector state=1 (n=27, 152-241 ms). That is when the PART DEPARTS, not the length of",
+        "the stroke - in VC the part leaves as soon as the pusher face reaches it, early in",
+        "the travel, so the full stroke may be longer and still put the departure on time.",
+        "CONTACT IS THE BINDING CONSTRAINT. 200 ms (500 mm/s) drove the cylinder 0->90 mm",
+        "with endpointError 0.0 and latched ClosedState, i.e. the CYLINDER was perfect - but",
+        "the part was not pushed: at that speed the face advances ~10 mm per simulation step",
+        "and outruns VC's contact sampling. 600 ms (150 mm/s) pushed reliably. 400 ms is the",
+        "bisection between the two: 1.5x faster than the value that worked, 1.5x slower than",
+        "the one that broke contact. If the part still fails to move, go back up toward 600.",
+        "RETURN = FORWARD x 1.69, the rig's own median fire:retract ratio on its three",
+        "extending cylinders (feeder 716:1125, transfer 1924:3436, clamp 166:280); the",
         "retract is unobserved by anything, so the ratio is the only evidence available.",
         "Endpoint verification holds the cylinder at the stop until the rig reports its next",
         "state, so the remaining PLC dwell costs nothing."
       ],
-      "durationsMs": { "1": 200, "3": 340 }
+      "durationsMs": { "1": 400, "3": 680 }
     },
 
     "smc/bearing_pnp": {
