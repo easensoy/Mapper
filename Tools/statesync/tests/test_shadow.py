@@ -463,33 +463,53 @@ def t_settle_clears_the_taught_dwell():
     check("...so the routine reaches its own end instead of being cut",
           bool(done) and done[0]["durationMs"] >= 4299,
           "%sms (last motion ends 4299)" % (done[0]["durationMs"] if done else None))
+    # SPEED SCALING MUST NOT ERODE THAT MARGIN. Motion shrinks with the factor but the two
+    # taught Delays do not, so the mid-routine still window stays 2000 ms at any factor -
+    # the window moves earlier, it does not grow. Arithmetic, not something the mock shows.
+    for factor in (1.0, 1.6, 3.0):
+        dwell = 1.0 + 1.0                       # the delays either side of the grip
+        check("the margin holds at speedFactor x%.1f" % factor,
+              ns["ROUTINE_SETTLE_MS"] > dwell * 1000.0,
+              "still window %.0fms vs settle %.0fms" % (dwell * 1000.0,
+                                                        ns["ROUTINE_SETTLE_MS"]))
 
 
 def t_robot_speed_factor():
     """The taught program is longer than the rig's task. Motion can be scaled; taught Delay
     cannot - which is correct, the rig's dwell is real. The lever is the joint limits."""
+    TAUGHT = {"MaxSpeed": 100.0, "MaxAcceleration": 200.0, "MaxDeceleration": 300.0}
     s = Scene(ur_part=True); g = Gateway(s); g.pump(2)
     j = s.ctl["UR3e"].Joints[0]
-    j.MaxSpeed, j.MaxAcceleration, j.MaxDeceleration = 100.0, 200.0, 300.0
-    g.send(env("UR3e", "robot", "routine", routine="Home", speedFactor=1.6))
+    # the model arrives ALREADY POLLUTED - an earlier build scaled it and recorded nothing.
+    # Absolute scaling from the taught values must land on the same numbers regardless.
+    j.MaxSpeed, j.MaxAcceleration, j.MaxDeceleration = 160.0, 512.0, 768.0
+    g.send(env("UR3e", "robot", "routine", routine="Home", speedFactor=1.6,
+               taughtJointLimits=TAUGHT))
     g.pump(60)
     # speed by f, acceleration by f squared - so a short accel-limited move (Home) speeds
     # up by the same factor as a long speed-limited one. Linear accel scaling gave x1.35.
-    check("a speedFactor raises the joint limits, accel by the SQUARE",
+    check("scaling is taught x factor, so a pre-scaled model cannot compound",
           abs(j.MaxSpeed - 160.0) < 0.01 and abs(j.MaxAcceleration - 512.0) < 0.01
           and abs(j.MaxDeceleration - 768.0) < 0.01,
-          "v=%.1f a=%.1f d=%.1f (base 100/200/300)" % (j.MaxSpeed, j.MaxAcceleration,
-                                                       j.MaxDeceleration))
-    g.send(env("UR3e", "robot", "routine", routine="Home", speedFactor=1.6))
+          "v=%.1f a=%.1f d=%.1f (taught 100/200/300, arrived at 160/512/768)"
+          % (j.MaxSpeed, j.MaxAcceleration, j.MaxDeceleration))
+    g.send(env("UR3e", "robot", "routine", routine="Home", speedFactor=1.6,
+               taughtJointLimits=TAUGHT))
     g.pump(60)
-    check("...applied once, never compounded",
+    check("...and re-running lands on the same numbers",
           abs(j.MaxSpeed - 160.0) < 0.01, "v=%.1f (compounding would give 256)" % j.MaxSpeed)
-    g.send(env("UR3e", "robot", "routine", routine="Home", speedFactor=2.0))
+    g.send(env("UR3e", "robot", "routine", routine="Home", speedFactor=2.0,
+               taughtJointLimits=TAUGHT))
     g.pump(60)
-    check("...and a changed factor re-scales from the model's own limits",
-          abs(j.MaxSpeed - 200.0) < 0.01, "v=%.1f (want 200 from base 100)" % j.MaxSpeed)
+    check("...a changed factor is measured from TAUGHT, not from the current value",
+          abs(j.MaxSpeed - 200.0) < 0.01, "v=%.1f (want 200 from taught 100)" % j.MaxSpeed)
+    g.send(env("UR3e", "robot", "routine", routine="Home", taughtJointLimits=TAUGHT))
+    g.pump(60)
+    check("...and no factor at all restores the taught limits",
+          abs(j.MaxSpeed - 100.0) < 0.01 and abs(j.MaxAcceleration - 200.0) < 0.01,
+          "v=%.1f a=%.1f (taught 100/200)" % (j.MaxSpeed, j.MaxAcceleration))
     scaled = [e for e in g.ev("robot_speed_scaled")]
-    check("the scaling is reported", len(scaled) == 2, "%d reports" % len(scaled))
+    check("every scaling is reported", len(scaled) == 4, "%d reports" % len(scaled))
 
     # Joint limits do not reach a LINEAR statement - it carries its own absolute mm/s -
     # so the taught values are retimed directly. Measured: joint-only scaling left
