@@ -94,8 +94,14 @@ class Scene(object):
         self.arm._beh["Executor"] = arm_ex
 
         self.ur3e = M.Component("UR3e")
+        ur_ctl = M.Controller(["J1", "J2", "J3", "J4", "J5", "J6"])
+        self.ctl["UR3e"] = ur_ctl
+        # measured from the taught program: Partpick moves then dwells 2 s; Partplace has
+        # NO motion at all - a gripper output and a ~5 s Delay; Home is pure motion.
         ur_ex = M.Executor(self.app, self.ur3e, ["Partpick", "Partplace", "Home"],
-                           {"Partpick": 6939.0, "Partplace": 5531.0, "Home": 1024.0},
+                           {"Partpick": 6679.0, "Partplace": 4979.0, "Home": 779.0},
+                           motion={"Partpick": 4679.0, "Partplace": 0.0, "Home": 779.0},
+                           controller=ur_ctl,
                            fire_scope=fire_scope, report_busy=report_busy)
         self.ur3e._beh["Executor"] = ur_ex
         self.app.Components.append(self.ur3e)
@@ -292,6 +298,7 @@ def t_unobserved_routine():
     must not complete early, and must NOT strand the lane. Reporting `never_started` here
     is what left UR3e Home queued behind Partplace forever."""
     s = Scene(fire_scope=False, report_busy=False); g = Gateway(s); g.pump(2)
+    s.ur_ex.Controller = None            # no joints to watch -> settle cannot apply
     g.send(env("UR3e", "robot", "routine", routine="Home"))
     g.pump(40)                                   # 800 ms - inside the 3000 ms grace
     check("no completion before the observation grace", not g.ev("completed"),
@@ -319,6 +326,7 @@ def t_stuck_routine_timeout():
     its configured limit, fail the lane explicitly, and release it."""
     s = Scene(); g = Gateway(s); g.pump(2)
     s.ur_ex._durations["Partplace"] = 10 ** 9         # never completes
+    s.ur_ex._motion["Partplace"] = 10 ** 9            # and never stops moving
     g.send(env("UR3e", "robot", "routine", routine="Partplace", timeoutMs=2000))
     g.pump(150)
     tmo = g.ev("timeout")
@@ -326,6 +334,33 @@ def t_stuck_routine_timeout():
           bool(tmo) and abs(tmo[0]["durationMs"] - 2000) < 100,
           "%sms (want 2000)" % (tmo[0]["durationMs"] if tmo else None))
     check("timed-out routine releases its lane", not g.ns["active"])
+
+
+def t_motion_settled():
+    """The robot defect: a taught routine that stops moving but holds the executor busy in
+    a Delay. Partplace has NO motion at all - a gripper output and a ~5 s delay - and
+    waiting it out left the shadow 5.8 s behind the rig on every cycle."""
+    s = Scene(); g = Gateway(s); g.pump(2)
+    g.send(env("UR3e", "robot", "routine", routine="Partplace"))
+    g.pump(400)
+    done = [e for e in g.ev("completed") if e["vcId"] == "UR3e"]
+    ok = bool(done) and done[0].get("via") == "motion_settled"
+    check("a stationary routine completes on motion settling", ok,
+          "via=%s at %sms (taught 4979)" % (done[0].get("via") if done else None,
+                                            done[0].get("durationMs") if done else None))
+    check("...well before the taught delay would have ended",
+          bool(done) and done[0]["durationMs"] < 2500,
+          "%sms" % (done[0]["durationMs"] if done else None))
+
+    # a routine that IS moving must never be cut short
+    g2 = Gateway(Scene()); g2.pump(2)
+    g2.send(env("UR3e", "robot", "routine", routine="Partpick"))
+    g2.pump(500)
+    pick = [e for e in g2.ev("completed") if e["vcId"] == "UR3e"]
+    check("a moving routine runs to its natural end", bool(pick) and pick[0]["durationMs"] > 6000,
+          "%sms (taught 6679)" % (pick[0]["durationMs"] if pick else None))
+    check("carried part reported without any config",
+          bool(pick) and "carrying" in pick[0], str(pick[0].get("carrying") if pick else None))
 
 
 def t_duplicate():
@@ -605,7 +640,7 @@ def main():
     print("\n-- gateway: concurrency ------------------------------------------------")
     t_axis_during_ur3e(); t_lane_serialisation(); t_shared_controller()
     print("\n-- gateway: honesty ----------------------------------------------------")
-    t_unobserved_routine(); t_stuck_routine_timeout(); t_duplicate()
+    t_unobserved_routine(); t_stuck_routine_timeout(); t_motion_settled(); t_duplicate()
     print("\n-- gateway: signal contract --------------------------------------------")
     t_signal_executor(); t_signal_no_motion(); t_signal_edge_guarantee()
     print("\n-- gateway: stop / clock safety ----------------------------------------")
