@@ -84,7 +84,17 @@
       "vcId": "Ejector", "execution": "signal", "lane": "ejector",
       "states": { "0": "Home Pos", "1": "ToWork", "2": "AtWork", "3": "ToHome", "4": "AtHome" },
       "signal": { "behaviour": "PushJoint_ActionSignal", "open": 0.0, "closed": 90.0 },
-      "durationsMs": { "1": 2011, "3": 2009 }
+      "_override_durations": [
+        "NOT the measured rig gap. The Ejector is the ONLY actuator sensorless in BOTH",
+        "directions (WorkSensorFitted=FALSE, HomeSensorFitted=FALSE, toWorkTime=toHomeTime",
+        "=T#2000ms in the deployed sysres), so its measured 2011/2009/2005 ms is the PLC's",
+        "COUNTDOWN, not a stroke - the rig cannot see this cylinder arrive. Animating 2000 ms",
+        "swept 90 mm at 49.7 mm/s while every sensored cylinder on the rig runs 109-196 mm/s.",
+        "600 ms = 90 mm at ~150 mm/s, the middle of that band. ESTIMATE, not a measurement;",
+        "tune by eye. The endpoint verification holds the cylinder at the stop until the rig",
+        "reports its next state, so the remaining PLC dwell costs nothing."
+      ],
+      "durationsMs": { "1": 600, "3": 600 }
     },
 
     "smc/bearing_pnp": {
