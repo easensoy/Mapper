@@ -161,8 +161,16 @@
       "station": "disassembly", "component": "robot", "twinName": "Robot",
       "vcId": "UR3e", "execution": "routine", "lane": "robot",
       "states": { "0": "Home Pos", "1": "Partpick", "2": "Partplace" },
-      "_override_routines": "The twin names state 1 'PickPart'; the taught VC routine is 'Partpick'. The routine name wins.",
-      "routines": { "0": "Home", "1": "Partpick", "2": "Partplace" }
+      "_override_routines": [
+        "The twin names state 1 'PickPart'; the taught VC routine is 'Partpick'.",
+        "ONE ATOMIC TASK. The rig's robot reports task-start (1), then task-done (2) and",
+        "ready (0) only 2 ms apart at the END - measured 7827 ms apart from state 1. All of",
+        "its motion happens inside state 1. Firing a separate routine on 2 and 0 replayed",
+        "the place and the return AFTER the rig had already parked, which is what left the",
+        "shadow seconds behind. The chain runs the whole task from state 1 instead; 2 and 0",
+        "carry no motion and command nothing."
+      ],
+      "routines": { "1": ["Partpick", "Partplace", "Home"] }
     },
 
     "smc/PartInHopper": {
