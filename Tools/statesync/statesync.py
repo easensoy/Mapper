@@ -346,6 +346,11 @@ class Bridge:
         else:
             env["routine"] = routine
         env["timeoutMs"] = self.routine_timeout
+        # How much faster than taught the robot's MOTION should run. Taught Delay statements
+        # are wall time and are unaffected, which is what makes this the right lever: the
+        # dwell the rig really has is kept, the travel is matched to it.
+        if comp.get("speedFactor"):
+            env["speedFactor"] = float(comp["speedFactor"])
         v = comp.get("verify")
         if v:
             env["verify"] = {"part": v["part"], "carriers": list(v["carriers"]),
