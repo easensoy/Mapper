@@ -538,9 +538,12 @@ def startRoutine(env, lane, chainIdx=0):
         pass
 
     active[lane] = item
+    # Only the first routine of a chain is a dispatch of the COMMAND; the rest are steps
+    # within the same atomic task, so they never re-publish and never re-count.
     if chainIdx == 0:
         publish(env, "dispatched")
-    log("dispatched", commandId=env.get("commandId"), vcId=vcid, lane=lane, routine=name,
+    log("dispatched" if chainIdx == 0 else "chain_step_start",
+        commandId=env.get("commandId"), vcId=vcid, lane=lane, routine=name,
         chainStep=("%d/%d" % (chainIdx + 1, len(chain))) if chain else None,
         chainBefore=chainBefore, recv=env.get("_recv"))
 
