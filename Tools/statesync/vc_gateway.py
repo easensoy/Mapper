@@ -341,16 +341,32 @@ def shapeServo(comp, control, j, distance, durationMs):
     """Speed/accel so the stock servo sweeps `distance` in `durationMs`:
     10% ramp up, 80% cruise, 10% ramp down -> total time == durationMs exactly.
     Written to the joint (authoritative) and to the component's Push* properties
-    (so the stock changeSpeed lands in the same place if it re-runs)."""
+    (so the stock changeSpeed lands in the same place if it re-runs).
+
+    Also reports OVERDRIVE: how many times the shaped values exceed the ones the model
+    was AUTHORED with. That ratio is the thing to look at when a cylinder moves perfectly
+    but fails to shift the part it is supposed to push - the part is carried by physics
+    contact, and a kinematic body slammed in at many times the design acceleration
+    resolves its contact in a single solver step instead of over several. Acceleration
+    grows as 1/t^2 (the ramp is a fixed fraction of the stroke), so it overdrives far
+    faster than the speed does: halving a stroke doubles the speed but QUADRUPLES the
+    acceleration."""
     t = max(float(durationMs), 1.0) / 1000.0
     d = abs(float(distance))
     if d <= ZERO_EPS:
-        return None
+        return None, None
     v = d / ((1.0 - RAMP_FRACTION) * t)
     a = v / (RAMP_FRACTION * t)
+    over = {}
     for pname, val in (("PushSpeed", v), ("PushAcceleration", a)):
         pr = comp.getProperty(pname)
         if pr:
+            try:
+                was = float(pr.Value)
+                if was > ZERO_EPS:
+                    over[pname] = round(val / was, 1)
+            except Exception:
+                pass
             try:
                 pr.Value = float(val)
             except Exception:
@@ -364,7 +380,7 @@ def shapeServo(comp, control, j, distance, durationMs):
                 pass
     except Exception:
         pass
-    return v
+    return v, (over or None)
 
 
 def startSignal(env, lane):
@@ -398,7 +414,7 @@ def startSignal(env, lane):
             execution="signal", durationMs=0, cur=round(before, 3), alreadyAtTarget=True)
         return
 
-    speed = shapeServo(comp, control, j, dist, durMs) if durMs > 0 else None
+    speed, overdrive = shapeServo(comp, control, j, dist, durMs) if durMs > 0 else (None, None)
 
     # EDGE GUARANTEE: a VC boolean signal fires OnSignal only on a CHANGE, and the stock
     # ServoController_Script moves only on that event. If the signal already holds the
@@ -429,7 +445,8 @@ def startSignal(env, lane):
     log("start", commandId=env.get("commandId"), vcId=vcid, lane=lane, execution="signal",
         value=value, sigBefore=sigBefore, forcedEdge=forced, jointBefore=round(before, 3),
         target=round(target, 3), tol=round(tol, 3), durMs=int(durMs),
-        speed=round(speed, 2) if speed else None, recv=env.get("_recv"))
+        speed=round(speed, 2) if speed else None, overdrive=overdrive,
+        recv=env.get("_recv"))
 
 # ------------------------------------------------------ axis executor
 def startAxis(env, lane):
