@@ -41,6 +41,11 @@ namespace CodeGen.Translation
             System.Array.Find(MapperConfig.M262SynthSensors,
                 s => string.Equals(s.Name, "PartAtAssembly", System.StringComparison.OrdinalIgnoreCase));
 
+        // A twin may declare the part-present sensor itself instead of leaving it to the synth
+        // injection. It then keeps the SAME reserved slot, so ids stay identical either way.
+        public static bool IsPartAtAssembly(string name) =>
+            string.Equals(name, "PartAtAssembly", System.StringComparison.OrdinalIgnoreCase);
+
         public static IReadOnlyList<HandoffSpec> All()
         {
             var pa = PartAtAssembly;
