@@ -49,6 +49,14 @@ namespace CodeGen.Translation.Process
             foreach (var s in allowedSensors)
             {
                 if (string.IsNullOrEmpty(s.ComponentID)) continue;
+                // PartAtAssembly holds a RESERVED slot (the one the synth injection uses), so it must not
+                // consume a positional one -- otherwise a twin that declares it pushes every actuator up by
+                // one and the topmost actuator lands on the Assembly process_id.
+                if (HandoffPlanner.IsPartAtAssembly(s.Name))
+                {
+                    map[s.ComponentID.Trim()] = HandoffPlanner.PartAtAssembly.Id;
+                    continue;
+                }
                 map[s.ComponentID.Trim()] = next++;
             }
             foreach (var a in allowedActuators)
@@ -94,7 +102,13 @@ namespace CodeGen.Translation.Process
             // computed per ring topology). A recipe that waited on the positional id would read a different
             // component's slot entirely.
             var byName = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            foreach (var kv in cat.CoverActuatorIds) byName[kv.Key] = kv.Value;
+            // The covers are NOT listed here. They are ordinary components the injector numbers positionally, and
+            // that positional number is exactly what it writes as their actuator_id -- so the scoped map already
+            // gives the slot they report on. A static override could only ever be right for one layout: pinning
+            // them to 14/15/16 matches the clamp models, but a no-clamp model has no Clamp to occupy a slot, so
+            // its covers land on 13/14/15 and every cover WAIT read the NEXT component's slot. That is why a
+            // no-clamp Assembly commanded coverpnp_vr and then waited on coverpnp_gripper, which nothing had yet
+            // been told to move, and the cover sequence stopped dead with the gripper never gripping.
             foreach (var s in cat.SynthSensors) byName[s.Name] = s.Id;
             byName["Robot"] = cat.RobotActuatorId;
             foreach (var n in TemplateMap.TopCoverSensorNames) byName[n] = MapperConfig.TopCoverSensorId;
