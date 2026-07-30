@@ -474,6 +474,32 @@ def t_settle_clears_the_taught_dwell():
                                                         ns["ROUTINE_SETTLE_MS"]))
 
 
+def t_nothing_free_runs():
+    """A VC executor left enabled runs its own taught program the moment the simulation
+    starts - the robot moves on its own, with nothing on the rig asking it to. Measured: the
+    UR3e ran unattended for 46 s before its first command arrived, because the executor was
+    only disabled when that command finally came."""
+    s = Scene()
+    for ex in s.app.executors:
+        ex.IsEnabled = True                    # how the model actually loads
+    g = Gateway(s, max_ticks=3)
+    try:
+        g.ns["OnRun"]()                        # the REAL startup, not a stand-in
+    except g.Stop:
+        pass
+    live = [e for e in s.app.executors if e.IsEnabled]
+    check("no executor is left free-running once the gateway is up",
+          not live, "%d still enabled" % len(live))
+    rep = [e for e in g.ev("executors_silenced")]
+    check("...and it is reported", bool(rep) and rep[0]["count"] == len(s.app.executors),
+          "silenced %s of %d" % (rep[0]["count"] if rep else None, len(s.app.executors)))
+    for ex in s.app.executors:
+        ex.IsEnabled = True                    # a reset re-enables them
+    g.ns["OnReset"]()
+    live = [e for e in s.app.executors if e.IsEnabled]
+    check("...including after a reset", not live, "%d still enabled" % len(live))
+
+
 def t_robot_speed_factor():
     """The taught program is longer than the rig's task. Motion can be scaled; taught Delay
     cannot - which is correct, the rig's dwell is real. The lever is the joint limits."""
@@ -897,7 +923,7 @@ def main():
     t_axis_during_ur3e(); t_lane_serialisation(); t_shared_controller()
     print("\n-- gateway: honesty ----------------------------------------------------")
     t_unobserved_routine(); t_stuck_routine_timeout(); t_motion_settled()
-    t_release_completes_step(); t_settle_clears_the_taught_dwell()
+    t_release_completes_step(); t_settle_clears_the_taught_dwell(); t_nothing_free_runs()
     t_robot_speed_factor(); t_routine_chain(); t_duplicate()
     print("\n-- gateway: signal contract --------------------------------------------")
     t_signal_executor(); t_signal_no_motion(); t_signal_edge_guarantee()
