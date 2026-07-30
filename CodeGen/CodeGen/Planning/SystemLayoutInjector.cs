@@ -844,6 +844,10 @@ namespace CodeGen.Translation
                 "BearingSensor", "ShaftSensor",
                 // BOTH spellings: the twin's name for this one varies by revision (see TemplateMap.IsTopCoverSensor).
                 "TopCoverSenosr", "TopCoverSensor",
+                // LAST on purpose: this list's order assigns the positional sensor ids, so appending
+                // leaves every existing sensor id untouched. A twin that omits it falls through to the
+                // synth injection, so both shapes generate the same ids.
+                "PartAtAssembly",
             };
             // Source from full Control.xml (StationGroupingService only populates Feed_Station's conditions); grippers are Type="Robot", so accept both.
             var contents = new StationContents(
@@ -875,7 +879,12 @@ namespace CodeGen.Translation
                 "restore via 'git checkout' on the Demonstrator repo to revert.");
 
             int sensorIdStart = 0;
-            int actuatorIdStart = contents.Sensors.Count;
+            // A twin may declare PartAtAssembly itself rather than leave it to the synth injection below.
+            // It then keeps the SAME reserved slot (HandoffPlanner.PartAtAssembly.Id), which sits in the
+            // hole TopCoverSenosr's pin leaves behind -- so it must NOT push the actuator range up, or
+            // every actuator id (and with it every recipe slot, interlock SourceID and HCF binding) shifts.
+            int actuatorIdStart = contents.Sensors.Count
+                - contents.Sensors.Count(s => HandoffPlanner.IsPartAtAssembly(s.Name));
             // process_ids stay in [0..19] (state_table ARRAY[20]) and above the component id space (max actuator_id 16), so no Wait1Id collides with one.
             int assemblyProcessId = MapperConfig.AssemblyProcessId;
             int disassemblyProcessId = MapperConfig.DisassemblyProcessId;
@@ -901,7 +910,11 @@ namespace CodeGen.Translation
                 if (plc is PlcAssignment.M580 or PlcAssignment.BX1 || cross.Contains(nm) || MapperConfig.MergeFeedRing)
                     occ.Add(id);
             }
-            for (int i = 0; i < contents.Sensors.Count; i++)   MarkOcc(contents.Sensors[i].Name, sensorIdStart + i);
+            for (int i = 0; i < contents.Sensors.Count; i++)
+                MarkOcc(contents.Sensors[i].Name,
+                    HandoffPlanner.IsPartAtAssembly(contents.Sensors[i].Name)
+                        ? HandoffPlanner.PartAtAssembly.Id      // pinned, same slot the synth would take
+                        : sensorIdStart + i);
             for (int i = 0; i < contents.Actuators.Count; i++)
             {
                 // The robot task arm is APPENDED to allowedActuators, so its LOCAL positional id here is wrong --
@@ -980,7 +993,15 @@ namespace CodeGen.Translation
                     if (processRecipe.CmdStateArr[i] == 1) adv.Add(t);
                     else if (processRecipe.CmdStateArr[i] == 3) ret.Add(t);
                 }
-                var strandedAct = adv.Where(a => !ret.Contains(a)).ToList();
+                // Advancing and returning need not be the same process. Command ownership is declared on the
+                // actuator's own transitions, so a transfer that carries a part across stations is legitimately
+                // advanced by the upstream process and returned by the downstream one -- holding the part in
+                // between is the point. Stranded means NO process in the model commands it home.
+                var strandedAct = adv
+                    .Where(a => !ret.Contains(a) &&
+                                CodeGen.Translation.Process.Recipes.ProcessCompiler
+                                    .ProcessesCommandingHome(a, allComponents).Count == 0)
+                    .ToList();
                 if (strandedAct.Count > 0)
                     throw new InvalidOperationException(
                         $"[Recipe] Actuator '{strandedAct[0]}' has no return-to-home cmd step" +
@@ -988,7 +1009,7 @@ namespace CodeGen.Translation
                             ? $" ({strandedAct.Count} affected: {string.Join(", ", strandedAct)})"
                             : string.Empty) +
                         " — refusing to generate code that strands an actuator at work. " +
-                        "(auto-retract should have inserted it; this is a recipe-generator bug.)");
+                        "(no process state in the model owns a movement that drives it home.)");
             }
 
             builder.AddFB(FBIdGenerator.GenerateFBId(contents.Process.ComponentID),
@@ -1050,15 +1071,6 @@ namespace CodeGen.Translation
                     "[Recipe] Disassembly Process not found in Control.xml — " +
                     "BX1 zone will have actuators but no Disassembly Process FB.");
             }
-
-            // Bearing_PnP routes to Seven_State (13-state PARALLEL+ALTERNATIVE branched swivel).
-            var bearingPnp = allComponents.FirstOrDefault(c =>
-                string.Equals(c.Type, "Actuator", StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(c.Name, "Bearing_PnP", StringComparison.Ordinal));
-            if (bearingPnp != null)
-                report.Missing.Add(
-                    $"[Recipe] Bearing_PnP ({bearingPnp.States.Count} states / PARALLEL+ALTERNATIVE " +
-                    "branched) → Seven_State_Actuator_CAT; recipe emits settled WAITs (CMD vocabulary pending).");
 
             if (processRecipe != null && processRecipe.SkippedConditions.Count > 0)
             {
@@ -1179,6 +1191,10 @@ namespace CodeGen.Translation
                 if (
                     CodeGen.Mapping.TemplateMap.IsTopCoverSensor(sensor.Name))
                     assignedId = MapperConfig.TopCoverSensorId;
+                // Twin-declared PartAtAssembly takes the slot the synth injection reserves for it, so a
+                // model that declares it and one that does not generate the same ids.
+                else if (HandoffPlanner.IsPartAtAssembly(sensor.Name))
+                    assignedId = HandoffPlanner.PartAtAssembly.Id;
 
                 SensorBinding? senBinding = null;
                 bindings?.Sensors.TryGetValue(sensor.Name, out senBinding);
@@ -1209,6 +1225,10 @@ namespace CodeGen.Translation
                 string prevSynthInit = "PartInHopper";
                 foreach (var (synthName, _, synthId) in MapperConfig.M262SynthSensors)
                 {
+                    // The twin owns it if it declares it; synthesizing a second FB of the same name
+                    // would put two components on one ring slot.
+                    if (contents.Sensors.Any(s => string.Equals(s.Name, synthName, StringComparison.OrdinalIgnoreCase)))
+                        continue;
                     builder.AddFB(FBIdGenerator.GenerateFBId("m262rigsensor-" + synthName),
                         synthName, "Sensor_Bool_CAT", "Main", 2000, synthY,
                         new Dictionary<string, string>
@@ -1358,6 +1378,9 @@ namespace CodeGen.Translation
 
             // EAE Solution Integrity requires an opcua.xml inside a folder named after the syslay stem.
             EnsureOpcuaXmlBesideArtefact(fullPath);
+
+            // The HMI is derived from the finished layout (FB Id -> TagName, FB Type -> faceplate).
+            CodeGen.Hmi.HmiGenerator.Emit(fullPath, config);
 
             return fullPath;
         }
@@ -1616,7 +1639,7 @@ namespace CodeGen.Translation
 
             // Recreate the app shell (create-if-absent) BEFORE the SyslayPath2 check below.
             CodeGen.Devices.Core.ApplicationShellEmitter.EnsureApplicationShell(
-                DeriveDemonstratorEaeRoot(config),
+                config, DeriveDemonstratorEaeRoot(config),
                 line => report.DeviceCleanupLog.Add(line));
 
             if (string.IsNullOrEmpty(config.SyslayPath2) || !File.Exists(config.SyslayPath2))
