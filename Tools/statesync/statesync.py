@@ -351,6 +351,8 @@ class Bridge:
         # dwell the rig really has is kept, the travel is matched to it.
         if comp.get("speedFactor"):
             env["speedFactor"] = float(comp["speedFactor"])
+        if comp.get("dwellFactor"):
+            env["dwellFactor"] = float(comp["dwellFactor"])
         # The robot's TAUGHT joint limits, read out of the layout. They travel on the wire
         # because the gateway must never infer a baseline from what the model currently
         # holds - it has already written to those limits itself.
