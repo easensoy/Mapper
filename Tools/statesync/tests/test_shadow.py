@@ -568,6 +568,37 @@ def t_robot_speed_factor():
           abs(lin.getProperty("MaxSpeed").Value - 320.0) < 0.01,
           "v=%.1f (compounding would give 512)" % lin.getProperty("MaxSpeed").Value)
 
+    # THE RIG'S PICK-AND-PLACE TIME INCLUDES ITS OWN GRIPPER DWELL, so taught Delay is a
+    # floor that no amount of extra travel speed can get under. Leaving it unscaled put the
+    # release 2401 ms late and gave the part 320 ms to settle instead of the rig's 2721 ms.
+    s3 = Scene(ur_part=True); g3b = Gateway(s3); g3b.pump(2)
+    pp3 = s3.ur_ex.Program.findRoutine("Partplace")
+    g3b.send(env("UR3e", "robot", "routine", routine="Partplace",
+                 speedFactor=2.0, dwellFactor=2.0))
+    g3b.pump(400)
+    check("taught Delay is retimed with the motion",
+          abs(pp3.Statements[1].getProperty("Delay").Value - 0.5) < 1e-9
+          and abs(pp3.Statements[3].getProperty("Delay").Value - 0.8) < 1e-9,
+          "%.3f / %.3f (taught 1.0 / 1.6)" % (pp3.Statements[1].getProperty("Delay").Value,
+                                              pp3.Statements[3].getProperty("Delay").Value))
+    check("...and the motion with it",
+          abs(pp3.Statements[0].getProperty("MaxSpeed").Value - 400.0) < 0.01,
+          "v=%.1f (taught 200)" % pp3.Statements[0].getProperty("MaxSpeed").Value)
+    g3b.send(env("UR3e", "robot", "routine", routine="Partplace",
+                 speedFactor=2.0, dwellFactor=2.0))
+    g3b.pump(400)
+    check("...dwell retiming does not compound either",
+          abs(pp3.Statements[1].getProperty("Delay").Value - 0.5) < 1e-9,
+          "%.3f (compounding would give 0.25)" % pp3.Statements[1].getProperty("Delay").Value)
+
+    # the rate itself: taught pick+place over the rig's measured pick+place
+    taught = (3.387 + 0.883 + 0.395 + 2.368) + 3.0
+    check("the rate is the taught pick-and-place over the rig's",
+          abs(taught / 5.012 - 2.0) < 0.01, "%.3f / 5.012 = %.3f" % (taught, taught / 5.012))
+    release = (3.387 + 0.883 + 0.395 + 2.368) / 2.0 + 3.0 / 2.0
+    check("...so the release lands on the rig's 5.012 s",
+          abs(release - 5.012) < 0.05, "%.3f s vs rig 5.012 s" % release)
+
     # RE-PASTING the script wipes every module variable while the MODEL keeps its scaled
     # values. Remembering originals in Python would therefore capture a scaled value as
     # taught and compound on the next run. The applied factor lives beside the model.
