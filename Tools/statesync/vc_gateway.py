@@ -393,12 +393,20 @@ class _AttrProp(object):
     Value = property(_get, _set)
 
 
-def scaleRoutineMotion(routine, vcid, name, factor):
-    """Retime the LINEAR statements of one taught routine, in the model, at runtime.
+def scaleRoutineMotion(routine, vcid, name, factor, dwellFactor=None):
+    """Retime one taught routine, in the model, at runtime.
 
     A statement carrying JointSpeed is deliberately SKIPPED: it asks for a fraction of the
     joint maximum, which scaleRobotSpeed already raised, and scaling both would compound to
-    the factor squared. Delay statements are never touched.
+    the factor squared.
+
+    TAUGHT DELAY IS RETIMED TOO, and it has to be. The rig's own pick-and-place time
+    INCLUDES its gripper dwell, so a shadow that shortens only the travel can never land the
+    release where the rig lands it - the dwell is a fixed floor. Measured: with motion alone
+    at x1.6 the release came 7413 ms into the task against the rig's 5012 ms, leaving the
+    part 320 ms to settle in the hopper before the feeder stroked, where the rig allows
+    2721 ms. That is why the part was unstable. dwellFactor DIVIDES each taught Delay, so
+    the whole routine can be run at the rate the rig actually works at.
 
     ABSOLUTE, like the joint limits: the taught values are captured ONCE into a property
     that lives beside the model, and every write is taught * factor. A re-paste of this
@@ -406,6 +414,7 @@ def scaleRoutineMotion(routine, vcid, name, factor):
     Passing factor 1.0 puts the taught program back exactly as it was."""
     if not factor or factor <= 0 or routine is None:
         return None
+    dwellFactor = float(dwellFactor) if dwellFactor else 1.0
     key = "stmt:%s/%s" % (vcid, name)
     state = _appliedScale().get(key) or {}
     taught = state.get("taught")
@@ -420,7 +429,7 @@ def scaleRoutineMotion(routine, vcid, name, factor):
         for st in stmts:
             row = {}
             if _stmtProp(st, "JointSpeed") is None:   # joint move: the limits own it
-                for pn in LINEAR_SPEED_PROPS + LINEAR_ACCEL_PROPS:
+                for pn in LINEAR_SPEED_PROPS + LINEAR_ACCEL_PROPS + ("Delay",):
                     pr = _stmtProp(st, pn)
                     if pr is None:
                         continue
@@ -432,24 +441,29 @@ def scaleRoutineMotion(routine, vcid, name, factor):
                         row[pn] = v
             taught.append(row)
 
-    if abs(float(state.get("factor", 0.0)) - factor) < 1e-6:
-        return factor                        # already at this factor, nothing to write
+    if abs(float(state.get("factor", 0.0)) - factor) < 1e-6 \
+            and abs(float(state.get("dwell", 0.0)) - dwellFactor) < 1e-6:
+        return factor                        # already at this rate, nothing to write
 
-    n = 0
+    n = dwells = 0
     for st, row in zip(stmts, taught):
         for pn, base in row.items():
             pr = _stmtProp(st, pn)
             if pr is None:
                 continue
             try:
-                pr.Value = float(base) * (factor * factor
-                                          if pn in LINEAR_ACCEL_PROPS else factor)
+                if pn == "Delay":
+                    pr.Value = float(base) / dwellFactor
+                    dwells += 1
+                else:
+                    pr.Value = float(base) * (factor * factor
+                                              if pn in LINEAR_ACCEL_PROPS else factor)
                 n += 1
             except Exception:
                 pass
-    _rememberScale(key, {"factor": factor, "taught": taught})
+    _rememberScale(key, {"factor": factor, "dwell": dwellFactor, "taught": taught})
     log("routine_motion_scaled", vcId=vcid, routine=name, factor=factor,
-        statements=len(stmts), properties=n)
+        dwellFactor=dwellFactor, statements=len(stmts), properties=n, delays=dwells)
     return factor
 
 
@@ -770,7 +784,7 @@ def startRoutine(env, lane, chainIdx=0):
     if sf or _appliedScale().get("stmt:%s/%s" % (vcid, name)):
         sf = float(sf) if sf else 1.0
         scaleRobotSpeed(ex, vcid, sf, env.get("taughtJointLimits"))
-        scaleRoutineMotion(routine, vcid, name, sf)
+        scaleRoutineMotion(routine, vcid, name, sf, env.get("dwellFactor"))
     chainBefore = configureGrasp(vcid, verify.get("part")) if verify else None
 
     item = {"kind": "routine", "env": env, "vcId": vcid, "routine": name, "key": key,
