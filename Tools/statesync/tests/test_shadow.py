@@ -411,21 +411,24 @@ def t_motion_settled():
 
 
 def t_release_completes_step():
-    """Letting go is the last physical act of a place, so the shadow moves on the moment it
-    happens. Partplace then dwells another 1.6 s with nothing left to do - pure lateness
-    against a rig that has already parked. A GRASP is the opposite: Partpick grips at
-    statement 5 of 7 and still has to retract, so completing on it would drag the part."""
+    """The taught dwell AFTER a release is the part settling in the nest, and it is kept.
+    Cutting it at the instant of release withdrew the gripper while the part was still
+    dropping - the taught place releases 178 mm above the height the part is gripped from,
+    so it falls, and the arm must hold still while it does. A GRASP is different again:
+    Partpick grips at statement 5 of 7 and still has to retract, so completing on the grasp
+    would cancel the lift and drag the part."""
     s = Scene(ur_part=True); g = Gateway(s); g.pump(2)
     s.ur_part.Parent = s.tool            # the robot arrives at Partplace holding the part
     g.send(env("UR3e", "robot", "routine", routine="Partplace"))
     g.pump(400)
     done = [e for e in g.ev("completed") if e["vcId"] == "UR3e"]
-    check("a place completes on the release, not on a still-window",
-          bool(done) and done[0].get("via") == "released",
+    check("a place is NOT cut at the release - the taught settle is the part dropping",
+          bool(done) and done[0]["durationMs"] > 3479,
+          "%sms (release at 3479)" % (done[0]["durationMs"] if done else None))
+    check("...so the gripper is not withdrawn while the part is still falling",
+          bool(done) and done[0].get("via") in ("idle_after_start", "motion_settled",
+                                                "scope_event"),
           "via=%s" % (done[0].get("via") if done else None))
-    check("...at the release, ahead of the settle deadline and the taught 5079 ms",
-          bool(done) and 3400 <= done[0]["durationMs"] < 3979,
-          "%sms (release 3479, settle would fire 3979)" % (done[0]["durationMs"] if done else None))
     check("the part really did leave the gripper",
           "Part" not in (done[0].get("carrying") or []) if done else False,
           str(done[0].get("carrying") if done else None))
