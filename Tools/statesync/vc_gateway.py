@@ -956,16 +956,16 @@ def advance():
                     s["lastJv"] = jv
                     s["stillSince"] = now
                 else:
-                    # LETTING GO IS THE LAST PHYSICAL ACT OF A PLACE. Once the robot is
-                    # stationary AND holding less than it started with, the step's work is
-                    # provably done and any remaining taught dwell has no rig counterpart -
-                    # in this program that is Partplace's trailing Delay 1.6, pure lateness.
-                    # A GRASP alone is deliberately NOT enough: it is always followed by a
-                    # retract (Partpick grips at statement 5 of 7), so completing on it
-                    # would cancel the lift and drag the part. Grasp THEN a real retract
-                    # THEN stillness is enough - there is nothing taught after the lift.
-                    if held is not None and held < len(n0):
-                        done.append((lane, "released", elapsed)); continue
+                    # THE TAUGHT DWELL AFTER A RELEASE IS THE PART SETTLING, AND IT IS KEPT.
+                    # This used to complete the step the instant the part detached, on the
+                    # grounds that Partplace's trailing Delay 1.6 was pure lateness with no
+                    # rig counterpart. dwellFactor superseded that: the dwell is now run at
+                    # the rig's own rate, so it IS the rig's settle time, not lateness - and
+                    # cutting it withdrew the gripper while the part was still falling.
+                    # A GRASP is still deliberately not enough to end a step: it is always
+                    # followed by a retract (Partpick grips at statement 5 of 7), so
+                    # completing there would cancel the lift and drag the part. Grasp THEN a
+                    # real retract THEN stillness is - there is nothing taught after a lift.
                     still = now - s.get("stillSince", now)
                     if s.get("retracted") and still >= PICK_SETTLE_MS:
                         done.append((lane, "picked", elapsed)); continue
