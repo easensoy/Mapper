@@ -764,10 +764,13 @@ def startRoutine(env, lane, chainIdx=0):
     hookRoutine(vcid, name, routine)
     # No factor on the wire means "run it as taught". Restoring rather than doing nothing is
     # what makes removing the setting from the config actually put the model back.
+    # Retime only where the config asks for it. Without a factor there is nothing to undo
+    # unless this routine was scaled before, so an untouched robot is never written to.
     sf = env.get("speedFactor")
-    sf = float(sf) if sf else 1.0
-    scaleRobotSpeed(ex, vcid, sf, env.get("taughtJointLimits"))
-    scaleRoutineMotion(routine, vcid, name, sf)
+    if sf or _appliedScale().get("stmt:%s/%s" % (vcid, name)):
+        sf = float(sf) if sf else 1.0
+        scaleRobotSpeed(ex, vcid, sf, env.get("taughtJointLimits"))
+        scaleRoutineMotion(routine, vcid, name, sf)
     chainBefore = configureGrasp(vcid, verify.get("part")) if verify else None
 
     item = {"kind": "routine", "env": env, "vcId": vcid, "routine": name, "key": key,
@@ -1020,9 +1023,42 @@ def flush(lane, reason):
 STARTERS = {"signal": startSignal, "axis": startAxis, "routine": startRoutine}
 
 
+def silenceExecutors():
+    """Stop every robot in the layout from running its own program.
+
+    A VC executor with IsEnabled True runs its taught program the moment the simulation
+    starts - so a robot moves on its own, on its own schedule, with nothing on the rig
+    asking it to. resolveExecutor disables one, but only when that robot's FIRST command
+    arrives: measured, the UR3e ran unattended for 46 s between the simulation starting and
+    its first Partpick. In a shadow NOTHING may move except in answer to the rig, so every
+    executor is silenced up front. Generic - it needs no names and no config, because the
+    rule is true of every robot here."""
+    n = 0
+    try:
+        for c in app.Components:
+            try:
+                ex = c.findBehaviour("Executor")
+            except Exception:
+                continue
+            if ex is None:
+                continue
+            try:
+                if ex.IsEnabled:
+                    ex.IsEnabled = False
+                    n += 1
+            except Exception:
+                pass
+    except Exception as e:
+        log("silence_executors_failed", err=str(e))
+    if n:
+        log("executors_silenced", count=n)
+    return n
+
+
 def OnRun():
     reset_state("run")
     _simFallbackMs[0] = 0.0
+    silenceExecutors()
     log("gateway_up", tick_ms=int(TICK_S * 1000), simClock=_clockKind())
     publish_ready("run")
     while True:
@@ -1062,6 +1098,7 @@ def OnReset():
     reset_state("reset")
     _hooked.clear()                 # handlers are re-assigned (not accumulated) on next use
     _simFallbackMs[0] = 0.0
+    silenceExecutors()              # a reset re-enables them; nothing may free-run
     publish_ready("reset")
 
 
