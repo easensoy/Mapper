@@ -591,6 +591,28 @@ def t_robot_speed_factor():
           abs(pp3.Statements[1].getProperty("Delay").Value - 0.5) < 1e-9,
           "%.3f (compounding would give 0.25)" % pp3.Statements[1].getProperty("Delay").Value)
 
+    # A BASELINE RECORDED BY AN OLDER BUILD IS MISSING WHATEVER IT DID NOT COLLECT. Delay
+    # was added after the first baselines were written; the row count still matched, the
+    # stale rows were reused, and the dwell was silently never written - the log said the
+    # routine was retimed while it still ran its full taught dwell (delays=0).
+    s4 = Scene(ur_part=True); g4 = Gateway(s4); g4.pump(2)
+    pp4 = s4.ur_ex.Program.findRoutine("Partplace")
+    old = {"factor": 2.0, "dwell": 2.0, "taught": [
+        {"MaxSpeed": 200.0, "Acceleration": 200.0, "Deceleration": 200.0,
+         "MaxAngularSpeed": 360.0}, {}, {}, {}]}          # no Delay: the pre-Delay build
+    s4.gw.getProperty("AppliedScale").Value = json.dumps({"stmt:UR3e/Partplace": old})
+    g4.send(env("UR3e", "robot", "routine", routine="Partplace",
+                speedFactor=2.0, dwellFactor=2.0))
+    g4.pump(400)
+    check("a baseline from an older build is completed, not trusted whole",
+          abs(pp4.Statements[1].getProperty("Delay").Value - 0.5) < 1e-9,
+          "%.3f (stale reuse leaves it at the taught 1.0)"
+          % pp4.Statements[1].getProperty("Delay").Value)
+    sc = [e for e in g4.ev("routine_motion_scaled") if e.get("routine") == "Partplace"]
+    check("...and the write is reported, so a silent no-op is visible",
+          bool(sc) and sc[-1].get("delays") == 2,
+          "delays=%s" % (sc[-1].get("delays") if sc else None))
+
     # the rate itself: taught pick+place over the rig's measured pick+place
     taught = (3.387 + 0.883 + 0.395 + 2.368) + 3.0
     check("the rate is the taught pick-and-place over the rig's",
