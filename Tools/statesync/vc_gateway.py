@@ -424,26 +424,43 @@ def scaleRoutineMotion(routine, vcid, name, factor, dwellFactor=None):
         log("routine_motion_scale_failed", vcId=vcid, routine=name, err=str(e))
         return None
 
+    # Capture the taught values, MERGING into whatever was recorded before rather than
+    # replacing it. A stored baseline can be missing a property this build has only just
+    # started collecting - that is exactly what happened when Delay was added: the row count
+    # still matched, the stale rows were reused, and the dwell was silently never written
+    # (delays=0 in the log while the routine still ran its full 2000 ms). Merging fixes that
+    # WITHOUT re-reading a value we have already scaled: a property already in the baseline
+    # is kept, and one that is missing has by definition never been written, so the model
+    # still holds its taught value.
     if not taught or len(taught) != len(stmts):
-        taught = []                          # first sight of this routine: record it
-        for st in stmts:
-            row = {}
-            if _stmtProp(st, "JointSpeed") is None:   # joint move: the limits own it
-                for pn in LINEAR_SPEED_PROPS + LINEAR_ACCEL_PROPS + ("Delay",):
-                    pr = _stmtProp(st, pn)
-                    if pr is None:
-                        continue
-                    try:
-                        v = float(pr.Value)
-                    except Exception:
-                        continue
-                    if v > 0:
-                        row[pn] = v
-            taught.append(row)
+        if taught:
+            log("routine_baseline_reset", vcId=vcid, routine=name,
+                had=len(taught), now=len(stmts))
+        taught = [{} for _ in stmts]
+    grew = False
+    for st, row in zip(stmts, taught):
+        if _stmtProp(st, "JointSpeed") is not None:   # joint move: the limits own it
+            continue
+        for pn in LINEAR_SPEED_PROPS + LINEAR_ACCEL_PROPS + ("Delay",):
+            if pn in row:
+                continue                             # already taught-recorded; never re-read
+            pr = _stmtProp(st, pn)
+            if pr is None:
+                continue
+            try:
+                v = float(pr.Value)
+            except Exception:
+                continue
+            if v > 0:
+                row[pn] = v
+                grew = True
 
-    if abs(float(state.get("factor", 0.0)) - factor) < 1e-6 \
+    # Nothing to do only if the rate is unchanged AND the baseline did not just grow - a
+    # newly captured property has never been written and would otherwise stay taught while
+    # the log claimed the routine was retimed.
+    if not grew and abs(float(state.get("factor", 0.0)) - factor) < 1e-6 \
             and abs(float(state.get("dwell", 0.0)) - dwellFactor) < 1e-6:
-        return factor                        # already at this rate, nothing to write
+        return factor
 
     n = dwells = 0
     for st, row in zip(stmts, taught):
