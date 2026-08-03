@@ -31,12 +31,6 @@ namespace CodeGen.Translation
         public static List<string> GetSheetNames(string xlsxPath)
             => XlsxRuleLoader.GetSheetNames(xlsxPath);
 
-        public static List<MappingRuleEntry> GetActiveRulesForCat(string xlsxPath, string catSheetName)
-        {
-            return XlsxRuleLoader.LoadSheet(xlsxPath, catSheetName)
-                .Where(r => !r.IsSection && r.Type != MappingType.DISCARDED)
-                .ToList();
-        }
     }
 
     public static class XlsxRuleLoader
