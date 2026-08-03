@@ -108,7 +108,7 @@ namespace CodeGen.Devices.RevPi
                 equipmentJsonName: EquipmentJsonName,
                 equipmentBuilder: () => BuildRevPiEquipmentJson(RevPiSysdevId, solutionId,
                                           cfg.RevPiHostIp, cfg.RevPiTargetIp),
-                deployPluginPropertiesXml: Station2DeviceEmitter.BuildSoftDpacDeployPluginPropertiesXml(
+                deployPluginPropertiesXml: Station2DeviceEmitter.BuildSoftDpacDeployPluginPropertiesXml(cfg,
                     cfg.MqttPublishEnabled && !cfg.MqttSecureTls),
                 simulationBindingDeployPort: 51502,
                 simulationBindingArchivePort: 51499);
