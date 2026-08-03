@@ -50,11 +50,17 @@ namespace CodeGen.Devices.BX1
         // Bit positions fixed by the PLC_RW_BX1 WordToBits/BitsToWord core (index = VALUE = NAME = wiring order):
         // IN bit0=Hr athome,1=Hr atwork,2=Vr athome,3=Vr atwork,5=gripper atwork;
         // OUT bit0=Hr OutputToWork,1=Hr OutputToHome,2=Vr OutputToWork,3=gripper OutputToWork.
+        // Bit5 is published THREE times on purpose: it is the only cover-present bit the coupler carries,
+        // so it feeds the gripper's grip-detect AND the top-cover sensor's Input. The sensor instance is
+        // spelled either way across twin revisions (TemplateMap.TopCoverSensorNames), and the composite is
+        // a shared TYPE that cannot know which; publishing both is safe because a SYMLINKMULTIVARSRC whose
+        // name nothing subscribes to is inert — only the DST side fails on a missing counterpart.
         static readonly (string Sym, int Bit)[] CoverSensors =
         {
             ("CoverPNP_Hr.athome", 0), ("CoverPNP_Hr.atwork", 1),
             ("CoverPNP_Vr.athome", 2), ("CoverPNP_Vr.atwork", 3),
             ("CoverPnp_Gripper.atwork", 5),
+            ("TopCoverSenosr.Input", 5), ("TopCoverSensor.Input", 5),
         };
         static readonly (string Sym, int Bit)[] CoverCoils =
         {
@@ -404,6 +410,18 @@ namespace CodeGen.Devices.BX1
                                  .Where(c => IsExtBridge(FbOf((string?)c.Attribute("Source"))) ||
                                              IsExtBridge(FbOf((string?)c.Attribute("Destination")))).ToList())
                         conn.Remove();
+
+                // The composite publishes bit5 into the top-cover sensor's Input, but it cannot fire that
+                // sensor's RD from inside (a composite has no path to a sibling instance's event input). So
+                // the one wire that has to stay at resource level is the re-sample trigger — no FB, just an
+                // event from the broker's own change detector. Without it the sensor never re-reads and a
+                // cover already in place at power-on is never reported (see the 'sample THEN report' contract).
+                var tcFb = net.Elements(Ns + "FB").FirstOrDefault(f =>
+                    (string?)f.Attribute("Type") == "Sensor_Bool_CAT" &&
+                    ((string?)f.Attribute("Name") ?? "").ToLowerInvariant().Contains("cover"));
+                if (tcFb != null)
+                    AddEvent(ec, $"{BrokerFbName}.CoverSensorEvent",
+                             $"{(string)tcFb.Attribute("Name")!}.RD");
 
                 SaveWithRetry(doc, path);
                 report.Missing.Add($"[BX1][Broker] BX1_IO injected into {label} (resource " +
