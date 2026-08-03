@@ -4,6 +4,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Xml.Linq;
+using CodeGen.Mapping;
 
 namespace CodeGen.Translation
 {
@@ -20,18 +21,6 @@ namespace CodeGen.Translation
         // "CasAdptrIN" (lowercase s). Defined once so the capitalisation can't drift.
         public const string CaSAdptrTerminatorInPort = "CasAdptrIN";
 
-        private static readonly Dictionary<string, string[]> ExpectedPorts = new(StringComparer.Ordinal)
-        {
-            ["Station"] = new[] { "AreaAdptrIN", "StationHMIAdptrIN", "AreaAdptrOUT", "StationAdaptrOUT" },
-            ["Area"] = new[] { "AreaHMIAdptrIN", "AreaAdptrOUT" },
-            ["CaSAdptrTerminator"] = new[] { CaSAdptrTerminatorInPort },
-            ["Five_State_Actuator_CAT"] = new[] { "stationAdptr_in", "stateRprtCmd_in", "stationAdptr_out", "stateRprtCmd_out" },
-            ["Sensor_Bool_CAT"] = new[] { "stateRprtCmd_in", "stateRprtCmd_out" },
-            ["Process1_Generic"] = new[] { "stateRptCmdAdptr_in", "stationAdptr_in", "stateRptCmdAdptr_out", "stationAdptr_out" },
-            // The UR3e task arm: RING ports ONLY, NO stationAdptr (it is in
-            // ResourceWireEmitter.NoStationAdapterTypes, off the CaSBus chain).
-            ["Robot_Task_CAT"] = new[] { "stateRprtCmd_in", "stateRprtCmd_out" },
-        };
 
         public static List<PortNameMismatch> Validate(string templateLibraryPath)
         {
@@ -46,7 +35,7 @@ namespace CodeGen.Translation
                 return mismatches;
             }
 
-            foreach (var kvp in ExpectedPorts)
+            foreach (var kvp in TemplateManifest.PortContract)
             {
                 var fbType = kvp.Key;
                 var expected = kvp.Value;
