@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Xml.Linq;
 using CodeGen.Configuration;
 using CodeGen.Devices.M262;
+using CodeGen.Services;
 using CodeGen.Devices.Core;
 
 namespace CodeGen.Devices.Core
@@ -118,7 +120,7 @@ namespace CodeGen.Devices.Core
                 equipmentBuilder: () => BuildM580EquipmentJson(M580SysdevId, solutionId,
                                           cfg.M580TargetIp, cfg.M580BroadcastDomainUuid),
                 // Insecure-app override lets a plain mqtt:// MQTT_CONNECTION avoid the RC101 fault.
-                deployPluginPropertiesXml: BuildStandardDeployPluginPropertiesXml(
+                deployPluginPropertiesXml: BuildDeployPluginPropertiesXml(cfg, bootProject: false,
                     cfg.MqttPublishEnabled && !cfg.MqttSecureTls),
                 simulationBindingDeployPort: 51500,
                 simulationBindingArchivePort: 51497);
@@ -135,7 +137,7 @@ namespace CodeGen.Devices.Core
                     BX1SysdevId, solutionId, cfg.BX1TargetIp, cfg.BX1HostIp),
                 // Insecure-app override (== EAE GUI "Security -> Insecure Application -> Enable") lets a
                 // plain mqtt:// MQTT_CONNECTION avoid the RC101 fault.
-                deployPluginPropertiesXml: BuildSoftDpacDeployPluginPropertiesXml(
+                deployPluginPropertiesXml: BuildSoftDpacDeployPluginPropertiesXml(cfg,
                     cfg.MqttPublishEnabled && !cfg.MqttSecureTls),
                 simulationBindingDeployPort: 51501,
                 simulationBindingArchivePort: 51498);
@@ -187,7 +189,7 @@ namespace CodeGen.Devices.Core
         {
             // 1. sysdev
             var sysdevPath = Path.Combine(systemGuidDir, $"{sysdevId}.sysdev");
-            File.WriteAllText(sysdevPath, BuildSysdevXml(sysdevId, deviceName, deviceType, resourceId, resourceName));
+            File.WriteAllText(sysdevPath, BuildSysdevXml(cfg, sysdevId, deviceName, deviceType, resourceId, resourceName));
             result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, sysdevPath));
 
             // 2. sysres — drop any sysres under a different resource ID so EAE never sees two per folder
@@ -224,7 +226,7 @@ namespace CodeGen.Devices.Core
             }
             if (!File.Exists(sysresPath))
             {
-                File.WriteAllText(sysresPath, BuildSysresXml(resourceId, resourceName));
+                File.WriteAllText(sysresPath, BuildSysresXml(cfg, resourceId, resourceName));
                 result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, sysresPath));
             }
             else
@@ -266,13 +268,13 @@ namespace CodeGen.Devices.Core
                 "E0601B81-4A3A-4A96-B6C2-007BDC680D59.Properties.xml");
             if (!File.Exists(sysDevPropsPath))
             {
-                File.WriteAllText(sysDevPropsPath, BuildEmptySystemDeviceProps());
+                File.WriteAllText(sysDevPropsPath, BuildEmptySystemDeviceProps(cfg));
                 result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, sysDevPropsPath));
             }
 
             // 3d. Simulation.Binding.xml — LogicalDevice deployment + archive service ports.
             var simBindPath = Path.Combine(sysdevFolder, $"{sysdevId}.Simulation.Binding.xml");
-            File.WriteAllText(simBindPath, BuildSimulationBindingXml(sysdevId,
+            File.WriteAllText(simBindPath, BuildSimulationBindingXml(cfg, sysdevId,
                 simulationBindingDeployPort, simulationBindingArchivePort));
             result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, simBindPath));
 
@@ -327,84 +329,63 @@ namespace CodeGen.Devices.Core
         }
 
         // DeployPlugin Properties XML — EAE reads it (plugin GUID F513CAE3-…) to register the device's
-        // .hcf with the Hardware Configuration tree.
-        static string BuildStandardDeployPluginPropertiesXml(bool enableInsecureApp = false) =>
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
-            "<SystemDeviceProperties xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns=\"http://www.nxtControl.com/DeviceProperties\">\r\n" +
-            "  <ComplexProperty Name=\"DeployPlugin\" Expanded=\"true\">\r\n" +
-            "    <Property Name=\"ClearBeforeDeploy\" Value=\"True\" IsPassword=\"false\" />\r\n" +
-            "  </ComplexProperty>\r\n" +
-            "  <GroupProperty Name=\"Configuration\" Expanded=\"true\" Enabled=\"true\">\r\n" +
-            "    <GroupProperty Name=\"Deploy\" Expanded=\"true\" Enabled=\"true\">\r\n" +
-            "      <Property Name=\"AutoStart\" Value=\"True\" IsPassword=\"false\" />\r\n" +
-            "    </GroupProperty>\r\n" +
-            "    <GroupProperty Name=\"Boot\" Expanded=\"true\" Enabled=\"true\">\r\n" +
-            "      <Property Name=\"BootMode\" Value=\"Run\" IsPassword=\"false\" />\r\n" +
-            "    </GroupProperty>\r\n" +
-            // SecurityApp/InsecureApplication override lets a plain mqtt:// MQTT_CONNECTION avoid RC101.
-            (enableInsecureApp
-                ? "    <GroupProperty Name=\"SecurityApp\" Expanded=\"true\" Enabled=\"true\">\r\n" +
-                  "      <GroupProperty Name=\"InsecureApplication\" Expanded=\"true\" Enabled=\"true\">\r\n" +
-                  "        <Property Name=\"Enable\" Value=\"True\" IsPassword=\"false\" />\r\n" +
-                  "      </GroupProperty>\r\n" +
-                  "    </GroupProperty>\r\n"
-                : string.Empty) +
-            "  </GroupProperty>\r\n" +
-            "</SystemDeviceProperties>";
+        // .hcf with the Hardware Configuration tree. bootProject adds the Soft_dPAC-only
+        // SetActiveProjectAsABootProject; enableInsecureApp adds the SecurityApp/InsecureApplication
+        // override that lets a plain mqtt:// MQTT_CONNECTION avoid RC101.
+        static string BuildDeployPluginPropertiesXml(MapperConfig cfg, bool bootProject, bool enableInsecureApp) =>
+            TemplateDocument.Load(cfg, @"Device\SystemDeviceProperties.xml", new Dictionary<string, string>
+            {
+                ["BootProjectProperty"] = bootProject
+                    ? TemplateDocument.Load(cfg, @"Device\SystemDeviceProperties.BootProject.fragment.xml")
+                    : string.Empty,
+                ["SecurityAppGroup"] = enableInsecureApp
+                    ? TemplateDocument.Load(cfg, @"Device\SystemDeviceProperties.SecurityApp.fragment.xml")
+                    : string.Empty,
+            });
 
-        // Soft_dPAC variant — adds SetActiveProjectAsABootProject; enableInsecureApp emits the
-        // SecurityApp/InsecureApplication override (see above) to avoid the RC101 fault.
-        internal static string BuildSoftDpacDeployPluginPropertiesXml(bool enableInsecureApp) =>
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
-            "<SystemDeviceProperties xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns=\"http://www.nxtControl.com/DeviceProperties\">\r\n" +
-            "  <ComplexProperty Name=\"DeployPlugin\" Expanded=\"true\">\r\n" +
-            "    <Property Name=\"ClearBeforeDeploy\" Value=\"True\" IsPassword=\"false\" />\r\n" +
-            "    <Property Name=\"SetActiveProjectAsABootProject\" Value=\"True\" IsPassword=\"false\" />\r\n" +
-            "  </ComplexProperty>\r\n" +
-            "  <GroupProperty Name=\"Configuration\" Expanded=\"true\" Enabled=\"true\">\r\n" +
-            "    <GroupProperty Name=\"Deploy\" Expanded=\"true\" Enabled=\"true\">\r\n" +
-            "      <Property Name=\"AutoStart\" Value=\"True\" IsPassword=\"false\" />\r\n" +
-            "    </GroupProperty>\r\n" +
-            "    <GroupProperty Name=\"Boot\" Expanded=\"true\" Enabled=\"true\">\r\n" +
-            "      <Property Name=\"BootMode\" Value=\"Run\" IsPassword=\"false\" />\r\n" +
-            "    </GroupProperty>\r\n" +
-            (enableInsecureApp
-                ? "    <GroupProperty Name=\"SecurityApp\" Expanded=\"true\" Enabled=\"true\">\r\n" +
-                  "      <GroupProperty Name=\"InsecureApplication\" Expanded=\"true\" Enabled=\"true\">\r\n" +
-                  "        <Property Name=\"Enable\" Value=\"True\" IsPassword=\"false\" />\r\n" +
-                  "      </GroupProperty>\r\n" +
-                  "    </GroupProperty>\r\n"
-                : string.Empty) +
-            "  </GroupProperty>\r\n" +
-            "</SystemDeviceProperties>";
+        internal static string BuildSoftDpacDeployPluginPropertiesXml(MapperConfig cfg, bool enableInsecureApp) =>
+            BuildDeployPluginPropertiesXml(cfg, bootProject: true, enableInsecureApp);
+
+        internal static string BuildStandardDeployPluginPropertiesXml(MapperConfig cfg, bool enableInsecureApp) =>
+            BuildDeployPluginPropertiesXml(cfg, bootProject: false, enableInsecureApp);
 
         // LogicalDevice service-port binding XML — Deployment (F7C90C9D-…) + Archive Service (32B24F96-…).
-        internal static string BuildSimulationBindingXml(string logicalDeviceId, int deployPort, int archivePort) =>
-            "<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"yes\"?>\r\n" +
-            "<Bindings>\r\n" +
-            $"  <LogicalDeviceBinding LogicalDeviceId=\"{logicalDeviceId}\">\r\n" +
-            $"    <LogicalDeviceService ServiceId=\"F7C90C9D-BD8B-4D0B-B8DE-C659AF6EABCC\" LogicalPort=\"{deployPort}\" />\r\n" +
-            $"    <LogicalDeviceService ServiceId=\"32B24F96-50F3-429E-9586-58A14DEB5DD5\" LogicalPort=\"{archivePort}\" />\r\n" +
-            "  </LogicalDeviceBinding>\r\n" +
-            "</Bindings>";
+        internal static string BuildSimulationBindingXml(MapperConfig cfg,
+            string logicalDeviceId, int deployPort, int archivePort) =>
+            TemplateDocument.Load(cfg, @"Device\Simulation.Binding.xml", new Dictionary<string, string>
+            {
+                ["LogicalDeviceId"] = logicalDeviceId,
+                ["DeployPort"] = deployPort.ToString(CultureInfo.InvariantCulture),
+                ["ArchivePort"] = archivePort.ToString(CultureInfo.InvariantCulture),
+            });
 
         // The .sysdev MUST carry an inline <Resources><Resource> mirroring the sibling .sysres ID+Name,
         // else EAE's catalog auto-adds a default EMB_RES_ECO -> "2 instances of EMB_RES_ECO".
-        internal static string BuildSysdevXml(string sysdevId, string name, string type,
-                                     string resourceId, string resourceName) =>
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
-            $"<Device xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" ID=\"{sysdevId}\" Name=\"{name}\" Type=\"{type}\" Namespace=\"SE.DPAC\" Locked=\"false\" xmlns=\"{LibElNs}\">\r\n" +
-            "  <Resources>\r\n" +
-            $"    <Resource ID=\"{resourceId}\" Name=\"{resourceName}\" Type=\"EMB_RES_ECO\" Namespace=\"Runtime.Management\" />\r\n" +
-            "  </Resources>\r\n" +
-            "</Device>\r\n";
+        internal static string BuildSysdevXml(MapperConfig cfg, string sysdevId, string name, string type,
+                                              string resourceId, string resourceName) =>
+            TemplateDocument.Load(cfg, @"Device\Device.sysdev", new Dictionary<string, string>
+            {
+                ["SysdevId"] = sysdevId,
+                ["DeviceName"] = name,
+                ["DeviceType"] = type,
+                ["ResourceId"] = resourceId,
+                ["ResourceName"] = resourceName,
+            });
 
-        internal static string BuildSysresXml(string resourceId, string name) =>
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
-            $"<Resource xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" ID=\"{resourceId}\" Name=\"{name}\" Type=\"EMB_RES_ECO\" Namespace=\"Runtime.Management\" xmlns=\"{LibElNs}\">\r\n" +
-            "  <FBNetwork>\r\n" +
-            "  </FBNetwork>\r\n" +
-            "</Resource>\r\n";
+        internal static string BuildSysresXml(MapperConfig cfg, string resourceId, string name) =>
+            TemplateDocument.Load(cfg, @"Device\Resource.sysres", new Dictionary<string, string>
+            {
+                ["ResourceId"] = resourceId,
+                ["ResourceName"] = name,
+            });
+
+        internal static string BuildEmptySystemDeviceProps(MapperConfig cfg) =>
+            TemplateDocument.Load(cfg, @"Device\SystemDeviceProperties.Empty.xml");
+
+
+
+
+
 
         // Set an existing .sysres root Resource Name (idempotent), preserving its FBNetwork.
         static void AlignSysresResourceName(string sysresPath, string resourceName, string deviceName, EmitResult result)
@@ -423,11 +404,6 @@ namespace CodeGen.Devices.Core
             catch { /* best-effort — emit pipeline continues even if the sysres rewrite fails */ }
         }
 
-        internal static string BuildEmptySystemDeviceProps() =>
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
-            "<SystemDeviceProperties xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" " +
-            "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" " +
-            "xmlns=\"http://www.nxtControl.com/DeviceProperties\" />";
 
         // M580 dPAC equipment JSON — X80 8-slot rack + PSU + CPU. Catalog refs must match EAE 24.1's
         // catalog names or they render as unknown placeholder boxes.
