@@ -396,8 +396,7 @@ namespace MapperUI
         }
 
         static bool IsSevenState(VueOneComponent component) =>
-            !MapperConfig.StubSevenStateActuatorsAsFiveState &&
-            (component.States.Count == 7 || TemplateMap.IsBranchedSevenState(component));
+            component.States.Count == 7 || TemplateMap.IsBranchedSevenState(component);
 
         static VueOneComponent? LookupComponent(string? componentId,
             IReadOnlyList<VueOneComponent> components)
