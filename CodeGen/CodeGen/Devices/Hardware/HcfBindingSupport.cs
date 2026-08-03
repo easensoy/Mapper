@@ -55,6 +55,36 @@ namespace CodeGen.Devices.Core
             return map;
         }
 
+        // Component name -> the CAT type actually emitted for it. The deployed sysres is the single
+        // source of truth: SystemLayoutInjector wrote that Type from TemplateMap.ResolveActuatorCatType,
+        // i.e. from the twin's own state graph. A binder that needs to know which port vocabulary a
+        // component exposes reads it here rather than re-deriving it or keying off a model name.
+        public static Dictionary<string, string> BuildComponentTypeMap(string sysdevFolder)
+        {
+            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                var sysres = Directory.Exists(sysdevFolder)
+                    ? Directory.EnumerateFiles(sysdevFolder, "*.sysres").FirstOrDefault()
+                    : null;
+                if (sysres == null) return map;
+                var root = XDocument.Load(sysres).Root;
+                if (root == null) return map;
+                XNamespace ns = root.GetDefaultNamespace();
+                var net = root.Element(ns + "FBNetwork");
+                if (net == null) return map;
+                foreach (var fb in net.Elements(ns + "FB"))
+                {
+                    var n = (string?)fb.Attribute("Name");
+                    var t = (string?)fb.Attribute("Type");
+                    if (!string.IsNullOrEmpty(n) && !string.IsNullOrEmpty(t))
+                        map[n!] = t!;
+                }
+            }
+            catch { }
+            return map;
+        }
+
         public static string? FindSysdevByType(string eaeRoot, string deviceType, string deviceNamespace)
         {
             var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
