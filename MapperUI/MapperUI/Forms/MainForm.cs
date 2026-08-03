@@ -7,6 +7,7 @@ using CodeGen.Devices.M580;
 using CodeGen.Devices.BX1;
 using CodeGen.Devices.RevPi;
 using CodeGen.Devices.Core;
+using CodeGen.Mapping;
 using CodeGen.Services;
 using CodeGen.Translation;
 using System;
@@ -65,13 +66,6 @@ namespace MapperUI
             "TopCoverSenosr",
         };
 
-        // Vacuum grippers (single coil, no athome/atwork) route to Vacuum_Gripper_CAT; mechanical ones
-        // use Five_State. By exact name since Control.xml Type=Robot doesn't distinguish them.
-        static readonly HashSet<string> _vacuumGripperNames = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "CoverPnp_Gripper",
-        };
-
         sealed class ComponentValidationRow
         {
             public VueOneComponent Component { get; init; } = null!;
@@ -99,7 +93,6 @@ namespace MapperUI
         {
             ParseStartupArgs(args, out _startupControlXmlPath, out _startupShowMappingRules);
             InitializeComponent();
-            btnGenerateCode.Enabled = false;
         }
 
         protected override void OnLoad(EventArgs e)
@@ -257,118 +250,6 @@ namespace MapperUI
             lblEngineStatusDot.ForeColor = running ? Color.LimeGreen : Color.Red;
         }
 
-
-        async void btnGenerate_Click(object sender, EventArgs e)
-        {
-            btnGenerate.Enabled = false;
-            txtActivityLog.Clear();
-
-            var rejected = _validationRows
-                .Where(r => r.TemplateName.StartsWith("No template found"))
-                .Select(r => r.Component)
-                .ToList();
-
-            if (rejected.Count == 0)
-            {
-                AppendActivity("No rejected components to generate.");
-                btnGenerate.Enabled = true;
-                return;
-            }
-
-            AppendActivity($"Sending {rejected.Count} component(s) to LLM Engine…");
-
-            try
-            {
-                var payload = new
-                {
-                    components = rejected.Select(c => new
-                    {
-                        ComponentID = c.ComponentID,
-                        Name = c.Name,
-                        Description = c.Description,
-                        Type = c.Type,
-                        States = c.States.Select(s => new
-                        {
-                            StateID = s.StateID,
-                            Name = s.Name,
-                            StateNumber = s.StateNumber,
-                            InitialState = s.InitialState,
-                            Time = s.Time,
-                            Position = s.Position,
-                            Counter = s.Counter,
-                            StaticState = s.StaticState,
-                        }),
-                        NameTag = c.NameTag,
-                    }),
-                    control_xml_path = txtModelPath.Text,
-                    pdf_paths = Array.Empty<string>(),
-                };
-
-                var json = JsonSerializer.Serialize(payload);
-                using var body = new StringContent(json, Encoding.UTF8, "application/json");
-                var postResp = await _http.PostAsync("generate", body);
-                postResp.EnsureSuccessStatusCode();
-
-                var postJson = await postResp.Content.ReadAsStringAsync();
-                using var doc = JsonDocument.Parse(postJson);
-                var jobId = doc.RootElement.GetProperty("job_id").GetString()
-                    ?? throw new Exception("No job_id in response.");
-
-                AppendActivity($"Job submitted: {jobId}. Polling…");
-
-                List<VueOneComponent> generated;
-                while (true)
-                {
-                    await Task.Delay(2000);
-                    var pollResp = await _http.GetAsync($"status/{jobId}");
-                    pollResp.EnsureSuccessStatusCode();
-                    var pollJson = await pollResp.Content.ReadAsStringAsync();
-                    using var pollDoc = JsonDocument.Parse(pollJson);
-                    var status = pollDoc.RootElement.GetProperty("status").GetString();
-                    AppendActivity($"  status = {status}");
-
-                    if (status == "completed")
-                    {
-                        var resultJson = pollDoc.RootElement.GetProperty("result").GetRawText();
-                        generated = JsonSerializer.Deserialize<List<VueOneComponent>>(resultJson,
-                            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
-                            ?? new();
-                        break;
-                    }
-                    if (status == "failed")
-                    {
-                        AppendActivity("LLM generation failed.");
-                        return;
-                    }
-                }
-
-                AppendActivity($"Deserialised {generated.Count} component(s). Injecting…");
-
-                var cfg = Cfg();
-                var injector = new SystemInjector();
-                var result = await Task.Run(() => injector.Inject(cfg, generated,
-                    controlXmlPath: null, mappingRulesPath: cfg.MappingRulesPath));
-
-                if (result.Success)
-                {
-                    AppendActivity($"Done. {result.InjectedFBs.Count} FB(s) injected.");
-                    Invoke(() => lblStatus.Text =
-                        $"LLM injection done — {result.InjectedFBs.Count} FB(s).");
-                }
-                else
-                {
-                    AppendActivity($"Injection failed: {result.ErrorMessage}");
-                }
-            }
-            catch (Exception ex)
-            {
-                AppendActivity($"[Error] {ex.Message}");
-            }
-            finally
-            {
-                Invoke(() => btnGenerate.Enabled = true);
-            }
-        }
 
         void AppendActivity(string text)
         {
@@ -881,8 +762,12 @@ namespace MapperUI
         {
             foreach (var (comp, detail) in report.Bound)
                 AppendActivity($"[IoBindings] {comp} bound: {detail}");
-            foreach (var miss in report.Missing)
-                AppendActivity($"[IoBindings] No binding for component {miss}; component will not bind to physical I/O");
+            // report.Missing is the binders' general diagnostic channel, not a list of unbound components -- the
+            // HCF binders write their per-channel results and recipe summaries into it. Labelling every line
+            // "No binding for component X; will not bind to physical I/O" invented failures that did not exist
+            // (a correctly bound five-state swivel, a recipe summary). Emit the lines as what they are.
+            foreach (var line in report.Missing)
+                AppendActivity($"[IoBindings] {line}");
             if (report.Bound.Count > 0)
             {
                 AppendActivity("[IoBindings] Symlink override via nested FB is invalid IEC 61499; PLC_RW_M262 variables must be renamed to match $${PATH} expansion: " +
@@ -968,7 +853,7 @@ namespace MapperUI
                 // deep FB/canvas/device wipe) — the reliable "brand-new EAE project" reset, so no stale
                 // FB/recipe/interlock or drifted RevPi tree survives. (The former separate 'Clean
                 // Demonstrator' button is folded in here: Generate now cleans first, then generates.)
-                await DeepCleanDemonstratorAsync(@"C:\Demonstrator", "Generate");
+                await DeepCleanDemonstratorAsync(Cfg(), @"C:\Demonstrator", "Generate");
 
                 // STEP 2 — GENERATE IEC 61499 CODE.
                 var injector = new SystemInjector();
@@ -1290,7 +1175,7 @@ namespace MapperUI
         // clears HwConfiguration too. Produces a brand-new-EAE-project state. Called by Generate as its
         // first step — the former standalone 'Clean Demonstrator' button is merged into Generate, so a
         // partial-RevPi switch (Feeder/Checker) always starts from a clean tree and can't inherit drift.
-        async Task DeepCleanDemonstratorAsync(string demoRepo, string tag)
+        async Task DeepCleanDemonstratorAsync(MapperConfig cfg, string demoRepo, string tag)
         {
             // EAE is intentionally NOT killed; files it holds open surface as sharing-violation warnings.
             if (Directory.Exists(Path.Combine(demoRepo, ".git")))
@@ -1309,7 +1194,7 @@ namespace MapperUI
             }
 
             // Deep wipe of FB types + canvas contents (also deletes devices/app + clears HwConfiguration).
-            var report = await Task.Run(() => CodeGen.Services.DemonstratorWiper.Wipe(demoRepo));
+            var report = await Task.Run(() => CodeGen.Services.DemonstratorWiper.Wipe(cfg, demoRepo));
             foreach (var step in report.Steps) AppendActivity($"[{tag}] {step}");
             foreach (var w in report.Warnings) AppendActivity($"[{tag}][!] {w}");
             AppendActivity(
@@ -1340,84 +1225,12 @@ namespace MapperUI
             return (p.ExitCode, string.IsNullOrEmpty(stderr) ? stdout : stdout + stderr);
         }
 
-        async void btnGeneratePusherTest_Click(object sender, EventArgs e)
-        {
-            try
-            {
-                if (!TryResolveDemonstratorPath(out var syslayPath)) return;
-
-                lblStatus.Text = "Generating...";
-                AppendActivity($"Generating Pusher Test into Demonstrator at {syslayPath}...");
-
-                var injector = new SystemInjector();
-                var report = await Task.Run(() => injector.PrepareDemonstratorForGeneration(Cfg()));
-                LogCleanup(report);
-
-                var bindings = TryLoadBindings();
-                SystemInjector.BindingApplicationReport bindingReport = null!;
-                var path = await Task.Run(() => injector.GeneratePusherTestSyslayToPath(syslayPath, bindings, out bindingReport));
-                LogBindingsReport(bindingReport);
-
-                AppendActivity($"Generated: {path}");
-                lblStatus.Text = $"Ready  |  {path}  |  {bindingReport.Bound.Count} bound, {bindingReport.Missing.Count} unbound";
-                MessageBox.Show($"Generated into Demonstrator:\n{path}\n\n{bindingReport.Bound.Count} components bound, {bindingReport.Missing.Count} without bindings.",
-                    "Pusher Test", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-            catch (Exception ex)
-            {
-                AppendActivity($"[Error] {ex}");
-                lblStatus.Text = "Ready";
-                ShowError(ex.Message);
-            }
-        }
-
-        async void btnGenerateFeedStation_Click(object sender, EventArgs e)
-        {
-            try
-            {
-                if (string.IsNullOrEmpty(_loadedControlXmlPath) || !File.Exists(_loadedControlXmlPath))
-                {
-                    ShowError("Load a Control.xml first via Browse.");
-                    return;
-                }
-                if (!TryResolveDemonstratorPath(out var syslayPath)) return;
-
-                lblStatus.Text = "Generating...";
-                AppendActivity($"Generating Feed_Station into Demonstrator at {syslayPath}...");
-
-                var injector = new SystemInjector();
-                var report = await Task.Run(() => injector.PrepareDemonstratorForGeneration(Cfg()));
-                LogCleanup(report);
-
-                var bindings = TryLoadBindings();
-                SystemInjector.BindingApplicationReport bindingReport = null!;
-                var path = await Task.Run(() => injector.GenerateFeedStationSyslayToPath(_loadedControlXmlPath, syslayPath, bindings, out bindingReport));
-                LogBindingsReport(bindingReport);
-
-                AppendActivity($"Generated: {path}");
-                AppendActivity("[v1] DataConnections not generated; manual wiring required for sensor-to-process status feeds.");
-                lblStatus.Text = $"Ready  |  {path}  |  {bindingReport.Bound.Count} bound, {bindingReport.Missing.Count} unbound";
-                MessageBox.Show($"Generated into Demonstrator:\n{path}\n\n{bindingReport.Bound.Count} components bound, {bindingReport.Missing.Count} without bindings.\nv1 limitation: DataConnections empty.",
-                    "Feed Station", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-            catch (Exception ex)
-            {
-                AppendActivity($"[Error] {ex}");
-                lblStatus.Text = "Ready";
-                ShowError(ex.Message);
-            }
-        }
-
         async Task LoadAndValidateAsync(string path)
         {
             dgvComponents.Rows.Clear();
             dgvMappingRules.Rows.Clear();
             _loadedComponents.Clear();
             _validationRows.Clear();
-            btnGenerateCode.Enabled = false;
-            btnGenerate.Enabled = false;
-            btnGenerateSevenState.Enabled = false;
-            btnGenerateProcessFB.Enabled = false;
             txtActivityLog.Clear();
             lblStatus.Text = "Loading\u2026";
 
@@ -1491,9 +1304,6 @@ namespace MapperUI
 
                 SetValidationLabel(ok ? "PASSED" : "FAILED", ok ? Color.Green : Color.Red);
                 lblStatus.Text = ok ? "Validation passed." : "Validation failed.";
-                btnGenerateCode.Enabled = ok && _validationRows.Any(r => r.IsValid && _allowedInstances.Contains(r.Component.Name));
-                btnGenerateSevenState.Enabled = ok && _loadedComponents.Any(c => c.Type == "Actuator" && c.States.Count == 7);
-                btnGenerateProcessFB.Enabled = ok && _loadedComponents.Any(c => c.Type == "Process");
 
                 var noTemplate = _validationRows
                     .Where(r => r.TemplateName.StartsWith("No template found"))
@@ -1501,7 +1311,6 @@ namespace MapperUI
 
                 if (noTemplate.Count > 0)
                 {
-                    btnGenerate.Enabled = true;
                     AppendActivity(
                         $"{noTemplate.Count} component(s) have no template and can be generated by the LLM Engine: " +
                         string.Join(", ", noTemplate.Select(r => r.Component.Name)));
@@ -1595,27 +1404,20 @@ namespace MapperUI
             {
                 case "process": return Pass(comp, tName);
                 case "robot":
-                    // Type=Robot is a category: vacuum gripper -> Vacuum_Gripper_CAT, 5-state finger
-                    // gripper -> Five_State, 7-state task arm -> Robot_Task_CAT.
-                    if (_vacuumGripperNames.Contains(comp.Name))
-                        return Pass(comp, "Vacuum_Gripper_CAT.fbt");
-                    if (comp.States.Count == 5)
-                        return Pass(comp, "Five_State_Actuator_CAT.fbt");
-                    if (comp.States.Count == 7)
+                    // Type=Robot is a category: the task arm gets Robot_Task_CAT, every gripper resolves
+                    // through the same routing the generator uses.
+                    if (TemplateMap.IsRobotTaskArm(comp))
                         return Pass(comp, "Robot_Task_CAT.fbt");
-                    return Fail(comp, "No template found",
-                        $"Robot '{comp.Name}' has {comp.States.Count} states — expected 5 (gripper) or 7 (task arm)");
-                case "actuator":
-                    // Bearing_PnP's branched 13-state pattern collapses onto Seven_State (via
-                    // IsBranchedSevenStateActuator: PARALLEL ∧ ALTERNATIVE on the resting state).
-                    if (comp.States.Count == 7 || IsBranchedSevenStateActuator(comp))
-                        return Pass(comp, "Seven_State_Actuator_CAT.fbt");
-                    if (comp.States.Count == 4)
-                        return Pass(comp, "Five_State_Actuator_No_Sensors_CAT.fbt");
                     if (comp.States.Count != 5)
                         return Fail(comp, "No template found",
+                            $"Robot '{comp.Name}' has {comp.States.Count} states — expected 5 (gripper) or 7 (task arm)");
+                    return Pass(comp, ResolvedCatFile(comp));
+                case "actuator":
+                    if (comp.States.Count is not (4 or 5 or 7)
+                        && !TemplateMap.IsBranchedSevenState(comp))
+                        return Fail(comp, "No template found",
                             $"{comp.States.Count} states — only 4, 5, or 7 (incl. PARALLEL+ALTERNATIVE branched) supported");
-                    break;
+                    return Pass(comp, ResolvedCatFile(comp));
                 case "sensor":
                     if (comp.States.Count != 2)
                         return Fail(comp, "No template found",
@@ -1639,236 +1441,18 @@ namespace MapperUI
             _ => string.Empty
         };
 
+        // One routing decision for the grid and the generator: TemplateMap owns it, so the
+        // displayed CAT can never drift from the one actually emitted.
+        static string ResolvedCatFile(VueOneComponent c) =>
+            TemplateMap.ResolveActuatorCatType(
+                c.Name, c.States.Count, TemplateMap.IsBranchedSevenState(c)) + ".fbt";
+
         static ComponentValidationRow Pass(VueOneComponent c, string t) =>
             new() { Component = c, TemplateName = t, IsValid = true };
 
         static ComponentValidationRow Fail(VueOneComponent c, string t, string r) =>
             new() { Component = c, TemplateName = t, IsValid = false, FailReason = r };
 
-        // True when a resting state has BOTH an outgoing PARALLEL and an outgoing ALTERNATIVE
-        // transition (the branched-swivel pattern that routes to Seven_State_Actuator_CAT).
-        static bool IsBranchedSevenStateActuator(VueOneComponent comp)
-        {
-            foreach (var st in comp.States)
-            {
-                bool hasParallel = false;
-                bool hasAlternative = false;
-                foreach (var tr in st.Transitions)
-                {
-                    if (string.Equals(tr.TransitionType, "PARALLEL", StringComparison.OrdinalIgnoreCase))
-                        hasParallel = true;
-                    else if (string.Equals(tr.TransitionType, "ALTERNATIVE", StringComparison.OrdinalIgnoreCase))
-                        hasAlternative = true;
-                }
-                if (hasParallel && hasAlternative)
-                    return true;
-            }
-            return false;
-        }
-
-
-        async void btnGenerateCode_Click(object sender, EventArgs e)
-        {
-            var toInject = _validationRows
-                .Where(r => r.IsValid && _allowedInstances.Contains(r.Component.Name))
-                .Select(r => r.Component).ToList();
-
-            if (toInject.Count == 0)
-            {
-                MessageBox.Show("No in-scope components to inject.", "Nothing to Inject",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            btnGenerateCode.Enabled = false;
-            try
-            {
-                var cfg = Cfg();
-                var dfbproj = FindDfbproj(cfg.ActiveSyslayPath);
-                if (dfbproj == null) { ShowError("Cannot find .dfbproj."); return; }
-                if (!File.Exists(cfg.ActiveSyslayPath)) { ShowError($"syslay not found:\n{cfg.ActiveSyslayPath}"); return; }
-
-                MapperLogger.Info($"Project: {Path.GetFileName(dfbproj)}");
-
-                var deployResult = await Task.Run(() => TemplateLibraryDeployer.Deploy(cfg, toInject));
-                if (!deployResult.Success)
-                {
-                    var warns = string.Join("\n", deployResult.Warnings);
-                    MapperLogger.Error($"Template deploy warnings: {warns}");
-                }
-                MapperLogger.Info($"[Deploy] {deployResult.CATsDeployed.Count} CAT(s), " +
-                                 $"{deployResult.BasicFBsDeployed.Count} Basic FB(s), " +
-                                 $"{deployResult.FilesExtracted} files extracted, " +
-                                 $"{deployResult.FilesSkipped} skipped (already present).");
-
-                if (Directory.Exists(cfg.TemplateIec61499Dir))
-                {
-                    await Task.Run(() => TemplatePackager.Package(
-                        cfg.TemplateIec61499Dir,
-                        Path.GetDirectoryName(dfbproj)!,
-                        dfbproj,
-                        cfg.TemplateHmiDir,
-                        Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(dfbproj)!)!, "HMI")));
-                }
-
-                var injCfg = MapperConfig.Load();
-                injCfg.SyslayPath = cfg.ActiveSyslayPath;
-                injCfg.SysresPath = cfg.ActiveSysresPath;
-
-                var injector = new SystemInjector();
-                var rulesPath = cfg.MappingRulesPath;
-                var result = await Task.Run(() => injector.Inject(injCfg, toInject,
-                    controlXmlPath: null, mappingRulesPath: rulesPath));
-
-                if (!result.Success) { ShowError($"Injection failed:\n{result.ErrorMessage}"); return; }
-
-                File.SetLastWriteTime(dfbproj, DateTime.Now);
-                lblStatus.Text = $"Done. {result.InjectedFBs.Count} instance(s) injected.";
-                MessageBox.Show($"Injected {result.InjectedFBs.Count} instance(s).\nReload Solution in EAE.",
-                    "Done", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-            catch (Exception ex) { ShowError(ex.Message); }
-            finally { btnGenerateCode.Enabled = true; }
-        }
-
-        async void btnGenerateSevenState_Click(object sender, EventArgs e)
-        {
-            var sevenStateComps = _loadedComponents
-                .Where(c => c.Type == "Actuator" && c.States.Count == 7)
-                .ToList();
-
-            if (sevenStateComps.Count == 0)
-            {
-                MessageBox.Show("No seven-state actuator components found.", "Nothing to Inject",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            btnGenerateSevenState.Enabled = false;
-            try
-            {
-                var cfg = Cfg();
-                var dfbproj = FindDfbproj(cfg.ActiveSyslayPath);
-                if (dfbproj == null) { ShowError("Cannot find .dfbproj."); return; }
-                if (!File.Exists(cfg.ActiveSyslayPath)) { ShowError($"syslay not found:\n{cfg.ActiveSyslayPath}"); return; }
-
-                MapperLogger.Info($"Seven State FB generation — {sevenStateComps.Count} component(s)");
-
-                var deployResult = await Task.Run(() => TemplateLibraryDeployer.Deploy(cfg, sevenStateComps));
-                if (!deployResult.Success)
-                {
-                    var warns = string.Join("\n", deployResult.Warnings);
-                    MapperLogger.Error($"Template deploy warnings: {warns}");
-                }
-                MapperLogger.Info($"[Deploy] {deployResult.CATsDeployed.Count} CAT(s), " +
-                                 $"{deployResult.BasicFBsDeployed.Count} Basic FB(s), " +
-                                 $"{deployResult.FilesExtracted} files extracted, " +
-                                 $"{deployResult.FilesSkipped} skipped (already present).");
-
-                if (Directory.Exists(cfg.TemplateIec61499Dir))
-                {
-                    await Task.Run(() => TemplatePackager.Package(
-                        cfg.TemplateIec61499Dir,
-                        Path.GetDirectoryName(dfbproj)!,
-                        dfbproj,
-                        cfg.TemplateHmiDir,
-                        Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(dfbproj)!)!, "HMI")));
-                }
-
-                var injCfg = MapperConfig.Load();
-                injCfg.SyslayPath = cfg.ActiveSyslayPath;
-                injCfg.SysresPath = cfg.ActiveSysresPath;
-
-                var injector = new SystemInjector();
-                var rulesPath = cfg.MappingRulesPath;
-                var result = await Task.Run(() => injector.Inject(injCfg, sevenStateComps,
-                    controlXmlPath: null, mappingRulesPath: rulesPath));
-
-                if (!result.Success) { ShowError($"Injection failed:\n{result.ErrorMessage}"); return; }
-
-                File.SetLastWriteTime(dfbproj, DateTime.Now);
-                lblStatus.Text = $"Done. {result.InjectedFBs.Count} seven-state instance(s) injected.";
-                MessageBox.Show($"Injected {result.InjectedFBs.Count} seven-state actuator instance(s).\nReload Solution in EAE.",
-                    "Done", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-            catch (Exception ex) { ShowError(ex.Message); }
-            finally { btnGenerateSevenState.Enabled = true; }
-        }
-
-        async void btnGenerateProcessFB_Click(object sender, EventArgs e)
-        {
-            var processes = _loadedComponents
-                .Where(c => c.Type == "Process")
-                .ToList();
-
-            if (processes.Count == 0)
-            {
-                MessageBox.Show("No Process components found in Control.xml.", "Nothing to Generate",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-
-            btnGenerateProcessFB.Enabled = false;
-            try
-            {
-                var cfg = Cfg();
-                var dfbproj = FindDfbproj(cfg.ActiveSyslayPath);
-                if (dfbproj == null) { ShowError("Cannot find .dfbproj."); return; }
-                if (!File.Exists(cfg.ActiveSyslayPath)) { ShowError($"syslay not found:\n{cfg.ActiveSyslayPath}"); return; }
-
-                MapperLogger.Info($"Process FB generation — {processes.Count} process(es)");
-                AppendActivity($"Generating Process FB for {processes.Count} process(es)...");
-                AppendActivity("[IoBindings] skipped, Process FB has no symlinks");
-
-                var cleanupInjector = new SystemInjector();
-                var cleanupReport = await Task.Run(() => cleanupInjector.PrepareDemonstratorForGeneration(cfg));
-                LogCleanup(cleanupReport);
-
-                var deployResult = await Task.Run(() => TemplateLibraryDeployer.Deploy(cfg, processes));
-                if (!deployResult.Success)
-                {
-                    var warns = string.Join("\n", deployResult.Warnings);
-                    MapperLogger.Error($"Template deploy warnings: {warns}");
-                }
-                MapperLogger.Info($"[Deploy] {deployResult.CATsDeployed.Count} CAT(s), " +
-                                 $"{deployResult.BasicFBsDeployed.Count} Basic FB(s), " +
-                                 $"{deployResult.FilesExtracted} files extracted, " +
-                                 $"{deployResult.FilesSkipped} skipped (already present).");
-
-                if (Directory.Exists(cfg.TemplateIec61499Dir))
-                {
-                    await Task.Run(() => TemplatePackager.Package(
-                        cfg.TemplateIec61499Dir,
-                        Path.GetDirectoryName(dfbproj)!,
-                        dfbproj,
-                        cfg.TemplateHmiDir,
-                        Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(dfbproj)!)!, "HMI")));
-                }
-
-                var injCfg = MapperConfig.Load();
-                injCfg.SyslayPath = cfg.ActiveSyslayPath;
-                injCfg.SysresPath = cfg.ActiveSysresPath;
-
-                var injector = new SystemInjector();
-                var rulesPath = cfg.MappingRulesPath;
-                var result = await Task.Run(() => injector.Inject(injCfg, processes,
-                    controlXmlPath: null, mappingRulesPath: rulesPath,
-                    crossReferenceComponents: _loadedComponents));
-
-                if (!result.Success) { ShowError($"Injection failed:\n{result.ErrorMessage}"); return; }
-
-                File.SetLastWriteTime(dfbproj, DateTime.Now);
-
-                foreach (var msg in result.InjectedFBs.Where(s => s.StartsWith("[StepTable]") || s.StartsWith("  Step ") || s.StartsWith("  WARN")))
-                    AppendActivity(msg);
-
-                lblStatus.Text = $"Done. {processes.Count} process(es) generated with step tables.";
-                MessageBox.Show($"Generated {processes.Count} Process FB(s) with step tables.\nReload Solution in EAE.",
-                    "Done", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-            catch (Exception ex) { ShowError(ex.Message); }
-            finally { btnGenerateProcessFB.Enabled = true; }
-        }
 
         void dgvComponents_SelectionChanged(object sender, EventArgs e) { }
 
