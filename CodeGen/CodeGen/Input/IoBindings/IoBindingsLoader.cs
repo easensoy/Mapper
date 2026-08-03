@@ -73,11 +73,6 @@ namespace CodeGen.Translation
             }
         }
 
-        public static void InvalidateCache()
-        {
-            lock (Lock) { _cache = null; _cachedPath = string.Empty; }
-        }
-
         private static void ParseActuatorSheet(List<List<string>> rows, IoBindings bindings)
         {
             if (rows.Count == 0)
