@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using CodeGen.Services;
 using CodeGen.Configuration;
 
 namespace CodeGen.Devices.Core
@@ -121,9 +122,7 @@ namespace CodeGen.Devices.Core
                 try
                 {
                     File.WriteAllText(snapshot,
-                        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
-                        "<baseline xmlns:xsd=\"http://www.nxtControl.com/Snapshot\" " +
-                        "xmlns=\"http://tempuri.org/XMLSchema1.xsd\" />\r\n");
+                        TemplateDocument.Load(cfg, @"Clean\SnapshotBaseline.xml"));
                     result.SnapshotReset = true;
                 }
                 catch (Exception ex)
