@@ -21,9 +21,9 @@ namespace CodeGen.Translation
             if (string.IsNullOrWhiteSpace(processInstanceName)) processInstanceName = "Process1";
 
             // Per-PLC filter: EAE renders a resource-boundary-crossing wire as dashed/unresolved and blocks deploy; each PLC's sysres is wired separately.
-            // The Feed station runs on the M262 OR the RevPi controller (byte-identical for M262 — nothing guesses RevPi there).
+            // Which controller hosts the Feed station is ControllerMap's question, not this planner's.
             static bool OnFeedController(string name) =>
-                HcfSymbolIndex.NameBasedPlcGuess(name) is PlcAssignment.M262 or PlcAssignment.RevPi;
+                ControllerMap.IsFeedController(HcfSymbolIndex.NameBasedPlcGuess(name));
 
             // Keep the robot-tail (Ejector+Robot) OUT of the INIT path to Feed_Station (a Robot bring-up stall would block it); init the tail last, mirrored in ResourceWireEmitter.
             bool robotTail = MapperConfig.EnableRobotTaskTail &&
