@@ -74,8 +74,5 @@ namespace CodeGen.Translation
 
         public static bool DischargeActive => CrossPlcDischargeActive;
 
-        // WaitId < 0 means "resolve the id from the component map".
-        public static HandoffSpec AssemblyStart =>
-            All().First(h => h.Consumer == "Assembly_Station");
     }
 }
