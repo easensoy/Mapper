@@ -24,7 +24,10 @@ namespace CodeGen.Devices.Core
             public string? FilePath { get; set; }
         }
 
-        public static EmitResult Register(MapperConfig cfg)
+        public static EmitResult Register(MapperConfig cfg) =>
+            Register(cfg, Array.Empty<string>());
+
+        public static EmitResult Register(MapperConfig cfg, params string[] additionalSysdevIds)
         {
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
             var result = new EmitResult();
@@ -87,7 +90,9 @@ namespace CodeGen.Devices.Core
                 : MapperConfig.PartialRevPi
                     ? new[] { M262SysdevId, RevPiSysdevId }
                     : new[] { M262SysdevId };
-            foreach (var sysdevId in feedSysdevIds.Concat(new[] { M580SysdevId, BX1SysdevId }))
+            foreach (var sysdevId in feedSysdevIds
+                         .Concat(new[] { M580SysdevId, BX1SysdevId })
+                         .Concat(additionalSysdevIds ?? Array.Empty<string>()))
             {
                 if (existing.Contains(sysdevId)) continue;
                 items.Add(new XElement(ns + "item", sysdevId));
