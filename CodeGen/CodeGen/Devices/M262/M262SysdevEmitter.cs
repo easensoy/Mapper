@@ -72,7 +72,7 @@ namespace CodeGen.Devices.M262
             var sysdevPath = FindSysdev(eaeRoot);
             if (sysdevPath == null)
             {
-                sysdevPath = BootstrapM262Device(eaeRoot, resourceName);
+                sysdevPath = BootstrapM262Device(cfg, eaeRoot, resourceName);
                 justBootstrapped = sysdevPath != null;
                 if (sysdevPath == null)
                     throw new FileNotFoundException(
@@ -97,7 +97,7 @@ namespace CodeGen.Devices.M262
             }
 
             // DeployPlugin Properties is deploy config (not the trust certificate), so written every run.
-            propsPath = WriteM262DevicePropertiesXml(sysdevPath,
+            propsPath = WriteM262DevicePropertiesXml(cfg, sysdevPath,
                 cfg.MqttPublishEnabled && !cfg.MqttSecureTls);
 
             var systemFile = FindSystemFile(eaeRoot)
@@ -158,7 +158,8 @@ namespace CodeGen.Devices.M262
 
         const string M262DevicePropertiesPluginGuid = "F513CAE3-7194-4086-936C-02912EA0B352";
 
-        public static string WriteM262DevicePropertiesXml(string sysdevPath, bool enableInsecureApp = false)
+        public static string WriteM262DevicePropertiesXml(MapperConfig cfg, string sysdevPath,
+                                                         bool enableInsecureApp = false)
         {
             var sysdevFolder = Path.Combine(
                 Path.GetDirectoryName(sysdevPath)!,
@@ -168,31 +169,8 @@ namespace CodeGen.Devices.M262
             var propsPath = Path.Combine(sysdevFolder,
                 $"{M262DevicePropertiesPluginGuid}.Properties.xml");
 
-            // A plain mqtt:// broker needs the SecurityApp -> InsecureApplication override or MQTT faults RC101.
-            string canonical =
-                "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
-                "<SystemDeviceProperties xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" " +
-                    "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" " +
-                    "xmlns=\"http://www.nxtControl.com/DeviceProperties\">\r\n" +
-                "  <ComplexProperty Name=\"DeployPlugin\" Expanded=\"true\">\r\n" +
-                "    <Property Name=\"ClearBeforeDeploy\" Value=\"True\" IsPassword=\"false\" />\r\n" +
-                "  </ComplexProperty>\r\n" +
-                "  <GroupProperty Name=\"Configuration\" Expanded=\"true\" Enabled=\"true\">\r\n" +
-                "    <GroupProperty Name=\"Deploy\" Expanded=\"true\" Enabled=\"true\">\r\n" +
-                "      <Property Name=\"AutoStart\" Value=\"True\" IsPassword=\"false\" />\r\n" +
-                "    </GroupProperty>\r\n" +
-                "    <GroupProperty Name=\"Boot\" Expanded=\"true\" Enabled=\"true\">\r\n" +
-                "      <Property Name=\"BootMode\" Value=\"Run\" IsPassword=\"false\" />\r\n" +
-                "    </GroupProperty>\r\n" +
-                (enableInsecureApp
-                    ? "    <GroupProperty Name=\"SecurityApp\" Expanded=\"true\" Enabled=\"true\">\r\n" +
-                      "      <GroupProperty Name=\"InsecureApplication\" Expanded=\"true\" Enabled=\"true\">\r\n" +
-                      "        <Property Name=\"Enable\" Value=\"True\" IsPassword=\"false\" />\r\n" +
-                      "      </GroupProperty>\r\n" +
-                      "    </GroupProperty>\r\n"
-                    : string.Empty) +
-                "  </GroupProperty>\r\n" +
-                "</SystemDeviceProperties>";
+            // Byte-identical to the standard (non-Soft_dPAC) device properties every other PLC gets.
+            var canonical = Station2DeviceEmitter.BuildStandardDeployPluginPropertiesXml(cfg, enableInsecureApp);
 
             if (!File.Exists(propsPath) || File.ReadAllText(propsPath) != canonical)
                 File.WriteAllText(propsPath, canonical);
@@ -218,7 +196,7 @@ namespace CodeGen.Devices.M262
         }
 
         // Creates the M262 logical device from scratch when none exists (the empty-start path after Clean).
-        static string? BootstrapM262Device(string eaeRoot, string resourceName)
+        static string? BootstrapM262Device(MapperConfig cfg, string eaeRoot, string resourceName)
         {
             var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
             if (!Directory.Exists(systemDir)) return null;
@@ -231,7 +209,7 @@ namespace CodeGen.Devices.M262
             if (sysGuidDir == null) return null;
 
             var sysdevPath = Path.Combine(sysGuidDir, $"{M262SysdevId}.sysdev");
-            File.WriteAllText(sysdevPath, Station2DeviceEmitter.BuildSysdevXml(
+            File.WriteAllText(sysdevPath, Station2DeviceEmitter.BuildSysdevXml(cfg,
                 M262SysdevId, DeviceName, "M262_dPAC", M262ResourceId, resourceName));
 
             var sysdevFolder = Path.Combine(sysGuidDir, M262SysdevId);
@@ -239,16 +217,16 @@ namespace CodeGen.Devices.M262
             var sysresPath = Path.Combine(sysdevFolder, $"{M262ResourceId}.sysres");
             if (!File.Exists(sysresPath))
                 File.WriteAllText(sysresPath,
-                    Station2DeviceEmitter.BuildSysresXml(M262ResourceId, resourceName));
+                    Station2DeviceEmitter.BuildSysresXml(cfg, M262ResourceId, resourceName));
 
             var e0601 = Path.Combine(sysdevFolder,
                 "E0601B81-4A3A-4A96-B6C2-007BDC680D59.Properties.xml");
             if (!File.Exists(e0601))
-                File.WriteAllText(e0601, Station2DeviceEmitter.BuildEmptySystemDeviceProps());
+                File.WriteAllText(e0601, Station2DeviceEmitter.BuildEmptySystemDeviceProps(cfg));
 
             var simBind = Path.Combine(sysdevFolder, $"{M262SysdevId}.Simulation.Binding.xml");
             File.WriteAllText(simBind,
-                Station2DeviceEmitter.BuildSimulationBindingXml(M262SysdevId, 51499, 51496));
+                Station2DeviceEmitter.BuildSimulationBindingXml(cfg, M262SysdevId, 51499, 51496));
 
             return sysdevPath;
         }
