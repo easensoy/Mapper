@@ -5,131 +5,137 @@ using CodeGen.Models;
 
 namespace CodeGen.Translation.Interlocks
 {
-    // Owns interlock translation + emission: rule plan from Control.xml (InterlockPlanner), centre-home
-    // range filter, RuleCount/Rule* param write, and the inert-safety-net guards.
+    // Owns interlock translation + emission: rule plan from Control.xml (InterlockPlanner), the
+    // centre-home post-filters, the RuleTable/Rule* param write, and the inert-safety-net guard.
+    //
+    // The two CAT shapes differ only in the post-filters applied to the plan and in what the guard
+    // reports, so each public entry point is a one-line call into the shared implementation.
     public static class InterlockEmitter
     {
         private static int Cap => InterlockConfig.Current.RuleArraySize;
 
-        // ── Five_State_Actuator_CAT ──────────────────────────────────────────────────────────────
+        // ── Public entry points, one per CAT shape ───────────────────────────────────────────────
 
         public static void ApplyFiveState(Dictionary<string, string> p, VueOneComponent actuator,
             IReadOnlyList<VueOneComponent> allComponents,
             IReadOnlyDictionary<string, int>? scopedIds)
-            => Write(p, FiveStatePlan(actuator, allComponents, scopedIds));
-
-        // Hard-fail if in-scope Control.xml conditions survive but RuleCount=0 — never ship an
-        // InterlockManager that passes everything through (a false safety net).
-        public static void GuardFiveState(Dictionary<string, string> p, VueOneComponent actuator,
-            IReadOnlyList<VueOneComponent> allComponents,
-            IReadOnlyDictionary<string, int>? scopedIds,
-            List<(string Component, string Detail)> bound)
-        {
-            int emitted = EmittedCount(p);
-            int inScope = InScope(actuator, allComponents, scopedIds);
-            if (inScope > 0 && emitted == 0)
-                throw new InvalidOperationException(
-                    $"[Recipe] Actuator '{actuator.Name}' has {inScope} in-scope Control.xml interlock " +
-                    "condition(s) but emitted RuleCount=0 — refusing to generate code whose InterlockManager " +
-                    "passes everything through (false safety net). Interlock rule translation failed for this actuator.");
-            if (emitted > 0)
-                bound.Add((actuator.Name, $"interlock RuleCount={emitted}"));
-        }
-
-        // ── Seven_State_Actuator_Centre_Home_CAT (Bearing_PnP) ───────────────────────────────────
+            => Write(p, Plan(actuator, allComponents, scopedIds, centreHome: false));
 
         public static void ApplyCentreHome(Dictionary<string, string> p, VueOneComponent actuator,
             IReadOnlyList<VueOneComponent> allComponents,
             IReadOnlyDictionary<string, int>? scopedIds)
-            => Write(p, CentreHomePlan(actuator, allComponents, scopedIds));
+            => Write(p, Plan(actuator, allComponents, scopedIds, centreHome: true));
+
+        public static void GuardFiveState(Dictionary<string, string> p, VueOneComponent actuator,
+            IReadOnlyList<VueOneComponent> allComponents,
+            IReadOnlyDictionary<string, int>? scopedIds,
+            List<(string Component, string Detail)> bound)
+            => Guard(p, actuator, allComponents, scopedIds, bound,
+                     label: "interlock", recordWhenEmpty: false);
 
         public static void GuardCentreHome(Dictionary<string, string> p, VueOneComponent actuator,
             IReadOnlyList<VueOneComponent> allComponents,
             IReadOnlyDictionary<string, int>? scopedIds,
             List<(string Component, string Detail)> bound)
-        {
-            int count = EmittedCount(p);
-            if (scopedIds != null)
-            {
-                int inScope = InterlockPlanner.CountInScopeConditions(actuator, allComponents, scopedIds);
-                if (inScope > 0 && count == 0)
-                    throw new InvalidOperationException(
-                        $"[Recipe] Bearing_PnP '{actuator.Name}' has {inScope} in-scope interlock condition(s) but " +
-                        "emitted RuleCount=0 — refusing to ship an inert safety net for the swivel that is the " +
-                        "cross-process intersection.");
-            }
-            bound.Add((actuator.Name,
-                $"centre-home interlock RuleCount={count} (blocks turn-to-Place when the crossing is occupied)"));
-        }
+            => Guard(p, actuator, allComponents, scopedIds, bound,
+                     label: "centre-home interlock", recordWhenEmpty: true);
 
-        // ── Default (callers without a scoped map / non-interlock minimal path) ───────────────────
-
+        // Callers without a scoped map / the non-interlock minimal path.
         public static void ApplyZero(Dictionary<string, string> p) => Write(p, InterlockPlan.Empty(Cap));
 
-        // ── Plans ────────────────────────────────────────────────────────────────────────────────
+        // ── Plan ─────────────────────────────────────────────────────────────────────────────────
 
-        private static InterlockPlan FiveStatePlan(VueOneComponent actuator,
+        // Component ids are global (sensors-first), so a cross-PLC SourceID indexes the same state_table
+        // slot the bridged ring feeds; BuildRules drops genuinely out-of-scope sources.
+        private static InterlockPlan Plan(VueOneComponent actuator,
             IReadOnlyList<VueOneComponent> allComponents,
-            IReadOnlyDictionary<string, int>? scopedIds)
-            // Component ids are global (sensors-first), so a cover's cross-PLC SourceID indexes the same
-            // state_table slot the bridged ring feeds; BuildRules drops genuinely out-of-scope sources.
-            => scopedIds != null
-                ? InterlockPlanner.BuildRules(actuator, allComponents, scopedIds)
-                : InterlockPlan.Empty(Cap);
-
-        private static InterlockPlan CentreHomePlan(VueOneComponent actuator,
-            IReadOnlyList<VueOneComponent> allComponents,
-            IReadOnlyDictionary<string, int>? scopedIds)
+            IReadOnlyDictionary<string, int>? scopedIds,
+            bool centreHome)
         {
-            var plan = scopedIds != null
-                ? InterlockPlanner.BuildRules(actuator, allComponents, scopedIds)
-                : InterlockPlan.Empty(Cap);
-            // Ground-truth-faithful: only the twin's Work1<->Work2 crossing rules (+ their reverses). Do NOT
-            // add a synthetic Home->Work block on a cross-station sensor (PartAtAssembly) -- that sensor can be
-            // transient, so it would refuse the swivel's commanded pick after the recipe gate already passed
-            // (bearing_pnp "does not move"). Assembly start is the recipe gate's job, not the interlock's.
-            return WithReverseCrossings(FilterToCentreHomeRange(plan));
+            if (scopedIds == null) return InterlockPlan.Empty(Cap);
+            var plan = InterlockPlanner.BuildRules(actuator, allComponents, scopedIds);
+            // Twin-faithful: the centre-home shape keeps only the crossing rules the twin declares, plus
+            // their reverses. Nothing synthetic is added here — a start gate belongs to the recipe, not
+            // to the interlock, because a transient sensor would otherwise refuse an already-gated move.
+            return centreHome ? WithReverseCrossings(FilterToRawStateRange(plan)) : plan;
         }
 
-        // Keep only rules whose From/To fall in the core's CurrentRawState range. Do NOT re-drop Blocked==0
-        // here: BuildRules already dropped the inverted same-controller home-rest rules and kept the genuine
-        // cross-controller readiness gates; re-dropping would discard those kept gates.
-        private static InterlockPlan FilterToCentreHomeRange(InterlockPlan plan)
+        // Keep only rules whose From/To fall in the core's CurrentRawState range; anything outside can
+        // never match. Blocked==0 is NOT re-dropped here — BuildRules already dropped the inverted
+        // same-controller rules and deliberately kept the cross-controller readiness gates.
+        private static InterlockPlan FilterToRawStateRange(InterlockPlan plan)
         {
             var r = InterlockConfig.Current.CentreHome;
-            int cap = Cap, kept = 0;
-            int[] f = new int[cap], t = new int[cap], s = new int[cap], b = new int[cap];
-            for (int i = 0; i < plan.Count && i < cap; i++)
+            var b = new Builder(Cap);
+            for (int i = 0; i < plan.Count && i < Cap; i++)
             {
                 if (plan.From[i] < r.MinState || plan.From[i] > r.MaxState ||
                     plan.To[i] < r.MinState || plan.To[i] > r.MaxState) continue;
-                f[kept] = plan.From[i]; t[kept] = plan.To[i];
-                s[kept] = plan.Src[i];  b[kept] = plan.Blocked[i];
-                kept++;
+                b.Add(plan.From[i], plan.To[i], plan.Src[i], plan.Blocked[i]);
             }
-            return new InterlockPlan(kept, f, t, s, b);
+            return b.ToPlan();
         }
 
-        // The centre-home swivel crosses the shared work volume BOTH ways (Work1->Work2 placing,
-        // Work2->Work1 depositing), so emit the reverse (To->From) of every surviving crossing rule to block
-        // the crossing whichever way it travels, guarded by the same source + blocked-state.
+        // The centre-home actuator crosses the shared volume BOTH ways, so emit the reverse of every
+        // surviving crossing rule, guarded by the same source and blocked state.
         private static InterlockPlan WithReverseCrossings(InterlockPlan plan)
         {
-            int cap = Cap, n = 0;
-            int[] f = new int[cap], t = new int[cap], s = new int[cap], b = new int[cap];
-            void Add(int fr, int to, int src, int blk)
+            var b = new Builder(Cap);
+            for (int i = 0; i < plan.Count && i < Cap; i++)
+                b.Add(plan.From[i], plan.To[i], plan.Src[i], plan.Blocked[i]);
+            for (int i = 0; i < plan.Count && i < Cap; i++)
+                if (plan.From[i] != plan.To[i])                       // a crossing, not a self-loop
+                    b.Add(plan.To[i], plan.From[i], plan.Src[i], plan.Blocked[i]);
+            return b.ToPlan();
+        }
+
+        // Fixed-capacity rule accumulator with dedup — the shape both post-filters need.
+        private sealed class Builder
+        {
+            private readonly int[] _f, _t, _s, _b;
+            private readonly int _cap;
+            private int _n;
+
+            public Builder(int cap)
             {
-                for (int j = 0; j < n; j++)
-                    if (f[j] == fr && t[j] == to && s[j] == src && b[j] == blk) return; // dedup
-                if (n >= cap) return;
-                f[n] = fr; t[n] = to; s[n] = src; b[n] = blk; n++;
+                _cap = cap;
+                _f = new int[cap]; _t = new int[cap]; _s = new int[cap]; _b = new int[cap];
             }
-            for (int i = 0; i < plan.Count && i < cap; i++)
-                Add(plan.From[i], plan.To[i], plan.Src[i], plan.Blocked[i]);
-            for (int i = 0; i < plan.Count && i < cap; i++)
-                if (plan.From[i] != plan.To[i])                      // a crossing, not a self-loop
-                    Add(plan.To[i], plan.From[i], plan.Src[i], plan.Blocked[i]);
-            return new InterlockPlan(n, f, t, s, b);
+
+            public void Add(int from, int to, int src, int blocked)
+            {
+                for (int j = 0; j < _n; j++)
+                    if (_f[j] == from && _t[j] == to && _s[j] == src && _b[j] == blocked) return;
+                if (_n >= _cap) return;
+                _f[_n] = from; _t[_n] = to; _s[_n] = src; _b[_n] = blocked; _n++;
+            }
+
+            public InterlockPlan ToPlan() => new(_n, _f, _t, _s, _b);
+        }
+
+        // ── Guard ────────────────────────────────────────────────────────────────────────────────
+
+        // Hard-fail if in-scope Control.xml conditions survive translation but nothing was emitted —
+        // never ship an InterlockManager that passes everything through (a false safety net).
+        private static void Guard(Dictionary<string, string> p, VueOneComponent actuator,
+            IReadOnlyList<VueOneComponent> allComponents,
+            IReadOnlyDictionary<string, int>? scopedIds,
+            List<(string Component, string Detail)> bound,
+            string label, bool recordWhenEmpty)
+        {
+            int emitted = EmittedCount(p);
+            int inScope = scopedIds == null
+                ? 0
+                : InterlockPlanner.CountInScopeConditions(actuator, allComponents, scopedIds);
+
+            if (inScope > 0 && emitted == 0)
+                throw new InvalidOperationException(
+                    $"[Recipe] Actuator '{actuator.Name}' has {inScope} in-scope Control.xml interlock " +
+                    "condition(s) but emitted RuleCount=0 — refusing to generate code whose InterlockManager " +
+                    "passes everything through (false safety net). Interlock rule translation failed for this actuator.");
+
+            if (emitted > 0 || recordWhenEmpty)
+                bound.Add((actuator.Name, $"{label} RuleCount={emitted}"));
         }
 
         // ── Param IO ─────────────────────────────────────────────────────────────────────────────
@@ -161,10 +167,5 @@ namespace CodeGen.Translation.Interlocks
             }
             return 0;
         }
-
-        private static int InScope(VueOneComponent actuator,
-            IReadOnlyList<VueOneComponent> allComponents,
-            IReadOnlyDictionary<string, int>? scopedIds)
-            => scopedIds == null ? 0 : InterlockPlanner.CountInScopeConditions(actuator, allComponents, scopedIds);
     }
 }
