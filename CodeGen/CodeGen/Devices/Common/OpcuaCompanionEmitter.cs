@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using CodeGen.Configuration;
+using CodeGen.Services;
 
 namespace CodeGen.Artefacts
 {
@@ -85,14 +87,19 @@ namespace CodeGen.Artefacts
             return false;
         }
 
+        // The two public entry points are linked by the VueOne hidden runner, so they keep their
+        // signatures and the template root is resolved here instead of being threaded through.
+        internal static string BuildOpcuaCompanion(string uid)
+        {
+            MapperConfig? cfg = null;
+            try { cfg = MapperConfig.Load(); } catch { /* fall back to the default template root */ }
+            return TemplateDocument.Load(cfg, @"Companion\opcua.xml",
+                new Dictionary<string, string> { ["Uid"] = uid });
+        }
+
         private static bool WriteOpcuaFile(string opcuaPath, string uid)
         {
-            var content =
-                "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
-                "<OPCUAComplexObject xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" " +
-                "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n" +
-                $"  <OPCUAComplexObject UID=\"{uid}\" />\r\n" +
-                "</OPCUAComplexObject>";
+            var content = BuildOpcuaCompanion(uid);
 
             // Best-effort — a transient lock isn't fatal; the next regen retries.
             for (int attempt = 0; attempt < 4; attempt++)
