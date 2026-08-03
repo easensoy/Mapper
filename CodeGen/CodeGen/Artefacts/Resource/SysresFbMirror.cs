@@ -13,29 +13,6 @@ namespace CodeGen.Devices.Core
     {
         const string LibElNs = "https://www.se.com/LibraryElements";
 
-        // SINGLE SOURCE OF TRUTH for the syslay->sysres projection: MirrorFbsIntoSysres and
-        // SyslaySysresParityValidator both read this set so they can never drift.
-        public static readonly IReadOnlySet<string> MirroredCatTypes =
-            new HashSet<string>(StringComparer.Ordinal)
-        {
-            "Five_State_Actuator_CAT",
-            "Five_State_Actuator_No_Sensors_CAT",
-            "Seven_State_Actuator_CAT",
-            "Seven_State_Actuator_Centre_Home_CAT",
-            "Sensor_Bool_CAT",
-            "PLC_RW_M262",
-            "Area",
-            "Area_CAT",
-            "Station",
-            "Station_CAT",
-            "Process1_Generic",
-            "CaSAdptrTerminator",
-            "Robot_Task_CAT",
-            "MQTT_CONNECTION",
-            "Telemetry",
-            "MqttStateFormatter",
-            "MQTT_PUBLISH_115480E69E664F878",
-        };
 
 
         public record SyslayFbParameter(string Name, string Value);
@@ -211,7 +188,7 @@ namespace CodeGen.Devices.Core
                     .Where(s => !string.IsNullOrEmpty(s)),
                 StringComparer.Ordinal);
 
-            var keepTypes = MirroredCatTypes;
+            var keepTypes = TemplateManifest.Mirrored;
 
             // Name -> existing sysres FB, so an already-mirrored FB is UPDATED (params replaced), not
             // skipped with stale values. Its ID/Mapping/x/y stay unchanged (stable instance handle).
