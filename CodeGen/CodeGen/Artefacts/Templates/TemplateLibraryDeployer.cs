@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -6,6 +6,7 @@ using System.Linq;
 using System.Xml.Linq;
 using CodeGen.Configuration;
 using CodeGen.Models;
+using CodeGen.Mapping;
 using CodeGen.Translation.Interlocks;
 using CodeGen.Devices.M262;
 using CodeGen.Devices.Core;
@@ -23,70 +24,12 @@ namespace CodeGen.Services
 {
     public static class TemplateLibraryDeployer
     {
-        static readonly Dictionary<string, string[]> CatDependencies = new()
-        {
-            { "Five_State_Actuator_CAT", new[] { "FiveStateActuator" } },
-            { "Sensor_Bool_CAT",         new[] { "Sensor_Bool" } },
-            { "Actuator_Fault_CAT",      new[] { "FaultLatch" } },
-            { "Robot_Task_CAT",          new[] { "Robot_Task_Core" } },
-            { "Seven_State_Actuator_CAT", new[] { "SevenStateActuator", "SevenStateActuator2" } },
-            { "Seven_State_Actuator_Centre_Home_CAT",
-              new[] { "SevenStateCentreHomeActuator", "No_Sensor_Handler_7SCH", "FaultLatch_7SCH",
-                      "actuatorStateEvents_7SCH" } },
-            { "Station_CAT",             new[] { "Station_Core", "Station_Fault", "Station_Status" } },
-            { "Process1_Generic",        new[] { "ProcessRuntime_Generic_v1", "ProcessStateBusHandler" } },
-        };
-
         static readonly Dictionary<string, string> ComponentTypeToCat = new(StringComparer.OrdinalIgnoreCase)
         {
             { "Actuator_5",  "Five_State_Actuator_CAT" },
             { "Actuator_7",  "Seven_State_Actuator_CAT" },
             { "Sensor_2",    "Sensor_Bool_CAT" },
             { "Process_Any", "Process1_Generic" },
-        };
-
-        static readonly string[] UniversalCats = new[]
-        {
-            "Five_State_Actuator_CAT", "Sensor_Bool_CAT", "Process1_Generic",
-            "Seven_State_Actuator_CAT",
-            "Seven_State_Actuator_Centre_Home_CAT",
-        };
-
-        static readonly string[] UniversalComposites = new[]
-        {
-            "Area", "Station", "CaSAdptrTerminator", "faultDetection",
-            "faultDetection_7SCH",
-        };
-
-        static readonly string[] UniversalAdapters = new[]
-        {
-            "CaSAdptr", "AreaHMIAdptr", "StationHMIAdptr", "stateRptCmdAdptr"
-        };
-
-        static readonly string[] UniversalBasics = new[]
-        {
-            "FiveStateActuator", "Sensor_Bool",
-            "Station_Core", "Station_Fault", "Station_Status",
-            "ProcessRuntime_Generic_v1", "ProcessStateBusHandler",
-            "FaultLatch", "actuatorStateEvents",
-            "updateComponentState", "updateComponentState_Sensor",
-            "No_Sensor_Handler",
-            "CommonInterlockEvaluator",
-            "changeEventProcess1", "changeEventProcess2",
-            "SevenStateActuator", "SevenStateActuator2",
-            "SevenStateCentreHomeActuator", "No_Sensor_Handler_7SCH", "FaultLatch_7SCH",
-            "actuatorStateEvents_7SCH",
-        };
-
-        static readonly string[] UniversalHmiCats = new[]
-        {
-            "Area_CAT", "Station_CAT"
-        };
-
-        static readonly string[] UniversalDataTypes = new[]
-        {
-            "Component_State",
-            "Component_State_Msg"
         };
 
         public static DeployResult DeployUniversalArchitecture(MapperConfig cfg)
@@ -109,7 +52,7 @@ namespace CodeGen.Services
             // it, and Process1_Generic (force-re-extracted) wires those ports -- if the handler stayed copy-if-absent a
             // plain re-Generate would keep the stale one and EAE would fail ("port does not exist on ProcessStateBusHandler").
             foreach (var ext in new[] { ".fbt", ".doc.xml", ".meta.xml" })
-            foreach (var basic in new[] { "No_Sensor_Handler_7SCH", "SevenStateCentreHomeActuator", "ProcessRuntime_Generic_v1", "ProcessStateBusHandler", "CommonInterlockEvaluator" })
+            foreach (var basic in TemplateManifest.ForceRefresh(ArtefactKind.Basic))
             {
                 var stale = Path.Combine(eaeProjectDir, "IEC61499", basic + ext);
                 try { if (File.Exists(stale)) File.Delete(stale); }
@@ -118,7 +61,7 @@ namespace CodeGen.Services
             }
 
             // ExtractToEae is copy-if-absent, so force-re-extract the CATs reshaped by later patches (delete first).
-            foreach (var catRefresh in new[] { "Sensor_Bool_CAT", "Five_State_Actuator_CAT", "Seven_State_Actuator_Centre_Home_CAT", "Process1_Generic" })
+            foreach (var catRefresh in TemplateManifest.ForceRefresh(ArtefactKind.Cat))
             {
                 var dir = Path.Combine(eaeProjectDir, "IEC61499", catRefresh);
                 try { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
@@ -126,21 +69,21 @@ namespace CodeGen.Services
                 { MapperLogger.Info($"[Deploy][Refresh] could not remove deployed CAT {dir}: {ex.Message}"); }
             }
 
-            foreach (var name in UniversalBasics)
+            foreach (var name in TemplateManifest.Deployed(ArtefactKind.Basic))
                 DeployArtifact(libPath, "Basic", name, eaeProjectDir, result, isBasic: true);
 
             SweepRetiredType(eaeProjectDir, "SimCentreHomeSensor_7SCH", result);
 
-            foreach (var name in UniversalAdapters)
+            foreach (var name in TemplateManifest.Deployed(ArtefactKind.Adapter))
                 DeployArtifact(libPath, "Adapter", name, eaeProjectDir, result, isBasic: true);
 
-            foreach (var name in UniversalComposites)
+            foreach (var name in TemplateManifest.Deployed(ArtefactKind.Composite))
                 DeployArtifact(libPath, "Composite", name, eaeProjectDir, result, isBasic: false);
 
-            foreach (var name in UniversalHmiCats)
+            foreach (var name in TemplateManifest.Deployed(ArtefactKind.HmiCat))
                 DeployArtifact(libPath, "CAT", name, eaeProjectDir, result, isBasic: false, isCat: true);
 
-            foreach (var name in UniversalCats)
+            foreach (var name in TemplateManifest.Deployed(ArtefactKind.Cat))
                 DeployArtifact(libPath, "CAT", name, eaeProjectDir, result, isBasic: false, isCat: true);
 
             DeployArtifact(libPath, "Basic", "Robot_Task_Core", eaeProjectDir, result, isBasic: true);
@@ -204,8 +147,7 @@ namespace CodeGen.Services
             PatchActuatorModeInitialValue(eaeProjectDir, "SevenStateCentreHomeActuator.fbt", result);
             PatchSwivelBlockStartupMotion(eaeProjectDir, result);
             PatchSwivelAtHomeCoilClear(eaeProjectDir, clearCoils: true, result);
-            PatchSwivelAtHomeBothCoils(eaeProjectDir, false, result);
-            // SAFE: SwivelBrakeHome runs LAST — directional brake (reverse the driving coil only when homing from AtWork1, away from the ejector).
+            // Runs LAST: the directional brake rewrites the whole atHome algorithm.
             PatchSwivelBrakeHome(eaeProjectDir, true,
                 GenerationConfig.Current.BearingPnpHomeBrakeMs, result);
             PatchSwivelRelaxWorkLatch(eaeProjectDir, relax: true, result);
@@ -220,7 +162,7 @@ namespace CodeGen.Services
             // Additive, gated by MqttPublishEnabled; PUBLISH binds to the injected MQTT_CONNECTION by matching ConnectionID value (no wire).
             if (cfg.MqttPublishEnabled)
             {
-                DeployMqttFormatter(eaeProjectDir, result);
+                DeployMqttFormatter(cfg, eaeProjectDir, result);
                 PatchCatMqttPublish(eaeProjectDir, "Five_State_Actuator_CAT",
                     stateEventSource: "ActuatorCore.pst_out",
                     stateDataSource: "ActuatorCore.current_state_to_process",
@@ -251,16 +193,16 @@ namespace CodeGen.Services
             // couldn't save while the evaluator's did). Aborting beats shipping a tree that fails EAE Build.
             bool interlockStruct = InterlockConfig.Current.UseStruct;
             bool targetStruct = InterlockConfig.Current.UseTargetStruct;
-            ApplyInterlockNormalizers(eaeProjectDir, interlockStruct, targetStruct, result);
-            AssertInterlockInterfaceConsistent(eaeProjectDir, interlockStruct, targetStruct, result);
+            ApplyInterlockNormalizers(cfg, eaeProjectDir, interlockStruct, targetStruct, result);
+            AssertInterlockInterfaceConsistent(cfg, eaeProjectDir, interlockStruct, targetStruct, result);
 
             // Wrap each resource MQTT_CONNECTION in the 'Telemetry' composite (gated by UseTelemetryCat); false emits the raw MQTT_CONNECTION.
             if (cfg.UseTelemetryCat)
             {
                 // Sweep first (copy-if-absent staleness): removes current + legacy 'Telemetry_CAT' artifacts before deploying fresh.
                 SweepTelemetryCat(eaeProjectDir, result);
-                DeployTelemetryConfigDatatype(eaeProjectDir, result);
-                DeployTelemetryHealthDatatype(eaeProjectDir, result);
+                DeployTelemetryConfigDatatype(cfg, eaeProjectDir, result);
+                DeployTelemetryHealthDatatype(cfg, eaeProjectDir, result);
                 DeployArtifact(libPath, "Basic", "TelemetryUnpack", eaeProjectDir, result, isBasic: true);
                 DeployArtifact(libPath, "Basic", "TelemetryPack", eaeProjectDir, result, isBasic: true);
                 DeployArtifact(libPath, "Composite", "Telemetry", eaeProjectDir, result, isBasic: false);
@@ -274,18 +216,22 @@ namespace CodeGen.Services
             // Broker-fed BX1 sensors (TopCoverSenosr) have no I/O-scan event, so give Sensor_Bool_CAT a scoped
             // RD re-read event; the BX1 broker fires it on the cover-detect change (HCF M262/M580 unaffected).
             EnsureSensorBoolReadEvent(eaeProjectDir, result);
+            // A sensor reports only on a level change, so a level already true at power-on is announced once and
+            // then never again. Give Sensor_Bool an addressed refresh (sample, then report even if unchanged) so
+            // the recipe can ask before it waits; the CAT wiring above serialises request -> sample -> report.
+            EnsureSensorBoolRefreshPath(eaeProjectDir, result);
             NormalizeFiveStateSimSensorSource(eaeProjectDir, result);
             NormalizeFiveStateFaultEnables(eaeProjectDir, result);
             // Recipe-struct collapse on Process1_Generic + engine (gated by UseRecipeStruct); false reverts to the 6 arrays.
             bool recipeStruct = cfg.UseRecipeStruct;
             if (recipeStruct)
-                DeployRecipeStepDatatype(eaeProjectDir, result);
+                DeployRecipeStepDatatype(cfg, eaeProjectDir, result);
             NormalizeProcess1RecipeArrays(eaeProjectDir, recipeStruct, result);
             NormalizeProcessRuntimeRecipeArrays(eaeProjectDir, recipeStruct, result);
             NormalizeProcessEngineDebugWatch(eaeProjectDir, result);
             // check_wait is LEVEL-triggered (WaitSatisfied := state_table[...].state = Wait1State); a WAIT already-true when it arms satisfies immediately.
 
-            GenerateCfgFiles(eaeProjectDir, result);
+            CodeGen.Hmi.HmiCatCfgEmitter.EmitAll(eaeProjectDir, cfg.TemplateLibraryPath);
             RegisterInDfbproj(eaeProjectDir, result);
 
             VerifyArraySizeConsistency(eaeProjectDir, result);
@@ -371,7 +317,7 @@ namespace CodeGen.Services
             var destDir = Path.Combine(eaeProjectDir, "IEC61499", "DataType");
             Directory.CreateDirectory(destDir);
 
-            foreach (var name in UniversalDataTypes)
+            foreach (var name in TemplateManifest.Deployed(ArtefactKind.DataType))
             {
                 var src = Path.Combine(srcDir, name + ".dt");
                 if (!File.Exists(src))
@@ -391,20 +337,13 @@ namespace CodeGen.Services
             }
         }
 
-
-
-
-
-
-
-
-
-        static void DeployMqttFormatter(string eaeProjectDir, DeployResult result)
+        static void DeployMqttFormatter(MapperConfig cfg, string eaeProjectDir, DeployResult result)
         {
             try
             {
                 var dst = Path.Combine(eaeProjectDir, "IEC61499", "MqttStateFormatter.fbt");
-                File.WriteAllText(dst, MqttStateFormatterFbt);
+                File.WriteAllText(dst, TemplateDocument.Load(cfg,
+                    @"Basic\MqttStateFormatter\IEC61499\MqttStateFormatter.fbt"));
                 result.PatchesApplied.Add("MqttStateFormatter.fbt deployed (INT→STRING[255] payload)");
                 MapperLogger.Info("[Deploy][MQTT] MqttStateFormatter.fbt written to IEC61499/");
             }
@@ -413,9 +352,6 @@ namespace CodeGen.Services
                 result.Warnings.Add($"MqttStateFormatter deploy failed: {ex.Message}");
             }
         }
-
-
-
 
         // Fan an MQTT_PUBLISH off the CAT's post-update state event (additive). MQTT_PUBLISH does NOT resolve $${PATH} at runtime → topicNameSource must be a concrete per-instance name.
         static void PatchCatMqttPublish(string eaeProjectDir, string catName,
@@ -556,48 +492,6 @@ namespace CodeGen.Services
             }
         }
 
-
-        const string MqttStateFormatterFbt =
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
-            "<!DOCTYPE FBType SYSTEM \"../LibraryElement.dtd\">\r\n" +
-            "<FBType GUID=\"f0a1b2c3-d4e5-4f60-8a1b-2c3d4e5f6071\" Name=\"MqttStateFormatter\" Comment=\"Basic FB - INT state to STRING payload for MQTT publish\" Namespace=\"Main\">\r\n" +
-            "  <Identification Standard=\"61499-2\" />\r\n" +
-            "  <VersionInfo Organization=\"WMG\" Version=\"0.1\" Author=\"easensoy\" Date=\"5/22/2026\" Remarks=\"v1 bare state-to-string\" />\r\n" +
-            "  <InterfaceList>\r\n" +
-            "    <EventInputs>\r\n" +
-            "      <Event Name=\"INIT\" Comment=\"Initialization Request\"><With Var=\"state\" /></Event>\r\n" +
-            "      <Event Name=\"REQ\" Comment=\"Format on state change\"><With Var=\"state\" /></Event>\r\n" +
-            "    </EventInputs>\r\n" +
-            "    <EventOutputs>\r\n" +
-            "      <Event Name=\"INITO\" Comment=\"Initialization Confirm\"><With Var=\"payload\" /></Event>\r\n" +
-            "      <Event Name=\"CNF\" Comment=\"Payload ready\"><With Var=\"payload\" /></Event>\r\n" +
-            "    </EventOutputs>\r\n" +
-            "    <InputVars>\r\n" +
-            "      <VarDeclaration Name=\"state\" Type=\"INT\" Comment=\"current_state_to_process\" />\r\n" +
-            "    </InputVars>\r\n" +
-            "    <OutputVars>\r\n" +
-            "      <VarDeclaration Name=\"payload\" Type=\"STRING[255]\" Comment=\"MQTT payload (state as text). Sized [255] so EAE does not flag WRN_UNSIZED_STRING (the yellow pin marker) inside every actuator/sensor CAT.\" />\r\n" +
-            "    </OutputVars>\r\n" +
-            "  </InterfaceList>\r\n" +
-            "  <BasicFB>\r\n" +
-            "    <Attribute Name=\"FBType.Basic.Algorithm.Order\" Value=\"INIT,Fmt\" />\r\n" +
-            "    <ECC>\r\n" +
-            "      <ECState Name=\"START\" Comment=\"Initial State\" x=\"300\" y=\"300\" />\r\n" +
-            "      <ECState Name=\"INIT\" x=\"700\" y=\"120\"><ECAction Algorithm=\"Fmt\" Output=\"INITO\" /></ECState>\r\n" +
-            "      <ECState Name=\"Format\" x=\"700\" y=\"520\"><ECAction Algorithm=\"Fmt\" Output=\"CNF\" /></ECState>\r\n" +
-            "      <ECTransition Source=\"START\" Destination=\"INIT\" Condition=\"INIT\" x=\"450\" y=\"200\" />\r\n" +
-            "      <ECTransition Source=\"INIT\" Destination=\"START\" Condition=\"1\" x=\"500\" y=\"300\" />\r\n" +
-            "      <ECTransition Source=\"START\" Destination=\"Format\" Condition=\"REQ\" x=\"450\" y=\"420\" />\r\n" +
-            "      <ECTransition Source=\"Format\" Destination=\"START\" Condition=\"1\" x=\"500\" y=\"520\" />\r\n" +
-            "    </ECC>\r\n" +
-            "    <Algorithm Name=\"INIT\" Comment=\"Initialization algorithm\"><ST><![CDATA[;]]></ST></Algorithm>\r\n" +
-            "    <Algorithm Name=\"Fmt\" Comment=\"INT state to JSON payload\"><ST><![CDATA[payload := CONCAT(CONCAT('{state:', INT_TO_STRING(state)), '}');]]></ST></Algorithm>\r\n" +
-            "  </BasicFB>\r\n" +
-            "</FBType>\r\n";
-
-
-
-
         static void VerifyArraySizeConsistency(string eaeProjectDir, DeployResult result)
         {
             try
@@ -704,7 +598,7 @@ namespace CodeGen.Services
                 MapperLogger.Info($"[Deploy] CAT: {cat}");
             }
 
-            GenerateCfgFiles(eaeProjectDir, result);
+            CodeGen.Hmi.HmiCatCfgEmitter.EmitAll(eaeProjectDir, cfg.TemplateLibraryPath);
             RegisterInDfbproj(eaeProjectDir, result);
 
             result.Success = true;
@@ -732,7 +626,7 @@ namespace CodeGen.Services
             var basics = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var cat in cats)
             {
-                if (CatDependencies.TryGetValue(cat, out var deps))
+                if (TemplateManifest.Requires(cat) is { Count: > 0 } deps)
                     foreach (var dep in deps)
                         basics.Add(dep);
             }
