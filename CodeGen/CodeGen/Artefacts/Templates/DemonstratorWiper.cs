@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using CodeGen.Configuration;
 
 namespace CodeGen.Services
 {
@@ -47,7 +48,16 @@ namespace CodeGen.Services
             ".Adapter.export", ".Basic.export",
         };
 
+        // The VueOne hidden runner links against this one-argument signature, so it must stay.
+        // It resolves the config the same way that runner does, from the working directory.
         public static WipeReport Wipe(string demonstratorRepoRoot)
+        {
+            MapperConfig? cfg = null;
+            try { cfg = MapperConfig.Load(); } catch { /* fall back to the default template root */ }
+            return Wipe(cfg!, demonstratorRepoRoot);
+        }
+
+        public static WipeReport Wipe(MapperConfig cfg, string demonstratorRepoRoot)
         {
             var report = new WipeReport();
             if (string.IsNullOrEmpty(demonstratorRepoRoot) || !Directory.Exists(demonstratorRepoRoot))
@@ -64,7 +74,7 @@ namespace CodeGen.Services
             }
             report.Steps.Add($"Target: {iec}");
 
-            EmptyAllCanvases(iec, report);
+            EmptyAllCanvases(cfg, iec, report);
 
             // Delete logical devices + app BEFORE StripDfbproj so the now-missing entries are pruned
             // (dfbproj keeps a System/* entry only if File.Exists).
@@ -99,7 +109,7 @@ namespace CodeGen.Services
                 .FirstOrDefault();
         }
 
-        static void EmptyAllCanvases(string iecDir, WipeReport report)
+        static void EmptyAllCanvases(MapperConfig cfg, string iecDir, WipeReport report)
         {
             var systemDir = Path.Combine(iecDir, "System");
             if (!Directory.Exists(systemDir))
@@ -110,13 +120,13 @@ namespace CodeGen.Services
 
             int emptied = 0;
             foreach (var path in Directory.EnumerateFiles(systemDir, "*.syslay", SearchOption.AllDirectories))
-                emptied += TryEmpty(path, BuildEmptySyslay, report) ? 1 : 0;
+                emptied += TryEmpty(path, p => BuildEmptySyslay(cfg, p), report) ? 1 : 0;
             foreach (var path in Directory.EnumerateFiles(systemDir, "*.sysres", SearchOption.AllDirectories))
-                emptied += TryEmpty(path, BuildEmptySysres, report) ? 1 : 0;
+                emptied += TryEmpty(path, p => BuildEmptySysres(cfg, p), report) ? 1 : 0;
             foreach (var path in Directory.EnumerateFiles(systemDir, "*.hcf", SearchOption.AllDirectories))
-                emptied += TryEmpty(path, _ => EmptyHcf, report) ? 1 : 0;
+                emptied += TryEmpty(path, _ => TemplateDocument.Load(cfg, @"Clean\Empty.hcf"), report) ? 1 : 0;
             foreach (var path in Directory.EnumerateFiles(systemDir, "*.sysapp", SearchOption.AllDirectories))
-                emptied += TryEmpty(path, BuildEmptySysapp, report) ? 1 : 0;
+                emptied += TryEmpty(path, p => BuildEmptySysapp(cfg, p), report) ? 1 : 0;
 
             report.FilesEmptied = emptied;
             report.Steps.Add($"Emptied {emptied} canvas file(s) under System/");
@@ -137,48 +147,28 @@ namespace CodeGen.Services
             }
         }
 
-        static string BuildEmptySyslay(string path)
-        {
-            string layerId = TryReadAttr(path, "Layer", "ID") ?? "00000000-0000-0000-0000-000000000000";
-            // Clean BLANKS the layer name (identified by ID); Test Runtime restores Name="SMC_Rig".
-            return
-                "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
-                $"<Layer ID=\"{layerId}\" Name=\"\" Comment=\"\" IsDefault=\"true\" " +
-                "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns=\"https://www.se.com/LibraryElements\">\n" +
-                "  <SubAppNetwork />\n" +
-                "</Layer>\n";
-        }
+        // Clean BLANKS the layer name (identified by ID); Test Runtime restores Name="SMC_Rig".
+        static string BuildEmptySyslay(MapperConfig cfg, string path) =>
+            TemplateDocument.Load(cfg, @"Clean\Empty.syslay", new Dictionary<string, string>
+            {
+                ["LayerId"] = TryReadAttr(path, "Layer", "ID") ?? "00000000-0000-0000-0000-000000000000",
+            });
 
-        static string BuildEmptySysres(string path)
-        {
-            string id   = TryReadAttr(path, "Resource", "ID")   ?? "00000000-0000-0000-0000-000000000000";
-            string name = TryReadAttr(path, "Resource", "Name") ?? "RES0";
-            string type = TryReadAttr(path, "Resource", "Type") ?? "EMB_RES_ECO";
-            string ns   = TryReadAttr(path, "Resource", "Namespace") ?? "Runtime.Management";
-            return
-                "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
-                $"<Resource xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" " +
-                $"xmlns=\"https://www.se.com/LibraryElements\" ID=\"{id}\" Name=\"{name}\" " +
-                $"Type=\"{type}\" x=\"800\" y=\"800\" Namespace=\"{ns}\">\n" +
-                "  <FBNetwork />\n" +
-                "</Resource>\n";
-        }
+        static string BuildEmptySysres(MapperConfig cfg, string path) =>
+            TemplateDocument.Load(cfg, @"Clean\Empty.sysres", new Dictionary<string, string>
+            {
+                ["ResourceId"]   = TryReadAttr(path, "Resource", "ID")        ?? "00000000-0000-0000-0000-000000000000",
+                ["ResourceName"] = TryReadAttr(path, "Resource", "Name")      ?? "RES0",
+                ["ResourceType"] = TryReadAttr(path, "Resource", "Type")      ?? "EMB_RES_ECO",
+                ["Namespace"]    = TryReadAttr(path, "Resource", "Namespace") ?? "Runtime.Management",
+            });
 
-        static string BuildEmptySysapp(string path)
-        {
-            string id   = TryReadAttr(path, "Application", "ID")   ?? "00000000-0000-0000-0000-000000000001";
-            // Clean BLANKS the application name (identified by ID); Test Runtime restores Name="WMG".
-            string name = "";
-            return
-                "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
-                "<Application xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" " +
-                $"xmlns=\"https://www.se.com/LibraryElements\" Name=\"{name}\" ID=\"{id}\" />\n";
-        }
-
-        const string EmptyHcf =
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n" +
-            "<DeviceHwConfigurationItems xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" " +
-            "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" />\n";
+        // Clean BLANKS the application name (the template carries Name=""); Test Runtime restores "WMG".
+        static string BuildEmptySysapp(MapperConfig cfg, string path) =>
+            TemplateDocument.Load(cfg, @"Clean\Empty.sysapp", new Dictionary<string, string>
+            {
+                ["AppId"] = TryReadAttr(path, "Application", "ID") ?? "00000000-0000-0000-0000-000000000001",
+            });
 
         static string? TryReadAttr(string path, string elementLocalName, string attrName)
         {
