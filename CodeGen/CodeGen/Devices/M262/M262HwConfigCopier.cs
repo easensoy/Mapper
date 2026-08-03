@@ -130,16 +130,5 @@ namespace CodeGen.Devices.M262
 
 
 
-        // Deprecated no-op kept so M262HcfDocument compiles; verbatim Copy() is the entry point.
-        internal static int OverwriteHcfParameterValuesInMemory(XDocument doc, IoBindings bindings,
-            HashSet<string> syslayFbNames, HwConfigCopyResult result, string resourceId,
-            string m262IoFbId)
-        {
-            _ = doc; _ = bindings; _ = syslayFbNames; _ = resourceId; _ = m262IoFbId;
-            result.Warnings.Add(
-                "M262HwConfigCopier.OverwriteHcfParameterValuesInMemory is deprecated — " +
-                "Copy() now performs a pure verbatim copy of the IO-folder .hcf.");
-            return 0;
-        }
     }
 }
