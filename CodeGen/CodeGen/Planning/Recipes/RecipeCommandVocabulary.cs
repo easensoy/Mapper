@@ -8,9 +8,6 @@ namespace CodeGen.Translation.Process.Recipes
     // seven-state centre-home: 1->Work1(2), 3->Work2(4), 5->Home(0).
     public static class RecipeCommandVocabulary
     {
-        public static bool IsFiveStateCommandable(VueOneComponent t) =>
-            t != null && !IsSensorOrProcess(t) && !IsSevenShape(t);
-
         public static bool IsSevenStateCommandable(VueOneComponent t) =>
             t != null && !IsSensorOrProcess(t) && IsSevenShape(t);
 
