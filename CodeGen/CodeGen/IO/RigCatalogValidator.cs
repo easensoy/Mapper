@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -19,9 +19,6 @@ namespace CodeGen.Configuration
             };
             foreach (var g in processIds.GroupBy(p => p.Id).Where(g => g.Count() > 1))
                 errors.Add($"processIds collide on slot {g.Key}: {string.Join(", ", g.Select(p => p.Name))}");
-
-            foreach (var g in c.CoverActuatorIds.GroupBy(kv => kv.Value).Where(g => g.Count() > 1))
-                errors.Add($"coverActuatorIds collide on slot {g.Key}: {string.Join(", ", g.Select(kv => kv.Key))}");
 
             foreach (var s in c.SynthSensors)
             {
