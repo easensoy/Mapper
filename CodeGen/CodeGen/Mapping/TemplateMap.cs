@@ -64,8 +64,12 @@ namespace CodeGen.Mapping
         public static List<string> M262CrossRingSegment(bool discharge) =>
             discharge ? new List<string>(RigCatalog.Current.CrossRingSegment) : new List<string>();
 
-        // Actuator CAT routing. Must agree with the 6 sites in Docs/INVARIANTS.md I-4 for the same
-        // actuator instance (gate: MapperConfig.StubSevenStateActuatorsAsFiveState).
+        // The centre-home swivel CAT. Named once so the sites that must agree on the selected vocabulary
+        // (CAT deploy, parameters, I/O binding) compare against one constant rather than a repeated literal.
+        public const string SevenStateCentreHomeCat = "Seven_State_Actuator_Centre_Home_CAT";
+
+        // Actuator CAT routing: the twin's own state graph decides the CAT, so a model change needs
+        // no code change. Every consumer (deploy, parameters, I/O binding) must resolve the same way.
         public static string ResolveActuatorCatType(
             string componentName, int stateCount, bool isBranchedSeven)
         {
@@ -73,10 +77,11 @@ namespace CodeGen.Mapping
                 VacuumGripperNames.Contains(componentName))
                 return "Vacuum_Gripper_CAT";
 
-            if (!MapperConfig.StubSevenStateActuatorsAsFiveState
-                && (stateCount == 7 || isBranchedSeven))
+            if (stateCount == 7 || isBranchedSeven)
                 // Centre-home swivel: state_val 1=Work1, 3=Work2, 5=Home; core publishes 2/4/6.
-                return "Seven_State_Actuator_Centre_Home_CAT";
+                // A swivel the twin models with only Work1 + Work2 and no centre stop falls through to the
+                // five-state CAT below, whose Home/Work vocabulary then carries Work1/Work2 respectively.
+                return SevenStateCentreHomeCat;
 
             if (stateCount == 4)
                 return "Five_State_Actuator_No_Sensors_CAT";
