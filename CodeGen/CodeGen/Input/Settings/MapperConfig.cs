@@ -15,8 +15,6 @@ namespace CodeGen.Configuration
     {
         private const string ConfigFileName = "mapper_config.json";
 
-        public static readonly bool StubSevenStateActuatorsAsFiveState = false;
-
         public static bool SimulatorRecipeMode = false;
 
         // Feed-station controller target (single toggle for the whole Feed station). Static so the static
@@ -37,20 +35,8 @@ namespace CodeGen.Configuration
         public static bool PartialRevPi =>
             FeedStationController == FeedController.M262 && RevPiComponents.Count > 0;
 
-        // TRUE = the RevPi Modbus symlink bridge (sensor publisher + coil subscriber + scan heartbeat) lives
-        // INSIDE the PLC_RW_REVPI composite, so the sysres instantiates only RevPI_IO (tight/DRY). FALSE = the
-        // bridge is 3 external FBs beside RevPI_IO (the shape BX1 ships). Same FM3 nested-absolute-symlink
-        // design proven in software for BX1; rig-verifiable. Revert to FALSE if EAE can't resolve them.
-        public static bool RevPiBridgeInsideComposite = true;
-
         // Engine END->0 loop-back (ProcessRuntimeTemplatePatcher).
         public static bool EnableCyclicRestart = true;
-
-        // SAFETY: both-coils-on holds the swivel at centre ONLY if the cylinder has a mechanical mid-stop; with no mid-stop it drives toward an extreme.
-        public static bool SwivelHomeHoldBothCoils = false;
-
-        // SAFETY: directional brake (homing from AtWork1 only) reverses the driving coil toward AtWork1/away from the ejector; errs safe (a longer pulse only pushes toward AtWork1).
-        public static bool SwivelBrakeHome = true;
 
         public static bool UnparkDisassembly = true;
 
@@ -135,13 +121,32 @@ namespace CodeGen.Configuration
         public string RevPiTargetIp { get; set; } = DeviceConfig.Current.RevPi.TargetIp;
         public string RevPiHostIp { get; set; } = DeviceConfig.Current.RevPi.HostIp;
 
+        public string HmiHostIp { get; set; } = DeviceConfig.Current.Hmi.HostIp;
+        public string HmiInternalRuntimeIp { get; set; } = DeviceConfig.Current.Hmi.InternalRuntimeIp;
+        public int HmiLogicalPort { get; set; } = DeviceConfig.Current.Hmi.LogicalPort;
+        public int HmiSecurePort { get; set; } = DeviceConfig.Current.Hmi.SecurePort;
+
+        // The generated HMI is a MONITORING panel and must not present a control the controller cannot
+        // honour: the Station/Area STOP button fires CycleType=0, but ProcessRuntime_Generic_v1's ECC
+        // has no transition that reads Mode or CycleType (INIT->IDLE1 and END->ADVANCE are
+        // unconditional), so STOP cannot stop recipe execution. Setting this false does NOT enable
+        // command screens -- generation fails until an approved command contract exists in the control
+        // logic. A real operational Stop needs a process-engine change; the safety stop stays in the
+        // certified hardware safety system either way.
+        public bool HmiReadOnly { get; set; } = true;
+
         // EAE constraint: an FDT project copied verbatim from another solution can make the topology server throw a 500 on import.
         public bool EmitBx1EtherNetIpDevice { get; set; } = true;
 
         public bool DeployBx1IoBroker { get; set; } = true;
 
-        // EAE-runtime unknown for the internalized (TRUE) path: whether a SYMLINKMULTIVAR with an ABSOLUTE cross-instance NAME (BX1_RES.CoverPNP_Vr.OutputToWork) resolves from INSIDE a composite type.
-        public bool Bx1BridgeInsideComposite { get; set; } = false;
+        // TRUE: the cover I/O bridge (BX1IO_Sense_*/BX1IO_Coil_*/BX1_IO_Cycle) lives INSIDE the
+        // PLC_RW_BX1 composite, so BX1_RES instantiates only BX1_IO -- the same shape M262 has with
+        // PLC_RW_M262. Same sensors, same coils, same 50 ms scan; only the nesting changes.
+        // ⚠ Rig-verify: a SYMLINKMULTIVAR with an ABSOLUTE cross-instance NAME
+        // (BX1_RES.CoverPNP_Vr.OutputToWork) must resolve from INSIDE a composite type. Proven by
+        // spike (EIP_Output_Word 16#0004); set false to restore the external bridge in one rebuild.
+        public bool Bx1BridgeInsideComposite { get; set; } = true;
 
         // SAFETY: on start forces CoverPNP_Hr HOME (ToWork=0,ToHome=1) until the at-home sensor is TRUE so cover_hr can't auto-energise Work (swivel-collision). Run-time only: does NOT act on EAE Clean/STOP/fault. Homing while STOPPED needs the TM3BC coupler ToHome fallback (word 16#0002) set on its own web server (192.168.1.210).
         public bool Bx1CoverSafeStart { get; set; } = true;
@@ -215,9 +220,6 @@ namespace CodeGen.Configuration
 
         public string TemplateIec61499Dir =>
             Path.GetDirectoryName(Path.GetDirectoryName(ActuatorTemplatePath)) ?? string.Empty;
-
-        public string TemplateHmiDir =>
-            Path.Combine(Path.GetDirectoryName(TemplateIec61499Dir) ?? string.Empty, "HMI");
 
         public static MapperConfig Load()
         {
