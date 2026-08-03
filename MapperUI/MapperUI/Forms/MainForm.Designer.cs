@@ -24,7 +24,6 @@ namespace MapperUI
             this.txtModelPath = new System.Windows.Forms.TextBox();
             this.btnMappingRules = new System.Windows.Forms.Button();
             this.btnBrowse = new System.Windows.Forms.Button();
-            this.btnGenerateCode = new System.Windows.Forms.Button();
             this.grpValidation = new System.Windows.Forms.GroupBox();
             this.pnlDetectedInfo = new System.Windows.Forms.FlowLayoutPanel();
             this.lblDetectedPrefix = new System.Windows.Forms.Label();
@@ -54,14 +53,6 @@ namespace MapperUI
             this.lblEngineStatusDot = new System.Windows.Forms.Label();
             this.txtActivityLog = new System.Windows.Forms.TextBox();
             this.pnlEngineBottom = new System.Windows.Forms.Panel();
-            this.btnIO = new System.Windows.Forms.Button();
-            this.btnGenerateTemplate = new System.Windows.Forms.Button();
-            this.btnADP = new System.Windows.Forms.Button();
-            this.btnGenerate = new System.Windows.Forms.Button();
-            this.btnGenerateSevenState = new System.Windows.Forms.Button();
-            this.btnGenerateProcessFB = new System.Windows.Forms.Button();
-            this.btnGeneratePusherTest = new System.Windows.Forms.Button();
-            this.btnGenerateFeedStation = new System.Windows.Forms.Button();
             this.btnTestStation1 = new System.Windows.Forms.Button();
             this.statusStrip = new System.Windows.Forms.StatusStrip();
             this.lblStatus = new System.Windows.Forms.ToolStripStatusLabel();
@@ -128,12 +119,7 @@ namespace MapperUI
             this.btnBrowse.Text = "Browse";
             this.btnBrowse.Click += new System.EventHandler(this.btnBrowse_Click);
 
-            this.btnGenerateSevenState.Visible = false;
-            this.btnGenerateSevenState.Click += new System.EventHandler(this.btnGenerateSevenState_Click);
 
-            this.btnGeneratePusherTest.Visible = false;
-            this.btnGenerateProcessFB.Visible = false;
-            this.btnGenerateFeedStation.Visible = false;
 
 
             this.btnTestStation1.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
@@ -151,8 +137,6 @@ namespace MapperUI
 
             // Generate Code placeholder hidden again post-QRM. Kept in code so
             // the future "single primary action" UI is a one-line flip away.
-            this.btnGenerateCode.Visible = false;
-            this.btnGenerateCode.Click += new System.EventHandler(this.btnGenerateCode_Click);
 
 
             this.grpValidation.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left | System.Windows.Forms.AnchorStyles.Right;
@@ -303,24 +287,15 @@ namespace MapperUI
             this.txtActivityLog.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
 
 
-            this.pnlEngineBottom.Controls.Add(this.btnGenerate);
-            this.pnlEngineBottom.Controls.Add(this.btnADP);
-            this.pnlEngineBottom.Controls.Add(this.btnGenerateTemplate);
-            this.pnlEngineBottom.Controls.Add(this.btnIO);
             this.pnlEngineBottom.Dock = System.Windows.Forms.DockStyle.Bottom;
             this.pnlEngineBottom.Height = 44;
             this.pnlEngineBottom.BackColor = System.Drawing.SystemColors.Control;
             this.pnlEngineBottom.Padding = new System.Windows.Forms.Padding(4, 6, 4, 4);
 
 
-            this.btnIO.Visible = false;
 
-            this.btnGenerateTemplate.Visible = false;
 
-            this.btnADP.Visible = false;
 
-            this.btnGenerate.Visible = false;
-            this.btnGenerate.Click += new System.EventHandler(this.btnGenerate_Click);
 
 
             this.statusStrip.Items.AddRange(new System.Windows.Forms.ToolStripItem[] { this.lblStatus });
@@ -332,11 +307,6 @@ namespace MapperUI
             this.ClientSize = new System.Drawing.Size(1632, 792);
             this.Controls.Add(this.grpMappingInfo);
             this.Controls.Add(this.grpValidation);
-            this.Controls.Add(this.btnGenerateCode);
-            this.Controls.Add(this.btnGenerateSevenState);
-            this.Controls.Add(this.btnGenerateProcessFB);
-            this.Controls.Add(this.btnGeneratePusherTest);
-            this.Controls.Add(this.btnGenerateFeedStation);
             this.Controls.Add(this.btnTestStation1);
             this.Controls.Add(this.btnBrowse);
             this.Controls.Add(this.lblLoadedFile);
@@ -394,7 +364,6 @@ namespace MapperUI
         private System.Windows.Forms.TextBox txtModelPath;
         private System.Windows.Forms.Button btnMappingRules;
         private System.Windows.Forms.Button btnBrowse;
-        private System.Windows.Forms.Button btnGenerateCode;
         private System.Windows.Forms.GroupBox grpValidation;
         private System.Windows.Forms.FlowLayoutPanel pnlDetectedInfo;
         private System.Windows.Forms.Label lblDetectedPrefix;
@@ -424,14 +393,6 @@ namespace MapperUI
         private System.Windows.Forms.Label lblEngineStatusDot;
         private System.Windows.Forms.TextBox txtActivityLog;
         private System.Windows.Forms.Panel pnlEngineBottom;
-        private System.Windows.Forms.Button btnIO;
-        private System.Windows.Forms.Button btnGenerateTemplate;
-        private System.Windows.Forms.Button btnADP;
-        private System.Windows.Forms.Button btnGenerate;
-        private System.Windows.Forms.Button btnGenerateSevenState;
-        private System.Windows.Forms.Button btnGenerateProcessFB;
-        private System.Windows.Forms.Button btnGeneratePusherTest;
-        private System.Windows.Forms.Button btnGenerateFeedStation;
         private System.Windows.Forms.Button btnTestStation1;
         private System.Windows.Forms.Label lblLoadedFile;
         private System.Windows.Forms.StatusStrip statusStrip;
