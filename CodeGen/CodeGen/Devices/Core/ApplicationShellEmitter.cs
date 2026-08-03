@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using CodeGen.Configuration;
+using CodeGen.Services;
 
 namespace CodeGen.Devices.Core
 {
@@ -12,35 +15,9 @@ namespace CodeGen.Devices.Core
         public const string SystemId = "00000000-0000-0000-0000-000000000000";
         public const string AppId    = "00000000-0000-0000-0000-000000000001";
 
-        // Written name-blank; M262SysdevEmitter.AlignApplicationName sets the WMG name later.
-        const string SysappXml =
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
-            "<Application xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" " +
-            "xmlns=\"https://www.se.com/LibraryElements\" Name=\"\" " +
-            $"ID=\"{AppId}\" />";
-
-        // Placeholder so PrepareDemonstratorForGeneration's File.Exists check passes;
-        // GenerateStation1TestSyslay overwrites this with the real layout.
-        const string EmptySyslayXml =
-            "﻿<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
-            "<Layer ID=\"2240693B1370B496\" Name=\"\" Comment=\"\" IsDefault=\"true\" " +
-            "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" " +
-            "xmlns=\"https://www.se.com/LibraryElements\">\r\n  <SubAppNetwork />\r\n</Layer>";
-
-        const string AspmapXml =
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
-            "<ASPMapping xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" " +
-            "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" />";
-
-        static string OpcuaXml(string uid) =>
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
-            "<OPCUAComplexObject xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" " +
-            "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n" +
-            $"  <OPCUAComplexObject UID=\"{uid}\" />\r\n</OPCUAComplexObject>";
-
         // Recreates the application shell + re-registers it in the .dfbproj, only when the
         // .sysapp is absent. Runs at the start of Generate, before Prepare needs the layout.
-        public static bool EnsureApplicationShell(string? eaeRoot, Action<string>? log = null)
+        public static bool EnsureApplicationShell(MapperConfig cfg, string? eaeRoot, Action<string>? log = null)
         {
             if (string.IsNullOrEmpty(eaeRoot)) return false;
             var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
@@ -55,14 +32,20 @@ namespace CodeGen.Devices.Core
             try
             {
                 Directory.CreateDirectory(companionDir);
-                File.WriteAllText(sysappPath, SysappXml);
+                // Written name-blank; M262SysdevEmitter.AlignApplicationName sets the WMG name later.
+                File.WriteAllText(sysappPath, TemplateDocument.Load(cfg, @"Application\Application.sysapp",
+                    new Dictionary<string, string> { ["AppId"] = AppId }));
 
+                // Placeholder so PrepareDemonstratorForGeneration's File.Exists check passes;
+                // GenerateStation1TestSyslay overwrites this with the real layout.
                 var syslayPath = Path.Combine(appDir, SystemId + ".syslay"); // == SyslayPath2
-                if (!File.Exists(syslayPath)) File.WriteAllText(syslayPath, EmptySyslayXml);
+                if (!File.Exists(syslayPath))
+                    File.WriteAllText(syslayPath, TemplateDocument.Load(cfg, @"Application\Empty.syslay"));
 
-                File.WriteAllText(Path.Combine(companionDir, "aspmap.xml"), AspmapXml);
-                File.WriteAllText(Path.Combine(companionDir, "opcua.xml"),  OpcuaXml(AppId));
-                File.WriteAllText(Path.Combine(appDir, "opcua.xml"),        OpcuaXml(SystemId));
+                File.WriteAllText(Path.Combine(companionDir, "aspmap.xml"),
+                    TemplateDocument.Load(cfg, @"Application\aspmap.xml"));
+                File.WriteAllText(Path.Combine(companionDir, "opcua.xml"), CodeGen.Artefacts.OpcuaCompanionEmitter.BuildOpcuaCompanion(AppId));
+                File.WriteAllText(Path.Combine(appDir, "opcua.xml"),       CodeGen.Artefacts.OpcuaCompanionEmitter.BuildOpcuaCompanion(SystemId));
 
                 var dfbproj = Path.Combine(eaeRoot, "IEC61499", "IEC61499.dfbproj");
                 int reg = DfbprojRegistrar.RegisterApplicationShell(dfbproj);
