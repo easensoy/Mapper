@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -177,6 +177,10 @@ namespace CodeGen.Services
                 if (prefixToStrip != null && relativePath.StartsWith(prefixToStrip, StringComparison.OrdinalIgnoreCase))
                     relativePath = relativePath.Substring(prefixToStrip.Length);
 
+                // HMI faceplates are owned by CodeGen.Hmi (Template Library\HMI\Faceplates), which
+                // regenerates them every run; the copies inside CAT packages are ignored.
+                if (relativePath.StartsWith("HMI/", StringComparison.OrdinalIgnoreCase)) continue;
+
                 var targetPath = Path.Combine(eaeProjectDir, relativePath);
                 var targetDir = Path.GetDirectoryName(targetPath)!;
 
@@ -191,46 +195,6 @@ namespace CodeGen.Services
                 else
                 {
                     result.FilesSkipped++;
-                }
-            }
-        }
-
-        internal static void GenerateCfgFiles(string eaeProjectDir, DeployResult result)
-        {
-            var iec61499Dir = Path.Combine(eaeProjectDir, "IEC61499");
-            foreach (var cat in result.CATsDeployed)
-            {
-                var catDir = Path.Combine(iec61499Dir, cat);
-                var cfgPath = Path.Combine(catDir, $"{cat}.cfg");
-                if (File.Exists(cfgPath)) continue;
-                if (!Directory.Exists(catDir)) continue;
-
-                var hmi = cat + "_HMI";
-                var cfg = $@"<?xml version=""1.0"" encoding=""utf-8""?>
-<CAT xmlns:xsd=""http://www.w3.org/2001/XMLSchema"" xmlns:xsi=""http://www.w3.org/2001/XMLSchema-instance"" Name=""{cat}"" CATFile=""{cat}\{cat}.fbt"" SymbolDefFile=""..\HMI\{cat}\{cat}.def.cs"" SymbolEventFile=""..\HMI\{cat}\{cat}.event.cs"" DesignFile=""..\HMI\{cat}\{cat}.Design.resx"" xmlns=""http://www.nxtcontrol.com/IEC61499.xsd"">
-  <HMIInterface Name=""IThis"" FileName=""{cat}\{hmi}.fbt"" UsedInCAT=""true"" Usage=""Private"">
-    <Symbol Name=""sDefault"" FileName=""..\HMI\{cat}\{cat}_sDefault.cnv.cs"">
-      <DependentFiles>..\HMI\{cat}\{cat}_sDefault.cnv.Designer.cs</DependentFiles>
-      <DependentFiles>..\HMI\{cat}\{cat}_sDefault.cnv.resx</DependentFiles>
-      <DependentFiles>..\HMI\{cat}\{cat}_sDefault.cnv.xml</DependentFiles>
-    </Symbol>
-  </HMIInterface>
-  <Plugin Name=""Plugin=OfflineParametrizationEditor;IEC61499Type=CAT_OFFLINE;$ItemType$=None"" Project=""IEC61499"" Value=""{cat}\{cat}_CAT.offline.xml"" />
-  <Plugin Name=""Plugin=OPCUAConfigurator;IEC61499Type=CAT_OPCUA;$ItemType$=None"" Project=""IEC61499"" Value=""{cat}\{cat}_CAT.opcua.xml"" />
-  <Plugin Name=""Plugin=OfflineParametrizationEditor;IEC61499Type=CAT_OFFLINE;$ItemType$=None"" Project=""IEC61499"" Value=""{cat}\{hmi}.offline.xml"" />
-  <Plugin Name=""Plugin=OPCUAConfigurator;IEC61499Type=CAT_OPCUA;$ItemType$=None"" Project=""IEC61499"" Value=""{cat}\{hmi}.opcua.xml"" />
-  <HWConfiguration xsi:nil=""true"" />
-</CAT>";
-                File.WriteAllText(cfgPath, cfg);
-                result.FilesExtracted++;
-                MapperLogger.Info($"[Deploy] Generated {cat}.cfg");
-
-                var metaPath = Path.Combine(catDir, $"{hmi}.meta.xml");
-                if (!File.Exists(metaPath))
-                {
-                    File.WriteAllBytes(metaPath, Array.Empty<byte>());
-                    result.FilesExtracted++;
-                    MapperLogger.Info($"[Deploy] Created empty {hmi}.meta.xml placeholder");
                 }
             }
         }
