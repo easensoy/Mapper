@@ -15,6 +15,11 @@ bx1:
 revPi:
   targetIp: 192.168.1.1
   hostIp: 192.168.1.2
+hmi:
+  hostIp: 192.168.1.2
+  internalRuntimeIp: 192.168.1.1
+  logicalPort: 61999
+  securePort: 51443
 defaultNetwork:
   subnetAddress: 192.168.0.0
   subnetMask: 255.255.255.0
