@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using CodeGen.Mapping;
@@ -8,9 +8,16 @@ using static CodeGen.Translation.Process.Recipes.RecipeCommandVocabulary;
 
 namespace CodeGen.Translation.Process.Recipes
 {
-    // Deterministic Control.xml -> recipe rows. A process state names an actuator ACTION; the state's outgoing
-    // condition names the actuator state that ACTION must reach; the command trajectory to reach it comes from the
-    // target's own State_Numbers via the CAT command protocol (never from a name string).
+    // Deterministic Control.xml -> recipe rows.
+    //
+    // COMMAND OWNERSHIP. Who moves an actuator is declared by the ACTUATOR, not by the process: an actuator
+    // transition whose Sequence_Condition names Process/State is the model stating that that process state issues
+    // the command driving the actuator toward that transition's destination. A condition on a PROCESS transition
+    // naming an actuator state is the opposite -- an observation the process waits on. Treating those observations
+    // as instructions makes every process that merely watches an actuator also drive it, which is how a Transfer
+    // owned by one process came to be commanded by three, and how a single "has it returned yet" condition
+    // expanded into a whole advance-and-return stroke. So a process state emits exactly the movements it owns,
+    // then waits on what its outgoing conditions observe.
     //
     // PHASE PROTOCOL. Every process announces two of its OWN model states on the ring: the entry state of its
     // transition chain (it has begun a cycle) and each state a peer waits on (it has reached that phase). A
@@ -50,21 +57,31 @@ namespace CodeGen.Translation.Process.Recipes
             var states = OrderStatesByTransitionChain(process.States);
             foreach (var line in BuildTransitionTable(process.States, states)) arrays.TransitionTable.Add(line);
             var announce = ComputeAnnounce(process, ctx);
+            var owned = BuildOwnership(process, ctx);
 
             var pos = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             var at = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);      // actuator -> the StateID it now rests in
             var graphs = new Dictionary<string, ActuatorGraph>(StringComparer.OrdinalIgnoreCase);
             var rows = new List<Row>();
             var firstRow = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            // Producers this recipe has already proven to be inside a fresh cycle (see EmitHandoff).
+            var armed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             for (int idx = 0; idx < states.Count; idx++)
             {
                 var state = states[idx];
                 int before = rows.Count;
-                // A process reaches an ordinary phase as soon as the previous phase's work finished, so it
-                // announces that phase before the conditions it then waits on. Its ENTRY phase is different: the
-                // process has not begun a cycle until it has been authorised to, so the entry announcement is
-                // emitted AFTER the entry conditions. Otherwise every process would publish "I have started" the
+                // A phase is announced only once its OWN work is done. The announcement is a claim about the
+                // plant -- 'bearing_pnp_home_pos' asserts the arm is home -- and a peer acts on it, so publishing
+                // it before the movement that makes it true releases that peer into a machine that is still
+                // moving. On the no-clamp model that is a collision: Disassembly announced its bearing-home phase
+                // BEFORE homing the arm, Feed took that as "Disassembly finished", re-advanced the Transfer, and
+                // Assembly began commanding the same swivel Disassembly was still carrying a bearing on. The
+                // actuator interlocks cannot catch it -- they guard the Work1<->Work2 crossing, never the move out
+                // of home. So: own work, THEN announce, THEN wait on the conditions.
+                //
+                // The ENTRY phase additionally announces after its entry CONDITIONS: a process has not begun a
+                // cycle until it has been authorised to, otherwise every process publishes "I have started" the
                 // moment the controllers are deployed, before any material arrived.
                 bool entryPhase = idx == 0;
                 void Announcement()
@@ -73,18 +90,21 @@ namespace CodeGen.Translation.Process.Recipes
                     if (kind.HasFlag(Announce.Ring))       rows.Add(Row.Cmd(process.Name.Trim(), state.StateNumber, state.StateID));   // report own State_Number on the ring
                     if (kind.HasFlag(Announce.CycleReady)) rows.Add(Row.Cmd("cycle_ready", state.StateNumber, state.StateID));         // ... and across CycleReady to the Feed ring
                 }
-                if (!entryPhase) Announcement();
+                // The phase's own work: the movements this state is declared to own. Each ends in the arrival WAIT
+                // of the command it issued, so once Work() has run the phase really has been reached.
+                void Work() => EmitOwnedMoves(process, state, owned, ctx, pos, at, graphs, rows, arrays);
+                if (!entryPhase) { Work(); Announcement(); }
                 foreach (var t in state.Transitions.OrderBy(t => t.Priority))
                 {
                     // Conditions of one transition are ANDed, so two of them naming states of the SAME component
                     // that settle at the SAME stop (VueOne models a rest as both "ReturnedHome" and
-                    // "ReturnedFinished") state one requirement, not two: without this the second sends the
-                    // actuator a full lap back around its graph to re-reach the place it already holds.
+                    // "ReturnedFinished") state one requirement, not two.
                     var settledHere = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
                     foreach (var cond in t.Conditions)
-                        EmitCondition(process, state, cond, t.Conditions.Count, ctx, pos, at, graphs, rows, arrays, settledHere);
+                        EmitCondition(process, state, cond, t.Conditions.Count, ctx, pos, at, graphs, rows, arrays,
+                            settledHere, owned, entryPhase, armed);
                 }
-                if (entryPhase) Announcement();
+                if (entryPhase) { Work(); Announcement(); }
                 if (rows.Count > before) firstRow[state.StateID] = before;
             }
 
@@ -93,31 +113,111 @@ namespace CodeGen.Translation.Process.Recipes
             return arrays;
         }
 
-        private static void EmitCondition(VueOneComponent process, VueOneState state, VueOneCondition cond,
-            int gateCount, Ctx ctx, Dictionary<string, int> pos,
-            Dictionary<string, string> at, Dictionary<string, ActuatorGraph> graphs, List<Row> rows,
-            RecipeArrays arrays, Dictionary<string, int> settledHere)
+        // One movement a process state is declared to own, read off the ACTUATOR's own transition.
+        private sealed class OwnedMove
         {
-            var target = Resolve(cond, ctx.All);
-            if (IsProcess(target)) { EmitHandoff(process, state, cond, gateCount, target, ctx, rows, arrays); return; }
+            public VueOneComponent Actuator = null!;
+            public string OriginStateId = string.Empty;
+            public string DestinationStateId = string.Empty;
+            public string TransitionId = string.Empty;
+        }
 
-            int id = SlotOf(target, ctx, process, state);
-            int reached = StateNumberOf(cond, target, process, state);
-
-            if (IsSensor(target))
+        // Command ownership, taken from every actuator's own transitions: a Sequence_Condition naming
+        // Process/State means that process state commands this actuator toward that transition's destination.
+        // Indexed by the owning process state so compiling a state is a lookup, not a search.
+        private static Dictionary<string, List<OwnedMove>> BuildOwnership(VueOneComponent process, Ctx ctx)
+        {
+            var res = new Dictionary<string, List<OwnedMove>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var actuator in ctx.All)
             {
-                int wait = ctx.SensorPresent.TryGetValue(target.Name.Trim(), out int p) ? p : reached;
-                if (!pos.TryGetValue(target.ComponentID, out int c) || c != wait)
-                {
-                    rows.Add(Row.Wait(id, wait, state.StateID));
-                    pos[target.ComponentID] = wait;
-                }
-                return;
+                if (IsProcess(actuator) || IsSensor(actuator)) continue;
+                foreach (var s in actuator.States)
+                    foreach (var t in s.Transitions.OrderBy(t => t.Priority))
+                        foreach (var cond in t.Conditions)
+                        {
+                            var owner = TryResolve(cond, ctx.All);
+                            if (owner == null || !IsProcess(owner) || !SameName(owner, process)) continue;
+
+                            var ownerState = PeerState(owner, cond)
+                                ?? throw Fail(process, null,
+                                    $"'{actuator.Name}' transition '{t.TransitionID}' is owned by condition " +
+                                    $"'{cond.Name}', which names no state of '{owner.Name}'");
+                            if (string.IsNullOrWhiteSpace(t.DestinationStateID))
+                                throw Fail(process, ownerState,
+                                    $"owns '{actuator.Name}' transition '{t.TransitionID}', which declares no " +
+                                    "destination state, so the commanded movement cannot be derived");
+
+                            var list = res.TryGetValue(ownerState.StateID, out var l)
+                                ? l : (res[ownerState.StateID] = new List<OwnedMove>());
+                            // The model routinely restates one movement (the same origin->destination declared
+                            // twice); that is one command, not two.
+                            if (list.Any(m => string.Equals(m.Actuator.ComponentID, actuator.ComponentID, StringComparison.OrdinalIgnoreCase) &&
+                                              string.Equals(m.DestinationStateId, t.DestinationStateID, StringComparison.OrdinalIgnoreCase)))
+                                continue;
+                            list.Add(new OwnedMove
+                            {
+                                Actuator = actuator,
+                                OriginStateId = string.IsNullOrWhiteSpace(t.OriginStateID) ? s.StateID : t.OriginStateID,
+                                DestinationStateId = t.DestinationStateID,
+                                TransitionId = t.TransitionID,
+                            });
+                        }
             }
+            return res;
+        }
+
+        // The movements this state owns, in a deterministic order. Where a state owns SEVERAL movements of the
+        // same actuator the model is describing a sequence, not a choice -- a Checker owned both
+        // ReturnedHome->Lowering and Down->Rising by one process state performs the whole down-then-up stroke.
+        // They are executed by following the chain from where the recipe last left the actuator: each leg whose
+        // ORIGIN is the current position runs, and running it advances the position for the next. Two legs
+        // leaving the SAME origin is a fork the model does not resolve, and generation fails rather than pick one.
+        private static void EmitOwnedMoves(VueOneComponent process, VueOneState state,
+            Dictionary<string, List<OwnedMove>> owned, Ctx ctx, Dictionary<string, int> pos,
+            Dictionary<string, string> at, Dictionary<string, ActuatorGraph> graphs, List<Row> rows,
+            RecipeArrays arrays)
+        {
+            if (!owned.TryGetValue(state.StateID, out var moves)) return;
+
+            foreach (var group in moves.GroupBy(m => m.Actuator.ComponentID, StringComparer.OrdinalIgnoreCase))
+            {
+                var target = group.First().Actuator;
+                var g = Graph(target, graphs);
+                var pending = group.ToList();
+
+                foreach (var fork in pending.GroupBy(m => m.OriginStateId, StringComparer.OrdinalIgnoreCase).Where(f => f.Count() > 1))
+                    throw Fail(process, state,
+                        $"owns {fork.Count()} movements of '{target.Name}' that all leave '{g.NameOf(fork.Key)}' " +
+                        $"(transitions {string.Join(", ", fork.Select(m => m.TransitionId))}), so which command " +
+                        "this state issues is ambiguous");
+
+                if (pending.Count == 1) { DriveOwned(process, state, pending[0], target, g, ctx, pos, at, rows); continue; }
+
+                // Follow the chain. A leg that never becomes applicable belongs to the actuator's other pass
+                // through this state (the model reuses one process state across both directions of a cycle).
+                for (bool moved = true; moved && pending.Count > 0; )
+                {
+                    string here = at.TryGetValue(target.ComponentID, out var cur) ? cur : g.StartId;
+                    var leg = pending.FirstOrDefault(m => string.Equals(m.OriginStateId, here, StringComparison.OrdinalIgnoreCase));
+                    moved = leg != null;
+                    if (leg == null) break;
+                    pending.Remove(leg);
+                    DriveOwned(process, state, leg, target, g, ctx, pos, at, rows);
+                }
+            }
+        }
+
+        // Issue the owned command. A destination is normally a MOTION state, so the stop actually commanded is the
+        // first stop the actuator reaches through it -- which is also what the CAT can report back.
+        private static void DriveOwned(VueOneComponent process, VueOneState state, OwnedMove move,
+            VueOneComponent target, ActuatorGraph g, Ctx ctx, Dictionary<string, int> pos,
+            Dictionary<string, string> at, List<Row> rows)
+        {
+            int id = SlotOf(target, ctx, process, state);
 
             // A task arm (VcID=UR3e -> Robot_Task_CAT) runs its whole modeled move on one StartTask: its core
-            // reports 1 while running, 2 on completion, 0 when reset. Fold every condition on it into that one
-            // start(1)->done(2)->reset(2)->ready(0) handshake -- Robot never commands 3 or 5.
+            // reports 1 while running, 2 on completion, 0 when reset. Every movement the model gives it folds
+            // into that single start(1)->done(2)->reset(2)->ready(0) handshake -- Robot never commands 3 or 5.
             if (TemplateMap.IsRobotTaskArm(target))
             {
                 if (pos.ContainsKey(target.ComponentID)) return;
@@ -129,47 +229,187 @@ namespace CodeGen.Translation.Process.Recipes
                 return;
             }
 
-            // A jaw's direction is a physical wiring fact (INVARIANTS R-12: the rig is wired energise-to-GRIP
-            // while the twin models the jaw geometry energise-to-OPEN), so the twin's stop must never pick the
-            // direction or the part is dropped. It CAN say WHEN: once the jaw has acted, a condition naming the
-            // stop it already holds is a hold-guard, and one naming the other stop is the opposite action. Only
-            // the very first reference has nothing to compare against, and there the universal rule applies -- a
-            // transfer must hold before it moves, so the first action on a jaw grips.
+            var stopId = g.FirstStopVia(move.DestinationStateId)
+                ?? throw Fail(process, state,
+                    $"owns '{target.Name}' transition '{move.TransitionId}' toward '{g.NameOf(move.DestinationStateId)}', " +
+                    "from which the actuator reaches no physical stop, so no command can be derived");
+
+            // A jaw's direction is a physical wiring fact (REVERTED_FIXES R-12: the rig is wired energise-to-GRIP
+            // while the twin models the jaw geometry energise-to-OPEN), so the twin's destination must never pick
+            // the direction or the part is dropped. The model still says WHEN: each owned movement is one jaw
+            // action, and a transfer must hold before it moves, so the first action on a jaw grips and they
+            // alternate from there.
             if (IsGripper(target))
             {
-                var (gc, gs) = !pos.TryGetValue(target.ComponentID, out int jaw) ? (1, 2)
-                             : Command(target, reached, process, state).settled == jaw ? (0, jaw)   // holds: no action
-                             : jaw == 2 ? (3, 0) : (1, 2);
-                if (gc == 0 || Restates(settledHere, target, gs)) return;
+                var (gc, gs) = !pos.TryGetValue(target.ComponentID, out int jaw) ? (1, 2) : jaw == 2 ? (3, 0) : (1, 2);
                 rows.Add(Row.Cmd(TemplateMap.RingKey(target.Name), gc, state.StateID));
                 rows.Add(Row.Wait(id, gs, state.StateID));
                 pos[target.ComponentID] = gs;
+                at[target.ComponentID] = stopId;
                 return;
             }
 
-            EmitTrajectory(process, state, cond, target, id, at, graphs, rows, settledHere);
+            DriveTo(process, state, target, id, stopId, at, g, rows);
         }
 
-        // The command trajectory is the actuator's OWN shortest path from where this recipe last left it to the
-        // state the condition names: every physical stop crossed on the way is commanded in order. So a process
-        // state that names only a stroke's END (Checker/RisingFinished) still executes the whole stroke (down,
-        // then up), a stop already occupied costs nothing (no duplicated stroke), and a transfer arm's return
-        // branch is driven by the branch it is actually on -- no numeric thresholds, no state-name guessing.
-        private static void EmitTrajectory(VueOneComponent process, VueOneState state, VueOneCondition cond,
-            VueOneComponent target, int id, Dictionary<string, string> at,
-            Dictionary<string, ActuatorGraph> graphs, List<Row> rows, Dictionary<string, int> settledHere)
+        private static void EmitCondition(VueOneComponent process, VueOneState state, VueOneCondition cond,
+            int gateCount, Ctx ctx, Dictionary<string, int> pos,
+            Dictionary<string, string> at, Dictionary<string, ActuatorGraph> graphs, List<Row> rows,
+            RecipeArrays arrays, Dictionary<string, int> settledHere,
+            Dictionary<string, List<OwnedMove>> owned, bool entryPhase, HashSet<string> armed)
         {
-            if (!graphs.TryGetValue(target.ComponentID, out var g))
-                graphs[target.ComponentID] = g = new ActuatorGraph(target);
+            var target = Resolve(cond, ctx.All);
+            if (IsProcess(target)) { EmitHandoff(process, state, cond, gateCount, target, ctx, rows, arrays, armed); return; }
 
-            var dest = PeerState(target, cond)
+            int id = SlotOf(target, ctx, process, state);
+            int reached = StateNumberOf(cond, target, process, state);
+
+            if (IsSensor(target))
+            {
+                int wait = ctx.SensorPresent.TryGetValue(target.Name.Trim(), out int p) ? p : reached;
+                if (!pos.TryGetValue(target.ComponentID, out int c) || c != wait)
+                {
+                    // Ask before waiting. A sensor announces a level only on the edge that produced it, so a
+                    // level that was already true before this PLC started is announced once (at INIT) and never
+                    // again -- and that one frame is lost if the consuming ring is not up yet, leaving the WAIT
+                    // dead until the sensor is physically toggled. Addressing the sensor drives its CAT through
+                    // sample-then-report, so the WAIT below always evaluates a freshly read input. The state
+                    // value carries no meaning here: nothing on a sensor consumes state_cmd, the frame is only
+                    // a request to report. Bounded by construction -- one request, one report.
+                    //
+                    // NOT RingKey here. BREQ's test is `component_state_in.dest_name = name`, case-sensitive ST
+                    // string equality. Actuators are claimable in lower case because the injector lower-cases
+                    // actuator_name; a sensor is parameterised with its component name verbatim, so a
+                    // lower-cased target would circle the ring unclaimed and the sensor would never answer.
+                    rows.Add(Row.Cmd(target.Name.Trim(), 0, state.StateID));
+                    rows.Add(Row.Wait(id, wait, state.StateID));
+                    pos[target.ComponentID] = wait;
+                }
+                return;
+            }
+
+            // Everything below is an OBSERVATION. The process is watching an actuator it may or may not own; the
+            // command, if this state issues one at all, was already emitted from the ownership the actuator itself
+            // declares. So a condition can only add a requirement that the actuator has REACHED a stop.
+            var g = Graph(target, graphs);
+            var named = PeerState(target, cond)
                 ?? throw Fail(process, state, $"condition '{cond.Name}' does not name a state of '{target.Name}'");
-            if (g.IsStop(dest.StateID) &&
-                Restates(settledHere, target, Settled(target, g.StopNumber(dest.StateID), process, state))) return;
-            string from = at.TryGetValue(target.ComponentID, out var f) ? f : g.StartId;
-            var path = g.PathTo(from, dest.StateID)
-                ?? throw Fail(process, state, $"'{target.Name}' cannot reach '{dest.Name}' from '{g.NameOf(from)}' along its own transitions");
 
+            // A jaw and the task arm do not report the twin's stop numbering: the jaw's direction is inverted by
+            // physical wiring (R-12) and the arm folds its whole move into one 1/2/0 handshake. Their arrival is
+            // proved by the owning command's own WAIT, so an observation adds nothing -- but only where this
+            // state really is the owner. Anywhere else the model is asking for something the ring cannot express.
+            if (IsGripper(target) || TemplateMap.IsRobotTaskArm(target))
+            {
+                if (!Owns(owned, state, target))
+                    arrays.Warnings.Add(
+                        $"'{process.Name}' state '{state.Name}': condition '{cond.Name}' observes " +
+                        $"'{target.Name}', whose reported states are the CAT's handshake rather than the twin's " +
+                        "stop numbering, and this state does not own its movement; the step is sequenced by the " +
+                        "owning process instead.");
+                return;
+            }
+
+            // The CAT reports stops, so a condition naming a motion state is already sequenced by the arrival
+            // WAIT of whichever command drives through it.
+            if (!g.IsStop(named.StateID)) return;
+
+            int settledAt = Settled(target, g.StopNumber(named.StateID), process, state);
+            if (Restates(settledHere, target, settledAt)) return;
+
+            // An ENTRY gate on an actuator this process NEVER MOVES has to consume a fresh arrival. The process
+            // re-enters its first phase the moment the gate reads true, and an actuator it does not drive is
+            // wherever the last cycle left it -- if that is the observed stop the gate is already true and the
+            // process restarts immediately, re-doing work that was finished. That is how a no-clamp Assembly,
+            // whose entry gate is "Transfer advanced" and which never touches the Transfer, looped straight back
+            // and drove the swivel to Work1 to pick up the bearing Disassembly had just released there.
+            //
+            // A process that DOES own a movement of that actuator is not exposed: its own cycle moves the
+            // actuator off the observed stop, so by the time it loops the gate genuinely has to be re-satisfied.
+            // Arming it there would be actively wrong -- the no-clamp Disassembly observes a Transfer that is
+            // still advanced because it is holding the part Disassembly is about to take, and demanding a
+            // departure first would deadlock it against its own return command.
+            //
+            // The arming value is the stop the actuator's own graph says it arrives FROM, so where that settles
+            // to the same value the arming collapses to one WAIT and a gate confirming a resting position is
+            // untouched.
+            if (entryPhase && !OwnsAny(owned, target))
+            {
+                var prev = g.PrevStopInto(named.StateID);
+                if (prev != null)
+                {
+                    int armFrom = Settled(target, g.StopNumber(prev), process, state);
+                    if (armFrom != settledAt) rows.Add(Row.Wait(id, armFrom, state.StateID));
+                }
+            }
+            // Already established by a command in this recipe: that command's arrival WAIT proved it.
+            if (at.TryGetValue(target.ComponentID, out var cur) && g.IsStop(cur) &&
+                Settled(target, g.StopNumber(cur), process, state) == settledAt) return;
+
+            rows.Add(Row.Wait(id, settledAt, state.StateID));
+            at[target.ComponentID] = named.StateID;
+        }
+
+        // Which processes the model declares as commanding this actuator back to a home stop, keyed by the recipe's
+        // ring name. Ownership lives on the actuator's own transitions, so this answers the question the
+        // per-process stranded-actuator guard cannot: an actuator advanced by one process and driven home by
+        // another is not stranded, it is being held for the downstream station.
+        internal static IReadOnlyCollection<string> ProcessesCommandingHome(
+            string ringName, IReadOnlyList<VueOneComponent> all)
+        {
+            var res = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var actuator = all.FirstOrDefault(c => !IsProcess(c) && !IsSensor(c) &&
+                string.Equals(TemplateMap.RingKey(c.Name), ringName?.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (actuator == null) return res;
+
+            var g = new ActuatorGraph(actuator);
+            foreach (var s in actuator.States)
+                foreach (var t in s.Transitions)
+                {
+                    var stop = g.FirstStopVia(t.DestinationStateID);
+                    if (stop == null || !g.IsStop(stop)) continue;
+                    // Home is the stop the CAT settles to 0 -- the same protocol the commands themselves use.
+                    int number = g.StopNumber(stop);
+                    bool home = IsSevenStateCommandable(actuator) ? number == 0 : number is 0 or 4;
+                    if (!home) continue;
+                    foreach (var cond in t.Conditions)
+                    {
+                        var owner = TryResolve(cond, all);
+                        if (owner != null && IsProcess(owner)) res.Add(owner.Name.Trim());
+                    }
+                }
+            return res;
+        }
+
+        // Does this process command this actuator anywhere in its cycle? If not, the actuator's position at the
+        // process's entry is whatever another process left behind.
+        private static bool OwnsAny(Dictionary<string, List<OwnedMove>> owned, VueOneComponent target) =>
+            owned.Values.Any(l => l.Any(m =>
+                string.Equals(m.Actuator.ComponentID, target.ComponentID, StringComparison.OrdinalIgnoreCase)));
+
+        private static bool Owns(Dictionary<string, List<OwnedMove>> owned, VueOneState state, VueOneComponent target) =>
+            owned.TryGetValue(state.StateID, out var m) &&
+            m.Any(x => string.Equals(x.Actuator.ComponentID, target.ComponentID, StringComparison.OrdinalIgnoreCase));
+
+        private static ActuatorGraph Graph(VueOneComponent target, Dictionary<string, ActuatorGraph> graphs) =>
+            graphs.TryGetValue(target.ComponentID, out var g) ? g : graphs[target.ComponentID] = new ActuatorGraph(target);
+
+        // The commanded trajectory is the actuator's OWN shortest path from where this recipe last left it to the
+        // stop the owned movement reaches: every physical stop crossed on the way is commanded in order. So an
+        // owned movement whose destination lies beyond an intermediate stop still executes the whole stroke, a
+        // stop already occupied costs nothing (no duplicated stroke), and a transfer arm's return branch is driven
+        // by the branch it is actually on -- no numeric thresholds, no state-name guessing.
+        private static void DriveTo(VueOneComponent process, VueOneState state, VueOneComponent target, int id,
+            string stopId, Dictionary<string, string> at, ActuatorGraph g, List<Row> rows)
+        {
+            // Where this recipe has not yet moved the actuator, its position is only ASSUMED -- the model's
+            // Initial_State describes where the cycle starts, never where the arm physically is at deploy.
+            bool assumed = !at.TryGetValue(target.ComponentID, out var f);
+            string from = assumed ? g.StartId : f!;
+            var path = g.PathTo(from, stopId)
+                ?? throw Fail(process, state, $"'{target.Name}' cannot reach '{g.NameOf(stopId)}' from '{g.NameOf(from)}' along its own transitions");
+
+            int before = rows.Count;
             int last = g.IsStop(from) ? Settled(target, g.StopNumber(from), process, state) : -1;
             foreach (var sid in path)
             {
@@ -180,7 +420,13 @@ namespace CodeGen.Translation.Process.Recipes
                 rows.Add(Row.Wait(id, settled, state.StateID));
                 last = settled;
             }
-            at[target.ComponentID] = dest.StateID;
+            // The walk commanded nothing because the destination is where the actuator was ASSUMED to be. The
+            // owned movement is still a requirement to be AT that stop, so emit the confirming WAIT rather than
+            // let it vanish on an assumption. Once a prior command in this recipe has established the position
+            // the assumption is gone and the walk speaks for itself.
+            if (assumed && rows.Count == before && g.IsStop(stopId))
+                rows.Add(Row.Wait(id, Settled(target, g.StopNumber(stopId), process, state), state.StateID));
+            at[target.ComponentID] = stopId;
         }
 
         // The CAT command that drives an actuator to a physical stop, from the CAT's shape only: Five-state
@@ -243,6 +489,46 @@ namespace CodeGen.Translation.Process.Recipes
             public int StopNumber(string id) => _stop[id];
             public string NameOf(string id) => _byId.TryGetValue(id, out var s) ? s.Name : id;
 
+            // The stop an owned movement actually commands. A transition's destination is normally a MOTION state
+            // (Advancing, Lowering, TurningWork) which the CAT cannot report; the physical stop that motion ends
+            // at is the first stop reachable from it, and that is what the command drives to and waits on.
+            // The stop the actuator arrives FROM to reach this one: nearest stop walking the transitions
+            // backwards. Used to arm an entry gate so it needs a genuine arrival rather than a held level.
+            public string? PrevStopInto(string stop)
+            {
+                if (string.IsNullOrEmpty(stop) || !_byId.ContainsKey(stop)) return null;
+                var back = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+                foreach (var kv in _next)
+                    foreach (var n in kv.Value)
+                        (back.TryGetValue(n, out var l) ? l : back[n] = new List<string>()).Add(kv.Key);
+                var q = new Queue<string>(); q.Enqueue(stop);
+                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { stop };
+                while (q.Count > 0)
+                    foreach (var p in back.TryGetValue(q.Dequeue(), out var l2) ? l2 : Enumerable.Empty<string>())
+                    {
+                        if (!seen.Add(p)) continue;
+                        if (IsStop(p)) return p;
+                        q.Enqueue(p);
+                    }
+                return null;
+            }
+
+            public string? FirstStopVia(string destination)
+            {
+                if (string.IsNullOrEmpty(destination) || !_byId.ContainsKey(destination)) return null;
+                if (IsStop(destination)) return destination;
+                var q = new Queue<string>(); q.Enqueue(destination);
+                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { destination };
+                while (q.Count > 0)
+                    foreach (var n in _next.TryGetValue(q.Dequeue(), out var l) ? l : Enumerable.Empty<string>())
+                    {
+                        if (!seen.Add(n)) continue;
+                        if (IsStop(n)) return n;
+                        q.Enqueue(n);
+                    }
+                return null;
+            }
+
             // Shortest route from -> to, excluding `from`; null when unreachable.
             public List<string>? PathTo(string from, string to)
             {
@@ -279,7 +565,8 @@ namespace CodeGen.Translation.Process.Recipes
         // condition on the same AND-transition already sequences it (reported, not dropped), or the configured
         // material bridge stands in as a freshly-ARMED edge, or generation fails naming the missing route.
         private static void EmitHandoff(VueOneComponent process, VueOneState state, VueOneCondition cond,
-            int gateCount, VueOneComponent peer, Ctx ctx, List<Row> rows, RecipeArrays arrays)
+            int gateCount, VueOneComponent peer, Ctx ctx, List<Row> rows, RecipeArrays arrays,
+            HashSet<string> armed)
         {
             if (SameName(peer, process)) return;                                   // self: the recipe is already here
             var refState = PeerState(peer, cond) ?? throw Fail(process, state, $"condition '{cond.Name}' does not name a state of '{peer.Name}'");
@@ -299,15 +586,25 @@ namespace CodeGen.Translation.Process.Recipes
             {
                 // Fresh phase transition: the producer must be seen BEGINNING a cycle before its completion of
                 // that cycle counts, so a value held over from the previous cycle cannot release this process.
+                //
+                // Only the FIRST wait on a given producer arms, though. The arming proves the producer has begun a
+                // fresh cycle, and once this recipe has established that, every later phase of the same producer
+                // is by construction inside that cycle. Re-arming would demand a SECOND entry announcement, and a
+                // producer announces its entry once per cycle -- so a consumer that waits on two of its phases
+                // would park forever on the second arming while the producer waited on the consumer to restart.
                 var entry = EntryState(peer);
                 int done = refState.StateNumber;
-                if (entry != null && entry.StateNumber != done)
-                    rows.Add(Row.Wait(peerId, entry.StateNumber, state.StateID));
-                else if (done == 0)
-                    throw Fail(process, state,
-                        $"condition '{cond.Name}' completes on State_Number 0, which is also the initial value of " +
-                        $"a state_table slot, and '{peer.Name}' declares no earlier phase to arm against, so the " +
-                        "completion could never be told apart from a slot that was merely never written");
+                bool armHere = armed.Add(peer.Name?.Trim() ?? string.Empty);
+                if (armHere)
+                {
+                    if (entry != null && entry.StateNumber != done)
+                        rows.Add(Row.Wait(peerId, entry.StateNumber, state.StateID));
+                    else if (done == 0)
+                        throw Fail(process, state,
+                            $"condition '{cond.Name}' completes on State_Number 0, which is also the initial value of " +
+                            $"a state_table slot, and '{peer.Name}' declares no earlier phase to arm against, so the " +
+                            "completion could never be told apart from a slot that was merely never written");
+                }
                 rows.Add(Row.Wait(peerId, done, state.StateID));
                 return;
             }
