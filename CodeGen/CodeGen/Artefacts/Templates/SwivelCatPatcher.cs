@@ -345,14 +345,140 @@ namespace CodeGen.Services
                     changed = true;
                 }
 
+                // An unconditional per-frame re-sample buys nothing: FB1 reports only on a level change, so a
+                // sensor whose ECC already holds the right level stays silent no matter how often it re-reads.
+                // Superseded by the addressed refresh below; reconciled away so a tree deployed with it heals.
+                foreach (var stale in ec.Elements(ns + "Connection")
+                             .Where(c => (string?)c.Attribute("Source") == "stateRprtCmd_in.CNF" &&
+                                         (string?)c.Attribute("Destination") == "FB2.REQ")
+                             .ToList())
+                {
+                    stale.Remove();
+                    changed = true;
+                }
+
+                // Addressed refresh: sample the physical input, THEN report it even when it has not changed.
+                // A sensor announces a level exactly once, on the edge that produced it. A level that was
+                // already true before this PLC started produces no edge at all, and the single frame emitted at
+                // INIT is lost if the consuming ring is not up yet -- after which nothing can re-announce it and
+                // the consumer's WAIT is dead until the sensor is physically toggled.
+                //
+                // StateHandling.CNF fires ONLY from updateComponentState's BREQ state, which is entered only when
+                // component_state_in.dest_name = name. Reports set dest_name := '', so no report can trigger any
+                // sensor: only a frame that names this component does. That makes the refresh strictly bounded --
+                // one request in, one report out, nothing while the line is idle.
+                //
+                // The order matters and must be serial, not fanned out. Driving StateHandling.REQ from the same
+                // event as the sample would publish the CACHED state_sts, which for an active-low input can
+                // briefly report the wrong level and release a gate early. So the request enters FB1 (RPT), FB1
+                // emits SMP, SMP samples FB2, FB2.CNF re-enters FB1 (REQ) and only then does FB1.CNF publish:
+                //     StateHandling.CNF -> FB1.RPT -> FB1.SMP -> FB2.REQ -> FB2.CNF -> FB1.REQ -> FB1.CNF -> publish
+                // RPT parks FB1's ECC in START, where both level transitions are unconditionally available, so the
+                // following sample always emits CNF -- that is what makes an unchanged level report.
+                foreach (var (src, dst) in new[]
+                         {
+                             ("StateHandling.CNF", "FB1.RPT"),
+                             ("FB1.SMP", "FB2.REQ"),
+                         })
+                {
+                    if (ec.Elements(ns + "Connection").Any(c =>
+                            (string?)c.Attribute("Source") == src &&
+                            (string?)c.Attribute("Destination") == dst)) continue;
+                    ec.Add(new XElement(ns + "Connection",
+                        new XAttribute("Source", src), new XAttribute("Destination", dst)));
+                    changed = true;
+                }
+
                 if (!changed) return;
 
                 doc.Save(fbt);
                 result.PatchesApplied.Add(
-                    "Sensor_Bool_CAT: initial sample and explicit re-read paths established; RD re-reads the "
-                    + "input but reports only through the change gate, so a cyclic re-read emits no ring frame.");
-                MapperLogger.Info("[Deploy] Sensor_Bool_CAT.fbt: initial sample + change-gated RD re-read");
+                    "Sensor_Bool_CAT: addressed refresh wired sample-then-report (StateHandling.CNF -> FB1.RPT -> "
+                    + "FB1.SMP -> FB2.REQ -> FB1.REQ -> publish); RD still reports only through the change gate.");
+                MapperLogger.Info("[Deploy] Sensor_Bool_CAT.fbt: addressed refresh (sample-then-report) wired");
             }, notFoundNote: "Sensor_Bool_CAT.fbt not found; RD event inject skipped.");
+
+        // Gives Sensor_Bool the two ports the addressed refresh needs, and the one ECC state that makes an
+        // UNCHANGED level report. The ECC is otherwise change-only: Sensor_TRUE/Sensor_FALSE are entered solely
+        // on the opposite level, so once a level is latched no amount of re-sampling emits anything.
+        //
+        // RPT parks the ECC in START via a transient Arm state whose only action is SMP (the sample request).
+        // From START both level transitions are unconditionally available, so the sample that SMP triggers
+        // always fires one of them and therefore always emits CNF -- carrying the value just read, not a cached
+        // one. Arm returns to START unconditionally, so the ECC never lingers there.
+        //
+        // Nothing else drives RPT: it comes only from updateComponentState's addressed CNF, so the free-running
+        // I/O-scan push (FB2.CNF -> REQ, which every HCF-bound sensor relies on) keeps its change gate intact
+        // and cannot be turned into a per-scan publisher.
+        internal static void EnsureSensorBoolRefreshPath(string eaeProjectDir, DeployResult result)
+            => EditDeployedFbt(eaeProjectDir, "Sensor_Bool.fbt", "Sensor_Bool refresh path inject failed", result,
+                (doc, root, ns, fbt) =>
+            {
+                var iface = root.Element(ns + "InterfaceList");
+                var ecc = root.Element(ns + "BasicFB")?.Element(ns + "ECC");
+                if (iface == null || ecc == null) return;
+                var ei = iface.Element(ns + "EventInputs");
+                var eo = iface.Element(ns + "EventOutputs");
+                if (ei == null || eo == null) return;
+
+                bool changed = false;
+
+                if (!ei.Elements(ns + "Event").Any(e => (string?)e.Attribute("Name") == "RPT"))
+                {
+                    ei.Add(new XElement(ns + "Event", new XAttribute("Name", "RPT"),
+                        new XAttribute("Comment",
+                            "Addressed refresh: sample the input, then report it even if it has not changed")));
+                    changed = true;
+                }
+
+                if (!eo.Elements(ns + "Event").Any(e => (string?)e.Attribute("Name") == "SMP"))
+                {
+                    eo.Add(new XElement(ns + "Event", new XAttribute("Name", "SMP"),
+                        new XAttribute("Comment", "Sample request issued before reporting")));
+                    changed = true;
+                }
+
+                if (!ecc.Elements(ns + "ECState").Any(s => (string?)s.Attribute("Name") == "Arm"))
+                {
+                    var arm = new XElement(ns + "ECState",
+                        new XAttribute("Name", "Arm"),
+                        new XAttribute("Comment", "Request a fresh sample, then re-enter START so the next REQ reports"),
+                        new XAttribute("x", "300"), new XAttribute("y", "1100"),
+                        new XElement(ns + "ECAction", new XAttribute("Output", "SMP")));
+                    var lastState = ecc.Elements(ns + "ECState").LastOrDefault();
+                    if (lastState != null) lastState.AddAfterSelf(arm); else ecc.AddFirst(arm);
+                    changed = true;
+                }
+
+                // Every level state must be able to accept a refresh, otherwise a sensor sitting in
+                // Sensor_TRUE/Sensor_FALSE (the normal case) could not be asked.
+                foreach (var (from, to, cond) in new[]
+                         {
+                             ("START", "Arm", "RPT"),
+                             ("Sensor_TRUE", "Arm", "RPT"),
+                             ("Sensor_FALSE", "Arm", "RPT"),
+                             ("Arm", "START", "1"),
+                         })
+                {
+                    if (ecc.Elements(ns + "ECTransition").Any(t =>
+                            (string?)t.Attribute("Source") == from &&
+                            (string?)t.Attribute("Destination") == to &&
+                            (string?)t.Attribute("Condition") == cond)) continue;
+                    ecc.Add(new XElement(ns + "ECTransition",
+                        new XAttribute("Source", from), new XAttribute("Destination", to),
+                        new XAttribute("Condition", cond),
+                        new XAttribute("x", "300"), new XAttribute("y", "1100")));
+                    changed = true;
+                }
+
+                if (!changed) return;
+
+                doc.Save(fbt);
+                result.PatchesApplied.Add(
+                    "Sensor_Bool: RPT/SMP refresh ports + Arm state added - an addressed request samples the "
+                    + "input and reports it even when the level is unchanged.");
+                MapperLogger.Info("[Deploy] Sensor_Bool.fbt: addressed-refresh ECC path (RPT/SMP/Arm)");
+            }, notFoundNote: "Sensor_Bool.fbt not found; addressed-refresh path skipped.");
 
         // Swivel work-arrival latch: relax=true (rig) fires ToWorkN->AtWorkN on atWorkN=TRUE alone;
         // strict=false (sim) also requires atWorkOther=FALSE.
@@ -698,40 +824,5 @@ namespace CodeGen.Services
                     (clearCoils ? "(coils cleared and published at home)" : "(coils held)"));
             });
 
-        // OFF de-energises both 'atHome' coils
-        // (a venting swivel rests off-centre); TRUE holds both to drive a cylinder into a mechanical mid-stop.
-        // SAFETY: with NO mid-stop, both-on drives toward an extreme — rig only, e-stop ready, abort if it heads to Work2.
-        internal static void PatchSwivelAtHomeBothCoils(string eaeProjectDir, bool holdBothCoils, DeployResult result)
-            => EditSwivelCore(eaeProjectDir, "SevenStateCentreHomeActuator.fbt home-hold patch failed", result,
-                (doc, root, ns, fbt) =>
-            {
-                var atHomeAlgo = root.Descendants(ns + "Algorithm")
-                    .FirstOrDefault(a => (string?)a.Attribute("Name") == "atHome");
-                var st = atHomeAlgo?.Element(ns + "ST");
-                if (st == null)
-                {
-                    result.Warnings.Add(
-                        "SevenStateCentreHomeActuator.fbt: no 'atHome' algorithm ST; home-hold patch skipped.");
-                    return;
-                }
-
-                string coil = holdBothCoils ? "TRUE" : "FALSE";
-                string body = st.Value;
-                string newBody = System.Text.RegularExpressions.Regex.Replace(
-                    body, @"outputToWork1:=\s*(?:TRUE|FALSE);", $"outputToWork1:= {coil};");
-                newBody = System.Text.RegularExpressions.Regex.Replace(
-                    newBody, @"outputToWork2:=\s*(?:TRUE|FALSE);", $"outputToWork2:= {coil};");
-                if (newBody == body) return;
-
-                st.ReplaceNodes(new System.Xml.Linq.XCData(newBody));
-                doc.Save(fbt);
-
-                result.PatchesApplied.Add(
-                    $"SevenStateCentreHomeActuator.fbt: home 'atHome' coils -> {coil}/{coil} " +
-                    (holdBothCoils ? "(HOLD at mid-stop -- centre-home overshoot fix)" : "(de-energise -- default)"));
-                MapperLogger.Info(
-                    $"[Deploy] SevenStateCentreHomeActuator.fbt: home coils -> {coil}/{coil} " +
-                    (holdBothCoils ? "(both-coils hold at centre)" : "(de-energise)"));
-            });
     }
 }
