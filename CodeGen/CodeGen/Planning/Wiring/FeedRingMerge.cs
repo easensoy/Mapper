@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using CodeGen.Configuration;
+using CodeGen.Mapping;
 using CodeGen.Models;
 using CodeGen.Translation;
 using static CodeGen.Translation.Process.Recipes.RecipeComponentLookup;
@@ -21,8 +22,8 @@ namespace CodeGen.Translation.Process.Recipes
         {
             foreach (var proc in allComponents)
             {
-                if (!string.Equals(proc.Type, "Process", StringComparison.OrdinalIgnoreCase)) continue;
-                if (HcfSymbolIndex.NameBasedPlcGuess(proc.Name) is not (PlcAssignment.M262 or PlcAssignment.RevPi))
+                if (!ComponentType.IsProcess(proc)) continue;
+                if (!ControllerMap.IsFeedController(HcfSymbolIndex.NameBasedPlcGuess(proc.Name)))
                     continue;
                 foreach (var st in proc.States)
                 {
