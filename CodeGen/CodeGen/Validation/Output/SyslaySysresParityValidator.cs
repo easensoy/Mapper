@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using CodeGen.Configuration;
+using CodeGen.Mapping;
 using CodeGen.Translation;
 
 namespace CodeGen.Devices.Core
@@ -64,7 +65,10 @@ namespace CodeGen.Devices.Core
 
             var claimable = new HashSet<string>(StringComparer.Ordinal);
             foreach (var p in fbs.SelectMany(f => f.Parameters))
-                if (p.Name is "actuator_name" or "process_name") claimable.Add(Unquote(p.Value));
+                // What BREQ compares is updateComponentState's own `name` input. Actuator CATs feed it from
+                // actuator_name and processes from process_name, but a Sensor_Bool_CAT passes `name` straight
+                // through -- so a sensor is claimable under that, and an addressed refresh reaches it.
+                if (p.Name is "actuator_name" or "process_name" or "name") claimable.Add(Unquote(p.Value));
             claimable.Add("cycle_ready");   // the runtime's own ready handshake, not a component
 
             foreach (var fb in fbs)
@@ -102,9 +106,9 @@ namespace CodeGen.Devices.Core
 
             foreach (var (deviceType, deviceName, plc, label) in Devices())
             {
-                // The syslay FBs the mirror would project onto this PLC (MirroredCatTypes n bucket).
+                // The syslay FBs the mirror would project onto this PLC (TemplateManifest.Mirrored n bucket).
                 var expected = syslayFbs
-                    .Where(f => SysresFbMirror.MirroredCatTypes.Contains(f.Type) &&
+                    .Where(f => TemplateManifest.Mirrored.Contains(f.Type) &&
                                 SysresFbMirror.BucketFor(f.Name) == plc)
                     .ToList();
                 if (expected.Count == 0) continue;
