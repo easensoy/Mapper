@@ -130,25 +130,6 @@ namespace CodeGen.Translation.Process
             };
         }
 
-        internal static bool TryGetComponentId(RecipeArrays arrays,
-            IReadOnlyList<VueOneComponent> allComponents, string componentName, out int id)
-        {
-            foreach (var kv in arrays.ComponentRegistry)
-            {
-                var comp = LookupComponent(kv.Key, allComponents);
-                if (comp != null &&
-                    string.Equals((comp.Name ?? string.Empty).Trim(), componentName,
-                        StringComparison.OrdinalIgnoreCase))
-                {
-                    id = kv.Value;
-                    return true;
-                }
-            }
-
-            id = -1;
-            return false;
-        }
-
         private static void ValidateProcessIdInvariant(RecipeArrays arrays, int processId)
         {
             for (int i = 0; i < arrays.Wait1Id.Count; i++)
