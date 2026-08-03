@@ -44,18 +44,6 @@ namespace CodeGen.Devices.Core
             "CoverPNP_Hr", "CoverPNP_Vr", "CoverPnp_Gripper",
         };
 
-        private static readonly HashSet<string> SensorCatTypes =
-            new(StringComparer.Ordinal) { "Sensor_Bool_CAT" };
-        private static readonly HashSet<string> ActuatorCatTypes =
-            new(StringComparer.Ordinal)
-            {
-                "Five_State_Actuator_CAT",
-                "Five_State_Actuator_No_Sensors_CAT",
-                "Seven_State_Actuator_CAT",
-                "Seven_State_Actuator_Centre_Home_CAT",
-                "Vacuum_Gripper_CAT",
-                "Robot_Task_CAT",
-            };
 
         // Single source of truth in TemplateMap so the syslay stationChain and this sysres wiring can never drift.
         private static readonly IReadOnlySet<string> NoStationAdapterTypes =
@@ -222,9 +210,9 @@ namespace CodeGen.Devices.Core
 
                 // Component-driven init chain + CaSBus station chain + report ring, built from the components present (CaSBus order then extras) so a missing component never severs them.
                 bool IsSensor(XElement fb) =>
-                    SensorCatTypes.Contains((string?)fb.Attribute("Type") ?? string.Empty);
+                    TemplateManifest.SensorTypes.Contains((string?)fb.Attribute("Type") ?? string.Empty);
                 bool IsActuator(XElement fb) =>
-                    ActuatorCatTypes.Contains((string?)fb.Attribute("Type") ?? string.Empty);
+                    TemplateManifest.ActuatorTypes.Contains((string?)fb.Attribute("Type") ?? string.Empty);
                 bool HasStationAdapter(XElement fb) =>
                     !NoStationAdapterTypes.Contains((string?)fb.Attribute("Type") ?? string.Empty);
                 bool HasRingAdapter(XElement fb) =>
@@ -256,10 +244,9 @@ namespace CodeGen.Devices.Core
                         (string.Equals(s, "Ejector",        StringComparison.OrdinalIgnoreCase) ||
                          string.Equals(s, "Robot",          StringComparison.OrdinalIgnoreCase) ||
                          string.Equals(s, "PartAtAssembly", StringComparison.OrdinalIgnoreCase))))
-                    // Cover-presence interlock (clamp model): TopCoverSenosr joins the cover ring so its
-                    // report reaches Assembly's state_table. Off = kept off the ring (byte-identical baseline).
-                    .Where(s => true ||
-                                !CodeGen.Mapping.TemplateMap.IsTopCoverSensor(s))
+                    // TopCoverSenosr stays ON the ring so its cover-presence report reaches Assembly's
+                    // state_table (the clamp-model interlock). The old opt-out filter here was dead —
+                    // it read `true || …`, so it never excluded anything.
                     .ToList();
                 var actNames = orderedComps.Where(c => IsActuator(c) && HasStationAdapter(c))
                     .Select(Nm).Where(s => s.Length > 0).ToList();
