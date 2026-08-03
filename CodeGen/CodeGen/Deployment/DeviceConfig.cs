@@ -6,6 +6,7 @@ namespace CodeGen.Configuration
         public DeviceNet M580 { get; set; } = new();
         public DeviceNet Bx1 { get; set; } = new();
         public DeviceNet RevPi { get; set; } = new() { TargetIp = "192.168.1.6", HostIp = "192.168.1.2" };
+        public HmiDeviceNet Hmi { get; set; } = new();
         public DeviceNet DefaultNetwork { get; set; } = new();
 
         private static readonly YamlConfigFile<DeviceConfig> _file = new("Config", "device.yml");
@@ -20,5 +21,13 @@ namespace CodeGen.Configuration
         public string SubnetAddress { get; set; } = string.Empty;
         public string SubnetMask { get; set; } = string.Empty;
         public string Gateway { get; set; } = string.Empty;
+    }
+
+    public sealed class HmiDeviceNet
+    {
+        public string HostIp { get; set; } = "192.168.1.2";
+        public string InternalRuntimeIp { get; set; } = "192.168.1.1";
+        public int LogicalPort { get; set; } = 61999;
+        public int SecurePort { get; set; } = 51443;
     }
 }
