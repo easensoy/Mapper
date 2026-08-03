@@ -111,25 +111,10 @@ namespace CodeGen.Services
             ("NextStep", "INT"),
         };
 
-        const string RecipeStepDt =
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
-            "<!DOCTYPE DataType SYSTEM \"../LibraryElement.dtd\">\r\n" +
-            "<DataType Namespace=\"Main\" Name=\"RecipeStep\" Comment=\"One recipe step as a struct: StepType/CmdTargetName/CmdStateArr/Wait1Id/Wait1State/NextStep\">\r\n" +
-            "  <Identification Standard=\"1131-3\" />\r\n" +
-            "  <VersionInfo Organization=\"WMG\" Version=\"0.1\" Author=\"easensoy\" Date=\"5/24/2026\" Remarks=\"array-of-struct packaging of the 6 recipe arrays\" />\r\n" +
-            "  <CompilerInfo />\r\n" +
-            "  <StructuredType>\r\n" +
-            "    <VarDeclaration Name=\"StepType\" Type=\"INT\" />\r\n" +
-            "    <VarDeclaration Name=\"CmdTargetName\" Type=\"STRING[150]\" />\r\n" +
-            "    <VarDeclaration Name=\"CmdStateArr\" Type=\"INT\" />\r\n" +
-            "    <VarDeclaration Name=\"Wait1Id\" Type=\"INT\" />\r\n" +
-            "    <VarDeclaration Name=\"Wait1State\" Type=\"INT\" />\r\n" +
-            "    <VarDeclaration Name=\"NextStep\" Type=\"INT\" />\r\n" +
-            "  </StructuredType>\r\n" +
-            "</DataType>";
 
-        internal static void DeployRecipeStepDatatype(string eaeProjectDir, DeployResult result)
-            => DeployDatatype(eaeProjectDir, "RecipeStep", RecipeStepDt, result, "(sim Recipe struct)");
+        internal static void DeployRecipeStepDatatype(MapperConfig cfg, string eaeProjectDir, DeployResult result)
+            => DeployDatatype(eaeProjectDir, "RecipeStep",
+                TemplateDocument.Load(cfg, @"DataType\RecipeStep.dt"), result, "(sim Recipe struct)");
 
         // Recipe-struct collapse on Process1_Generic (gated by UseRecipeStruct); reduce==false restores the 6 arrays.
         internal static void NormalizeProcess1RecipeArrays(
