@@ -17,7 +17,5 @@ namespace CodeGen.Translation.Process.Recipes
                     StringComparison.OrdinalIgnoreCase));
         }
 
-        public static bool NameEquals(string? a, string b) =>
-            string.Equals((a ?? string.Empty).Trim(), b, StringComparison.OrdinalIgnoreCase);
     }
 }
