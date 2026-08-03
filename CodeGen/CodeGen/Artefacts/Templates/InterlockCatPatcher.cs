@@ -13,58 +13,21 @@ namespace CodeGen.Services
     // and the actuator-CAT + CommonInterlockEvaluator struct collapses (gated by interlock.yaml).
     internal static class InterlockCatPatcher
     {
-        // The STRUCT the four parallel Rule arrays collapse into (RuleTable : ARRAY OF InterlockRule).
-        const string InterlockRuleDt =
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
-            "<!DOCTYPE DataType SYSTEM \"../LibraryElement.dtd\">\r\n" +
-            "<DataType Namespace=\"Main\" Name=\"InterlockRule\" Comment=\"One interlock rule as a struct: FromState/ToState/SourceID/BlockedState\">\r\n" +
-            "  <Identification Standard=\"1131-3\" />\r\n" +
-            "  <VersionInfo Organization=\"WMG\" Version=\"0.1\" Author=\"easensoy\" Date=\"5/24/2026\" Remarks=\"array-of-struct packaging of the 4 Rule arrays\" />\r\n" +
-            "  <CompilerInfo />\r\n" +
-            "  <StructuredType>\r\n" +
-            "    <VarDeclaration Name=\"FromState\" Type=\"INT\" />\r\n" +
-            "    <VarDeclaration Name=\"ToState\" Type=\"INT\" />\r\n" +
-            "    <VarDeclaration Name=\"SourceID\" Type=\"INT\" />\r\n" +
-            "    <VarDeclaration Name=\"BlockedState\" Type=\"INT\" />\r\n" +
-            "  </StructuredType>\r\n" +
-            "</DataType>";
+        internal static void DeployInterlockRuleDatatype(MapperConfig cfg, string eaeProjectDir, DeployResult result)
+            => DeployDatatype(eaeProjectDir, "InterlockRule",
+                TemplateDocument.Load(cfg, @"DataType\InterlockRule.dt"), result);
 
-        internal static void DeployInterlockRuleDatatype(string eaeProjectDir, DeployResult result)
-            => DeployDatatype(eaeProjectDir, "InterlockRule", InterlockRuleDt, result);
+        internal static void DeployInterlockTableDatatype(MapperConfig cfg, string eaeProjectDir, DeployResult result)
+            => DeployDatatype(eaeProjectDir, "InterlockTable",
+                TemplateDocument.Load(cfg, @"DataType\InterlockTable.dt", new Dictionary<string, string>
+                {
+                    ["RuleArraySize"] = InterlockConfig.Current.RuleArraySize.ToString(
+                        System.Globalization.CultureInfo.InvariantCulture),
+                }), result, "(encapsulated interlock input)");
 
-        // Encapsulated interlock interface (Count + Rules[]); Rules ArraySize from interlock.yaml ruleArraySize.
-        static string BuildInterlockTableDt() =>
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
-            "<!DOCTYPE DataType SYSTEM \"../LibraryElement.dtd\">\r\n" +
-            "<DataType Namespace=\"Main\" Name=\"InterlockTable\" Comment=\"Encapsulated interlock interface: Count + the InterlockRule array\">\r\n" +
-            "  <Identification Standard=\"1131-3\" />\r\n" +
-            "  <VersionInfo Organization=\"WMG\" Version=\"0.1\" Author=\"easensoy\" Date=\"6/21/2026\" Remarks=\"single STRUCT input wrapping the rule count and rules\" />\r\n" +
-            "  <CompilerInfo />\r\n" +
-            "  <StructuredType>\r\n" +
-            "    <VarDeclaration Name=\"Count\" Type=\"INT\" />\r\n" +
-            $"    <VarDeclaration Name=\"Rules\" Type=\"InterlockRule\" ArraySize=\"{InterlockConfig.Current.RuleArraySize}\" Namespace=\"Main\" />\r\n" +
-            "  </StructuredType>\r\n" +
-            "</DataType>";
-
-        internal static void DeployInterlockTableDatatype(string eaeProjectDir, DeployResult result)
-            => DeployDatatype(eaeProjectDir, "InterlockTable", BuildInterlockTableDt(), result, "(encapsulated interlock input)");
-
-        const string TargetStatesDt =
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
-            "<!DOCTYPE DataType SYSTEM \"../LibraryElement.dtd\">\r\n" +
-            "<DataType Namespace=\"Main\" Name=\"TargetStates\" Comment=\"Actuator target states: Work1/Work2/Home\">\r\n" +
-            "  <Identification Standard=\"1131-3\" />\r\n" +
-            "  <VersionInfo Organization=\"WMG\" Version=\"0.1\" Author=\"easensoy\" Date=\"6/21/2026\" Remarks=\"single STRUCT input wrapping the target states\" />\r\n" +
-            "  <CompilerInfo />\r\n" +
-            "  <StructuredType>\r\n" +
-            "    <VarDeclaration Name=\"Work1\" Type=\"INT\" />\r\n" +
-            "    <VarDeclaration Name=\"Work2\" Type=\"INT\" />\r\n" +
-            "    <VarDeclaration Name=\"Home\" Type=\"INT\" />\r\n" +
-            "  </StructuredType>\r\n" +
-            "</DataType>";
-
-        internal static void DeployTargetStatesDatatype(string eaeProjectDir, DeployResult result)
-            => DeployDatatype(eaeProjectDir, "TargetStates", TargetStatesDt, result, "(encapsulated target input)");
+        internal static void DeployTargetStatesDatatype(MapperConfig cfg, string eaeProjectDir, DeployResult result)
+            => DeployDatatype(eaeProjectDir, "TargetStates",
+                TemplateDocument.Load(cfg, @"DataType\TargetStates.dt"), result, "(encapsulated target input)");
 
         static readonly Dictionary<string, string> TargetVarToField = new()
         {
@@ -687,20 +650,20 @@ namespace CodeGen.Services
 
         // The interlock struct/target normalizers as one unit — both actuator CATs + the shared evaluator flip
         // TOGETHER. Extracted so the consistency guard can re-run it as a self-heal.
-        internal static void ApplyInterlockNormalizers(
+        internal static void ApplyInterlockNormalizers(MapperConfig cfg,
             string eaeProjectDir, bool interlockStruct, bool targetStruct, DeployResult result)
         {
             if (interlockStruct)
             {
-                DeployInterlockRuleDatatype(eaeProjectDir, result);
-                DeployInterlockTableDatatype(eaeProjectDir, result);
+                DeployInterlockRuleDatatype(cfg, eaeProjectDir, result);
+                DeployInterlockTableDatatype(cfg, eaeProjectDir, result);
             }
             NormalizeFiveStateRuleArrays(eaeProjectDir, "Five_State_Actuator_CAT.fbt", "InterlockManager", interlockStruct, result);
             NormalizeFiveStateRuleArrays(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT.fbt", "CommonInterlockManager", interlockStruct, result);
             NormalizeCommonInterlockEvaluatorRules(eaeProjectDir, interlockStruct, result);
 
             if (targetStruct)
-                DeployTargetStatesDatatype(eaeProjectDir, result);
+                DeployTargetStatesDatatype(cfg, eaeProjectDir, result);
             NormalizeTargetStates(eaeProjectDir, "Five_State_Actuator_CAT.fbt", "InterlockManager",
                 new[] { "TargetWork1State", "TargetHomeState" }, targetStruct, result);
             NormalizeTargetStates(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT.fbt", "CommonInterlockManager",
@@ -713,14 +676,14 @@ namespace CodeGen.Services
         // a stale scalar/struct interlock mix (e.g. EAE held a CAT .fbt locked so its reshape could not save
         // while the evaluator's did). One self-heal re-run (the lock may have released); if it persists, ABORT
         // the Generate so the broken tree is never deployed — an actionable message beats cryptic build errors.
-        internal static void AssertInterlockInterfaceConsistent(
+        internal static void AssertInterlockInterfaceConsistent(MapperConfig cfg,
             string eaeProjectDir, bool interlockStruct, bool targetStruct, DeployResult result)
         {
             var missing = FindInterlockInterfaceMismatches(eaeProjectDir);
             if (missing.Count == 0) return;
 
             MapperLogger.Info("[Interlock][Guard] interface mismatch detected; re-running the interlock normalizers to self-heal.");
-            ApplyInterlockNormalizers(eaeProjectDir, interlockStruct, targetStruct, result);
+            ApplyInterlockNormalizers(cfg, eaeProjectDir, interlockStruct, targetStruct, result);
             missing = FindInterlockInterfaceMismatches(eaeProjectDir);
             if (missing.Count == 0)
             {
