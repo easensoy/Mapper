@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
 namespace CodeGen.Configuration
 {
@@ -6,7 +6,6 @@ namespace CodeGen.Configuration
     {
         public ProcessIds ProcessIds { get; set; } = new();
         public int RobotActuatorId { get; set; }
-        public Dictionary<string, int> CoverActuatorIds { get; set; } = new();
         public List<SynthSensor> SynthSensors { get; set; } = new();
         public List<string> CrossRingSegment { get; set; } = new();
         public List<DischargeChannel> DischargeChannels { get; set; } = new();
