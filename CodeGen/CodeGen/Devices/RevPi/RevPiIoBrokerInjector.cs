@@ -40,6 +40,17 @@ namespace CodeGen.Devices.RevPi
             ("ExtendPusher", "Feeder.OutputToWork", "IN1"), ("ExtendChecker", "Checker.OutputToWork", "IN2"),
         };
 
+        // The Feed components whose physical IO the RevPi Modbus coupler actually carries, derived from the
+        // two tables above so it can never drift from them. This BOUNDS what may be hosted on the RevPi: a
+        // component relocated here without a signal in PLC_RW_REVPI's interface would deploy with no
+        // physical IO and could never actuate — silently, which is the worst failure mode on a rig.
+        public static IReadOnlySet<string> CoveredComponents { get; } =
+            new HashSet<string>(
+                Sensors.Select(s => s.Symlink)
+                       .Concat(Coils.Select(c => c.Symlink))
+                       .Select(sym => sym.Split('.')[0]),
+                StringComparer.OrdinalIgnoreCase);
+
         // Inject into the RevPi sysres + syslay. resourceName scopes the absolute symlink names (RevPi_RES).
         public static int Inject(string? sysresPath, string? syslayPath, string resourceName,
             SystemInjector.BindingApplicationReport report)
@@ -74,11 +85,15 @@ namespace CodeGen.Devices.RevPi
             string ns = root.GetDefaultNamespace().NamespaceName;
             XName N(string n) => XName.Get(n, ns);
 
-            // The RevPi FBNetwork (sysres: root/FBNetwork; syslay: the RevPi SubApp holding the Feed FBs).
+            // The RevPi network (sysres: root/FBNetwork; syslay: the network holding the Feed FBs).
+            // SyslayBuilder emits <SubAppNetwork>, NOT <FBNetwork>, so searching only FBNetwork silently
+            // matched nothing and the syslay half of this injector never ran — RevPI_IO existed on the
+            // resource with no application instance behind it. Search BOTH, as Bx1IoBrokerInjector does.
             var net = isSysres
-                ? root.Element(N("FBNetwork"))
-                : root.Descendants(N("FBNetwork")).FirstOrDefault(fn =>
-                    fn.Elements(N("FB")).Any(f => (string?)f.Attribute("Name") == "Feeder"));
+                ? root.Element(N("SubAppNetwork")) ?? root.Element(N("FBNetwork"))
+                : root.Descendants(N("FBNetwork")).Concat(root.Descendants(N("SubAppNetwork")))
+                      .FirstOrDefault(fn =>
+                          fn.Elements(N("FB")).Any(f => (string?)f.Attribute("Name") == "Feeder"));
             if (net == null) return false;
 
             // Idempotent: sweep any prior broker + bridge, then re-add.
@@ -88,7 +103,14 @@ namespace CodeGen.Devices.RevPi
             var ec = net.Element(N("EventConnections")) ?? EnsureSection(net, N("EventConnections"));
             var dc = net.Element(N("DataConnections"))  ?? EnsureSection(net, N("DataConnections"));
             foreach (var fb in net.Elements(N("FB")).Where(f => IsBrokerFb((string?)f.Attribute("Name") ?? "")).ToList())
+            {
+                // Drop the element's own indentation text node with it. The document is loaded with
+                // PreserveWhitespace, so removing only the <FB> leaves an orphan blank line behind and the
+                // resource grows a few bytes of whitespace on EVERY re-deploy — sweep-and-re-add would
+                // never be byte-idempotent.
+                if (fb.PreviousNode is XText ws && string.IsNullOrWhiteSpace(ws.Value)) ws.Remove();
                 fb.Remove();
+            }
             foreach (var grp in new[] { ec, dc })
                 foreach (var c in grp.Elements(N("Connection"))
                              .Where(c => IsBrokerFb(FbOf((string?)c.Attribute("Source"))) ||
@@ -101,10 +123,15 @@ namespace CodeGen.Devices.RevPi
                 new XAttribute("Source", s), new XAttribute("Destination", d)));
 
             // 1. The broker FB (forced id so the copied Modbus .hcf's LinkNames resolve).
-            Add(new XElement(N("FB"),
+            var brokerFb = new XElement(N("FB"),
                 new XAttribute("ID", BrokerFbId), new XAttribute("Name", BrokerFbName),
-                new XAttribute("Type", BrokerFbType), new XAttribute("Namespace", "Main"),
-                new XAttribute("x", isSysres ? "12180" : "36000"), new XAttribute("y", "6600")));
+                new XAttribute("Type", BrokerFbType), new XAttribute("Namespace", "Main"));
+            // A resource FB must name the application instance it realises; without Mapping EAE sees an
+            // unmapped instance ("Repair Instances"). The syslay FB carries this same ID, so Mapping ==
+            // ID — the shape Bx1IoBrokerInjector emits and the deployed BX1_IO already ships.
+            if (isSysres) brokerFb.Add(new XAttribute("Mapping", BrokerFbId));
+            brokerFb.Add(new XAttribute("x", isSysres ? "12180" : "36000"), new XAttribute("y", "6600"));
+            Add(brokerFb);
 
             // 2. INIT anchor (always): the resource's local boot chain. Full swap: Feed_Station (on RevPi) inits
             //    the broker. Partial swap: Feed_Station is on M262, so anchor off a LOCAL RevPi component in
