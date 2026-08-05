@@ -1,0 +1,80 @@
+SMC MQTT logging — run commands
+================================
+
+WHAT GETS PUBLISHED
+-------------------
+  smc/<component>            e.g.  smc/feeder {state:2}
+      A device's own position. One publisher is embedded in each actuator /
+      sensor CAT and fires when that device changes state.
+
+  smc/process/<Process>      e.g.  smc/process/Feed_Station {state:4}
+      Which PHASE of the recipe a process is in. One publisher is embedded in
+      Process1_Generic. The number is the VueOne State_Number from Control.xml
+      (4 = FeederReturning), NOT the compiled recipe row index.
+
+  The three processes are Feed_Station, Assembly_Station, Disassembly.
+
+Output folder (auto-created):
+  C:\Users\alper\OneDrive\Masaüstü\Output\smc.jsonl   (one JSON object per line)
+  C:\Users\alper\OneDrive\Masaüstü\Output\smc.db      (SQLite, table mqtt_log)
+
+  Table mqtt_log: id, ts, topic, kind, component, state, raw
+  `kind` is 'component' or 'process'. A process and a device can carry the same
+  state number while meaning different things, so always filter on kind.
+
+
+ONE COMMAND  (starts the broker in its own window, then the subscriber+logger):
+  & "C:\VueOneMapper\MQTT\start_smc_logging.cmd"
+
+
+OR TWO COMMANDS  (two windows):
+  1) Broker:
+     & "C:\Program Files\mosquitto\mosquitto.exe" -c "C:\VueOneMapper\MQTT\mosquitto.conf" -v
+
+  2) Subscriber + logger  (prints  smc/<topic> {state:N}  live AND writes JSONL + SQLite):
+     python "C:\VueOneMapper\MQTT\mqtt_to_sqlite.py"
+
+  The logger subscribes to smc/# so ONE run captures components and processes
+  together. Nothing extra is needed to pick up the process topics.
+
+
+WATCH ONLY, NO LOGGING  (plain mosquitto_sub, useful to confirm traffic exists)
+------------------------------------------------------------------------------
+  Everything:
+    & "C:\Program Files\mosquitto\mosquitto_sub.exe" -h 127.0.0.1 -t "smc/#" -v
+
+  Process phases only:
+    & "C:\Program Files\mosquitto\mosquitto_sub.exe" -h 127.0.0.1 -t "smc/process/#" -v
+
+  One process only:
+    & "C:\Program Files\mosquitto\mosquitto_sub.exe" -h 127.0.0.1 -t "smc/process/Feed_Station" -v
+
+  Components only (single level, so it excludes smc/process/...):
+    & "C:\Program Files\mosquitto\mosquitto_sub.exe" -h 127.0.0.1 -t "smc/+" -v
+
+
+VIEW STORED ROWS  (any time, second window):
+  python "C:\VueOneMapper\MQTT\mqtt_to_sqlite.py" show 50            # any kind
+  python "C:\VueOneMapper\MQTT\mqtt_to_sqlite.py" show process 50    # phases only
+  python "C:\VueOneMapper\MQTT\mqtt_to_sqlite.py" show component 50  # devices only
+  python "C:\VueOneMapper\MQTT\mqtt_to_sqlite.py" steps              # phase timeline
+  python "C:\VueOneMapper\MQTT\mqtt_to_sqlite.py" csv                # export for Excel
+
+  `steps` collapses repeats: a process republishes on every recipe row, so one
+  phase spans several messages. Collapsing them turns the log into the sequence
+  of phases the line actually went through.
+
+  Get-Content "C:\Users\alper\OneDrive\Masaüstü\Output\smc.jsonl" -Tail 20
+  ii "C:\Users\alper\OneDrive\Masaüstü\Output"
+
+
+TEST WITHOUT THE RIG  (publish a fake phase and watch it land):
+  & "C:\Program Files\mosquitto\mosquitto_pub.exe" -h 127.0.0.1 -t "smc/process/Feed_Station" -m "{state:4}"
+
+
+Stop:           Ctrl+C in the logger window.
+Fresh capture:  delete smc.jsonl + smc.db in the Output folder (they append across runs).
+
+NOTE ON EXISTING CAPTURES: the first run adds the `kind` column to an existing
+smc.db and labels the old rows from their own topic. Nothing is deleted and no
+row is rewritten, so earlier component captures stay queryable.
