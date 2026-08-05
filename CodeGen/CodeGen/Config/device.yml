@@ -9,15 +9,30 @@ m580:
 bx1:
   targetIp: 192.168.1.151
   hostIp: 192.168.1.209
-# Revolution Pi (Soft_dPAC) — used only when the Feed station targets RevPi instead of M262.
-# targetIp = the Softdpac runtime container (EAE deploys here); hostIp = the RevPi NIC (eth0).
-# Set to the SMC rig's RevPi: the Softdpac controller answers on .1, the NIC on .2 (both ping-verified).
+# Revolution Pi (Soft_dPAC) Feed-station host. The two addresses are DIFFERENT ROLES and must never be
+# equal — a Docker macvlan child is a separate layer-2 endpoint (its own MAC) from the host it rides on:
+#   hostIp   = the RevPi Linux/Docker HOST NIC (eth0). Runs the Soft dPAC Manager on TCP 8080; EAE's
+#              "Manage Soft dPAC" talks HERE to create the macvlan, pull the ARM image and start the
+#              container. The host never listens on the runtime port.
+#   targetIp = the Soft dPAC CONTAINER on that macvlan. This is where the IEC 61499 runtime listens and
+#              where EAE Deploy/Login connects. Dead until Manager Apply has created the container.
+# targetIp .6 is COMPILER-PROVEN: EAE itself resolved Revolution_Pi.RES0 to nxtv3://192.168.1.6:51300 in
+# the reference solution's own CrossComm commdesc output. Do NOT "fix" it to a host address again —
+# commit cc8d07f set it to .1 because .6 "timed out" and .1 answered a ping, but .6 was dead only because
+# the container had never been created, and a ping to .1 is fully explained by the HMI panel below.
+# ⚠ hostIp .1 is PROVISIONAL: it is the only address observed answering as an ARM Linux host with a Soft
+# dPAC Manager on 8080, but no project file prescribes it. Confirm it against the MAC address printed on
+# the physical RevPi before deploying — this is the one check that cannot be made offline.
 revPi:
-  targetIp: 192.168.1.1
-  hostIp: 192.168.1.2
+  targetIp: 192.168.1.6
+  hostIp: 192.168.1.1
+# Harmony HMI. hostIp carries the real HMI_NET logical device (Equipment_Workstation_1); the HMIP6 panel
+# object is inert — both of its RuntimeDEOs bind the null device 00000000-…-000000000000, so nothing is
+# ever deployed to internalRuntimeIp. It was moved off .1 so the inert panel container stops squatting on
+# the physical RevPi host address; HMI function is unaffected because the runtime lives on hostIp.
 hmi:
   hostIp: 192.168.1.2
-  internalRuntimeIp: 192.168.1.1
+  internalRuntimeIp: 192.168.1.3
   logicalPort: 61999
   securePort: 51443
 defaultNetwork:
