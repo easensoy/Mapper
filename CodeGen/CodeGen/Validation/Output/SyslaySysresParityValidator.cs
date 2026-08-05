@@ -29,6 +29,12 @@ namespace CodeGen.Devices.Core
             yield return MapperConfig.FeedStationController == FeedController.RevPi
                 ? ("Soft_dPAC", "Revolution_Pi", PlcAssignment.RevPi, "RevPi")
                 : ("M262_dPAC", null,            PlcAssignment.M262,  "M262");
+            // PARTIAL swap: M262 KEEPS the Feed station while Feeder/Checker/PartInHopper relocate to the
+            // RevPi, so BOTH devices exist. The either/or above only ever validated the RevPi in the FULL
+            // swap -- a mode nothing selects -- so the one reachable RevPi mode shipped with zero parity
+            // coverage: FBs bucketed PlcAssignment.RevPi were compared against no sysres at all.
+            if (MapperConfig.PartialRevPi)
+                yield return ("Soft_dPAC", "Revolution_Pi", PlcAssignment.RevPi, "RevPi");
             yield return ("M580_dPAC", null,  PlcAssignment.M580, "M580");
             yield return ("Soft_dPAC", "BX1", PlcAssignment.BX1,  "BX1");
         }
@@ -174,6 +180,12 @@ namespace CodeGen.Devices.Core
                     ValidateDischargeHcf(eaeRoot, violations);
             }
 
+            // Whenever a RevPi device is generated — FULL swap or the partial Feeder/Checker swap — its
+            // Modbus IO must be complete. Deliberately independent of the discharge tail, which in the
+            // partial swap correctly stays on M262.
+            if (MapperConfig.FeedStationController == FeedController.RevPi || MapperConfig.PartialRevPi)
+                ValidateRevPiIo(eaeRoot, syslayPath, violations);
+
             return violations;
         }
 
@@ -289,16 +301,77 @@ namespace CodeGen.Devices.Core
                     violations.Add(new("RevPi-Discharge",
                         $"discharge tail active but '{fb}' is not on the RevPi sysres — the discharge tail did not land on the Feed controller"));
 
-            // RevPi Feed IO = the Modbus broker RevPI_IO (PLC_RW_REVPI) on the sysres + the Modbus .hcf whose
-            // MB_Read/Write LinkNames resolve to it. Without both, the Feed actuators have no physical IO.
+        }
+
+        // RevPi Feed IO = the Modbus broker RevPI_IO (PLC_RW_REVPI) on the sysres, carrying a Mapping to a
+        // matching application instance, + the Modbus .hcf whose MB_Read/Write LinkNames resolve to it.
+        // Without all three the Feed actuators have no physical IO.
+        //
+        // These assertions used to live inside ValidateDischargeRevPi, which runs only on the FULL swap --
+        // a mode nothing selects -- so the one reachable RevPi mode (the partial Feeder/Checker swap)
+        // shipped with ZERO IO validation. They now run whenever a RevPi device is generated.
+        static void ValidateRevPiIo(string eaeRoot, string syslayPath, List<Violation> violations)
+        {
             const string BrokerFbId = "A6B61E2425DB1C30";   // == RevPiIoBrokerInjector.BrokerFbId
-            if (!fbNames.Contains("RevPI_IO"))
-                violations.Add(new("RevPi-IO", "the RevPI_IO Modbus broker (PLC_RW_REVPI) is not on the RevPi sysres"));
+            const string BrokerName = "RevPI_IO";
+
+            var sysdev = EaeProjectLayout.FindSysdevByDeviceTypeAndName(eaeRoot, "Soft_dPAC", "Revolution_Pi");
+            var sysres = sysdev == null ? null : EaeProjectLayout.FindSysresFor(sysdev);
+            if (string.IsNullOrEmpty(sysres) || !File.Exists(sysres))
+            {
+                violations.Add(new("RevPi-IO",
+                    "a RevPi Feed station is selected but the RevPi sysres was not found — the Feed components have no deployable resource"));
+                return;
+            }
+
+            XElement? broker;
+            try
+            {
+                var doc = XDocument.Load(sysres);
+                XNamespace ns = doc.Root!.GetDefaultNamespace();
+                broker = doc.Descendants(ns + "FB").FirstOrDefault(e => (string?)e.Attribute("Name") == BrokerName);
+            }
+            catch (Exception ex)
+            {
+                violations.Add(new("RevPi-IO", $"unreadable RevPi sysres '{Path.GetFileName(sysres)}': {ex.Message}"));
+                return;
+            }
+
+            if (broker == null)
+            {
+                violations.Add(new("RevPi-IO",
+                    $"the {BrokerName} Modbus broker (PLC_RW_REVPI) is not on the RevPi sysres — the Feed actuators would have no physical IO"));
+            }
+            else
+            {
+                // A resource FB with no Mapping is an ORPHAN: EAE has no application instance to bind it
+                // to, which is the documented "Repair Instances" class. This shipped because the injector's
+                // syslay pass searched only <FBNetwork> while the syslay carries <SubAppNetwork>.
+                if (string.IsNullOrWhiteSpace((string?)broker.Attribute("Mapping")))
+                    violations.Add(new("RevPi-IO",
+                        $"{BrokerName} on the RevPi sysres has no Mapping attribute — it is an orphan resource instance with no application-layer counterpart"));
+
+                // The .hcf's LinkNames are <resourceId>.<fbId>.<port>, so the FB id is load-bearing.
+                if (!string.Equals((string?)broker.Attribute("ID"), BrokerFbId, StringComparison.OrdinalIgnoreCase))
+                    violations.Add(new("RevPi-IO",
+                        $"{BrokerName}'s FB ID is not {BrokerFbId} — the Modbus .hcf LinkNames resolve against that id and would not bind"));
+            }
+
+            // The application layer must declare the broker too, else the sysres Mapping dangles.
+            try
+            {
+                if (!SysresFbMirror.ReadTopLevelFbsWithSystemModelFallback(syslayPath)
+                        .Any(f => string.Equals(f.Name, BrokerName, StringComparison.Ordinal)))
+                    violations.Add(new("RevPi-IO",
+                        $"{BrokerName} is missing from the generated syslay — the resource instance has no application counterpart to map onto"));
+            }
+            catch { /* the syslay read is already reported by the caller */ }
+
             var revpiFolder = Path.GetDirectoryName(sysres);
             var hcf = revpiFolder != null && Directory.Exists(revpiFolder)
                 ? Directory.EnumerateFiles(revpiFolder, "*.hcf").FirstOrDefault() : null;
             if (hcf == null)
-                violations.Add(new("RevPi-IO", "the RevPi Modbus .hcf is missing"));
+                violations.Add(new("RevPi-IO", "the RevPi Modbus .hcf is missing — EAE reports Missing Project Files"));
             else if (!File.ReadAllText(hcf).Contains(BrokerFbId, StringComparison.Ordinal))
                 violations.Add(new("RevPi-IO",
                     "the RevPi .hcf's Modbus LinkNames do not resolve to the RevPI_IO broker FB — the Feed IO would not bind"));
