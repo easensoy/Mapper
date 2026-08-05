@@ -9,6 +9,14 @@ namespace CodeGen.Services
 {
     internal static class ProcessRuntimeTemplatePatcher
     {
+        // The engine emits SCNF from four ECStates, one of which is WAIT_STEP. WAIT_STEP is re-entered
+        // from WAIT_HOLD on every `state_change`, i.e. on every ring message from any component, and
+        // check_wait does not touch CurrentProcessState — so publishing off SCNF republishes the same
+        // phase hundreds of times while a process merely waits. IDLE1 is entered exactly once per recipe
+        // row (from INIT, from ADVANCE, and from WAIT_STEP once the wait is satisfied), so a dedicated
+        // event emitted there is the one publish-per-step signal the telemetry needs.
+        internal const string PhaseEventName = "PHASECNF";
+
         // TELEMETRY ONLY. The engine reports progress as CurrentStep, a compiled recipe-row index that
         // means nothing outside the generator. This adds a parallel row->VueOne-State_Number lookup and
         // one derived output so the phase the model actually names can be published.
@@ -49,6 +57,17 @@ namespace CodeGen.Services
                     iface.Descendants(ns + "With")
                         .Where(w => (string?)w.Attribute("Var") == "CurrentProcessState")
                         .ToList().ForEach(w => w.Remove());
+                    iface.Descendants(ns + "Event")
+                        .Where(e => (string?)e.Attribute("Name") == PhaseEventName)
+                        .ToList().ForEach(e => e.Remove());
+                    foreach (var act in root.Descendants(ns + "ECAction")
+                                 .Where(a => (string?)a.Attribute("Output") == PhaseEventName).ToList())
+                    {
+                        // Standalone when we added it; if anything ever merged it onto an algorithm
+                        // action, drop only the emission so the algorithm keeps running.
+                        if (act.Attribute("Algorithm") != null) act.SetAttributeValue("Output", null);
+                        else act.Remove();
+                    }
                     foreach (var alg in root.Descendants(ns + "Algorithm"))
                     {
                         var st = alg.Element(ns + "ST");
@@ -94,19 +113,36 @@ namespace CodeGen.Services
                                     st.Value.TrimEnd() + "\nCurrentProcessState := ProcessStateByRow[CurrentStep];"));
                             }
 
-                            // An OutputVar is only published when an event it is WITH-associated to fires;
-                            // without this the value never leaves the FB and every subscriber reads the
-                            // initial 0 forever. SCNF is the association to make because SCNF is what
-                            // drives the publisher, so the payload is sampled from the step just loaded.
-                            var scnf = iface.Element(ns + "EventOutputs")?.Elements(ns + "Event")
-                                .FirstOrDefault(e => (string?)e.Attribute("Name") == "SCNF");
-                            if (scnf == null)
+                            // An OutputVar is only sampled onto its data connections when an event it is
+                            // WITH-associated to fires; with no association the value never leaves the FB
+                            // and every subscriber reads the initial 0 forever. Associating it here rather
+                            // than on SCNF is what makes the phase publish once per step instead of on
+                            // every ring message (see PhaseEventName).
+                            var evOut = iface.Element(ns + "EventOutputs");
+                            if (evOut == null)
                                 result.Warnings.Add(
-                                    "ProcessRuntime_Generic_v1: EventOutput 'SCNF' not found; CurrentProcessState "
-                                    + "will never be published and process telemetry would report 0 forever.");
+                                    "ProcessRuntime_Generic_v1: EventOutputs not found; CurrentProcessState "
+                                    + "cannot be published and process telemetry would report 0 forever.");
                             else
-                                scnf.Add(new System.Xml.Linq.XElement(ns + "With",
-                                    new System.Xml.Linq.XAttribute("Var", "CurrentProcessState")));
+                                evOut.Add(new System.Xml.Linq.XElement(ns + "Event",
+                                    new System.Xml.Linq.XAttribute("Name", PhaseEventName),
+                                    new System.Xml.Linq.XAttribute("Comment",
+                                        "Telemetry only: fires once per recipe row, carrying that row's phase."),
+                                    new System.Xml.Linq.XElement(ns + "With",
+                                        new System.Xml.Linq.XAttribute("Var", "CurrentProcessState"))));
+
+                            // Appended after the existing action, so LoadStep has already refreshed the
+                            // value by the time the event fires. Adding an emission cannot alter control
+                            // flow: no transition tests it and only the publisher consumes it.
+                            var idle = root.Descendants(ns + "ECState")
+                                .FirstOrDefault(s => (string?)s.Attribute("Name") == "IDLE1");
+                            if (idle == null)
+                                result.Warnings.Add(
+                                    "ProcessRuntime_Generic_v1: ECState 'IDLE1' not found; process phase would "
+                                    + "never be published.");
+                            else
+                                idle.Add(new System.Xml.Linq.XElement(ns + "ECAction",
+                                    new System.Xml.Linq.XAttribute("Output", PhaseEventName)));
                         }
                     }
 
