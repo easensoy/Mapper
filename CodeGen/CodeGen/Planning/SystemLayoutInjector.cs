@@ -313,9 +313,15 @@ namespace CodeGen.Translation
                 overrides.ByComponentId, overrides.ByVueOneName);
             if (string.IsNullOrWhiteSpace(processInstanceName)) processInstanceName = "Process1";
 
+            // ordinal -> phase name per process, emitted beside the project so a telemetry subscriber can
+            // render the number it receives. Collected as each process is built; written once at the end.
+            var phaseNames = new Dictionary<string, IReadOnlyDictionary<int, string>>(StringComparer.Ordinal);
+
             var (processOuter, processNested, processRecipe) = BuildProcessFbParameters(
                 contents.Process, allComponents, processInstanceName, processId, contents,
-                useRecipeStruct: config != null && config.UseRecipeStruct);
+                useRecipeStruct: config != null && config.UseRecipeStruct,
+                    emitProcessTelemetry: config != null && config.MqttPublishEnabled);
+            if (processRecipe != null) phaseNames[processInstanceName] = processRecipe.ProcessPhaseNames;
 
             // EAE rejects a Parameter not declared as an InputVar on the FBType (ERR_MEMBER_VAR_NOTFOUND).
 
@@ -371,11 +377,13 @@ namespace CodeGen.Translation
                 var (aOuter, aNested, aRecipe) = BuildProcessFbParameters(
                     assemblyStationProc, allComponents, assemblyName, assemblyProcessId,
                     contents: contents,
-                    useRecipeStruct: config != null && config.UseRecipeStruct);
+                    useRecipeStruct: config != null && config.UseRecipeStruct,
+                    emitProcessTelemetry: config != null && config.MqttPublishEnabled);
                 builder.AddFB(FBIdGenerator.GenerateFBId(assemblyStationProc.ComponentID),
                     assemblyName, "Process1_Generic", "Main", 12200, 1460,
                     aOuter, aNested);
                 crossProcInstances.Add(assemblyName);
+                if (aRecipe != null) phaseNames[assemblyName] = aRecipe.ProcessPhaseNames;
                 ReportStation2Recipe(report, assemblyName, aRecipe, "M580");
                 AppendProcessRecipeComment(builder, assemblyName, aRecipe);
             }
@@ -400,11 +408,13 @@ namespace CodeGen.Translation
                 var (dOuter, dNested, dRecipe) = BuildProcessFbParameters(
                     disassyProc, allComponents, disassyName, disassemblyProcessId,
                     contents: contents,
-                    useRecipeStruct: config != null && config.UseRecipeStruct);
+                    useRecipeStruct: config != null && config.UseRecipeStruct,
+                    emitProcessTelemetry: config != null && config.MqttPublishEnabled);
                 builder.AddFB(FBIdGenerator.GenerateFBId(disassyProc.ComponentID),
                     disassyName, "Process1_Generic", "Main", 20800, 1460,
                     dOuter, dNested);
                 crossProcInstances.Add(disassyName);
+                if (dRecipe != null) phaseNames[disassyName] = dRecipe.ProcessPhaseNames;
                 ReportStation2Recipe(report, disassyName, dRecipe, "M580");
                 AppendProcessRecipeComment(builder, disassyName, dRecipe);
             }
@@ -724,6 +734,16 @@ namespace CodeGen.Translation
 
             // The HMI is derived from the finished layout (FB Id -> TagName, FB Type -> faceplate).
             CodeGen.Hmi.HmiGenerator.Emit(fullPath, config);
+
+            // Telemetry sidecar: lets a subscriber render the published phase ordinal as the twin's own
+            // state name. Written outside the solution and read by nothing in the generated project.
+            if (config != null && config.MqttPublishEnabled && phaseNames.Count > 0)
+            {
+                var mapPath = ProcessPhaseMapEmitter.Emit(
+                    config, phaseNames, CodeGen.Services.MapperLogger.Info);
+                if (mapPath != null)
+                    CodeGen.Services.MapperLogger.Info($"[Telemetry] phase-name map -> {mapPath}");
+            }
 
             return fullPath;
         }
@@ -1371,7 +1391,8 @@ namespace CodeGen.Translation
                        RecipeArrays? Recipe)
             BuildProcessFbParameters(VueOneComponent process, List<VueOneComponent> allComponents,
                 string processName, int processId,
-                StationContents? contents = null, bool useRecipeStruct = false)
+                StationContents? contents = null, bool useRecipeStruct = false,
+                bool emitProcessTelemetry = false)
         {
             // Recipe arrays travel as Process1_Generic Parameter values; if `contents` is null, emit only the two scalars and return a null Recipe.
             var outer = new Dictionary<string, string>
@@ -1400,6 +1421,10 @@ namespace CodeGen.Translation
                     outer["Wait1State"]    = SyslayBuilder.FormatIntArray(recipe.Wait1State);
                     outer["NextStep"]      = SyslayBuilder.FormatIntArray(recipe.NextStep);
                 }
+                // Telemetry-only companion to the control arrays: row -> VueOne State_Number. Emitted
+                // only when MQTT publishing is on, so a telemetry-off tree carries no stale parameter.
+                if (emitProcessTelemetry)
+                    outer["ProcessStateByRow"] = SyslayBuilder.FormatIntArray(recipe.ProcessStateByRow);
             }
 
             var nested = new Dictionary<string, IDictionary<string, string>>(StringComparer.Ordinal);
