@@ -246,7 +246,7 @@ namespace MapperUI
             this.colDevice.Width = 110;
             this.colDevice.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.colDevice.DisplayStyle = System.Windows.Forms.DataGridViewComboBoxDisplayStyle.DropDownButton;
-            this.colDevice.ToolTipText = "Feed-station controller. Set any component to RevPi to host the whole Feed station on the Revolution Pi (Soft_dPAC) instead of M262; leave all on M262 for the default rig. (M580/BX1 are fixed.)";
+            this.colDevice.ToolTipText = "Feed-station controller. Set Feeder and/or Checker to RevPi to host them on the Revolution Pi (Soft_dPAC); PartInHopper follows automatically and M262 keeps the rest, giving a 4-controller project. Only those two are swappable — the RevPi Modbus coupler wires only Feeder/Checker/Hopper. Leave all on M262 for the default rig. (M580/BX1 are fixed.)";
             this.colDevice.Items.AddRange(new object[] { "M262", "M580", "BX1", "RevPi" });
 
 
