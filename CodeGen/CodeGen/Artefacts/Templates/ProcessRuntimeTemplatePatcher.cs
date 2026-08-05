@@ -9,6 +9,119 @@ namespace CodeGen.Services
 {
     internal static class ProcessRuntimeTemplatePatcher
     {
+        // TELEMETRY ONLY. The engine reports progress as CurrentStep, a compiled recipe-row index that
+        // means nothing outside the generator. This adds a parallel row->VueOne-State_Number lookup and
+        // one derived output so the phase the model actually names can be published.
+        //
+        // It cannot change control flow: ProcessStateByRow is read nowhere else, CurrentProcessState is
+        // written and never tested, and the assignment is appended to algorithms that already run on
+        // every step change. No ECC state, transition, event or existing algorithm line is altered.
+        // Reverting is a no-op because the strip path removes both declarations and both assignments.
+        internal static void PatchProcessTelemetryState(string eaeProjectDir, MapperConfig cfg, DeployResult result)
+        {
+            var candidates = new[]
+            {
+                Path.Combine(eaeProjectDir, "IEC61499", "ProcessRuntime_Generic_v1.fbt"),
+                Path.Combine(eaeProjectDir, "IEC61499", "Process1_Generic", "Process1_Generic.fbt"),
+            };
+            int size = GenerationConfig.Current.RecipeArraySize;
+
+            foreach (var fbtPath in candidates)
+            {
+                if (!File.Exists(fbtPath)) continue;
+                bool isEngine = fbtPath.EndsWith("ProcessRuntime_Generic_v1.fbt", StringComparison.OrdinalIgnoreCase);
+                try
+                {
+                    var doc = System.Xml.Linq.XDocument.Load(fbtPath, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                    var root = doc.Root;
+                    if (root == null) continue;
+                    System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+                    var iface = root.Element(ns + "InterfaceList");
+                    if (iface == null) continue;
+
+                    var inputs = iface.Element(ns + "InputVars");
+                    var outputs = iface.Element(ns + "OutputVars");
+
+                    // Always strip first so a telemetry-off deploy leaves no residue and a re-deploy is idempotent.
+                    iface.Descendants(ns + "VarDeclaration")
+                        .Where(v => (string?)v.Attribute("Name") is "ProcessStateByRow" or "CurrentProcessState")
+                        .ToList().ForEach(v => v.Remove());
+                    iface.Descendants(ns + "With")
+                        .Where(w => (string?)w.Attribute("Var") == "CurrentProcessState")
+                        .ToList().ForEach(w => w.Remove());
+                    foreach (var alg in root.Descendants(ns + "Algorithm"))
+                    {
+                        var st = alg.Element(ns + "ST");
+                        if (st == null) continue;
+                        var text = st.Value;
+                        if (!text.Contains("CurrentProcessState", StringComparison.Ordinal)) continue;
+                        var kept = string.Join("\n", text.Split('\n')
+                            .Where(l => !l.Contains("CurrentProcessState", StringComparison.Ordinal)));
+                        st.ReplaceAll(new System.Xml.Linq.XCData(kept));
+                    }
+
+                    if (cfg.MqttPublishEnabled)
+                    {
+                        inputs?.Add(new System.Xml.Linq.XElement(ns + "VarDeclaration",
+                            new System.Xml.Linq.XAttribute("Name", "ProcessStateByRow"),
+                            new System.Xml.Linq.XAttribute("Type", "INT"),
+                            new System.Xml.Linq.XAttribute("ArraySize", size.ToString()),
+                            new System.Xml.Linq.XAttribute("Comment",
+                                "Telemetry only: recipe row -> VueOne process State_Number. Not read by control logic.")));
+
+                        if (isEngine)
+                        {
+                            outputs?.Add(new System.Xml.Linq.XElement(ns + "VarDeclaration",
+                                new System.Xml.Linq.XAttribute("Name", "CurrentProcessState"),
+                                new System.Xml.Linq.XAttribute("Type", "INT"),
+                                new System.Xml.Linq.XAttribute("Comment",
+                                    "Telemetry only: the VueOne State_Number of the active row. Never tested by control logic.")));
+
+                            // Appended to the algorithms that already set CurrentStep, so the derived value
+                            // tracks the active row without adding an event, a transition or an FB.
+                            foreach (var name in new[] { "LoadStep", "AdvanceStep" })
+                            {
+                                var alg = root.Descendants(ns + "Algorithm")
+                                    .FirstOrDefault(a => (string?)a.Attribute("Name") == name);
+                                var st = alg?.Element(ns + "ST");
+                                if (st == null)
+                                {
+                                    result.Warnings.Add(
+                                        $"ProcessRuntime_Generic_v1: algorithm '{name}' not found; process telemetry state not derived there.");
+                                    continue;
+                                }
+                                st.ReplaceAll(new System.Xml.Linq.XCData(
+                                    st.Value.TrimEnd() + "\nCurrentProcessState := ProcessStateByRow[CurrentStep];"));
+                            }
+
+                            // An OutputVar is only published when an event it is WITH-associated to fires;
+                            // without this the value never leaves the FB and every subscriber reads the
+                            // initial 0 forever. SCNF is the association to make because SCNF is what
+                            // drives the publisher, so the payload is sampled from the step just loaded.
+                            var scnf = iface.Element(ns + "EventOutputs")?.Elements(ns + "Event")
+                                .FirstOrDefault(e => (string?)e.Attribute("Name") == "SCNF");
+                            if (scnf == null)
+                                result.Warnings.Add(
+                                    "ProcessRuntime_Generic_v1: EventOutput 'SCNF' not found; CurrentProcessState "
+                                    + "will never be published and process telemetry would report 0 forever.");
+                            else
+                                scnf.Add(new System.Xml.Linq.XElement(ns + "With",
+                                    new System.Xml.Linq.XAttribute("Var", "CurrentProcessState")));
+                        }
+                    }
+
+                    doc.Save(fbtPath);
+                    result.PatchesApplied.Add(cfg.MqttPublishEnabled
+                        ? $"{Path.GetFileName(fbtPath)}: process telemetry state added (ProcessStateByRow[{size}]{(isEngine ? " + CurrentProcessState" : "")})"
+                        : $"{Path.GetFileName(fbtPath)}: process telemetry state stripped (MQTT publishing off)");
+                }
+                catch (Exception ex)
+                {
+                    result.Warnings.Add($"{Path.GetFileName(fbtPath)} process telemetry patch failed: {ex.Message}");
+                }
+            }
+        }
+
         // process_name InputVar must be STRING[150] or deploy fails ("Cannot connect parameter to data input process_name").
         internal static void PatchProcessNameStringSize(string eaeProjectDir, DeployResult result)
         {
