@@ -189,12 +189,18 @@ namespace CodeGen.Devices.Core
                 new XElement(ns + "DependentUpon", SystemFileName),
                 new XElement(ns + "IEC61499Type", "SystemDevice"));
 
-            // Siblings go under <None SystemDevice>, EXCEPT the BX1 SoftPAC (sysdev id ...0004, the only
-            // EtherNet/IP-scanner PLC): its .sysres must be <Compile SystemResource> and its .hcf ALSO
-            // <Content SystemDevice>, or EAE compiles no HWConfig and the Deploy export emits an EMPTY
-            // scanner. M262/M580 keep the legacy <None>.
+            // Siblings go under <None SystemDevice>, EXCEPT the Soft_dPACs, whose .sysres must be
+            // <Compile SystemResource> or EAE compiles no HWConfig for them. M262/M580 keep the legacy
+            // <None> (they are rig-proven that way).
+            //   ...0004 = BX1  — EtherNet/IP scanner; without this the Deploy export emits an EMPTY scanner.
+            //   ...0005 = RevPi — Modbus MASTER (RevPiIO.modbus.hcf). Same class of hardware config, so the
+            //             same rule applies: registered as <None> its Modbus master is not compiled and the
+            //             RevPi deploys with no I/O — silently, which is the worst failure mode.
             bool isBx1Resource = sysdevFileName.StartsWith(
                 "00000000-0000-0000-0000-000000000004", StringComparison.OrdinalIgnoreCase);
+            bool isRevPiResource = sysdevFileName.StartsWith(
+                "00000000-0000-0000-0000-000000000005", StringComparison.OrdinalIgnoreCase);
+            bool isSoftDpacResource = isBx1Resource || isRevPiResource;
             if (Directory.Exists(sysdevFolder))
             {
                 foreach (var sibling in Directory.EnumerateFiles(sysdevFolder, "*.*", SearchOption.TopDirectoryOnly))
@@ -202,7 +208,7 @@ namespace CodeGen.Devices.Core
                     var rel = Path.GetRelativePath(iec, sibling).Replace('/', '\\');
                     var ext = Path.GetExtension(sibling).ToLowerInvariant();
 
-                    if (ext == ".sysres" && isBx1Resource)
+                    if (ext == ".sysres" && isSoftDpacResource)
                     {
                         // Migrate a stale <None> registration of this .sysres to <Compile SystemResource>.
                         foreach (var stale in xml.Root!.Descendants(ns + "None")
