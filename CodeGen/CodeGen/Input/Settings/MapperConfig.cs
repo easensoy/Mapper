@@ -116,8 +116,10 @@ namespace CodeGen.Configuration
         // HMIB1X panel host IP: setting this makes BX1 a REMOTE panel not a local Workstation (whose runtime EAE resolves to 127.0.0.1 -- the "cannot connect to BX1" error).
         public string BX1HostIp { get; set; } = DeviceConfig.Current.Bx1.HostIp;
 
-        // Revolution Pi (Soft_dPAC) Feed-station host, used only when FeedStationController == RevPi.
-        // From Config/device.yml (softpac runtime .6, host NIC .2 — Jyotsna's RevPi reference).
+        // Revolution Pi (Soft_dPAC) Feed station. From Config/device.yml, which documents the roles:
+        // RevPiTargetIp = the Soft dPAC CONTAINER on the EAE-managed macvlan (runtime; EAE deploys here).
+        // RevPiHostIp   = the RevPi Linux HOST NIC (Soft dPAC Manager on 8080). The two must differ —
+        // RevPiAddressValidator fails generation if they are equal or collide with another endpoint.
         public string RevPiTargetIp { get; set; } = DeviceConfig.Current.RevPi.TargetIp;
         public string RevPiHostIp { get; set; } = DeviceConfig.Current.RevPi.HostIp;
 
