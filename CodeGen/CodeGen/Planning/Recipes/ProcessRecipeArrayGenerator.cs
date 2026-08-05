@@ -24,6 +24,21 @@ namespace CodeGen.Translation.Process
         public Dictionary<string, int> ComponentRegistry { get; } =
             new(StringComparer.OrdinalIgnoreCase);
 
+        // TELEMETRY ONLY. Parallel to the six control arrays: for each recipe row, a 1-based ordinal
+        // identifying the VueOne process state that owns it. A state compiles to several rows, so
+        // consecutive entries repeat. Nothing in the control path reads this — it exists so the engine
+        // can publish the phase the model names rather than CurrentStep, which is a compiled row index.
+        //
+        // The ordinal is deliberately NOT the twin's State_Number. State_Number is a broadcast slot
+        // announcing a phase to a peer process, so the twin only fills it in where a peer is watching:
+        // most states carry 0 and a process reuses the same number for unrelated phases. That is correct
+        // for handshakes and useless for telling phases apart, which is what telemetry needs.
+        public List<int> ProcessStateByRow { get; } = new();
+
+        // TELEMETRY ONLY. ordinal -> the state's name in the twin, so a subscriber can render the phase
+        // rather than a bare number. Emitted alongside the generated project; never read by the runtime.
+        public Dictionary<int, string> ProcessPhaseNames { get; } = new();
+
         public List<string> SkippedConditions { get; } = new();
 
         public List<string> Warnings { get; } = new();
