@@ -689,6 +689,19 @@ namespace CodeGen.Translation.Process.Recipes
             int end = rows.Count;
             var byId = states.ToDictionary(s => s.StateID, s => s, StringComparer.OrdinalIgnoreCase);
 
+            // Telemetry: a 1-based ordinal per declared state, taken from the twin's own declaration
+            // order so it is stable across regenerations and independent of how the chain was walked.
+            // 0 stays free to mean "no owning state". Two states may share a name in the twin; they still
+            // get distinct ordinals, so a phase is never conflated with a different one.
+            var ordinalOf = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < process.States.Count; i++)
+            {
+                var s = process.States[i];
+                if (string.IsNullOrEmpty(s.StateID) || ordinalOf.ContainsKey(s.StateID)) continue;
+                ordinalOf[s.StateID] = i + 1;
+                arrays.ProcessPhaseNames[i + 1] = s.Name ?? string.Empty;
+            }
+
             int DestRow(string fromStateId)
             {
                 var dst = byId[fromStateId].Transitions.OrderBy(t => t.Priority).FirstOrDefault()?.DestinationStateID;
@@ -711,6 +724,10 @@ namespace CodeGen.Translation.Process.Recipes
                 arrays.Wait1State.Add(r.WaitState);
                 bool last = i + 1 >= rows.Count || rows[i + 1].StateId != r.StateId;
                 arrays.NextStep.Add(last ? DestRow(r.StateId) : i + 1);
+                // Telemetry only: the row's owning VueOne state, so the engine can report the phase the
+                // model names. Resolved from the same StateId the row was built under, never guessed.
+                arrays.ProcessStateByRow.Add(
+                    r.StateId != null && ordinalOf.TryGetValue(r.StateId, out var ord) ? ord : 0);
             }
 
             arrays.StepType.Add(StepType.End);
@@ -719,6 +736,9 @@ namespace CodeGen.Translation.Process.Recipes
             arrays.Wait1Id.Add(0);
             arrays.Wait1State.Add(0);
             arrays.NextStep.Add(TerminalLoopsHome(states) ? 0 : end);
+            // END carries the last row's phase so the final publish does not report a phantom state 0.
+            arrays.ProcessStateByRow.Add(
+                arrays.ProcessStateByRow.Count > 0 ? arrays.ProcessStateByRow[^1] : 0);
         }
 
         private static bool TerminalLoopsHome(List<VueOneState> states)
