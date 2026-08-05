@@ -20,14 +20,20 @@ TWO KINDS OF TELEMETRY share one broker, one table and one file:
       A device's own position. Published by the MqttFmt/MqttPub pair embedded
       in each actuator/sensor CAT, fired when that device changes state.
 
-  smc/process/<Process>    e.g. smc/process/Feed_Station {state:4}
+  smc/process/<Process>    e.g. smc/process/Feed_Station {state:5}
       Which PHASE of the recipe a process is in. Published by the pair embedded
-      in Process1_Generic. The number is the VueOne State_Number from
-      Control.xml (4 = FeederReturning), NOT the compiled recipe row index -
-      the row index is a generator artefact and means nothing outside it.
+      in Process1_Generic. The number identifies a state of the process in the
+      twin (5 = FeederReturning), NOT the compiled recipe row index - the row
+      index is a generator artefact and means nothing outside it.
 
 `kind` tells the two apart, because a process and a component can legitimately
-carry the same state number while meaning different things.
+carry the same number while meaning different things.
+
+PHASE NAMES: the wire payload is an integer, so the Mapper writes an
+ordinal -> name map beside the generated project (process-phases.json). When it
+is found, each process row is stored and printed with the twin's own state name
+and the log reads "Unclamping" rather than "29". Without it the logger still
+works, just in numbers.
 """
 import sys, os, re, json, sqlite3, datetime
 
@@ -41,6 +47,40 @@ STATE_RE = re.compile(r"state\s*:\s*(-?\d+)")
 # The root the generator publishes under (MapperConfig.MqttTopicRoot) and the
 # segment Process1_Generic inserts for a process (RootPath 'smc/process').
 ROOT, PROCESS_SEG = "smc", "process"
+
+# Written by the Mapper next to the generated project, deliberately outside the
+# EAE solution. Override with SMC_PHASE_MAP when generating somewhere else.
+PHASE_MAP_PATHS = [
+    os.environ.get("SMC_PHASE_MAP", ""),
+    r"C:\Demonstrator\process-phases.json",
+]
+
+
+def load_phase_map():
+    """process -> {ordinal: state name}. Empty when the map has not been generated."""
+    for p in PHASE_MAP_PATHS:
+        if not p or not os.path.exists(p):
+            continue
+        try:
+            with open(p, encoding="utf-8") as f:
+                doc = json.load(f)
+            m = {proc: {int(k): v for k, v in phases.items()}
+                 for proc, phases in doc.get("processes", {}).items()}
+            if m:
+                return m, p
+        except Exception as e:
+            print(f"phase map at {p} could not be read ({e}); falling back to numbers")
+    return {}, None
+
+
+PHASES, PHASE_MAP_FILE = load_phase_map()
+
+
+def phase_name(kind, name, state):
+    """The twin's state name for a process reading, else None."""
+    if kind != "process" or state is None:
+        return None
+    return PHASES.get(name, {}).get(state)
 
 
 def classify(topic):
@@ -78,13 +118,18 @@ def db_connect():
             db.execute("UPDATE mqtt_log SET kind=? WHERE id=?", (classify(topic)[0], rowid))
         print(f"migrated: added `kind` and labelled "
               f"{db.execute('SELECT COUNT(*) FROM mqtt_log').fetchone()[0]} existing rows")
+    if "phase" not in cols and "phase" not in [c[1] for c in db.execute("PRAGMA table_info(mqtt_log)")]:
+        # Resolved at capture time rather than on read: the map belongs to the build that was
+        # running, so a later regeneration cannot silently relabel history.
+        db.execute("ALTER TABLE mqtt_log ADD COLUMN phase TEXT")
+        print("migrated: added `phase` (earlier rows keep NULL - they predate the name map)")
     db.commit()
     return db
 
 
 def show(kind=None, n=20):
     db = db_connect()
-    sql = "SELECT ts, kind, component, state, topic FROM mqtt_log"
+    sql = "SELECT ts, kind, component, state, phase FROM mqtt_log"
     args = []
     if kind:
         sql += " WHERE kind=?"
@@ -92,14 +137,15 @@ def show(kind=None, n=20):
     sql += " ORDER BY id DESC LIMIT ?"
     args.append(n)
     rows = db.execute(sql, args).fetchall()
-    print(f"{'ts':<26}{'kind':<11}{'name':<20}{'state':>6}  topic")
-    print("-" * 84)
-    for ts, k, comp, state, topic in reversed(rows):
-        print(f"{ts:<26}{(k or '?'):<11}{comp:<20}{str(state):>6}  {topic}")
+    print(f"{'ts':<26}{'kind':<11}{'name':<20}{'state':>6}  phase")
+    print("-" * 90)
+    for ts, k, comp, state, ph in reversed(rows):
+        print(f"{ts:<26}{(k or '?'):<11}{comp:<20}{str(state):>6}  {ph or ''}")
     counts = dict(db.execute("SELECT kind, COUNT(*) FROM mqtt_log GROUP BY kind").fetchall())
     total = sum(counts.values())
     breakdown = "  ".join(f"{k or '?'}={v}" for k, v in sorted(counts.items(), key=lambda x: str(x[0])))
     print(f"\n{total} rows total  ({breakdown})   db={DB}   jsonl={JSONL}")
+    print(f"phase names: {PHASE_MAP_FILE or 'NOT FOUND - showing numbers only'}")
 
 
 def steps(n=40):
@@ -111,20 +157,22 @@ def steps(n=40):
     """
     db = db_connect()
     rows = db.execute(
-        "SELECT ts, component, state FROM mqtt_log WHERE kind='process' ORDER BY id").fetchall()
+        "SELECT ts, component, state, phase FROM mqtt_log WHERE kind='process' ORDER BY id").fetchall()
     if not rows:
         print("no process rows yet -- is a process publishing on smc/process/#?")
         return
     last, timeline = {}, []
-    for ts, proc, state in rows:
+    for ts, proc, state, ph in rows:
         if last.get(proc) != state:
-            timeline.append((ts, proc, state))
+            timeline.append((ts, proc, state, ph))
             last[proc] = state
-    print(f"{'ts':<26}{'process':<20}{'state':>6}")
-    print("-" * 54)
-    for ts, proc, state in timeline[-n:]:
-        print(f"{ts:<26}{proc:<20}{str(state):>6}")
+    print(f"{'ts':<26}{'process':<20}{'state':>6}  phase")
+    print("-" * 86)
+    for ts, proc, state, ph in timeline[-n:]:
+        print(f"{ts:<26}{proc:<20}{str(state):>6}  {ph or ''}")
     print(f"\n{len(timeline)} phase changes from {len(rows)} process messages")
+    if not PHASE_MAP_FILE:
+        print("phase names unavailable (no process-phases.json) - regenerate to produce it")
 
 
 def export_csv():
@@ -133,9 +181,9 @@ def export_csv():
     db = db_connect()
     with open(out, "w", newline="", encoding="utf-8-sig") as f:   # utf-8-sig so Excel reads it
         w = csv.writer(f)
-        w.writerow(["id", "ts", "topic", "kind", "component", "state", "raw"])
+        w.writerow(["id", "ts", "topic", "kind", "component", "state", "phase", "raw"])
         w.writerows(db.execute(
-            "SELECT id,ts,topic,kind,component,state,raw FROM mqtt_log ORDER BY id"))
+            "SELECT id,ts,topic,kind,component,state,phase,raw FROM mqtt_log ORDER BY id"))
     n = db.execute("SELECT COUNT(*) FROM mqtt_log").fetchone()[0]
     print(f"wrote {n} rows -> {out}  (double-click to open in Excel)")
 
@@ -144,16 +192,18 @@ def record(db, jf, topic, payload):
     m = STATE_RE.search(payload or "")
     state = int(m.group(1)) if m else None
     kind, name = classify(topic)
+    phase = phase_name(kind, name, state)
     ts = datetime.datetime.now().isoformat(timespec="milliseconds")
     jf.write(json.dumps({"ts": ts, "topic": topic, "kind": kind, "component": name,
-                         "state": state, "raw": payload}) + "\n")
+                         "state": state, "phase": phase, "raw": payload}) + "\n")
     jf.flush()
     db.execute(
-        "INSERT INTO mqtt_log(ts,topic,kind,component,state,raw) VALUES(?,?,?,?,?,?)",
-        (ts, topic, kind, name, state, payload))
+        "INSERT INTO mqtt_log(ts,topic,kind,component,state,phase,raw) VALUES(?,?,?,?,?,?,?)",
+        (ts, topic, kind, name, state, phase, payload))
     db.commit()
-    # Print exactly like `mosquitto_sub -v`: "smc/<topic> {state:N}".
-    print(f"{topic} {payload}", flush=True)
+    # Print like `mosquitto_sub -v`: "smc/<topic> {state:N}", plus the phase name
+    # when one is known, which is the whole point of watching a process.
+    print(f"{topic} {payload}" + (f"   {phase}" if phase else ""), flush=True)
 
 
 def run():
