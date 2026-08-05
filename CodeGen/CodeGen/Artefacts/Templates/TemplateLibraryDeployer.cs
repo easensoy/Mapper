@@ -185,6 +185,11 @@ namespace CodeGen.Services
                     topicNameSource: "name", cfg, result);
             }
 
+            // Process-state telemetry. Runs unconditionally: when MQTT is off both calls STRIP, so a
+            // telemetry-off tree carries no publisher, no derived output and no stale array declaration.
+            ProcessRuntimeTemplatePatcher.PatchProcessTelemetryState(eaeProjectDir, cfg, result);
+            PatchProcessMqttPublish(eaeProjectDir, cfg, result);
+
             // Interlock/target interface -> struct (gated by interlock.yaml useStruct/useTargetStruct; false
             // restores the arrays/scalars). Both actuator CATs + the shared CommonInterlockEvaluator flip
             // TOGETHER; the normalizer saves retry through transient EAE locks (SaveXmlWithRetry), and the guard
@@ -489,6 +494,144 @@ namespace CodeGen.Services
             catch (Exception ex)
             {
                 result.Warnings.Add($"{catName} MQTT publish patch failed: {ex.Message}");
+            }
+        }
+
+        // Process-state telemetry: one embedded formatter + publisher inside Process1_Generic, fanned off
+        // the engine's dedicated phase event, which fires once per recipe row. Passive by construction —
+        // nothing waits on the publish and a broker outage cannot stall the recipe.
+        //
+        // Topic is <root>/process/<process_name>; payload is the shared {state:N} convention, where N is
+        // the VueOne State_Number carried by ProcessStateByRow, NOT CurrentStep (a recipe-row index).
+        static void PatchProcessMqttPublish(string eaeProjectDir, MapperConfig cfg, DeployResult result)
+        {
+            var fbt = FindDeployedFbt(eaeProjectDir, "Process1_Generic.fbt");
+            if (string.IsNullOrEmpty(fbt))
+            {
+                result.Warnings.Add("Process1_Generic.fbt not found; process MQTT patch skipped.");
+                return;
+            }
+            try
+            {
+                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var root = doc.Root;
+                if (root == null) return;
+                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
+                var net = root.Element(ns + "FBNetwork");
+                if (net == null) { result.Warnings.Add("Process1_Generic.fbt: no FBNetwork; process MQTT patch skipped."); return; }
+
+                // Strip any previous emission first: the CAT folder is copy-if-absent, and telemetry-off
+                // must leave no residue.
+                net.Elements(ns + "FB")
+                   .Where(f => (string?)f.Attribute("Name") is "MqttFmt" or "MqttPub")
+                   .ToList().ForEach(f => f.Remove());
+                foreach (var section in new[] { "EventConnections", "DataConnections" })
+                {
+                    var sec = net.Element(ns + section);
+                    sec?.Elements(ns + "Connection")
+                        .Where(c =>
+                        {
+                            var s = (string?)c.Attribute("Source") ?? string.Empty;
+                            var d = (string?)c.Attribute("Destination") ?? string.Empty;
+                            return s.StartsWith("MqttFmt.", StringComparison.Ordinal)
+                                || s.StartsWith("MqttPub.", StringComparison.Ordinal)
+                                || d.StartsWith("MqttFmt.", StringComparison.Ordinal)
+                                || d.StartsWith("MqttPub.", StringComparison.Ordinal)
+                                || d.EndsWith(".ProcessStateByRow", StringComparison.Ordinal);
+                        })
+                        .ToList().ForEach(c => c.Remove());
+                }
+
+                if (!cfg.MqttPublishEnabled)
+                {
+                    doc.Save(fbt);
+                    result.PatchesApplied.Add("Process1_Generic: process MQTT publisher stripped (MQTT publishing off)");
+                    return;
+                }
+
+                var engine = net.Elements(ns + "FB")
+                    .FirstOrDefault(f => (string?)f.Attribute("Type") == "ProcessRuntime_Generic_v1");
+                if (engine == null)
+                {
+                    result.Warnings.Add("Process1_Generic.fbt: ProcessRuntime_Generic_v1 instance not found; process MQTT patch skipped.");
+                    return;
+                }
+                string eng = (string?)engine.Attribute("Name") ?? "ProcessEngine";
+
+                var idAttr = root.Elements(ns + "Attribute")
+                    .FirstOrDefault(a => (string?)a.Attribute("Name") == "Configuration.FB.IDCounter");
+                int idc = 0;
+                if (idAttr != null && int.TryParse((string?)idAttr.Attribute("Value"), out var parsed)) idc = parsed;
+                int maxFbId = net.Elements(ns + "FB")
+                    .Select(f => int.TryParse((string?)f.Attribute("ID"), out var v) ? v : 0)
+                    .DefaultIfEmpty(0).Max();
+                int baseId = Math.Max(maxFbId + 1, idc);
+                int fmtId = baseId, pubId = baseId + 1;
+                if (idAttr != null) idAttr.SetAttributeValue("Value", (baseId + 2).ToString());
+
+                string Q(string s) => "'" + s + "'";
+                var fmtFb = new System.Xml.Linq.XElement(ns + "FB",
+                    new System.Xml.Linq.XAttribute("ID", fmtId),
+                    new System.Xml.Linq.XAttribute("Name", "MqttFmt"),
+                    new System.Xml.Linq.XAttribute("Type", "MqttStateFormatter"),
+                    new System.Xml.Linq.XAttribute("x", "8000"),
+                    new System.Xml.Linq.XAttribute("y", "3200"),
+                    new System.Xml.Linq.XAttribute("Namespace", "Main"));
+
+                const string MqttPublishVariant = "MQTT_PUBLISH_115480E69E664F878";
+                var pubFb = new System.Xml.Linq.XElement(ns + "FB",
+                    new System.Xml.Linq.XAttribute("ID", pubId),
+                    new System.Xml.Linq.XAttribute("Name", "MqttPub"),
+                    new System.Xml.Linq.XAttribute("Type", MqttPublishVariant),
+                    new System.Xml.Linq.XAttribute("x", "8600"),
+                    new System.Xml.Linq.XAttribute("y", "3200"),
+                    new System.Xml.Linq.XAttribute("Namespace", "Main"));
+                pubFb.Add(new System.Xml.Linq.XElement(ns + "Attribute",
+                    new System.Xml.Linq.XAttribute("Name", "Configuration.GenericFBType.InterfaceParams"),
+                    new System.Xml.Linq.XAttribute("Value", "Runtime.NetConnectivity#CNTX:=1")));
+                void P(System.Xml.Linq.XElement fb, string n, string v) =>
+                    fb.Add(new System.Xml.Linq.XElement(ns + "Parameter",
+                        new System.Xml.Linq.XAttribute("Name", n),
+                        new System.Xml.Linq.XAttribute("Value", v)));
+                P(pubFb, "QI", "TRUE");
+                // Same shared binding key as the component publishers, so the process publisher binds to
+                // whichever telemetry connection lives on its own resource. No new connection is added.
+                P(pubFb, "ConnectionID", Q(cfg.MqttConnectionName));
+                P(pubFb, "RootPath", Q(cfg.MqttTopicRoot + "/process"));
+                P(pubFb, "QoS1", cfg.MqttQoS.ToString());
+                P(pubFb, "Retain1", cfg.MqttRetain ? "TRUE" : "FALSE");
+
+                var lastFb = net.Elements(ns + "FB").LastOrDefault();
+                if (lastFb != null) { lastFb.AddAfterSelf(pubFb); lastFb.AddAfterSelf(fmtFb); }
+                else { net.Add(fmtFb); net.Add(pubFb); }
+
+                var ec = net.Element(ns + "EventConnections");
+                if (ec == null) { ec = new System.Xml.Linq.XElement(ns + "EventConnections"); net.Add(ec); }
+                var dc = net.Element(ns + "DataConnections");
+                if (dc == null) { dc = new System.Xml.Linq.XElement(ns + "DataConnections"); net.Add(dc); }
+                void Conn(System.Xml.Linq.XElement parent, string s, string d) =>
+                    parent.Add(new System.Xml.Linq.XElement(ns + "Connection",
+                        new System.Xml.Linq.XAttribute("Source", s),
+                        new System.Xml.Linq.XAttribute("Destination", d)));
+
+                Conn(dc, "ProcessStateByRow", eng + ".ProcessStateByRow");
+                Conn(ec, eng + "." + ProcessRuntimeTemplatePatcher.PhaseEventName, "MqttFmt.REQ");
+                Conn(ec, "MqttFmt.CNF", "MqttPub.PUBLISH1");
+                Conn(ec, "INIT", "MqttFmt.INIT");
+                Conn(ec, "INIT", "MqttPub.INIT");
+                Conn(dc, eng + ".CurrentProcessState", "MqttFmt.state");
+                Conn(dc, "MqttFmt.payload", "MqttPub.Payload1");
+                Conn(dc, "process_name", "MqttPub.Topic1");
+
+                doc.Save(fbt);
+                result.PatchesApplied.Add(
+                    $"Process1_Generic: process MQTT publish injected (fan {eng}.SCNF -> MqttFmt -> MqttPub.PUBLISH1, " +
+                    $"ConnectionID={cfg.MqttConnectionName}, Topic={cfg.MqttTopicRoot}/process/<process_name>)");
+                MapperLogger.Info($"[Deploy][MQTT] Process1_Generic.fbt: process-state MQTT_PUBLISH wired off {eng}.SCNF");
+            }
+            catch (Exception ex)
+            {
+                result.Warnings.Add($"Process1_Generic process MQTT patch failed: {ex.Message}");
             }
         }
 
