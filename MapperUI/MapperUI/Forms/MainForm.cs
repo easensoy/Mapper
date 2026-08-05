@@ -31,7 +31,9 @@ namespace MapperUI
         MapperConfig? _mapperConfig;
         List<VueOneComponent> _loadedComponents = new();
         List<ComponentValidationRow> _validationRows = new();
-        // In-session Device-column overrides — display only; generation reads ComponentRegistry.
+        // In-session Device-column overrides. NOT display-only: btnTestStation1_Click reads this at
+        // generation time and converts RevPi picks into MapperConfig.RevPiComponents, which is what
+        // re-partitions ComponentRegistry. Not persisted across restarts.
         readonly Dictionary<string, string> _deviceOverrides = new(StringComparer.OrdinalIgnoreCase);
         // True while the grid is (re)populating, so CellValueChanged ignores programmatic writes.
         bool _populatingGrid;
@@ -829,20 +831,37 @@ namespace MapperUI
                 foreach (var kv in _deviceOverrides)
                 {
                     if (!string.Equals(kv.Value, "RevPi", StringComparison.OrdinalIgnoreCase)) continue;
-                    if (string.Equals(kv.Key, "Feeder", StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(kv.Key, "Checker", StringComparison.OrdinalIgnoreCase))
+                    // Swappable == what the RevPi Modbus coupler actually carries, read from the injector's
+                    // own signal tables so this can never drift from PLC_RW_REVPI's interface.
+                    if (CodeGen.Devices.RevPi.RevPiIoBrokerInjector.CoveredComponents.Contains(kv.Key))
                         revpiComponents.Add(kv.Key);
                     else
-                        AppendActivity($"[Target][!] '{kv.Key}' cannot move to RevPi (only Feeder/Checker are swappable) — kept on M262.");
+                        AppendActivity($"[Target][!] '{kv.Key}' cannot move to the RevPi — the Modbus coupler (PLC_RW_REVPI) exposes no IO for it; kept on M262.");
                 }
                 if (revpiComponents.Count > 0) revpiComponents.Add("PartInHopper");
-                MapperConfig.FeedStationController = FeedController.M262;   // M262 stays the Feed host; RevPi coexists
+                // The Feed station stays on M262 and the RevPi COEXISTS with it. This is a deliberate
+                // contract, not a placeholder: the whole-Feed swap is unsupportable because PLC_RW_REVPI
+                // carries IO for only Feeder/Checker/PartInHopper, so relocating the whole station would
+                // strand Transfer/Ejector/Robot/PartAtAssembly with no physical IO. The per-component swap
+                // IS the RevPi mode; RevPiSelectionValidator rejects the full swap by name.
+                MapperConfig.FeedStationController = FeedController.M262;
                 MapperConfig.RevPiComponents = revpiComponents;
+
+                // Fail BEFORE generating rather than emitting a RevPi project that cannot actuate.
+                CodeGen.Validation.Plan.RevPiSelectionValidator.ThrowIfInvalid();
+
+                // Log the controller decision on EVERY run: a pure-M262 run must be distinguishable in the
+                // activity log from one where every RevPi pick was silently rejected.
                 if (revpiComponents.Count > 0)
                 {
                     var picked = revpiComponents.Where(c =>
                         !string.Equals(c, "PartInHopper", StringComparison.OrdinalIgnoreCase));
-                    AppendActivity($"[Target] Per-component controller: {string.Join(", ", picked)} + PartInHopper -> Revolution Pi (Soft_dPAC); M262 keeps the rest (4 controllers).");
+                    AppendActivity($"[Target] Feed controller: M262 + Revolution Pi (Soft_dPAC) — {string.Join(", ", picked)} + PartInHopper on the RevPi; M262 keeps the rest (4 controllers).");
+                    AppendActivity($"[Target] RevPi endpoints: host {Cfg().RevPiHostIp} (Soft dPAC Manager :8080, EAE 'Manage Soft dPAC') / container {Cfg().RevPiTargetIp} (IEC 61499 runtime, EAE Deploy+Login target).");
+                }
+                else
+                {
+                    AppendActivity("[Target] Feed controller: M262 (no components routed to the RevPi).");
                 }
 
                 lblStatus.Text = "Generating...";
@@ -1110,6 +1129,32 @@ namespace MapperUI
                 catch (Exception ex)
                 {
                     AppendActivity($"[Parity][Error] {ex.Message}");
+                    throw;
+                }
+
+                // Topology address-role guard. An IP collision is only visible ACROSS emitters — the RevPi
+                // device and the HMI panel are written by unrelated code paths into the SAME broadcast
+                // domain — so no single-file check can catch it. A duplicated Soft dPAC CONTAINER address
+                // is fatal (it is EAE's deploy/login target and must be uniquely reachable); duplicated
+                // host NICs are reported but tolerated, because the shipped tree and the reference both
+                // carry one and both import into EAE.
+                try
+                {
+                    var eaeRootAddr = CodeGen.Devices.Core.EaeProjectLayout.DeriveEaeProjectRoot(Cfg());
+                    var addr = await Task.Run(() =>
+                        CodeGen.Validation.Output.TopologyAddressValidator.Validate(eaeRootAddr, Cfg()));
+                    var addrErrors = addr.Where(v => v.IsError).ToList();
+                    foreach (var v in addr) AppendActivity($"  [Addr] {v}");
+                    if (addr.Count == 0)
+                        AppendActivity("[Addr] PASS — every topology endpoint owns its address within its broadcast domain.");
+                    if (addrErrors.Count > 0)
+                        throw new InvalidOperationException(
+                            $"Generated topology has {addrErrors.Count} fatal address collision(s). Two endpoints " +
+                            "cannot share one address in a broadcast domain — fix Config/device.yml and re-generate.");
+                }
+                catch (Exception ex)
+                {
+                    AppendActivity($"[Addr][Error] {ex.Message}");
                     throw;
                 }
 
@@ -1467,7 +1512,8 @@ namespace MapperUI
         // A blank/unlisted combo value would raise a formatting error; swallow it.
         void dgvComponents_DataError(object sender, DataGridViewDataErrorEventArgs e) => e.ThrowException = false;
 
-        // Record a Device dropdown override + refresh the summary. Display only — see _deviceOverrides.
+        // Record a Device dropdown override + refresh the summary. LIVE — btnTestStation1_Click reads
+        // _deviceOverrides at generation time; a RevPi pick on Feeder/Checker relocates that component.
         void dgvComponents_DeviceChanged(object sender, DataGridViewCellEventArgs e)
         {
             if (_populatingGrid || e.RowIndex < 0 || e.ColumnIndex != colDevice.Index) return;
@@ -1477,8 +1523,14 @@ namespace MapperUI
             if (string.IsNullOrEmpty(comp)) return;
             _deviceOverrides[comp] = dev;
             RefreshDeviceSummary();
-            AppendActivity($"[UI] Device set: {comp} -> {dev} " +
-                "(display only; generation still uses the canonical device map — re-assignment wiring is a follow-up).");
+            bool swappable = string.Equals(dev, "RevPi", StringComparison.OrdinalIgnoreCase) &&
+                             CodeGen.Devices.RevPi.RevPiIoBrokerInjector.CoveredComponents.Contains(comp);
+            AppendActivity($"[UI] Device set: {comp} -> {dev}" +
+                (string.Equals(dev, "RevPi", StringComparison.OrdinalIgnoreCase)
+                    ? swappable
+                        ? " (applied at Generate: this component moves to the Revolution Pi)."
+                        : " — IGNORED at Generate: the RevPi Modbus coupler carries no IO for this component; only Feeder/Checker are swappable."
+                    : "."));
         }
 
         // Recompute per-device counts and refresh the Mapping Information title.
