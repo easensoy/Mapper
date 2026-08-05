@@ -5,7 +5,9 @@ namespace CodeGen.Configuration
         public DeviceNet M262 { get; set; } = new();
         public DeviceNet M580 { get; set; } = new();
         public DeviceNet Bx1 { get; set; } = new();
-        public DeviceNet RevPi { get; set; } = new() { TargetIp = "192.168.1.6", HostIp = "192.168.1.2" };
+        // TargetIp = Soft dPAC CONTAINER (macvlan child, runtime + EAE deploy target).
+        // HostIp   = RevPi Linux/Docker HOST NIC (Soft dPAC Manager on 8080). Must differ from TargetIp.
+        public DeviceNet RevPi { get; set; } = new() { TargetIp = "192.168.1.6", HostIp = "192.168.1.1" };
         public HmiDeviceNet Hmi { get; set; } = new();
         public DeviceNet DefaultNetwork { get; set; } = new();
 
@@ -26,7 +28,8 @@ namespace CodeGen.Configuration
     public sealed class HmiDeviceNet
     {
         public string HostIp { get; set; } = "192.168.1.2";
-        public string InternalRuntimeIp { get; set; } = "192.168.1.1";
+        // The HMIP6 panel container is inert (null logicalDeviceId); kept off the RevPi host address.
+        public string InternalRuntimeIp { get; set; } = "192.168.1.3";
         public int LogicalPort { get; set; } = 61999;
         public int SecurePort { get; set; } = 51443;
     }
