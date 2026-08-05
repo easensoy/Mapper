@@ -7,20 +7,39 @@ WHAT GETS PUBLISHED
       A device's own position. One publisher is embedded in each actuator /
       sensor CAT and fires when that device changes state.
 
-  smc/process/<Process>      e.g.  smc/process/Feed_Station {state:4}
+  smc/process/<Process>      e.g.  smc/process/Disassembly {state:29}
       Which PHASE of the recipe a process is in. One publisher is embedded in
-      Process1_Generic. The number is the VueOne State_Number from Control.xml
-      (4 = FeederReturning), NOT the compiled recipe row index.
+      Process1_Generic, fired once per recipe row. The number identifies a state
+      of the process in the twin, NOT the compiled recipe row index.
 
   The three processes are Feed_Station, Assembly_Station, Disassembly.
+
+PHASE NAMES
+-----------
+  The payload is an integer, so the Mapper writes the ordinal -> name map next
+  to the generated project:
+
+      C:\Demonstrator\process-phases.json
+
+  The logger reads it and stores/prints the twin's own state name, so the log
+  reads "Unclamping" instead of "29". It appears after a Generate; without it
+  the logger still works, just in numbers. Override the location with the
+  SMC_PHASE_MAP environment variable.
+
+  The number is deliberately NOT the twin's State_Number. State_Number is a
+  broadcast slot announcing a phase to a peer process, so the twin fills it in
+  only where a peer is watching: 14 of 32 Assembly states and 18 of 29
+  Disassembly states carry 0, and Assembly reuses 1-7 for two states each.
+  Correct for handshakes, useless for telling phases apart.
 
 Output folder (auto-created):
   C:\Users\alper\OneDrive\Masaüstü\Output\smc.jsonl   (one JSON object per line)
   C:\Users\alper\OneDrive\Masaüstü\Output\smc.db      (SQLite, table mqtt_log)
 
-  Table mqtt_log: id, ts, topic, kind, component, state, raw
+  Table mqtt_log: id, ts, topic, kind, component, state, phase, raw
   `kind` is 'component' or 'process'. A process and a device can carry the same
-  state number while meaning different things, so always filter on kind.
+  number while meaning different things, so always filter on kind.
+  `phase` is the resolved state name, filled in for process rows only.
 
 
 ONE COMMAND  (starts the broker in its own window, then the subscriber+logger):
@@ -74,6 +93,17 @@ TEST WITHOUT THE RIG  (publish a fake phase and watch it land):
 
 Stop:           Ctrl+C in the logger window.
 Fresh capture:  delete smc.jsonl + smc.db in the Output folder (they append across runs).
+
+DROP A BAD CAPTURE WITHOUT LOSING THE REST
+------------------------------------------
+  Captures taken before a fix are still in the table. To remove only those (for
+  example every process row recorded while telemetry reported 0), delete by time
+  rather than wiping the file:
+
+    sqlite3 "C:\Users\alper\OneDrive\Masaüstü\Output\smc.db" ^
+      "DELETE FROM mqtt_log WHERE kind='process' AND ts < '2026-08-05T14:30';"
+
+  Component rows are untouched by that, and the JSONL keeps the full history.
 
 NOTE ON EXISTING CAPTURES: the first run adds the `kind` column to an existing
 smc.db and labels the old rows from their own topic. Nothing is deleted and no
