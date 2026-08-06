@@ -129,9 +129,11 @@ namespace CodeGen.Translation
             static bool IsM580(string name) =>
                 HcfSymbolIndex.NameBasedPlcGuess(name) == PlcAssignment.M580;
 
-            // Thread Disassembly after Assembly_Station to keep the syslay+sysres rings in lock-step (else EAE re-derives a ring dropping it); flag-off is byte-identical.
-            bool threadDisassembly =
-                MapperConfig.UnparkDisassembly && !string.IsNullOrEmpty(disassemblyFbName);
+            // Thread Disassembly after Assembly_Station so the syslay ring matches the sysres, which wires
+            // every Process FB it finds (ResourceWireEmitter discovers them by type). Skipping it here while
+            // the sysres threads it is a divergence no validator inspects — the parity check reads FBs and
+            // parameters only, never connections.
+            bool threadDisassembly = !string.IsNullOrEmpty(disassemblyFbName);
 
             // Station2's internal plcStart fires Station2.INITO; the FB1->Station2.INIT bootstrap is on the M580 sysres (ResourceWireEmitter).
             var initChain = new List<string> { StationFb };
