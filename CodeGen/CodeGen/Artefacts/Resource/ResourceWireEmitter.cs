@@ -33,16 +33,7 @@ namespace CodeGen.Devices.Core
             new("FB2.FIRST_INIT",      "FB2.ACK_FIRST"),
         };
 
-        // FB instance names from Control.xml (NOT hardware aliases): CAT $${PATH} symlinks expand to these, so renaming here severs the chain + bindings.
-        private static readonly string[] CaSBusOrder =
-        {
-            "PartInHopper", "PartAtChecker", "Feeder", "Checker", "Transfer",
-            "BearingSensor", "ShaftSensor",
-            "Bearing_PnP", "Bearing_Gripper",
-            "Shaft_Hr", "Shaft_Vr", "Shaft_Gripper", "Clamp",
-            "TopCoverSenosr", "TopCoverSensor",   // both twin spellings; the absent one is simply skipped
-            "CoverPNP_Hr", "CoverPNP_Vr", "CoverPnp_Gripper",
-        };
+        private static IReadOnlyList<string> CaSBusOrder => ComponentRegistry.CaSBusOrder;
 
 
         // Single source of truth in TemplateMap so the syslay stationChain and this sysres wiring can never drift.
@@ -251,27 +242,18 @@ namespace CodeGen.Devices.Core
                 var actNames = orderedComps.Where(c => IsActuator(c) && HasStationAdapter(c))
                     .Select(Nm).Where(s => s.Length > 0).ToList();
 
-                // Every Process1_Generic on this resource (anchor first); the chains/ring below thread through every one. The parked M580 Disassembly is filtered out unless UnparkDisassembly.
-                bool BypassParkedM580Disassembly(string name) =>
-                    !MapperConfig.UnparkDisassembly &&
-                    string.Equals(anchors.ProcessFb, "Assembly_Station", StringComparison.Ordinal) &&
-                    (string.Equals(name, "Disassembly", StringComparison.Ordinal) ||
-                     string.Equals(name, "Disassembly_Station", StringComparison.Ordinal));
-
+                // Every Process1_Generic on this resource, anchor first; the chains and ring below thread
+                // through every one.
                 var processNames = new List<string>();
-                if (Present(anchors.ProcessFb, byName) &&
-                    !BypassParkedM580Disassembly(anchors.ProcessFb!))
+                if (Present(anchors.ProcessFb, byName))
                     processNames.Add(anchors.ProcessFb!);
                 foreach (var fb in fbNet.Elements(ns + "FB"))
                 {
                     var nm = (string?)fb.Attribute("Name") ?? string.Empty;
                     if (nm.Length == 0 || processNames.Contains(nm)) continue;
-                    if (BypassParkedM580Disassembly(nm)) continue;
                     if ((string?)fb.Attribute("Type") == "Process1_Generic")
                         processNames.Add(nm);
                 }
-                if (byName.ContainsKey("Disassembly") && BypassParkedM580Disassembly("Disassembly"))
-                    report.Missing.Add("[M580 RES0] Disassembly parked and bypassed in init/CaS/stateRprtCmd wiring");
                 bool haveProcess = processNames.Count > 0;
 
                 // Init chain FB1.INITO->[Area]->[Station]->components...->[Process]; absent anchors collapse out so FB1.INITO fans straight into the first component.
