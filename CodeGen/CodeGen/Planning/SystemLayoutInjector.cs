@@ -19,103 +19,6 @@ namespace CodeGen.Translation
     {
         private static readonly XNamespace Ns = "https://www.se.com/LibraryElements";
 
-        private static XElement EnsureSection(XElement net, string tag)
-        {
-            var s = net.Elements().FirstOrDefault(e => e.Name.LocalName == tag);
-            if (s != null) return s;
-            s = new XElement(Ns + tag);
-            net.Add(s);
-            return s;
-        }
-
-        private static void AddConn(XElement section, string src, string dst,
-            SystemInjectionResult result)
-        {
-            bool exists = section.Elements()
-                .Where(e => e.Name.LocalName == "Connection")
-                .Any(c =>
-                    string.Equals(c.Attribute("Source")?.Value, src, StringComparison.OrdinalIgnoreCase) &&
-                    string.Equals(c.Attribute("Destination")?.Value, dst, StringComparison.OrdinalIgnoreCase));
-            if (exists) return;
-
-            section.Add(new XElement(Ns + "Connection",
-                new XAttribute("Source", src),
-                new XAttribute("Destination", dst)));
-            result.InjectedFBs.Add($"  wire: {src} → {dst}");
-        }
-
-        private static void SetParam(XElement fb, string name, string value)
-        {
-            var el = fb.Elements()
-                .FirstOrDefault(e => e.Name.LocalName == "Parameter" &&
-                                     e.Attribute("Name")?.Value == name);
-            if (el != null) el.SetAttributeValue("Value", value);
-            else fb.Add(new XElement(Ns + "Parameter",
-                new XAttribute("Name", name),
-                new XAttribute("Value", value)));
-        }
-
-        private static List<VueOneComponent> Actuators(List<VueOneComponent> all) =>
-            all.Where(c => c.Type?.Equals("Actuator", StringComparison.OrdinalIgnoreCase) == true
-                        && c.States.Count == 5).ToList();
-
-        private static List<VueOneComponent> Sensors(List<VueOneComponent> all) =>
-            all.Where(c => c.Type?.Equals("Sensor", StringComparison.OrdinalIgnoreCase) == true
-                        && c.States.Count == 2).ToList();
-
-        private static List<VueOneComponent> Processes(List<VueOneComponent> all) =>
-            all.Where(c => c.Type?.Equals("Process", StringComparison.OrdinalIgnoreCase) == true).ToList();
-
-
-
-        public string GeneratePusherTestSyslayToPath(string targetSyslayPath, IoBindings? bindings = null)
-        {
-            return GeneratePusherTestSyslayToPath(targetSyslayPath, bindings, out _);
-        }
-
-        public string GeneratePusherTestSyslayToPath(string targetSyslayPath, IoBindings? bindings,
-            out BindingApplicationReport report)
-        {
-            if (string.IsNullOrEmpty(targetSyslayPath))
-                throw new ArgumentException("Target syslay path is required.", nameof(targetSyslayPath));
-
-            report = new BindingApplicationReport();
-            var fileName = Path.GetFileName(targetSyslayPath);
-            var layerId = FBIdGenerator.GenerateFBId(fileName);
-            var builder = new SyslayBuilder(layerId);
-            builder.SetTopComment(
-                "v1 limitations: Pusher test only. Demonstrator was cleaned of universal-architecture instances " +
-                "before this generation; restore via 'git checkout' on the Demonstrator repo to revert.");
-
-            var pusherId = FBIdGenerator.GenerateFBId("Pusher_Test_v1");
-            var parameters = new Dictionary<string, string>
-            {
-                ["actuator_name"] = SyslayBuilder.FormatString("pusher"),
-                ["actuator_id"] = SyslayBuilder.FormatInt(0),
-                ["WorkSensorFitted"] = SyslayBuilder.FormatBool(false),
-                ["HomeSensorFitted"] = SyslayBuilder.FormatBool(false),
-                ["toWorkTime"] = SyslayBuilder.FormatTimeMs(2000),
-                ["toHomeTime"] = SyslayBuilder.FormatTimeMs(2000),
-                ["enableToWorkFaultTimeout"] = SyslayBuilder.FormatBool(false),
-                ["enableToHomeFaultTimeout"] = SyslayBuilder.FormatBool(false),
-                ["faultTimeoutWork"] = SyslayBuilder.FormatTimeMs(4000),
-                ["faultTimeoutHome"] = SyslayBuilder.FormatTimeMs(4000),
-            };
-
-            var pusherBinding = bindings?.Actuators.GetValueOrDefault("Pusher")
-                ?? bindings?.Actuators.GetValueOrDefault("Feeder");
-            if (pusherBinding != null)
-                report.Bound.Add(("Pusher", DescribeBinding(pusherBinding)));
-            else
-                report.Missing.Add("Pusher");
-
-            builder.AddFB(pusherId, "Pusher", "Five_State_Actuator_CAT", "Main", 1300, 2480, parameters);
-
-            var doc = builder.Build();
-            doc.Save(targetSyslayPath);
-            return targetSyslayPath;
-        }
-
         public class BindingApplicationReport
         {
             public List<(string Component, string Detail)> Bound { get; } = new();
@@ -130,17 +33,6 @@ namespace CodeGen.Translation
         private static string DescribeBinding(SensorBinding b) =>
             $"input={b.InputTag ?? "-"}";
 
-
-        public string GenerateFeedStationSyslayToPath(string controlXmlPath, string targetSyslayPath)
-        {
-            return GenerateFeedStationSyslayToPath(controlXmlPath, targetSyslayPath, null, null, out _);
-        }
-
-        public string GenerateFeedStationSyslayToPath(string controlXmlPath, string targetSyslayPath,
-            IoBindings? bindings, out BindingApplicationReport report)
-        {
-            return GenerateFeedStationSyslayToPath(controlXmlPath, targetSyslayPath, bindings, null, out report);
-        }
 
         public string GenerateFeedStationSyslayToPath(string controlXmlPath, string targetSyslayPath,
             IoBindings? bindings, MapperConfig? config, out BindingApplicationReport report)
@@ -752,18 +644,9 @@ namespace CodeGen.Translation
         private static int DefaultMotionMs => GenerationConfig.Current.DefaultMotionMs;
 
 
-        // Component → emitted FB Type via TemplateMap; the 6 sites that must agree are INVARIANTS.md I-4.
-        internal static string ResolveActuatorFBType(VueOneComponent actuator)
-        {
-            if (actuator == null) return "Five_State_Actuator_CAT";
-            // Only the real UR3e (IsRobotTaskArm) → Robot_Task_CAT; Type="Robot" grippers stay Five_State/Vacuum.
-            if (MapperConfig.EnableRobotTaskTail && TemplateMap.IsRobotTaskArm(actuator))
-                return "Robot_Task_CAT";
-            return TemplateMap.ResolveActuatorCatType(
-                actuator.Name ?? string.Empty,
-                actuator.States?.Count ?? 0,
-                TemplateMap.IsBranchedSevenState(actuator));
-        }
+        // Alias for the planners that reach it through `using static`; TemplateMap owns the decision.
+        internal static string ResolveActuatorFBType(VueOneComponent actuator) =>
+            TemplateMap.ResolveActuatorCatType(actuator);
 
         // Minimal params (actuator_name + actuator_id) for actuators that are NOT plain 5-state cylinders.
         private static Dictionary<string, string> BuildMinimalActuatorParameters(
@@ -1489,18 +1372,9 @@ namespace CodeGen.Translation
         {
             if (string.IsNullOrEmpty(config.SyslayPath2))
                 throw new InvalidOperationException("MapperConfig.SyslayPath2 is not configured.");
-            // Reset SimulatorRecipeMode (the State-Transition Table preview sets it transiently) so no preview run carries over onto the rig.
-            Configuration.MapperConfig.SimulatorRecipeMode = false;
             return GenerateFeedStationSyslayToPath(controlXmlPath, config.SyslayPath2, bindings, config, out report);
         }
 
-
-        private static string SanitizeFileName(string name)
-        {
-            foreach (var c in Path.GetInvalidFileNameChars())
-                name = name.Replace(c, '_');
-            return name;
-        }
 
         // opcua.xml stub in a folder named after the artefact stem, so EAE's Solution Integrity check passes.
         public static void EnsureOpcuaXmlBesideArtefact(string artefactPath)
