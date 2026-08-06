@@ -62,11 +62,5 @@ namespace CodeGen.Mapping
         };
 
 
-        public static (int X, int Y)? PositionOf(string? name)
-        {
-            var e = ComponentRegistry.Get(name);
-            return e is null ? null : (e.X, e.Y);
-        }
-
     }
 }
