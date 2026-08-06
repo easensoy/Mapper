@@ -169,6 +169,58 @@ namespace CodeGen.Mapping
             new(name, PlcAssignment.Unknown, string.Empty,
                 -1, LayoutRow.Boot, x, y, string.Empty);
 
+        // ── Ordered projections ──────────────────────────────────────────────────
+        //
+        // TWO DIFFERENT ORDERS, both load-bearing, deliberately NOT merged.
+        //
+        // Id order (sensors first, then actuators) assigns the state_table index, the CAT actuator_id and
+        // the recipe Wait1Id. Appending is safe; inserting renumbers every component after the insert and
+        // silently repoints every WAIT.
+        //
+        // CaS-bus order chains the station adapter and interleaves sensors with actuators. Normalising the
+        // two into one list would either renumber components or rewire the bus.
+        //
+        // Names are Control.xml FB instance names, not hardware aliases: CAT $${PATH} symlinks expand to
+        // them. A component the twin omits is simply skipped by the consumer.
+
+        public static IReadOnlyList<string> IdOrderSensors { get; } = new[]
+        {
+            "PartInHopper", "PartAtChecker",
+            "BearingSensor", "ShaftSensor",
+            // Both twin spellings; the absent one is skipped (see TemplateMap.IsTopCoverSensor).
+            "TopCoverSenosr", "TopCoverSensor",
+            // LAST on purpose: appending leaves every existing sensor id untouched. A twin that omits it
+            // falls through to the synth injection, so both shapes generate the same ids.
+            "PartAtAssembly",
+        };
+
+        // includeRobotTail appends the UR3e, which only participates when the cross-PLC discharge is on.
+        public static IReadOnlyList<string> IdOrderActuators(bool includeRobotTail)
+        {
+            var ordered = new List<string>
+            {
+                "Feeder", "Checker", "Transfer", "Ejector",
+                "Bearing_PnP",
+                "Bearing_Gripper",
+                "Shaft_Hr", "Shaft_Vr", "Shaft_Gripper",
+                "Clamp",
+                "CoverPNP_Hr", "CoverPNP_Vr",
+                "CoverPnp_Gripper",
+            };
+            if (includeRobotTail) ordered.Add("Robot");
+            return ordered;
+        }
+
+        public static IReadOnlyList<string> CaSBusOrder { get; } = new[]
+        {
+            "PartInHopper", "PartAtChecker", "Feeder", "Checker", "Transfer",
+            "BearingSensor", "ShaftSensor",
+            "Bearing_PnP", "Bearing_Gripper",
+            "Shaft_Hr", "Shaft_Vr", "Shaft_Gripper", "Clamp",
+            "TopCoverSenosr", "TopCoverSensor",
+            "CoverPNP_Hr", "CoverPNP_Vr", "CoverPnp_Gripper",
+        };
+
         // ── Generic lookup ───────────────────────────────────────────────────────
 
         public static ComponentEntry? Get(string? name)
