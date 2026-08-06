@@ -138,19 +138,10 @@ namespace MapperUI
                 .Where(c => string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase))
                 .ToList();
 
-            bool previousSimulatorMode = MapperConfig.SimulatorRecipeMode;
-            try
+            foreach (var process in processes)
             {
-                MapperConfig.SimulatorRecipeMode = true;
-                foreach (var process in processes)
-                {
-                    AddTransitionRows(transitionRows, process, components);
-                    AddRecipeRows(recipeRows, notes, process, components);
-                }
-            }
-            finally
-            {
-                MapperConfig.SimulatorRecipeMode = previousSimulatorMode;
+                AddTransitionRows(transitionRows, process, components);
+                AddRecipeRows(recipeRows, notes, process, components);
             }
 
             return new Snapshot(recipeRows, transitionRows, notes);
