@@ -28,9 +28,6 @@ namespace CodeGen.Translation
             return XlsxRuleLoader.LoadSheets(xlsxPath, sheets);
         }
 
-        public static List<string> GetSheetNames(string xlsxPath)
-            => XlsxRuleLoader.GetSheetNames(xlsxPath);
-
     }
 
     public static class XlsxRuleLoader
@@ -61,12 +58,6 @@ namespace CodeGen.Translation
             foreach (var sheetName in sheetNames)
                 foreach (var entry in LoadSheetInternal(xlsxPath, sheetName))
                     yield return entry;
-        }
-
-        public static IEnumerable<MappingRuleEntry> LoadSheet(string xlsxPath, string sheetName)
-        {
-            xlsxPath = ValidatePath(xlsxPath);
-            return LoadSheetInternal(xlsxPath, sheetName);
         }
 
         public static IEnumerable<MappingRuleEntry> LoadSheets(string xlsxPath, List<string> sheetNames)
