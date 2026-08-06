@@ -7,23 +7,14 @@ using CodeGen.Devices.Core;
 
 namespace CodeGen.Translation.Process
 {
-    /// Writes the ordinal -> phase-name map that process telemetry publishes against.
-    ///
-    /// The wire payload is an integer, because that is the shared {state:N} convention every component
-    /// already uses and the formatter is an INT formatter. A subscriber therefore needs the names from
-    /// somewhere, and deriving them by re-walking Control.xml would duplicate the compiler's numbering
-    /// in every consumer. Emitting the map at generation time keeps one source of truth: whoever reads
-    /// this file is reading the same numbering the PLC was built with.
-    ///
-    /// TELEMETRY ONLY. Nothing in the generated project references this file, so a missing or stale map
-    /// degrades a subscriber to bare numbers and can never affect the rig.
+    // TELEMETRY ONLY: the ordinal -> phase-name map process telemetry publishes against. Nothing in the
+    // generated project reads it, so a missing or stale map only degrades a subscriber to bare numbers.
     internal static class ProcessPhaseMapEmitter
     {
         internal const string FileName = "process-phases.json";
 
-        /// Written to the PARENT of the EAE project root, deliberately outside the solution: EAE
-        /// enumerates its own project tree, and an unregistered file inside it is a Solution Integrity
-        /// complaint waiting to happen.
+        // Written OUTSIDE the EAE solution (the project root's parent): EAE enumerates its own tree and
+        // an unregistered file inside it raises a Solution Integrity complaint.
         internal static string? Emit(MapperConfig cfg,
             IReadOnlyDictionary<string, IReadOnlyDictionary<int, string>> byProcess,
             Action<string>? warn = null)
