@@ -41,8 +41,6 @@ namespace CodeGen.Configuration
         // Engine END->0 loop-back (ProcessRuntimeTemplatePatcher).
         public static bool EnableCyclicRestart = true;
 
-        public static bool UnparkDisassembly = true;
-
         public static bool MergeFeedRing = false;
 
         // Emits the Disassembly->Feed CycleReady CrossReference wiring (clamp model only, see CycleReadyActive).
@@ -185,25 +183,9 @@ namespace CodeGen.Configuration
 
         public bool UseTelemetryCat { get; set; } = TelemetrySettings.Current.UseTelemetryCat;
 
-        public int MqttConnectionId { get; set; } = 1;
-
-        public int MqttQueueDepth { get; set; } = 100;
-
         public int MqttQoS { get; set; } = 1;
 
-        public bool MqttCleanSession { get; set; } = false;
-
         public bool MqttRetain { get; set; } = false;
-
-        // EAE constraint: must reach the TIME port as a TIME literal (T#60000ms), not a bare INT (ERR_CAST_CONSTANT); an unset value defaults to T#0s and aborts the connect.
-        public int MqttKeepAliveMs { get; set; } = 60000;
-
-        // EAE constraint: an unset TIME port defaults to T#0s and aborts the connect before the first handshake completes.
-        public int MqttConnectionTimeoutMs { get; set; } = 5000;
-
-        public int MqttConnectionRetryCount { get; set; } = 999;
-
-        public int MqttConnectionRetryTimeMs { get; set; } = 2000;
 
         public string MqttTopicRoot { get; set; } = "smc";
 
@@ -213,8 +195,12 @@ namespace CodeGen.Configuration
         public string ActiveSysresPath =>
             !string.IsNullOrEmpty(SysresPath2) ? SysresPath2 : SysresPath;
 
-        public string TemplateIec61499Dir =>
-            Path.GetDirectoryName(Path.GetDirectoryName(ActuatorTemplatePath)) ?? string.Empty;
+        // A generation run needs to settle a few values (UseRecipeStruct) without writing back into the
+        // caller's instance. MapperUI holds one cached config for the life of the process, so mutating it
+        // in place made each run start from the last run's leftovers.
+        public MapperConfig Clone() =>
+            JsonSerializer.Deserialize<MapperConfig>(JsonSerializer.Serialize(this))
+                ?? throw new InvalidOperationException("MapperConfig could not be cloned.");
 
         public static MapperConfig Load()
         {
