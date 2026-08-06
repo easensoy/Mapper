@@ -15,6 +15,9 @@ namespace CodeGen.Configuration
     {
         private const string ConfigFileName = "mapper_config.json";
 
+        // RETIRED: nothing branches on this. It survives only as a binary contract — the prebuilt
+        // VueOneMapperHiddenRunner writes it, and removing the field would fault that consumer at load.
+        // Do not read it, do not migrate it into a config: it carries no meaning.
         public static bool SimulatorRecipeMode = false;
 
         // Feed-station controller target (single toggle for the whole Feed station). Static so the static
@@ -48,8 +51,6 @@ namespace CodeGen.Configuration
         // The merged no-clamp ring already carries Disassembly's state to Feed, so the extra wiring is clamp-only.
         public static bool CycleReadyActive => EnableCycleReadyHandoff && !MergeFeedRing;
 
-
-
         // Computed per ring topology by SystemLayoutInjector; this default is a fallback.
         public static int TopCoverSensorId = 6;
 
@@ -68,29 +69,21 @@ namespace CodeGen.Configuration
 
         public static bool EnableRobotTaskTail => CodeGen.Translation.HandoffPlanner.DischargeActive;
 
-        public string SystemXmlPath { get; set; } = string.Empty;
         public string MappingRulesPath { get; set; } = string.Empty;
         public string TemplateLibraryPath { get; set; } = string.Empty;
         public string ActuatorTemplatePath { get; set; } = string.Empty;
         public string SensorTemplatePath { get; set; } = string.Empty;
         public string ProcessCATTemplatePath { get; set; } = string.Empty;
         public string RobotTemplatePath { get; set; } = string.Empty;
-        public string RobotBasicTemplatePath { get; set; } = string.Empty;
         public string SyslayPath { get; set; } = string.Empty;
         public string SysresPath { get; set; } = string.Empty;
         public string SyslayPath2 { get; set; } = string.Empty;
         public string SysresPath2 { get; set; } = string.Empty;
 
-        public string SyslayPathSim { get; set; } = string.Empty;
-        public string SysresPathSim { get; set; } = string.Empty;
-
         public string IoBindingsPath { get; set; } = "Input/SMC_Rig_IO_Bindings.xlsx";
 
         public string M262TargetIp { get; set; } = DeviceConfig.Current.M262.TargetIp;
 
-        public string M262SubnetAddress { get; set; } = DeviceConfig.Current.M262.SubnetAddress;
-        public string M262SubnetMask { get; set; } = DeviceConfig.Current.M262.SubnetMask;
-        public string M262Gateway { get; set; } = DeviceConfig.Current.M262.Gateway;
         public string M262LogicalNetworkName { get; set; } = "DeviceNetwork_1";
 
         // EAE constraint: a device with no concrete IP is not listed in Deploy & Diagnostic, so this must be a real address, not a placeholder.
@@ -242,29 +235,22 @@ namespace CodeGen.Configuration
 
         private static MapperConfig CreateDefault() => new()
         {
-            SystemXmlPath = @"C:\VueOne\system\Control.xml",
             MappingRulesPath = @"Input\VueOne_IEC61499_Mapping.xlsx",
             TemplateLibraryPath = @"C:\VueOneMapper\Template Library",
             ActuatorTemplatePath = @"C:\Station1\IEC61499\Five_State_Actuator_CAT\Five_State_Actuator_CAT.fbt",
             SensorTemplatePath = @"C:\Station1\IEC61499\Sensor_Bool_CAT\Sensor_Bool_CAT.fbt",
             ProcessCATTemplatePath = @"C:\Station1\IEC61499\Process1_Generic\Process1_Generic.fbt",
             RobotTemplatePath = @"C:\SMC_Rig\IEC61499\Robot_Task_CAT\Robot_Task_CAT.fbt",
-            RobotBasicTemplatePath = @"C:\SMC_Rig\IEC61499\Robot_Task_Core.fbt",
             SyslayPath = @"C:\Station1\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000001\00000000-0000-0000-0000-000000000000.syslay",
             SysresPath = @"C:\Station1\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000002\00000000-0000-0000-0000-000000000000.sysres",
             SyslayPath2 = @"C:\Demonstrator\Demonstrator\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000001\00000000-0000-0000-0000-000000000000.syslay",
             SysresPath2 = @"C:\Demonstrator\Demonstrator\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000002\00000000-0000-0000-0000-000000000000.sysres",
-            SyslayPathSim = @"C:\DemonstratorSim\Demonstrator\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000001\00000000-0000-0000-0000-000000000000.syslay",
-            SysresPathSim = @"C:\DemonstratorSim\Demonstrator\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000002\00000000-0000-0000-0000-000000000000.sysres",
             IoBindingsPath = @"Input\SMC_Rig_IO_Bindings.xlsx",
             IoFolderPath = @"C:\VueOneMapper\IO",
             M262HcfTemplatePath = @"C:\VueOneMapper\IO\M262IO.hcf",
             M580HcfTemplatePath = @"C:\VueOneMapper\IO\M580IO.hcf",
             BX1HcfTemplatePath = @"C:\VueOneMapper\IO\BX1IO.ethernetip.hcf",
             M262TargetIp = DeviceConfig.Current.M262.TargetIp,
-            M262SubnetAddress = DeviceConfig.Current.M262.SubnetAddress,
-            M262SubnetMask = DeviceConfig.Current.M262.SubnetMask,
-            M262Gateway = DeviceConfig.Current.M262.Gateway,
             M262LogicalNetworkName = "DeviceNetwork_1",
             ResourceName = "M262_RES",
         };
