@@ -4,23 +4,12 @@ using CodeGen.Configuration;
 
 namespace CodeGen.Translation
 {
-    // Single source of truth for the cross-station handoffs (recipe generator, ring wiring, and HCF
-    // binder all read here). Transports: LocalRing = producer + consumer share one PLC's stateRprtCmd
-    // ring; CrossDeviceSegment = a short M262 segment spliced onto the M580 ring at the Disassembly
-    // seam via two cross-device adapter hops EAE bridges, WITHOUT touching the M580 actuator ring.
+    // The facts the recipe generator, ring wiring and HCF binder share about the cross-station handoffs:
+    // whether the M262<->M580 discharge is active, which cover actuators splice onto the M580 ring, and
+    // where the part-present sensor sits. The handoff ROWS themselves are emitted by ProcessCompiler from
+    // the twin, not declared here.
     public static class HandoffPlanner
     {
-        public enum HandoffTransport { LocalRing, CrossDeviceSegment }
-
-        public sealed record HandoffSpec(
-            string Name,
-            string Producer,
-            string Consumer,
-            string SignalComponent,
-            int WaitId,
-            int WaitState,
-            HandoffTransport Transport);
-
         // Master switch for the M262<->M580 cross-device discharge + part-present handoffs. RIG-VERIFY:
         // the M262<->M580 cross-device adapter transport (only M580<->BX1 is rig-proven). OFF =
         // decoupled local rings (Assembly gates on the local BearingSensor).
@@ -45,32 +34,6 @@ namespace CodeGen.Translation
         // injection. It then keeps the SAME reserved slot, so ids stay identical either way.
         public static bool IsPartAtAssembly(string name) =>
             string.Equals(name, "PartAtAssembly", System.StringComparison.OrdinalIgnoreCase);
-
-        public static IReadOnlyList<HandoffSpec> All()
-        {
-            var pa = PartAtAssembly;
-            var list = new List<HandoffSpec>
-            {
-                // Assembly->Disassembly is ALWAYS local: Assembly's tail publishes CMD state 7 with
-                // src_id = AssemblyProcessId; Disassembly row 0 WAITs on (AssemblyProcessId, 7).
-                new("AssemblyToDisassembly", "Assembly_Station", "Disassembly",
-                    "Assembly_Station", MapperConfig.AssemblyProcessId, 7, HandoffTransport.LocalRing),
-            };
-            if (CrossPlcDischargeActive && pa.Name != null)
-            {
-                list.Insert(0, new("FeedToAssembly", "Feed_Station", "Assembly_Station",
-                    pa.Name, pa.Id, 1, HandoffTransport.CrossDeviceSegment));
-                list.Add(new("DisassemblyToDischarge", "Disassembly", "Discharge",
-                    "Ejector", MapperConfig.DisassemblyProcessId, 0, HandoffTransport.CrossDeviceSegment));
-            }
-            else
-            {
-                // Decoupled: Assembly gates on the part arriving at the M580 BearingSensor.
-                list.Insert(0, new("FeedToAssembly", "Feed_Station", "Assembly_Station",
-                    "BearingSensor", -1, 1, HandoffTransport.LocalRing));
-            }
-            return list;
-        }
 
         public static bool DischargeActive => CrossPlcDischargeActive;
 
