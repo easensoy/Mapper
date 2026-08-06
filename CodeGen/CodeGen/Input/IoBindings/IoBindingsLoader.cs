@@ -46,6 +46,7 @@ namespace CodeGen.Translation
         private static readonly object Lock = new();
         private static IoBindings? _cache;
         private static string _cachedPath = string.Empty;
+        private static DateTime _cachedStampUtc;
 
         public static IoBindings LoadBindings(string xlsxPath)
         {
@@ -54,9 +55,16 @@ namespace CodeGen.Translation
             if (!File.Exists(xlsxPath))
                 throw new FileNotFoundException($"IO bindings file not found: {xlsxPath}");
 
+            // Keyed on path AND write time, mirroring YamlConfigFile: MapperUI generates in-process, so a
+            // path-only key serves the first run's bindings for the rest of the session even after the xlsx
+            // is edited -- and stale bindings surface as an unbound HCF channel, not an error.
+            var stampUtc = File.GetLastWriteTimeUtc(xlsxPath);
+
             lock (Lock)
             {
-                if (_cache != null && string.Equals(_cachedPath, xlsxPath, StringComparison.OrdinalIgnoreCase))
+                if (_cache != null
+                    && string.Equals(_cachedPath, xlsxPath, StringComparison.OrdinalIgnoreCase)
+                    && _cachedStampUtc == stampUtc)
                     return _cache;
 
                 var bindings = new IoBindings { SourcePath = xlsxPath };
@@ -69,6 +77,7 @@ namespace CodeGen.Translation
 
                 _cache = bindings;
                 _cachedPath = xlsxPath;
+                _cachedStampUtc = stampUtc;
                 return bindings;
             }
         }
