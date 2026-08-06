@@ -48,14 +48,21 @@ namespace CodeGen.Application
             if (request is null) throw new ArgumentNullException(nameof(request));
             if (log is null) throw new ArgumentNullException(nameof(log));
 
-            var cfg = request.Config;
+            // Work on a copy so a run cannot write back into the caller's config. MapperUI keeps one
+            // instance for the life of the process, so in-place mutation leaked between runs.
+            var cfg = request.Config.Clone();
             cfg.UseRecipeStruct = true;
 
+            // ⚠ The routing mode still travels as static state. ComponentRegistry caches its partition
+            // keyed on these two, and its readers are static methods with no config in scope, so they
+            // cannot be injected without threading a context through every emitter. Confined to this one
+            // place so the mutation is at least visible and happens once per run.
+            //
             // The Feed station stays on M262 and the RevPi COEXISTS with it: PLC_RW_REVPI carries IO for
             // only Feeder/Checker/PartInHopper, so a whole-station swap would strand Transfer/Ejector/
             // Robot/PartAtAssembly with no physical IO. RevPiSelectionValidator rejects the full swap.
             MapperConfig.FeedStationController = FeedController.M262;
-            MapperConfig.RevPiComponents = request.RevPiComponents;
+            MapperConfig.RevPiComponents = WithImpliedRevPiComponents(request.RevPiComponents);
             RevPiSelectionValidator.ThrowIfInvalid();
 
             DeepClean(cfg, log);
@@ -89,6 +96,16 @@ namespace CodeGen.Application
             TouchDfbproj(cfg, log);
             log($"Generated: {path}");
             return new GenerationResult(path, report);
+        }
+
+        // PartInHopper is not a free choice: its sensor is physically read by the RevPI_IO Modbus coupler,
+        // so moving any Feed component to the RevPi takes the hopper sensor with it. The rule lived in the
+        // UI, which meant a caller that was not the UI silently produced a different partition.
+        static IReadOnlySet<string> WithImpliedRevPiComponents(IReadOnlySet<string> selected)
+        {
+            if (selected.Count == 0) return selected;
+            var full = new HashSet<string>(selected, StringComparer.OrdinalIgnoreCase) { "PartInHopper" };
+            return full;
         }
 
         // git reset/clean where the Demonstrator is a repo, then the deep FB/canvas/device wipe. The root
