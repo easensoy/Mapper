@@ -15,11 +15,8 @@ namespace CodeGen.Devices.M262
     // silently drop authored channel bindings). Symmetric with the verbatim M580/BX1 copy.
     public static class M262HwConfigCopier
     {
-        public static HwConfigCopyResult Copy(MapperConfig cfg) => Copy(cfg, null);
-
-        public static HwConfigCopyResult Copy(MapperConfig cfg, IoBindings? bindingsOverride)
+        public static HwConfigCopyResult Copy(MapperConfig cfg)
         {
-            _ = bindingsOverride;
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
             var result = new HwConfigCopyResult();
 
