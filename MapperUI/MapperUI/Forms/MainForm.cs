@@ -297,6 +297,9 @@ namespace MapperUI
 
         string? _loadedControlXmlPath;
 
+        // Guards btnTestStation1_Click against re-entry while a generation is in flight.
+        bool _generating;
+
         async void btnBrowse_Click(object sender, EventArgs e)
         {
             using var dlg = new OpenFileDialog
@@ -375,11 +378,18 @@ namespace MapperUI
         // UI only: collect the inputs, hand them to the one generation path, show the result.
         async void btnTestStation1_Click(object sender, EventArgs e)
         {
+            // Generation runs in-process over mutable MapperConfig statics and a non-thread-safe
+            // ComponentRegistry cache, so a second click during the await would corrupt both runs.
+            if (_generating) return;
+
             try
             {
                 if (string.IsNullOrEmpty(_loadedControlXmlPath) || !File.Exists(_loadedControlXmlPath))
                 { ShowError("Load a Control.xml first via Browse."); return; }
                 if (!TryResolveDemonstratorPath(out var syslayPath)) return;
+
+                _generating = true;
+                btnTestStation1.Enabled = false;
 
                 var revpiComponents = CollectRevPiSelection();
                 LogControllerChoice(revpiComponents);
@@ -407,6 +417,11 @@ namespace MapperUI
                 lblStatus.Text = "Ready";
                 ShowError(ex.Message);
             }
+            finally
+            {
+                _generating = false;
+                btnTestStation1.Enabled = true;
+            }
         }
 
         // Every Feed component DEFAULTS to M262. Only Feeder and Checker are swappable, because the RevPi
@@ -424,7 +439,6 @@ namespace MapperUI
                 else
                     AppendActivity($"[Target][!] '{kv.Key}' cannot move to the RevPi — the Modbus coupler (PLC_RW_REVPI) exposes no IO for it; kept on M262.");
             }
-            if (picked.Count > 0) picked.Add("PartInHopper");
             return picked;
         }
 
