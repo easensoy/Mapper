@@ -1,5 +1,4 @@
 using System;
-﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -60,30 +59,10 @@ namespace CodeGen.Translation
             var grouping = new StationGroupingService();
             var fullContents = grouping.GroupStationContents(process, allComponents);
 
-            // Sensors-first ordering here is load-bearing: it drives state_table[] index / FB id (actuator_id) / recipe Wait1Id. Absent components are skipped.
-            var allowedActuators = new[]
-            {
-                "Feeder", "Checker", "Transfer", "Ejector",
-                "Bearing_PnP",
-                "Bearing_Gripper",
-                "Shaft_Hr", "Shaft_Vr", "Shaft_Gripper",
-                "Clamp",
-                "CoverPNP_Hr", "CoverPNP_Vr",
-                "CoverPnp_Gripper",
-            };
-            if (MapperConfig.EnableRobotTaskTail)
-                allowedActuators = allowedActuators.Append("Robot").ToArray();
-            var allowedSensors = new[]
-            {
-                "PartInHopper", "PartAtChecker",
-                "BearingSensor", "ShaftSensor",
-                // BOTH spellings: the twin's name for this one varies by revision (see TemplateMap.IsTopCoverSensor).
-                "TopCoverSenosr", "TopCoverSensor",
-                // LAST on purpose: this list's order assigns the positional sensor ids, so appending
-                // leaves every existing sensor id untouched. A twin that omits it falls through to the
-                // synth injection, so both shapes generate the same ids.
-                "PartAtAssembly",
-            };
+            // Order assigns state_table index / actuator_id / recipe Wait1Id; ComponentRegistry owns it.
+            var allowedActuators = ComponentRegistry.IdOrderActuators(MapperConfig.EnableRobotTaskTail);
+            var allowedSensors = ComponentRegistry.IdOrderSensors;
+
             // Source from full Control.xml (StationGroupingService only populates Feed_Station's conditions); grippers are Type="Robot", so accept both.
             var contents = new StationContents(
                 fullContents.Process,
@@ -158,8 +137,19 @@ namespace CodeGen.Translation
                 if (CodeGen.Mapping.TemplateMap.IsRobotTaskArm(contents.Actuators[i])) continue;
                 MarkOcc(contents.Actuators[i].Name, actuatorIdStart + i);
             }
+            // Total by construction: assign or throw. A silent skip would leave the static holding the
+            // PREVIOUS generation's slot (MapperUI generates in-process), and a wrong cover slot produces
+            // no error -- the cover-place gate simply waits on a component that never reports.
+            int coverSlot = -1;
             for (int slot = 16; slot >= 0; slot--)
-                if (!occ.Contains(slot)) { MapperConfig.TopCoverSensorId = slot; break; }
+                if (!occ.Contains(slot)) { coverSlot = slot; break; }
+            if (coverSlot < 0)
+                throw new InvalidOperationException(
+                    "No free state_table slot for the top-cover sensor: every id in [0..16] is claimed by an " +
+                    $"Assembly-ring member (occupied = {string.Join(",", occ.Where(i => i <= 16).OrderBy(i => i))}). " +
+                    "The cover interlock cannot be placed without colliding with another component's report. " +
+                    "Widening state_table past 20 entries touches every CAT's updateComponentState.");
+            MapperConfig.TopCoverSensorId = coverSlot;
 
 
 
