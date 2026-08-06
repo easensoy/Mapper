@@ -325,32 +325,6 @@ namespace CodeGen.Devices.M262
             catch { /* best-effort — emit pipeline continues even if sysres write fails */ }
         }
 
-        static int ReplaceMappingsBlock(string systemFilePath, List<string> fbInstances)
-        {
-            var doc = XDocument.Load(systemFilePath);
-            var root = doc.Root
-                ?? throw new InvalidDataException($"Empty .system: {systemFilePath}");
-            XNamespace ns = root.GetDefaultNamespace().NamespaceName.Length > 0
-                ? root.GetDefaultNamespace()
-                : LibElNs;
-
-            foreach (var stale in root.Elements(ns + "Mappings").ToList())
-                stale.Remove();
-
-            var mappings = new XElement(ns + "Mappings");
-            var to = $"{DeviceName}.{DefaultResourceName}";
-            foreach (var fbName in fbInstances)
-            {
-                if (string.IsNullOrWhiteSpace(fbName)) continue;
-                mappings.Add(new XElement(ns + "Mapping",
-                    new XAttribute("From", $"{ApplicationName}.{fbName}"),
-                    new XAttribute("To",   to)));
-            }
-            root.Add(mappings);
-            doc.Save(systemFilePath);
-            return mappings.Elements(ns + "Mapping").Count();
-        }
-
         // Force every M262 Topology Equipment Ethernet endpoint to ipAddress 0.0.0.0 + zero domain (NOCONF).
         static void SetTopologyEquipmentToNoConf(string eaeRoot)
         {
