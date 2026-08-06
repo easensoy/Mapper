@@ -24,14 +24,6 @@ namespace CodeGen.Services
 {
     public static class TemplateLibraryDeployer
     {
-        static readonly Dictionary<string, string> ComponentTypeToCat = new(StringComparer.OrdinalIgnoreCase)
-        {
-            { "Actuator_5",  "Five_State_Actuator_CAT" },
-            { "Actuator_7",  "Seven_State_Actuator_CAT" },
-            { "Sensor_2",    "Sensor_Bool_CAT" },
-            { "Process_Any", "Process1_Generic" },
-        };
-
         public static DeployResult DeployUniversalArchitecture(MapperConfig cfg)
         {
             var result = new DeployResult();
@@ -697,98 +689,6 @@ namespace CodeGen.Services
             {
                 result.Warnings.Add($"ArraySize verification crashed: {ex.Message}");
             }
-        }
-
-        public static DeployResult Deploy(MapperConfig cfg, List<VueOneComponent> components)
-        {
-            var result = new DeployResult();
-            var libPath = cfg.TemplateLibraryPath;
-
-            if (string.IsNullOrWhiteSpace(libPath) || !Directory.Exists(libPath))
-                throw new DirectoryNotFoundException($"Template Library not found: {libPath}");
-
-            var eaeProjectDir = DeriveEaeProjectDir(cfg);
-            if (string.IsNullOrWhiteSpace(eaeProjectDir))
-                throw new InvalidOperationException(
-                    "Cannot determine EAE project directory from syslay path.");
-
-            var neededCats = ResolveNeededCats(components);
-            var neededBasics = ResolveNeededBasics(neededCats);
-
-            foreach (var basic in neededBasics)
-            {
-                var zipPath = FindPackage(libPath, "Basic", basic, ".Basic");
-                if (zipPath == null)
-                {
-                    result.Warnings.Add($"Basic package not found: {basic}");
-                    continue;
-                }
-                ExtractToEae(zipPath, eaeProjectDir, result);
-                result.BasicFBsDeployed.Add(basic);
-                MapperLogger.Info($"[Deploy] Basic: {basic}");
-            }
-
-            foreach (var cat in neededCats)
-            {
-                var zipPath = FindPackage(libPath, "CAT", cat, ".cat");
-                if (zipPath == null)
-                {
-                    result.Warnings.Add($"CAT package not found: {cat}");
-                    continue;
-                }
-                ExtractToEae(zipPath, eaeProjectDir, result);
-                result.CATsDeployed.Add(cat);
-                MapperLogger.Info($"[Deploy] CAT: {cat}");
-            }
-
-            CodeGen.Hmi.HmiCatCfgEmitter.EmitAll(eaeProjectDir, cfg.TemplateLibraryPath);
-            RegisterInDfbproj(eaeProjectDir, result);
-
-            result.Success = true;
-            return result;
-        }
-
-        static HashSet<string> ResolveNeededCats(List<VueOneComponent> components)
-        {
-            var cats = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var c in components)
-            {
-                var key = $"{c.Type}_{c.States.Count}";
-                if (ComponentTypeToCat.TryGetValue(key, out var cat))
-                    cats.Add(cat);
-
-                if (string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase) &&
-                    ComponentTypeToCat.TryGetValue("Process_Any", out var procCat))
-                    cats.Add(procCat);
-            }
-            return cats;
-        }
-
-        static HashSet<string> ResolveNeededBasics(HashSet<string> cats)
-        {
-            var basics = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var cat in cats)
-            {
-                if (TemplateManifest.Requires(cat) is { Count: > 0 } deps)
-                    foreach (var dep in deps)
-                        basics.Add(dep);
-            }
-            return basics;
-        }
-
-        static string? FindPackage(string libPath, string subfolder, string name, string extension)
-        {
-            var dir = Path.Combine(libPath, subfolder);
-            if (!Directory.Exists(dir)) return null;
-
-            foreach (var file in Directory.GetFiles(dir))
-            {
-                var fileName = Path.GetFileName(file);
-                if (fileName.StartsWith(name, StringComparison.OrdinalIgnoreCase) &&
-                    fileName.Contains(extension, StringComparison.OrdinalIgnoreCase))
-                    return file;
-            }
-            return null;
         }
 
     }
