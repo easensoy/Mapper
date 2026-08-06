@@ -68,6 +68,27 @@ namespace CodeGen.Mapping
         // (CAT deploy, parameters, I/O binding) compare against one constant rather than a repeated literal.
         public const string SevenStateCentreHomeCat = "Seven_State_Actuator_Centre_Home_CAT";
 
+        // The twin's shape test for the centre-home swivel. One owner: the recipe's command vocabulary and
+        // the CAT routing below must agree on what "seven-shape" means, and they used to spell it out
+        // separately.
+        public static bool IsSevenShape(VueOneComponent component) =>
+            component != null &&
+            ((component.States?.Count ?? 0) == 7 || IsBranchedSevenState(component));
+
+        // THE component -> emitted FB Type decision. Every consumer (deploy, parameters, wiring, I/O
+        // binding) resolves through here so the sites INVARIANTS.md I-4 requires to agree cannot drift.
+        public static string ResolveActuatorCatType(VueOneComponent actuator)
+        {
+            if (actuator == null) return "Five_State_Actuator_CAT";
+            // Only the real UR3e (IsRobotTaskArm) -> Robot_Task_CAT; Type="Robot" grippers stay Five_State/Vacuum.
+            if (MapperConfig.EnableRobotTaskTail && IsRobotTaskArm(actuator))
+                return "Robot_Task_CAT";
+            return ResolveActuatorCatType(
+                actuator.Name ?? string.Empty,
+                actuator.States?.Count ?? 0,
+                IsBranchedSevenState(actuator));
+        }
+
         // Actuator CAT routing: the twin's own state graph decides the CAT, so a model change needs
         // no code change. Every consumer (deploy, parameters, I/O binding) must resolve the same way.
         public static string ResolveActuatorCatType(
