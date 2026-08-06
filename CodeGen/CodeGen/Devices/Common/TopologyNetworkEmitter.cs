@@ -15,8 +15,6 @@ namespace CodeGen.Devices.Core
     public static class TopologyNetworkEmitter
     {
         const string Switch1Uuid          = "11111111-2222-3333-4444-000000000060";
-        const string WireM262SwitchUuid   = "11111111-2222-3333-4444-000000000061";
-        const string WireSwitchM580Uuid   = "11111111-2222-3333-4444-000000000062";
 
         // Endpoint UUIDs MUST match what M262TopologyEmitter + Station2DeviceEmitter write.
         const string M262EquipmentUuid    = "11111111-2222-3333-4444-000000000010";
