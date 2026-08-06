@@ -44,10 +44,6 @@ namespace CodeGen.Devices.Core
                 ? EaeProjectLayout.FindSysdevByDeviceType(eaeRoot, deviceType)
                 : EaeProjectLayout.FindSysdevByDeviceTypeAndName(eaeRoot, deviceType, deviceName);
 
-        // Recipe is carried either as a single STRUCT param or as the six parallel arrays.
-        static readonly string[] RecipeParamNames =
-            { "Recipe", "StepType", "CmdTargetName", "CmdStateArr", "Wait1Id", "Wait1State", "NextStep" };
-
         static readonly string[] RuntimeParamNames =
         {
             "Recipe", "StepType", "CmdTargetName", "CmdStateArr", "Wait1Id", "Wait1State", "NextStep",
@@ -198,15 +194,6 @@ namespace CodeGen.Devices.Core
                 if (!string.IsNullOrEmpty(n)) d[n!] = (string?)p.Attribute("Value") ?? string.Empty;
             }
             return d;
-        }
-
-        static string RecipeSignature(IReadOnlyDictionary<string, string> parameters)
-        {
-            var sb = new StringBuilder();
-            foreach (var n in RecipeParamNames)
-                if (parameters.TryGetValue(n, out var val))
-                    sb.Append(n).Append('=').Append(val).Append('\n');
-            return sb.ToString();
         }
 
         static string DescribeRecipe(SysresFbMirror.SyslayFb fb) =>
