@@ -233,12 +233,5 @@ namespace CodeGen.Devices.RevPi
             return el;
         }
 
-        static int NextFbId(XElement root, Func<string, XName> N)
-        {
-            var idc = root.Elements(N("Attribute"))
-                .FirstOrDefault(a => (string?)a.Attribute("Name") == "Configuration.FB.IDCounter");
-            int start = (idc != null && int.TryParse((string?)idc.Attribute("Value"), out var c)) ? c : 200;
-            return Math.Max(start, 200);
-        }
     }
 }
