@@ -9,13 +9,10 @@ namespace CodeGen.Translation.Process.Recipes
     public static class RecipeCommandVocabulary
     {
         public static bool IsSevenStateCommandable(VueOneComponent t) =>
-            t != null && !IsSensorOrProcess(t) && IsSevenShape(t);
+            t != null && !IsSensorOrProcess(t) && TemplateMap.IsSevenShape(t);
 
         private static bool IsSensorOrProcess(VueOneComponent t) =>
             string.Equals(t.Type, "Sensor", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(t.Type, "Process", StringComparison.OrdinalIgnoreCase);
-
-        private static bool IsSevenShape(VueOneComponent t) =>
-            t.States.Count == 7 || TemplateMap.IsBranchedSevenState(t);
     }
 }
