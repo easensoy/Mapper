@@ -224,6 +224,9 @@ namespace CodeGen.Services
             if (recipeStruct)
                 DeployRecipeStepDatatype(cfg, eaeProjectDir, result);
             NormalizeProcess1RecipeArrays(eaeProjectDir, recipeStruct, result);
+            // Per-instance process-phase receiver slot. Required, not best-effort: the syslay emits rdy_id as
+            // an instance parameter, which EAE ignores unless the type declares the pin.
+            ProcessRuntimeTemplatePatcher.PromoteProcessPhaseReceiverSlot(eaeProjectDir);
             NormalizeProcessRuntimeRecipeArrays(eaeProjectDir, recipeStruct, result);
             NormalizeProcessEngineDebugWatch(eaeProjectDir, result);
             // check_wait is LEVEL-triggered (WaitSatisfied := state_table[...].state = Wait1State); a WAIT already-true when it arms satisfies immediately.
