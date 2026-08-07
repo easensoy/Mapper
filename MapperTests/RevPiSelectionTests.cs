@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -10,45 +10,24 @@ using CodeGen.Validation.Output;
 using CodeGen.Validation.Plan;
 using Xunit;
 
-// MapperConfig's routing switches are STATIC (FeedStationController, RevPiComponents) and
-// ComponentRegistry caches its partition off them, so these tests mutate global state and must never
-// run concurrently with each other.
-[assembly: CollectionBehavior(DisableTestParallelization = true)]
+// The deployment profile is a value passed into each run, so these tests share no state and are safe
+// to run in parallel — which is itself part of what ConcurrentGenerationTests proves.
 
 namespace MapperTests
 {
-    /// Restores the global routing statics after every test so one test can never leak its
-    /// selection into the next (and so a failing test cannot poison the whole run).
-    public abstract class RevPiTestBase : IDisposable
+    /// A run's routing is a value, so a test states its selection and holds it locally; there is no
+    /// global to save or restore.
+    public abstract class RevPiTestBase
     {
-        private readonly FeedController _controller = MapperConfig.FeedStationController;
-        private readonly IReadOnlySet<string> _components = MapperConfig.RevPiComponents;
-
-        protected static void SelectM262()
-        {
-            MapperConfig.FeedStationController = FeedController.M262;
-            MapperConfig.RevPiComponents = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        }
+        protected static DeploymentProfile M262 => DeploymentProfile.M262Only;
 
         /// The supported RevPi mode: named Feed components move, M262 keeps the rest.
-        protected static void SelectRevPiComponents(params string[] names)
-        {
-            MapperConfig.FeedStationController = FeedController.M262;
-            MapperConfig.RevPiComponents = new HashSet<string>(names, StringComparer.OrdinalIgnoreCase);
-        }
+        protected static DeploymentProfile RevPiComponents(params string[] names) => new(names);
 
-        protected static void SelectRevPiFullSwap()
-        {
-            MapperConfig.FeedStationController = FeedController.RevPi;
-            MapperConfig.RevPiComponents = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        }
+        protected static DeploymentRoster Roster(DeploymentProfile profile) => new(profile);
 
-        public void Dispose()
-        {
-            MapperConfig.FeedStationController = _controller;
-            MapperConfig.RevPiComponents = _components;
-            GC.SuppressFinalize(this);
-        }
+        protected static ControllerAllocation Allocation(DeploymentProfile profile) =>
+            new(new DeploymentRoster(profile));
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -59,9 +38,9 @@ namespace MapperTests
         [Fact] // (1) default M262 selection remains valid
         public void Default_selection_is_M262_and_keeps_the_feed_station_on_M262()
         {
-            SelectM262();
-            Assert.False(MapperConfig.PartialRevPi);
-            var byName = ComponentRegistry.ByName;
+            var profile = M262;
+            Assert.False(profile.PartialRevPi);
+            var byName = Roster(profile).All.ToDictionary(e => e.Name, e => e, StringComparer.Ordinal);
             Assert.Equal(PlcAssignment.M262, byName["Feeder"].Plc);
             Assert.Equal(PlcAssignment.M262, byName["Checker"].Plc);
             Assert.DoesNotContain(byName.Values, e => e.Plc == PlcAssignment.RevPi);
@@ -70,9 +49,9 @@ namespace MapperTests
         [Fact] // (16) Feeder/Checker are allocated to the RevPi when selected
         public void Selecting_Feeder_and_Checker_relocates_them_onto_the_RevPi()
         {
-            SelectRevPiComponents("Feeder", "Checker", "PartInHopper");
-            Assert.True(MapperConfig.PartialRevPi);
-            var byName = ComponentRegistry.ByName;
+            var profile = RevPiComponents("Feeder", "Checker", "PartInHopper");
+            Assert.True(profile.PartialRevPi);
+            var byName = Roster(profile).All.ToDictionary(e => e.Name, e => e, StringComparer.Ordinal);
             Assert.Equal(PlcAssignment.RevPi, byName["Feeder"].Plc);
             Assert.Equal(PlcAssignment.RevPi, byName["Checker"].Plc);
             Assert.Equal(PlcAssignment.RevPi, byName["PartInHopper"].Plc);
@@ -81,8 +60,8 @@ namespace MapperTests
         [Fact] // (17) they are absent from M262 once relocated — no dual hosting
         public void Relocated_components_are_no_longer_hosted_on_M262()
         {
-            SelectRevPiComponents("Feeder", "Checker", "PartInHopper");
-            var m262 = ComponentRegistry.ByName.Values
+            var profile = RevPiComponents("Feeder", "Checker", "PartInHopper");
+            var m262 = Roster(profile).All.ToDictionary(e => e.Name, e => e, StringComparer.Ordinal).Values
                 .Where(e => e.Plc == PlcAssignment.M262)
                 .Select(e => e.Name)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -94,8 +73,8 @@ namespace MapperTests
         [Fact] // the partial swap must KEEP M262 — it is a coexistence mode, not a replacement
         public void Partial_swap_keeps_the_rest_of_the_feed_station_on_M262()
         {
-            SelectRevPiComponents("Feeder", "Checker", "PartInHopper");
-            var byName = ComponentRegistry.ByName;
+            var profile = RevPiComponents("Feeder", "Checker", "PartInHopper");
+            var byName = Roster(profile).All.ToDictionary(e => e.Name, e => e, StringComparer.Ordinal);
             Assert.Equal(PlcAssignment.M262, byName["Transfer"].Plc);
             Assert.Contains(byName.Values, e => e.Plc == PlcAssignment.M262);
         }
@@ -103,8 +82,8 @@ namespace MapperTests
         [Fact] // (19) no component may be owned by two controllers
         public void Every_component_is_hosted_by_exactly_one_controller()
         {
-            SelectRevPiComponents("Feeder", "Checker", "PartInHopper");
-            var byName = ComponentRegistry.ByName;
+            var profile = RevPiComponents("Feeder", "Checker", "PartInHopper");
+            var byName = Roster(profile).All.ToDictionary(e => e.Name, e => e, StringComparer.Ordinal);
             // The dictionary is keyed by name, so a duplicate host would surface as a name collision.
             Assert.Equal(byName.Count, byName.Values.Select(e => e.Name).Distinct(StringComparer.Ordinal).Count());
             // Every DEVICE-HOSTED component must name a real controller. Boot rows (FB1/FB2-class
@@ -118,24 +97,20 @@ namespace MapperTests
         [Fact] // M580/BX1 are fixed and must be untouched by any RevPi selection
         public void RevPi_selection_never_moves_M580_or_BX1_components()
         {
-            SelectM262();
-            var before = ComponentRegistry.ByName.Values
+            var before = Roster(M262).All
                 .Where(e => e.Plc is PlcAssignment.M580 or PlcAssignment.BX1)
                 .ToDictionary(e => e.Name, e => e.Plc, StringComparer.Ordinal);
 
-            SelectRevPiComponents("Feeder", "Checker", "PartInHopper");
-            var after = ComponentRegistry.ByName;
+            var after = Roster(RevPiComponents("Feeder", "Checker", "PartInHopper"));
             foreach (var (name, plc) in before)
-                Assert.Equal(plc, after[name].Plc);
+                Assert.Equal(plc, after.Get(name)!.Plc);
         }
 
         [Fact] // relocation must preserve canvas coordinates so the Feed band renders unchanged
         public void Relocation_preserves_canvas_coordinates()
         {
-            SelectM262();
-            var before = ComponentRegistry.ByName["Feeder"];
-            SelectRevPiComponents("Feeder", "Checker", "PartInHopper");
-            var after = ComponentRegistry.ByName["Feeder"];
+            var before = Roster(M262).Get("Feeder")!;
+            var after = Roster(RevPiComponents("Feeder", "Checker", "PartInHopper")).Get("Feeder")!;
             Assert.Equal(before.X, after.X);
             Assert.Equal(before.Y, after.Y);
             Assert.Equal(before.Column, after.Column);
@@ -144,22 +119,20 @@ namespace MapperTests
         [Fact] // the relocated components land on the RevPi RESOURCE, not just the RevPi bucket
         public void Relocated_components_are_bound_to_the_RevPi_resource()
         {
-            SelectRevPiComponents("Feeder", "Checker", "PartInHopper");
+            var profile = RevPiComponents("Feeder", "Checker", "PartInHopper");
             var expected = ControllerMap.ResourceForPlc(PlcAssignment.RevPi);
             Assert.False(string.IsNullOrWhiteSpace(expected));
-            Assert.Equal(expected, ComponentRegistry.ByName["Feeder"].Resource);
+            Assert.Equal(expected, Roster(profile).Get("Feeder")!.Resource);
         }
 
-        [Fact] // switching back must fully restore the M262 partition (cache correctness)
-        public void Switching_back_to_M262_restores_the_default_partition()
+        [Fact] // two rosters are independent values; building one cannot disturb the other
+        public void A_RevPi_roster_never_alters_a_separately_built_M262_roster()
         {
-            SelectM262();
-            var baseline = ComponentRegistry.ByName.ToDictionary(kv => kv.Key, kv => kv.Value.Plc, StringComparer.Ordinal);
-            SelectRevPiComponents("Feeder", "Checker", "PartInHopper");
-            SelectM262();
-            var restored = ComponentRegistry.ByName;
+            var baseline = Roster(M262).All.ToDictionary(e => e.Name, e => e.Plc, StringComparer.Ordinal);
+            _ = Roster(RevPiComponents("Feeder", "Checker", "PartInHopper"));
+            var restored = Roster(M262);
             foreach (var (name, plc) in baseline)
-                Assert.Equal(plc, restored[name].Plc);
+                Assert.Equal(plc, restored.Get(name)!.Plc);
         }
     }
 
@@ -171,42 +144,22 @@ namespace MapperTests
         [Fact]
         public void Default_M262_selection_raises_no_problems()
         {
-            SelectM262();
-            Assert.Empty(RevPiSelectionValidator.Validate());
+            var profile = M262;
+            Assert.Empty(RevPiSelectionValidator.Validate(profile));
         }
 
         [Fact]
         public void Supported_per_component_swap_raises_no_problems()
         {
-            SelectRevPiComponents("Feeder", "Checker", "PartInHopper");
-            Assert.Empty(RevPiSelectionValidator.Validate());
-        }
-
-        [Fact] // the whole-Feed swap strands Transfer/Ejector/Robot/PartAtAssembly with no Modbus IO
-        public void Whole_feed_swap_is_rejected_because_the_coupler_cannot_serve_it()
-        {
-            SelectRevPiFullSwap();
-            var problems = RevPiSelectionValidator.Validate();
-            Assert.NotEmpty(problems);
-            Assert.Contains(problems, p => p.Contains("not supported", StringComparison.OrdinalIgnoreCase));
-            Assert.Throws<RevPiSelectionValidator.InvalidRevPiSelectionException>(
-                RevPiSelectionValidator.ThrowIfInvalid);
-        }
-
-        [Fact] // ComponentRegistry silently DISCARDS RevPiComponents on the full-swap branch
-        public void Combining_full_swap_with_an_explicit_component_set_is_rejected()
-        {
-            MapperConfig.FeedStationController = FeedController.RevPi;
-            MapperConfig.RevPiComponents = new HashSet<string>(new[] { "Feeder" }, StringComparer.OrdinalIgnoreCase);
-            var problems = RevPiSelectionValidator.Validate();
-            Assert.Contains(problems, p => p.Contains("mutually exclusive", StringComparison.OrdinalIgnoreCase));
+            var profile = RevPiComponents("Feeder", "Checker", "PartInHopper");
+            Assert.Empty(RevPiSelectionValidator.Validate(profile));
         }
 
         [Fact] // a component with no Modbus signal would deploy unable to actuate
         public void Routing_an_uncovered_component_to_the_RevPi_is_rejected()
         {
-            SelectRevPiComponents("Transfer");
-            var problems = RevPiSelectionValidator.Validate();
+            var profile = RevPiComponents("Transfer");
+            var problems = RevPiSelectionValidator.Validate(profile);
             Assert.NotEmpty(problems);
             Assert.Contains(problems, p => p.Contains("Transfer", StringComparison.Ordinal));
         }
@@ -253,30 +206,30 @@ namespace MapperTests
         [Fact]
         public void Equal_host_and_container_addresses_are_rejected()
         {
-            SelectRevPiComponents("Feeder", "Checker", "PartInHopper");
+            var profile = RevPiComponents("Feeder", "Checker", "PartInHopper");
             var cfg = new MapperConfig { RevPiHostIp = "192.168.1.7", RevPiTargetIp = "192.168.1.7" };
-            var problems = TopologyAddressValidator.ValidateRevPiRoles(cfg).ToList();
+            var problems = TopologyAddressValidator.ValidateRevPiRoles(cfg, profile).ToList();
             Assert.Contains(problems, p => p.IsError && p.Detail.Contains("cannot share one address", StringComparison.Ordinal));
         }
 
         [Fact]
         public void Malformed_or_empty_addresses_are_rejected()
         {
-            SelectRevPiComponents("Feeder", "Checker", "PartInHopper");
+            var profile = RevPiComponents("Feeder", "Checker", "PartInHopper");
             Assert.Contains(
-                TopologyAddressValidator.ValidateRevPiRoles(new MapperConfig { RevPiHostIp = "not-an-ip" }),
+                TopologyAddressValidator.ValidateRevPiRoles(new MapperConfig { RevPiHostIp = "not-an-ip" }, profile),
                 p => p.IsError);
             Assert.Contains(
-                TopologyAddressValidator.ValidateRevPiRoles(new MapperConfig { RevPiTargetIp = "" }),
+                TopologyAddressValidator.ValidateRevPiRoles(new MapperConfig { RevPiTargetIp = "" }, profile),
                 p => p.IsError);
         }
 
         [Fact] // address roles are only asserted when a RevPi is actually being generated
         public void Address_role_checks_are_silent_when_no_RevPi_is_selected()
         {
-            SelectM262();
+            var profile = M262;
             var cfg = new MapperConfig { RevPiHostIp = "192.168.1.7", RevPiTargetIp = "192.168.1.7" };
-            Assert.Empty(TopologyAddressValidator.ValidateRevPiRoles(cfg));
+            Assert.Empty(TopologyAddressValidator.ValidateRevPiRoles(cfg, profile));
         }
     }
 
@@ -315,29 +268,26 @@ namespace MapperTests
         [Fact]
         public void Unique_addresses_produce_no_violations()
         {
-            SelectM262();
             WriteEquipment("Equipment_A.json", "A", "SoftdpacContainer_V01.00_01.00", "192.168.1.6", Domain);
             WriteEquipment("Equipment_B.json", "B", "Workstation_V01.00_01.00", "192.168.1.2", Domain);
-            Assert.Empty(TopologyAddressValidator.Validate(_root, null));
+            Assert.Empty(TopologyAddressValidator.Validate(_root));
         }
 
         [Fact] // a duplicated CONTAINER address is fatal — it is EAE's deploy/login target
         public void Duplicate_container_address_is_a_fatal_error()
         {
-            SelectM262();
             WriteEquipment("Equipment_A.json", "Softdpac_2", "HMIP6_SoftdpacContainer_V01.00_01.00", "192.168.1.1", Domain);
             WriteEquipment("Equipment_B.json", "Softdpac_3", "SoftdpacContainer_V01.00_01.00", "192.168.1.1", Domain);
-            var v = TopologyAddressValidator.Validate(_root, null);
+            var v = TopologyAddressValidator.Validate(_root);
             Assert.Contains(v, x => x.IsError && x.Detail.Contains("192.168.1.1", StringComparison.Ordinal));
         }
 
         [Fact] // duplicated HOST NICs warn but must not reject known-good output
         public void Duplicate_host_nic_address_warns_but_does_not_fail()
         {
-            SelectM262();
             WriteEquipment("Equipment_A.json", "HMIP6_1", "HMIP6_V01.00_01.00", "192.168.1.2", Domain);
             WriteEquipment("Equipment_B.json", "NIC_1", "NIC_EAE_V01.00_01.00", "192.168.1.2", Domain);
-            var v = TopologyAddressValidator.Validate(_root, null);
+            var v = TopologyAddressValidator.Validate(_root);
             Assert.NotEmpty(v);
             Assert.DoesNotContain(v, x => x.IsError);
         }
@@ -345,26 +295,23 @@ namespace MapperTests
         [Fact] // the same address in DIFFERENT broadcast domains is not a collision
         public void Same_address_in_different_domains_is_not_a_collision()
         {
-            SelectM262();
             WriteEquipment("Equipment_A.json", "A", "SoftdpacContainer_V01.00_01.00", "192.168.1.6", Domain);
             WriteEquipment("Equipment_B.json", "B", "SoftdpacContainer_V01.00_01.00", "192.168.1.6",
                 "2131fbdd-0a41-4e41-abfb-a14a5ca9218d");
-            Assert.DoesNotContain(TopologyAddressValidator.Validate(_root, null), x => x.IsError);
+            Assert.DoesNotContain(TopologyAddressValidator.Validate(_root), x => x.IsError);
         }
 
         [Fact] // 0.0.0.0 is "unconfigured", not a claim on an address
         public void Unconfigured_endpoints_are_ignored()
         {
-            SelectM262();
             WriteEquipment("Equipment_A.json", "A", "HMIP6_V01.00_01.00", "0.0.0.0", Domain);
             WriteEquipment("Equipment_B.json", "B", "Workstation_V01.00_01.00", "0.0.0.0", Domain);
-            Assert.Empty(TopologyAddressValidator.Validate(_root, null));
+            Assert.Empty(TopologyAddressValidator.Validate(_root));
         }
 
-        public new void Dispose()
+        public void Dispose()
         {
             try { if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true); } catch { }
-            base.Dispose();
         }
     }
 
