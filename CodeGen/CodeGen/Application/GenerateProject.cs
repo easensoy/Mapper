@@ -57,7 +57,7 @@ namespace CodeGen.Application
             // The Feed station stays on M262 and the RevPi COEXISTS with it: PLC_RW_REVPI carries IO for
             // only Feeder/Checker/PartInHopper, so a whole-station swap would strand Transfer/Ejector/
             // Robot/PartAtAssembly with no physical IO. RevPiSelectionValidator rejects the full swap.
-            var profile = new DeploymentProfile(request.RevPiComponents);
+            var profile = new DeploymentProfile(request.RevPiComponents, LayoutCatalog.Load());
             RevPiSelectionValidator.ThrowIfInvalid(profile);
 
             // Parse once, plan once, render once: everything the run decides is settled here, before the
