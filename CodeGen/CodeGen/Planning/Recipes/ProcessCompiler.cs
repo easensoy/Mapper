@@ -36,8 +36,9 @@ namespace CodeGen.Translation.Process.Recipes
             public IReadOnlyList<VueOneComponent> All = Array.Empty<VueOneComponent>();
             public IReadOnlyDictionary<string, int> ProcessIdByName = new Dictionary<string, int>();
             public IReadOnlyDictionary<string, int> SensorPresent = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            public int FeedProcessId = -1;          // the process that sits on the (separate) Feed ring
-            public bool MergeFeedRing;              // no clamp: Feed shares the M580 ring -> every process announce is same-ring
+            // Which controller hosts each component, and therefore which report ring it publishes onto.
+            public ControllerAllocation Allocation = ControllerAllocation.Current;
+            public bool RingsMerged;                // topology folds the per-controller rings into one
             // The one sensor that DOES cross from the Feed controller to the assembly controller (it rides the
             // cross-ring segment). It is a material LEVEL, not a process state, so it can only stand in for a
             // Feed-side handoff as a freshly-armed edge -- see EmitHandoff. -1 = no bridge available.
@@ -53,7 +54,8 @@ namespace CodeGen.Translation.Process.Recipes
 
             var states = OrderStatesByTransitionChain(process.States);
             foreach (var line in BuildTransitionTable(process.States, states)) arrays.TransitionTable.Add(line);
-            var announce = HandoffPlan(ctx).AnnouncementsOf(process.Name?.Trim() ?? string.Empty);
+            var plan = HandoffPlan(ctx);
+            var announce = plan.AnnouncementsOf(process.Name?.Trim() ?? string.Empty);
             var owned = BuildOwnership(process, ctx);
 
             var pos = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -103,8 +105,8 @@ namespace CodeGen.Translation.Process.Recipes
                     // "ReturnedFinished") state one requirement, not two.
                     var settledHere = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
                     foreach (var cond in t.Conditions)
-                        EmitCondition(process, state, cond, t.Conditions.Count, ctx, pos, at, graphs, rows, arrays,
-                            settledHere, owned, entryPhase, armed);
+                        EmitCondition(process, state, cond, t.Conditions.Count, ctx, plan, pos, at, graphs, rows,
+                            arrays, settledHere, owned, entryPhase, armed);
                 }
                 if (entryPhase) { Work(); Announcement(); }
                 if (rows.Count > before) firstRow[state.StateID] = before;
@@ -255,13 +257,13 @@ namespace CodeGen.Translation.Process.Recipes
         }
 
         private static void EmitCondition(VueOneComponent process, VueOneState state, VueOneCondition cond,
-            int gateCount, Ctx ctx, Dictionary<string, int> pos,
+            int gateCount, Ctx ctx, ProcessHandoffPlan plan, Dictionary<string, int> pos,
             Dictionary<string, string> at, Dictionary<string, ActuatorGraph> graphs, List<Row> rows,
             RecipeArrays arrays, Dictionary<string, int> settledHere,
             Dictionary<string, List<OwnedMove>> owned, bool entryPhase, HashSet<string> armed)
         {
             var target = Resolve(cond, ctx.All);
-            if (IsProcess(target)) { EmitHandoff(process, state, cond, gateCount, target, ctx, rows, arrays, armed); return; }
+            if (IsProcess(target)) { EmitHandoff(process, state, cond, gateCount, target, ctx, plan, rows, arrays, armed); return; }
 
             int id = SlotOf(target, ctx, process, state);
             int reached = StateNumberOf(cond, target, process, state);
@@ -559,16 +561,16 @@ namespace CodeGen.Translation.Process.Recipes
             }
         }
 
-        // A cross-process condition becomes a WAIT on the peer's OWN announced State_Number wherever that
-        // announcement is actually transported into this process's state_table -- the shared ring (same
-        // controller, or a merged Feed ring) or CycleReady (an assembly-side process reporting to the Feed ring).
-        // A peer Initialisation condition is model readiness, not a runtime gate. When the announcement cannot
-        // reach this process the condition is NEVER silently replaced by an unrelated level: either a sibling
-        // condition on the same AND-transition already sequences it (reported, not dropped), or the configured
-        // material bridge stands in as a freshly-ARMED edge, or generation fails naming the missing route.
+        // A cross-process condition becomes a WAIT on the peer's OWN announced State_Number wherever the plan
+        // says that announcement is transported into this process's state_table -- the shared ring, or the
+        // process-phase cross-reference between rings. A peer Initialisation condition is model readiness, not
+        // a runtime gate. When the announcement cannot reach this process the condition is NEVER silently
+        // replaced by an unrelated level: either a sibling condition on the same AND-transition already
+        // sequences it (reported, not dropped), or the configured material bridge stands in as a freshly-ARMED
+        // edge, or generation fails naming the missing route.
         private static void EmitHandoff(VueOneComponent process, VueOneState state, VueOneCondition cond,
-            int gateCount, VueOneComponent peer, Ctx ctx, List<Row> rows, RecipeArrays arrays,
-            HashSet<string> armed)
+            int gateCount, VueOneComponent peer, Ctx ctx, ProcessHandoffPlan plan, List<Row> rows,
+            RecipeArrays arrays, HashSet<string> armed)
         {
             if (SameName(peer, process)) return;                                   // self: the recipe is already here
             var refState = PeerState(peer, cond) ?? throw Fail(process, state, $"condition '{cond.Name}' does not name a state of '{peer.Name}'");
@@ -584,7 +586,7 @@ namespace CodeGen.Translation.Process.Recipes
             if (!ctx.ProcessIdByName.TryGetValue(peer.Name.Trim(), out int peerId))
                 throw Fail(process, state, $"peer process '{peer.Name}' has no deployment id");
 
-            if (Announces(peer, process, ctx))
+            if (plan.TransportFor(peer.Name, process.Name) != HandoffTransport.None)
             {
                 // Fresh phase transition: the producer must be seen BEGINNING a cycle before its completion of
                 // that cycle counts, so a value held over from the previous cycle cannot release this process.
@@ -642,49 +644,23 @@ namespace CodeGen.Translation.Process.Recipes
 
             throw Fail(process, state,
                 $"condition '{cond.Name}' names state '{refState.Name}' of '{peer.Name}', which is not " +
-                "transported to this controller: no shared ring, no CycleReady, and no material bridge is " +
-                "configured to carry it");
+                "transported to this controller: no shared report ring, no process-phase cross-reference, " +
+                "and no material bridge is configured to carry it");
         }
 
         // The twin's own cross-process conditions with each transport resolved. Derived from the context it is
-        // asked about and returned by value -- no cache, so nothing survives between generations.
+        // asked about and returned by value -- no cache, so nothing survives between generations. Sharing a
+        // report ring carries a phase directly; across rings the process-phase cross-reference carries it,
+        // and the plan itself rejects a fan-in the runtime interface cannot express.
         internal static ProcessHandoffPlan HandoffPlan(Ctx ctx) =>
             ProcessHandoffPlan.Derive(
                 ctx.All, ctx.ProcessIdByName,
-                (producer, consumer) => Transport(producer, consumer, ctx),
+                (producer, consumer) => SameRing(producer, consumer, ctx),
                 EntryState,
                 (producer, cond) => PeerState(producer, cond),
                 cond => TryResolve(cond, ctx.All),
                 IsProcess,
                 IsInitialisationState);
-
-        // Where a producer's phase can physically land in a consumer's state_table. Sharing a report ring
-        // carries it directly. Otherwise the generic process-phase cross-reference does -- but the receiving
-        // slot (rdy_id) is declared on the Process1_Generic TYPE, so every instance shares one slot and only
-        // ONE consumer in the project can receive a cross-controller phase. That consumer is the one whose ring
-        // no producer's report reaches, i.e. the ring holding no other process: the remaining direction is
-        // covered by the material bridge instead. Widening this needs rdy_id on the instance interface.
-        private static HandoffTransport Transport(VueOneComponent producer, VueOneComponent consumer, Ctx ctx)
-        {
-            if (SameRing(consumer, producer, ctx)) return HandoffTransport.Ring;
-            return SoleCrossControllerConsumer(ctx) is { } sole && SameName(consumer, sole)
-                ? HandoffTransport.CrossController
-                : HandoffTransport.None;
-        }
-
-        // The one process that may receive cross-controller phases: the sole process on its ring. With two
-        // rings and one process alone on one of them, that process is the only possible receiver, so the
-        // single type-level rdy_id is unambiguous. Any other shape returns null and the caller falls back.
-        private static VueOneComponent? SoleCrossControllerConsumer(Ctx ctx)
-        {
-            var procs = ctx.All.Where(IsProcess).ToList();
-            var alone = procs.Where(p => procs.Count(q => SameRing(p, q, ctx)) == 1).ToList();
-            return alone.Count == 1 ? alone[0] : null;
-        }
-
-        // Does `peer`'s own state announcement reach `consumer`'s state_table?
-        private static bool Announces(VueOneComponent peer, VueOneComponent consumer, Ctx ctx) =>
-            Transport(peer, consumer, ctx) != HandoffTransport.None;
 
         private static void Serialize(VueOneComponent process, List<VueOneState> states, List<Row> rows,
             Dictionary<string, int> firstRow, RecipeArrays arrays)
@@ -802,8 +778,8 @@ namespace CodeGen.Translation.Process.Recipes
         // Grippers are Type "Robot" but not the task arm: a Five-state jaw whose two strokes share one rest sensor.
         private static bool IsGripper(VueOneComponent c) => string.Equals(c.Type, "Robot", StringComparison.OrdinalIgnoreCase) && !TemplateMap.IsRobotTaskArm(c);
         private static bool SameName(VueOneComponent a, VueOneComponent b) => string.Equals(a.Name?.Trim(), b.Name?.Trim(), StringComparison.OrdinalIgnoreCase);
-        private static bool IsFeedSide(VueOneComponent p, Ctx ctx) => ctx.ProcessIdByName.TryGetValue(p.Name?.Trim() ?? "", out int pid) && pid == ctx.FeedProcessId;
-        private static bool SameRing(VueOneComponent a, VueOneComponent b, Ctx ctx) => ctx.MergeFeedRing || IsFeedSide(a, ctx) == IsFeedSide(b, ctx);
+        private static bool SameRing(VueOneComponent a, VueOneComponent b, Ctx ctx) =>
+            ctx.Allocation.SameRing(a.Name, b.Name, ctx.RingsMerged);
         private static string After(string? s) => string.IsNullOrEmpty(s) ? string.Empty : (s.LastIndexOf('/') is int i and >= 0 ? s.Substring(i + 1) : s);
 
         private static InvalidOperationException Fail(VueOneComponent process, VueOneState? state, string why) =>
