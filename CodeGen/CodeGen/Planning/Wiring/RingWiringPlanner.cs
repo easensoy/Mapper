@@ -14,15 +14,16 @@ namespace CodeGen.Translation
         static bool NameEq(string a, string b) =>
             string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 
-        internal static void BuildFeedStationWiring(SyslayBuilder builder, StationContents contents)
+        internal static void BuildFeedStationWiring(SyslayBuilder builder, GenerationContext ctx)
         {
+            var contents = ctx.Station;
             // Same resolver as GenerateFeedStationSyslayToPath, so the wire endpoints match the emitted instance name.
             var processInstanceName = InstanceNameResolver.Resolve(contents.Process);
             if (string.IsNullOrWhiteSpace(processInstanceName)) processInstanceName = "Process1";
 
             // Per-PLC filter: EAE renders a resource-boundary-crossing wire as dashed/unresolved and blocks deploy; each PLC's sysres is wired separately.
             // Which controller hosts a component is the allocation's question, not this planner's.
-            var allocation = ControllerAllocation.Current;
+            var allocation = ctx.Allocation;
             bool OnFeedController(string name) => allocation.IsFeedSide(name);
 
             // Keep the robot-tail (Ejector+Robot) OUT of the INIT path to Feed_Station (a Robot bring-up stall would block it); init the tail last, mirrored in ResourceWireEmitter.
@@ -105,7 +106,7 @@ namespace CodeGen.Translation
                     builder.AddAdapterConnection(
                         $"{ringComponents[i].Name}.{StateRprtOut(ringComponents[i].Type)}",
                         $"{ringComponents[i + 1].Name}.{StateRprtIn(ringComponents[i + 1].Type)}");
-                if (GenerationPlan.Current.RingsMerged)
+                if (ctx.RingsMerged)
                 {
                     // Merged rings: the Feed tail crosses to the M580 head instead of closing locally, joining the one cross-PLC ring.
                     var m580Head = contents.Sensors.FirstOrDefault(
@@ -131,15 +132,16 @@ namespace CodeGen.Translation
         }
 
         // M580 (Station 2) sibling of BuildFeedStationWiring; contained to the M580 bucket, M262+BX1 filtered out.
-        internal static void BuildStation2Wiring(SyslayBuilder builder, StationContents contents,
-            string? disassemblyFbName = null)
+        internal static void BuildStation2Wiring(SyslayBuilder builder, GenerationContext ctx,
+            string? disassemblyFbName)
         {
             const string StationFb     = "Station2";
             const string StationHmiFb  = "Station2_HMI";
             const string AssemblyProc  = "Assembly_Station";
             const string Stn2Term      = "Stn2_Term";
 
-            var allocation = ControllerAllocation.Current;
+            var allocation = ctx.Allocation;
+            var contents = ctx.Station;
             bool IsM580(string name) => allocation.IsOn(name, PlcAssignment.M580);
 
             // Thread Disassembly after Assembly_Station so the syslay ring matches the sysres, which wires
@@ -226,7 +228,7 @@ namespace CodeGen.Translation
                     builder.AddAdapterConnection(
                         $"{ring[^1].Name}.{StateRprtOut(ring[^1].Type)}",
                         $"{seg[0]}.stateRprtCmd_in");
-                    if (GenerationPlan.Current.RingsMerged)
+                    if (ctx.RingsMerged)
                     {
                         // Merged rings: the discharge-segment tail feeds the Feed head, so segment + Feed form one loop.
                         var m262Head = contents.Sensors.FirstOrDefault(s => allocation.IsFeedSide(s.Name));
@@ -250,16 +252,16 @@ namespace CodeGen.Translation
         }
 
         // BX1 (Cover PnP) sibling: no Process FB of its own — Assembly_Station commands it over the cross-PLC ring. Three chains: MqttConn bring-up, INIT, stateRprtCmd ring.
-        internal static void BuildBx1Wiring(SyslayBuilder builder, StationContents contents,
-            MapperConfig? config)
+        internal static void BuildBx1Wiring(SyslayBuilder builder, GenerationContext ctx)
         {
-            var allocation = ControllerAllocation.Current;
+            var allocation = ctx.Allocation;
+            var contents = ctx.Station;
             bool IsBx1(string name) => allocation.IsOn(name, PlcAssignment.BX1);
 
             // INITO->CONNECT self-loop opens the broker on init; MqttConn.INIT is sourced from FB1 on the sysres, so it shows dangling here (runtime resolves it).
-            bool mqttEnabled = config != null && config.MqttPublishEnabled;
+            bool mqttEnabled = ctx.Config.MqttPublishEnabled;
             // UseTelemetryCat (default) names the connection Telemetry_BX1; the raw-FB revert keeps "MqttConn".
-            string bx1Conn = (config != null && config.UseTelemetryCat) ? "Telemetry_BX1" : "MqttConn";
+            string bx1Conn = ctx.Config.UseTelemetryCat ? "Telemetry_BX1" : "MqttConn";
             if (mqttEnabled)
                 builder.AddEventConnection($"{bx1Conn}.INITO", $"{bx1Conn}.CONNECT");
 
