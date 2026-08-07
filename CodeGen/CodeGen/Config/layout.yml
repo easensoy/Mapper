@@ -1,0 +1,168 @@
+# Where the generated FBs are placed on the EAE canvas, and which controller runs each of them.
+#
+# This is the DEPLOYMENT roster: the twin says what the machine does, this says where each component
+# runs and where it is drawn. Adding a component to the rig is a row here, not a change in C#.
+#
+# ORDER IS LOAD-BEARING, and there are two different orders that must NOT be merged:
+#
+#   idOrder      assigns the state_table index, the CAT actuator_id and every recipe Wait1Id. Appending
+#                is safe; INSERTING renumbers every component after the insert and silently repoints
+#                every WAIT that referenced them.
+#   casBusOrder  chains the station adapter, interleaving sensors with actuators. Normalising the two
+#                into one list would either renumber components or rewire the bus.
+#
+# Names are Control.xml FB instance names, not hardware aliases: a CAT's $${PATH} symlinks expand to
+# them. A component the twin omits is simply skipped by whatever consumes the list.
+
+# Canvas geometry. Actuator CATs render ~1400 wide, so a 1700 pitch leaves a ~300 gap with no overlap.
+geometry:
+  columnPitchX: 1700
+  frameOriginY: 1700
+  frameHeight: 5300
+  # Y per row, spaced to clear the EAE-rendered FB body in the row above (Process1_Generic ~800,
+  # Five_State ~1400) while keeping the canvas tight.
+  rowY:
+    Floating: 200
+    Hmi: 1200
+    Station: 2100
+    Process: 2900
+    Sensor: 2900
+    Actuator: 4100
+
+# One band per controller. frameOriginX is the band's left edge, columnBaseX the X of column 0 (200
+# inside the frame), frameWidth the fitted width. Combined with MoveStyle="None" on every Frame, EAE
+# renders them at exactly these bounds instead of auto-growing one band around another's FBs.
+# RevPi hosts the Feed station in M262's band, so it shares M262's geometry.
+bands:
+  - plc: M262
+    frameOriginX: 1800
+    columnBaseX: 2000
+    frameWidth: 8500      # 1800..10300
+  - plc: RevPi
+    frameOriginX: 1800
+    columnBaseX: 2000
+    frameWidth: 8500
+  - plc: M580
+    frameOriginX: 10800
+    columnBaseX: 11000
+    frameWidth: 16000     # 10800..26800
+  - plc: BX1
+    frameOriginX: 23200
+    columnBaseX: 23400
+    frameWidth: 6600      # 23200..29800
+
+# Bootstrap FBs: fixed coordinates, no column grid, no controller (the resource owns them).
+bootFbs:
+  - name: FB1            # DPAC_FULLINIT
+    x: 3000
+    y: 400
+  - name: FB2            # plcStart
+    x: 800
+    y: 1100
+
+# The roster. plc = hosting controller, column/row = canvas position, owner = the Process FB that
+# commands it ("" = commanded by none, or across controllers).
+components:
+  # M262 - Feed Station
+  - { name: Area_HMI,        plc: M262, column: 0, row: Hmi,      owner: "" }
+  - { name: Station1_HMI,    plc: M262, column: 1, row: Hmi,      owner: "" }
+  - { name: Area,            plc: M262, column: 0, row: Station,  owner: "" }
+  - { name: Station1,        plc: M262, column: 1, row: Station,  owner: "" }
+  - { name: Area_Term,       plc: M262, column: 2, row: Station,  owner: "" }
+  - { name: PartInHopper,    plc: M262, column: 0, row: Process,  owner: Feed_Station }
+  - { name: PartAtChecker,   plc: M262, column: 1, row: Process,  owner: Feed_Station }
+  - { name: Feed_Station,    plc: M262, column: 2, row: Process,  owner: Feed_Station }
+  # synth discharge sensor (DI08)
+  - { name: PartAtAssembly,  plc: M262, column: 3, row: Sensor,   owner: Feed_Station }
+  - { name: Feeder,          plc: M262, column: 0, row: Actuator, owner: Feed_Station }
+  - { name: Checker,         plc: M262, column: 1, row: Actuator, owner: Feed_Station }
+  - { name: Transfer,        plc: M262, column: 2, row: Actuator, owner: Feed_Station }
+  - { name: Ejector,         plc: M262, column: 3, row: Actuator, owner: Feed_Station }
+  # UR3e discharge tail, commanded across controllers by Disassembly
+  - { name: Robot,           plc: M262, column: 4, row: Actuator, owner: "" }
+  - { name: Stn1_Term,       plc: M262, column: 3, row: Station,  owner: "" }
+
+  # M580 - Assembly + Disassembly
+  - { name: Station2_HMI,     plc: M580, column: 0, row: Hmi,      owner: "" }
+  - { name: Station2,         plc: M580, column: 0, row: Station,  owner: "" }
+  - { name: Assembly_Station, plc: M580, column: 0, row: Process,  owner: Assembly_Station }
+  - { name: Disassembly,      plc: M580, column: 1, row: Process,  owner: Disassembly }
+  - { name: BearingSensor,    plc: M580, column: 2, row: Process,  owner: Assembly_Station }
+  - { name: ShaftSensor,      plc: M580, column: 3, row: Process,  owner: Assembly_Station }
+  - { name: Bearing_PnP,      plc: M580, column: 0, row: Actuator, owner: Assembly_Station }
+  - { name: Bearing_Gripper,  plc: M580, column: 1, row: Actuator, owner: Assembly_Station }
+  - { name: Shaft_Hr,         plc: M580, column: 2, row: Actuator, owner: Assembly_Station }
+  - { name: Shaft_Vr,         plc: M580, column: 3, row: Actuator, owner: Assembly_Station }
+  - { name: Shaft_Gripper,    plc: M580, column: 4, row: Actuator, owner: Assembly_Station }
+  - { name: Clamp,            plc: M580, column: 5, row: Actuator, owner: Assembly_Station }
+  - { name: Stn2_Term,        plc: M580, column: 6, row: Actuator, owner: "" }
+
+  # BX1 - Cover PnP. The covers fold into the M580 flow, so BX1 runs no Process engine.
+  # Both twin spellings of the cover sensor are registered; only the one a model contains is looked up.
+  - { name: TopCoverSenosr,   plc: BX1, column: 0, row: Process,  owner: "" }
+  - { name: TopCoverSensor,   plc: BX1, column: 0, row: Process,  owner: "" }
+  - { name: CoverPNP_Hr,      plc: BX1, column: 0, row: Actuator, owner: "" }
+  - { name: CoverPNP_Vr,      plc: BX1, column: 1, row: Actuator, owner: "" }
+  - { name: CoverPnp_Gripper, plc: BX1, column: 2, row: Actuator, owner: "" }
+  # EtherNet/IP cover-IO broker
+  - { name: BX1_IO,           plc: BX1, column: 3, row: Actuator, owner: "" }
+
+  # MQTT lives on BX1 (Soft dPAC); M262/M580 have no MQTT runtime client (RC50).
+  - { name: MqttConn,         plc: BX1,  column: 0, row: Floating, owner: "" }
+  - { name: MqttConn_M262,    plc: M262, column: 0, row: Floating, owner: "" }
+  - { name: MqttConn_M580,    plc: M580, column: 0, row: Floating, owner: "" }
+  - { name: Telemetry_M262,   plc: M262, column: 2, row: Hmi,      owner: "" }
+  - { name: Telemetry_M580,   plc: M580, column: 1, row: Hmi,      owner: "" }
+  - { name: Telemetry_BX1,    plc: BX1,  column: 0, row: Hmi,      owner: "" }
+
+# Assigns the state_table index / actuator_id / recipe Wait1Id. See the ORDER note at the top.
+idOrder:
+  sensors:
+    - PartInHopper
+    - PartAtChecker
+    - BearingSensor
+    - ShaftSensor
+    # Both twin spellings; the absent one is skipped.
+    - TopCoverSenosr
+    - TopCoverSensor
+    # LAST on purpose: appending leaves every existing sensor id untouched. A twin that omits it falls
+    # through to the synth injection, so both shapes generate the same ids.
+    - PartAtAssembly
+  actuators:
+    - Feeder
+    - Checker
+    - Transfer
+    - Ejector
+    - Bearing_PnP
+    - Bearing_Gripper
+    - Shaft_Hr
+    - Shaft_Vr
+    - Shaft_Gripper
+    - Clamp
+    - CoverPNP_Hr
+    - CoverPNP_Vr
+    - CoverPnp_Gripper
+  # Appended only when the cross-controller discharge is active, so it never shifts the ids above it.
+  robotTail:
+    - Robot
+
+# Chains the station adapter; interleaves sensors with actuators.
+casBusOrder:
+  - PartInHopper
+  - PartAtChecker
+  - Feeder
+  - Checker
+  - Transfer
+  - BearingSensor
+  - ShaftSensor
+  - Bearing_PnP
+  - Bearing_Gripper
+  - Shaft_Hr
+  - Shaft_Vr
+  - Shaft_Gripper
+  - Clamp
+  - TopCoverSenosr
+  - TopCoverSensor
+  - CoverPNP_Hr
+  - CoverPNP_Vr
+  - CoverPnp_Gripper
