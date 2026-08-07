@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using CodeGen.Configuration;
 
@@ -13,7 +13,7 @@ namespace CodeGen.Translation
         // Master switch for the M262<->M580 cross-device discharge + part-present handoffs. RIG-VERIFY:
         // the M262<->M580 cross-device adapter transport (only M580<->BX1 is rig-proven). OFF =
         // decoupled local rings (Assembly gates on the local BearingSensor).
-        public const bool CrossPlcDischargeActive = true;
+        public static bool DischargeActive => true;
 
         // BX1 cover actuators spliced onto the M580 ring (between Clamp and Assembly_Station); cover
         // place/remove fold into the M580 recipes. TopCoverSenosr stays OFF the ring (its id collides
@@ -34,8 +34,6 @@ namespace CodeGen.Translation
         // injection. It then keeps the SAME reserved slot, so ids stay identical either way.
         public static bool IsPartAtAssembly(string name) =>
             string.Equals(name, "PartAtAssembly", System.StringComparison.OrdinalIgnoreCase);
-
-        public static bool DischargeActive => CrossPlcDischargeActive;
 
     }
 }
