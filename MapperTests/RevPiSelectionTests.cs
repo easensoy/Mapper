@@ -19,10 +19,11 @@ namespace MapperTests
     /// global to save or restore.
     public abstract class RevPiTestBase
     {
-        protected static DeploymentProfile M262 => DeploymentProfile.M262Only;
+        protected static DeploymentProfile M262 => DeploymentProfile.M262Only(LayoutCatalog.Load());
 
         /// The supported RevPi mode: named Feed components move, M262 keeps the rest.
-        protected static DeploymentProfile RevPiComponents(params string[] names) => new(names);
+        protected static DeploymentProfile RevPiComponents(params string[] names) =>
+            new(names, LayoutCatalog.Load());
 
         protected static DeploymentRoster Roster(DeploymentProfile profile) => new(profile);
 
