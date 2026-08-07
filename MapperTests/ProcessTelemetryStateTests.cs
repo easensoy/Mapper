@@ -1,8 +1,10 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using CodeGen.Configuration;
 using CodeGen.IO;
+using CodeGen.Mapping;
 using CodeGen.Models;
 using CodeGen.Translation;
 using CodeGen.Translation.Process;
@@ -33,32 +35,26 @@ namespace MapperTests
 
         private static bool ModelAvailable(string suffix) => File.Exists(ModelPath(suffix));
 
-        /// Compile one process from a model exactly as the generator does, and hand back the
-        /// telemetry array beside the states it was derived from.
-        private static (RecipeArrays Arrays, VueOneComponent Process, List<VueOneComponent> All)
+        /// Plan a model exactly as the generator does, and hand back one process's telemetry array
+        /// beside the states it was derived from.
+        private static (RecipeArrays Arrays, VueOneComponent Process)
             Compile(string suffix, string processName)
         {
-            var all = new SystemXmlReader().ReadAllComponents(ModelPath(suffix));
-            var process = all.Single(c =>
+            var ctx = GenerationContext.Plan(new MapperConfig(), ModelPath(suffix), DeploymentProfile.M262Only);
+            var process = ctx.Components.Single(c =>
                 string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(c.Name, processName, StringComparison.OrdinalIgnoreCase));
-
-            var contents = new StationGroupingService().GroupStationContents(process, all);
-            var arrays = ProcessRecipeArrayGenerator.Generate(process, contents, all);
-            return (arrays, process, all);
+            return (ctx.Recipes[processName], process);
         }
 
-        // Only Feed_Station is compiled here. Assembly_Station and Disassembly reach across stations for
-        // their state_table slots, so compiling one in isolation throws ("no state_table slot on this
-        // ring") — they need the whole-system grouping the generator performs. Their ordinals are
-        // verified against the generated tree instead; what is asserted offline is the numbering rule
-        // and the twin data that motivates it.
+        // Feed_Station carries the assertions because it is self-contained: Assembly_Station and
+        // Disassembly reach across stations, so their phases only mean something beside the whole plan.
         [Theory]
         [InlineData("_se", "Feed_Station")]
         public void EveryRowIdentifiesADeclaredPhase(string suffix, string processName)
         {
             if (!ModelAvailable(suffix)) return;   // model not present on this machine
-            var (arrays, process, _) = Compile(suffix, processName);
+            var (arrays, process) = Compile(suffix, processName);
 
             Assert.Equal(arrays.StepType.Count, arrays.ProcessStateByRow.Count);
             Assert.NotEmpty(arrays.ProcessStateByRow);
@@ -78,7 +74,7 @@ namespace MapperTests
         public void DistinctPhasesGetDistinctOrdinals(string suffix, string processName)
         {
             if (!ModelAvailable(suffix)) return;   // model not present on this machine
-            var (arrays, process, _) = Compile(suffix, processName);
+            var (arrays, process) = Compile(suffix, processName);
 
             // The whole reason for not publishing State_Number. Two states that share a State_Number, or
             // that both carry 0, must still be told apart on the wire.
@@ -125,7 +121,7 @@ namespace MapperTests
         public void RowsOfOnePhaseAllReportThatSamePhase()
         {
             if (!ModelAvailable("_se")) return;   // model not present on this machine
-            var (arrays, _, _) = Compile("_se", "Feed_Station");
+            var (arrays, _) = Compile("_se", "Feed_Station");
 
             // A state compiles to a CMD and its WAIT, so entries repeat in contiguous runs. Any phase
             // appearing in two non-adjacent runs would mean rows were attributed by position.
@@ -143,7 +139,7 @@ namespace MapperTests
         public void FeederReturningResolvesToItsOwnPhase()
         {
             if (!ModelAvailable("_se")) return;   // model not present on this machine
-            var (arrays, _, _) = Compile("_se", "Feed_Station");
+            var (arrays, _) = Compile("_se", "Feed_Station");
 
             var ordinal = arrays.ProcessPhaseNames
                 .Where(kv => string.Equals(kv.Value, "FeederReturning", StringComparison.OrdinalIgnoreCase))
@@ -159,7 +155,7 @@ namespace MapperTests
         public void PublishedPhaseIsNotTheRecipeRowIndex()
         {
             if (!ModelAvailable("_se")) return;   // model not present on this machine
-            var (arrays, _, _) = Compile("_se", "Feed_Station");
+            var (arrays, _) = Compile("_se", "Feed_Station");
 
             // If telemetry ever regressed to reporting CurrentStep, the array would be 0,1,2,3...
             bool identityMapping = arrays.ProcessStateByRow
@@ -176,7 +172,7 @@ namespace MapperTests
         public void EachModelResolvesFromItsOwnControlXml(string suffix)
         {
             if (!ModelAvailable(suffix)) return;   // model not present on this machine
-            var (arrays, process, _) = Compile(suffix, "Feed_Station");
+            var (arrays, process) = Compile(suffix, "Feed_Station");
 
             Assert.NotEmpty(arrays.ProcessStateByRow);
             Assert.All(arrays.ProcessStateByRow, n => Assert.InRange(n, 1, process.States.Count));
@@ -188,7 +184,7 @@ namespace MapperTests
         public void ChainOrderIsFollowedNotDeclarationOrder()
         {
             if (!ModelAvailable("_se")) return;   // model not present on this machine
-            var (arrays, _, _) = Compile("_se", "Feed_Station");
+            var (arrays, _) = Compile("_se", "Feed_Station");
 
             // _se runs the feeder out of declaration order: FeederAdvancing, then FeederReturning, then
             // PartChecking. A mapping derived from the transition chain reproduces that; one derived from
@@ -216,7 +212,7 @@ namespace MapperTests
         public void ControlArraysAreUnaffectedByTheTelemetryArray()
         {
             if (!ModelAvailable("_se")) return;   // model not present on this machine
-            var (arrays, _, _) = Compile("_se", "Feed_Station");
+            var (arrays, _) = Compile("_se", "Feed_Station");
 
             // The six control arrays and the telemetry array are the same length and independent: the
             // telemetry array must never have inserted or removed a row.
