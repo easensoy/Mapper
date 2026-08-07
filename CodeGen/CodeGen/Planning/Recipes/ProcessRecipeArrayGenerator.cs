@@ -82,6 +82,13 @@ namespace CodeGen.Translation.Process
             return map;
         }
 
+        // The model's process-to-process handoffs with their transports resolved, for the backend to render
+        // wiring from. Derived from the same Ctx the recipe rows are compiled from, so the wiring and the
+        // WAIT rows can never disagree about which producer reaches which consumer.
+        internal static Recipes.ProcessHandoffPlan HandoffPlan(IReadOnlyList<VueOneComponent> allComponents) =>
+            Recipes.ProcessCompiler.HandoffPlan(
+                BuildCompilerCtx(allComponents, new Dictionary<string, int>()));
+
         public static RecipeArrays Generate(VueOneComponent process,
             StationContents stationContents, IReadOnlyList<VueOneComponent> allComponents,
             int processId = 10)
