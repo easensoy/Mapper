@@ -1,4 +1,4 @@
-using CodeGen.Configuration;
+﻿using CodeGen.Configuration;
 using CodeGen.Mapping;
 using CodeGen.Models;
 using CodeGen.Translation;
@@ -214,13 +214,22 @@ namespace MapperUI
             VueOneComponent process, IReadOnlyList<VueOneComponent> components)
         {
             var contents = BuildGlobalContents(process, components);
-            int processId = 1000 + table.Rows.Count;
+
+            // The preview compiles the same rows the generator would, so it needs the same allocation.
+            // Reading it from a fresh roster keeps the preview independent of any run in flight.
+            var allocation = new CodeGen.Mapping.ControllerAllocation(
+                new CodeGen.Mapping.DeploymentRoster(CodeGen.Mapping.DeploymentProfile.M262Only));
+            bool ringsMerged = CodeGen.Translation.Process.Recipes.FeedRingMerge.Needed(components, allocation);
 
             RecipeArrays recipe;
             try
             {
+                var slots = CodeGen.Translation.StateTableAllocation
+                    .Slots(contents, allocation, ringsMerged);
+                int topCover = CodeGen.Mapping.TemplateMap.TopCoverSensorNames
+                    .Select(n => slots.TryGetValue(n, out int s) ? s : -1).FirstOrDefault(s => s >= 0);
                 recipe = ProcessRecipeArrayGenerator.Generate(
-                    process, contents, components, processId);
+                    process, contents, components, slots, allocation, ringsMerged, topCover);
             }
             catch (Exception ex)
             {
@@ -228,7 +237,7 @@ namespace MapperUI
                 return;
             }
 
-            var idToComponent = recipe.ComponentRegistry
+            var idToComponent = recipe.ComponentIds
                 .Select(kv => new
                 {
                     Id = kv.Value,
