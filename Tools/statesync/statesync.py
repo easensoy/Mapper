@@ -358,6 +358,11 @@ class Bridge:
         # holds - it has already written to those limits itself.
         if comp.get("taughtJointLimits"):
             env["taughtJointLimits"] = dict(comp["taughtJointLimits"])
+        # The rig's own measured task duration. Carried so the gateway can report how far
+        # the shadow is from it and what factor would close the gap - a re-teach changes
+        # the taught duration, and a fixed speedFactor cannot know that on its own.
+        if comp.get("taskTargetMs"):
+            env["taskTargetMs"] = float(comp["taskTargetMs"])
         v = comp.get("verify")
         if v:
             env["verify"] = {"part": v["part"], "carriers": list(v["carriers"]),
