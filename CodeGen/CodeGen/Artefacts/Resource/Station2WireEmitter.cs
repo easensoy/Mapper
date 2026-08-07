@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Xml.Linq;
@@ -42,46 +42,37 @@ namespace CodeGen.Devices.Core
                 return;
             }
 
-            var m580 = ResourceWireEmitter.LocateSysresByDeviceType(eaeRoot, "M580_dPAC");
-            if (m580 != null)
-            {
-                var paramSynced = SysresFbMirror.SyncMirroredFbParametersFromSyslay(cfg.ActiveSyslayPath, m580);
-                if (paramSynced > 0)
-                    report.Missing.Add($"[Wire][M580] synced {paramSynced} mirrored FB parameter set(s) from syslay to sysres");
-                var synced = SysresFbMirror.SyncProcessRecipesFromSyslay(cfg.ActiveSyslayPath, m580);
-                if (synced > 0)
-                    report.Missing.Add($"[Wire][M580] synced {synced} Process recipe(s) from syslay to sysres");
-                ResourceWireEmitter.EmitForResource(cfg, m580, M580Anchors, report);
-                paramSynced = SysresFbMirror.SyncMirroredFbParametersFromSyslay(cfg.ActiveSyslayPath, m580);
-                if (paramSynced > 0)
-                    report.Missing.Add($"[Wire][M580] post-wire synced {paramSynced} mirrored FB parameter set(s) from syslay to sysres");
-                synced = SysresFbMirror.SyncProcessRecipesFromSyslay(cfg.ActiveSyslayPath, m580);
-                if (synced > 0)
-                    report.Missing.Add($"[Wire][M580] post-wire synced {synced} Process parameter set(s) from syslay to sysres");
-            }
-            else report.Missing.Add("[Wire][M580] skipped, M580 sysres not found");
+            Wire(cfg, eaeRoot, "M580_dPAC", "M580", M580Anchors, report);
+            Wire(cfg, eaeRoot, "Soft_dPAC", "BX1", BX1Anchors, report);
+        }
 
-            var bx1 = ResourceWireEmitter.LocateSysresByDeviceType(eaeRoot, "Soft_dPAC");
-            if (bx1 != null)
+        // Parameters are synced from the syslay BOTH sides of the wiring pass: before, so the wiring
+        // sees the FBs it is about to connect, and after, because EmitForResource rewrites the
+        // FBNetwork and a resource that shipped with a stale recipe deploys silently wrong.
+        private static void Wire(MapperConfig cfg, string eaeRoot, string deviceType, string tag,
+            ResourceWireEmitter.ResourceAnchors anchors, SystemInjector.BindingApplicationReport report)
+        {
+            var sysres = ResourceWireEmitter.LocateSysresByDeviceType(eaeRoot, deviceType);
+            if (sysres == null)
             {
-                var paramSynced = SysresFbMirror.SyncMirroredFbParametersFromSyslay(cfg.ActiveSyslayPath, bx1);
-                if (paramSynced > 0)
-                    report.Missing.Add($"[Wire][BX1] synced {paramSynced} mirrored FB parameter set(s) from syslay to sysres");
-                var synced = SysresFbMirror.SyncProcessRecipesFromSyslay(cfg.ActiveSyslayPath, bx1);
-                if (synced > 0)
-                    report.Missing.Add($"[Wire][BX1] synced {synced} Process recipe(s) from syslay to sysres");
-                // Sweep any leftover Cover_Station FB before wiring; ResourceWireEmitter
-                // would otherwise re-splice it by type-scan.
-                SweepCoverStationFromSysres(bx1, report);
-                ResourceWireEmitter.EmitForResource(cfg, bx1, BX1Anchors, report);
-                paramSynced = SysresFbMirror.SyncMirroredFbParametersFromSyslay(cfg.ActiveSyslayPath, bx1);
-                if (paramSynced > 0)
-                    report.Missing.Add($"[Wire][BX1] post-wire synced {paramSynced} mirrored FB parameter set(s) from syslay to sysres");
-                synced = SysresFbMirror.SyncProcessRecipesFromSyslay(cfg.ActiveSyslayPath, bx1);
-                if (synced > 0)
-                    report.Missing.Add($"[Wire][BX1] post-wire synced {synced} Process parameter set(s) from syslay to sysres");
+                report.Missing.Add($"[Wire][{tag}] skipped, {tag} sysres not found");
+                return;
             }
-            else report.Missing.Add("[Wire][BX1] skipped, BX1 sysres not found");
+
+            // The mirrored-parameter sync covers the process engines too, so their recipes travel with it.
+            void Sync(string when)
+            {
+                var parameters = SysresFbMirror.SyncMirroredFbParametersFromSyslay(cfg.ActiveSyslayPath, sysres);
+                if (parameters > 0)
+                    report.Missing.Add($"[Wire][{tag}] {when}synced {parameters} mirrored FB parameter set(s) from syslay to sysres");
+            }
+
+            Sync(string.Empty);
+            // A leftover Cover_Station would be re-discovered and re-wired by the type scan below, so it
+            // is swept first. BX1 runs no Process engine: Assembly_Station commands the covers.
+            if (anchors.ProcessFb == null) SweepCoverStationFromSysres(sysres, report);
+            ResourceWireEmitter.EmitForResource(cfg, sysres, anchors, report);
+            Sync("post-wire ");
         }
 
         // Removes a stale Cover_Station Process FB + its connections from a BX1 sysres so
