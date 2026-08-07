@@ -1,55 +1,55 @@
 using System;
 using System.Collections.Generic;
-using CodeGen.Configuration;
+using System.Linq;
 using CodeGen.Mapping;
 using CodeGen.Models;
 using CodeGen.Translation;
 using static CodeGen.Translation.Process.Recipes.RecipeComponentLookup;
+using static CodeGen.Translation.Process.Recipes.TransitionChainParser;
 
 namespace CodeGen.Translation.Process.Recipes
 {
-    // Wiring topology (not recipe): the Feed ring merges into the M580 ring when a Feed-controller process
-    // has a motion state whose leave-condition targets the Disassembly process. Purely model-derived.
+    // Wiring topology, not recipe: do the per-controller report rings fold into one?
+    //
+    // The phase transport carries a station's cycle BOUNDARIES -- a producer announces that it has begun a
+    // cycle and that it has reached the phase a peer waits on -- and the material sensor on the cross-ring
+    // segment covers the other direction's arrival. Both are handshakes at the edges of a cycle, which is
+    // all a station needs when it hands material on and is then done with it.
+    //
+    // A Feed-side process that waits on a process hosted by another controller in the MIDDLE of its own
+    // cycle is stating something else: it is holding material for the downstream station and must observe
+    // that station live while it holds it. A boundary handshake cannot express that, so the two rings have
+    // to be one and every announcement becomes directly readable. Derived from the transition chain and the
+    // controller allocation; no process name and no model shape participates.
     public static class FeedRingMerge
     {
-        private static readonly string[] MotionVerbs =
-        {
-            "advancing", "rising", "returning", "descending",
-            "towork", "tohome", "gotowork", "gotohome", "checking",
-        };
-
         public static bool Needed(IReadOnlyList<VueOneComponent> allComponents)
         {
+            var allocation = ControllerAllocation.Current;
             foreach (var proc in allComponents)
             {
                 if (!ComponentType.IsProcess(proc)) continue;
-                if (!ControllerMap.IsFeedController(HcfSymbolIndex.NameBasedPlcGuess(proc.Name)))
-                    continue;
-                foreach (var st in proc.States)
-                {
-                    if (!SuggestsMotion(st.Name)) continue;
-                    foreach (var tr in st.Transitions)
-                        foreach (var c in tr.Conditions)
-                        {
-                            if (string.IsNullOrEmpty(c.ComponentID)) continue;
-                            var target = LookupComponent(c.ComponentID, allComponents);
-                            if (target != null &&
-                                string.Equals(target.Type, "Process", StringComparison.OrdinalIgnoreCase) &&
-                                (string.Equals(target.Name?.Trim(), "Disassembly", StringComparison.OrdinalIgnoreCase) ||
-                                 string.Equals(target.Name?.Trim(), "Disassembly_Station", StringComparison.OrdinalIgnoreCase)))
-                                return true;
-                        }
-                }
+                if (!allocation.IsFeedSide(proc.Name)) continue;
+
+                var chain = OrderStatesByTransitionChain(proc.States);
+                // Index 0 is the cycle entry and the last link is where the cycle closes; a dependency at
+                // either is a boundary handshake the phase transport already carries.
+                for (int i = 1; i < chain.Count - 1; i++)
+                    if (WaitsOnAnotherController(chain[i], proc, allComponents, allocation))
+                        return true;
             }
             return false;
         }
 
-        private static bool SuggestsMotion(string? stateName)
-        {
-            var n = (stateName ?? string.Empty).Trim().ToLowerInvariant();
-            foreach (var v in MotionVerbs)
-                if (n.Contains(v, StringComparison.Ordinal)) return true;
-            return false;
-        }
+        private static bool WaitsOnAnotherController(VueOneState state, VueOneComponent proc,
+            IReadOnlyList<VueOneComponent> all, ControllerAllocation allocation) =>
+            state.Transitions
+                .SelectMany(t => t.Conditions)
+                .Where(c => !string.IsNullOrEmpty(c.ComponentID))
+                .Select(c => LookupComponent(c.ComponentID, all))
+                .Any(target => target != null
+                    && ComponentType.IsProcess(target)
+                    && !string.Equals(target.Name?.Trim(), proc.Name?.Trim(), StringComparison.OrdinalIgnoreCase)
+                    && allocation.Of(target.Name) != allocation.Of(proc.Name));
     }
 }
