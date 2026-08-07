@@ -1,12 +1,16 @@
 ﻿# SMC rig catalog — facts the generator reads instead of hardcoding them in C#.
 
-# Process FB state_table slots. Each must sit ABOVE the component id space (0..16) so it never
-# collides with a sensor/actuator id; ValidateProcessIdInvariant throws otherwise. The
-# Assembly->Disassembly handshake rides assembly as a sentinel, so the stamp and the WAIT share it.
-processIds:
-  feedStation: 10
-  assembly: 17
-  disassembly: 18
+# state_table slot allocated to each Process FB, keyed by its Control.xml component name. Each must sit
+# ABOVE the component id space (0..16) so it never collides with a sensor/actuator id;
+# ValidateProcessIdInvariant throws otherwise. A process announces its own phase on its slot, so a peer
+# waiting on that phase reads the same number — the stamp and the WAIT share it by construction.
+#
+# This is an ALLOCATION, so it lives here rather than in C#: a twin that renames or adds a process is a
+# new row, not a code change.
+processSlots:
+  Feed_Station: 10
+  Assembly_Station: 17
+  Disassembly: 18
 
 # state_table slot the UR3e stamps on its ring reports. Its M262 registry id collides on M580 with
 # the Assembly station, so it needs a slot free on both PLCs; 19 is the only one.
