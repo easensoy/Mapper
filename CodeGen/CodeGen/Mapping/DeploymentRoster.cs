@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using CodeGen.Configuration;
@@ -6,7 +6,7 @@ using CodeGen.Translation;
 
 namespace CodeGen.Mapping
 {
-    // Canonical row labels for the SMC rig syslay canvas; Y is per-row (see LayoutGrid.RowY).
+    // Canonical row labels for the SMC rig syslay canvas; Y per row comes from the layout catalog.
     public enum LayoutRow
     {
         Boot,       // Bootstrap FBs (DPAC_FULLINIT / plcStart) — fixed coords, no column grid
@@ -44,7 +44,7 @@ namespace CodeGen.Mapping
         public DeploymentRoster(DeploymentProfile profile)
         {
             Profile = profile ?? throw new ArgumentNullException(nameof(profile));
-            var layout = LayoutCatalog.Current;
+            var layout = profile.Layout;
 
             var revPiResource = ControllerMap.ResourceForPlc(PlcAssignment.RevPi);
             var rows = layout.BootFbs
