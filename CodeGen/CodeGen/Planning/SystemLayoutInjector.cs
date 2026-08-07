@@ -318,7 +318,7 @@ namespace CodeGen.Translation
 
                 // Placeholder position; CanonicalLayout overrides known names post-syslay.
                 int colInPlc = perPlcCount[actPlc]++;
-                var (zoneX, zoneY) = PlcZoneActuatorPosition(actPlc, colInPlc);
+                var (zoneX, zoneY) = PlcZonePosition(ctx.Layout, actPlc, colInPlc, LayoutRow.Actuator);
 
                 builder.AddFB(FBIdGenerator.GenerateFBId(actuator.ComponentID),
                     displayName, fbType, "Main",
@@ -361,7 +361,7 @@ namespace CodeGen.Translation
 
                 var senPlc = plcIndex.ResolveComponent(sensor.Name, bindings, ctx.Allocation);
                 int senCol = perPlcSensorCount[senPlc]++;
-                var (sX, sY) = PlcZoneSensorPosition(senPlc, senCol);
+                var (sX, sY) = PlcZonePosition(ctx.Layout, senPlc, senCol, LayoutRow.Sensor);
 
                 var senDisplayName = InstanceNameResolver.Resolve(sensor,
                     overrides.ByComponentId, overrides.ByVueOneName);
@@ -466,9 +466,9 @@ namespace CodeGen.Translation
                 // Each conn is routed to its own sysres via SysresFbMirror.BucketFor; BX1 bring-up is in BuildBx1Wiring, Feed/M580 below.
                 InjectMqttConn(bx1Name, config.MqttConnectionName, config.MqttClientId, bx1X, bx1Y);
                 InjectMqttConn(feedName, config.MqttConnectionName, feedClientId,
-                    LayoutGrid.ColumnBaseX(PlcAssignment.M262), 200);
+                    ctx.Layout.Band(PlcAssignment.M262).ColumnBaseX, 200);
                 InjectMqttConn(m580Name, config.MqttConnectionName, config.MqttClientM580,
-                    LayoutGrid.ColumnBaseX(PlcAssignment.M580), 200);
+                    ctx.Layout.Band(PlcAssignment.M580).ColumnBaseX, 200);
                 builder.AddEventConnection($"{feedName}.INITO", $"{feedName}.CONNECT");
                 builder.AddEventConnection($"{m580Name}.INITO", $"{m580Name}.CONNECT");
                 builder.AddEventConnection("Area.INITO", $"{feedName}.INIT");
@@ -481,7 +481,7 @@ namespace CodeGen.Translation
                 {
                     string revpiName = tele ? "Telemetry_RevPi" : "MqttConn_RevPi";
                     InjectMqttConn(revpiName, config.MqttConnectionName, config.MqttClientRevPi,
-                        LayoutGrid.ColumnBaseX(PlcAssignment.RevPi), 200);
+                        ctx.Layout.Band(PlcAssignment.RevPi).ColumnBaseX, 200);
                     builder.AddEventConnection($"{revpiName}.INITO", $"{revpiName}.CONNECT");
                     builder.AddEventConnection("PartInHopper.INITO", $"{revpiName}.INIT");
                 }
@@ -520,21 +520,22 @@ namespace CodeGen.Translation
 
             _ = config;
 
-            // Frame widths (from LayoutGrid) MUST enclose all this PLC's FBs: EAE's MoveStyle="AnyContained" auto-grows a frame westward around any FB past its right edge, swallowing neighbours.
+            // Frame widths MUST enclose all this PLC's FBs: EAE's MoveStyle="AnyContained" auto-grows a frame westward around any FB past its right edge, swallowing neighbours.
+            var geom = ctx.Layout.Geometry;
             builder.AddFrame("FRAME_Station1",
-                LayoutGrid.FrameOriginX(PlcAssignment.M262), LayoutGrid.FrameOriginY,
-                LayoutGrid.FrameWidth(PlcAssignment.M262), LayoutGrid.FrameHeight,
+                ctx.Layout.Band(PlcAssignment.M262).FrameOriginX, geom.FrameOriginY,
+                ctx.Layout.Band(PlcAssignment.M262).FrameWidth, geom.FrameHeight,
                 "LightYellow", "Station 1   —   PLC M262", "TopCenter",
                 "Microsoft Sans Serif, 36pt, style=Bold");
             builder.AddFrame("FRAME_Station2_M580",
-                LayoutGrid.FrameOriginX(PlcAssignment.M580), LayoutGrid.FrameOriginY,
-                LayoutGrid.FrameWidth(PlcAssignment.M580), LayoutGrid.FrameHeight,
+                ctx.Layout.Band(PlcAssignment.M580).FrameOriginX, geom.FrameOriginY,
+                ctx.Layout.Band(PlcAssignment.M580).FrameWidth, geom.FrameHeight,
                 "MediumPurple", "Station 2   —   PLC M580", "TopCenter",
                 "Microsoft Sans Serif, 36pt, style=Bold");
             // BX1 is the Soft dPAC host (Cover P&P) — NOT Station 2 (which is the M580 frame above).
             builder.AddFrame("FRAME_BX1",
-                LayoutGrid.FrameOriginX(PlcAssignment.BX1), LayoutGrid.FrameOriginY,
-                LayoutGrid.FrameWidth(PlcAssignment.BX1), LayoutGrid.FrameHeight,
+                ctx.Layout.Band(PlcAssignment.BX1).FrameOriginX, geom.FrameOriginY,
+                ctx.Layout.Band(PlcAssignment.BX1).FrameWidth, geom.FrameHeight,
                 "LightGreen", "Soft dPAC   —   PLC BX1", "TopCenter",
                 "Microsoft Sans Serif, 36pt, style=Bold");
 
@@ -601,17 +602,10 @@ namespace CodeGen.Translation
         }
 
         // Placeholder placement; CanonicalLayout rewrites rostered names to their canvas coordinate post-syslay.
-        private static (int X, int Y) PlcZoneActuatorPosition(PlcAssignment plc, int colIndexInPlc)
-        {
-            return (LayoutGrid.ColumnBaseX(plc) + colIndexInPlc * LayoutGrid.ColumnPitchX,
-                    LayoutGrid.RowY(plc, LayoutRow.Actuator));
-        }
-
-        private static (int X, int Y) PlcZoneSensorPosition(PlcAssignment plc, int colIndexInPlc)
-        {
-            return (LayoutGrid.ColumnBaseX(plc) + colIndexInPlc * LayoutGrid.ColumnPitchX,
-                    LayoutGrid.RowY(plc, LayoutRow.Sensor));
-        }
+        private static (int X, int Y) PlcZonePosition(
+            LayoutCatalog layout, PlcAssignment plc, int colIndexInPlc, LayoutRow row) =>
+            (layout.Band(plc).ColumnBaseX + colIndexInPlc * layout.Geometry.ColumnPitchX,
+             layout.RowY(row.ToString()));
 
         internal static bool IsBx1CoverActuator(string name) =>
             name is "CoverPNP_Hr" or "CoverPNP_Vr" or "CoverPnp_Gripper";
