@@ -1,10 +1,12 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
 using System.Text.Json;
 using CodeGen.Configuration;
+using CodeGen.Mapping;
+using CodeGen.Translation;
 
 namespace CodeGen.Validation.Output
 {
@@ -48,10 +50,12 @@ namespace CodeGen.Validation.Output
         static bool IsRealAddress(string? ip) =>
             !string.IsNullOrWhiteSpace(ip) && ip != "0.0.0.0";
 
-        public static List<Violation> Validate(string? eaeRoot, MapperConfig? cfg)
+        // Address collisions in what actually reached the topology folder. The role checks are a separate
+        // entry point: they hold regardless of what was written, so they still fire when generation aborts
+        // before any equipment JSON exists.
+        public static List<Violation> Validate(string? eaeRoot)
         {
             var violations = new List<Violation>();
-            if (cfg != null) violations.AddRange(ValidateRevPiRoles(cfg));
             if (string.IsNullOrEmpty(eaeRoot)) return violations;
 
             var topologyDir = Path.Combine(eaeRoot, "Topology");
@@ -98,10 +102,9 @@ namespace CodeGen.Validation.Output
 
         // Config-level role checks: these hold regardless of what reached the topology folder, so they
         // still fire when generation aborts before any equipment JSON is written.
-        public static IEnumerable<Violation> ValidateRevPiRoles(MapperConfig cfg)
+        public static IEnumerable<Violation> ValidateRevPiRoles(MapperConfig cfg, DeploymentProfile profile)
         {
-            bool revPiSelected = MapperConfig.FeedStationController == FeedController.RevPi
-                              || MapperConfig.PartialRevPi;
+            bool revPiSelected = profile.PartialRevPi;
             if (!revPiSelected) yield break;
 
             string host = cfg.RevPiHostIp ?? string.Empty;
