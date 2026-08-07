@@ -21,7 +21,7 @@ namespace CodeGen.Mapping
         public ControllerAllocation(DeploymentRoster roster)
         {
             _roster = roster ?? throw new ArgumentNullException(nameof(roster));
-            _aliases = LayoutCatalog.Current.Aliases;
+            _aliases = roster.Profile.Layout.Aliases;
         }
 
         public PlcAssignment Of(string? componentName) => Lookup(componentName)?.Plc ?? PlcAssignment.Unknown;
