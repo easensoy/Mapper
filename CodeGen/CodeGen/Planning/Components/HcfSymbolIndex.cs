@@ -19,7 +19,7 @@ namespace CodeGen.Translation
 
     // Reverse index from a symlink symbol (e.g. RES0.M262IO.PusherAtHome) to the PLC that
     // owns the .hcf binding. Resolution order: exact HCF match, then symbol prefix
-    // (RES0.M262IO.*/M580IO.*/BX1IO.*), then NameBasedPlcGuess.
+    // (RES0.M262IO.*/M580IO.*/BX1IO.*), then the deployment allocation.
     public class HcfSymbolIndex
     {
         private readonly Dictionary<string, PlcAssignment> _symbolToPlc =
@@ -100,7 +100,7 @@ namespace CodeGen.Translation
         }
 
         // Owns a component by tracing an IO binding (atwork/athome/OutputToWork/OutputToHome,
-        // then Sensor InputTag); falls back to NameBasedPlcGuess when none is registered.
+        // then Sensor InputTag); falls back to the allocation when none is registered.
         public PlcAssignment ResolveComponent(string componentName, IoBindings? bindings)
         {
             if (string.IsNullOrWhiteSpace(componentName)) return PlcAssignment.Unknown;
@@ -127,29 +127,9 @@ namespace CodeGen.Translation
                 }
             }
 
-            return NameBasedPlcGuess(componentName);
+            // No IO binding traced: fall back to the deployment allocation, which is where the component's
+            // controller is decided in the first place.
+            return ControllerAllocation.Current.Of(componentName);
         }
-
-        // Fallback when a component has no row in IoBindings.xlsx: primary partition from
-        // ControllerMap, then the alias/Robot list below for unregistered names.
-        public static PlcAssignment NameBasedPlcGuess(string componentName)
-        {
-            if (string.IsNullOrWhiteSpace(componentName)) return PlcAssignment.Unknown;
-
-            var fromRegistry = ControllerMap.PlcOf(componentName);
-            if (fromRegistry != PlcAssignment.Unknown) return fromRegistry;
-
-            // Rejector=Ejector synonym (M262); TopCoverSensor variant of TopCoverSenosr (BX1);
-            // Robot RobotStatus channel is on M262IO.
-            var n = componentName.Trim();
-            if (Eq(n, "Rejector")) return PlcAssignment.M262;
-            if (Eq(n, "TopCoverSensor")) return PlcAssignment.BX1;
-            if (Eq(n, "Robot") || Eq(n, "Robot_Pick_And_Place1")) return PlcAssignment.M262;
-
-            return PlcAssignment.Unknown;
-        }
-
-        private static bool Eq(string a, string b) =>
-            string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
     }
 }
