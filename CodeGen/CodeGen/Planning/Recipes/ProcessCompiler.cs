@@ -37,7 +37,7 @@ namespace CodeGen.Translation.Process.Recipes
             public IReadOnlyDictionary<string, int> ProcessIdByName = new Dictionary<string, int>();
             public IReadOnlyDictionary<string, int> SensorPresent = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             // Which controller hosts each component, and therefore which report ring it publishes onto.
-            public ControllerAllocation Allocation = ControllerAllocation.Current;
+            public ControllerAllocation Allocation = null!;
             public bool RingsMerged;                // topology folds the per-controller rings into one
             // The one sensor that DOES cross from the Feed controller to the assembly controller (it rides the
             // cross-ring segment). It is a material LEVEL, not a process state, so it can only stand in for a
@@ -50,7 +50,7 @@ namespace CodeGen.Translation.Process.Recipes
         public static RecipeArrays Compile(VueOneComponent process, int processId, Ctx ctx)
         {
             var arrays = new RecipeArrays();
-            foreach (var kv in ctx.Ids) arrays.ComponentRegistry[kv.Key] = kv.Value;
+            foreach (var kv in ctx.Ids) arrays.ComponentIds[kv.Key] = kv.Value;
 
             var states = OrderStatesByTransitionChain(process.States);
             foreach (var line in BuildTransitionTable(process.States, states)) arrays.TransitionTable.Add(line);
@@ -253,7 +253,7 @@ namespace CodeGen.Translation.Process.Recipes
                 return;
             }
 
-            DriveTo(process, state, target, id, stopId, at, g, rows);
+            DriveTo(process, state, target, id, stopId, move.OriginStateId, at, g, rows);
         }
 
         private static void EmitCondition(VueOneComponent process, VueOneState state, VueOneCondition cond,
@@ -404,12 +404,18 @@ namespace CodeGen.Translation.Process.Recipes
         // stop already occupied costs nothing (no duplicated stroke), and a transfer arm's return branch is driven
         // by the branch it is actually on -- no numeric thresholds, no state-name guessing.
         private static void DriveTo(VueOneComponent process, VueOneState state, VueOneComponent target, int id,
-            string stopId, Dictionary<string, string> at, ActuatorGraph g, List<Row> rows)
+            string stopId, string declaredOrigin, Dictionary<string, string> at, ActuatorGraph g, List<Row> rows)
         {
-            // Where this recipe has not yet moved the actuator, its position is only ASSUMED -- the model's
-            // Initial_State describes where the cycle starts, never where the arm physically is at deploy.
+            // Where this recipe HAS moved the actuator, its position is known. Where it has not, the model
+            // still states it: the owned transition declares the state it leaves from. Taking that instead of
+            // the actuator's Initial_State is what stops a downstream process re-driving a whole cycle it did
+            // not perform -- Disassembly owns the clamp's Clamped->Unclamp leg, and walking to it from the
+            // initial Home Pos crossed Clamped on the way, so the recipe CLOSED an already-closed clamp
+            // before opening it.
             bool assumed = !at.TryGetValue(target.ComponentID, out var f);
-            string from = assumed ? g.StartId : f!;
+            string from = !assumed ? f!
+                : !string.IsNullOrEmpty(declaredOrigin) && g.Knows(declaredOrigin) ? declaredOrigin
+                : g.StartId;
             var path = g.PathTo(from, stopId)
                 ?? throw Fail(process, state, $"'{target.Name}' cannot reach '{g.NameOf(stopId)}' from '{g.NameOf(from)}' along its own transitions");
 
@@ -489,6 +495,7 @@ namespace CodeGen.Translation.Process.Recipes
                 StartId = (c.States.FirstOrDefault(s => s.InitialState) ?? c.States.FirstOrDefault())?.StateID ?? string.Empty;
             }
 
+            public bool Knows(string id) => _byId.ContainsKey(id);
             public bool IsStop(string id) => _stop.ContainsKey(id);
             public int StopNumber(string id) => _stop[id];
             public string NameOf(string id) => _byId.TryGetValue(id, out var s) ? s.Name : id;
