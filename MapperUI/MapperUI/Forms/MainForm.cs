@@ -1,4 +1,4 @@
-using CodeGen.Application;
+﻿using CodeGen.Application;
 using CodeGen.Configuration;
 using CodeGen.IO;
 using CodeGen.Models;
@@ -627,14 +627,9 @@ namespace MapperUI
 
         static ComponentValidationRow Validate(VueOneComponent comp, ComponentValidator validator, MapperConfig cfg)
         {
-            string tPath = TemplatePath(comp, cfg);
-            string tName = string.IsNullOrEmpty(tPath)
-                ? "No template found"
-                : Path.GetFileName(tPath);
-
             switch (comp.Type.ToLowerInvariant())
             {
-                case "process": return Pass(comp, tName);
+                case "process": return Pass(comp, ProcessCatFile);
                 case "robot":
                     // Type=Robot is a category: the task arm gets Robot_Task_CAT, every gripper resolves
                     // through the same routing the generator uses.
@@ -656,22 +651,20 @@ namespace MapperUI
                             $"{comp.States.Count} states, not 2");
                     break;
                 default:
-                    return Fail(comp, tName, $"Unknown type '{comp.Type}'");
+                    return Fail(comp, "No template found", $"Unknown type '{comp.Type}'");
             }
 
             var vr = validator.Validate(comp);
-            return vr.IsValid ?
-                Pass(comp, tName) : Fail(comp, tName, string.Join("; ", vr.Errors));
+            return vr.IsValid
+                ? Pass(comp, SensorCatFile)
+                : Fail(comp, SensorCatFile, string.Join("; ", vr.Errors));
         }
 
-        static string TemplatePath(VueOneComponent comp, MapperConfig cfg) => comp.Type.ToLowerInvariant() switch
-        {
-            "actuator" => cfg.ActuatorTemplatePath,
-            "sensor" => cfg.SensorTemplatePath,
-            "process" => cfg.ProcessCATTemplatePath,
-            "robot" => cfg.RobotTemplatePath,
-            _ => string.Empty
-        };
+        // The types the deployer actually emits for a process and a sensor. Shown rather than a
+        // configured path so the grid names the CAT that is generated, the same rule the actuator and
+        // robot rows already follow.
+        const string ProcessCatFile = "Process1_Generic.fbt";
+        const string SensorCatFile = "Sensor_Bool_CAT.fbt";
 
         // One routing decision for the grid and the generator: TemplateMap owns it, so the
         // displayed CAT can never drift from the one actually emitted.
