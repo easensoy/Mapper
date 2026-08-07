@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -410,90 +410,20 @@ namespace CodeGen.Devices.Core
         static string BuildM580EquipmentJson(string sysdevId, string solutionId,
                                              string targetIp, string broadcastDomainUuid)
         {
-            return $$"""
-            {
-              "catalogReference": "M080_V01.00_01.00",
-              "uuid": "{{M580EquipmentUuid}}",
-              "identifier": "M580dPAC_1",
-              "path": "Topology",
-              "properties": [
-                { "propertyName": "IsUnderConstruction", "propertyValue": "False" },
-                { "propertyName": "DomainTag",            "propertyValue": "{{solutionId}}" }
-              ],
-              "references": [
-                { "diagramPath": "Physical Views", "x": -80, "y": -380 }
-              ],
-              "equipments": [
+            return TemplateDocument.Load(null, @"Topology\Equipment_M580dPAC.json",
+                new Dictionary<string, string>
                 {
-                  "catalogReference": "BMEXBP0800_V01.00_01.00",
-                  "uuid": "{{M580RackUuid}}",
-                  "identifier": "BME XBP 0800 #0",
-                  "path": "M580dPAC_1\\BME XBP 0800 #0",
-                  "partNumber": "BME XBP 0800",
-                  "equipments": [
-                    {
-                      "catalogReference": "BMXCPS4002_V01.00_01.00",
-                      "uuid": "{{M580CpsUuid}}",
-                      "identifier": "BMX CPS 4002 #P",
-                      "path": "M580dPAC_1\\BME XBP 0800 #0\\BMX CPS 4002 #P",
-                      "partNumber": "BMX CPS 4002"
-                    },
-                    {
-                      "catalogReference": "BMED581020_V01.00_01.00",
-                      "uuid": "{{M580CpuUuid}}",
-                      "identifier": "BME D58 1020 #0",
-                      "path": "M580dPAC_1\\BME XBP 0800 #0\\BME D58 1020 #0",
-                      "partNumber": "BME D58 1020",
-                      "components": [
-                        {
-                          "interfaces": [
-                            {
-                              "identifier": "seGmac0",
-                              "disabled": false,
-                              "physicalAddress": "",
-                              "endpoints": [
-                                {
-                                  "identifier": "IP Address",
-                                  "isReadOnly": false,
-                                  "domainReadOnly": false,
-                                  "ipAddress": "{{targetIp}}",
-                                  "domain": "{{broadcastDomainUuid}}"
-                                }
-                              ]
-                            }
-                          ],
-                          "ports": [
-                            { "identifier": "BKP",  "side": "Default" },
-                            { "identifier": "ETH1", "side": "Default" },
-                            { "identifier": "ETH2", "side": "Default" },
-                            { "identifier": "ETH3", "side": "Default" }
-                          ],
-                          "componentType": "EthernetDEO"
-                        },
-                        {
-                          "endpoint": "seGmac0\\IP Address",
-                          "connectionTypes": "None",
-                          "componentType": "EthernetMasterDEO"
-                        },
-                        { "enabled": false, "securityMode": 0, "componentType": "SysLogClientDEO" },
-                        { "mode": 0, "componentType": "CyberSecurityDEO" },
-                        {
-                          "uuid": "{{M580RuntimeUuid}}",
-                          "typeId": "{{M580RuntimeTypeId}}",
-                          "logicalDeviceId": "{{sysdevId}}",
-                          "runtimeServices": [
-                            { "identifier": "Deployment" },
-                            { "identifier": "Archive Service", "logicalPortSecured": "0" }
-                          ],
-                          "componentType": "RuntimeDEO"
-                        }
-                      ]
-                    }
-                  ]
-                }
-              ]
-            }
-            """;
+                    ["M580CpsUuid"] = M580CpsUuid,
+                    ["M580CpuUuid"] = M580CpuUuid,
+                    ["M580EquipmentUuid"] = M580EquipmentUuid,
+                    ["M580RackUuid"] = M580RackUuid,
+                    ["M580RuntimeTypeId"] = M580RuntimeTypeId,
+                    ["M580RuntimeUuid"] = M580RuntimeUuid,
+                    ["broadcastDomainUuid"] = broadcastDomainUuid,
+                    ["solutionId"] = solutionId,
+                    ["sysdevId"] = sysdevId,
+                    ["targetIp"] = targetIp,
+                });
         }
 
         // BX1 equipment JSON in the HMIB1X form (host .209 hosting a nested SoftdpacContainer running
@@ -502,215 +432,36 @@ namespace CodeGen.Devices.Core
         static string BuildBX1HmiB1XEquipmentJson(string sysdevId, string solutionId,
             string softpacIp, string hostIp)
         {
-            return $$"""
-            {
-              "catalogReference": "HMIB1X_V01.00_01.00",
-              "uuid": "{{BX1EquipmentUuid}}",
-              "identifier": "HMIB1X_1",
-              "path": "Topology",
-              "properties": [
-                { "propertyName": "IsUnderConstruction", "propertyValue": "False" },
-                { "propertyName": "DomainTag",            "propertyValue": "{{solutionId}}" }
-              ],
-              "references": [
-                { "diagramPath": "Physical Views", "x": 112.30403451708418, "y": -352.30162018013522 }
-              ],
-              "equipments": [
+            return TemplateDocument.Load(null, @"Topology\Equipment_HMIB1X.json",
+                new Dictionary<string, string>
                 {
-                  "catalogReference": "HMIB1X_SoftdpacContainer_V01.00_01.00",
-                  "uuid": "{{BX1ContainerUuid}}",
-                  "identifier": "Softdpac_1",
-                  "path": "HMIB1X_1\\Softdpac_1",
-                  "components": [
-                    {
-                      "interfaces": [
-                        {
-                          "identifier": "eth0",
-                          "disabled": false,
-                          "physicalAddress": "",
-                          "endpoints": [
-                            {
-                              "identifier": "IP Address",
-                              "isReadOnly": false,
-                              "domainReadOnly": true,
-                              "ipAddress": "{{softpacIp}}",
-                              "domain": "{{Bx1SoftdpacDomainUuid}}"
-                            }
-                          ]
-                        }
-                      ],
-                      "ports": [
-                        { "identifier": "Port0", "side": "Default" }
-                      ],
-                      "componentType": "EthernetDEO"
-                    },
-                    {
-                      "scannerId": "{{Bx1ScannerId}}",
-                      "endpoint": "eth0\\IP Address",
-                      "connectionTypes": "None",
-                      "componentType": "EthernetMasterDEO"
-                    },
-                    {
-                      "enabled": false,
-                      "securityMode": 0,
-                      "componentType": "SysLogClientDEO"
-                    },
-                    {
-                      "imageName": "softdpac",
-                      "imageVersion": "v24.1.25090.08",
-                      "identifier": "DockerContainer",
-                      "allocatedRam": 524288,
-                      "cpuCores": [ 0, 1, 2, 3 ],
-                      "componentType": "DockerContainerDEO"
-                    },
-                    {
-                      "uuid": "{{BX1RuntimeUuid}}",
-                      "typeId": "{{SoftDpacTypeId}}",
-                      "logicalDeviceId": "{{sysdevId}}",
-                      "runtimeServices": [
-                        { "identifier": "Deployment" },
-                        { "identifier": "Archive Service", "logicalPortSecured": "0" }
-                      ],
-                      "componentType": "RuntimeDEO"
-                    }
-                  ]
-                }
-              ],
-              "components": [
-                {
-                  "interfaces": [
-                    {
-                      "identifier": "eth0",
-                      "disabled": false,
-                      "physicalAddress": "",
-                      "endpoints": [
-                        {
-                          "identifier": "IP Address",
-                          "isReadOnly": false,
-                          "domainReadOnly": false,
-                          "ipAddress": "{{hostIp}}",
-                          "domain": "{{NoConfDomainUuid}}"
-                        }
-                      ]
-                    },
-                    {
-                      "identifier": "eth1",
-                      "disabled": false,
-                      "physicalAddress": "",
-                      "endpoints": [
-                        {
-                          "identifier": "IP Address",
-                          "isReadOnly": false,
-                          "domainReadOnly": false,
-                          "ipAddress": "0.0.0.0",
-                          "domain": "{{NoConfDomainUuid}}"
-                        }
-                      ]
-                    }
-                  ],
-                  "ports": [
-                    { "identifier": "LAN1", "side": "Default" },
-                    { "identifier": "LAN2", "side": "Default" }
-                  ],
-                  "componentType": "EthernetDEO"
-                },
-                {
-                  "preferredPrimary": false,
-                  "dockerImages": [
-                    { "identifier": "softdpac", "version": "" }
-                  ],
-                  "dockerVlans": [
-                    {
-                      "identifier": "softdpacDeviceNet",
-                      "type": 0,
-                      "domain": "{{Bx1SoftdpacDomainUuid}}",
-                      "interface": "eth0",
-                      "domainReadOnly": false
-                    }
-                  ],
-                  "softdpacManagerServices": [
-                    { "identifier": "Management services", "logicalPort": 8080, "endpoint": "" }
-                  ],
-                  "componentType": "SoftdpacManagerDEO"
-                },
-                {
-                  "mode": 1,
-                  "servers": [
-                    { "name": "Primary NTP Server_1", "address": "0.0.0.0", "type": 0, "minPoll": 1, "maxPoll": 1 },
-                    { "name": "Secondary NTP Server_1", "address": "0.0.0.0", "type": 1, "minPoll": 1, "maxPoll": 1 }
-                  ],
-                  "componentType": "TimeSettingsDEO"
-                },
-                {
-                  "mode": 0,
-                  "componentType": "CyberSecurityDEO"
-                }
-              ]
-            }
-            """;
+                    ["BX1ContainerUuid"] = BX1ContainerUuid,
+                    ["BX1EquipmentUuid"] = BX1EquipmentUuid,
+                    ["BX1RuntimeUuid"] = BX1RuntimeUuid,
+                    ["Bx1ScannerId"] = Bx1ScannerId,
+                    ["Bx1SoftdpacDomainUuid"] = Bx1SoftdpacDomainUuid,
+                    ["NoConfDomainUuid"] = NoConfDomainUuid,
+                    ["SoftDpacTypeId"] = SoftDpacTypeId,
+                    ["hostIp"] = hostIp,
+                    ["softpacIp"] = softpacIp,
+                    ["solutionId"] = solutionId,
+                    ["sysdevId"] = sysdevId,
+                });
         }
 
         // EtherNet/IP remote-I/O coupler (TM3BC_EtherNetIP, Cover PnP I/O island) at deviceIp .210,
         // scanned by scannerId. Topology-only — a field device has no logical runtime.
         static string BuildEtherNetIpDeviceEquipmentJson(string solutionId, string deviceIp, string scannerId)
         {
-            return $$"""
-            {
-              "catalogReference": "GenericEthernetIPFieldDevice_V01.00_01.00",
-              "uuid": "{{BX1EtherNetIpUuid}}",
-              "identifier": "EtherNetIPDevice_1",
-              "path": "Topology",
-              "properties": [
-                { "propertyName": "IsUnderConstruction", "propertyValue": "False" },
-                { "propertyName": "DomainTag",            "propertyValue": "{{solutionId}}" }
-              ],
-              "references": [
-                { "diagramPath": "Physical Views", "x": 109, "y": -104 }
-              ],
-              "components": [
+            return TemplateDocument.Load(null, @"Topology\Equipment_EtherNetIPDevice.json",
+                new Dictionary<string, string>
                 {
-                  "fdtProjectIdentifiers": [ "FdtProject" ],
-                  "catalogDtmIsInitialized": true,
-                  "catalogDeviceName": "TM3BC_EtherNetIP Revision 2.3 (from EDS)",
-                  "catalogDeviceVersion": "2.3",
-                  "catalogDeviceVendor": "Schneider Electric",
-                  "catalogDtmName": "Generic EDS Device DTM",
-                  "catalogDtmVendor": "Schneider Electric",
-                  "catalogDtmVersion": "1.15.1.0",
-                  "componentType": "DtmDeviceDEO"
-                },
-                {
-                  "interfaces": [
-                    {
-                      "identifier": "Embedded Interface",
-                      "disabled": false,
-                      "physicalAddress": "",
-                      "endpoints": [
-                        {
-                          "identifier": "IP Address",
-                          "isReadOnly": false,
-                          "domainReadOnly": false,
-                          "ipAddress": "{{deviceIp}}",
-                          "domain": "{{NoConfDomainUuid}}"
-                        }
-                      ]
-                    }
-                  ],
-                  "ports": [
-                    { "identifier": "Port1", "side": "Default" },
-                    { "identifier": "Port2", "side": "Default" }
-                  ],
-                  "componentType": "EthernetDEO"
-                },
-                {
-                  "associatedScannerId": "{{scannerId}}",
-                  "associatedHwCatType": "Generic",
-                  "ioProfileIdentifiers": [ "IOProfile" ],
-                  "componentType": "EthernetScannedDeviceDEO"
-                }
-              ]
-            }
-            """;
+                    ["BX1EtherNetIpUuid"] = BX1EtherNetIpUuid,
+                    ["NoConfDomainUuid"] = NoConfDomainUuid,
+                    ["deviceIp"] = deviceIp,
+                    ["scannerId"] = scannerId,
+                    ["solutionId"] = solutionId,
+                });
         }
 
         // Resolves the BX1 EtherNet/IP .hcf (the real export is BX1IO.ethernetip.hcf), falling back
