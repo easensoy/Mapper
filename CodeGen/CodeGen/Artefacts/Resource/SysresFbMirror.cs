@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -268,38 +268,52 @@ namespace CodeGen.Devices.Core
             return added + updated;
         }
 
-        public static int SyncProcessRecipesFromSyslay(string syslayPath, string sysresPath)
+        // Refresh a sysres FB's Parameters from the syslay FB it mirrors. The syslay is the authority:
+        // the wiring pass rewrites the FBNetwork, so a resource that kept its old parameters would deploy
+        // a stale recipe with no error. Matched by Name, then by the Mapping attribute (I-9: an FB's
+        // Mapping is a separate GUID that carries the syslay id).
+        //
+        // Two entry points over ONE implementation: every mirrored FB, or only the process engines. They
+        // differ in nothing but which FBs they select, and keeping two copies of the compare-and-replace
+        // is how the two came to disagree about what "changed" means.
+        public static int SyncProcessRecipesFromSyslay(string syslayPath, string sysresPath) =>
+            SyncFromSyslay(syslayPath, sysresPath, IsProcessEngine);
+
+        public static int SyncProcessRecipesFromSyslay(string syslayPath, XDocument sysresDoc) =>
+            SyncFromSyslay(syslayPath, sysresDoc, IsProcessEngine);
+
+        public static int SyncMirroredFbParametersFromSyslay(string syslayPath, string sysresPath) =>
+            SyncFromSyslay(syslayPath, sysresPath, _ => true);
+
+        public static int SyncMirroredFbParametersFromSyslay(string syslayPath, XDocument sysresDoc) =>
+            SyncFromSyslay(syslayPath, sysresDoc, _ => true);
+
+        private static bool IsProcessEngine(string type) =>
+            string.Equals(type, "Process1_Generic", StringComparison.Ordinal);
+
+        private static int SyncFromSyslay(string syslayPath, string sysresPath, Func<string, bool> selects)
         {
             if (string.IsNullOrWhiteSpace(syslayPath) || !File.Exists(syslayPath)) return 0;
             if (string.IsNullOrWhiteSpace(sysresPath) || !File.Exists(sysresPath)) return 0;
 
             var doc = XDocument.Load(sysresPath);
-            var changed = SyncProcessRecipesFromSyslay(syslayPath, doc);
+            var changed = SyncFromSyslay(syslayPath, doc, selects);
             if (changed > 0) doc.Save(sysresPath);
             return changed;
         }
 
-        public static int SyncProcessRecipesFromSyslay(string syslayPath, XDocument sysresDoc)
+        private static int SyncFromSyslay(string syslayPath, XDocument sysresDoc, Func<string, bool> selects)
         {
             if (string.IsNullOrWhiteSpace(syslayPath) || !File.Exists(syslayPath)) return 0;
             var root = sysresDoc.Root;
             if (root == null) return 0;
 
             var sourceByName = ReadTopLevelFbsWithSystemModelFallback(syslayPath)
-                .Where(f => string.Equals(f.Type, "Process1_Generic", StringComparison.Ordinal))
-                .Select(f => new
-                {
-                    f.Id,
-                    f.Name,
-                    Parameters = f.Parameters.ToArray()
-                })
-                .Where(f => f.Parameters.Length > 0)
+                .Where(f => selects(f.Type) && f.Parameters.Count > 0)
                 .ToDictionary(f => f.Name, StringComparer.Ordinal);
-
             var sourceById = sourceByName.Values
                 .Where(f => !string.IsNullOrWhiteSpace(f.Id))
                 .ToDictionary(f => f.Id, StringComparer.Ordinal);
-
             if (sourceByName.Count == 0) return 0;
 
             XNamespace ns = root.GetDefaultNamespace().NamespaceName.Length > 0
@@ -312,8 +326,7 @@ namespace CodeGen.Devices.Core
             int changed = 0;
             foreach (var fb in network.Elements()
                          .Where(e => e.Name.LocalName == "FB")
-                         .Where(f => string.Equals((string?)f.Attribute("Type"),
-                             "Process1_Generic", StringComparison.Ordinal)))
+                         .Where(f => selects((string?)f.Attribute("Type") ?? string.Empty)))
             {
                 var name = (string?)fb.Attribute("Name") ?? string.Empty;
                 var mapping = (string?)fb.Attribute("Mapping") ?? string.Empty;
@@ -328,97 +341,15 @@ namespace CodeGen.Devices.Core
                         Name: (string?)p.Attribute("Name") ?? string.Empty,
                         Value: (string?)p.Attribute("Value") ?? string.Empty))
                     .ToArray();
+                var expected = source.Parameters.Select(p => (p.Name, p.Value)).ToArray();
+                if (existing.SequenceEqual(expected)) continue;
 
-                var expected = source.Parameters
-                    .Select(p => (p.Name, p.Value))
-                    .ToArray();
-
-                if (!existing.SequenceEqual(expected))
-                {
-                    fb.Elements()
-                        .Where(e => e.Name.LocalName == "Parameter")
-                        .Remove();
-                    foreach (var p in source.Parameters)
-                    {
-                        fb.Add(new XElement(ns + "Parameter",
-                            new XAttribute("Name", p.Name),
-                            new XAttribute("Value", p.Value)));
-                    }
-                    changed++;
-                }
-            }
-
-            return changed;
-        }
-
-        public static int SyncMirroredFbParametersFromSyslay(string syslayPath, string sysresPath)
-        {
-            if (string.IsNullOrWhiteSpace(syslayPath) || !File.Exists(syslayPath)) return 0;
-            if (string.IsNullOrWhiteSpace(sysresPath) || !File.Exists(sysresPath)) return 0;
-
-            var doc = XDocument.Load(sysresPath);
-            var changed = SyncMirroredFbParametersFromSyslay(syslayPath, doc);
-            if (changed > 0) doc.Save(sysresPath);
-            return changed;
-        }
-
-        public static int SyncMirroredFbParametersFromSyslay(string syslayPath, XDocument sysresDoc)
-        {
-            if (string.IsNullOrWhiteSpace(syslayPath) || !File.Exists(syslayPath)) return 0;
-            var root = sysresDoc.Root;
-            if (root == null) return 0;
-
-            var sourceByName = ReadTopLevelFbsWithSystemModelFallback(syslayPath)
-                .Where(f => f.Parameters.Count > 0)
-                .ToDictionary(f => f.Name, StringComparer.Ordinal);
-            var sourceById = sourceByName.Values
-                .Where(f => !string.IsNullOrWhiteSpace(f.Id))
-                .ToDictionary(f => f.Id, StringComparer.Ordinal);
-            if (sourceByName.Count == 0) return 0;
-
-            XNamespace ns = root.GetDefaultNamespace().NamespaceName.Length > 0
-                ? root.GetDefaultNamespace()
-                : LibElNs;
-
-            var network = root.Elements().FirstOrDefault(e => e.Name.LocalName == "FBNetwork");
-            if (network == null) return 0;
-
-            int changed = 0;
-            foreach (var fb in network.Elements().Where(e => e.Name.LocalName == "FB"))
-            {
-                var name = (string?)fb.Attribute("Name") ?? string.Empty;
-                var mapping = (string?)fb.Attribute("Mapping") ?? string.Empty;
-
-                if (!sourceByName.TryGetValue(name, out var source) &&
-                    !sourceById.TryGetValue(mapping, out source))
-                    continue;
-
-                var existing = fb.Elements()
-                    .Where(e => e.Name.LocalName == "Parameter")
-                    .Select(p => (
-                        Name: (string?)p.Attribute("Name") ?? string.Empty,
-                        Value: (string?)p.Attribute("Value") ?? string.Empty))
-                    .ToArray();
-
-                var expected = source.Parameters
-                    .Select(p => (p.Name, p.Value))
-                    .ToArray();
-
-                if (existing.SequenceEqual(expected))
-                    continue;
-
-                fb.Elements()
-                    .Where(e => e.Name.LocalName == "Parameter")
-                    .Remove();
+                fb.Elements().Where(e => e.Name.LocalName == "Parameter").Remove();
                 foreach (var p in source.Parameters)
-                {
                     fb.Add(new XElement(ns + "Parameter",
-                        new XAttribute("Name", p.Name),
-                        new XAttribute("Value", p.Value)));
-                }
+                        new XAttribute("Name", p.Name), new XAttribute("Value", p.Value)));
                 changed++;
             }
-
             return changed;
         }
 
@@ -497,7 +428,7 @@ namespace CodeGen.Devices.Core
             if (string.Equals(fbName, "Disassembly_Station", StringComparison.Ordinal))
                 return PlcAssignment.M580;
 
-            var p = ControllerMap.PlcOf(fbName);
+            var p = ControllerAllocation.Current.Of(fbName);
             // Unknown falls back to whichever controller currently hosts the Feed station (M262 or RevPi),
             // so nothing is dropped and no FB lands on a non-emitted device.
             return p == PlcAssignment.Unknown
