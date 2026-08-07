@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using CodeGen.Mapping;
@@ -23,9 +23,9 @@ namespace CodeGen.Translation.Process.Recipes
     // controller allocation; no process name and no model shape participates.
     public static class FeedRingMerge
     {
-        public static bool Needed(IReadOnlyList<VueOneComponent> allComponents)
+        public static bool Needed(IReadOnlyList<VueOneComponent> allComponents,
+            ControllerAllocation allocation)
         {
-            var allocation = ControllerAllocation.Current;
             foreach (var proc in allComponents)
             {
                 if (!ComponentType.IsProcess(proc)) continue;
