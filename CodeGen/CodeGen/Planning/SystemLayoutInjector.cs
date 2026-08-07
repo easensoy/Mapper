@@ -51,6 +51,10 @@ namespace CodeGen.Translation
             Configuration.MapperConfig.MergeFeedRing =
                 Process.Recipes.FeedRingMerge.Needed(allComponents);
 
+            // Every process-to-process handoff the twin declares, with transports resolved. One derivation per
+            // generation, read by both the recipe rows and the backend wiring so they cannot disagree.
+            var handoffPlan = Process.ProcessRecipeArrayGenerator.HandoffPlan(allComponents);
+
             var process = FindStation1Process(allComponents);
             if (process == null)
                 throw new InvalidOperationException(
@@ -574,19 +578,43 @@ namespace CodeGen.Translation
             RingWiringPlanner.BuildStation2Wiring(builder, contents, disassemblyFbName);
             RingWiringPlanner.BuildBx1Wiring(builder, contents, config);
 
-            // CycleReady cross-controller handoff: the dedicated CrossComm
-            // link Disassembly(M580) -> Feed_Station(M262). CrossReference=True tells EAE to auto-generate the UDP
-            // proxy; both FBs are Process1_Generic (CycleReadyEventOut/CycleReadyOut outputs on Disassembly,
-            // CycleReadyEvent/CycleReady inputs on Feed). Feed's ProcessHandler.SETRDY writes
-            // state_table[DisassemblyProcessId] = the value Feed's WAIT gate keys on. Syslay-only; the sysres
-            // leaves these boundary ports OPEN and EAE bridges from here (same as the ejector/robot cross-hops).
-            if (CodeGen.Configuration.MapperConfig.CycleReadyActive && disassemblyFbName != null)
+            // Cross-controller process-phase transport, one link per model-derived handoff whose producer and
+            // consumer sit on different rings. CrossReference=True tells EAE to auto-generate the UDP proxy;
+            // both ends are Process1_Generic. Syslay-only: the sysres leaves these boundary ports OPEN and EAE
+            // bridges from here, exactly as it does for the ejector/robot cross-hops.
+            var crossLinks = handoffPlan.CrossControllerLinks().ToList();
+
+            // One consumer input can carry one source, and the receiving slot is type-level, so two producers
+            // reaching the same consumer cannot be represented. Fail rather than emit a double-driven input.
+            foreach (var g in crossLinks.GroupBy(h => h.ConsumerName, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1))
+                throw new InvalidOperationException(
+                    $"[Handoff] '{g.Key}' consumes cross-controller phases from {g.Count()} producers " +
+                    $"({string.Join(", ", g.Select(h => h.ProducerName))}). The process-phase transport carries one " +
+                    "producer per consumer, so this model needs a runtime interface that accepts multiple sources.");
+
+            foreach (var link in crossLinks)
             {
-                builder.AddEventConnection($"{disassemblyFbName}.CycleReadyEventOut",
-                    $"{processInstanceName}.CycleReadyEvent", crossReference: true);
-                builder.AddDataConnection($"{disassemblyFbName}.CycleReadyOut",
-                    $"{processInstanceName}.CycleReady", crossReference: true);
+                var producerFb = ResolveProcessFbName(link.ProducerName, allComponents, overrides, contents.Process, processInstanceName)
+                    ?? throw new InvalidOperationException(
+                        $"[Handoff] producer process '{link.ProducerName}' (condition '{link.ConditionName}' on " +
+                        $"'{link.ConsumerName}') has no emitted FB, so its phase has no transport.");
+                var consumerFb = ResolveProcessFbName(link.ConsumerName, allComponents, overrides, contents.Process, processInstanceName)
+                    ?? throw new InvalidOperationException(
+                        $"[Handoff] consumer process '{link.ConsumerName}' has no emitted FB to receive " +
+                        $"'{link.ProducerName}' phases.");
+                builder.AddEventConnection($"{producerFb}.{Process.Recipes.ProcessPhaseTransport.EventOut}",
+                    $"{consumerFb}.{Process.Recipes.ProcessPhaseTransport.EventIn}", crossReference: true);
+                builder.AddDataConnection($"{producerFb}.{Process.Recipes.ProcessPhaseTransport.DataOut}",
+                    $"{consumerFb}.{Process.Recipes.ProcessPhaseTransport.DataIn}", crossReference: true);
             }
+
+            // The receiving slot is the producer's allocated ProcessId, written into the runtime type rather
+            // than left as the template's placeholder literal.
+            var eaeRootForSlot = config == null ? null : DeriveDemonstratorEaeRoot(config);
+            if (!string.IsNullOrEmpty(eaeRootForSlot))
+                foreach (var slot in crossLinks.Select(h => h.ProducerProcessId).Distinct())
+                    CodeGen.Services.ProcessRuntimeTemplatePatcher.SetProcessPhaseReceiverSlot(
+                        eaeRootForSlot, slot, new CodeGen.Services.DeployResult());
 
             _ = config;
 
@@ -873,6 +901,22 @@ namespace CodeGen.Translation
         }
 
         // Delete .sysres files referenced by no <Resource> in the sysdev, else EAE raises a "Repair Instances" dialog.
+        // Process name (as the twin declares it) -> the FB instance name emitted for it, so handoff wiring can
+        // be addressed by model name without the injector knowing which processes exist.
+        private static string? ResolveProcessFbName(
+            string processName, IReadOnlyList<VueOneComponent> all,
+            InstanceNameOverridesLoader.Overrides overrides,
+            VueOneComponent? feedProcess, string feedProcessFbName)
+        {
+            var c = all.FirstOrDefault(x =>
+                string.Equals(x.Type, "Process", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(x.Name?.Trim(), processName?.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (c == null) return null;
+            if (feedProcess != null && ReferenceEquals(c, feedProcess)) return feedProcessFbName;
+            var n = InstanceNameResolver.Resolve(c, overrides.ByComponentId, overrides.ByVueOneName);
+            return string.IsNullOrWhiteSpace(n) ? null : n;
+        }
+
         private static void SweepOrphanSysresPerSysdev(MapperConfig config, CleanupReport report)
         {
             void Log(string line) => report.DeviceCleanupLog.Add($"[CleanDevice] {line}");
