@@ -390,7 +390,7 @@ namespace CodeGen.Devices.Core
 
         // Which PLC resource a syslay FB belongs on: the ControllerMap partition, plus the MQTT/legacy
         // special cases below. Unknown falls back to M262 so nothing is dropped.
-        public static PlcAssignment BucketFor(string fbName)
+        public static PlcAssignment BucketFor(string fbName, ControllerAllocation allocation)
         {
             if (string.IsNullOrEmpty(fbName)) return PlcAssignment.Unknown;
 
@@ -424,15 +424,15 @@ namespace CodeGen.Devices.Core
             if (string.Equals(fbName, "BX1_CoverRingGate", StringComparison.Ordinal))
                 return PlcAssignment.BX1;
 
-            // Legacy structural-FB name variant not in ComponentRegistry.
+            // Legacy structural-FB name variant the roster does not declare.
             if (string.Equals(fbName, "Disassembly_Station", StringComparison.Ordinal))
                 return PlcAssignment.M580;
 
-            var p = ControllerAllocation.Current.Of(fbName);
+            var p = allocation.Of(fbName);
             // Unknown falls back to whichever controller currently hosts the Feed station (M262 or RevPi),
             // so nothing is dropped and no FB lands on a non-emitted device.
             return p == PlcAssignment.Unknown
-                ? (MapperConfig.FeedStationController == FeedController.RevPi ? PlcAssignment.RevPi : PlcAssignment.M262)
+                ? PlcAssignment.M262
                 : p;
         }
 
