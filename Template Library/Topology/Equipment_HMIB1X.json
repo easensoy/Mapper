@@ -1,0 +1,144 @@
+{
+  "catalogReference": "HMIB1X_V01.00_01.00",
+  "uuid": "{{BX1EquipmentUuid}}",
+  "identifier": "HMIB1X_1",
+  "path": "Topology",
+  "properties": [
+    { "propertyName": "IsUnderConstruction", "propertyValue": "False" },
+    { "propertyName": "DomainTag",            "propertyValue": "{{solutionId}}" }
+  ],
+  "references": [
+    { "diagramPath": "Physical Views", "x": 112.30403451708418, "y": -352.30162018013522 }
+  ],
+  "equipments": [
+    {
+      "catalogReference": "HMIB1X_SoftdpacContainer_V01.00_01.00",
+      "uuid": "{{BX1ContainerUuid}}",
+      "identifier": "Softdpac_1",
+      "path": "HMIB1X_1\\Softdpac_1",
+      "components": [
+        {
+          "interfaces": [
+            {
+              "identifier": "eth0",
+              "disabled": false,
+              "physicalAddress": "",
+              "endpoints": [
+                {
+                  "identifier": "IP Address",
+                  "isReadOnly": false,
+                  "domainReadOnly": true,
+                  "ipAddress": "{{softpacIp}}",
+                  "domain": "{{Bx1SoftdpacDomainUuid}}"
+                }
+              ]
+            }
+          ],
+          "ports": [
+            { "identifier": "Port0", "side": "Default" }
+          ],
+          "componentType": "EthernetDEO"
+        },
+        {
+          "scannerId": "{{Bx1ScannerId}}",
+          "endpoint": "eth0\\IP Address",
+          "connectionTypes": "None",
+          "componentType": "EthernetMasterDEO"
+        },
+        {
+          "enabled": false,
+          "securityMode": 0,
+          "componentType": "SysLogClientDEO"
+        },
+        {
+          "imageName": "softdpac",
+          "imageVersion": "v24.1.25090.08",
+          "identifier": "DockerContainer",
+          "allocatedRam": 524288,
+          "cpuCores": [ 0, 1, 2, 3 ],
+          "componentType": "DockerContainerDEO"
+        },
+        {
+          "uuid": "{{BX1RuntimeUuid}}",
+          "typeId": "{{SoftDpacTypeId}}",
+          "logicalDeviceId": "{{sysdevId}}",
+          "runtimeServices": [
+            { "identifier": "Deployment" },
+            { "identifier": "Archive Service", "logicalPortSecured": "0" }
+          ],
+          "componentType": "RuntimeDEO"
+        }
+      ]
+    }
+  ],
+  "components": [
+    {
+      "interfaces": [
+        {
+          "identifier": "eth0",
+          "disabled": false,
+          "physicalAddress": "",
+          "endpoints": [
+            {
+              "identifier": "IP Address",
+              "isReadOnly": false,
+              "domainReadOnly": false,
+              "ipAddress": "{{hostIp}}",
+              "domain": "{{NoConfDomainUuid}}"
+            }
+          ]
+        },
+        {
+          "identifier": "eth1",
+          "disabled": false,
+          "physicalAddress": "",
+          "endpoints": [
+            {
+              "identifier": "IP Address",
+              "isReadOnly": false,
+              "domainReadOnly": false,
+              "ipAddress": "0.0.0.0",
+              "domain": "{{NoConfDomainUuid}}"
+            }
+          ]
+        }
+      ],
+      "ports": [
+        { "identifier": "LAN1", "side": "Default" },
+        { "identifier": "LAN2", "side": "Default" }
+      ],
+      "componentType": "EthernetDEO"
+    },
+    {
+      "preferredPrimary": false,
+      "dockerImages": [
+        { "identifier": "softdpac", "version": "" }
+      ],
+      "dockerVlans": [
+        {
+          "identifier": "softdpacDeviceNet",
+          "type": 0,
+          "domain": "{{Bx1SoftdpacDomainUuid}}",
+          "interface": "eth0",
+          "domainReadOnly": false
+        }
+      ],
+      "softdpacManagerServices": [
+        { "identifier": "Management services", "logicalPort": 8080, "endpoint": "" }
+      ],
+      "componentType": "SoftdpacManagerDEO"
+    },
+    {
+      "mode": 1,
+      "servers": [
+        { "name": "Primary NTP Server_1", "address": "0.0.0.0", "type": 0, "minPoll": 1, "maxPoll": 1 },
+        { "name": "Secondary NTP Server_1", "address": "0.0.0.0", "type": 1, "minPoll": 1, "maxPoll": 1 }
+      ],
+      "componentType": "TimeSettingsDEO"
+    },
+    {
+      "mode": 0,
+      "componentType": "CyberSecurityDEO"
+    }
+  ]
+}
