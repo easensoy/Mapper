@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using CodeGen.Configuration;
@@ -21,16 +21,29 @@ namespace CodeGen.Translation
             if (string.IsNullOrWhiteSpace(processInstanceName)) processInstanceName = "Process1";
 
             // Per-PLC filter: EAE renders a resource-boundary-crossing wire as dashed/unresolved and blocks deploy; each PLC's sysres is wired separately.
-            // Which controller hosts the Feed station is ControllerMap's question, not this planner's.
-            static bool OnFeedController(string name) =>
-                ControllerMap.IsFeedController(HcfSymbolIndex.NameBasedPlcGuess(name));
+            // Which controller hosts a component is the allocation's question, not this planner's.
+            var allocation = ControllerAllocation.Current;
+            bool OnFeedController(string name) => allocation.IsFeedSide(name);
 
             // Keep the robot-tail (Ejector+Robot) OUT of the INIT path to Feed_Station (a Robot bring-up stall would block it); init the tail last, mirrored in ResourceWireEmitter.
-            bool robotTail = MapperConfig.EnableRobotTaskTail &&
+            bool robotTail = HandoffPlanner.DischargeActive &&
                 contents.Actuators.Any(a => NameEq(a.Name, "Ejector")) &&
                 contents.Actuators.Any(a => NameEq(a.Name, "Robot"));
             bool IsRobotTailName(string name) =>
                 robotTail && (NameEq(name, "Ejector") || NameEq(name, "Robot"));
+
+            // Everything on the cross-controller segment is driven BY that segment, so it must stay off the
+            // locally-closed Feed ring or its stateRprtCmd_in has two sources -- which EAE resolves by
+            // arbitrary order, so the report a process reads is whichever wire happened to win.
+            //
+            // The membership is read from the segment itself rather than re-listed here, and it applies to
+            // sensors as well as actuators: a twin that DECLARES the part-present sensor (rather than leaving
+            // it to the synth injection) puts it in contents.Sensors, and a rule that only filtered actuators
+            // spliced it onto the ring while the segment was already driving it. ResourceWireEmitter excludes
+            // the same set from the sysres ring, so this is also what keeps the two halves agreeing.
+            var crossSegment = TemplateMap.M262CrossRingSegment(robotTail);
+            bool OnCrossSegment(string name) =>
+                crossSegment.Any(n => NameEq(n, name));
 
             var initChain = new List<string>();
             initChain.Add("Area");
@@ -76,13 +89,13 @@ namespace CodeGen.Translation
                     "Stn1_Term.CasAdptrIN");
             }
 
-            // Report ring is M262-only, closed locally; the robot tail is kept out (its separate cross-PLC segment would double-drive Robot.stateRprtCmd_out).
+            // Report ring is Feed-controller-only and closed locally; the cross-controller segment is kept out.
             var ringComponents = new List<(string Name, string Type)>();
             foreach (var s in contents.Sensors)
-                if (OnFeedController(s.Name)) ringComponents.Add((s.Name, "Sensor_Bool_CAT"));
+                if (OnFeedController(s.Name) && !OnCrossSegment(s.Name))
+                    ringComponents.Add((s.Name, "Sensor_Bool_CAT"));
             foreach (var a in contents.Actuators)
-                if (OnFeedController(a.Name) &&
-                    !(robotTail && (NameEq(a.Name, "Ejector") || NameEq(a.Name, "Robot"))))
+                if (OnFeedController(a.Name) && !OnCrossSegment(a.Name))
                     ringComponents.Add((a.Name, "Five_State_Actuator_CAT"));
             ringComponents.Add((processInstanceName, "Process1_Generic"));
 
@@ -92,11 +105,11 @@ namespace CodeGen.Translation
                     builder.AddAdapterConnection(
                         $"{ringComponents[i].Name}.{StateRprtOut(ringComponents[i].Type)}",
                         $"{ringComponents[i + 1].Name}.{StateRprtIn(ringComponents[i + 1].Type)}");
-                if (MapperConfig.MergeFeedRing)
+                if (GenerationPlan.Current.RingsMerged)
                 {
-                    // MergeFeedRing: the Feed tail crosses to the M580 head instead of closing locally, joining the one cross-PLC ring.
+                    // Merged rings: the Feed tail crosses to the M580 head instead of closing locally, joining the one cross-PLC ring.
                     var m580Head = contents.Sensors.FirstOrDefault(
-                        s => HcfSymbolIndex.NameBasedPlcGuess(s.Name) == PlcAssignment.M580);
+                        s => allocation.IsOn(s.Name, PlcAssignment.M580));
                     if (m580Head != null)
                         builder.AddAdapterConnection(
                             $"{ringComponents[^1].Name}.{StateRprtOut(ringComponents[^1].Type)}",
@@ -126,8 +139,8 @@ namespace CodeGen.Translation
             const string AssemblyProc  = "Assembly_Station";
             const string Stn2Term      = "Stn2_Term";
 
-            static bool IsM580(string name) =>
-                HcfSymbolIndex.NameBasedPlcGuess(name) == PlcAssignment.M580;
+            var allocation = ControllerAllocation.Current;
+            bool IsM580(string name) => allocation.IsOn(name, PlcAssignment.M580);
 
             // Thread Disassembly after Assembly_Station so the syslay ring matches the sysres, which wires
             // every Process FB it finds (ResourceWireEmitter discovers them by type). Skipping it here while
@@ -213,11 +226,10 @@ namespace CodeGen.Translation
                     builder.AddAdapterConnection(
                         $"{ring[^1].Name}.{StateRprtOut(ring[^1].Type)}",
                         $"{seg[0]}.stateRprtCmd_in");
-                    if (MapperConfig.MergeFeedRing)
+                    if (GenerationPlan.Current.RingsMerged)
                     {
-                        // MergeFeedRing: the discharge-segment tail feeds the Feed head, so segment + Feed form one loop.
-                        var m262Head = contents.Sensors.FirstOrDefault(
-                            s => HcfSymbolIndex.NameBasedPlcGuess(s.Name) is PlcAssignment.M262 or PlcAssignment.RevPi);
+                        // Merged rings: the discharge-segment tail feeds the Feed head, so segment + Feed form one loop.
+                        var m262Head = contents.Sensors.FirstOrDefault(s => allocation.IsFeedSide(s.Name));
                         if (m262Head != null)
                             builder.AddAdapterConnection(
                                 $"{seg[^1]}.stateRprtCmd_out",
@@ -241,8 +253,8 @@ namespace CodeGen.Translation
         internal static void BuildBx1Wiring(SyslayBuilder builder, StationContents contents,
             MapperConfig? config)
         {
-            static bool IsBx1(string name) =>
-                HcfSymbolIndex.NameBasedPlcGuess(name) == PlcAssignment.BX1;
+            var allocation = ControllerAllocation.Current;
+            bool IsBx1(string name) => allocation.IsOn(name, PlcAssignment.BX1);
 
             // INITO->CONNECT self-loop opens the broker on init; MqttConn.INIT is sourced from FB1 on the sysres, so it shows dangling here (runtime resolves it).
             bool mqttEnabled = config != null && config.MqttPublishEnabled;
