@@ -53,7 +53,7 @@ namespace CodeGen.Devices.Core
 
             // Save only on a real change (an unconditional save bumps the mtime -> spurious EAE
             // "Reload Solution" prompt).
-            if (a > 0) xml.Save(dfbprojPath);
+            if (a > 0) Save(xml, dfbprojPath);
             return a;
         }
 
@@ -85,7 +85,7 @@ namespace CodeGen.Devices.Core
                      ?? AddGroup(xml, ns);
             Add(fg, ns, "Folder", typeName, ref a);
 
-            if (a > 0) xml.Save(dfbprojPath);
+            if (a > 0) Save(xml, dfbprojPath);
             return a;
         }
 
@@ -113,7 +113,7 @@ namespace CodeGen.Devices.Core
                     removed++;
                 }
             }
-            if (removed > 0) xml.Save(dfbprojPath);
+            if (removed > 0) Save(xml, dfbprojPath);
             return removed;
         }
 
@@ -124,7 +124,7 @@ namespace CodeGen.Devices.Core
             var (cg, _) = Groups(xml, ns);
             int a = 0;
             Add(cg, ns, "Compile", fileName, ref a, new XElement(ns + "IEC61499Type", type));
-            if (a > 0) xml.Save(dfbprojPath);   // only write on a real change
+            if (a > 0) Save(xml, dfbprojPath);   // only write on a real change
             return a;
         }
 
@@ -136,7 +136,7 @@ namespace CodeGen.Devices.Core
             var (cg, _) = Groups(xml, ns);
             int a = 0;
             Add(cg, ns, "Compile", dtRelativePath, ref a, new XElement(ns + "IEC61499Type", "DataType"));
-            if (a > 0) xml.Save(dfbprojPath);   // only write on a real change
+            if (a > 0) Save(xml, dfbprojPath);   // only write on a real change
             return a;
         }
 
@@ -158,7 +158,7 @@ namespace CodeGen.Devices.Core
             refGroup.Add(new XElement(ns + "Reference",
                 new XAttribute("Include", libraryName),
                 new XElement(ns + "Version", version)));
-            xml.Save(dfbprojPath);
+            Save(xml, dfbprojPath);
             return 1;
         }
 
@@ -249,7 +249,7 @@ namespace CodeGen.Devices.Core
             }
 
             // Save only on a real change (else a spurious EAE "Reload Solution" prompt).
-            if (added > 0 || removed > 0 || backfilled > 0) xml.Save(dfbprojPath);
+            if (added > 0 || removed > 0 || backfilled > 0) Save(xml, dfbprojPath);
             return added;
         }
 
@@ -268,7 +268,7 @@ namespace CodeGen.Devices.Core
                     .Contains(sysdevId, StringComparison.OrdinalIgnoreCase))
                 .ToList();
             foreach (var e in stale) e.Remove();
-            if (stale.Count > 0) xml.Save(dfbprojPath);
+            if (stale.Count > 0) Save(xml, dfbprojPath);
             return stale.Count;
         }
 
@@ -313,7 +313,7 @@ namespace CodeGen.Devices.Core
                 new XElement(ns + "Plugin", "OPCUAConfigurator"),
                 new XElement(ns + "IEC61499Type", "CAT_OPCUA"));
 
-            if (added > 0) xml.Save(dfbprojPath);
+            if (added > 0) Save(xml, dfbprojPath);
             return added;
         }
 
@@ -368,7 +368,7 @@ namespace CodeGen.Devices.Core
                 if (nextWs != null) nextWs.Remove();
                 removed++;
             }
-            if (removed > 0) xml.Save(dfbprojPath);
+            if (removed > 0) Save(xml, dfbprojPath);
             return removed;
         }
 
@@ -408,7 +408,7 @@ namespace CodeGen.Devices.Core
                 if (nextWs != null) nextWs.Remove();
                 removed++;
             }
-            if (removed > 0) xml.Save(dfbprojPath);
+            if (removed > 0) Save(xml, dfbprojPath);
             return removed;
         }
 
@@ -482,7 +482,7 @@ namespace CodeGen.Devices.Core
             foreach (var pat in siblingPatterns)
                 foreach (var f in Directory.EnumerateFiles(iec61499Dir, pat, SearchOption.TopDirectoryOnly))
                     Add(sng, sns, "None", Path.GetFileName(f), ref siblingsAdded);
-            if (siblingsAdded > 0) sxml.Save(dfbprojPath);
+            if (siblingsAdded > 0) Save(sxml, dfbprojPath);
             added += siblingsAdded;
 
             return added;
@@ -495,6 +495,16 @@ namespace CodeGen.Devices.Core
             var ng = xml.Descendants(ns + "ItemGroup").FirstOrDefault(g => g.Elements(ns + "None").Any())
                      ?? AddGroup(xml, ns);
             return (cg, ng);
+        }
+
+        // Groups() creates a Compile and a None group up front, so a pass that registers nothing (or a
+        // strip that emptied one) leaves an empty ItemGroup behind. MSBuild ignores them, but they
+        // accumulate on every generation, so the project file never converges. Drop them on the way out.
+        static void Save(XDocument xml, string dfbprojPath)
+        {
+            XNamespace ns = xml.Root!.Name.Namespace;
+            xml.Descendants(ns + "ItemGroup").Where(g => !g.HasElements).ToList().ForEach(g => g.Remove());
+            xml.Save(dfbprojPath);
         }
 
         static XElement AddGroup(XDocument xml, XNamespace ns)
