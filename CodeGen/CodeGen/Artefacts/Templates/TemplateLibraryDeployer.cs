@@ -1,10 +1,11 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Xml.Linq;
 using CodeGen.Configuration;
+using CodeGen.Translation;
 using CodeGen.Models;
 using CodeGen.Mapping;
 using CodeGen.Translation.Interlocks;
@@ -24,8 +25,9 @@ namespace CodeGen.Services
 {
     public static class TemplateLibraryDeployer
     {
-        public static DeployResult DeployUniversalArchitecture(MapperConfig cfg)
+        public static DeployResult DeployUniversalArchitecture(GenerationContext ctx)
         {
+            var cfg = ctx.Config;
             var result = new DeployResult();
             var libPath = cfg.TemplateLibraryPath;
             if (string.IsNullOrWhiteSpace(libPath) || !Directory.Exists(libPath))
@@ -113,7 +115,7 @@ namespace CodeGen.Services
             // RevPi is used — the FULL swap (RevPi hosts the whole Feed station) OR the PARTIAL swap
             // (Feeder/Checker on RevPi). Without it EAE cannot instantiate the RevPI_IO broker
             // (ERR_NO_SUCH_TYPE). Pure M262 mode never deploys it, so M262 output stays byte-identical.
-            if (MapperConfig.FeedStationController == FeedController.RevPi || MapperConfig.PartialRevPi)
+            if (ctx.Profile.PartialRevPi)
             {
                 DeployArtifact(libPath, "Composite", "PLC_RW_REVPI", eaeProjectDir, result, isBasic: false);
                 // Internalize the Modbus symlink bridge INTO PLC_RW_REVPI so the RevPi sysres instantiates only
@@ -137,7 +139,7 @@ namespace CodeGen.Services
                 FixCatHmiOpcuaFrame(eaeProjectDir, hmiCat, result);
             PatchActuatorModeInitialValue(eaeProjectDir, "FiveStateActuator.fbt", result);
             PatchActuatorModeInitialValue(eaeProjectDir, "SevenStateCentreHomeActuator.fbt", result);
-            PatchSwivelBlockStartupMotion(eaeProjectDir, result);
+            PatchSwivelStartup(eaeProjectDir, ctx.Components, result);
             PatchSwivelAtHomeCoilClear(eaeProjectDir, clearCoils: true, result);
             // Runs LAST: the directional brake rewrites the whole atHome algorithm.
             PatchSwivelBrakeHome(eaeProjectDir, true,
@@ -242,7 +244,7 @@ namespace CodeGen.Services
             string sysdevId = string.Empty;
             try
             {
-                var sysdev = M262SysdevEmitter.Emit(cfg);
+                var sysdev = M262SysdevEmitter.Emit(ctx);
                 result.SysdevPath = sysdev.SysdevPath;
                 result.SystemFilePath = sysdev.SystemFilePath;
                 result.MappingsAdded = sysdev.MappingsAdded;
