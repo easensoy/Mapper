@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using CodeGen.Translation;
@@ -17,12 +17,6 @@ namespace CodeGen.Mapping
             PlcAssignment.RevPi => "RevPi_RES",
             _ => string.Empty,
         };
-
-        public static PlcAssignment PlcOf(string? name)
-        {
-            var e = ComponentRegistry.Get(name);
-            return e?.Plc ?? PlcAssignment.Unknown;
-        }
 
         // The Feed station's controller: M262 by default, the RevPi once FeedStationController is
         // switched. Topology questions ("is this component upstream of the assembly side?") ask here
