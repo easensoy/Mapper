@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -7,6 +7,7 @@ using System.Xml.Linq;
 using CodeGen.Artefacts;
 using CodeGen.Configuration;
 using CodeGen.Devices.BX1;
+using CodeGen.Mapping;
 using CodeGen.Devices.Core;
 using CodeGen.Devices.M262;
 using CodeGen.Devices.M580;
@@ -53,17 +54,16 @@ namespace CodeGen.Application
             var cfg = request.Config.Clone();
             cfg.UseRecipeStruct = true;
 
-            // ⚠ The routing mode still travels as static state. ComponentRegistry caches its partition
-            // keyed on these two, and its readers are static methods with no config in scope, so they
-            // cannot be injected without threading a context through every emitter. Confined to this one
-            // place so the mutation is at least visible and happens once per run.
-            //
             // The Feed station stays on M262 and the RevPi COEXISTS with it: PLC_RW_REVPI carries IO for
             // only Feeder/Checker/PartInHopper, so a whole-station swap would strand Transfer/Ejector/
             // Robot/PartAtAssembly with no physical IO. RevPiSelectionValidator rejects the full swap.
-            MapperConfig.FeedStationController = FeedController.M262;
-            MapperConfig.RevPiComponents = WithImpliedRevPiComponents(request.RevPiComponents);
-            RevPiSelectionValidator.ThrowIfInvalid();
+            var profile = new DeploymentProfile(request.RevPiComponents);
+            RevPiSelectionValidator.ThrowIfInvalid(profile);
+
+            // Parse once, plan once, render once: everything the run decides is settled here, before the
+            // first artefact is written, so a model the backend cannot express fails with a diagnostic
+            // instead of a half-generated project.
+            var ctx = GenerationContext.Plan(cfg, request.ControlXmlPath, profile);
 
             DeepClean(cfg, log);
             LogM262SysdevState(cfg, log);
@@ -73,24 +73,24 @@ namespace CodeGen.Application
 
             // AFTER cleanup: cleanup deletes flat root-level Basic FB files, so deploying first would drop
             // the patched core.
-            DeployTemplates(cfg, log);
+            DeployTemplates(ctx, log);
 
             var bindings = LoadBindings(cfg, log);
-            var path = injector.GenerateStation1TestSyslay(cfg, request.ControlXmlPath, bindings, out var report);
+            var path = injector.GenerateStation1TestSyslay(ctx, bindings, out var report);
             LogBindings(report, log);
 
-            FinalizeDeviceStack(cfg, log);
-            WireFeedResource(cfg, report, log);
-            MirrorAndWireStation2(cfg, report, log);
-            InjectBx1Broker(cfg, path, report, log);
-            PatchAndBindHcf(cfg, path, bindings, report, log);
+            FinalizeDeviceStack(ctx, log);
+            WireFeedResource(ctx, report, log);
+            MirrorAndWireStation2(ctx, report, log);
+            InjectBx1Broker(ctx, path, report, log);
+            PatchAndBindHcf(ctx, path, bindings, report, log);
 
             ValidateHcfReferences(cfg, log);
             SyncSysresParameters(cfg, path, log);
             SweepOrphans(cfg, log);
-            ValidateParity(cfg, path, log);
+            ValidateParity(ctx, path, log);
             ValidateConnections(cfg, log);
-            ValidateAddresses(cfg, log);
+            ValidateAddresses(ctx, log);
             ValidateMqtt(cfg, log);
             ValidateBx1Scanner(cfg, log);
 
@@ -174,11 +174,11 @@ namespace CodeGen.Application
                 : "[Device] M262 sysdev absent — Mapper will bootstrap the M262 logical device from scratch.");
         }
 
-        static void DeployTemplates(MapperConfig cfg, Action<string> log)
+        static void DeployTemplates(GenerationContext ctx, Action<string> log)
         {
             try
             {
-                var deploy = TemplateLibraryDeployer.DeployUniversalArchitecture(cfg);
+                var deploy = TemplateLibraryDeployer.DeployUniversalArchitecture(ctx);
                 log($"[Deploy] Registered {deploy.CATsDeployed.Count} CAT(s), " +
                     $"{deploy.BasicFBsDeployed.Count} Basic(s), " +
                     $"{deploy.CompositesDeployed.Count} Composite(s), " +
@@ -290,69 +290,57 @@ namespace CodeGen.Application
 
         // MANDATORY after the syslay is (re)written: Prepare cleans the .sysres, wiping the earlier FB
         // mirror, so without this the .sysres ends up empty and every FB is unmapped on the EAE canvas.
-        static void FinalizeDeviceStack(MapperConfig cfg, Action<string> log)
+        static void FinalizeDeviceStack(GenerationContext ctx, Action<string> log)
         {
+            var cfg = ctx.Config;
             var m262DeviceExists = false;
             try { m262DeviceExists = M262SysdevEmitter.M262SysdevAlreadyExists(cfg); } catch { }
 
             var sysdevId = string.Empty;
-            if (MapperConfig.FeedStationController == FeedController.RevPi)
+            try
             {
-                try
+                var sysdev = M262SysdevEmitter.Emit(ctx);
+                if (sysdev.DevicePreserved)
                 {
-                    var rr = new SystemInjector.BindingApplicationReport();
-                    RevPiDeviceEmitter.EmitDevice(cfg, rr);
-                    foreach (var m in rr.Missing) log(m);
+                    log("[Device] M262 sysdev exists, skipping device creation and config writes to preserve trust binding");
+                    log($"[M262] .sysres mirrored {sysdev.SysresFbsMirrored} FB(s) to {sysdev.SysresPath} (application-layer only)");
                 }
-                catch (Exception ex) { log($"[RevPi][Error] device emit: {ex.Message}"); }
+                else
+                {
+                    log($"[M262] sysdev re-emitted; .sysres mirrored {sysdev.SysresFbsMirrored} FBs to {sysdev.SysresPath}");
+                }
+                sysdevId = ReadSysdevId(sysdev.SysdevPath);
             }
-            else
+            catch (Exception ex) { log($"[M262][Error] sysdev emit: {ex.Message}"); }
+
+            // Topology always runs: solutionData (trust) is preserved, but Equipment JSON (placement)
+            // MUST be re-written every run or the M262dPAC never re-appears after a wipe.
+            try
             {
-                try
+                if (!string.IsNullOrEmpty(sysdevId))
                 {
-                    var sysdev = M262SysdevEmitter.Emit(cfg);
-                    if (sysdev.DevicePreserved)
-                    {
-                        log("[Device] M262 sysdev exists, skipping device creation and config writes to preserve trust binding");
-                        log($"[M262] .sysres mirrored {sysdev.SysresFbsMirrored} FB(s) to {sysdev.SysresPath} (application-layer only)");
-                    }
-                    else
-                    {
-                        log($"[M262] sysdev re-emitted; .sysres mirrored {sysdev.SysresFbsMirrored} FBs to {sysdev.SysresPath}");
-                    }
-                    sysdevId = ReadSysdevId(sysdev.SysdevPath);
+                    var topo = M262TopologyEmitter.Emit(cfg, sysdevId);
+                    log($"[M262] topology emitted: {topo.FilesWritten.Count} JSON file(s), {topo.TopologyProjEntriesAdded} topologyproj entries added");
+                    if (m262DeviceExists) log("[Device] solutionData preserved (existing trust binding kept intact)");
+                    foreach (var w in topo.Warnings) log($"[M262][Warn] topology: {w}");
                 }
-                catch (Exception ex) { log($"[M262][Error] sysdev emit: {ex.Message}"); }
-
-                // Topology always runs: solutionData (trust) is preserved, but Equipment JSON (placement)
-                // MUST be re-written every run or the M262dPAC never re-appears after a wipe.
-                try
+                else
                 {
-                    if (!string.IsNullOrEmpty(sysdevId))
-                    {
-                        var topo = M262TopologyEmitter.Emit(cfg, sysdevId);
-                        log($"[M262] topology emitted: {topo.FilesWritten.Count} JSON file(s), {topo.TopologyProjEntriesAdded} topologyproj entries added");
-                        if (m262DeviceExists) log("[Device] solutionData preserved (existing trust binding kept intact)");
-                        foreach (var w in topo.Warnings) log($"[M262][Warn] topology: {w}");
-                    }
-                    else
-                    {
-                        log("[M262][Warn] topology emit skipped — sysdevId was empty");
-                    }
+                    log("[M262][Warn] topology emit skipped — sysdevId was empty");
                 }
-                catch (Exception ex) { log($"[M262][Error] topology emit: {ex.Message}"); }
-
-                if (m262DeviceExists) log("[Device] M262 sysdev preserved (trust binding intact)");
             }
+            catch (Exception ex) { log($"[M262][Error] topology emit: {ex.Message}"); }
 
+            if (m262DeviceExists) log("[Device] M262 sysdev preserved (trust binding intact)");
+        
             // Partial swap: the RevPi coexists WITH M262 — emit its Soft_dPAC device AFTER the M262 device
             // so the System GUID folder exists. M262 is not swept in partial mode.
-            if (MapperConfig.PartialRevPi)
+            if (ctx.Profile.PartialRevPi)
             {
                 try
                 {
                     var rr = new SystemInjector.BindingApplicationReport();
-                    RevPiDeviceEmitter.EmitDevice(cfg, rr);
+                    RevPiDeviceEmitter.EmitDevice(ctx, rr);
                     foreach (var m in rr.Missing) log(m);
                 }
                 catch (Exception ex) { log($"[RevPi][Error] partial device emit: {ex.Message}"); }
@@ -384,7 +372,7 @@ namespace CodeGen.Application
             // Deploy & Diagnostic.
             try
             {
-                var fx = FoldersXmlEmitter.Register(cfg);
+                var fx = FoldersXmlEmitter.Register(cfg, partialRevPi: ctx.Profile.PartialRevPi);
                 if (fx.ItemsAdded > 0) log($"[Topology] Folders.xml: registered {fx.ItemsAdded} sysdev GUID(s)");
                 foreach (var w in fx.Warnings) log($"[Topology][Warn] Folders.xml: {w}");
             }
@@ -423,7 +411,7 @@ namespace CodeGen.Application
             // Runs AFTER Station2DeviceEmitter so the Equipment UUIDs the wires reference are on disk.
             try
             {
-                var net = TopologyNetworkEmitter.Emit(cfg);
+                var net = TopologyNetworkEmitter.Emit(ctx);
                 log($"[Topology] {net.FilesWritten.Count} network file(s) written, {net.TopologyProjEntriesAdded} topologyproj entries");
                 foreach (var f in net.FilesWritten) log($"[Topology]   {f}");
                 foreach (var w in net.Warnings) log($"[Topology][Warn] {w}");
@@ -434,7 +422,7 @@ namespace CodeGen.Application
             // "Repair Instances" / "Missing Project Files".
             try
             {
-                var s2 = Station2SysresMirror.EmitStation2Sysres(cfg);
+                var s2 = Station2SysresMirror.EmitStation2Sysres(ctx);
                 log($"[Stn2] mirrored FBs → M580:{s2.M580} BX1:{s2.BX1}");
             }
             catch (Exception ex) { log($"[Stn2][Error] sysres mirror: {ex.Message}"); }
@@ -450,7 +438,6 @@ namespace CodeGen.Application
             }
             catch (Exception ex) { log($"[Artefacts][Error] opcua sweep: {ex.Message}"); }
 
-            if (MapperConfig.FeedStationController != FeedController.RevPi)
             {
                 try
                 {
@@ -503,29 +490,22 @@ namespace CodeGen.Application
 
         // Event + data wires into the Feed sysres FBNetwork (init chain, adapter wires, I/O bindings);
         // without these EAE deploys but nothing inits.
-        static void WireFeedResource(MapperConfig cfg, SystemInjector.BindingApplicationReport report, Action<string> log)
+        static void WireFeedResource(GenerationContext ctx, SystemInjector.BindingApplicationReport report, Action<string> log)
         {
             var before = report.Missing.Count;
-            if (MapperConfig.FeedStationController == FeedController.RevPi)
-            {
-                RevPiDeviceEmitter.WireResource(cfg, report);
-            }
-            else
-            {
-                M262SysresWireEmitter.Emit(cfg, report);
-                if (MapperConfig.PartialRevPi) RevPiDeviceEmitter.WireResource(cfg, report);
-            }
+            M262SysresWireEmitter.Emit(ctx, report);
+            if (ctx.Profile.PartialRevPi) RevPiDeviceEmitter.WireResource(ctx, report);
             LogNew(report, before, l => l.StartsWith("[Wire]") || l.StartsWith("[Sysres"), log);
         }
 
         // The mirror MUST run before the wiring: it creates the FBs the wiring connects. Re-mirroring also
         // re-syncs each component's CAT type every run; a stale Type trips "Found References to Missing
         // Instances".
-        static void MirrorAndWireStation2(MapperConfig cfg, SystemInjector.BindingApplicationReport report, Action<string> log)
+        static void MirrorAndWireStation2(GenerationContext ctx, SystemInjector.BindingApplicationReport report, Action<string> log)
         {
             try
             {
-                var s2m = Station2SysresMirror.EmitStation2Sysres(cfg);
+                var s2m = Station2SysresMirror.EmitStation2Sysres(ctx);
                 log($"[Stn2] re-mirrored FBs -> M580:{s2m.M580} BX1:{s2m.BX1} (CAT types synced to syslay)");
             }
             catch (Exception ex) { log($"[Stn2][Error] sysres mirror: {ex.Message}"); }
@@ -533,7 +513,7 @@ namespace CodeGen.Application
             try
             {
                 var before = report.Missing.Count;
-                Station2WireEmitter.EmitStation2Resources(cfg, report);
+                Station2WireEmitter.EmitStation2Resources(ctx, report);
                 LogNew(report, before, l =>
                     l.StartsWith("[Wire][M580]") || l.StartsWith("[M580]") ||
                     l.StartsWith("[Wire][BX1]") || l.StartsWith("[BX1]") ||
@@ -544,25 +524,25 @@ namespace CodeGen.Application
 
         // Instantiates BX1_IO (PLC_RW_BX1) so the .hcf's EIP_Input/Output_Word_1 symlinks resolve. Runs
         // after the Station-2 mirror/wire so the cover FBs exist.
-        static void InjectBx1Broker(MapperConfig cfg, string syslayPath,
+        static void InjectBx1Broker(GenerationContext ctx, string syslayPath,
             SystemInjector.BindingApplicationReport report, Action<string> log)
         {
-            if (!cfg.DeployBx1IoBroker) return;
+            if (!ctx.Config.DeployBx1IoBroker) return;
             try
             {
-                var n = Bx1IoBrokerInjector.InjectBx1IoBroker(cfg, syslayPath, report);
+                var n = Bx1IoBrokerInjector.InjectBx1IoBroker(ctx.Config, syslayPath, report);
                 log($"[BX1][Broker] BX1_IO injected into {n} artefact(s).");
-                ResourceWireEmitter.ApplyLayoutToSyslay(syslayPath, report);
+                ResourceWireEmitter.ApplyLayoutToSyslay(ctx, syslayPath, report);
             }
             catch (Exception ex) { log($"[BX1][Broker][Error] {ex.Message}"); }
         }
 
-        static void PatchAndBindHcf(MapperConfig cfg, string path, IoBindings? bindings,
+        static void PatchAndBindHcf(GenerationContext ctx, string path, IoBindings? bindings,
             SystemInjector.BindingApplicationReport report, Action<string> log)
         {
+            var cfg = ctx.Config;
             var hcfBefore = report.Missing.Count;
-            if (MapperConfig.FeedStationController != FeedController.RevPi)
-                HcfPatchService.PatchDeployed(cfg, path, bindings, report);
+            HcfPatchService.PatchDeployed(ctx, path, bindings, report);
             LogNew(report, hcfBefore, l => l.StartsWith("[Hcf]"), log);
 
             // Station 2 symbol binding only: the IO-bindings xlsx has no Station-2 pin rows, so each
@@ -669,12 +649,13 @@ namespace CodeGen.Application
 
         // HARD guard: the deployable sysres MUST be a faithful projection of the syslay, else EAE deploys
         // the OLD logic silently. A FAIL usually means EAE held a sysres locked during the sync.
-        static void ValidateParity(MapperConfig cfg, string path, Action<string> log)
+        static void ValidateParity(GenerationContext ctx, string path, Action<string> log)
         {
+            var cfg = ctx.Config;
             try
             {
                 var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
-                var parity = SyslaySysresParityValidator.Validate(eaeRoot, path);
+                var parity = SyslaySysresParityValidator.Validate(ctx, eaeRoot, path);
                 if (parity.Count == 0)
                 {
                     log("[Parity] PASS — every device sysres mirrors the syslay (FBs + recipes + discharge hcf).");
@@ -688,7 +669,7 @@ namespace CodeGen.Application
                 if (resynced > 0)
                     log($"[Parity] retry sync updated {resynced} mapped sysres FB parameter set(s); re-validating.");
 
-                parity = SyslaySysresParityValidator.Validate(eaeRoot, path);
+                parity = SyslaySysresParityValidator.Validate(ctx, eaeRoot, path);
                 if (parity.Count == 0)
                 {
                     log("[Parity] PASS after retry sync — deployable sysres now mirrors the syslay.");
@@ -711,12 +692,14 @@ namespace CodeGen.Application
         // by unrelated paths into the SAME broadcast domain — so no single-file check can catch it. A
         // duplicated Soft dPAC CONTAINER address is fatal (it is EAE's deploy/login target); duplicated
         // host NICs are reported but tolerated, because the shipped tree and the reference both carry one.
-        static void ValidateAddresses(MapperConfig cfg, Action<string> log)
+        static void ValidateAddresses(GenerationContext ctx, Action<string> log)
         {
+            var cfg = ctx.Config;
             try
             {
                 var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
-                var addr = TopologyAddressValidator.Validate(eaeRoot, cfg);
+                var addr = TopologyAddressValidator.Validate(eaeRoot)
+                    .Concat(TopologyAddressValidator.ValidateRevPiRoles(cfg, ctx.Profile)).ToList();
                 var errors = addr.Where(v => v.IsError).ToList();
                 foreach (var v in addr) log($"  [Addr] {v}");
                 if (addr.Count == 0)
