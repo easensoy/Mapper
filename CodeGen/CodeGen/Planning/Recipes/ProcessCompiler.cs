@@ -46,9 +46,6 @@ namespace CodeGen.Translation.Process.Recipes
             public int MaterialBridgeDeasserted;
         }
 
-        [Flags]
-        private enum Announce { None = 0, Ring = 1, CycleReady = 2 }
-
         public static RecipeArrays Compile(VueOneComponent process, int processId, Ctx ctx)
         {
             var arrays = new RecipeArrays();
@@ -56,7 +53,7 @@ namespace CodeGen.Translation.Process.Recipes
 
             var states = OrderStatesByTransitionChain(process.States);
             foreach (var line in BuildTransitionTable(process.States, states)) arrays.TransitionTable.Add(line);
-            var announce = ComputeAnnounce(process, ctx);
+            var announce = HandoffPlan(ctx).AnnouncementsOf(process.Name?.Trim() ?? string.Empty);
             var owned = BuildOwnership(process, ctx);
 
             var pos = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -87,8 +84,13 @@ namespace CodeGen.Translation.Process.Recipes
                 void Announcement()
                 {
                     if (!announce.TryGetValue(state.StateID, out var kind)) return;
-                    if (kind.HasFlag(Announce.Ring))       rows.Add(Row.Cmd(process.Name.Trim(), state.StateNumber, state.StateID));   // report own State_Number on the ring
-                    if (kind.HasFlag(Announce.CycleReady)) rows.Add(Row.Cmd("cycle_ready", state.StateNumber, state.StateID));         // ... and across CycleReady to the Feed ring
+                    // Ring: the producer reports its own State_Number under its own name. Cross-controller: the
+                    // same number additionally leaves on the process-phase transport, whose command token is a
+                    // backend protocol name, not a recipe decision.
+                    if (kind.HasFlag(HandoffTransport.Ring))
+                        rows.Add(Row.Cmd(process.Name?.Trim() ?? string.Empty, state.StateNumber, state.StateID));
+                    if (kind.HasFlag(HandoffTransport.CrossController))
+                        rows.Add(Row.Cmd(ProcessPhaseTransport.CommandToken, state.StateNumber, state.StateID));
                 }
                 // The phase's own work: the movements this state is declared to own. Each ends in the arrival WAIT
                 // of the command it issued, so once Work() has run the phase really has been reached.
@@ -644,44 +646,45 @@ namespace CodeGen.Translation.Process.Recipes
                 "configured to carry it");
         }
 
-        // Does `peer`'s own state announcement reach `consumer`'s state_table? Same ring (same controller, or a
-        // merged Feed ring) carries it directly; CycleReady carries an assembly-side process to the Feed ring.
-        private static bool Announces(VueOneComponent peer, VueOneComponent consumer, Ctx ctx) =>
-            SameRing(consumer, peer, ctx) || (IsFeedSide(consumer, ctx) && !IsFeedSide(peer, ctx));
+        // The twin's own cross-process conditions with each transport resolved. Derived from the context it is
+        // asked about and returned by value -- no cache, so nothing survives between generations.
+        internal static ProcessHandoffPlan HandoffPlan(Ctx ctx) =>
+            ProcessHandoffPlan.Derive(
+                ctx.All, ctx.ProcessIdByName,
+                (producer, consumer) => Transport(producer, consumer, ctx),
+                EntryState,
+                (producer, cond) => PeerState(producer, cond),
+                cond => TryResolve(cond, ctx.All),
+                IsProcess,
+                IsInitialisationState);
 
-
-        // Which of THIS process's states peers reference, and by which transport the peer reads them: the shared
-        // ring (or an M580 peer read by a Feed consumer, which also needs the ring announce) publish the number
-        // as a self-named CMD; a Feed consumer of an M580 producer additionally needs it on CycleReady. A Feed
-        // producer read by an M580 consumer publishes nothing here (that consumer uses PartAtAssembly instead).
-        private static Dictionary<string, Announce> ComputeAnnounce(VueOneComponent process, Ctx ctx)
+        // Where a producer's phase can physically land in a consumer's state_table. Sharing a report ring
+        // carries it directly. Otherwise the generic process-phase cross-reference does -- but the receiving
+        // slot (rdy_id) is declared on the Process1_Generic TYPE, so every instance shares one slot and only
+        // ONE consumer in the project can receive a cross-controller phase. That consumer is the one whose ring
+        // no producer's report reaches, i.e. the ring holding no other process: the remaining direction is
+        // covered by the material bridge instead. Widening this needs rdy_id on the instance interface.
+        private static HandoffTransport Transport(VueOneComponent producer, VueOneComponent consumer, Ctx ctx)
         {
-            var res = new Dictionary<string, Announce>(StringComparer.OrdinalIgnoreCase);
-            bool selfFeed = IsFeedSide(process, ctx);
-            foreach (var q in ctx.All.Where(IsProcess))
-            {
-                if (SameName(q, process)) continue;
-                foreach (var c in q.States.SelectMany(s => s.Transitions).SelectMany(t => t.Conditions))
-                {
-                    var tgt = TryResolve(c, ctx.All);
-                    if (tgt == null || !IsProcess(tgt) || !SameName(tgt, process)) continue;
-                    var s = PeerState(process, c);
-                    // A reference to our Initialisation state is the peer asserting readiness; it produces no
-                    // WAIT, so it must not make us announce a phase either -- an announcement no one consumes
-                    // still writes the consumer's slot and would collide with the phase token that ships there.
-                    if (s == null || IsInitialisationState(s)) continue;
-                    var how = SameRing(q, process, ctx) ? Announce.Ring
-                            : IsFeedSide(q, ctx) && !selfFeed ? Announce.CycleReady
-                            : Announce.None;    // Feed producer read across rings -> consumer uses the material sensor
-                    if (how == Announce.None) continue;
-                    res[s.StateID] = res.GetValueOrDefault(s.StateID) | how;
-                    // ... and the entry phase, which is what that consumer arms on.
-                    var entry = EntryState(process);
-                    if (entry != null) res[entry.StateID] = res.GetValueOrDefault(entry.StateID) | how;
-                }
-            }
-            return res;
+            if (SameRing(consumer, producer, ctx)) return HandoffTransport.Ring;
+            return SoleCrossControllerConsumer(ctx) is { } sole && SameName(consumer, sole)
+                ? HandoffTransport.CrossController
+                : HandoffTransport.None;
         }
+
+        // The one process that may receive cross-controller phases: the sole process on its ring. With two
+        // rings and one process alone on one of them, that process is the only possible receiver, so the
+        // single type-level rdy_id is unambiguous. Any other shape returns null and the caller falls back.
+        private static VueOneComponent? SoleCrossControllerConsumer(Ctx ctx)
+        {
+            var procs = ctx.All.Where(IsProcess).ToList();
+            var alone = procs.Where(p => procs.Count(q => SameRing(p, q, ctx)) == 1).ToList();
+            return alone.Count == 1 ? alone[0] : null;
+        }
+
+        // Does `peer`'s own state announcement reach `consumer`'s state_table?
+        private static bool Announces(VueOneComponent peer, VueOneComponent consumer, Ctx ctx) =>
+            Transport(peer, consumer, ctx) != HandoffTransport.None;
 
         private static void Serialize(VueOneComponent process, List<VueOneState> states, List<Row> rows,
             Dictionary<string, int> firstRow, RecipeArrays arrays)
