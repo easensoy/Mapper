@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using CodeGen.Models;
@@ -17,27 +17,27 @@ namespace CodeGen.Translation.Interlocks
         // ── Public entry points, one per CAT shape ───────────────────────────────────────────────
 
         public static void ApplyFiveState(Dictionary<string, string> p, VueOneComponent actuator,
-            IReadOnlyList<VueOneComponent> allComponents,
+            GenerationContext ctx,
             IReadOnlyDictionary<string, int>? scopedIds)
-            => Write(p, Plan(actuator, allComponents, scopedIds, centreHome: false));
+            => Write(p, Plan(actuator, ctx, scopedIds, centreHome: false));
 
         public static void ApplyCentreHome(Dictionary<string, string> p, VueOneComponent actuator,
-            IReadOnlyList<VueOneComponent> allComponents,
+            GenerationContext ctx,
             IReadOnlyDictionary<string, int>? scopedIds)
-            => Write(p, Plan(actuator, allComponents, scopedIds, centreHome: true));
+            => Write(p, Plan(actuator, ctx, scopedIds, centreHome: true));
 
         public static void GuardFiveState(Dictionary<string, string> p, VueOneComponent actuator,
-            IReadOnlyList<VueOneComponent> allComponents,
+            GenerationContext ctx,
             IReadOnlyDictionary<string, int>? scopedIds,
             List<(string Component, string Detail)> bound)
-            => Guard(p, actuator, allComponents, scopedIds, bound,
+            => Guard(p, actuator, ctx, scopedIds, bound,
                      label: "interlock", recordWhenEmpty: false);
 
         public static void GuardCentreHome(Dictionary<string, string> p, VueOneComponent actuator,
-            IReadOnlyList<VueOneComponent> allComponents,
+            GenerationContext ctx,
             IReadOnlyDictionary<string, int>? scopedIds,
             List<(string Component, string Detail)> bound)
-            => Guard(p, actuator, allComponents, scopedIds, bound,
+            => Guard(p, actuator, ctx, scopedIds, bound,
                      label: "centre-home interlock", recordWhenEmpty: true);
 
         // Callers without a scoped map / the non-interlock minimal path.
@@ -48,12 +48,12 @@ namespace CodeGen.Translation.Interlocks
         // Component ids are global (sensors-first), so a cross-PLC SourceID indexes the same state_table
         // slot the bridged ring feeds; BuildRules drops genuinely out-of-scope sources.
         private static InterlockPlan Plan(VueOneComponent actuator,
-            IReadOnlyList<VueOneComponent> allComponents,
+            GenerationContext ctx,
             IReadOnlyDictionary<string, int>? scopedIds,
             bool centreHome)
         {
             if (scopedIds == null) return InterlockPlan.Empty(Cap);
-            var plan = InterlockPlanner.BuildRules(actuator, allComponents, scopedIds);
+            var plan = InterlockPlanner.BuildRules(actuator, ctx.Components, scopedIds, ctx);
             // Twin-faithful: the centre-home shape keeps only the crossing rules the twin declares, plus
             // their reverses. Nothing synthetic is added here — a start gate belongs to the recipe, not
             // to the interlock, because a transient sensor would otherwise refuse an already-gated move.
@@ -118,7 +118,7 @@ namespace CodeGen.Translation.Interlocks
         // Hard-fail if in-scope Control.xml conditions survive translation but nothing was emitted —
         // never ship an InterlockManager that passes everything through (a false safety net).
         private static void Guard(Dictionary<string, string> p, VueOneComponent actuator,
-            IReadOnlyList<VueOneComponent> allComponents,
+            GenerationContext ctx,
             IReadOnlyDictionary<string, int>? scopedIds,
             List<(string Component, string Detail)> bound,
             string label, bool recordWhenEmpty)
@@ -126,7 +126,7 @@ namespace CodeGen.Translation.Interlocks
             int emitted = EmittedCount(p);
             int inScope = scopedIds == null
                 ? 0
-                : InterlockPlanner.CountInScopeConditions(actuator, allComponents, scopedIds);
+                : InterlockPlanner.CountInScopeConditions(actuator, ctx.Components, scopedIds, ctx);
 
             if (inScope > 0 && emitted == 0)
                 throw new InvalidOperationException(
