@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using CodeGen.Configuration;
 using CodeGen.Translation;
 
 namespace CodeGen.Mapping
@@ -9,33 +10,21 @@ namespace CodeGen.Mapping
     //
     // The single allocation authority. Every topology question -- "does this controller host the Feed
     // station?", "do these two processes share a ring?", "which resource does this FB land on?" -- is
-    // answered here, from the deployment roster, rather than re-derived at each call site from the shape
-    // of a component name. Allocation is a deployment decision, so it belongs to the roster; a name is
-    // only ever the key used to look it up.
+    // answered here, from the run's roster, rather than re-derived at each call site from the shape of a
+    // component name. Allocation is a deployment decision, so it belongs to the roster; a name is only
+    // ever the key used to look it up.
     public sealed class ControllerAllocation
     {
-        // Alternate spellings the twin may use for a component the roster already allocates. Two names for
-        // one physical device is a naming fact, not an allocation rule, so the alias resolves to the
-        // registered component and inherits whatever controller the roster gives it.
-        private static readonly (string Alias, string Registered)[] Aliases =
+        private readonly DeploymentRoster _roster;
+        private readonly IReadOnlyDictionary<string, string> _aliases;
+
+        public ControllerAllocation(DeploymentRoster roster)
         {
-            ("Rejector", "Ejector"),
-            ("Robot_Pick_And_Place1", "Robot"),
-        };
-
-        private readonly IReadOnlyDictionary<string, ComponentEntry> _roster;
-
-        private ControllerAllocation(IReadOnlyDictionary<string, ComponentEntry> roster) => _roster = roster;
-
-        // The allocation for the routing mode this generation runs in (M262, full-RevPi or the partial
-        // swap). Taken by value so a caller holds a stable snapshot for the whole run.
-        public static ControllerAllocation Current => new(ComponentRegistry.ByName);
-
-        public PlcAssignment Of(string? componentName)
-        {
-            var entry = Lookup(componentName);
-            return entry?.Plc ?? PlcAssignment.Unknown;
+            _roster = roster ?? throw new ArgumentNullException(nameof(roster));
+            _aliases = LayoutCatalog.Current.Aliases;
         }
+
+        public PlcAssignment Of(string? componentName) => Lookup(componentName)?.Plc ?? PlcAssignment.Unknown;
 
         // Is this component hosted by whichever controller runs the Feed station (M262 or the RevPi)?
         public bool IsFeedSide(string? componentName) => ControllerMap.IsFeedController(Of(componentName));
@@ -58,12 +47,8 @@ namespace CodeGen.Mapping
         {
             if (string.IsNullOrWhiteSpace(componentName)) return null;
             var name = componentName.Trim();
-            if (_roster.TryGetValue(name, out var direct)) return direct;
-            foreach (var (alias, registered) in Aliases)
-                if (string.Equals(alias, name, StringComparison.OrdinalIgnoreCase) &&
-                    _roster.TryGetValue(registered, out var aliased))
-                    return aliased;
-            return null;
+            return _roster.Get(name)
+                ?? (_aliases.TryGetValue(name, out var registered) ? _roster.Get(registered) : null);
         }
     }
 }
