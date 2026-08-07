@@ -33,8 +33,8 @@ namespace MapperUI
         List<VueOneComponent> _loadedComponents = new();
         List<ComponentValidationRow> _validationRows = new();
         // In-session Device-column overrides. NOT display-only: btnTestStation1_Click reads this at
-        // generation time and converts RevPi picks into MapperConfig.RevPiComponents, which is what
-        // re-partitions ComponentRegistry. Not persisted across restarts.
+        // generation time and turns RevPi picks into the run's DeploymentProfile, which is what relocates
+        // those components. Not persisted across restarts.
         readonly Dictionary<string, string> _deviceOverrides = new(StringComparer.OrdinalIgnoreCase);
         // True while the grid is (re)populating, so CellValueChanged ignores programmatic writes.
         bool _populatingGrid;
@@ -378,8 +378,7 @@ namespace MapperUI
         // UI only: collect the inputs, hand them to the one generation path, show the result.
         async void btnTestStation1_Click(object sender, EventArgs e)
         {
-            // Generation runs in-process over mutable MapperConfig statics and a non-thread-safe
-            // ComponentRegistry cache, so a second click during the await would corrupt both runs.
+            // One generation at a time: two runs would race on the deployed tree they both write.
             if (_generating) return;
 
             try
@@ -505,13 +504,16 @@ namespace MapperUI
                 _populatingGrid = true;
                 try
                 {
+                var roster = new CodeGen.Mapping.DeploymentRoster(
+                    new CodeGen.Mapping.DeploymentProfile(_deviceOverrides
+                        .Where(kv => kv.Value == "RevPi").Select(kv => kv.Key)));
                 foreach (var comp in _loadedComponents)
                 {
                     var vr = Validate(comp, validator, cfg);
                     _validationRows.Add(vr);
 
-                    // Device (PLC) from the registry, unless overridden this session.
-                    var reg = CodeGen.Mapping.ComponentRegistry.Get(comp.Name);
+                    // Device (PLC) from the deployment roster, unless overridden this session.
+                    var reg = roster.Get(comp.Name);
                     string dev = _deviceOverrides.TryGetValue(comp.Name, out var ov)
                         ? ov
                         : (reg?.Plc.ToString() ?? "");
