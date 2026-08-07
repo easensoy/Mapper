@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -26,9 +26,10 @@ namespace CodeGen.Devices.M262
             TerminatorFb: "Stn1_Term",
             HmiAdapterWires: ResourceWireEmitter.HmiAdapterWires);
 
-        public static void Emit(MapperConfig cfg,
+        public static void Emit(GenerationContext ctx,
             SystemInjector.BindingApplicationReport report)
         {
+            var cfg = ctx.Config;
             var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
             if (eaeRoot == null)
             {
@@ -41,17 +42,17 @@ namespace CodeGen.Devices.M262
                 report.Missing.Add("[Wire] skipped, M262 sysres not found");
                 return;
             }
-            EmitFeedRing(cfg, sysresPath, report);
+            EmitFeedRing(ctx, sysresPath, report);
         }
 
         // The Feed-station ring wiring (Area/Station1/Feed_Station/Stn1_Term). Applied to whichever
         // resource hosts the Feed station — the M262 sysres (Emit) or the RevPi sysres
         // (RevPiDeviceEmitter). The syslay layout mirror runs once here (the 3 PLCs share one canvas).
-        internal static void EmitFeedRing(MapperConfig cfg, string sysresPath,
+        internal static void EmitFeedRing(GenerationContext ctx, string sysresPath,
             SystemInjector.BindingApplicationReport report)
         {
-            ResourceWireEmitter.EmitForResource(cfg, sysresPath, M262Anchors, report);
-            ResourceWireEmitter.ApplyLayoutToSyslay(cfg.ActiveSyslayPath, report);
+            ResourceWireEmitter.EmitForResource(ctx, sysresPath, M262Anchors, report);
+            ResourceWireEmitter.ApplyLayoutToSyslay(ctx, ctx.Config.ActiveSyslayPath, report);
         }
 
         private static string? LocateM262Sysres(string eaeRoot)
