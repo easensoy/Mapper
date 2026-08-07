@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Xml.Linq;
 using CodeGen.Configuration;
 using static CodeGen.Services.FbtXmlEditor;
 
@@ -265,23 +266,92 @@ namespace CodeGen.Services
             => DeployDatatype(eaeProjectDir, "RecipeStep",
                 TemplateDocument.Load(cfg, @"DataType\RecipeStep.dt"), result, "(sim Recipe struct)");
 
-        // The state_table slot a consumer receives a cross-controller process phase into. The value is the
-        // PRODUCER's allocated ProcessId, resolved from ProcessHandoffPlan -- the shipped template carries a
-        // literal only as a placeholder. Type-level, so the runtime supports one producer per consumer; the
-        // planner fails generation before reaching here if a model needs more.
-        internal static void SetProcessPhaseReceiverSlot(string eaeProjectDir, int slot, DeployResult result)
-            => EditDeployedFbt(eaeProjectDir, "Process1_Generic.fbt",
-                "Process1_Generic receiver-slot patch failed", result,
-                (doc, root, ns, fbt) =>
+        // Promote the process-phase receiver slot from a literal inside the composite to an instance input.
+        //
+        // The shipped Process1_Generic pins the slot as a Parameter on its internal ProcessStateBusHandler,
+        // so EVERY Process FB in a project receives its transported phase into the same state_table index --
+        // one consumer per project, and only if that one literal happens to equal its producer's id.
+        // Declaring rdy_id on the TYPE's interface and wiring it to the handler makes the slot a per-instance
+        // parameter, which is what lets each consumer name its own producer.
+        //
+        // Modelled on process_id, which is the same shape: an INT InputVar sampled WITH INIT and connected
+        // straight through to the handler. Idempotent, and structurally verified before it returns.
+        internal static void PromoteProcessPhaseReceiverSlot(string eaeProjectDir)
+            => RequireDeployedFbt(eaeProjectDir, "Process1_Generic.fbt",
+                "Process1_Generic receiver-slot promotion failed", (doc, root, ns, fbt) =>
             {
-                const string SlotParam = CodeGen.Translation.Process.Recipes.ProcessPhaseTransport.ReceiverSlotParam;
-                var param = root.Element(ns + "FBNetwork")?.Elements(ns + "Parameter")
-                    .FirstOrDefault(p => (string?)p.Attribute("Name") == SlotParam);
-                if (param == null)
+                const string Slot = CodeGen.Translation.Process.Recipes.ProcessPhaseTransport.ReceiverSlotParam;
+                var iface = root.Element(ns + "InterfaceList")
+                    ?? throw new InvalidOperationException($"{fbt}: no InterfaceList.");
+                var net = root.Element(ns + "FBNetwork")
+                    ?? throw new InvalidOperationException($"{fbt}: no FBNetwork.");
+                var inputVars = iface.Element(ns + "InputVars")
+                    ?? throw new InvalidOperationException($"{fbt}: InterfaceList declares no InputVars.");
+                var init = iface.Element(ns + "EventInputs")?.Elements(ns + "Event")
+                        .FirstOrDefault(e => (string?)e.Attribute("Name") == "INIT")
+                    ?? throw new InvalidOperationException($"{fbt}: no INIT event to associate {Slot} with.");
+                var dataConns = net.Element(ns + "DataConnections")
+                    ?? throw new InvalidOperationException($"{fbt}: FBNetwork has no DataConnections.");
+
+                // By TYPE, not by instance name: the handler is the FB that declares the slot, and a renamed
+                // instance must not silently skip the wiring.
+                var handler = net.Elements(ns + "FB")
+                        .FirstOrDefault(f => (string?)f.Attribute("Type") == "ProcessStateBusHandler")
+                    ?? throw new InvalidOperationException(
+                        $"{fbt}: no ProcessStateBusHandler instance, so {Slot} has nothing to drive.");
+                var handlerName = (string?)handler.Attribute("Name") ?? string.Empty;
+                var destination = handlerName + "." + Slot;
+
+                if (!inputVars.Elements(ns + "VarDeclaration").Any(v => (string?)v.Attribute("Name") == Slot))
+                    inputVars.Add(new XElement(ns + "VarDeclaration",
+                        new XAttribute("Name", Slot), new XAttribute("Type", "INT"),
+                        new XAttribute("Comment", "Consumer: state_table slot the transported process phase lands in")));
+
+                if (!init.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == Slot))
+                    init.Add(new XElement(ns + "With", new XAttribute("Var", Slot)));
+
+                if (!net.Elements(ns + "Input").Any(i => (string?)i.Attribute("Name") == Slot))
+                {
+                    var pin = new XElement(ns + "Input",
+                        new XAttribute("Name", Slot), new XAttribute("x", "300"),
+                        new XAttribute("y", "1900"), new XAttribute("Type", "Data"));
+                    var last = net.Elements(ns + "Input").LastOrDefault();
+                    if (last != null) last.AddAfterSelf(pin); else net.Add(pin);
+                }
+
+                if (!dataConns.Elements(ns + "Connection").Any(c => (string?)c.Attribute("Source") == Slot))
+                    dataConns.Add(new XElement(ns + "Connection",
+                        new XAttribute("Source", Slot), new XAttribute("Destination", destination)));
+
+                // The internal literal has to go: a Parameter and a data connection on the same input are two
+                // sources for one value, and the literal is exactly the project-wide slot being removed.
+                RemoveElems(handler.Elements(ns + "Parameter"), p => (string?)p.Attribute("Name") == Slot);
+
+                SaveXmlWithRetry(doc, fbt);
+
+                // Re-read what was written. An in-memory edit that never reached disk would leave every
+                // instance parameter addressing a pin the deployed type does not declare.
+                var check = LoadXmlWithRetry(fbt, LoadOptions.PreserveWhitespace).Root
+                    ?? throw new InvalidOperationException($"{fbt}: unreadable after the receiver-slot promotion.");
+                var cns = check.GetDefaultNamespace();
+                var missing = new List<string>();
+                if (!check.Descendants(cns + "VarDeclaration").Any(v => (string?)v.Attribute("Name") == Slot))
+                    missing.Add($"InputVar '{Slot}'");
+                if (!check.Descendants(cns + "With").Any(w => (string?)w.Attribute("Var") == Slot))
+                    missing.Add($"INIT With '{Slot}'");
+                if (!check.Descendants(cns + "Input").Any(i => (string?)i.Attribute("Name") == Slot))
+                    missing.Add($"FBNetwork input pin '{Slot}'");
+                if (!check.Descendants(cns + "Connection").Any(c => (string?)c.Attribute("Source") == Slot
+                        && (string?)c.Attribute("Destination") == destination))
+                    missing.Add($"data connection '{Slot}' -> '{destination}'");
+                if (check.Descendants(cns + "Parameter").Any(p => (string?)p.Attribute("Name") == Slot))
+                    missing.Add($"the internal '{Slot}' literal is still present");
+                if (missing.Count > 0)
                     throw new InvalidOperationException(
-                        $"Process1_Generic.fbt declares no '{SlotParam}' parameter; the cross-controller " +
-                        "process-phase transport has nowhere to land.");
-                param.SetAttributeValue("Value", slot);
+                        $"Process1_Generic receiver-slot promotion did not apply to {fbt}: " +
+                        string.Join("; ", missing) + ".");
+
+                MapperLogger.Info($"[Deploy] Process1_Generic: {Slot} promoted to an instance input -> {destination}");
             });
 
         // Recipe-struct collapse on Process1_Generic (gated by UseRecipeStruct); reduce==false restores the 6 arrays.
