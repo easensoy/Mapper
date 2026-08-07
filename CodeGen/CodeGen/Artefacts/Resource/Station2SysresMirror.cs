@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -14,9 +14,10 @@ namespace CodeGen.Devices.Core
         // Mirrors the Station-2 FBs from the syslay onto the M580 and BX1 resources (bucketed by
         // BucketFor), so those PLCs carry their own FBs not empty shells. Runs AFTER
         // Station2DeviceEmitter.EmitAll wrote the sysdev/sysres shells. Returns (M580 count, BX1 count).
-        public static (int M580, int BX1) EmitStation2Sysres(MapperConfig cfg)
+        public static (int M580, int BX1) EmitStation2Sysres(GenerationContext ctx)
         {
-            if (cfg == null) throw new ArgumentNullException(nameof(cfg));
+            if (ctx == null) throw new ArgumentNullException(nameof(ctx));
+            var cfg = ctx.Config;
             var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
             if (string.IsNullOrEmpty(eaeRoot)) return (0, 0);
 
@@ -27,10 +28,10 @@ namespace CodeGen.Devices.Core
             if (all.Count == 0) return (0, 0);
 
             int m580 = MirrorBucket(eaeRoot, "M580_dPAC",
-                all.Where(f => SysresFbMirror.BucketFor(f.Name) == PlcAssignment.M580).ToList(),
+                all.Where(f => SysresFbMirror.BucketFor(f.Name, ctx.Allocation) == PlcAssignment.M580).ToList(),
                 dpacFullInitId: "66C40EEF3F39D969", plcStartId: "ACED009B79DFCE69");
             int bx1 = MirrorBucket(eaeRoot, "Soft_dPAC",
-                all.Where(f => SysresFbMirror.BucketFor(f.Name) == PlcAssignment.BX1).ToList(),
+                all.Where(f => SysresFbMirror.BucketFor(f.Name, ctx.Allocation) == PlcAssignment.BX1).ToList(),
                 dpacFullInitId: "0FE5E1B2C3D4A5B6", plcStartId: "1A2B3C4D5E6F7081");
             return (m580, bx1);
         }
