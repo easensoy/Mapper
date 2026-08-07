@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Xml.Linq;
@@ -19,8 +19,8 @@ namespace CodeGen.Devices.RevPi
     // SysresFbMirror, and the Feed ring from M262SysresWireEmitter.EmitFeedRing. Only the RevPi identity
     // (ids/name/IP) and the Revolution Pi equipment JSON are RevPi-specific and live here.
     //
-    // Active only when MapperConfig.FeedStationController == RevPi; ComponentRegistry has by then
-    // relocated the Feed components onto PlcAssignment.RevPi, so SysresFbMirror.BucketFor routes them here.
+    // Active only when the run's DeploymentProfile selects RevPi components; the roster has by then
+    // relocated them onto PlcAssignment.RevPi, so SysresFbMirror.BucketFor routes them here.
     //
     // Physical Feed IO: the reference's Modbus word broker (PLC_RW_REVPI + a Modbus master .hcf). The
     // reference wires that broker to Jyotsna's direct-wire Process1_CAT actuator PINS (which this Mapper
@@ -64,9 +64,10 @@ namespace CodeGen.Devices.RevPi
 
         // Device stage (mirrors M262SysdevEmitter.Emit + M262TopologyEmitter.Emit): emit the Soft_dPAC
         // shell + topology + dfbproj, then mirror the Feed-station FBs onto the RevPi sysres.
-        public static SystemInjector.BindingApplicationReport EmitDevice(MapperConfig cfg,
+        public static SystemInjector.BindingApplicationReport EmitDevice(GenerationContext ctx,
             SystemInjector.BindingApplicationReport report)
         {
+            var cfg = ctx.Config;
             var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
             if (string.IsNullOrEmpty(eaeRoot))
             {
@@ -86,14 +87,14 @@ namespace CodeGen.Devices.RevPi
             // 0. Full swap only: RevPi REPLACES M262, so remove it (a real Test Runtime deep-wipes all
             //    devices first, so this is usually a no-op; it self-heals a target switch without a Clean).
             //    PARTIAL mode (Feeder/Checker on RevPi, M262 keeps the rest) MUST keep M262 -> skip the sweep.
-            if (!MapperConfig.PartialRevPi)
+            if (!ctx.Profile.PartialRevPi)
                 SweepM262Device(eaeRoot, report);
             else
                 // PARTIAL swap: the relocated components (Feeder/Checker/PartInHopper) move to the RevPi
                 // sysres, so a stale copy MUST NOT linger on the M262 sysres — a duplicate instance trips
                 // EAE "Repair Instances" + the "same key already added" load error. The M262 mirror drops
                 // them via the routing bucket, but this guarantees it even over a stale in-place tree.
-                SweepRelocatedFromM262Sysres(systemGuidDir, report);
+                SweepRelocatedFromM262Sysres(ctx, systemGuidDir, report);
 
             // 1. Soft_dPAC shell — sysdev + sysres skeleton + Properties + Simulation.Binding + topology
             //    equipment + topologyproj + dfbproj + the Modbus .hcf (the reference RevPi IO mechanism).
@@ -126,7 +127,7 @@ namespace CodeGen.Devices.RevPi
             if (File.Exists(sysresPath) && !string.IsNullOrWhiteSpace(syslayPath) && File.Exists(syslayPath))
             {
                 var feedFbs = SysresFbMirror.ReadTopLevelFbsWithSystemModelFallback(syslayPath)
-                    .Where(f => SysresFbMirror.BucketFor(f.Name) == PlcAssignment.RevPi)
+                    .Where(f => SysresFbMirror.BucketFor(f.Name, ctx.Allocation) == PlcAssignment.RevPi)
                     .ToList();
                 int mirrored = SysresFbMirror.MirrorFbsIntoSysres(sysresPath, feedFbs,
                     RevPiDpacFullInitFbId, RevPiPlcStartFbId);
@@ -148,9 +149,10 @@ namespace CodeGen.Devices.RevPi
 
         // Wire stage (mirrors M262SysresWireEmitter.Emit): the Feed ring on the RevPi sysres. Reuses the
         // exact Feed-station anchors so the wiring is identical regardless of the hosting device.
-        public static void WireResource(MapperConfig cfg,
+        public static void WireResource(GenerationContext ctx,
             SystemInjector.BindingApplicationReport report)
         {
+            var cfg = ctx.Config;
             var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
             if (string.IsNullOrEmpty(eaeRoot))
             {
@@ -164,15 +166,15 @@ namespace CodeGen.Devices.RevPi
                 report.Missing.Add("[Wire] skipped, RevPi sysres not found");
                 return;
             }
-            if (MapperConfig.PartialRevPi)
+            if (ctx.Profile.PartialRevPi)
                 // Partial swap: RevPi hosts only Feeder/Checker/PartInHopper (no Feed_Station). RevPi-local
                 // anchors leave the report ring OPEN at the seam -> EAE bridges it to the M262 Feed ring.
-                ResourceWireEmitter.EmitForResource(cfg, sysresPath, RevPiPartialAnchors, report);
+                ResourceWireEmitter.EmitForResource(ctx, sysresPath, RevPiPartialAnchors, report);
             else
-                M262SysresWireEmitter.EmitFeedRing(cfg, sysresPath, report);
+                M262SysresWireEmitter.EmitFeedRing(ctx, sysresPath, report);
 
             // Modbus IO broker + symlink bridge — AFTER the Feed ring so its connections survive.
-            RevPiIoBrokerInjector.Inject(sysresPath, cfg.ActiveSyslayPath, RevPiResourceName, report);
+            RevPiIoBrokerInjector.Inject(ctx.Profile, sysresPath, cfg.ActiveSyslayPath, RevPiResourceName, report);
         }
 
         static string ResolveRevPiSysresPath(string systemGuidDir) =>
@@ -186,10 +188,10 @@ namespace CodeGen.Devices.RevPi
         // Remove the relocated Feed components (RevPiComponents) from the M262 sysres so the partial swap
         // never leaves a duplicate instance on M262 (the RevPi sysres now hosts them). No-op once they're
         // already gone (the normal mirror-driven case); the guarantee is for a stale in-place tree.
-        static void SweepRelocatedFromM262Sysres(string systemGuidDir,
+        static void SweepRelocatedFromM262Sysres(GenerationContext ctx, string systemGuidDir,
             SystemInjector.BindingApplicationReport report)
         {
-            var names = MapperConfig.RevPiComponents;
+            var names = ctx.Profile.RevPiComponents;
             if (names.Count == 0) return;
             var m262Dir = Path.Combine(systemGuidDir, M262SysdevId);
             var sysres = Directory.Exists(m262Dir)
