@@ -87,7 +87,7 @@ namespace CodeGen.Translation.Process
         // WAIT rows can never disagree about which producer reaches which consumer.
         internal static Recipes.ProcessHandoffPlan HandoffPlan(IReadOnlyList<VueOneComponent> allComponents) =>
             Recipes.ProcessCompiler.HandoffPlan(
-                BuildCompilerCtx(allComponents, new Dictionary<string, int>()));
+                BuildCompilerCtx(allComponents, new Dictionary<string, int>(), contents: null));
 
         public static RecipeArrays Generate(VueOneComponent process,
             StationContents stationContents, IReadOnlyList<VueOneComponent> allComponents,
@@ -95,7 +95,7 @@ namespace CodeGen.Translation.Process
         {
             var scopedRegistry = BuildScopedComponentMap(stationContents.Sensors, stationContents.Actuators);
             var arrays = Recipes.ProcessCompiler.Compile(process, processId,
-                BuildCompilerCtx(allComponents, scopedRegistry));
+                BuildCompilerCtx(allComponents, scopedRegistry, stationContents));
 
             ValidateProcessIdInvariant(arrays, processId);
             ValidateSingleEndMarker(arrays);
@@ -107,16 +107,14 @@ namespace CodeGen.Translation.Process
             return arrays;
         }
 
+        // `contents` is null when only the handoff plan is wanted: that derivation reads process states,
+        // never a component slot, so the deployment-allocated overrides below have nothing to contribute.
         private static Recipes.ProcessCompiler.Ctx BuildCompilerCtx(
-            IReadOnlyList<VueOneComponent> all, IReadOnlyDictionary<string, int> scopedIds)
+            IReadOnlyList<VueOneComponent> all, IReadOnlyDictionary<string, int> scopedIds,
+            StationContents? contents)
         {
             var cat = RigCatalog.Current;
-            var pids = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["Feed_Station"] = MapperConfig.FeedStationProcessId,
-                ["Assembly_Station"] = MapperConfig.AssemblyProcessId,
-                ["Disassembly"] = MapperConfig.DisassemblyProcessId,
-            };
+            bool ringsMerged = Recipes.FeedRingMerge.Needed(all);
             var present = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             foreach (var si in cat.SensorInterlocks) present[si.Sensor] = si.PresentState;
             // Deployment-allocated slots override the local positional ones: these components report on a slot the
@@ -133,7 +131,13 @@ namespace CodeGen.Translation.Process
             // been told to move, and the cover sequence stopped dead with the gripper never gripping.
             foreach (var s in cat.SynthSensors) byName[s.Name] = s.Id;
             byName["Robot"] = cat.RobotActuatorId;
-            foreach (var n in TemplateMap.TopCoverSensorNames) byName[n] = MapperConfig.TopCoverSensorId;
+            // Recomputed from the same inputs the layout used, rather than read back from a static a
+            // previous generation may have left behind -- identical inputs, identical slot, by construction.
+            if (contents != null)
+            {
+                int coverSlot = StateTableAllocation.TopCoverSensorSlot(contents, ringsMerged);
+                foreach (var n in TemplateMap.TopCoverSensorNames) byName[n] = coverSlot;
+            }
             // The material bridge is whichever synthesised sensor rides the cross-controller ring segment: that
             // membership is what makes its level readable on the far controller, so it is taken from the topology
             // rather than named here. A merged (no-clamp) ring announces every process directly and needs none.
@@ -144,10 +148,12 @@ namespace CodeGen.Translation.Process
                 Ids = scopedIds,
                 IdsByName = byName,
                 All = all,
-                ProcessIdByName = pids,
+                ProcessIdByName = cat.ProcessSlots,
                 SensorPresent = present,
-                FeedProcessId = MapperConfig.FeedStationProcessId,
-                MergeFeedRing = Recipes.FeedRingMerge.Needed(all),
+                // Ring membership from controller allocation: two processes share a ring when the same
+                // controller hosts them. Topology, not process identity.
+                Allocation = ControllerAllocation.Current,
+                RingsMerged = ringsMerged,
                 MaterialBridgeId = bridge?.Id ?? -1,
             };
         }
