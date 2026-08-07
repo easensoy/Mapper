@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -41,16 +41,6 @@ namespace CodeGen.Configuration
         // Engine END->0 loop-back (ProcessRuntimeTemplatePatcher).
         public static bool EnableCyclicRestart = true;
 
-        public static bool MergeFeedRing = false;
-
-        // Computed per ring topology by SystemLayoutInjector; this default is a fallback.
-        public static int TopCoverSensorId = 6;
-
-        // Each must sit above the component id space (ValidateProcessIdInvariant enforces it); the Assembly->Disassembly handshake rides AssemblyProcessId.
-        public static int FeedStationProcessId    => RigCatalog.Current.ProcessIds.FeedStation;
-        public static int AssemblyProcessId       => RigCatalog.Current.ProcessIds.Assembly;
-        public static int DisassemblyProcessId    => RigCatalog.Current.ProcessIds.Disassembly;
-
         public static int RobotActuatorId         => RigCatalog.Current.RobotActuatorId;
 
         // Real rig DI sensors the twin doesn't model; kept OFF the M262 Feed ring, riding the M262->M580 cross-device segment so the report lands only in M580 state_table[id].
@@ -59,14 +49,8 @@ namespace CodeGen.Configuration
                 .Select(s => (s.Name, s.Pin, s.Id))
                 .ToArray();
 
-        public static bool EnableRobotTaskTail => CodeGen.Translation.HandoffPlanner.DischargeActive;
-
         public string MappingRulesPath { get; set; } = string.Empty;
         public string TemplateLibraryPath { get; set; } = string.Empty;
-        public string ActuatorTemplatePath { get; set; } = string.Empty;
-        public string SensorTemplatePath { get; set; } = string.Empty;
-        public string ProcessCATTemplatePath { get; set; } = string.Empty;
-        public string RobotTemplatePath { get; set; } = string.Empty;
         public string SyslayPath { get; set; } = string.Empty;
         public string SysresPath { get; set; } = string.Empty;
         public string SyslayPath2 { get; set; } = string.Empty;
@@ -217,10 +201,6 @@ namespace CodeGen.Configuration
         {
             MappingRulesPath = @"Input\VueOne_IEC61499_Mapping.xlsx",
             TemplateLibraryPath = @"C:\VueOneMapper\Template Library",
-            ActuatorTemplatePath = @"C:\Station1\IEC61499\Five_State_Actuator_CAT\Five_State_Actuator_CAT.fbt",
-            SensorTemplatePath = @"C:\Station1\IEC61499\Sensor_Bool_CAT\Sensor_Bool_CAT.fbt",
-            ProcessCATTemplatePath = @"C:\Station1\IEC61499\Process1_Generic\Process1_Generic.fbt",
-            RobotTemplatePath = @"C:\SMC_Rig\IEC61499\Robot_Task_CAT\Robot_Task_CAT.fbt",
             SyslayPath = @"C:\Station1\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000001\00000000-0000-0000-0000-000000000000.syslay",
             SysresPath = @"C:\Station1\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000002\00000000-0000-0000-0000-000000000000.sysres",
             SyslayPath2 = @"C:\Demonstrator\Demonstrator\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000001\00000000-0000-0000-0000-000000000000.syslay",
