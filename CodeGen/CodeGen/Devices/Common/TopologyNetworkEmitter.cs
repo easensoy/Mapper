@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using CodeGen.Configuration;
 using CodeGen.Devices.M262;
+using CodeGen.Translation;
 
 namespace CodeGen.Devices.Core
 {
@@ -34,8 +35,9 @@ namespace CodeGen.Devices.Core
             public int TopologyProjEntriesAdded { get; set; }
         }
 
-        public static EmitResult Emit(MapperConfig cfg)
+        public static EmitResult Emit(GenerationContext ctx)
         {
+            var cfg = ctx.Config;
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
             var result = new EmitResult();
 
@@ -101,7 +103,7 @@ namespace CodeGen.Devices.Core
             // RevPi (full OR partial swap) connects to the switch via its NIC_2, mirroring the reference
             // (Wire 275: NIC_2[Port1] -> Switch). Switch Port4 is free (Port1=M262, Port2=M580, Port3=BX1
             // EtherNet/IP). Without this the Revolution_Pi floats unconnected in Physical Views.
-            if (MapperConfig.FeedStationController == FeedController.RevPi || MapperConfig.PartialRevPi)
+            if (ctx.Profile.PartialRevPi)
             {
                 ForceWriteJson(topologyDir, "Wire_RevPi_to_Switch1.json", BuildWireJson(
                     identifier:                 "RevPi_to_Switch1",
