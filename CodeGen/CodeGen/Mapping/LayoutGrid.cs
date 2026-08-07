@@ -1,66 +1,23 @@
-using System.Linq;
+using CodeGen.Configuration;
 using CodeGen.Translation;
 
 namespace CodeGen.Mapping
 {
-    // Geometry for the SMC rig syslay canvas: (Plc, Column, Row) -> (X, Y) projection in shared-canvas
-    // coordinates. Per-PLC sysres files apply a translateToOrigin shift elsewhere.
+    // Geometry for the SMC rig syslay canvas: (Plc, Column, Row) -> (X, Y) in shared-canvas coordinates,
+    // projected from Config/layout.yml. Per-PLC sysres files apply a translateToOrigin shift elsewhere.
     public static class LayoutGrid
     {
-        // Actuator CATs render ~1400 wide, so a 1700 pitch leaves a ~300 gap with no overlap.
-        public const int ColumnPitchX = 1700;
+        public static int ColumnPitchX => LayoutCatalog.Current.Geometry.ColumnPitchX;
+        public static int FrameOriginY => LayoutCatalog.Current.Geometry.FrameOriginY;
+        public static int FrameHeight => LayoutCatalog.Current.Geometry.FrameHeight;
 
-        public const int FrameOriginY = 1700;
+        // Left edge of each controller's band, the X of its column 0, and its fitted width. The bands are
+        // sized not to overlap; combined with MoveStyle="None" on every Frame, EAE renders them at exactly
+        // these bounds instead of auto-growing one band around a neighbour's FBs.
+        public static int FrameOriginX(PlcAssignment plc) => LayoutCatalog.Current.Band(plc).FrameOriginX;
+        public static int ColumnBaseX(PlcAssignment plc) => LayoutCatalog.Current.Band(plc).ColumnBaseX;
+        public static int FrameWidth(PlcAssignment plc) => LayoutCatalog.Current.Band(plc).FrameWidth;
 
-        public const int FrameHeight = 5300;
-
-
-        // Left edge of each PLC zone; origins follow the prior zone's fitted right edge (~250 gap).
-        public static int FrameOriginX(PlcAssignment plc) => plc switch
-        {
-            PlcAssignment.M262  => 1800,
-            PlcAssignment.RevPi => 1800,   // RevPi hosts the Feed station in M262's band
-            PlcAssignment.M580  => 10800,
-            PlcAssignment.BX1   => 23200,
-            _ => 0,
-        };
-
-        // X of column 0 for each PLC (FrameOriginX + 200 inside the frame); each zone starts right
-        // after the prior zone's fitted right edge.
-        public static int ColumnBaseX(PlcAssignment plc) => plc switch
-        {
-            PlcAssignment.M262  => 2000,
-            PlcAssignment.RevPi => 2000,
-            PlcAssignment.M580  => 11000,
-            PlcAssignment.BX1   => 23400,
-            _ => 0,
-        };
-
-        // Y per row, spaced to clear the EAE-rendered FB body in the row above (Process1_Generic
-        // ≈800, Five_State ≈1400) while keeping the canvas tight.
-        public static int RowY(PlcAssignment plc, LayoutRow row) => row switch
-        {
-            LayoutRow.Floating => 200,
-            LayoutRow.Hmi      => 1200,
-            LayoutRow.Station  => 2100,
-            LayoutRow.Process  => 2900,
-            LayoutRow.Sensor   => 2900,
-            LayoutRow.Actuator => 4100,
-            _ => 0,
-        };
-
-
-        // Frame width per PLC zone — three non-overlapping bands with small gaps. Combined with
-        // MoveStyle="None" on every Frame, EAE renders them at exactly these bounds (no auto-grow).
-        public static int FrameWidth(PlcAssignment plc) => plc switch
-        {
-            PlcAssignment.M262  => 8500,    // 1800..10300 (gap 1500 to M580 origin)
-            PlcAssignment.RevPi => 8500,
-            PlcAssignment.M580  => 16000,   // 11800..27800 (gap 400 to BX1 origin)
-            PlcAssignment.BX1   => 6600,    // 28200..34800 (last zone)
-            _ => 0,
-        };
-
-
+        public static int RowY(PlcAssignment plc, LayoutRow row) => LayoutCatalog.Current.RowY(row.ToString());
     }
 }
