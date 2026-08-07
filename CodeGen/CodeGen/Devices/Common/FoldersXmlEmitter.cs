@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Xml.Linq;
@@ -24,10 +24,9 @@ namespace CodeGen.Devices.Core
             public string? FilePath { get; set; }
         }
 
-        public static EmitResult Register(MapperConfig cfg) =>
-            Register(cfg, Array.Empty<string>());
-
-        public static EmitResult Register(MapperConfig cfg, params string[] additionalSysdevIds)
+        // partialRevPi adds the RevPi sysdev alongside the M262 that keeps the rest of the Feed station.
+        public static EmitResult Register(MapperConfig cfg, bool partialRevPi = false,
+            params string[] additionalSysdevIds)
         {
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
             var result = new EmitResult();
@@ -83,13 +82,10 @@ namespace CodeGen.Devices.Core
                      .Where(s => s.Length > 0),
                 StringComparer.OrdinalIgnoreCase);
 
-            // The Feed station runs on M262 (default) or is FULLY swapped to RevPi (M262 deleted). In
-            // PARTIAL mode (Feeder/Checker on RevPi, M262 keeps the rest) BOTH coexist -> register both.
-            var feedSysdevIds = MapperConfig.FeedStationController == FeedController.RevPi
-                ? new[] { RevPiSysdevId }
-                : MapperConfig.PartialRevPi
-                    ? new[] { M262SysdevId, RevPiSysdevId }
-                    : new[] { M262SysdevId };
+            // The M262 always hosts the Feed station; the partial swap adds a RevPi alongside it.
+            var feedSysdevIds = partialRevPi
+                ? new[] { M262SysdevId, RevPiSysdevId }
+                : new[] { M262SysdevId };
             foreach (var sysdevId in feedSysdevIds
                          .Concat(new[] { M580SysdevId, BX1SysdevId })
                          .Concat(additionalSysdevIds ?? Array.Empty<string>()))
