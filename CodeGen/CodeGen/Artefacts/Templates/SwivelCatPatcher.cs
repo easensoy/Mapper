@@ -1,9 +1,11 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Xml.Linq;
 using CodeGen.Configuration;
+using CodeGen.Mapping;
+using CodeGen.Models;
 using static CodeGen.Services.FbtXmlEditor;
 
 namespace CodeGen.Services
@@ -695,62 +697,114 @@ namespace CodeGen.Services
             catch (Exception ex) { result.Warnings.Add($"Swivel brake composite patch failed: {ex.Message}"); }
         }
 
-        // SOLE writer of the swivel core's INIT arcs, and it BLOCKS startup motion outright.
+        // SOLE writer of the swivel core's INIT arcs, derived from the twin.
         //
-        // Deliberate hardcode, decided at the rig: initialisation must never move the arm. The committed template
-        // acts on a startup sensor reading (INIT -> AtWork1 holds the Work1 coil, INIT -> ToWork2 energises the
-        // Work2 coil), and the reference project's INIT -> ToHome drives it to centre -- both move the arm before
-        // any recipe command. Reporting the sensed position with both coils FALSE was also tried and still left
-        // the arm unheld and un-homed. Cycles two onward are correct, so only INIT is the problem: it is reduced
-        // to a single unconditional arc into AtHomeInit, whose algorithm writes both coils FALSE and reports 0.
-        // The arm therefore stays exactly where it is until the recipe commands it, and every later cycle runs the
-        // normal ECC unchanged.
-        internal static void PatchSwivelBlockStartupMotion(string eaeProjectDir, DeployResult result)
-            => EditSwivelCore(eaeProjectDir, "SevenStateCentreHomeActuator.fbt startup-block patch failed", result,
+        // The model states where a cycle begins: the actuator's Initial_State. Startup therefore has one job --
+        // establish that state before any recipe command runs -- and the CAT contract offers exactly two ways to
+        // do it, so the arcs write themselves: where the work sensors read nothing the arm already is at its
+        // centre reference and is CLASSIFIED there; where one of them reads, the arm is at that work position and
+        // is DRIVEN to centre. Nothing is assumed about a position no sensor reports.
+        //
+        // A model whose swivel does not declare its centre stop as the initial state cannot be honoured by this
+        // CAT, and generation fails rather than invent a startup policy: an unheld three-position pneumatic that
+        // is neither classified nor driven simply drifts, and the first recipe command then starts from an
+        // unknown place -- which is a collision, not a warning.
+        internal static void PatchSwivelStartup(string eaeProjectDir,
+            IReadOnlyList<VueOneComponent> allComponents, DeployResult result)
+        {
+            var startup = ResolveStartupState(allComponents);
+            // No centre-home swivel in this model: the type is deployed but never instantiated, so its
+            // startup is not ours to rewrite. Leaving the shipped template alone is what keeps an
+            // uninstantiated type from shipping with an ECC that can never leave INIT.
+            if (startup.Count == 0) return;
+            EditSwivelCore(eaeProjectDir, "SevenStateCentreHomeActuator.fbt startup patch failed", result,
                 (doc, root, ns, fbt) =>
             {
                 var basic = root.Descendants(ns + "BasicFB").FirstOrDefault();
                 var ecc = basic?.Element(ns + "ECC");
                 if (basic == null || ecc == null)
                 {
-                    result.Warnings.Add("SevenStateCentreHomeActuator.fbt: no BasicFB/ECC; startup block skipped.");
+                    result.Warnings.Add("SevenStateCentreHomeActuator.fbt: no BasicFB/ECC; startup patch skipped.");
                     return;
                 }
 
-                bool changed = false;
-
-                // Retire any earlier startup-classification states.
+                // Retire any earlier startup-classification states so re-deploying converges.
                 foreach (var name in new[] { "StartupAtWork1", "StartupAtWork2" })
                 {
-                    foreach (var e in ecc.Elements(ns + "ECState")
-                                 .Where(e => (string?)e.Attribute("Name") == name).ToList())
-                    { e.Remove(); changed = true; }
-                    foreach (var a in basic.Elements(ns + "Algorithm")
-                                 .Where(a => (string?)a.Attribute("Name") == name).ToList())
-                    { a.Remove(); changed = true; }
+                    RemoveElems(ecc.Elements(ns + "ECState"), e => (string?)e.Attribute("Name") == name);
+                    RemoveElems(basic.Elements(ns + "Algorithm"), a => (string?)a.Attribute("Name") == name);
                 }
+                RemoveElems(ecc.Elements(ns + "ECTransition"), e =>
+                    (string?)e.Attribute("Source") == "INIT"
+                    || ((string?)e.Attribute("Source") ?? "").StartsWith("Startup", StringComparison.Ordinal)
+                    || ((string?)e.Attribute("Destination") ?? "").StartsWith("Startup", StringComparison.Ordinal));
 
-                // Drop EVERY arc out of INIT: none of them may act on a startup sensor reading.
-                foreach (var e in ecc.Elements(ns + "ECTransition")
-                             .Where(e => (string?)e.Attribute("Source") == "INIT"
-                                      || (string?)e.Attribute("Destination") == "StartupAtWork1"
-                                      || (string?)e.Attribute("Destination") == "StartupAtWork2"
-                                      || (string?)e.Attribute("Source") == "StartupAtWork1"
-                                      || (string?)e.Attribute("Source") == "StartupAtWork2").ToList())
-                { e.Remove(); changed = true; }
+                foreach (var (destination, condition) in startup)
+                    ecc.Add(new XElement(ns + "ECTransition",
+                        new XAttribute("Source", "INIT"),
+                        new XAttribute("Destination", destination),
+                        new XAttribute("Condition", condition)));
 
-                // One unconditional arc to the coils-off rest state, so the ECC always leaves INIT and the arm is
-                // never driven at startup. AtHomeInit reports 0; the first recipe command moves it from there.
-                ecc.Add(new XElement(ns + "ECTransition",
-                    new XAttribute("Source", "INIT"),
-                    new XAttribute("Destination", "AtHomeInit"),
-                    new XAttribute("Condition", "1")));
-
-                if (!changed) return;
                 doc.Save(fbt);
                 result.PatchesApplied.Add(
-                    "SevenStateCentreHomeActuator.fbt: startup motion blocked (INIT -> AtHomeInit only, both coils off)");
+                    $"SevenStateCentreHomeActuator.fbt: {startup.Count} startup arc(s) derived from the twin's " +
+                    "declared initial state");
             });
+        }
+
+        // The CAT's startup vocabulary: which ECC state each sensor reading resolves to. AtHomeInit classifies
+        // (both coils FALSE, reports 0); ToHome drives the arm to its centre reference.
+        private static readonly (string Sensor, string Destination)[] StartupFromWorkSensor =
+        {
+            ("atWork1", "ToHome"),
+            ("atWork2", "ToHome"),
+        };
+
+        // INIT arcs for the one startup the model declares. Every centre-home swivel in the project must agree:
+        // the arcs live on the shared TYPE, so two instances with different declared starts cannot both be honoured.
+        private static List<(string Destination, string Condition)> ResolveStartupState(
+            IReadOnlyList<VueOneComponent> allComponents)
+        {
+            var swivels = allComponents
+                .Where(c => string.Equals(TemplateMap.ResolveActuatorCatType(c),
+                    TemplateMap.SevenStateCentreHomeCat, StringComparison.Ordinal))
+                .ToList();
+            if (swivels.Count == 0) return new List<(string, string)>();
+
+            var declared = swivels
+                .Select(c => (Component: c, State: c.States.FirstOrDefault(s => s.InitialState)))
+                .ToList();
+
+            var undeclared = declared.Where(d => d.State == null).Select(d => d.Component.Name).ToList();
+            if (undeclared.Count > 0)
+                throw new InvalidOperationException(
+                    $"[Startup] {string.Join(", ", undeclared)} resolve to {TemplateMap.SevenStateCentreHomeCat} " +
+                    "but declare no Initial_State, so where the arm starts a cycle is unstated and the startup " +
+                    "arcs cannot be derived. Mark the centre stop as the initial state in Control.xml.");
+
+            var atWork = declared.Where(d => !d.State!.StaticState || d.State.StateNumber != CentreHomeStop).ToList();
+            if (atWork.Count > 0)
+                throw new InvalidOperationException(
+                    "[Startup] " + string.Join("; ", atWork.Select(d =>
+                        $"'{d.Component.Name}' declares initial state '{d.State!.Name}' (State_Number " +
+                        $"{d.State.StateNumber}, StaticState {d.State.StaticState})")) +
+                    $". {TemplateMap.SevenStateCentreHomeCat} can only establish its centre stop " +
+                    $"(State_Number {CentreHomeStop}) at startup: from anywhere else it would have to move the arm " +
+                    "to a position no sensor confirms. Declare the centre stop as the initial state, or model the " +
+                    "actuator with a CAT whose startup contract covers that position.");
+
+            // Classify home only when NEITHER work sensor reads; drive home from whichever one does.
+            var noWork = string.Join(" AND ", StartupFromWorkSensor.Select(s => s.Sensor + " = FALSE"));
+            var arcs = new List<(string, string)> { ("AtHomeInit", noWork) };
+            foreach (var (sensor, destination) in StartupFromWorkSensor)
+                arcs.Add((destination, string.Join(" AND ",
+                    StartupFromWorkSensor.Select(o => o.Sensor + (o.Sensor == sensor ? " = TRUE" : " = FALSE"))
+                        .Append("atHome = FALSE"))));
+            return arcs;
+        }
+
+        // The centre-home CAT settles its centre stop to 0; the recipe commands use the same encoding.
+        private const int CentreHomeStop = 0;
 
         // Wires AtHome to the coil-clearing 'atHome' algorithm + output_event so the Output
         // SYMLINKMULTIVARSRC writes both work coils FALSE (swaps which existing algorithm AtHome runs).
