@@ -505,8 +505,9 @@ namespace MapperUI
                 try
                 {
                 var roster = new CodeGen.Mapping.DeploymentRoster(
-                    new CodeGen.Mapping.DeploymentProfile(_deviceOverrides
-                        .Where(kv => kv.Value == "RevPi").Select(kv => kv.Key)));
+                    new CodeGen.Mapping.DeploymentProfile(
+                        _deviceOverrides.Where(kv => kv.Value == "RevPi").Select(kv => kv.Key),
+                        CodeGen.Configuration.LayoutCatalog.Load()));
                 foreach (var comp in _loadedComponents)
                 {
                     var vr = Validate(comp, validator, cfg);
