@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -47,10 +47,6 @@ namespace CodeGen.Translation
             var reader = new CodeGen.IO.SystemXmlReader();
             var allComponents = reader.ReadAllComponents(controlXmlPath);
 
-            // Merge the M262 Feed ring into the cross-PLC ring only when a Feed process has a cross-controller gate.
-            Configuration.MapperConfig.MergeFeedRing =
-                Process.Recipes.FeedRingMerge.Needed(allComponents);
-
             // Every process-to-process handoff the twin declares, with transports resolved. One derivation per
             // generation, read by both the recipe rows and the backend wiring so they cannot disagree.
             var handoffPlan = Process.ProcessRecipeArrayGenerator.HandoffPlan(allComponents);
@@ -64,7 +60,7 @@ namespace CodeGen.Translation
             var fullContents = grouping.GroupStationContents(process, allComponents);
 
             // Order assigns state_table index / actuator_id / recipe Wait1Id; ComponentRegistry owns it.
-            var allowedActuators = ComponentRegistry.IdOrderActuators(MapperConfig.EnableRobotTaskTail);
+            var allowedActuators = ComponentRegistry.IdOrderActuators(HandoffPlanner.DischargeActive);
             var allowedSensors = ComponentRegistry.IdOrderSensors;
 
             // Source from full Control.xml (StationGroupingService only populates Feed_Station's conditions); grippers are Type="Robot", so accept both.
@@ -81,6 +77,11 @@ namespace CodeGen.Translation
                         string.Equals(c.Type, "Sensor", StringComparison.OrdinalIgnoreCase) &&
                         string.Equals(c.Name, n, StringComparison.Ordinal)))
                     .Where(s => s != null).Select(s => s!).ToList());
+
+            // Planning is finished here: the twin has been read, the station resolved and every handoff
+            // classified. Publishing it is what lets the device emitters -- which run later and hold only a
+            // resource on disk -- read the same decisions instead of guessing at them.
+            var plan = GenerationPlan.Publish(allComponents, contents, handoffPlan);
 
             var fileName = Path.GetFileName(targetSyslayPath);
             var fullPath = targetSyslayPath;
@@ -101,59 +102,18 @@ namespace CodeGen.Translation
             // It then keeps the SAME reserved slot (HandoffPlanner.PartAtAssembly.Id), which sits in the
             // hole TopCoverSenosr's pin leaves behind -- so it must NOT push the actuator range up, or
             // every actuator id (and with it every recipe slot, interlock SourceID and HCF binding) shifts.
-            int actuatorIdStart = contents.Sensors.Count
-                - contents.Sensors.Count(s => HandoffPlanner.IsPartAtAssembly(s.Name));
-            // process_ids stay in [0..19] (state_table ARRAY[20]) and above the component id space (max actuator_id 16), so no Wait1Id collides with one.
-            int assemblyProcessId = MapperConfig.AssemblyProcessId;
-            int disassemblyProcessId = MapperConfig.DisassemblyProcessId;
-            // Feed_Station keeps process_id 10 (== Shaft_Hr); harmless under MergeFeedRing (Feed only WAITs, its CMD states 1/3 ≠ Shaft_Hr targets 0/2).
-            int processId = MapperConfig.FeedStationProcessId;
+            int actuatorIdStart = StateTableAllocation.ActuatorIdStart(contents.Sensors);
+            // Process slots are allocated in Config/smc-rig.yml, keyed by the twin's own process name. They
+            // stay above the component id space, so no Wait1Id collides with one. A slot may still coincide
+            // with a Feed component id (10 == Shaft_Hr): harmless once the rings merge, because Feed only
+            // WAITs there and its CMD states 1/3 are values Shaft_Hr never reports.
+            var processSlots = RigCatalog.Current;
+            int processId = processSlots.SlotOfProcess(contents.Process.Name);
 
-            // TopCoverSenosr's state_table slot -- computed, model-independent (nothing to do with the clamp).
-            // Occupy every id held by an ASSEMBLY-ring member (M580/BX1 components, the cross-PLC segment, and --
-            // when MergeFeedRing merges the rings -- the Feed components), plus the synth/process ids, then take the
-            // highest free component-range slot. The covers are occupied by MarkOcc below at their REAL positional
-            // ids (13/14/15 no-clamp, 14/15/16 clamp) -- NOT from a fixed RigCatalog value, which drifts when Clamp is
-            // absent (RigCatalog says 14/15/16 but the covers shift down to 13/14/15) and would wrongly reserve 16.
-            // Clamp: the Feed ids sit on a SEPARATE ring -> {0,4,5,6} free -> 6 (the rig-proven value). Merged
-            // no-clamp: the Feed + M580 + cover ids fill [0..15] but nothing occupies 16 -> 16 (a truly free slot;
-            // pinning it to 6 collides with Transfer on the merged ring and deadlocks the cover-place gate).
-            var occ = new HashSet<int> { assemblyProcessId, disassemblyProcessId, MapperConfig.RobotActuatorId };
-            foreach (var syn in MapperConfig.M262SynthSensors) occ.Add(syn.Id);            // PartAtAssembly (3)
-            var cross = RigCatalog.Current.CrossRingSegment;                               // Ejector/Robot/PartAtAssembly
-            void MarkOcc(string nm, int id)
-            {
-                if (CodeGen.Mapping.TemplateMap.IsTopCoverSensor(nm)) return; // this is the slot being placed
-                var plc = HcfSymbolIndex.NameBasedPlcGuess(nm);
-                if (plc is PlcAssignment.M580 or PlcAssignment.BX1 || cross.Contains(nm) || MapperConfig.MergeFeedRing)
-                    occ.Add(id);
-            }
-            for (int i = 0; i < contents.Sensors.Count; i++)
-                MarkOcc(contents.Sensors[i].Name,
-                    HandoffPlanner.IsPartAtAssembly(contents.Sensors[i].Name)
-                        ? HandoffPlanner.PartAtAssembly.Id      // pinned, same slot the synth would take
-                        : sensorIdStart + i);
-            for (int i = 0; i < contents.Actuators.Count; i++)
-            {
-                // The robot task arm is APPENDED to allowedActuators, so its LOCAL positional id here is wrong --
-                // globally it takes RobotActuatorId (already reserved in occ above), well outside the cover range.
-                // Marking its local slot would falsely reserve a free cover slot (the id-16 no-clamp collision).
-                if (CodeGen.Mapping.TemplateMap.IsRobotTaskArm(contents.Actuators[i])) continue;
-                MarkOcc(contents.Actuators[i].Name, actuatorIdStart + i);
-            }
-            // Total by construction: assign or throw. A silent skip would leave the static holding the
-            // PREVIOUS generation's slot (MapperUI generates in-process), and a wrong cover slot produces
-            // no error -- the cover-place gate simply waits on a component that never reports.
-            int coverSlot = -1;
-            for (int slot = 16; slot >= 0; slot--)
-                if (!occ.Contains(slot)) { coverSlot = slot; break; }
-            if (coverSlot < 0)
-                throw new InvalidOperationException(
-                    "No free state_table slot for the top-cover sensor: every id in [0..16] is claimed by an " +
-                    $"Assembly-ring member (occupied = {string.Join(",", occ.Where(i => i <= 16).OrderBy(i => i))}). " +
-                    "The cover interlock cannot be placed without colliding with another component's report. " +
-                    "Widening state_table past 20 entries touches every CAT's updateComponentState.");
-            MapperConfig.TopCoverSensorId = coverSlot;
+            // TopCoverSenosr reports onto the Assembly ring, so its slot must be free on THAT ring rather
+            // than the one its position would give it. StateTableAllocation owns the computation; the plan
+            // carries the answer to the recipe and the sensor emission below.
+            int coverSlot = plan.TopCoverSensorSlot;
 
 
 
@@ -206,7 +166,8 @@ namespace CodeGen.Translation
             var (processOuter, processNested, processRecipe) = BuildProcessFbParameters(
                 contents.Process, allComponents, processInstanceName, processId, contents,
                 useRecipeStruct: config != null && config.UseRecipeStruct,
-                    emitProcessTelemetry: config != null && config.MqttPublishEnabled);
+                    emitProcessTelemetry: config != null && config.MqttPublishEnabled,
+                    receiverSlot: handoffPlan.ReceiverSlotOf(contents.Process.Name));
             if (processRecipe != null) phaseNames[processInstanceName] = processRecipe.ProcessPhaseNames;
 
             // EAE rejects a Parameter not declared as an InputVar on the FBType (ERR_MEMBER_VAR_NOTFOUND).
@@ -221,8 +182,10 @@ namespace CodeGen.Translation
                     if (processRecipe.StepType[i] != 1) continue;
                     var t = (processRecipe.CmdTargetName[i] ?? string.Empty).Trim();
                     if (t.Length == 0) continue;
-                    // A process-announce CMD (a process publishing its own model-state onto its process_id slot)
-                    // is not an actuator move; the retract check applies only to real actuators.
+                    // A process-announce CMD (a process publishing its own model-state, whether onto its own
+                    // process_id slot or across the phase transport) is not an actuator move; the retract
+                    // check applies only to real actuators.
+                    if (string.Equals(t, Process.Recipes.ProcessPhaseTransport.CommandToken, StringComparison.OrdinalIgnoreCase)) continue;
                     if (allComponents.Any(c => string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase)
                         && string.Equals((c.Name ?? string.Empty).Trim(), t, StringComparison.OrdinalIgnoreCase))) continue;
                     if (processRecipe.CmdStateArr[i] == 1) adv.Add(t);
@@ -261,10 +224,11 @@ namespace CodeGen.Translation
                 var assemblyName = InstanceNameResolver.Resolve(assemblyStationProc,
                     overrides.ByComponentId, overrides.ByVueOneName);
                 var (aOuter, aNested, aRecipe) = BuildProcessFbParameters(
-                    assemblyStationProc, allComponents, assemblyName, assemblyProcessId,
+                    assemblyStationProc, allComponents, assemblyName, processSlots.SlotOfProcess(assemblyStationProc.Name),
                     contents: contents,
                     useRecipeStruct: config != null && config.UseRecipeStruct,
-                    emitProcessTelemetry: config != null && config.MqttPublishEnabled);
+                    emitProcessTelemetry: config != null && config.MqttPublishEnabled,
+                    receiverSlot: handoffPlan.ReceiverSlotOf(assemblyStationProc.Name));
                 builder.AddFB(FBIdGenerator.GenerateFBId(assemblyStationProc.ComponentID),
                     assemblyName, "Process1_Generic", "Main", 12200, 1460,
                     aOuter, aNested);
@@ -292,10 +256,11 @@ namespace CodeGen.Translation
                     overrides.ByComponentId, overrides.ByVueOneName);
                 disassemblyFbName = disassyName;
                 var (dOuter, dNested, dRecipe) = BuildProcessFbParameters(
-                    disassyProc, allComponents, disassyName, disassemblyProcessId,
+                    disassyProc, allComponents, disassyName, processSlots.SlotOfProcess(disassyProc.Name),
                     contents: contents,
                     useRecipeStruct: config != null && config.UseRecipeStruct,
-                    emitProcessTelemetry: config != null && config.MqttPublishEnabled);
+                    emitProcessTelemetry: config != null && config.MqttPublishEnabled,
+                    receiverSlot: handoffPlan.ReceiverSlotOf(disassyProc.Name));
                 builder.AddFB(FBIdGenerator.GenerateFBId(disassyProc.ComponentID),
                     disassyName, "Process1_Generic", "Main", 20800, 1460,
                     dOuter, dNested);
@@ -357,7 +322,7 @@ namespace CodeGen.Translation
                 int assignedId = actuatorIdStart + i;
                 var fbType = ResolveActuatorFBType(actuator);
                 // Force the UR3e's dedicated non-colliding slot (its positional id clashes on the M580 state_table) so CAT actuator_id == robot Wait1Id.
-                if (MapperConfig.EnableRobotTaskTail && TemplateMap.IsRobotTaskArm(actuator))
+                if (HandoffPlanner.DischargeActive && TemplateMap.IsRobotTaskArm(actuator))
                     assignedId = MapperConfig.RobotActuatorId;
                 var displayName = InstanceNameResolver.Resolve(actuator,
                     overrides.ByComponentId, overrides.ByVueOneName);
@@ -429,7 +394,7 @@ namespace CodeGen.Translation
                 // synth sensor at slot 3. It stays counted in contents.Sensors, so actuator ids are unshifted.
                 if (
                     CodeGen.Mapping.TemplateMap.IsTopCoverSensor(sensor.Name))
-                    assignedId = MapperConfig.TopCoverSensorId;
+                    assignedId = coverSlot;
                 // Twin-declared PartAtAssembly takes the slot the synth injection reserves for it, so a
                 // model that declares it and one that does not generate the same ids.
                 else if (HandoffPlanner.IsPartAtAssembly(sensor.Name))
@@ -458,7 +423,7 @@ namespace CodeGen.Translation
             }
 
             // Synthesized M262 sensors: EXPLICIT ids so they never shift Feed actuator ids; off every report ring, so the Feed ring stays byte-identical.
-            if (MapperConfig.EnableRobotTaskTail)
+            if (HandoffPlanner.DischargeActive)
             {
                 int synthY = 5200;
                 string prevSynthInit = "PartInHopper";
@@ -582,17 +547,9 @@ namespace CodeGen.Translation
             // consumer sit on different rings. CrossReference=True tells EAE to auto-generate the UDP proxy;
             // both ends are Process1_Generic. Syslay-only: the sysres leaves these boundary ports OPEN and EAE
             // bridges from here, exactly as it does for the ejector/robot cross-hops.
-            var crossLinks = handoffPlan.CrossControllerLinks().ToList();
-
-            // One consumer input can carry one source, and the receiving slot is type-level, so two producers
-            // reaching the same consumer cannot be represented. Fail rather than emit a double-driven input.
-            foreach (var g in crossLinks.GroupBy(h => h.ConsumerName, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1))
-                throw new InvalidOperationException(
-                    $"[Handoff] '{g.Key}' consumes cross-controller phases from {g.Count()} producers " +
-                    $"({string.Join(", ", g.Select(h => h.ProducerName))}). The process-phase transport carries one " +
-                    "producer per consumer, so this model needs a runtime interface that accepts multiple sources.");
-
-            foreach (var link in crossLinks)
+            // One link per (producer, consumer) pair. The plan has already rejected any fan-in the consumer's
+            // single input group cannot carry, so every link here drives one input from one source.
+            foreach (var link in handoffPlan.CrossControllerLinks())
             {
                 var producerFb = ResolveProcessFbName(link.ProducerName, allComponents, overrides, contents.Process, processInstanceName)
                     ?? throw new InvalidOperationException(
@@ -607,14 +564,6 @@ namespace CodeGen.Translation
                 builder.AddDataConnection($"{producerFb}.{Process.Recipes.ProcessPhaseTransport.DataOut}",
                     $"{consumerFb}.{Process.Recipes.ProcessPhaseTransport.DataIn}", crossReference: true);
             }
-
-            // The receiving slot is the producer's allocated ProcessId, written into the runtime type rather
-            // than left as the template's placeholder literal.
-            var eaeRootForSlot = config == null ? null : DeriveDemonstratorEaeRoot(config);
-            if (!string.IsNullOrEmpty(eaeRootForSlot))
-                foreach (var slot in crossLinks.Select(h => h.ProducerProcessId).Distinct())
-                    CodeGen.Services.ProcessRuntimeTemplatePatcher.SetProcessPhaseReceiverSlot(
-                        eaeRootForSlot, slot, new CodeGen.Services.DeployResult());
 
             _ = config;
 
@@ -742,7 +691,7 @@ namespace CodeGen.Translation
             }
 
             // M262 Ejector is open-loop (only the DO03 coil, no DIs), so force sensorless or a sensored WAIT stalls forever.
-            if (MapperConfig.EnableRobotTaskTail
+            if (HandoffPlanner.DischargeActive
                 && string.Equals(actuator.Name, "Ejector", StringComparison.OrdinalIgnoreCase))
             {
                 workSensorFitted = false;
@@ -755,7 +704,7 @@ namespace CodeGen.Translation
             // timer-acknowledge the close (a fast, bounded motion) -- the same reason CoverPnp_Gripper is
             // already sensorless. Position actuators (shaft_hr/vr) keep their real sensors. Scoped to the
             // no-clamp (_vc) path so the clamp/M262 output stays byte-identical.
-            if (MapperConfig.MergeFeedRing
+            if (GenerationPlan.Current.RingsMerged
                 && actuator.Name.IndexOf("Gripper", StringComparison.OrdinalIgnoreCase) >= 0
                 && !IsBx1CoverActuator(actuator.Name))
             {
@@ -893,14 +842,14 @@ namespace CodeGen.Translation
 
             CleanM262SysdevResources(config, report);
 
-            SweepOrphanSysresPerSysdev(config, report);
-
+            // Orphan .sysres files are swept by EaeProjectLayout.SweepOrphanSysres, which runs once per
+            // generation after the devices are emitted -- the point at which a resource id can actually
+            // have moved. A second sweep here duplicated the rule and could only ever agree with it.
             SweepBridgeFbsFromAllSysres(config, report);
 
             return report;
         }
 
-        // Delete .sysres files referenced by no <Resource> in the sysdev, else EAE raises a "Repair Instances" dialog.
         // Process name (as the twin declares it) -> the FB instance name emitted for it, so handoff wiring can
         // be addressed by model name without the injector knowing which processes exist.
         private static string? ResolveProcessFbName(
@@ -915,76 +864,6 @@ namespace CodeGen.Translation
             if (feedProcess != null && ReferenceEquals(c, feedProcess)) return feedProcessFbName;
             var n = InstanceNameResolver.Resolve(c, overrides.ByComponentId, overrides.ByVueOneName);
             return string.IsNullOrWhiteSpace(n) ? null : n;
-        }
-
-        private static void SweepOrphanSysresPerSysdev(MapperConfig config, CleanupReport report)
-        {
-            void Log(string line) => report.DeviceCleanupLog.Add($"[CleanDevice] {line}");
-
-            string? eaeRoot = DeriveDemonstratorEaeRoot(config);
-            if (string.IsNullOrEmpty(eaeRoot)) return; // harness / no project root → skip
-
-            var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
-            if (!Directory.Exists(systemDir)) return;
-
-            List<string> sysdevFiles;
-            try { sysdevFiles = Directory.EnumerateFiles(systemDir, "*.sysdev", SearchOption.AllDirectories).ToList(); }
-            catch { return; }
-            if (sysdevFiles.Count == 0) return; // not a real System folder
-
-            foreach (var sysdevPath in sysdevFiles)
-            {
-                XDocument doc;
-                try { doc = XDocument.Load(sysdevPath); }
-                catch { continue; }
-                var root = doc.Root;
-                if (root == null) continue;
-                XNamespace dns = root.GetDefaultNamespace();
-
-                var activeIds = new HashSet<string>(
-                    (root.Element(dns + "Resources")?.Elements(dns + "Resource")
-                        ?? Enumerable.Empty<XElement>())
-                        .Select(r => (string?)r.Attribute("ID") ?? string.Empty)
-                        .Where(s => s.Length > 0),
-                    StringComparer.Ordinal);
-                if (activeIds.Count == 0) continue; // nothing referenced → don't touch
-
-                // Resource files live in {sysdevFolder}/{sysdevStem}/
-                var sysdevStem = Path.GetFileNameWithoutExtension(sysdevPath);
-                var resDir = Path.Combine(Path.GetDirectoryName(sysdevPath)!, sysdevStem);
-                if (!Directory.Exists(resDir)) continue;
-
-                List<string> sysresFiles;
-                try { sysresFiles = Directory.GetFiles(resDir, "*.sysres", SearchOption.TopDirectoryOnly).ToList(); }
-                catch { continue; }
-                if (sysresFiles.Count <= 1) continue; // 0 or 1 file → no possible orphan
-
-                // Skip the whole sysdev unless every active resource has its {ID}.sysres (else filename==ID is broken).
-                bool allActivePresent = activeIds.All(id =>
-                    sysresFiles.Any(f => string.Equals(
-                        Path.GetFileNameWithoutExtension(f), id, StringComparison.Ordinal)));
-                if (!allActivePresent)
-                {
-                    Log($"{Path.GetFileName(sysdevPath)}: an active Resource has no matching .sysres on disk — orphan sweep skipped (filename!=ID convention not satisfied)");
-                    continue;
-                }
-
-                foreach (var file in sysresFiles)
-                {
-                    var stem = Path.GetFileNameWithoutExtension(file);
-                    if (activeIds.Contains(stem)) continue; // active → keep
-                    try
-                    {
-                        File.Delete(file);
-                        Log($"deleted orphan sysres {Path.GetFileName(file)} under {sysdevStem} " +
-                            $"(referenced by no Resource in {Path.GetFileName(sysdevPath)}; active = {string.Join(",", activeIds)})");
-                    }
-                    catch (Exception ex)
-                    {
-                        Log($"failed to delete orphan sysres {file}: {ex.Message}");
-                    }
-                }
-            }
         }
 
         // Remove stale MQTT bridge FBs (MqttFmt_/MqttPub_ names only, never MqttConn) + their connections from every .sysres in place.
@@ -1309,7 +1188,7 @@ namespace CodeGen.Translation
             BuildProcessFbParameters(VueOneComponent process, List<VueOneComponent> allComponents,
                 string processName, int processId,
                 StationContents? contents = null, bool useRecipeStruct = false,
-                bool emitProcessTelemetry = false)
+                bool emitProcessTelemetry = false, int? receiverSlot = null)
         {
             // Recipe arrays travel as Process1_Generic Parameter values; if `contents` is null, emit only the two scalars and return a null Recipe.
             var outer = new Dictionary<string, string>
@@ -1317,6 +1196,13 @@ namespace CodeGen.Translation
                 ["process_name"] = SyslayBuilder.FormatString(processName),
                 ["process_id"] = SyslayBuilder.FormatInt(processId)
             };
+            // Where THIS instance receives a transported process phase: its producer's own allocated
+            // process id, so the recipe's WAIT on that producer reads the slot the phase lands in. Absent
+            // when the plan gives this process no cross-controller producer, so a consumer that receives
+            // nothing carries no slot rather than a misleading default.
+            if (receiverSlot is int slot)
+                outer[Process.Recipes.ProcessPhaseTransport.ReceiverSlotParam] = SyslayBuilder.FormatInt(slot);
+
 
             RecipeArrays? recipe = null;
             if (contents != null)
