@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -18,8 +18,9 @@ namespace CodeGen.Hmi
     // the deployed faceplates rather than merely hidden.
     public static class HmiGenerator
     {
-        public static void Emit(string syslayPath, MapperConfig? config)
+        public static void Emit(string syslayPath, CodeGen.Translation.GenerationContext ctx)
         {
+            var config = ctx.Config;
             if (config == null || string.IsNullOrWhiteSpace(config.TemplateLibraryPath)) return;
 
             var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(config);
@@ -77,7 +78,7 @@ namespace CodeGen.Hmi
             // The .cfg must describe the STRIPPED symbols, not the library originals.
             foreach (var tpl in deployed) HmiCatCfgEmitter.Emit(eaeRoot!, tpl);
 
-            var runtime = HmiRuntimeEmitter.Emit(eaeRoot!, config, plan.FirstCanvas);
+            var runtime = HmiRuntimeEmitter.Emit(eaeRoot!, ctx, plan.FirstCanvas);
             foreach (var p in runtime.Problems) MapperLogger.Error("[Hmi] " + p);
 
             var problems = HmiPlanValidator.Validate(hmiDir, eaeRoot!, syslayPath, plan with { UsedTemplates = deployed })
