@@ -23,6 +23,10 @@ namespace CodeGen.Translation
     {
         public MapperConfig Config { get; }
         public DeploymentProfile Profile { get; }
+
+        // Where each component runs and is drawn. Carried on the profile, so nothing below this point
+        // reaches for the catalog.
+        public LayoutCatalog Layout => Profile.Layout;
         public DeploymentRoster Roster { get; }
         public ControllerAllocation Allocation { get; }
 
