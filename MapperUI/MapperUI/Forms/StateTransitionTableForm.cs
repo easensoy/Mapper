@@ -218,7 +218,8 @@ namespace MapperUI
             // The preview compiles the same rows the generator would, so it needs the same allocation.
             // Reading it from a fresh roster keeps the preview independent of any run in flight.
             var allocation = new CodeGen.Mapping.ControllerAllocation(
-                new CodeGen.Mapping.DeploymentRoster(CodeGen.Mapping.DeploymentProfile.M262Only));
+                new CodeGen.Mapping.DeploymentRoster(
+                    CodeGen.Mapping.DeploymentProfile.M262Only(CodeGen.Configuration.LayoutCatalog.Load())));
             bool ringsMerged = CodeGen.Translation.Process.Recipes.FeedRingMerge.Needed(components, allocation);
 
             RecipeArrays recipe;
