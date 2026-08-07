@@ -265,6 +265,25 @@ namespace CodeGen.Services
             => DeployDatatype(eaeProjectDir, "RecipeStep",
                 TemplateDocument.Load(cfg, @"DataType\RecipeStep.dt"), result, "(sim Recipe struct)");
 
+        // The state_table slot a consumer receives a cross-controller process phase into. The value is the
+        // PRODUCER's allocated ProcessId, resolved from ProcessHandoffPlan -- the shipped template carries a
+        // literal only as a placeholder. Type-level, so the runtime supports one producer per consumer; the
+        // planner fails generation before reaching here if a model needs more.
+        internal static void SetProcessPhaseReceiverSlot(string eaeProjectDir, int slot, DeployResult result)
+            => EditDeployedFbt(eaeProjectDir, "Process1_Generic.fbt",
+                "Process1_Generic receiver-slot patch failed", result,
+                (doc, root, ns, fbt) =>
+            {
+                const string SlotParam = CodeGen.Translation.Process.Recipes.ProcessPhaseTransport.ReceiverSlotParam;
+                var param = root.Element(ns + "FBNetwork")?.Elements(ns + "Parameter")
+                    .FirstOrDefault(p => (string?)p.Attribute("Name") == SlotParam);
+                if (param == null)
+                    throw new InvalidOperationException(
+                        $"Process1_Generic.fbt declares no '{SlotParam}' parameter; the cross-controller " +
+                        "process-phase transport has nowhere to land.");
+                param.SetAttributeValue("Value", slot);
+            });
+
         // Recipe-struct collapse on Process1_Generic (gated by UseRecipeStruct); reduce==false restores the 6 arrays.
         internal static void NormalizeProcess1RecipeArrays(
             string eaeProjectDir, bool reduce, DeployResult result)
