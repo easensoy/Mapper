@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -95,8 +95,20 @@ namespace CodeGen.Devices.Core
                     Path.GetDirectoryName(sysdev)!, Path.GetFileNameWithoutExtension(sysdev));
                 if (!Directory.Exists(folder)) continue;
 
-                foreach (var sysres in Directory
-                             .EnumerateFiles(folder, "*.sysres", SearchOption.TopDirectoryOnly).ToList())
+                var present = Directory
+                    .EnumerateFiles(folder, "*.sysres", SearchOption.TopDirectoryOnly).ToList();
+                // The sweep identifies the live resource by filename == active id. Where an active id has
+                // no file that convention does not hold here, so every file looks like an orphan and the
+                // sweep would delete the resource it was meant to keep.
+                if (!activeIds.All(id => present.Any(f =>
+                        string.Equals(Path.GetFileNameWithoutExtension(f), id, StringComparison.Ordinal))))
+                {
+                    log?.Invoke($"[Sysres][Sweep] {Path.GetFileName(sysdev)}: an active Resource has no " +
+                        "matching .sysres on disk — sweep skipped (filename==ID convention not satisfied).");
+                    continue;
+                }
+
+                foreach (var sysres in present)
                 {
                     var stem = Path.GetFileNameWithoutExtension(sysres);
                     if (activeIds.Contains(stem)) continue;   // the live resource — keep
