@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using CodeGen.Mapping;
@@ -126,10 +126,10 @@ namespace CodeGen.Translation.Interlocks
         // moves, so keeping its rule deadlocks. Data-driven; off when the rings are not merged.
         private static bool IsCrossControllerReadinessGate(VueOneComponent actuator, VueOneComponent? srcComp)
         {
-            if (!CodeGen.Configuration.MapperConfig.MergeFeedRing || srcComp == null) return false;
-            var source = HcfSymbolIndex.NameBasedPlcGuess(srcComp.Name);
-            return source != HcfSymbolIndex.NameBasedPlcGuess(actuator.Name) &&
-                   ControllerMap.IsFeedController(source);
+            if (!CodeGen.Translation.GenerationPlan.Current.RingsMerged || srcComp == null) return false;
+            var allocation = ControllerAllocation.Current;
+            var source = allocation.Of(srcComp.Name);
+            return source != allocation.Of(actuator.Name) && ControllerMap.IsFeedController(source);
         }
     }
 }
