@@ -1,8 +1,9 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using CodeGen.Configuration;
 using CodeGen.Devices.RevPi;
+using CodeGen.Mapping;
 
 namespace CodeGen.Validation.Plan
 {
@@ -26,34 +27,16 @@ namespace CodeGen.Validation.Plan
             public InvalidRevPiSelectionException(string message) : base(message) { }
         }
 
-        public static IReadOnlyList<string> Validate()
+        public static IReadOnlyList<string> Validate(DeploymentProfile profile)
         {
             var problems = new List<string>();
             var covered = RevPiIoBrokerInjector.CoveredComponents;
 
-            // 1. Whole-Feed swap: unsupportable until PLC_RW_REVPI carries the rest of the station.
-            if (MapperConfig.FeedStationController == FeedController.RevPi)
-                problems.Add(
-                    "FeedStationController=RevPi (whole-Feed swap) is not supported: the RevPi Modbus coupler " +
-                    $"PLC_RW_REVPI exposes IO for only [{string.Join(", ", covered.OrderBy(n => n, StringComparer.Ordinal))}], " +
-                    "so Transfer/Ejector/Robot/PartAtAssembly would be relocated off the M262 that owns their " +
-                    "channels and deploy with no physical IO. Use the per-component swap instead: set the " +
-                    "Device column to RevPi for Feeder and/or Checker (PartInHopper follows automatically).");
-
-            // 2. Both modes at once is contradictory — ComponentRegistry keys on 'RevPi-full' and silently
-            //    DISCARDS RevPiComponents, so the user's per-component choice would vanish without a word.
-            if (MapperConfig.FeedStationController == FeedController.RevPi &&
-                MapperConfig.RevPiComponents.Count > 0)
-                problems.Add(
-                    "FeedStationController=RevPi was combined with an explicit RevPiComponents set " +
-                    $"[{string.Join(", ", MapperConfig.RevPiComponents.OrderBy(n => n, StringComparer.Ordinal))}]. " +
-                    "These are mutually exclusive modes and the component set would be silently ignored. " +
-                    "Choose one.");
-
-            // 3. Per-component swap: every relocated component must be one the coupler actually serves.
-            if (MapperConfig.PartialRevPi)
+            // Every relocated component must be one the coupler actually serves: PLC_RW_REVPI exposes IO
+            // for a fixed set, and a component moved off the M262 that owns its channels deploys with none.
+            if (profile.PartialRevPi)
             {
-                var uncovered = MapperConfig.RevPiComponents
+                var uncovered = profile.RevPiComponents
                     .Where(c => !covered.Contains(c))
                     .OrderBy(n => n, StringComparer.Ordinal)
                     .ToList();
@@ -69,9 +52,9 @@ namespace CodeGen.Validation.Plan
         }
 
         // Convenience for call sites that want the selection to be fatal (the generation pipeline).
-        public static void ThrowIfInvalid()
+        public static void ThrowIfInvalid(DeploymentProfile profile)
         {
-            var problems = Validate();
+            var problems = Validate(profile);
             if (problems.Count > 0)
                 throw new InvalidRevPiSelectionException(
                     "Invalid RevPi selection:" + Environment.NewLine + " - " +
