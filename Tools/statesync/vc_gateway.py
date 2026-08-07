@@ -154,6 +154,7 @@ def reset_state(why):
     # AppliedScale is deliberately NOT cleared here. It records what the MODEL is carrying,
     # and a reset does not unwind those writes; clearing it would make the next run treat a
     # scaled model as taught. It is only ever rewritten by an actual scaling.
+    del _partProbes[:]      # a probe holds no model state, only a due time
     log("state_cleared", why=why)
 
 
@@ -548,6 +549,131 @@ def carriedBy(robotName):
         pass
     return out
 
+# ------------------------------------------------ part telemetry (read-only)
+# WHY THIS EXISTS. The gateway logs nothing about the workpiece. Across 52 ejector
+# strokes in vc_gateway.log every one reports "completed" with a flawless cylinder
+# (0 -> 90 mm, endpointError ~0) and not one line says where the part went. So a part
+# that was never touched and a part that was pushed and then stalled part-way down the
+# chute are INDISTINGUISHABLE from the log, and the difference is the whole diagnosis.
+# Several rig sessions have been spent guessing between them.
+#
+# This block only MEASURES. It writes nothing to the model, changes no timing, no
+# topic, no taught pose, and no actuator. Any failure disables it for the session after
+# exactly one line - it must never be able to disturb the seven non-ejector lanes that
+# share advance().
+PART_PROBE_MS  = 1000.0   # the acceptance moment: "in the magazine 1 s after forward"
+PART_TICK_EVERY = 5       # sample every 5th tick (~100 ms) while a stroke animates
+PART_MOVED_MM  = 0.5      # below this a tick sample is not worth a line
+
+_partProbes   = []
+_partTrackOff = [False]
+
+
+def physicsTypeOf(comp):
+    """0 In Physics, 1 Out of Physics, 2 Kinematic, 3 In Container - or None.
+
+    None when the component owns no rPhysicsEntity, and that distinction is
+    load-bearing: Bearing, Shaft and TopCover have no physics entity at all and are
+    moved purely by re-parenting, so a numeric default here would classify them as
+    dynamic bodies and put the wrong component under the microscope.
+    """
+    try:
+        for b in comp.getBehavioursByType("rPhysicsEntity"):
+            p = b.getProperty("Physics Type")
+            if p is not None:
+                return int(p.Value)
+    except Exception:
+        pass
+    return None
+
+
+def dynamicBodies():
+    """Every component PhysX is free to move, selected by PROPERTY and never by name.
+
+    In this model exactly one component qualifies, but asking the property rather than
+    asking for "Part" means a renamed, re-created or duplicated workpiece is still
+    found, and a fixture never is.
+    """
+    out = []
+    try:
+        for c in app.Components:
+            if physicsTypeOf(c) == 0:
+                out.append(c)
+    except Exception:
+        pass
+    return out
+
+
+def worldXYZ(o):
+    try:
+        p = o.WorldPositionMatrix.P
+        return (round(float(p.X), 2), round(float(p.Y), 2), round(float(p.Z), 2))
+    except Exception:
+        return None
+
+
+def _dist(a, b):
+    if not a or not b:
+        return None
+    return round(((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2) ** 0.5, 1)
+
+
+def partSample(when, lane, vcid, part, node, extra=None):
+    """One measurement of the workpiece. Returns its world XYZ, or None.
+
+    Deliberately reports NO verdict. The gateway cannot see the rig's discharge - the
+    rig's own landmark, PartAtAssembly, is not wired into the shadow at all - so it has
+    no authority to declare a delivery succeeded. It states where the part is; whether
+    that was good enough is answered by the next Partpick's `carrying`, which is the
+    only independent evidence in the system.
+    """
+    if _partTrackOff[0] or part is None:
+        return None
+    try:
+        pw = worldXYZ(part)
+        nw = worldXYZ(node) if node is not None else None
+        rec = {"when": when, "lane": lane, "vcId": vcid, "part": str(part.Name),
+               "partPos": pw, "facePos": nw, "partToFaceMm": _dist(pw, nw),
+               "physicsType": physicsTypeOf(part), "parents": parentChain(part)}
+        if extra:
+            rec.update(extra)
+        log("part_track", **rec)
+        return pw
+    except Exception as e:
+        _partTrackOff[0] = True
+        log("part_track_off", err=str(e),
+            note="part telemetry disabled for this session; motion is unaffected")
+        return None
+
+
+def servicePartProbes(now):
+    """Fire any due acceptance probe. Runs at the top of advance(), so it is wrapped and
+    self-limiting: one failure disables the whole block rather than throwing every tick
+    in the one function all eight lanes depend on."""
+    if _partTrackOff[0] or not _partProbes:
+        return
+    try:
+        for pr in [p for p in _partProbes if now >= p["due"]]:
+            _partProbes.remove(pr)
+            bodies = dynamicBodies()
+            part = bodies[0] if len(bodies) == 1 else None
+            node = None
+            try:
+                c = app.findComponent(pr["comp"])
+                node = c.findNode(pr["vcId"]) if c else None
+            except Exception:
+                node = None
+            pw = partSample("acceptance_1s", pr["lane"], pr["vcId"], part, node,
+                            {"strokeStartPos": pr["p0"], "sinceStrokeStartMs": int(PART_PROBE_MS)})
+            if pw and pr["p0"]:
+                log("part_travel", lane=pr["lane"], vcId=pr["vcId"],
+                    fromPos=pr["p0"], toPos=pw, travelMm=_dist(pr["p0"], pw))
+    except Exception as e:
+        _partTrackOff[0] = True
+        del _partProbes[:]
+        log("part_track_off", err=str(e), note="probe service disabled; motion unaffected")
+
+
 # ---------------------------------------------------- signal executor
 def stateSignals(comp, control, j):
     """The stock <joint>_OpenState / <joint>_ClosedState feedback signals, when present.
@@ -670,10 +796,37 @@ def startSignal(env, lane):
             execution="signal", durationMs=0, snapshot=True)
         return
 
+    # Resolve the workpiece and the moving frame ONCE per stroke. The component
+    # (e.g. "Transfer #3") does not move; the node named by vcId is the frame that
+    # translates, so it is the face the part has to be measured against. Nothing is
+    # cached between strokes - a stale reference is exactly how this kind of telemetry
+    # starts lying.
+    _part, _node, _p0 = None, None, None
+    if not _partTrackOff[0]:
+        try:
+            _node = comp.findNode(vcid)
+            _bodies = dynamicBodies()
+            if len(_bodies) == 1:
+                _part = _bodies[0]
+            else:
+                log("part_track_ambiguous", lane=lane, vcId=vcid, count=len(_bodies),
+                    names=[str(b.Name) for b in _bodies],
+                    note="expected exactly one In-Physics body; not sampling this stroke")
+            _p0 = partSample("stroke_start", lane, vcid, _part, _node,
+                             {"signalValue": value, "jointBefore": round(before, 3)})
+            if len(_partProbes) < 32:
+                _partProbes.append({"due": simNowMs() + PART_PROBE_MS, "lane": lane,
+                                    "vcId": vcid, "comp": str(comp.Name), "p0": _p0})
+        except Exception as e:
+            _partTrackOff[0] = True
+            log("part_track_off", err=str(e),
+                note="part telemetry disabled for this session; motion is unaffected")
+
     active[lane] = {"kind": "signal", "env": env, "vcId": vcid, "control": control, "j": j,
                     "sig": sig, "value": value, "start": before, "target": target, "tol": tol,
                     "t0": simNowMs(), "durMs": durMs, "moved": False, "forced": forced,
                     "openSig": openSig, "closedSig": closedSig,
+                    "part": _part, "node": _node, "partP0": _p0, "partLast": _p0, "tick": 0,
                     "deadline": durMs * SIGNAL_SLACK + SIGNAL_SLACK_MS}
     publish(env, "started", position=round(before, 3), speed=speed)
     log("start", commandId=env.get("commandId"), vcId=vcid, lane=lane, execution="signal",
@@ -901,6 +1054,7 @@ def finishRoutine(lane, item, how, elapsedMs, quiet=False):
 # ---------------------------------------------------------------- advance
 def advance():
     now = simNowMs()
+    servicePartProbes(now)
     controllers, done = [], []
 
     for lane, s in list(active.items()):
@@ -928,6 +1082,23 @@ def advance():
                 log("failed", commandId=s["env"].get("commandId"), vcId=s["vcId"], err=str(e))
                 done.append((lane, "error", elapsed)); continue
             s["cur"] = cur
+            # Does the part track the face, or does the face sweep through it? This is
+            # the single observation that separates the two leading explanations, and
+            # nothing in the log has ever recorded it.
+            if s.get("part") is not None and not _partTrackOff[0]:
+                try:
+                    s["tick"] = s.get("tick", 0) + 1
+                    if s["tick"] % PART_TICK_EVERY == 0:
+                        pw = worldXYZ(s["part"])
+                        d = _dist(pw, s.get("partLast"))
+                        if d is None or d >= PART_MOVED_MM:
+                            partSample("tick", lane, s["vcId"], s["part"], s.get("node"),
+                                       {"joint": round(cur, 2), "movedSinceLastMm": d})
+                            s["partLast"] = pw
+                except Exception as e:
+                    _partTrackOff[0] = True
+                    log("part_track_off", err=str(e),
+                        note="part telemetry disabled for this session; motion is unaffected")
             if abs(cur - s["start"]) > s["tol"]:
                 s["moved"] = True
             if abs(cur - s["target"]) <= s["tol"]:
@@ -1032,6 +1203,16 @@ def advance():
                 execution="axis", durationMs=int(elapsed), cur=round(s["target"], 2))
         elif s["kind"] == "signal":
             cur = s.get("cur", s["start"])
+            # Sampled at the POP, not inside the endpoint branch, so a stroke that ended
+            # any other way (no_motion, not_reached, error) is measured too - those are
+            # precisely the strokes worth measuring.
+            if s.get("part") is not None and not _partTrackOff[0]:
+                pw = partSample("stroke_end", lane, s["vcId"], s["part"], s.get("node"),
+                                {"exit": how, "joint": round(cur, 2)})
+                if pw and s.get("partP0"):
+                    log("part_travel", lane=lane, vcId=s["vcId"], phase="stroke",
+                        fromPos=s["partP0"], toPos=pw, travelMm=_dist(s["partP0"], pw),
+                        faceTravelMm=round(abs(cur - s["start"]), 1), exit=how)
             err = abs(cur - s["target"])
             ev = {"openState": signalValueOf(s["openSig"]) if s["openSig"] else None,
                   "closedState": signalValueOf(s["closedSig"]) if s["closedSig"] else None}
