@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -53,8 +53,10 @@ namespace CodeGen.Devices.M262
             catch { return false; }
         }
 
-        public static SysdevEmitResult Emit(MapperConfig cfg)
+        public static SysdevEmitResult Emit(GenerationContext ctx)
         {
+            var cfg = ctx.Config;
+            var allocation = ctx.Allocation;
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
 
             var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg)
@@ -133,7 +135,7 @@ namespace CodeGen.Devices.M262
                 // Mirror only the M262 (Feed Station) FBs — Station-2 FBs live on M580/BX1.
                 sysresMirrorCount = SysresFbMirror.MirrorFbsIntoSysres(
                     sysresPath,
-                    fbInstances.Where(f => SysresFbMirror.BucketFor(f.Name) == PlcAssignment.M262).ToList());
+                    fbInstances.Where(f => SysresFbMirror.BucketFor(f.Name, allocation) == PlcAssignment.M262).ToList());
 
             int systemMappingsAdded = 0;
 
