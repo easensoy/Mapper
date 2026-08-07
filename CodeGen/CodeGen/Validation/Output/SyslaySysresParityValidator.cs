@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -24,16 +24,13 @@ namespace CodeGen.Devices.Core
         // Logical PLC <-> EAE sysdev (Type + optional Name) <-> short label, in deploy order. The Feed
         // station is hosted on M262 (default) or the RevPi Soft_dPAC; M580/BX1 are fixed. A non-null Name
         // disambiguates two devices of the same Type (BX1 vs Revolution_Pi, both Soft_dPAC).
-        static IEnumerable<(string DeviceType, string? DeviceName, PlcAssignment Plc, string Label)> Devices()
+        static IEnumerable<(string DeviceType, string? DeviceName, PlcAssignment Plc, string Label)> Devices(
+            GenerationContext ctx)
         {
-            yield return MapperConfig.FeedStationController == FeedController.RevPi
-                ? ("Soft_dPAC", "Revolution_Pi", PlcAssignment.RevPi, "RevPi")
-                : ("M262_dPAC", null,            PlcAssignment.M262,  "M262");
-            // PARTIAL swap: M262 KEEPS the Feed station while Feeder/Checker/PartInHopper relocate to the
-            // RevPi, so BOTH devices exist. The either/or above only ever validated the RevPi in the FULL
-            // swap -- a mode nothing selects -- so the one reachable RevPi mode shipped with zero parity
-            // coverage: FBs bucketed PlcAssignment.RevPi were compared against no sysres at all.
-            if (MapperConfig.PartialRevPi)
+            yield return ("M262_dPAC", null, PlcAssignment.M262, "M262");
+            // The partial swap keeps the M262 Feed station while Feeder/Checker/PartInHopper relocate to
+            // the RevPi, so BOTH devices exist and both need parity coverage.
+            if (ctx.Profile.PartialRevPi)
                 yield return ("Soft_dPAC", "Revolution_Pi", PlcAssignment.RevPi, "RevPi");
             yield return ("M580_dPAC", null,  PlcAssignment.M580, "M580");
             yield return ("Soft_dPAC", "BX1", PlcAssignment.BX1,  "BX1");
@@ -90,7 +87,7 @@ namespace CodeGen.Devices.Core
             }
         }
 
-        public static List<Violation> Validate(string? eaeRoot, string? syslayPath)
+        public static List<Violation> Validate(GenerationContext ctx, string? eaeRoot, string? syslayPath)
         {
             var violations = new List<Violation>();
             if (string.IsNullOrEmpty(eaeRoot) || string.IsNullOrEmpty(syslayPath) || !File.Exists(syslayPath))
@@ -106,12 +103,12 @@ namespace CodeGen.Devices.Core
 
             violations.AddRange(ValidateCommandTargetsAreClaimable(syslayFbs));
 
-            foreach (var (deviceType, deviceName, plc, label) in Devices())
+            foreach (var (deviceType, deviceName, plc, label) in Devices(ctx))
             {
                 // The syslay FBs the mirror would project onto this PLC (TemplateManifest.Mirrored n bucket).
                 var expected = syslayFbs
                     .Where(f => TemplateManifest.Mirrored.Contains(f.Type) &&
-                                SysresFbMirror.BucketFor(f.Name) == plc)
+                                SysresFbMirror.BucketFor(f.Name, ctx.Allocation) == plc)
                     .ToList();
                 if (expected.Count == 0) continue;
 
@@ -169,17 +166,11 @@ namespace CodeGen.Devices.Core
             // FB-hosted on the RevPi sysres (its physical Modbus IO, PLC_RW_REVPI, is the documented
             // follow-up), so the RevPi path asserts the discharge FBs landed on the RevPi sysres.
             if (CodeGen.Translation.HandoffPlanner.DischargeActive)
-            {
-                if (MapperConfig.FeedStationController == FeedController.RevPi)
-                    ValidateDischargeRevPi(eaeRoot, violations);
-                else
-                    ValidateDischargeHcf(eaeRoot, violations);
-            }
+                ValidateDischargeHcf(eaeRoot, violations);
 
-            // Whenever a RevPi device is generated — FULL swap or the partial Feeder/Checker swap — its
-            // Modbus IO must be complete. Deliberately independent of the discharge tail, which in the
-            // partial swap correctly stays on M262.
-            if (MapperConfig.FeedStationController == FeedController.RevPi || MapperConfig.PartialRevPi)
+            // Whenever a RevPi device is generated its Modbus IO must be complete. Deliberately independent
+            // of the discharge tail, which stays on the M262 that owns its channels.
+            if (ctx.Profile.PartialRevPi)
                 ValidateRevPiIo(eaeRoot, syslayPath, violations);
 
             return violations;
