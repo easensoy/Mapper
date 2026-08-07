@@ -11,14 +11,10 @@ namespace CodeGen.Configuration
         {
             var errors = new List<string>();
 
-            var processIds = new (string Name, int Id)[]
-            {
-                ("feedStation", c.ProcessIds.FeedStation),
-                ("assembly", c.ProcessIds.Assembly),
-                ("disassembly", c.ProcessIds.Disassembly),
-            };
-            foreach (var g in processIds.GroupBy(p => p.Id).Where(g => g.Count() > 1))
-                errors.Add($"processIds collide on slot {g.Key}: {string.Join(", ", g.Select(p => p.Name))}");
+            if (c.ProcessSlots.Count == 0)
+                errors.Add("processSlots is empty: no process has a state_table slot, so no handoff can be addressed");
+            foreach (var g in c.ProcessSlots.GroupBy(p => p.Value).Where(g => g.Count() > 1))
+                errors.Add($"processSlots collide on slot {g.Key}: {string.Join(", ", g.Select(p => p.Key))}");
 
             foreach (var s in c.SynthSensors)
             {
