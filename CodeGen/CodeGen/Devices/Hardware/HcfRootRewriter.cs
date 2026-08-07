@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -98,18 +98,6 @@ namespace CodeGen.Devices.Core
                 }
             }
             return result;
-        }
-
-        // Derives the resource ID from the .sysres file stem (EAE names the sysres after the resource ID).
-        public static RewriteResult RewriteIfNeededDeriveId(string hcfPath, string sysdevFolder)
-        {
-            var sysresFile = Directory.Exists(sysdevFolder)
-                ? Directory.EnumerateFiles(sysdevFolder, "*.sysres").FirstOrDefault()
-                : null;
-            var resourceId = sysresFile != null
-                ? Path.GetFileNameWithoutExtension(sysresFile)
-                : string.Empty;
-            return RewriteIfNeeded(hcfPath, resourceId);
         }
 
         public sealed class RewriteResult
