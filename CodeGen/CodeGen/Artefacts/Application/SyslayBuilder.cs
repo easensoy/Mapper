@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Xml.Linq;
@@ -116,7 +116,7 @@ namespace CodeGen.Translation
             // the BX1 frame westward to swallow Station 1 / Station 2 (M580) on
             // every regen. "None" is what the SE DesignGuidelines reference
             // project uses; combined with non-overlapping abutting frame widths
-            // from CodeGen.Mapping.LayoutGrid, each PLC zone stays in its lane.
+            // from the run's layout catalog, each PLC zone stays in its lane.
             AddParam("MoveStyle", "None");
             AddParam("Text", text);
             AddParam("NxtLayerIdentifier", string.Empty);
