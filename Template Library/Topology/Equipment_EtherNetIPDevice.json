@@ -1,0 +1,55 @@
+{
+  "catalogReference": "GenericEthernetIPFieldDevice_V01.00_01.00",
+  "uuid": "{{BX1EtherNetIpUuid}}",
+  "identifier": "EtherNetIPDevice_1",
+  "path": "Topology",
+  "properties": [
+    { "propertyName": "IsUnderConstruction", "propertyValue": "False" },
+    { "propertyName": "DomainTag",            "propertyValue": "{{solutionId}}" }
+  ],
+  "references": [
+    { "diagramPath": "Physical Views", "x": 109, "y": -104 }
+  ],
+  "components": [
+    {
+      "fdtProjectIdentifiers": [ "FdtProject" ],
+      "catalogDtmIsInitialized": true,
+      "catalogDeviceName": "TM3BC_EtherNetIP Revision 2.3 (from EDS)",
+      "catalogDeviceVersion": "2.3",
+      "catalogDeviceVendor": "Schneider Electric",
+      "catalogDtmName": "Generic EDS Device DTM",
+      "catalogDtmVendor": "Schneider Electric",
+      "catalogDtmVersion": "1.15.1.0",
+      "componentType": "DtmDeviceDEO"
+    },
+    {
+      "interfaces": [
+        {
+          "identifier": "Embedded Interface",
+          "disabled": false,
+          "physicalAddress": "",
+          "endpoints": [
+            {
+              "identifier": "IP Address",
+              "isReadOnly": false,
+              "domainReadOnly": false,
+              "ipAddress": "{{deviceIp}}",
+              "domain": "{{NoConfDomainUuid}}"
+            }
+          ]
+        }
+      ],
+      "ports": [
+        { "identifier": "Port1", "side": "Default" },
+        { "identifier": "Port2", "side": "Default" }
+      ],
+      "componentType": "EthernetDEO"
+    },
+    {
+      "associatedScannerId": "{{scannerId}}",
+      "associatedHwCatType": "Generic",
+      "ioProfileIdentifiers": [ "IOProfile" ],
+      "componentType": "EthernetScannedDeviceDEO"
+    }
+  ]
+}
