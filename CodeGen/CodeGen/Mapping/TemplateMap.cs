@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using CodeGen.Configuration;
 using CodeGen.Models;
@@ -81,7 +81,7 @@ namespace CodeGen.Mapping
         {
             if (actuator == null) return "Five_State_Actuator_CAT";
             // Only the real UR3e (IsRobotTaskArm) -> Robot_Task_CAT; Type="Robot" grippers stay Five_State/Vacuum.
-            if (MapperConfig.EnableRobotTaskTail && IsRobotTaskArm(actuator))
+            if (CodeGen.Translation.HandoffPlanner.DischargeActive && IsRobotTaskArm(actuator))
                 return "Robot_Task_CAT";
             return ResolveActuatorCatType(
                 actuator.Name ?? string.Empty,
