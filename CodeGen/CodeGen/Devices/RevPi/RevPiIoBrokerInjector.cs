@@ -1,10 +1,11 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Xml.Linq;
 using CodeGen.Devices.Core;
 using CodeGen.Translation;
+using CodeGen.Mapping;
 
 namespace CodeGen.Devices.RevPi
 {
@@ -52,7 +53,7 @@ namespace CodeGen.Devices.RevPi
                 StringComparer.OrdinalIgnoreCase);
 
         // Inject into the RevPi sysres + syslay. resourceName scopes the absolute symlink names (RevPi_RES).
-        public static int Inject(string? sysresPath, string? syslayPath, string resourceName,
+        public static int Inject(DeploymentProfile profile, string? sysresPath, string? syslayPath, string resourceName,
             SystemInjector.BindingApplicationReport report)
         {
             int touched = 0;
@@ -63,7 +64,7 @@ namespace CodeGen.Devices.RevPi
             })
             {
                 if (string.IsNullOrEmpty(path) || !File.Exists(path)) continue;
-                try { if (InjectInto(path, isSysres, resourceName)) touched++; }
+                try { if (InjectInto(profile, path, isSysres, resourceName)) touched++; }
                 catch (IOException)
                 {
                     report.Missing.Add($"[RevPi][Broker] FAILED to write RevPI_IO to the {label} — file " +
@@ -77,7 +78,7 @@ namespace CodeGen.Devices.RevPi
             return touched;
         }
 
-        static bool InjectInto(string path, bool isSysres, string resourceName)
+        static bool InjectInto(DeploymentProfile profile, string path, bool isSysres, string resourceName)
         {
             var doc = XDocument.Load(path, LoadOptions.PreserveWhitespace);
             var root = doc.Root;
@@ -137,7 +138,7 @@ namespace CodeGen.Devices.RevPi
             //    the broker. Partial swap: Feed_Station is on M262, so anchor off a LOCAL RevPi component in
             //    BOTH this sysres and the shared syslay (PartInHopper) -> no cross-device INIT wire.
             bool Has(string nm) => net.Elements(N("FB")).Any(f => (string?)f.Attribute("Name") == nm);
-            string initSrc = !CodeGen.Configuration.MapperConfig.PartialRevPi && Has("Feed_Station")
+            string initSrc = !profile.PartialRevPi && Has("Feed_Station")
                 ? "Feed_Station"
                 : new[] { "PartInHopper", "Feeder", "Checker", "FB1" }.FirstOrDefault(Has) ?? "FB1";
             Ev($"{initSrc}.INITO", $"{BrokerFbName}.INIT");
