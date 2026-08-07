@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -157,7 +157,7 @@ namespace CodeGen.Devices.M262
                 || string.IsNullOrEmpty(v.Comp) || !fbIdByName.ContainsKey(v.Comp);
             // UR3e task arm (only when the Robot FB is on this resource's sysres): DO04 = start-task
             // pulse, DI10 = task-complete.
-            if (MapperConfig.EnableRobotTaskTail && fbIdByName.ContainsKey("Robot"))
+            if (HandoffPlanner.DischargeActive && fbIdByName.ContainsKey("Robot"))
             {
                 if (!effective.ContainsKey("DO04"))
                     effective["DO04"] = ("Robot", "RobotCommands_StartTask");
@@ -170,7 +170,7 @@ namespace CodeGen.Devices.M262
             }
             // M262 Ejector is open-loop (coil only, no DIs): bind DO03 = OutputToWork, only when
             // the Ejector FB is on this resource's sysres.
-            if (MapperConfig.EnableRobotTaskTail && fbIdByName.ContainsKey("Ejector")
+            if (HandoffPlanner.DischargeActive && fbIdByName.ContainsKey("Ejector")
                 && PinBlank("DO03"))
             {
                 effective["DO03"] = ("Ejector", "OutputToWork");
@@ -180,7 +180,7 @@ namespace CodeGen.Devices.M262
             // physical DI channel, only when the synthesized FB is on this resource's sysres.
             foreach (var (synthName, synthPin, _) in MapperConfig.M262SynthSensors)
             {
-                if (!MapperConfig.EnableRobotTaskTail) break;
+                if (!HandoffPlanner.DischargeActive) break;
                 if (!fbIdByName.ContainsKey(synthName) || !PinBlank(synthPin)) continue;
                 effective[synthPin] = (synthName, "Input");
                 if (synthPin.Length == 4 && int.TryParse(synthPin.Substring(2), out var diCh)) usedDi.Add(diCh);
