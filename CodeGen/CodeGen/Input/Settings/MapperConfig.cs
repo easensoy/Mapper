@@ -6,11 +6,6 @@ using System.Text.Json;
 
 namespace CodeGen.Configuration
 {
-    // Which controller hosts the Feed station: the physical Modicon M262 (default) or a Revolution Pi
-    // (RevPi), a PC-hosted Soft_dPAC. RevPi is a device/topology/deployment substitution only — the Feed
-    // FB network (Process1_Generic + stateRprtCmd ring), the recipe, and the interlocks are unchanged.
-    public enum FeedController { M262, RevPi }
-
     public class MapperConfig
     {
         private const string ConfigFileName = "mapper_config.json";
@@ -19,24 +14,6 @@ namespace CodeGen.Configuration
         // VueOneMapperHiddenRunner writes it, and removing the field would fault that consumer at load.
         // Do not read it, do not migrate it into a config: it carries no meaning.
         public static bool SimulatorRecipeMode = false;
-
-        // Feed-station controller target (single toggle for the whole Feed station). Static so the static
-        // ComponentRegistry partition reads it; set from the UI before generation. Default M262 keeps the
-        // generated project byte-identical to the M262 rig.
-        public static FeedController FeedStationController = FeedController.M262;
-
-        // PARTIAL controller swap: the specific Feed-input components relocated onto the RevPi (Soft_dPAC)
-        // while M262 KEEPS the rest (Transfer/Ejector/Robot/Feed_Station/PartAtAssembly). Empty = no partial
-        // swap (default -> byte-identical M262). The UI restricts the set to {Feeder, Checker}; PartInHopper
-        // is auto-added because its sensor is physically read by the RevPI_IO Modbus coupler. This is the
-        // 4-controller coexistence mode, DISTINCT from FeedStationController==RevPi (the whole-feed swap that
-        // deletes M262). Names are compared case-insensitively.
-        public static IReadOnlySet<string> RevPiComponents =
-            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        // Partial-RevPi coexistence: some Feed components on RevPi, M262 KEPT. Never true in the full swap.
-        public static bool PartialRevPi =>
-            FeedStationController == FeedController.M262 && RevPiComponents.Count > 0;
 
         // Engine END->0 loop-back (ProcessRuntimeTemplatePatcher).
         public static bool EnableCyclicRestart = true;
