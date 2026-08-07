@@ -837,6 +837,35 @@ def startRoutine(env, lane, chainIdx=0):
         chainBefore=chainBefore, recv=env.get("_recv"))
 
 
+def reportTaskError(vcid, env, measuredMs):
+    """How far the shadow's whole robot task is from the rig's, and the factor that
+    would close it.
+
+    speedFactor is only correct for the taught program it was derived against. Re-teach
+    the robot - add a descent, change a pose, delete a dwell - and the taught duration
+    moves, so a fixed factor silently drifts. That is not visible in any single line of
+    the log today: taskMs is there, the rig's number is not. This prints both together
+    with the corrected factor, so a re-teach costs one number instead of an evening.
+
+    duration = taught / k, so k_new = k_now * measured / target. Pure arithmetic on a
+    measurement, not a guess.
+    """
+    target = env.get("taskTargetMs")
+    if not target:
+        return
+    try:
+        target = float(target)
+        if target <= 0:
+            return
+        k = float(env.get("speedFactor") or 1.0)
+        err = measuredMs - target
+        log("robot_task_error", vcId=vcid, taskMs=int(measuredMs), targetMs=int(target),
+            errorMs=int(err), errorPct=round(100.0 * err / target, 1),
+            factor=k, suggestedFactor=round(k * measuredMs / target, 3))
+    except Exception as exc:
+        log("robot_task_error_failed", vcId=vcid, error=str(exc))
+
+
 def finishRoutine(lane, item, how, elapsedMs, quiet=False):
     env, verify = item["env"], item["verify"]
     total = int(simNowMs() - item["t0chain"]) if item.get("chain") else int(elapsedMs)
@@ -850,6 +879,8 @@ def finishRoutine(lane, item, how, elapsedMs, quiet=False):
             commandId=env.get("commandId"), vcId=item["vcId"], lane=lane,
             execution="routine", routine=item["routine"], durationMs=int(elapsedMs),
             taskMs=total, verified=False, via=how, carrying=carrying)
+        if not quiet:
+            reportTaskError(item["vcId"], env, total)
         return True
     attached, chain = chainHasCarrier(verify.get("part"), verify.get("carriers") or [])
     want = bool(verify.get("attached"))
