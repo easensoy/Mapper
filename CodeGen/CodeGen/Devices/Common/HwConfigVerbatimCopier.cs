@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Xml.Linq;
@@ -95,7 +95,7 @@ namespace CodeGen.Devices.Core
 
             try
             {
-                File.Copy(templatePath, hcfDest, overwrite: true);
+                CopyWithRetry(templatePath, hcfDest);
                 result.FilesCopied++;
                 result.HcfPath = hcfDest;
             }
@@ -113,6 +113,20 @@ namespace CodeGen.Devices.Core
                 : $"{deviceType}: .hcf deployed verbatim ({bytes} bytes; {rewrite.Skipped}).");
 
             return result;
+        }
+
+        // EAE briefly holds a deployed .hcf open during a live deploy or online change, so a copy that
+        // fails on a sharing violation is retried rather than reported as a missing hardware config.
+        private static void CopyWithRetry(string src, string dst)
+        {
+            for (int attempt = 1, delayMs = 50; ; attempt++, delayMs *= 2)
+            {
+                try { File.Copy(src, dst, overwrite: true); return; }
+                catch (Exception ex) when ((ex is IOException || ex is UnauthorizedAccessException) && attempt < 8)
+                {
+                    System.Threading.Thread.Sleep(delayMs);
+                }
+            }
         }
     }
 }
