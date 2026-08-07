@@ -1,0 +1,82 @@
+{
+  "catalogReference": "M080_V01.00_01.00",
+  "uuid": "{{M580EquipmentUuid}}",
+  "identifier": "M580dPAC_1",
+  "path": "Topology",
+  "properties": [
+    { "propertyName": "IsUnderConstruction", "propertyValue": "False" },
+    { "propertyName": "DomainTag",            "propertyValue": "{{solutionId}}" }
+  ],
+  "references": [
+    { "diagramPath": "Physical Views", "x": -80, "y": -380 }
+  ],
+  "equipments": [
+    {
+      "catalogReference": "BMEXBP0800_V01.00_01.00",
+      "uuid": "{{M580RackUuid}}",
+      "identifier": "BME XBP 0800 #0",
+      "path": "M580dPAC_1\\BME XBP 0800 #0",
+      "partNumber": "BME XBP 0800",
+      "equipments": [
+        {
+          "catalogReference": "BMXCPS4002_V01.00_01.00",
+          "uuid": "{{M580CpsUuid}}",
+          "identifier": "BMX CPS 4002 #P",
+          "path": "M580dPAC_1\\BME XBP 0800 #0\\BMX CPS 4002 #P",
+          "partNumber": "BMX CPS 4002"
+        },
+        {
+          "catalogReference": "BMED581020_V01.00_01.00",
+          "uuid": "{{M580CpuUuid}}",
+          "identifier": "BME D58 1020 #0",
+          "path": "M580dPAC_1\\BME XBP 0800 #0\\BME D58 1020 #0",
+          "partNumber": "BME D58 1020",
+          "components": [
+            {
+              "interfaces": [
+                {
+                  "identifier": "seGmac0",
+                  "disabled": false,
+                  "physicalAddress": "",
+                  "endpoints": [
+                    {
+                      "identifier": "IP Address",
+                      "isReadOnly": false,
+                      "domainReadOnly": false,
+                      "ipAddress": "{{targetIp}}",
+                      "domain": "{{broadcastDomainUuid}}"
+                    }
+                  ]
+                }
+              ],
+              "ports": [
+                { "identifier": "BKP",  "side": "Default" },
+                { "identifier": "ETH1", "side": "Default" },
+                { "identifier": "ETH2", "side": "Default" },
+                { "identifier": "ETH3", "side": "Default" }
+              ],
+              "componentType": "EthernetDEO"
+            },
+            {
+              "endpoint": "seGmac0\\IP Address",
+              "connectionTypes": "None",
+              "componentType": "EthernetMasterDEO"
+            },
+            { "enabled": false, "securityMode": 0, "componentType": "SysLogClientDEO" },
+            { "mode": 0, "componentType": "CyberSecurityDEO" },
+            {
+              "uuid": "{{M580RuntimeUuid}}",
+              "typeId": "{{M580RuntimeTypeId}}",
+              "logicalDeviceId": "{{sysdevId}}",
+              "runtimeServices": [
+                { "identifier": "Deployment" },
+                { "identifier": "Archive Service", "logicalPortSecured": "0" }
+              ],
+              "componentType": "RuntimeDEO"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
