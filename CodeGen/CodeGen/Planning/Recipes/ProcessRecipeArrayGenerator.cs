@@ -21,7 +21,7 @@ namespace CodeGen.Translation.Process
         public List<int> NextStep       { get; } = new();
 
         // ComponentID -> local id (sensors first, actuators next). Process is NOT in this map.
-        public Dictionary<string, int> ComponentRegistry { get; } =
+        public Dictionary<string, int> ComponentIds { get; } =
             new(StringComparer.OrdinalIgnoreCase);
 
         // TELEMETRY ONLY. Parallel to the six control arrays: for each recipe row, a 1-based ordinal
@@ -85,17 +85,20 @@ namespace CodeGen.Translation.Process
         // The model's process-to-process handoffs with their transports resolved, for the backend to render
         // wiring from. Derived from the same Ctx the recipe rows are compiled from, so the wiring and the
         // WAIT rows can never disagree about which producer reaches which consumer.
-        internal static Recipes.ProcessHandoffPlan HandoffPlan(IReadOnlyList<VueOneComponent> allComponents) =>
-            Recipes.ProcessCompiler.HandoffPlan(
-                BuildCompilerCtx(allComponents, new Dictionary<string, int>(), contents: null));
+        internal static Recipes.ProcessHandoffPlan HandoffPlan(IReadOnlyList<VueOneComponent> allComponents,
+            IReadOnlyDictionary<string, int> slots, ControllerAllocation allocation, bool ringsMerged) =>
+            Recipes.ProcessCompiler.HandoffPlan(BuildCompilerCtx(
+                allComponents, new Dictionary<string, int>(), slots, allocation, ringsMerged, topCoverSlot: null));
 
         public static RecipeArrays Generate(VueOneComponent process,
             StationContents stationContents, IReadOnlyList<VueOneComponent> allComponents,
-            int processId = 10)
+            IReadOnlyDictionary<string, int> slots, ControllerAllocation allocation, bool ringsMerged,
+            int topCoverSlot)
         {
+            int processId = slots[process.Name.Trim()];
             var scopedRegistry = BuildScopedComponentMap(stationContents.Sensors, stationContents.Actuators);
             var arrays = Recipes.ProcessCompiler.Compile(process, processId,
-                BuildCompilerCtx(allComponents, scopedRegistry, stationContents));
+                BuildCompilerCtx(allComponents, scopedRegistry, slots, allocation, ringsMerged, topCoverSlot));
 
             ValidateProcessIdInvariant(arrays, processId);
             ValidateSingleEndMarker(arrays);
@@ -107,14 +110,14 @@ namespace CodeGen.Translation.Process
             return arrays;
         }
 
-        // `contents` is null when only the handoff plan is wanted: that derivation reads process states,
-        // never a component slot, so the deployment-allocated overrides below have nothing to contribute.
+        // `topCoverSlot` is null when only the handoff plan is wanted: that derivation reads process
+        // states, never a component slot, so the deployment-allocated overrides below have nothing to add.
         private static Recipes.ProcessCompiler.Ctx BuildCompilerCtx(
             IReadOnlyList<VueOneComponent> all, IReadOnlyDictionary<string, int> scopedIds,
-            StationContents? contents)
+            IReadOnlyDictionary<string, int> slots, ControllerAllocation allocation, bool ringsMerged,
+            int? topCoverSlot)
         {
             var cat = RigCatalog.Current;
-            bool ringsMerged = Recipes.FeedRingMerge.Needed(all);
             var present = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             foreach (var si in cat.SensorInterlocks) present[si.Sensor] = si.PresentState;
             // Deployment-allocated slots override the local positional ones: these components report on a slot the
@@ -131,13 +134,8 @@ namespace CodeGen.Translation.Process
             // been told to move, and the cover sequence stopped dead with the gripper never gripping.
             foreach (var s in cat.SynthSensors) byName[s.Name] = s.Id;
             byName["Robot"] = cat.RobotActuatorId;
-            // Recomputed from the same inputs the layout used, rather than read back from a static a
-            // previous generation may have left behind -- identical inputs, identical slot, by construction.
-            if (contents != null)
-            {
-                int coverSlot = StateTableAllocation.TopCoverSensorSlot(contents, ringsMerged);
+            if (topCoverSlot is int coverSlot)
                 foreach (var n in TemplateMap.TopCoverSensorNames) byName[n] = coverSlot;
-            }
             // The material bridge is whichever synthesised sensor rides the cross-controller ring segment: that
             // membership is what makes its level readable on the far controller, so it is taken from the topology
             // rather than named here. A merged (no-clamp) ring announces every process directly and needs none.
@@ -148,11 +146,11 @@ namespace CodeGen.Translation.Process
                 Ids = scopedIds,
                 IdsByName = byName,
                 All = all,
-                ProcessIdByName = cat.ProcessSlots,
+                ProcessIdByName = slots,
                 SensorPresent = present,
                 // Ring membership from controller allocation: two processes share a ring when the same
                 // controller hosts them. Topology, not process identity.
-                Allocation = ControllerAllocation.Current,
+                Allocation = allocation,
                 RingsMerged = ringsMerged,
                 MaterialBridgeId = bridge?.Id ?? -1,
             };
@@ -168,7 +166,7 @@ namespace CodeGen.Translation.Process
                         $"the Process FB's process_id ({processId}). Process is not a ring " +
                         "participant and cannot publish its own wait state. Likely cause: " +
                         "a stray ComponentID in Control.xml conditions landed on the process_id " +
-                        "value via the registry. Inspect ComponentRegistry / SkippedConditions.");
+                        "value via the registry. Inspect ComponentIds / SkippedConditions.");
             }
         }
 
