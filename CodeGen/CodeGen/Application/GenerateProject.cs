@@ -89,6 +89,7 @@ namespace CodeGen.Application
             SyncSysresParameters(cfg, path, log);
             SweepOrphans(cfg, log);
             ValidateParity(cfg, path, log);
+            ValidateConnections(cfg, log);
             ValidateAddresses(cfg, log);
             ValidateMqtt(cfg, log);
             ValidateBx1Scanner(cfg, log);
@@ -595,6 +596,23 @@ namespace CodeGen.Application
                 }
             }
             catch (Exception ex) { log($"[Hcf][Validate][Error] {ex.Message}"); }
+        }
+
+        // Every generated connection names endpoints that exist and leaves each input driven once. Both
+        // failures are silent in EAE — an unresolvable wire is dropped, a double-driven input resolves by
+        // evaluation order — so they surface here or not at all.
+        static void ValidateConnections(MapperConfig cfg, Action<string> log)
+        {
+            var violations = ConnectionIntegrityValidator.Validate(EaeProjectLayout.DeriveEaeProjectRoot(cfg));
+            if (violations.Count == 0)
+            {
+                log("[Connections] PASS — every endpoint resolves and no input carries two sources.");
+                return;
+            }
+            foreach (var v in violations) log($"  [Connections][FAIL] {v}");
+            throw new InvalidOperationException(
+                $"[Connections] {violations.Count} connection defect(s) in the generated project; " +
+                "the first is: " + violations[0]);
         }
 
         static void SyncSysresParameters(MapperConfig cfg, string path, Action<string> log)
