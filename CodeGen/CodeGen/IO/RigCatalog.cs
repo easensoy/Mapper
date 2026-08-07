@@ -20,14 +20,6 @@ namespace CodeGen.Configuration
 
         public static RigCatalog Current => RigCatalogLoader.Catalog;
 
-        // The slot a process publishes its own phase on. Unallocated fails loudly and names the file to
-        // edit: a defaulted slot would silently collide with a component id and repoint every WAIT on it.
-        public int SlotOfProcess(string? processName) =>
-            ProcessSlots.TryGetValue((processName ?? string.Empty).Trim(), out int slot)
-                ? slot
-                : throw new System.InvalidOperationException(
-                    $"Process '{processName}' has no state_table slot. Add it to processSlots in " +
-                    "Config/smc-rig.yml, above the component id space and distinct from every other slot.");
     }
 
     public sealed class SensorInterlock
