@@ -6,20 +6,21 @@ using System.Xml.Linq;
 using CodeGen.Configuration;
 using CodeGen.Devices.Core;
 using CodeGen.Translation;
+using CodeGen.Mapping;
 
 namespace CodeGen.Devices.M262
 {
     public static class HcfPatchService
     {
-        public static void PatchDeployed(MapperConfig? config,
+        public static void PatchDeployed(GenerationContext ctx,
             string syslayPath, IoBindings? bindings,
             SystemInjector.BindingApplicationReport report)
         {
             var syslayFbNames = ReadSyslayFbNames(syslayPath);
-            PatchDeployed(config, syslayFbNames, bindings, report);
+            PatchDeployed(ctx.Config, ctx.Profile, syslayFbNames, bindings, report);
         }
 
-        public static void PatchDeployed(MapperConfig? config,
+        public static void PatchDeployed(MapperConfig? config, DeploymentProfile profile,
             HashSet<string> syslayFbNames,
             IoBindings? bindings,
             SystemInjector.BindingApplicationReport report)
@@ -73,7 +74,7 @@ namespace CodeGen.Devices.M262
                     }
                 }
                 var sensorNames = ReadSensorNames(sysresPath);
-                WriteHcfMerged(hcfPath, resourceId, bindings, fbIdByName, sensorNames, report);
+                WriteHcfMerged(profile, hcfPath, resourceId, bindings, fbIdByName, sensorNames, report);
 
                 report.Missing.Add($"[Hcf] wrote   ← {hcfPath}");
             }
@@ -132,7 +133,7 @@ namespace CodeGen.Devices.M262
 
         // Idempotent merge into the deployed .hcf. ParameterValue targets use the symlink
         // convention {resourceId}.{componentFbId}.{port}.
-        private static void WriteHcfMerged(string hcfPath, string resourceId,
+        private static void WriteHcfMerged(DeploymentProfile profile, string hcfPath, string resourceId,
             IoBindings? bindings, Dictionary<string, string> fbIdByName,
             List<string> sensorNames,
             SystemInjector.BindingApplicationReport report)
@@ -220,7 +221,7 @@ namespace CodeGen.Devices.M262
                 StringComparer.OrdinalIgnoreCase);
             foreach (var comp in expectedM262)
             {
-                if (MapperConfig.RevPiComponents.Contains(comp)) continue;   // explicitly on RevPi -> blank is correct
+                if (profile.RunsOnRevPi(comp)) continue;   // explicitly on RevPi -> blank is correct
                 if (fbIdByName.ContainsKey(comp)) continue;                  // present -> it will bind
                 report.Missing.Add($"[Hcf][M262][ORPHAN] '{comp}' is M262-default but MISSING from the M262 " +
                     "sysres, so its M262 IO is left blank. This is a stale partial-RevPi leftover — Clean " +
