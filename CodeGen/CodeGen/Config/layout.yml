@@ -1,4 +1,4 @@
-# Where the generated FBs are placed on the EAE canvas, and which controller runs each of them.
+﻿# Where the generated FBs are placed on the EAE canvas, and which controller runs each of them.
 #
 # This is the DEPLOYMENT roster: the twin says what the machine does, this says where each component
 # runs and where it is drawn. Adding a component to the rig is a row here, not a change in C#.
@@ -145,6 +145,13 @@ idOrder:
   # Appended only when the cross-controller discharge is active, so it never shifts the ids above it.
   robotTail:
     - Robot
+
+# Alternate spellings a twin may use for a component the roster already declares. Two names for one
+# physical device is a naming fact, not an allocation rule: the alias resolves to the declared component
+# and inherits whatever controller it is given.
+aliases:
+  Rejector: Ejector
+  Robot_Pick_And_Place1: Robot
 
 # Chains the station adapter; interleaves sensors with actuators.
 casBusOrder:
