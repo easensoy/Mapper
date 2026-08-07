@@ -17,7 +17,7 @@ namespace CodeGen.Translation.Interlocks
         // is how the guard came to omit the destination check and the array cap.
         public static InterlockPlan BuildRules(VueOneComponent actuator,
             IReadOnlyList<VueOneComponent> allComponents,
-            IReadOnlyDictionary<string, int> scopedIds)
+            IReadOnlyDictionary<string, int> scopedIds, GenerationContext ctx)
         {
             int cap = InterlockConfig.Current.RuleArraySize;
             var from = new int[cap];
@@ -26,7 +26,7 @@ namespace CodeGen.Translation.Interlocks
             var blk = new int[cap];
             int n = 0;
 
-            foreach (var r in Resolve(actuator, allComponents, scopedIds))
+            foreach (var r in Resolve(actuator, allComponents, scopedIds, ctx))
             {
                 if (n >= cap) break;
                 from[n] = r.From; to[n] = r.To; src[n] = r.Src; blk[n] = r.Blocked;
@@ -39,8 +39,8 @@ namespace CodeGen.Translation.Interlocks
         // (conditions present but RuleCount==0 => abort).
         public static int CountInScopeConditions(VueOneComponent actuator,
             IReadOnlyList<VueOneComponent> allComponents,
-            IReadOnlyDictionary<string, int> scopedIds)
-            => Resolve(actuator, allComponents, scopedIds)
+            IReadOnlyDictionary<string, int> scopedIds, GenerationContext ctx)
+            => Resolve(actuator, allComponents, scopedIds, ctx)
                 .Take(InterlockConfig.Current.RuleArraySize)
                 .Count();
 
@@ -49,7 +49,7 @@ namespace CodeGen.Translation.Interlocks
         // The single translation pass: one rule per surviving <Interlock_Condition>.
         private static IEnumerable<Rule> Resolve(VueOneComponent actuator,
             IReadOnlyList<VueOneComponent> allComponents,
-            IReadOnlyDictionary<string, int> scopedIds)
+            IReadOnlyDictionary<string, int> scopedIds, GenerationContext ctx)
         {
             foreach (var st in actuator.States)
             {
@@ -78,7 +78,7 @@ namespace CodeGen.Translation.Interlocks
                     // A cross-controller FEED source at rest is the genuine exception — it means "the
                     // workpiece is not delivered", which must keep blocking downstream work.
                     if (blocked == ActuatorStateEncoding.Home &&
-                        !IsCrossControllerReadinessGate(actuator, srcComp)) continue;
+                        !IsCrossControllerReadinessGate(actuator, srcComp, ctx)) continue;
 
                     yield return new Rule(fromState, toState, srcId, blocked);
                 }
@@ -124,10 +124,11 @@ namespace CodeGen.Translation.Interlocks
         // delivered", which must keep blocking the downstream station. A collision partner that merely
         // lives on another PLC is NOT a readiness gate — it returns home BEFORE the interlocked actuator
         // moves, so keeping its rule deadlocks. Data-driven; off when the rings are not merged.
-        private static bool IsCrossControllerReadinessGate(VueOneComponent actuator, VueOneComponent? srcComp)
+        private static bool IsCrossControllerReadinessGate(VueOneComponent actuator, VueOneComponent? srcComp,
+            GenerationContext ctx)
         {
-            if (!CodeGen.Translation.GenerationPlan.Current.RingsMerged || srcComp == null) return false;
-            var allocation = ControllerAllocation.Current;
+            if (!ctx.RingsMerged || srcComp == null) return false;
+            var allocation = ctx.Allocation;
             var source = allocation.Of(srcComp.Name);
             return source != allocation.Of(actuator.Name) && ControllerMap.IsFeedController(source);
         }
