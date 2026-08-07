@@ -43,12 +43,6 @@ namespace CodeGen.Configuration
 
         public static bool MergeFeedRing = false;
 
-        // Emits the Disassembly->Feed CycleReady CrossReference wiring (clamp model only, see CycleReadyActive).
-        public static bool EnableCycleReadyHandoff = true;
-
-        // The merged no-clamp ring already carries Disassembly's state to Feed, so the extra wiring is clamp-only.
-        public static bool CycleReadyActive => EnableCycleReadyHandoff && !MergeFeedRing;
-
         // Computed per ring topology by SystemLayoutInjector; this default is a fallback.
         public static int TopCoverSensorId = 6;
 
