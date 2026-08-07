@@ -32,9 +32,10 @@ namespace CodeGen.Devices.Core
             TerminatorFb: null,
             HmiAdapterWires: Array.Empty<ResourceWireEmitter.Wire>());
 
-        public static void EmitStation2Resources(MapperConfig cfg,
+        public static void EmitStation2Resources(GenerationContext ctx,
             SystemInjector.BindingApplicationReport report)
         {
+            var cfg = ctx.Config;
             var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
             if (eaeRoot == null)
             {
@@ -42,16 +43,17 @@ namespace CodeGen.Devices.Core
                 return;
             }
 
-            Wire(cfg, eaeRoot, "M580_dPAC", "M580", M580Anchors, report);
-            Wire(cfg, eaeRoot, "Soft_dPAC", "BX1", BX1Anchors, report);
+            Wire(ctx, eaeRoot, "M580_dPAC", "M580", M580Anchors, report);
+            Wire(ctx, eaeRoot, "Soft_dPAC", "BX1", BX1Anchors, report);
         }
 
         // Parameters are synced from the syslay BOTH sides of the wiring pass: before, so the wiring
         // sees the FBs it is about to connect, and after, because EmitForResource rewrites the
         // FBNetwork and a resource that shipped with a stale recipe deploys silently wrong.
-        private static void Wire(MapperConfig cfg, string eaeRoot, string deviceType, string tag,
+        private static void Wire(GenerationContext ctx, string eaeRoot, string deviceType, string tag,
             ResourceWireEmitter.ResourceAnchors anchors, SystemInjector.BindingApplicationReport report)
         {
+            var cfg = ctx.Config;
             var sysres = ResourceWireEmitter.LocateSysresByDeviceType(eaeRoot, deviceType);
             if (sysres == null)
             {
@@ -71,7 +73,7 @@ namespace CodeGen.Devices.Core
             // A leftover Cover_Station would be re-discovered and re-wired by the type scan below, so it
             // is swept first. BX1 runs no Process engine: Assembly_Station commands the covers.
             if (anchors.ProcessFb == null) SweepCoverStationFromSysres(sysres, report);
-            ResourceWireEmitter.EmitForResource(cfg, sysres, anchors, report);
+            ResourceWireEmitter.EmitForResource(ctx, sysres, anchors, report);
             Sync("post-wire ");
         }
 
