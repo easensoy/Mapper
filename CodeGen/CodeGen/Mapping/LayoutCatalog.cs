@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using CodeGen.Translation;
@@ -15,6 +15,7 @@ namespace CodeGen.Configuration
         public List<RosterEntry> Components { get; set; } = new();
         public IdOrder IdOrder { get; set; } = new();
         public List<string> CasBusOrder { get; set; } = new();
+        public Dictionary<string, string> Aliases { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
         public static LayoutCatalog Current => LayoutCatalogLoader.Catalog;
 
@@ -97,6 +98,13 @@ namespace CodeGen.Configuration
             foreach (var n in c.IdOrder.Sensors.Concat(c.IdOrder.Actuators)
                          .Concat(c.IdOrder.RobotTail).Concat(c.CasBusOrder))
                 if (!known.Contains(n)) errors.Add($"'{n}' is ordered but is not a declared component");
+            foreach (var kv in c.Aliases)
+            {
+                if (!known.Contains(kv.Value))
+                    errors.Add($"alias '{kv.Key}' points at '{kv.Value}', which is not a declared component");
+                if (known.Contains(kv.Key))
+                    errors.Add($"alias '{kv.Key}' is also a declared component, so the alias can never resolve");
+            }
 
             if (errors.Count > 0)
                 throw new InvalidOperationException(
