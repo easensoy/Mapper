@@ -15,8 +15,9 @@ namespace CodeGen.Configuration
         // Do not read it, do not migrate it into a config: it carries no meaning.
         public static bool SimulatorRecipeMode = false;
 
-        // Engine END->0 loop-back (ProcessRuntimeTemplatePatcher).
-        public static bool EnableCyclicRestart = true;
+        // Engine END->0 loop-back (ProcessRuntimeTemplatePatcher). Readonly: nothing assigns it, and a
+        // writable static here would be generation state one run could change under another.
+        public static readonly bool EnableCyclicRestart = true;
 
         public static int RobotActuatorId         => RigCatalog.Current.RobotActuatorId;
 
