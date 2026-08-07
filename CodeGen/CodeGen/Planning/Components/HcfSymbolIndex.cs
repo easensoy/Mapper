@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -101,7 +101,8 @@ namespace CodeGen.Translation
 
         // Owns a component by tracing an IO binding (atwork/athome/OutputToWork/OutputToHome,
         // then Sensor InputTag); falls back to the allocation when none is registered.
-        public PlcAssignment ResolveComponent(string componentName, IoBindings? bindings)
+        public PlcAssignment ResolveComponent(string componentName, IoBindings? bindings,
+            ControllerAllocation allocation)
         {
             if (string.IsNullOrWhiteSpace(componentName)) return PlcAssignment.Unknown;
 
@@ -129,7 +130,7 @@ namespace CodeGen.Translation
 
             // No IO binding traced: fall back to the deployment allocation, which is where the component's
             // controller is decided in the first place.
-            return ControllerAllocation.Current.Of(componentName);
+            return allocation.Of(componentName);
         }
     }
 }
