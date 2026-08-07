@@ -33,7 +33,6 @@ namespace CodeGen.Devices.Core
             new("FB2.FIRST_INIT",      "FB2.ACK_FIRST"),
         };
 
-        private static IReadOnlyList<string> CaSBusOrder => ComponentRegistry.CaSBusOrder;
 
 
         // Single source of truth in TemplateMap so the syslay stationChain and this sysres wiring can never drift.
@@ -63,9 +62,10 @@ namespace CodeGen.Devices.Core
         private static readonly Wire[] DataWires = Array.Empty<Wire>();
 
         // Wires one deployed sysres FBNetwork; components discovered from the sysres (CaSBusOrder then declaration order) so chains/ring are N-component-safe. BX1 (no Station/Process/Terminator) gets only the init fan-out + report ring.
-        public static void EmitForResource(MapperConfig cfg, string sysresPath,
+        public static void EmitForResource(GenerationContext ctx, string sysresPath,
             ResourceAnchors anchors, SystemInjector.BindingApplicationReport report)
         {
+            var cfg = ctx.Config;
             try
             {
                 var tag = anchors.Label;
@@ -95,9 +95,9 @@ namespace CodeGen.Devices.Core
                 // (they never carry Feed FBs), and when not in partial mode. Yields exactly the clean partition
                 // the gate proves valid; the M262 Feed ring then wires around the remaining components, leaving
                 // the cross-device seam open for EAE to bridge to RevPi.
-                if (MapperConfig.PartialRevPi && !string.Equals(tag, "RevPi", StringComparison.Ordinal))
+                if (ctx.Profile.PartialRevPi && !string.Equals(tag, "RevPi", StringComparison.Ordinal))
                 {
-                    var relocated = MapperConfig.RevPiComponents;
+                    var relocated = ctx.Profile.RevPiComponents;
                     var dropFbs = fbNet.Elements(ns + "FB")
                         .Where(f => relocated.Contains((string?)f.Attribute("Name") ?? "")).ToList();
                     foreach (var fb in dropFbs) fb.Remove();
@@ -133,7 +133,7 @@ namespace CodeGen.Devices.Core
                 bool translateToOrigin =
                     string.Equals(tag, "M580", StringComparison.Ordinal) ||
                     string.Equals(tag, "BX1",  StringComparison.Ordinal);
-                ApplyCanonicalLayout(byName, report, tag, translateToOrigin);
+                ApplyCanonicalLayout(ctx, byName, report, tag, translateToOrigin);
 
                 var portsByType = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
                 HashSet<string> PortsFor(string type)
@@ -211,7 +211,7 @@ namespace CodeGen.Devices.Core
 
                 var orderedComps = new List<XElement>();
                 var seenComp = new HashSet<string>(StringComparer.Ordinal);
-                foreach (var nm in CaSBusOrder)
+                foreach (var nm in ctx.Roster.CaSBusOrder)
                     if (byName.TryGetValue(nm, out var cfb) &&
                         (IsSensor(cfb) || IsActuator(cfb)))
                     {
@@ -338,7 +338,7 @@ namespace CodeGen.Devices.Core
                         // from the syslay. The Feed resource's Label is "Sysres", hence the tag test.
                         bool openBoundary =
                             (robotTail && string.Equals(tag, "M580", StringComparison.Ordinal)) ||
-                            (CodeGen.Translation.GenerationPlan.Current.RingsMerged &&
+                            (ctx.RingsMerged &&
                              string.Equals(tag, "Sysres", StringComparison.Ordinal));
                         if (openBoundary)
                             report.Missing.Add(
@@ -353,7 +353,7 @@ namespace CodeGen.Devices.Core
                         // Cover detour (BX1): when covers are commanded by the M580 ring the BX1 cover chain is OPEN at both ends — OMIT the self-close (EAE bridges via syslay). Off -> BX1 self-closes the broadcast loop locally.
                         // Partial RevPi: the Feeder/Checker segment is commanded by the M262 Feed_Station ring, so it too is OPEN at both ends (in from PartAtAssembly, out to Transfer/Feed_Station) — EAE bridges via syslay.
                         bool openCoverChain = string.Equals(tag, "BX1", StringComparison.Ordinal)
-                            || (MapperConfig.PartialRevPi && string.Equals(tag, "RevPi", StringComparison.Ordinal));
+                            || (ctx.Profile.PartialRevPi && string.Equals(tag, "RevPi", StringComparison.Ordinal));
                         if (openCoverChain)
                             report.Missing.Add(
                                 $"[{tag}] cover detour: cover chain {ringNames[0]}…{ringNames[^1]} ends OPEN " +
@@ -372,7 +372,7 @@ namespace CodeGen.Devices.Core
                         $"{crossSeg[i]}.stateRprtCmd_out", $"{crossSeg[i + 1]}.stateRprtCmd_in"));
                 if (crossSeg.Count > 0)
                 {
-                    if (CodeGen.Translation.GenerationPlan.Current.RingsMerged && ringNames.Count > 0 &&
+                    if (ctx.RingsMerged && ringNames.Count > 0 &&
                         string.Equals(tag, "Sysres", StringComparison.Ordinal)) // "Sysres" = the M262 anchors' Label
                     {
                         // Merged-ring seam (M262): the segment tail feeds the Feed head locally so discharge segment + Feed chain are one continuous chain; seg[0].in and Feed_Station.out stay OPEN (EAE bridges via syslay).
@@ -450,32 +450,25 @@ namespace CodeGen.Devices.Core
         private static bool RobotTailActive(MapperConfig cfg)
             => CodeGen.Translation.HandoffPlanner.DischargeActive;
 
-        // Projected from ComponentRegistry (single source of truth) so the table never drifts; applied to both the sysres and the syslay.
-        private static readonly Dictionary<string, (int X, int Y)> CanonicalLayout = BuildCanonicalLayout();
-
-        private static Dictionary<string, (int X, int Y)> BuildCanonicalLayout()
-        {
-            var dict = new Dictionary<string, (int X, int Y)>(StringComparer.Ordinal);
-            foreach (var entry in ComponentRegistry.ByName.Values)
-                dict[entry.Name] = (entry.X, entry.Y);
-            return dict;
-        }
-
+        // Projected from the run's roster so the canvas table never drifts from the allocation; applied to
+        // both the sysres and the syslay.
         // Device-local sysres canvases (M580/BX1) translate the present FBs back to this origin; the shared syslay's raw coords would leave them off-canvas.
         const int DeviceLocalCanvasOriginX = 2000;
         const int DeviceLocalCanvasOriginY = 2000;
 
         // translateToOrigin=true (M580/BX1) shifts the group's bounding-box top-left to the device-local origin; false (syslay + M262 sysres) keeps global coordinates.
-        private static void ApplyCanonicalLayout(Dictionary<string, XElement> byName,
+        private static void ApplyCanonicalLayout(GenerationContext ctx, Dictionary<string, XElement> byName,
             SystemInjector.BindingApplicationReport report, string source,
             bool translateToOrigin)
         {
-            var present = CanonicalLayout
+            var canonicalLayout = ctx.Roster.All.ToDictionary(
+                e => e.Name, e => (X: e.X, Y: e.Y), StringComparer.Ordinal);
+            var present = canonicalLayout
                 .Where(kv => byName.ContainsKey(kv.Key))
                 .ToList();
             if (present.Count == 0)
             {
-                report.Missing.Add($"[{source} layout] 0/{CanonicalLayout.Count} FBs placed");
+                report.Missing.Add($"[{source} layout] 0/{canonicalLayout.Count} FBs placed");
                 return;
             }
 
@@ -512,11 +505,11 @@ namespace CodeGen.Devices.Core
                 placed++;
             }
             report.Missing.Add(
-                $"[{source} layout] {placed}/{CanonicalLayout.Count} FBs placed" +
+                $"[{source} layout] {placed}/{canonicalLayout.Count} FBs placed" +
                 (translateToOrigin ? $" (component bucket dx={dx} dy={dy} -> device-local origin; FB1/FB2 fixed)" : ""));
         }
 
-        public static void ApplyLayoutToSyslay(string syslayPath,
+        public static void ApplyLayoutToSyslay(GenerationContext ctx, string syslayPath,
             SystemInjector.BindingApplicationReport report)
         {
             try
@@ -534,8 +527,8 @@ namespace CodeGen.Devices.Core
                     var n = (string?)fb.Attribute("Name") ?? string.Empty;
                     if (!string.IsNullOrEmpty(n)) byName[n] = fb;
                 }
-                ApplyCanonicalLayout(byName, report, "Syslay", translateToOrigin: false);
-                ResizeFramesToFitFbs(net, ns, report);
+                ApplyCanonicalLayout(ctx, byName, report, "Syslay", translateToOrigin: false);
+                ResizeFramesToFitFbs(ctx, net, ns, report);
                 var settings = new XmlWriterSettings
                 {
                     OmitXmlDeclaration = false,
@@ -584,7 +577,7 @@ namespace CodeGen.Devices.Core
         };
 
         // Grow each zone <Frame> to enclose the FBs its PLC owns (BucketFor); origins clamped to >=0. Best-effort: a frame with no FBs in its bucket is left as-is.
-        private static void ResizeFramesToFitFbs(XElement net, XNamespace ns,
+        private static void ResizeFramesToFitFbs(GenerationContext ctx, XElement net, XNamespace ns,
             SystemInjector.BindingApplicationReport report)
         {
             // Left pad is widest so the ring wires that loop out the FBs' left edges stay inside the frame.
@@ -608,7 +601,7 @@ namespace CodeGen.Devices.Core
                 // RevPi Feed FBs live in the M262 (Feed) zone frame — byte-identical for M262 (none guess RevPi).
                 var inZone = fbs.Where(f =>
                 {
-                    var b = SysresFbMirror.BucketFor(f.Name);
+                    var b = SysresFbMirror.BucketFor(f.Name, ctx.Allocation);
                     if (b == PlcAssignment.RevPi) b = PlcAssignment.M262;
                     return b == bucket;
                 }).ToList();
