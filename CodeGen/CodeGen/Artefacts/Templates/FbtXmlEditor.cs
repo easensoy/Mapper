@@ -79,6 +79,28 @@ namespace CodeGen.Services
             }
         }
 
+        // Apply a REQUIRED structural patch. Unlike EditDeployedFbt, nothing here is survivable: a missing
+        // .fbt, an unreadable root and an edit that throws all abort generation.
+        //
+        // The distinction is the difference between a warning and a silently broken deploy. A patch that
+        // reshapes a TYPE's interface is what makes the instance parameters the planner emits legal; if it
+        // does not apply, EAE ignores every parameter naming a pin the type never declared and the tree
+        // deploys looking correct while the value never reaches the runtime. That failure has no symptom
+        // until the machine misbehaves, so it must surface here.
+        internal static void RequireDeployedFbt(string eaeProjectDir, string fbtFileName, string what,
+            Action<XDocument, XElement, XNamespace, string> edit)
+        {
+            var fbt = FindDeployedFbt(eaeProjectDir, fbtFileName);
+            if (string.IsNullOrEmpty(fbt))
+                throw new InvalidOperationException(
+                    $"{what}: {fbtFileName} is not deployed under {eaeProjectDir}\\IEC61499, so the patch " +
+                    "cannot be applied and any instance parameter it enables would be a phantom.");
+            var doc = LoadXmlWithRetry(fbt, LoadOptions.PreserveWhitespace);
+            var root = doc.Root
+                ?? throw new InvalidOperationException($"{what}: {fbt} has no root element.");
+            edit(doc, root, root.GetDefaultNamespace(), fbt);
+        }
+
         // Write IEC61499/DataType/<name>.dt (copy-if-absent) and record it in DataTypesDeployed so the
         // dfbproj registers the type. patchNote appends to the PatchesApplied log line.
         internal static void DeployDatatype(string eaeProjectDir, string name, string dtXml,
