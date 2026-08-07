@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -333,10 +333,12 @@ namespace CodeGen.Devices.Core
                         for (int i = 0; i < processNames.Count - 1; i++)
                             adapterWires.Add(new Wire($"{processNames[i]}.stateRptCmdAdptr_out",
                                 $"{processNames[i + 1]}.stateRptCmdAdptr_in"));
-                        // Boundary-open on the robot-tail (M580) or MergeFeedRing (M262) cross-PLC seams: OMIT the local close-back so the boundary plug isn't double-driven (EAE bridges via syslay). The M262 resource's Label is "Sysres", so its identity check is tag == "Sysres".
+                        // Boundary-open on a cross-controller seam (the robot tail on M580, the merged ring on the Feed
+                        // controller): OMIT the local close-back so the boundary plug is not double-driven; EAE bridges it
+                        // from the syslay. The Feed resource's Label is "Sysres", hence the tag test.
                         bool openBoundary =
                             (robotTail && string.Equals(tag, "M580", StringComparison.Ordinal)) ||
-                            (CodeGen.Configuration.MapperConfig.MergeFeedRing &&
+                            (CodeGen.Translation.GenerationPlan.Current.RingsMerged &&
                              string.Equals(tag, "Sysres", StringComparison.Ordinal));
                         if (openBoundary)
                             report.Missing.Add(
@@ -370,14 +372,14 @@ namespace CodeGen.Devices.Core
                         $"{crossSeg[i]}.stateRprtCmd_out", $"{crossSeg[i + 1]}.stateRprtCmd_in"));
                 if (crossSeg.Count > 0)
                 {
-                    if (CodeGen.Configuration.MapperConfig.MergeFeedRing && ringNames.Count > 0 &&
+                    if (CodeGen.Translation.GenerationPlan.Current.RingsMerged && ringNames.Count > 0 &&
                         string.Equals(tag, "Sysres", StringComparison.Ordinal)) // "Sysres" = the M262 anchors' Label
                     {
-                        // MergeFeedRing seam (M262): the segment tail feeds the Feed head locally so discharge segment + Feed chain are one continuous chain; seg[0].in and Feed_Station.out stay OPEN (EAE bridges via syslay).
+                        // Merged-ring seam (M262): the segment tail feeds the Feed head locally so discharge segment + Feed chain are one continuous chain; seg[0].in and Feed_Station.out stay OPEN (EAE bridges via syslay).
                         adapterWires.Add(new Wire(
                             $"{crossSeg[^1]}.stateRprtCmd_out", $"{ringNames[0]}.stateRprtCmd_in"));
                         report.Missing.Add(
-                            $"[{tag}] MergeFeedRing seam: {crossSeg[^1]}.stateRprtCmd_out -> {ringNames[0]} " +
+                            $"[{tag}] merged-ring seam: {crossSeg[^1]}.stateRprtCmd_out -> {ringNames[0]} " +
                             "(Feed head, local); seg[0].in + Feed_Station.out OPEN — EAE bridges via syslay");
                     }
                     else
