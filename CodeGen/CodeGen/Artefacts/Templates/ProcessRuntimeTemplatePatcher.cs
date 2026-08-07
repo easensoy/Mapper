@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -781,22 +781,26 @@ namespace CodeGen.Services
             if (!File.Exists(fbtPath)) return;
 
             var text = File.ReadAllText(fbtPath);
-            const string oldDecl =
-                "<VarDeclaration Name=\"state_table\" Type=\"Component_State\" Namespace=\"Main\" ArraySize=\"1\" />";
-            const string newDecl =
-                "<VarDeclaration Name=\"state_table\" Type=\"Component_State\" Namespace=\"Main\" ArraySize=\"20\" />";
+            // The size is StateTableAllocation.Capacity, not a literal: the engine, the bus handler, the
+            // ring relay and the interlock evaluator all declare state_table and must agree, or a report
+            // writes past the end of one of them.
+            int cap = CodeGen.Translation.StateTableAllocation.Capacity;
+            const string declPrefix =
+                "<VarDeclaration Name=\"state_table\" Type=\"Component_State\" Namespace=\"Main\" ArraySize=\"";
+            string oldDecl = declPrefix + "1\" />";
+            string newDecl = declPrefix + cap + "\" />";
 
             if (text.Contains(newDecl)) return;
             if (!text.Contains(oldDecl))
             {
                 result.Warnings.Add(
-                    "ProcessRuntime_Generic_v1.fbt: state_table declaration not found in expected " +
-                    "shape (ArraySize=\"1\"). Skipping ArraySize patch — verify by hand.");
+                    "ProcessRuntime_Generic_v1.fbt: state_table is neither ArraySize=\"1\" (the shape this " +
+                    $"repairs) nor ArraySize=\"{cap}\" (the shape the template ships). Verify by hand.");
                 return;
             }
             File.WriteAllText(fbtPath, text.Replace(oldDecl, newDecl));
-            result.PatchesApplied.Add("ProcessRuntime_Generic_v1.state_table ArraySize 1 -> 20");
-            MapperLogger.Info("[Deploy] Patched ProcessRuntime_Generic_v1.state_table ArraySize 1 -> 20");
+            result.PatchesApplied.Add($"ProcessRuntime_Generic_v1.state_table ArraySize 1 -> {cap}");
+            MapperLogger.Info($"[Deploy] Patched ProcessRuntime_Generic_v1.state_table ArraySize 1 -> {cap}");
 
             // Fix the shipped check_wait typo (RHS Wait1Id -> Wait1State) or no wait can ever be satisfied.
             const string brokenCheckWait =
