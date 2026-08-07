@@ -17,7 +17,9 @@ namespace CodeGen.Configuration
         public List<string> CasBusOrder { get; set; } = new();
         public Dictionary<string, string> Aliases { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
-        public static LayoutCatalog Current => LayoutCatalogLoader.Catalog;
+        // Read once at the entry point and carried on the run's DeploymentProfile. Not an ambient
+        // singleton: nothing below the entry point may reach the catalog without being handed it.
+        public static LayoutCatalog Load() => LayoutCatalogLoader.Catalog;
 
         public LayoutBand Band(PlcAssignment plc) =>
             Bands.FirstOrDefault(b => b.Plc == plc) ?? LayoutBand.OffCanvas;
