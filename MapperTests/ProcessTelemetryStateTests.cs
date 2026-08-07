@@ -40,7 +40,7 @@ namespace MapperTests
         private static (RecipeArrays Arrays, VueOneComponent Process)
             Compile(string suffix, string processName)
         {
-            var ctx = GenerationContext.Plan(new MapperConfig(), ModelPath(suffix), DeploymentProfile.M262Only);
+            var ctx = GenerationContext.Plan(new MapperConfig(), ModelPath(suffix), DeploymentProfile.M262Only(LayoutCatalog.Load()));
             var process = ctx.Components.Single(c =>
                 string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(c.Name, processName, StringComparison.OrdinalIgnoreCase));
