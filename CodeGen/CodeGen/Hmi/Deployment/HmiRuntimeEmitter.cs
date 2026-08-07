@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -38,8 +38,9 @@ internal static class HmiRuntimeEmitter
         internal int ProjectEntriesAdded { get; set; }
     }
 
-    internal static EmitResult Emit(string eaeRoot, MapperConfig config, string firstCanvas)
+    internal static EmitResult Emit(string eaeRoot, CodeGen.Translation.GenerationContext ctx, string firstCanvas)
     {
+        var config = ctx.Config;
         ArgumentException.ThrowIfNullOrWhiteSpace(eaeRoot);
         ArgumentNullException.ThrowIfNull(config);
         ArgumentException.ThrowIfNullOrWhiteSpace(firstCanvas);
@@ -101,7 +102,7 @@ internal static class HmiRuntimeEmitter
             result.Problems.Add("IEC61499.dfbproj is missing; the HMI logical device was not registered.");
         }
 
-        var folders = FoldersXmlEmitter.Register(config, DeviceId);
+        var folders = FoldersXmlEmitter.Register(config, ctx.Profile.PartialRevPi, DeviceId);
         result.Problems.AddRange(folders.Warnings);
 
         var topologyProj = Path.Combine(topologyDir, "TopologyManager.topologyproj");
