@@ -33,55 +33,19 @@ namespace CodeGen.Translation
             $"input={b.InputTag ?? "-"}";
 
 
-        public string GenerateFeedStationSyslayToPath(string controlXmlPath, string targetSyslayPath,
-            IoBindings? bindings, MapperConfig? config, out BindingApplicationReport report)
+        public string GenerateFeedStationSyslayToPath(GenerationContext ctx, string targetSyslayPath,
+            IoBindings? bindings, out BindingApplicationReport report)
         {
             report = new BindingApplicationReport();
-            if (string.IsNullOrEmpty(controlXmlPath))
-                throw new ArgumentException("Control.xml path is required.", nameof(controlXmlPath));
-            if (!File.Exists(controlXmlPath))
-                throw new FileNotFoundException($"Control.xml not found: {controlXmlPath}");
+            if (ctx == null) throw new ArgumentNullException(nameof(ctx));
             if (string.IsNullOrEmpty(targetSyslayPath))
                 throw new ArgumentException("Target syslay path is required.", nameof(targetSyslayPath));
 
-            var reader = new CodeGen.IO.SystemXmlReader();
-            var allComponents = reader.ReadAllComponents(controlXmlPath);
+            var config = ctx.Config;
+            var allComponents = ctx.Components.ToList();
+            var handoffPlan = ctx.Handoffs;
 
-            // Every process-to-process handoff the twin declares, with transports resolved. One derivation per
-            // generation, read by both the recipe rows and the backend wiring so they cannot disagree.
-            var handoffPlan = Process.ProcessRecipeArrayGenerator.HandoffPlan(allComponents);
-
-            var process = FindStation1Process(allComponents);
-            if (process == null)
-                throw new InvalidOperationException(
-                    "No Process referencing a 'Feeder' actuator was found in Control.xml.");
-
-            var grouping = new StationGroupingService();
-            var fullContents = grouping.GroupStationContents(process, allComponents);
-
-            // Order assigns state_table index / actuator_id / recipe Wait1Id; ComponentRegistry owns it.
-            var allowedActuators = ComponentRegistry.IdOrderActuators(HandoffPlanner.DischargeActive);
-            var allowedSensors = ComponentRegistry.IdOrderSensors;
-
-            // Source from full Control.xml (StationGroupingService only populates Feed_Station's conditions); grippers are Type="Robot", so accept both.
-            var contents = new StationContents(
-                fullContents.Process,
-                allowedActuators
-                    .Select(n => allComponents.FirstOrDefault(c =>
-                        (string.Equals(c.Type, "Actuator", StringComparison.OrdinalIgnoreCase) ||
-                         string.Equals(c.Type, "Robot", StringComparison.OrdinalIgnoreCase)) &&
-                        string.Equals(c.Name, n, StringComparison.Ordinal)))
-                    .Where(a => a != null).Select(a => a!).ToList(),
-                allowedSensors
-                    .Select(n => allComponents.FirstOrDefault(c =>
-                        string.Equals(c.Type, "Sensor", StringComparison.OrdinalIgnoreCase) &&
-                        string.Equals(c.Name, n, StringComparison.Ordinal)))
-                    .Where(s => s != null).Select(s => s!).ToList());
-
-            // Planning is finished here: the twin has been read, the station resolved and every handoff
-            // classified. Publishing it is what lets the device emitters -- which run later and hold only a
-            // resource on disk -- read the same decisions instead of guessing at them.
-            var plan = GenerationPlan.Publish(allComponents, contents, handoffPlan);
+            var contents = ctx.Station;
 
             var fileName = Path.GetFileName(targetSyslayPath);
             var fullPath = targetSyslayPath;
@@ -107,13 +71,12 @@ namespace CodeGen.Translation
             // stay above the component id space, so no Wait1Id collides with one. A slot may still coincide
             // with a Feed component id (10 == Shaft_Hr): harmless once the rings merge, because Feed only
             // WAITs there and its CMD states 1/3 are values Shaft_Hr never reports.
-            var processSlots = RigCatalog.Current;
-            int processId = processSlots.SlotOfProcess(contents.Process.Name);
+            int processId = ctx.Slots[contents.Process.Name];
 
             // TopCoverSenosr reports onto the Assembly ring, so its slot must be free on THAT ring rather
             // than the one its position would give it. StateTableAllocation owns the computation; the plan
             // carries the answer to the recipe and the sensor emission below.
-            int coverSlot = plan.TopCoverSensorSlot;
+            int coverSlot = ctx.TopCoverSensorSlot;
 
 
 
@@ -164,10 +127,7 @@ namespace CodeGen.Translation
             var phaseNames = new Dictionary<string, IReadOnlyDictionary<int, string>>(StringComparer.Ordinal);
 
             var (processOuter, processNested, processRecipe) = BuildProcessFbParameters(
-                contents.Process, allComponents, processInstanceName, processId, contents,
-                useRecipeStruct: config != null && config.UseRecipeStruct,
-                    emitProcessTelemetry: config != null && config.MqttPublishEnabled,
-                    receiverSlot: handoffPlan.ReceiverSlotOf(contents.Process.Name));
+                ctx, contents.Process, processInstanceName, processId, withRecipe: true);
             if (processRecipe != null) phaseNames[processInstanceName] = processRecipe.ProcessPhaseNames;
 
             // EAE rejects a Parameter not declared as an InputVar on the FBType (ERR_MEMBER_VAR_NOTFOUND).
@@ -224,11 +184,8 @@ namespace CodeGen.Translation
                 var assemblyName = InstanceNameResolver.Resolve(assemblyStationProc,
                     overrides.ByComponentId, overrides.ByVueOneName);
                 var (aOuter, aNested, aRecipe) = BuildProcessFbParameters(
-                    assemblyStationProc, allComponents, assemblyName, processSlots.SlotOfProcess(assemblyStationProc.Name),
-                    contents: contents,
-                    useRecipeStruct: config != null && config.UseRecipeStruct,
-                    emitProcessTelemetry: config != null && config.MqttPublishEnabled,
-                    receiverSlot: handoffPlan.ReceiverSlotOf(assemblyStationProc.Name));
+                    ctx, assemblyStationProc, assemblyName,
+                    ctx.Slots[assemblyStationProc.Name], withRecipe: true);
                 builder.AddFB(FBIdGenerator.GenerateFBId(assemblyStationProc.ComponentID),
                     assemblyName, "Process1_Generic", "Main", 12200, 1460,
                     aOuter, aNested);
@@ -256,11 +213,8 @@ namespace CodeGen.Translation
                     overrides.ByComponentId, overrides.ByVueOneName);
                 disassemblyFbName = disassyName;
                 var (dOuter, dNested, dRecipe) = BuildProcessFbParameters(
-                    disassyProc, allComponents, disassyName, processSlots.SlotOfProcess(disassyProc.Name),
-                    contents: contents,
-                    useRecipeStruct: config != null && config.UseRecipeStruct,
-                    emitProcessTelemetry: config != null && config.MqttPublishEnabled,
-                    receiverSlot: handoffPlan.ReceiverSlotOf(disassyProc.Name));
+                    ctx, disassyProc, disassyName,
+                    ctx.Slots[disassyProc.Name], withRecipe: true);
                 builder.AddFB(FBIdGenerator.GenerateFBId(disassyProc.ComponentID),
                     disassyName, "Process1_Generic", "Main", 20800, 1460,
                     dOuter, dNested);
@@ -326,26 +280,26 @@ namespace CodeGen.Translation
                     assignedId = MapperConfig.RobotActuatorId;
                 var displayName = InstanceNameResolver.Resolve(actuator,
                     overrides.ByComponentId, overrides.ByVueOneName);
-                var actPlc = plcIndex.ResolveComponent(actuator.Name, bindings);
+                var actPlc = plcIndex.ResolveComponent(actuator.Name, bindings, ctx.Allocation);
 
                 Dictionary<string, string> actParams;
                 if (fbType == "Five_State_Actuator_CAT")
                 {
-                    actParams = BuildActuatorParameters(actuator, assignedId, allComponents, scopedIds);
+                    actParams = BuildActuatorParameters(actuator, assignedId, ctx, scopedIds);
                     // actuator_name IS the ring key this FB answers to; TemplateMap.RingKey is the one
                     // function that also spells the recipe's CmdTargetName, so the two cannot drift.
                     actParams["actuator_name"] = SyslayBuilder.FormatString(
                         TemplateMap.RingKey(displayName));
 
-                    InterlockEmitter.GuardFiveState(actParams, actuator, allComponents, scopedIds, report.Bound);
+                    InterlockEmitter.GuardFiveState(actParams, actuator, ctx, scopedIds, report.Bound);
                 }
                 else if (string.Equals(fbType, "Seven_State_Actuator_Centre_Home_CAT", StringComparison.Ordinal))
                 {
                     actParams = BuildMinimalActuatorParameters(actuator, assignedId, fbType);
                     actParams["actuator_name"] = SyslayBuilder.FormatString(
                         TemplateMap.RingKey(displayName));
-                    InterlockEmitter.ApplyCentreHome(actParams, actuator, allComponents, scopedIds);
-                    InterlockEmitter.GuardCentreHome(actParams, actuator, allComponents, scopedIds, report.Bound);
+                    InterlockEmitter.ApplyCentreHome(actParams, actuator, ctx, scopedIds);
+                    InterlockEmitter.GuardCentreHome(actParams, actuator, ctx, scopedIds, report.Bound);
                 }
                 else
                 {
@@ -405,7 +359,7 @@ namespace CodeGen.Translation
                 if (senBinding != null) report.Bound.Add((sensor.Name, DescribeBinding(senBinding)));
                 else if (bindings != null) report.Missing.Add(sensor.Name);
 
-                var senPlc = plcIndex.ResolveComponent(sensor.Name, bindings);
+                var senPlc = plcIndex.ResolveComponent(sensor.Name, bindings, ctx.Allocation);
                 int senCol = perPlcSensorCount[senPlc]++;
                 var (sX, sY) = PlcZoneSensorPosition(senPlc, senCol);
 
@@ -500,14 +454,13 @@ namespace CodeGen.Translation
                 // The Feed controller's connection follows the Feed station onto M262 or RevPi (FB name +
                 // ClientIdentifier). ConnectionID stays the shared 'SMC' so the embedded MqttPub topic/
                 // payload is byte-for-byte unchanged. Byte-identical for M262 (suffix M262, ClientM262).
-                bool feedRevPi = MapperConfig.FeedStationController == FeedController.RevPi;
-                string feedSuffix = feedRevPi ? "RevPi" : "M262";
-                string feedClientId = feedRevPi ? config.MqttClientRevPi : config.MqttClientM262;
+                const string feedSuffix = "M262";
+                string feedClientId = config.MqttClientM262;
                 string bx1Name  = tele ? "Telemetry_BX1"  : "MqttConn";
                 string feedName = tele ? $"Telemetry_{feedSuffix}" : $"MqttConn_{feedSuffix}";
                 string m580Name = tele ? "Telemetry_M580" : "MqttConn_M580";
 
-                var mqttEntry = CodeGen.Mapping.ComponentRegistry.Get(bx1Name);
+                var mqttEntry = ctx.Roster.Get(bx1Name);
                 int bx1X = mqttEntry?.X ?? 29000;
                 int bx1Y = mqttEntry?.Y ?? 200;
                 // Each conn is routed to its own sysres via SysresFbMirror.BucketFor; BX1 bring-up is in BuildBx1Wiring, Feed/M580 below.
@@ -524,7 +477,7 @@ namespace CodeGen.Translation
                 // 'SMC'), so it needs its OWN local connection alongside the M262 Feed connection — else
                 // those publishers have no active connection. INIT off a RevPi-local component (PartInHopper)
                 // so there is no cross-device INIT wire. Full swap already puts the one Feed conn on RevPi.
-                if (MapperConfig.PartialRevPi)
+                if (ctx.Profile.PartialRevPi)
                 {
                     string revpiName = tele ? "Telemetry_RevPi" : "MqttConn_RevPi";
                     InjectMqttConn(revpiName, config.MqttConnectionName, config.MqttClientRevPi,
@@ -539,9 +492,9 @@ namespace CodeGen.Translation
             }
 
 
-            RingWiringPlanner.BuildFeedStationWiring(builder, contents);
-            RingWiringPlanner.BuildStation2Wiring(builder, contents, disassemblyFbName);
-            RingWiringPlanner.BuildBx1Wiring(builder, contents, config);
+            RingWiringPlanner.BuildFeedStationWiring(builder, ctx);
+            RingWiringPlanner.BuildStation2Wiring(builder, ctx, disassemblyFbName);
+            RingWiringPlanner.BuildBx1Wiring(builder, ctx);
 
             // Cross-controller process-phase transport, one link per model-derived handoff whose producer and
             // consumer sit on different rings. CrossReference=True tells EAE to auto-generate the UDP proxy;
@@ -592,7 +545,7 @@ namespace CodeGen.Translation
             EnsureOpcuaXmlBesideArtefact(fullPath);
 
             // The HMI is derived from the finished layout (FB Id -> TagName, FB Type -> faceplate).
-            CodeGen.Hmi.HmiGenerator.Emit(fullPath, config);
+            CodeGen.Hmi.HmiGenerator.Emit(fullPath, ctx);
 
             // Telemetry sidecar: lets a subscriber render the published phase ordinal as the twin's own
             // state name. Written outside the solution and read by nothing in the generated project.
@@ -647,7 +600,7 @@ namespace CodeGen.Translation
             return dict;
         }
 
-        // Placeholder placement; CanonicalLayout rewrites registered names to their ComponentRegistry coordinate post-syslay.
+        // Placeholder placement; CanonicalLayout rewrites rostered names to their canvas coordinate post-syslay.
         private static (int X, int Y) PlcZoneActuatorPosition(PlcAssignment plc, int colIndexInPlc)
         {
             return (LayoutGrid.ColumnBaseX(plc) + colIndexInPlc * LayoutGrid.ColumnPitchX,
@@ -665,7 +618,7 @@ namespace CodeGen.Translation
 
         public static Dictionary<string, string> BuildActuatorParameters(
             VueOneComponent actuator, int assignedId,
-            IReadOnlyList<VueOneComponent> allComponents,
+            GenerationContext ctx,
             IReadOnlyDictionary<string, int>? scopedIds = null)
         {
             int toWorkMs = ResolveStateTimeMs(actuator, stateNumber: 1, fallbackMs: DefaultMotionMs);
@@ -673,8 +626,8 @@ namespace CodeGen.Translation
 
             var atWorkIds = ResolveAtWorkStateIds(actuator);
             var atHomeIds = ResolveAtHomeStateIds(actuator);
-            bool workSensorFitted = AnyComponentReferencesStates(allComponents, actuator, atWorkIds);
-            bool homeSensorFitted = AnyComponentReferencesStates(allComponents, actuator, atHomeIds);
+            bool workSensorFitted = AnyComponentReferencesStates(ctx.Components, actuator, atWorkIds);
+            bool homeSensorFitted = AnyComponentReferencesStates(ctx.Components, actuator, atHomeIds);
 
             // Cover actuators settle in coverMotionMs (Hr/Vr keep real DIs); the gripper has no grip/release DI, so it timer-acknowledges sensorless or the release WAIT stalls.
             if (IsBx1CoverActuator(actuator.Name))
@@ -704,7 +657,7 @@ namespace CodeGen.Translation
             // timer-acknowledge the close (a fast, bounded motion) -- the same reason CoverPnp_Gripper is
             // already sensorless. Position actuators (shaft_hr/vr) keep their real sensors. Scoped to the
             // no-clamp (_vc) path so the clamp/M262 output stays byte-identical.
-            if (GenerationPlan.Current.RingsMerged
+            if (ctx.RingsMerged
                 && actuator.Name.IndexOf("Gripper", StringComparison.OrdinalIgnoreCase) >= 0
                 && !IsBx1CoverActuator(actuator.Name))
             {
@@ -732,7 +685,7 @@ namespace CodeGen.Translation
             // Five_State has no Work2).
             TargetEmitter.Apply(actuatorParams, work1: 2, work2: null, home: 4);
 
-            InterlockEmitter.ApplyFiveState(actuatorParams, actuator, allComponents, scopedIds);
+            InterlockEmitter.ApplyFiveState(actuatorParams, actuator, ctx, scopedIds);
 
             return actuatorParams;
         }
@@ -781,8 +734,6 @@ namespace CodeGen.Translation
             }
             return false;
         }
-
-        // Legacy literal-substring lookup, no longer used by BuildActuatorParameters.
 
         public static string StateRprtOut(string fbType)
         {
@@ -1185,12 +1136,15 @@ namespace CodeGen.Translation
         public static (Dictionary<string, string> Outer,
                        IDictionary<string, IDictionary<string, string>> Nested,
                        RecipeArrays? Recipe)
-            BuildProcessFbParameters(VueOneComponent process, List<VueOneComponent> allComponents,
-                string processName, int processId,
-                StationContents? contents = null, bool useRecipeStruct = false,
-                bool emitProcessTelemetry = false, int? receiverSlot = null)
+            BuildProcessFbParameters(GenerationContext ctx, VueOneComponent process,
+                string processName, int processId, bool withRecipe)
         {
-            // Recipe arrays travel as Process1_Generic Parameter values; if `contents` is null, emit only the two scalars and return a null Recipe.
+            // Recipe arrays travel as Process1_Generic Parameter values; withRecipe=false emits only the
+            // two scalars and returns a null Recipe.
+            var config = ctx.Config;
+            bool useRecipeStruct = config.UseRecipeStruct;
+            bool emitProcessTelemetry = config.MqttPublishEnabled;
+            int? receiverSlot = ctx.Handoffs.ReceiverSlotOf(process.Name);
             var outer = new Dictionary<string, string>
             {
                 ["process_name"] = SyslayBuilder.FormatString(processName),
@@ -1205,9 +1159,9 @@ namespace CodeGen.Translation
 
 
             RecipeArrays? recipe = null;
-            if (contents != null)
+            if (withRecipe)
             {
-                recipe = ProcessRecipeArrayGenerator.Generate(process, contents, allComponents, processId);
+                recipe = ctx.Recipes[process.Name?.Trim() ?? string.Empty];
                 if (useRecipeStruct)
                 {
                     // 6 arrays collapse into one Recipe struct; the deployer normalizers reshape the FBType to match under the same flag (else ERR_MEMBER_VAR_NOTFOUND).
@@ -1287,12 +1241,12 @@ namespace CodeGen.Translation
         }
 
 
-        public string GenerateStation1TestSyslay(MapperConfig config, string controlXmlPath,
+        public string GenerateStation1TestSyslay(GenerationContext ctx,
             IoBindings? bindings, out BindingApplicationReport report)
         {
-            if (string.IsNullOrEmpty(config.SyslayPath2))
+            if (string.IsNullOrEmpty(ctx.Config.SyslayPath2))
                 throw new InvalidOperationException("MapperConfig.SyslayPath2 is not configured.");
-            return GenerateFeedStationSyslayToPath(controlXmlPath, config.SyslayPath2, bindings, config, out report);
+            return GenerateFeedStationSyslayToPath(ctx, ctx.Config.SyslayPath2, bindings, out report);
         }
 
 
