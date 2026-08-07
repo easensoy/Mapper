@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using CodeGen.Configuration;
@@ -7,84 +7,138 @@ using CodeGen.Models;
 
 namespace CodeGen.Translation
 {
-    // Which state_table slot each component reports on.
-    //
-    // Slots are positional: sensors first, then actuators, in ComponentRegistry's declared id order. Two
-    // components need a slot that is NOT positional, and both are computed here so the recipe and the
-    // layout can never disagree about them:
-    //
-    //  * the part-present sensor, pinned to the slot the synth injection reserves so a twin that declares
-    //    it and one that leaves it to the rig produce identical ids;
-    //  * the top-cover sensor, whose report crosses onto the Assembly ring and therefore needs a slot free
-    //    on THAT ring rather than the one its position would give it.
-    //
-    // Pure: everything is derived from the components handed in. Nothing is cached and nothing is stored,
-    // so a second generation in the same process cannot inherit the first one's answer -- which is exactly
-    // what a stale slot did, silently, with no error: the cover-place gate simply waited forever on a
-    // component that never reported.
+    // Which state_table slot every reporter on the ring owns — sensors, actuators and processes alike.
+    // Component slots are positional (sensors, then actuators, in the roster's id order); the part-present
+    // sensor, the top-cover sensor and a process whose pinned slot is taken are placed here instead, so
+    // the recipe and the layout can never disagree about one. Pure: derived only from the arguments, so a
+    // second generation cannot inherit the first one's answer.
     public static class StateTableAllocation
     {
+        // state_table's declared size, and so the number of reporters one ring can carry. It is the
+        // ArraySize of state_table on ProcessRuntime_Generic_v1, ProcessStateBusHandler and
+        // updateComponentState; all three must agree or a report writes past the end of one of them.
+        public const int Capacity = 24;
+
+        // Highest id a component may take. Above it sit the process and robot slots.
+        private const int ComponentIdCeiling = 16;
+
         // The first actuator slot. The part-present sensor holds a RESERVED slot rather than a positional
         // one, so it must not push the actuator range up: every actuator id, and with it every recipe
         // Wait1Id, interlock SourceID and HCF binding, would shift by one.
         public static int ActuatorIdStart(IReadOnlyList<VueOneComponent> sensors) =>
             sensors.Count - sensors.Count(s => HandoffPlanner.IsPartAtAssembly(s.Name));
 
-        // The top-cover sensor's slot: the highest component-range id no ASSEMBLY-ring member occupies.
-        //
-        // Occupied means every M580/BX1 component, every member of the cross-controller segment, every
-        // allocated process slot, the robot's reserved slot, the synth sensors -- and, when the topology
-        // merges the rings, the Feed components too, because then they report onto the same ring.
-        //
-        // Highest-free rather than a configured constant: with a clamp the Feed ids sit on a separate ring
-        // so {0,4,5,6} are free and this yields 6, the rig-proven value; without one the merged ring fills
-        // [0..15] and this yields 16. A fixed 6 collides with the Transfer on the merged ring and deadlocks
-        // the cover-place gate, and a fixed 14/15/16 drifts the other way when no Clamp occupies a slot.
-        public static int TopCoverSensorSlot(StationContents contents, bool ringsMerged)
+        // Name -> slot for everything that writes the table. A pinned process slot is only unambiguous
+        // while the component sharing it reports on a DIFFERENT ring; a merged twin puts both in one table
+        // and a WAIT there is satisfied by either. The PROCESS moves, never the component, whose slot is
+        // also its actuator_id, its interlock SourceID and its HCF binding.
+        public static IReadOnlyDictionary<string, int> Slots(StationContents contents,
+            ControllerAllocation allocation, bool ringsMerged)
         {
             var catalog = RigCatalog.Current;
-            var allocation = ControllerAllocation.Current;
-            var cross = catalog.CrossRingSegment;
-
-            var occupied = new HashSet<int>(catalog.ProcessSlots.Values) { catalog.RobotActuatorId };
-            foreach (var synth in catalog.SynthSensors) occupied.Add(synth.Id);
-
-            void MarkOccupied(string name, int id)
-            {
-                if (TemplateMap.IsTopCoverSensor(name)) return;          // this is the slot being placed
-                var plc = allocation.Of(name);
-                if (plc is PlcAssignment.M580 or PlcAssignment.BX1 || cross.Contains(name) || ringsMerged)
-                    occupied.Add(id);
-            }
+            var byName = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            string? cover = null;
 
             for (int i = 0; i < contents.Sensors.Count; i++)
-                MarkOccupied(contents.Sensors[i].Name,
-                    HandoffPlanner.IsPartAtAssembly(contents.Sensors[i].Name)
-                        ? HandoffPlanner.PartAtAssembly.Id
-                        : i);
+            {
+                var n = contents.Sensors[i].Name;
+                if (TemplateMap.IsTopCoverSensor(n)) { cover = n; continue; }   // placed below
+                byName[n] = HandoffPlanner.IsPartAtAssembly(n) ? HandoffPlanner.PartAtAssembly.Id : i;
+            }
             int actuatorIdStart = ActuatorIdStart(contents.Sensors);
             for (int i = 0; i < contents.Actuators.Count; i++)
+                byName[contents.Actuators[i].Name] = TemplateMap.IsRobotTaskArm(contents.Actuators[i])
+                    ? catalog.RobotActuatorId                 // appended to the order, so not positional
+                    : actuatorIdStart + i;
+
+            // Reserved slots the twin need not declare — an injected synth sensor and the task arm — are
+            // ring writers like any other, so a placement must see them.
+            foreach (var synth in catalog.SynthSensors)
+                if (!byName.ContainsKey(synth.Name)) byName[synth.Name] = synth.Id;
+            byName.TryAdd("Robot", catalog.RobotActuatorId);
+
+            // Every pinned process slot is reserved before the first placement, so a reporter that has to
+            // move cannot take a slot a process was already promised and start a chain of moves.
+            var taken = new HashSet<int>(byName.Values);
+            foreach (var pinned in catalog.ProcessSlots.Values) taken.Add(pinned);
+
+            // Highest component-range slot free on the ring the cover reports onto, not a constant: with
+            // a clamp that yields 6 (the rig-proven value), without one 16. A fixed 6 collides with the
+            // Transfer on a merged ring; a fixed 14/15/16 drifts when no Clamp occupies a slot.
+            if (cover != null)
             {
-                // The task arm is APPENDED to the actuator order, so its positional id here is not the one
-                // it deploys with -- it takes the robot's reserved slot, already occupied above. Marking the
-                // positional one would falsely reserve a cover slot that is genuinely free.
-                if (TemplateMap.IsRobotTaskArm(contents.Actuators[i])) continue;
-                MarkOccupied(contents.Actuators[i].Name, actuatorIdStart + i);
+                // Free means free ON THE COVER'S RING: a Feed-side component's slot is available here
+                // precisely because its report never arrives on the assembly ring. Process slots are
+                // excluded whatever their ring, since a process may yet be relocated onto one.
+                int slot = Enumerable.Range(0, ComponentIdCeiling + 1).Reverse().FirstOrDefault(
+                    s => !catalog.ProcessSlots.Values.Contains(s) &&
+                         !byName.Any(kv => kv.Value == s && SameRing(kv.Key, cover, allocation, ringsMerged)),
+                    -1);
+                if (slot < 0)
+                    throw new InvalidOperationException(
+                        $"[state_table] No free slot for the top-cover sensor '{cover}': every id in " +
+                        $"[0..{ComponentIdCeiling}] is claimed by a reporter on its ring. The cover " +
+                        "interlock cannot be placed without reading another component's report.");
+                byName[cover] = slot;
+                taken.Add(slot);
             }
 
-            for (int slot = ComponentIdCeiling; slot >= 0; slot--)
-                if (!occupied.Contains(slot)) return slot;
+            foreach (var (process, pinned) in catalog.ProcessSlots.OrderBy(p => p.Value))
+            {
+                var clash = byName.FirstOrDefault(kv =>
+                    kv.Value == pinned && SameRing(kv.Key, process, allocation, ringsMerged));
+                int slot = pinned;
+                if (clash.Key != null)
+                {
+                    slot = Enumerable.Range(0, Capacity).FirstOrDefault(s => !taken.Contains(s), -1);
+                    if (slot < 0)
+                        throw new InvalidOperationException(
+                            $"[state_table] '{process}' shares slot {pinned} with component " +
+                            $"'{clash.Key}' on the same report ring, and all {Capacity} slots are taken, " +
+                            "so neither can be moved. Both write that slot, so a WAIT on it is satisfied " +
+                            "by whichever reported last. Widen state_table's ArraySize on " +
+                            "ProcessRuntime_Generic_v1, ProcessStateBusHandler and updateComponentState.");
+                }
+                byName[process] = slot;
+                taken.Add(slot);
+            }
 
-            throw new InvalidOperationException(
-                "No free state_table slot for the top-cover sensor: every id in " +
-                $"[0..{ComponentIdCeiling}] is claimed by an Assembly-ring member (occupied = " +
-                $"{string.Join(",", occupied.Where(i => i <= ComponentIdCeiling).OrderBy(i => i))}). " +
-                "The cover interlock cannot be placed without colliding with another component's report. " +
-                "Widening state_table past its declared size touches every CAT's updateComponentState.");
+            RejectAmbiguousSlots(byName, allocation, ringsMerged);
+            return byName;
         }
 
-        // Highest id a component may take. Above it are the process/robot slots, below it the positional
-        // component range; state_table is declared one larger than this in every CAT.
-        private const int ComponentIdCeiling = 16;
+        // Two reporters on one ring writing one slot makes every WAIT on it mean two things, and the
+        // build looks correct while it deadlocks. Sharing ACROSS rings is legitimate — each ring keeps its
+        // own copy of the table — so only same-ring pairs are refused.
+        private static void RejectAmbiguousSlots(IReadOnlyDictionary<string, int> byName,
+            ControllerAllocation allocation, bool ringsMerged)
+        {
+            var bad = byName
+                .GroupBy(kv => kv.Value)
+                .SelectMany(g => g.SelectMany(a => g
+                    .Where(b => string.Compare(a.Key, b.Key, StringComparison.Ordinal) < 0 &&
+                                SameRing(a.Key, b.Key, allocation, ringsMerged))
+                    .Select(b => $"slot {g.Key}: '{a.Key}' and '{b.Key}'")))
+                .OrderBy(s => s, StringComparer.Ordinal)
+                .ToList();
+            if (bad.Count == 0) return;
+            throw new InvalidOperationException(
+                "[state_table] " + bad.Count + " slot(s) have two reporters on one ring — " +
+                string.Join("; ", bad) + ". Each writes the same state_table entry, so every WAIT on it " +
+                "is satisfied by whichever reported last. Give one of them a free slot in " +
+                $"Config/smc-rig.yml or Config/layout.yml, within the {Capacity}-slot table.");
+        }
+
+        // Whether two reporters land in the same state_table: the Feed controller keeps its own ring, the
+        // assembly side spans M580 and BX1 plus the Feed hardware spliced into it, and a merged twin folds
+        // all of that into one.
+        private static bool SameRing(string a, string b, ControllerAllocation allocation, bool ringsMerged)
+        {
+            if (ringsMerged) return true;
+            static string Group(string n, ControllerAllocation alloc) =>
+                RigCatalog.Current.CrossRingSegment.Contains(n, StringComparer.OrdinalIgnoreCase) ||
+                !alloc.IsFeedSide(n) ? "assembly" : "feed";
+            return Group(a, allocation) == Group(b, allocation);
+        }
     }
 }
