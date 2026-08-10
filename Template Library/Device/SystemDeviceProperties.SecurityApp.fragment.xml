@@ -1,0 +1,5 @@
+    <GroupProperty Name="SecurityApp" Expanded="true" Enabled="true">
+      <GroupProperty Name="InsecureApplication" Expanded="true" Enabled="true">
+        <Property Name="Enable" Value="True" IsPassword="false" />
+      </GroupProperty>
+    </GroupProperty>
