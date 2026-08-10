@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Device xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" ID="{{DeviceId}}" Name="HMI" Type="HMI_NET" Namespace="SE.Standard" Locked="false" xmlns="https://www.se.com/LibraryElements">
+  <FBNetwork />
+</Device>
