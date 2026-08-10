@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="f0a1b2c3-d4e5-4f60-8a1b-2c3d4e5f6071" Name="MqttStateFormatter" Comment="Basic FB - INT state to STRING payload for MQTT publish" Namespace="Main">
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="WMG" Version="0.1" Author="easensoy" Date="5/22/2026" Remarks="v1 bare state-to-string" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT" Comment="Initialization Request"><With Var="state" /></Event>
+      <Event Name="REQ" Comment="Format on state change"><With Var="state" /></Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO" Comment="Initialization Confirm"><With Var="payload" /></Event>
+      <Event Name="CNF" Comment="Payload ready"><With Var="payload" /></Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="state" Type="INT" Comment="current_state_to_process" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="payload" Type="STRING[255]" Comment="MQTT payload (state as text). Sized [255] so EAE does not flag WRN_UNSIZED_STRING (the yellow pin marker) inside every actuator/sensor CAT." />
+    </OutputVars>
+  </InterfaceList>
+  <BasicFB>
+    <Attribute Name="FBType.Basic.Algorithm.Order" Value="INIT,Fmt" />
+    <ECC>
+      <ECState Name="START" Comment="Initial State" x="300" y="300" />
+      <ECState Name="INIT" x="700" y="120"><ECAction Algorithm="Fmt" Output="INITO" /></ECState>
+      <ECState Name="Format" x="700" y="520"><ECAction Algorithm="Fmt" Output="CNF" /></ECState>
+      <ECTransition Source="START" Destination="INIT" Condition="INIT" x="450" y="200" />
+      <ECTransition Source="INIT" Destination="START" Condition="1" x="500" y="300" />
+      <ECTransition Source="START" Destination="Format" Condition="REQ" x="450" y="420" />
+      <ECTransition Source="Format" Destination="START" Condition="1" x="500" y="520" />
+    </ECC>
+    <Algorithm Name="INIT" Comment="Initialization algorithm"><ST><![CDATA[;]]></ST></Algorithm>
+    <Algorithm Name="Fmt" Comment="INT state to JSON payload"><ST><![CDATA[payload := CONCAT(CONCAT('{state:', INT_TO_STRING(state)), '}');]]></ST></Algorithm>
+  </BasicFB>
+</FBType>
