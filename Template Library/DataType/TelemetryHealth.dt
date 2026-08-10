@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE DataType SYSTEM "../LibraryElement.dtd">
+<DataType Namespace="Main" Name="TelemetryHealth" Comment="Telemetry connection health: wraps the MQTT_CONNECTION status outputs">
+  <Identification Standard="1131-3" />
+  <VersionInfo Organization="WMG" Version="0.1" Author="easensoy" Date="6/21/2026" Remarks="single STRUCT output for Telemetry" />
+  <CompilerInfo />
+  <StructuredType>
+    <VarDeclaration Name="IsConnected" Type="BOOL" />
+    <VarDeclaration Name="ReturnCode" Type="USINT" />
+    <VarDeclaration Name="Status" Type="STRING[255]" />
+    <VarDeclaration Name="NetworkState" Type="STRING[80]" />
+    <VarDeclaration Name="SecurityState" Type="STRING[80]" />
+    <VarDeclaration Name="ProtocolState" Type="STRING[80]" />
+  </StructuredType>
+</DataType>
