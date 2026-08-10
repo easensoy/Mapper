@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE DataType SYSTEM "../LibraryElement.dtd">
+<DataType Namespace="Main" Name="InterlockTable" Comment="Encapsulated interlock interface: Count + the InterlockRule array">
+  <Identification Standard="1131-3" />
+  <VersionInfo Organization="WMG" Version="0.1" Author="easensoy" Date="6/21/2026" Remarks="single STRUCT input wrapping the rule count and rules" />
+  <CompilerInfo />
+  <StructuredType>
+    <VarDeclaration Name="Count" Type="INT" />
+    <VarDeclaration Name="Rules" Type="InterlockRule" ArraySize="{{RuleArraySize}}" Namespace="Main" />
+  </StructuredType>
+</DataType>
