@@ -524,7 +524,7 @@ namespace CodeGen.Devices.M262
                 NewLineHandling = System.Xml.NewLineHandling.Replace,
             };
 
-            const int MaxAttempts = 8;
+            int MaxAttempts = GenerationConfig.Current.FileWriteRetries;
             int delayMs = 50;
             for (int attempt = 1; attempt <= MaxAttempts; attempt++)
             {
