@@ -1,4 +1,4 @@
-# Deployment-target device network facts for the SMC Demonstrator.
+﻿# Deployment-target device network facts for the SMC Demonstrator.
 m262:
   targetIp: 192.168.1.10
   subnetAddress: 192.168.1.0
@@ -9,6 +9,9 @@ m580:
 bx1:
   targetIp: 192.168.1.151
   hostIp: 192.168.1.209
+  # TM3BC EtherNet/IP remote-I/O coupler carrying the covers' physical I/O. The BX1 scanner must
+  # list it or cover_hr can neither be commanded nor homed.
+  couplerIp: 192.168.1.210
 # Revolution Pi (Soft_dPAC) Feed-station host. The two addresses are DIFFERENT ROLES and must never be
 # equal — a Docker macvlan child is a separate layer-2 endpoint (its own MAC) from the host it rides on:
 #   hostIp   = the RevPi Linux/Docker HOST NIC (eth0). Runs the Soft dPAC Manager on TCP 8080; EAE's
@@ -26,15 +29,13 @@ bx1:
 revPi:
   targetIp: 192.168.1.6
   hostIp: 192.168.1.1
-# Harmony HMI. hostIp carries the real HMI_NET logical device (Equipment_Workstation_1); the HMIP6 panel
-# object is inert — both of its RuntimeDEOs bind the null device 00000000-…-000000000000, so nothing is
-# ever deployed to internalRuntimeIp. It was moved off .1 so the inert panel container stops squatting on
-# the physical RevPi host address; HMI function is unaffected because the runtime lives on hostIp.
-hmi:
-  hostIp: 192.168.1.2
-  internalRuntimeIp: 192.168.1.3
-  logicalPort: 61999
-  securePort: 51443
+# The Harmony HMI is NOT configured here. Every HMI deployment fact - addresses, ports, identities,
+# artefacts - lives in Config/hmi.yml, its single source of truth, and DeviceConfig no longer
+# exposes an Hmi section. Keeping a second copy here is what let the panel container drift back onto
+# the RevPi host address (.1) and fail generation on a fatal address collision.
+#
+# The panel container still matters to THIS file's addressing: it is a macvlan child with its own MAC
+# and must not collide with revPi.hostIp. hmi.yml pins it to .3 for exactly that reason.
 defaultNetwork:
   subnetAddress: 192.168.0.0
   subnetMask: 255.255.255.0
