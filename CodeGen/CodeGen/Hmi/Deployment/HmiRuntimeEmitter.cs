@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -10,27 +10,21 @@ using CodeGen.Devices.M262;
 
 namespace CodeGen.Hmi;
 
+// Emits the HMI logical device, its runtime properties and its topology equipment.
+//
+// Every identity, address, port, filename and version comes from Config/hmi.yml - this file
+// holds no deployment constant of its own. The four facts the generated project already states
+// authoritatively are DERIVED rather than restated, because a second copy could silently bind the
+// panel to the wrong object:
+//
+//   SolutionId  <- IEC61499.dfbproj
+//   SystemDir   <- the System GUID folder, discovered by EaeProjectLayout
+//   NetworkId   <- the BroadcastDomain whose ipV4Address matches the configured subnet
+//   SwitchId    <- the uuid inside the configured switch equipment file
+//
+// Each of those fails loudly when absent or ambiguous.
 internal static class HmiRuntimeEmitter
 {
-    internal const string DeviceId = "a441cfb6-5523-4d2c-a152-aacecdcef78e";
-
-    private const string SystemId = "00000000-0000-0000-0000-000000000000";
-    private const string DeviceNetworkId = "db72f221-ece1-4b82-8132-731ce655044e";
-    private const string WorkstationId = "c2d95ca9-038c-4234-94e7-dbd0d2e177d6";
-    private const string WorkstationNicId = "d31ea8d5-6dbe-4894-9d5d-5b5885b68ccc";
-    private const string WorkstationRuntimeId = "0a062e36-bf86-4578-83af-e7ea841f23ab";
-    private const string PanelId = "25e3cc7c-d98a-486a-963b-c5ab645331c9";
-    private const string PanelContainerId = "87e8a4b7-4c64-42cd-aa81-4c610b6e237c";
-    private const string PanelContainerRuntimeId = "d0643772-7619-49ca-92e1-54a8649dbcac";
-    private const string PanelRuntimeId = "3a2ddbd2-8267-4ebb-a73e-6743b3db76aa";
-    private const string SwitchId = "11111111-2222-3333-4444-000000000060";
-    private const string RuntimeTypeId = "422ee926-a34a-4ab5-9e8f-dce0782579f0";
-    private const string ContainerRuntimeTypeId = "29797a55-a6b8-47c4-9c06-e8a42b1a38b5";
-    private const string EmptyDeviceId = "00000000-0000-0000-0000-000000000000";
-    private const string SimulationServiceId = "F7C90C9D-BD8B-4D0B-B8DE-C659AF6EABCC";
-    private const string EmptyPropertiesFile = "E0601B81-4A3A-4A96-B6C2-007BDC680D59.Properties.xml";
-    private const string RuntimePropertiesFile = "F513CAE3-7194-4086-936C-02912EA0B352.Properties.xml";
-
     internal sealed class EmitResult
     {
         internal List<string> FilesWritten { get; } = new();
@@ -38,12 +32,15 @@ internal static class HmiRuntimeEmitter
         internal int ProjectEntriesAdded { get; set; }
     }
 
-    internal static EmitResult Emit(string eaeRoot, CodeGen.Translation.GenerationContext ctx, string firstCanvas)
+    internal static EmitResult Emit(
+        string eaeRoot, CodeGen.Translation.GenerationContext ctx, string firstCanvas,
+        HmiDeviceDefinition device)
     {
         var config = ctx.Config;
         ArgumentException.ThrowIfNullOrWhiteSpace(eaeRoot);
         ArgumentNullException.ThrowIfNull(config);
         ArgumentException.ThrowIfNullOrWhiteSpace(firstCanvas);
+        ArgumentNullException.ThrowIfNull(device);
 
         var result = new EmitResult();
         var templateDir = HmiTemplateLibrary.DeploymentDir(config.TemplateLibraryPath);
@@ -52,146 +49,185 @@ internal static class HmiRuntimeEmitter
             result.Problems.Add($"HMI deployment templates are missing: {templateDir}");
             return result;
         }
-        if (string.IsNullOrWhiteSpace(config.HmiHostIp) ||
-            string.IsNullOrWhiteSpace(config.HmiInternalRuntimeIp) ||
-            config.HmiLogicalPort <= 0 ||
-            config.HmiSecurePort <= 0)
+
+        var iecDir = Path.Combine(eaeRoot, "IEC61499");
+        var topologyDir = Path.Combine(eaeRoot, "Topology");
+
+        // EaeProjectLayout owns this discovery. A local copy that merely counted directories saw
+        // EAE's own RuntimeData folder as a second system and failed the whole generation.
+        var systemDir = EaeProjectLayout.FindSystemGuidDir(eaeRoot);
+        if (systemDir == null)
         {
-            result.Problems.Add("HMI deployment settings in Config/device.yml are incomplete.");
+            result.Problems.Add($"IEC61499/System has no system GUID folder: {Path.Combine(iecDir, "System")}");
             return result;
         }
 
-        var iecDir = Path.Combine(eaeRoot, "IEC61499");
-        var systemDir = Path.Combine(iecDir, "System", SystemId);
-        var deviceDir = Path.Combine(systemDir, DeviceId);
-        var topologyDir = Path.Combine(eaeRoot, "Topology");
+        var networkId = ResolveNetworkId(topologyDir, device.Subnet, result);
+        var switchId = ResolveSwitchId(topologyDir, device.SwitchEquipmentFile, result);
+        if (networkId == null || switchId == null) return result;
+
+        var solutionId = M262TopologyEmitter.ReadProjectGuid(eaeRoot);
+        if (string.IsNullOrWhiteSpace(solutionId))
+        {
+            result.Problems.Add("The solution id could not be read from IEC61499.dfbproj.");
+            return result;
+        }
+
+        var deviceDir = Path.Combine(systemDir, device.DeviceId);
         Directory.CreateDirectory(deviceDir);
         Directory.CreateDirectory(topologyDir);
 
-        var tokens = Tokens(
-            M262TopologyEmitter.ReadProjectGuid(eaeRoot) ?? EmptyDeviceId,
-            FindDeviceNetwork(topologyDir) ?? DeviceNetworkId,
-            firstCanvas,
-            config);
+        var tokens = new Dictionary<string, string>(device.Tokens(solutionId!, switchId), StringComparer.Ordinal)
+        {
+            ["NetworkId"] = networkId,
+            ["FirstCanvas"] = firstCanvas,
+        };
 
-        WriteTemplate(templateDir, "HMI.sysdev.xml", Path.Combine(systemDir, DeviceId + ".sysdev"),
-            tokens, eaeRoot, result);
-        WriteTemplate(templateDir, "Simulation.Binding.xml",
-            Path.Combine(deviceDir, DeviceId + ".Simulation.Binding.xml"), tokens, eaeRoot, result);
-        WriteTemplate(templateDir, "Empty.Properties.xml",
-            Path.Combine(deviceDir, EmptyPropertiesFile), tokens, eaeRoot, result);
-        WriteTemplate(templateDir, "Runtime.Properties.xml",
-            Path.Combine(deviceDir, RuntimePropertiesFile), tokens, eaeRoot, result);
-        WriteTemplate(templateDir, "Equipment_Workstation_1.json",
-            Path.Combine(topologyDir, "Equipment_Workstation_1.json"), tokens, eaeRoot, result);
-        WriteTemplate(templateDir, "Equipment_HMIP6_1.json",
-            Path.Combine(topologyDir, "Equipment_HMIP6_1.json"), tokens, eaeRoot, result);
-        WriteTemplate(templateDir, "Wire_HMI_to_Switch1.json",
-            Path.Combine(topologyDir, "Wire_HMI_to_Switch1.json"), tokens, eaeRoot, result);
+        var roots = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["system"] = systemDir,
+            ["device"] = deviceDir,
+            ["topology"] = topologyDir,
+        };
+
+        // One generic pass over the configured artefact list - no per-file call site.
+        foreach (var spec in device.Artefacts)
+        {
+            var name = Substitute(spec.Name, tokens);
+            WriteTemplate(templateDir, spec.Template, Path.Combine(roots[spec.Into], name),
+                          tokens, eaeRoot, result);
+        }
 
         var dfbproj = Path.Combine(iecDir, "IEC61499.dfbproj");
         if (File.Exists(dfbproj))
         {
             result.ProjectEntriesAdded += DfbprojRegistrar.RegisterReference(
-                dfbproj, "SE.Standard", "24.1.0.4");
+                dfbproj, device.LibraryName, device.LibraryVersion);
             result.ProjectEntriesAdded += DfbprojRegistrar.RegisterSystemDevice(
-                dfbproj, eaeRoot, Path.Combine(systemDir, DeviceId + ".sysdev"));
+                dfbproj, eaeRoot, Path.Combine(systemDir, device.DeviceId + ".sysdev"));
         }
         else
         {
             result.Problems.Add("IEC61499.dfbproj is missing; the HMI logical device was not registered.");
         }
 
-        var folders = FoldersXmlEmitter.Register(config, ctx.Profile.PartialRevPi, DeviceId);
+        var folders = FoldersXmlEmitter.Register(config, ctx.Profile.PartialRevPi, device.DeviceId);
         result.Problems.AddRange(folders.Warnings);
 
         var topologyProj = Path.Combine(topologyDir, "TopologyManager.topologyproj");
+        var register = device.Artefacts.Where(a => a.RegisterInTopologyProj)
+                                       .Select(a => Substitute(a.Name, tokens)).ToArray();
         if (File.Exists(topologyProj))
-        {
-            result.ProjectEntriesAdded += M262TopologyEmitter.RegisterInTopologyProj(topologyProj, new[]
-            {
-                "Equipment_Workstation_1.json",
-                "Equipment_HMIP6_1.json",
-                "Wire_HMI_to_Switch1.json"
-            });
-        }
+            result.ProjectEntriesAdded += M262TopologyEmitter.RegisterInTopologyProj(topologyProj, register);
         else
-        {
             result.Problems.Add("TopologyManager.topologyproj is missing; the HMI physical devices were not registered.");
-        }
 
-        result.Problems.AddRange(Validate(eaeRoot, config, firstCanvas));
+        result.Problems.AddRange(Validate(eaeRoot, systemDir, device, firstCanvas, switchId, tokens));
         return result;
     }
 
-    private static Dictionary<string, string> Tokens(
-        string solutionId,
-        string networkId,
-        string firstCanvas,
-        MapperConfig config) =>
-        new(StringComparer.Ordinal)
-        {
-            ["DeviceId"] = DeviceId,
-            ["SolutionId"] = solutionId,
-            ["NetworkId"] = networkId,
-            ["FirstCanvas"] = firstCanvas,
-            ["HostIp"] = config.HmiHostIp,
-            ["InternalRuntimeIp"] = config.HmiInternalRuntimeIp,
-            ["LogicalPort"] = config.HmiLogicalPort.ToString(),
-            ["SecurePort"] = config.HmiSecurePort.ToString(),
-            ["SimulationServiceId"] = SimulationServiceId,
-            ["WorkstationId"] = WorkstationId,
-            ["WorkstationNicId"] = WorkstationNicId,
-            ["WorkstationRuntimeId"] = WorkstationRuntimeId,
-            ["PanelId"] = PanelId,
-            ["PanelContainerId"] = PanelContainerId,
-            ["PanelContainerRuntimeId"] = PanelContainerRuntimeId,
-            ["PanelRuntimeId"] = PanelRuntimeId,
-            ["SwitchId"] = SwitchId,
-            ["RuntimeTypeId"] = RuntimeTypeId,
-            ["ContainerRuntimeTypeId"] = ContainerRuntimeTypeId,
-            ["EmptyDeviceId"] = EmptyDeviceId
-        };
+    // ---- derived project facts -------------------------------------------------------------
 
-    private static IReadOnlyList<string> Validate(string eaeRoot, MapperConfig config, string firstCanvas)
+    private static string? ResolveNetworkId(string topologyDir, string subnet, EmitResult result)
+    {
+        var matches = new List<string>();
+        foreach (var path in Directory.Exists(topologyDir)
+                     ? Directory.EnumerateFiles(topologyDir, "BroadcastDomain_*.json")
+                     : Enumerable.Empty<string>())
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(File.ReadAllText(path));
+                var root = doc.RootElement;
+                if (!root.TryGetProperty("ipV4Address", out var address) ||
+                    !string.Equals(address.GetString(), subnet, StringComparison.Ordinal)) continue;
+                if (root.TryGetProperty("uuid", out var uuid) && !string.IsNullOrWhiteSpace(uuid.GetString()))
+                    matches.Add(uuid.GetString()!);
+            }
+            catch (JsonException) { }
+        }
+
+        if (matches.Count == 1) return matches[0];
+        result.Problems.Add(matches.Count == 0
+            ? $"No BroadcastDomain declares the configured HMI subnet '{subnet}'."
+            : $"{matches.Count} BroadcastDomains declare subnet '{subnet}'; the HMI network is ambiguous.");
+        return null;
+    }
+
+    private static string? ResolveSwitchId(string topologyDir, string equipmentFile, EmitResult result)
+    {
+        var path = Path.Combine(topologyDir, equipmentFile);
+        if (!File.Exists(path))
+        {
+            result.Problems.Add($"The configured switch equipment '{equipmentFile}' does not exist in Topology.");
+            return null;
+        }
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(path));
+            if (doc.RootElement.TryGetProperty("uuid", out var uuid) &&
+                !string.IsNullOrWhiteSpace(uuid.GetString()))
+                return uuid.GetString();
+        }
+        catch (JsonException ex) { result.Problems.Add($"'{equipmentFile}' is not valid JSON: {ex.Message}"); return null; }
+
+        result.Problems.Add($"'{equipmentFile}' declares no uuid; the HMI wire has no destination.");
+        return null;
+    }
+
+    // ---- validation --------------------------------------------------------------------------
+
+    private static IReadOnlyList<string> Validate(
+        string eaeRoot, string systemDir, HmiDeviceDefinition device, string firstCanvas,
+        string switchId, IReadOnlyDictionary<string, string> tokens)
     {
         var problems = new List<string>();
-        var systemDir = Path.Combine(eaeRoot, "IEC61499", "System", SystemId);
-        var deviceDir = Path.Combine(systemDir, DeviceId);
-        var sysdev = Path.Combine(systemDir, DeviceId + ".sysdev");
-        var runtimeProperties = Path.Combine(deviceDir, RuntimePropertiesFile);
-        var workstation = Path.Combine(eaeRoot, "Topology", "Equipment_Workstation_1.json");
-        var panel = Path.Combine(eaeRoot, "Topology", "Equipment_HMIP6_1.json");
-        var wire = Path.Combine(eaeRoot, "Topology", "Wire_HMI_to_Switch1.json");
+        var deviceDir = Path.Combine(systemDir, device.DeviceId);
+        var topologyDir = Path.Combine(eaeRoot, "Topology");
 
+        string Dest(string template) =>
+            device.Artefacts.Where(a => a.Template == template)
+                .Select(a => Path.Combine(
+                    a.Into == "system" ? systemDir : a.Into == "device" ? deviceDir : topologyDir,
+                    Substitute(a.Name, tokens)))
+                .FirstOrDefault() ?? string.Empty;
+
+        var sysdev = Dest("HMI.sysdev.xml");
         if (!File.Exists(sysdev) ||
-            !string.Equals((string?)XDocument.Load(sysdev).Root?.Attribute("Type"), "HMI_NET",
+            !string.Equals((string?)XDocument.Load(sysdev).Root?.Attribute("Type"), device.LogicalDeviceType,
                 StringComparison.Ordinal))
-            problems.Add("The generated HMI_NET logical device is missing or malformed.");
+            problems.Add($"The generated {device.LogicalDeviceType} logical device is missing or malformed.");
 
+        var runtimeProperties = Dest("Runtime.Properties.xml");
         if (!File.Exists(runtimeProperties) ||
             !File.ReadAllText(runtimeProperties).Contains($"FirstCanvas={firstCanvas}", StringComparison.Ordinal))
             problems.Add($"The HMI runtime does not start on generated canvas '{firstCanvas}'.");
 
-        var workstationText = File.Exists(workstation) ? File.ReadAllText(workstation) : string.Empty;
-        if (!workstationText.Contains($"\"logicalDeviceId\": \"{DeviceId}\"", StringComparison.Ordinal) ||
-            !workstationText.Contains($"\"ipAddress\": \"{config.HmiHostIp}\"", StringComparison.Ordinal))
-            problems.Add("Workstation_1 is not bound to the generated HMI logical device and host IP.");
+        var workstation = ReadOrEmpty(Dest("Equipment_Workstation_1.json"));
+        if (!workstation.Contains($"\"logicalDeviceId\": \"{device.DeviceId}\"", StringComparison.Ordinal) ||
+            !workstation.Contains($"\"ipAddress\": \"{device.HostIp}\"", StringComparison.Ordinal))
+            problems.Add("The workstation equipment is not bound to the generated HMI logical device and host IP.");
 
-        var panelText = File.Exists(panel) ? File.ReadAllText(panel) : string.Empty;
-        if (!panelText.Contains($"\"ipAddress\": \"{config.HmiInternalRuntimeIp}\"",
-                StringComparison.Ordinal))
-            problems.Add("HMIP6_1 does not contain the configured internal Soft_dPAC runtime.");
+        var panel = ReadOrEmpty(Dest("Equipment_HMIP6_1.json"));
+        if (!panel.Contains($"\"ipAddress\": \"{device.InternalRuntimeIp}\"", StringComparison.Ordinal))
+            problems.Add("The HMI panel equipment does not contain the configured internal runtime address.");
+        if (!panel.Contains(device.LogicalPort.ToString(), StringComparison.Ordinal) ||
+            !panel.Contains(device.SecurePort.ToString(), StringComparison.Ordinal))
+            problems.Add("The HMI panel equipment does not carry the configured logical/secure ports.");
 
-        var wireText = File.Exists(wire) ? File.ReadAllText(wire) : string.Empty;
-        if (!wireText.Contains($"\"sourceEquipment\": \"{PanelId}\"", StringComparison.Ordinal) ||
-            !wireText.Contains($"\"destinationEquipment\": \"{SwitchId}\"", StringComparison.Ordinal))
+        var wire = ReadOrEmpty(Dest("Wire_HMI_to_Switch1.json"));
+        if (!wire.Contains($"\"sourceEquipment\": \"{device.PanelId}\"", StringComparison.Ordinal) ||
+            !wire.Contains($"\"destinationEquipment\": \"{switchId}\"", StringComparison.Ordinal))
             problems.Add("The HMI panel-to-switch topology wire is missing or malformed.");
+
+        var binding = ReadOrEmpty(Dest("Simulation.Binding.xml"));
+        if (binding.Length > 0 && !binding.Contains(device.LogicalPort.ToString(), StringComparison.Ordinal))
+            problems.Add("The HMI simulation binding does not carry the configured logical port.");
 
         var dfbproj = Path.Combine(eaeRoot, "IEC61499", "IEC61499.dfbproj");
         if (!File.Exists(dfbproj) ||
             !XDocument.Load(dfbproj).Descendants().Any(e =>
-                ((string?)e.Attribute("Include") ?? string.Empty).Contains(DeviceId,
+                ((string?)e.Attribute("Include") ?? string.Empty).Contains(device.DeviceId,
                     StringComparison.OrdinalIgnoreCase)))
             problems.Add("IEC61499.dfbproj does not register the HMI logical device.");
 
@@ -199,38 +235,29 @@ internal static class HmiRuntimeEmitter
         if (!File.Exists(folders) ||
             !XDocument.Load(folders).Descendants().Any(e =>
                 e.Name.LocalName == "item" &&
-                string.Equals(e.Value.Trim(), DeviceId, StringComparison.OrdinalIgnoreCase)))
+                string.Equals(e.Value.Trim(), device.DeviceId, StringComparison.OrdinalIgnoreCase)))
             problems.Add("General/Folders.xml does not expose the HMI logical device.");
 
         return problems;
     }
 
-    private static string? FindDeviceNetwork(string topologyDir)
+    private static string ReadOrEmpty(string path) => File.Exists(path) ? File.ReadAllText(path) : string.Empty;
+
+    // Templates use {{Token}}; the artefact file names in hmi.yml use the lighter {Token}.
+    // The double form MUST be substituted first - replacing {Token} first would consume the inner
+    // braces of {{Token}} and leave a literal '{value}' in a deployed artefact.
+    internal static string Substitute(string text, IReadOnlyDictionary<string, string> tokens)
     {
-        foreach (var path in Directory.EnumerateFiles(topologyDir, "BroadcastDomain_*.json"))
-        {
-            try
-            {
-                using var doc = JsonDocument.Parse(File.ReadAllText(path));
-                var root = doc.RootElement;
-                if (!root.TryGetProperty("ipV4Address", out var address) ||
-                    !string.Equals(address.GetString(), "192.168.1.0", StringComparison.Ordinal))
-                    continue;
-                if (root.TryGetProperty("uuid", out var uuid) && !string.IsNullOrWhiteSpace(uuid.GetString()))
-                    return uuid.GetString();
-            }
-            catch (JsonException) { }
-        }
-        return null;
+        foreach (var token in tokens)
+            text = text.Replace("{{" + token.Key + "}}", token.Value, StringComparison.Ordinal);
+        foreach (var token in tokens)
+            text = text.Replace("{" + token.Key + "}", token.Value, StringComparison.Ordinal);
+        return text;
     }
 
     private static void WriteTemplate(
-        string templateDir,
-        string templateName,
-        string destination,
-        IReadOnlyDictionary<string, string> tokens,
-        string eaeRoot,
-        EmitResult result)
+        string templateDir, string templateName, string destination,
+        IReadOnlyDictionary<string, string> tokens, string eaeRoot, EmitResult result)
     {
         var source = Path.Combine(templateDir, templateName);
         if (!File.Exists(source))
@@ -239,10 +266,17 @@ internal static class HmiRuntimeEmitter
             return;
         }
 
-        var content = File.ReadAllText(source);
-        foreach (var token in tokens)
-            content = content.Replace("{{" + token.Key + "}}", token.Value, StringComparison.Ordinal);
-        content = content.TrimEnd('\r', '\n');
+        var content = Substitute(File.ReadAllText(source), tokens).TrimEnd('\r', '\n');
+
+        // A surviving placeholder means the template references a token the definition does not
+        // supply - shipping it would write a literal {{...}} into a deployed artefact.
+        var unresolved = System.Text.RegularExpressions.Regex.Matches(content, @"\{\{[A-Za-z]+\}\}")
+            .Select(m => m.Value).Distinct().ToList();
+        if (unresolved.Count > 0)
+        {
+            result.Problems.Add($"'{templateName}' has unresolved placeholder(s): {string.Join(", ", unresolved)}.");
+            return;
+        }
 
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
         if (File.Exists(destination) &&
