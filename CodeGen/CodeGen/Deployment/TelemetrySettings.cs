@@ -1,19 +1,20 @@
 namespace CodeGen.Configuration
 {
-    // Telemetry/MQTT settings from Config/telemetry.yml. The defaults here mirror the prior values, so
-    // a missing/empty YAML is behaviour-identical.
+    // Telemetry/MQTT settings from Config/telemetry.yml, which is their only source. No value is
+    // restated here: a C# default is a second source of truth that silently wins when a key is
+    // dropped, which is exactly how the configuration and the code drift apart.
     public sealed class TelemetrySettings
     {
-        public bool UseTelemetryCat { get; set; } = true;
-        public string BrokerUrl { get; set; } = "mqtt://192.168.1.50:1883";
-        public bool SecureTls { get; set; } = false;
-        public string CaCert { get; set; } = "";
-        public int ValidateCert { get; set; } = 0;
-        public string ConnectionName { get; set; } = "SMC";
-        public string ClientBx1 { get; set; } = "SMC_BX1";
-        public string ClientM262 { get; set; } = "SMC_M262";
-        public string ClientM580 { get; set; } = "SMC_M580";
-        public string ClientRevPi { get; set; } = "SMC_RevPi";
+        public bool UseTelemetryCat { get; set; }
+        public string BrokerUrl { get; set; } = string.Empty;
+        public bool SecureTls { get; set; }
+        public int ValidateCert { get; set; }
+        public string CaCert { get; set; } = string.Empty;
+        public string ConnectionName { get; set; } = string.Empty;
+        public string ClientBx1 { get; set; } = string.Empty;
+        public string ClientM262 { get; set; } = string.Empty;
+        public string ClientM580 { get; set; } = string.Empty;
+        public string ClientRevPi { get; set; } = string.Empty;
 
         private static readonly YamlConfigFile<TelemetrySettings> _file = new("Config", "telemetry.yml");
 
