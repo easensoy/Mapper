@@ -11,13 +11,13 @@ namespace CodeGen.Devices.M262
 {
     public static class M262SysdevEmitter
     {
-        const string LibElNs = "https://www.se.com/LibraryElements";
+        const string LibElNs = CodeGen.Devices.Core.Station2DeviceEmitter.LibElNs;
         const string ApplicationName = "WMG";
         const string DeviceName = "M262";
         const string DefaultResourceName = "RES0";
 
         // GUID + resource ID must match what EAE created (the .hcf Form-1 binding + FB mirror key off them).
-        const string M262SysdevId   = "00000000-0000-0000-0000-000000000002";
+        internal const string M262SysdevId   = "00000000-0000-0000-0000-000000000002";
         const string M262ResourceId = "1459BCD12760907D";
 
         // When true, an existing M262 sysdev is left as-is to preserve EAE's controller trust binding.
