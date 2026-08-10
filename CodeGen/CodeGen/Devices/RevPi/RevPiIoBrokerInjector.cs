@@ -1,184 +1,275 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Xml.Linq;
+using CodeGen.Configuration;
 using CodeGen.Devices.Core;
-using CodeGen.Translation;
 using CodeGen.Mapping;
+using CodeGen.Translation;
 
 namespace CodeGen.Devices.RevPi
 {
-    // Injects the Revolution Pi Modbus IO broker + its symlink bridge onto the RevPi sysres (and syslay),
-    // exactly the pattern BX1 uses (PLC_RW_BX1 word broker + external SYMLINKMULTIVAR bridge), but with the
-    // reference's Modbus broker PLC_RW_REVPI. Our Five_State CAT binds IO via symlinks ($${PATH}athome/
-    // atwork/OutputToWork), NOT the direct pins Jyotsna's reference CAT wires — so the bridge connects the
-    // broker's InputVars/OutputVars to the Feed actuators' symlink names, and a ScanCycle heartbeat drives
-    // the Modbus read/write (the reference's plc_out trigger is a direct-wire pin our CAT lacks).
+    // The Revolution Pi's field I/O: what the Modbus coupler carries, and the symlink bridge connecting
+    // it to the actuator CATs.
     //
-    // Scope = exactly what the reference broker exposes: Feeder (Pusher) + Checker + PartInHopper (Hopper).
-    // Transfer/Ejector/Robot/PartAtAssembly have no Modbus IO in the reference, so none is invented here.
+    // NOTHING about pushers, checkers or hoppers is written down here or in YAML. The coupler type states
+    // which signals exist and which word bit each uses; the I/O bindings workbook states which component
+    // and port owns each channel; the Modbus hardware config states the broker's FB id and the bus cycle.
+    // Change the coupler or the workbook and this follows with no edit.
     public static class RevPiIoBrokerInjector
     {
-        public const string BrokerFbId   = "A6B61E2425DB1C30";   // matches the .hcf MB_Read/Write LinkNames
-        public const string BrokerFbName = "RevPI_IO";
-        public const string BrokerFbType = "PLC_RW_REVPI";
-        const string ScanFbName = "RevPI_IO_Cycle";
-        const string ScanPeriod = "T#80ms";                       // = the reference Modbus buscycletime
+        // SyslaySysresParityValidator looks for this exact instance name on the RevPi resource.
+        internal const string BrokerName = "RevPI_IO";
+        internal const string BrokerType = "PLC_RW_REVPI";
 
-        // broker OutputVar (unpacked Modbus input bit) -> the actuator sensor symlink it feeds. Pin = the
-        // internal Bitman_1 output the INTERNALIZED publisher taps directly (external path uses Var+Symlink).
-        static readonly (string Var, string Symlink, string Pin)[] Sensors =
-        {
-            ("PusherAtWork", "Feeder.atwork", "OUT2"), ("PusherAtHome", "Feeder.athome", "OUT1"),
-            ("checkerUp", "Checker.athome", "OUT4"), ("chekcerDown", "Checker.atwork", "OUT5"),
-            ("Hopper", "PartInHopper.Input", "OUT3"),
-        };
-        // broker InputVar (Modbus output bit) <- the actuator coil symlink. Pin = the internal BITMAN_OUT input
-        // the INTERNALIZED subscriber drives directly.
-        static readonly (string Var, string Symlink, string Pin)[] Coils =
-        {
-            ("ExtendPusher", "Feeder.OutputToWork", "IN1"), ("ExtendChecker", "Checker.OutputToWork", "IN2"),
-        };
+        // Relative to the template library root. The coupler type ships as a Composite zip; the Modbus
+        // master hardware config ships beside it.
+        const string BrokerTypeZip = @"Composite\PLC_RW_REVPI.zip";
+        const string HcfTemplate = @"RevPi\RevPiIO.modbus.hcf";
+        // Bridge instances. They exist only because a symlink carries a value with no event to ride on,
+        // and they are swept by these names so a re-deploy converges instead of accumulating.
+        const string Publisher = "RevPiSensorPublisher";
+        const string Subscriber = "RevPiCoilSubscriber";
+        const string ScanFb = "RevPI_IO_Cycle";
+        static readonly string[] Bridge = { Publisher, Subscriber, ScanFb };
 
-        // The Feed components whose physical IO the RevPi Modbus coupler actually carries, derived from the
-        // two tables above so it can never drift from them. This BOUNDS what may be hosted on the RevPi: a
-        // component relocated here without a signal in PLC_RW_REVPI's interface would deploy with no
-        // physical IO and could never actuate — silently, which is the worst failure mode on a rig.
-        public static IReadOnlySet<string> CoveredComponents { get; } =
-            new HashSet<string>(
-                Sensors.Select(s => s.Symlink)
-                       .Concat(Coils.Select(c => c.Symlink))
-                       .Select(sym => sym.Split('.')[0]),
-                StringComparer.OrdinalIgnoreCase);
+        // The coupler's own canvas, below its pristine blocks. Not plant layout — this is the inside of a
+        // function block type.
+        const int BridgeX = 400, BridgeY = 4400, BridgeColumn = 2600, BridgeRow = 800;
+        // Sensor_Bool_CAT's field input. The workbook gives a sensor a tag but no channel, so a sensor
+        // signal is matched by tag and takes this port — the same port the M262 hardware config binds.
+        const string SensorPort = "Input";
 
-        // Inject into the RevPi sysres + syslay. resourceName scopes the absolute symlink names (RevPi_RES).
-        public static int Inject(DeploymentProfile profile, string? sysresPath, string? syslayPath, string resourceName,
-            SystemInjector.BindingApplicationReport report)
+        // One field signal, fully resolved: the pin inside the coupler, the physical channel that pin is
+        // bit-wired to, and the component/port that owns it.
+        internal sealed record Signal(bool IsCoil, string Pin, string Component, string Port)
         {
-            int touched = 0;
-            foreach (var (label, path, isSysres) in new[]
-            {
-                ("sysres", sysresPath ?? "", true),
-                ("syslay", syslayPath ?? "", false),
-            })
-            {
-                if (string.IsNullOrEmpty(path) || !File.Exists(path)) continue;
-                try { if (InjectInto(profile, path, isSysres, resourceName)) touched++; }
-                catch (IOException)
-                {
-                    report.Missing.Add($"[RevPi][Broker] FAILED to write RevPI_IO to the {label} — file " +
-                        "LOCKED. Close the RevPi_RES view in EAE (or close EAE) before Test Runtime.");
-                }
-                catch (Exception ex) { report.Missing.Add($"[RevPi][Broker] {label} injection error: {ex.Message}"); }
-            }
-            if (touched > 0)
-                report.Missing.Add($"[RevPi][Broker] RevPI_IO (PLC_RW_REVPI) + Modbus symlink bridge injected " +
-                    "(Feeder/Checker/PartInHopper); scan-driven, resolves the .hcf MB_Read/Write LinkNames.");
-            return touched;
+            public string Symlink(string resource) => $"{resource}.{Component}.{Port}";
         }
 
-        static bool InjectInto(DeploymentProfile profile, string path, bool isSysres, string resourceName)
+        internal sealed record Coupler(IReadOnlyList<Signal> Signals, string Unpacker, string Packer,
+            string ModbusRead, string ScanPeriod, string BrokerFbId, string ResourceId)
         {
+            public IEnumerable<Signal> Sensors => Signals.Where(s => !s.IsCoil);
+            public IEnumerable<Signal> Coils => Signals.Where(s => s.IsCoil);
+            public IReadOnlySet<string> Components =>
+                new HashSet<string>(Signals.Select(s => s.Component), StringComparer.OrdinalIgnoreCase);
+        }
+
+        // ── the surface anything outside this folder asks for ─────────────────────────────────────────
+        // Read by the pre-generation selection guard and the MapperUI device column. Deliberately
+        // propagates a resolution failure rather than answering "nothing": an empty set would quietly
+        // turn every RevPi selection into a rejection with no explanation.
+        public static IReadOnlySet<string> CoveredComponents => Current.Components;
+
+        // Read from the hardware config, whose Modbus LinkNames resolve against it.
+        public static string BrokerFbId => Current.BrokerFbId;
+
+        // Called by the template deployer once the pristine coupler type is in place, so the resource
+        // instantiates only the broker itself.
+        public static void EmbedBridgeInComposite(string fbtPath) =>
+            EmbedBridge(Current, ControllerMap.ResourceForPlc(PlcAssignment.RevPi), fbtPath);
+
+        static Coupler? _current;
+        internal static Coupler Current => _current ??= Resolve(MapperConfig.Load().TemplateLibraryPath);
+
+        internal static Coupler Resolve(string? templateLibraryPath)
+        {
+            var lib = Locate(templateLibraryPath, BrokerTypeZip)
+                ?? throw Fail($"the coupler type '{BrokerTypeZip}' is not in the template library");
+            var hcf = Locate(templateLibraryPath, HcfTemplate)
+                ?? throw Fail($"the hardware config '{HcfTemplate}' is not in the template library");
+            var bindings = IoBindingsLoader.LoadBindings(ResolveBindings(MapperConfig.Load().IoBindingsPath));
+
+            // The PRISTINE type is the specification. The deployed copy is one this adapter has already
+            // rewritten (the boundary wires into the packer are superseded by the subscriber), so reading
+            // it back would find a coupler with no coils.
+            using var zip = ZipFile.OpenRead(lib);
+            var entry = zip.Entries.First(e => e.FullName.EndsWith($"{BrokerType}.fbt", StringComparison.OrdinalIgnoreCase));
+            using var stream = entry.Open();
+            var type = XDocument.Load(stream);
+
+            var iface = type.Root?.Element("InterfaceList");
+            var net = type.Root?.Element("FBNetwork");
+            if (iface == null || net == null) throw Fail($"'{BrokerType}' declares no interface or FB network");
+
+            HashSet<string> Names(string g) => new((iface.Element(g)?.Elements() ?? Enumerable.Empty<XElement>())
+                .Select(v => (string?)v.Attribute("Name") ?? ""), StringComparer.Ordinal);
+            var outs = Names("OutputVars");
+            var ins = Names("InputVars");
+            var edges = (net.Element("DataConnections")?.Elements("Connection") ?? Enumerable.Empty<XElement>())
+                .Select(c => (S: (string?)c.Attribute("Source") ?? "", D: (string?)c.Attribute("Destination") ?? ""))
+                .ToList();
+
+            // A sensor is an internal pin feeding a boundary output; a coil is a boundary input feeding an
+            // internal pin. That direction is the whole definition — no list of names is needed.
+            var sensors = edges.Where(e => outs.Contains(e.D) && e.S.Contains('.')).ToList();
+            var coils = edges.Where(e => ins.Contains(e.S) && e.D.Contains('.')).ToList();
+
+            var signals = sensors.Select(e => Bind(false, e.S, e.D, bindings))
+                .Concat(coils.Select(e => Bind(true, e.D, e.S, bindings)))
+                .OrderBy(s => s.IsCoil).ThenBy(s => s.Pin, StringComparer.Ordinal).ToList();
+
+            var read = net.Elements("FB").FirstOrDefault(f =>
+                ((string?)f.Attribute("Type") ?? "").StartsWith("SYMLINKMULTIVARDST", StringComparison.Ordinal))
+                ?? throw Fail($"'{BrokerType}' declares no Modbus read symlink, so the word can never refresh");
+
+            var h = XDocument.Load(hcf);
+            var resId = h.Descendants().Select(e => (string?)e.Attribute("ResourceId"))
+                .FirstOrDefault(v => !string.IsNullOrWhiteSpace(v))
+                ?? throw Fail("the RevPi hardware config declares no ResourceId");
+            // LinkName is '<resource>.<fb>.<port>', so the file the broker must satisfy names its id.
+            var fbIds = h.Descendants("ParameterValue")
+                .Where(p => (string?)p.Attribute("Name") == "LinkName")
+                .Select(p => ((string?)p.Attribute("Value") ?? "").Split('.'))
+                .Where(a => a.Length >= 3 && a[0] == resId).Select(a => a[1])
+                .Distinct(StringComparer.Ordinal).ToList();
+            if (fbIds.Count != 1)
+                throw Fail($"the RevPi hardware config links to {fbIds.Count} function blocks; exactly one broker must satisfy it");
+            var cycle = h.Descendants("ItemProperty")
+                .Where(p => string.Equals((string?)p.Element("Name"), "buscycletime", StringComparison.OrdinalIgnoreCase))
+                .Select(p => (string?)p.Element("Value")).FirstOrDefault(v => !string.IsNullOrWhiteSpace(v))
+                ?? throw Fail("the RevPi hardware config declares no bus cycle time");
+
+            return new Coupler(signals, Node(sensors[0].S), Node(coils[0].D),
+                (string)read.Attribute("Name")!, cycle, fbIds[0], resId);
+        }
+
+        // Two independent routes into the workbook, and they must agree: by CHANNEL, which is the wiring
+        // itself, and by FIELD TAG, which the coupler's boundary variable names. Sensors carry a tag but
+        // no channel, and a vendor typo in a boundary name defeats the tag route, so together they cover
+        // the coupler and a disagreement is a real fault.
+        static Signal Bind(bool isCoil, string pin, string var, IoBindings b)
+        {
+            var channel = Channel(isCoil, pin);
+            var byChannel = b.PinAssignments.TryGetValue(channel, out var pa) ? (pa.ComponentName, pa.Port) : default;
+            var byTag = Tag(var, b);
+            if (byChannel != default && byTag != default && !byChannel.Equals(byTag))
+                throw Fail($"'{var}' owns {byChannel} by channel {channel} but {byTag} by field tag — " +
+                           "the coupler and the I/O bindings disagree about the wiring");
+            var owner = byChannel != default ? byChannel : byTag;
+            if (owner == default)
+                throw Fail($"'{var}' (channel {channel}) is in neither the workbook's pin columns nor its tags, " +
+                           "so nothing owns it");
+            return new Signal(isCoil, pin, owner.Item1, owner.Item2);
+        }
+
+        static (string, string) Tag(string tag, IoBindings b)
+        {
+            bool Is(string? c) => !string.IsNullOrWhiteSpace(c) && string.Equals(tag, c, StringComparison.OrdinalIgnoreCase);
+            foreach (var a in b.Actuators.Values)
+            {
+                if (Is(a.AthomeTag)) return (a.ComponentName, "athome");
+                if (Is(a.AtworkTag)) return (a.ComponentName, "atwork");
+                if (Is(a.OutputToWorkTag)) return (a.ComponentName, "OutputToWork");
+                if (Is(a.OutputToHomeTag)) return (a.ComponentName, "OutputToHome");
+            }
+            foreach (var s in b.Sensors.Values) if (Is(s.InputTag)) return (s.ComponentName, SensorPort);
+            return default;
+        }
+
+        // A word-block pin is numbered from one; the bit and the channel it is wired to are numbered from
+        // zero, so pin n is channel n-1.
+        static string Channel(bool isCoil, string pin)
+        {
+            var digits = new string(pin[(pin.IndexOf('.') + 1)..].SkipWhile(c => !char.IsDigit(c)).ToArray());
+            if (!int.TryParse(digits, out var n)) throw Fail($"pin '{pin}' carries no bit number");
+            return $"{(isCoil ? "DO" : "DI")}{n - 1:D2}";
+        }
+
+        internal static string Node(string endpoint) =>
+            endpoint.Contains('.') ? endpoint[..endpoint.IndexOf('.')] : endpoint;
+
+        static InvalidOperationException Fail(string why) =>
+            new($"The Revolution Pi I/O cannot be resolved: {why}. Nothing has been written.");
+
+        // The template library and the workbook are hard prerequisites of any generation, so they are
+        // located the way everything else locates them: the configured root first, then beside this
+        // build, then out towards the checkout.
+        static string? Locate(string? root, string relative)
+        {
+            var roots = new List<string?> { root };
+            foreach (var origin in new[] { AppContext.BaseDirectory, Environment.CurrentDirectory })
+                for (var d = new DirectoryInfo(origin); d != null; d = d.Parent)
+                    roots.Add(Path.Combine(d.FullName, "Template Library"));
+            return roots.Where(r => !string.IsNullOrWhiteSpace(r))
+                .Select(r => Path.Combine(r!, relative)).FirstOrDefault(File.Exists);
+        }
+
+        static string ResolveBindings(string configured) =>
+            Path.IsPathRooted(configured) ? configured
+            : new[] { AppContext.BaseDirectory, Environment.CurrentDirectory }
+                  .Select(o => Path.Combine(o, configured)).FirstOrDefault(File.Exists)
+              ?? Path.Combine(AppContext.BaseDirectory, configured);
+
+        // Only the resource copy carries the Mapping that ties the two together; an unmapped resource FB
+        // is the orphan EAE offers to "repair".
+        internal static bool PlaceBroker(Coupler coupler, string path, bool isResource,
+            IReadOnlyList<string> hosted, LayoutCatalog layout, string bootFb)
+        {
+            if (!File.Exists(path)) return false;
             var doc = XDocument.Load(path, LoadOptions.PreserveWhitespace);
             var root = doc.Root;
             if (root == null) return false;
             string ns = root.GetDefaultNamespace().NamespaceName;
             XName N(string n) => XName.Get(n, ns);
 
-            // The RevPi network (sysres: root/FBNetwork; syslay: the network holding the Feed FBs).
-            // SyslayBuilder emits <SubAppNetwork>, NOT <FBNetwork>, so searching only FBNetwork silently
-            // matched nothing and the syslay half of this injector never ran — RevPI_IO existed on the
-            // resource with no application instance behind it. Search BOTH, as Bx1IoBrokerInjector does.
-            var net = isSysres
+            var net = isResource
                 ? root.Element(N("SubAppNetwork")) ?? root.Element(N("FBNetwork"))
                 : root.Descendants(N("FBNetwork")).Concat(root.Descendants(N("SubAppNetwork")))
-                      .FirstOrDefault(fn =>
-                          fn.Elements(N("FB")).Any(f => (string?)f.Attribute("Name") == "Feeder"));
+                    .FirstOrDefault(n => n.Elements(N("FB"))
+                        .Any(f => hosted.Contains((string?)f.Attribute("Name") ?? "")));
             if (net == null) return false;
 
-            // Idempotent: sweep any prior broker + bridge, then re-add.
-            bool IsBrokerFb(string n) => n == BrokerFbName || n == "RevPiSensorPublisher"
-                || n == "RevPiCoilSubscriber" || n == ScanFbName;
-            static string FbOf(string? ep) => ep == null ? "" : (ep.Contains('.') ? ep[..ep.IndexOf('.')] : ep);
-            var ec = net.Element(N("EventConnections")) ?? EnsureSection(net, N("EventConnections"));
-            var dc = net.Element(N("DataConnections"))  ?? EnsureSection(net, N("DataConnections"));
-            foreach (var fb in net.Elements(N("FB")).Where(f => IsBrokerFb((string?)f.Attribute("Name") ?? "")).ToList())
-            {
-                // Drop the element's own indentation text node with it. The document is loaded with
-                // PreserveWhitespace, so removing only the <FB> leaves an orphan blank line behind and the
-                // resource grows a few bytes of whitespace on EVERY re-deploy — sweep-and-re-add would
-                // never be byte-idempotent.
-                if (fb.PreviousNode is XText ws && string.IsNullOrWhiteSpace(ws.Value)) ws.Remove();
-                fb.Remove();
-            }
-            foreach (var grp in new[] { ec, dc })
-                foreach (var c in grp.Elements(N("Connection"))
-                             .Where(c => IsBrokerFb(FbOf((string?)c.Attribute("Source"))) ||
-                                         IsBrokerFb(FbOf((string?)c.Attribute("Destination")))).ToList())
-                    c.Remove();
+            var owned = new HashSet<string>(Bridge, StringComparer.Ordinal) { BrokerName };
+            var events = Section(net, N("EventConnections"));
+            Sweep(net, N, owned, events, Section(net, N("DataConnections")));
 
+            // The broker takes the column after the last component this controller hosts, on the row its
+            // components sit on — the RevPi shares the Feed band and keeps the global canvas coordinates.
+            var band = layout.Band(PlcAssignment.RevPi);
+            var fb = new XElement(N("FB"),
+                new XAttribute("ID", coupler.BrokerFbId), new XAttribute("Name", BrokerName),
+                new XAttribute("Type", BrokerType), new XAttribute("Namespace", "Main"));
+            if (isResource) fb.Add(new XAttribute("Mapping", coupler.BrokerFbId));
+            fb.Add(new XAttribute("x", (band.ColumnBaseX + layout.Geometry.ColumnPitchX * hosted.Count).ToString()),
+                   new XAttribute("y", layout.RowY("Actuator").ToString()));
+
+            // EAE requires FB declarations before the boundary Input elements.
             var firstInput = net.Elements(N("Input")).FirstOrDefault();
-            void Add(XElement fb) { if (firstInput != null) firstInput.AddBeforeSelf(fb); else net.Add(fb); }
-            void Ev(string s, string d) => ec.Add(new XElement(N("Connection"),
-                new XAttribute("Source", s), new XAttribute("Destination", d)));
+            if (firstInput != null) firstInput.AddBeforeSelf(fb); else net.Add(fb);
 
-            // 1. The broker FB (forced id so the copied Modbus .hcf's LinkNames resolve).
-            var brokerFb = new XElement(N("FB"),
-                new XAttribute("ID", BrokerFbId), new XAttribute("Name", BrokerFbName),
-                new XAttribute("Type", BrokerFbType), new XAttribute("Namespace", "Main"));
-            // A resource FB must name the application instance it realises; without Mapping EAE sees an
-            // unmapped instance ("Repair Instances"). The syslay FB carries this same ID, so Mapping ==
-            // ID — the shape Bx1IoBrokerInjector emits and the deployed BX1_IO already ships.
-            if (isSysres) brokerFb.Add(new XAttribute("Mapping", BrokerFbId));
-            brokerFb.Add(new XAttribute("x", isSysres ? "12180" : "36000"), new XAttribute("y", "6600"));
-            Add(brokerFb);
-
-            // 2. INIT anchor (always): the resource's local boot chain. Full swap: Feed_Station (on RevPi) inits
-            //    the broker. Partial swap: Feed_Station is on M262, so anchor off a LOCAL RevPi component in
-            //    BOTH this sysres and the shared syslay (PartInHopper) -> no cross-device INIT wire.
-            bool Has(string nm) => net.Elements(N("FB")).Any(f => (string?)f.Attribute("Name") == nm);
-            string initSrc = !profile.PartialRevPi && Has("Feed_Station")
-                ? "Feed_Station"
-                : new[] { "PartInHopper", "Feeder", "Checker", "FB1" }.FirstOrDefault(Has) ?? "FB1";
-            Ev($"{initSrc}.INITO", $"{BrokerFbName}.INIT");
-
+            // The broker must be initialised from something already on this resource, else it never runs.
+            var anchor = hosted.FirstOrDefault(h => net.Elements(N("FB"))
+                .Any(f => (string?)f.Attribute("Name") == h)) ?? bootFb;
+            events.Add(new XElement(N("Connection"), new XAttribute("Source", $"{anchor}.INITO"),
+                new XAttribute("Destination", $"{BrokerName}.INIT")));
 
             doc.Save(path);
             return true;
         }
 
-        // Internalize the Modbus symlink bridge INTO the deployed PLC_RW_REVPI composite so the RevPi sysres
-        // instantiates ONLY RevPI_IO (the bridge Publisher/Subscriber/ScanCycle live inside the type). Mirrors
-        // BX1's EmbedCoverBridgeInComposite: the publisher taps the composite's internal unpacked sensor bits
-        // (Bitman_1.OUTn), the subscriber drives the internal packer (BITMAN_OUT.INn), and an E_DELAY re-reads
-        // (DI_Read_Word) + re-writes (BITMAN_OUT) each cycle. Sweep-and-rebuild = self-healing on re-deploy and
-        // deterministic from the pristine template. resourceName scopes the absolute symlink NAMEs (RevPi_RES).
-        public static void EmbedBridgeInComposite(string fbtPath, string resourceName = "RevPi_RES")
+        internal static void EmbedBridge(Coupler c, string resourceName, string fbtPath)
         {
             if (!File.Exists(fbtPath)) return;
-            // No PreserveWhitespace: Save re-indents so every FB lands on its own line (EAE requires it).
+            // No PreserveWhitespace: saving re-indents so each added FB lands on its own line, which EAE
+            // requires of this file.
             var doc = XDocument.Load(fbtPath);
             var net = doc.Root?.Element("FBNetwork");
             var ec = net?.Element("EventConnections");
             var dc = net?.Element("DataConnections");
             if (net == null || ec == null || dc == null) return;
 
-            static string FbOf(string? ep) => ep == null ? "" : (ep.Contains('.') ? ep[..ep.IndexOf('.')] : ep);
-            bool IsBridge(string n) => n is "RevPiSensorPublisher" or "RevPiCoilSubscriber" or ScanFbName;
-            foreach (var fb in net.Elements("FB").Where(f => IsBridge((string?)f.Attribute("Name") ?? "")).ToList())
-                fb.Remove();
-            foreach (var grp in new[] { ec, dc })
-                foreach (var c in grp.Elements("Connection")
-                             .Where(c => IsBridge(FbOf((string?)c.Attribute("Source"))) ||
-                                         IsBridge(FbOf((string?)c.Attribute("Destination")))).ToList())
-                    c.Remove();
+            var owned = new HashSet<string>(Bridge, StringComparer.Ordinal);
+            Sweep(net, n => n, owned, ec, dc);
 
-            var idc = doc.Root!.Elements("Attribute")
-                .FirstOrDefault(a => (string?)a.Attribute("Name") == "Configuration.FB.IDCounter");
-            int nextId = (idc != null && int.TryParse((string?)idc.Attribute("Value"), out var cur))
-                ? Math.Max(cur, 40) : 40;
-            int uid = 40;
+            // Ids sit above whatever the surviving content uses, measured AFTER the sweep — the stored
+            // counter advances on every render, so the same input applied twice would never settle.
+            int id = net.Elements("FB").Select(f => int.TryParse((string?)f.Attribute("ID"), out var v) ? v : 0)
+                .DefaultIfEmpty(0).Max() + 1;
+            int uid = id;
             var firstInput = net.Elements("Input").FirstOrDefault();
             void Add(XElement fb) { if (firstInput != null) firstInput.AddBeforeSelf(fb); else net.Add(fb); }
             void Ev(string s, string d) => ec.Add(new XElement("Connection",
@@ -186,53 +277,73 @@ namespace CodeGen.Devices.RevPi
             void Da(string s, string d) => dc.Add(new XElement("Connection",
                 new XAttribute("Source", s), new XAttribute("Destination", d)));
 
-            // Publisher (SRC): internal Bitman_1 sensor bits -> the Feed actuator sensor symlinks.
-            var (sArity, sType) = SymlinkBridge.Pick("SRC", Sensors.Length);
-            Add(SymlinkBridge.BuildFb("", nextId++, uid++, "RevPiSensorPublisher", sType, sArity,
-                Sensors.Select(s => $"{resourceName}.{s.Symlink}").ToList(), 400, 4400));
-            // Subscriber (DST): the Feed actuator coil symlinks -> internal BITMAN_OUT.
-            var (cArity, cType) = SymlinkBridge.Pick("DST", Coils.Length);
-            Add(SymlinkBridge.BuildFb("", nextId++, uid++, "RevPiCoilSubscriber", cType, cArity,
-                Coils.Select(c => $"{resourceName}.{c.Symlink}").ToList(), 3000, 4400));
-            // ScanCycle heartbeat: our CAT publishes coils via a symlink with no boundary event, so the read/
-            // write must be REQ'd each cycle or the Modbus words freeze.
-            Add(new XElement("FB",
-                new XAttribute("ID", nextId++), new XAttribute("Name", ScanFbName),
-                new XAttribute("Type", "E_DELAY"), new XAttribute("x", "400"), new XAttribute("y", "5200"),
+            var sensors = c.Sensors.ToList();
+            var coils = c.Coils.ToList();
+            var (sa, st) = SymlinkBridge.Pick("SRC", sensors.Count);
+            Add(SymlinkBridge.BuildFb("", id++, uid++, Publisher, st, sa,
+                sensors.Select(s => s.Symlink(resourceName)).ToList(), BridgeX, BridgeY));
+            var (ca, ct) = SymlinkBridge.Pick("DST", coils.Count);
+            Add(SymlinkBridge.BuildFb("", id++, uid++, Subscriber, ct, ca,
+                coils.Select(s => s.Symlink(resourceName)).ToList(), BridgeX + BridgeColumn, BridgeY));
+            // The actuator CATs publish their coils through a symlink with no boundary event, so the read
+            // and write must be re-requested on a clock or the words freeze. The coupler's own bus cycle
+            // is that clock.
+            Add(new XElement("FB", new XAttribute("ID", id++), new XAttribute("Name", ScanFb),
+                new XAttribute("Type", "E_DELAY"),
+                new XAttribute("x", BridgeX.ToString()), new XAttribute("y", (BridgeY + BridgeRow).ToString()),
                 new XAttribute("Namespace", "IEC61499.Standard"),
-                new XElement("Parameter", new XAttribute("Name", "DT"), new XAttribute("Value", ScanPeriod))));
+                new XElement("Parameter", new XAttribute("Name", "DT"), new XAttribute("Value", c.ScanPeriod))));
 
-            Ev("INIT", "RevPiSensorPublisher.INIT");
-            Ev("INIT", "RevPiCoilSubscriber.INIT");
-            Ev("INIT", $"{ScanFbName}.START");
-            Ev($"{ScanFbName}.EO", $"{ScanFbName}.START");
-            Ev($"{ScanFbName}.EO", "DI_Read_Word.REQ");          // re-read the Modbus input word each cycle
-            Ev($"{ScanFbName}.EO", "RevPiCoilSubscriber.REQ");   // read the coil symlinks
-            Ev("Bitman_1.CNF", "RevPiSensorPublisher.REQ");      // publish the sensor bits after the word unpacks
-            Ev("RevPiCoilSubscriber.CNF", "BITMAN_OUT.REQ");     // pack + write the coils after they're read
+            Ev("INIT", $"{Publisher}.INIT");
+            Ev("INIT", $"{Subscriber}.INIT");
+            Ev("INIT", $"{ScanFb}.START");
+            Ev($"{ScanFb}.EO", $"{ScanFb}.START");
+            Ev($"{ScanFb}.EO", $"{c.ModbusRead}.REQ");   // re-read the input word each cycle
+            Ev($"{ScanFb}.EO", $"{Subscriber}.REQ");     // read the coil symlinks
+            Ev($"{c.Unpacker}.CNF", $"{Publisher}.REQ"); // publish once the word has unpacked
+            Ev($"{Subscriber}.CNF", $"{c.Packer}.REQ");  // pack and write once the coils are read
 
-            for (int i = 0; i < Sensors.Length; i++)
-                Da($"Bitman_1.{Sensors[i].Pin}", $"RevPiSensorPublisher.VALUE{i + 1}");
-            for (int i = 0; i < Coils.Length; i++)
-                Da($"RevPiCoilSubscriber.VALUE{i + 1}", $"BITMAN_OUT.{Coils[i].Pin}");
+            // VALUE pins are positional, so the coupler's signal order binds a pin to a symlink.
+            for (int i = 0; i < sensors.Count; i++) Da(sensors[i].Pin, $"{Publisher}.VALUE{i + 1}");
+            for (int i = 0; i < coils.Count; i++) Da($"{Subscriber}.VALUE{i + 1}", coils[i].Pin);
 
-            // Remove the boundary InputVar -> BITMAN_OUT connections (two data sources per pin is an EAE error).
-            var inputVarSources = Coils.Select(c => c.Var).ToHashSet();
-            foreach (var c in dc.Elements("Connection").Where(c =>
-                         ((string?)c.Attribute("Destination"))?.StartsWith("BITMAN_OUT.IN") == true &&
-                         inputVarSources.Contains((string?)c.Attribute("Source") ?? "")).ToList())
-                c.Remove();
+            // The pristine boundary wire into each coil pin is superseded by the subscriber, and two
+            // sources on one destination is an EAE error.
+            foreach (var conn in dc.Elements("Connection")
+                         .Where(x => coils.Any(k => (string?)x.Attribute("Destination") == k.Pin) &&
+                                     Node((string?)x.Attribute("Source") ?? "") != Subscriber).ToList())
+                conn.Remove();
 
-            idc?.SetAttributeValue("Value", nextId.ToString());
+            doc.Root!.Elements("Attribute")
+                .FirstOrDefault(a => (string?)a.Attribute("Name") == "Configuration.FB.IDCounter")
+                ?.SetAttributeValue("Value", id.ToString());
             doc.Save(fbtPath);
         }
 
-        static XElement EnsureSection(XElement net, XName name)
+        static XElement Section(XElement net, XName name)
         {
-            var el = new XElement(name);
+            var el = net.Element(name);
+            if (el != null) return el;
+            el = new XElement(name);
             net.Add(el);
             return el;
         }
 
+        static void Sweep(XElement net, Func<string, XName> N, HashSet<string> owned, params XElement[] groups)
+        {
+            foreach (var fb in net.Elements(N("FB"))
+                         .Where(f => owned.Contains((string?)f.Attribute("Name") ?? "")).ToList())
+            {
+                // Take the element's indentation with it, else a PreserveWhitespace document grows a blank
+                // line on every re-deploy and sweep-and-re-add is never byte-idempotent.
+                if (fb.PreviousNode is XText ws && string.IsNullOrWhiteSpace(ws.Value)) ws.Remove();
+                fb.Remove();
+            }
+            foreach (var g in groups)
+                foreach (var c in g.Elements(N("Connection"))
+                             .Where(c => owned.Contains(Node((string?)c.Attribute("Source") ?? "")) ||
+                                         owned.Contains(Node((string?)c.Attribute("Destination") ?? ""))).ToList())
+                    c.Remove();
+        }
     }
 }
