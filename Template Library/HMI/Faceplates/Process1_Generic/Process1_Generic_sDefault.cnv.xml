@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Mapping>
+  <EventInputs>
+    <Event Name="stateUpdate">ActuatorName;StateValue</Event>
+    <Event Name="SCNF">ThisStepText;NextStepText;PreviousStepText</Event>
+  </EventInputs>
+  <EventOutputs />
+  <Inputs>
+    <Input Name="ThisStepText" Type="STRING" />
+    <Input Name="NextStepText" Type="STRING" />
+    <Input Name="PreviousStepText" Type="STRING" />
+    <Input Name="ActuatorName" Type="STRING" />
+    <Input Name="StateValue" Type="INT" />
+  </Inputs>
+  <Outputs />
+</Mapping>
