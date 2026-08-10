@@ -194,14 +194,21 @@ namespace MapperTests
             Assert.Equal("192.168.1.6", new MapperConfig().RevPiTargetIp);
         }
 
-        [Fact] // (5) the RevPi must not collide with the HMI host or the HMI panel container
+        // (5) the RevPi must not collide with the HMI host or the HMI panel container.
+        //
+        // The HMI half now comes from Config/hmi.yml, which owns those addresses outright.
+        // This is the cross-subsystem invariant: a Soft dPAC container is a macvlan child with its
+        // own MAC and is EAE's deploy target, so a shared address fails the whole generation.
+        [Fact]
         public void RevPi_addresses_do_not_collide_with_the_HMI()
         {
             var cfg = new MapperConfig();
-            Assert.NotEqual(cfg.HmiHostIp, cfg.RevPiHostIp);
-            Assert.NotEqual(cfg.HmiHostIp, cfg.RevPiTargetIp);
-            Assert.NotEqual(cfg.HmiInternalRuntimeIp, cfg.RevPiHostIp);
-            Assert.NotEqual(cfg.HmiInternalRuntimeIp, cfg.RevPiTargetIp);
+            var hmi = CodeGen.Hmi.HmiDeviceLoader.Load();
+
+            Assert.NotEqual(hmi.HostIp, cfg.RevPiHostIp);
+            Assert.NotEqual(hmi.HostIp, cfg.RevPiTargetIp);
+            Assert.NotEqual(hmi.InternalRuntimeIp, cfg.RevPiHostIp);
+            Assert.NotEqual(hmi.InternalRuntimeIp, cfg.RevPiTargetIp);
         }
 
         [Fact]
