@@ -452,10 +452,6 @@ namespace CodeGen.Devices.Core
 
         // Projected from the run's roster so the canvas table never drifts from the allocation; applied to
         // both the sysres and the syslay.
-        // Device-local sysres canvases (M580/BX1) translate the present FBs back to this origin; the shared syslay's raw coords would leave them off-canvas.
-        const int DeviceLocalCanvasOriginX = 2000;
-        const int DeviceLocalCanvasOriginY = 2000;
-
         // translateToOrigin=true (M580/BX1) shifts the group's bounding-box top-left to the device-local origin; false (syslay + M262 sysres) keeps global coordinates.
         private static void ApplyCanonicalLayout(GenerationContext ctx, Dictionary<string, XElement> byName,
             SystemInjector.BindingApplicationReport report, string source,
@@ -482,8 +478,8 @@ namespace CodeGen.Devices.Core
                 {
                     int minX = components.Min(kv => kv.Value.X);
                     int minY = components.Min(kv => kv.Value.Y);
-                    dx = DeviceLocalCanvasOriginX - minX;
-                    dy = DeviceLocalCanvasOriginY - minY;
+                    dx = ctx.Layout.Geometry.DeviceCanvasOrigin.X - minX;
+                    dy = ctx.Layout.Geometry.DeviceCanvasOrigin.Y - minY;
                 }
             }
 
@@ -554,34 +550,13 @@ namespace CodeGen.Devices.Core
             { "FRAME_BX1",           PlcAssignment.BX1  },
         };
 
-        // Per-Type body-size allowance, kept ~15-20% above the observed EAE render so a MoveStyle="AnyContained" frame still ENCLOSES the body (no overflow); raise a type only if EAE shows it overflowing.
-        private const int FbEstWidth = 1400;
-        private static int FbEstHeight(string type) => type switch
-        {
-            "Five_State_Actuator_CAT"            => 1800,
-            "Five_State_Actuator_No_Sensors_CAT" => 1800,
-            "Vacuum_Gripper_CAT"                 => 1800,
-            "Seven_State_Actuator_CAT"           => 1500,
-            "Seven_State_Actuator_Centre_Home_CAT" => 1800,
-            "Robot_Task_CAT"                     => 1500,
-            "Process1_Generic"                   => 1000,
-            "Sensor_Bool_CAT"                    => 650,
-            "Area" or "Station"                  => 600,
-            "Area_CAT" or "Station_CAT"          => 500,
-            "CaSAdptrTerminator"                 => 450,
-            "PLC_RW_M580" or "PLC_RW_BX1" or "PLC_RW_M262" => 1200,
-            "DPAC_FULLINIT" or "plcStart"        => 500,
-            "MQTT_CONNECTION"                    => 600,
-            "Telemetry"                          => 800,
-            _                                     => 1100,
-        };
 
         // Grow each zone <Frame> to enclose the FBs its PLC owns (BucketFor); origins clamped to >=0. Best-effort: a frame with no FBs in its bucket is left as-is.
         private static void ResizeFramesToFitFbs(GenerationContext ctx, XElement net, XNamespace ns,
             SystemInjector.BindingApplicationReport report)
         {
-            // Left pad is widest so the ring wires that loop out the FBs' left edges stay inside the frame.
-            const int padLeft = 500, padTop = 220, padRight = 250, padBottom = 260;
+            var body = ctx.Layout.FbBody;
+            var pad = ctx.Layout.Geometry.FramePadding;
             var inv = System.Globalization.CultureInfo.InvariantCulture;
 
             var fbs = new List<(string Name, double X, double Y, string Type)>();
@@ -609,14 +584,14 @@ namespace CodeGen.Devices.Core
 
                 double minX = inZone.Min(f => f.X);
                 double minY = inZone.Min(f => f.Y);
-                double maxX = inZone.Max(f => f.X + FbEstWidth);
-                double maxY = inZone.Max(f => f.Y + FbEstHeight(f.Type));
+                double maxX = inZone.Max(f => f.X + body.Width);
+                double maxY = inZone.Max(f => f.Y + body.HeightOf(f.Type));
 
                 // Derive W/H from the edges (not width/height directly) so the origin clamp never shrinks the bottom/right coverage.
-                double fx = Math.Max(0, minX - padLeft);
-                double fy = Math.Max(0, minY - padTop);
-                double fw = (maxX + padRight) - fx;
-                double fh = (maxY + padBottom) - fy;
+                double fx = Math.Max(0, minX - pad.Left);
+                double fy = Math.Max(0, minY - pad.Top);
+                double fw = (maxX + pad.Right) - fx;
+                double fh = (maxY + pad.Bottom) - fy;
 
                 frame.SetAttributeValue("X", fx.ToString(inv));
                 frame.SetAttributeValue("Y", fy.ToString(inv));
