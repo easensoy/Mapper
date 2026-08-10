@@ -70,10 +70,6 @@ namespace CodeGen.Configuration
         public string RevPiTargetIp { get; set; } = DeviceConfig.Current.RevPi.TargetIp;
         public string RevPiHostIp { get; set; } = DeviceConfig.Current.RevPi.HostIp;
 
-        public string HmiHostIp { get; set; } = DeviceConfig.Current.Hmi.HostIp;
-        public string HmiInternalRuntimeIp { get; set; } = DeviceConfig.Current.Hmi.InternalRuntimeIp;
-        public int HmiLogicalPort { get; set; } = DeviceConfig.Current.Hmi.LogicalPort;
-        public int HmiSecurePort { get; set; } = DeviceConfig.Current.Hmi.SecurePort;
 
         // The generated HMI is a MONITORING panel and must not present a control the controller cannot
         // honour: the Station/Area STOP button fires CycleType=0, but ProcessRuntime_Generic_v1's ECC
@@ -82,7 +78,6 @@ namespace CodeGen.Configuration
         // command screens -- generation fails until an approved command contract exists in the control
         // logic. A real operational Stop needs a process-engine change; the safety stop stays in the
         // certified hardware safety system either way.
-        public bool HmiReadOnly { get; set; } = true;
 
         // EAE constraint: an FDT project copied verbatim from another solution can make the topology server throw a 500 on import.
         public bool EmitBx1EtherNetIpDevice { get; set; } = true;
@@ -188,9 +183,6 @@ namespace CodeGen.Configuration
             M262HcfTemplatePath = @"C:\VueOneMapper\IO\M262IO.hcf",
             M580HcfTemplatePath = @"C:\VueOneMapper\IO\M580IO.hcf",
             BX1HcfTemplatePath = @"C:\VueOneMapper\IO\BX1IO.ethernetip.hcf",
-            M262TargetIp = DeviceConfig.Current.M262.TargetIp,
-            M262LogicalNetworkName = "DeviceNetwork_1",
-            ResourceName = "M262_RES",
         };
 
         private static void Save(string path, MapperConfig config)
