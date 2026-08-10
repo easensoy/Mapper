@@ -1,0 +1,22 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Mapping>
+  <EventInputs>
+    <Event Name="SREQ">StationName;ParentName</Event>
+    <Event Name="LMREQ">LocalMode</Event>
+    <Event Name="LCTREQ">LocalCycleType</Event>
+    <Event Name="LLFREQ">LL_Fault</Event>
+    <Event Name="LLMREQ">LL_Mode</Event>
+    <Event Name="LLCTREQ">LL_CycleType</Event>
+  </EventInputs>
+  <EventOutputs />
+  <Inputs>
+    <Input Name="StationName" Type="STRING" />
+    <Input Name="ParentName" Type="STRING" />
+    <Input Name="LocalMode" Type="INT" />
+    <Input Name="LocalCycleType" Type="INT" />
+    <Input Name="LL_Fault" Type="BOOL" />
+    <Input Name="LL_Mode" Type="INT" />
+    <Input Name="LL_CycleType" Type="INT" />
+  </Inputs>
+  <Outputs />
+</Mapping>
