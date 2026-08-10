@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Colors xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://tempuri.org/Colors.xsd">
+  <Normal Name="LedFrameColor" Description="Defines the default color of the frame of LED" R="200" G="200" B="200" A="255" />
+  <Normal Name="ButtonTextColorMouseDown" Description="Defines the color of button when mouse down is performed" R="255" G="255" B="255" A="255" />
+  <Normal Name="ButtonTextColor" Description="The color of the text in button" R="255" G="255" B="255" A="255" />
+  <Normal Name="LedTrueColor" Description="Indicates the true state of LED" R="0" G="168" B="231" A="255" />
+  <Normal Name="ButtonInnerBorderColor" Description="The color of the inner border of button" R="90" G="90" B="90" A="255" />
+  <Normal Name="LabelTextColor" Description="The color of the text in label" R="100" G="100" B="100" A="255" />
+  <Normal Name="LedFalseColor" Description="Indicates the false state of LED" R="60" G="60" B="60" A="255" />
+</Colors>
