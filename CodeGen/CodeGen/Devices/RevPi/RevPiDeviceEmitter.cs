@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Xml.Linq;
@@ -9,338 +10,264 @@ using CodeGen.Translation;
 
 namespace CodeGen.Devices.RevPi
 {
-    // Emits the Revolution Pi Feed-station controller: a Soft_dPAC device (identical device family to
-    // BX1) that HOSTS the current Feed-station FB network (Process1_Generic Feed_Station + Feeder/Checker/
-    // Transfer/Ejector/sensors + the M262 station scaffold) instead of the Modicon M262. The FB network,
-    // the recipe and the interlocks are UNCHANGED — only the owning device/topology/deployment differ.
+    // The Revolution Pi as an EAE deployment target.
     //
-    // Reuse over duplication: the Soft_dPAC shell (sysdev/sysres/Properties/Simulation.Binding/topology/
-    // dfbproj) comes from Station2DeviceEmitter.EmitOnePlc (the BX1 path), the FB mirror from
-    // SysresFbMirror, and the Feed ring from M262SysresWireEmitter.EmitFeedRing. Only the RevPi identity
-    // (ids/name/IP) and the Revolution Pi equipment JSON are RevPi-specific and live here.
+    // It is NOT a new kind of controller: its .sysdev is Type="Soft_dPAC" exactly like the BX1's, so the
+    // whole device shell — sysdev, sysres, Properties, Simulation.Binding, hardware config, dfbproj and
+    // topologyproj registration — comes from the shared Station2DeviceEmitter.EmitOnePlc. What it hosts
+    // comes from the run's allocation, the I/O from the bindings workbook, the bridge from the coupler's
+    // own type. This file holds only the RevPi DELTA: the equipment document (a Workstation host with a
+    // CHILD NIC equipment, and a Soft dPAC container on a Docker macvlan parented to that NIC), the
+    // Modbus hardware config, and moving relocated components off whichever resource used to host them.
     //
-    // Active only when the run's DeploymentProfile selects RevPi components; the roster has by then
-    // relocated them onto PlcAssignment.RevPi, so SysresFbMirror.BucketFor routes them here.
-    //
-    // Physical Feed IO: the reference's Modbus word broker (PLC_RW_REVPI + a Modbus master .hcf). The
-    // reference wires that broker to Jyotsna's direct-wire Process1_CAT actuator PINS (which this Mapper
-    // must NOT adopt — INVARIANTS I-1 / REVERTED_FIXES R-4). Our Five_State CAT binds IO via symlinks, so
-    // RevPiIoBrokerInjector bridges the broker to the Feed actuators' symlinks (the proven BX1 pattern).
+    // The Mapper never runs docker. It emits the topology; EAE's Soft dPAC Manager reads the declaration
+    // and creates the network and the container. See Docs/REVPI_PROVISIONING.md.
     public static class RevPiDeviceEmitter
     {
-        // Sysdev GUID follows the M262/M580/BX1 (…002/003/004) series; resource id is the reference
-        // Revolution_Pi resource id (a valid 16-hex, distinct from the other three resources).
-        const string RevPiSysdevId    = "00000000-0000-0000-0000-000000000005";
-        const string RevPiResourceId  = "D090B4163A62A815";
-        const string RevPiResourceName = "RevPi_RES";
-        const string DeviceName        = "Revolution_Pi";
-
-        // Fresh RevPi topology UUIDs (…005x series) — must not collide with M262/M580/BX1 equipment.
-        const string RevPiEquipmentUuid = "11111111-2222-3333-4444-000000000050";
-        const string RevPiNicUuid       = "11111111-2222-3333-4444-000000000051";
-        const string RevPiContainerUuid = "11111111-2222-3333-4444-000000000052";
-        const string RevPiRuntimeUuid   = "11111111-2222-3333-4444-000000000053";
-
-        // Shared with BX1/reference; a soft-dPAC vlan domain the BroadcastDomainEmitter already declares.
-        const string SoftDpacTypeId    = "29797a55-a6b8-47c4-9c06-e8a42b1a38b5";
-        const string SoftdpacDomainUuid = "db72f221-ece1-4b82-8132-731ce655044e";
-        const string NoConfDomainUuid   = "00000000-0000-0000-0000-000000000000";
-
+        // Continues the M262/M580/BX1 (…002/003/004) series. Also named in Devices/Common/FoldersXmlEmitter.cs.
+        internal const string SysdevId = "00000000-0000-0000-0000-000000000005";
+        const string DeviceName = "Revolution_Pi";
         const string EquipmentJsonName = "Equipment_Revolution_Pi.json";
+        // Topology uuids. The NIC uuid is also named in Devices/Common/TopologyNetworkEmitter.cs, which
+        // wires NIC_2[Port1] to the switch — the reference does the same (Wire 275).
+        const string EquipmentUuid = "11111111-2222-3333-4444-000000000050";
+        internal const string NicUuid = "11111111-2222-3333-4444-000000000051";
+        const string ContainerUuid = "11111111-2222-3333-4444-000000000052";
+        const string RuntimeUuid = "11111111-2222-3333-4444-000000000053";
+        // EAE schema constants: the Soft dPAC runtime type, and DeviceNetwork_1 (192.168.1.0/24), the
+        // broadcast domain BroadcastDomainEmitter declares and both endpoints join.
+        const string SoftDpacTypeId = CodeGen.Devices.Core.Station2DeviceEmitter.SoftDpacTypeId;
+        const string DeviceNetworkUuid = CodeGen.Devices.Core.Station2DeviceEmitter.Bx1SoftdpacDomainUuid;
+        const string NoDomainUuid = "00000000-0000-0000-0000-000000000000";
 
-        // RevPi's OWN boot FB IDs — MUST differ from M262's (the SysresFbMirror defaults 593A…/3DB1…), else
-        // in the PARTIAL swap the coexisting M262 + RevPi resources share an FB ID. EAE indexes FBs by ID in
-        // its global system model, so a shared boot-FB ID across resources throws "An item with the same key
-        // has already been added" on load. M580/BX1 already pass their own (Station2SysresMirror); do the same.
-        const string RevPiDpacFullInitFbId = "9C4E7A1F5B3D8062";
-        const string RevPiPlcStartFbId     = "A5D8F2B60E4C1937";
+        // The supported RevPi target profile: a Revolution Pi's primary NIC, and the ARM Soft dPAC image
+        // (an x86 image exec-format-fails on the Pi). Not user choices — one profile is supported.
+        const string HostInterface = "eth0";
+        const string SoftDpacImage = "softdpac";
+        const string SoftDpacImageVersion = "v24.1.25090.08";
 
-        // Partial swap: RevPi has no Feed_Station process, so it wires like BX1 (no Area/Station/Process/
-        // Terminator anchors, tag "RevPi") -> the feed segment inits off FB1 and the report ring is left
-        // OPEN at the seam so EAE bridges it to the M262 Feed ring via the shared syslay.
-        static readonly ResourceWireEmitter.ResourceAnchors RevPiPartialAnchors = new(
+        // Simulation-binding ports continue the per-device series (M580 51500/51497, BX1 51501/51498);
+        // every coexisting resource needs its own pair.
+        const int SimulationDeployPort = 51502, SimulationArchivePort = 51499;
+
+        // This controller hosts components but no process, so it declares no area/station/process/
+        // terminator anchor: its report ring stays OPEN at the seam and the shared syslay bridges it to
+        // the Feed ring. The label is how ResourceWireEmitter identifies this resource.
+        static readonly ResourceWireEmitter.ResourceAnchors Anchors = new(
             Label: "RevPi", AreaFb: null, StationFb: null, ProcessFb: null,
             TerminatorFb: null, HmiAdapterWires: Array.Empty<ResourceWireEmitter.Wire>());
 
-        // Device stage (mirrors M262SysdevEmitter.Emit + M262TopologyEmitter.Emit): emit the Soft_dPAC
-        // shell + topology + dfbproj, then mirror the Feed-station FBs onto the RevPi sysres.
         public static SystemInjector.BindingApplicationReport EmitDevice(GenerationContext ctx,
             SystemInjector.BindingApplicationReport report)
         {
             var cfg = ctx.Config;
             var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
-            if (string.IsNullOrEmpty(eaeRoot))
-            {
-                report.Missing.Add("[RevPi] skipped, EAE project root not derivable");
-                return report;
-            }
-
-            var systemGuidDir = EaeProjectLayout.FindSystemGuidDir(eaeRoot);
+            var systemGuidDir = string.IsNullOrEmpty(eaeRoot) ? null : EaeProjectLayout.FindSystemGuidDir(eaeRoot);
             if (systemGuidDir == null)
             {
-                report.Missing.Add("[RevPi] skipped, no System GUID folder (run a Test Runtime once first)");
+                report.Missing.Add("[RevPi] skipped, no EAE project root / System GUID folder " +
+                                   "(run a generation once first)");
                 return report;
             }
 
-            string solutionId = M262TopologyEmitter.ReadProjectGuid(eaeRoot) ?? NoConfDomainUuid;
+            // Resolves the signals from the coupler type + the bindings workbook, and the resource and
+            // broker ids from the Modbus hardware config. Throws with a precise reason if they disagree,
+            // BEFORE anything is written.
+            var coupler = RevPiIoBrokerInjector.Resolve(cfg.TemplateLibraryPath);
+            var hosted = HostedComponents(ctx, coupler);
 
-            // 0. Full swap only: RevPi REPLACES M262, so remove it (a real Test Runtime deep-wipes all
-            //    devices first, so this is usually a no-op; it self-heals a target switch without a Clean).
-            //    PARTIAL mode (Feeder/Checker on RevPi, M262 keeps the rest) MUST keep M262 -> skip the sweep.
-            if (!ctx.Profile.PartialRevPi)
-                SweepM262Device(eaeRoot, report);
-            else
-                // PARTIAL swap: the relocated components (Feeder/Checker/PartInHopper) move to the RevPi
-                // sysres, so a stale copy MUST NOT linger on the M262 sysres — a duplicate instance trips
-                // EAE "Repair Instances" + the "same key already added" load error. The M262 mirror drops
-                // them via the routing bucket, but this guarantees it even over a stale in-place tree.
-                SweepRelocatedFromM262Sysres(ctx, systemGuidDir, report);
+            // A component instance may exist on exactly ONE resource — the same instance on two is EAE's
+            // "Repair Instances" / duplicate-key load failure. Whichever resource used to host it, that is
+            // the one it leaves; nothing here assumes which controller that was.
+            SweepFromOtherResources(systemGuidDir, hosted, report);
 
-            // 1. Soft_dPAC shell — sysdev + sysres skeleton + Properties + Simulation.Binding + topology
-            //    equipment + topologyproj + dfbproj + the Modbus .hcf (the reference RevPi IO mechanism).
+            var solutionId = M262TopologyEmitter.ReadProjectGuid(eaeRoot!) ?? NoDomainUuid;
             var shell = new Station2DeviceEmitter.EmitResult();
-            Station2DeviceEmitter.EmitOnePlc(cfg, eaeRoot, systemGuidDir, shell,
-                sysdevId: RevPiSysdevId,
+            Station2DeviceEmitter.EmitOnePlc(cfg, eaeRoot!, systemGuidDir, shell,
+                sysdevId: SysdevId,
                 deviceName: DeviceName,
                 deviceType: "Soft_dPAC",
-                resourceId: RevPiResourceId,
-                resourceName: RevPiResourceName,
-                hcfTemplatePath: ModbusHcfTemplatePath(cfg),
+                resourceId: coupler.ResourceId,
+                resourceName: ResourceName,
+                hcfTemplatePath: HcfTemplatePath(cfg),
                 equipmentJsonName: EquipmentJsonName,
-                equipmentBuilder: () => BuildRevPiEquipmentJson(RevPiSysdevId, solutionId,
-                                          cfg.RevPiHostIp, cfg.RevPiTargetIp),
+                equipmentBuilder: () => EquipmentJson(solutionId, cfg.RevPiHostIp, cfg.RevPiTargetIp),
                 deployPluginPropertiesXml: Station2DeviceEmitter.BuildSoftDpacDeployPluginPropertiesXml(cfg,
                     cfg.MqttPublishEnabled && !cfg.MqttSecureTls),
-                simulationBindingDeployPort: 51502,
-                simulationBindingArchivePort: 51499);
+                simulationBindingDeployPort: SimulationDeployPort,
+                simulationBindingArchivePort: SimulationArchivePort);
             foreach (var w in shell.Warnings) report.Missing.Add($"[RevPi] {w}");
 
-            // Guarantee the Modbus .hcf is on disk — the dfbproj registers it, so a missing file is EAE
-            // "Missing Project Files". EmitOnePlc force-copies it, but a stale in-place tree can carry the
-            // device folder without it; re-copy defensively.
-            EnsureRevPiHcf(cfg, systemGuidDir, report);
+            // A missing hardware config is an EAE "Missing Project Files" report (the dfbproj registers
+            // it). EmitOnePlc force-copies it; EnsureHcf re-copies over a stale in-place tree.
+            var sysres = SysresPath(systemGuidDir, coupler.ResourceId);
+            EnsureHcf(cfg, systemGuidDir, coupler.ResourceId, report);
 
-            // 2. Mirror the RevPi (ex-Feed-station) FBs onto the RevPi sysres — same mechanism M262 uses,
-            //    filtered to PlcAssignment.RevPi.
-            var sysresPath = ResolveRevPiSysresPath(systemGuidDir);
-            var syslayPath = cfg.ActiveSyslayPath;
-            if (File.Exists(sysresPath) && !string.IsNullOrWhiteSpace(syslayPath) && File.Exists(syslayPath))
+            // Mirror what the allocation routed here, with the mechanism every other controller uses.
+            // Each resource needs its OWN boot pair — EAE indexes FBs by id in one global model, so a
+            // shared boot id is a duplicate-key load failure; seeding on the resource name makes them
+            // unique by construction and stable across runs.
+            var syslay = cfg.ActiveSyslayPath;
+            if (File.Exists(sysres) && !string.IsNullOrWhiteSpace(syslay) && File.Exists(syslay))
             {
-                var feedFbs = SysresFbMirror.ReadTopLevelFbsWithSystemModelFallback(syslayPath)
+                var fbs = SysresFbMirror.ReadTopLevelFbsWithSystemModelFallback(syslay)
                     .Where(f => SysresFbMirror.BucketFor(f.Name, ctx.Allocation) == PlcAssignment.RevPi)
                     .ToList();
-                int mirrored = SysresFbMirror.MirrorFbsIntoSysres(sysresPath, feedFbs,
-                    RevPiDpacFullInitFbId, RevPiPlcStartFbId);
-                report.Missing.Add($"[RevPi] sysdev emitted; .sysres mirrored {mirrored} Feed FB(s) to {sysresPath}");
-                // EAE Solution Integrity FAILS TO LOAD a resource whose {resId}/opcua.xml companion folder
-                // is absent ("Unable to load file: missing or corrupted"). SysresFbMirror — unlike
-                // Station2SysresMirror (BX1/M580) — does not create it, so create it here beside the sysres.
-                CodeGen.Artefacts.OpcuaCompanionEmitter.EmitForArtefact(sysresPath);
-                report.Missing.Add($"[RevPi] opcua companion created beside {Path.GetFileName(sysresPath)}");
-                // The Modbus IO broker is injected in WireResource — AFTER the Feed ring wiring, which
-                // rebuilds the sysres FBNetwork connections and would otherwise wipe the broker's wires.
+                int mirrored = SysresFbMirror.MirrorFbsIntoSysres(sysres, fbs,
+                    FBIdGenerator.GenerateFBId($"{ResourceName}.FB1"),
+                    FBIdGenerator.GenerateFBId($"{ResourceName}.FB2"));
+                report.Missing.Add($"[RevPi] device emitted; resource mirrored {mirrored} component(s)");
+                // EAE fails to LOAD a resource whose {resId}/opcua.xml companion folder is absent.
+                // SysresFbMirror — unlike Station2SysresMirror — does not create it.
+                CodeGen.Artefacts.OpcuaCompanionEmitter.EmitForArtefact(sysres);
             }
-            else
-            {
-                report.Missing.Add("[RevPi] sysres or syslay missing — Feed FB mirror skipped");
-            }
+            else report.Missing.Add("[RevPi] sysres or application layer missing — component mirror skipped");
+
             return report;
         }
 
-        // Wire stage (mirrors M262SysresWireEmitter.Emit): the Feed ring on the RevPi sysres. Reuses the
-        // exact Feed-station anchors so the wiring is identical regardless of the hosting device.
+        // Order matters: the shared wiring pass rebuilds the resource's connections, so the broker is
+        // placed after it or its edges are lost.
         public static void WireResource(GenerationContext ctx,
             SystemInjector.BindingApplicationReport report)
         {
             var cfg = ctx.Config;
             var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
-            if (string.IsNullOrEmpty(eaeRoot))
+            var systemGuidDir = string.IsNullOrEmpty(eaeRoot) ? null : EaeProjectLayout.FindSystemGuidDir(eaeRoot);
+            var coupler = RevPiIoBrokerInjector.Resolve(cfg.TemplateLibraryPath);
+            var sysres = systemGuidDir == null ? null : SysresPath(systemGuidDir, coupler.ResourceId);
+            if (sysres == null || !File.Exists(sysres))
             {
-                report.Missing.Add("[Wire] skipped, EAE project root not derivable (RevPi)");
+                report.Missing.Add("[Wire] skipped, the Revolution Pi resource is not on disk");
                 return;
             }
-            var systemGuidDir = EaeProjectLayout.FindSystemGuidDir(eaeRoot);
-            var sysresPath = systemGuidDir == null ? null : ResolveRevPiSysresPath(systemGuidDir);
-            if (sysresPath == null || !File.Exists(sysresPath))
-            {
-                report.Missing.Add("[Wire] skipped, RevPi sysres not found");
-                return;
-            }
-            if (ctx.Profile.PartialRevPi)
-                // Partial swap: RevPi hosts only Feeder/Checker/PartInHopper (no Feed_Station). RevPi-local
-                // anchors leave the report ring OPEN at the seam -> EAE bridges it to the M262 Feed ring.
-                ResourceWireEmitter.EmitForResource(ctx, sysresPath, RevPiPartialAnchors, report);
-            else
-                M262SysresWireEmitter.EmitFeedRing(ctx, sysresPath, report);
 
-            // Modbus IO broker + symlink bridge — AFTER the Feed ring so its connections survive.
-            RevPiIoBrokerInjector.Inject(ctx.Profile, sysresPath, cfg.ActiveSyslayPath, RevPiResourceName, report);
+            ResourceWireEmitter.EmitForResource(ctx, sysres, Anchors, report);
+
+            var hosted = HostedComponents(ctx, coupler);
+            var bootFb = ctx.Layout.BootFbs.Count > 0 ? ctx.Layout.BootFbs[0].Name : "FB1";
+            int written = 0;
+            foreach (var (label, path, isResource) in new[]
+                     {
+                         ("resource", sysres, true),
+                         ("application", cfg.ActiveSyslayPath ?? string.Empty, false),
+                     })
+            {
+                try
+                {
+                    if (RevPiIoBrokerInjector.PlaceBroker(coupler, path, isResource, hosted, ctx.Layout, bootFb))
+                        written++;
+                }
+                catch (IOException)
+                {
+                    report.Missing.Add($"[RevPi][IO] FAILED to write the broker to the {label} — file " +
+                        "LOCKED. Close the resource view in EAE (or close EAE) before generating.");
+                }
+                catch (Exception ex) { report.Missing.Add($"[RevPi][IO] {label} error: {ex.Message}"); }
+            }
+            if (written > 0)
+                report.Missing.Add($"[RevPi][IO] {RevPiIoBrokerInjector.BrokerName} " +
+                    $"({RevPiIoBrokerInjector.BrokerType}) placed on {written} document(s) carrying " +
+                    $"{coupler.Signals.Count} signal(s) for [{string.Join(", ", hosted)}].");
         }
 
-        static string ResolveRevPiSysresPath(string systemGuidDir) =>
-            Path.Combine(systemGuidDir, RevPiSysdevId, $"{RevPiResourceId}.sysres");
+        static string ResourceName => Mapping.ControllerMap.ResourceForPlc(PlcAssignment.RevPi);
 
-        // The reference RevPi Modbus master .hcf (Standard.IoModbus), staged in the template library. Its
-        // ResourceId (D090…) + MB_Read/Write LinkNames (…A6B61E2425DB1C30…) resolve to RevPI_IO on RevPi_RES.
-        static string ModbusHcfTemplatePath(MapperConfig cfg) =>
+        static string SysresPath(string systemGuidDir, string resourceId) =>
+            Path.Combine(systemGuidDir, SysdevId, $"{resourceId}.sysres");
+
+        // The reference Modbus master hardware config, staged in the template library. Its ResourceId and
+        // MB_Read/Write LinkNames are what the resource and the broker instance must satisfy.
+        static string HcfTemplatePath(MapperConfig cfg) =>
             Path.Combine(cfg.TemplateLibraryPath ?? string.Empty, "RevPi", "RevPiIO.modbus.hcf");
 
-        // Remove the relocated Feed components (RevPiComponents) from the M262 sysres so the partial swap
-        // never leaves a duplicate instance on M262 (the RevPi sysres now hosts them). No-op once they're
-        // already gone (the normal mirror-driven case); the guarantee is for a stale in-place tree.
-        static void SweepRelocatedFromM262Sysres(GenerationContext ctx, string systemGuidDir,
-            SystemInjector.BindingApplicationReport report)
-        {
-            var names = ctx.Profile.RevPiComponents;
-            if (names.Count == 0) return;
-            var m262Dir = Path.Combine(systemGuidDir, M262SysdevId);
-            var sysres = Directory.Exists(m262Dir)
-                ? Directory.EnumerateFiles(m262Dir, "*.sysres").FirstOrDefault() : null;
-            if (sysres == null) return;
-            try
-            {
-                // Load with retry too: EAE holds the .sysres briefly during a background scan.
-                var doc = CodeGen.Services.FbtXmlEditor.LoadXmlWithRetry(sysres, LoadOptions.PreserveWhitespace);
-                var ns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
-                var net = doc.Root?.Element(ns + "FBNetwork");
-                if (net == null) return;
-                var stale = net.Elements(ns + "FB")
-                    .Where(f => names.Contains((string?)f.Attribute("Name") ?? "")).ToList();
-                foreach (var fb in stale) fb.Remove();
-                foreach (var grp in new[] { "EventConnections", "DataConnections", "AdapterConnections" })
-                    net.Element(ns + grp)?.Elements(ns + "Connection")
-                        .Where(c => names.Any(nm =>
-                            ((string?)c.Attribute("Source") ?? "").StartsWith(nm + ".", StringComparison.Ordinal) ||
-                            ((string?)c.Attribute("Destination") ?? "").StartsWith(nm + ".", StringComparison.Ordinal)))
-                        .ToList().ForEach(c => c.Remove());
-                if (stale.Count > 0)
-                {
-                    // RETRY-SAVE (root-cause fix): EAE holds the M262 .sysres LOCKED while it is open (esp.
-                    // mid-build), and a bare doc.Save fails SILENTLY -> the relocated Feeder/Checker/
-                    // PartInHopper linger on M262 -> a duplicate instance across M262 + RevPi -> EAE
-                    // "Repair Instances" / "same key already added". SaveXmlWithRetry rides out a transient
-                    // lock (8 attempts, ~2.4s backoff), so an idle-EAE Generate self-heals without a manual Clean.
-                    CodeGen.Services.FbtXmlEditor.SaveXmlWithRetry(doc, sysres);
-                    report.Missing.Add($"[RevPi][Partial] swept {stale.Count} relocated Feed FB(s) " +
-                        $"({string.Join(", ", names)}) off the M262 sysres — prevents duplicate-instance " +
-                        "'Repair Instances' / 'same key already added'.");
-                }
-            }
-            catch (Exception ex)
-            {
-                // Early cleanup only — not fatal if EAE has the file locked here: the M262 Feed-ring wire pass
-                // (ResourceWireEmitter.EmitForResource) is the LAST writer of the sysres and drops these FBs
-                // again on the final write, so the duplicate can't reach EAE regardless.
-                report.Missing.Add($"[RevPi][Partial] early M262 sysres sweep deferred ({ex.GetType().Name}); " +
-                    "the Feed-ring wire pass drops the relocated FBs from the final file.");
-            }
-        }
+        // What this run routed here, in the coupler's own signal order so the result is stable whatever
+        // order the operator picked. The selection itself is guarded before generation by
+        // RevPiSelectionValidator, which rejects anything the coupler cannot serve.
+        static IReadOnlyList<string> HostedComponents(GenerationContext ctx, RevPiIoBrokerInjector.Coupler c) =>
+            c.Signals.Select(s => s.Component)
+                .Where(n => ctx.Profile.RevPiComponents.Contains(n))
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
-        // Re-copy the Modbus .hcf if a stale tree lost it (EmitOnePlc already force-copies on a fresh emit).
-        static void EnsureRevPiHcf(MapperConfig cfg, string systemGuidDir,
+        static void EnsureHcf(MapperConfig cfg, string systemGuidDir, string resourceId,
             SystemInjector.BindingApplicationReport report)
         {
-            var dest = Path.Combine(systemGuidDir, RevPiSysdevId, $"{RevPiSysdevId}.hcf");
+            var dest = Path.Combine(systemGuidDir, SysdevId, $"{SysdevId}.hcf");
             if (File.Exists(dest)) return;
-            var template = ModbusHcfTemplatePath(cfg);
-            if (!File.Exists(template))
-            {
-                report.Missing.Add($"[RevPi] Modbus .hcf template not found at {template}.");
-                return;
-            }
             try
             {
-                File.Copy(template, dest, overwrite: true);
-                HcfRootRewriter.RewriteIfNeeded(dest, RevPiResourceId);
-                report.Missing.Add($"[RevPi] Modbus .hcf was missing — re-copied ({RevPiSysdevId}.hcf); clears 'Missing Project Files'.");
+                File.Copy(HcfTemplatePath(cfg), dest, overwrite: true);
+                HcfRootRewriter.RewriteIfNeeded(dest, resourceId);
+                report.Missing.Add("[RevPi] hardware config was missing — re-copied.");
             }
-            catch (Exception ex) { report.Missing.Add($"[RevPi] hcf re-copy error: {ex.Message}"); }
+            catch (Exception ex) { report.Missing.Add($"[RevPi] hardware config copy error: {ex.Message}"); }
         }
 
-        const string M262SysdevId       = "00000000-0000-0000-0000-000000000002";
-        const string M262EquipmentJson  = "Equipment_M262dPAC_1.json";
-
-        // Remove the M262 device COMPLETELY when the RevPi hosts the Feed station: the sysdev + its folder
-        // (sysres/hcf/Properties), the topology equipment JSON, AND every project reference to it —
-        // IEC61499.dfbproj entries, the TopologyManager.topologyproj equipment entry, and the Folders.xml
-        // registration — so EAE Solution Integrity reports no missing M262 project files. Idempotent.
-        static void SweepM262Device(string eaeRoot, SystemInjector.BindingApplicationReport report)
+        // Drop the hosted components from every OTHER resource. Generic by construction: it names no
+        // controller and no device type, it simply enforces one instance on one resource, so it works
+        // whichever controller the run moved them off.
+        static void SweepFromOtherResources(string systemGuidDir, IReadOnlyList<string> hosted,
+            SystemInjector.BindingApplicationReport report)
         {
-            try
+            if (hosted.Count == 0) return;
+            var names = new HashSet<string>(hosted, StringComparer.Ordinal);
+            var mine = Path.GetFullPath(Path.Combine(systemGuidDir, SysdevId));
+
+            foreach (var sysres in Directory.EnumerateFiles(systemGuidDir, "*.sysres", SearchOption.AllDirectories))
             {
-                var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
-                if (Directory.Exists(systemDir))
+                if (Path.GetFullPath(Path.GetDirectoryName(sysres)!).StartsWith(mine, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                try
                 {
-                    foreach (var sysdev in Directory.EnumerateFiles(systemDir, "*.sysdev", SearchOption.AllDirectories))
-                    {
-                        if (!IsDeviceType(sysdev, "M262_dPAC")) continue;
-                        var folder = Path.Combine(Path.GetDirectoryName(sysdev)!, Path.GetFileNameWithoutExtension(sysdev));
-                        try { File.Delete(sysdev); } catch { }
-                        try { if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true); } catch { }
-                        report.Missing.Add("[RevPi] removed the M262 device (RevPi now hosts the Feed station)");
-                    }
+                    var doc = CodeGen.Services.FbtXmlEditor.LoadXmlWithRetry(sysres, LoadOptions.PreserveWhitespace);
+                    var ns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
+                    var net = doc.Root?.Element(ns + "FBNetwork");
+                    if (net == null) continue;
+                    var stale = net.Elements(ns + "FB")
+                        .Where(f => names.Contains((string?)f.Attribute("Name") ?? "")).ToList();
+                    if (stale.Count == 0) continue;
+                    foreach (var fb in stale) fb.Remove();
+                    foreach (var group in new[] { "EventConnections", "DataConnections", "AdapterConnections" })
+                        net.Element(ns + group)?.Elements(ns + "Connection")
+                            .Where(c => names.Any(n =>
+                                ((string?)c.Attribute("Source") ?? "").StartsWith(n + ".", StringComparison.Ordinal) ||
+                                ((string?)c.Attribute("Destination") ?? "").StartsWith(n + ".", StringComparison.Ordinal)))
+                            .ToList().ForEach(c => c.Remove());
+                    // EAE holds the file locked while the resource is open and a bare save fails silently,
+                    // which would leave the duplicate in place. Ride out a transient lock.
+                    CodeGen.Services.FbtXmlEditor.SaveXmlWithRetry(doc, sysres);
+                    report.Missing.Add($"[RevPi] swept {stale.Count} relocated component(s) off " +
+                        $"'{Path.GetFileName(sysres)}' — prevents a duplicate instance.");
                 }
-                var m262Equipment = Path.Combine(eaeRoot, "Topology", M262EquipmentJson);
-                if (File.Exists(m262Equipment)) { try { File.Delete(m262Equipment); } catch { } }
-
-                // IEC61499.dfbproj: drop every entry referencing the M262 sysdev (sysdev + siblings).
-                var dfbproj = Path.Combine(eaeRoot, "IEC61499", "IEC61499.dfbproj");
-                int dfbGone = DfbprojRegistrar.UnregisterSystemDevice(dfbproj, M262SysdevId);
-                if (dfbGone > 0) report.Missing.Add($"[RevPi] stripped {dfbGone} M262 entry(ies) from IEC61499.dfbproj");
-
-                // TopologyManager.topologyproj: drop the M262 equipment registration.
-                int topoGone = RemoveTopologyProjEntry(eaeRoot, M262EquipmentJson);
-                if (topoGone > 0) report.Missing.Add($"[RevPi] stripped the M262 equipment entry from TopologyManager.topologyproj");
-
-                // General/Folders.xml: drop the M262 sysdev GUID so EAE shows no phantom device node.
-                var folders = Path.Combine(eaeRoot, "General", "Folders.xml");
-                if (File.Exists(folders))
+                catch (Exception ex)
                 {
-                    var doc = System.Xml.Linq.XDocument.Load(folders, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                    var stale = doc.Descendants().Where(e => e.Name.LocalName == "item" &&
-                        string.Equals((e.Value ?? "").Trim(), M262SysdevId, StringComparison.OrdinalIgnoreCase)).ToList();
-                    if (stale.Count > 0) { foreach (var s in stale) s.Remove(); doc.Save(folders); }
+                    // Early cleanup only: the shared wiring pass is the final writer of each resource and
+                    // drops them again, so a duplicate cannot reach EAE even if this is skipped.
+                    report.Missing.Add($"[RevPi] early sweep of '{Path.GetFileName(sysres)}' deferred " +
+                        $"({ex.GetType().Name}); the wiring pass drops them from the final file.");
                 }
             }
-            catch (Exception ex) { report.Missing.Add($"[RevPi] M262 sweep warning: {ex.Message}"); }
         }
 
-        // Remove a single <None Include="<jsonName>"> entry from TopologyManager.topologyproj (idempotent).
-        static int RemoveTopologyProjEntry(string eaeRoot, string jsonName)
-        {
-            var topoProj = Path.Combine(eaeRoot, "Topology", "TopologyManager.topologyproj");
-            if (!File.Exists(topoProj)) return 0;
-            try
-            {
-                var doc = System.Xml.Linq.XDocument.Load(topoProj, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                var stale = doc.Descendants().Where(e => e.Name.LocalName == "None" &&
-                    string.Equals((string?)e.Attribute("Include"), jsonName, StringComparison.OrdinalIgnoreCase)).ToList();
-                foreach (var s in stale) s.Remove();
-                if (stale.Count > 0) doc.Save(topoProj);
-                return stale.Count;
-            }
-            catch { return 0; }
-        }
-
-        static bool IsDeviceType(string sysdevPath, string type)
-        {
-            try
-            {
-                var head = File.ReadAllText(sysdevPath);
-                return head.Contains($"Type=\"{type}\"", StringComparison.Ordinal);
-            }
-            catch { return false; }
-        }
-
-        // Revolution Pi topology equipment — the reference form (Workstation host + NIC + SoftdpacContainer
-        // + RuntimeDEO), parameterised with RevPi ids/IPs. Read verbatim from Jyotsna's RevPi reference.
-        static string BuildRevPiEquipmentJson(string sysdevId, string solutionId,
-                                              string hostIp, string softpacIp) =>
+        // Structurally identical to the reference solution's own "Equipment_Revolution Pi.json"; only the
+        // uuids, the identifier and the diagram position are generated rather than copied.
+        //
+        // dockerVlans is NOT decorative. EAE validates that a Soft dPAC interface's logical network is
+        // associated with a Docker network ("The logical network selected for interface ... is not
+        // associated with a Docker network of ..." — SchneiderElectric.Automation.Nxt.dll), and it is the
+        // Manager, not this generator, that then creates it. type 0 == VLanType.MacVLan (reflected from
+        // SchneiderElectric.Automation.Topology.dll 1.0.25093.1); a macvlan child holds its own MAC, which
+        // is what lets the switch — and EAE Deploy/Login — see the container as its own endpoint.
+        //
+        // Host vs container is a ROLE split: the host NIC carries the Manager (8080) and its address stays
+        // editable; the container carries the runtime and its address is dictated by the vlan, hence
+        // domainReadOnly true. They must never be equal (TopologyAddressValidator enforces it).
+        static string EquipmentJson(string solutionId, string hostIp, string containerIp) =>
 $$"""
 {
   "catalogReference": "Workstation_V01.00_01.00",
-  "uuid": "{{RevPiEquipmentUuid}}",
-  "identifier": "Revolution_Pi",
+  "uuid": "{{EquipmentUuid}}",
+  "identifier": "{{DeviceName}}",
   "path": "Topology",
   "properties": [
     { "propertyName": "IsUnderConstruction", "propertyValue": "False" },
@@ -353,26 +280,15 @@ $$"""
   "equipments": [
     {
       "catalogReference": "NIC_EAE_V01.00_01.00",
-      "uuid": "{{RevPiNicUuid}}",
+      "uuid": "{{NicUuid}}",
       "identifier": "NIC_2",
-      "path": "Revolution_Pi\\NIC_2",
+      "path": "{{DeviceName}}\\NIC_2",
       "components": [
         {
           "interfaces": [
-            {
-              "identifier": "eth0",
-              "disabled": false,
-              "physicalAddress": "",
-              "endpoints": [
-                {
-                  "identifier": "IP Address",
-                  "isReadOnly": false,
-                  "domainReadOnly": false,
-                  "ipAddress": "{{hostIp}}",
-                  "domain": "{{SoftdpacDomainUuid}}"
-                }
-              ]
-            }
+            { "identifier": "{{HostInterface}}", "disabled": false, "physicalAddress": "",
+              "endpoints": [ { "identifier": "IP Address", "isReadOnly": false, "domainReadOnly": false,
+                               "ipAddress": "{{hostIp}}", "domain": "{{DeviceNetworkUuid}}" } ] }
           ],
           "ports": [ { "identifier": "Port1", "side": "Default" } ],
           "componentType": "EthernetDEO"
@@ -381,52 +297,28 @@ $$"""
     },
     {
       "catalogReference": "SoftdpacContainer_V01.00_01.00",
-      "uuid": "{{RevPiContainerUuid}}",
+      "uuid": "{{ContainerUuid}}",
       "identifier": "Softdpac_3",
-      "path": "Revolution_Pi\\Softdpac_3",
+      "path": "{{DeviceName}}\\Softdpac_3",
       "components": [
         {
           "interfaces": [
-            {
-              "identifier": "Eth0",
-              "disabled": false,
-              "physicalAddress": "",
-              "endpoints": [
-                {
-                  "identifier": "IP Address",
-                  "isReadOnly": false,
-                  "domainReadOnly": true,
-                  "ipAddress": "{{softpacIp}}",
-                  "domain": "{{SoftdpacDomainUuid}}"
-                }
-              ]
-            }
+            { "identifier": "Eth0", "disabled": false, "physicalAddress": "",
+              "endpoints": [ { "identifier": "IP Address", "isReadOnly": false, "domainReadOnly": true,
+                               "ipAddress": "{{containerIp}}", "domain": "{{DeviceNetworkUuid}}" } ] }
           ],
           "ports": [ { "identifier": "Port0", "side": "Default" } ],
           "componentType": "EthernetDEO"
         },
+        { "endpoint": "Eth0\\IP Address", "connectionTypes": "None", "componentType": "EthernetMasterDEO" },
+        { "enabled": false, "securityMode": 0, "componentType": "SysLogClientDEO" },
         {
-          "endpoint": "Eth0\\IP Address",
-          "connectionTypes": "None",
-          "componentType": "EthernetMasterDEO"
-        },
-        {
-          "enabled": false,
-          "securityMode": 0,
-          "componentType": "SysLogClientDEO"
-        },
-        {
-          "imageName": "softdpac",
-          "imageVersion": "v24.1.25090.08",
-          "identifier": "DockerContainer",
-          "allocatedRam": 524288,
-          "cpuCores": [ 0, 1, 2, 3 ],
+          "imageName": "{{SoftDpacImage}}", "imageVersion": "{{SoftDpacImageVersion}}",
+          "identifier": "DockerContainer", "allocatedRam": 524288, "cpuCores": [ 0, 1, 2, 3 ],
           "componentType": "DockerContainerDEO"
         },
         {
-          "uuid": "{{RevPiRuntimeUuid}}",
-          "typeId": "{{SoftDpacTypeId}}",
-          "logicalDeviceId": "{{sysdevId}}",
+          "uuid": "{{RuntimeUuid}}", "typeId": "{{SoftDpacTypeId}}", "logicalDeviceId": "{{SysdevId}}",
           "runtimeServices": [
             { "identifier": "Deployment" },
             { "identifier": "Archive Service", "logicalPortSecured": "0" }
@@ -440,15 +332,10 @@ $$"""
     { "mode": 0, "componentType": "CyberSecurityDEO" },
     {
       "preferredPrimary": false,
-      "dockerImages": [ { "identifier": "softdpac", "version": "" } ],
+      "dockerImages": [ { "identifier": "{{SoftDpacImage}}", "version": "" } ],
       "dockerVlans": [
-        {
-          "identifier": "softdpacDeviceNet",
-          "type": 0,
-          "domain": "{{SoftdpacDomainUuid}}",
-          "interface": "NIC_2\\eth0",
-          "domainReadOnly": false
-        }
+        { "identifier": "softdpacDeviceNet", "type": 0, "domain": "{{DeviceNetworkUuid}}",
+          "interface": "NIC_2\\{{HostInterface}}", "domainReadOnly": false }
       ],
       "softdpacManagerServices": [
         { "identifier": "Management services", "logicalPort": 8080, "endpoint": "" }
