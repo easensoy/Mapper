@@ -1,0 +1,61 @@
+{
+  "catalogReference": "Workstation_V01.00_01.00",
+  "uuid": "{{WorkstationId}}",
+  "identifier": "Workstation_1",
+  "path": "Topology",
+  "properties": [
+    { "propertyName": "IsUnderConstruction", "propertyValue": "False" },
+    { "propertyName": "CommCardReference", "propertyValue": "" },
+    { "propertyName": "DomainTag", "propertyValue": "{{SolutionId}}" }
+  ],
+  "references": [
+    { "diagramPath": "Physical Views", "x": -558.13756704541595, "y": -368.53762018013498 }
+  ],
+  "equipments": [
+    {
+      "catalogReference": "NIC_EAE_V01.00_01.00",
+      "uuid": "{{WorkstationNicId}}",
+      "identifier": "NIC_1",
+      "path": "Workstation_1\\NIC_1",
+      "components": [
+        {
+          "interfaces": [
+            {
+              "identifier": "eno1",
+              "disabled": false,
+              "physicalAddress": "",
+              "endpoints": [
+                {
+                  "identifier": "IP Address",
+                  "isReadOnly": false,
+                  "domainReadOnly": false,
+                  "ipAddress": "{{HostIp}}",
+                  "domain": "{{NetworkId}}"
+                }
+              ]
+            }
+          ],
+          "ports": [ { "identifier": "Port1", "side": "Default" } ],
+          "componentType": "EthernetDEO"
+        }
+      ]
+    }
+  ],
+  "components": [
+    {
+      "uuid": "{{WorkstationRuntimeId}}",
+      "typeId": "{{RuntimeTypeId}}",
+      "logicalDeviceId": "{{DeviceId}}",
+      "identifier": "Runtime_1",
+      "runtimeServices": [
+        {
+          "identifier": "Deployment",
+          "endpoint": "NIC_1\\eno1\\IP Address",
+          "logicalPort": "{{LogicalPort}}",
+          "logicalPortSecured": "{{SecurePort}}"
+        }
+      ],
+      "componentType": "RuntimeDEO"
+    }
+  ]
+}
