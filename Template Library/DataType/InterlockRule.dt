@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE DataType SYSTEM "../LibraryElement.dtd">
+<DataType Namespace="Main" Name="InterlockRule" Comment="One interlock rule as a struct: FromState/ToState/SourceID/BlockedState">
+  <Identification Standard="1131-3" />
+  <VersionInfo Organization="WMG" Version="0.1" Author="easensoy" Date="5/24/2026" Remarks="array-of-struct packaging of the 4 Rule arrays" />
+  <CompilerInfo />
+  <StructuredType>
+    <VarDeclaration Name="FromState" Type="INT" />
+    <VarDeclaration Name="ToState" Type="INT" />
+    <VarDeclaration Name="SourceID" Type="INT" />
+    <VarDeclaration Name="BlockedState" Type="INT" />
+  </StructuredType>
+</DataType>
