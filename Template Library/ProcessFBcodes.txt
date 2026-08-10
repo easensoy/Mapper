@@ -1,0 +1,717 @@
+CAT: Process1_Generic.20260423-080812017.cat: 
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="02b40928-95f4-45fe-883f-901880e94889" Name="Process1_Generic" Comment="Composite Function Block Type" Namespace="Main">
+  <Attribute Name="HMI.Alias" Value="" />
+  <Attribute Name="Configuration.FB.IDCounter" Value="37" />
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author=" " Date="9/29/2025" Remarks="template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT">
+        <With Var="process_name" />
+        <With Var="process_id" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO" />
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="process_name" Type="STRING[15]" />
+      <VarDeclaration Name="process_id" Type="INT" InitialValue="10" />
+    </InputVars>
+    <Sockets>
+      <AdapterDeclaration ID="23" Name="stateRptCmdAdptr_in" Type="stateRptCmdAdptr" Namespace="Main" x="2000" y="680" />
+      <AdapterDeclaration ID="25" Name="stationAdptr_in" Type="CaSAdptr" Namespace="Main" x="720" y="2560" />
+    </Sockets>
+    <Plugs>
+      <AdapterDeclaration Name="stateRptCmdAdptr_out" Type="stateRptCmdAdptr" Namespace="Main" x="4100" y="680" />
+      <AdapterDeclaration Name="stationAdptr_out" Type="CaSAdptr" Namespace="Main" x="4720" y="2580" />
+    </Plugs>
+  </InterfaceList>
+  <FBNetwork>
+    <FB ID="21" Name="ProcessHandler" Type="ProcessStateBusHandler" x="2780" y="1240" Namespace="Main" />
+    <FB ID="22" Name="ProcessEngine" Type="ProcessRuntime_Generic_v1" x="1240" y="1280" Namespace="Main" />
+    <FB ID="27" Name="IThis" Type="Process1_Generic_HMI" x="5340" y="1440" Namespace="Main">
+      <Parameter Name="QI" Value="TRUE" />
+    </FB>
+    <FB ID="30" Name="TSString" Type="ANY2ANY_712C23814B844B70" x="3980" y="2060" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=1;IN${CNT}:STRING(30);OUT${CNT}:STRING" />
+    </FB>
+    <FB ID="32" Name="PSString" Type="ANY2ANY_712C23814B844B70" x="3980" y="2480" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=1;IN${CNT}:STRING(30);OUT${CNT}:STRING" />
+    </FB>
+    <FB ID="34" Name="NSString" Type="ANY2ANY_712C23814B844B70" x="4000" y="2920" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=1;IN${CNT}:STRING(30);OUT${CNT}:STRING" />
+    </FB>
+    <FB ID="36" Name="ANString" Type="ANY2ANY_227EF3D2FFD8A2CBC" x="5440" y="760" Namespace="Main">
+      <Attribute Name="Configuration.GenericFBType.InterfaceParams" Value="Runtime.Standard#CNT:=1;IN${CNT}:STRING(150);OUT${CNT}:STRING" />
+    </FB>
+    <Input Name="INIT" x="2420" y="432" Type="Event" />
+    <Input Name="process_name" x="1740" y="2352" Type="Data" />
+    <Input Name="process_id" x="1940" y="2192" Type="Data" />
+    <Output Name="INITO" x="5640" y="1172" Type="Event" />
+    <EventConnections>
+      <Connection Source="ProcessEngine.CMDREQ" Destination="ProcessHandler.CMDREQ" dx1="40.89587" />
+      <Connection Source="ProcessHandler.BCNF" Destination="ProcessEngine.state_change" dx1="80" dx2="70" dy="-170" />
+      <Connection Source="stateRptCmdAdptr_in.CNF" Destination="ProcessHandler.BREQ" dx1="9.041748">
+        <AvoidsNodes>false</AvoidsNodes>
+      </Connection>
+      <Connection Source="INIT" Destination="ProcessHandler.INIT" dx1="41.41675" />
+      <Connection Source="ProcessHandler.INITO" Destination="ProcessEngine.INIT" dx1="100" dx2="30" dy="-110" />
+      <Connection Source="ProcessEngine.SCNF" Destination="TSString.REQ" dx1="40.89587" />
+      <Connection Source="ProcessEngine.SCNF" Destination="PSString.REQ" dx1="440.8959" />
+      <Connection Source="ProcessEngine.SCNF" Destination="NSString.REQ" dx1="440.8959" />
+      <Connection Source="ProcessEngine.SCNF" Destination="ANString.REQ">
+        <Points>
+          <Points>
+            <X>497.276031</X>
+            <Y>360</Y>
+          </Points>
+          <Points>
+            <X>519.776</X>
+            <Y>360</Y>
+          </Points>
+          <Points>
+            <X>519.776</X>
+            <Y>292.5</Y>
+          </Points>
+          <Points>
+            <X>1137.5</X>
+            <Y>292.5</Y>
+          </Points>
+          <Points>
+            <X>1137.5</X>
+            <Y>200</Y>
+          </Points>
+          <Points>
+            <X>1355</X>
+            <Y>200</Y>
+          </Points>
+        </Points>
+      </Connection>
+      <Connection Source="stationAdptr_in.MCTRL" Destination="ProcessEngine.MREQ" dx1="73.47925" dx2="30" dy="-169.9998" />
+      <Connection Source="stationAdptr_in.CTCTRL" Destination="ProcessEngine.CTREQ" dx1="93.47925" dx2="30" dy="-229.9998" />
+      <Connection Source="ProcessHandler.BCNF" Destination="stateRptCmdAdptr_out.CNF" dx1="75.85425" />
+      <Connection Source="stationAdptr_in.INIT" Destination="stationAdptr_out.INIT">
+        <Points>
+          <Points>
+            <X>359.1302</X>
+            <Y>649.999939</Y>
+          </Points>
+          <Points>
+            <X>404.1302</X>
+            <Y>649.999939</Y>
+          </Points>
+          <Points>
+            <X>404.1302</X>
+            <Y>702.5</Y>
+          </Points>
+          <Points>
+            <X>1092.5</X>
+            <Y>702.5</Y>
+          </Points>
+          <Points>
+            <X>1092.5</X>
+            <Y>655</Y>
+          </Points>
+          <Points>
+            <X>1175</X>
+            <Y>655</Y>
+          </Points>
+        </Points>
+      </Connection>
+      <Connection Source="stationAdptr_in.MCTRL" Destination="stationAdptr_out.MCTRL">
+        <Points>
+          <Points>
+            <X>359.1302</X>
+            <Y>664.999939</Y>
+          </Points>
+          <Points>
+            <X>399.1302</X>
+            <Y>664.999939</Y>
+          </Points>
+          <Points>
+            <X>399.1302</X>
+            <Y>702.5</Y>
+          </Points>
+          <Points>
+            <X>1092.5</X>
+            <Y>702.5</Y>
+          </Points>
+          <Points>
+            <X>1092.5</X>
+            <Y>670</Y>
+          </Points>
+          <Points>
+            <X>1175</X>
+            <Y>670</Y>
+          </Points>
+        </Points>
+      </Connection>
+      <Connection Source="stationAdptr_in.CTCTRL" Destination="stationAdptr_out.CTCTRL">
+        <Points>
+          <Points>
+            <X>359.1302</X>
+            <Y>679.999939</Y>
+          </Points>
+          <Points>
+            <X>394.1302</X>
+            <Y>679.999939</Y>
+          </Points>
+          <Points>
+            <X>394.1302</X>
+            <Y>702.5</Y>
+          </Points>
+          <Points>
+            <X>1092.5</X>
+            <Y>702.5</Y>
+          </Points>
+          <Points>
+            <X>1092.5</X>
+            <Y>685</Y>
+          </Points>
+          <Points>
+            <X>1175</X>
+            <Y>685</Y>
+          </Points>
+        </Points>
+      </Connection>
+      <Connection Source="stationAdptr_in.FRCTRL" Destination="stationAdptr_out.FRCTRL" dx1="120" />
+      <Connection Source="ProcessEngine.INITO" Destination="IThis.INIT">
+        <Points>
+          <Points>
+            <X>497.276031</X>
+            <Y>330</Y>
+          </Points>
+          <Points>
+            <X>507.5</X>
+            <Y>330</Y>
+          </Points>
+          <Points>
+            <X>507.5</X>
+            <Y>292.5</Y>
+          </Points>
+          <Points>
+            <X>937.5</X>
+            <Y>292.5</Y>
+          </Points>
+          <Points>
+            <X>937.5</X>
+            <Y>370</Y>
+          </Points>
+          <Points>
+            <X>1330</X>
+            <Y>370</Y>
+          </Points>
+        </Points>
+      </Connection>
+      <Connection Source="TSString.CNF" Destination="IThis.SCNF" dx1="83.75" />
+      <Connection Source="PSString.CNF" Destination="IThis.SCNF" dx1="83.75" />
+      <Connection Source="NSString.CNF" Destination="IThis.SCNF" dx1="63.75" />
+      <Connection Source="IThis.INITO" Destination="INITO" dx1="44.6875" dx2="30" dy="-110" />
+    </EventConnections>
+    <DataConnections>
+      <Connection Source="ProcessEngine.cmd_target_name" Destination="ProcessHandler.dest_name" dx1="169.9999" />
+      <Connection Source="ProcessEngine.cmd_state" Destination="ProcessHandler.cmd_state" dx1="189.9999" />
+      <Connection Source="ProcessHandler.state_table" Destination="ProcessEngine.state_table" dx1="40" dx2="170" dy="370" />
+      <Connection Source="stateRptCmdAdptr_in.CNFD" Destination="ProcessHandler.component_state_in" dx1="40" />
+      <Connection Source="process_name" Destination="ProcessHandler.name" dx1="46.79199" />
+      <Connection Source="process_id" Destination="ProcessHandler.id" dx1="43.6875" />
+      <Connection Source="ProcessEngine.ThisStepText" Destination="TSString.IN1" dx1="400.8959" />
+      <Connection Source="ProcessEngine.PreviousStepText" Destination="PSString.IN1" dx1="440.8959" />
+      <Connection Source="ProcessEngine.NextStepText" Destination="NSString.IN1" dx1="440.8959" />
+      <Connection Source="stationAdptr_in.ModeCMD" Destination="ProcessEngine.Mode" dx1="133.4792" dx2="30" dy="-489.9998" />
+      <Connection Source="stationAdptr_in.CycleTypeCMD" Destination="ProcessEngine.CycleType" dx1="153.4792" dx2="30" dy="-549.9998" />
+      <Connection Source="ProcessHandler.component_state_out" Destination="stateRptCmdAdptr_out.CNFD" dx1="95.85425" />
+      <Connection Source="stationAdptr_in.ModeCMD" Destination="stationAdptr_out.ModeCMD">
+        <Points>
+          <Points>
+            <X>359.1302</X>
+            <Y>744.999939</Y>
+          </Points>
+          <Points>
+            <X>384.1302</X>
+            <Y>744.999939</Y>
+          </Points>
+          <Points>
+            <X>384.1302</X>
+            <Y>712.5</Y>
+          </Points>
+          <Points>
+            <X>1097.5</X>
+            <Y>712.5</Y>
+          </Points>
+          <Points>
+            <X>1097.5</X>
+            <Y>750</Y>
+          </Points>
+          <Points>
+            <X>1175</X>
+            <Y>750</Y>
+          </Points>
+        </Points>
+      </Connection>
+      <Connection Source="stationAdptr_in.CycleTypeCMD" Destination="stationAdptr_out.CycleTypeCMD">
+        <Points>
+          <Points>
+            <X>359.1302</X>
+            <Y>759.999939</Y>
+          </Points>
+          <Points>
+            <X>379.1302</X>
+            <Y>759.999939</Y>
+          </Points>
+          <Points>
+            <X>379.1302</X>
+            <Y>712.5</Y>
+          </Points>
+          <Points>
+            <X>1097.5</X>
+            <Y>712.5</Y>
+          </Points>
+          <Points>
+            <X>1097.5</X>
+            <Y>765</Y>
+          </Points>
+          <Points>
+            <X>1175</X>
+            <Y>765</Y>
+          </Points>
+        </Points>
+      </Connection>
+      <Connection Source="stationAdptr_in.ParentName" Destination="stationAdptr_out.ParentName">
+        <Points>
+          <Points>
+            <X>359.1302</X>
+            <Y>774.999939</Y>
+          </Points>
+          <Points>
+            <X>374.1302</X>
+            <Y>774.999939</Y>
+          </Points>
+          <Points>
+            <X>374.1302</X>
+            <Y>812.5</Y>
+          </Points>
+          <Points>
+            <X>1097.5</X>
+            <Y>812.5</Y>
+          </Points>
+          <Points>
+            <X>1097.5</X>
+            <Y>780</Y>
+          </Points>
+          <Points>
+            <X>1175</X>
+            <Y>780</Y>
+          </Points>
+        </Points>
+      </Connection>
+      <Connection Source="stationAdptr_in.FaultResetCMD" Destination="stationAdptr_out.FaultResetCMD">
+        <Points>
+          <Points>
+            <X>359.1302</X>
+            <Y>789.999939</Y>
+          </Points>
+          <Points>
+            <X>369.1302</X>
+            <Y>789.999939</Y>
+          </Points>
+          <Points>
+            <X>369.1302</X>
+            <Y>812.5</Y>
+          </Points>
+          <Points>
+            <X>1097.5</X>
+            <Y>812.5</Y>
+          </Points>
+          <Points>
+            <X>1097.5</X>
+            <Y>795</Y>
+          </Points>
+          <Points>
+            <X>1175</X>
+            <Y>795</Y>
+          </Points>
+        </Points>
+      </Connection>
+      <Connection Source="TSString.OUT1" Destination="IThis.ThisStepText" dx1="70" />
+      <Connection Source="NSString.OUT1" Destination="IThis.NextStepText" dx1="70" />
+      <Connection Source="PSString.OUT1" Destination="IThis.PreviousStepText" dx1="70" />
+      <Connection Source="ANString.OUT1" Destination="IThis.ActuatorName" dx1="43.75" dx2="170" dy="90" />
+      <Connection Source="ProcessEngine.cmd_state" Destination="IThis.StateValue">
+        <Points>
+          <Points>
+            <X>497.276031</X>
+            <Y>500</Y>
+          </Points>
+          <Points>
+            <X>507.5</X>
+            <Y>500</Y>
+          </Points>
+          <Points>
+            <X>507.5</X>
+            <Y>512.5</Y>
+          </Points>
+          <Points>
+            <X>937.5</X>
+            <Y>512.5</Y>
+          </Points>
+          <Points>
+            <X>937.5</X>
+            <Y>497.5</Y>
+          </Points>
+          <Points>
+            <X>1092.5</X>
+            <Y>497.5</Y>
+          </Points>
+          <Points>
+            <X>1092.5</X>
+            <Y>525</Y>
+          </Points>
+          <Points>
+            <X>1330</X>
+            <Y>525</Y>
+          </Points>
+        </Points>
+      </Connection>
+    </DataConnections>
+  </FBNetwork>
+</FBType>
+*********
+Basic: ProcessRuntime_Generic_v1.20260423-080839396.Basic: 
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="dbe3b38c-7d40-4fa7-9b53-c0b4acf14bd4" Name="ProcessRuntime_Generic_v1" Comment="Basic Function Block Type" Namespace="Main">
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author="azam_w" Date="5/13/2025" Remarks="Template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT">
+        <With Var="Mode" />
+        <With Var="CycleType" />
+        <With Var="nextStepCMD" />
+        <With Var="state_table" />
+      </Event>
+      <Event Name="state_change">
+        <With Var="state_table" />
+      </Event>
+      <Event Name="MREQ">
+        <With Var="Mode" />
+      </Event>
+      <Event Name="CTREQ">
+        <With Var="CycleType" />
+      </Event>
+      <Event Name="NSREQ">
+        <With Var="nextStepCMD" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO">
+        <With Var="ThisStepText" />
+      </Event>
+      <Event Name="CMDREQ" Comment="Execution Confirmation">
+        <With Var="cmd_target_name" />
+        <With Var="cmd_state" />
+      </Event>
+      <Event Name="SCNF">
+        <With Var="ThisStepText" />
+        <With Var="PreviousStepText" />
+        <With Var="NextStepText" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="Mode" Type="INT" />
+      <VarDeclaration Name="CycleType" Type="INT" />
+      <VarDeclaration Name="nextStepCMD" Type="BOOL" />
+      <VarDeclaration Name="state_table" Type="Component_State" Namespace="Main" ArraySize="1" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="ThisStepText" Type="STRING[30]" />
+      <VarDeclaration Name="PreviousStepText" Type="STRING[30]" />
+      <VarDeclaration Name="NextStepText" Type="STRING[30]" />
+      <VarDeclaration Name="cmd_target_name" Type="STRING[15]" />
+      <VarDeclaration Name="cmd_state" Type="INT" />
+    </OutputVars>
+  </InterfaceList>
+  <BasicFB>
+    <Attribute Name="FBType.Basic.Algorithm.Order" Value="initializeinit,LoadStep,IssueCmd,check_wait,AdvanceStep,EndSequence" />
+    <InternalVars>
+      <VarDeclaration Name="CurrentStep" Type="INT" Comment="This is the step number it is currently executing" />
+      <VarDeclaration Name="StepDone" Type="BOOL" />
+      <VarDeclaration Name="StepType" Type="INT" ArraySize="10" Comment="0 command, 1 wait, 2 end" />
+      <VarDeclaration Name="CmdTargetName" Type="STRING[15]" ArraySize="10" />
+      <VarDeclaration Name="CmdStateArr" Type="INT" ArraySize="10" Comment="For command steps, which state value hsould be sent" />
+      <VarDeclaration Name="Wait1Id" Type="INT" ArraySize="10" />
+      <VarDeclaration Name="Wait1State" Type="INT" ArraySize="10" />
+      <VarDeclaration Name="NextStep" Type="INT" ArraySize="10" />
+      <VarDeclaration Name="CurrentStepType" Type="INT" Comment="This tells the runtime what kind of step the current one is. 1- command, 2 - wait, 9 - end" />
+      <VarDeclaration Name="WaitSatisfied" Type="BOOL" />
+      <VarDeclaration Name="PusherID" Type="INT" />
+    </InternalVars>
+    <ECC>
+      <ECState Name="START" Comment="Initial State" x="477.3859" y="429.3015" />
+      <ECState Name="INIT" x="434.524" y="956.111">
+        <ECAction Algorithm="initializeinit" Output="INITO" />
+      </ECState>
+      <ECState Name="IDLE1" x="1352.545" y="600.0003">
+        <ECAction Algorithm="LoadStep" Output="SCNF" />
+      </ECState>
+      <ECState Name="ISSUE_CMD" x="1348.1" y="1151.111">
+        <ECAction Algorithm="IssueCmd" Output="CMDREQ" />
+      </ECState>
+      <ECState Name="WAIT_STEP" x="2472.544" y="479.9996">
+        <ECAction Algorithm="check_wait" Output="SCNF" />
+      </ECState>
+      <ECState Name="ADVANCE" x="1334.766" y="1715.555">
+        <ECAction Algorithm="AdvanceStep" Output="SCNF" />
+      </ECState>
+      <ECState Name="END" x="1983.655" y="968.8892">
+        <ECAction Algorithm="EndSequence" Output="SCNF" />
+      </ECState>
+      <ECTransition Source="START" Destination="INIT" Condition="INIT" x="526.1159" y="696.8713">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="136.8388,156.9643,134.0239,192.1655" />
+      </ECTransition>
+      <ECTransition Source="INIT" Destination="IDLE1" Condition="1" x="767.1438" y="680.0045">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="153.0228,176.9492,216.0506,150.9819" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="IDLE1" Condition="Mode = 1 AND CycleType &lt;&gt; 0" x="938.1094" y="434.045">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="208.9543,99.33229,261.4239,109.5664" />
+      </ECTransition>
+      <ECTransition Source="IDLE1" Destination="ISSUE_CMD" Condition="CurrentStepType = 1" x="1431.808" y="876.1604">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="362.7299,200.4761,362.4297,237.7049" />
+      </ECTransition>
+      <ECTransition Source="IDLE1" Destination="WAIT_STEP" Condition="CurrentStepType = 2" x="1871.199" y="472.5714">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="433.7345,118.2509,501.3824,111.2199" />
+      </ECTransition>
+      <ECTransition Source="IDLE1" Destination="END" Condition="CurrentStepType = 9" x="1722.671" y="714.1903">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="412.2174,162.3411,451.9259,185.7816" />
+      </ECTransition>
+      <ECTransition Source="ISSUE_CMD" Destination="ADVANCE" Condition="1" x="1414.695" y="1435.496">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="358.3799,339.8844,357.364,378.2244" />
+      </ECTransition>
+      <ECTransition Source="WAIT_STEP" Destination="ADVANCE" Condition="WaitSatisfied" x="2153.896" y="1306.557">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="662.172,349.7537,450.0622,338.3217" />
+      </ECTransition>
+      <ECTransition Source="ADVANCE" Destination="IDLE1" Condition="1" x="911.2888" y="1084.578">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="57.02499,307.7778,336.5853,222.3115" />
+      </ECTransition>
+      <ECTransition Source="WAIT_STEP" Destination="WAIT_STEP" Condition="state_change" x="2472.546" y="662.0857" />
+    </ECC>
+    <Algorithm Name="initializeinit" Comment="Loads test step data&#xD;&#xA;Clears outputs&#xD;&#xA;sets inital texts">
+      <ST><![CDATA[CurrentStep := 0;
+CurrentStepType := 0;
+WaitSatisfied := FALSE;
+
+PusherID := 0;
+
+StepType[0] := 1;
+CmdTargetName[0] := 'Pusher';
+CmdStateArr[0] := 1;
+NextStep[0] := 1;
+
+StepType[1] := 2;
+Wait1Id[1] := PusherID;
+Wait1State[1] := 2;
+NextStep[1] := 2;
+
+StepType[2] := 9;
+
+cmd_target_name := '';
+cmd_state := 0;
+
+PreviousStepText := '';
+ThisStepText := 'Initialised';
+NextStepText := 'Command Pusher';]]></ST>
+    </Algorithm>
+    <Algorithm Name="LoadStep">
+      <ST><![CDATA[CurrentStepType := StepType[CurrentStep];
+
+CASE CurrentStepType OF
+    1:
+        ThisStepText := 'Command step';
+    2:
+        ThisStepText := 'Wait step';
+    9:
+        ThisStepText := 'End step';
+ELSE
+    ThisStepText := 'Unknown step';
+END_CASE;]]></ST>
+    </Algorithm>
+    <Algorithm Name="IssueCmd" Comment="Reads the current command data">
+      <ST><![CDATA[cmd_target_name := CmdTargetName[CurrentStep];
+cmd_state := CmdStateArr[CurrentStep];
+
+PreviousStepText := ThisStepText;
+ThisStepText := 'Sending command';
+NextStepText := 'Waiting for feedback';]]></ST>
+    </Algorithm>
+    <Algorithm Name="check_wait">
+      <ST><![CDATA[WaitSatisfied := state_table[Wait1Id[CurrentStep]].state = Wait1Id[CurrentStep];
+
+PreviousStepText := ThisStepText;
+ThisStepText := 'Waiting for target state';
+NextStepText := 'Advance when satisfied';]]></ST>
+    </Algorithm>
+    <Algorithm Name="AdvanceStep">
+      <ST><![CDATA[CurrentStep := NextStep[CurrentStep];
+CurrentStepType := StepType[CurrentStep];
+WaitSatisfied := FALSE;
+
+PreviousStepText := ThisStepText;
+
+CASE CurrentStepType OF
+    1:
+        NextStepText := 'Next: Command';
+    2:
+        NextStepText := 'Next: Wait';
+    9:
+        NextStepText := 'Next: End';
+ELSE
+    NextStepText := '';
+END_CASE;]]></ST>
+    </Algorithm>
+    <Algorithm Name="EndSequence">
+      <ST><![CDATA[CurrentStep := NextStep[CurrentStep];
+CurrentStepType := StepType[CurrentStep];
+WaitSatisfied := FALSE;
+
+PreviousStepText := ThisStepText;
+
+CASE CurrentStepType OF
+    1:
+        NextStepText := 'Next: Command';
+    2:
+        NextStepText := 'Next: Wait';
+    9:
+        NextStepText := 'Next: End';
+ELSE
+    NextStepText := '';
+END_CASE;]]></ST>
+    </Algorithm>
+  </BasicFB>
+</FBType>
+*********
+Basic: ProcessStateBusHandler.20260423-080854609.Basic: 
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE FBType SYSTEM "../LibraryElement.dtd">
+<FBType GUID="08f01bfb-f935-4a1a-9faa-997af27ab5af" Name="ProcessStateBusHandler" Comment="Basic Function Block Type" Namespace="Main">
+  <Identification Standard="61499-2" />
+  <VersionInfo Organization="Schneider Electric" Version="0.0" Author=" " Date="3/17/2026" Remarks="Template" />
+  <InterfaceList>
+    <EventInputs>
+      <Event Name="INIT" Comment="Initialization Request">
+        <With Var="component_state_in" />
+        <With Var="name" />
+        <With Var="state_sts" />
+      </Event>
+      <Event Name="REQ" Comment="Normal Execution Request">
+        <With Var="id" />
+        <With Var="name" />
+        <With Var="state_sts" />
+      </Event>
+      <Event Name="BREQ">
+        <With Var="component_state_in" />
+        <With Var="id" />
+        <With Var="name" />
+      </Event>
+      <Event Name="CMDREQ">
+        <With Var="id" />
+        <With Var="name" />
+        <With Var="dest_name" />
+        <With Var="cmd_state" />
+      </Event>
+    </EventInputs>
+    <EventOutputs>
+      <Event Name="INITO" Comment="Initialization Confirm">
+        <With Var="component_state_out" />
+      </Event>
+      <Event Name="BCNF" Comment="Execution Confirmation">
+        <With Var="component_state_out" />
+        <With Var="state_table" />
+      </Event>
+      <Event Name="CNF">
+        <With Var="state_cmd" />
+      </Event>
+    </EventOutputs>
+    <InputVars>
+      <VarDeclaration Name="component_state_in" Type="Component_State_Msg" Namespace="Main" Comment="Input event qualifier" />
+      <VarDeclaration Name="id" Type="INT" />
+      <VarDeclaration Name="name" Type="STRING[15]" />
+      <VarDeclaration Name="state_sts" Type="INT" />
+      <VarDeclaration Name="dest_name" Type="STRING[15]" />
+      <VarDeclaration Name="cmd_state" Type="INT" />
+    </InputVars>
+    <OutputVars>
+      <VarDeclaration Name="component_state_out" Type="Component_State_Msg" Namespace="Main" Comment="Output event qualifier" />
+      <VarDeclaration Name="state_table" Type="Component_State" Namespace="Main" ArraySize="20" />
+      <VarDeclaration Name="state_cmd" Type="INT" />
+    </OutputVars>
+  </InterfaceList>
+  <BasicFB>
+    <Attribute Name="FBType.Basic.Algorithm.Order" Value="INIT,REQ,BREQ,CMDREQST" />
+    <ECC>
+      <ECState Name="START" Comment="Initial State" x="552.9412" y="429.4117" />
+      <ECState Name="INIT" Comment="Initialization" x="923.5294" y="141.1765">
+        <ECAction Algorithm="INIT" Output="INITO" />
+      </ECState>
+      <ECState Name="REQ" Comment="Normal execution" x="217.647" y="752.9412">
+        <ECAction Algorithm="REQ" Output="BCNF" />
+      </ECState>
+      <ECState Name="BREQ" x="1864" y="484">
+        <ECAction Algorithm="BREQ" Output="BCNF" />
+        <ECAction Output="CNF" />
+      </ECState>
+      <ECState Name="CMDREQ_ST" x="1364" y="1140">
+        <ECAction Algorithm="CMDREQST" Output="BCNF" />
+      </ECState>
+      <ECTransition Source="START" Destination="INIT" Condition="INIT" x="731.1476" y="204.8375" />
+      <ECTransition Source="INIT" Destination="START" Condition="1" x="797.5924" y="348.3231" />
+      <ECTransition Source="START" Destination="REQ" Condition="REQ" x="447.8488" y="648.3352" />
+      <ECTransition Source="REQ" Destination="START" Condition="1" x="372.8767" y="512.7991" />
+      <ECTransition Source="START" Destination="BREQ" Condition="BREQ AND name &lt;&gt; component_state_in.source_name" x="1161.774" y="397.5871">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="250.8719,94.90436,321.2458,96.86175" />
+      </ECTransition>
+      <ECTransition Source="BREQ" Destination="START" Condition="1" x="1331.698" y="515.5707">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="377.4676,133.2486,307.9332,131.4601" />
+      </ECTransition>
+      <ECTransition Source="START" Destination="CMDREQ_ST" Condition="CMDREQ" x="1009.886" y="726.9066">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="225.066,151.6458,282.9683,202.1743" />
+      </ECTransition>
+      <ECTransition Source="CMDREQ_ST" Destination="START" Condition="1" x="1001.882" y="879.7841">
+        <Attribute Name="Configuration.Transaction.BezierPoints" Value="285.231,253.1284,226.5237,202.61" />
+      </ECTransition>
+    </ECC>
+    <Algorithm Name="INIT" Comment="Initialization algorithm">
+      <ST><![CDATA[state_cmd := 0;]]></ST>
+    </Algorithm>
+    <Algorithm Name="REQ" Comment="Normally executed algorithm">
+      <ST><![CDATA[component_state_out.src_id := id;
+component_state_out.source_name := name;
+component_state_out.state := state_sts;
+state_table[id].name := name;
+state_table[id].state := state_sts;
+]]></ST>
+    </Algorithm>
+    <Algorithm Name="BREQ">
+      <ST><![CDATA[component_state_out := component_state_in;
+state_table[component_state_in.src_id].name := component_state_in.source_name;
+state_table[component_state_in.src_id].state := component_state_in.state;
+
+IF component_state_in.dest_name = name THEN
+	state_cmd := component_state_in.state;
+END_IF;
+]]></ST>
+    </Algorithm>
+    <Algorithm Name="CMDREQST">
+      <ST><![CDATA[component_state_out.src_id := id;
+component_state_out.source_name := name;
+component_state_out.dest_name := dest_name;
+component_state_out.state := cmd_state;
+
+state_table[id].name := name;
+state_table[id].state := state_sts;]]></ST>
+    </Algorithm>
+  </BasicFB>
+</FBType>
