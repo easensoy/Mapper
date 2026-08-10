@@ -16,8 +16,6 @@ namespace CodeGen.Translation
 {
     public class SystemInjector
     {
-        private static readonly XNamespace Ns = "https://www.se.com/LibraryElements";
-
         public class BindingApplicationReport
         {
             public List<(string Component, string Detail)> Bound { get; } = new();
