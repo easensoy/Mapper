@@ -11,7 +11,7 @@ namespace CodeGen.Devices.M262
     public static class M262TopologyEmitter
     {
         const string FallbackSolutionUuid      = "00000000-0000-0000-0000-000000000000";
-        const string DefaultM262Uuid           = "11111111-2222-3333-4444-000000000010";
+        internal const string DefaultM262Uuid = "11111111-2222-3333-4444-000000000010";
         const string DefaultRuntimeUuid        = "11111111-2222-3333-4444-000000000030";
         const string RuntimeDeoTypeId          = "b0723d05-50bb-4c15-94a4-d8b5981bcb56";
 
