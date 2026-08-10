@@ -3,23 +3,13 @@ using CodeGen.Configuration;
 using CodeGen.IO;
 using CodeGen.Models;
 using CodeGen.Validation;
-using CodeGen.Devices.M262;
-using CodeGen.Devices.M580;
-using CodeGen.Devices.BX1;
-using CodeGen.Devices.RevPi;
-using CodeGen.Devices.Core;
 using CodeGen.Mapping;
 using CodeGen.Services;
-using CodeGen.Translation;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Drawing;
 using System.IO;
 using System.Linq;
-using System.Net.Http;
-using System.Text;
-using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -682,7 +672,7 @@ namespace MapperUI
             new() { Component = c, TemplateName = t, IsValid = false, FailReason = r };
 
 
-        void dgvComponents_SelectionChanged(object sender, EventArgs e) { }
+
 
         // Commit a Device combo selection on pick so CellValueChanged fires without leaving the cell.
         void dgvComponents_CurrentCellDirtyStateChanged(object sender, EventArgs e)
@@ -803,18 +793,6 @@ namespace MapperUI
 
         MapperConfig Cfg() => _mapperConfig ??= MapperConfig.Load();
 
-
-        static string? FindDfbproj(string startPath)
-        {
-            var dir = Directory.Exists(startPath) ? startPath : Path.GetDirectoryName(startPath);
-            while (dir != null)
-            {
-                var f = Directory.GetFiles(dir, "*.dfbproj", SearchOption.TopDirectoryOnly).FirstOrDefault();
-                if (f != null) return f;
-                dir = Directory.GetParent(dir)?.FullName;
-            }
-            return null;
-        }
 
         static void ShowError(string msg) =>
             MessageBox.Show(msg, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
