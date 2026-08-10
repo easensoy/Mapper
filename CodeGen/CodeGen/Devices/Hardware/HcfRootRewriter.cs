@@ -1,4 +1,5 @@
 ﻿using System;
+using CodeGen.Configuration;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -67,7 +68,7 @@ namespace CodeGen.Devices.Core
                 Indent = true,
                 Encoding = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true),
             };
-            const int MaxAttempts = 8;
+            int MaxAttempts = GenerationConfig.Current.FileWriteRetries;
             int delayMs = 50;
             for (int attempt = 1; attempt <= MaxAttempts; attempt++)
             {
