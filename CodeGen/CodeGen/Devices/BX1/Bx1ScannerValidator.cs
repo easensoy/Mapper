@@ -5,12 +5,12 @@ using System.Linq;
 namespace CodeGen.Devices.BX1
 {
     // SAFETY: the BX1 cover I/O (incl. the CoverPNP_Hr safe-start) only reaches the TM3BC coupler if
-    // the scanner carries the 192.168.1.210 device adapter; an empty scanner means cover_hr can hold
-    // at Work (swivel-collision hazard) and be neither commanded nor homed. FAILS generation if the
-    // scanner source lacks the coupler; WARNS if the compiled EIPSCANNER2.xml is empty/stale.
+    // the scanner carries its device adapter; an empty scanner means cover_hr can hold at Work
+    // (swivel-collision hazard) and be neither commanded nor homed. FAILS generation if the scanner
+    // source lacks the coupler; WARNS if the compiled EIPSCANNER2.xml is empty/stale.
     public static class Bx1ScannerValidator
     {
-        public const string CouplerIp = "192.168.1.210";
+        public static string CouplerIp => CodeGen.Configuration.DeviceConfig.Current.Bx1.CouplerIp;
 
         public sealed class Result
         {
@@ -57,7 +57,7 @@ namespace CodeGen.Devices.BX1
 
             // SAFETY NOTICE (warn, not fatal): homing CoverPNP_Hr on EAE Clean/Stop/fault needs the
             // TM3BC coupler's own output fallback (word 16#0002 = bit1 ToHome), set on the coupler at
-            // 192.168.1.210 — no EAE-owned file carries an output-fallback field. Bx1CoverFailsafe only
+            // the coupler — no EAE-owned file carries an output-fallback field. Bx1CoverFailsafe only
             // covers the run-time side.
             if (anyCoupler)
                 EmitCoverCleanFallbackNotice(r);
@@ -88,7 +88,7 @@ namespace CodeGen.Devices.BX1
                 "(deploy/login/restart). It does NOT act on EAE Clean/Stop/fault: the logic stops,");
             r.Lines.Add(T + "no FB can write ToHome, and the double-acting cover HOLDS its last position " +
                 "(CoverPNP_Hr <-> Bearing_PnP swivel-collision hazard).");
-            r.Lines.Add(T + "FIX (once, on the coupler's OWN embedded web server - browse to http://192.168.1.210, " +
+            r.Lines.Add(T + $"FIX (once, on the coupler's OWN embedded web server - browse to http://{CouplerIp}, " +
                 "MAINTENANCE page): set the TM3DQ16T output module FALLBACK so the fallback word = 16#0002 ->");
             r.Lines.Add(T + "    bit0 CoverPNP_Hr_ToWork=0   bit1 CoverPNP_Hr_ToHome=1   " +
                 "bit2 CoverPNP_Vr=0   bit3 Cover_Gripper=0");
