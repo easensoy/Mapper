@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE DataType SYSTEM "../LibraryElement.dtd">
+<DataType Namespace="Main" Name="RecipeStep" Comment="One recipe step as a struct: StepType/CmdTargetName/CmdStateArr/Wait1Id/Wait1State/NextStep">
+  <Identification Standard="1131-3" />
+  <VersionInfo Organization="WMG" Version="0.1" Author="easensoy" Date="5/24/2026" Remarks="array-of-struct packaging of the 6 recipe arrays" />
+  <CompilerInfo />
+  <StructuredType>
+    <VarDeclaration Name="StepType" Type="INT" />
+    <VarDeclaration Name="CmdTargetName" Type="STRING[150]" />
+    <VarDeclaration Name="CmdStateArr" Type="INT" />
+    <VarDeclaration Name="Wait1Id" Type="INT" />
+    <VarDeclaration Name="Wait1State" Type="INT" />
+    <VarDeclaration Name="NextStep" Type="INT" />
+  </StructuredType>
+</DataType>
