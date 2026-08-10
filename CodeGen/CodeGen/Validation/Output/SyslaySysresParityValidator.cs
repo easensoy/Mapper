@@ -291,7 +291,7 @@ namespace CodeGen.Devices.Core
         static void ValidateRevPiIo(string eaeRoot, string syslayPath, List<Violation> violations)
         {
             const string BrokerFbId = "A6B61E2425DB1C30";   // == RevPiIoBrokerInjector.BrokerFbId
-            const string BrokerName = "RevPI_IO";
+            const string BrokerName = CodeGen.Devices.RevPi.RevPiIoBrokerInjector.BrokerName;
 
             var sysdev = EaeProjectLayout.FindSysdevByDeviceTypeAndName(eaeRoot, "Soft_dPAC", "Revolution_Pi");
             var sysres = sysdev == null ? null : EaeProjectLayout.FindSysresFor(sysdev);
