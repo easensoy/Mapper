@@ -1,4 +1,4 @@
-namespace MapperUI
+﻿namespace MapperUI
 {
     partial class MainForm
     {
@@ -15,7 +15,6 @@ namespace MapperUI
         private void InitializeComponent()
         {
             this.menuStrip = new System.Windows.Forms.MenuStrip();
-            this.fileToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.dataToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.menuItemStateTransitionTable = new System.Windows.Forms.ToolStripMenuItem();
             this.buildToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
@@ -52,7 +51,6 @@ namespace MapperUI
             this.lblEngineLabel = new System.Windows.Forms.Label();
             this.lblEngineStatusDot = new System.Windows.Forms.Label();
             this.txtActivityLog = new System.Windows.Forms.TextBox();
-            this.pnlEngineBottom = new System.Windows.Forms.Panel();
             this.btnTestStation1 = new System.Windows.Forms.Button();
             this.statusStrip = new System.Windows.Forms.StatusStrip();
             this.lblStatus = new System.Windows.Forms.ToolStripStatusLabel();
@@ -69,16 +67,14 @@ namespace MapperUI
             ((System.ComponentModel.ISupportInitialize)(this.dgvComponents)).BeginInit();
             this.grpGenerationEngine.SuspendLayout();
             this.pnlEngineHeader.SuspendLayout();
-            this.pnlEngineBottom.SuspendLayout();
             this.statusStrip.SuspendLayout();
             this.SuspendLayout();
 
 
             this.menuStrip.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
-                this.fileToolStripMenuItem, this.dataToolStripMenuItem, this.buildToolStripMenuItem });
+                this.dataToolStripMenuItem, this.buildToolStripMenuItem });
             this.menuStrip.Location = new System.Drawing.Point(0, 0);
             this.menuStrip.Size = new System.Drawing.Size(1400, 24);
-            this.fileToolStripMenuItem.Text = "File";
             this.dataToolStripMenuItem.Text = "Data";
             this.dataToolStripMenuItem.DropDownItems.Add(this.menuItemStateTransitionTable);
             this.menuItemStateTransitionTable.Text = "State-Transition Table";
@@ -99,14 +95,7 @@ namespace MapperUI
             this.txtModelPath.ReadOnly = true;
             this.txtModelPath.Size = new System.Drawing.Size(560, 23);
 
-            this.lblLoadedFile = new System.Windows.Forms.Label();
-            this.lblLoadedFile.Visible = false;
 
-            // QRM slide layout: scaled-up h=28 buttons, consistent Segoe UI 9pt Bold,
-            // single primary action (Generate Code) replaces the three numbered buttons.
-            // Restored post-QRM: original 6-button layout (Mapping Rules, Browse,
-            // 3 numbered Generate actions, Clean Demonstrator). Generate Code
-            // placeholder hidden.
             this.btnMappingRules.Anchor = System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Right;
             this.btnMappingRules.Location = new System.Drawing.Point(668, 28);
             this.btnMappingRules.Size = new System.Drawing.Size(95, 25);
@@ -226,7 +215,6 @@ namespace MapperUI
             this.dgvComponents.MultiSelect = true;
             this.dgvComponents.SelectionMode = System.Windows.Forms.DataGridViewSelectionMode.FullRowSelect;
             this.dgvComponents.DefaultCellStyle.Font = new System.Drawing.Font("Segoe UI", 9F);
-            this.dgvComponents.SelectionChanged += new System.EventHandler(this.dgvComponents_SelectionChanged);
             this.dgvComponents.CellValueChanged += new System.Windows.Forms.DataGridViewCellEventHandler(this.dgvComponents_DeviceChanged);
             this.dgvComponents.CurrentCellDirtyStateChanged += new System.EventHandler(this.dgvComponents_CurrentCellDirtyStateChanged);
             this.dgvComponents.DataError += new System.Windows.Forms.DataGridViewDataErrorEventHandler(this.dgvComponents_DataError);
@@ -251,7 +239,6 @@ namespace MapperUI
 
 
             this.grpGenerationEngine.Controls.Add(this.txtActivityLog);
-            this.grpGenerationEngine.Controls.Add(this.pnlEngineBottom);
             this.grpGenerationEngine.Controls.Add(this.pnlEngineHeader);
             this.grpGenerationEngine.Dock = System.Windows.Forms.DockStyle.Fill;
             this.grpGenerationEngine.Text = "Generation Engine";
@@ -287,10 +274,6 @@ namespace MapperUI
             this.txtActivityLog.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
 
 
-            this.pnlEngineBottom.Dock = System.Windows.Forms.DockStyle.Bottom;
-            this.pnlEngineBottom.Height = 44;
-            this.pnlEngineBottom.BackColor = System.Drawing.SystemColors.Control;
-            this.pnlEngineBottom.Padding = new System.Windows.Forms.Padding(4, 6, 4, 4);
 
 
 
@@ -309,7 +292,6 @@ namespace MapperUI
             this.Controls.Add(this.grpValidation);
             this.Controls.Add(this.btnTestStation1);
             this.Controls.Add(this.btnBrowse);
-            this.Controls.Add(this.lblLoadedFile);
             this.Controls.Add(this.btnMappingRules);
             this.Controls.Add(this.txtModelPath);
             this.Controls.Add(this.lblVueOneModel);
@@ -335,7 +317,6 @@ namespace MapperUI
             ((System.ComponentModel.ISupportInitialize)(this.dgvComponents)).EndInit();
             this.pnlEngineHeader.ResumeLayout(false);
             this.pnlEngineHeader.PerformLayout();
-            this.pnlEngineBottom.ResumeLayout(false);
             this.grpGenerationEngine.ResumeLayout(false);
             this.statusStrip.ResumeLayout(false);
             this.statusStrip.PerformLayout();
@@ -355,7 +336,6 @@ namespace MapperUI
         #endregion
 
         private System.Windows.Forms.MenuStrip menuStrip;
-        private System.Windows.Forms.ToolStripMenuItem fileToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem dataToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem menuItemStateTransitionTable;
         private System.Windows.Forms.ToolStripMenuItem buildToolStripMenuItem;
@@ -392,9 +372,7 @@ namespace MapperUI
         private System.Windows.Forms.Label lblEngineLabel;
         private System.Windows.Forms.Label lblEngineStatusDot;
         private System.Windows.Forms.TextBox txtActivityLog;
-        private System.Windows.Forms.Panel pnlEngineBottom;
         private System.Windows.Forms.Button btnTestStation1;
-        private System.Windows.Forms.Label lblLoadedFile;
         private System.Windows.Forms.StatusStrip statusStrip;
         private System.Windows.Forms.ToolStripStatusLabel lblStatus;
     }
