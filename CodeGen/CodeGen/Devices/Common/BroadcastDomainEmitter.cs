@@ -92,7 +92,10 @@ namespace CodeGen.Devices.Core
                 if (m.Success) defined.Add(m.Groups[1].Value);
             }
 
-            // Create any referenced-but-undefined domain at 192.168.1.0/24.
+            // Create any referenced-but-undefined domain on the device network. It is the M262
+            // subnet, not DefaultNetwork: the domains that go undefined are the ones the dPACs
+            // reference, and they all sit on the rig network.
+            var dev = DeviceConfig.Current.M262;
             int n = 1;
             foreach (var uuid in referenced)
             {
@@ -106,9 +109,9 @@ namespace CodeGen.Devices.Core
                 {
                   "uuid": "{{uuid}}",
                   "identifier": "{{name}}",
-                  "ipV4Address": "192.168.1.0",
-                  "ipV4Mask": "255.255.255.0",
-                  "ipV4Gateway": "192.168.1.254"
+                  "ipV4Address": "{{dev.SubnetAddress}}",
+                  "ipV4Mask": "{{dev.SubnetMask}}",
+                  "ipV4Gateway": "{{dev.Gateway}}"
                 }
                 """;
                 File.WriteAllText(path, json);
