@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -12,7 +12,6 @@ namespace CodeGen.Hmi
     // present on disk, so a registration can never dangle and a generated file can never be missed.
     internal static class HmiProjectEmitter
     {
-        private const string StartCanvas = "StartCanvas_2";
 
         internal static void EmitCsproj(string hmiDir, IReadOnlyCollection<string> screenNames)
         {
@@ -89,32 +88,52 @@ namespace CodeGen.Hmi
             new(ns + "DependentUpon", file[..^suffix.Length] + ".cnv.cs");
 
         internal static void EmitCanvasList(string hmiDir, string projectName, string libraryNamespace,
-                                            IReadOnlyList<string> screenNames, string firstCanvas)
+                                            IReadOnlyList<string> screenNames, string firstCanvas,
+                                            HmiDefinition def)
         {
             var canvases = new StringBuilder();
             foreach (var s in screenNames)
                 canvases.Append(
-                    $"        <Canvas Name=\"{s}\" Title=\"\" Tooltip=\"\" Instance=\"HMI.{libraryNamespace}.Canvases.{s}\">\r\n" +
+                    $"        <Canvas Name=\"{s}\" Title=\"\" Tooltip=\"\" Instance=\"HMI.{libraryNamespace}.{def.Deployment.CanvasNamespaceSuffix}.{s}\">\r\n" +
                     "          <Children />\r\n" +
                     "        </Canvas>\r\n");
+
+            // Every dimension, name and chrome flag below comes from hmi.yml. The work-area height is
+            // DERIVED (canvas height minus the runtime navigation bar) rather than restated, because a
+            // work area that disagrees with the placement geometry silently clips the bottom row of
+            // faceplates the planner believed it had room for.
+            var rt = def.Runtime;
+            var g = def.Geometry;
+            var c = rt.Chrome;
+            var main = rt.Resolution;
+            var fallback = rt.FallbackResolution;
+
+            static string B(bool value) => value ? "true" : "false";
 
             var xml =
                 "<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n" +
                 "<CanvasesResolutionList xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" " +
-                $"Name=\"{projectName}\" Version=\"1.6.0.0\" xmlns=\"http://www.nxtcontrol.com/IEC61499.xsd\">\r\n" +
-                $"  <CanvasResolution Name=\"1024x768\" StartCanvasClass=\"HMI.{libraryNamespace}.Canvases.{StartCanvas}\" " +
-                "Width=\"1024\" Height=\"768\" WorkAreaWidth=\"1024\" WorkAreaHeight=\"698\" Template=\"Default\" Logger=\"true\" " +
-                "Login=\"true\" NavigationControl=\"1\" CurrentUser=\"true\" LanguageButton=\"true\" RuntimeConnection=\"true\" " +
-                "NavigationBar=\"true\" NewVersionDeployed=\"true\" IsCanvasTopologyPanel=\"true\" ResizeBehaviour=\"Standard\" " +
-                "CanvasButtonHeight=\"30\">\r\n" +
+                $"Name=\"{projectName}\" Version=\"{rt.SchemaVersion}\" xmlns=\"http://www.nxtcontrol.com/IEC61499.xsd\">\r\n" +
+                $"  <CanvasResolution Name=\"{main.Name}\" StartCanvasClass=\"HMI.{libraryNamespace}." +
+                $"{def.Deployment.CanvasNamespaceSuffix}.{rt.StartCanvas}\" " +
+                $"Width=\"{g.CanvasWidth}\" Height=\"{g.CanvasHeight}\" WorkAreaWidth=\"{g.CanvasWidth}\" " +
+                $"WorkAreaHeight=\"{g.WorkHeight}\" Template=\"{main.Template}\" Logger=\"{B(c.Logger)}\" " +
+                $"Login=\"{B(c.Login)}\" NavigationControl=\"{c.NavigationControl}\" CurrentUser=\"{B(c.CurrentUser)}\" " +
+                $"LanguageButton=\"{B(c.LanguageButton)}\" RuntimeConnection=\"{B(c.RuntimeConnection)}\" " +
+                $"NavigationBar=\"{B(c.NavigationBar)}\" NewVersionDeployed=\"{B(c.NewVersionDeployed)}\" " +
+                $"IsCanvasTopologyPanel=\"true\" ResizeBehaviour=\"{main.ResizeBehaviour}\" " +
+                $"CanvasButtonHeight=\"{main.CanvasButtonHeight}\">\r\n" +
                 $"    <Topology Name=\"Default\" FirstCanvas=\"{firstCanvas}\">\r\n" +
                 "      <Canvases>\r\n" + canvases + "      </Canvases>\r\n" +
                 "    </Topology>\r\n" +
                 "  </CanvasResolution>\r\n" +
-                "  <CanvasResolution Name=\"Without resolution\" StartCanvasClass=\"\" Width=\"-1\" Height=\"-1\" WorkAreaWidth=\"-1\" " +
-                "WorkAreaHeight=\"-1\" Template=\"\" Login=\"true\" CurrentUser=\"true\" LanguageButton=\"true\" RuntimeConnection=\"true\" " +
-                "NavigationBar=\"true\" NewVersionDeployed=\"true\" WarningText=\"\" SiblingButtonCount=\"5\" ChildButtonCount=\"5\" " +
-                "IsCanvasTopologyPanel=\"true\" ResizeBehaviour=\"None\" CanvasButtonHeight=\"30\">\r\n" +
+                $"  <CanvasResolution Name=\"{fallback.Name}\" StartCanvasClass=\"\" Width=\"-1\" Height=\"-1\" WorkAreaWidth=\"-1\" " +
+                $"WorkAreaHeight=\"-1\" Template=\"\" Login=\"{B(c.Login)}\" CurrentUser=\"{B(c.CurrentUser)}\" " +
+                $"LanguageButton=\"{B(c.LanguageButton)}\" RuntimeConnection=\"{B(c.RuntimeConnection)}\" " +
+                $"NavigationBar=\"{B(c.NavigationBar)}\" NewVersionDeployed=\"{B(c.NewVersionDeployed)}\" WarningText=\"\" " +
+                $"SiblingButtonCount=\"{fallback.SiblingButtonCount}\" ChildButtonCount=\"{fallback.ChildButtonCount}\" " +
+                $"IsCanvasTopologyPanel=\"true\" ResizeBehaviour=\"{fallback.ResizeBehaviour}\" " +
+                $"CanvasButtonHeight=\"{fallback.CanvasButtonHeight}\">\r\n" +
                 "    <Topology Name=\"Default\">\r\n      <Canvases />\r\n    </Topology>\r\n" +
                 "  </CanvasResolution>\r\n" +
                 "</CanvasesResolutionList>";
