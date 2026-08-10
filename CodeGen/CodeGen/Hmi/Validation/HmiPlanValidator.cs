@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -12,7 +12,7 @@ namespace CodeGen.Hmi
     // live command control on a panel that is supposed to be monitoring-only.
     internal static class HmiPlanValidator
     {
-        internal static IReadOnlyList<string> Validate(string hmiDir, string eaeProjectDir, string syslayPath, HmiPlan plan)
+        internal static IReadOnlyList<string> Validate(string hmiDir, string eaeProjectDir, string syslayPath, HmiPlan plan, HmiDefinition def)
         {
             var problems = new List<string>();
 
@@ -40,8 +40,8 @@ namespace CodeGen.Hmi
                 foreach (var item in screen.Items)
                 {
                     if (item.X < 0 || item.Y < 0 ||
-                        item.X + item.Symbol.Width > HmiPlanner.CanvasWidth ||
-                        item.Y + item.Symbol.Height > HmiPlanner.CanvasHeight)
+                        item.X + item.Symbol.Width > def.Geometry.CanvasWidth ||
+                        item.Y + item.Symbol.Height > def.Geometry.WorkHeight)
                         problems.Add($"{screen.Name}: '{item.Name}' overflows the canvas " +
                                      $"({item.X},{item.Y} {item.Symbol.Width}x{item.Symbol.Height}).");
                 }
@@ -91,20 +91,20 @@ namespace CodeGen.Hmi
                 catch (Exception ex) { problems.Add($"Malformed XML {Path.GetRelativePath(hmiDir, xml)}: {ex.Message}"); }
             }
 
-            if (plan.ReadOnly) problems.AddRange(ReadOnlyViolations(hmiDir, plan));
+            if (plan.ReadOnly) problems.AddRange(ReadOnlyViolations(hmiDir, plan, def));
             return problems;
         }
 
         // A monitoring HMI must not be able to reach the controller by ANY route: not a bound output,
         // not a button, not a leftover handler. These are hard failures, not warnings.
-        private static IEnumerable<string> ReadOnlyViolations(string hmiDir, HmiPlan plan)
+        private static IEnumerable<string> ReadOnlyViolations(string hmiDir, HmiPlan plan, HmiDefinition def)
         {
             foreach (var screen in plan.Screens)
                 foreach (var item in screen.Items.Where(i => i.Symbol.CommandCapable))
                     yield return $"READ-ONLY VIOLATION: {screen.Name} places '{item.Name}' using symbol " +
                                  $"'{item.Symbol.Name}', which declares controller outputs ({item.Symbol.Outputs}).";
 
-            foreach (var screen in plan.Screens.Where(s => HmiNames.IsCommandSymbol(s.Name)))
+            foreach (var screen in plan.Screens.Where(s => def.Deployment.IsCommandSymbol(s.Name)))
                 yield return $"READ-ONLY VIOLATION: command screen '{screen.Name}' was generated.";
 
             foreach (var contract in Directory.EnumerateFiles(hmiDir, "*.cnv.xml", SearchOption.AllDirectories))
