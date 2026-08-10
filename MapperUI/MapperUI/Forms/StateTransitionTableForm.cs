@@ -3,6 +3,7 @@ using CodeGen.Mapping;
 using CodeGen.Models;
 using CodeGen.Translation;
 using CodeGen.Translation.Process;
+using static CodeGen.Translation.Process.Recipes.RecipeComponentLookup;
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -398,15 +399,6 @@ namespace MapperUI
 
         static bool IsSevenState(VueOneComponent component) =>
             component.States.Count == 7 || TemplateMap.IsBranchedSevenState(component);
-
-        static VueOneComponent? LookupComponent(string? componentId,
-            IReadOnlyList<VueOneComponent> components)
-        {
-            if (string.IsNullOrWhiteSpace(componentId)) return null;
-            return components.FirstOrDefault(c =>
-                string.Equals(c.ComponentID, componentId.Trim(),
-                    StringComparison.OrdinalIgnoreCase));
-        }
 
         static string StationOf(VueOneComponent process)
         {
