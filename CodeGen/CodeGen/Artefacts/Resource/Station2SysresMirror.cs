@@ -29,22 +29,20 @@ namespace CodeGen.Devices.Core
 
             int m580 = MirrorBucket(eaeRoot, "M580_dPAC",
                 all.Where(f => SysresFbMirror.BucketFor(f.Name, ctx.Allocation) == PlcAssignment.M580).ToList(),
+                ctx.Layout.Geometry.DeviceCanvasOrigin,
                 dpacFullInitId: "66C40EEF3F39D969", plcStartId: "ACED009B79DFCE69");
             int bx1 = MirrorBucket(eaeRoot, "Soft_dPAC",
                 all.Where(f => SysresFbMirror.BucketFor(f.Name, ctx.Allocation) == PlcAssignment.BX1).ToList(),
+                ctx.Layout.Geometry.DeviceCanvasOrigin,
                 dpacFullInitId: "0FE5E1B2C3D4A5B6", plcStartId: "1A2B3C4D5E6F7081");
             return (m580, bx1);
         }
 
-        // Canvas origin every PLC's local sysres mirrors to, next to FB1/FB2.
-        const int CanvasOriginX = 2000;
-        const int CanvasOriginY = 2000;
-
-        // Copy of bucket translated so its bounding box's top-left lands at (CanvasOriginX, CanvasOriginY)
-        // on the destination sysres — the syslay's global coords (M580 at x=12200+) would otherwise land
-        // off-screen on each device-local canvas. Preserves relative spacing exactly.
+        // Copy of bucket translated so its bounding box's top-left lands on the device-local canvas
+        // origin — the syslay's global coords (M580 at x=12200+) would otherwise land off-screen on each
+        // device-local canvas. Preserves relative spacing exactly. Same origin the syslay pass uses.
         static List<SysresFbMirror.SyslayFb> TranslateBucketToCanvasOrigin(
-            List<SysresFbMirror.SyslayFb> bucket)
+            List<SysresFbMirror.SyslayFb> bucket, CanvasPoint origin)
         {
             if (bucket.Count == 0) return bucket;
             int minX = int.MaxValue, minY = int.MaxValue;
@@ -54,8 +52,8 @@ namespace CodeGen.Devices.Core
                 if (int.TryParse(fb.Y, out var y) && y < minY) minY = y;
             }
             if (minX == int.MaxValue) return bucket;     // no parseable coords
-            int dx = CanvasOriginX - minX;
-            int dy = CanvasOriginY - minY;
+            int dx = origin.X - minX;
+            int dy = origin.Y - minY;
             return bucket.Select(fb =>
             {
                 int x = int.TryParse(fb.X, out var px) ? px + dx : 0;
@@ -65,10 +63,10 @@ namespace CodeGen.Devices.Core
         }
 
         static int MirrorBucket(string eaeRoot, string deviceType, List<SysresFbMirror.SyslayFb> bucket,
-            string dpacFullInitId, string plcStartId)
+            CanvasPoint origin, string dpacFullInitId, string plcStartId)
         {
             if (bucket.Count == 0) return 0;
-            bucket = TranslateBucketToCanvasOrigin(bucket);
+            bucket = TranslateBucketToCanvasOrigin(bucket, origin);
             var sysdev = EaeProjectLayout.FindSysdevByDeviceType(eaeRoot, deviceType);
             if (sysdev == null) return 0;
             var sysres = EaeProjectLayout.FindSysresFor(sysdev);
