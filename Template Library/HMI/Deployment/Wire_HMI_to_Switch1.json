@@ -1,0 +1,15 @@
+{
+  "references": [
+    {
+      "diagramPath": "Physical Views",
+      "sourceSide": 0,
+      "destinationSide": 2
+    }
+  ],
+  "label": "HMI to Switch",
+  "identifier": "HMI_to_Switch1",
+  "sourceEquipment": "{{PanelId}}",
+  "sourcePortIdentifier": "LAN1",
+  "destinationEquipment": "{{SwitchId}}",
+  "destinationPortIdentifier": "Port5"
+}
