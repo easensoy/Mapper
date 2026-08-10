@@ -11,11 +11,11 @@ namespace CodeGen.Devices.Core
     // Idempotent; save is skipped when nothing changed (no spurious "Reload Solution" prompt).
     public static class FoldersXmlEmitter
     {
-        // Must match the IDs the sysdev/dfbproj/Equipment JSON path uses.
-        const string M262SysdevId  = "00000000-0000-0000-0000-000000000002";
-        const string M580SysdevId  = "00000000-0000-0000-0000-000000000003";
-        const string BX1SysdevId   = "00000000-0000-0000-0000-000000000004";
-        const string RevPiSysdevId = "00000000-0000-0000-0000-000000000005"; // RevPiDeviceEmitter
+        // Each device emitter owns its own sysdev id; restating them here is how they drift.
+        const string M262SysdevId  = CodeGen.Devices.M262.M262SysdevEmitter.M262SysdevId;
+        const string M580SysdevId  = Station2DeviceEmitter.M580SysdevId;
+        const string BX1SysdevId   = Station2DeviceEmitter.BX1SysdevId;
+        const string RevPiSysdevId = CodeGen.Devices.RevPi.RevPiDeviceEmitter.SysdevId;
 
         public sealed class EmitResult
         {
