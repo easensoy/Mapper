@@ -418,6 +418,11 @@ namespace CodeGen.Application
             }
             catch (Exception ex) { log($"[Topology][Error] network emit: {ex.Message}"); }
 
+            // The HMI PROJECT is generated with the syslay; its DEPLOYMENT must wait until here,
+            // because the panel binds to the broadcast domain and the switch the topology emitters
+            // have only just written. Both are resolved from those files rather than restated.
+            CodeGen.Hmi.HmiGenerator.EmitDeployment(ctx);
+
             // Runs AFTER the sysdev/sysres shells exist, else the .sysres stay empty and EAE reports
             // "Repair Instances" / "Missing Project Files".
             try
