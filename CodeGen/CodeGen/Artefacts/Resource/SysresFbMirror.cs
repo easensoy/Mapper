@@ -11,7 +11,7 @@ namespace CodeGen.Devices.Core
 {
     public static class SysresFbMirror
     {
-        const string LibElNs = "https://www.se.com/LibraryElements";
+        const string LibElNs = Station2DeviceEmitter.LibElNs;
 
 
 
