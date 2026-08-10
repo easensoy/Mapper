@@ -60,7 +60,10 @@ namespace MapperTests
         [Fact]
         public void MissingRequiredValueIsRejectedWithItsPath()
         {
-            var yaml = ShippedYaml().Replace("  canvasWidth: 1024\n", string.Empty);
+            // No newline in the needle: the file is LF in git and CRLF after checkout, and a "\n"
+            // here silently matches nothing on Windows, leaving the key present and the test green
+            // for the wrong reason. Removing the text alone leaves a blank line, which YAML ignores.
+            var yaml = ShippedYaml().Replace("  canvasWidth: 1024", string.Empty);
             var ex = Assert.Throws<HmiConfigException>(() => HmiDefinitionLoader.Parse(yaml));
             Assert.Contains("geometry.canvasWidth", ex.Message);
         }
