@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<Bindings>
+  <LogicalDeviceBinding LogicalDeviceId="{{DeviceId}}">
+    <LogicalDeviceService ServiceId="{{SimulationServiceId}}" LogicalPort="{{LogicalPort}}" />
+  </LogicalDeviceBinding>
+</Bindings>
