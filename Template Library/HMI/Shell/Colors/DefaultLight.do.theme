@@ -1,0 +1,126 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<DrawingObjects xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns="http://tempuri.org/Colors.xsd">
+  <Brush Name="TrackerHandleBrush" Description="The default background color of the Tracker handle">
+    <Value>Solid;[230, 230, 230];[Type=VerticalTop: ColorBlend={248, 248, 248|0};{232, 232, 232|1}]</Value>
+  </Brush>
+  <Brush Name="ButtonFalseBrush" Description="The default color fills the content with the button on false state">
+    <Value>Solid;[110, 110, 110];[Type=None]</Value>
+  </Brush>
+  <Brush Name="ButtonTrueBrush" Description="The default color fills the content with the button on true state">
+    <Value>Solid;[0, 168, 231];[Type=None]</Value>
+  </Brush>
+  <Brush Name="ButtonBrush" Description="The default color fills the content with the button">
+    <Value>Solid;[110, 110, 110];[Type=None]</Value>
+  </Brush>
+  <Brush Name="ButtonSwitchBackgroundBrush" Description="The default background color of the button">
+    <Value>Solid;[185, 185, 185];[Type=None]</Value>
+  </Brush>
+  <Brush Name="TrackerBrush" Description="The default background color of the Tracker control">
+    <Value>Null</Value>
+  </Brush>
+  <Brush Name="TrackerLineBackgroundBrush" Description="The default background color of the Tracker Line">
+    <Value>Solid;[215, 215, 215];[Type=None]</Value>
+  </Brush>
+  <Brush Name="TrackerHandleDisabledBrush" Description="The default background color of the Tracker handle on disabled state">
+    <Value>Solid;[180, 180, 180];[Type=VerticalTop: ColorBlend={180, 180, 180|0};{180, 180, 180|1}]</Value>
+  </Brush>
+  <Brush Name="TextBoxReadOnlyBrush" Description="The default color fills the content with the text box on read only state">
+    <Value>Solid;[220, 220, 220];[Type=None]</Value>
+  </Brush>
+  <Brush Name="ButtonSwitchBrush" Description="The default color fills the content with the button switch">
+    <Value>Solid;[110, 110, 110];[Type=None]</Value>
+  </Brush>
+  <Brush Name="CheckBoxBrush" Description="The default color fills the content with the checkbox">
+    <Value>Null</Value>
+  </Brush> 
+  <Brush Name="CanvasTopologyButtonBrush" Description="The default background color of the button control">
+    <Value>Solid;[230, 230, 230];[Type=VerticalTop: ColorBlend={245, 245, 245|0};{235, 235, 235|1}]</Value>
+  </Brush>
+  <Brush Name="CanvasTopologyButtonCurrentBrush" Description="The default color fills the content with the breadcrumb buttons">
+    <Value>Solid;[0, 168, 231];[Type=None]</Value>
+  </Brush>
+  <Brush Name="CanvasTopologyRoseBrush" Description="The default color fills the content with the canvas topology rose control">
+    <Value>Solid;[230, 230, 230];[Type=VerticalTop: ColorBlend={245, 245, 245|0};{235, 235, 235|1}]</Value>
+  </Brush>
+  <Brush Name="CanvasTopologyHeaderBrush" Description="The default color fills the content with the canvas topology header">
+    <Value>Solid;[230, 230, 230];[Type=VerticalTop: ColorBlend={245, 245, 245|0};{235, 235, 235|1}]</Value>
+  </Brush>
+  <Brush Name="CanvasTopologySeparatorBrush" Description="The default color fills the content with the separator in canvas topology breadcrumb">
+    <Value>Solid;[30, 30, 30];[Type=HorizontalRight: ColorBlend={255, 255, 255|0};{255, 255, 255|0.5};{200, 200, 200|0.51};{200, 200, 200|1}]</Value>
+  </Brush>
+  <Brush Name="ComboBoxArrowBackBrush" Description="The default background color of the arrow button in combobox control">
+    <Value>Solid;[230, 230, 230];[Type=VerticalTop: ColorBlend={245, 245, 245|0};{235, 235, 235|1}]</Value>
+  </Brush>
+  <Brush Name="ComboBoxArrowBackDisabledBrush" Description="The default background color of the arrow button in combobox control on disabled state">
+    <Value>Solid;[230, 230, 230];[Type=VerticalTop: ColorBlend={245, 245, 245|0};{235, 235, 235|1}]</Value>
+  </Brush>
+  <Brush Name="ComboBoxBrush" Description="The default color fills the content with the combobox">
+    <Value>Solid;[ComboBoxBackColor];[Type=None]</Value>
+  </Brush>
+  <Brush Name="ComboBoxDisabledBrush" Description="The default color fills the content with the combobox on disabled state">
+    <Value>Solid;[220, 220, 220];[Type=None]</Value>
+  </Brush>
+  <Brush Name="FaceplateBrush" Description="The default color fills the content with the faceplate">
+    <Value>Solid;[FaceplateBackColor];[Type=None]</Value>
+  </Brush>
+  <Brush Name="FpStyleRectangularHandleBrush" Description="The default color fills the content with the rectangular faceplate header">
+    <Value>Solid;[230, 230, 230];[Type=VerticalTop: ColorBlend={245, 245, 245|0};{140, 140, 140|1}]</Value>
+  </Brush>
+  <Brush Name="FpStyleRoundHandleBrush" Description="The default color fills the content with the round faceplate header">
+    <Value>Solid;[230, 230, 230];[Type=VerticalTop: ColorBlend={245, 245, 245|0};{140, 140, 140|1}]</Value>
+  </Brush>
+  <Brush Name="LabelBrush" Description="The default background color of the  Label control">
+    <Value>Null</Value>
+  </Brush>
+  <Brush Name="ButtonPushedBrush" Description="Indicates the background color of the button when it is in pushed state">
+    <Value>Solid;[0, 168, 230];[Type=None]</Value>
+  </Brush>
+  <Brush Name="LedColor" Description="${res:System.Brush.LedColor.Description}">
+    <Value>Solid;[90, 90, 90];[Type=None]</Value>
+  </Brush>
+  <Pen Name="ButtonPen" Description="The default boundary color of the Button control">
+    <Value>Color=Transparent:Width=0</Value>
+  </Pen>
+  <Pen Name="CanvasTopologyButtonPen" Description="The default boundary color of the  Canvas Topology Button control">
+    <Value>Color=220, 220, 220:Width=1</Value>
+  </Pen>
+  <Pen Name="TrackerHandlePen" Description="The default boundary color of the Tracker handle control">
+    <Value>Color=190, 190, 190:Width=1</Value>
+  </Pen>
+  <Pen Name="TrackerLinePen" Description="The default boundary color of the Tracker line control">
+    <Value>Color=190, 190, 190:Width=1</Value>
+  </Pen>
+  <Pen Name="TrackerPen" Description="The default boundary color of the  Tracker control">
+    <Value>Color=Transparent:Width=1</Value>
+  </Pen>
+  <Pen Name="RoundKnobPen" Description="The default boundary color of the Round knob control">
+    <Value>Color=White:Width=1</Value>
+  </Pen>
+  <Pen Name="TextBoxPen" Description="The default boundary color of the text box control">
+    <Value>Color=TextBoxPenColor:Width=0</Value>
+  </Pen>
+  <Pen Name="ComboBoxPen" Description="The default boundary color of the Combobox control">
+    <Value>Color=ComboBoxPenColor:Width=0</Value>
+  </Pen>
+  <Font Name="ButtonFont" Description="The default font of the text for Button control">
+    <Value>Arial, 9pt, style=Bold</Value>
+  </Font>
+  <Font Name="CheckBoxFont" Description="The default font of the text for checkbox control">
+    <Value>Arial, 9pt, style=Bold</Value>
+  </Font>
+  <Font Name="RoundKnobFont" Description="The default font of the text for Round knob control">
+    <Value>Arial, 9pt</Value>
+  </Font>
+  <Font Name="TextBoxFont" Description="The default font of the text for text box control">
+    <Value>Arial, 9pt</Value>
+  </Font>
+  <Font Name="ComboBoxFont" Description="The default font of the text for Combobox control">
+    <Value>Arial, 9pt</Value>
+  </Font>
+  <Font Name="TrackerValueFont" Description="The default font of the text for Tracker value in tracker control">
+    <Value>Arial, 9pt</Value>
+  </Font>
+  <Font Name="TrackerFont" Description="The default font of the text for Tracker control">
+    <Value>Arial, 9pt</Value>
+  </Font>
+</DrawingObjects>
