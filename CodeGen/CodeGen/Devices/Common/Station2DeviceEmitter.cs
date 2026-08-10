@@ -13,10 +13,10 @@ namespace CodeGen.Devices.Core
 {
     public static class Station2DeviceEmitter
     {
-        const string LibElNs = "https://www.se.com/LibraryElements";
+        internal const string LibElNs = "https://www.se.com/LibraryElements";
 
-        const string M580SysdevId    = "00000000-0000-0000-0000-000000000003";
-        const string BX1SysdevId     = "00000000-0000-0000-0000-000000000004";
+        internal const string M580SysdevId    = "00000000-0000-0000-0000-000000000003";
+        internal const string BX1SysdevId     = "00000000-0000-0000-0000-000000000004";
         // Sysres IDs are 16-hex chars (EAE convention).
         const string M580ResourceId  = "3E5C2B7F1A4D6C8E";
         const string BX1ResourceId   = "C9F2A4B7E1D3F5A8";
@@ -29,20 +29,18 @@ namespace CodeGen.Devices.Core
         const string M580RuntimeUuid     = "11111111-2222-3333-4444-000000000041";
         const string M580RackUuid        = "11111111-2222-3333-4444-000000000042";
         const string M580CpsUuid         = "11111111-2222-3333-4444-000000000043";
-        const string M580CpuUuid         = "11111111-2222-3333-4444-000000000044";
-        const string BX1EquipmentUuid    = "49363b74-1a84-46c1-b4cd-93f02374daec"; // HMIB1X_1
+        internal const string M580CpuUuid = "11111111-2222-3333-4444-000000000044";
+        internal const string BX1EquipmentUuid = "49363b74-1a84-46c1-b4cd-93f02374daec"; // HMIB1X_1
         const string BX1ContainerUuid    = "37f5487c-396f-477a-a9ae-9c0476a4f772"; // Softdpac_1
         const string BX1RuntimeUuid      = "52c5633b-f50b-4bc4-8fbd-e035bc5dfffa"; // RuntimeDEO
-        const string BX1EtherNetIpUuid   = "49d2ea8e-3a4f-4ead-add4-ec4ba00d5239";
+        internal const string BX1EtherNetIpUuid = "49d2ea8e-3a4f-4ead-add4-ec4ba00d5239";
 
-        const string Bx1SoftdpacDomainUuid = "db72f221-ece1-4b82-8132-731ce655044e";
+        internal const string Bx1SoftdpacDomainUuid = "db72f221-ece1-4b82-8132-731ce655044e";
         // Must match associatedScannerId on the EtherNetIPDevice AND the <ID> in the BX1 .hcf.
         const string Bx1ScannerId = "270AFDB7F209BFE8";
-        // BX1 remote-I/O coupler (TM3BC_EtherNetIP) address — covers' physical I/O island.
-        const string Bx1IoDeviceIp = "192.168.1.210";
 
         const string M580RuntimeTypeId = "7fd313c7-1da3-4618-9a5d-9ff3596aff7f";
-        const string SoftDpacTypeId    = "29797a55-a6b8-47c4-9c06-e8a42b1a38b5";
+        internal const string SoftDpacTypeId = "29797a55-a6b8-47c4-9c06-e8a42b1a38b5";
 
         // NOCONF sentinel — no broadcast domain binding.
         const string NoConfDomainUuid = "00000000-0000-0000-0000-000000000000";
@@ -502,7 +500,7 @@ namespace CodeGen.Devices.Core
                 }
             }
             File.WriteAllText(equipmentPath,
-                BuildEtherNetIpDeviceEquipmentJson(solutionId, Bx1IoDeviceIp, Bx1ScannerId));
+                BuildEtherNetIpDeviceEquipmentJson(solutionId, DeviceConfig.Current.Bx1.CouplerIp, Bx1ScannerId));
             result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, equipmentPath));
 
             // 2. DTM Content artifacts (copied verbatim from IO-folder templates).
@@ -672,7 +670,7 @@ namespace CodeGen.Devices.Core
                 result.Warnings.Add(
                     $"[BX1] EtherNet/IP HwConfiguration device model deployed (TM3BC_Ethe_* + EIPSolutionsV2 scanner; " +
                     $"{reg} hwconfigproj entr{(reg == 1 ? "y" : "ies")}). EAE compiles a POPULATED EIPSCANNER2.xml " +
-                    "(acceptance: ~1200 bytes incl. 192.168.1.210).");
+                    $"(acceptance: ~1200 bytes incl. {DeviceConfig.Current.Bx1.CouplerIp}).");
             }
             catch (Exception ex)
             {
@@ -700,8 +698,8 @@ namespace CodeGen.Devices.Core
             var hwproj = Path.Combine(eaeRoot, "HwConfiguration", "HwConfiguration.hwconfigproj");
             var problems = new List<string>();
             if (!File.Exists(scannerXml)) problems.Add($"scanner.xml MISSING ({scannerXml})");
-            else if (!File.ReadAllText(scannerXml).Contains("192.168.1.210"))
-                problems.Add("scanner.xml has NO 192.168.1.210 buscoupler");
+            else if (!File.ReadAllText(scannerXml).Contains(DeviceConfig.Current.Bx1.CouplerIp))
+                problems.Add($"scanner.xml has NO {DeviceConfig.Current.Bx1.CouplerIp} buscoupler");
             if (!File.Exists(hwproj)) problems.Add($"HwConfiguration.hwconfigproj MISSING ({hwproj})");
             else
             {
