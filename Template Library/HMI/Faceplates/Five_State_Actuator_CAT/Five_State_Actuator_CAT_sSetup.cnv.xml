@@ -1,0 +1,31 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Mapping>
+  <EventInputs>
+    <Event Name="output_event">toWorkPLC;toHomePLC</Event>
+    <Event Name="pst_event">current_state_to_process</Event>
+    <Event Name="input_event">atHome;atWork</Event>
+    <Event Name="FAULT_EVENT">fault_active;fault_code</Event>
+    <Event Name="name_event">component_name;ModeCMD</Event>
+    <Event Name="mode_event">ModeCMD</Event>
+    <Event Name="interlock_event">Work1Interlock;HomeInterlock;MoveAllowed;ActiveRuleIndex;ActiveSourceID;ActiveBlockedState</Event>
+  </EventInputs>
+  <EventOutputs />
+  <Inputs>
+    <Input Name="toHomePLC" Type="BOOL" />
+    <Input Name="toWorkPLC" Type="BOOL" />
+    <Input Name="current_state_to_process" Type="INT" />
+    <Input Name="atHome" Type="BOOL" />
+    <Input Name="atWork" Type="BOOL" />
+    <Input Name="fault_active" Type="BOOL" />
+    <Input Name="fault_code" Type="INT" />
+    <Input Name="component_name" Type="STRING" />
+    <Input Name="ModeCMD" Type="INT" />
+    <Input Name="Work1Interlock" Type="BOOL" />
+    <Input Name="HomeInterlock" Type="BOOL" />
+    <Input Name="MoveAllowed" Type="BOOL" />
+    <Input Name="ActiveRuleIndex" Type="INT" />
+    <Input Name="ActiveSourceID" Type="INT" />
+    <Input Name="ActiveBlockedState" Type="INT" />
+  </Inputs>
+  <Outputs />
+</Mapping>
