@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -16,33 +16,26 @@ namespace CodeGen.Hmi
     // component is never silently dropped.
     internal static class HmiPlanner
     {
-        // Work area from CanvasesResolutionList (1024x768 minus the 70px runtime navigation bar).
-        internal const int CanvasWidth = 1024;
-        internal const int CanvasHeight = 698;
-        private const int Margin = 16;
-        private const int Gap = 16;
-        private const int ButtonW = 208;
-        private const int ButtonH = 64;
-        private const int BannerY = 8;
-        private const int TitleY = 34;
-        private const int CaptionH = 22;
-        private const int ContentTop = 68;
-        private const int NavBandY = CanvasHeight - ButtonH - 10;
-        private const int ContentBottom = NavBandY - Gap;
-        private const int ContentRight = CanvasWidth - Margin;
-
-        private const string MainScreen = "MainScreen";
-        private const string ResidualBase = "PlantOverviewScreen";
-
         internal static HmiPlan Plan(
-            string syslayPath, string eaeProjectDir, IReadOnlyList<HmiCatTemplate> templates, bool readOnly)
+            HmiPlant plant, IReadOnlyList<HmiCatTemplate> templates, HmiDefinition def)
         {
-            var diagnostics = new List<string>();
+            var readOnly = def.ReadOnly;
+            var diagnostics = new List<string>(plant.Diagnostics);
             var byType = templates.ToDictionary(t => t.CatType, StringComparer.OrdinalIgnoreCase);
-            var fbs = SyslayReader.Read(syslayPath);
 
-            var drawable = Drawable(fbs, eaeProjectDir, byType, readOnly, diagnostics);
-            var owners = Ownership(fbs, drawable);
+            var drawable = Drawable(plant, byType, def, diagnostics);
+
+            // Ownership comes from the compiled recipe in GenerationContext, not from re-parsing the
+            // serialised Recipe parameter back out of the syslay. Same answer, one source of truth.
+            var owners = plant.Processes
+                .Where(p => drawable.ContainsKey(p.InstanceName))
+                .ToDictionary(
+                    p => p.InstanceName,
+                    p => p.Owned.Concat(p.Observed)
+                          .Where(drawable.ContainsKey)
+                          .Distinct(StringComparer.Ordinal)
+                          .ToList(),
+                    StringComparer.Ordinal);
 
             var families = new List<(string Base, string Title, List<Drawn> Items)>();
 
@@ -50,20 +43,20 @@ namespace CodeGen.Hmi
             {
                 var members = new List<Drawn> { drawable[proc] };
                 members.AddRange(owners[proc].OrderBy(n => n, StringComparer.Ordinal).Select(n => drawable[n]));
-                families.Add((ScreenBase(proc), Humanise(proc), members));
+                families.Add((ScreenBase(proc, def), Humanise(proc), members));
             }
 
             var claimed = new HashSet<string>(owners.SelectMany(o => o.Value).Concat(owners.Keys), StringComparer.Ordinal);
             var residual = drawable.Keys.Where(n => !claimed.Contains(n))
                 .OrderBy(n => n, StringComparer.Ordinal).Select(n => drawable[n]).ToList();
-            if (residual.Count > 0) families.Add((ResidualBase, "Plant Overview", residual));
+            if (residual.Count > 0) families.Add((def.Screens.ResidualName, def.Screens.ResidualTitle, residual));
 
             var screens = new List<HmiScreen>();
             var hub = new List<(string First, string Label)>();
 
             foreach (var fam in families)
             {
-                var pages = Paginate(fam.Items);
+                var pages = Paginate(fam.Items, plant, def);
                 for (var i = 0; i < pages.Count; i++)
                 {
                     var title = pages.Count > 1 ? $"{fam.Title} ({i + 1}/{pages.Count})" : fam.Title;
@@ -75,47 +68,54 @@ namespace CodeGen.Hmi
 
             var all = new List<HmiScreen>
             {
-                new(MainScreen, "Plant Monitoring", Array.Empty<HmiPlaceable>(), NavHub(hub), Array.Empty<HmiCaption>())
+                new(def.Screens.HubName, def.Screens.HubTitle, Array.Empty<HmiPlaceable>(), NavHub(hub, def), Array.Empty<HmiCaption>())
             };
-            all.AddRange(screens.Select(s => s with { Buttons = PageNav(s.Name, screens) }));
+            all.AddRange(screens.Select(s => s with { Buttons = PageNav(s.Name, screens, def) }));
 
             // Every screen carries the banner and its own title.
-            all = all.Select(s => s with { Captions = Chrome(s, readOnly).Concat(s.Captions).ToList() }).ToList();
+            all = all.Select(s => s with { Captions = Chrome(s, def).Concat(s.Captions).ToList() }).ToList();
 
             var used = families.SelectMany(f => f.Items).Select(i => i.Template)
                 .GroupBy(t => t.CatType, StringComparer.Ordinal).Select(g => g.First()).ToList();
 
-            if (readOnly) diagnostics.Add(HmiNames.CommandContractDiagnostic);
+            if (readOnly) diagnostics.Add(def.UnsupportedCommandNotice);
             return new HmiPlan(all, used, diagnostics, readOnly);
         }
 
         private sealed record Drawn(string Name, string TagName, HmiCatTemplate Template, HmiSymbol Symbol);
 
+        // Everything drawable, taken from the semantic model. A component reaches this point only if
+        // the twin declared it AND the deployment emitted it, so a placement can never dangle.
         private static Dictionary<string, Drawn> Drawable(
-            IReadOnlyList<SyslayFb> fbs, string eaeProjectDir,
-            IReadOnlyDictionary<string, HmiCatTemplate> byType, bool readOnly, List<string> diagnostics)
+            HmiPlant plant, IReadOnlyDictionary<string, HmiCatTemplate> byType,
+            HmiDefinition def, List<string> diagnostics)
         {
-            var iec = Path.Combine(eaeProjectDir, "IEC61499");
+            var readOnly = def.ReadOnly;
             var result = new Dictionary<string, Drawn>(StringComparer.Ordinal);
             var missing = new SortedSet<string>(StringComparer.Ordinal);
 
-            foreach (var fb in fbs)
+            void Add(string name, string tag, string catType)
             {
-                // Infrastructure blocks (brokers, symlinks, terminators) declare no HMI interface.
-                if (!File.Exists(Path.Combine(iec, fb.Type, fb.Type + "_HMI.fbt"))) continue;
+                if (result.ContainsKey(name)) return;
+                // Resolve the template first so both it and the symbol are provably non-null at the
+                // point of construction - the compiler could not see that through a combined lookup.
+                if (!byType.TryGetValue(catType, out var tpl)) { missing.Add(catType); return; }
 
-                if (!byType.TryGetValue(fb.Type, out var tpl) || tpl.Primary == null) { missing.Add(fb.Type); continue; }
-
-                var symbol = tpl.Primary;
+                var symbol = tpl.Primary(def.Deployment.PrimarySymbol);
+                if (symbol == null) { missing.Add(catType); return; }
                 if (readOnly && symbol.CommandCapable)
                 {
                     diagnostics.Add(
-                        $"'{fb.Name}' ({fb.Type}) is not placed: its '{symbol.Name}' symbol still declares controller " +
-                        $"outputs ({symbol.Outputs}) after stripping. Monitoring for this component is lost.");
-                    continue;
+                        $"'{name}' ({catType}) is not placed: its '{symbol.Name}' symbol declares controller " +
+                        $"outputs ({symbol.Outputs}). Monitoring for this component is lost.");
+                    return;
                 }
-                result[fb.Name] = new Drawn(Identifier(fb.Name), fb.Id, tpl, symbol);
+                result[name] = new Drawn(Identifier(name), tag, tpl, symbol);
             }
+
+            foreach (var p in plant.Processes) Add(p.InstanceName, p.TagName, p.CatType);
+            foreach (var c in plant.Components) Add(c.InstanceName, c.TagName, c.CatType);
+            foreach (var s in plant.Stations) Add(s.InstanceName, s.TagName, s.CatType);
 
             foreach (var type in missing)
                 diagnostics.Add($"CAT '{type}' declares an HMI interface but no faceplate template exists in " +
@@ -123,69 +123,39 @@ namespace CodeGen.Hmi
             return result;
         }
 
-        // process FB name -> the component FB names its own recipe drives or observes.
-        private static Dictionary<string, List<string>> Ownership(
-            IReadOnlyList<SyslayFb> fbs, IReadOnlyDictionary<string, Drawn> drawable)
-        {
-            var byRingKey = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            var byId = new Dictionary<int, string>();
-            foreach (var fb in fbs)
-            {
-                var key = (fb.Param("actuator_name") ?? fb.Param("name"))?.Trim('\'');
-                if (!string.IsNullOrEmpty(key)) byRingKey[key!] = fb.Name;
-                var id = fb.Param("actuator_id") ?? fb.Param("id");
-                if (int.TryParse(id, out var n)) byId[n] = fb.Name;
-            }
-
-            var owners = new Dictionary<string, List<string>>(StringComparer.Ordinal);
-            foreach (var fb in fbs)
-            {
-                var recipe = fb.Param("Recipe");
-                if (recipe == null || !drawable.ContainsKey(fb.Name)) continue;
-
-                var members = new List<string>();
-                void Claim(string? name)
-                {
-                    // A recipe also names process sentinels (cycle_ready, the process itself), which
-                    // resolve to no component - dropping them is correct, not a gap.
-                    if (name == null || name == fb.Name || !drawable.ContainsKey(name) || members.Contains(name)) return;
-                    members.Add(name);
-                }
-
-                foreach (Match m in Regex.Matches(recipe, @"CmdTargetName:='([^']*)'"))
-                    if (m.Groups[1].Value.Length > 0 && byRingKey.TryGetValue(m.Groups[1].Value, out var n)) Claim(n);
-                foreach (Match m in Regex.Matches(recipe, @"Wait1Id:=(\d+)"))
-                    if (byId.TryGetValue(int.Parse(m.Groups[1].Value), out var n)) Claim(n);
-
-                owners[fb.Name] = members;
-            }
-            return owners;
-        }
-
         private sealed record Page(List<HmiPlaceable> Items, List<HmiCaption> Captions);
 
-        // Shelf packing over the symbol's DECLARED footprint (what EAE uses for placement),
-        // with a caption reserved above each tile.
-        private static List<Page> Paginate(List<Drawn> items)
+        // Shelf packing over the symbol's DECLARED footprint (what EAE uses for placement), with a
+        // caption above each tile and MODEL-DERIVED detail lines below it. Those detail lines are the
+        // point: state labels, the decoded interlock rules and the controller allocation land in a
+        // compiled canvas, so the deployed panel shows model data instead of a side file nothing reads.
+        private static List<Page> Paginate(List<Drawn> items, HmiPlant plant, HmiDefinition def)
         {
+            var g = def.Geometry;
             var pages = new List<Page>();
             var page = new Page(new List<HmiPlaceable>(), new List<HmiCaption>());
-            int x = Margin, y = ContentTop, rowH = 0;
+            int x = g.Margin, y = g.ContentTop, rowH = 0;
 
             foreach (var it in items)
             {
-                var cellH = it.Symbol.Height + CaptionH;
-                if (x > Margin && x + it.Symbol.Width > ContentRight) { x = Margin; y += rowH + Gap; rowH = 0; }
-                if (y + cellH > ContentBottom && page.Items.Count > 0)
+                var detail = Detail(it.Name, plant, def);
+                var cellH = it.Symbol.Height + g.CaptionHeight + detail.Count * g.CaptionHeight;
+                if (x > g.Margin && x + it.Symbol.Width > g.ContentRight) { x = g.Margin; y += rowH + g.Gap; rowH = 0; }
+                if (y + cellH > g.ContentBottom && page.Items.Count > 0)
                 {
                     pages.Add(page);
                     page = new Page(new List<HmiPlaceable>(), new List<HmiCaption>());
-                    x = Margin; y = ContentTop; rowH = 0;
+                    x = g.Margin; y = g.ContentTop; rowH = 0;
                 }
 
                 page.Captions.Add(new HmiCaption($"cap_{it.Name}", Humanise(it.Name), x, y, false));
-                page.Items.Add(new HmiPlaceable(it.Name, it.TagName, it.Template.CatType, it.Symbol, x, y + CaptionH));
-                x += it.Symbol.Width + Gap;
+                page.Items.Add(new HmiPlaceable(it.Name, it.TagName, it.Template.CatType, it.Symbol, x, y + g.CaptionHeight));
+
+                var dy = y + g.CaptionHeight + it.Symbol.Height;
+                for (var i = 0; i < detail.Count; i++)
+                    page.Captions.Add(new HmiCaption($"det{i}_{it.Name}", detail[i], x, dy + i * g.CaptionHeight, false, true));
+
+                x += it.Symbol.Width + g.Gap;
                 rowH = Math.Max(rowH, cellH);
             }
 
@@ -193,43 +163,110 @@ namespace CodeGen.Hmi
             return pages;
         }
 
-        private static IReadOnlyList<HmiCaption> Chrome(HmiScreen s, bool readOnly)
+        // The model-derived lines for one placed instance. Everything here comes from Control.xml via
+        // the semantic model or from the exact emitted RuleTable - never from a template.
+        private static IReadOnlyList<string> Detail(string instance, HmiPlant plant, HmiDefinition def)
         {
-            var chrome = new List<HmiCaption> { new("screenTitle", s.Title, Margin, TitleY, true) };
-            if (readOnly) chrome.Insert(0, new HmiCaption("roBanner", HmiNames.ReadOnlyBanner, Margin, BannerY, true));
+            var lines = new List<string>();
+            var d = def.Screens;
+
+            var c = plant.ByInstance(instance);
+            if (c != null)
+            {
+                if (d.ShowAllocation)
+                    lines.Add($"{c.Controller} / {c.Resource}" + (c.Slot >= 0 ? $" / slot {c.Slot}" : string.Empty));
+
+                if (d.ShowStates && c.States.Count > 0)
+                    lines.Add(Clip("States: " + string.Join(", ", c.States.Select(s => $"{s.Value}={s.Name}")),
+                                   d.MaxStateChars));
+
+                if (d.ShowInterlocks)
+                    foreach (var r in c.Interlocks)
+                        lines.Add(Clip(r.Explain(c.DisplayName), d.MaxInterlockChars));
+                return lines;
+            }
+
+            var p = plant.Processes.FirstOrDefault(x => string.Equals(x.InstanceName, instance, StringComparison.Ordinal));
+            if (p != null)
+            {
+                if (d.ShowAllocation)
+                    lines.Add($"{p.Controller} / {p.Resource}" + (p.Slot >= 0 ? $" / slot {p.Slot}" : string.Empty));
+                if (d.ShowStates && p.Phases.Count > 0)
+                    lines.Add(Clip("Phases: " + string.Join(", ", p.Phases.Select(s => $"{s.Value}={s.Name}")),
+                                   d.MaxStateChars));
+                lines.Add($"Recipe: {p.Rows.Count} step(s), owns {p.Owned.Count}, observes {p.Observed.Count}");
+                return lines;
+            }
+
+            var st = plant.Stations.FirstOrDefault(x => string.Equals(x.InstanceName, instance, StringComparison.Ordinal));
+            if (st != null)
+            {
+                if (d.ShowAllocation)
+                    lines.Add($"{st.Controller} / {st.Resource}" +
+                              (st.ReceivesModeBroadcast ? " / mode chain" : " / no mode broadcast"));
+
+                // The mode/cycle vocabulary decodes the live LL_Mode / LL_CycleType the faceplate
+                // already binds; without it the operator reads a bare number. Printed ONLY where the
+                // station actually receives the mode chain - on one that does not, the numbers never
+                // change and the legend would imply a selection the controller cannot see.
+                if (d.ShowProtocolLegend && st.ReceivesModeBroadcast)
+                {
+                    lines.Add(Clip("Modes: " + Vocabulary(def.ModeLabels), d.MaxProtocolChars));
+                    lines.Add(Clip("Cycle: " + Vocabulary(def.CycleLabels), d.MaxProtocolChars));
+                }
+            }
+            return lines;
+        }
+
+        private static string Vocabulary(IReadOnlyDictionary<int, string> labels) =>
+            string.Join(", ", labels.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}={kv.Value}"));
+
+        private static string Clip(string text, int max) =>
+            text.Length <= max ? text : text.Substring(0, Math.Max(0, max - 3)) + "...";
+
+        private static IReadOnlyList<HmiCaption> Chrome(HmiScreen s, HmiDefinition def)
+        {
+            var g = def.Geometry;
+            var chrome = new List<HmiCaption> { new("screenTitle", s.Title, g.Margin, g.TitleY, true) };
+            if (def.ReadOnly) chrome.Insert(0, new HmiCaption("roBanner", def.BannerText, g.Margin, g.BannerY, true));
             return chrome;
         }
 
-        private static IReadOnlyList<HmiNavButton> NavHub(List<(string First, string Label)> families)
+        private static IReadOnlyList<HmiNavButton> NavHub(List<(string First, string Label)> families, HmiDefinition def)
         {
+            var g = def.Geometry;
             var buttons = new List<HmiNavButton>();
-            int x = Margin, y = ContentTop;
+            int x = g.Margin, y = g.ContentTop;
             foreach (var f in families)
             {
-                if (x + ButtonW > ContentRight) { x = Margin; y += ButtonH + Gap; }
+                if (x + g.ButtonWidth > g.ContentRight) { x = g.Margin; y += g.ButtonHeight + g.Gap; }
                 buttons.Add(new HmiNavButton(f.First, f.First, f.Label, x, y));
-                x += ButtonW + Gap;
+                x += g.ButtonWidth + g.Gap;
             }
             return buttons;
         }
 
-        private static IReadOnlyList<HmiNavButton> PageNav(string screenName, List<HmiScreen> screens)
+        private static IReadOnlyList<HmiNavButton> PageNav(string screenName, List<HmiScreen> screens, HmiDefinition def)
         {
-            var buttons = new List<HmiNavButton> { new(MainScreen, MainScreen, "Main Screen", Margin, NavBandY) };
+            var g = def.Geometry;
+            var buttons = new List<HmiNavButton>
+            {
+                new(def.Screens.HubName, def.Screens.HubName, def.Screens.HubButtonText, g.Margin, g.NavBandY)
+            };
 
             var idx = screens.FindIndex(s => s.Name == screenName);
             var baseName = BaseOf(screenName);
             var prev = screens.Take(idx).LastOrDefault(s => BaseOf(s.Name) == baseName);
             var next = screens.Skip(idx + 1).FirstOrDefault(s => BaseOf(s.Name) == baseName);
 
-            var x = Margin + ButtonW + Gap;
+            var x = g.Margin + g.ButtonWidth + g.Gap;
             if (prev != null)
             {
-                buttons.Add(new HmiNavButton("prev_" + prev.Name, prev.Name, "Previous Page", x, NavBandY));
-                x += ButtonW + Gap;
+                buttons.Add(new HmiNavButton("prev_" + prev.Name, prev.Name, def.Screens.PreviousText, x, g.NavBandY));
+                x += g.ButtonWidth + g.Gap;
             }
             if (next != null)
-                buttons.Add(new HmiNavButton("next_" + next.Name, next.Name, "Next Page", x, NavBandY));
+                buttons.Add(new HmiNavButton("next_" + next.Name, next.Name, def.Screens.NextText, x, g.NavBandY));
             return buttons;
         }
 
@@ -237,7 +274,7 @@ namespace CodeGen.Hmi
         // travels in TagName, never in this name, so sanitising here is safe.
         private static string Identifier(string name)
         {
-            var s = new string(name.Select(c => char.IsLetterOrDigit(c) || c == '_' ? c : '_').ToArray());
+            var s = new string(name.Select(ch => char.IsLetterOrDigit(ch) || ch == '_' ? ch : '_').ToArray());
             return s.Length > 0 && char.IsDigit(s[0]) ? "_" + s : s;
         }
 
@@ -262,7 +299,8 @@ namespace CodeGen.Hmi
 
         private static string PageName(string baseName, int index) => index == 0 ? baseName : baseName + (index + 1);
 
-        private static string ScreenBase(string processName) => Identifier(processName).Replace("_", string.Empty) + "Screen";
+        private static string ScreenBase(string processName, HmiDefinition def) =>
+            Identifier(processName).Replace("_", string.Empty) + def.Screens.Suffix;
     }
 
     internal sealed record SyslayFb(string Id, string Name, string Type, IReadOnlyDictionary<string, string> Parameters)
