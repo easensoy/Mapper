@@ -18,15 +18,15 @@ namespace CodeGen.Devices.Core
         const string Switch1Uuid          = "11111111-2222-3333-4444-000000000060";
 
         // Endpoint UUIDs MUST match what M262TopologyEmitter + Station2DeviceEmitter write.
-        const string M262EquipmentUuid    = "11111111-2222-3333-4444-000000000010";
-        const string M580CpuUuid          = "11111111-2222-3333-4444-000000000044";
+        const string M262EquipmentUuid    = CodeGen.Devices.M262.M262TopologyEmitter.DefaultM262Uuid;
+        const string M580CpuUuid          = Station2DeviceEmitter.M580CpuUuid;
         const string FallbackSolutionUuid = "00000000-0000-0000-0000-000000000000";
 
-        const string Bx1EtherNetIpUuid    = "49d2ea8e-3a4f-4ead-add4-ec4ba00d5239"; // EtherNetIPDevice_1 (.210)
-        const string Bx1HmiB1XUuid        = "49363b74-1a84-46c1-b4cd-93f02374daec"; // HMIB1X_1 (BX1 panel .209)
+        const string Bx1EtherNetIpUuid    = Station2DeviceEmitter.BX1EtherNetIpUuid;  // EtherNetIPDevice_1
+        const string Bx1HmiB1XUuid        = Station2DeviceEmitter.BX1EquipmentUuid;   // HMIB1X_1 (BX1 panel)
         // RevPi NIC_2 uuid — MUST match RevPiDeviceEmitter.RevPiNicUuid. The RevPi connects to the switch via
         // its NIC (reference Wire 275: NIC_2[Port1] -> Switch); without this wire the Revolution_Pi floats.
-        const string RevPiNicUuid         = "11111111-2222-3333-4444-000000000051";
+        const string RevPiNicUuid         = CodeGen.Devices.RevPi.RevPiDeviceEmitter.NicUuid;
 
         public sealed class EmitResult
         {
