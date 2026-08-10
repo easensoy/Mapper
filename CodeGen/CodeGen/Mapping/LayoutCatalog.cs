@@ -15,6 +15,7 @@ namespace CodeGen.Configuration
         public List<RosterEntry> Components { get; set; } = new();
         public IdOrder IdOrder { get; set; } = new();
         public List<string> CasBusOrder { get; set; } = new();
+        public FbBodySize FbBody { get; set; } = new();
         public Dictionary<string, string> Aliases { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
         // Read once at the entry point and carried on the run's DeploymentProfile. Not an ambient
@@ -32,7 +33,35 @@ namespace CodeGen.Configuration
         public int ColumnPitchX { get; set; }
         public int FrameOriginY { get; set; }
         public int FrameHeight { get; set; }
+        public CanvasPoint DeviceCanvasOrigin { get; set; } = new();
+        public FramePad FramePadding { get; set; } = new();
         public Dictionary<string, int> RowY { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    }
+
+    public sealed class CanvasPoint
+    {
+        public int X { get; set; }
+        public int Y { get; set; }
+    }
+
+    public sealed class FramePad
+    {
+        public int Left { get; set; }
+        public int Top { get; set; }
+        public int Right { get; set; }
+        public int Bottom { get; set; }
+    }
+
+    // Frame-sizing allowance per FB Type. Only height varies, so a type is a single number and an
+    // unlisted one takes the default -- no table entry is needed just to repeat the common case.
+    public sealed class FbBodySize
+    {
+        public int Width { get; set; }
+        public int DefaultHeight { get; set; }
+        public Dictionary<string, int> HeightByType { get; set; } = new(StringComparer.Ordinal);
+
+        public int HeightOf(string? fbType) =>
+            fbType != null && HeightByType.TryGetValue(fbType, out int h) ? h : DefaultHeight;
     }
 
     public sealed class LayoutBand
@@ -107,6 +136,18 @@ namespace CodeGen.Configuration
                 if (known.Contains(kv.Key))
                     errors.Add($"alias '{kv.Key}' is also a declared component, so the alias can never resolve");
             }
+
+            if (c.Geometry.ColumnPitchX <= 0) errors.Add("geometry.columnPitchX must be positive");
+            if (c.FbBody.Width <= 0) errors.Add("fbBody.width must be positive");
+            if (c.FbBody.DefaultHeight <= 0) errors.Add("fbBody.defaultHeight must be positive");
+            // A zero pad or origin would silently produce frames that do not enclose their FBs, which
+            // EAE then grows westward around a neighbour's zone.
+            var geo = c.Geometry;
+            if (geo.DeviceCanvasOrigin.X <= 0 || geo.DeviceCanvasOrigin.Y <= 0)
+                errors.Add("geometry.deviceCanvasOrigin must be positive in both axes");
+            if (geo.FramePadding.Left <= 0 || geo.FramePadding.Top <= 0 ||
+                geo.FramePadding.Right <= 0 || geo.FramePadding.Bottom <= 0)
+                errors.Add("geometry.framePadding must be positive on all four sides");
 
             if (errors.Count > 0)
                 throw new InvalidOperationException(
