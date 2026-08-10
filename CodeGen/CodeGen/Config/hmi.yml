@@ -1,0 +1,318 @@
+﻿# VueOneMapper - native EAE HMI configuration.
+#
+# THIS FILE IS THE SINGLE SOURCE OF TRUTH FOR HMI PRESENTATION, PROTOCOL AND CAPABILITY DATA.
+# CodeGen/CodeGen/Hmi reads exactly the keys below and carries no defaults of its own: a missing
+# required value is an ERROR, not a silent fallback, and an unknown key is rejected rather than
+# ignored. If a presentation or protocol fact is not here, it does not exist.
+#
+# What must NOT go in this file: component names, recipe steps, interlock rules, controller
+# allocation or anything else that varies with the model. Those come from Control.xml via
+# GenerationContext and from the finished syslay.
+
+# Bump only alongside a loader change; an absent or unknown version is rejected.
+schemaVersion: 1
+
+policy:
+  # The generated HMI is monitoring-only. The generator refuses to run with this false, because
+  # the deployed controller cannot honour a command (see capabilities.engineProbe).
+  readOnly: true
+  # What to do when a deployed CAT declares an HMI contract no profile matches.
+  # fail = abort generation; skip = do not place, record a diagnostic.
+  unknownContract: skip
+  bannerText: "MONITORING ONLY - HMI COMMANDS DISABLED"
+  unsupportedCommandNotice: >-
+    Controller Start/Stop and Setup control are unavailable by contract;
+    control-logic support is required before they can be enabled safely.
+  # Operator-facing text for every reason a capability can be withheld. One entry per
+  # HmiUnavailableReason member; a missing or unknown key is rejected by the loader.
+  unavailableReasons:
+    NoContract:             "the deployed CAT ships no HMI contract"
+    NoOutputEvent:          "the deployed HMI contract declares no output event for this command"
+    NoAcceptedFeedback:     "the contract exposes no accepted-state feedback, so acceptance could not be shown"
+    ModeChainUnreachable:   "the station mode chain does not reach this controller"
+    EngineDoesNotImplement: "the deployed process engine declares the port but its ECC never reads it"
+    ReadOnlyPolicy:         "the generated HMI is monitoring-only"
+
+# ---------------------------------------------------------------------------------------------
+# Geometry. All values are EAE design units; the work area is the canvas minus the runtime
+# navigation bar declared by CanvasesResolutionList.
+geometry:
+  canvasWidth: 1024
+  canvasHeight: 768
+  navigationBarHeight: 70
+  margin: 16
+  gap: 16
+  captionHeight: 22
+  bannerY: 8
+  titleY: 34
+  contentTop: 68
+  button:
+    width: 208
+    height: 64
+    bottomInset: 10
+  # Used only when a symbol template declares no geometry at all.
+  symbolFallback:
+    width: 300
+    height: 204
+
+style:
+  canvasBrush: CanvasBrush
+  buttonBrush: ButtonFalseBrush
+  buttonFont: { family: "HMI Sans Serif", size: 12, bold: false }
+  captionFont: { family: BigCanvasTopologyButtonFont }
+  detailFont: { family: "HMI Sans Serif", size: 9, bold: false }
+  buttonTextColor: { r: 255, g: 255, b: 255 }
+  captionColor: { r: 0, g: 0, b: 0 }
+  emphasisColor: { r: 176, g: 0, b: 0 }
+  detailColor: { r: 64, g: 64, b: 64 }
+
+screens:
+  hubName: MainScreen
+  hubTitle: "Plant Monitoring"
+  residualName: PlantOverviewScreen
+  residualTitle: "Plant Overview"
+  suffix: Screen
+  hubButtonText: "Main Screen"
+  previousText: "Previous Page"
+  nextText: "Next Page"
+  # Model-derived detail rendered as compiled, bound-adjacent text under each tile.
+  detail:
+    showStates: true
+    showInterlocks: true
+    showAllocation: true
+    # The mode/cycle vocabulary a station can actually be commanded into. Shown ONLY on a station
+    # that receives the mode chain - printing it on one that does not would tell the operator the
+    # panel understands a selection the controller will never see.
+    showProtocolLegend: true
+    maxStateChars: 96
+    maxInterlockChars: 150
+    maxProtocolChars: 150
+
+# ---------------------------------------------------------------------------------------------
+# Protocol. Values the deployed Station/Area CAT vocabulary exchanges. These are properties of
+# the generated FB contract, not of any model.
+protocol:
+  modes:
+    - { value: 0,   label: "No Mode Selected" }
+    - { value: 1,   label: "Automatic" }
+    - { value: 2,   label: "Manual" }
+    - { value: 3,   label: "Setup" }
+    - { value: 9,   label: "Initial Position" }
+    - { value: 100, label: "Undetermined" }
+  cycleTypes:
+    - { value: 0, label: "Stop" }
+    - { value: 1, label: "Run Continuous" }
+    - { value: 2, label: "Stop At End Of Cycle" }
+    - { value: 3, label: "Single Cycle" }
+
+  # Runtime-state vocabularies: the values a CAT publishes on current_state_to_process.
+  # `match` selects the profile from the DEPLOYED contract signature, never from a CAT name.
+  # `labels` is the fallback vocabulary used when the twin's stops cannot be mapped one-to-one.
+  statesProfiles:
+    - id: twoPosition
+      match: { inputEventCarries: [atHome, atWork] }
+      labels: ["At Home", "To Work", "At Work", "To Home", "At Home (returned)"]
+    - id: threePosition
+      match: { inputEventCarries: [atHome, atWork1, atWork2] }
+      labels: ["At Home", "To Work 1", "At Work 1", "To Work 2", "At Work 2", "To Home", "At Home (returned)"]
+    - id: booleanSensor
+      match: { inputEventCarries: [State] }
+      labels: ["Off", "On"]
+
+# ---------------------------------------------------------------------------------------------
+# Capabilities. Discovery is by contract signature only. Each entry says what output event the
+# HMI would need, what data it must carry, and which accepted-state feedback proves the command
+# landed. `anyFeedback` means at least one must be present.
+capabilities:
+  commands:
+    - purpose: ModeSelection
+      outputEvent: MCNF
+      outputData: [Mode]
+      anyFeedback: [System_Mode, LL_Mode, LocalMode, ModeCMD]
+      needsModeChain: false
+      needsRecipeEngine: false
+    - purpose: CycleControl
+      outputEvent: CTCNF
+      outputData: [CycleType]
+      anyFeedback: [System_Cycle_Type, LL_CycleType, LocalCycleType]
+      needsModeChain: false
+      needsRecipeEngine: true
+    - purpose: FaultReset
+      outputEvent: FRCNF
+      outputData: []
+      anyFeedback: [LL_Fault_Status, LL_Fault, fault_active, fault_code]
+      needsModeChain: false
+      needsRecipeEngine: false
+    - purpose: ManualStep
+      outputEvent: MREQO
+      outputData: []
+      alsoRequiresOutputEvent: NSREQO
+      anyFeedback: [ManualStepReady, ManualStepComplete]
+      needsModeChain: false
+      needsRecipeEngine: true
+    - purpose: SetupJog
+      outputEvent: cmd_event
+      # The widest matching set wins, which is also what distinguishes a two-position actuator
+      # from a three-position one - no state-count guess.
+      outputDataVariants:
+        - [toWork1, toWork2, toHome]
+        - [toWork, toHome]
+      anyFeedback: [current_state_to_process, atHome, atWork]
+      needsModeChain: true
+      needsRecipeEngine: false
+
+  # A pure feedback capability: it commands nothing, so read-only never suppresses it.
+  interlockDiagnostics:
+    requiredFeedback: [ActiveSourceID, ActiveBlockedState]
+
+  # What the deployed process engine must actually honour. A port the ECC never reads is a port
+  # the controller ignores, so a control bound to it would be inert.
+  engineProbe:
+    typeName: ProcessRuntime_Generic_v1
+    autoGatingTokens: [Mode, CycleType]
+    manualSteppingTokens: [Mode, MREQ, NSREQ]
+
+# ---------------------------------------------------------------------------------------------
+# Deployment. HMI project registration data that is otherwise embedded in the emitters.
+# ---------------------------------------------------------------------------------------------
+# The runtime canvas topology written into CanvasesResolutionList.xml. EAE's HMI runtime reads
+# this to size the panel, pick the shell canvas and decide which chrome to draw, so it belongs to
+# the presentation policy rather than to C#. The work-area height is derived from geometry
+# (canvasHeight - navigationBarHeight) and is deliberately NOT restated here.
+runtime:
+  # The NxtControl schema version the file declares.
+  schemaVersion: 1.6.0.0
+  # The shell canvas class the runtime starts in, before it navigates to the first work canvas.
+  startCanvas: StartCanvas_2
+  resolution:
+    name:            1024x768
+    template:        Default
+    resizeBehaviour: Standard
+    canvasButtonHeight: 30
+  # The second, resolution-independent entry EAE expects to be present.
+  fallbackResolution:
+    name:            Without resolution
+    resizeBehaviour: None
+    canvasButtonHeight: 30
+    siblingButtonCount: 5
+    childButtonCount:   5
+  # Runtime chrome. All monitoring affordances - none of them command the plant.
+  chrome:
+    logger:             true
+    login:              true
+    currentUser:        true
+    languageButton:     true
+    runtimeConnection:  true
+    navigationBar:      true
+    newVersionDeployed: true
+    navigationControl:  1
+
+deployment:
+  hmiFolderName: HMI
+  canvasNamespaceSuffix: Canvases
+  symbolNamespaceSuffix: Symbols
+  defaultLibraryNamespace: Main
+  generatedBanner: "Generated by VueOneMapper from the VueOne model. Do not edit by hand."
+  ownershipManifest: .hmi-generated.txt
+  primarySymbol: sDefault
+  # Symbol families that exist only to command the plant. Never deployed, never registered.
+  commandSymbols: [sSetup, setup, sManual]
+
+# =================================================================================================
+# DEPLOYMENT / DEVICE FACTS
+#
+# The fixed vendor identities, addresses, ports, filenames and library versions the generated HMI
+# panel is deployed with. CodeGen/CodeGen/Hmi holds none of these as literals - a missing or
+# malformed value fails before any output is written, naming the exact YAML path.
+#
+# What must NOT go here: anything the generated project already states authoritatively. The
+# solution id comes from IEC61499.dfbproj, the broadcast domain is found by matching this file's
+# host address against the emitted BroadcastDomain_*.json, the switch uuid is read from the emitted
+# topology equipment, and the active system directory is discovered. Duplicating those would let
+# the HMI silently attach to the wrong object.
+# =================================================================================================
+# ---------------------------------------------------------------------------------------------
+# Fixed vendor/platform identities. These are properties of the HMI product being deployed, not
+# of any model, so they are stable across every generation. All must be distinct except the two
+# that are deliberately the null GUID.
+identities:
+  # The HMI logical device (HMI_NET). Its id names the emitted .sysdev and binding files.
+  device:                 a441cfb6-5523-4d2c-a152-aacecdcef78e
+  # The engineering workstation that hosts the panel runtime.
+  workstation:            c2d95ca9-038c-4234-94e7-dbd0d2e177d6
+  workstationNic:         d31ea8d5-6dbe-4894-9d5d-5b5885b68ccc
+  workstationRuntime:     0a062e36-bf86-4578-83af-e7ea841f23ab
+  # The Harmony panel and its Soft dPAC container.
+  panel:                  25e3cc7c-d98a-486a-963b-c5ab645331c9
+  panelRuntime:           3a2ddbd2-8267-4ebb-a73e-6743b3db76aa
+  panelContainer:         87e8a4b7-4c64-42cd-aa81-4c610b6e237c
+  panelContainerRuntime:  d0643772-7619-49ca-92e1-54a8649dbcac
+  # Runtime type discriminators.
+  runtimeType:            422ee926-a34a-4ab5-9e8f-dce0782579f0
+  containerRuntimeType:   29797a55-a6b8-47c4-9c06-e8a42b1a38b5
+  simulationService:      F7C90C9D-BD8B-4D0B-B8DE-C659AF6EABCC
+  # The null device id. Deliberately shared by the two RuntimeDEOs that bind no device, so the
+  # duplicate-GUID check exempts exactly this key and no other.
+  nullDevice:             00000000-0000-0000-0000-000000000000
+
+# ---------------------------------------------------------------------------------------------
+# Addressing. hostIp is the workstation NIC; internalRuntimeIp is the panel's Soft dPAC container.
+#
+# The container address is LOAD-BEARING and must not be moved casually: a Soft dPAC container is a
+# macvlan child with its own MAC and is EAE's deploy/login target, so it must own its address
+# exclusively. It sits at .3 because .1 is the RevPi host - a post-generation validator fails the
+# whole generation on a container collision, which is exactly what a silent revert to .1 produced.
+network:
+  hostIp:            192.168.1.2
+  internalRuntimeIp: 192.168.1.3
+  subnet:            192.168.1.0
+  # Matches the July 30 reference: Simulation.Binding LogicalPort="61999" and the
+  # topology equipment logicalPort/logicalPortSecured pair.
+  logicalPort:       61999
+  securePort:        51443
+
+# The IEC61499 library reference the HMI project requires.
+library:
+  name:    SE.Standard
+  version: 24.1.0.4
+
+# The logical-device type/name the generated .sysdev must declare, checked after emission.
+logicalDevice:
+  type: HMI_NET
+  name: HMI_NET
+
+# ---------------------------------------------------------------------------------------------
+# Deployment artefacts. Each entry is one template rendered to one destination; the emitter walks
+# this list rather than carrying a WriteTemplate call per file. `into` selects the destination
+# root the generator resolves: system (the active System GUID folder), device (the HMI device
+# folder) or topology.
+artefacts:
+  - template: HMI.sysdev.xml
+    into:     system
+    name:     "{DeviceId}.sysdev"
+  - template: Simulation.Binding.xml
+    into:     device
+    name:     "{DeviceId}.Simulation.Binding.xml"
+  - template: Empty.Properties.xml
+    into:     device
+    name:     E0601B81-4A3A-4A96-B6C2-007BDC680D59.Properties.xml
+  - template: Runtime.Properties.xml
+    into:     device
+    name:     F513CAE3-7194-4086-936C-02912EA0B352.Properties.xml
+  - template: Equipment_Workstation_1.json
+    into:     topology
+    name:     Equipment_Workstation_1.json
+    register: topologyProj
+  - template: Equipment_HMIP6_1.json
+    into:     topology
+    name:     Equipment_HMIP6_1.json
+    register: topologyProj
+  - template: Wire_HMI_to_Switch1.json
+    into:     topology
+    name:     Wire_HMI_to_Switch1.json
+    register: topologyProj
+
+# Which emitted topology equipment the HMI wire attaches to. The uuid is READ from that file, not
+# stated here, so the wire can never point at a switch that no longer exists.
+switch:
+  equipmentFile: Equipment_Switch_1.json
