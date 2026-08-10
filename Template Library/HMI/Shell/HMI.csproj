@@ -1,0 +1,321 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
+  <PropertyGroup>
+    <ProjectGuid>{75FD96E8-E935-47EE-8572-DA9966AF39C9}</ProjectGuid>
+    <ProjectTypeGuids>{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <OutputType>Library</OutputType>
+    <RootNamespace>HMI</RootNamespace>
+    <AssemblyName>HMI</AssemblyName>
+    <ProjectType>HMI</ProjectType>
+    <HMILibraries>HMIBaseSymbols:</HMILibraries>
+    <Theme>DefaultLight:Default|DefaultLight</Theme>
+    <NxtVersion>24.1.0.0</NxtVersion>
+    <ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>None</ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>
+    <CanvasLookAndFeel>Theme</CanvasLookAndFeel>
+    <WarningsAsErrors>0618</WarningsAsErrors>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <EnableDefaultItems>False</EnableDefaultItems>
+    <AssemblyVersion>24.1.0.0</AssemblyVersion>
+    <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
+    <Product>HMI</Product>
+    <AppendTargetFrameworkToOutputPath>False</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Platform)' == 'AnyCPU' ">
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <RegisterForComInterop>False</RegisterForComInterop>
+    <GenerateSerializationAssemblies>Auto</GenerateSerializationAssemblies>
+    <BaseAddress>4194304</BaseAddress>
+    <FileAlignment>4096</FileAlignment>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Platform)' == 'Windows' ">
+    <RegisterForComInterop>False</RegisterForComInterop>
+    <GenerateSerializationAssemblies>Auto</GenerateSerializationAssemblies>
+    <BaseAddress>4194304</BaseAddress>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <FileAlignment>4096</FileAlignment>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+    <OutputPath>bin\$(Platform)\Debug\</OutputPath>
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>Full</DebugType>
+    <Optimize>False</Optimize>
+    <CheckForOverflowUnderflow>True</CheckForOverflowUnderflow>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+    <OutputPath>bin\$(Platform)\Release</OutputPath>
+    <DebugSymbols>false</DebugSymbols>
+    <DebugType>None</DebugType>
+    <Optimize>False</Optimize>
+    <CheckForOverflowUnderflow>False</CheckForOverflowUnderflow>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'Verify' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>Full</DebugType>
+    <CheckForOverflowUnderflow>True</CheckForOverflowUnderflow>
+    <Optimize>False</Optimize>
+    <OutputPath>bin\$(Platform)\Verify\</OutputPath>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|Windows' ">
+    <DefineConstants>DEBUG%3bTRACE</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DefineConstants>TRACE</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|Windows' ">
+    <DefineConstants>TRACE</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="CommunicationProfile">
+      <HintPath>CommunicationProfile</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="HMIBaseSymbols">
+      <HintPath>HMIBaseSymbols</HintPath>
+    </Reference>
+    <Reference Include="NxtControl.ComponentModel">
+      <HintPath>NxtControl.ComponentModel</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="NxtControl.GuiFramework">
+      <HintPath>NxtControl.GuiFramework</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="SE.AppBase.HMI">
+      <Version>24.1.0.21</Version>
+      <HintPath>SE.AppBase.HMI</HintPath>
+    </Reference>
+    <Reference Include="SE.AppCommonProcess.HMI">
+      <Version>24.1.0.21</Version>
+      <HintPath>SE.AppCommonProcess.HMI</HintPath>
+    </Reference>
+    <Reference Include="SE.AppConveying.HMI">
+      <Version>24.1.0.21</Version>
+      <HintPath>SE.AppConveying.HMI</HintPath>
+    </Reference>
+    <Reference Include="SE.AppLiquidFood.HMI">
+      <Version>24.1.0.21</Version>
+      <HintPath>SE.AppLiquidFood.HMI</HintPath>
+    </Reference>
+    <Reference Include="SE.AppSequence.HMI">
+      <Version>24.1.0.21</Version>
+      <HintPath>SE.AppSequence.HMI</HintPath>
+    </Reference>
+    <Reference Include="SE.AppSingleLinePowerMonitoring.HMI">
+      <Version>24.1.0.21</Version>
+      <HintPath>SE.AppSingleLinePowerMonitoring.HMI</HintPath>
+    </Reference>
+    <Reference Include="SE.AppStateManagement.HMI">
+      <Version>24.1.0.21</Version>
+      <HintPath>SE.AppStateManagement.HMI</HintPath>
+    </Reference>
+    <Reference Include="SE.AppWWW.HMI">
+      <Version>24.1.0.21</Version>
+      <HintPath>SE.AppWWW.HMI</HintPath>
+    </Reference>
+    <Reference Include="SE.DPAC.HMI">
+      <Version>24.1.0.33</Version>
+      <HintPath>SE.DPAC.HMI</HintPath>
+    </Reference>
+    <Reference Include="SE.FieldDevice.HMI">
+      <Version>24.1.0.31</Version>
+      <HintPath>SE.FieldDevice.HMI</HintPath>
+    </Reference>
+    <Reference Include="SE.HwCommon.HMI">
+      <Version>24.1.0.19</Version>
+      <HintPath>SE.HwCommon.HMI</HintPath>
+    </Reference>
+    <Reference Include="SE.IoATV.HMI">
+      <Version>24.1.0.26</Version>
+      <HintPath>SE.IoATV.HMI</HintPath>
+    </Reference>
+    <Reference Include="SE.IoTMx.HMI">
+      <Version>24.1.0.19</Version>
+      <HintPath>SE.IoTMx.HMI</HintPath>
+    </Reference>
+    <Reference Include="SE.IoX80.HMI">
+      <Version>24.1.0.19</Version>
+      <HintPath>SE.IoX80.HMI</HintPath>
+    </Reference>
+    <Reference Include="SE.ModbusGateway.HMI">
+      <Version>24.1.0.17</Version>
+      <HintPath>SE.ModbusGateway.HMI</HintPath>
+    </Reference>
+    <Reference Include="Standard.IoEtherNetIP.HMI">
+      <Version>24.1.0.27</Version>
+      <HintPath>Standard.IoEtherNetIP.HMI</HintPath>
+    </Reference>
+    <Reference Include="Standard.IoModbus.HMI">
+      <Version>24.1.0.32</Version>
+      <HintPath>Standard.IoModbus.HMI</HintPath>
+    </Reference>
+    <Reference Include="Standard.IoModbusSlave.HMI">
+      <Version>24.1.0.25</Version>
+      <HintPath>Standard.IoModbusSlave.HMI</HintPath>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="ActuatorsScreen.cnv.cs">
+      <Canvas>true</Canvas>
+    </Compile>
+    <Compile Include="ActuatorsScreen.cnv.Designer.cs">
+      <DependentUpon>ActuatorsScreen.cnv.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Area_CAT\Area_CAT.def.cs" />
+    <Compile Include="Area_CAT\Area_CAT.event.cs" />
+    <Compile Include="Area_CAT\Area_CAT_sDefault.cnv.cs" />
+    <Compile Include="Area_CAT\Area_CAT_sDefault.cnv.Designer.cs">
+      <DependentUpon>Area_CAT_sDefault.cnv.cs</DependentUpon>
+    </Compile>
+    <Compile Include="AssemblyInfo.cs" />
+    <Compile Include="Colors\ProjectColors.cs" />
+    <Compile Include="Colors\ProjectDrawingObjects.cs" />
+    <Compile Include="Five_State_Actuator_CAT\Five_State_Actuator_CAT.def.cs" />
+    <Compile Include="Five_State_Actuator_CAT\Five_State_Actuator_CAT.event.cs" />
+    <Compile Include="Five_State_Actuator_CAT\Five_State_Actuator_CAT_sDefault.cnv.cs" />
+    <Compile Include="Five_State_Actuator_CAT\Five_State_Actuator_CAT_sDefault.cnv.Designer.cs">
+      <DependentUpon>Five_State_Actuator_CAT_sDefault.cnv.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Five_State_Actuator_CAT\Five_State_Actuator_CAT_sFault.cnv.cs" />
+    <Compile Include="Five_State_Actuator_CAT\Five_State_Actuator_CAT_sFault.cnv.Designer.cs">
+      <DependentUpon>Five_State_Actuator_CAT_sFault.cnv.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Five_State_Actuator_CAT\Five_State_Actuator_CAT_sInterlock.cnv.cs" />
+    <Compile Include="Five_State_Actuator_CAT\Five_State_Actuator_CAT_sInterlock.cnv.Designer.cs">
+      <DependentUpon>Five_State_Actuator_CAT_sInterlock.cnv.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Five_State_Actuator_CAT\Five_State_Actuator_CAT_sSetup.cnv.cs" />
+    <Compile Include="Five_State_Actuator_CAT\Five_State_Actuator_CAT_sSetup.cnv.Designer.cs">
+      <DependentUpon>Five_State_Actuator_CAT_sSetup.cnv.cs</DependentUpon>
+    </Compile>
+    <Compile Include="MainScreen.cnv.cs">
+      <Canvas>true</Canvas>
+    </Compile>
+    <Compile Include="MainScreen.cnv.Designer.cs">
+      <DependentUpon>MainScreen.cnv.cs</DependentUpon>
+    </Compile>
+    <Compile Include="ManualScreen.cnv.cs">
+      <Canvas>true</Canvas>
+    </Compile>
+    <Compile Include="ManualScreen.cnv.Designer.cs">
+      <DependentUpon>ManualScreen.cnv.cs</DependentUpon>
+    </Compile>
+    <Compile Include="ManualScreen2.cnv.cs">
+      <Canvas>true</Canvas>
+    </Compile>
+    <Compile Include="ManualScreen2.cnv.Designer.cs">
+      <DependentUpon>ManualScreen2.cnv.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Process1_Generic\Process1_Generic.def.cs" />
+    <Compile Include="Process1_Generic\Process1_Generic.event.cs" />
+    <Compile Include="Process1_Generic\Process1_Generic_sAutomatic.cnv.cs" />
+    <Compile Include="Process1_Generic\Process1_Generic_sAutomatic.cnv.Designer.cs">
+      <DependentUpon>Process1_Generic_sAutomatic.cnv.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Process1_Generic\Process1_Generic_sManual.cnv.cs" />
+    <Compile Include="Process1_Generic\Process1_Generic_sManual.cnv.Designer.cs">
+      <DependentUpon>Process1_Generic_sManual.cnv.cs</DependentUpon>
+    </Compile>
+    <Compile Include="SetupScreen.cnv.cs">
+      <Canvas>true</Canvas>
+    </Compile>
+    <Compile Include="SetupScreen.cnv.Designer.cs">
+      <DependentUpon>SetupScreen.cnv.cs</DependentUpon>
+    </Compile>
+    <Compile Include="SetupScreen2.cnv.cs">
+      <Canvas>true</Canvas>
+    </Compile>
+    <Compile Include="SetupScreen2.cnv.Designer.cs">
+      <DependentUpon>SetupScreen2.cnv.cs</DependentUpon>
+    </Compile>
+    <Compile Include="StartCanvas_2.cnv.cs" />
+    <Compile Include="StartCanvas_2.cnv.Designer.cs">
+      <DependentUpon>StartCanvas_2.cnv.cs</DependentUpon>
+    </Compile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Alarms\AlarmClasses.xml" />
+    <None Include="Area_CAT\Area_CAT.Design.resx" />
+    <None Include="CanvasesResolutionList.xml" />
+    <None Include="Colors\Default.color.theme" />
+    <None Include="Colors\Default.do.theme" />
+    <None Include="Colors\DefaultLight.color.theme" />
+    <None Include="Colors\DefaultLight.do.theme" />
+    <None Include="Colors\ProjectColors.xml" />
+    <None Include="Colors\ProjectDrawingObjects.xml" />
+    <None Include="Five_State_Actuator_CAT\Five_State_Actuator_CAT.Design.resx" />
+    <None Include="GraphicsList.xml" />
+    <None Include="ImageStorage\ImageStorage.xml" />
+    <none Include="Languages\neutral\Dictionary.Resources.xml" />
+    <None Include="Process1_Generic\Process1_Generic.Design.resx" />
+    <none Include="Theme\Languages\neutral\Dictionary.Resources.xml" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="ActuatorsScreen.cnv.resx">
+      <DependentUpon>ActuatorsScreen.cnv.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Alarms\AlarmClasses.xml" />
+    <EmbeddedResource Include="Alarms\SystemAlarmClasses.xml" />
+    <EmbeddedResource Include="Area_CAT\Area_CAT_sDefault.cnv.resx">
+      <DependentUpon>Area_CAT_sDefault.cnv.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Area_CAT\Area_CAT_sDefault.cnv.xml">
+      <DependentUpon>Area_CAT_sDefault.cnv.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Configurations\HistoryTrend.xml" />
+    <EmbeddedResource Include="Configurations\Journalling.xml" />
+    <EmbeddedResource Include="Configurations\TagValueEditor.xml" />
+    <EmbeddedResource Include="Five_State_Actuator_CAT\Five_State_Actuator_CAT_sDefault.cnv.resx">
+      <DependentUpon>Five_State_Actuator_CAT_sDefault.cnv.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Five_State_Actuator_CAT\Five_State_Actuator_CAT_sDefault.cnv.xml">
+      <DependentUpon>Five_State_Actuator_CAT_sDefault.cnv.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Five_State_Actuator_CAT\Five_State_Actuator_CAT_sFault.cnv.resx">
+      <DependentUpon>Five_State_Actuator_CAT_sFault.cnv.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Five_State_Actuator_CAT\Five_State_Actuator_CAT_sInterlock.cnv.resx">
+      <DependentUpon>Five_State_Actuator_CAT_sInterlock.cnv.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Five_State_Actuator_CAT\Five_State_Actuator_CAT_sSetup.cnv.resx">
+      <DependentUpon>Five_State_Actuator_CAT_sSetup.cnv.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Five_State_Actuator_CAT\Five_State_Actuator_CAT_sSetup.cnv.xml">
+      <DependentUpon>Five_State_Actuator_CAT_sSetup.cnv.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="MainScreen.cnv.resx">
+      <DependentUpon>MainScreen.cnv.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="ManualScreen.cnv.resx">
+      <DependentUpon>ManualScreen.cnv.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="ManualScreen2.cnv.resx">
+      <DependentUpon>ManualScreen2.cnv.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Process1_Generic\Process1_Generic_sAutomatic.cnv.resx">
+      <DependentUpon>Process1_Generic_sAutomatic.cnv.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Process1_Generic\Process1_Generic_sAutomatic.cnv.xml">
+      <DependentUpon>Process1_Generic_sAutomatic.cnv.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Process1_Generic\Process1_Generic_sManual.cnv.resx">
+      <DependentUpon>Process1_Generic_sManual.cnv.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Process1_Generic\Process1_Generic_sManual.cnv.xml">
+      <DependentUpon>Process1_Generic_sManual.cnv.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="SetupScreen.cnv.resx">
+      <DependentUpon>SetupScreen.cnv.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="SetupScreen2.cnv.resx">
+      <DependentUpon>SetupScreen2.cnv.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="StartCanvas_2.cnv.resx">
+      <DependentUpon>StartCanvas_2.cnv.cs</DependentUpon>
+    </EmbeddedResource>
+  </ItemGroup>
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+  <Import Project="$(SharpDevelopBinPath)\SharpDevelop.Build.CSharp.Standard.targets" />
+</Project>
