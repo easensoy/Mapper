@@ -1,0 +1,78 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Colors xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns="http://tempuri.org/Colors.xsd">
+  <Normal Name="CanvasBackColor" R="230" G="230" B="230" Description="The background color of the canvas" />
+  <Normal Name="GroupBoxBackColor" R="200" G="200" B="200" Description="Defines the default background color of the group box" />
+  <Normal Name="TextBoxBackColor" R="255" G="255" B="255" Description="Defines the default background color of the text box" />
+  <Normal Name="TextBoxPenColor" R="200" G="200" B="200" Description="The color of the pen for text box" />
+  <Normal Name="TrackerScaleColor" R="150" G="150" B="150" Description="The color of the ticks in tracker scale" />
+  <Normal Name="TrackerTextColor" R="130" G="130" B="130" Description="The color of the text in the tracker" />
+  <Normal Name="TrackerValueColor" R="0" G="168" B="231" Description="The color of the value for the tracker control" />
+  <Normal Name="ButtonInnerBorderColor" R="90" G="90" B="90" Description="The color of the inner border of button" />
+  <Normal Name="LabelTextColor" R="100" G="100" B="100" Description="The color of the text in label" />
+  <Normal Name="TrackerLineBackColor" R="200" G="200" B="200" Description="Defines the default background color of the tracker line" />
+  <Normal Name="TrackerScaleDisabledColor" R="180" G="180" B="180" Description="Indicates the disabled state of ticks in tracker scale" />
+  <Normal Name="TrackerTextDisabledColor" R="180" G="180" B="180" Description="Indicates disabled state of tracker text" />
+  <Normal Name="TrackerValueDisabledColor" R="180" G="180" B="180" Description="Indicates disabled state of tracker value" />
+  <Normal Name="ButtonTextColor" R="255" G="255" B="255" Description="The color of the text in button" />
+  <Normal Name="TextBoxTextColor" R="90" G="90" B="90" Description="The color of the text in text box" />
+  <Normal Name="CheckBoxTextColor" R="70" G="70" B="70" Description="The color of the text in checkbox" />
+  <Normal Name="CheckBoxTextDisabledColor" R="180" G="180" B="180" Description="Defines the text color to be shown on disable of the checkbox" />
+  <Normal Name="TextBoxTextDisabledColor" R="180" G="180" B="180" Description="Defines the default text color to be shown on disable of the text box" />
+  <Normal Name="ButtonPenColor" R="110" G="110" B="110" Description="The color of the pen of button" />
+  <Normal Name="ButtonTextColorFalse" R="255" G="255" B="255" Description="Defines the default color of the text when value is false" />
+  <Normal Name="ButtonTextDisabledColor" R="160" G="160" B="160" Description="Defines the text color to be shown on disable of the button" />
+  <Normal Name="CanvasTopologyButtonTextColor" R="150" G="150" B="150" Description="Defines the default button text color of the canvas topology" />
+  <Normal Name="ComboBoxArrowColor" R="110" G="110" B="110" Description="The color of the arrow in the combobox arrow button" />
+  <Normal Name="ComboBoxArrowDisabledColor" R="180" G="180" B="180" Description="Indicates disabled state of ComboBox Arrow" />
+  <Normal Name="ComboBoxPenColor" R="200" G="200" B="200" Description="The color of the pen for combobox" />
+  <Normal Name="ComboBoxTextColor" R="90" G="90" B="90" Description="The color of the text in combobox" />
+  <Normal Name="ComboBoxTextDisabledColor" R="180" G="180" B="180" Description="Defines the text color to be shown on disable of the combobox" />
+  <Normal Name="FaceplateBackColor" R="230" G="230" B="230" Description="Defines the default background color of the faceplate" />
+  <Normal Name="LabelPenColor" R="220" G="220" B="220" Description="The color of the pen for label" />
+  <Normal Name="LabelBackColor" R="240" G="240" B="240" Description="Defines the default background color of the label" />
+  <Normal Name="ButtonTextColorTrue" R="255" G="255" B="255" Description="Defines the default color of the text when value is true" />
+  <Normal Name="ButtonTextColorMouseDown" R="255" G="255" B="255" Description="Defines the color of button when mouse down is performed" />
+  <Normal Name="CanvasTopologyButtonCurrentTextColor" R="255" G="255" B="255" Description="Default text color of the canvas topology button" />
+  <Normal Name="FpStyleRectangularHeader3DLineBright" R="200" G="200" B="200" Description="Rectangular faceplate frame header vertical separator with black color" />
+  <Normal Name="FpStyleRectangularHeader3DLineDark" R="150" G="150" B="150" Description="Rectangular faceplate frame header vertical separator with dark black color" />
+  <Normal Name="FpStyleRectangularWindowInnerBorder" R="150" G="150" B="150" Description="Rectangular faceplate frame window inner border with white color" />
+  <Normal Name="FpStyleRectangularWindowOuterBorder" R="130" G="130" B="130" Description="Rectangular faceplate frame window outer border with black color" />
+  <Normal Name="RoundKnobInnerCircleColor" R="0" G="168" B="231" Description="The color of the inner circle in round knob" />
+  <Normal Name="RoundKnobInnerCircleDisabledColor" R="180" G="180" B="180" Description="Indicates disabled state of round knob inner circle" />
+  <Normal Name="RoundKnobKnobColor" R="210" G="210" B="210" Description="The color of the knob in round knob" />
+  <Normal Name="RoundKnobNeedleColor" R="110" G="110" B="110" Description="The color of the needle in round knob" />
+  <Normal Name="RoundKnobScaleColor" R="130" G="130" B="130" Description="The color of the scale in round knob" />
+  <Normal Name="RoundKnobScaleDisabledColor" R="180" G="180" B="180" Description="Indicates disabled state of round knob scale" />
+  <Normal Name="RoundKnobTextColor" R="60" G="60" B="60" Description="The color of the text in the round knob" />
+  <Normal Name="RoundKnobTextDisabledColor" R="180" G="180" B="180" Description="Indicates disabled state of text in round knob" />
+  <Normal Name="ComboBoxBackColor" R="255" G="255" B="255" Description="Defines the default background color of the combobox" />
+  <Normal Name="CanvasTopologyButtonColor" R="110" G="110" B="110" Description="The color of the button of canvas topology panel" />
+  <Normal Name="FpStyleRectangularHeaderBackground" R="150" G="150" B="150" Description="Rectangular faceplate frame window header background with black color" />
+  <Normal Name="FpStyleRectangularLineClose" R="100" G="100" B="100" Description="Indicates color of the faceplate close button" />
+  <Normal Name="FpStyleRectangularTitle" R="100" G="100" B="100" Description="Rectangular faceplate frame window title text with white color" />
+  <Normal Name="FpStyleRoundTitle" R="100" G="100" B="100" Description="Rounded faceplate frame title text with white color" />
+  <Normal Name="FpStyleRoundWindowBorder" R="140" G="140" B="140" Description="Rounded faceplate frame window border with white color" />
+  <Normal Name="FpStyleRectangularHeaderLine1" R="140" G="140" B="140" Description="Rectangular faceplate frame header separator with black color"/>
+  <Normal Name="FpStyleRectangularHeaderLine2" R="230" G="230" B="230" Description="Rectangular faceplate frame header separator with gray color" />
+  <Normal Name="FpStyleRectangularWindowBackground" R="230" G="230" B="230" Description="Rectangular faceplate frame window background with gray color" />
+  <Normal Name="FpStyleRoundHeaderBackground" R="140" G="140" B="140" Description="Rounded faceplate frame header background with black color" />
+  <Normal Name="FpStyleRoundWindowBackground" R="230" G="230" B="230" Description="Defines the color for faceplate round style background window color" />
+  <Normal Name="FpStyleRoundHeaderLine" R="114" G="114" B="114" Description="Rounded faceplate frame header separator with gray color"/>
+  <Normal Name="TrendAxisLabelColor" R="120" G="120" B="120" Description="The color of the label of trend axis" />
+  <Normal Name="TrendAxisTickColor" R="120" G="120" B="120" Description="The color of the tick in trend axis" />
+  <Normal Name="TrendBackColor" R="220" G="220" B="220" Description="The Background color of the trend" />
+  <Normal Name="TrendGridColor" R="220" G="220" B="220" Description="The color of the grid in the Trend control"/>
+  <Normal Name="TrendLegendColor" R="120" G="120" B="120" Description="The color of the Trend legend "/>
+  <Normal Name="TrendLegendFontColor" R="120" G="120" B="120" Description="Defines the font color of the trend legend"/>
+  <Normal Name="LedFrameColor" R="200" G="200" B="200" Description="Defines the default color of the frame of LED" />
+  <Normal Name="LedFalseColor" R="60" G="60" B="60" Description="Indicates the false state of LED" />
+  <Normal Name="LedDefaultColor" R="200" G="200" B="200" Description="The default color of the LED" />
+  <Normal Name="LedBackColor" R="150" G="150" B="150" Description="Defines the default led color" />
+  <Normal Name="LedTrueColor" R="0" G="168" B="231" Description="Indicates the true state of LED"/>
+  <Normal Name="TrendAxisColor" R="180" G="180" B="180" Description="The color of the TrendAxis" />
+  <Normal Name="FpStyleRoundLineClose" R="100" G="100" B="100" Description="Rounded faceplate frame close button line with white color" />
+  <Normal Name="ActiveHelpButton" R="100" G="100" B="100" Description="Indicates active state of Help button"/>
+  <Normal Name="InactiveHelpButton" R="128" G="128" B="128" Description="Indicates inactive state of Help button" />
+  <Normal Name="RuntimeConnectionNotConnected" R="255" G="255" B="255" A="255" Description="Defines the color for representing when the HMI and Device connection is not operational" />
+  <Normal Name="RuntimeConnectionConnected" R="70" G="70" B="70" A="255" Description="Defines the color for representing when the HMI and Device connection is in operational" />
+</Colors>
