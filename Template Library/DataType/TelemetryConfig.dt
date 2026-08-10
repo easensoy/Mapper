@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE DataType SYSTEM "../LibraryElement.dtd">
+<DataType Namespace="Main" Name="TelemetryConfig" Comment="Telemetry connection config: wraps the MQTT_CONNECTION inputs">
+  <Identification Standard="1131-3" />
+  <VersionInfo Organization="WMG" Version="0.1" Author="easensoy" Date="6/21/2026" Remarks="single STRUCT input for Telemetry" />
+  <CompilerInfo />
+  <StructuredType>
+    <VarDeclaration Name="QI" Type="BOOL" />
+    <VarDeclaration Name="ConnectionID" Type="STRING[80]" />
+    <VarDeclaration Name="URL" Type="STRING[255]" />
+    <VarDeclaration Name="ClientIdentifier" Type="STRING[80]" />
+    <VarDeclaration Name="ValidateCert" Type="USINT" />
+    <VarDeclaration Name="CACert" Type="STRING[255]" />
+  </StructuredType>
+</DataType>
