@@ -1,4 +1,4 @@
-# Global generation constants. Sizes must match the deployed FBT ArraySize patches.
+﻿# Global generation constants. Sizes must match the deployed FBT ArraySize patches.
 recipeArraySize: 100    # Process1_Generic recipe arrays
 
 # Actuator settle times (ms) written into the syslay when Control.xml gives none.
@@ -14,3 +14,7 @@ coverGripperAckMs: 200
 # arrest the home-drive coast, then de-energises. SAFE direction is UP: a longer pulse always errs
 # toward AtWork1 / away from the ejector. If the arm rests toward AtWork2, raise; toward AtWork1, lower.
 bearingPnpHomeBrakeMs: 160
+
+# EAE holds a generated file open while its editor is on that artefact, so a write can fail with a
+# sharing violation that clears on its own. Retry rather than abort the whole generation.
+fileWriteRetries: 8
