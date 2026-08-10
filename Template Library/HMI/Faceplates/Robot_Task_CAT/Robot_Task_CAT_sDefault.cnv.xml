@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Mapping>
+  <EventInputs>
+    <Event Name="pst_out">current_state_to_process</Event>
+    <Event Name="CNF_CHANGE">PulseActive</Event>
+  </EventInputs>
+  <EventOutputs />
+  <Inputs>
+    <Input Name="current_state_to_process" Type="INT" />
+    <Input Name="PulseActive" Type="BOOL" />
+  </Inputs>
+  <Outputs />
+</Mapping>
