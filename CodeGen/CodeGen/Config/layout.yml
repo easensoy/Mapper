@@ -19,6 +19,13 @@ geometry:
   columnPitchX: 1700
   frameOriginY: 1700
   frameHeight: 5300
+  # A device-local sysres canvas (M580/BX1) translates the FBs it hosts so the group's bounding-box
+  # top-left lands here. The shared syslay's raw coordinates are global and would put a device-local
+  # canvas off-screen. The syslay and the M262 sysres keep the global coordinates and ignore this.
+  deviceCanvasOrigin: { x: 2000, y: 2000 }
+  # Grown around the FBs each zone frame owns. Left is widest because the ring wires loop out of the
+  # FBs' left edges and must stay inside the frame.
+  framePadding: { left: 500, top: 220, right: 250, bottom: 260 }
   # Y per row, spaced to clear the EAE-rendered FB body in the row above (Process1_Generic ~800,
   # Five_State ~1400) while keeping the canvas tight.
   rowY:
@@ -114,6 +121,35 @@ components:
   - { name: Telemetry_M262,   plc: M262, column: 2, row: Hmi,      owner: "" }
   - { name: Telemetry_M580,   plc: M580, column: 1, row: Hmi,      owner: "" }
   - { name: Telemetry_BX1,    plc: BX1,  column: 0, row: Hmi,      owner: "" }
+
+# How much canvas each FB body is assumed to occupy, used only to size the zone frames. Kept ~15-20%
+# above the observed EAE render so a MoveStyle="AnyContained" frame still ENCLOSES the body rather
+# than growing westward around a neighbour's FBs. Width is uniform; only height varies by type.
+# Raise a type only if EAE shows it overflowing. An unlisted type takes defaultHeight.
+fbBody:
+  width: 1400
+  defaultHeight: 1100
+  heightByType:
+    Five_State_Actuator_CAT: 1800
+    Five_State_Actuator_No_Sensors_CAT: 1800
+    Vacuum_Gripper_CAT: 1800
+    Seven_State_Actuator_CAT: 1500
+    Seven_State_Actuator_Centre_Home_CAT: 1800
+    Robot_Task_CAT: 1500
+    Process1_Generic: 1000
+    Sensor_Bool_CAT: 650
+    Area: 600
+    Station: 600
+    Area_CAT: 500
+    Station_CAT: 500
+    CaSAdptrTerminator: 450
+    PLC_RW_M580: 1200
+    PLC_RW_BX1: 1200
+    PLC_RW_M262: 1200
+    DPAC_FULLINIT: 500
+    plcStart: 500
+    MQTT_CONNECTION: 600
+    Telemetry: 800
 
 # Assigns the state_table index / actuator_id / recipe Wait1Id. See the ORDER note at the top.
 idOrder:
