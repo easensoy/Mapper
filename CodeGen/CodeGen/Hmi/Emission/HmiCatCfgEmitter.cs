@@ -1,4 +1,5 @@
-using System.IO;
+﻿using System.IO;
+using System.Linq;
 using System.Text;
 
 namespace CodeGen.Hmi
@@ -7,26 +8,37 @@ namespace CodeGen.Hmi
     // HMI interface FB (IThis) and every symbol/faceplate canvas EAE must compile for that type.
     internal static class HmiCatCfgEmitter
     {
-        // Emits a .cfg for every deployed CAT that has a faceplate template.
+        // Deploy-time entry point, called from TemplateLibraryDeployer (outside CodeGen/Hmi) while the
+        // CAT artefacts are being laid down - well before the HMI itself is generated. It writes the
+        // .cfg straight into the CAT folder so a deployed CAT is never left without one; the HMI
+        // generation later re-renders the same file through the staged path.
         internal static int EmitAll(string eaeProjectDir, string templateLibraryPath)
         {
             if (string.IsNullOrWhiteSpace(templateLibraryPath)) return 0;
+            var policy = HmiDefinitionLoader.Load().Deployment;
 
             var written = 0;
             foreach (var tpl in HmiTemplateLibrary.Load(templateLibraryPath))
             {
-                if (!Directory.Exists(Path.Combine(eaeProjectDir, "IEC61499", tpl.CatType))) continue;
-                Emit(eaeProjectDir, tpl);
+                var catDir = Path.Combine(eaeProjectDir, "IEC61499", tpl.CatType);
+                if (!Directory.Exists(catDir)) continue;
+                EmitTo(catDir, tpl, policy);
+
+                // EAE expects the HMI sidecar to exist even when empty.
+                var meta = Path.Combine(catDir, $"{tpl.CatType}_HMI.meta.xml");
+                if (!File.Exists(meta)) File.WriteAllBytes(meta, System.Array.Empty<byte>());
                 written++;
             }
             return written;
         }
 
-        internal static void Emit(string eaeProjectDir, HmiCatTemplate tpl)
+        // Renders <CAT>.cfg into a STAGING directory as <CAT>.cfg. The caller copies it into the
+        // IEC61499 tree only after every validator has passed, so a rejected generation never leaves
+        // a half-updated registration behind.
+        internal static void EmitTo(string stagingDir, HmiCatTemplate tpl, HmiDeploymentPolicy policy)
         {
             var cat = tpl.CatType;
-            var catDir = Path.Combine(eaeProjectDir, "IEC61499", cat);
-            if (!Directory.Exists(catDir)) return;
+            Directory.CreateDirectory(stagingDir);
 
             var hmi = cat + "_HMI";
             var b = new StringBuilder();
@@ -43,7 +55,7 @@ namespace CodeGen.Hmi
             foreach (var sym in tpl.Symbols.OrderBy(s => s.IsFaceplate).ThenBy(s => s.Name, StringComparer.Ordinal))
             {
                 // Setup canvases exist only to drive the plant; a monitoring HMI never registers them.
-                if (HmiNames.IsCommandSymbol(sym.Name)) continue;
+                if (policy.IsCommandSymbol(sym.Name)) continue;
 
                 var stem = $"..\\HMI\\{cat}\\{cat}_{sym.Name}";
                 var faceplate = sym.IsFaceplate ? " IsFaceplate=\"true\"" : string.Empty;
@@ -64,11 +76,7 @@ namespace CodeGen.Hmi
             b.Append("  <HWConfiguration xsi:nil=\"true\" />\r\n");
             b.Append("</CAT>");
 
-            File.WriteAllText(Path.Combine(catDir, $"{cat}.cfg"), b.ToString(), new UTF8Encoding(false));
-
-            // EAE expects the sidecar to exist even when empty.
-            var meta = Path.Combine(catDir, $"{hmi}.meta.xml");
-            if (!File.Exists(meta)) File.WriteAllBytes(meta, System.Array.Empty<byte>());
+            File.WriteAllText(Path.Combine(stagingDir, $"{cat}.cfg"), b.ToString(), new UTF8Encoding(false));
         }
 
         private static string Plugin(string plugin, string type, string value) =>
