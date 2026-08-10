@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE DataType SYSTEM "../LibraryElement.dtd">
+<DataType Namespace="Main" Name="TargetStates" Comment="Actuator target states: Work1/Work2/Home">
+  <Identification Standard="1131-3" />
+  <VersionInfo Organization="WMG" Version="0.1" Author="easensoy" Date="6/21/2026" Remarks="single STRUCT input wrapping the target states" />
+  <CompilerInfo />
+  <StructuredType>
+    <VarDeclaration Name="Work1" Type="INT" />
+    <VarDeclaration Name="Work2" Type="INT" />
+    <VarDeclaration Name="Home" Type="INT" />
+  </StructuredType>
+</DataType>
