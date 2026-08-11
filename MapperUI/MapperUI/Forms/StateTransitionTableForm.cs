@@ -1,9 +1,9 @@
 ﻿using CodeGen.Configuration;
+using CodeGen.Domain.Twin;
 using CodeGen.Mapping;
 using CodeGen.Models;
 using CodeGen.Translation;
 using CodeGen.Translation.Process;
-using static CodeGen.Translation.Process.Recipes.RecipeComponentLookup;
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -135,28 +135,26 @@ namespace MapperUI
             var transitionRows = CreateTransitionTable();
             var notes = CreateNotesTable();
 
-            var processes = components
-                .Where(c => string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase))
-                .ToList();
+            var twin = TwinModel.Build(components);
 
-            foreach (var process in processes)
+            foreach (var process in twin.Processes.Select(p => p.Source))
             {
-                AddTransitionRows(transitionRows, process, components);
-                AddRecipeRows(recipeRows, notes, process, components);
+                AddTransitionRows(transitionRows, process, components, twin);
+                AddRecipeRows(recipeRows, notes, process, components, twin);
             }
 
             return new Snapshot(recipeRows, transitionRows, notes);
         }
 
         static void AddTransitionRows(DataTable table, VueOneComponent process,
-            IReadOnlyList<VueOneComponent> components)
+            IReadOnlyList<VueOneComponent> components, TwinModel twin)
         {
             int stateIndex = 0;
             foreach (var state in process.States)
             {
                 if (state.Transitions.Count == 0)
                 {
-                    AddTransitionRow(table, process, stateIndex, state, null, null, 0, components);
+                    AddTransitionRow(table, process, stateIndex, state, null, null, 0, components, twin);
                     stateIndex++;
                     continue;
                 }
@@ -165,13 +163,13 @@ namespace MapperUI
                 {
                     if (transition.Conditions.Count == 0)
                     {
-                        AddTransitionRow(table, process, stateIndex, state, transition, null, 0, components);
+                        AddTransitionRow(table, process, stateIndex, state, transition, null, 0, components, twin);
                         continue;
                     }
 
                     for (int i = 0; i < transition.Conditions.Count; i++)
                         AddTransitionRow(table, process, stateIndex, state, transition,
-                            transition.Conditions[i], i + 1, components);
+                            transition.Conditions[i], i + 1, components, twin);
                 }
                 stateIndex++;
             }
@@ -180,14 +178,14 @@ namespace MapperUI
         static void AddTransitionRow(DataTable table, VueOneComponent process,
             int stateIndex, VueOneState state, VueOneTransition? transition,
             VueOneCondition? condition, int conditionIndex,
-            IReadOnlyList<VueOneComponent> components)
+            IReadOnlyList<VueOneComponent> components, TwinModel twin)
         {
             var destState = transition == null
                 ? null
                 : process.States.FirstOrDefault(s =>
                     string.Equals(s.StateID, transition.DestinationStateID,
                         StringComparison.OrdinalIgnoreCase));
-            var target = condition == null ? null : LookupComponent(condition.ComponentID, components);
+            var target = condition == null ? null : twin.ById(condition.ComponentID)?.Source;
             var targetState = condition == null || target == null
                 ? null
                 : target.States.FirstOrDefault(s =>
@@ -212,7 +210,7 @@ namespace MapperUI
         }
 
         static void AddRecipeRows(DataTable table, DataTable notes,
-            VueOneComponent process, IReadOnlyList<VueOneComponent> components)
+            VueOneComponent process, IReadOnlyList<VueOneComponent> components, TwinModel twin)
         {
             var contents = BuildGlobalContents(process, components);
 
@@ -221,7 +219,7 @@ namespace MapperUI
             var allocation = new CodeGen.Mapping.ControllerAllocation(
                 new CodeGen.Mapping.DeploymentRoster(
                     CodeGen.Mapping.DeploymentProfile.M262Only(CodeGen.Configuration.LayoutCatalog.Load())));
-            bool ringsMerged = CodeGen.Translation.Process.Recipes.FeedRingMerge.Needed(components, allocation);
+            bool ringsMerged = CodeGen.Translation.Process.Recipes.FeedRingMerge.Needed(twin, allocation);
 
             RecipeArrays recipe;
             try
@@ -231,7 +229,7 @@ namespace MapperUI
                 int topCover = CodeGen.Mapping.TemplateMap.TopCoverSensorNames
                     .Select(n => slots.TryGetValue(n, out int s) ? s : -1).FirstOrDefault(s => s >= 0);
                 recipe = ProcessRecipeArrayGenerator.Generate(
-                    process, contents, components, slots, allocation, ringsMerged, topCover);
+                    process, contents, twin, slots, allocation, ringsMerged, topCover);
             }
             catch (Exception ex)
             {
@@ -243,7 +241,7 @@ namespace MapperUI
                 .Select(kv => new
                 {
                     Id = kv.Value,
-                    Component = LookupComponent(kv.Key, components)
+                    Component = twin.ById(kv.Key)?.Source
                 })
                 .Where(x => x.Component != null)
                 .ToDictionary(x => x.Id, x => x.Component!);
