@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using CodeGen.Configuration;
 using CodeGen.Devices.Core;
 
@@ -14,7 +14,7 @@ namespace CodeGen.Devices.M262
             var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
             var template = HwConfigVerbatimCopier.ResolveTemplatePath(
                 cfg.M262HcfTemplatePath, cfg.IoFolderPath, "M262IO.hcf");
-            return HwConfigVerbatimCopier.Deploy(eaeRoot, "M262_dPAC", "SE.DPAC", template);
+            return HwConfigVerbatimCopier.Deploy(eaeRoot, CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.M262), CodeGen.Mapping.PlcTargets.DeviceNamespace, template);
         }
     }
 }
