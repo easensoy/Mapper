@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using CodeGen.Configuration;
+using CodeGen.Domain.Twin;
 using CodeGen.Mapping;
 using CodeGen.Models;
 using CodeGen.Translation.Process;
@@ -30,7 +31,12 @@ namespace CodeGen.Translation
         public DeploymentRoster Roster { get; }
         public ControllerAllocation Allocation { get; }
 
-        // The twin, parsed once.
+        // The twin, parsed and resolved once. Every component, state, transition and condition reference
+        // is indexed and bound here, so no later stage re-scans the component list to answer a question
+        // the model already settles.
+        public TwinModel Twin { get; }
+
+        // The same components in declaration order, for the stages still consuming the flat list.
         public IReadOnlyList<VueOneComponent> Components { get; }
 
         // The station slice the layout emits: the roster's ordered sensors and actuators, resolved against
@@ -39,6 +45,12 @@ namespace CodeGen.Translation
 
         // The per-controller report rings fold into one; see FeedRingMerge for what makes a twin need it.
         public bool RingsMerged { get; }
+
+        // The Feed-controller nodes the discharge tail splices into the assembly ring, in order. Empty
+        // when the twin declares no tail, which closes every ring locally. Decided once because the
+        // syslay and the sysres must exclude exactly the same names: a node left on a locally-closed ring
+        // while the segment also drives it gets two sources on one stateRprtCmd_in.
+        public IReadOnlyList<string> CrossRingSegment { get; }
 
         // state_table slot the top-cover sensor reports on; see StateTableAllocation for why it is computed
         // rather than positional.
@@ -56,17 +68,20 @@ namespace CodeGen.Translation
 
         private GenerationContext(MapperConfig config, DeploymentProfile profile,
             DeploymentRoster roster, ControllerAllocation allocation,
-            IReadOnlyList<VueOneComponent> components, StationContents station,
-            bool ringsMerged, int topCoverSensorSlot, IReadOnlyDictionary<string, int> slots,
+            TwinModel twin, IReadOnlyList<VueOneComponent> components, StationContents station,
+            bool ringsMerged, IReadOnlyList<string> crossRingSegment, int topCoverSensorSlot,
+            IReadOnlyDictionary<string, int> slots,
             ProcessHandoffPlan handoffs, IReadOnlyDictionary<string, RecipeArrays> recipes)
         {
             Config = config;
             Profile = profile;
             Roster = roster;
             Allocation = allocation;
+            Twin = twin;
             Components = components;
             Station = station;
             RingsMerged = ringsMerged;
+            CrossRingSegment = crossRingSegment;
             TopCoverSensorSlot = topCoverSensorSlot;
             Slots = slots;
             Handoffs = handoffs;
@@ -86,17 +101,29 @@ namespace CodeGen.Translation
                 throw new System.IO.FileNotFoundException($"Control.xml not found: {controlXmlPath}", controlXmlPath);
 
             var components = new CodeGen.IO.SystemXmlReader().ReadAllComponents(controlXmlPath);
+            // Resolve the twin before anything derives from it: a model whose references do not close is
+            // rejected here rather than silently losing whatever the dangling reference asked for.
+            var twin = TwinModel.Build(components);
             var roster = new DeploymentRoster(profile);
             var allocation = new ControllerAllocation(roster);
             RejectUnallocatedComponents(components, allocation);
 
             var station = ResolveStation(components, roster);
-            bool ringsMerged = FeedRingMerge.Needed(components, allocation);
+            bool ringsMerged = FeedRingMerge.Needed(twin, allocation);
+            // The tail only exists if the twin declares the actuators it is made of. Its sensor member is
+            // synthesised later, so it is not part of the test.
+            var crossRingSegment = TemplateMap.M262CrossRingSegment(
+                HandoffPlanner.DischargeActive &&
+                TemplateMap.M262CrossRingSegment(true)
+                    .Where(n => !RigCatalog.Current.SynthSensors.Any(
+                        s => string.Equals(s.Name, n, StringComparison.OrdinalIgnoreCase)))
+                    .All(n => station.Actuators.Any(
+                        a => string.Equals(a.Name?.Trim(), n, StringComparison.OrdinalIgnoreCase))));
             var slots = StateTableAllocation.Slots(station, allocation, ringsMerged);
             int topCover = TemplateMap.TopCoverSensorNames
                 .Select(n => slots.TryGetValue(n, out int s) ? s : -1).FirstOrDefault(s => s >= 0, -1);
 
-            var handoffs = ProcessRecipeArrayGenerator.HandoffPlan(components, slots, allocation, ringsMerged);
+            var handoffs = ProcessRecipeArrayGenerator.HandoffPlan(twin, slots, allocation, ringsMerged);
 
             // Compile every process the twin declares, in one pass, so the layout and the sysres mirror read
             // the same rows rather than each asking for them again.
@@ -110,11 +137,11 @@ namespace CodeGen.Translation
                         "Config/smc-rig.yml; without one it cannot announce its phase and every peer " +
                         "waiting on it would block.");
                 recipes[name] = ProcessRecipeArrayGenerator.Generate(
-                    process, station, components, slots, allocation, ringsMerged, topCover);
+                    process, station, twin, slots, allocation, ringsMerged, topCover);
             }
 
             return new GenerationContext(config, profile, roster, allocation,
-                components, station, ringsMerged, topCover, slots, handoffs, recipes);
+                twin, components, station, ringsMerged, crossRingSegment, topCover, slots, handoffs, recipes);
         }
 
         // A component the roster does not place has no controller, no canvas position and no state_table
@@ -139,7 +166,7 @@ namespace CodeGen.Translation
         }
 
         private static bool IsPlaceable(VueOneComponent c) =>
-            c.Type is "Actuator" or "Sensor" or "Robot";
+            ComponentType.IsActuator(c) || ComponentType.IsSensor(c) || ComponentType.Is(c, ComponentType.Robot);
 
         // The roster's ordered sensors and actuators resolved against the twin. The ORDER is the
         // roster's, because it assigns every state_table id.
