@@ -53,7 +53,7 @@ namespace CodeGen.Translation.Interlocks
             bool centreHome)
         {
             if (scopedIds == null) return InterlockPlan.Empty(Cap);
-            var plan = InterlockPlanner.BuildRules(actuator, ctx.Components, scopedIds, ctx);
+            var plan = InterlockPlanner.BuildRules(actuator, scopedIds, ctx);
             // Twin-faithful: the centre-home shape keeps only the crossing rules the twin declares, plus
             // their reverses. Nothing synthetic is added here — a start gate belongs to the recipe, not
             // to the interlock, because a transient sensor would otherwise refuse an already-gated move.
@@ -126,7 +126,7 @@ namespace CodeGen.Translation.Interlocks
             int emitted = EmittedCount(p);
             int inScope = scopedIds == null
                 ? 0
-                : InterlockPlanner.CountInScopeConditions(actuator, ctx.Components, scopedIds, ctx);
+                : InterlockPlanner.CountInScopeConditions(actuator, scopedIds, ctx);
 
             if (inScope > 0 && emitted == 0)
                 throw new InvalidOperationException(
