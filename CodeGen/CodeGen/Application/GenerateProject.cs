@@ -99,16 +99,6 @@ namespace CodeGen.Application
             return new GenerationResult(path, report);
         }
 
-        // PartInHopper is not a free choice: its sensor is physically read by the RevPI_IO Modbus coupler,
-        // so moving any Feed component to the RevPi takes the hopper sensor with it. The rule lived in the
-        // UI, which meant a caller that was not the UI silently produced a different partition.
-        static IReadOnlySet<string> WithImpliedRevPiComponents(IReadOnlySet<string> selected)
-        {
-            if (selected.Count == 0) return selected;
-            var full = new HashSet<string>(selected, StringComparer.OrdinalIgnoreCase) { "PartInHopper" };
-            return full;
-        }
-
         // git reset/clean where the Demonstrator is a repo, then the deep FB/canvas/device wipe. The root
         // is DERIVED from the configured project so a retargeted output root cleans itself rather than
         // C:\Demonstrator.
