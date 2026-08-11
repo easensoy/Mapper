@@ -43,8 +43,8 @@ namespace CodeGen.Devices.Core
                 return;
             }
 
-            Wire(ctx, eaeRoot, "M580_dPAC", "M580", M580Anchors, report);
-            Wire(ctx, eaeRoot, "Soft_dPAC", "BX1", BX1Anchors, report);
+            Wire(ctx, eaeRoot, CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.M580), "M580", M580Anchors, report);
+            Wire(ctx, eaeRoot, CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.BX1), "BX1", BX1Anchors, report);
         }
 
         // Parameters are synced from the syslay BOTH sides of the wiring pass: before, so the wiring
@@ -54,7 +54,8 @@ namespace CodeGen.Devices.Core
             ResourceWireEmitter.ResourceAnchors anchors, SystemInjector.BindingApplicationReport report)
         {
             var cfg = ctx.Config;
-            var sysres = ResourceWireEmitter.LocateSysresByDeviceType(eaeRoot, deviceType);
+            var sysdev = EaeProjectLayout.FindSysdevByDeviceType(eaeRoot, deviceType);
+            var sysres = sysdev == null ? null : EaeProjectLayout.FindSysresFor(sysdev);
             if (sysres == null)
             {
                 report.Missing.Add($"[Wire][{tag}] skipped, {tag} sysres not found");
