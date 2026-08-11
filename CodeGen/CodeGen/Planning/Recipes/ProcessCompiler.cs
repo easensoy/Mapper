@@ -33,10 +33,10 @@ namespace CodeGen.Translation.Process.Recipes
         {
             public IReadOnlyDictionary<string, int> Ids = new Dictionary<string, int>();          // ComponentID -> state_table slot (scoped + deployment)
             public IReadOnlyDictionary<string, int> IdsByName = new Dictionary<string, int>();     // component name -> slot (deployment-allocated peers)
-            public IReadOnlyList<VueOneComponent> All = Array.Empty<VueOneComponent>();
             public IReadOnlyDictionary<string, int> ProcessIdByName = new Dictionary<string, int>();
             public IReadOnlyDictionary<string, int> SensorPresent = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             // Which controller hosts each component, and therefore which report ring it publishes onto.
+            public CodeGen.Domain.Twin.TwinModel Twin = null!;
             public ControllerAllocation Allocation = null!;
             public bool RingsMerged;                // topology folds the per-controller rings into one
             // The one sensor that DOES cross from the Feed controller to the assembly controller (it rides the
@@ -132,17 +132,16 @@ namespace CodeGen.Translation.Process.Recipes
         private static Dictionary<string, List<OwnedMove>> BuildOwnership(VueOneComponent process, Ctx ctx)
         {
             var res = new Dictionary<string, List<OwnedMove>>(StringComparer.OrdinalIgnoreCase);
-            foreach (var actuator in ctx.All)
+            foreach (var actuator in ctx.Twin.Components.Where(c => c.IsActuator).Select(c => c.Source))
             {
-                if (IsProcess(actuator) || IsSensor(actuator)) continue;
                 foreach (var s in actuator.States)
                     foreach (var t in s.Transitions.OrderBy(t => t.Priority))
                         foreach (var cond in t.Conditions)
                         {
-                            var owner = TryResolve(cond, ctx.All);
+                            var owner = TryResolve(cond, ctx.Twin);
                             if (owner == null || !IsProcess(owner) || !SameName(owner, process)) continue;
 
-                            var ownerState = PeerState(owner, cond)
+                            var ownerState = PeerState(owner, cond, ctx)
                                 ?? throw Fail(process, null,
                                     $"'{actuator.Name}' transition '{t.TransitionID}' is owned by condition " +
                                     $"'{cond.Name}', which names no state of '{owner.Name}'");
@@ -262,11 +261,11 @@ namespace CodeGen.Translation.Process.Recipes
             RecipeArrays arrays, Dictionary<string, int> settledHere,
             Dictionary<string, List<OwnedMove>> owned, bool entryPhase, HashSet<string> armed)
         {
-            var target = Resolve(cond, ctx.All);
+            var target = Resolve(cond, ctx.Twin);
             if (IsProcess(target)) { EmitHandoff(process, state, cond, gateCount, target, ctx, plan, rows, arrays, armed); return; }
 
             int id = SlotOf(target, ctx, process, state);
-            int reached = StateNumberOf(cond, target, process, state);
+            int reached = StateNumberOf(cond, target, process, state, ctx);
 
             if (IsSensor(target))
             {
@@ -296,7 +295,7 @@ namespace CodeGen.Translation.Process.Recipes
             // command, if this state issues one at all, was already emitted from the ownership the actuator itself
             // declares. So a condition can only add a requirement that the actuator has REACHED a stop.
             var g = Graph(target, graphs);
-            var named = PeerState(target, cond)
+            var named = PeerState(target, cond, ctx)
                 ?? throw Fail(process, state, $"condition '{cond.Name}' does not name a state of '{target.Name}'");
 
             // A jaw and the task arm do not report the twin's stop numbering: the jaw's direction is inverted by
@@ -359,11 +358,11 @@ namespace CodeGen.Translation.Process.Recipes
         // per-process stranded-actuator guard cannot: an actuator advanced by one process and driven home by
         // another is not stranded, it is being held for the downstream station.
         internal static IReadOnlyCollection<string> ProcessesCommandingHome(
-            string ringName, IReadOnlyList<VueOneComponent> all)
+            string ringName, CodeGen.Domain.Twin.TwinModel twin)
         {
             var res = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var actuator = all.FirstOrDefault(c => !IsProcess(c) && !IsSensor(c) &&
-                string.Equals(TemplateMap.RingKey(c.Name), ringName?.Trim(), StringComparison.OrdinalIgnoreCase));
+            var actuator = twin.Components.FirstOrDefault(c => c.IsActuator &&
+                string.Equals(TemplateMap.RingKey(c.Name), ringName?.Trim(), StringComparison.OrdinalIgnoreCase))?.Source;
             if (actuator == null) return res;
 
             var g = new ActuatorGraph(actuator);
@@ -378,7 +377,7 @@ namespace CodeGen.Translation.Process.Recipes
                     if (!home) continue;
                     foreach (var cond in t.Conditions)
                     {
-                        var owner = TryResolve(cond, all);
+                        var owner = TryResolve(cond, twin);
                         if (owner != null && IsProcess(owner)) res.Add(owner.Name.Trim());
                     }
                 }
@@ -580,7 +579,7 @@ namespace CodeGen.Translation.Process.Recipes
             RecipeArrays arrays, HashSet<string> armed)
         {
             if (SameName(peer, process)) return;                                   // self: the recipe is already here
-            var refState = PeerState(peer, cond) ?? throw Fail(process, state, $"condition '{cond.Name}' does not name a state of '{peer.Name}'");
+            var refState = PeerState(peer, cond, ctx) ?? throw Fail(process, state, $"condition '{cond.Name}' does not name a state of '{peer.Name}'");
             if (IsInitialisationState(refState))
             {
                 // A peer's Initialisation state asserts boot readiness, not the completion of a work cycle; the
@@ -661,11 +660,11 @@ namespace CodeGen.Translation.Process.Recipes
         // and the plan itself rejects a fan-in the runtime interface cannot express.
         internal static ProcessHandoffPlan HandoffPlan(Ctx ctx) =>
             ProcessHandoffPlan.Derive(
-                ctx.All, ctx.ProcessIdByName,
+                ctx.Twin.Components.Select(c => c.Source).ToList(), ctx.ProcessIdByName,
                 (producer, consumer) => SameRing(producer, consumer, ctx),
                 EntryState,
-                (producer, cond) => PeerState(producer, cond),
-                cond => TryResolve(cond, ctx.All),
+                (producer, cond) => PeerState(producer, cond, ctx),
+                cond => TryResolve(cond, ctx.Twin),
                 IsProcess,
                 IsInitialisationState);
 
@@ -741,9 +740,11 @@ namespace CodeGen.Translation.Process.Recipes
         }
 
         // The peer state a condition names (by StateID, else by the name after the slash).
-        private static VueOneState? PeerState(VueOneComponent peer, VueOneCondition cond) =>
-            peer.States.FirstOrDefault(s => string.Equals(s.StateID?.Trim(), cond.ID?.Trim(), StringComparison.OrdinalIgnoreCase))
-            ?? peer.States.FirstOrDefault(s => string.Equals(s.Name?.Trim(), After(cond.Name), StringComparison.OrdinalIgnoreCase));
+        private static VueOneState? PeerState(VueOneComponent peer, VueOneCondition cond, Ctx ctx)
+        {
+            var c = ctx.Twin.ById(peer.ComponentID);
+            return (c?.StateById(cond.ID) ?? c?.StateByName(After(cond.Name)))?.Source;
+        }
 
         private static int SlotOf(VueOneComponent target, Ctx ctx, VueOneComponent process, VueOneState state)
         {
@@ -756,34 +757,29 @@ namespace CodeGen.Translation.Process.Recipes
             throw Fail(process, state, $"'{target.Name}' has no state_table slot on this ring");
         }
 
-        private static int StateNumberOf(VueOneCondition cond, VueOneComponent target, VueOneComponent process, VueOneState? state)
+        private static int StateNumberOf(VueOneCondition cond, VueOneComponent target, VueOneComponent process, VueOneState? state, Ctx ctx)
         {
-            var st = target.States.FirstOrDefault(s =>
-                        string.Equals(s.StateID?.Trim(), cond.ID?.Trim(), StringComparison.OrdinalIgnoreCase))
-                     ?? target.States.FirstOrDefault(s =>
-                        string.Equals(s.Name?.Trim(), After(cond.Name), StringComparison.OrdinalIgnoreCase));
+            var st = PeerState(target, cond, ctx);
             if (st == null)
                 throw Fail(process, state, $"condition '{cond.Name}' does not name a state of '{target.Name}'");
             return st.StateNumber;
         }
 
-        private static VueOneComponent Resolve(VueOneCondition cond, IReadOnlyList<VueOneComponent> all) =>
-            TryResolve(cond, all) ?? throw new InvalidOperationException(
+        private static VueOneComponent Resolve(VueOneCondition cond, CodeGen.Domain.Twin.TwinModel twin) =>
+            TryResolve(cond, twin) ?? throw new InvalidOperationException(
                 $"[Compile] condition '{cond.Name}' (ComponentID '{cond.ComponentID}') resolves to no component.");
 
-        private static VueOneComponent? TryResolve(VueOneCondition cond, IReadOnlyList<VueOneComponent> all)
+        private static VueOneComponent? TryResolve(VueOneCondition cond, CodeGen.Domain.Twin.TwinModel twin)
         {
-            if (!string.IsNullOrWhiteSpace(cond.ComponentID))
-                return all.FirstOrDefault(c => string.Equals(c.ComponentID?.Trim(), cond.ComponentID.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(cond.ComponentID)) return twin.ById(cond.ComponentID)?.Source;
             var name = cond.Name?.IndexOf('/') is int i and >= 0 ? cond.Name.Substring(0, i).Trim() : cond.Name?.Trim();
-            return string.IsNullOrEmpty(name) ? null
-                : all.FirstOrDefault(c => string.Equals(c.Name?.Trim(), name, StringComparison.OrdinalIgnoreCase));
+            return twin.ByName(name)?.Source;
         }
 
-        private static bool IsProcess(VueOneComponent? c) => c != null && string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase);
-        private static bool IsSensor(VueOneComponent c) => string.Equals(c.Type, "Sensor", StringComparison.OrdinalIgnoreCase);
+        private static bool IsProcess(VueOneComponent? c) => ComponentType.IsProcess(c);
+        private static bool IsSensor(VueOneComponent c) => ComponentType.IsSensor(c);
         // Grippers are Type "Robot" but not the task arm: a Five-state jaw whose two strokes share one rest sensor.
-        private static bool IsGripper(VueOneComponent c) => string.Equals(c.Type, "Robot", StringComparison.OrdinalIgnoreCase) && !TemplateMap.IsRobotTaskArm(c);
+        private static bool IsGripper(VueOneComponent c) => ComponentType.Is(c, ComponentType.Robot) && !TemplateMap.IsRobotTaskArm(c);
         private static bool SameName(VueOneComponent a, VueOneComponent b) => string.Equals(a.Name?.Trim(), b.Name?.Trim(), StringComparison.OrdinalIgnoreCase);
         private static bool SameRing(VueOneComponent a, VueOneComponent b, Ctx ctx) =>
             ctx.Allocation.SameRing(a.Name, b.Name, ctx.RingsMerged);
