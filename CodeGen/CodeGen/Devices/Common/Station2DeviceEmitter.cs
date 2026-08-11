@@ -22,8 +22,8 @@ namespace CodeGen.Devices.Core
         const string BX1ResourceId   = "C9F2A4B7E1D3F5A8";
         // M580 name "RES0" = EAE default + what M580IO.hcf symlinks use ('RES0.M580IO.<sym>'); a custom
         // name makes EAE track its default RES0 *plus* it = "2 instances of EMB_RES_ECO".
-        const string M580ResourceName = "RES0";
-        const string BX1ResourceName  = "BX1_RES";
+        static readonly string M580ResourceName = Mapping.ControllerMap.ResourceForPlc(Translation.PlcAssignment.M580);
+        static readonly string BX1ResourceName  = Mapping.ControllerMap.ResourceForPlc(Translation.PlcAssignment.BX1);
 
         const string M580EquipmentUuid   = "11111111-2222-3333-4444-000000000040";
         const string M580RuntimeUuid     = "11111111-2222-3333-4444-000000000041";
@@ -37,7 +37,12 @@ namespace CodeGen.Devices.Core
 
         internal const string Bx1SoftdpacDomainUuid = "db72f221-ece1-4b82-8132-731ce655044e";
         // Must match associatedScannerId on the EtherNetIPDevice AND the <ID> in the BX1 .hcf.
-        const string Bx1ScannerId = "270AFDB7F209BFE8";
+        internal const string Bx1ScannerId = "270AFDB7F209BFE8";
+
+        // EAE reads each device's Properties file by plugin GUID: DeployPlugin registers the .hcf with
+        // the device card, SystemDeviceProperties carries the per-device settings.
+        internal const string DeployPluginPropertiesFile = "F513CAE3-7194-4086-936C-02912EA0B352.Properties.xml";
+        internal const string SystemDevicePropertiesFile = "E0601B81-4A3A-4A96-B6C2-007BDC680D59.Properties.xml";
 
         const string M580RuntimeTypeId = "7fd313c7-1da3-4618-9a5d-9ff3596aff7f";
         internal const string SoftDpacTypeId = "29797a55-a6b8-47c4-9c06-e8a42b1a38b5";
@@ -110,7 +115,7 @@ namespace CodeGen.Devices.Core
             EmitOnePlc(cfg, eaeRoot, systemGuidDir, result,
                 sysdevId: M580SysdevId,
                 deviceName: "M580",
-                deviceType: "M580_dPAC",
+                deviceType: CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.M580),
                 resourceId: M580ResourceId,
                 resourceName: m580ResourceName,
                 hcfTemplatePath: cfg.M580HcfTemplatePath,
@@ -126,7 +131,7 @@ namespace CodeGen.Devices.Core
             EmitOnePlc(cfg, eaeRoot, systemGuidDir, result,
                 sysdevId: BX1SysdevId,
                 deviceName: "BX1",
-                deviceType: "Soft_dPAC",
+                deviceType: CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.BX1),
                 resourceId: bx1ResourceId,
                 resourceName: BX1ResourceName,
                 hcfTemplatePath: bx1HcfPath,
@@ -257,13 +262,13 @@ namespace CodeGen.Devices.Core
 
             // 3b. DeployPlugin Properties XML — EAE needs it to register the .hcf with the device card.
             var deployPluginPath = Path.Combine(sysdevFolder,
-                "F513CAE3-7194-4086-936C-02912EA0B352.Properties.xml");
+                DeployPluginPropertiesFile);
             File.WriteAllText(deployPluginPath, deployPluginPropertiesXml);
             result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, deployPluginPath));
 
             // 3c. SystemDeviceProperties (E0601B81) — empty default so the project compiles cold.
             var sysDevPropsPath = Path.Combine(sysdevFolder,
-                "E0601B81-4A3A-4A96-B6C2-007BDC680D59.Properties.xml");
+                SystemDevicePropertiesFile);
             if (!File.Exists(sysDevPropsPath))
             {
                 File.WriteAllText(sysDevPropsPath, BuildEmptySystemDeviceProps(cfg));
@@ -609,7 +614,7 @@ namespace CodeGen.Devices.Core
         }
 
         // EAE compiles EIPSCANNER2.xml from the HwConfiguration device model, not the .hcf/.sysres.
-        const string Bx1HwConfigScannerId = "270AFDB7F209BFE8";
+        const string Bx1HwConfigScannerId = Bx1ScannerId;
         static readonly string[] Bx1Tm3bcModelFolders =
             { "TM3BC_Ethe_R1C9LFqq0OfJh", "TM3BC_Ethe_yYhtt9jWKUOJs" };
 
