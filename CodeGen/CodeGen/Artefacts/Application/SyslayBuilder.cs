@@ -7,7 +7,7 @@ namespace CodeGen.Translation
 {
     public class SyslayBuilder
     {
-        private static readonly XNamespace Ns = "https://www.se.com/LibraryElements";
+        private static readonly XNamespace Ns = CodeGen.Devices.Core.Station2DeviceEmitter.LibElNs;
         private static readonly XNamespace Xsi = "http://www.w3.org/2001/XMLSchema-instance";
 
         private readonly string _layerId;
