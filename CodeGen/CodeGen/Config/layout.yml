@@ -1,4 +1,4 @@
-﻿# Where the generated FBs are placed on the EAE canvas, and which controller runs each of them.
+# Where the generated FBs are placed on the EAE canvas, and which controller runs each of them.
 #
 # This is the DEPLOYMENT roster: the twin says what the machine does, this says where each component
 # runs and where it is drawn. Adding a component to the rig is a row here, not a change in C#.
@@ -58,14 +58,20 @@ bands:
     columnBaseX: 23400
     frameWidth: 6600      # 23200..29800
 
-# Bootstrap FBs: fixed coordinates, no column grid, no controller (the resource owns them).
+# Bootstrap FBs: fixed coordinates, no column grid, no controller (the resource owns them). x/y is the
+# application canvas, sysresX/sysresY the device-local one. Which type each name carries, and under which
+# EAE id, is deployment protocol and lives in TargetBootstrap.
 bootFbs:
   - name: FB1            # DPAC_FULLINIT
     x: 3000
     y: 400
+    sysresX: 1900
+    sysresY: 140
   - name: FB2            # plcStart
     x: 800
     y: 1100
+    sysresX: 820
+    sysresY: 660
 
 # The roster. plc = hosting controller, column/row = canvas position, owner = the Process FB that
 # commands it ("" = commanded by none, or across controllers).
@@ -188,6 +194,7 @@ idOrder:
 aliases:
   Rejector: Ejector
   Robot_Pick_And_Place1: Robot
+  Disassembly_Station: Disassembly
 
 # Chains the station adapter; interleaves sensors with actuators.
 casBusOrder:
