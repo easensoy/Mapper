@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using CodeGen.Configuration;
 using CodeGen.Devices.M262;
 using CodeGen.Devices.Core;
@@ -15,7 +15,7 @@ namespace CodeGen.Devices.M580
             var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
             var template = HwConfigVerbatimCopier.ResolveTemplatePath(
                 cfg.M580HcfTemplatePath, cfg.IoFolderPath, "M580IO.hcf");
-            return HwConfigVerbatimCopier.Deploy(eaeRoot, "M580_dPAC", "SE.DPAC", template);
+            return HwConfigVerbatimCopier.Deploy(eaeRoot, CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.M580), CodeGen.Mapping.PlcTargets.DeviceNamespace, template);
         }
     }
 }
