@@ -59,12 +59,6 @@ namespace CodeGen.Translation
                 "Demonstrator was cleaned of universal-architecture instances before this generation; " +
                 "restore via 'git checkout' on the Demonstrator repo to revert.");
 
-            int sensorIdStart = 0;
-            // A twin may declare PartAtAssembly itself rather than leave it to the synth injection below.
-            // It then keeps the SAME reserved slot (HandoffPlanner.PartAtAssembly.Id), which sits in the
-            // hole TopCoverSenosr's pin leaves behind -- so it must NOT push the actuator range up, or
-            // every actuator id (and with it every recipe slot, interlock SourceID and HCF binding) shifts.
-            int actuatorIdStart = StateTableAllocation.ActuatorIdStart(contents.Sensors);
             // Process slots are allocated in Config/smc-rig.yml, keyed by the twin's own process name. They
             // stay above the component id space, so no Wait1Id collides with one. A slot may still coincide
             // with a Feed component id (10 == Shaft_Hr): harmless once the rings merge, because Feed only
@@ -74,7 +68,6 @@ namespace CodeGen.Translation
             // TopCoverSenosr reports onto the Assembly ring, so its slot must be free on THAT ring rather
             // than the one its position would give it. StateTableAllocation owns the computation; the plan
             // carries the answer to the recipe and the sensor emission below.
-            int coverSlot = ctx.TopCoverSensorSlot;
 
 
 
@@ -156,7 +149,7 @@ namespace CodeGen.Translation
                 var strandedAct = adv
                     .Where(a => !ret.Contains(a) &&
                                 CodeGen.Translation.Process.Recipes.ProcessCompiler
-                                    .ProcessesCommandingHome(a, allComponents).Count == 0)
+                                    .ProcessesCommandingHome(a, ctx.Twin).Count == 0)
                     .ToList();
                 if (strandedAct.Count > 0)
                     throw new InvalidOperationException(
@@ -251,9 +244,9 @@ namespace CodeGen.Translation
                 report.Missing.Add($"recipe ordering: {processRecipe.OrderingSummary}");
             }
 
-            // Sensors-first id map == the recipe's Wait1Id scheme, so InterlockManager.RuleSourceID and the engine read the same state_table slots.
-            var scopedIds = ProcessRecipeArrayGenerator.BuildScopedComponentMap(
-                contents.Sensors, contents.Actuators);
+            // The planned slots, keyed by ComponentID: interlock RuleSourceID and the engine's Wait1Id
+            // are the same number because both read the one allocation.
+            var scopedIds = ProcessRecipeArrayGenerator.ScopedIds(contents, ctx.Slots);
 
             // PLC partitioning index (name-based guess when MapperConfig is null).
             var plcIndex = config != null
@@ -271,11 +264,8 @@ namespace CodeGen.Translation
             for (int i = 0; i < contents.Actuators.Count; i++)
             {
                 var actuator = contents.Actuators[i];
-                int assignedId = actuatorIdStart + i;
+                int assignedId = ctx.Slots[actuator.Name.Trim()];
                 var fbType = ResolveActuatorFBType(actuator);
-                // Force the UR3e's dedicated non-colliding slot (its positional id clashes on the M580 state_table) so CAT actuator_id == robot Wait1Id.
-                if (HandoffPlanner.DischargeActive && TemplateMap.IsRobotTaskArm(actuator))
-                    assignedId = MapperConfig.RobotActuatorId;
                 var displayName = InstanceNameResolver.Resolve(actuator,
                     overrides.ByComponentId, overrides.ByVueOneName);
                 var actPlc = plcIndex.ResolveComponent(actuator.Name, bindings, ctx.Allocation);
@@ -291,7 +281,7 @@ namespace CodeGen.Translation
 
                     InterlockEmitter.GuardFiveState(actParams, actuator, ctx, scopedIds, report.Bound);
                 }
-                else if (string.Equals(fbType, "Seven_State_Actuator_Centre_Home_CAT", StringComparison.Ordinal))
+                else if (string.Equals(fbType, TemplateMap.SevenStateCentreHomeCat, StringComparison.Ordinal))
                 {
                     actParams = BuildMinimalActuatorParameters(actuator, assignedId, fbType);
                     actParams["actuator_name"] = SyslayBuilder.FormatString(
@@ -340,17 +330,7 @@ namespace CodeGen.Translation
             for (int i = 0; i < contents.Sensors.Count; i++)
             {
                 var sensor = contents.Sensors[i];
-                int assignedId = sensorIdStart + i;
-                // TopCoverSenosr rides the cover ring into the Assembly state_table; pin it OUT of the
-                // positional sequence to its own slot so its report never collides with the PartAtAssembly
-                // synth sensor at slot 3. It stays counted in contents.Sensors, so actuator ids are unshifted.
-                if (
-                    CodeGen.Mapping.TemplateMap.IsTopCoverSensor(sensor.Name))
-                    assignedId = coverSlot;
-                // Twin-declared PartAtAssembly takes the slot the synth injection reserves for it, so a
-                // model that declares it and one that does not generate the same ids.
-                else if (HandoffPlanner.IsPartAtAssembly(sensor.Name))
-                    assignedId = HandoffPlanner.PartAtAssembly.Id;
+                int assignedId = ctx.Slots[sensor.Name.Trim()];
 
                 SensorBinding? senBinding = null;
                 bindings?.Sensors.TryGetValue(sensor.Name, out senBinding);
@@ -586,7 +566,7 @@ namespace CodeGen.Translation
                 dict["process_state_name"] = SyslayBuilder.FormatString(TemplateMap.RingKey(actuator.Name));
             }
             // Centre-home swivel settles at current_state_to_process 2=Work1 / 4=Work2 / 6=Home; Target*State feed the interlock manager at those values.
-            if (string.Equals(fbType, "Seven_State_Actuator_Centre_Home_CAT", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(fbType, TemplateMap.SevenStateCentreHomeCat, StringComparison.OrdinalIgnoreCase))
             {
                 TargetEmitter.Apply(dict, work1: 2, work2: 4, home: 6);
                 dict["enableToWork1FaultTimeout"] = SyslayBuilder.FormatBool(false);
@@ -606,7 +586,7 @@ namespace CodeGen.Translation
              layout.RowY(row.ToString()));
 
         internal static bool IsBx1CoverActuator(string name) =>
-            name is "CoverPNP_Hr" or "CoverPNP_Vr" or "CoverPnp_Gripper";
+            HandoffPlanner.IsCoverDetourActuator(name);
 
         public static Dictionary<string, string> BuildActuatorParameters(
             VueOneComponent actuator, int assignedId,
@@ -821,7 +801,7 @@ namespace CodeGen.Translation
             try { if (!Directory.EnumerateFiles(sysGuidDir, "*.sysdev").Any()) return; }
             catch { return; }
 
-            System.Xml.Linq.XNamespace ns = "https://www.se.com/LibraryElements";
+            System.Xml.Linq.XNamespace ns = CodeGen.Devices.Core.Station2DeviceEmitter.LibElNs;
             bool IsBridge(string? n) =>
                 n != null && (n.StartsWith("MqttFmt_", StringComparison.Ordinal)
                            || n.StartsWith("MqttPub_", StringComparison.Ordinal));
@@ -911,7 +891,7 @@ namespace CodeGen.Translation
                     if (root == null) continue;
                     var type  = (string?)root.Attribute("Type")      ?? string.Empty;
                     var nspac = (string?)root.Attribute("Namespace") ?? string.Empty;
-                    if (string.Equals(type,  "M262_dPAC", StringComparison.Ordinal) &&
+                    if (string.Equals(type,  CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.M262), StringComparison.Ordinal) &&
                         string.Equals(nspac, "SE.DPAC",   StringComparison.Ordinal))
                     {
                         sysdevPath = candidate;
@@ -1046,7 +1026,7 @@ namespace CodeGen.Translation
         {
             report.DeviceCleanupLog.Add($"[Clean] file={path} root=<{netTag}>");
 
-            XNamespace ns = "https://www.se.com/LibraryElements";
+            XNamespace ns = CodeGen.Devices.Core.Station2DeviceEmitter.LibElNs;
             var doc = XDocument.Load(path);
             var net = doc.Root?.Element(ns + netTag);
             if (net == null)
