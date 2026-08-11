@@ -200,7 +200,7 @@ namespace CodeGen.Devices.Core
 
                     bool changed = false;
                     foreach (var fb in net.Elements(ns + "FB")
-                                 .Where(f => (string?)f.Attribute("Type") == "Seven_State_Actuator_Centre_Home_CAT"))
+                                 .Where(f => (string?)f.Attribute("Type") == CodeGen.Mapping.TemplateMap.SevenStateCentreHomeCat))
                     {
                         foreach (var p in fb.Elements(ns + "Parameter")
                                      .Where(p => timerParamNames.Contains((string?)p.Attribute("Name")))
