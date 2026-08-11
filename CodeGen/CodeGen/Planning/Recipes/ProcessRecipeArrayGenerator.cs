@@ -6,7 +6,6 @@ using CodeGen.Models;
 using CodeGen.Devices.Core;
 using CodeGen.Mapping;
 using static CodeGen.Translation.Process.Recipes.TransitionChainParser;
-using static CodeGen.Translation.Process.Recipes.RecipeComponentLookup;
 
 namespace CodeGen.Translation.Process
 {
@@ -54,30 +53,19 @@ namespace CodeGen.Translation.Process
     {
         public static int RecipeArraySize => GenerationConfig.Current.RecipeArraySize;
 
-        // Sensors first (ids 0..N-1), actuators next (ids N..N+M-1). Process is NOT in the map.
-        public static Dictionary<string, int> BuildScopedComponentMap(
-            IReadOnlyList<VueOneComponent> allowedSensors,
-            IReadOnlyList<VueOneComponent> allowedActuators)
+        // The same slots StateTableAllocation assigned, keyed by ComponentID for the callers that hold a
+        // condition's reference rather than a name. A projection, not a second allocation: a recipe
+        // Wait1Id, an interlock SourceID and the layout's actuator_id are then the same number by
+        // construction rather than because two allocators happened to agree.
+        public static Dictionary<string, int> ScopedIds(
+            StationContents contents, IReadOnlyDictionary<string, int> slots)
         {
             var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            int next = 0;
-            foreach (var s in allowedSensors)
+            foreach (var c in contents.Sensors.Concat(contents.Actuators))
             {
-                if (string.IsNullOrEmpty(s.ComponentID)) continue;
-                // PartAtAssembly holds a RESERVED slot (the one the synth injection uses), so it must not
-                // consume a positional one -- otherwise a twin that declares it pushes every actuator up by
-                // one and the topmost actuator lands on the Assembly process_id.
-                if (HandoffPlanner.IsPartAtAssembly(s.Name))
-                {
-                    map[s.ComponentID.Trim()] = HandoffPlanner.PartAtAssembly.Id;
-                    continue;
-                }
-                map[s.ComponentID.Trim()] = next++;
-            }
-            foreach (var a in allowedActuators)
-            {
-                if (string.IsNullOrEmpty(a.ComponentID)) continue;
-                map[a.ComponentID.Trim()] = next++;
+                if (string.IsNullOrEmpty(c.ComponentID)) continue;
+                if (slots.TryGetValue(c.Name.Trim(), out int slot))
+                    map[c.ComponentID.Trim()] = slot;
             }
             return map;
         }
@@ -85,20 +73,20 @@ namespace CodeGen.Translation.Process
         // The model's process-to-process handoffs with their transports resolved, for the backend to render
         // wiring from. Derived from the same Ctx the recipe rows are compiled from, so the wiring and the
         // WAIT rows can never disagree about which producer reaches which consumer.
-        internal static Recipes.ProcessHandoffPlan HandoffPlan(IReadOnlyList<VueOneComponent> allComponents,
+        internal static Recipes.ProcessHandoffPlan HandoffPlan(CodeGen.Domain.Twin.TwinModel twin,
             IReadOnlyDictionary<string, int> slots, ControllerAllocation allocation, bool ringsMerged) =>
             Recipes.ProcessCompiler.HandoffPlan(BuildCompilerCtx(
-                allComponents, new Dictionary<string, int>(), slots, allocation, ringsMerged, topCoverSlot: null));
+                twin, new Dictionary<string, int>(), slots, allocation, ringsMerged, topCoverSlot: null));
 
         public static RecipeArrays Generate(VueOneComponent process,
-            StationContents stationContents, IReadOnlyList<VueOneComponent> allComponents,
+            StationContents stationContents, CodeGen.Domain.Twin.TwinModel twin,
             IReadOnlyDictionary<string, int> slots, ControllerAllocation allocation, bool ringsMerged,
             int topCoverSlot)
         {
             int processId = slots[process.Name.Trim()];
-            var scopedRegistry = BuildScopedComponentMap(stationContents.Sensors, stationContents.Actuators);
+            var scopedRegistry = ScopedIds(stationContents, slots);
             var arrays = Recipes.ProcessCompiler.Compile(process, processId,
-                BuildCompilerCtx(allComponents, scopedRegistry, slots, allocation, ringsMerged, topCoverSlot));
+                BuildCompilerCtx(twin, scopedRegistry, slots, allocation, ringsMerged, topCoverSlot));
 
             ValidateProcessIdInvariant(arrays, processId);
             ValidateSingleEndMarker(arrays);
@@ -113,7 +101,7 @@ namespace CodeGen.Translation.Process
         // `topCoverSlot` is null when only the handoff plan is wanted: that derivation reads process
         // states, never a component slot, so the deployment-allocated overrides below have nothing to add.
         private static Recipes.ProcessCompiler.Ctx BuildCompilerCtx(
-            IReadOnlyList<VueOneComponent> all, IReadOnlyDictionary<string, int> scopedIds,
+            CodeGen.Domain.Twin.TwinModel twin, IReadOnlyDictionary<string, int> scopedIds,
             IReadOnlyDictionary<string, int> slots, ControllerAllocation allocation, bool ringsMerged,
             int? topCoverSlot)
         {
@@ -145,11 +133,11 @@ namespace CodeGen.Translation.Process
             {
                 Ids = scopedIds,
                 IdsByName = byName,
-                All = all,
                 ProcessIdByName = slots,
                 SensorPresent = present,
                 // Ring membership from controller allocation: two processes share a ring when the same
                 // controller hosts them. Topology, not process identity.
+                Twin = twin,
                 Allocation = allocation,
                 RingsMerged = ringsMerged,
                 MaterialBridgeId = bridge?.Id ?? -1,
