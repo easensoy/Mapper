@@ -97,7 +97,7 @@ namespace CodeGen.Devices.M262
                     if (root == null || root.Name.LocalName != "Device") continue;
                     var type = (string?)root.Attribute("Type") ?? string.Empty;
                     var nspace = (string?)root.Attribute("Namespace") ?? string.Empty;
-                    if (type != "M262_dPAC" || nspace != "SE.DPAC") continue;
+                    if (type != CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.M262) || nspace != CodeGen.Mapping.PlcTargets.DeviceNamespace) continue;
                     XNamespace ns = root.GetDefaultNamespace();
                     var resources = root.Element(ns + "Resources");
                     // The M262 device always has exactly one resource child.
