@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -133,7 +133,7 @@ namespace CodeGen.Devices.Core
             {
                 var dir = Path.GetDirectoryName(sysresPath);
                 if (string.IsNullOrEmpty(dir)) return false;
-                var props = Path.Combine(dir, "F513CAE3-7194-4086-936C-02912EA0B352.Properties.xml");
+                var props = Path.Combine(dir, CodeGen.Devices.Core.Station2DeviceEmitter.DeployPluginPropertiesFile);
                 if (!File.Exists(props)) return false;
                 return XDocument.Load(props).Descendants()
                     .Any(e => e.Name.LocalName == "Property"
