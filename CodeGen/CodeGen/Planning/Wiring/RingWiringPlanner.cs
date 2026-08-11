@@ -26,12 +26,9 @@ namespace CodeGen.Translation
             var allocation = ctx.Allocation;
             bool OnFeedController(string name) => allocation.IsFeedSide(name);
 
-            // Keep the robot-tail (Ejector+Robot) OUT of the INIT path to Feed_Station (a Robot bring-up stall would block it); init the tail last, mirrored in ResourceWireEmitter.
-            bool robotTail = HandoffPlanner.DischargeActive &&
-                contents.Actuators.Any(a => NameEq(a.Name, "Ejector")) &&
-                contents.Actuators.Any(a => NameEq(a.Name, "Robot"));
-            bool IsRobotTailName(string name) =>
-                robotTail && (NameEq(name, "Ejector") || NameEq(name, "Robot"));
+            // Keep the discharge tail OUT of the INIT path to Feed_Station (a Robot bring-up stall would
+            // block it); init the tail last, mirrored in ResourceWireEmitter.
+            bool IsRobotTailName(string name) => OnCrossSegment(name);
 
             // Everything on the cross-controller segment is driven BY that segment, so it must stay off the
             // locally-closed Feed ring or its stateRprtCmd_in has two sources -- which EAE resolves by
@@ -42,7 +39,7 @@ namespace CodeGen.Translation
             // it to the synth injection) puts it in contents.Sensors, and a rule that only filtered actuators
             // spliced it onto the ring while the segment was already driving it. ResourceWireEmitter excludes
             // the same set from the sysres ring, so this is also what keeps the two halves agreeing.
-            var crossSegment = TemplateMap.M262CrossRingSegment(robotTail);
+            var crossSegment = ctx.CrossRingSegment;
             bool OnCrossSegment(string name) =>
                 crossSegment.Any(n => NameEq(n, name));
 
@@ -61,10 +58,9 @@ namespace CodeGen.Translation
             for (int i = 0; i < initChain.Count - 1; i++)
                 builder.AddEventConnection($"{initChain[i]}.INITO", $"{initChain[i + 1]}.INIT");
 
-            builder.AddAdapterConnection("Area_HMI.AreaHMIAdptrOUT", "Area.AreaHMIAdptrIN");
-            builder.AddAdapterConnection("Station1_HMI.StationHMIAdptrOUT", "Station1.StationHMIAdptrIN");
-            builder.AddAdapterConnection("Area.AreaAdptrOUT", "Station1.AreaAdptrIN");
-            builder.AddAdapterConnection("Station1.AreaAdptrOUT", "Area_Term.CasAdptrIN");
+            // The same array the sysres renders, so the two halves of the wiring layer cannot drift.
+            foreach (var w in CodeGen.Devices.Core.ResourceWireEmitter.HmiAdapterWires)
+                builder.AddAdapterConnection(w.Source, w.Destination);
 
             // CaS chain skips any CAT lacking stationAdptr (sensors, Seven_State); a dangling stationAdptr makes EAE reject the resource. sysres+syslay must match.
             var stationChain = new List<(string Name, string Type)>();
@@ -125,7 +121,7 @@ namespace CodeGen.Translation
             }
 
             // Local intra-M262 Ejector->Robot links only; the cross-device hops at its ends come from HandoffPlanner. Empty when robotTail off.
-            var m262Seg = TemplateMap.M262CrossRingSegment(robotTail);
+            var m262Seg = ctx.CrossRingSegment;
             for (int i = 0; i < m262Seg.Count - 1; i++)
                 builder.AddAdapterConnection(
                     $"{m262Seg[i]}.stateRprtCmd_out", $"{m262Seg[i + 1]}.stateRprtCmd_in");
