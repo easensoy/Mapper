@@ -56,6 +56,7 @@ namespace CodeGen.Devices.M262
         }
 
         private static string? LocateM262Sysres(string eaeRoot)
-            => ResourceWireEmitter.LocateSysresByDeviceType(eaeRoot, "M262_dPAC");
+            => EaeProjectLayout.FindSysdevByDeviceType(eaeRoot, CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.M262)) is string sysdev
+                ? EaeProjectLayout.FindSysresFor(sysdev) : null;
     }
 }
