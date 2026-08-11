@@ -132,9 +132,9 @@ namespace CodeGen.Services
             PatchCatSymlinkQi(eaeProjectDir, "Five_State_Actuator_CAT", result);
             EnsureFiveStateInputPoll(eaeProjectDir, result);
             // QI=TRUE on the SYMLINKMULTIVARDST/SRC or the subscriber is dropped and the core is islanded from its IO.
-            PatchCatSymlinkQi(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT", result);
+            PatchCatSymlinkQi(eaeProjectDir, TemplateMap.SevenStateCentreHomeCat, result);
             EnsureSevenStateStateOut(eaeProjectDir, result);
-            foreach (var hmiCat in new[] { "Five_State_Actuator_CAT", "Seven_State_Actuator_Centre_Home_CAT",
+            foreach (var hmiCat in new[] { "Five_State_Actuator_CAT", TemplateMap.SevenStateCentreHomeCat,
                                            "Sensor_Bool_CAT", "Robot_Task_CAT" })
                 FixCatHmiOpcuaFrame(eaeProjectDir, hmiCat, result);
             PatchActuatorModeInitialValue(eaeProjectDir, "FiveStateActuator.fbt", result);
@@ -162,7 +162,7 @@ namespace CodeGen.Services
                     stateDataSource: "ActuatorCore.current_state_to_process",
                     initSource: "StateHandling.INITO",
                     topicNameSource: "actuator_name", cfg, result);
-                PatchCatMqttPublish(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT",
+                PatchCatMqttPublish(eaeProjectDir, TemplateMap.SevenStateCentreHomeCat,
                     stateEventSource: "ActuatorCore.pst_out",
                     stateDataSource: "ActuatorCore.current_state_to_process",
                     initSource: "StateHandling.INITO",
@@ -211,7 +211,7 @@ namespace CodeGen.Services
                 SweepTelemetryCat(eaeProjectDir, result);
             }
             NormalizeSwivelSimSensorSource(eaeProjectDir, result);
-            StripCatHomeSensorPoll(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT", result);
+            StripCatHomeSensorPoll(eaeProjectDir, TemplateMap.SevenStateCentreHomeCat, result);
             // Broker-fed BX1 sensors (TopCoverSenosr) have no I/O-scan event, so give Sensor_Bool_CAT a scoped
             // RD re-read event; the BX1 broker fires it on the cover-detect change (HCF M262/M580 unaffected).
             EnsureSensorBoolReadEvent(eaeProjectDir, result);
