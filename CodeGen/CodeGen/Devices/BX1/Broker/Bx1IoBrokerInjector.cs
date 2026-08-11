@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -12,7 +12,7 @@ namespace CodeGen.Devices.BX1
     // F6C04A4BA6FA8593 is the id the copied BX1 .hcf binds to; the IN/OUT bit map is on CoverSensors/CoverCoils below.
     public static class Bx1IoBrokerInjector
     {
-        static readonly XNamespace Ns = "https://www.se.com/LibraryElements";
+        static readonly XNamespace Ns = CodeGen.Devices.Core.Station2DeviceEmitter.LibElNs;
 
         public const string BrokerFbId = "F6C04A4BA6FA8593";
         public const string BrokerFbName = "BX1_IO";
@@ -339,7 +339,7 @@ namespace CodeGen.Devices.BX1
             try
             {
                 var bx1Sysres = FindBx1Sysres(cfg, syslayPath);
-                var resourceName = ReadResourceName(bx1Sysres) ?? "BX1_RES";
+                var resourceName = ReadResourceName(bx1Sysres) ?? CodeGen.Mapping.ControllerMap.ResourceForPlc(PlcAssignment.BX1);
                 foreach (var (label, path, isSysres) in new[]
                 {
                     ("syslay", syslayPath,        false),
