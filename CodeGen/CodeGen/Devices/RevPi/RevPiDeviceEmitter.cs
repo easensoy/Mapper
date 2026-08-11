@@ -7,6 +7,7 @@ using CodeGen.Configuration;
 using CodeGen.Devices.Core;
 using CodeGen.Devices.M262;
 using CodeGen.Translation;
+using CodeGen.Mapping;
 
 namespace CodeGen.Devices.RevPi
 {
@@ -26,7 +27,7 @@ namespace CodeGen.Devices.RevPi
     {
         // Continues the M262/M580/BX1 (…002/003/004) series. Also named in Devices/Common/FoldersXmlEmitter.cs.
         internal const string SysdevId = "00000000-0000-0000-0000-000000000005";
-        const string DeviceName = "Revolution_Pi";
+        static readonly string DeviceName = CodeGen.Mapping.PlcTargets.DeviceName(CodeGen.Translation.PlcAssignment.RevPi)!;
         const string EquipmentJsonName = "Equipment_Revolution_Pi.json";
         // Topology uuids. The NIC uuid is also named in Devices/Common/TopologyNetworkEmitter.cs, which
         // wires NIC_2[Port1] to the switch — the reference does the same (Wire 275).
@@ -86,7 +87,7 @@ namespace CodeGen.Devices.RevPi
             Station2DeviceEmitter.EmitOnePlc(cfg, eaeRoot!, systemGuidDir, shell,
                 sysdevId: SysdevId,
                 deviceName: DeviceName,
-                deviceType: "Soft_dPAC",
+                deviceType: CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.RevPi),
                 resourceId: coupler.ResourceId,
                 resourceName: ResourceName,
                 hcfTemplatePath: HcfTemplatePath(cfg),
@@ -114,8 +115,7 @@ namespace CodeGen.Devices.RevPi
                     .Where(f => SysresFbMirror.BucketFor(f.Name, ctx.Allocation) == PlcAssignment.RevPi)
                     .ToList();
                 int mirrored = SysresFbMirror.MirrorFbsIntoSysres(sysres, fbs,
-                    FBIdGenerator.GenerateFBId($"{ResourceName}.FB1"),
-                    FBIdGenerator.GenerateFBId($"{ResourceName}.FB2"));
+                    TargetBootstrap.For(PlcAssignment.RevPi, ctx.Layout));
                 report.Missing.Add($"[RevPi] device emitted; resource mirrored {mirrored} component(s)");
                 // EAE fails to LOAD a resource whose {resId}/opcua.xml companion folder is absent.
                 // SysresFbMirror — unlike Station2SysresMirror — does not create it.
