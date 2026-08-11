@@ -6,6 +6,7 @@ using System.Xml.Linq;
 using CodeGen.Configuration;
 using CodeGen.Devices.Core;
 using CodeGen.Translation;
+using CodeGen.Mapping;
 
 namespace CodeGen.Devices.M262
 {
@@ -47,7 +48,7 @@ namespace CodeGen.Devices.M262
                 if (root == null) return false;
                 var type  = (string?)root.Attribute("Type")      ?? string.Empty;
                 var nspac = (string?)root.Attribute("Namespace") ?? string.Empty;
-                return string.Equals(type, "M262_dPAC", StringComparison.Ordinal) &&
+                return string.Equals(type, CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.M262), StringComparison.Ordinal) &&
                        string.Equals(nspac, "SE.DPAC", StringComparison.Ordinal);
             }
             catch { return false; }
@@ -89,7 +90,7 @@ namespace CodeGen.Devices.M262
             string propsPath = string.Empty;
             if (!preserveDevice)
             {
-                RewriteSysdev(sysdevPath, DeviceName, "M262_dPAC",
+                RewriteSysdev(sysdevPath, DeviceName, CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.M262),
                     cfg.M262TargetIp ?? string.Empty, resourceName);
                 var sysresPathForRename = EaeProjectLayout.FindSysresFor(sysdevPath);
                 if (sysresPathForRename != null)
@@ -135,7 +136,8 @@ namespace CodeGen.Devices.M262
                 // Mirror only the M262 (Feed Station) FBs — Station-2 FBs live on M580/BX1.
                 sysresMirrorCount = SysresFbMirror.MirrorFbsIntoSysres(
                     sysresPath,
-                    fbInstances.Where(f => SysresFbMirror.BucketFor(f.Name, allocation) == PlcAssignment.M262).ToList());
+                    fbInstances.Where(f => SysresFbMirror.BucketFor(f.Name, allocation) == PlcAssignment.M262).ToList(),
+                    TargetBootstrap.For(PlcAssignment.M262, ctx.Layout));
 
             int systemMappingsAdded = 0;
 
@@ -158,7 +160,7 @@ namespace CodeGen.Devices.M262
             };
         }
 
-        const string M262DevicePropertiesPluginGuid = "F513CAE3-7194-4086-936C-02912EA0B352";
+        const string M262DevicePropertiesPluginGuid = "F513CAE3-7194-4086-936C-02912EA0B352";  // == Station2DeviceEmitter.DeployPluginPropertiesFile stem
 
         public static string WriteM262DevicePropertiesXml(MapperConfig cfg, string sysdevPath,
                                                          bool enableInsecureApp = false)
@@ -212,7 +214,7 @@ namespace CodeGen.Devices.M262
 
             var sysdevPath = Path.Combine(sysGuidDir, $"{M262SysdevId}.sysdev");
             File.WriteAllText(sysdevPath, Station2DeviceEmitter.BuildSysdevXml(cfg,
-                M262SysdevId, DeviceName, "M262_dPAC", M262ResourceId, resourceName));
+                M262SysdevId, DeviceName, CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.M262), M262ResourceId, resourceName));
 
             var sysdevFolder = Path.Combine(sysGuidDir, M262SysdevId);
             Directory.CreateDirectory(sysdevFolder);
@@ -222,7 +224,7 @@ namespace CodeGen.Devices.M262
                     Station2DeviceEmitter.BuildSysresXml(cfg, M262ResourceId, resourceName));
 
             var e0601 = Path.Combine(sysdevFolder,
-                "E0601B81-4A3A-4A96-B6C2-007BDC680D59.Properties.xml");
+                CodeGen.Devices.Core.Station2DeviceEmitter.SystemDevicePropertiesFile);
             if (!File.Exists(e0601))
                 File.WriteAllText(e0601, Station2DeviceEmitter.BuildEmptySystemDeviceProps(cfg));
 
