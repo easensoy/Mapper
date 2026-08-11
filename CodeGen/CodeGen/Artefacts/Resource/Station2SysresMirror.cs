@@ -5,6 +5,7 @@ using System.Linq;
 using System.Xml.Linq;
 using CodeGen.Configuration;
 using CodeGen.Devices.Core;
+using CodeGen.Mapping;
 using CodeGen.Translation;
 
 namespace CodeGen.Devices.Core
@@ -27,14 +28,14 @@ namespace CodeGen.Devices.Core
                 : SysresFbMirror.ReadTopLevelFbsWithSystemModelFallback(syslayPath);
             if (all.Count == 0) return (0, 0);
 
-            int m580 = MirrorBucket(eaeRoot, "M580_dPAC",
+            int m580 = MirrorBucket(eaeRoot, CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.M580),
                 all.Where(f => SysresFbMirror.BucketFor(f.Name, ctx.Allocation) == PlcAssignment.M580).ToList(),
                 ctx.Layout.Geometry.DeviceCanvasOrigin,
-                dpacFullInitId: "66C40EEF3F39D969", plcStartId: "ACED009B79DFCE69");
-            int bx1 = MirrorBucket(eaeRoot, "Soft_dPAC",
+                TargetBootstrap.For(PlcAssignment.M580, ctx.Layout));
+            int bx1 = MirrorBucket(eaeRoot, CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.BX1),
                 all.Where(f => SysresFbMirror.BucketFor(f.Name, ctx.Allocation) == PlcAssignment.BX1).ToList(),
                 ctx.Layout.Geometry.DeviceCanvasOrigin,
-                dpacFullInitId: "0FE5E1B2C3D4A5B6", plcStartId: "1A2B3C4D5E6F7081");
+                TargetBootstrap.For(PlcAssignment.BX1, ctx.Layout));
             return (m580, bx1);
         }
 
@@ -63,7 +64,7 @@ namespace CodeGen.Devices.Core
         }
 
         static int MirrorBucket(string eaeRoot, string deviceType, List<SysresFbMirror.SyslayFb> bucket,
-            CanvasPoint origin, string dpacFullInitId, string plcStartId)
+            CanvasPoint origin, IReadOnlyList<SystemFbSpec> systemFbs)
         {
             if (bucket.Count == 0) return 0;
             bucket = TranslateBucketToCanvasOrigin(bucket, origin);
@@ -71,7 +72,7 @@ namespace CodeGen.Devices.Core
             if (sysdev == null) return 0;
             var sysres = EaeProjectLayout.FindSysresFor(sysdev);
             if (sysres == null) return 0;
-            var added = SysresFbMirror.MirrorFbsIntoSysres(sysres, bucket, dpacFullInitId, plcStartId);
+            var added = SysresFbMirror.MirrorFbsIntoSysres(sysres, bucket, systemFbs);
 
             // SysresFbMirror keeps x/y untouched on an existing FB (so EAE doesn't see it as new), so
             // existing M580/BX1 FBs keep OLD global-syslay coords — restamp the canvas-origin x/y here.
