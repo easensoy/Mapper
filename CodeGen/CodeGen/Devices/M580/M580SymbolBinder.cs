@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -94,7 +94,7 @@ namespace CodeGen.Devices.M580
                 var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(config);
                 if (string.IsNullOrEmpty(eaeRoot)) { Log("skipped, could not derive EAE project root"); return; }
 
-                var sysdevFile = HcfBindingSupport.FindSysdevByType(eaeRoot, "M580_dPAC", "SE.DPAC");
+                var sysdevFile = HcfBindingSupport.FindSysdevByType(eaeRoot, CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.M580), CodeGen.Mapping.PlcTargets.DeviceNamespace);
                 if (sysdevFile == null) { Log("skipped, no deployed M580 sysdev (Type=M580_dPAC)"); return; }
 
                 var stem = Path.GetFileNameWithoutExtension(sysdevFile);
@@ -106,7 +106,7 @@ namespace CodeGen.Devices.M580
                 if (string.IsNullOrEmpty(resId)) { Log("skipped, deployed sysres ID not resolvable"); return; }
                 // resName is the live Resource Name attribute EAE's $${PATH} macro resolves to as the
                 // leading segment of every per-instance symlink the CAT body declares.
-                if (string.IsNullOrWhiteSpace(resName)) resName = "RES0";
+                if (string.IsNullOrWhiteSpace(resName)) resName = CodeGen.Mapping.ControllerMap.ResourceForPlc(PlcAssignment.M580);
 
                 var compId = HcfBindingSupport.BuildComponentIdMap(folder);
                 if (compId.Count == 0)
