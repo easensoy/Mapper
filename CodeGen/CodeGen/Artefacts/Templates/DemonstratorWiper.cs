@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -30,7 +30,7 @@ namespace CodeGen.Services
         {
             "Area_CAT", "Station_CAT", "Five_State_Actuator_CAT",
             "Sensor_Bool_CAT", "Process1_Generic", "Seven_State_Actuator_CAT",
-            "Seven_State_Actuator_Centre_Home_CAT",
+            CodeGen.Mapping.TemplateMap.SevenStateCentreHomeCat,
             "Robot_Task_CAT", "Actuator_Fault_CAT", "PLC_RW_M262",
             "DataType",
             "Configuration", "Languages", "License", "Log", "SnapshotCompiles",
