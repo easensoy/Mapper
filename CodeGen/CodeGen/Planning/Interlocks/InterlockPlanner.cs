@@ -16,7 +16,6 @@ namespace CodeGen.Translation.Interlocks
         // with what was emitted. They used to be separate walks applying the drops independently, which
         // is how the guard came to omit the destination check and the array cap.
         public static InterlockPlan BuildRules(VueOneComponent actuator,
-            IReadOnlyList<VueOneComponent> allComponents,
             IReadOnlyDictionary<string, int> scopedIds, GenerationContext ctx)
         {
             int cap = InterlockConfig.Current.RuleArraySize;
@@ -26,7 +25,7 @@ namespace CodeGen.Translation.Interlocks
             var blk = new int[cap];
             int n = 0;
 
-            foreach (var r in Resolve(actuator, allComponents, scopedIds, ctx))
+            foreach (var r in Resolve(actuator, scopedIds, ctx))
             {
                 if (n >= cap) break;
                 from[n] = r.From; to[n] = r.To; src[n] = r.Src; blk[n] = r.Blocked;
@@ -38,85 +37,51 @@ namespace CodeGen.Translation.Interlocks
         // Count of in-scope conditions that survive the drops, for the inert-safety-net guard
         // (conditions present but RuleCount==0 => abort).
         public static int CountInScopeConditions(VueOneComponent actuator,
-            IReadOnlyList<VueOneComponent> allComponents,
             IReadOnlyDictionary<string, int> scopedIds, GenerationContext ctx)
-            => Resolve(actuator, allComponents, scopedIds, ctx)
+            => Resolve(actuator, scopedIds, ctx)
                 .Take(InterlockConfig.Current.RuleArraySize)
                 .Count();
 
         private readonly record struct Rule(int From, int To, int Src, int Blocked);
 
-        // The single translation pass: one rule per surviving <Interlock_Condition>.
+        // The single translation pass: one rule per surviving <Interlock_Condition>. Every reference
+        // is already bound by TwinModel, so a dangling one never reaches here.
         private static IEnumerable<Rule> Resolve(VueOneComponent actuator,
-            IReadOnlyList<VueOneComponent> allComponents,
             IReadOnlyDictionary<string, int> scopedIds, GenerationContext ctx)
         {
-            foreach (var st in actuator.States)
-            {
-                if (st.InterlockConditions.Count == 0) continue;
+            var owner = ctx.Twin.ById(actuator.ComponentID);
+            if (owner == null) yield break;
 
-                int toState = FirstDestinationStateNumber(actuator, st);
-                if (toState < 0) continue;
+            foreach (var st in owner.States)
+            {
+                if (st.Interlocks.Count == 0) continue;
+
+                var destination = st.Transitions.Select(tr => tr.Destination).FirstOrDefault(d => d != null);
+                if (destination == null) continue;
 
                 // RuleFromState = the resting predecessor the FB sees at REQ time (a rule matches only
                 // when CurrentRawState == RuleFromState).
-                int fromState = PredecessorStateNumber(actuator, st);
+                int fromState = owner.States
+                    .FirstOrDefault(p => p.Transitions.Any(tr => ReferenceEquals(tr.Destination, st)))
+                    ?.Number ?? st.Number;
 
-                foreach (var c in st.InterlockConditions)
+                foreach (var reference in st.Interlocks)
                 {
-                    var key = (c.ComponentID ?? string.Empty).Trim();
-                    if (key.Length == 0 || !scopedIds.TryGetValue(key, out var srcId)) continue;
+                    if (!scopedIds.TryGetValue(reference.Component.Id, out var srcId)) continue;
 
-                    var srcComp = Lookup(allComponents, key);
-                    int blockedState = StateNumberOf(srcComp, c.ID);
-                    if (blockedState < 0) continue;
-
-                    int blocked = ActuatorStateEncoding.Settled(srcComp, blockedState);
+                    int blocked = ActuatorStateEncoding.Settled(
+                        reference.Component.Source, reference.State.Number);
 
                     // Drop "block-while-source-is-home": a SAME-controller source at rest is out of the
                     // collision crossing, so blocking on it is inverted and would deadlock the recipe.
                     // A cross-controller FEED source at rest is the genuine exception — it means "the
                     // workpiece is not delivered", which must keep blocking downstream work.
                     if (blocked == ActuatorStateEncoding.Home &&
-                        !IsCrossControllerReadinessGate(actuator, srcComp, ctx)) continue;
+                        !IsCrossControllerReadinessGate(actuator, reference.Component.Source, ctx)) continue;
 
-                    yield return new Rule(fromState, toState, srcId, blocked);
+                    yield return new Rule(fromState, destination.Number, srcId, blocked);
                 }
             }
-        }
-
-        private static VueOneComponent? Lookup(IReadOnlyList<VueOneComponent> all, string componentId) =>
-            all.FirstOrDefault(x =>
-                string.Equals((x.ComponentID ?? string.Empty).Trim(), componentId,
-                    StringComparison.OrdinalIgnoreCase));
-
-        private static int StateNumberOf(VueOneComponent? comp, string? stateId) =>
-            comp?.States.FirstOrDefault(s =>
-                string.Equals((s.StateID ?? string.Empty).Trim(), (stateId ?? string.Empty).Trim(),
-                    StringComparison.OrdinalIgnoreCase))?.StateNumber ?? -1;
-
-        private static int FirstDestinationStateNumber(VueOneComponent actuator, VueOneState st)
-        {
-            foreach (var tr in st.Transitions)
-            {
-                var dest = (tr.DestinationStateID ?? string.Empty).Trim();
-                if (dest.Length == 0) continue;
-                var ds = actuator.States.FirstOrDefault(s =>
-                    string.Equals((s.StateID ?? string.Empty).Trim(), dest, StringComparison.OrdinalIgnoreCase));
-                if (ds != null) return ds.StateNumber;
-            }
-            return -1;
-        }
-
-        private static int PredecessorStateNumber(VueOneComponent actuator, VueOneState st)
-        {
-            var ownStateId = (st.StateID ?? string.Empty).Trim();
-            if (ownStateId.Length == 0) return st.StateNumber;
-            var predecessor = actuator.States.FirstOrDefault(p =>
-                p.Transitions.Any(t =>
-                    string.Equals((t.DestinationStateID ?? string.Empty).Trim(), ownStateId,
-                        StringComparison.OrdinalIgnoreCase)));
-            return predecessor?.StateNumber ?? st.StateNumber;
         }
 
         // A home-state interlock is normally an inverted "source is out of the way" no-op. The one
