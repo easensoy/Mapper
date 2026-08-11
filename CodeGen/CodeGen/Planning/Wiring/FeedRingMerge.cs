@@ -1,10 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
+using System;
 using System.Linq;
+using CodeGen.Domain.Twin;
 using CodeGen.Mapping;
-using CodeGen.Models;
-using CodeGen.Translation;
-using static CodeGen.Translation.Process.Recipes.RecipeComponentLookup;
 using static CodeGen.Translation.Process.Recipes.TransitionChainParser;
 
 namespace CodeGen.Translation.Process.Recipes
@@ -23,33 +20,30 @@ namespace CodeGen.Translation.Process.Recipes
     // controller allocation; no process name and no model shape participates.
     public static class FeedRingMerge
     {
-        public static bool Needed(IReadOnlyList<VueOneComponent> allComponents,
-            ControllerAllocation allocation)
+        public static bool Needed(TwinModel twin, ControllerAllocation allocation)
         {
-            foreach (var proc in allComponents)
+            foreach (var proc in twin.Processes)
             {
-                if (!ComponentType.IsProcess(proc)) continue;
                 if (!allocation.IsFeedSide(proc.Name)) continue;
 
-                var chain = OrderStatesByTransitionChain(proc.States);
+                var chain = OrderStatesByTransitionChain(proc.Source.States);
                 // Index 0 is the cycle entry and the last link is where the cycle closes; a dependency at
                 // either is a boundary handshake the phase transport already carries.
                 for (int i = 1; i < chain.Count - 1; i++)
-                    if (WaitsOnAnotherController(chain[i], proc, allComponents, allocation))
+                    if (WaitsOnAnotherController(chain[i], proc, twin, allocation))
                         return true;
             }
             return false;
         }
 
-        private static bool WaitsOnAnotherController(VueOneState state, VueOneComponent proc,
-            IReadOnlyList<VueOneComponent> all, ControllerAllocation allocation) =>
+        private static bool WaitsOnAnotherController(Models.VueOneState state, TwinComponent proc,
+            TwinModel twin, ControllerAllocation allocation) =>
             state.Transitions
                 .SelectMany(t => t.Conditions)
-                .Where(c => !string.IsNullOrEmpty(c.ComponentID))
-                .Select(c => LookupComponent(c.ComponentID, all))
+                .Select(c => twin.ById(c.ComponentID))
                 .Any(target => target != null
-                    && ComponentType.IsProcess(target)
-                    && !string.Equals(target.Name?.Trim(), proc.Name?.Trim(), StringComparison.OrdinalIgnoreCase)
+                    && target.IsProcess
+                    && !string.Equals(target.Name, proc.Name, StringComparison.OrdinalIgnoreCase)
                     && allocation.Of(target.Name) != allocation.Of(proc.Name));
     }
 }
