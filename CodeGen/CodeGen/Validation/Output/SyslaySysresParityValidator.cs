@@ -27,13 +27,13 @@ namespace CodeGen.Devices.Core
         static IEnumerable<(string DeviceType, string? DeviceName, PlcAssignment Plc, string Label)> Devices(
             GenerationContext ctx)
         {
-            yield return ("M262_dPAC", null, PlcAssignment.M262, "M262");
+            yield return (CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.M262), null, PlcAssignment.M262, "M262");
             // The partial swap keeps the M262 Feed station while Feeder/Checker/PartInHopper relocate to
             // the RevPi, so BOTH devices exist and both need parity coverage.
             if (ctx.Profile.PartialRevPi)
-                yield return ("Soft_dPAC", "Revolution_Pi", PlcAssignment.RevPi, "RevPi");
-            yield return ("M580_dPAC", null,  PlcAssignment.M580, "M580");
-            yield return ("Soft_dPAC", "BX1", PlcAssignment.BX1,  "BX1");
+                yield return (CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.RevPi), CodeGen.Mapping.PlcTargets.DeviceName(CodeGen.Translation.PlcAssignment.RevPi)!, PlcAssignment.RevPi, "RevPi");
+            yield return (CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.M580), null,  PlcAssignment.M580, "M580");
+            yield return (CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.BX1), CodeGen.Mapping.PlcTargets.DeviceName(CodeGen.Translation.PlcAssignment.BX1)!, PlcAssignment.BX1,  "BX1");
         }
 
         static string? LocateSysdev(string eaeRoot, string deviceType, string? deviceName) =>
@@ -203,7 +203,7 @@ namespace CodeGen.Devices.Core
 
         static void ValidateDischargeHcf(string eaeRoot, List<Violation> violations)
         {
-            var sysdev = EaeProjectLayout.FindSysdevByDeviceType(eaeRoot, "M262_dPAC");
+            var sysdev = EaeProjectLayout.FindSysdevByDeviceType(eaeRoot, CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.M262));
             if (string.IsNullOrEmpty(sysdev))
             {
                 violations.Add(new("M262-HCF", "discharge tail active but the M262 sysdev was not found"));
@@ -248,7 +248,7 @@ namespace CodeGen.Devices.Core
         // of the discharge-channel Meanings — Ejector/Robot/PartAtAssembly) landed on the RevPi sysres.
         static void ValidateDischargeRevPi(string eaeRoot, List<Violation> violations)
         {
-            var sysdev = EaeProjectLayout.FindSysdevByDeviceTypeAndName(eaeRoot, "Soft_dPAC", "Revolution_Pi");
+            var sysdev = EaeProjectLayout.FindSysdevByDeviceTypeAndName(eaeRoot, CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.RevPi), CodeGen.Mapping.PlcTargets.DeviceName(CodeGen.Translation.PlcAssignment.RevPi)!);
             var sysres = sysdev == null ? null : EaeProjectLayout.FindSysresFor(sysdev);
             if (string.IsNullOrEmpty(sysres) || !File.Exists(sysres))
             {
@@ -293,7 +293,7 @@ namespace CodeGen.Devices.Core
             const string BrokerFbId = "A6B61E2425DB1C30";   // == RevPiIoBrokerInjector.BrokerFbId
             const string BrokerName = CodeGen.Devices.RevPi.RevPiIoBrokerInjector.BrokerName;
 
-            var sysdev = EaeProjectLayout.FindSysdevByDeviceTypeAndName(eaeRoot, "Soft_dPAC", "Revolution_Pi");
+            var sysdev = EaeProjectLayout.FindSysdevByDeviceTypeAndName(eaeRoot, CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.RevPi), CodeGen.Mapping.PlcTargets.DeviceName(CodeGen.Translation.PlcAssignment.RevPi)!);
             var sysres = sysdev == null ? null : EaeProjectLayout.FindSysresFor(sysdev);
             if (string.IsNullOrEmpty(sysres) || !File.Exists(sysres))
             {
