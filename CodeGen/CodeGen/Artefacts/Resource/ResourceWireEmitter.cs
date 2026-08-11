@@ -227,14 +227,14 @@ namespace CodeGen.Devices.Core
                 }
                 string Nm(XElement fb) => (string?)fb.Attribute("Name") ?? string.Empty;
                 var initNames = orderedComps.Select(Nm).Where(s => s.Length > 0).ToList();
-                bool robotTail = RobotTailActive(cfg);
-                // Ejector/Robot/PartAtAssembly + TopCoverSenosr are kept OFF the Feed ring (driven by the M262->M580 segment / cover detour); on it they'd be double-driven. Mirrors TemplateMap.M262CrossRingSegment.
+                // The cross-device segment is driven by the M262->M580 splice, so it stays OFF the local
+                // Feed ring; on both it would be double-driven. Read from the plan, so the two halves of
+                // the deploy cannot disagree about its membership.
+                var crossSegment = ctx.CrossRingSegment;
+                bool robotTail = crossSegment.Count > 0;
                 var ringNames = orderedComps.Where(HasRingAdapter).Select(Nm)
                     .Where(s => s.Length > 0)
-                    .Where(s => !(robotTail &&
-                        (string.Equals(s, "Ejector",        StringComparison.OrdinalIgnoreCase) ||
-                         string.Equals(s, "Robot",          StringComparison.OrdinalIgnoreCase) ||
-                         string.Equals(s, "PartAtAssembly", StringComparison.OrdinalIgnoreCase))))
+                    .Where(s => !crossSegment.Contains(s, StringComparer.OrdinalIgnoreCase))
                     // TopCoverSenosr stays ON the ring so its cover-presence report reaches Assembly's
                     // state_table (the clamp-model interlock). The old opt-out filter here was dead —
                     // it read `true || …`, so it never excluded anything.
@@ -261,10 +261,13 @@ namespace CodeGen.Devices.Core
                 var initChain = new List<string> { "FB1" };
                 if (Present(anchors.AreaFb, byName)) initChain.Add(anchors.AreaFb!);
                 if (Present(anchors.StationFb, byName)) initChain.Add(anchors.StationFb!);
-                // Robot tail (Ejector+Robot) inits LAST so a stall in its cross-PLC bring-up can't block Feed_Station.INIT. M262-only; off -> byte-identical.
-                var robotTailInit = RobotTailActive(cfg)
-                    ? new HashSet<string>(StringComparer.Ordinal) { "Ejector", "Robot" }
-                    : new HashSet<string>(StringComparer.Ordinal);
+                // The segment's ACTUATORS init LAST so a stall in their cross-PLC bring-up cannot block
+                // Feed_Station.INIT. Its sensor reports inward and needs no bring-up order, so it is not
+                // held back. Same declaration as the ring exclusion above; off -> byte-identical.
+                var robotTailInit = new HashSet<string>(
+                    crossSegment.Where(n => !RigCatalog.Current.SynthSensors
+                        .Any(s => string.Equals(s.Name, n, StringComparison.OrdinalIgnoreCase))),
+                    StringComparer.Ordinal);
                 initChain.AddRange(initNames.Where(n => !robotTailInit.Contains(n)));
                 initChain.AddRange(processNames);
                 initChain.AddRange(initNames.Where(n => robotTailInit.Contains(n)));
@@ -365,7 +368,7 @@ namespace CodeGen.Devices.Core
                 }
 
                 // M262 cross-ring segment (intra-M262 chain kept OFF the Feed ring); seg[0].in and seg[^1].out stay OPEN (EAE bridges via syslay). No-op on M580/BX1 and when both flags are off.
-                var crossSeg = TemplateMap.M262CrossRingSegment(robotTail)
+                var crossSeg = crossSegment
                     .Where(byName.ContainsKey).ToList();
                 for (int i = 0; i < crossSeg.Count - 1; i++)
                     adapterWires.Add(new Wire(
@@ -445,10 +448,6 @@ namespace CodeGen.Devices.Core
 
         private static bool Present(string? name, Dictionary<string, XElement> byName)
             => !string.IsNullOrEmpty(name) && byName.ContainsKey(name);
-
-        // Reads the SAME authority (HandoffPlanner.DischargeActive) BuildStation2Wiring uses for the syslay cross-hops, so the sysres ring topology follows the decision that shaped the syslay; TRUE opens every per-resource ring at the robot-tail boundary.
-        private static bool RobotTailActive(MapperConfig cfg)
-            => CodeGen.Translation.HandoffPlanner.DischargeActive;
 
         // Projected from the run's roster so the canvas table never drifts from the allocation; applied to
         // both the sysres and the syslay.
@@ -601,32 +600,6 @@ namespace CodeGen.Devices.Core
                     $"[Layout] frame {fname} ({bucket}) -> X={fx:0} Y={fy:0} W={fw:0} H={fh:0} " +
                     $"encloses {inZone.Count} FB(s)");
             }
-        }
-
-        // Locates the deployed .sysres beside the .sysdev whose root <Device> has the given deviceType ("M262_dPAC"/"M580_dPAC"/"Soft_dPAC") in SE.DPAC.
-        public static string? LocateSysresByDeviceType(string eaeRoot, string deviceType)
-        {
-            var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
-            if (!Directory.Exists(systemDir)) return null;
-            foreach (var sysdev in Directory.EnumerateFiles(systemDir, "*.sysdev", SearchOption.AllDirectories))
-            {
-                try
-                {
-                    var doc = XDocument.Load(sysdev);
-                    var root = doc.Root;
-                    if (root == null) continue;
-                    var type = (string?)root.Attribute("Type") ?? string.Empty;
-                    var nspace = (string?)root.Attribute("Namespace") ?? string.Empty;
-                    if (type != deviceType || nspace != "SE.DPAC") continue;
-                    var sysdevDir = Path.Combine(
-                        Path.GetDirectoryName(sysdev)!,
-                        Path.GetFileNameWithoutExtension(sysdev));
-                    if (!Directory.Exists(sysdevDir)) continue;
-                    return Directory.EnumerateFiles(sysdevDir, "*.sysres").FirstOrDefault();
-                }
-                catch { /* skip */ }
-            }
-            return null;
         }
 
         private static bool PortExists(HashSet<string> ports, string portName)
