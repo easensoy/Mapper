@@ -81,6 +81,8 @@ namespace CodeGen.Configuration
         public string Name { get; set; } = string.Empty;
         public int X { get; set; }
         public int Y { get; set; }
+        public int SysresX { get; set; }
+        public int SysresY { get; set; }
     }
 
     public sealed class RosterEntry
