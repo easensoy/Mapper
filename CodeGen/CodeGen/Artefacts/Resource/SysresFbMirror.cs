@@ -29,29 +29,34 @@ namespace CodeGen.Devices.Core
             XNamespace ns = root.GetDefaultNamespace();
             var net = root.Element(ns + "SubAppNetwork") ?? root.Element(ns + "FBNetwork");
             if (net == null) return new List<SyslayFb>();
-            return net.Elements(ns + "FB")
-                .Select(e => new SyslayFb(
+            return Project(net.Elements(ns + "FB"));
+        }
+
+        // The FB projection both readers share. Children are matched by local name so it serves the
+        // namespaced .syslay and the namespace-free System.hash alike.
+        static List<SyslayFb> Project(IEnumerable<XElement> fbs) =>
+            fbs.Select(e => new SyslayFb(
                     Id:        (string?)e.Attribute("ID")        ?? string.Empty,
                     Name:      (string?)e.Attribute("Name")      ?? string.Empty,
                     Type:      (string?)e.Attribute("Type")      ?? string.Empty,
                     Namespace: (string?)e.Attribute("Namespace") ?? "Main",
                     X:         (string?)e.Attribute("x")         ?? "0",
                     Y:         (string?)e.Attribute("y")         ?? "0",
-                    Parameters: e.Elements(ns + "Parameter")
-                        .Select(p => new SyslayFbParameter(
-                            (string?)p.Attribute("Name")  ?? string.Empty,
-                            (string?)p.Attribute("Value") ?? string.Empty))
+                    Parameters: Named(e, "Parameter")
+                        .Select(p => new SyslayFbParameter(Attr(p, "Name"), Attr(p, "Value")))
                         .Where(p => !string.IsNullOrEmpty(p.Name))
                         .ToList(),
-                    Attributes: e.Elements(ns + "Attribute")
-                        .Select(a => new SyslayFbAttribute(
-                            (string?)a.Attribute("Name")  ?? string.Empty,
-                            (string?)a.Attribute("Value") ?? string.Empty))
+                    Attributes: Named(e, "Attribute")
+                        .Select(a => new SyslayFbAttribute(Attr(a, "Name"), Attr(a, "Value")))
                         .Where(a => !string.IsNullOrEmpty(a.Name))
                         .ToList()))
                 .Where(fb => !string.IsNullOrWhiteSpace(fb.Name))
                 .ToList();
-        }
+
+        static IEnumerable<XElement> Named(XElement parent, string localName) =>
+            parent.Elements().Where(c => c.Name.LocalName == localName);
+
+        static string Attr(XElement e, string name) => (string?)e.Attribute(name) ?? string.Empty;
 
         public static List<SyslayFb> ReadTopLevelFbsWithSystemModelFallback(string syslayPath)
         {
@@ -83,43 +88,11 @@ namespace CodeGen.Devices.Core
         static List<SyslayFb> ReadSystemHashFbs(string systemHashPath)
         {
             var doc = XDocument.Load(systemHashPath);
-            return doc.Descendants()
-                .Where(e => e.Name.LocalName == "FB")
-                .Select(e => new SyslayFb(
-                    Id:        (string?)e.Attribute("ID")        ?? string.Empty,
-                    Name:      (string?)e.Attribute("Name")      ?? string.Empty,
-                    Type:      (string?)e.Attribute("Type")      ?? string.Empty,
-                    Namespace: (string?)e.Attribute("Namespace") ?? "Main",
-                    X:         (string?)e.Attribute("x")         ?? "0",
-                    Y:         (string?)e.Attribute("y")         ?? "0",
-                    Parameters: e.Elements()
-                        .Where(p => p.Name.LocalName == "Parameter")
-                        .Select(p => new SyslayFbParameter(
-                            (string?)p.Attribute("Name")  ?? string.Empty,
-                            (string?)p.Attribute("Value") ?? string.Empty))
-                        .Where(p => !string.IsNullOrEmpty(p.Name))
-                        .ToList(),
-                    Attributes: e.Elements()
-                        .Where(a => a.Name.LocalName == "Attribute")
-                        .Select(a => new SyslayFbAttribute(
-                            (string?)a.Attribute("Name")  ?? string.Empty,
-                            (string?)a.Attribute("Value") ?? string.Empty))
-                        .Where(a => !string.IsNullOrEmpty(a.Name))
-                        .ToList()))
-                .Where(fb => !string.IsNullOrWhiteSpace(fb.Name))
-                .ToList();
+            return Project(doc.Descendants().Where(e => e.Name.LocalName == "FB"));
         }
 
-        public const string DpacFullInitFbId  = "593A8F4FDEA0A668";
-        public const string PlcStartFbId      = "3DB1FB0F578E5F1E";
-
-        public static int MirrorFbsIntoSysres(string sysresPath, List<SyslayFb> syslayFbs) =>
-            MirrorFbsIntoSysres(sysresPath, syslayFbs, DpacFullInitFbId, PlcStartFbId);
-
-        // Boot-ID-parameterized so each PLC resource gets its OWN DPAC_FULLINIT + plcStart (EAE FB IDs
-        // must be unique across resources).
         public static int MirrorFbsIntoSysres(string sysresPath, List<SyslayFb> syslayFbs,
-            string dpacFullInitId, string plcStartId)
+            IReadOnlyList<SystemFbSpec> systemFbs)
         {
             if (!File.Exists(sysresPath)) return 0;
             var doc = XDocument.Load(sysresPath);
@@ -136,17 +109,7 @@ namespace CodeGen.Devices.Core
                 root.Add(network);
             }
 
-            // M262IO (PLC_RW_M262) is NOT emitted onto the sysres — the .hcf channels publish symlinks
-            // direct to the consumer FBs, so an M262IO instance would be dead weight.
-            EnsureSystemFb(network, ns,
-                id: dpacFullInitId, name: "FB1", type: "DPAC_FULLINIT", nsAttr: "SE.DPAC",
-                mapping: null, x: 1900, y: 140,
-                loaded: true);
-            EnsureSystemFb(network, ns,
-                id: plcStartId, name: "FB2", type: "plcStart", nsAttr: "SE.AppBase",
-                mapping: null, x: 820, y: 660,
-                loaded: true,
-                parameters: new[] { ("Prio", "10"), ("Delay", "T#1000ms") });
+            foreach (var spec in systemFbs) EnsureSystemFb(network, ns, spec);
 
             // DEDUP the id-flip: a component's sysres FB id can flip between regens (mirror id = syslay
             // id with its top hex bit flipped), leaving a stale previous-id copy that declares the
@@ -353,37 +316,28 @@ namespace CodeGen.Devices.Core
             return changed;
         }
 
-        static void EnsureSystemFb(XElement network, XNamespace ns,
-            string id, string name, string type, string nsAttr,
-            string? mapping, int x, int y, bool loaded,
-            (string Name, string Value)[]? parameters = null)
+        static void EnsureSystemFb(XElement network, XNamespace ns, SystemFbSpec spec)
         {
             foreach (var stale in network.Elements(ns + "FB")
-                .Where(e => string.Equals((string?)e.Attribute("ID"), id, StringComparison.OrdinalIgnoreCase))
+                .Where(e => string.Equals((string?)e.Attribute("ID"), spec.Id, StringComparison.OrdinalIgnoreCase))
                 .ToList())
             {
                 stale.Remove();
             }
 
             var fb = new XElement(ns + "FB",
-                new XAttribute("ID",        id),
-                new XAttribute("Name",      name),
-                new XAttribute("Type",      type),
-                new XAttribute("Namespace", nsAttr));
-            if (!string.IsNullOrEmpty(mapping)) fb.SetAttributeValue("Mapping", mapping);
-            fb.SetAttributeValue("x", x);
-            fb.SetAttributeValue("y", y);
-            if (loaded) fb.SetAttributeValue("Loaded", "true");
+                new XAttribute("ID",        spec.Id),
+                new XAttribute("Name",      spec.Name),
+                new XAttribute("Type",      spec.Type),
+                new XAttribute("Namespace", spec.Namespace));
+            fb.SetAttributeValue("x", spec.X);
+            fb.SetAttributeValue("y", spec.Y);
+            fb.SetAttributeValue("Loaded", "true");
 
-            if (parameters != null)
-            {
-                foreach (var (pn, pv) in parameters)
-                {
-                    fb.Add(new XElement(ns + "Parameter",
-                        new XAttribute("Name",  pn),
-                        new XAttribute("Value", pv)));
-                }
-            }
+            foreach (var (pn, pv) in spec.Parameters)
+                fb.Add(new XElement(ns + "Parameter",
+                    new XAttribute("Name",  pn),
+                    new XAttribute("Value", pv)));
 
             network.Add(fb);
         }
@@ -394,20 +348,8 @@ namespace CodeGen.Devices.Core
         {
             if (string.IsNullOrEmpty(fbName)) return PlcAssignment.Unknown;
 
-            // One MQTT connection per resource ("MqttConn"=BX1, "_M262"=M262, "_M580"=M580); each
-            // routes to its own sysres so the embedded MqttPub binds the LOCAL connection. Telemetry_*
-            // wraps MQTT_CONNECTION and routes to the SAME resource as the MqttConn* it replaces.
-            if (string.Equals(fbName, "MqttConn", StringComparison.Ordinal) ||
-                string.Equals(fbName, "Telemetry_BX1", StringComparison.Ordinal))
-                return PlcAssignment.BX1;
-            // M262's MQTT connection (M262 mode only; RevPi mode emits Telemetry_RevPi/MqttConn_RevPi,
-            // which route to RevPi via the Feed-controller fallback below).
-            if (string.Equals(fbName, "MqttConn_M262", StringComparison.Ordinal) ||
-                string.Equals(fbName, "Telemetry_M262", StringComparison.Ordinal))
-                return PlcAssignment.M262;
-            if (string.Equals(fbName, "MqttConn_M580", StringComparison.Ordinal) ||
-                string.Equals(fbName, "Telemetry_M580", StringComparison.Ordinal))
-                return PlcAssignment.M580;
+            // One MQTT connection per resource, so the embedded MqttPub binds the LOCAL one. The six
+            // MqttConn*/Telemetry_* the roster declares route through it like any other FB.
             // RevPi's own connection — partial swap emits it explicitly alongside Telemetry_M262 (full swap
             // routes it here via the Feed-controller fallback below, but partial keeps M262 as the controller).
             if (string.Equals(fbName, "MqttConn_RevPi", StringComparison.Ordinal) ||
@@ -423,10 +365,6 @@ namespace CodeGen.Devices.Core
                 return PlcAssignment.M580;
             if (string.Equals(fbName, "BX1_CoverRingGate", StringComparison.Ordinal))
                 return PlcAssignment.BX1;
-
-            // Legacy structural-FB name variant the roster does not declare.
-            if (string.Equals(fbName, "Disassembly_Station", StringComparison.Ordinal))
-                return PlcAssignment.M580;
 
             var p = allocation.Of(fbName);
             // Unknown falls back to whichever controller currently hosts the Feed station (M262 or RevPi),
