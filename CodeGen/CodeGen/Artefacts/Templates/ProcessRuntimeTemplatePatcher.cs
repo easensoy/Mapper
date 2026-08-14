@@ -627,7 +627,6 @@ namespace CodeGen.Services
                 return;
             }
 
-            // Match Source=START, Destination=IDLE1, Condition (spaces stripped) containing "CycleType<>0".
             var bypass = ecc.Elements(ns + "ECTransition").Where(t =>
                 (string?)t.Attribute("Source") == "START" &&
                 (string?)t.Attribute("Destination") == "IDLE1" &&
