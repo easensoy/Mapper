@@ -15,41 +15,6 @@ namespace CodeGen.Devices.Core
     {
         public sealed record Wire(string Source, string Destination);
 
-        // A resource with no Station/Process/Terminator (BX1) leaves those null; the CaS chain + report ring skip gracefully.
-        public sealed record ResourceAnchors(
-            string Label,
-            string? AreaFb,
-            string? StationFb,
-            string? ProcessFb,
-            string? TerminatorFb,
-            IReadOnlyList<Wire> HmiAdapterWires);
-
-        // The init CHAIN is built dynamically in EmitForResource from the components present, so a missing component never severs it.
-        private static readonly Wire[] BootstrapEventWires =
-        {
-            new("START.COLD",          "FB1.INIT"),
-            new("START.WARM",          "FB1.INIT"),
-            new("START.ONLINECHANGE",  "FB1.OC_RETRIGGER"),
-            new("FB2.FIRST_INIT",      "FB2.ACK_FIRST"),
-        };
-
-
-
-        // Single source of truth in TemplateMap so the syslay stationChain and this sysres wiring can never drift.
-        private static readonly IReadOnlySet<string> NoStationAdapterTypes =
-            TemplateMap.NoStationAdapterCatTypes;
-
-        // Hook to exclude a future ring-less CAT from the report ring; kept separate from NoStationAdapterTypes (else ring wires dangle on EAE import).
-        private static readonly HashSet<string> NoRingAdapterTypes =
-            new(StringComparer.Ordinal);
-
-        internal static readonly Wire[] HmiAdapterWires =
-        {
-            new("Area_HMI.AreaHMIAdptrOUT",        "Area.AreaHMIAdptrIN"),
-            new("Station1_HMI.StationHMIAdptrOUT", "Station1.StationHMIAdptrIN"),
-            new("Area.AreaAdptrOUT",               "Station1.AreaAdptrIN"),
-            new("Station1.AreaAdptrOUT",           "Area_Term.CasAdptrIN"),
-        };
 
         // Built-in FBs emitted with the literal name (no FBNetwork lookup, no port validation); START/E_RESTART vary by EMB_RES_ECO canvas variant.
         private static readonly HashSet<string> BuiltInRuntimeFbs = new(StringComparer.Ordinal)
@@ -58,17 +23,14 @@ namespace CodeGen.Devices.Core
             "E_RESTART",
         };
 
-        // No sysres-level data wires: athome/atwork/OutputToWork/Input are CAT-body SYMLINK params (fail port validation here); the .hcf binds them via PLC_RW_M262 symlinks.
-        private static readonly Wire[] DataWires = Array.Empty<Wire>();
-
         // Wires one deployed sysres FBNetwork; components discovered from the sysres (CaSBusOrder then declaration order) so chains/ring are N-component-safe. BX1 (no Station/Process/Terminator) gets only the init fan-out + report ring.
         public static void EmitForResource(GenerationContext ctx, string sysresPath,
-            ResourceAnchors anchors, SystemInjector.BindingApplicationReport report)
+            ResourcePlan plan, SystemInjector.BindingApplicationReport report)
         {
             var cfg = ctx.Config;
             try
             {
-                var tag = anchors.Label;
+                var tag = plan.Label;
                 if (!File.Exists(sysresPath))
                 {
                     report.Missing.Add($"[Wire][{tag}] skipped, sysres not found: {sysresPath}");
@@ -205,10 +167,7 @@ namespace CodeGen.Devices.Core
                 bool IsActuator(XElement fb) =>
                     TemplateManifest.ActuatorTypes.Contains((string?)fb.Attribute("Type") ?? string.Empty);
                 bool HasStationAdapter(XElement fb) =>
-                    !NoStationAdapterTypes.Contains((string?)fb.Attribute("Type") ?? string.Empty);
-                bool HasRingAdapter(XElement fb) =>
-                    !NoRingAdapterTypes.Contains((string?)fb.Attribute("Type") ?? string.Empty);
-
+                    !TemplateMap.NoStationAdapterCatTypes.Contains((string?)fb.Attribute("Type") ?? string.Empty);
                 var orderedComps = new List<XElement>();
                 var seenComp = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var nm in ctx.Roster.CaSBusOrder)
@@ -232,7 +191,7 @@ namespace CodeGen.Devices.Core
                 // the deploy cannot disagree about its membership.
                 var crossSegment = ctx.CrossRingSegment;
                 bool robotTail = crossSegment.Count > 0;
-                var ringNames = orderedComps.Where(HasRingAdapter).Select(Nm)
+                var ringNames = orderedComps.Select(Nm)
                     .Where(s => s.Length > 0)
                     .Where(s => !crossSegment.Contains(s, StringComparer.OrdinalIgnoreCase))
                     // TopCoverSenosr stays ON the ring so its cover-presence report reaches Assembly's
@@ -245,8 +204,8 @@ namespace CodeGen.Devices.Core
                 // Every Process1_Generic on this resource, anchor first; the chains and ring below thread
                 // through every one.
                 var processNames = new List<string>();
-                if (Present(anchors.ProcessFb, byName))
-                    processNames.Add(anchors.ProcessFb!);
+                if (Present(plan.ProcessFb, byName))
+                    processNames.Add(plan.ProcessFb!);
                 foreach (var fb in fbNet.Elements(ns + "FB"))
                 {
                     var nm = (string?)fb.Attribute("Name") ?? string.Empty;
@@ -256,11 +215,11 @@ namespace CodeGen.Devices.Core
                 }
                 bool haveProcess = processNames.Count > 0;
 
-                // Init chain FB1.INITO->[Area]->[Station]->components...->[Process]; absent anchors collapse out so FB1.INITO fans straight into the first component.
-                var eventWires = new List<Wire>(BootstrapEventWires);
+                // Init chain FB1.INITO->[Area]->[Station]->components...->[Process]; absent roles collapse out so FB1.INITO fans straight into the first component.
+                var eventWires = TargetBootstrap.BringUpWires.Select(w => new Wire(w.Source, w.Destination)).ToList();
                 var initChain = new List<string> { "FB1" };
-                if (Present(anchors.AreaFb, byName)) initChain.Add(anchors.AreaFb!);
-                if (Present(anchors.StationFb, byName)) initChain.Add(anchors.StationFb!);
+                if (Present(plan.AreaFb, byName)) initChain.Add(plan.AreaFb!);
+                if (Present(plan.StationFb, byName)) initChain.Add(plan.StationFb!);
                 // The segment's ACTUATORS init LAST so a stall in their cross-PLC bring-up cannot block
                 // Feed_Station.INIT. Its sensor reports inward and needs no bring-up order, so it is not
                 // held back. Same declaration as the ring exclusion above; off -> byte-identical.
@@ -283,29 +242,29 @@ namespace CodeGen.Devices.Core
                         continue;
                     var mqttName = mqttKv.Key;
                     // INIT off the resource boot anchor: Area (M262), else Station (M580), else FB1 (BX1). Self INITO -> CONNECT opens the broker once.
-                    var mqttInit = Present(anchors.AreaFb, byName) ? anchors.AreaFb!
-                                 : Present(anchors.StationFb, byName) ? anchors.StationFb!
+                    var mqttInit = Present(plan.AreaFb, byName) ? plan.AreaFb!
+                                 : Present(plan.StationFb, byName) ? plan.StationFb!
                                  : "FB1";
                     eventWires.Add(new Wire($"{mqttInit}.INITO", $"{mqttName}.INIT"));
                     eventWires.Add(new Wire($"{mqttName}.INITO", $"{mqttName}.CONNECT"));
                 }
 
-                var adapterWires = new List<Wire>(anchors.HmiAdapterWires);
+                var adapterWires = plan.AdapterRelations.Select(r => new Wire(r.Source, r.Destination)).ToList();
 
                 // CaSBus station chain [Station]->actuators...->[Process]->[Terminator]; needs both a Station and a Process anchor, so BX1 skips it (actuators still init + report via the ring).
-                bool haveStation = Present(anchors.StationFb, byName);
+                bool haveStation = Present(plan.StationFb, byName);
                 if (haveStation && haveProcess)
                 {
                     var stationChain = new List<string>(actNames);
                     stationChain.AddRange(processNames);
-                    adapterWires.Add(new Wire($"{anchors.StationFb}.StationAdaptrOUT",
+                    adapterWires.Add(new Wire($"{plan.StationFb}.StationAdaptrOUT",
                         $"{stationChain[0]}.stationAdptr_in"));
                     for (int i = 0; i < stationChain.Count - 1; i++)
                         adapterWires.Add(new Wire($"{stationChain[i]}.stationAdptr_out",
                             $"{stationChain[i + 1]}.stationAdptr_in"));
-                    if (Present(anchors.TerminatorFb, byName))
+                    if (Present(plan.TerminatorFb, byName))
                         adapterWires.Add(new Wire($"{stationChain[^1]}.stationAdptr_out",
-                            $"{anchors.TerminatorFb}." +
+                            $"{plan.TerminatorFb}." +
                             CodeGen.Translation.PortNameValidator.CaSAdptrTerminatorInPort));
                 }
                 else
@@ -376,7 +335,7 @@ namespace CodeGen.Devices.Core
                 if (crossSeg.Count > 0)
                 {
                     if (ctx.RingsMerged && ringNames.Count > 0 &&
-                        string.Equals(tag, "Sysres", StringComparison.Ordinal)) // "Sysres" = the M262 anchors' Label
+                        string.Equals(tag, "Sysres", StringComparison.Ordinal)) // the M262 resource label
                     {
                         // Merged-ring seam (M262): the segment tail feeds the Feed head locally so discharge segment + Feed chain are one continuous chain; seg[0].in and Feed_Station.out stay OPEN (EAE bridges via syslay).
                         adapterWires.Add(new Wire(
@@ -392,7 +351,6 @@ namespace CodeGen.Devices.Core
                 }
 
                 foreach (var w in eventWires)   Process(w, emittedEvents,   "event");
-                foreach (var w in DataWires)    Process(w, emittedData,     "data");
                 foreach (var w in adapterWires) Process(w, emittedAdapters, "adapter");
 
                 fbNet.Elements(ns + "EventConnections").Remove();
@@ -442,7 +400,7 @@ namespace CodeGen.Devices.Core
             }
             catch (Exception ex)
             {
-                report.Missing.Add($"[Wire][{anchors.Label}] failed: {ex.GetType().Name}: {ex.Message}");
+                report.Missing.Add($"[Wire][{plan.Label}] failed: {ex.GetType().Name}: {ex.Message}");
             }
         }
 
