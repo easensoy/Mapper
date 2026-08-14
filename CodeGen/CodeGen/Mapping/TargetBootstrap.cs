@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using CodeGen.Configuration;
@@ -35,6 +35,16 @@ namespace CodeGen.Mapping
             [PlcAssignment.M262] = new[] { "593A8F4FDEA0A668", "3DB1FB0F578E5F1E" },
             [PlcAssignment.M580] = new[] { "66C40EEF3F39D969", "ACED009B79DFCE69" },
             [PlcAssignment.BX1]  = new[] { "0FE5E1B2C3D4A5B6", "1A2B3C4D5E6F7081" },
+        };
+
+        // The resource's runtime bring-up: EAE's START fires the full-init FB, and plcStart acknowledges
+        // its own first-init. Emitted before any component wire, in this order.
+        public static readonly IReadOnlyList<(string Source, string Destination)> BringUpWires = new[]
+        {
+            ("START.COLD",          "FB1.INIT"),
+            ("START.WARM",          "FB1.INIT"),
+            ("START.ONLINECHANGE",  "FB1.OC_RETRIGGER"),
+            ("FB2.FIRST_INIT",      "FB2.ACK_FIRST"),
         };
 
         public static IReadOnlyList<SystemFbSpec> For(PlcAssignment plc, LayoutCatalog layout)
