@@ -499,9 +499,6 @@ namespace CodeGen.Translation.Process.Recipes
             public int StopNumber(string id) => _stop[id];
             public string NameOf(string id) => _byId.TryGetValue(id, out var s) ? s.Name : id;
 
-            // The stop an owned movement actually commands. A transition's destination is normally a MOTION state
-            // (Advancing, Lowering, TurningWork) which the CAT cannot report; the physical stop that motion ends
-            // at is the first stop reachable from it, and that is what the command drives to and waits on.
             // The stop the actuator arrives FROM to reach this one: nearest stop walking the transitions
             // backwards. Used to arm an entry gate so it needs a genuine arrival rather than a held level.
             public string? PrevStopInto(string stop)
@@ -660,7 +657,7 @@ namespace CodeGen.Translation.Process.Recipes
         // and the plan itself rejects a fan-in the runtime interface cannot express.
         internal static ProcessHandoffPlan HandoffPlan(Ctx ctx) =>
             ProcessHandoffPlan.Derive(
-                ctx.Twin.Components.Select(c => c.Source).ToList(), ctx.ProcessIdByName,
+                ctx.Twin, ctx.ProcessIdByName,
                 (producer, consumer) => SameRing(producer, consumer, ctx),
                 EntryState,
                 (producer, cond) => PeerState(producer, cond, ctx),
