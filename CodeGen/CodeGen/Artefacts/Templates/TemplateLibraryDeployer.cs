@@ -139,7 +139,7 @@ namespace CodeGen.Services
                 FixCatHmiOpcuaFrame(eaeProjectDir, hmiCat, result);
             PatchActuatorModeInitialValue(eaeProjectDir, "FiveStateActuator.fbt", result);
             PatchActuatorModeInitialValue(eaeProjectDir, "SevenStateCentreHomeActuator.fbt", result);
-            PatchSwivelStartup(eaeProjectDir, ctx.Components, result);
+            PatchSwivelStartup(eaeProjectDir, ctx, result);
             PatchSwivelAtHomeCoilClear(eaeProjectDir, clearCoils: true, result);
             // Runs LAST: the directional brake rewrites the whole atHome algorithm.
             PatchSwivelBrakeHome(eaeProjectDir, true,
@@ -231,7 +231,6 @@ namespace CodeGen.Services
             ProcessRuntimeTemplatePatcher.PromoteProcessPhaseReceiverSlot(eaeProjectDir);
             NormalizeProcessRuntimeRecipeArrays(eaeProjectDir, recipeStruct, result);
             NormalizeProcessEngineDebugWatch(eaeProjectDir, result);
-            // check_wait is LEVEL-triggered (WaitSatisfied := state_table[...].state = Wait1State); a WAIT already-true when it arms satisfies immediately.
 
             CodeGen.Hmi.HmiCatCfgEmitter.EmitAll(eaeProjectDir, cfg.TemplateLibraryPath);
             RegisterInDfbproj(eaeProjectDir, result);
