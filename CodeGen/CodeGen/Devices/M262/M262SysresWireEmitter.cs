@@ -16,16 +16,6 @@ namespace CodeGen.Devices.M262
     // their internal SYMLINK FBs.
     public static class M262SysresWireEmitter
     {
-        // The label "Sysres" must stay so the M262 file output is byte-identical to the
-        // pre-generalisation path.
-        private static readonly ResourceWireEmitter.ResourceAnchors M262Anchors = new(
-            Label:        "Sysres",
-            AreaFb:       "Area",
-            StationFb:    "Station1",
-            ProcessFb:    "Feed_Station",
-            TerminatorFb: "Stn1_Term",
-            HmiAdapterWires: ResourceWireEmitter.HmiAdapterWires);
-
         public static void Emit(GenerationContext ctx,
             SystemInjector.BindingApplicationReport report)
         {
@@ -51,7 +41,7 @@ namespace CodeGen.Devices.M262
         internal static void EmitFeedRing(GenerationContext ctx, string sysresPath,
             SystemInjector.BindingApplicationReport report)
         {
-            ResourceWireEmitter.EmitForResource(ctx, sysresPath, M262Anchors, report);
+            ResourceWireEmitter.EmitForResource(ctx, sysresPath, ctx.ResourceFor(CodeGen.Translation.PlcAssignment.M262), report);
             ResourceWireEmitter.ApplyLayoutToSyslay(ctx, ctx.Config.ActiveSyslayPath, report);
         }
 
