@@ -574,7 +574,6 @@ namespace CodeGen.Services
             if (!enabled) return;
             if (brakeMs <= 0) brakeMs = 500;
 
-            // Core ECC: SevenStateCentreHomeActuator.fbt
             var ecc = Path.Combine(eaeProjectDir, "IEC61499", "SevenStateCentreHomeActuator.fbt");
             if (!File.Exists(ecc))
             {
@@ -642,7 +641,6 @@ namespace CodeGen.Services
             }
             catch (Exception ex) { result.Warnings.Add($"Swivel brake core ECC patch failed: {ex.Message}"); return; }
 
-            // Composite: brakeTimer E_DELAY + wiring
             var cat = Directory.EnumerateFiles(Path.Combine(eaeProjectDir, "IEC61499"),
                 "Seven_State_Actuator_Centre_Home_CAT.fbt", SearchOption.AllDirectories).FirstOrDefault();
             if (string.IsNullOrEmpty(cat) || !File.Exists(cat)) { result.Warnings.Add("Swivel brake: composite not found; skipped."); return; }
@@ -710,9 +708,9 @@ namespace CodeGen.Services
         // is neither classified nor driven simply drifts, and the first recipe command then starts from an
         // unknown place -- which is a collision, not a warning.
         internal static void PatchSwivelStartup(string eaeProjectDir,
-            IReadOnlyList<VueOneComponent> allComponents, DeployResult result)
+            CodeGen.Translation.GenerationContext ctx, DeployResult result)
         {
-            var startup = ResolveStartupState(allComponents);
+            var startup = ResolveStartupState(ctx);
             // No centre-home swivel in this model: the type is deployed but never instantiated, so its
             // startup is not ours to rewrite. Leaving the shipped template alone is what keeps an
             // uninstantiated type from shipping with an ECC that can never leave INIT.
@@ -762,11 +760,10 @@ namespace CodeGen.Services
 
         // INIT arcs for the one startup the model declares. Every centre-home swivel in the project must agree:
         // the arcs live on the shared TYPE, so two instances with different declared starts cannot both be honoured.
-        private static List<(string Destination, string Condition)> ResolveStartupState(
-            IReadOnlyList<VueOneComponent> allComponents)
+        private static List<(string Destination, string Condition)> ResolveStartupState(CodeGen.Translation.GenerationContext ctx)
         {
-            var swivels = allComponents
-                .Where(c => string.Equals(TemplateMap.ResolveActuatorCatType(c),
+            var swivels = ctx.Station.Actuators
+                .Where(a => string.Equals(ctx.CatTypes[a.Name.Trim()],
                     TemplateMap.SevenStateCentreHomeCat, StringComparison.Ordinal))
                 .ToList();
             if (swivels.Count == 0) return new List<(string, string)>();
