@@ -11,27 +11,6 @@ namespace CodeGen.Devices.Core
 {
     public static class Station2WireEmitter
     {
-        // M580 carries the full Assembly_Station slice; BX1 has no
-        // Station/Process/Terminator (null anchors -> INIT fan-out + report ring only).
-        private static readonly ResourceWireEmitter.ResourceAnchors M580Anchors = new(
-            Label:        "M580",
-            AreaFb:       null,                 // Area lives on the M262 only
-            StationFb:    "Station2",
-            ProcessFb:    "Assembly_Station",
-            TerminatorFb: "Stn2_Term",
-            HmiAdapterWires: new[]
-            {
-                new ResourceWireEmitter.Wire("Station2_HMI.StationHMIAdptrOUT", "Station2.StationHMIAdptrIN"),
-            });
-
-        private static readonly ResourceWireEmitter.ResourceAnchors BX1Anchors = new(
-            Label:        "BX1",
-            AreaFb:       null,
-            StationFb:    null,                 // no Station FB on BX1 (graceful skip)
-            ProcessFb:    null,                 // no Process FB on BX1
-            TerminatorFb: null,
-            HmiAdapterWires: Array.Empty<ResourceWireEmitter.Wire>());
-
         public static void EmitStation2Resources(GenerationContext ctx,
             SystemInjector.BindingApplicationReport report)
         {
@@ -43,16 +22,19 @@ namespace CodeGen.Devices.Core
                 return;
             }
 
-            Wire(ctx, eaeRoot, CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.M580), "M580", M580Anchors, report);
-            Wire(ctx, eaeRoot, CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.BX1), "BX1", BX1Anchors, report);
+            Wire(ctx, eaeRoot, CodeGen.Translation.PlcAssignment.M580, report);
+            Wire(ctx, eaeRoot, CodeGen.Translation.PlcAssignment.BX1, report);
         }
 
         // Parameters are synced from the syslay BOTH sides of the wiring pass: before, so the wiring
         // sees the FBs it is about to connect, and after, because EmitForResource rewrites the
         // FBNetwork and a resource that shipped with a stale recipe deploys silently wrong.
-        private static void Wire(GenerationContext ctx, string eaeRoot, string deviceType, string tag,
-            ResourceWireEmitter.ResourceAnchors anchors, SystemInjector.BindingApplicationReport report)
+        private static void Wire(GenerationContext ctx, string eaeRoot,
+            CodeGen.Translation.PlcAssignment plc, SystemInjector.BindingApplicationReport report)
         {
+            var deviceType = CodeGen.Mapping.PlcTargets.DeviceType(plc);
+            var plan = ctx.ResourceFor(plc);
+            var tag = plan.Label;
             var cfg = ctx.Config;
             var sysdev = EaeProjectLayout.FindSysdevByDeviceType(eaeRoot, deviceType);
             var sysres = sysdev == null ? null : EaeProjectLayout.FindSysresFor(sysdev);
@@ -73,8 +55,8 @@ namespace CodeGen.Devices.Core
             Sync(string.Empty);
             // A leftover Cover_Station would be re-discovered and re-wired by the type scan below, so it
             // is swept first. BX1 runs no Process engine: Assembly_Station commands the covers.
-            if (anchors.ProcessFb == null) SweepCoverStationFromSysres(sysres, report);
-            ResourceWireEmitter.EmitForResource(ctx, sysres, anchors, report);
+            if (plan.ProcessFb == null) SweepCoverStationFromSysres(sysres, report);
+            ResourceWireEmitter.EmitForResource(ctx, sysres, plan, report);
             Sync("post-wire ");
         }
 
