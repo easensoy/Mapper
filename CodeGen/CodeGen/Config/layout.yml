@@ -73,6 +73,32 @@ bootFbs:
     sysresX: 820
     sysresY: 660
 
+# Per-resource infrastructure. The generic wire emitter learns a resource's shape from here rather than
+# from a table of controller names: a role the resource does not declare is simply not planned. label is
+# the resource's report tag (M262's must stay "Sysres" -- its file output is byte-identical only under it).
+resources:
+  - plc: M262
+    label: Sysres
+    roles: { areaHmi: Area_HMI, area: Area, stationHmi: Station1_HMI, station: Station1, areaTerminator: Area_Term, terminator: Stn1_Term }
+  - plc: M580
+    label: M580
+    roles: { stationHmi: Station2_HMI, station: Station2, terminator: Stn2_Term }
+  - plc: BX1
+    label: BX1
+    roles: {}
+  - plc: RevPi
+    label: RevPi
+    roles: {}
+
+# Adapter wiring between infrastructure roles. Emitted in this order, and only where the resource
+# declares both endpoints. Ports are the CAT interface contract, so they stay spelled here beside the
+# role that owns them.
+resourceRelations:
+  - { from: areaHmi,    fromPort: AreaHMIAdptrOUT,    to: area,           toPort: AreaHMIAdptrIN }
+  - { from: stationHmi, fromPort: StationHMIAdptrOUT, to: station,        toPort: StationHMIAdptrIN }
+  - { from: area,       fromPort: AreaAdptrOUT,       to: station,        toPort: AreaAdptrIN }
+  - { from: station,    fromPort: AreaAdptrOUT,       to: areaTerminator, toPort: CasAdptrIN }
+
 # The roster. plc = hosting controller, column/row = canvas position, owner = the Process FB that
 # commands it ("" = commanded by none, or across controllers).
 components:
