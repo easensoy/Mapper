@@ -43,9 +43,10 @@ namespace CodeGen.Translation
             bool OnCrossSegment(string name) =>
                 crossSegment.Any(n => NameEq(n, name));
 
+            var feed = ctx.ResourceFor(PlcAssignment.M262);
             var initChain = new List<string>();
-            initChain.Add("Area");
-            initChain.Add("Station1");
+            if (feed.AreaFb != null) initChain.Add(feed.AreaFb);
+            if (feed.StationFb != null) initChain.Add(feed.StationFb);
             foreach (var s in contents.Sensors)
                 if (OnFeedController(s.Name)) initChain.Add(s.Name);
             foreach (var a in contents.Actuators)
@@ -58,16 +59,16 @@ namespace CodeGen.Translation
             for (int i = 0; i < initChain.Count - 1; i++)
                 builder.AddEventConnection($"{initChain[i]}.INITO", $"{initChain[i + 1]}.INIT");
 
-            // The same array the sysres renders, so the two halves of the wiring layer cannot drift.
-            foreach (var w in CodeGen.Devices.Core.ResourceWireEmitter.HmiAdapterWires)
-                builder.AddAdapterConnection(w.Source, w.Destination);
+            // The same planned relations the sysres renders, so the two halves cannot drift.
+            foreach (var (source, destination) in ctx.ResourceFor(PlcAssignment.M262).AdapterRelations)
+                builder.AddAdapterConnection(source, destination);
 
             // CaS chain skips any CAT lacking stationAdptr (sensors, Seven_State); a dangling stationAdptr makes EAE reject the resource. sysres+syslay must match.
             var stationChain = new List<(string Name, string Type)>();
             foreach (var a in contents.Actuators)
             {
                 if (!OnFeedController(a.Name)) continue;
-                var fbType = ResolveActuatorFBType(a);
+                var fbType = ctx.CatTypes[a.Name.Trim()];
                 if (TemplateMap.LacksStationAdapter(fbType)) continue;
                 stationChain.Add((a.Name, fbType));
             }
@@ -129,22 +130,20 @@ namespace CodeGen.Translation
 
         // M580 (Station 2) sibling of BuildFeedStationWiring; contained to the M580 bucket, M262+BX1 filtered out.
         internal static void BuildStation2Wiring(SyslayBuilder builder, GenerationContext ctx,
-            string? disassemblyFbName)
+            IReadOnlyList<string> procFbs)
         {
-            const string StationFb     = "Station2";
-            const string StationHmiFb  = "Station2_HMI";
-            const string AssemblyProc  = "Assembly_Station";
-            const string Stn2Term      = "Stn2_Term";
+            var station2 = ctx.ResourceFor(PlcAssignment.M580);
+            var StationFb    = station2.StationFb!;
+            var StationHmiFb = station2.StationHmiFb!;
+            var Stn2Term     = station2.TerminatorFb!;
 
             var allocation = ctx.Allocation;
             var contents = ctx.Station;
             bool IsM580(string name) => allocation.IsOn(name, PlcAssignment.M580);
 
-            // Thread Disassembly after Assembly_Station so the syslay ring matches the sysres, which wires
-            // every Process FB it finds (ResourceWireEmitter discovers them by type). Skipping it here while
-            // the sysres threads it is a divergence no validator inspects — the parity check reads FBs and
-            // parameters only, never connections.
-            bool threadDisassembly = !string.IsNullOrEmpty(disassemblyFbName);
+            // Every Station-2 process is threaded, in the order the layout emitted them. The sysres wires
+            // every Process FB it finds, so omitting one here is a divergence no validator inspects -- the
+            // parity check reads FBs and parameters only, never connections.
 
             // Station2's internal plcStart fires Station2.INITO; the FB1->Station2.INIT bootstrap is on the M580 sysres (ResourceWireEmitter).
             var initChain = new List<string> { StationFb };
@@ -152,8 +151,7 @@ namespace CodeGen.Translation
                 if (IsM580(s.Name)) initChain.Add(s.Name);
             foreach (var a in contents.Actuators)
                 if (IsM580(a.Name)) initChain.Add(a.Name);
-            initChain.Add(AssemblyProc);
-            if (threadDisassembly) initChain.Add(disassemblyFbName!);   // Assembly_Station → Disassembly
+            initChain.AddRange(procFbs);
             for (int i = 0; i < initChain.Count - 1; i++)
                 builder.AddEventConnection($"{initChain[i]}.INITO", $"{initChain[i + 1]}.INIT");
 
@@ -166,14 +164,12 @@ namespace CodeGen.Translation
             foreach (var a in contents.Actuators)
             {
                 if (!IsM580(a.Name)) continue;
-                var fbType = ResolveActuatorFBType(a);
+                var fbType = ctx.CatTypes[a.Name.Trim()];
                 if (TemplateMap.LacksStationAdapter(fbType))
                     continue;
                 stationChain.Add((a.Name, fbType));
             }
-            stationChain.Add((AssemblyProc, "Process1_Generic"));
-            if (threadDisassembly)
-                stationChain.Add((disassemblyFbName!, "Process1_Generic"));
+            foreach (var proc in procFbs) stationChain.Add((proc, "Process1_Generic"));
             if (stationChain.Count > 0)
             {
                 builder.AddAdapterConnection($"{StationFb}.StationAdaptrOUT",
@@ -192,7 +188,7 @@ namespace CodeGen.Translation
             foreach (var s in contents.Sensors)
                 if (IsM580(s.Name)) m580.Add((s.Name, "Sensor_Bool_CAT"));
             foreach (var a in contents.Actuators)
-                if (IsM580(a.Name)) m580.Add((a.Name, ResolveActuatorFBType(a)));
+                if (IsM580(a.Name)) m580.Add((a.Name, ctx.CatTypes[a.Name.Trim()]));
 
             // Discharge (DischargeActive) splices the M262 segment at the Disassembly seam via two EAE-bridged cross-device hops, without stretching the M580 ring. Off -> ring closes locally.
             var ring = new List<(string Name, string Type)>(m580);
@@ -207,18 +203,16 @@ namespace CodeGen.Translation
             if (!string.IsNullOrEmpty(topCoverName))
                 ring.Add((topCoverName!, "Sensor_Bool_CAT"));
             // Cover detour splices the BX1 covers between Clamp and Assembly_Station at a DIFFERENT seam, so the two compose with only M580<->BX1 and M580<->M262 boundaries, never M262<->BX1. Empty when off.
-            foreach (var cover in HandoffPlanner.CoverDetour)
+            foreach (var cover in ctx.CoverDetour)
                 ring.Add((cover, "Five_State_Actuator_CAT"));
-            ring.Add((AssemblyProc, "Process1_Generic"));
-            if (threadDisassembly)
-                ring.Add((disassemblyFbName!, "Process1_Generic"));
+            foreach (var proc in procFbs) ring.Add((proc, "Process1_Generic"));
             if (ring.Count > 1)
             {
                 for (int i = 0; i < ring.Count - 1; i++)
                     builder.AddAdapterConnection(
                         $"{ring[i].Name}.{StateRprtOut(ring[i].Type)}",
                         $"{ring[i + 1].Name}.{StateRprtIn(ring[i + 1].Type)}");
-                var seg = TemplateMap.M262CrossRingSegment(HandoffPlanner.DischargeActive);
+                var seg = ctx.CrossRingSegment;
                 if (seg.Count > 0)
                 {
                     builder.AddAdapterConnection(
@@ -278,7 +272,7 @@ namespace CodeGen.Translation
                     ring.Add((s.Name, "Sensor_Bool_CAT"));
             // Cover-detour actuators are on the M580 ring, so keep them off the BX1 ring (TopCoverSenosr stays a BX1 sensor, off-ring).
             foreach (var a in contents.Actuators)
-                if (IsBx1(a.Name) && !HandoffPlanner.IsCoverDetourActuator(a.Name))
+                if (IsBx1(a.Name) && !ctx.IsCoverDetour(a.Name))
                     ring.Add((a.Name, "Five_State_Actuator_CAT"));
 
             // BX1-local stateRprtCmd ring: self-closed broadcast loop (last -> first).
