@@ -15,15 +15,6 @@ namespace CodeGen.Translation
         // decoupled local rings (Assembly gates on the local BearingSensor).
         public static bool DischargeActive => true;
 
-        // BX1 cover actuators spliced onto the M580 ring (between Clamp and Assembly_Station); cover
-        // place/remove fold into the M580 recipes. TopCoverSenosr stays OFF the ring (its id collides
-        // with PartAtAssembly on the M580 state_table).
-        public static IReadOnlyList<string> CoverDetour =>
-            new[] { "CoverPNP_Hr", "CoverPNP_Vr", "CoverPnp_Gripper" };
-
-        public static bool IsCoverDetourActuator(string name) =>
-            CoverDetour.Any(c => string.Equals(c, name, System.StringComparison.OrdinalIgnoreCase));
-
         // The M262 part-present proximity sensor (DI08); id/pin from MapperConfig.M262SynthSensors
         // (the rig wires it; the twin does not model it).
         public static (string Name, string Pin, int Id) PartAtAssembly =>
@@ -33,7 +24,7 @@ namespace CodeGen.Translation
         // A twin may declare the part-present sensor itself instead of leaving it to the synth
         // injection. It then keeps the SAME reserved slot, so ids stay identical either way.
         public static bool IsPartAtAssembly(string name) =>
-            string.Equals(name, "PartAtAssembly", System.StringComparison.OrdinalIgnoreCase);
+            string.Equals(name, PartAtAssembly.Name, System.StringComparison.OrdinalIgnoreCase);
 
     }
 }
