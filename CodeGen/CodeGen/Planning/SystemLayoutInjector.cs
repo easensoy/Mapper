@@ -40,7 +40,6 @@ namespace CodeGen.Translation
                 throw new ArgumentException("Target syslay path is required.", nameof(targetSyslayPath));
 
             var config = ctx.Config;
-            var allComponents = ctx.Components.ToList();
             var handoffPlan = ctx.Handoffs;
 
             var contents = ctx.Station;
@@ -65,9 +64,6 @@ namespace CodeGen.Translation
             // WAITs there and its CMD states 1/3 are values Shaft_Hr never reports.
             int processId = ctx.Slots[contents.Process.Name];
 
-            // TopCoverSenosr reports onto the Assembly ring, so its slot must be free on THAT ring rather
-            // than the one its position would give it. StateTableAllocation owns the computation; the plan
-            // carries the answer to the recipe and the sensor emission below.
 
 
 
@@ -137,8 +133,7 @@ namespace CodeGen.Translation
                     // process_id slot or across the phase transport) is not an actuator move; the retract
                     // check applies only to real actuators.
                     if (string.Equals(t, Process.Recipes.ProcessPhaseTransport.CommandToken, StringComparison.OrdinalIgnoreCase)) continue;
-                    if (allComponents.Any(c => string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase)
-                        && string.Equals((c.Name ?? string.Empty).Trim(), t, StringComparison.OrdinalIgnoreCase))) continue;
+                    if (ctx.Twin.ByName(t) is { IsProcess: true }) continue;
                     if (processRecipe.CmdStateArr[i] == 1) adv.Add(t);
                     else if (processRecipe.CmdStateArr[i] == 3) ret.Add(t);
                 }
@@ -165,61 +160,28 @@ namespace CodeGen.Translation
                 processInstanceName, "Process1_Generic", "Main", 3360, 1460,
                 processOuter, processNested);
 
-            // Station 2 Process FBs reuse the SAME global sensors-first `contents` so every Wait1Id matches the global FB id.
-            var assemblyStationProc = allComponents.FirstOrDefault(c =>
-                string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(c.Name, "Assembly_Station", StringComparison.Ordinal));
+            // Station 2's Process FBs are the ones the roster allocates to M580, in roster order. They
+            // reuse the SAME global sensors-first `contents`, so every Wait1Id matches the global FB id.
             var crossProcInstances = new List<string> { processInstanceName };
-            if (assemblyStationProc != null)
+            var station2ProcFbs = new List<string>();
+            foreach (var proc in ctx.ProcessesOn(PlcAssignment.M580))
             {
-                var assemblyName = InstanceNameResolver.Resolve(assemblyStationProc,
+                var procName = InstanceNameResolver.Resolve(proc,
                     overrides.ByComponentId, overrides.ByVueOneName);
-                var (aOuter, aNested, aRecipe) = BuildProcessFbParameters(
-                    ctx, assemblyStationProc, assemblyName,
-                    ctx.Slots[assemblyStationProc.Name], withRecipe: true);
-                builder.AddFB(FBIdGenerator.GenerateFBId(assemblyStationProc.ComponentID),
-                    assemblyName, "Process1_Generic", "Main", 12200, 1460,
-                    aOuter, aNested);
-                crossProcInstances.Add(assemblyName);
-                if (aRecipe != null) phaseNames[assemblyName] = aRecipe.ProcessPhaseNames;
-                ReportStation2Recipe(report, assemblyName, aRecipe, "M580");
-                AppendProcessRecipeComment(builder, assemblyName, aRecipe);
+                var (pOuter, pNested, pRecipe) = BuildProcessFbParameters(
+                    ctx, proc, procName, ctx.Slots[proc.Name], withRecipe: true);
+                builder.AddFB(FBIdGenerator.GenerateFBId(proc.ComponentID),
+                    procName, "Process1_Generic", "Main", 0, 0, pOuter, pNested);
+                crossProcInstances.Add(procName);
+                station2ProcFbs.Add(procName);
+                if (pRecipe != null) phaseNames[procName] = pRecipe.ProcessPhaseNames;
+                ReportStation2Recipe(report, procName, pRecipe, "M580");
+                AppendProcessRecipeComment(builder, procName, pRecipe);
             }
-            else
-            {
+            if (station2ProcFbs.Count == 0)
                 report.Missing.Add(
-                    "[Recipe] Assembly_Station Process not found in Control.xml — " +
-                    "Station 2 (M580) frame will have actuators but no Process FB.");
-            }
-
-            // disassemblyFbName is captured so BuildStation2Wiring threads the SAME FB the sysres does; null → syslay stays Assembly-only.
-            string? disassemblyFbName = null;
-            var disassyProc = allComponents.FirstOrDefault(c =>
-                string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase) &&
-                (string.Equals(c.Name, "Disassembly", StringComparison.Ordinal)
-                 || string.Equals(c.Name, "Disassembly_Station", StringComparison.Ordinal)));
-            if (disassyProc != null)
-            {
-                var disassyName = InstanceNameResolver.Resolve(disassyProc,
-                    overrides.ByComponentId, overrides.ByVueOneName);
-                disassemblyFbName = disassyName;
-                var (dOuter, dNested, dRecipe) = BuildProcessFbParameters(
-                    ctx, disassyProc, disassyName,
-                    ctx.Slots[disassyProc.Name], withRecipe: true);
-                builder.AddFB(FBIdGenerator.GenerateFBId(disassyProc.ComponentID),
-                    disassyName, "Process1_Generic", "Main", 20800, 1460,
-                    dOuter, dNested);
-                crossProcInstances.Add(disassyName);
-                if (dRecipe != null) phaseNames[disassyName] = dRecipe.ProcessPhaseNames;
-                ReportStation2Recipe(report, disassyName, dRecipe, "M580");
-                AppendProcessRecipeComment(builder, disassyName, dRecipe);
-            }
-            else
-            {
-                report.Missing.Add(
-                    "[Recipe] Disassembly Process not found in Control.xml — " +
-                    "BX1 zone will have actuators but no Disassembly Process FB.");
-            }
+                    "[Recipe] the roster allocates no Process to M580 — " +
+                    "Station 2 will have actuators but no Process FB.");
 
             if (processRecipe != null && processRecipe.SkippedConditions.Count > 0)
             {
@@ -265,7 +227,7 @@ namespace CodeGen.Translation
             {
                 var actuator = contents.Actuators[i];
                 int assignedId = ctx.Slots[actuator.Name.Trim()];
-                var fbType = ResolveActuatorFBType(actuator);
+                var fbType = ctx.CatTypes[actuator.Name.Trim()];
                 var displayName = InstanceNameResolver.Resolve(actuator,
                     overrides.ByComponentId, overrides.ByVueOneName);
                 var actPlc = plcIndex.ResolveComponent(actuator.Name, bindings, ctx.Allocation);
@@ -358,7 +320,9 @@ namespace CodeGen.Translation
             if (HandoffPlanner.DischargeActive)
             {
                 int synthY = 5200;
-                string prevSynthInit = "PartInHopper";
+                string prevSynthInit = contents.Sensors
+                    .Select(s => (s.Name ?? string.Empty).Trim())
+                    .First(n => ctx.Allocation.IsFeedSide(n));
                 foreach (var (synthName, _, synthId) in MapperConfig.M262SynthSensors)
                 {
                     // The twin owns it if it declares it; synthesizing a second FB of the same name
@@ -471,7 +435,7 @@ namespace CodeGen.Translation
 
 
             RingWiringPlanner.BuildFeedStationWiring(builder, ctx);
-            RingWiringPlanner.BuildStation2Wiring(builder, ctx, disassemblyFbName);
+            RingWiringPlanner.BuildStation2Wiring(builder, ctx, station2ProcFbs);
             RingWiringPlanner.BuildBx1Wiring(builder, ctx);
 
             // Cross-controller process-phase transport, one link per model-derived handoff whose producer and
@@ -482,11 +446,11 @@ namespace CodeGen.Translation
             // single input group cannot carry, so every link here drives one input from one source.
             foreach (var link in handoffPlan.CrossControllerLinks())
             {
-                var producerFb = ResolveProcessFbName(link.ProducerName, allComponents, overrides, contents.Process, processInstanceName)
+                var producerFb = ResolveProcessFbName(link.ProducerName, ctx.Twin, overrides, contents.Process, processInstanceName)
                     ?? throw new InvalidOperationException(
                         $"[Handoff] producer process '{link.ProducerName}' (condition '{link.ConditionName}' on " +
                         $"'{link.ConsumerName}') has no emitted FB, so its phase has no transport.");
-                var consumerFb = ResolveProcessFbName(link.ConsumerName, allComponents, overrides, contents.Process, processInstanceName)
+                var consumerFb = ResolveProcessFbName(link.ConsumerName, ctx.Twin, overrides, contents.Process, processInstanceName)
                     ?? throw new InvalidOperationException(
                         $"[Handoff] consumer process '{link.ConsumerName}' has no emitted FB to receive " +
                         $"'{link.ProducerName}' phases.");
@@ -542,11 +506,6 @@ namespace CodeGen.Translation
         // Default fallback timing used only when Control.xml omits or zeros out State.Time.
         private static int DefaultMotionMs => GenerationConfig.Current.DefaultMotionMs;
 
-
-        // Alias for the planners that reach it through `using static`; TemplateMap owns the decision.
-        internal static string ResolveActuatorFBType(VueOneComponent actuator) =>
-            TemplateMap.ResolveActuatorCatType(actuator);
-
         // Minimal params (actuator_name + actuator_id) for actuators that are NOT plain 5-state cylinders.
         private static Dictionary<string, string> BuildMinimalActuatorParameters(
             VueOneComponent actuator, int assignedId, string fbType)
@@ -585,8 +544,6 @@ namespace CodeGen.Translation
             (layout.Band(plc).ColumnBaseX + colIndexInPlc * layout.Geometry.ColumnPitchX,
              layout.RowY(row.ToString()));
 
-        internal static bool IsBx1CoverActuator(string name) =>
-            HandoffPlanner.IsCoverDetourActuator(name);
 
         public static Dictionary<string, string> BuildActuatorParameters(
             VueOneComponent actuator, int assignedId,
@@ -598,11 +555,11 @@ namespace CodeGen.Translation
 
             var atWorkIds = ResolveAtWorkStateIds(actuator);
             var atHomeIds = ResolveAtHomeStateIds(actuator);
-            bool workSensorFitted = AnyComponentReferencesStates(ctx.Components, actuator, atWorkIds);
-            bool homeSensorFitted = AnyComponentReferencesStates(ctx.Components, actuator, atHomeIds);
+            bool workSensorFitted = AnyComponentReferencesStates(ctx.Twin, actuator, atWorkIds);
+            bool homeSensorFitted = AnyComponentReferencesStates(ctx.Twin, actuator, atHomeIds);
 
             // Cover actuators settle in coverMotionMs (Hr/Vr keep real DIs); the gripper has no grip/release DI, so it timer-acknowledges sensorless or the release WAIT stalls.
-            if (IsBx1CoverActuator(actuator.Name))
+            if (ctx.IsCoverDetour(actuator.Name))
             {
                 toWorkMs = GenerationConfig.Current.CoverMotionMs;
                 toHomeMs = GenerationConfig.Current.CoverMotionMs;
@@ -631,7 +588,7 @@ namespace CodeGen.Translation
             // no-clamp (_vc) path so the clamp/M262 output stays byte-identical.
             if (ctx.RingsMerged
                 && actuator.Name.IndexOf("Gripper", StringComparison.OrdinalIgnoreCase) >= 0
-                && !IsBx1CoverActuator(actuator.Name))
+                && !ctx.IsCoverDetour(actuator.Name))
             {
                 workSensorFitted = false;
                 homeSensorFitted = false;
@@ -688,24 +645,16 @@ namespace CodeGen.Translation
             return ids;
         }
 
+        // Does any OTHER component's transition guard observe one of these states? That is what makes the
+        // actuator's position sensed rather than timed.
         public static bool AnyComponentReferencesStates(
-            IReadOnlyList<VueOneComponent> allComponents,
+            CodeGen.Domain.Twin.TwinModel twin,
             VueOneComponent actuator,
-            HashSet<string> stateIds)
-        {
-            if (stateIds.Count == 0) return false;
-            foreach (var c in allComponents)
-            {
-                if (string.Equals(c.ComponentID, actuator.ComponentID, StringComparison.OrdinalIgnoreCase))
-                    continue;
-                foreach (var st in c.States)
-                    foreach (var t in st.Transitions)
-                        foreach (var cond in t.Conditions)
-                            if (!string.IsNullOrEmpty(cond.ID) && stateIds.Contains(cond.ID))
-                                return true;
-            }
-            return false;
-        }
+            HashSet<string> stateIds) =>
+            stateIds.Count > 0 && twin.Components
+                .Where(c => !string.Equals(c.Id, actuator.ComponentID, StringComparison.OrdinalIgnoreCase))
+                .SelectMany(c => c.States).SelectMany(s => s.Transitions).SelectMany(t => t.Conditions)
+                .Any(r => stateIds.Contains(r.State.Id));
 
         public static string StateRprtOut(string fbType)
         {
@@ -776,14 +725,12 @@ namespace CodeGen.Translation
         // Process name (as the twin declares it) -> the FB instance name emitted for it, so handoff wiring can
         // be addressed by model name without the injector knowing which processes exist.
         private static string? ResolveProcessFbName(
-            string processName, IReadOnlyList<VueOneComponent> all,
+            string processName, CodeGen.Domain.Twin.TwinModel twin,
             InstanceNameOverridesLoader.Overrides overrides,
             VueOneComponent? feedProcess, string feedProcessFbName)
         {
-            var c = all.FirstOrDefault(x =>
-                string.Equals(x.Type, "Process", StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(x.Name?.Trim(), processName?.Trim(), StringComparison.OrdinalIgnoreCase));
-            if (c == null) return null;
+            if (twin.ByName(processName) is not { IsProcess: true } resolved) return null;
+            var c = resolved.Source;
             if (feedProcess != null && ReferenceEquals(c, feedProcess)) return feedProcessFbName;
             var n = InstanceNameResolver.Resolve(c, overrides.ByComponentId, overrides.ByVueOneName);
             return string.IsNullOrWhiteSpace(n) ? null : n;
@@ -939,7 +886,6 @@ namespace CodeGen.Translation
                 sysresCount = Directory.GetFiles(
                     sysdevDir, "*.sysres", SearchOption.TopDirectoryOnly).Length;
 
-            // Fast-path: one Resource + one .sysres = canonical clean state.
             if (count == 1 && sysresCount == 1)
             {
                 Log("M262 sysdev clean, no duplicates");
@@ -952,7 +898,6 @@ namespace CodeGen.Translation
                 return;
             }
 
-            // 2+ Resources — keep the first, drop the rest and their backing .sysres files.
             var keep = resources[0];
             var firstResourceId = (string?)keep.Attribute("ID")
                 ?? (string?)keep.Attribute("Name")
@@ -1091,19 +1036,6 @@ namespace CodeGen.Translation
             doc.Save(path);
         }
 
-        public static VueOneComponent? FindStation1Process(List<VueOneComponent> all)
-        {
-            var feeder = all.FirstOrDefault(c =>
-                string.Equals(c.Type, "Actuator", StringComparison.Ordinal) &&
-                string.Equals(c.Name, "Feeder", StringComparison.Ordinal));
-            if (feeder == null) return null;
-
-            return all.FirstOrDefault(c =>
-                string.Equals(c.Type, "Process", StringComparison.Ordinal) &&
-                c.States.Any(s => s.Transitions.Any(t =>
-                    t.Conditions.Any(cond =>
-                        string.Equals(cond.ComponentID, feeder.ComponentID, StringComparison.OrdinalIgnoreCase)))));
-        }
 
         public static (Dictionary<string, string> Outer,
                        IDictionary<string, IDictionary<string, string>> Nested,
