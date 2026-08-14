@@ -35,11 +35,6 @@ namespace CodeGen.Application
 
     // The one generation path from Control.xml to EAE artefacts.
     //
-    // Every caller — MapperUI, the VueOne integration, the hidden runner and the byte-identical gate —
-    // runs this same sequence. It previously existed twice, once inline in the WinForms click handler and
-    // once in the runner, which is how the two drifted (the UI validated topology addresses and derived
-    // nothing for the wipe root; the runner did neither).
-    //
     // Synchronous by design: callers that need responsiveness wrap the single call, rather than each step
     // deciding its own threading. `log` is invoked on the calling thread.
     public static class GenerateProject
