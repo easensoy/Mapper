@@ -12,6 +12,8 @@ namespace CodeGen.Configuration
         public LayoutGeometry Geometry { get; set; } = new();
         public List<LayoutBand> Bands { get; set; } = new();
         public List<BootFb> BootFbs { get; set; } = new();
+        public List<ResourceProfile> Resources { get; set; } = new();
+        public List<RoleRelation> ResourceRelations { get; set; } = new();
         public List<RosterEntry> Components { get; set; } = new();
         public IdOrder IdOrder { get; set; } = new();
         public List<string> CasBusOrder { get; set; } = new();
@@ -76,6 +78,23 @@ namespace CodeGen.Configuration
         public static readonly LayoutBand OffCanvas = new();
     }
 
+    // One controller's infrastructure: its report tag and the instance filling each role it declares.
+    public sealed class ResourceProfile
+    {
+        public PlcAssignment Plc { get; set; }
+        public string Label { get; set; } = string.Empty;
+        public Dictionary<string, string> Roles { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    }
+
+    // An adapter wire between two roles. Rendered only where the resource declares both.
+    public sealed class RoleRelation
+    {
+        public string From { get; set; } = string.Empty;
+        public string FromPort { get; set; } = string.Empty;
+        public string To { get; set; } = string.Empty;
+        public string ToPort { get; set; } = string.Empty;
+    }
+
     public sealed class BootFb
     {
         public string Name { get; set; } = string.Empty;
@@ -115,6 +134,25 @@ namespace CodeGen.Configuration
         {
             var errors = new List<string>();
             if (c.Components.Count == 0) errors.Add("components is empty: nothing would be placed on the canvas");
+            foreach (var g in c.Resources.GroupBy(r => r.Plc).Where(g => g.Count() > 1))
+                errors.Add($"resource '{g.Key}' is declared {g.Count()} times");
+            var declaredRoles = new HashSet<string>(
+                c.Resources.SelectMany(r => r.Roles.Keys), StringComparer.OrdinalIgnoreCase);
+            foreach (var r in c.Resources)
+            {
+                if (string.IsNullOrWhiteSpace(r.Label)) errors.Add($"resource '{r.Plc}' has no label");
+                foreach (var kv in r.Roles)
+                    if (string.IsNullOrWhiteSpace(kv.Value))
+                        errors.Add($"resource '{r.Plc}' role '{kv.Key}' names no instance");
+            }
+            foreach (var rel in c.ResourceRelations)
+            {
+                if (string.IsNullOrWhiteSpace(rel.FromPort) || string.IsNullOrWhiteSpace(rel.ToPort))
+                    errors.Add($"resourceRelations '{rel.From}'->'{rel.To}' is missing a port");
+                foreach (var role in new[] { rel.From, rel.To })
+                    if (!declaredRoles.Contains(role))
+                        errors.Add($"resourceRelations references role '{role}', which no resource declares");
+            }
             foreach (var g in c.Components.GroupBy(e => e.Name, StringComparer.Ordinal).Where(g => g.Count() > 1))
                 errors.Add($"component '{g.Key}' is declared {g.Count()} times");
             foreach (var e in c.Components)
