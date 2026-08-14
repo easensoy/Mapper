@@ -83,7 +83,6 @@ namespace CodeGen.Devices.Core
                 return result;
             }
 
-            // SolutionId must be a real GUID matching General/ProjectInfo.xml (== DomainTag).
             string solutionId = M262TopologyEmitter.ReadProjectGuid(eaeRoot)
                 ?? FallbackSolutionUuid;
             if (solutionId == FallbackSolutionUuid)
@@ -122,7 +121,6 @@ namespace CodeGen.Devices.Core
                 equipmentJsonName: "Equipment_M580dPAC_1.json",
                 equipmentBuilder: () => BuildM580EquipmentJson(M580SysdevId, solutionId,
                                           cfg.M580TargetIp, cfg.M580BroadcastDomainUuid),
-                // Insecure-app override lets a plain mqtt:// MQTT_CONNECTION avoid the RC101 fault.
                 deployPluginPropertiesXml: BuildDeployPluginPropertiesXml(cfg, bootProject: false,
                     cfg.MqttPublishEnabled && !cfg.MqttSecureTls),
                 simulationBindingDeployPort: 51500,
@@ -212,7 +210,6 @@ namespace CodeGen.Devices.Core
                 }
                 catch { /* best-effort */ }
             }
-            // Sweep any .sysres sister folder whose stem has no matching .sysres.
             foreach (var sister in Directory.EnumerateDirectories(sysdevFolder))
             {
                 var sisterName = Path.GetFileName(sister);
@@ -594,7 +591,6 @@ namespace CodeGen.Devices.Core
             }
         }
 
-        // Sweeps the saved coupler FB type (IEC61499 + HMI folders + dfbproj entries). Idempotent.
         static void SweepBx1EtherNetIpType(string eaeRoot, EmitResult result)
         {
             try
@@ -720,7 +716,6 @@ namespace CodeGen.Devices.Core
                     ". Fix: close EAE, confirm the Template Library 'EtherNetIP/HwConfiguration' model exists, then re-run Test Runtime.");
         }
 
-        // Removes the BX1 scanner HwConfiguration model (folders + hwconfigproj entries). Idempotent.
         static void SweepBx1HwConfigScannerModel(string eaeRoot, EmitResult result)
         {
             try
@@ -745,8 +740,6 @@ namespace CodeGen.Devices.Core
             }
         }
 
-        // Idempotently registers the scanner model files in HwConfiguration.hwconfigproj (TM3BC
-        // .prop.cs/.script.cs <Compile>, scanner*.xml + .prop.xml <None>, folders <Folder>).
         static int RegisterBx1HwConfigScannerModel(string hwproj)
         {
             if (!File.Exists(hwproj)) return 0;
@@ -786,7 +779,6 @@ namespace CodeGen.Devices.Core
             return added;
         }
 
-        // Removes the entries added by RegisterBx1HwConfigScannerModel. Idempotent.
         static void UnregisterBx1HwConfigScannerModel(string hwproj)
         {
             if (!File.Exists(hwproj)) return;
@@ -821,7 +813,6 @@ namespace CodeGen.Devices.Core
                 CopyDirectory(dir, Path.Combine(dst, Path.GetFileName(dir)));
         }
 
-        // Resolves the EtherNet/IP DTM Content templates (FDT project + IO profile) from the IO folder.
         static (string Prj, string Xml) ResolveEtherNetIpContentTemplates(MapperConfig cfg)
         {
             var ioFolder = !string.IsNullOrWhiteSpace(cfg.IoFolderPath)
@@ -836,7 +827,6 @@ namespace CodeGen.Devices.Core
             return (Pick("BX1_EtherNetIP_FdtProject.prj"), Pick("BX1_EtherNetIP_IOProfile.xml"));
         }
 
-        // Deletes a stale Topology Equipment JSON + its topologyproj <None Include> registration. Idempotent.
         static void CleanupStaleTopologyJson(string eaeRoot, string jsonName, EmitResult result)
         {
             try
