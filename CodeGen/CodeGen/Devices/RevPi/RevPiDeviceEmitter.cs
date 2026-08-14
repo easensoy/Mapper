@@ -51,13 +51,6 @@ namespace CodeGen.Devices.RevPi
         // every coexisting resource needs its own pair.
         const int SimulationDeployPort = 51502, SimulationArchivePort = 51499;
 
-        // This controller hosts components but no process, so it declares no area/station/process/
-        // terminator anchor: its report ring stays OPEN at the seam and the shared syslay bridges it to
-        // the Feed ring. The label is how ResourceWireEmitter identifies this resource.
-        static readonly ResourceWireEmitter.ResourceAnchors Anchors = new(
-            Label: "RevPi", AreaFb: null, StationFb: null, ProcessFb: null,
-            TerminatorFb: null, HmiAdapterWires: Array.Empty<ResourceWireEmitter.Wire>());
-
         public static SystemInjector.BindingApplicationReport EmitDevice(GenerationContext ctx,
             SystemInjector.BindingApplicationReport report)
         {
@@ -142,7 +135,7 @@ namespace CodeGen.Devices.RevPi
                 return;
             }
 
-            ResourceWireEmitter.EmitForResource(ctx, sysres, Anchors, report);
+            ResourceWireEmitter.EmitForResource(ctx, sysres, ctx.ResourceFor(PlcAssignment.RevPi), report);
 
             var hosted = HostedComponents(ctx, coupler);
             var bootFb = ctx.Layout.BootFbs.Count > 0 ? ctx.Layout.BootFbs[0].Name : "FB1";
@@ -203,9 +196,6 @@ namespace CodeGen.Devices.RevPi
             catch (Exception ex) { report.Missing.Add($"[RevPi] hardware config copy error: {ex.Message}"); }
         }
 
-        // Drop the hosted components from every OTHER resource. Generic by construction: it names no
-        // controller and no device type, it simply enforces one instance on one resource, so it works
-        // whichever controller the run moved them off.
         static void SweepFromOtherResources(string systemGuidDir, IReadOnlyList<string> hosted,
             SystemInjector.BindingApplicationReport report)
         {
