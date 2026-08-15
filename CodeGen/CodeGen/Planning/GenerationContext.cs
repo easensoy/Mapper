@@ -19,15 +19,32 @@ namespace CodeGen.Translation
     // One resource's planned infrastructure: the instance filling each role the target profile declares
     // for it, the processes allocated to it, and the adapter wires between roles it actually has. A role
     // the resource does not declare is absent, not null-by-convention.
+    // One infrastructure FB a resource needs, fully decided: which role it plays, what it is called
+    // here, which template realises it, where it is drawn and what it is parameterised with. The
+    // emitter renders these; it does not know that an area is called Area or is an Area_CAT.
+    public sealed record InfraInstance(
+        string Role,
+        string Name,
+        TemplateType Template,
+        string Namespace,
+        int X,
+        int Y,
+        IReadOnlyDictionary<string, string> Parameters);
+
     public sealed record ResourcePlan(
         PlcAssignment Plc,
         string Label,
         string? AreaFb,
         string? StationFb,
-        string? StationHmiFb,
         string? ProcessFb,
         string? TerminatorFb,
-        IReadOnlyList<(string Source, string Destination)> AdapterRelations);
+        IReadOnlyList<(string Source, string Destination)> AdapterRelations,
+        IReadOnlyList<InfraInstance> Infrastructure,
+        (string From, string To)? StationChain)
+    {
+        public InfraInstance? Infra(string role) =>
+            Infrastructure.FirstOrDefault(i => string.Equals(i.Role, role, StringComparison.Ordinal));
+    }
 
     // Everything one generation decided before any artefact was written. Parse once, plan once, render
     // once: the twin is read a single time, every derivation happens here, and the emitters are handed the
@@ -105,18 +122,48 @@ namespace CodeGen.Translation
             string? Role(string role) => profile.Roles.TryGetValue(role, out var n) ? n : null;
 
             var wires = new List<(string, string)>();
+            (string From, string To)? chain = null;
             foreach (var rel in Layout.ResourceRelations)
             {
                 var from = Role(rel.From); var to = Role(rel.To);
                 if (from == null || to == null) continue;
-                wires.Add(($"{from}.{rel.FromPort}", $"{to}.{rel.ToPort}"));
+                var endpoints = ($"{from}.{rel.FromPort}", $"{to}.{rel.ToPort}");
+                if (rel.IsChain) chain = endpoints; else wires.Add(endpoints);
+            }
+
+            // Geometry is the roster's, so an infrastructure FB is placed by the same rule as any
+            // component and the emitter carries no coordinates of its own.
+            var infra = new List<InfraInstance>();
+            foreach (var role in InfraRoleOrder)
+            {
+                var name = Role(role);
+                if (name == null) continue;
+                var template = TemplateManifest.ForInfraRole(role);
+                var row = Roster.All.FirstOrDefault(e =>
+                    string.Equals(e.Name, name, StringComparison.Ordinal))
+                    ?? throw new InvalidOperationException(
+                        $"[Layout] resource {plc} names '{name}' as its {role}, but layout.yml gives it no row, " +
+                        "so it has nowhere to be drawn.");
+                var parameters = template.NameParameter == null
+                    ? (IReadOnlyDictionary<string, string>)EmptyParameters
+                    : new Dictionary<string, string> { [template.NameParameter] = SyslayBuilder.FormatString(name) };
+                infra.Add(new InfraInstance(role, name, template, InfraNamespace, row.X, row.Y, parameters));
             }
 
             return new ResourcePlan(plc, profile.Label,
-                Role("area"), Role("station"), Role("stationHmi"),
+                Role("area"), Role("station"),
                 ProcessesOn(plc).FirstOrDefault()?.Name?.Trim(),
-                Role("terminator"), wires);
+                Role("terminator"), wires, infra, chain);
         }
+
+        // The order a resource's stack is declared in, which is the order it is emitted in.
+        private static readonly string[] InfraRoleOrder =
+            { "areaHmi", "area", "station", "stationHmi", "terminator", "areaTerminator" };
+
+        // Every infrastructure composite the Mapper emits lives in the project's own namespace.
+        private const string InfraNamespace = "Main";
+
+        private static readonly Dictionary<string, string> EmptyParameters = new(StringComparer.Ordinal);
 
         // Every process-to-process handoff the twin declares, with its transport resolved.
         internal ProcessHandoffPlan Handoffs { get; }
