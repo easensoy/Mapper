@@ -93,6 +93,12 @@ namespace CodeGen.Configuration
         public string FromPort { get; set; } = string.Empty;
         public string To { get; set; } = string.Empty;
         public string ToPort { get; set; } = string.Empty;
+
+        // A chain relation is not a direct wire: it names the two ENDS of a component chain whose
+        // middle the layout decides, so the station that starts the CaS chain and the terminator
+        // that caps it are declared once here instead of in each emitter.
+        public string Chain { get; set; } = string.Empty;
+        public bool IsChain => !string.IsNullOrWhiteSpace(Chain);
     }
 
     public sealed class BootFb
