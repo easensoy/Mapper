@@ -69,36 +69,8 @@ namespace CodeGen.Translation
 
             // No top-level PLC_Start FB: Area_CAT/Station_CAT each hold their own plcStart; an external one double-bootstraps (EAE rejects).
 
-            builder.AddFB(FBIdGenerator.GenerateFBId("Area_HMI"),
-                "Area_HMI", "Area_CAT", "Main", 240, 140);
-
-            builder.AddFB(FBIdGenerator.GenerateFBId("Area"),
-                "Area", "Area", "Main", 400, 580,
-                new Dictionary<string, string>
-                {
-                    ["AreaName"] = SyslayBuilder.FormatString("Area")
-                });
-
-            builder.AddFB(FBIdGenerator.GenerateFBId("Station1"),
-                "Station1", "Station", "Main", 2120, 600,
-                new Dictionary<string, string>
-                {
-                    ["StationName"] = SyslayBuilder.FormatString("Station1")
-                });
-
-            builder.AddFB(FBIdGenerator.GenerateFBId("Station1_HMI"),
-                "Station1_HMI", "Station_CAT", "Main", 2220, 100);
-
-            // Station 2 stack — coordinates here just need to be unique; the post-syslay CanonicalLayout pass rewrites them.
-            builder.AddFB(FBIdGenerator.GenerateFBId("Station2"),
-                "Station2", "Station", "Main", 12000, 600,
-                new Dictionary<string, string>
-                {
-                    ["StationName"] = SyslayBuilder.FormatString("Station2")
-                });
-
-            builder.AddFB(FBIdGenerator.GenerateFBId("Station2_HMI"),
-                "Station2_HMI", "Station_CAT", "Main", 12100, 100);
+            // Each resource's area/station stack, as layout.yml names it and the manifest types it.
+            EmitInfrastructure(builder, ctx, role => role != "terminator" && role != "areaTerminator");
 
             // Instance name: Instance_Name_Overrides sheet, else suffix-stripping convention, else "Process1".
             var overrides = (config != null && !string.IsNullOrWhiteSpace(config.MappingRulesPath))
@@ -342,14 +314,9 @@ namespace CodeGen.Translation
                 }
             }
 
-            builder.AddFB(FBIdGenerator.GenerateFBId("Stn1_Term"),
-                "Stn1_Term", "CaSAdptrTerminator", "Main", 4780, 2360);
-
-            builder.AddFB(FBIdGenerator.GenerateFBId("Stn2_Term"),
-                "Stn2_Term", "CaSAdptrTerminator", "Main", 14000, 2360);
-
-            builder.AddFB(FBIdGenerator.GenerateFBId("Area_Term"),
-                "Area_Term", "CaSAdptrTerminator", "Main", 3760, 720);
+            // The terminators cap each CaS chain, so they follow the components they terminate.
+            EmitInfrastructure(builder, ctx, role => role == "terminator");
+            EmitInfrastructure(builder, ctx, role => role == "areaTerminator");
 
             // Embedded MQTT_PUBLISH binds to a connection by matching ConnectionID value (no wire); gated so output is unchanged when off.
             if (config != null && config.MqttPublishEnabled)
@@ -413,8 +380,12 @@ namespace CodeGen.Translation
                     ctx.Layout.Band(PlcAssignment.M580).ColumnBaseX, 200);
                 builder.AddEventConnection($"{feedName}.INITO", $"{feedName}.CONNECT");
                 builder.AddEventConnection($"{m580Name}.INITO", $"{m580Name}.CONNECT");
-                builder.AddEventConnection("Area.INITO", $"{feedName}.INIT");
-                builder.AddEventConnection("Station2.INITO", $"{m580Name}.INIT");
+                // Each connection is brought up by its own resource's infrastructure, whatever that
+                // resource calls it.
+                builder.AddEventConnection(
+                    $"{ctx.ResourceFor(PlcAssignment.M262).AreaFb}.INITO", $"{feedName}.INIT");
+                builder.AddEventConnection(
+                    $"{ctx.ResourceFor(PlcAssignment.M580).StationFb}.INITO", $"{m580Name}.INIT");
                 // Partial swap: the RevPi ALSO hosts Feeder/Checker (embedded MqttPub bind ConnectionID
                 // 'SMC'), so it needs its OWN local connection alongside the M262 Feed connection — else
                 // those publishers have no active connection. INIT off a RevPi-local component (PartInHopper)
@@ -1090,6 +1061,21 @@ namespace CodeGen.Translation
 
             var nested = new Dictionary<string, IDictionary<string, string>>(StringComparer.Ordinal);
             return (outer, nested, recipe);
+        }
+
+        // Renders the planned infrastructure of every declared resource, in declaration order. A
+        // resource that declares no role for a slot simply contributes nothing.
+        private static void EmitInfrastructure(SyslayBuilder builder, GenerationContext ctx,
+            Func<string, bool> wanted)
+        {
+            foreach (var resource in ctx.Layout.Resources)
+            foreach (var fb in ctx.ResourceFor(resource.Plc).Infrastructure)
+            {
+                if (!wanted(fb.Role)) continue;
+                builder.AddFB(FBIdGenerator.GenerateFBId(fb.Name),
+                    fb.Name, fb.Template.Name, fb.Namespace, fb.X, fb.Y,
+                    fb.Parameters.Count == 0 ? null : new Dictionary<string, string>(fb.Parameters));
+            }
         }
 
         private static void ReportStation2Recipe(BindingApplicationReport report,
