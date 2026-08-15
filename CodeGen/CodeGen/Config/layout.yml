@@ -98,6 +98,8 @@ resourceRelations:
   - { from: stationHmi, fromPort: StationHMIAdptrOUT, to: station,        toPort: StationHMIAdptrIN }
   - { from: area,       fromPort: AreaAdptrOUT,       to: station,        toPort: AreaAdptrIN }
   - { from: station,    fromPort: AreaAdptrOUT,       to: areaTerminator, toPort: CasAdptrIN }
+  # Not a direct wire: the two ends of the CaS chain the resource's components are threaded onto.
+  - { from: station,    fromPort: StationAdaptrOUT,   to: terminator,     toPort: CasAdptrIN, chain: stationAdptr }
 
 # The roster. plc = hosting controller, column/row = canvas position, owner = the Process FB that
 # commands it ("" = commanded by none, or across controllers).
