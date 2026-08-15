@@ -252,20 +252,18 @@ namespace CodeGen.Devices.Core
                 var adapterWires = plan.AdapterRelations.Select(r => new Wire(r.Source, r.Destination)).ToList();
 
                 // CaSBus station chain [Station]->actuators...->[Process]->[Terminator]; needs both a Station and a Process anchor, so BX1 skips it (actuators still init + report via the ring).
-                bool haveStation = Present(plan.StationFb, byName);
+                var chain = plan.StationChain;
+                bool haveStation = chain != null && Present(plan.StationFb, byName);
                 if (haveStation && haveProcess)
                 {
                     var stationChain = new List<string>(actNames);
                     stationChain.AddRange(processNames);
-                    adapterWires.Add(new Wire($"{plan.StationFb}.StationAdaptrOUT",
-                        $"{stationChain[0]}.stationAdptr_in"));
+                    adapterWires.Add(new Wire(chain!.Value.From, $"{stationChain[0]}.stationAdptr_in"));
                     for (int i = 0; i < stationChain.Count - 1; i++)
                         adapterWires.Add(new Wire($"{stationChain[i]}.stationAdptr_out",
                             $"{stationChain[i + 1]}.stationAdptr_in"));
                     if (Present(plan.TerminatorFb, byName))
-                        adapterWires.Add(new Wire($"{stationChain[^1]}.stationAdptr_out",
-                            $"{plan.TerminatorFb}." +
-                            CodeGen.Translation.PortNameValidator.CaSAdptrTerminatorInPort));
+                        adapterWires.Add(new Wire($"{stationChain[^1]}.stationAdptr_out", chain.Value.To));
                 }
                 else
                 {
