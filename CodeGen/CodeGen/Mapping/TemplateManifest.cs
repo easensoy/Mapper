@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -26,6 +26,14 @@ namespace CodeGen.Mapping
 
         // Boundary ports the deployed artefact must declare. Empty = not port-validated.
         public IReadOnlyList<string> Ports { get; init; } = Array.Empty<string>();
+
+        // Which resource-infrastructure roles this type serves. layout.yml names the INSTANCE for a
+        // role; this says which type realises it, so no emitter spells a template name to build a
+        // station. One type may serve several roles (a terminator caps an area or a station).
+        public IReadOnlyList<string> InfraRoles { get; init; } = Array.Empty<string>();
+
+        // The parameter that carries the instance's own name, when the type has one.
+        public string? NameParameter { get; init; }
     }
 
     // One row per FB type the Mapper owns, so adding a CAT is a one-row change rather than an
@@ -68,16 +76,17 @@ namespace CodeGen.Mapping
             new("stateRptCmdAdptr",             ArtefactKind.Adapter, TypeRole.Infrastructure, true, false, None),
 
             // --- Composites ---------------------------------------------------------------
-            new("Area",                         ArtefactKind.Composite, TypeRole.Infrastructure, true, true,  None) { Ports = new[] { "AreaHMIAdptrIN", "AreaAdptrOUT" } },
-            new("Station",                      ArtefactKind.Composite, TypeRole.Infrastructure, true, true,  None) { Ports = new[] { "AreaAdptrIN", "StationHMIAdptrIN", "AreaAdptrOUT", "StationAdaptrOUT" } },
-            new("CaSAdptrTerminator",           ArtefactKind.Composite, TypeRole.Infrastructure, true, true,  None) { Ports = new[] { "CasAdptrIN" } },
+            new("Area",                         ArtefactKind.Composite, TypeRole.Infrastructure, true, true,  None) { Ports = new[] { "AreaHMIAdptrIN", "AreaAdptrOUT" }, InfraRoles = new[] { "area" }, NameParameter = "AreaName" },
+            new("Station",                      ArtefactKind.Composite, TypeRole.Infrastructure, true, true,  None) { Ports = new[] { "AreaAdptrIN", "StationHMIAdptrIN", "AreaAdptrOUT", "StationAdaptrOUT" }, InfraRoles = new[] { "station" }, NameParameter = "StationName" },
+            new("CaSAdptrTerminator",           ArtefactKind.Composite, TypeRole.Infrastructure, true, true,  None) { Ports = new[] { "CasAdptrIN" }, InfraRoles = new[] { "terminator", "areaTerminator" } },
             new("faultDetection",               ArtefactKind.Composite, TypeRole.Infrastructure, true, false, None),
             new("faultDetection_7SCH",          ArtefactKind.Composite, TypeRole.Infrastructure, true, false, None),
 
             // --- HMI CATs (deployed before the control CATs, as EAE expects) ---------------
-            new("Area_CAT",                     ArtefactKind.HmiCat, TypeRole.Infrastructure, true, true, None),
+            new("Area_CAT",                     ArtefactKind.HmiCat, TypeRole.Infrastructure, true, true, None) { InfraRoles = new[] { "areaHmi" } },
             new("Station_CAT",                  ArtefactKind.HmiCat, TypeRole.Infrastructure, true, true,
-                new[] { "Station_Core", "Station_Fault", "Station_Status" }),
+                new[] { "Station_Core", "Station_Fault", "Station_Status" })
+                { InfraRoles = new[] { "stationHmi" } },
 
             // --- Control CATs -------------------------------------------------------------
             new("Five_State_Actuator_CAT",      ArtefactKind.Cat, TypeRole.Actuator, true, true,
@@ -123,6 +132,22 @@ namespace CodeGen.Mapping
 
         static readonly Dictionary<string, TemplateType> ByName =
             Types.ToDictionary(t => t.Name, StringComparer.Ordinal);
+
+        // The CAT a process engine is emitted as. One type carries TypeRole.Process, so nothing
+        // downstream has to spell it.
+        public static TemplateType ProcessType { get; } = Types.Single(t => t.Role == TypeRole.Process);
+
+        // The one type that realises a resource-infrastructure role. Throws rather than guessing:
+        // an unserved role means layout.yml names an instance the Mapper has no template for.
+        public static TemplateType ForInfraRole(string role)
+        {
+            var hits = Types.Where(t => t.InfraRoles.Contains(role, StringComparer.Ordinal)).ToList();
+            if (hits.Count == 1) return hits[0];
+            throw new InvalidOperationException(hits.Count == 0
+                ? $"[Manifest] no template serves the infrastructure role '{role}'."
+                : $"[Manifest] {hits.Count} templates serve the infrastructure role '{role}': " +
+                  string.Join(", ", hits.Select(t => t.Name)) + ".");
+        }
 
         public static TemplateType? Find(string? name) =>
             name != null && ByName.TryGetValue(name, out var t) ? t : null;
