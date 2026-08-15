@@ -60,7 +60,7 @@ namespace CodeGen.Translation
                 builder.AddEventConnection($"{initChain[i]}.INITO", $"{initChain[i + 1]}.INIT");
 
             // The same planned relations the sysres renders, so the two halves cannot drift.
-            foreach (var (source, destination) in ctx.ResourceFor(PlcAssignment.M262).AdapterRelations)
+            foreach (var (source, destination) in feed.AdapterRelations)
                 builder.AddAdapterConnection(source, destination);
 
             // CaS chain skips any CAT lacking stationAdptr (sensors, Seven_State); a dangling stationAdptr makes EAE reject the resource. sysres+syslay must match.
@@ -72,11 +72,11 @@ namespace CodeGen.Translation
                 if (TemplateMap.LacksStationAdapter(fbType)) continue;
                 stationChain.Add((a.Name, fbType));
             }
-            stationChain.Add((processInstanceName, "Process1_Generic"));
+            stationChain.Add((processInstanceName, TemplateManifest.ProcessType.Name));
 
             if (stationChain.Count > 0)
             {
-                builder.AddAdapterConnection("Station1.StationAdaptrOUT",
+                builder.AddAdapterConnection(feed.StationChain!.Value.From,
                     $"{stationChain[0].Name}.{StationAdptrIn(stationChain[0].Type)}");
                 for (int i = 0; i < stationChain.Count - 1; i++)
                     builder.AddAdapterConnection(
@@ -84,7 +84,7 @@ namespace CodeGen.Translation
                         $"{stationChain[i + 1].Name}.{StationAdptrIn(stationChain[i + 1].Type)}");
                 builder.AddAdapterConnection(
                     $"{stationChain[^1].Name}.{StationAdptrOut(stationChain[^1].Type)}",
-                    "Stn1_Term.CasAdptrIN");
+                    feed.StationChain!.Value.To);
             }
 
             // Report ring is Feed-controller-only and closed locally; the cross-controller segment is kept out.
@@ -133,9 +133,7 @@ namespace CodeGen.Translation
             IReadOnlyList<string> procFbs)
         {
             var station2 = ctx.ResourceFor(PlcAssignment.M580);
-            var StationFb    = station2.StationFb!;
-            var StationHmiFb = station2.StationHmiFb!;
-            var Stn2Term     = station2.TerminatorFb!;
+            var StationFb = station2.StationFb!;
 
             var allocation = ctx.Allocation;
             var contents = ctx.Station;
@@ -155,8 +153,9 @@ namespace CodeGen.Translation
             for (int i = 0; i < initChain.Count - 1; i++)
                 builder.AddEventConnection($"{initChain[i]}.INITO", $"{initChain[i + 1]}.INIT");
 
-            builder.AddAdapterConnection($"{StationHmiFb}.StationHMIAdptrOUT",
-                                         $"{StationFb}.StationHMIAdptrIN");
+            // The same planned relations the sysres renders, so the two halves cannot drift.
+            foreach (var (source, destination) in station2.AdapterRelations)
+                builder.AddAdapterConnection(source, destination);
 
             // CaS chain skips sensors and any actuator whose resolved CAT lacks stationAdptr. The
             // centre-home swivel CAT does have the port, so Bearing_PnP is wired by its resolved type.
@@ -172,7 +171,7 @@ namespace CodeGen.Translation
             foreach (var proc in procFbs) stationChain.Add((proc, "Process1_Generic"));
             if (stationChain.Count > 0)
             {
-                builder.AddAdapterConnection($"{StationFb}.StationAdaptrOUT",
+                builder.AddAdapterConnection(station2.StationChain!.Value.From,
                     $"{stationChain[0].Name}.{StationAdptrIn(stationChain[0].Type)}");
                 for (int i = 0; i < stationChain.Count - 1; i++)
                     builder.AddAdapterConnection(
@@ -180,7 +179,7 @@ namespace CodeGen.Translation
                         $"{stationChain[i + 1].Name}.{StationAdptrIn(stationChain[i + 1].Type)}");
                 builder.AddAdapterConnection(
                     $"{stationChain[^1].Name}.{StationAdptrOut(stationChain[^1].Type)}",
-                    $"{Stn2Term}.CasAdptrIN");
+                    station2.StationChain!.Value.To);
             }
 
             // M580 sensors then actuators, EXCLUDING the process (the process closes the ring).
