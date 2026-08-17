@@ -49,6 +49,115 @@ namespace CodeGen.Services
             return hits.Count > 0;
         }
 
+        // A connection group inside an FBNetwork, created if the network has none yet. EAE writes the
+        // groups only when non-empty, so a patcher adding the first wire of its kind must create one.
+        internal static ConnectionSet Connections(XElement network, XNamespace ns, string group)
+        {
+            var element = network.Element(ns + group);
+            if (element == null) { element = new XElement(ns + group); network.Add(element); }
+            return new ConnectionSet(element, ns);
+        }
+
+        // One <EventConnections>/<DataConnections>/<AdapterConnections> group, and the four edits the
+        // patchers make to one. A Connection carries exactly Source then Destination in that order --
+        // and XAttribute constructor order IS the serialised order -- so building it in one place is
+        // what keeps every patcher's output identical. Each edit reports whether it changed anything,
+        // which is the `changed` flag the callers accumulate before deciding to save.
+        internal readonly struct ConnectionSet
+        {
+            private readonly XElement _group;
+            private readonly XNamespace _ns;
+
+            internal ConnectionSet(XElement group, XNamespace ns) { _group = group; _ns = ns; }
+
+            internal IEnumerable<XElement> All => _group.Elements(_ns + "Connection");
+
+            internal XElement? Find(string source, string destination) =>
+                All.FirstOrDefault(c =>
+                    string.Equals((string?)c.Attribute("Source"), source, StringComparison.Ordinal) &&
+                    string.Equals((string?)c.Attribute("Destination"), destination, StringComparison.Ordinal));
+
+            internal bool Has(string source, string destination) => Find(source, destination) != null;
+
+            // Is this pin already driving anything? A data input takes ONE source, so the patchers that
+            // add a pin guard on the source alone -- a wire from it to some other destination still means
+            // the pin is wired, and adding a second would be two drivers for one value.
+            internal bool HasSource(string source) =>
+                All.Any(c => string.Equals((string?)c.Attribute("Source"), source, StringComparison.Ordinal));
+
+            // Appends, so a re-deploy that already carries the wire is a no-op and the order the
+            // patcher established the first time is preserved.
+            internal bool Add(string source, string destination)
+            {
+                if (Has(source, destination)) return false;
+                _group.Add(new XElement(_ns + "Connection",
+                    new XAttribute("Source", source),
+                    new XAttribute("Destination", destination)));
+                return true;
+            }
+
+            // Appends without checking. Distinct from Add on purpose: the emitters that build a
+            // freshly-created group know the wire cannot already be there, and silently giving them a
+            // guard would change what a re-deploy over an existing tree produces.
+            internal void Append(string source, string destination) =>
+                _group.Add(new XElement(_ns + "Connection",
+                    new XAttribute("Source", source),
+                    new XAttribute("Destination", destination)));
+
+            internal bool Remove(string source, string destination) =>
+                RemoveElems(All, c =>
+                    string.Equals((string?)c.Attribute("Source"), source, StringComparison.Ordinal) &&
+                    string.Equals((string?)c.Attribute("Destination"), destination, StringComparison.Ordinal));
+
+            internal bool RemoveTo(params string[] destinations)
+            {
+                var set = destinations.ToHashSet(StringComparer.Ordinal);
+                return RemoveElems(All, c => set.Contains((string?)c.Attribute("Destination") ?? string.Empty));
+            }
+
+            internal bool RemoveFrom(params string[] sources)
+            {
+                var set = sources.ToHashSet(StringComparer.Ordinal);
+                return RemoveElems(All, c => set.Contains((string?)c.Attribute("Source") ?? string.Empty));
+            }
+        }
+
+        // Every deployed .fbt, parsed. A file that will not parse is skipped rather than fatal: this is
+        // the read side, used by verifiers that must report on the tree they were given, not refuse it.
+        internal static IEnumerable<(string Path, XDocument Doc)> EachDeployedFbt(string eaeProjectDir)
+        {
+            var iec = Path.Combine(eaeProjectDir, "IEC61499");
+            if (!Directory.Exists(iec)) yield break;
+            foreach (var fbt in Directory.EnumerateFiles(iec, "*.fbt", SearchOption.AllDirectories))
+            {
+                XDocument doc;
+                try { doc = XDocument.Load(fbt); }
+                catch { continue; }
+                yield return (fbt, doc);
+            }
+        }
+
+        // Find a child by one of its attributes. The .fbt schema identifies almost everything this way
+        // -- an Algorithm, ECState, VarDeclaration or FB by Name, a Parameter by Name -- so the patchers
+        // would otherwise repeat the same FirstOrDefault/cast/compare for each element name.
+        internal static XElement? ByAttribute(this XContainer? scope, XNamespace ns,
+            string element, string attribute, string value) =>
+            scope?.Elements(ns + element)
+                .FirstOrDefault(e => string.Equals((string?)e.Attribute(attribute), value, StringComparison.Ordinal));
+
+        // An Algorithm anywhere under the type. Algorithms sit inside BasicFB, so the patchers reach them
+        // by descendant rather than by child.
+        internal static XElement? FindAlgorithm(XContainer root, XNamespace ns, string name) =>
+            root.Descendants(ns + "Algorithm")
+                .FirstOrDefault(a => string.Equals((string?)a.Attribute("Name"), name, StringComparison.Ordinal));
+
+        // An ECC transition identified by the states it joins. Source+Destination is the only stable key:
+        // transitions carry no name and their Condition is what a patch usually rewrites.
+        internal static XElement? FindTransition(XContainer? ecc, XNamespace ns, string source, string destination) =>
+            ecc?.Elements(ns + "ECTransition").FirstOrDefault(t =>
+                string.Equals((string?)t.Attribute("Source"), source, StringComparison.Ordinal) &&
+                string.Equals((string?)t.Attribute("Destination"), destination, StringComparison.Ordinal));
+
         // The deployed CAT/type .fbt under IEC61499/ (excluding its _HMI faceplate); "" if absent.
         internal static string FindDeployedFbt(string eaeProjectDir, string fbtFileName)
             => Directory.EnumerateFiles(Path.Combine(eaeProjectDir, "IEC61499"), fbtFileName, SearchOption.AllDirectories)
