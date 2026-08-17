@@ -34,8 +34,7 @@ namespace CodeGen.Services
                     return;
                 }
 
-                var init = basic.Descendants(ns + "Algorithm")
-                    .FirstOrDefault(a => (string?)a.Attribute("Name") == "INIT");
+                var init = FindAlgorithm(basic, ns, "INIT");
                 if (init == null)
                 {
                     init = new XElement(ns + "Algorithm", new XAttribute("Name", "INIT"));
@@ -57,26 +56,11 @@ namespace CodeGen.Services
         // Component_State_Msg is a reused struct, so a stale dest_name spuriously satisfies a target
         // actuator's BREQ match (dest_name==name) and clobbers its state_cmd.
         internal static void PatchRingReportClearDest(string eaeProjectDir, DeployResult result)
-        {
-            var fbt = Path.Combine(eaeProjectDir, "IEC61499", "updateComponentState.fbt");
-            if (!File.Exists(fbt))
+            => EditDeployedFbt(eaeProjectDir, "updateComponentState.fbt",
+                "updateComponentState.fbt report-dest-clear patch failed", result,
+                (doc, root, ns, fbt) =>
             {
-                fbt = Directory.EnumerateFiles(
-                        Path.Combine(eaeProjectDir, "IEC61499"),
-                        "updateComponentState.fbt", SearchOption.AllDirectories)
-                    .FirstOrDefault() ?? string.Empty;
-                if (string.IsNullOrEmpty(fbt)) return;
-            }
-            try
-            {
-                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                var root = doc.Root;
-                if (root == null) return;
-                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
-
-                var req = root.Descendants(ns + "Algorithm")
-                    .FirstOrDefault(a => (string?)a.Attribute("Name") == "REQ");
-                var st = req?.Element(ns + "ST");
+                var st = FindAlgorithm(root, ns, "REQ")?.Element(ns + "ST");
                 if (st == null)
                 {
                     result.Warnings.Add("updateComponentState.fbt: no REQ algorithm; report-dest-clear skipped.");
@@ -92,39 +76,20 @@ namespace CodeGen.Services
                     "component_state_out.state := state_sts;\r\n" +
                     "state_table[id].name := name;\r\n" +
                     "state_table[id].state := state_sts;\r\n";
-                st.ReplaceAll(new System.Xml.Linq.XCData(newBody));
+                st.ReplaceAll(new XCData(newBody));
                 doc.Save(fbt);
                 result.PatchesApplied.Add(
                     "updateComponentState.fbt: REQ now clears component_state_out.dest_name -- a state REPORT no longer carries a stale command target, so a sensor report can no longer overwrite an actuator's state_cmd.");
                 MapperLogger.Info("[Deploy] updateComponentState.fbt: REQ clears dest_name (ring report-vs-command leftover fix)");
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"updateComponentState.fbt report-dest-clear patch failed: {ex.Message}");
-            }
-        }
+            });
 
         // Ring relay: BCNF always forwards, but CNF fires into the actuator core only on dest match — else an
         // unrelated report replays the last retained state_cmd through ActuatorCore.pst_event.
         internal static void PatchRingCommandCnfOnlyOnDestination(string eaeProjectDir, DeployResult result)
-        {
-            var fbt = Path.Combine(eaeProjectDir, "IEC61499", "updateComponentState.fbt");
-            if (!File.Exists(fbt))
+            => EditDeployedFbt(eaeProjectDir, "updateComponentState.fbt",
+                "updateComponentState.fbt destination-gated CNF patch failed", result,
+                (doc, root, ns, fbt) =>
             {
-                fbt = Directory.EnumerateFiles(
-                        Path.Combine(eaeProjectDir, "IEC61499"),
-                        "updateComponentState.fbt", SearchOption.AllDirectories)
-                    .FirstOrDefault() ?? string.Empty;
-                if (string.IsNullOrEmpty(fbt)) return;
-            }
-
-            try
-            {
-                var doc = System.Xml.Linq.XDocument.Load(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                var root = doc.Root;
-                if (root == null) return;
-                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
-
                 var ecc = root.Descendants(ns + "ECC").FirstOrDefault();
                 if (ecc == null)
                 {
@@ -138,18 +103,15 @@ namespace CodeGen.Services
 
                 bool changed = false;
 
-                var addressedTransition = ecc.Elements(ns + "ECTransition")
-                    .FirstOrDefault(t =>
-                        (string?)t.Attribute("Source") == "START" &&
-                        (string?)t.Attribute("Destination") == "BREQ");
+                var addressedTransition = FindTransition(ecc, ns, "START", "BREQ");
                 if (addressedTransition == null)
                 {
-                    ecc.Add(new System.Xml.Linq.XElement(ns + "ECTransition",
-                        new System.Xml.Linq.XAttribute("Source", "START"),
-                        new System.Xml.Linq.XAttribute("Destination", "BREQ"),
-                        new System.Xml.Linq.XAttribute("Condition", addressedCondition),
-                        new System.Xml.Linq.XAttribute("x", "825.226"),
-                        new System.Xml.Linq.XAttribute("y", "407.2253")));
+                    ecc.Add(new XElement(ns + "ECTransition",
+                        new XAttribute("Source", "START"),
+                        new XAttribute("Destination", "BREQ"),
+                        new XAttribute("Condition", addressedCondition),
+                        new XAttribute("x", "825.226"),
+                        new XAttribute("y", "407.2253")));
                     changed = true;
                 }
                 else if ((string?)addressedTransition.Attribute("Condition") != addressedCondition)
@@ -158,19 +120,17 @@ namespace CodeGen.Services
                     changed = true;
                 }
 
-                var passState = ecc.Elements(ns + "ECState")
-                    .FirstOrDefault(s => (string?)s.Attribute("Name") == "BREQ_PASS");
+                var passState = ecc.ByAttribute(ns, "ECState", "Name", "BREQ_PASS");
                 if (passState == null)
                 {
-                    passState = new System.Xml.Linq.XElement(ns + "ECState",
-                        new System.Xml.Linq.XAttribute("Name", "BREQ_PASS"),
-                        new System.Xml.Linq.XAttribute("x", "1036"),
-                        new System.Xml.Linq.XAttribute("y", "752"),
-                        new System.Xml.Linq.XElement(ns + "ECAction",
-                            new System.Xml.Linq.XAttribute("Algorithm", "BREQ"),
-                            new System.Xml.Linq.XAttribute("Output", "BCNF")));
-                    var reqState = ecc.Elements(ns + "ECState")
-                        .FirstOrDefault(s => (string?)s.Attribute("Name") == "BREQ");
+                    passState = new XElement(ns + "ECState",
+                        new XAttribute("Name", "BREQ_PASS"),
+                        new XAttribute("x", "1036"),
+                        new XAttribute("y", "752"),
+                        new XElement(ns + "ECAction",
+                            new XAttribute("Algorithm", "BREQ"),
+                            new XAttribute("Output", "BCNF")));
+                    var reqState = ecc.ByAttribute(ns, "ECState", "Name", "BREQ");
                     if (reqState != null)
                         reqState.AddAfterSelf(passState);
                     else
@@ -186,25 +146,22 @@ namespace CodeGen.Services
                         actions.Any(a => (string?)a.Attribute("Output") == "CNF"))
                     {
                         passState.Elements(ns + "ECAction").Remove();
-                        passState.Add(new System.Xml.Linq.XElement(ns + "ECAction",
-                            new System.Xml.Linq.XAttribute("Algorithm", "BREQ"),
-                            new System.Xml.Linq.XAttribute("Output", "BCNF")));
+                        passState.Add(new XElement(ns + "ECAction",
+                            new XAttribute("Algorithm", "BREQ"),
+                            new XAttribute("Output", "BCNF")));
                         changed = true;
                     }
                 }
 
-                var passTransition = ecc.Elements(ns + "ECTransition")
-                    .FirstOrDefault(t =>
-                        (string?)t.Attribute("Source") == "START" &&
-                        (string?)t.Attribute("Destination") == "BREQ_PASS");
+                var passTransition = FindTransition(ecc, ns, "START", "BREQ_PASS");
                 if (passTransition == null)
                 {
-                    ecc.Add(new System.Xml.Linq.XElement(ns + "ECTransition",
-                        new System.Xml.Linq.XAttribute("Source", "START"),
-                        new System.Xml.Linq.XAttribute("Destination", "BREQ_PASS"),
-                        new System.Xml.Linq.XAttribute("Condition", passThroughCondition),
-                        new System.Xml.Linq.XAttribute("x", "721"),
-                        new System.Xml.Linq.XAttribute("y", "655")));
+                    ecc.Add(new XElement(ns + "ECTransition",
+                        new XAttribute("Source", "START"),
+                        new XAttribute("Destination", "BREQ_PASS"),
+                        new XAttribute("Condition", passThroughCondition),
+                        new XAttribute("x", "721"),
+                        new XAttribute("y", "655")));
                     changed = true;
                 }
                 else if ((string?)passTransition.Attribute("Condition") != passThroughCondition)
@@ -213,18 +170,15 @@ namespace CodeGen.Services
                     changed = true;
                 }
 
-                var passReturn = ecc.Elements(ns + "ECTransition")
-                    .FirstOrDefault(t =>
-                        (string?)t.Attribute("Source") == "BREQ_PASS" &&
-                        (string?)t.Attribute("Destination") == "START");
+                var passReturn = FindTransition(ecc, ns, "BREQ_PASS", "START");
                 if (passReturn == null)
                 {
-                    ecc.Add(new System.Xml.Linq.XElement(ns + "ECTransition",
-                        new System.Xml.Linq.XAttribute("Source", "BREQ_PASS"),
-                        new System.Xml.Linq.XAttribute("Destination", "START"),
-                        new System.Xml.Linq.XAttribute("Condition", "1"),
-                        new System.Xml.Linq.XAttribute("x", "793"),
-                        new System.Xml.Linq.XAttribute("y", "760")));
+                    ecc.Add(new XElement(ns + "ECTransition",
+                        new XAttribute("Source", "BREQ_PASS"),
+                        new XAttribute("Destination", "START"),
+                        new XAttribute("Condition", "1"),
+                        new XAttribute("x", "793"),
+                        new XAttribute("y", "760")));
                     changed = true;
                 }
 
@@ -235,11 +189,6 @@ namespace CodeGen.Services
                         "updateComponentState.fbt: CNF is now destination-gated; non-target BREQ messages pass with BCNF only, preventing stale actuator command replay.");
                     MapperLogger.Info("[Deploy] updateComponentState.fbt: gated CNF to dest_name match only (stale command replay fix)");
                 }
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"updateComponentState.fbt destination-gated CNF patch failed: {ex.Message}");
-            }
-        }
+            });
     }
 }
