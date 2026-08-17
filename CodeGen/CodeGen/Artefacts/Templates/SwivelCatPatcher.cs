@@ -79,53 +79,20 @@ namespace CodeGen.Services
                     }
                 }
 
+                var events = new ConnectionSet(eventConns, ns);
+                var data = new ConnectionSet(dataConns, ns);
+
                 void RemoveEvent(string source, string destination)
-                {
-                    foreach (var c in eventConns.Elements(ns + "Connection")
-                                 .Where(c => (string?)c.Attribute("Source") == source &&
-                                             (string?)c.Attribute("Destination") == destination)
-                                 .ToList())
-                    {
-                        c.Remove();
-                        changed = true;
-                    }
-                }
+                    => changed |= events.Remove(source, destination);
 
                 void AddEvent(string source, string destination)
-                {
-                    if (eventConns.Elements(ns + "Connection").Any(c =>
-                            (string?)c.Attribute("Source") == source &&
-                            (string?)c.Attribute("Destination") == destination))
-                        return;
-                    eventConns.Add(new XElement(ns + "Connection",
-                        new XAttribute("Source", source),
-                        new XAttribute("Destination", destination)));
-                    changed = true;
-                }
+                    => changed |= events.Add(source, destination);
 
                 void RemoveDataTo(params string[] destinations)
-                {
-                    var destinationSet = destinations.ToHashSet(StringComparer.Ordinal);
-                    foreach (var c in dataConns.Elements(ns + "Connection")
-                                 .Where(c => destinationSet.Contains((string?)c.Attribute("Destination") ?? string.Empty))
-                                 .ToList())
-                    {
-                        c.Remove();
-                        changed = true;
-                    }
-                }
+                    => changed |= data.RemoveTo(destinations);
 
                 void AddData(string source, string destination)
-                {
-                    if (dataConns.Elements(ns + "Connection").Any(c =>
-                            (string?)c.Attribute("Source") == source &&
-                            (string?)c.Attribute("Destination") == destination))
-                        return;
-                    dataConns.Add(new XElement(ns + "Connection",
-                        new XAttribute("Source", source),
-                        new XAttribute("Destination", destination)));
-                    changed = true;
-                }
+                    => changed |= data.Add(source, destination);
 
                 void RemoveSimPosition()
                 {
