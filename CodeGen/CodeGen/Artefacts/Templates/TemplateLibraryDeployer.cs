@@ -463,23 +463,17 @@ namespace CodeGen.Services
                 net.Elements(ns + "Frame")
                    .Where(fr => (string?)fr.Attribute("Name") == "FRAME_MQTT").Remove();
 
-                var ec = net.Element(ns + "EventConnections");
-                if (ec == null) { ec = new System.Xml.Linq.XElement(ns + "EventConnections"); net.Add(ec); }
-                var dc = net.Element(ns + "DataConnections");
-                if (dc == null) { dc = new System.Xml.Linq.XElement(ns + "DataConnections"); net.Add(dc); }
+                var ec = Connections(net, ns, "EventConnections");
+                var dc = Connections(net, ns, "DataConnections");
 
-                void Conn(System.Xml.Linq.XElement parent, string s, string d) =>
-                    parent.Add(new System.Xml.Linq.XElement(ns + "Connection",
-                        new System.Xml.Linq.XAttribute("Source", s),
-                        new System.Xml.Linq.XAttribute("Destination", d)));
 
-                Conn(ec, stateEventSource, "MqttFmt.REQ");
-                Conn(ec, "MqttFmt.CNF", "MqttPub.PUBLISH1");
-                Conn(ec, initSource, "MqttFmt.INIT");
-                Conn(ec, initSource, "MqttPub.INIT");
-                Conn(dc, stateDataSource, "MqttFmt.state");
-                Conn(dc, "MqttFmt.payload", "MqttPub.Payload1");
-                Conn(dc, topicNameSource, "MqttPub.Topic1");
+                ec.Append(stateEventSource, "MqttFmt.REQ");
+                ec.Append("MqttFmt.CNF", "MqttPub.PUBLISH1");
+                ec.Append(initSource, "MqttFmt.INIT");
+                ec.Append(initSource, "MqttPub.INIT");
+                dc.Append(stateDataSource, "MqttFmt.state");
+                dc.Append("MqttFmt.payload", "MqttPub.Payload1");
+                dc.Append(topicNameSource, "MqttPub.Topic1");
 
                 doc.Save(fbt);
                 result.PatchesApplied.Add(
@@ -601,23 +595,17 @@ namespace CodeGen.Services
                 if (lastFb != null) { lastFb.AddAfterSelf(pubFb); lastFb.AddAfterSelf(fmtFb); }
                 else { net.Add(fmtFb); net.Add(pubFb); }
 
-                var ec = net.Element(ns + "EventConnections");
-                if (ec == null) { ec = new System.Xml.Linq.XElement(ns + "EventConnections"); net.Add(ec); }
-                var dc = net.Element(ns + "DataConnections");
-                if (dc == null) { dc = new System.Xml.Linq.XElement(ns + "DataConnections"); net.Add(dc); }
-                void Conn(System.Xml.Linq.XElement parent, string s, string d) =>
-                    parent.Add(new System.Xml.Linq.XElement(ns + "Connection",
-                        new System.Xml.Linq.XAttribute("Source", s),
-                        new System.Xml.Linq.XAttribute("Destination", d)));
+                var ec = Connections(net, ns, "EventConnections");
+                var dc = Connections(net, ns, "DataConnections");
 
-                Conn(dc, "ProcessStateByRow", eng + ".ProcessStateByRow");
-                Conn(ec, eng + "." + ProcessRuntimeTemplatePatcher.PhaseEventName, "MqttFmt.REQ");
-                Conn(ec, "MqttFmt.CNF", "MqttPub.PUBLISH1");
-                Conn(ec, "INIT", "MqttFmt.INIT");
-                Conn(ec, "INIT", "MqttPub.INIT");
-                Conn(dc, eng + ".CurrentProcessState", "MqttFmt.state");
-                Conn(dc, "MqttFmt.payload", "MqttPub.Payload1");
-                Conn(dc, "process_name", "MqttPub.Topic1");
+                dc.Append("ProcessStateByRow", eng + ".ProcessStateByRow");
+                ec.Append(eng + "." + ProcessRuntimeTemplatePatcher.PhaseEventName, "MqttFmt.REQ");
+                ec.Append("MqttFmt.CNF", "MqttPub.PUBLISH1");
+                ec.Append("INIT", "MqttFmt.INIT");
+                ec.Append("INIT", "MqttPub.INIT");
+                dc.Append(eng + ".CurrentProcessState", "MqttFmt.state");
+                dc.Append("MqttFmt.payload", "MqttPub.Payload1");
+                dc.Append("process_name", "MqttPub.Topic1");
 
                 doc.Save(fbt);
                 result.PatchesApplied.Add(
@@ -635,17 +623,11 @@ namespace CodeGen.Services
         {
             try
             {
-                var iec = Path.Combine(eaeProjectDir, "IEC61499");
-                if (!Directory.Exists(iec)) return;
-
                 var sizes = new Dictionary<(string, string), string>(
                     EqualityComparer<(string, string)>.Default);
 
-                foreach (var fbt in Directory.EnumerateFiles(iec, "*.fbt", SearchOption.AllDirectories))
+                foreach (var (fbt, doc) in EachDeployedFbt(eaeProjectDir))
                 {
-                    System.Xml.Linq.XDocument doc;
-                    try { doc = System.Xml.Linq.XDocument.Load(fbt); }
-                    catch { continue; }
                     var fbType = Path.GetFileNameWithoutExtension(fbt);
                     foreach (var vd in doc.Descendants().Where(e => e.Name.LocalName == "VarDeclaration"))
                     {
@@ -656,11 +638,8 @@ namespace CodeGen.Services
                     }
                 }
 
-                foreach (var fbt in Directory.EnumerateFiles(iec, "*.fbt", SearchOption.AllDirectories))
+                foreach (var (fbt, doc) in EachDeployedFbt(eaeProjectDir))
                 {
-                    System.Xml.Linq.XDocument doc;
-                    try { doc = System.Xml.Linq.XDocument.Load(fbt); }
-                    catch { continue; }
                     var instances = doc.Descendants()
                         .Where(e => e.Name.LocalName == "FB")
                         .ToDictionary(
