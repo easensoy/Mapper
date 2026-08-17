@@ -319,9 +319,8 @@ namespace CodeGen.Services
                     if (last != null) last.AddAfterSelf(pin); else net.Add(pin);
                 }
 
-                if (!dataConns.Elements(ns + "Connection").Any(c => (string?)c.Attribute("Source") == Slot))
-                    dataConns.Add(new XElement(ns + "Connection",
-                        new XAttribute("Source", Slot), new XAttribute("Destination", destination)));
+                var wires = new ConnectionSet(dataConns, ns);
+                if (!wires.HasSource(Slot)) wires.Append(Slot, destination);
 
                 // The internal literal has to go: a Parameter and a data connection on the same input are two
                 // sources for one value, and the literal is exactly the project-wide slot being removed.
