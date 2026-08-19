@@ -33,6 +33,27 @@ namespace CodeGen.Domain.Twin
                 : _byId.TryGetValue(componentId.Trim(), out var c) ? c : null;
 
         // First declaration wins where a name repeats, as FirstOrDefault gave before.
+        // The process that DRIVES a component, read off the model the same way the recipe compiler reads
+        // command ownership: an actuator transition whose condition names a Process/State is that process
+        // stating it issues the command. A sensor has no owner in that sense, so it falls back to the
+        // process that observes it. Null when nothing in the model refers to it.
+        public TwinComponent? OwningProcess(TwinComponent component)
+        {
+            if (component is null || component.IsProcess) return null;
+            // An actuator names its driver on its own transitions.
+            foreach (var st in component.States)
+                foreach (var tr in st.Transitions)
+                    foreach (var c in tr.Conditions)
+                        if (c.Component.IsProcess) return c.Component;
+            // A sensor is named BY the process that waits on it.
+            foreach (var proc in Processes)
+                foreach (var st in proc.States)
+                    foreach (var tr in st.Transitions)
+                        foreach (var c in tr.Conditions)
+                            if (ReferenceEquals(c.Component, component)) return proc;
+            return null;
+        }
+
         public TwinComponent? ByName(string? name) =>
             string.IsNullOrWhiteSpace(name) ? null
                 : _byName.TryGetValue(name.Trim(), out var c) ? c : null;
