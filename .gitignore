@@ -28,6 +28,8 @@ venv/
 /_verify*/
 # Local, machine-specific config (read from CWD at runtime; never committed)
 mapper_config.json
+# ...except the one authored copy, which is linked into every build output.
+!CodeGen/CodeGen/Config/mapper_config.json
 # MQTT broker runtime artefacts + secrets (certs/keys/data MUST stay out)
 MQTT/certs/
 MQTT/data/
