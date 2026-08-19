@@ -7,6 +7,7 @@ using CodeGen.Devices.Core;
 using CodeGen.Devices.M262;
 using CodeGen.Translation;
 
+using CodeGen.Mapping;
 namespace CodeGen.Devices.Core
 {
     public static class Station2WireEmitter
@@ -32,7 +33,7 @@ namespace CodeGen.Devices.Core
         private static void Wire(GenerationContext ctx, string eaeRoot,
             CodeGen.Translation.PlcAssignment plc, SystemInjector.BindingApplicationReport report)
         {
-            var deviceType = CodeGen.Mapping.PlcTargets.DeviceType(plc);
+            var deviceType = TargetRegistry.Of(plc).DeviceType;
             var plan = ctx.ResourceFor(plc);
             var tag = plan.Label;
             var cfg = ctx.Config;
