@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using CodeGen.Configuration;
@@ -22,9 +22,12 @@ namespace CodeGen.Mapping
             Layout = layout ?? throw new ArgumentNullException(nameof(layout));
             var selected = new HashSet<string>(
                 revPiComponents ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
-            // PartInHopper is not a free choice: its sensor is physically read by the RevPI_IO Modbus
-            // coupler, so moving any Feed component to the RevPi takes the hopper sensor with it.
-            if (selected.Count > 0) selected.Add("PartInHopper");
+            // Hosting anything on the RevPi takes its coupler's own signals along: device.yml declares
+            // which components that target's I/O hardware is the only reader of. A hardware contract of
+            // the target, not a name this planner knows.
+            if (selected.Count > 0)
+                foreach (var required in DeviceConfig.Current.RevPi.AlwaysHosts)
+                    selected.Add(required);
             RevPiComponents = selected;
         }
 
