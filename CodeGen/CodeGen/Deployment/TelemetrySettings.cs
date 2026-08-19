@@ -1,4 +1,4 @@
-namespace CodeGen.Configuration
+﻿namespace CodeGen.Configuration
 {
     // Telemetry/MQTT settings from Config/telemetry.yml, which is their only source. No value is
     // restated here: a C# default is a second source of truth that silently wins when a key is
@@ -15,6 +15,12 @@ namespace CodeGen.Configuration
         public string ClientM262 { get; set; } = string.Empty;
         public string ClientM580 { get; set; } = string.Empty;
         public string ClientRevPi { get; set; } = string.Empty;
+
+        // Publish policy for the embedded MQTT_PUBLISH the CATs carry.
+        public bool PublishEnabled { get; set; } = true;
+        public int Qos { get; set; } = 1;
+        public bool Retain { get; set; }
+        public string TopicRoot { get; set; } = string.Empty;
 
         private static readonly YamlConfigFile<TelemetrySettings> _file = new("Config", "telemetry.yml");
 
