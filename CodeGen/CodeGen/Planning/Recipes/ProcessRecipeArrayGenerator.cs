@@ -121,7 +121,8 @@ namespace CodeGen.Translation.Process
             // no-clamp Assembly commanded coverpnp_vr and then waited on coverpnp_gripper, which nothing had yet
             // been told to move, and the cover sequence stopped dead with the gripper never gripping.
             foreach (var s in cat.SynthSensors) byName[s.Name] = s.Id;
-            byName["Robot"] = cat.RobotActuatorId;
+            if (!string.IsNullOrWhiteSpace(cat.Roles.TaskArm))
+                byName[cat.Roles.TaskArm] = cat.RobotActuatorId;
             if (topCoverSlot is int coverSlot)
                 foreach (var n in TemplateMap.TopCoverSensorNames) byName[n] = coverSlot;
             // The material bridge is whichever synthesised sensor rides the cross-controller ring segment: that
