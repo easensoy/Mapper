@@ -10,21 +10,27 @@ namespace CodeGen.Translation
     // the twin, not declared here.
     public static class HandoffPlanner
     {
-        // Master switch for the M262<->M580 cross-device discharge + part-present handoffs. RIG-VERIFY:
-        // the M262<->M580 cross-device adapter transport (only M580<->BX1 is rig-proven). OFF =
-        // decoupled local rings (Assembly gates on the local BearingSensor).
-        public static bool DischargeActive => true;
+        // The sensor filling the MATERIAL role: the part-present level that rides the cross-controller
+        // segment and can therefore stand in for a Feed-side handoff. The profile names it because the
+        // twin has no way to say "this is the one that crosses"; its slot comes from the synth
+        // reservation and its physical channel from dischargeChannels.
+        public static (string Name, int Id) PartAtAssembly
+        {
+            get
+            {
+                var role = RigCatalog.Current.Roles.MaterialSensor;
+                foreach (var s in MapperConfig.M262SynthSensors)
+                    if (string.Equals(s.Name, role, System.StringComparison.OrdinalIgnoreCase)) return s;
+                throw new System.InvalidOperationException(
+                    $"[Rig] roles.materialSensor names '{role}', which smc-rig.yml does not reserve a " +
+                    "synthSensor slot for, so the cross-controller material bridge has no sensor to ride.");
+            }
+        }
 
-        // The M262 part-present proximity sensor (DI08); id/pin from MapperConfig.M262SynthSensors
-        // (the rig wires it; the twin does not model it).
-        public static (string Name, string Pin, int Id) PartAtAssembly =>
-            System.Array.Find(MapperConfig.M262SynthSensors,
-                s => string.Equals(s.Name, "PartAtAssembly", System.StringComparison.OrdinalIgnoreCase));
-
-        // A twin may declare the part-present sensor itself instead of leaving it to the synth
-        // injection. It then keeps the SAME reserved slot, so ids stay identical either way.
+        // A twin may declare the material sensor itself instead of leaving it to the synth injection. It
+        // then keeps the SAME reserved slot, so ids stay identical either way.
         public static bool IsPartAtAssembly(string name) =>
-            string.Equals(name, PartAtAssembly.Name, System.StringComparison.OrdinalIgnoreCase);
+            RigCatalog.Current.Roles.Is(RigCatalog.Current.Roles.MaterialSensor, name);
 
     }
 }
