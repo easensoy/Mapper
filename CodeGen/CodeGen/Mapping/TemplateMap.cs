@@ -14,56 +14,26 @@ namespace CodeGen.Mapping
         // nothing reports an error -- the engine simply parks on the following WAIT forever.
         public static string RingKey(string? name) => (name ?? string.Empty).Trim().ToLowerInvariant();
 
-        // VacuumGripperNames is empty until Vacuum_Gripper_CAT is in the Template Library;
-        // gripper instances otherwise fall through to Five_State_Actuator_CAT.
-        public static readonly HashSet<string> VacuumGripperNames =
-            new(StringComparer.OrdinalIgnoreCase) { };
+        // Both twin spellings of the cover sensor, from the profile. Matched by name in the id pin, the
+        // ring splice and the cover interlock, so a spelling the profile does not list drops the sensor
+        // from all three at once.
+        public static IReadOnlyList<string> TopCoverSensorNames =>
+            RigCatalog.Current.Roles.TopCoverSensor;
 
+        public static bool IsTopCoverSensor(string? name) => RigCatalog.Current.Roles.IsTopCover(name);
 
-        // VueOne spells the top-cover sensor inconsistently across twin revisions: the original component name
-        // carries a typo ("TopCoverSenosr") and corrected models use "TopCoverSensor" (the VcID was always the
-        // corrected spelling). Match EITHER everywhere, because this component is matched BY NAME in the sensor
-        // allow-list, the registry, the state_table id pin and the cover ring -- so a twin rename would silently
-        // drop the sensor from all of them and take the whole cover interlock with it.
-        public static readonly string[] TopCoverSensorNames = { "TopCoverSenosr", "TopCoverSensor" };
+        // The task arm: one command runs a whole taught program, so it is not a five-state jaw even though
+        // VueOne types both as "Robot". The twin cannot express that, so the profile names the instance.
+        public static bool IsRobotTaskArm(VueOneComponent component) =>
+            component != null && RigCatalog.Current.Roles.Is(RigCatalog.Current.Roles.TaskArm, component.Name);
 
-        public static bool IsTopCoverSensor(string? name)
-        {
-            var n = (name ?? string.Empty).Trim();
-            foreach (var w in TopCoverSensorNames)
-                if (n.Equals(w, System.StringComparison.OrdinalIgnoreCase)) return true;
-            return false;
-        }
-
-        // TRUE only for the real UR3e task arm; Type="Robot" grippers (*Gripper*/*Grasp*) are excluded.
-        public static bool IsRobotTaskArm(VueOneComponent component)
-        {
-            if (component is null) return false;
-            var name = component.Name ?? string.Empty;
-            if (name.IndexOf("Gripper", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
-                name.IndexOf("Grasp", System.StringComparison.OrdinalIgnoreCase) >= 0)
-                return false;
-            return string.Equals(name, "Robot", System.StringComparison.OrdinalIgnoreCase)
-                || string.Equals(component.ComponentID, "C-c4ebfd68-0a5b-4512-889e-f6ab61bccecb",
-                                 System.StringComparison.OrdinalIgnoreCase)
-                || string.Equals(component.VcID, "UR3e", System.StringComparison.OrdinalIgnoreCase);
-        }
-
-        // CAT types whose .fbt declares NO stationAdptr port — stitching one into a station chain
-        // dangles stationAdptr_in/out against non-existent ports and EAE rejects the resource.
-        // Single source of truth read by both the syslay and sysres wiring sites.
-        public static readonly System.Collections.Generic.IReadOnlySet<string> NoStationAdapterCatTypes =
-            new System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal)
-            { "Seven_State_Actuator_CAT", "Robot_Task_CAT" };
-
+        // Whether a CAT can be stitched into the station chain at all. Declared on the template, not
+        // listed here: threading one that has no stationAdptr port dangles it and EAE rejects the resource.
         public static bool LacksStationAdapter(string? catType) =>
-            catType != null && NoStationAdapterCatTypes.Contains(catType);
+            catType != null && TemplateManifest.Find(catType) is { StationAdapter: false };
 
         // The ordered M262 cross-device segment spliced onto the M580 ring at the Disassembly seam
         // when the cross-PLC discharge is active; empty when off (ring closes locally).
-        public static List<string> M262CrossRingSegment(bool discharge) =>
-            discharge ? new List<string>(RigCatalog.Current.CrossRingSegment) : new List<string>();
-
         // The centre-home swivel CAT. Named once so the sites that must agree on the selected vocabulary
         // (CAT deploy, parameters, I/O binding) compare against one constant rather than a repeated literal.
         public const string SevenStateCentreHomeCat = "Seven_State_Actuator_Centre_Home_CAT";
@@ -81,7 +51,7 @@ namespace CodeGen.Mapping
         {
             if (actuator == null) return "Five_State_Actuator_CAT";
             // Only the real UR3e (IsRobotTaskArm) -> Robot_Task_CAT; Type="Robot" grippers stay Five_State/Vacuum.
-            if (CodeGen.Translation.HandoffPlanner.DischargeActive && IsRobotTaskArm(actuator))
+            if (IsRobotTaskArm(actuator))
                 return "Robot_Task_CAT";
             return ResolveActuatorCatType(
                 actuator.Name ?? string.Empty,
@@ -94,10 +64,6 @@ namespace CodeGen.Mapping
         public static string ResolveActuatorCatType(
             string componentName, int stateCount, bool isBranchedSeven)
         {
-            if (!string.IsNullOrEmpty(componentName) &&
-                VacuumGripperNames.Contains(componentName))
-                return "Vacuum_Gripper_CAT";
-
             if (stateCount == 7 || isBranchedSeven)
                 // Centre-home swivel: state_val 1=Work1, 3=Work2, 5=Home; core publishes 2/4/6.
                 // A swivel the twin models with only Work1 + Work2 and no centre stop falls through to the
