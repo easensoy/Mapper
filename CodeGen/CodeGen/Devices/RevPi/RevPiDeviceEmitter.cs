@@ -27,7 +27,7 @@ namespace CodeGen.Devices.RevPi
     {
         // Continues the M262/M580/BX1 (…002/003/004) series. Also named in Devices/Common/FoldersXmlEmitter.cs.
         internal const string SysdevId = "00000000-0000-0000-0000-000000000005";
-        static readonly string DeviceName = CodeGen.Mapping.PlcTargets.DeviceName(CodeGen.Translation.PlcAssignment.RevPi)!;
+        static readonly string DeviceName = TargetRegistry.Of(CodeGen.Translation.PlcAssignment.RevPi).DeviceName!;
         const string EquipmentJsonName = "Equipment_Revolution_Pi.json";
         // Topology uuids. The NIC uuid is also named in Devices/Common/TopologyNetworkEmitter.cs, which
         // wires NIC_2[Port1] to the switch — the reference does the same (Wire 275).
@@ -80,7 +80,7 @@ namespace CodeGen.Devices.RevPi
             Station2DeviceEmitter.EmitOnePlc(cfg, eaeRoot!, systemGuidDir, shell,
                 sysdevId: SysdevId,
                 deviceName: DeviceName,
-                deviceType: CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.RevPi),
+                deviceType: TargetRegistry.Of(CodeGen.Translation.PlcAssignment.RevPi).DeviceType,
                 resourceId: coupler.ResourceId,
                 resourceName: ResourceName,
                 hcfTemplatePath: HcfTemplatePath(cfg),
