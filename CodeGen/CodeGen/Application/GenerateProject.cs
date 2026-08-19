@@ -551,21 +551,28 @@ namespace CodeGen.Application
         // legacy symbolic name or a GUID triple pointing at an absent FB never resolves.
         static void ValidateHcfReferences(MapperConfig cfg, Action<string> log)
         {
+            // FATAL. A binding that resolves to no FB or no pin is I/O the runtime cannot reach: the
+            // project imports, deploys and reports success while the channel is dead. Only the read
+            // itself is survivable -- a defect found is not.
+            List<HcfReferenceValidator.Violation> violations;
             try
             {
-                var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
-                var violations = HcfReferenceValidator.Validate(eaeRoot);
-                if (violations.Count == 0)
-                {
-                    log("[Hcf][Validate] PASS — every DI/DO binding resolves to a sysres FB + pin (no split-brain).");
-                }
-                else
-                {
-                    log($"[Hcf][Validate] FAIL — {violations.Count} split-brain HCF binding(s) reference an FB/pin NOT on the resource:");
-                    foreach (var v in violations) log($"  [Hcf][SPLIT-BRAIN] {v}");
-                }
+                violations = HcfReferenceValidator.Validate(EaeProjectLayout.DeriveEaeProjectRoot(cfg));
             }
-            catch (Exception ex) { log($"[Hcf][Validate][Error] {ex.Message}"); }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    $"[Hcf][Validate] the generated .hcf bindings could not be checked: {ex.Message}", ex);
+            }
+            if (violations.Count == 0)
+            {
+                log("[Hcf][Validate] PASS — every DI/DO binding resolves to a sysres FB + pin (no split-brain).");
+                return;
+            }
+            foreach (var v in violations) log($"  [Hcf][SPLIT-BRAIN] {v}");
+            throw new InvalidOperationException(
+                $"[Hcf][Validate] {violations.Count} split-brain HCF binding(s) reference an FB/pin that is " +
+                "not on the resource; the first is: " + violations[0]);
         }
 
         // Every generated connection names endpoints that exist and leaves each input driven once. Both
@@ -723,21 +730,26 @@ namespace CodeGen.Application
         }
 
         // SAFETY: the BX1 cover safe-start reaches the TM3BC coupler only if the scanner carries the .210
-        // device; warn loudly if it is missing or EIPSCANNER2.xml is empty.
+        // device; an empty EIPSCANNER2.xml fails the generation.
         static void ValidateBx1Scanner(MapperConfig cfg, Action<string> log)
         {
+            bool fatal = false;
             try
             {
                 var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
                 if (string.IsNullOrEmpty(eaeRoot)) return;
                 var scan = Bx1ScannerValidator.Validate(eaeRoot);
                 foreach (var l in scan.Lines) log(l);
-                if (scan.Fatal)
-                    log("[BX1][Scanner] FATAL — the BX1 EtherNet/IP scanner would compile " +
-                        "EMPTY; the cover I/O and the CoverPNP_Hr safe-start cannot reach the coupler. " +
-                        "DO NOT deploy until fixed.");
+                fatal = scan.Fatal;
             }
             catch (Exception ex) { log($"[BX1][Scanner][Error] {ex.Message}"); }
+            // FATAL, outside the catch so the throw is not swallowed by it: an empty scanner means the
+            // cover I/O and the CoverPNP_Hr safe-start never reach the coupler, which is a project that
+            // deploys and cannot move a cover.
+            if (fatal)
+                throw new InvalidOperationException(
+                    "[BX1][Scanner] the BX1 EtherNet/IP scanner would compile EMPTY; the cover I/O and the " +
+                    "CoverPNP_Hr safe-start cannot reach the coupler.");
         }
 
         static void TouchDfbproj(MapperConfig cfg, Action<string> log)
