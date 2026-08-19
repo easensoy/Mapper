@@ -97,7 +97,7 @@ namespace CodeGen.Devices.M262
                     if (root == null || root.Name.LocalName != "Device") continue;
                     var type = (string?)root.Attribute("Type") ?? string.Empty;
                     var nspace = (string?)root.Attribute("Namespace") ?? string.Empty;
-                    if (type != CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.M262) || nspace != CodeGen.Mapping.PlcTargets.DeviceNamespace) continue;
+                    if (type != TargetRegistry.Of(CodeGen.Translation.PlcAssignment.M262).DeviceType || nspace != TargetDescriptor.DeviceNamespace) continue;
                     XNamespace ns = root.GetDefaultNamespace();
                     var resources = root.Element(ns + "Resources");
                     // The M262 device always has exactly one resource child.
@@ -156,36 +156,18 @@ namespace CodeGen.Devices.M262
             // bind in code when it is absent, empty, OR points at a component not on this sysres.
             bool PinBlank(string p) => !effective.TryGetValue(p, out var v)
                 || string.IsNullOrEmpty(v.Comp) || !fbIdByName.ContainsKey(v.Comp);
-            // UR3e task arm (only when the Robot FB is on this resource's sysres): DO04 = start-task
-            // pulse, DI10 = task-complete.
-            if (HandoffPlanner.DischargeActive && fbIdByName.ContainsKey("Robot"))
+            // The cross-PLC discharge tail's physical channels, exactly as Config/smc-rig.yml declares
+            // them. The binder and the parity validator read this one list, so an edit there changes what
+            // is emitted AND what is checked. A channel binds only when its component is on this
+            // resource's own sysres and the IO workbook has not already claimed the pin.
             {
-                if (!effective.ContainsKey("DO04"))
-                    effective["DO04"] = ("Robot", "RobotCommands_StartTask");
-                if (!effective.ContainsKey("DI10"))
+                foreach (var dc in RigCatalog.Current.DischargeChannels)
                 {
-                    effective["DI10"] = ("Robot", "RobotStatus_Task_Complete");
-                    usedDi.Add(10);
+                    if (!fbIdByName.ContainsKey(dc.Component) || !PinBlank(dc.Channel)) continue;
+                    effective[dc.Channel] = (dc.Component, dc.Port);
+                    if (dc.IsInput && int.TryParse(dc.Channel.Substring(2), out var diCh)) usedDi.Add(diCh);
+                    report.Missing.Add($"[Hcf][5b] bound {dc.Channel}={dc.Meaning}");
                 }
-                report.Missing.Add("[Hcf][5b] bound DO04=Robot.RobotCommands_StartTask, DI10=Robot.RobotStatus_Task_Complete");
-            }
-            // M262 Ejector is open-loop (coil only, no DIs): bind DO03 = OutputToWork, only when
-            // the Ejector FB is on this resource's sysres.
-            if (HandoffPlanner.DischargeActive && fbIdByName.ContainsKey("Ejector")
-                && PinBlank("DO03"))
-            {
-                effective["DO03"] = ("Ejector", "OutputToWork");
-                report.Missing.Add("[Hcf][5b] bound DO03=Ejector.OutputToWork (open-loop, no sensor DIs)");
-            }
-            // Synthesized M262 rig proximity sensors (not in the twin): bind each to its fixed
-            // physical DI channel, only when the synthesized FB is on this resource's sysres.
-            foreach (var (synthName, synthPin, _) in MapperConfig.M262SynthSensors)
-            {
-                if (!HandoffPlanner.DischargeActive) break;
-                if (!fbIdByName.ContainsKey(synthName) || !PinBlank(synthPin)) continue;
-                effective[synthPin] = (synthName, "Input");
-                if (synthPin.Length == 4 && int.TryParse(synthPin.Substring(2), out var diCh)) usedDi.Add(diCh);
-                report.Missing.Add($"[Hcf][5b] bound {synthPin}={synthName}.Input (synthesized M262 rig sensor, not in twin)");
             }
             var alreadyBoundSensors = new HashSet<string>(
                 effective.Values
