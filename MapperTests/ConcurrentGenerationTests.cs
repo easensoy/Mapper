@@ -125,10 +125,10 @@ namespace MapperTests
                 Assert.Equal(plc, m262.Get(name)!.Plc);
         }
 
-        [Fact] // a twin component the roster does not place must fail, not be skipped
-        public void An_unallocated_twin_component_fails_planning_and_names_it()
+        [Fact] // a layout row is an OVERRIDE, so a component only the twin declares is planned, not refused
+        public void A_twin_component_with_no_layout_row_is_planned_automatically()
         {
-            var doctored = Path.Combine(Path.GetTempPath(), "unallocated_" + Guid.NewGuid().ToString("N") + ".xml");
+            var doctored = Path.Combine(Path.GetTempPath(), "unlisted_" + Guid.NewGuid().ToString("N") + ".xml");
             try
             {
                 // Rename one actuator to a name no roster row and no alias covers.
@@ -136,10 +136,16 @@ namespace MapperTests
                     File.ReadAllText(Require("_se")).Replace(
                         "<Name>Checker</Name>", "<Name>Widget_Nobody_Allocated</Name>"));
 
-                var ex = Assert.Throws<InvalidOperationException>(
-                    () => GenerationContext.Plan(new MapperConfig(), doctored, DeploymentProfile.M262Only(LayoutCatalog.Load())));
-                Assert.Contains("Widget_Nobody_Allocated", ex.Message, StringComparison.Ordinal);
-                Assert.Contains("layout.yml", ex.Message, StringComparison.Ordinal);
+                var ctx = GenerationContext.Plan(new MapperConfig(), doctored,
+                    DeploymentProfile.M262Only(LayoutCatalog.Load()));
+
+                // Placed on a real controller, given a state_table slot, and typed from its state graph --
+                // all without a roster row or a line of C# naming it.
+                var entry = ctx.Roster.Get("Widget_Nobody_Allocated");
+                Assert.NotNull(entry);
+                Assert.NotEqual(PlcAssignment.Unknown, entry!.Plc);
+                Assert.True(ctx.Slots.ContainsKey("Widget_Nobody_Allocated"));
+                Assert.True(ctx.CatTypes.ContainsKey("Widget_Nobody_Allocated"));
             }
             finally
             {
