@@ -37,7 +37,7 @@ namespace CodeGen.Mapping
     // at once at all. Nothing here is shared or cached across runs.
     public sealed class DeploymentRoster
     {
-        private readonly IReadOnlyDictionary<string, ComponentEntry> _byName;
+        private readonly Dictionary<string, ComponentEntry> _byName;
 
         public DeploymentProfile Profile { get; }
 
@@ -67,9 +67,9 @@ namespace CodeGen.Mapping
             _byName = rows.ToDictionary(r => r.Name, r => r, StringComparer.Ordinal);
 
             IdOrderSensors = layout.IdOrder.Sensors;
-            IdOrderActuators = HandoffPlanner.DischargeActive
-                ? layout.IdOrder.Actuators.Concat(layout.IdOrder.RobotTail).ToList()
-                : layout.IdOrder.Actuators;
+            // The discharge tail's reservations are always listed; a name the twin does not declare
+            // simply resolves to nothing, so presence in the MODEL decides whether the tail exists.
+            IdOrderActuators = layout.IdOrder.Actuators.Concat(layout.IdOrder.RobotTail).ToList();
             CaSBusOrder = layout.CasBusOrder;
         }
 
@@ -89,5 +89,64 @@ namespace CodeGen.Mapping
         public IReadOnlyList<string> IdOrderSensors { get; }
         public IReadOnlyList<string> IdOrderActuators { get; }
         public IReadOnlyList<string> CaSBusOrder { get; }
+
+        // Fold in every twin component the layout does not list. A layout row is an OVERRIDE -- it pins a
+        // controller and a canvas cell for a component whose placement someone chose deliberately -- not a
+        // permit. A component the twin declares and the layout omits is placed with the process that drives
+        // it, in the next free cell of that band's role row, so adding an ordinary sensor, actuator or
+        // process to the model is a model edit and nothing else.
+        //
+        // Deterministic by construction: the owner fixes the band, the role fixes the row, and the column is
+        // the first one that band/row has not already used, walked in the twin's own declaration order.
+        public void PlaceUnlisted(Domain.Twin.TwinModel twin)
+        {
+            var layout = Profile.Layout;
+            var used = new HashSet<(PlcAssignment Plc, LayoutRow Row, int Column)>();
+            foreach (var e in _byName.Values) used.Add((e.Plc, e.Row, e.Column));
+
+            foreach (var c in twin.Components)
+            {
+                var name = c.Name.Trim();
+                if (name.Length == 0 || _byName.ContainsKey(name)) continue;
+
+                // A component runs where its driver runs; a process that drives nothing yet defaults to the
+                // Feed controller, which is the only one guaranteed to exist.
+                var owner = c.IsProcess ? c : twin.OwningProcess(c);
+                var plc = owner == null || ReferenceEquals(owner, c)
+                    ? PlcAssignment.Unknown
+                    : Of(owner.Name.Trim());
+                if (plc == PlcAssignment.Unknown)
+                    plc = c.IsProcess ? BusiestProcessTarget() : ControllerMap.FeedController;
+
+                var row = c.IsProcess ? LayoutRow.Process : c.IsSensor ? LayoutRow.Sensor : LayoutRow.Actuator;
+                int column = 0;
+                while (!used.Add((plc, row, column))) column++;
+
+                var band = layout.Band(plc);
+                _byName[name] = new ComponentEntry(name, plc, ControllerMap.ResourceForPlc(plc),
+                    column, row,
+                    band.ColumnBaseX + column * layout.Geometry.ColumnPitchX,
+                    layout.RowY(row.ToString()),
+                    owner?.Name?.Trim() ?? string.Empty);
+            }
+        }
+
+        // Where an unplaced PROCESS goes: the target already running the most, ties broken by registry
+        // order. A process is emitted and ring-threaded per controller, and the target that already runs
+        // several is the one whose emitter is written for N of them.
+        private PlcAssignment BusiestProcessTarget()
+        {
+            var counts = _byName.Values
+                .Where(e => e.Row == LayoutRow.Process)
+                .GroupBy(e => e.Plc)
+                .ToDictionary(g => g.Key, g => g.Count());
+            return TargetRegistry.All
+                .OrderByDescending(t => counts.TryGetValue(t.Plc, out int n) ? n : 0)
+                .Select(t => t.Plc)
+                .First();
+        }
+
+        private PlcAssignment Of(string name) =>
+            _byName.TryGetValue(name, out var e) ? e.Plc : PlcAssignment.Unknown;
     }
 }
