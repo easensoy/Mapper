@@ -189,7 +189,7 @@ namespace CodeGen.Translation
             foreach (var a in contents.Actuators)
                 if (IsM580(a.Name)) m580.Add((a.Name, ctx.CatTypes[a.Name.Trim()]));
 
-            // Discharge (DischargeActive) splices the M262 segment at the Disassembly seam via two EAE-bridged cross-device hops, without stretching the M580 ring. Off -> ring closes locally.
+            // The discharge segment splices at the Disassembly seam via two EAE-bridged cross-device hops, without stretching the M580 ring. Absent from the twin -> the ring closes locally.
             var ring = new List<(string Name, string Type)>(m580);
             // Cover-presence sensor (TopCoverSenosr) rides the ring into Assembly's state_table so the cover
             // pick can gate on it (clamp model). Spliced just before the cover actuators to mirror the sysres
