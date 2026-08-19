@@ -9,6 +9,7 @@ using CodeGen.Configuration;
 using CodeGen.Devices.Core;
 using CodeGen.Translation;
 
+using CodeGen.Mapping;
 namespace CodeGen.Devices.M262
 {
     // Emits the canonical event + data wires into the deployed M262 sysres FBNetwork so EAE
@@ -46,7 +47,7 @@ namespace CodeGen.Devices.M262
         }
 
         private static string? LocateM262Sysres(string eaeRoot)
-            => EaeProjectLayout.FindSysdevByDeviceType(eaeRoot, CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.M262)) is string sysdev
+            => EaeProjectLayout.FindSysdevByDeviceType(eaeRoot, TargetRegistry.Of(CodeGen.Translation.PlcAssignment.M262).DeviceType) is string sysdev
                 ? EaeProjectLayout.FindSysresFor(sysdev) : null;
     }
 }
