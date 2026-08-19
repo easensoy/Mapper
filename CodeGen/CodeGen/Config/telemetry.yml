@@ -25,3 +25,10 @@ clientM262: SMC_M262
 clientM580: SMC_M580
 # Feed controller when the RevPi hosts the Feed station instead of M262.
 clientRevPi: SMC_RevPi
+
+# Publish policy. These were previously C# defaults shadowed by mapper_config.json; telemetry.yml is
+# the single owner of every MQTT setting, so they live here with the connection they belong to.
+publishEnabled: true
+qos: 1
+retain: false
+topicRoot: smc
