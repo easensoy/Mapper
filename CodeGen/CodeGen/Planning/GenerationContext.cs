@@ -14,7 +14,12 @@ namespace CodeGen.Translation
     public record StationContents(
         VueOneComponent Process,
         List<VueOneComponent> Actuators,
-        List<VueOneComponent> Sensors);
+        List<VueOneComponent> Sensors)
+    {
+        // Every process the twin declares, in declaration order. The allocator needs them all: each one
+        // announces its phase on a slot, whether or not the catalog pinned it.
+        public IReadOnlyList<string> Processes { get; init; } = System.Array.Empty<string>();
+    }
 
     // One resource's planned infrastructure: the instance filling each role the target profile declares
     // for it, the processes allocated to it, and the adapter wires between roles it actually has. A role
@@ -31,6 +36,24 @@ namespace CodeGen.Translation
         int Y,
         IReadOnlyDictionary<string, string> Parameters);
 
+    // What a resource DOES in the generated topology, decided once from its controller and the run's
+    // shape. Emitters branch on these, never on Label: a label is a diagnostic string an engineer may
+    // rename in layout.yml, and renaming it must not move a wire.
+    public sealed record ResourceCapabilities(
+        // The sysres canvas is device-local, so its FBs translate to a local origin. The shared
+        // application canvas keeps raw global coordinates.
+        bool DeviceLocalCanvas,
+        // Receives components relocated off another controller, so it is the one resource that must NOT
+        // have them swept from its sysres.
+        bool ReceivesRelocatedComponents,
+        // Hands the cover detour out to another controller, so its ring closes across the seam instead
+        // of locally.
+        bool OpensCoverSeam,
+        // Carries the cover chain itself, open at both ends because another controller commands it.
+        bool CarriesDetouredChain,
+        // Hosts the Feed ring, so a merged ring closes through its own seam.
+        bool HostsFeedRing);
+
     public sealed record ResourcePlan(
         PlcAssignment Plc,
         string Label,
@@ -40,7 +63,8 @@ namespace CodeGen.Translation
         string? TerminatorFb,
         IReadOnlyList<(string Source, string Destination)> AdapterRelations,
         IReadOnlyList<InfraInstance> Infrastructure,
-        (string From, string To)? StationChain)
+        (string From, string To)? StationChain,
+        ResourceCapabilities Capabilities)
     {
         public InfraInstance? Infra(string role) =>
             Infrastructure.FirstOrDefault(i => string.Equals(i.Role, role, StringComparison.Ordinal));
@@ -106,8 +130,8 @@ namespace CodeGen.Translation
         // The processes a controller runs, in the order the roster declares them -- which is the order the
         // layout emits and the wiring threads them.
         public IEnumerable<VueOneComponent> ProcessesOn(PlcAssignment plc) =>
-            Layout.Components
-                .Where(e => Allocation.Of(e.Name) == plc)
+            Roster.All
+                .Where(e => e.Plc == plc)
                 .Select(e => Twin.ByName(e.Name))
                 .Where(c => c is { IsProcess: true })
                 .Select(c => c!.Source);
@@ -153,7 +177,24 @@ namespace CodeGen.Translation
             return new ResourcePlan(plc, profile.Label,
                 Role("area"), Role("station"),
                 ProcessesOn(plc).FirstOrDefault()?.Name?.Trim(),
-                Role("terminator"), wires, infra, chain);
+                Role("terminator"), wires, infra, chain, CapabilitiesOf(plc));
+        }
+
+        // Topology role per controller, decided here so no emitter re-derives it -- and never from the
+        // resource Label, which is display text. Feed may be hosted by M262 or, under a partial swap, by
+        // the RevPi; the covers detour off the assembly controller onto the cover controller.
+        private ResourceCapabilities CapabilitiesOf(PlcAssignment plc)
+        {
+            var target = TargetRegistry.Of(plc);
+            return new ResourceCapabilities(
+                DeviceLocalCanvas:           target.DeviceLocalCanvas,
+                ReceivesRelocatedComponents: target.ReceivesRelocatedComponents,
+                // Only when the covers actually detour, and only from the target that hands them out.
+                OpensCoverSeam:              CoverDetour.Count > 0 && target.OpensCoverSeam,
+                // A relocation target carries its chain only while a run has actually relocated onto it.
+                CarriesDetouredChain:        target.CarriesDetouredChain
+                                             && (!target.ReceivesRelocatedComponents || Profile.PartialRevPi),
+                HostsFeedRing:               target.HostsFeedStation && !target.ReceivesRelocatedComponents);
         }
 
         // The order a resource's stack is declared in, which is the order it is emitted in.
@@ -212,8 +253,9 @@ namespace CodeGen.Translation
             // rejected here rather than silently losing whatever the dangling reference asked for.
             var twin = TwinModel.Build(components);
             var roster = new DeploymentRoster(profile);
+            // Layout rows are overrides; everything else the twin declares is placed from the model.
+            roster.PlaceUnlisted(twin);
             var allocation = new ControllerAllocation(roster);
-            RejectUnallocatedComponents(components, allocation);
 
             var station = ResolveStation(components, roster);
             var catTypes = station.Actuators.ToDictionary(
@@ -222,15 +264,17 @@ namespace CodeGen.Translation
                 .Select(a => (a.Name ?? string.Empty).Trim())
                 .Where(n => allocation.IsOn(n, PlcAssignment.BX1)).ToList();
             bool ringsMerged = FeedRingMerge.Needed(twin, allocation);
-            // The tail only exists if the twin declares the actuators it is made of. Its sensor member is
-            // synthesised later, so it is not part of the test.
-            var crossRingSegment = TemplateMap.M262CrossRingSegment(
-                HandoffPlanner.DischargeActive &&
-                TemplateMap.M262CrossRingSegment(true)
-                    .Where(n => !RigCatalog.Current.SynthSensors.Any(
-                        s => string.Equals(s.Name, n, StringComparison.OrdinalIgnoreCase)))
-                    .All(n => station.Actuators.Any(
-                        a => string.Equals(a.Name?.Trim(), n, StringComparison.OrdinalIgnoreCase))));
+            // Cross-controller transport exists only where the twin declares the components it is made
+            // of; nothing switches it on. Its sensor member is synthesised later, so it is not tested.
+            var declaredSegment = RigCatalog.Current.CrossRingSegment;
+            bool segmentPresent = declaredSegment
+                .Where(n => !RigCatalog.Current.SynthSensors.Any(
+                    s => string.Equals(s.Name, n, StringComparison.OrdinalIgnoreCase)))
+                .All(n => station.Actuators.Any(
+                    a => string.Equals(a.Name?.Trim(), n, StringComparison.OrdinalIgnoreCase)));
+            var crossRingSegment = segmentPresent
+                ? new List<string>(declaredSegment)
+                : new List<string>();
             var slots = StateTableAllocation.Slots(station, allocation, ringsMerged);
             int topCover = TemplateMap.TopCoverSensorNames
                 .Select(n => slots.TryGetValue(n, out int s) ? s : -1).FirstOrDefault(s => s >= 0, -1);
@@ -243,11 +287,6 @@ namespace CodeGen.Translation
             foreach (var process in components.Where(ComponentType.IsProcess))
             {
                 var name = process.Name?.Trim() ?? string.Empty;
-                if (!slots.ContainsKey(name))
-                    throw new InvalidOperationException(
-                        $"[state_table] Process '{name}' has no slot. Add it to processSlots in " +
-                        "Config/smc-rig.yml; without one it cannot announce its phase and every peer " +
-                        "waiting on it would block.");
                 recipes[name] = ProcessRecipeArrayGenerator.Generate(
                     process, station, twin, slots, allocation, ringsMerged, topCover);
             }
@@ -258,27 +297,6 @@ namespace CodeGen.Translation
 
         // A component the roster does not place has no controller, no canvas position and no state_table
         // slot, so every later step would skip it without a word. Fail here, naming all of them at once.
-        private static void RejectUnallocatedComponents(
-            IReadOnlyList<VueOneComponent> components, ControllerAllocation allocation)
-        {
-            var unallocated = components
-                .Where(c => ComponentType.IsProcess(c) || IsPlaceable(c))
-                .Where(c => allocation.Of(c.Name) == PlcAssignment.Unknown)
-                .Select(c => $"'{c.Name}' (Type={c.Type})")
-                .Distinct(StringComparer.Ordinal)
-                .OrderBy(n => n, StringComparer.Ordinal)
-                .ToList();
-            if (unallocated.Count == 0) return;
-            throw new InvalidOperationException(
-                $"[Deployment] Control.xml declares {unallocated.Count} component(s) the deployment roster " +
-                $"does not place: {string.Join(", ", unallocated)}. Each needs a row in " +
-                "Config/layout.yml naming the controller that runs it, or an alias to one that has it; " +
-                "without one it has no controller, no canvas position and no state_table slot, and every " +
-                "later step would skip it silently.");
-        }
-
-        private static bool IsPlaceable(VueOneComponent c) =>
-            ComponentType.IsActuator(c) || ComponentType.IsSensor(c) || ComponentType.Is(c, ComponentType.Robot);
 
         // The roster's ordered sensors and actuators resolved against the twin. The ORDER is the
         // roster's, because it assigns every state_table id.
@@ -297,11 +315,36 @@ namespace CodeGen.Translation
                 ?? throw new InvalidOperationException(
                     "The roster allocates no Process to the Feed controller, so there is no station to emit.");
 
+            // idOrder is an ordered RESERVATION, not an allowlist: the names it pins keep the slots they
+            // already have, and anything the twin declares beyond them is APPENDED in declaration order.
+            // Appending is what makes a new component free -- it can never renumber an existing one, which
+            // would silently repoint every recipe Wait1Id, interlock SourceID and HCF binding after it.
+            static List<VueOneComponent> Ordered(
+                IReadOnlyList<string> reserved,
+                Func<string, VueOneComponent?> resolve,
+                IEnumerable<VueOneComponent> declared)
+            {
+                var placed = reserved.Select(resolve).Where(c => c != null).Select(c => c!).ToList();
+                var seen = new HashSet<string>(placed.Select(c => c.Name.Trim()), StringComparer.OrdinalIgnoreCase);
+                placed.AddRange(declared.Where(c => seen.Add(c.Name.Trim())));
+                return placed;
+            }
+
+            bool IsRole(VueOneComponent c, params string[] types) =>
+                types.Any(t => string.Equals(c.Type, t, StringComparison.OrdinalIgnoreCase));
+
             return new StationContents(process,
-                roster.IdOrderActuators.Select(n => ByName(n, ComponentType.Actuator, ComponentType.Robot))
-                    .Where(a => a != null).Select(a => a!).ToList(),
-                roster.IdOrderSensors.Select(n => ByName(n, ComponentType.Sensor))
-                    .Where(s => s != null).Select(s => s!).ToList());
+                Ordered(roster.IdOrderActuators,
+                        n => ByName(n, ComponentType.Actuator, ComponentType.Robot),
+                        components.Where(c => IsRole(c, ComponentType.Actuator, ComponentType.Robot))),
+                Ordered(roster.IdOrderSensors,
+                        n => ByName(n, ComponentType.Sensor),
+                        components.Where(c => IsRole(c, ComponentType.Sensor))))
+            {
+                Processes = components.Where(ComponentType.IsProcess)
+                    .Select(c => c.Name?.Trim() ?? string.Empty)
+                    .Where(n => n.Length > 0).ToList(),
+            };
         }
     }
 }
