@@ -26,47 +26,46 @@ namespace CodeGen.Devices.BX1
         const string ScanFbName = "BX1_IO_Cycle";
         const string ScanPeriod = "T#50ms";
 
-        sealed class CoverMap
-        {
-            public string Cover = "";
-            public string? SensorFromHome;
-            public string? SensorFromWork;
-            public string Event = "";
-            public string? CoilToHome;
-            public string? CoilToWork;
-        }
+        // The coupler word as the rig wired it, from Config/device.yml. Neither the plant names nor the
+        // bit numbers live here: this file wires and gates what the profile describes.
+        static Configuration.Bx1IoProfile Io => Configuration.DeviceConfig.Current.Bx1Io;
 
-        static readonly CoverMap[] Covers =
-        {
-            new CoverMap { Cover = "CoverPNP_Hr",      SensorFromHome = "CoverPnpHrAtHome", SensorFromWork = "CoverPnpHrAtWork",
-                           Event = "CoverPnpHrEvent",  CoilToHome = "Cover_Pnp_Hr_ToHome",  CoilToWork = "Cover_Pnp_Hr_ToWork" },
-            new CoverMap { Cover = "CoverPNP_Vr",      SensorFromHome = "CoverPnpVrAtHome", SensorFromWork = "CoverPnpVrAtWork",
-                           Event = "CoverPnpVrEvent",  CoilToHome = null,                   CoilToWork = "Cover_Pnp_Vr_Q" },
-            // Gripper: 1 sensor (gripped) -> atwork; no home sensor.
-            new CoverMap { Cover = "CoverPnp_Gripper", SensorFromHome = null,               SensorFromWork = "CoverPnpSensor",
-                           Event = "CoverSensorEvent", CoilToHome = null,                   CoilToWork = "Cover_Gripper_Q" },
-        };
+        // The cover whose INITO roots the broker fan-out: the LAST on the profile's chain, so every
+        // cover ahead of it has already initialised when the broker and its scan start.
+        static string InitRootCover => Io.Covers[^1].Component;
 
-        // Bit positions fixed by the PLC_RW_BX1 WordToBits/BitsToWord core (index = VALUE = NAME = wiring order):
-        // IN bit0=Hr athome,1=Hr atwork,2=Vr athome,3=Vr atwork,5=gripper atwork;
-        // OUT bit0=Hr OutputToWork,1=Hr OutputToHome,2=Vr OutputToWork,3=gripper OutputToWork.
-        // Bit5 is published THREE times on purpose: it is the only cover-present bit the coupler carries,
-        // so it feeds the gripper's grip-detect AND the top-cover sensor's Input. The sensor instance is
-        // spelled either way across twin revisions (TemplateMap.TopCoverSensorNames), and the composite is
-        // a shared TYPE that cannot know which; publishing both is safe because a SYMLINKMULTIVARSRC whose
-        // name nothing subscribes to is inert — only the DST side fails on a missing counterpart.
-        static readonly (string Sym, int Bit)[] CoverSensors =
-        {
-            ("CoverPNP_Hr.athome", 0), ("CoverPNP_Hr.atwork", 1),
-            ("CoverPNP_Vr.athome", 2), ("CoverPNP_Vr.atwork", 3),
-            ("CoverPnp_Gripper.atwork", 5),
-            ("TopCoverSenosr.Input", 5), ("TopCoverSensor.Input", 5),
-        };
-        static readonly (string Sym, int Bit)[] CoverCoils =
-        {
-            ("CoverPNP_Hr.OutputToWork", 0), ("CoverPNP_Hr.OutputToHome", 1),
-            ("CoverPNP_Vr.OutputToWork", 2), ("CoverPnp_Gripper.OutputToWork", 3),
-        };
+        static (string Cover, string? SensorFromHome, string? SensorFromWork,
+                string Event, string? CoilToHome, string? CoilToWork)[] Covers =>
+            Io.Covers.Select(c => (c.Component, c.SensorFromHome?.Signal, c.SensorFromWork?.Signal,
+                                   c.Event, c.CoilToHome?.Signal, c.CoilToWork?.Signal)).ToArray();
+
+        // symlink name -> word bit, for the publisher (sensors) and the subscriber (coils). The cover
+        // sensor bit is published for the top-cover sensor too, under EVERY spelling the profile lists:
+        // it is the only cover-present bit the coupler carries, and the broker is a shared TYPE that
+        // cannot know which spelling a twin uses. A SYMLINKMULTIVARSRC nothing subscribes to is inert.
+        static (string Sym, int Bit)[] CoverSensors =>
+            Io.Covers
+                .SelectMany(c => new[]
+                {
+                    c.SensorFromHome == null ? default : ($"{c.Component}.athome", c.SensorFromHome.Bit),
+                    c.SensorFromWork == null ? default : ($"{c.Component}.atwork", c.SensorFromWork.Bit),
+                })
+                .Where(t => t.Item1 != null)
+                .Concat(Io.Covers
+                    .Where(c => c.SensorFromWork != null && c.SensorFromHome == null)
+                    .SelectMany(c => Mapping.TemplateMap.TopCoverSensorNames
+                        .Select(n => ($"{n}.Input", c.SensorFromWork!.Bit))))
+                .ToArray();
+
+        static (string Sym, int Bit)[] CoverCoils =>
+            Io.Covers
+                .SelectMany(c => new[]
+                {
+                    c.CoilToWork == null ? default : ($"{c.Component}.OutputToWork", c.CoilToWork.Bit),
+                    c.CoilToHome == null ? default : ($"{c.Component}.OutputToHome", c.CoilToHome.Bit),
+                })
+                .Where(t => t.Item1 != null)
+                .ToArray();
 
         // EAE generates SYMLINKMULTIVAR{SRC,DST}_<hash> per BOOL arity; the hash is GUI-computed (not
         // derivable), SRC/DST of one arity share it. Only these arities exist -> pick the smallest >= the
@@ -239,8 +238,9 @@ namespace CodeGen.Devices.BX1
             return true;
         }
 
-        // SAFETY (cover safe-start, CoverPNP_Hr <-> Bearing_PnP swivel collision; gated by cfg.Bx1CoverSafeStart).
-        // Inserts a Bx1CoverFailsafe gate that on start forces CoverPNP_Hr HOME (bit0 ToWork=0, bit1 ToHome=1,
+        // SAFETY (cover safe-start: the profile's safeStartComponent vs the swivel it shares space with;
+        // gated by cfg.Bx1CoverSafeStart). Inserts a Bx1CoverFailsafe gate that on start forces that cover
+        // HOME (its ToWork coil 0, its ToHome coil 1,
         // double-acting Hr needs ToHome=1 to return) and holds until the Hr at-home sensor (input bit0). Fires
         // only while the logic RUNS — NOT on EAE Clean/STOP/fault; homing while stopped needs the TM3BC coupler
         // output fallback word 16#0002 (TM3DQ16T ToHome channel -> 1), set on the coupler's web server, which the Mapper can't emit.
@@ -383,7 +383,7 @@ namespace CodeGen.Devices.BX1
             var fileTag = isSysres ? "sysres" : "syslay";
 
             bool hasGripper = net.Elements(Ns + "FB")
-                .Any(f => (string?)f.Attribute("Name") == "CoverPnp_Gripper");
+                .Any(f => (string?)f.Attribute("Name") == InitRootCover);
 
             var ec = net.Element(Ns + "EventConnections") ?? AddSection(net, "EventConnections");
             var dc = net.Element(Ns + "DataConnections")  ?? AddSection(net, "DataConnections");
@@ -392,7 +392,7 @@ namespace CodeGen.Devices.BX1
             AddFbIfAbsent(net, BrokerFbId, BrokerFbName, BrokerFbType, "Main", isSysres,
                 isSysres ? 9500 : 32000, 5800, ifaceParams: null, name1: null, name2: null);
             if (hasGripper)
-                AddEvent(ec, "CoverPnp_Gripper.INITO", $"{BrokerFbName}.INIT");
+                AddEvent(ec, $"{InitRootCover}.INITO", $"{BrokerFbName}.INIT");
 
             // INTERNALIZED (cfg.Bx1BridgeInsideComposite, default): the bridge lives inside the PLC_RW_BX1
             // composite, so the resource carries only BX1_IO — sweep any external bridge a prior deploy left.
@@ -452,11 +452,11 @@ namespace CodeGen.Devices.BX1
                 if (c.CoilToWork != null) AddData(dc, $"{dstName}.VALUE2", $"{BrokerFbName}.{c.CoilToWork}");
 
                 // A SYMLINKMULTIVAR{SRC,DST} registers its symlink (QI=TRUE) only when its INIT fires, else it
-                // stays DISABLED and ignores every scan REQ — fan from CoverPnp_Gripper.INITO before the first EO.
+                // stays DISABLED and ignores every scan REQ — fan from the init-root cover before the first EO.
                 if (hasGripper)
                 {
-                    AddEvent(ec, "CoverPnp_Gripper.INITO", $"{srcName}.INIT");
-                    AddEvent(ec, "CoverPnp_Gripper.INITO", $"{dstName}.INIT");
+                    AddEvent(ec, $"{InitRootCover}.INITO", $"{srcName}.INIT");
+                    AddEvent(ec, $"{InitRootCover}.INITO", $"{dstName}.INIT");
                 }
                 slot++;
             }
@@ -476,7 +476,7 @@ namespace CodeGen.Devices.BX1
                 AddFbIfAbsent(net, Hex16($"{tcSrc}|{fileTag}"), tcSrc, Sym1BoolSrc, "Main", isSysres,
                     xSrc, 1500 + slot * 500, OneBoolIfaceParams,
                     $"'{resourceName}.{tcName}.Input'", null);
-                AddEvent(ec, "CoverPnp_Gripper.INITO", $"{tcSrc}.INIT");
+                AddEvent(ec, $"{InitRootCover}.INITO", $"{tcSrc}.INIT");
                 AddEvent(ec, $"{BrokerFbName}.CoverSensorEvent", $"{tcSrc}.REQ");
                 // The publisher is fired by the CHANGE DETECTOR ALONE, never by the free-running scan.
                 // BX1_IO.CoverSensorEvent comes from FB2 (changeEventM262_2), which is clocked on EVERY broker
@@ -503,15 +503,15 @@ namespace CodeGen.Devices.BX1
             AddFbIfAbsent(net, Hex16($"{ScanFbName}|{fileTag}"), ScanFbName, "E_DELAY", "IEC61499.Standard",
                 isSysres, isSysres ? 15000 : 39000, 1300, ifaceParams: null, name1: null, name2: null,
                 extraParams: new[] { ("DT", ScanPeriod) });
-            // Kick the scan from CoverPnp_Gripper.INITO (also drives BX1_IO.INIT, so the broker is ready at
+            // Kick the scan from the init-root cover (also drives BX1_IO.INIT, so the broker is ready at
             // the first EO); the broker's PLC_EVENT does not fire on a plain INIT (kept as a redundant kick).
             if (hasGripper)
-                AddEvent(ec, "CoverPnp_Gripper.INITO", $"{ScanFbName}.START");
+                AddEvent(ec, $"{InitRootCover}.INITO", $"{ScanFbName}.START");
             AddEvent(ec, $"{BrokerFbName}.PLC_EVENT", $"{ScanFbName}.START");
             AddEvent(ec, $"{ScanFbName}.EO", $"{ScanFbName}.START");
             AddEvent(ec, $"{ScanFbName}.EO", $"{BrokerFbName}.REQ");
             // Output write via a CAUSAL CHAIN over the non-gripper coil readers so no coil is stale when the
-            // word is packed — a parallel fan-out RACES and can leave CoverPNP_Hr's home command stale.
+            // word is packed — a parallel fan-out RACES and can leave the safe-start cover's home command stale.
             foreach (var conn in ec.Elements(Ns + "Connection")
                          .Where(c => { var d = (string?)c.Attribute("Destination") ?? "";
                                        return (d.StartsWith("BX1IO_Coil_") && d.EndsWith(".REQ"))
@@ -586,8 +586,8 @@ namespace CodeGen.Devices.BX1
             {
                 if (net.Elements(Ns + "FB").Any(f =>
                 {
-                    var n = (string?)f.Attribute("Name");
-                    return n == "CoverPNP_Hr" || n == "CoverPNP_Vr" || n == "CoverPnp_Gripper";
+                    var n = (string?)f.Attribute("Name") ?? string.Empty;
+                    return Io.Covers.Any(c => string.Equals(c.Component, n, StringComparison.Ordinal));
                 }))
                     return net;
             }
@@ -654,7 +654,7 @@ namespace CodeGen.Devices.BX1
                 try
                 {
                     var head = File.ReadAllText(sysres);
-                    if (head.Contains("CoverPnp_Gripper") || head.Contains("CoverPNP_Hr"))
+                    if (Io.Covers.Any(c => head.Contains(c.Component, StringComparison.Ordinal)))
                         return sysres;
                 }
                 catch { /* ignore unreadable */ }
