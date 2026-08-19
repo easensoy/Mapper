@@ -57,7 +57,7 @@ namespace CodeGen.Devices.Core
                 // (they never carry Feed FBs), and when not in partial mode. Yields exactly the clean partition
                 // the gate proves valid; the M262 Feed ring then wires around the remaining components, leaving
                 // the cross-device seam open for EAE to bridge to RevPi.
-                if (ctx.Profile.PartialRevPi && !string.Equals(tag, "RevPi", StringComparison.Ordinal))
+                if (ctx.Profile.PartialRevPi && !plan.Capabilities.ReceivesRelocatedComponents)
                 {
                     var relocated = ctx.Profile.RevPiComponents;
                     var dropFbs = fbNet.Elements(ns + "FB")
@@ -92,9 +92,7 @@ namespace CodeGen.Devices.Core
                 }
 
                 // M580/BX1 sysres canvases are device-local, so translate the present FBs to the local origin; M262 keeps raw coords (its FBs already start at x=2000).
-                bool translateToOrigin =
-                    string.Equals(tag, "M580", StringComparison.Ordinal) ||
-                    string.Equals(tag, "BX1",  StringComparison.Ordinal);
+                bool translateToOrigin = plan.Capabilities.DeviceLocalCanvas;
                 ApplyCanonicalLayout(ctx, byName, report, tag, translateToOrigin);
 
                 var portsByType = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
@@ -167,7 +165,7 @@ namespace CodeGen.Devices.Core
                 bool IsActuator(XElement fb) =>
                     TemplateManifest.ActuatorTypes.Contains((string?)fb.Attribute("Type") ?? string.Empty);
                 bool HasStationAdapter(XElement fb) =>
-                    !TemplateMap.NoStationAdapterCatTypes.Contains((string?)fb.Attribute("Type") ?? string.Empty);
+                    !TemplateMap.LacksStationAdapter((string?)fb.Attribute("Type"));
                 var orderedComps = new List<XElement>();
                 var seenComp = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var nm in ctx.Roster.CaSBusOrder)
@@ -281,7 +279,7 @@ namespace CodeGen.Devices.Core
                     if (haveProcess)
                     {
                         // Cover detour (M580): when covers splice onto the M580 ring, OMIT the local compN->P0 close so the boundary plug isn't double-driven (EAE bridges via syslay). Distinct seam from the robot-tail open below.
-                        bool openCoverSeam = string.Equals(tag, "M580", StringComparison.Ordinal);
+                        bool openCoverSeam = plan.Capabilities.OpensCoverSeam;
                         if (openCoverSeam)
                             report.Missing.Add(
                                 $"[{tag}] cover detour: left {ringNames[^1]}.stateRprtCmd_out OPEN " +
@@ -295,11 +293,10 @@ namespace CodeGen.Devices.Core
                                 $"{processNames[i + 1]}.stateRptCmdAdptr_in"));
                         // Boundary-open on a cross-controller seam (the robot tail on M580, the merged ring on the Feed
                         // controller): OMIT the local close-back so the boundary plug is not double-driven; EAE bridges it
-                        // from the syslay. The Feed resource's Label is "Sysres", hence the tag test.
+                        // from the syslay.
                         bool openBoundary =
-                            (robotTail && string.Equals(tag, "M580", StringComparison.Ordinal)) ||
-                            (ctx.RingsMerged &&
-                             string.Equals(tag, "Sysres", StringComparison.Ordinal));
+                            (robotTail && plan.Capabilities.OpensCoverSeam) ||
+                            (ctx.RingsMerged && plan.Capabilities.HostsFeedRing);
                         if (openBoundary)
                             report.Missing.Add(
                                 $"[{tag}] cross-PLC ring: left {processNames[^1]}.stateRptCmdAdptr_out OPEN " +
@@ -312,8 +309,7 @@ namespace CodeGen.Devices.Core
                     {
                         // Cover detour (BX1): when covers are commanded by the M580 ring the BX1 cover chain is OPEN at both ends — OMIT the self-close (EAE bridges via syslay). Off -> BX1 self-closes the broadcast loop locally.
                         // Partial RevPi: the Feeder/Checker segment is commanded by the M262 Feed_Station ring, so it too is OPEN at both ends (in from PartAtAssembly, out to Transfer/Feed_Station) — EAE bridges via syslay.
-                        bool openCoverChain = string.Equals(tag, "BX1", StringComparison.Ordinal)
-                            || (ctx.Profile.PartialRevPi && string.Equals(tag, "RevPi", StringComparison.Ordinal));
+                        bool openCoverChain = plan.Capabilities.CarriesDetouredChain;
                         if (openCoverChain)
                             report.Missing.Add(
                                 $"[{tag}] cover detour: cover chain {ringNames[0]}…{ringNames[^1]} ends OPEN " +
@@ -332,8 +328,7 @@ namespace CodeGen.Devices.Core
                         $"{crossSeg[i]}.stateRprtCmd_out", $"{crossSeg[i + 1]}.stateRprtCmd_in"));
                 if (crossSeg.Count > 0)
                 {
-                    if (ctx.RingsMerged && ringNames.Count > 0 &&
-                        string.Equals(tag, "Sysres", StringComparison.Ordinal)) // the M262 resource label
+                    if (ctx.RingsMerged && ringNames.Count > 0 && plan.Capabilities.HostsFeedRing)
                     {
                         // Merged-ring seam (M262): the segment tail feeds the Feed head locally so discharge segment + Feed chain are one continuous chain; seg[0].in and Feed_Station.out stay OPEN (EAE bridges via syslay).
                         adapterWires.Add(new Wire(
