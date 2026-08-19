@@ -28,11 +28,11 @@ namespace CodeGen.Devices.Core
                 : SysresFbMirror.ReadTopLevelFbsWithSystemModelFallback(syslayPath);
             if (all.Count == 0) return (0, 0);
 
-            int m580 = MirrorBucket(eaeRoot, CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.M580),
+            int m580 = MirrorBucket(eaeRoot, TargetRegistry.Of(CodeGen.Translation.PlcAssignment.M580).DeviceType,
                 all.Where(f => SysresFbMirror.BucketFor(f.Name, ctx.Allocation) == PlcAssignment.M580).ToList(),
                 ctx.Layout.Geometry.DeviceCanvasOrigin,
                 TargetBootstrap.For(PlcAssignment.M580, ctx.Layout));
-            int bx1 = MirrorBucket(eaeRoot, CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.BX1),
+            int bx1 = MirrorBucket(eaeRoot, TargetRegistry.Of(CodeGen.Translation.PlcAssignment.BX1).DeviceType,
                 all.Where(f => SysresFbMirror.BucketFor(f.Name, ctx.Allocation) == PlcAssignment.BX1).ToList(),
                 ctx.Layout.Geometry.DeviceCanvasOrigin,
                 TargetBootstrap.For(PlcAssignment.BX1, ctx.Layout));
