@@ -3,6 +3,7 @@ using CodeGen.Configuration;
 using CodeGen.Devices.M262;
 using CodeGen.Devices.Core;
 
+using CodeGen.Mapping;
 namespace CodeGen.Devices.BX1
 {
     // Verbatim copy of the BX1 soft-dPAC .hcf (an EtherNet/IP EIPSCANNER2 scanner) into the EAE
@@ -15,7 +16,7 @@ namespace CodeGen.Devices.BX1
             var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
             var template = HwConfigVerbatimCopier.ResolveTemplatePath(
                 cfg.BX1HcfTemplatePath, cfg.IoFolderPath, "BX1IO.hcf");
-            var copied = HwConfigVerbatimCopier.Deploy(eaeRoot, CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.BX1), CodeGen.Mapping.PlcTargets.DeviceNamespace, template);
+            var copied = HwConfigVerbatimCopier.Deploy(eaeRoot, TargetRegistry.Of(CodeGen.Translation.PlcAssignment.BX1).DeviceType, TargetDescriptor.DeviceNamespace, template);
             // Must run AFTER HwConfiguration/ is rebuilt: an in-EmitAll deploy no-ops here, leaving an
             // EMPTY EIPSCANNER2.xml so the cover I/O never reaches the coupler.
             Station2DeviceEmitter.DeployBx1ScannerModelFinalPass(cfg);
