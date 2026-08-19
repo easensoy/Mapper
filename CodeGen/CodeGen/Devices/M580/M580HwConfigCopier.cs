@@ -3,6 +3,7 @@ using CodeGen.Configuration;
 using CodeGen.Devices.M262;
 using CodeGen.Devices.Core;
 
+using CodeGen.Mapping;
 namespace CodeGen.Devices.M580
 {
     // Verbatim copy of the M580 .hcf into the EAE project; authoritative final pass so the config
@@ -15,7 +16,7 @@ namespace CodeGen.Devices.M580
             var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
             var template = HwConfigVerbatimCopier.ResolveTemplatePath(
                 cfg.M580HcfTemplatePath, cfg.IoFolderPath, "M580IO.hcf");
-            return HwConfigVerbatimCopier.Deploy(eaeRoot, CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.M580), CodeGen.Mapping.PlcTargets.DeviceNamespace, template);
+            return HwConfigVerbatimCopier.Deploy(eaeRoot, TargetRegistry.Of(CodeGen.Translation.PlcAssignment.M580).DeviceType, TargetDescriptor.DeviceNamespace, template);
         }
     }
 }
