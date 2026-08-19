@@ -10,11 +10,6 @@ namespace CodeGen.Configuration
     {
         private const string ConfigFileName = "mapper_config.json";
 
-        // RETIRED: nothing branches on this. It survives only as a binary contract — the prebuilt
-        // VueOneMapperHiddenRunner writes it, and removing the field would fault that consumer at load.
-        // Do not read it, do not migrate it into a config: it carries no meaning.
-        public static bool SimulatorRecipeMode = false;
-
         // Engine END->0 loop-back (ProcessRuntimeTemplatePatcher). Readonly: nothing assigns it, and a
         // writable static here would be generation state one run could change under another.
         public static readonly bool EnableCyclicRestart = true;
@@ -22,9 +17,9 @@ namespace CodeGen.Configuration
         public static int RobotActuatorId         => RigCatalog.Current.RobotActuatorId;
 
         // Real rig DI sensors the twin doesn't model; kept OFF the M262 Feed ring, riding the M262->M580 cross-device segment so the report lands only in M580 state_table[id].
-        public static (string Name, string Pin, int Id)[] M262SynthSensors =>
+        public static (string Name, int Id)[] M262SynthSensors =>
             RigCatalog.Current.SynthSensors
-                .Select(s => (s.Name, s.Pin, s.Id))
+                .Select(s => (s.Name, s.Id))
                 .ToArray();
 
         public string MappingRulesPath { get; set; } = string.Empty;
@@ -109,36 +104,27 @@ namespace CodeGen.Configuration
         // CmdTargetName must be STRING[150] so long names (coverpnp_gripper) do not overflow.
         public bool UseRecipeStruct { get; set; } = true;
 
-        public bool MqttPublishEnabled { get; set; } = true;
-
-        // Host:port only; the URL scheme is forced from MqttSecureTls (never drifts). EAE 24.1 MQTT_CONNECTION is secure-by-default: plain mqtt:// needs the device "Insecure Application" override (else RC101); mqtts:// needs a TLS broker with certfile (else RC100).
-        public string MqttBrokerUrl { get; set; } = TelemetrySettings.Current.BrokerUrl;
-
-        // FALSE = insecure mqtt:// (needs the device "Insecure Application" override); TRUE = mqtts:// + TLS. The URL scheme is derived from this.
-        public bool MqttSecureTls { get; set; } = TelemetrySettings.Current.SecureTls;
-
-        public string MqttCaCert { get; set; } = TelemetrySettings.Current.CaCert;
-
-        public int MqttValidateCert { get; set; } = TelemetrySettings.Current.ValidateCert;
-
-        public string MqttClientId { get; set; } = TelemetrySettings.Current.ClientBx1;
-
-        public string MqttClientM262 { get; set; } = TelemetrySettings.Current.ClientM262;
-
-        // Feed controller ClientIdentifier when the RevPi hosts the Feed station instead of M262.
-        public string MqttClientRevPi { get; set; } = TelemetrySettings.Current.ClientRevPi;
-
-        public string MqttClientM580 { get; set; } = TelemetrySettings.Current.ClientM580;
-
-        public string MqttConnectionName { get; set; } = TelemetrySettings.Current.ConnectionName;
-
-        public bool UseTelemetryCat { get; set; } = TelemetrySettings.Current.UseTelemetryCat;
-
-        public int MqttQoS { get; set; } = 1;
-
-        public bool MqttRetain { get; set; } = false;
-
-        public string MqttTopicRoot { get; set; } = "smc";
+        // Every MQTT setting is READ-ONLY here and answers from Config/telemetry.yml, which is their one
+        // owner. They stay on MapperConfig because the prebuilt VueOne runner links these properties, but
+        // having no setter is what stops a stale mapper_config.json shadowing the broker or client identity
+        // -- the failure mode where a YAML edit appeared to do nothing.
+        // Scheme note: mqtt:// vs mqtts:// is derived from SecureTls, never spelled in the URL. EAE 24.1
+        // MQTT_CONNECTION is secure-by-default: plain mqtt:// needs the device "Insecure Application"
+        // override (else RC101); mqtts:// needs a TLS broker with a certfile (else RC100).
+        public bool MqttPublishEnabled => TelemetrySettings.Current.PublishEnabled;
+        public string MqttBrokerUrl => TelemetrySettings.Current.BrokerUrl;
+        public bool MqttSecureTls => TelemetrySettings.Current.SecureTls;
+        public string MqttCaCert => TelemetrySettings.Current.CaCert;
+        public int MqttValidateCert => TelemetrySettings.Current.ValidateCert;
+        public string MqttClientId => TelemetrySettings.Current.ClientBx1;
+        public string MqttClientM262 => TelemetrySettings.Current.ClientM262;
+        public string MqttClientRevPi => TelemetrySettings.Current.ClientRevPi;
+        public string MqttClientM580 => TelemetrySettings.Current.ClientM580;
+        public string MqttConnectionName => TelemetrySettings.Current.ConnectionName;
+        public bool UseTelemetryCat => TelemetrySettings.Current.UseTelemetryCat;
+        public int MqttQoS => TelemetrySettings.Current.Qos;
+        public bool MqttRetain => TelemetrySettings.Current.Retain;
+        public string MqttTopicRoot => TelemetrySettings.Current.TopicRoot;
 
         public string ActiveSyslayPath =>
             !string.IsNullOrEmpty(SyslayPath2) ? SyslayPath2 : SyslayPath;
@@ -153,21 +139,63 @@ namespace CodeGen.Configuration
             JsonSerializer.Deserialize<MapperConfig>(JsonSerializer.Serialize(this))
                 ?? throw new InvalidOperationException("MapperConfig could not be cloned.");
 
+        // An explicit configuration root, when the host knows where its configuration lives. Set this and
+        // nothing else is consulted.
+        public static string? ConfigurationRoot { get; set; }
+
+        // Where an authored mapper_config.json may legitimately sit, most specific first. The process
+        // WORKING DIRECTORY is included only because the prebuilt VueOne runner sets it before calling in
+        // and cannot be changed; it is never consulted alone, and a disagreement between candidates is
+        // fatal rather than resolved by order.
+        private static IEnumerable<string> CandidateRoots()
+        {
+            if (!string.IsNullOrWhiteSpace(ConfigurationRoot)) { yield return ConfigurationRoot!; yield break; }
+            yield return AppContext.BaseDirectory;
+            yield return Environment.CurrentDirectory;
+        }
+
         public static MapperConfig Load()
         {
-            var configPath = Path.Combine(Environment.CurrentDirectory, ConfigFileName);
-
-            if (!File.Exists(configPath))
+            var found = new List<(string Path, string Json)>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var root in CandidateRoots())
             {
-                var def = CreateDefault();
-                Save(configPath, def);
-                return def;
+                string path;
+                try { path = Path.GetFullPath(Path.Combine(root, ConfigFileName)); }
+                catch { continue; }
+                if (!seen.Add(path) || !File.Exists(path)) continue;
+                found.Add((path, File.ReadAllText(path)));
             }
 
-            var json = File.ReadAllText(configPath);
-            return JsonSerializer.Deserialize<MapperConfig>(json,
+            if (found.Count == 0)
+                throw new InvalidOperationException(
+                    $"No authored {ConfigFileName} was found in " +
+                    string.Join(" or ", CandidateRoots()) +
+                    $". It is generated into every build output from Config/{ConfigFileName}; a missing one " +
+                    "means the build did not run or the deployment is incomplete. Generation stops rather " +
+                    "than inventing defaults, because the defaults point at the live Demonstrator tree.");
+
+            // Two authored copies that disagree is the ambiguity this resolution exists to remove: the
+            // effective configuration would then depend on where the process happened to be launched.
+            var distinct = found.Select(f => Normalise(f.Json)).Distinct(StringComparer.Ordinal).Count();
+            if (distinct > 1)
+                throw new InvalidOperationException(
+                    $"Conflicting {ConfigFileName} copies: " + string.Join(" and ", found.Select(f => f.Path)) +
+                    ". They differ, so the effective configuration would depend on the launch directory. " +
+                    "Delete every copy but the one generated from Config/" + ConfigFileName + ".");
+
+            return JsonSerializer.Deserialize<MapperConfig>(found[0].Json,
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
-                ?? throw new Exception($"Failed to deserialise config from '{configPath}'");
+                ?? throw new InvalidOperationException($"Failed to deserialise config from '{found[0].Path}'");
+        }
+
+        // Compare content, not bytes: line endings and key order are formatting, not configuration.
+        private static string Normalise(string json)
+        {
+            using var doc = JsonDocument.Parse(json);
+            return string.Join("", doc.RootElement.EnumerateObject()
+                .Select(p => p.Name + "=" + p.Value.ToString())
+                .OrderBy(x => x, StringComparer.Ordinal));
         }
 
         private static MapperConfig CreateDefault() => new()
