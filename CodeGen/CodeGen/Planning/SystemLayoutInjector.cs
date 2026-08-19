@@ -289,13 +289,14 @@ namespace CodeGen.Translation
             }
 
             // Synthesized M262 sensors: EXPLICIT ids so they never shift Feed actuator ids; off every report ring, so the Feed ring stays byte-identical.
-            if (HandoffPlanner.DischargeActive)
+            // Only when the twin actually declares the cross-controller tail the synth sensor rides.
+            if (ctx.CrossRingSegment.Count > 0)
             {
                 int synthY = 5200;
                 string prevSynthInit = contents.Sensors
                     .Select(s => (s.Name ?? string.Empty).Trim())
                     .First(n => ctx.Allocation.IsFeedSide(n));
-                foreach (var (synthName, _, synthId) in MapperConfig.M262SynthSensors)
+                foreach (var (synthName, synthId) in MapperConfig.M262SynthSensors)
                 {
                     // The twin owns it if it declares it; synthesizing a second FB of the same name
                     // would put two components on one ring slot.
@@ -529,36 +530,31 @@ namespace CodeGen.Translation
             bool workSensorFitted = AnyComponentReferencesStates(ctx.Twin, actuator, atWorkIds);
             bool homeSensorFitted = AnyComponentReferencesStates(ctx.Twin, actuator, atHomeIds);
 
-            // Cover actuators settle in coverMotionMs (Hr/Vr keep real DIs); the gripper has no grip/release DI, so it timer-acknowledges sensorless or the release WAIT stalls.
+            // Detoured cover actuators settle in coverMotionMs; Hr/Vr keep their real DIs.
             if (ctx.IsCoverDetour(actuator.Name))
             {
                 toWorkMs = GenerationConfig.Current.CoverMotionMs;
                 toHomeMs = GenerationConfig.Current.CoverMotionMs;
-                if (string.Equals(actuator.Name, "CoverPnp_Gripper", StringComparison.OrdinalIgnoreCase))
-                {
-                    workSensorFitted = false;
-                    homeSensorFitted = false;
-                    int ackMs = GenerationConfig.Current.CoverGripperAckMs;
-                    if (ackMs > 0) { toWorkMs = ackMs; toHomeMs = ackMs; }
-                }
             }
 
-            // M262 Ejector is open-loop (only the DO03 coil, no DIs), so force sensorless or a sensored WAIT stalls forever.
-            if (HandoffPlanner.DischargeActive
-                && string.Equals(actuator.Name, "Ejector", StringComparison.OrdinalIgnoreCase))
+            // The rig may contradict what the twin implies: an actuator the catalog declares
+            // timer-acknowledged has no usable arrival DI, so a sensored WAIT on it would never satisfy.
+            var feedback = RigCatalog.Current.FeedbackFor(actuator.Name);
+            if (feedback is { IsTimerAcknowledged: true })
             {
                 workSensorFitted = false;
                 homeSensorFitted = false;
+                if (feedback.AckMs > 0) { toWorkMs = feedback.AckMs; toHomeMs = feedback.AckMs; }
             }
 
-            // Grippers (bearing/shaft) grip a PART: their "atwork" is a grip-detect that only asserts when a
-            // part is actually held, NOT a position DI that always toggles on arrival (why feeder/transfer,
-            // both WorkSensorFitted=TRUE, confirm fine while the gripper stalls at WAIT gripper=AtWork). So
-            // timer-acknowledge the close (a fast, bounded motion) -- the same reason CoverPnp_Gripper is
-            // already sensorless. Position actuators (shaft_hr/vr) keep their real sensors. Scoped to the
-            // no-clamp (_vc) path so the clamp/M262 output stays byte-identical.
+            // A gripper jaw closes on a PART, so its "atwork" is a grip-detect that asserts only when
+            // something is actually held -- not a position DI that always toggles on arrival. That is why
+            // feeder and transfer confirm fine while a jaw stalls at WAIT gripper=AtWork. The role comes
+            // from the twin (a Robot that is not the task arm), not from the instance name. Scoped to the
+            // merged-ring path so the separate-ring output stays byte-identical.
             if (ctx.RingsMerged
-                && actuator.Name.IndexOf("Gripper", StringComparison.OrdinalIgnoreCase) >= 0
+                && ComponentType.Is(actuator, ComponentType.Robot)
+                && !TemplateMap.IsRobotTaskArm(actuator)
                 && !ctx.IsCoverDetour(actuator.Name))
             {
                 workSensorFitted = false;
@@ -809,7 +805,7 @@ namespace CodeGen.Translation
                     if (root == null) continue;
                     var type  = (string?)root.Attribute("Type")      ?? string.Empty;
                     var nspac = (string?)root.Attribute("Namespace") ?? string.Empty;
-                    if (string.Equals(type,  CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.M262), StringComparison.Ordinal) &&
+                    if (string.Equals(type,  TargetRegistry.Of(CodeGen.Translation.PlcAssignment.M262).DeviceType, StringComparison.Ordinal) &&
                         string.Equals(nspac, "SE.DPAC",   StringComparison.Ordinal))
                     {
                         sysdevPath = candidate;
