@@ -48,7 +48,7 @@ namespace CodeGen.Devices.M262
                 if (root == null) return false;
                 var type  = (string?)root.Attribute("Type")      ?? string.Empty;
                 var nspac = (string?)root.Attribute("Namespace") ?? string.Empty;
-                return string.Equals(type, CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.M262), StringComparison.Ordinal) &&
+                return string.Equals(type, TargetRegistry.Of(CodeGen.Translation.PlcAssignment.M262).DeviceType, StringComparison.Ordinal) &&
                        string.Equals(nspac, "SE.DPAC", StringComparison.Ordinal);
             }
             catch { return false; }
@@ -90,7 +90,7 @@ namespace CodeGen.Devices.M262
             string propsPath = string.Empty;
             if (!preserveDevice)
             {
-                RewriteSysdev(sysdevPath, DeviceName, CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.M262),
+                RewriteSysdev(sysdevPath, DeviceName, TargetRegistry.Of(CodeGen.Translation.PlcAssignment.M262).DeviceType,
                     cfg.M262TargetIp ?? string.Empty, resourceName);
                 var sysresPathForRename = EaeProjectLayout.FindSysresFor(sysdevPath);
                 if (sysresPathForRename != null)
@@ -214,7 +214,7 @@ namespace CodeGen.Devices.M262
 
             var sysdevPath = Path.Combine(sysGuidDir, $"{M262SysdevId}.sysdev");
             File.WriteAllText(sysdevPath, Station2DeviceEmitter.BuildSysdevXml(cfg,
-                M262SysdevId, DeviceName, CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.M262), M262ResourceId, resourceName));
+                M262SysdevId, DeviceName, TargetRegistry.Of(CodeGen.Translation.PlcAssignment.M262).DeviceType, M262ResourceId, resourceName));
 
             var sysdevFolder = Path.Combine(sysGuidDir, M262SysdevId);
             Directory.CreateDirectory(sysdevFolder);
