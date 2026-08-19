@@ -29,6 +29,11 @@ bx1:
 revPi:
   targetIp: 192.168.1.6
   hostIp: 192.168.1.1
+  # Hardware contract, not a free choice: these components' signals are physically read by the RevPi's
+  # own Modbus coupler, so hosting ANY Feed component here takes them along. Selecting the rest without
+  # them would strand a sensor whose DI no other controller can reach.
+  alwaysHosts:
+    - PartInHopper
 # The Harmony HMI is NOT configured here. Every HMI deployment fact - addresses, ports, identities,
 # artefacts - lives in Config/hmi.yml, its single source of truth, and DeviceConfig no longer
 # exposes an Hmi section. Keeping a second copy here is what let the panel container drift back onto
@@ -40,3 +45,31 @@ defaultNetwork:
   subnetAddress: 192.168.0.0
   subnetMask: 255.255.255.0
   gateway: 192.168.0.254
+# BX1 physical I/O profile: the TM3BC EtherNet/IP coupler's word, as the rig wired it. Bit positions are
+# fixed by the PLC_RW_BX1 WordToBits/BitsToWork core (index = VALUE = NAME = wiring order). The BX1
+# backend derives its broker wires and its cover safe-start from this; it holds no plant names or bit
+# numbers of its own.
+#
+# inputBit 5 is published for BOTH the gripper's grip-detect and the top-cover sensor: it is the only
+# cover-present bit the coupler carries. That is a wiring fact, so it is stated once, here.
+bx1Io:
+  covers:
+    - component: CoverPNP_Hr
+      event: CoverPnpHrEvent
+      sensorFromHome: { signal: CoverPnpHrAtHome, bit: 0 }
+      sensorFromWork: { signal: CoverPnpHrAtWork, bit: 1 }
+      coilToWork:     { signal: Cover_Pnp_Hr_ToWork, bit: 0 }
+      coilToHome:     { signal: Cover_Pnp_Hr_ToHome, bit: 1 }
+    - component: CoverPNP_Vr
+      event: CoverPnpVrEvent
+      sensorFromHome: { signal: CoverPnpVrAtHome, bit: 2 }
+      sensorFromWork: { signal: CoverPnpVrAtWork, bit: 3 }
+      # Single-acting/spring return: one solenoid, so no ToHome coil is routed.
+      coilToWork:     { signal: Cover_Pnp_Vr_Q, bit: 2 }
+    - component: CoverPnp_Gripper
+      event: CoverSensorEvent
+      # One sensor only (gripped); no home sensor exists on the jaw.
+      sensorFromWork: { signal: CoverPnpSensor, bit: 5 }
+      coilToWork:     { signal: Cover_Gripper_Q, bit: 3 }
+  # The cover actuator forced HOME on start so it cannot auto-energise Work into the swivel.
+  safeStartComponent: CoverPNP_Hr
