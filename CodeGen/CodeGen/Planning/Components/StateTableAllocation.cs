@@ -19,8 +19,11 @@ namespace CodeGen.Translation
         // updateComponentState; all three must agree or a report writes past the end of one of them.
         public const int Capacity = 24;
 
-        // Highest id a component may take. Above it sit the process and robot slots.
-        private const int ComponentIdCeiling = 16;
+        // The boundary between the positional component range and the slots reserved above it for
+        // processes and the task arm. A RESERVATION, so it is declared rather than computed: moving it
+        // would renumber components. A placement that cannot fit below it falls through to the rest of
+        // the table instead of failing.
+        private static int ComponentIdCeiling => RigCatalog.Current.ComponentIdCeiling;
 
         // The first actuator slot. The part-present sensor holds a RESERVED slot rather than a positional
         // one, so it must not push the actuator range up: every actuator id, and with it every recipe
@@ -55,7 +58,10 @@ namespace CodeGen.Translation
             // ring writers like any other, so a placement must see them.
             foreach (var synth in catalog.SynthSensors)
                 if (!byName.ContainsKey(synth.Name)) byName[synth.Name] = synth.Id;
-            byName.TryAdd("Robot", catalog.RobotActuatorId);
+            // The task arm keeps a reserved slot free on every ring it reports across; the profile names
+            // which instance that is.
+            if (!string.IsNullOrWhiteSpace(catalog.Roles.TaskArm))
+                byName.TryAdd(catalog.Roles.TaskArm, catalog.RobotActuatorId);
 
             // Every pinned process slot is reserved before the first placement, so a reporter that has to
             // move cannot take a slot a process was already promised and start a chain of moves.
@@ -70,15 +76,20 @@ namespace CodeGen.Translation
                 // Free means free ON THE COVER'S RING: a Feed-side component's slot is available here
                 // precisely because its report never arrives on the assembly ring. Process slots are
                 // excluded whatever their ring, since a process may yet be relocated onto one.
-                int slot = Enumerable.Range(0, ComponentIdCeiling + 1).Reverse().FirstOrDefault(
-                    s => !catalog.ProcessSlots.Values.Contains(s) &&
-                         !byName.Any(kv => kv.Value == s && SameRing(kv.Key, cover, allocation, ringsMerged)),
-                    -1);
+                bool Free(int s) =>
+                    !catalog.ProcessSlots.Values.Contains(s) &&
+                    !byName.Any(kv => kv.Value == s && SameRing(kv.Key, cover, allocation, ringsMerged));
+                // Highest free slot in the component range first, so an existing model keeps the id it
+                // already has; only a full range reaches into the reserved space above it.
+                int slot = Enumerable.Range(0, ComponentIdCeiling + 1).Reverse().FirstOrDefault(Free, -1);
+                if (slot < 0)
+                    slot = Enumerable.Range(ComponentIdCeiling + 1, Capacity - ComponentIdCeiling - 1)
+                        .Reverse().FirstOrDefault(Free, -1);
                 if (slot < 0)
                     throw new InvalidOperationException(
-                        $"[state_table] No free slot for the top-cover sensor '{cover}': every id in " +
-                        $"[0..{ComponentIdCeiling}] is claimed by a reporter on its ring. The cover " +
-                        "interlock cannot be placed without reading another component's report.");
+                        $"[state_table] No free slot for the top-cover sensor '{cover}': all {Capacity} ids " +
+                        "are claimed by reporters on its ring. The cover interlock cannot be placed without " +
+                        "reading another component's report.");
                 byName[cover] = slot;
                 taken.Add(slot);
             }
@@ -99,6 +110,22 @@ namespace CodeGen.Translation
                             "by whichever reported last. Widen state_table's ArraySize on " +
                             "ProcessRuntime_Generic_v1, ProcessStateBusHandler and updateComponentState.");
                 }
+                byName[process] = slot;
+                taken.Add(slot);
+            }
+
+            // A process the catalog does not pin still has to announce its phase, so it takes the lowest
+            // free slot. Pinned slots are reservations that keep existing ids stable; they are not a
+            // requirement to declare every process by hand.
+            foreach (var process in contents.Processes)
+            {
+                if (byName.ContainsKey(process)) continue;
+                int slot = Enumerable.Range(0, Capacity).FirstOrDefault(s => !taken.Contains(s), -1);
+                if (slot < 0)
+                    throw new InvalidOperationException(
+                        $"[state_table] Process '{process}' has no slot and all {Capacity} are taken. " +
+                        "Widen state_table's ArraySize on ProcessRuntime_Generic_v1, ProcessStateBusHandler " +
+                        "and updateComponentState together, or free a reservation in Config/smc-rig.yml.");
                 byName[process] = slot;
                 taken.Add(slot);
             }
