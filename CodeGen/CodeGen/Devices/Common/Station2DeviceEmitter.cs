@@ -9,6 +9,7 @@ using CodeGen.Devices.M262;
 using CodeGen.Services;
 using CodeGen.Devices.Core;
 
+using CodeGen.Mapping;
 namespace CodeGen.Devices.Core
 {
     public static class Station2DeviceEmitter
@@ -114,7 +115,7 @@ namespace CodeGen.Devices.Core
             EmitOnePlc(cfg, eaeRoot, systemGuidDir, result,
                 sysdevId: M580SysdevId,
                 deviceName: "M580",
-                deviceType: CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.M580),
+                deviceType: TargetRegistry.Of(CodeGen.Translation.PlcAssignment.M580).DeviceType,
                 resourceId: M580ResourceId,
                 resourceName: m580ResourceName,
                 hcfTemplatePath: cfg.M580HcfTemplatePath,
@@ -129,7 +130,7 @@ namespace CodeGen.Devices.Core
             EmitOnePlc(cfg, eaeRoot, systemGuidDir, result,
                 sysdevId: BX1SysdevId,
                 deviceName: "BX1",
-                deviceType: CodeGen.Mapping.PlcTargets.DeviceType(CodeGen.Translation.PlcAssignment.BX1),
+                deviceType: TargetRegistry.Of(CodeGen.Translation.PlcAssignment.BX1).DeviceType,
                 resourceId: bx1ResourceId,
                 resourceName: BX1ResourceName,
                 hcfTemplatePath: bx1HcfPath,
