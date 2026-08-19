@@ -34,6 +34,10 @@ namespace CodeGen.Mapping
 
         // The parameter that carries the instance's own name, when the type has one.
         public string? NameParameter { get; init; }
+
+        // Whether the type can be threaded onto the station (CaSBus) chain. A type without the
+        // stationAdptr port dangles when stitched in, and EAE rejects the whole resource.
+        public bool StationAdapter { get; init; } = true;
     }
 
     // One row per FB type the Mapper owns, so adding a CAT is a one-row change rather than an
@@ -98,8 +102,11 @@ namespace CodeGen.Mapping
             new("Process1_Generic",             ArtefactKind.Cat, TypeRole.Process,  true, true,
                 new[] { "ProcessRuntime_Generic_v1", "ProcessStateBusHandler" })
                 { ForceRefresh = true, Ports = new[] { "stateRptCmdAdptr_in", "stationAdptr_in", "stateRptCmdAdptr_out", "stationAdptr_out" } },
+            // The original seven-state CAT carries ring ports only; the centre-home variant below DOES
+            // declare stationAdptr, so only this one is kept off the CaSBus chain.
             new("Seven_State_Actuator_CAT",     ArtefactKind.Cat, TypeRole.Actuator, true, true,
-                new[] { "SevenStateActuator", "SevenStateActuator2" }),
+                new[] { "SevenStateActuator", "SevenStateActuator2" })
+                { StationAdapter = false },
             new(TemplateMap.SevenStateCentreHomeCat, ArtefactKind.Cat, TypeRole.Actuator, true, true,
                 new[] { "SevenStateCentreHomeActuator", "No_Sensor_Handler_7SCH", "FaultLatch_7SCH",
                         "actuatorStateEvents_7SCH" })
@@ -113,7 +120,7 @@ namespace CodeGen.Mapping
             // The UR3e task arm carries RING ports ONLY — no stationAdptr (it is off the CaSBus chain).
             new("Robot_Task_CAT",               ArtefactKind.Cat,   TypeRole.Actuator, false, true,
                 new[] { "Robot_Task_Core" })
-                { Ports = new[] { "stateRprtCmd_in", "stateRprtCmd_out" } },
+                { Ports = new[] { "stateRprtCmd_in", "stateRprtCmd_out" } , StationAdapter = false },
             new("Five_State_Actuator_No_Sensors_CAT", ArtefactKind.Cat, TypeRole.Actuator, false, true, None),
             new("Vacuum_Gripper_CAT",           ArtefactKind.Cat,   TypeRole.Actuator, false, false, None),
             new("Actuator_Fault_CAT",           ArtefactKind.Cat,   TypeRole.Infrastructure, false, false,
