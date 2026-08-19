@@ -16,12 +16,17 @@ processSlots:
 # the Assembly station, so it needs a slot free on both PLCs; 19 is the only one.
 robotActuatorId: 19
 
+# Boundary of the positional component id range; the reserved process and task-arm slots sit above it.
+# A RESERVATION: moving it renumbers components, so it is declared rather than computed. A placement that
+# will not fit below it falls through to the rest of the table instead of failing.
+componentIdCeiling: 16
+
 # Real M262 proximity sensors the digital twin does not model; the rig wires them to fixed DI
 # channels. id is the shared state_table slot — it must be free on every PLC whose ring carries
 # the report. PartAtAssembly id 3 is free on both the M262 and M580 state_tables.
+# The physical channel each one binds is declared once, under dischargeChannels below.
 synthSensors:
   - name: PartAtAssembly
-    pin: DI08
     id: 3
 
 # Ordered M262 components spliced onto the M580 ring at the Disassembly seam when the cross-PLC
@@ -53,14 +58,82 @@ sensorInterlocks:
     sensor: TopCoverSenosr
     presentState: 1
 
-# M262 DI/DO channels the .hcf MUST bind when the cross-PLC discharge tail is active, else the
-# ejector/robot never actuate. The parity validator checks each is bound and non-blank.
+# M262 DI/DO channels the .hcf binds when the cross-PLC discharge tail is active, else the ejector/robot
+# never actuate. AUTHORITATIVE: HcfPatchService binds exactly these, and the parity validator checks
+# exactly these, so the two can no longer disagree. A channel is bound only when its component is on the
+# resource's own sysres and the IO workbook has not already claimed the pin.
 dischargeChannels:
-  - channel: DI08
-    meaning: PartAtAssembly.Input
-  - channel: DO03
-    meaning: Ejector.OutputToWork
-  - channel: DO04
-    meaning: Robot.RobotCommands_StartTask
-  - channel: DI10
-    meaning: Robot.RobotStatus_Task_Complete
+  - { channel: DI08, component: PartAtAssembly, port: Input }
+  - { channel: DO03, component: Ejector,        port: OutputToWork }
+  - { channel: DO04, component: Robot,          port: RobotCommands_StartTask }
+  - { channel: DI10, component: Robot,          port: RobotStatus_Task_Complete }
+
+# How each actuator's ARRIVAL is confirmed. Absent = the twin decides: a stop another component
+# observes means a sensor is fitted. A row here states a physical fact the twin cannot know -- that the
+# rig wired no usable feedback for that stroke -- so the CAT's own motion timer acknowledges instead.
+# Without it the recipe's WAIT on that stop never satisfies and the line stalls there forever.
+#   timerAck : no usable DI; the CAT motion timer acknowledges. ackMs overrides the settle time.
+feedbackModes:
+  # The cover jaw has no grip/release DI at all: its only bit is the shared cover-PRESENCE bit5.
+  - { component: CoverPnp_Gripper, mode: timerAck, ackMs: 200 }
+  # The M262 ejector is open-loop -- one coil (DO03), no DIs.
+  - { component: Ejector, mode: timerAck }
+
+# M580 X80 rack: the authored .hcf channel symlink name -> the component and CAT port it binds.
+# The channel NAMES are the rig's own wiring labels (they appear in IO/M580IO.hcf); the ports are the
+# CAT interface contract. Grippers: "open" = home, "closed" = work.
+m580Channels:
+  - { channel: ClampAtWork,            component: Clamp,           port: atwork }
+  - { channel: ClampAtHome,            component: Clamp,           port: athome }
+  - { channel: Clamp,                  component: Clamp,           port: OutputToWork }
+  - { channel: ShaftPnpVrAtWork,       component: Shaft_Vr,        port: atwork }
+  - { channel: ShaftPnpVrAtHome,       component: Shaft_Vr,        port: athome }
+  - { channel: Shaft_Vertical,         component: Shaft_Vr,        port: OutputToWork }
+  - { channel: ShaftPnpHrAtWork,       component: Shaft_Hr,        port: atwork }
+  - { channel: ShaftPnpHrAtHome,       component: Shaft_Hr,        port: athome }
+  - { channel: Shaft_Horizontal,       component: Shaft_Hr,        port: OutputToWork }
+  - { channel: Bearing_Gripper_Open,   component: Bearing_Gripper, port: athome }
+  - { channel: Bearing_Gripper_Closed, component: Bearing_Gripper, port: atwork }
+  - { channel: Bearing_Gripper_Q,      component: Bearing_Gripper, port: OutputToWork }
+  - { channel: ShaftPnpGripperOpened,  component: Shaft_Gripper,   port: athome }
+  - { channel: ShaftPnpGripperClosed,  component: Shaft_Gripper,   port: atwork }
+  - { channel: Shaft_Gripper,          component: Shaft_Gripper,   port: OutputToWork }
+  - { channel: Bearing_At_Place_Sensor, component: BearingSensor,  port: Input }
+  - { channel: ShaftPnpSensor,         component: ShaftSensor,     port: Input }
+
+# The swivel's channels depend on which CAT the twin's own state graph selected for it, so they are
+# declared per CAT shape and resolved per generation. An empty port means the physical channel has no
+# counterpart on that CAT and is BLANKED -- a dangling symbolic fails the EAE compile.
+# ⚠ COIL DIRECTION (Left = Work1/Pick, Right = Work2/Place) IS ASSUMED, NOT VERIFIED. Confirm on the rig
+# before motion -- Docs/REVERTED_FIXES.md R-12.
+swivelChannels:
+  # Centre-home: Home + Work1 + Work2 are three distinct physical stops. atWork2 keeps its CAPITAL W to
+  # match the CAT's own '$${PATH}atWork2' symlink. Home closes via No_Sensor_Handler_7SCH.
+  centreHome:
+    - { channel: SwivelArmAtHome,    component: Bearing_PnP, port: athome }
+    - { channel: SwivelArmAtPick,    component: Bearing_PnP, port: atwork1 }
+    - { channel: SwivelArmAtPlace,   component: Bearing_PnP, port: atWork2 }
+    - { channel: Swivel_Arm_Left_Q,  component: Bearing_PnP, port: OutputToWork1 }
+    - { channel: Swivel_Arm_Right_Q, component: Bearing_PnP, port: OutputToWork2 }
+  # Two-position: the twin models only Work1 and Work2 (no centre stop), so the five-state vocabulary
+  # carries it -- Work1 is the rest position and binds the HOME ports, Work2 the WORK ports.
+  twoPosition:
+    - { channel: SwivelArmAtPick,    component: Bearing_PnP, port: athome }
+    - { channel: SwivelArmAtPlace,   component: Bearing_PnP, port: atwork }
+    - { channel: SwivelArmAtHome,    component: Bearing_PnP, port: "" }
+    - { channel: Swivel_Arm_Left_Q,  component: Bearing_PnP, port: OutputToHome }
+    - { channel: Swivel_Arm_Right_Q, component: Bearing_PnP, port: OutputToWork }
+
+# Semantic roles the twin does not carry. VueOne types a component (Actuator/Sensor/Robot) but cannot say
+# "this Robot is the task arm" or "this sensor is the one that crosses the controller boundary", so the
+# profile names the INSTANCE and the compiler asks for the ROLE. Renaming one here is the whole change.
+roles:
+  # One command starts a whole taught program and a second resets it, so it is not a five-state jaw.
+  taskArm: Robot
+  # The part-present level that rides the cross-controller segment and can stand in for a Feed handoff.
+  materialSensor: PartAtAssembly
+  # VueOne spells this inconsistently across twin revisions: the original carries a typo and corrected
+  # models use the other. Both are listed so a twin of either vintage resolves.
+  topCoverSensor:
+    - TopCoverSenosr
+    - TopCoverSensor
