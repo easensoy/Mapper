@@ -18,4 +18,8 @@
 		</Content>
 	</ItemGroup>
 
+  <ItemGroup>
+    <None Include="..\..\CodeGen\CodeGen\Config\mapper_config.json" Link="mapper_config.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
