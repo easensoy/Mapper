@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
 namespace CodeGen.Models
 {
@@ -28,9 +28,16 @@ namespace CodeGen.Models
 
         public List<VueOneTransition> Transitions { get; set; } = new();
 
-        // State-level <Interlock_Condition> entries (NOT the transition Sequence_Condition): each is a
-        // "block this state's transition while <ComponentID> is in state <ID>" guard.
-        public List<VueOneCondition> InterlockConditions { get; set; } = new();
+        // State-level <Interlock_Condition> (NOT the transition Sequence_Condition): "block this
+        // state's transition while <ComponentID> is in state <ID>".
+        public ConditionExpr? InterlockGuard { get; set; }
+
+        // The guard's leaves in document order. Assigning a bare list means "all of these".
+        public IReadOnlyList<VueOneCondition> InterlockConditions
+        {
+            get => InterlockGuard?.References() ?? System.Array.Empty<VueOneCondition>();
+            set => InterlockGuard = ConditionExpr.FromFlat(value);
+        }
     }
 
     public class VueOneTransition
@@ -39,7 +46,14 @@ namespace CodeGen.Models
         public string OriginStateID { get; set; } = string.Empty;
         public string DestinationStateID { get; set; } = string.Empty;
         public int Priority { get; set; }
-        public List<VueOneCondition> Conditions { get; set; } = new();
+        public ConditionExpr? Guard { get; set; }
+
+        // The guard's leaves in document order. Assigning a bare list means "all of these".
+        public IReadOnlyList<VueOneCondition> Conditions
+        {
+            get => Guard?.References() ?? System.Array.Empty<VueOneCondition>();
+            set => Guard = ConditionExpr.FromFlat(value);
+        }
 
         // VueOne transition <Type>: SINGLE (default), PARALLEL, or ALTERNATIVE. A state with both
         // PARALLEL and ALTERNATIVE outgoing transitions is a branched (13-state swivel) actuator.
