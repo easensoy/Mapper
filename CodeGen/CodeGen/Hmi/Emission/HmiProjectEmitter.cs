@@ -12,6 +12,8 @@ namespace CodeGen.Hmi
     // present on disk, so a registration can never dangle and a generated file can never be missed.
     internal static class HmiProjectEmitter
     {
+        internal const string CanvasListFileName = "CanvasesResolutionList.xml";
+
 
         internal static void EmitCsproj(string hmiDir, IReadOnlyCollection<string> screenNames)
         {
@@ -138,7 +140,7 @@ namespace CodeGen.Hmi
                 "  </CanvasResolution>\r\n" +
                 "</CanvasesResolutionList>";
 
-            File.WriteAllText(Path.Combine(hmiDir, "CanvasesResolutionList.xml"), xml, new UTF8Encoding(true));
+            File.WriteAllText(Path.Combine(hmiDir, CanvasListFileName), xml, new UTF8Encoding(true));
         }
     }
 }
