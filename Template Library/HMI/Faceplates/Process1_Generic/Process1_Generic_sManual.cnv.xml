@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Mapping>
+  <EventInputs>
+    <Event Name="stateUpdate">ActuatorName;StateValue;ModeCMD;CurrentStep;CurrentStepType;WaitSatisfied;ManualStepReady;ManualStepComplete;ProcessComplete;ProcessName;OperatorInstruction</Event>
+    <Event Name="SCNF">ThisStepText;NextStepText;PreviousStepText;ActuatorName;StateValue;ModeCMD;CurrentStep;CurrentStepType;WaitSatisfied;ManualStepReady;ManualStepComplete;ProcessComplete;ProcessName;OperatorInstruction</Event>
+  </EventInputs>
+  <EventOutputs>
+    <Event Name="MREQO">ManualExecuteStep</Event>
+    <Event Name="NSREQO">ManualNextStep</Event>
+  </EventOutputs>
+  <Inputs>
+    <Input Name="ThisStepText" Type="STRING" />
+    <Input Name="NextStepText" Type="STRING" />
+    <Input Name="PreviousStepText" Type="STRING" />
+    <Input Name="ActuatorName" Type="STRING" />
+    <Input Name="StateValue" Type="INT" />
+    <Input Name="ModeCMD" Type="INT" />
+    <Input Name="CurrentStep" Type="INT" />
+    <Input Name="CurrentStepType" Type="INT" />
+    <Input Name="WaitSatisfied" Type="BOOL" />
+    <Input Name="ManualStepReady" Type="BOOL" />
+    <Input Name="ManualStepComplete" Type="BOOL" />
+    <Input Name="ProcessComplete" Type="BOOL" />
+    <Input Name="ProcessName" Type="STRING" />
+    <Input Name="OperatorInstruction" Type="STRING" />
+  </Inputs>
+  <Outputs>
+    <Output Name="ManualExecuteStep" Type="BOOL" />
+    <Output Name="ManualNextStep" Type="BOOL" />
+  </Outputs>
+</Mapping>
