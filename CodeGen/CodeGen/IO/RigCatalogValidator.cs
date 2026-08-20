@@ -11,18 +11,27 @@ namespace CodeGen.Configuration
         {
             var errors = new List<string>();
 
-            if (c.ProcessSlots.Count == 0)
-                errors.Add("processSlots is empty: no process has a state_table slot, so no handoff can be addressed");
-            foreach (var g in c.ProcessSlots.GroupBy(p => p.Value).Where(g => g.Count() > 1))
-                errors.Add($"processSlots collide on slot {g.Key}: {string.Join(", ", g.Select(p => p.Key))}");
+            foreach (var g in c.Protocols.GroupBy(p => p.Cat, StringComparer.OrdinalIgnoreCase)
+                         .Where(g => g.Count() > 1))
+                errors.Add($"CAT '{g.Key}' declares {g.Count()} protocols");
+            foreach (var p in c.Protocols)
+            {
+                if (p.Command.Count == 0)
+                    errors.Add($"'{p.Cat}' declares no command values, so nothing can drive it");
+                if (p.StateCounts.Count == 0 && !p.ServesBranched)
+                    errors.Add($"'{p.Cat}' serves no state-graph shape, so it can never be selected");
+                foreach (var stop in p.Command.Keys)
+                {
+                    if (!p.Settled.ContainsKey(stop))
+                        errors.Add($"'{p.Cat}' commands '{stop}' but declares no settled value for it");
+                    if (!p.Interlock.ContainsKey(stop))
+                        errors.Add($"'{p.Cat}' commands '{stop}' but declares no interlock value for it");
+                }
+            }
 
             foreach (var s in c.SynthSensors)
-            {
                 if (string.IsNullOrWhiteSpace(s.Name))
                     errors.Add("synthSensor with empty name");
-            }
-            foreach (var g in c.SynthSensors.GroupBy(s => s.Id).Where(g => g.Count() > 1))
-                errors.Add($"synthSensors collide on state_table slot {g.Key}");
 
             // These rows ARE the binding, so an invalid or repeated one would emit a wrong .hcf rather
             // than merely mis-report. Two rows on one channel is two drivers for one physical pin.
