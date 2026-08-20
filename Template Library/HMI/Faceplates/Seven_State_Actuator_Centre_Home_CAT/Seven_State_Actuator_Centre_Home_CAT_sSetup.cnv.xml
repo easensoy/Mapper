@@ -1,0 +1,38 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Mapping>
+  <EventInputs>
+    <Event Name="output_event">toWork2PLC;toWork1PLC</Event>
+    <Event Name="pst_event">current_state_to_process</Event>
+    <Event Name="input_event">atHome;atWork1;atWork2</Event>
+    <Event Name="FAULT_EVENT">fault_active;fault_code</Event>
+    <Event Name="name_event">component_name;ModeCMD</Event>
+    <Event Name="mode_event">ModeCMD</Event>
+    <Event Name="interlock_event">ActiveRuleIndex;ActiveSourceID;ActiveBlockedState;MoveAllowed;Work1Interlock;Work2Interlock</Event>
+  </EventInputs>
+  <EventOutputs>
+    <Event Name="cmd_event">toWork1;toHome;toWork2</Event>
+  </EventOutputs>
+  <Inputs>
+    <Input Name="toWork1PLC" Type="BOOL" />
+    <Input Name="toWork2PLC" Type="BOOL" />
+    <Input Name="current_state_to_process" Type="INT" />
+    <Input Name="atHome" Type="BOOL" />
+    <Input Name="atWork1" Type="BOOL" />
+    <Input Name="atWork2" Type="BOOL" />
+    <Input Name="fault_active" Type="BOOL" />
+    <Input Name="fault_code" Type="INT" />
+    <Input Name="component_name" Type="STRING" />
+    <Input Name="ModeCMD" Type="INT" />
+    <Input Name="ActiveRuleIndex" Type="INT" />
+    <Input Name="ActiveSourceID" Type="INT" />
+    <Input Name="ActiveBlockedState" Type="INT" />
+    <Input Name="MoveAllowed" Type="BOOL" />
+    <Input Name="Work1Interlock" Type="BOOL" />
+    <Input Name="Work2Interlock" Type="BOOL" />
+  </Inputs>
+  <Outputs>
+    <Output Name="toHome" Type="BOOL" />
+    <Output Name="toWork1" Type="BOOL" />
+    <Output Name="toWork2" Type="BOOL" />
+  </Outputs>
+</Mapping>
