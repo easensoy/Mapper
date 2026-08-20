@@ -1,24 +1,17 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using CodeGen.Configuration;
 using CodeGen.Devices.RevPi;
+using CodeGen.Configuration;
 using CodeGen.Mapping;
 
 namespace CodeGen.Validation.Plan
 {
-    // Pre-generation guard on the RevPi SELECTION itself, so an unsupportable choice fails before any
-    // artefact is written rather than shipping a project whose actuators cannot actuate.
+    // Pre-generation guard on the RevPi SELECTION, so an unsupportable choice fails before any artefact is
+    // written rather than shipping a project whose actuators cannot actuate.
     //
-    // The Revolution Pi carries its Feed IO over one Modbus word pair through PLC_RW_REVPI, whose
-    // interface exposes exactly ExtendPusher/ExtendChecker (coils) and PusherAtWork/PusherAtHome/
-    // checkerUp/chekcerDown/Hopper (sensors) — i.e. Feeder, Checker and PartInHopper. That set is a
-    // strict SUBSET of the Feed station: Transfer, Ejector, Robot and PartAtAssembly hold real M262
-    // channels today and the coupler has no signals for them.
-    //
-    // So the supported RevPi mode is the PER-COMPONENT swap (Feeder and/or Checker move, M262 keeps the
-    // rest — a four-controller project). The whole-Feed swap is rejected: it would relocate components
-    // the coupler cannot serve, and they would deploy with no physical IO at all.
+    // PLC_RW_REVPI carries the Feed IO over one Modbus word pair and serves a strict SUBSET of the Feed
+    // station, so the supported mode is the PER-COMPONENT swap; a whole-Feed swap is rejected.
     public static class RevPiSelectionValidator
     {
         // Thrown so generation stops loudly instead of emitting a half-supportable RevPi project.
@@ -32,8 +25,7 @@ namespace CodeGen.Validation.Plan
             var problems = new List<string>();
             var covered = RevPiIoBrokerInjector.CoveredComponents;
 
-            // Every relocated component must be one the coupler actually serves: PLC_RW_REVPI exposes IO
-            // for a fixed set, and a component moved off the M262 that owns its channels deploys with none.
+            // A component moved off the M262 that owns its channels deploys with no IO unless the coupler serves it.
             if (profile.PartialRevPi)
             {
                 var uncovered = profile.RevPiComponents
