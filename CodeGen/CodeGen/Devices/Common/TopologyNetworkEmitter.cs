@@ -1,18 +1,17 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
+using CodeGen.Devices.M262;
+using System.IO;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using CodeGen.Configuration;
-using CodeGen.Devices.M262;
 using CodeGen.Translation;
 
 namespace CodeGen.Devices.Core
 {
-    // Emits Topology Physical-Views NETWORK objects (L2 Switch_1 + Wire JSONs) connecting
-    // M262 <-> Switch_1 <-> M580. A wire's destination for the M580 must be the nested CPU
-    // UUID that owns ETH1, not the rack root.
+    // Emits Topology Physical-Views NETWORK objects (L2 Switch_1 + Wire JSONs). A wire's M580 destination must
+    // be the nested CPU UUID that owns ETH1, not the rack root.
     public static class TopologyNetworkEmitter
     {
         const string Switch1Uuid          = "11111111-2222-3333-4444-000000000060";
@@ -24,8 +23,7 @@ namespace CodeGen.Devices.Core
 
         const string Bx1EtherNetIpUuid    = Station2DeviceEmitter.BX1EtherNetIpUuid;  // EtherNetIPDevice_1
         const string Bx1HmiB1XUuid        = Station2DeviceEmitter.BX1EquipmentUuid;   // HMIB1X_1 (BX1 panel)
-        // RevPi NIC_2 uuid — MUST match RevPiDeviceEmitter.RevPiNicUuid. The RevPi connects to the switch via
-        // its NIC (reference Wire 275: NIC_2[Port1] -> Switch); without this wire the Revolution_Pi floats.
+        // RevPi NIC_2 uuid — MUST match RevPiDeviceEmitter.RevPiNicUuid.
         const string RevPiNicUuid         = CodeGen.Devices.RevPi.RevPiDeviceEmitter.NicUuid;
 
         public sealed class EmitResult
@@ -56,7 +54,7 @@ namespace CodeGen.Devices.Core
             }
 
             // DomainTag must be the live SolutionId; a zero DomainTag fails topology-import.
-            var solutionId = M262TopologyEmitter.ReadProjectGuid(eaeRoot) ?? FallbackSolutionUuid;
+            var solutionId = EaeProjectLayout.ReadProjectGuid(eaeRoot) ?? FallbackSolutionUuid;
 
             ForceWriteJson(topologyDir, "Equipment_Switch_1.json", BuildSwitchJson(solutionId), result, eaeRoot);
             ForceWriteJson(topologyDir, "Wire_M262_to_Switch1.json", BuildWireJson(
@@ -79,9 +77,7 @@ namespace CodeGen.Devices.Core
                 "Wire_Switch1_to_M580.json",
             };
 
-            // BX1 EtherNet/IP daisy-chain (only when the coupler is emitted): Switch Port3 ->
-            // EtherNetIPDevice Port2, EtherNetIPDevice Port1 -> HMIB1X LAN1. Both endpoints are
-            // real Equipment so SweepOrphanWires keeps them.
+            // BX1 EtherNet/IP daisy-chain, only when the coupler is emitted: Switch Port3 -> coupler -> HMIB1X LAN1.
             if (cfg.EmitBx1EtherNetIpDevice)
             {
                 ForceWriteJson(topologyDir, "Wire_Switch1_to_EtherNetIP.json", BuildWireJson(
@@ -100,9 +96,7 @@ namespace CodeGen.Devices.Core
                 registerNames.Add("Wire_EtherNetIP_to_BX1.json");
             }
 
-            // RevPi (full OR partial swap) connects to the switch via its NIC_2, mirroring the reference
-            // (Wire 275: NIC_2[Port1] -> Switch). Switch Port4 is free (Port1=M262, Port2=M580, Port3=BX1
-            // EtherNet/IP). Without this the Revolution_Pi floats unconnected in Physical Views.
+            // RevPi connects to free Switch Port4 via its NIC_2 (Port1=M262, Port2=M580, Port3=BX1); without this wire it floats.
             if (ctx.Profile.PartialRevPi)
             {
                 ForceWriteJson(topologyDir, "Wire_RevPi_to_Switch1.json", BuildWireJson(
@@ -114,11 +108,10 @@ namespace CodeGen.Devices.Core
                 registerNames.Add("Wire_RevPi_to_Switch1.json");
             }
 
-            // Register in TopologyManager.topologyproj so the EAE build target picks them up.
             var topologyProj = Path.Combine(topologyDir, "TopologyManager.topologyproj");
             if (File.Exists(topologyProj))
             {
-                result.TopologyProjEntriesAdded = M262TopologyEmitter.RegisterInTopologyProj(
+                result.TopologyProjEntriesAdded = EaeProjectLayout.RegisterInTopologyProj(
                     topologyProj, registerNames.ToArray());
             }
             else
@@ -128,16 +121,14 @@ namespace CodeGen.Devices.Core
                     "written but not registered with the TopologyManager build target.");
             }
 
-            // A wire whose endpoint UUID is declared by NO Equipment makes EAE's TopologyManager
-            // 500 the entire import — delete + de-register any such orphan wire.
+            // A wire whose endpoint UUID is declared by no Equipment makes TopologyManager 500 the entire import.
             SweepOrphanWires(topologyDir, Path.Combine(topologyDir, "TopologyManager.topologyproj"),
                 result, eaeRoot);
 
             return result;
         }
 
-        // Deletes + de-registers any Wire_*.json whose endpoint UUID is declared by no Equipment.
-        // Conservative: if no equipment UUIDs are readable it sweeps nothing.
+        // Deletes + de-registers orphan wires. Conservative: if no equipment UUIDs are readable it sweeps nothing.
         static void SweepOrphanWires(string topologyDir, string topologyProj,
             EmitResult result, string eaeRoot)
         {
@@ -204,8 +195,7 @@ namespace CodeGen.Devices.Core
             catch { }
         }
 
-        // Delete any pre-existing file before rewrite so a manual import / EAE merge can't leave
-        // hybrid content behind.
+        // Delete before rewrite so a manual import or EAE merge cannot leave hybrid content behind.
         static void ForceWriteJson(string dir, string fileName, string content,
             EmitResult result, string eaeRoot)
         {
