@@ -2,18 +2,17 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using CodeGen.Mapping;
+using CodeGen.Translation;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using CodeGen.Configuration;
-using CodeGen.Mapping;
-using CodeGen.Translation;
 
 namespace CodeGen.Devices.Core
 {
-    // syslay <-> sysres parity guard: every runtime parameter the syslay sets on an FB must mirror
-    // byte-identically onto that FB in the owning PLC's (deployed) sysres. EAE deploys the sysres,
-    // so a lagging sysres runs stale logic. Any divergence fails generation.
+    // Every runtime parameter the syslay sets on an FB must mirror byte-identically onto that FB in the
+    // owning PLC's sysres. EAE deploys the sysres, so a lagging one runs stale logic.
     public static class SyslaySysresParityValidator
     {
         public sealed record Violation(string Scope, string Detail)
@@ -21,15 +20,13 @@ namespace CodeGen.Devices.Core
             public override string ToString() => $"[{Scope}] {Detail}";
         }
 
-        // Logical PLC <-> EAE sysdev (Type + optional Name) <-> short label, in deploy order. The Feed
-        // station is hosted on M262 (default) or the RevPi Soft_dPAC; M580/BX1 are fixed. A non-null Name
-        // disambiguates two devices of the same Type (BX1 vs Revolution_Pi, both Soft_dPAC).
+        // Logical PLC <-> EAE sysdev <-> short label, in deploy order. A non-null Name disambiguates two
+        // devices of the same Type (BX1 and Revolution_Pi are both Soft_dPAC).
         static IEnumerable<(string DeviceType, string? DeviceName, PlcAssignment Plc, string Label)> Devices(
             GenerationContext ctx)
         {
             yield return (TargetRegistry.Of(CodeGen.Translation.PlcAssignment.M262).DeviceType, null, PlcAssignment.M262, "M262");
-            // The partial swap keeps the M262 Feed station while Feeder/Checker/PartInHopper relocate to
-            // the RevPi, so BOTH devices exist and both need parity coverage.
+            // The partial swap leaves BOTH devices in place, so both need parity coverage.
             if (ctx.Profile.PartialRevPi)
                 yield return (TargetRegistry.Of(CodeGen.Translation.PlcAssignment.RevPi).DeviceType, TargetRegistry.Of(CodeGen.Translation.PlcAssignment.RevPi).DeviceName!, PlcAssignment.RevPi, "RevPi");
             yield return (TargetRegistry.Of(CodeGen.Translation.PlcAssignment.M580).DeviceType, null,  PlcAssignment.M580, "M580");
@@ -53,22 +50,20 @@ namespace CodeGen.Devices.Core
 
         static string Short(string s) => s.Length <= 48 ? s : s.Substring(0, 45) + "...";
 
-        // A recipe CMD is claimed by the ONE component whose actuator_name equals its CmdTargetName: the test in
-        // updateComponentState.BREQ is `component_state_in.dest_name = name`, case-sensitive ST string equality.
-        // A target nothing answers to does not fault at runtime -- the command circles the ring unclaimed, the
-        // actuator never moves, and the engine parks on the following WAIT forever, with every other validator
-        // green. That silence is why this is checked here, across all PLCs (commands legitimately cross devices).
+        // A recipe CMD is claimed by the ONE component whose actuator_name equals its CmdTargetName, and
+        // updateComponentState.BREQ compares them with case-sensitive ST string equality. A target nothing
+        // answers to never faults: the command circles the ring unclaimed and the engine parks in silence.
         private static IEnumerable<Violation> ValidateCommandTargetsAreClaimable(List<SysresFbMirror.SyslayFb> fbs)
         {
             static string Unquote(string? v) => (v ?? string.Empty).Trim().Trim('\'');
 
             var claimable = new HashSet<string>(StringComparer.Ordinal);
             foreach (var p in fbs.SelectMany(f => f.Parameters))
-                // What BREQ compares is updateComponentState's own `name` input. Actuator CATs feed it from
-                // actuator_name and processes from process_name, but a Sensor_Bool_CAT passes `name` straight
-                // through -- so a sensor is claimable under that, and an addressed refresh reaches it.
+                // BREQ compares updateComponentState's own `name` input, which a Sensor_Bool_CAT passes
+                // straight through, so a sensor is claimable under `name` and an addressed refresh reaches it.
                 if (p.Name is "actuator_name" or "process_name" or "name") claimable.Add(Unquote(p.Value));
-            claimable.Add("cycle_ready");   // the runtime's own ready handshake, not a component
+            // The runtime's own ready handshake, not a component.
+            claimable.Add(Translation.Process.Recipes.ProcessPhaseTransport.CommandToken);
 
             foreach (var fb in fbs)
             {
@@ -105,7 +100,6 @@ namespace CodeGen.Devices.Core
 
             foreach (var (deviceType, deviceName, plc, label) in Devices(ctx))
             {
-                // The syslay FBs the mirror would project onto this PLC (TemplateManifest.Mirrored n bucket).
                 var expected = syslayFbs
                     .Where(f => TemplateManifest.Mirrored.Contains(f.Type) &&
                                 SysresFbMirror.BucketFor(f.Name, ctx.Allocation) == plc)
@@ -161,15 +155,12 @@ namespace CodeGen.Devices.Core
                 }
             }
 
-            // When the cross-PLC discharge tail is active the Feed controller's IO must carry it. On M262
-            // that is the four .hcf channels (ejector/robot/part-sensor); on RevPi the discharge tail is
-            // FB-hosted on the RevPi sysres (its physical Modbus IO, PLC_RW_REVPI, is the documented
-            // follow-up), so the RevPi path asserts the discharge FBs landed on the RevPi sysres.
+            // With the cross-PLC discharge tail active the Feed controller's IO must carry it: on M262 the
+            // four .hcf channels, on RevPi the discharge FBs hosted on the RevPi sysres.
             if (ctx.CrossRingSegment.Count > 0)
                 ValidateDischargeHcf(eaeRoot, violations);
 
-            // Whenever a RevPi device is generated its Modbus IO must be complete. Deliberately independent
-            // of the discharge tail, which stays on the M262 that owns its channels.
+            // Independent of the discharge tail, which stays on the M262 that owns its channels.
             if (ctx.Profile.PartialRevPi)
                 ValidateRevPiIo(eaeRoot, syslayPath, violations);
 
@@ -185,20 +176,6 @@ namespace CodeGen.Devices.Core
                 if (!string.IsNullOrEmpty(n)) d[n!] = (string?)p.Attribute("Value") ?? string.Empty;
             }
             return d;
-        }
-
-        static string DescribeRecipe(SysresFbMirror.SyslayFb fb) =>
-            DescribeRecipe(fb.Parameters.FirstOrDefault(p => p.Name == "Recipe")?.Value);
-
-        static string DescribeRecipe(XElement sysresFb) =>
-            DescribeRecipe(ReadSysresParams(sysresFb).TryGetValue("Recipe", out var v) ? v : null);
-
-        static string DescribeRecipe(string? recipe)
-        {
-            if (string.IsNullOrEmpty(recipe)) return "no-Recipe-param";
-            var w = Regex.Match(recipe, @"Wait1Id:=(\d+)");
-            return $"firstWait1Id={(w.Success ? w.Groups[1].Value : "?")}," +
-                   $"ejector={recipe.Contains("'ejector'")},robot={recipe.Contains("'robot'")}";
         }
 
         static void ValidateDischargeHcf(string eaeRoot, List<Violation> violations)
@@ -243,9 +220,8 @@ namespace CodeGen.Devices.Core
                         "the ejector/robot will not actuate on the rig"));
         }
 
-        // RevPi hosts the discharge tail on its own sysres (the physical Modbus IO — PLC_RW_REVPI — is the
-        // documented follow-up, so there is no .hcf to bind yet). Assert each discharge FB (the FB-name part
-        // named by Config/smc-rig.yml dischargeChannels) landed on the RevPi sysres.
+        // RevPi hosts the discharge tail on its own sysres, with no .hcf to bind yet, so assert each
+        // discharge FB named by Config/smc-rig.yml dischargeChannels landed there.
         static void ValidateDischargeRevPi(string eaeRoot, List<Violation> violations)
         {
             var sysdev = EaeProjectLayout.FindSysdevByDeviceTypeAndName(eaeRoot, TargetRegistry.Of(CodeGen.Translation.PlcAssignment.RevPi).DeviceType, TargetRegistry.Of(CodeGen.Translation.PlcAssignment.RevPi).DeviceName!);
@@ -281,13 +257,8 @@ namespace CodeGen.Devices.Core
 
         }
 
-        // RevPi Feed IO = the Modbus broker RevPI_IO (PLC_RW_REVPI) on the sysres, carrying a Mapping to a
-        // matching application instance, + the Modbus .hcf whose MB_Read/Write LinkNames resolve to it.
-        // Without all three the Feed actuators have no physical IO.
-        //
-        // These assertions used to live inside ValidateDischargeRevPi, which runs only on the FULL swap --
-        // a mode nothing selects -- so the one reachable RevPi mode (the partial Feeder/Checker swap)
-        // shipped with ZERO IO validation. They now run whenever a RevPi device is generated.
+        // RevPi Feed IO = the Modbus broker RevPI_IO on the sysres carrying a Mapping to a matching application
+        // instance, plus the .hcf whose LinkNames resolve to it. Without all three the Feed IO does not bind.
         static void ValidateRevPiIo(string eaeRoot, string syslayPath, List<Violation> violations)
         {
             const string BrokerFbId = "A6B61E2425DB1C30";   // == RevPiIoBrokerInjector.BrokerFbId
@@ -322,9 +293,8 @@ namespace CodeGen.Devices.Core
             }
             else
             {
-                // A resource FB with no Mapping is an ORPHAN: EAE has no application instance to bind it
-                // to, which is the documented "Repair Instances" class. This shipped because the injector's
-                // syslay pass searched only <FBNetwork> while the syslay carries <SubAppNetwork>.
+                // A resource FB with no Mapping is an ORPHAN: EAE has no application instance to bind it to,
+                // which is the documented "Repair Instances" class.
                 if (string.IsNullOrWhiteSpace((string?)broker.Attribute("Mapping")))
                     violations.Add(new("RevPi-IO",
                         $"{BrokerName} on the RevPi sysres has no Mapping attribute — it is an orphan resource instance with no application-layer counterpart"));
