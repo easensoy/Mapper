@@ -203,7 +203,7 @@ namespace MapperTests
         public void RevPi_addresses_do_not_collide_with_the_HMI()
         {
             var cfg = new MapperConfig();
-            var hmi = CodeGen.Hmi.HmiDeviceLoader.Load();
+            var hmi = CodeGen.Hmi.HmiDefinitionLoader.Load().Device;
 
             Assert.NotEqual(hmi.HostIp, cfg.RevPiHostIp);
             Assert.NotEqual(hmi.HostIp, cfg.RevPiTargetIp);
