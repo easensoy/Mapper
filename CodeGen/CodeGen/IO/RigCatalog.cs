@@ -5,21 +5,17 @@ namespace CodeGen.Configuration
 {
     public sealed class RigCatalog
     {
-        // Control.xml process name -> its state_table slot. Allocation, so it is data: a twin that renames
-        // or adds a process needs a row here, not a branch in the planner.
-        public Dictionary<string, int> ProcessSlots { get; set; } = new(System.StringComparer.OrdinalIgnoreCase);
-        public int RobotActuatorId { get; set; }
-
         // Boundary of the positional component id range; reserved process/task-arm slots sit above it.
         public int ComponentIdCeiling { get; set; } = 16;
         public List<SynthSensor> SynthSensors { get; set; } = new();
+
+        // Each CAT's command vocabulary; see the smc-rig.yml section for what the columns mean.
+        public List<CatProtocolDeclaration> Protocols { get; set; } = new();
         public List<string> CrossRingSegment { get; set; } = new();
         public List<DischargeChannel> DischargeChannels { get; set; } = new();
 
-        // Part-presence gates the Assembly recipe inserts before each pick (block -> sensor + the
-        // runtime state that means "present"; active-low sensors = 0, active-high = 1). The top-cover
-        // sensor's state_table slot is NOT stored here -- StateTableAllocation computes it per ring
-        // topology, so the cover interlock is model-independent.
+        // Part-presence gates inserted before each pick (active-low sensors = 0, active-high = 1).
+        // The top-cover slot is not stored here; StateTableAllocation computes it per ring topology.
         public List<SensorInterlock> SensorInterlocks { get; set; } = new();
 
         public List<FeedbackMode> FeedbackModes { get; set; } = new();
@@ -29,7 +25,6 @@ namespace CodeGen.Configuration
 
         public SemanticRoles Roles { get; set; } = new();
 
-        // How an actuator confirms arrival, when the rig contradicts what the twin implies.
         public FeedbackMode? FeedbackFor(string? component) =>
             FeedbackModes.FirstOrDefault(f =>
                 string.Equals(f.Component, component, System.StringComparison.OrdinalIgnoreCase));
@@ -38,12 +33,10 @@ namespace CodeGen.Configuration
 
     }
 
-    // Instances filling the semantic roles the twin cannot express. Named here so no compiler branch
-    // spells a plant component.
+    // Roles the twin cannot express, named here so no compiler branch spells a plant component.
     public sealed class SemanticRoles
     {
         public string TaskArm { get; set; } = string.Empty;
-        public string MaterialSensor { get; set; } = string.Empty;
         public List<string> TopCoverSensor { get; set; } = new();
 
         public bool Is(string? role, string? name) =>
@@ -55,9 +48,7 @@ namespace CodeGen.Configuration
                 System.StringComparison.OrdinalIgnoreCase));
     }
 
-    // One authored .hcf channel and what it binds to. The channel name is the rig's own wiring label;
-    // the port is the CAT interface contract. An empty port means this CAT has no counterpart for the
-    // channel, so it is blanked rather than left dangling.
+    // One authored .hcf channel and its CAT port. An empty port is blanked, never left dangling.
     public sealed class ChannelBinding
     {
         public string Channel { get; set; } = string.Empty;
@@ -85,14 +76,11 @@ namespace CodeGen.Configuration
 
     public sealed class SensorInterlock
     {
-        public string Block { get; set; } = string.Empty;   // sensor-interlock block key (bearing/shaft/coverPlace)
         public string Sensor { get; set; } = string.Empty;  // Control.xml sensor instance name
         public int PresentState { get; set; }               // runtime state that means "part present"
     }
 
-    // One physical M262 channel of the cross-PLC discharge tail, fully resolved: which pin, which
-    // component answers on it, and which CAT port. The binder and the parity validator read this same
-    // row, so what is emitted and what is checked cannot drift apart.
+    // One M262 discharge-tail channel. Binder and parity validator read this same row, so they cannot drift.
     public sealed class DischargeChannel
     {
         public string Channel { get; set; } = string.Empty;
@@ -106,6 +94,27 @@ namespace CodeGen.Configuration
     public sealed class SynthSensor
     {
         public string Name { get; set; } = string.Empty;
-        public int Id { get; set; }
+    }
+
+    public sealed class CatProtocolDeclaration
+    {
+        public string Cat { get; set; } = string.Empty;
+        public List<int> StateCounts { get; set; } = new();
+        public bool ServesBranched { get; set; }
+        public bool StopsAreGeometric { get; set; }
+        public Dictionary<string, int> Command { get; set; } = new(System.StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, int> Settled { get; set; } = new(System.StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, int> Interlock { get; set; } = new(System.StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, int> Target { get; set; } = new(System.StringComparer.OrdinalIgnoreCase);
+        public int CrossingFaultTimeoutMs { get; set; }
+        public RawStateRange? RawStateRange { get; set; }
+    }
+
+    // The values one CAT's core can publish as CurrentRawState. Declared only by a CAT whose core
+    // has a range narrower than the rules its twin could name.
+    public sealed class RawStateRange
+    {
+        public int Min { get; set; }
+        public int Max { get; set; }
     }
 }
