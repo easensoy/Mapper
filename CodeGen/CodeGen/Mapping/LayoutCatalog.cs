@@ -5,29 +5,34 @@ using CodeGen.Translation;
 
 namespace CodeGen.Configuration
 {
-    // Config/layout.yml: the deployment roster and the canvas geometry. See the file's own header for
-    // why the two orderings it declares must stay separate.
+    // Config/layout.yml: the deployment roster and the canvas geometry. Its own header says why the two orderings it declares must stay separate.
     public sealed class LayoutCatalog
     {
         public LayoutGeometry Geometry { get; set; } = new();
         public List<LayoutBand> Bands { get; set; } = new();
+        public FrameStyle FrameStyle { get; set; } = new();
         public List<BootFb> BootFbs { get; set; } = new();
         public List<ResourceProfile> Resources { get; set; } = new();
+
+        // The one controller a thing runs on when the model anchors it nowhere: declared, never a fallback.
+        public PlcAssignment DefaultTarget { get; set; } = PlcAssignment.Unknown;
         public List<RoleRelation> ResourceRelations { get; set; } = new();
         public List<RosterEntry> Components { get; set; } = new();
-        public IdOrder IdOrder { get; set; } = new();
-        public List<string> CasBusOrder { get; set; } = new();
         public FbBodySize FbBody { get; set; } = new();
         public Dictionary<string, string> Aliases { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
-        // Read once at the entry point and carried on the run's DeploymentProfile. Not an ambient
-        // singleton: nothing below the entry point may reach the catalog without being handed it.
+        // Read once at the entry point and carried on the run's DeploymentProfile, never reached ambiently.
         public static LayoutCatalog Load() => LayoutCatalogLoader.Catalog;
 
         public LayoutBand Band(PlcAssignment plc) =>
             Bands.FirstOrDefault(b => b.Plc == plc) ?? LayoutBand.OffCanvas;
 
         public int RowY(string row) => Geometry.RowY.TryGetValue(row, out int y) ? y : 0;
+
+        // The fixed slot declared for a component, or -1 if it takes a positional one.
+        public int StableSlotOf(string name) =>
+            Components.FirstOrDefault(e =>
+                string.Equals(e.Name, name, StringComparison.OrdinalIgnoreCase))?.StableSlot ?? -1;
     }
 
     public sealed class LayoutGeometry
@@ -54,8 +59,7 @@ namespace CodeGen.Configuration
         public int Bottom { get; set; }
     }
 
-    // Frame-sizing allowance per FB Type. Only height varies, so a type is a single number and an
-    // unlisted one takes the default -- no table entry is needed just to repeat the common case.
+    // Frame-sizing allowance per FB Type. Only height varies; an unlisted type takes the default.
     public sealed class FbBodySize
     {
         public int Width { get; set; }
@@ -73,9 +77,25 @@ namespace CodeGen.Configuration
         public int ColumnBaseX { get; set; }
         public int FrameWidth { get; set; }
 
-        // A component with no band (an unallocated name) draws at the origin rather than throwing: it is
-        // never emitted, so its coordinates are never read.
+        // The zone rectangle drawn around this band, or null where the band shares another's zone.
+        public BandFrame? Frame { get; set; }
+
+        // An unallocated name draws at the origin rather than throwing: it is never emitted, so never read.
         public static readonly LayoutBand OffCanvas = new();
+    }
+
+    public sealed class BandFrame
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Colour { get; set; } = string.Empty;
+        public string Caption { get; set; } = string.Empty;
+    }
+
+    public sealed class FrameStyle
+    {
+        public string Font { get; set; } = string.Empty;
+        public string TextColour { get; set; } = string.Empty;
+        public string TextAlignment { get; set; } = string.Empty;
     }
 
     // One controller's infrastructure: its report tag and the instance filling each role it declares.
@@ -94,9 +114,7 @@ namespace CodeGen.Configuration
         public string To { get; set; } = string.Empty;
         public string ToPort { get; set; } = string.Empty;
 
-        // A chain relation is not a direct wire: it names the two ENDS of a component chain whose
-        // middle the layout decides, so the station that starts the CaS chain and the terminator
-        // that caps it are declared once here instead of in each emitter.
+        // Not a direct wire: it names the two ENDS of a component chain whose middle the layout decides.
         public string Chain { get; set; } = string.Empty;
         public bool IsChain => !string.IsNullOrWhiteSpace(Chain);
     }
@@ -110,20 +128,22 @@ namespace CodeGen.Configuration
         public int SysresY { get; set; }
     }
 
+    // One declaration per known component; everything optional is an OVERRIDE, absent means "decide from the model".
     public sealed class RosterEntry
     {
         public string Name { get; set; } = string.Empty;
         public PlcAssignment Plc { get; set; }
         public int Column { get; set; }
         public string Row { get; set; } = string.Empty;
-        public string Owner { get; set; } = string.Empty;
-    }
 
-    public sealed class IdOrder
-    {
-        public List<string> Sensors { get; set; } = new();
-        public List<string> Actuators { get; set; } = new();
-        public List<string> RobotTail { get; set; } = new();
+        // Position in the state_table id ordering, within its role. Absent = allocated after the ranked ones, so adding a component never renumbers an existing one.
+        public int? IdRank { get; set; }
+
+        // Position on the station-adapter chain. Absent = not threaded onto it.
+        public int? CasBusRank { get; set; }
+
+        // A fixed slot this reporter always takes, reserved before any positional placement.
+        public int? StableSlot { get; set; }
     }
 
     internal static class LayoutCatalogLoader
@@ -169,12 +189,21 @@ namespace CodeGen.Configuration
                 if (c.Bands.All(b => b.Plc != e.Plc))
                     errors.Add($"component '{e.Name}' is allocated to '{e.Plc}', which declares no band");
             }
-            // An id-order name that is not on the roster would be silently skipped, taking its slot with it
-            // and shifting every id after it.
             var known = new HashSet<string>(c.Components.Select(e => e.Name), StringComparer.Ordinal);
-            foreach (var n in c.IdOrder.Sensors.Concat(c.IdOrder.Actuators)
-                         .Concat(c.IdOrder.RobotTail).Concat(c.CasBusOrder))
-                if (!known.Contains(n)) errors.Add($"'{n}' is ordered but is not a declared component");
+            // Two components on one rank or one fixed slot make a WAIT mean whichever reported last.
+            foreach (var g in c.Components.Where(e => e.IdRank.HasValue)
+                         .GroupBy(e => (Role: e.Row, Rank: e.IdRank!.Value))
+                         .Where(g => g.Count() > 1))
+                errors.Add($"idRank {g.Key.Rank} is claimed by {g.Count()} '{g.Key.Role}' components: " +
+                           string.Join(", ", g.Select(e => e.Name)));
+            foreach (var g in c.Components.Where(e => e.CasBusRank.HasValue)
+                         .GroupBy(e => e.CasBusRank!.Value).Where(g => g.Count() > 1))
+                errors.Add($"casBusRank {g.Key} is claimed by {g.Count()} components: " +
+                           string.Join(", ", g.Select(e => e.Name)));
+            foreach (var g in c.Components.Where(e => e.StableSlot.HasValue)
+                         .GroupBy(e => e.StableSlot!.Value).Where(g => g.Count() > 1))
+                errors.Add($"stableSlot {g.Key} is reserved by {g.Count()} components: " +
+                           string.Join(", ", g.Select(e => e.Name)));
             foreach (var kv in c.Aliases)
             {
                 if (!known.Contains(kv.Value))
@@ -186,8 +215,7 @@ namespace CodeGen.Configuration
             if (c.Geometry.ColumnPitchX <= 0) errors.Add("geometry.columnPitchX must be positive");
             if (c.FbBody.Width <= 0) errors.Add("fbBody.width must be positive");
             if (c.FbBody.DefaultHeight <= 0) errors.Add("fbBody.defaultHeight must be positive");
-            // A zero pad or origin would silently produce frames that do not enclose their FBs, which
-            // EAE then grows westward around a neighbour's zone.
+            // A zero pad or origin produces frames that do not enclose their FBs, which EAE then grows westward around a neighbour's zone.
             var geo = c.Geometry;
             if (geo.DeviceCanvasOrigin.X <= 0 || geo.DeviceCanvasOrigin.Y <= 0)
                 errors.Add("geometry.deviceCanvasOrigin must be positive in both axes");
