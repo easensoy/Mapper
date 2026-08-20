@@ -1,19 +1,18 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Xml.Linq;
 using CodeGen.Configuration;
-using CodeGen.Translation.Interlocks;
 using static CodeGen.Services.FbtXmlEditor;
+using System.IO;
+using CodeGen.Translation.Interlocks;
 
 namespace CodeGen.Services
 {
     // Deploy-time patchers for the actuator/sensor CATs. Consumed via `using static`.
     internal static class ActuatorCatTemplatePatcher
     {
-        // Force QI=TRUE on Sensor_Bool_CAT's internal SYMLINKMULTIVARDST; without it the DST defaults
-        // FALSE (disabled subscriber, publishes to '$${PATH}Input' silently dropped). Idempotent.
+        // Force QI=TRUE on Sensor_Bool_CAT's internal SYMLINKMULTIVARDST; without it the DST defaults FALSE and publishes are silently dropped.
         internal static void PatchSensorBoolCatDstQi(string eaeProjectDir, DeployResult result)
         {
             var fbt = Path.Combine(eaeProjectDir, "IEC61499", "Sensor_Bool_CAT", "Sensor_Bool_CAT.fbt");
@@ -75,8 +74,7 @@ namespace CodeGen.Services
             }
         }
 
-        // Force QI=TRUE on an actuator CAT's internal SYMLINKMULTIVARDST (Inputs) + SYMLINKMULTIVARSRC
-        // (Output); without QI the DST rejects sensor publishes and the SRC never writes the solenoid.
+        // Force QI=TRUE on the actuator CAT's Inputs DST and Output SRC; without it the DST rejects sensor publishes and the SRC never writes the solenoid.
         internal static void PatchCatSymlinkQi(string eaeProjectDir, string catName, DeployResult result)
         {
             var fbt = Path.Combine(eaeProjectDir, "IEC61499",
@@ -261,8 +259,7 @@ namespace CodeGen.Services
             }, notFoundNote: "Five_State_Actuator_CAT.fbt not found; fault-enable normalize skipped.");
 
 
-        // Force the actuator's "mode" InputVar InitialValue=1 (auto); without it mode=0 at boot fires no
-        // mode_event and the ECC is stuck in AtHomeInit forever.
+        // Force the actuator's "mode" InputVar InitialValue=1 (auto): mode=0 at boot fires no mode_event and the ECC sticks in AtHomeInit.
         internal static void PatchActuatorModeInitialValue(string eaeProjectDir, string fbtFileName, DeployResult result)
         {
             var fbt = Path.Combine(eaeProjectDir, "IEC61499", fbtFileName);
@@ -310,23 +307,13 @@ namespace CodeGen.Services
             }
         }
 
-        // Re-sample the actuator's own position sensors, so it notices it has ARRIVED.
-        // FiveStateActuator's arrival arcs carry NO event term -- 'ToWork -> AtWork [atwork = TRUE]',
-        // 'ToHome -> AtHome [athome]', 'AtHome -> AtHomeInit [atwork = FALSE AND athome = TRUE]' -- so they are
-        // only evaluated when some event reaches the core. The sensor path is Inputs.CNF -> InputHandler.inputEvent
-        // -> InputHandler.CNF -> ... -> ActuatorCore.input_event, and 'Inputs' is a SYMLINKMULTIVARDST, i.e.
-        // sample-on-REQ. With no Inputs.REQ driver the actuator can drive to a position and never observe that it
-        // got there, so its WAIT never satisfies. The motion timers are NOT a fallback here: they are gated
-        // AND(output, NOT SensorFitted), so a sensor-fitted actuator has no timer at all.
-        // The rig-proven Ground Truth (Demonstrator_20260617 WorkingEndtoEnd) carries exactly this Poll --
-        // E_DELAY DT=T#200ms, INIT -> START, EO -> START self-loop, EO -> Inputs.REQ -- and that build ran the line
-        // end to end. It was later stripped, after which the only thing re-evaluating those arcs was the 20 Hz ring
-        // event storm, which has now been removed at source; this restores the mechanism the working build used.
-        // Deliberately LOCAL: it re-reads a symlink and re-evaluates an ECC. It publishes nothing, because the ring
-        // report is driven by ActuatorCore.pst_out, which fires only on a genuine ECC state entry. So idle ring
-        // traffic stays zero and the process engines' state_change/SCNF stay still.
-        // NOT applied to the centre-home swivel (Ground Truth has no Poll there either -- see StripCatHomeSensorPoll)
-        // nor to Sensor_Bool_CAT, whose broker-fed instance already re-reads through its RD event.
+        // Re-sample the actuator's own position sensors so it notices it has ARRIVED. FiveStateActuator's arrival
+        // arcs carry NO event term, so they are only evaluated when an event reaches the core, and 'Inputs' is a
+        // sample-on-REQ SYMLINKMULTIVARDST: with no Inputs.REQ driver the actuator can drive to a position and
+        // never observe that it got there, so its WAIT never satisfies. The motion timers are no fallback — they
+        // are gated AND(output, NOT SensorFitted), so a sensor-fitted actuator has none. Deliberately LOCAL: it
+        // publishes nothing, so idle ring traffic stays zero. NOT applied to the centre-home swivel (see
+        // StripCatHomeSensorPoll) nor to Sensor_Bool_CAT, which re-reads through its RD event.
         internal static void EnsureFiveStateInputPoll(string eaeProjectDir, DeployResult result)
             => EditDeployedFbt(eaeProjectDir, "Five_State_Actuator_CAT.fbt",
                 "Five_State_Actuator_CAT input poll inject failed", result,
@@ -348,9 +335,8 @@ namespace CodeGen.Services
                     .Select(f => int.TryParse((string?)f.Attribute("ID"), out var v) ? v : 0)
                     .DefaultIfEmpty(0).Max() + 1;
 
-                // The LibraryElements schema fixes the child order of FBNetwork: every FB must precede the
-                // Input/Frame/Output markers and the connection lists. Appending would place it last and EAE
-                // rejects the file ("SubAppNetwork has invalid child element 'FB'"), so insert after the last FB.
+                // The LibraryElements schema fixes FBNetwork child order: every FB must precede the Input/Frame/Output
+                // markers and the connection lists, so insert after the last FB rather than appending.
                 var poll = new XElement(ns + "FB",
                     new XAttribute("ID", next), new XAttribute("Name", "Poll"),
                     new XAttribute("Type", "E_DELAY"), new XAttribute("x", "800"),
