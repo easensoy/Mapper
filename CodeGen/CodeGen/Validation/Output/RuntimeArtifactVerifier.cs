@@ -1,7 +1,7 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
+using System.IO;
 using System.Xml.Linq;
 using CodeGen.Configuration;
 using CodeGen.Devices.Core;
