@@ -1,9 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Text.RegularExpressions;
 using CodeGen.Mapping;
 using CodeGen.Models;
 using CodeGen.Translation;
@@ -24,20 +22,20 @@ namespace CodeGen.Hmi
     {
         internal static HmiPlant Build(
             GenerationContext ctx,
-            string syslayPath,
+            HmiSyslay syslay,
             string eaeProjectDir,
-            IReadOnlyDictionary<string, HmiContract> contracts,
+            HmiDeployedTypes types,
             HmiModeReach reach,
-            HmiEngineSupport engine,
             HmiDefinition def)
         {
             var diagnostics = new List<string>();
-            var fbs = SyslayReader.Read(syslayPath);
+            var fbs = syslay.Fbs;
             var byId = fbs.GroupBy(f => f.Id, StringComparer.OrdinalIgnoreCase)
                           .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
+            var ecc = types.Ecc;
             HmiContract Contract(string catType) =>
-                contracts.TryGetValue(catType, out var c) ? c : HmiContract.None;
+                types.Contracts.TryGetValue(catType, out var c) ? c : HmiContract.None;
 
             // ---- components ------------------------------------------------------------------
             var components = new List<HmiComponent>();
@@ -66,23 +64,21 @@ namespace CodeGen.Hmi
                     ComponentId: c.ComponentID,
                     InstanceName: fb.Name,
                     DisplayName: HmiPlanner.Humanise(fb.Name),
-                    SourceType: c.Type ?? string.Empty,
                     CatType: fb.Type,
                     TagName: fb.Id,
                     Controller: plc,
                     Resource: ControllerMap.ResourceForPlc(plc),
-                    OwningProcess: null,                       // filled once processes are known
                     Slot: ctx.Slots.TryGetValue(fb.Name, out var slot) ? slot : -1,
                     States: StatesOf(c, Contract(fb.Type), def, diagnostics),
                     Interlocks: Array.Empty<HmiInterlockRule>(),   // filled once every slot is known
                     Capabilities: HmiCapabilityResolver.Resolve(
-                        Contract(fb.Type), fb.Name, reach, engine, def)));
+                        Contract(fb.Type), fb.Name, reach, ecc, def)));
             }
 
             // Slots are resolved inside the REPORT RING that writes them, never by controller and
             // never globally. Cross-ring slot reuse is legal and normal, so any wider scope names the
-            // wrong component - see HmiRingIndex.
-            var rings = HmiRingIndex.Build(syslayPath, ctx.Slots);
+            // wrong component - see HmiSlotIndex. The ring itself comes from the plan, not from XML.
+            var rings = HmiSlotIndex.Build(ctx.Rings.Domain, ctx.Slots);
             foreach (var c in rings.Conflicts) diagnostics.Add(c);
 
             var byInstance = components.ToDictionary(c => c.InstanceName, StringComparer.Ordinal);
@@ -90,8 +86,7 @@ namespace CodeGen.Hmi
             // ---- interlocks ------------------------------------------------------------------
             components = components.Select(c =>
             {
-                var fb = byId[c.TagName];
-                var rules = InterlockRules(fb, c, rings, byInstance);
+                var rules = InterlockRules(ctx, c, rings, byInstance);
                 return c with { Interlocks = rules, Ring = rings.RingOf(c.InstanceName) };
             }).ToList();
             byInstance = components.ToDictionary(c => c.InstanceName, StringComparer.Ordinal);
@@ -109,29 +104,16 @@ namespace CodeGen.Hmi
                 if (!byId.TryGetValue(tag, out var fb)) continue;
 
                 var plc = ctx.Allocation.Of(fb.Name);
-                var rows = Rows(arrays, components, rings, fb.Name);
-
+                // The ROLE derivation, straight off the compiled recipe: a component this process
+                // issues a CMD to is an actuator, one it only waits on is a sensor. Read from the
+                // typed RecipeArrays - nothing is rendered, and no row objects are kept.
                 var ownedSet = new List<string>();
-                var observedSet = new List<string>();
-                foreach (var r in rows)
+                for (var i = 0; i < arrays.Count; i++)
                 {
-                    if (r.StepType == StepType.Cmd)
-                    {
-                        var t = ResolveCommandTarget(r.CmdTarget, components);
-                        if (t != null && !ownedSet.Contains(t.InstanceName, StringComparer.Ordinal))
-                        {
-                            ownedSet.Add(t.InstanceName);
-                            owner.TryAdd(t.InstanceName, fb.Name);
-                        }
-                    }
-                    else if (r.StepType == StepType.Wait)
-                    {
-                        // A recipe WAIT reads this process's own state_table, so the slot resolves
-                        // inside the process's ring - the same scope the controller itself uses.
-                        var inst = rings.Resolve(fb.Name, r.WaitSlot);
-                        if (inst != null && !observedSet.Contains(inst, StringComparer.Ordinal))
-                            observedSet.Add(inst);
-                    }
+                    if (arrays.StepType[i] != StepType.Cmd) continue;
+                    var t = ResolveCommandTarget(arrays.CmdTargetName[i] ?? string.Empty, components);
+                    if (t == null || ownedSet.Contains(t.InstanceName, StringComparer.Ordinal)) continue;
+                    ownedSet.Add(t.InstanceName);
                 }
 
                 processes.Add(new HmiProcess(
@@ -143,20 +125,13 @@ namespace CodeGen.Hmi
                     TagName: fb.Id,
                     CatType: fb.Type,
                     Slot: ctx.Slots.TryGetValue(fb.Name, out var s) ? s : -1,
-                    Rows: rows,
                     Owned: ownedSet,
-                    Observed: observedSet,
-                    Phases: (arrays.ProcessPhaseNames ?? new Dictionary<int, string>())
-                        .OrderBy(kv => kv.Key)
-                        .Select(kv => new HmiStateName(kv.Key, kv.Value))
-                        .ToList(),
                     Capabilities: HmiCapabilityResolver.Resolve(
-                        Contract(fb.Type), fb.Name, reach, engine, def),
+                        Contract(fb.Type), fb.Name, reach, ecc, def),
                     Ring: rings.RingOf(fb.Name)));
             }
 
             components = components
-                .Select(c => owner.TryGetValue(c.InstanceName, out var o) ? c with { OwningProcess = o } : c)
                 .ToList();
 
             // ---- stations --------------------------------------------------------------------
@@ -173,7 +148,7 @@ namespace CodeGen.Hmi
                         f.Name, f.Id, f.Type, plc, ControllerMap.ResourceForPlc(plc),
                         // Resolved through the core this faceplate drives - see HmiModeReach.
                         reach.ReachesThrough(f.Name),
-                        HmiCapabilityResolver.Resolve(Contract(f.Type), f.Name, reach, engine, def));
+                        HmiCapabilityResolver.Resolve(Contract(f.Type), f.Name, reach, ecc, def));
                 })
                 .OrderBy(s => s.InstanceName, StringComparer.Ordinal)
                 .ToList();
@@ -183,11 +158,8 @@ namespace CodeGen.Hmi
                 diagnostics.Add($"'{unreached}' is not on the station mode chain - mode selection, setup jog " +
                                 "and fault reset cannot reach it.");
 
-            if (engine.Found && !engine.AutoGating)
-                diagnostics.Add($"the deployed process engine's ECC ({engine.TransitionCount} transitions) never reads " +
-                                "Mode or CycleType, so Auto gating and an operational Stop are not implemented by the controller.");
-            if (engine.Found && !engine.ManualStepping)
-                diagnostics.Add("the deployed process engine does not implement manual recipe stepping.");
+            // Every withheld command reports its OWN generated reason (see HmiCapabilityResolver),
+            // so nothing is restated here - a second summary would be a parallel source of truth.
 
             return new HmiPlant(
                 ModelName: Path.GetFileName(eaeProjectDir),
@@ -236,8 +208,7 @@ namespace CodeGen.Hmi
             }
 
             // The twin's stop names map straight onto the runtime values when it declares exactly one
-            // state per value - this is what makes _sw5 read "AtWork1 / ToWork2 / AtWork2" while a
-            // clamp model reads its own words, from one generic faceplate.
+            // state per value, so each twin labels its own stops through one generic faceplate.
             if (declared.Count == profile.Labels.Count)
                 return declared.Select((s, i) => new HmiStateName(i, s.Name ?? string.Empty)).ToList();
 
@@ -253,98 +224,51 @@ namespace CodeGen.Hmi
 
         // ---- interlocks ----------------------------------------------------------------------
 
-        private static readonly Regex RuleRow = new(
-            @"FromState:=(-?\d+),\s*ToState:=(-?\d+),\s*SourceID:=(-?\d+),\s*BlockedState:=(-?\d+)",
-            RegexOptions.Compiled);
-
-        // The RuleTable is read back verbatim from the syslay because it IS the deployment fact -
-        // the exact rows the evaluator will run. Nothing here recomputes or reorders a rule; the
-        // numbers are only joined to names so the operator sees who is blocking and in what state.
+        // The rules the evaluator will actually run, taken from the plan that emitted them.
+        //
+        // ctx.Interlocks is the SAME InterlockPlan the RuleTable parameter was written from, including
+        // the centre-home range filter and mirrored crossings - so the panel explains the deployed
+        // behaviour rather than a second interpretation of it. Nothing here recomputes or reorders a
+        // rule; the numbers are only joined to names so the operator sees who is blocking and in what
+        // state.
         private static IReadOnlyList<HmiInterlockRule> InterlockRules(
-            SyslayFb fb,
+            GenerationContext ctx,
             HmiComponent owner,
-            HmiRingIndex rings,
+            HmiSlotIndex rings,
             IReadOnlyDictionary<string, HmiComponent> byInstance)
         {
-            var raw = fb.Param("RuleTable");
-            if (string.IsNullOrEmpty(raw)) return Array.Empty<HmiInterlockRule>();
+            if (!ctx.Interlocks.TryGetValue(owner.InstanceName, out var plan) || plan.Count == 0)
+                return Array.Empty<HmiInterlockRule>();
 
-            var rules = new List<HmiInterlockRule>();
-            foreach (Match m in RuleRow.Matches(raw))
+            var rules = new List<HmiInterlockRule>(plan.Count);
+            for (var i = 0; i < plan.Count; i++)
             {
-                var from = int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture);
-                var to = int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture);
-                var src = int.Parse(m.Groups[3].Value, CultureInfo.InvariantCulture);
-                var blocked = int.Parse(m.Groups[4].Value, CultureInfo.InvariantCulture);
-                if (from == 0 && to == 0 && src == 0 && blocked == 0) continue;   // unused array slot
-
                 // Resolved inside the owner's own report ring. The evaluator reads state_table[src],
                 // and that table is written only by this ring, so the ring is the exact scope. A slot
                 // that does not resolve here is left unresolved and shown as a bare slot - naming the
                 // wrong blocker is worse than naming none.
+                var src = plan.Src[i];
+                var blocked = plan.Blocked[i];
                 var srcName = rings.Resolve(owner.InstanceName, src);
                 HmiComponent? srcComp = srcName != null && byInstance.TryGetValue(srcName, out var sc) ? sc : null;
 
                 rules.Add(new HmiInterlockRule(
-                    from, to, src, blocked,
+                    plan.From[i], plan.To[i], src, blocked,
                     srcComp?.DisplayName,
                     srcComp?.StateName(blocked),
-                    owner.StateName(from),
-                    owner.StateName(to)));
+                    owner.StateName(plan.From[i]),
+                    owner.StateName(plan.To[i])));
             }
             return rules;
         }
 
-        // ---- recipe rows ---------------------------------------------------------------------
-
-        private static IReadOnlyList<HmiRecipeRow> Rows(
-            RecipeArrays a, IReadOnlyList<HmiComponent> components,
-            HmiRingIndex rings, string processInstance)
-        {
-            var rows = new List<HmiRecipeRow>(a.Count);
-            for (var i = 0; i < a.Count; i++)
-            {
-                var type = a.StepType[i];
-                var target = a.CmdTargetName[i] ?? string.Empty;
-                var cmdState = a.CmdStateArr[i];
-                var waitSlot = a.Wait1Id[i];
-                var waitState = a.Wait1State[i];
-
-                string text;
-                if (type == StepType.Cmd)
-                {
-                    var t = ResolveCommandTarget(target, components);
-                    text = t != null
-                        ? $"Command {t.DisplayName} to {t.StateName(cmdState)}"
-                        : $"Announce phase '{target}' = {cmdState}";
-                }
-                else if (type == StepType.Wait)
-                {
-                    var name = rings.Resolve(processInstance, waitSlot);
-                    var w = name == null ? null
-                        : components.FirstOrDefault(c => string.Equals(c.InstanceName, name, StringComparison.Ordinal));
-                    text = w != null
-                        ? $"Wait until {w.DisplayName} is {w.StateName(waitState)}"
-                        : $"Wait until slot {waitSlot} reports {waitState}";
-                }
-                else
-                {
-                    text = "End of recipe";
-                }
-
-                rows.Add(new HmiRecipeRow(i, type, target, cmdState, waitSlot, waitState, a.NextStep[i], text));
-            }
-            return rows;
-        }
-
         // CmdTargetName is one of three things and each is matched on its own terms: an actuator ring
-        // key (lower-cased), a sensor refresh (verbatim name), or a process phase announcement (which
-        // resolves to no component - correctly, not as a gap).
+        // key (lower-cased), a sensor refresh (verbatim name), or a process phase announcement, which
+        // resolves to no component - correctly, not as a gap.
         private static HmiComponent? ResolveCommandTarget(string target, IReadOnlyList<HmiComponent> components)
         {
-            if (string.IsNullOrWhiteSpace(target)) return null;
             var t = target.Trim();
-
+            if (t.Length == 0) return null;
             return components.FirstOrDefault(c =>
                        string.Equals(TemplateMap.RingKey(c.InstanceName), t, StringComparison.Ordinal))
                 ?? components.FirstOrDefault(c =>
