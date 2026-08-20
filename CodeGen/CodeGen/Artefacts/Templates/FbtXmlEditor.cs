@@ -1,18 +1,15 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
+using System.IO;
 using System.Xml.Linq;
 
 namespace CodeGen.Services
 {
-    // Shared .fbt/.xml load/save primitives for the deploy-time template patchers. Both retry on a
-    // transient file lock (EAE holding the file during a background scan) and preserve byte-identical
-    // formatting. Consumed via `using static` so the patcher call sites stay unqualified.
+    // Shared .fbt/.xml load/save primitives for the deploy-time template patchers. They retry on a
+    // transient EAE file lock and preserve byte-identical formatting. Consumed via `using static`.
     internal static class FbtXmlEditor
     {
-        // Load an .fbt/.xml with a short retry on a transient file lock (EAE holding the file during a
-        // background scan). Throws the last lock exception after the final attempt.
         internal static XDocument LoadXmlWithRetry(string path, LoadOptions opts)
         {
             for (int attempt = 1, delay = 50; ; attempt++, delay = Math.Min(delay * 2, 800))
@@ -25,22 +22,10 @@ namespace CodeGen.Services
             }
         }
 
-        // Save an XDocument with a short retry on a transient file lock. Uses plain doc.Save formatting so
-        // the on-disk bytes are identical to XDocument.Save(path) — byte-identical generation preserved.
-        internal static void SaveXmlWithRetry(XDocument doc, string path)
-        {
-            for (int attempt = 1, delay = 50; ; attempt++, delay = Math.Min(delay * 2, 800))
-            {
-                try { doc.Save(path); return; }
-                catch (Exception ex) when ((ex is IOException || ex is UnauthorizedAccessException) && attempt < 8)
-                {
-                    System.Threading.Thread.Sleep(delay);
-                }
-            }
-        }
+        // Plain doc.Save formatting, so the on-disk bytes stay byte-identical to XDocument.Save(path).
+        internal static void SaveXmlWithRetry(XDocument doc, string path) => Retry(() => doc.Save(path));
 
-        // Remove matching elements via instance Remove() (no IEnumerable<XElement>.Remove() extension in
-        // the callers). Returns true if anything was removed.
+        // Returns true if anything was removed.
         internal static bool RemoveElems(IEnumerable<XElement>? src, Func<XElement, bool> pred)
         {
             if (src == null) return false;
@@ -49,8 +34,7 @@ namespace CodeGen.Services
             return hits.Count > 0;
         }
 
-        // A connection group inside an FBNetwork, created if the network has none yet. EAE writes the
-        // groups only when non-empty, so a patcher adding the first wire of its kind must create one.
+        // EAE writes a connection group only when non-empty, so adding the first wire must create one.
         internal static ConnectionSet Connections(XElement network, XNamespace ns, string group)
         {
             var element = network.Element(ns + group);
@@ -58,11 +42,8 @@ namespace CodeGen.Services
             return new ConnectionSet(element, ns);
         }
 
-        // One <EventConnections>/<DataConnections>/<AdapterConnections> group, and the four edits the
-        // patchers make to one. A Connection carries exactly Source then Destination in that order --
-        // and XAttribute constructor order IS the serialised order -- so building it in one place is
-        // what keeps every patcher's output identical. Each edit reports whether it changed anything,
-        // which is the `changed` flag the callers accumulate before deciding to save.
+        // One connection group and the edits the patchers make to it. XAttribute constructor order IS the
+        // serialised order, so building a Connection in one place keeps every patcher's output identical.
         internal readonly struct ConnectionSet
         {
             private readonly XElement _group;
@@ -79,14 +60,12 @@ namespace CodeGen.Services
 
             internal bool Has(string source, string destination) => Find(source, destination) != null;
 
-            // Is this pin already driving anything? A data input takes ONE source, so the patchers that
-            // add a pin guard on the source alone -- a wire from it to some other destination still means
-            // the pin is wired, and adding a second would be two drivers for one value.
+            // A data input takes ONE source, so guard on the source alone: a second wire would be two
+            // drivers for one value.
             internal bool HasSource(string source) =>
                 All.Any(c => string.Equals((string?)c.Attribute("Source"), source, StringComparison.Ordinal));
 
-            // Appends, so a re-deploy that already carries the wire is a no-op and the order the
-            // patcher established the first time is preserved.
+            // Appends, so a re-deploy is a no-op and the order established the first time is preserved.
             internal bool Add(string source, string destination)
             {
                 if (Has(source, destination)) return false;
@@ -96,9 +75,7 @@ namespace CodeGen.Services
                 return true;
             }
 
-            // Appends without checking. Distinct from Add on purpose: the emitters that build a
-            // freshly-created group know the wire cannot already be there, and silently giving them a
-            // guard would change what a re-deploy over an existing tree produces.
+            // Unguarded on purpose: adding a guard would change what a re-deploy over an existing tree produces.
             internal void Append(string source, string destination) =>
                 _group.Add(new XElement(_ns + "Connection",
                     new XAttribute("Source", source),
@@ -115,15 +92,9 @@ namespace CodeGen.Services
                 return RemoveElems(All, c => set.Contains((string?)c.Attribute("Destination") ?? string.Empty));
             }
 
-            internal bool RemoveFrom(params string[] sources)
-            {
-                var set = sources.ToHashSet(StringComparer.Ordinal);
-                return RemoveElems(All, c => set.Contains((string?)c.Attribute("Source") ?? string.Empty));
-            }
         }
 
-        // Every deployed .fbt, parsed. A file that will not parse is skipped rather than fatal: this is
-        // the read side, used by verifiers that must report on the tree they were given, not refuse it.
+        // A file that will not parse is skipped, not fatal: verifiers must report on the tree they were given.
         internal static IEnumerable<(string Path, XDocument Doc)> EachDeployedFbt(string eaeProjectDir)
         {
             var iec = Path.Combine(eaeProjectDir, "IEC61499");
@@ -137,22 +108,18 @@ namespace CodeGen.Services
             }
         }
 
-        // Find a child by one of its attributes. The .fbt schema identifies almost everything this way
-        // -- an Algorithm, ECState, VarDeclaration or FB by Name, a Parameter by Name -- so the patchers
-        // would otherwise repeat the same FirstOrDefault/cast/compare for each element name.
+        // The .fbt schema identifies almost everything by attribute (Algorithm, ECState, FB, Parameter by Name).
         internal static XElement? ByAttribute(this XContainer? scope, XNamespace ns,
             string element, string attribute, string value) =>
             scope?.Elements(ns + element)
                 .FirstOrDefault(e => string.Equals((string?)e.Attribute(attribute), value, StringComparison.Ordinal));
 
-        // An Algorithm anywhere under the type. Algorithms sit inside BasicFB, so the patchers reach them
-        // by descendant rather than by child.
+        // Algorithms sit inside BasicFB, so they are reached by descendant rather than by child.
         internal static XElement? FindAlgorithm(XContainer root, XNamespace ns, string name) =>
             root.Descendants(ns + "Algorithm")
                 .FirstOrDefault(a => string.Equals((string?)a.Attribute("Name"), name, StringComparison.Ordinal));
 
-        // An ECC transition identified by the states it joins. Source+Destination is the only stable key:
-        // transitions carry no name and their Condition is what a patch usually rewrites.
+        // Source+Destination is the only stable key: transitions carry no name and a patch rewrites Condition.
         internal static XElement? FindTransition(XContainer? ecc, XNamespace ns, string source, string destination) =>
             ecc?.Elements(ns + "ECTransition").FirstOrDefault(t =>
                 string.Equals((string?)t.Attribute("Source"), source, StringComparison.Ordinal) &&
@@ -163,9 +130,8 @@ namespace CodeGen.Services
             => Directory.EnumerateFiles(Path.Combine(eaeProjectDir, "IEC61499"), fbtFileName, SearchOption.AllDirectories)
                 .FirstOrDefault(p => !p.Contains("_HMI", StringComparison.Ordinal)) ?? string.Empty;
 
-        // Locate the deployed <fbtFileName>, load it, and hand (doc, root, ns, path) to `edit` — which mutates,
-        // saves via doc.Save(path), and logs. Wraps the file-lock retry and warn-on-exception scaffold shared
-        // by the deploy-time patchers. Absent .fbt: warn notFoundNote (if given) and no-op. Null root: no-op.
+        // Hands (doc, root, ns, path) to `edit`, which mutates, saves and logs. Absent .fbt or null root
+        // is a no-op with an optional warning; every failure here is survivable.
         internal static void EditDeployedFbt(string eaeProjectDir, string fbtFileName, string failNote,
             DeployResult result, Action<XDocument, XElement, XNamespace, string> edit, string? notFoundNote = null)
         {
@@ -188,14 +154,9 @@ namespace CodeGen.Services
             }
         }
 
-        // Apply a REQUIRED structural patch. Unlike EditDeployedFbt, nothing here is survivable: a missing
-        // .fbt, an unreadable root and an edit that throws all abort generation.
-        //
-        // The distinction is the difference between a warning and a silently broken deploy. A patch that
-        // reshapes a TYPE's interface is what makes the instance parameters the planner emits legal; if it
-        // does not apply, EAE ignores every parameter naming a pin the type never declared and the tree
-        // deploys looking correct while the value never reaches the runtime. That failure has no symptom
-        // until the machine misbehaves, so it must surface here.
+        // A REQUIRED structural patch: a missing .fbt, an unreadable root or a throwing edit all abort.
+        // A patch that reshapes a TYPE's interface is what makes the planner's instance parameters legal;
+        // unapplied, EAE ignores every parameter naming an undeclared pin and the deploy looks correct.
         internal static void RequireDeployedFbt(string eaeProjectDir, string fbtFileName, string what,
             Action<XDocument, XElement, XNamespace, string> edit)
         {
@@ -210,8 +171,7 @@ namespace CodeGen.Services
             edit(doc, root, root.GetDefaultNamespace(), fbt);
         }
 
-        // Write IEC61499/DataType/<name>.dt (copy-if-absent) and record it in DataTypesDeployed so the
-        // dfbproj registers the type. patchNote appends to the PatchesApplied log line.
+        // Copy-if-absent, then record in DataTypesDeployed so the dfbproj registers the type.
         internal static void DeployDatatype(string eaeProjectDir, string name, string dtXml,
             DeployResult result, string? patchNote = null)
         {
@@ -228,6 +188,32 @@ namespace CodeGen.Services
             catch (Exception ex)
             {
                 result.Warnings.Add($"{name}.dt deploy failed: {ex.Message}");
+            }
+        }
+
+        // The CALLER supplies the writer settings, because .hcf encodings differ deliberately (one exporter
+        // emits a BOM, the other must not, one rewrites newlines) and collapsing them changes the bytes.
+        public static int SaveXmlRetrying(
+            string path, System.Xml.XmlWriterSettings settings, Action<System.Xml.XmlWriter> write) =>
+            Retry(() =>
+            {
+                using var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
+                using var w = System.Xml.XmlWriter.Create(fs, settings);
+                write(w);
+            });
+
+        // The one place that decides how long to keep trying a locked file. Returns the succeeding attempt.
+        private static int Retry(Action write)
+        {
+            int attempts = Configuration.GenerationConfig.Current.FileWriteRetries;
+            for (int attempt = 1, delay = 50; ; attempt++, delay = Math.Min(delay * 2, 800))
+            {
+                try { write(); return attempt; }
+                catch (Exception e) when (attempt < attempts &&
+                                          (e is IOException || e is UnauthorizedAccessException))
+                {
+                    System.Threading.Thread.Sleep(delay);
+                }
             }
         }
     }
