@@ -22,9 +22,8 @@ namespace MapperUI
         MapperConfig? _mapperConfig;
         List<VueOneComponent> _loadedComponents = new();
         List<ComponentValidationRow> _validationRows = new();
-        // In-session Device-column overrides. NOT display-only: btnTestStation1_Click reads this at
-        // generation time and turns RevPi picks into the run's DeploymentProfile, which is what relocates
-        // those components. Not persisted across restarts.
+        // In-session Device-column overrides. NOT display-only: generation reads these and turns a RevPi
+        // pick into the run's DeploymentProfile, which relocates the component. Not persisted.
         readonly Dictionary<string, string> _deviceOverrides = new(StringComparer.OrdinalIgnoreCase);
         // True while the grid is (re)populating, so CellValueChanged ignores programmatic writes.
         bool _populatingGrid;
@@ -276,7 +275,6 @@ namespace MapperUI
             }
             catch (Exception ex)
             {
-                // Surface the real cause (incl. a missing file name) instead of an unhandled popup.
                 var fnf = ex as System.IO.FileNotFoundException
                           ?? ex.InnerException as System.IO.FileNotFoundException;
                 ShowError(
@@ -413,10 +411,8 @@ namespace MapperUI
             }
         }
 
-        // Every Feed component DEFAULTS to M262. Only Feeder and Checker are swappable, because the RevPi
-        // Modbus coupler physically wires just Feeder/Checker/Hopper; PartInHopper follows automatically.
-        // The swappable set is read from the injector's own signal tables so it cannot drift from
-        // PLC_RW_REVPI's interface.
+        // Every Feed component DEFAULTS to M262. The swappable set is read from the injector's own signal
+        // tables so it cannot drift from what PLC_RW_REVPI physically wires.
         IReadOnlySet<string> CollectRevPiSelection()
         {
             var picked = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -431,8 +427,7 @@ namespace MapperUI
             return picked;
         }
 
-        // Logged on EVERY run: a pure-M262 run must be distinguishable from one where every RevPi pick
-        // was silently rejected.
+        // Logged on EVERY run: a pure-M262 run must be distinguishable from one whose RevPi picks were rejected.
         void LogControllerChoice(IReadOnlySet<string> revpiComponents)
         {
             if (revpiComponents.Count == 0)
@@ -440,9 +435,10 @@ namespace MapperUI
                 AppendActivity("[Target] Feed controller: M262 (no components routed to the RevPi).");
                 return;
             }
-            var picked = revpiComponents.Where(c =>
-                !string.Equals(c, "PartInHopper", StringComparison.OrdinalIgnoreCase));
-            AppendActivity($"[Target] Feed controller: M262 + Revolution Pi (Soft_dPAC) — {string.Join(", ", picked)} + PartInHopper on the RevPi; M262 keeps the rest (4 controllers).");
+            // Declared in device.yml, so the operator is told which components the selection dragged along.
+            var alwaysHosted = CodeGen.Configuration.DeviceConfig.Current.RevPi.AlwaysHosts;
+            var picked = revpiComponents.Where(c => !alwaysHosted.Contains(c, StringComparer.OrdinalIgnoreCase));
+            AppendActivity($"[Target] Feed controller: M262 + Revolution Pi (Soft_dPAC) — {string.Join(", ", picked)} + {string.Join(", ", alwaysHosted)} on the RevPi; M262 keeps the rest (4 controllers).");
             AppendActivity($"[Target] RevPi endpoints: host {Cfg().RevPiHostIp} (Soft dPAC Manager :8080, EAE 'Manage Soft dPAC') / container {Cfg().RevPiTargetIp} (IEC 61499 runtime, EAE Deploy+Login target).");
         }
 
@@ -503,7 +499,6 @@ namespace MapperUI
                     var vr = Validate(comp, validator, cfg);
                     _validationRows.Add(vr);
 
-                    // Device (PLC) from the deployment roster, unless overridden this session.
                     var reg = roster.Get(comp.Name);
                     string dev = _deviceOverrides.TryGetValue(comp.Name, out var ov)
                         ? ov
@@ -624,8 +619,7 @@ namespace MapperUI
             {
                 case "process": return Pass(comp, ProcessCatFile);
                 case "robot":
-                    // Type=Robot is a category: the task arm gets Robot_Task_CAT, every gripper resolves
-                    // through the same routing the generator uses.
+                    // Type=Robot is a category: the task arm gets Robot_Task_CAT, grippers route as usual.
                     if (TemplateMap.IsRobotTaskArm(comp))
                         return Pass(comp, "Robot_Task_CAT.fbt");
                     if (comp.States.Count != 5)
@@ -653,14 +647,11 @@ namespace MapperUI
                 : Fail(comp, SensorCatFile, string.Join("; ", vr.Errors));
         }
 
-        // The types the deployer actually emits for a process and a sensor. Shown rather than a
-        // configured path so the grid names the CAT that is generated, the same rule the actuator and
-        // robot rows already follow.
+        // The types the deployer actually emits, so the grid names the CAT that is generated.
         const string ProcessCatFile = "Process1_Generic.fbt";
         const string SensorCatFile = "Sensor_Bool_CAT.fbt";
 
-        // One routing decision for the grid and the generator: TemplateMap owns it, so the
-        // displayed CAT can never drift from the one actually emitted.
+        // TemplateMap owns the routing, so the displayed CAT can never drift from the emitted one.
         static string ResolvedCatFile(VueOneComponent c) =>
             TemplateMap.ResolveActuatorCatType(
                 c.Name, c.States.Count, TemplateMap.IsBranchedSevenState(c)) + ".fbt";
@@ -685,8 +676,6 @@ namespace MapperUI
         // A blank/unlisted combo value would raise a formatting error; swallow it.
         void dgvComponents_DataError(object sender, DataGridViewDataErrorEventArgs e) => e.ThrowException = false;
 
-        // Record a Device dropdown override + refresh the summary. LIVE — btnTestStation1_Click reads
-        // _deviceOverrides at generation time; a RevPi pick on Feeder/Checker relocates that component.
         void dgvComponents_DeviceChanged(object sender, DataGridViewCellEventArgs e)
         {
             if (_populatingGrid || e.RowIndex < 0 || e.ColumnIndex != colDevice.Index) return;
@@ -706,7 +695,6 @@ namespace MapperUI
                     : "."));
         }
 
-        // Recompute per-device counts and refresh the Mapping Information title.
         void RefreshDeviceSummary()
         {
             int cM262 = 0, cM580 = 0, cBx1 = 0, cRevPi = 0;
@@ -726,8 +714,7 @@ namespace MapperUI
                 + " mapped component(s)";
         }
 
-        // Designer anchors don't stretch the body sections to full width on some DPI/AutoScale configs;
-        // size them to the client area explicitly on every resize.
+        // Designer anchors don't stretch the body to full width on some DPI/AutoScale configs, so size it here.
         protected override void OnClientSizeChanged(EventArgs e)
         {
             base.OnClientSizeChanged(e);
@@ -747,17 +734,14 @@ namespace MapperUI
             int fullW = ClientSize.Width - 2 * margin;
             if (fullW < 200) return;
 
-            // Pin the top-right action button (Generate) to the form's right edge.
             if (btnTestStation1 != null)
                 btnTestStation1.Left = ClientSize.Width - margin - btnTestStation1.Width;
 
-            // Both body sections span the full width; Mapping Information takes all remaining height.
             grpValidation.Width = fullW;
             grpMappingInfo.Width = fullW;
             int statusH = statusStrip?.Height ?? 22;
             grpMappingInfo.Height = Math.Max(160, ClientSize.Height - grpMappingInfo.Top - statusH - margin);
 
-            // Components grid ~58% of the Mapping split; the activity log fills the rest.
             if (splitMain != null && splitMain.Width > 40)
             {
                 int min1 = Math.Max(1, splitMain.Panel1MinSize);
