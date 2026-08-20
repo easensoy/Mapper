@@ -1,8 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Net;
+using System.IO;
 using System.Text.Json;
 using CodeGen.Configuration;
 using CodeGen.Mapping;
@@ -10,23 +10,13 @@ using CodeGen.Translation;
 
 namespace CodeGen.Validation.Output
 {
-    // Address-role guard over the generated EAE topology. It exists because an address collision is only
-    // visible ACROSS emitters: the RevPi device (RevPiDeviceEmitter) and the HMI panel (HmiRuntimeEmitter)
-    // are written by unrelated code paths that hardcode the SAME broadcast domain, so neither can see the
-    // other's claim and no single-file check can catch it.
+    // Address-role guard over the generated EAE topology. An address collision is only visible ACROSS
+    // emitters — the RevPi device and the HMI panel are written by unrelated paths that hardcode the same
+    // broadcast domain — so no single-file check can catch it.
     //
-    // Two failures this catches that nothing else did:
-    //  1. A Soft dPAC CONTAINER sharing an address with another endpoint. A container is a Docker macvlan
-    //     child holding its own MAC/IP, and it is the endpoint EAE deploys and logs in to, so it must be
-    //     uniquely reachable. Every container the Mapper emits is unique today; a third one pointed at an
-    //     address another container already owns would silently break both.
-    //  2. A RevPi whose host and container addresses are equal or malformed. They are different layer-2
-    //     endpoints — the HOST runs the Soft dPAC Manager on 8080, the CONTAINER runs the IEC 61499
-    //     runtime — so collapsing them onto one address cannot work, yet nothing rejected it.
-    //
-    // Host-NIC duplicates are reported as WARNING, not ERROR, on purpose: the shipped Demonstrator AND
-    // Jyotsna's reference both carry 192.168.1.2 on two host NICs and both import into EAE, so failing on
-    // that would reject known-good output. Only container-level collisions are treated as fatal.
+    // A Soft dPAC CONTAINER is a Docker macvlan child with its own MAC and is the endpoint EAE deploys and
+    // logs in to, so a container-level collision is FATAL. Host-NIC duplicates are only a WARNING: the
+    // shipped Demonstrator and the reference both carry one and both import into EAE.
     public static class TopologyAddressValidator
     {
         public const string Error = "ERROR";
@@ -40,8 +30,7 @@ namespace CodeGen.Validation.Output
 
         sealed record Endpoint(string FileName, string Equipment, string Catalog, string Ip, string Domain)
         {
-            // A Soft dPAC container's catalog is *SoftdpacContainer* (HMIB1X_SoftdpacContainer_V01…,
-            // SoftdpacContainer_V01…). These carry the RuntimeDEO EAE deploys to.
+            // A Soft dPAC container's catalog is *SoftdpacContainer*; these carry the RuntimeDEO EAE deploys to.
             public bool IsSoftDpacContainer =>
                 Catalog.Contains("SoftdpacContainer", StringComparison.OrdinalIgnoreCase);
         }
@@ -50,9 +39,7 @@ namespace CodeGen.Validation.Output
         static bool IsRealAddress(string? ip) =>
             !string.IsNullOrWhiteSpace(ip) && ip != "0.0.0.0";
 
-        // Address collisions in what actually reached the topology folder. The role checks are a separate
-        // entry point: they hold regardless of what was written, so they still fire when generation aborts
-        // before any equipment JSON exists.
+        // Address collisions in what actually reached the topology folder.
         public static List<Violation> Validate(string? eaeRoot)
         {
             var violations = new List<Violation>();
@@ -100,8 +87,7 @@ namespace CodeGen.Validation.Output
             return violations;
         }
 
-        // Config-level role checks: these hold regardless of what reached the topology folder, so they
-        // still fire when generation aborts before any equipment JSON is written.
+        // Config-level role checks: these still fire when generation aborts before any equipment JSON exists.
         public static IEnumerable<Violation> ValidateRevPiRoles(MapperConfig cfg, DeploymentProfile profile)
         {
             bool revPiSelected = profile.PartialRevPi;
@@ -128,8 +114,7 @@ namespace CodeGen.Validation.Output
                     "Soft dPAC Manager (8080); the container runs the IEC 61499 runtime EAE deploys to.");
         }
 
-        // Walk the equipment tree, carrying the nearest enclosing equipment's identifier/catalogReference
-        // down to each endpoint so a collision can be reported against a name a human recognises.
+        // Carries the nearest enclosing identifier/catalogReference down, so a collision names something recognisable.
         static void Collect(JsonElement el, string fileName, string equipment, string catalog,
                             List<Endpoint> sink)
         {
