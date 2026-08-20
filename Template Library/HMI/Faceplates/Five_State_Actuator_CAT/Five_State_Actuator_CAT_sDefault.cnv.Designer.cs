@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Created by EcoStruxure Automation Expert.
  * User:  
  * Date: 10/7/2025
@@ -49,7 +49,6 @@ namespace HMI.Main.Symbols.Five_State_Actuator_CAT
 			NxtControl.GuiFramework.PropertyDictionary propertyDictionary23 = new NxtControl.GuiFramework.PropertyDictionary();
 			NxtControl.GuiFramework.PropertyDictionary propertyDictionary24 = new NxtControl.GuiFramework.PropertyDictionary();
 			NxtControl.GuiFramework.PropertyDictionary propertyDictionary22 = new NxtControl.GuiFramework.PropertyDictionary();
-			System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(sDefault));
 			this.current_state_to_process = new System.HMI.Symbols.Base.FreeText<short>();
 			this.rectangle1 = new NxtControl.GuiFramework.Rectangle();
 			this.toWorkPLC = new System.HMI.Symbols.Base.Led<bool>();
@@ -69,6 +68,7 @@ namespace HMI.Main.Symbols.Five_State_Actuator_CAT
 			this.HomeInterlock = new System.HMI.Symbols.Base.Led<bool>();
 			this.component_name_1 = new System.HMI.Symbols.Base.FreeText();
 			this.component_name_2 = new System.HMI.Symbols.Base.Label();
+			this.drawnButton1 = new NxtControl.GuiFramework.DrawnButton();
 			// 
 			// current_state_to_process
 			// 
@@ -271,7 +271,7 @@ namespace HMI.Main.Symbols.Five_State_Actuator_CAT
 			// 
 			this.Work1Interlock.BeginInit();
 			this.Work1Interlock.ColorFrame = new NxtControl.Drawing.Color("LedFrameColor");
-			this.Work1Interlock.DesignMatrix = new NxtControl.Drawing.Matrix2D(2D, 0D, 0D, 2D, 204D, 156D);
+			this.Work1Interlock.DesignMatrix = new NxtControl.Drawing.Matrix2D(2D, 0D, 0D, 2D, 236D, 156D);
 			this.Work1Interlock.FrameSize = 33F;
 			this.Work1Interlock.IsOnlyInput = true;
 			this.Work1Interlock.Name = "Work1Interlock";
@@ -289,7 +289,7 @@ namespace HMI.Main.Symbols.Five_State_Actuator_CAT
 			// 
 			this.HomeInterlock.BeginInit();
 			this.HomeInterlock.ColorFrame = new NxtControl.Drawing.Color("LedFrameColor");
-			this.HomeInterlock.DesignMatrix = new NxtControl.Drawing.Matrix2D(2D, 0D, 0D, 2D, 204D, 188D);
+			this.HomeInterlock.DesignMatrix = new NxtControl.Drawing.Matrix2D(2D, 0D, 0D, 2D, 236D, 188D);
 			this.HomeInterlock.FrameSize = 33F;
 			this.HomeInterlock.IsOnlyInput = true;
 			this.HomeInterlock.Name = "HomeInterlock";
@@ -327,6 +327,20 @@ namespace HMI.Main.Symbols.Five_State_Actuator_CAT
 			this.component_name_2.TagName = "component_name";
 			this.component_name_2.EndInit();
 			// 
+			// drawnButton1
+			// 
+			this.drawnButton1.Bounds = new NxtControl.Drawing.RectF(((float)(216D)), ((float)(0D)), ((float)(72D)), ((float)(37D)));
+			this.drawnButton1.Brush = new NxtControl.Drawing.Brush("Transparent");
+			this.drawnButton1.Font = new NxtControl.Drawing.Font("ButtonFont");
+			this.drawnButton1.InnerBorderColor = new NxtControl.Drawing.Color("ButtonInnerBorderColor");
+			this.drawnButton1.Name = "drawnButton1";
+			this.drawnButton1.OpenFaceplates.Add(new NxtControl.GuiFramework.OpenFaceplate("sFault", NxtControl.GuiFramework.MouseButtonType.Click));
+			this.drawnButton1.Pen = new NxtControl.Drawing.Pen("ButtonPen");
+			this.drawnButton1.Radius = 4D;
+			this.drawnButton1.TextColor = new NxtControl.Drawing.Color("ButtonTextColor");
+			this.drawnButton1.TextColorMouseDown = new NxtControl.Drawing.Color("ButtonTextColorMouseDown");
+			this.drawnButton1.Use3DEffect = false;
+			// 
 			// sDefault
 			// 
 			this.Shapes.AddRange(new System.ComponentModel.IComponent[] {
@@ -348,7 +362,8 @@ namespace HMI.Main.Symbols.Five_State_Actuator_CAT
 			this.Work1Interlock,
 			this.HomeInterlock,
 			this.component_name_1,
-			this.component_name_2});
+			this.component_name_2,
+			this.drawnButton1});
 			this.SymbolSize = new System.Drawing.Size(300, 204);
 
 		}
@@ -371,6 +386,7 @@ namespace HMI.Main.Symbols.Five_State_Actuator_CAT
 		private System.HMI.Symbols.Base.Led<bool> HomeInterlock;
 		private System.HMI.Symbols.Base.FreeText component_name_1;
 		private System.HMI.Symbols.Base.Label component_name_2;
+		private NxtControl.GuiFramework.DrawnButton drawnButton1;
 		#endregion
 	}
 }
