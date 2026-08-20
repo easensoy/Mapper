@@ -1,17 +1,15 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
+using CodeGen.Configuration;
+using System.IO;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
-using CodeGen.Configuration;
 
 namespace CodeGen.Services
 {
-    // Deep-wipes the Demonstrator EAE project to a no-devices state (empties canvases, deletes
-    // Mapper-deployed FB types + logical/physical devices + HwConfiguration + their dfbproj/
-    // topologyproj entries); the Mapper recreates everything on the next Test Runtime. Best-effort
-    // (per-file errors collected, never thrown). Keeps General/HMI/.system/.solutionData.
+    // Deep-wipes the Demonstrator EAE project to a no-devices state; the Mapper recreates everything on
+    // the next Test Runtime. Best-effort. Keeps General/HMI/.system/.solutionData.
     public static class DemonstratorWiper
     {
         public sealed class WipeReport
@@ -37,8 +35,7 @@ namespace CodeGen.Services
             "obj", "bin",
         };
 
-        // Top-level IEC61499/ files nuked. System/ .system/.syslay/.sysres/.hcf are NOT touched here
-        // — the canvas-empty pass handles them.
+        // System/ .system/.syslay/.sysres/.hcf are NOT touched here; the canvas-empty pass handles them.
         static readonly string[] FileExtensionsToDelete = new[]
         {
             ".fbt", ".adp", ".dt",
@@ -49,7 +46,6 @@ namespace CodeGen.Services
         };
 
         // The VueOne hidden runner links against this one-argument signature, so it must stay.
-        // It resolves the config the same way that runner does, from the working directory.
         public static WipeReport Wipe(string demonstratorRepoRoot)
         {
             MapperConfig? cfg = null;
@@ -76,8 +72,7 @@ namespace CodeGen.Services
 
             EmptyAllCanvases(cfg, iec, report);
 
-            // Delete logical devices + app BEFORE StripDfbproj so the now-missing entries are pruned
-            // (dfbproj keeps a System/* entry only if File.Exists).
+            // Delete logical devices + app BEFORE StripDfbproj: it keeps a System/* entry only if it exists.
             DeleteLogicalDevices(iec, report);
             CodeGen.Devices.Core.ApplicationShellEmitter.DeleteApplicationShell(
                 iec, line => report.Steps.Add(line));
@@ -87,12 +82,10 @@ namespace CodeGen.Services
             StripDfbproj(iec, report);
             DeleteRepoRootScratch(demonstratorRepoRoot, report);
 
-            // Wipe HwConfiguration/; leaving it populated stacks stale baseline entries and EAE shows
-            // duplicate M262_RES nodes. M262HwConfigCopier recreates it from the baseline.
+            // Leaving HwConfiguration/ populated stacks stale entries and EAE shows duplicate M262_RES nodes.
             DeleteHwConfiguration(demonstratorRepoRoot, report);
 
-            // Delete physical devices (Topology Equipment/Wires/BroadcastDomains + topologyproj
-            // registrations) — all Mapper-regenerated next Test Runtime. .solutionData stays.
+            // Physical devices are all Mapper-regenerated next Test Runtime; .solutionData stays.
             DeletePhysicalDevices(iec, report);
 
             return report;
@@ -233,8 +226,7 @@ namespace CodeGen.Services
             while (i < lines.Length)
             {
                 var line = lines[i];
-                // <Content> included: device .hcf + EAE compile artifacts register as <Content>; a
-                // stale one after a device-folder delete = EAE "Missing Project Files". Kept if the file exists.
+                // A stale <Content> entry after a device-folder delete = EAE "Missing Project Files".
                 var m = Regex.Match(line, @"^\s*<(Compile|None|EmbeddedResource|Content)\b", RegexOptions.IgnoreCase);
                 if (m.Success)
                 {
@@ -288,11 +280,10 @@ namespace CodeGen.Services
                 var abs = Path.Combine(iecDir, include.Replace('\\', '/').Replace('/', Path.DirectorySeparatorChar));
                 return File.Exists(abs);
             }
-            // CAT folders / top-level FB type files — all just deleted, so drop the entries.
             return false;
         }
 
-        // Delete HwConfiguration/; M262HwConfigCopier.Copy recreates it from the baseline next run.
+        // The verbatim .hcf copy recreates HwConfiguration/ from the baseline next run.
         static void DeleteHwConfiguration(string repoRoot, WipeReport report)
         {
             string? found = null;
@@ -371,7 +362,6 @@ namespace CodeGen.Services
         // Delete Topology Equipment/Wire/BroadcastDomain JSON + their topologyproj entries; keep .solutionData.
         static void DeletePhysicalDevices(string iecDir, WipeReport report)
         {
-            // Topology/ is a sibling of IEC61499/ under the project folder.
             var projectDir = Path.GetDirectoryName(iecDir);
             if (projectDir == null) return;
             var topoDir = Path.Combine(projectDir, "Topology");
@@ -399,7 +389,6 @@ namespace CodeGen.Services
                 "Mapper recreates them on the next Test Runtime.");
         }
 
-        // Drop topologyproj entries pointing at a just-deleted Equipment/Wire/BroadcastDomain JSON.
         static void StripTopologyProj(string topoDir, WipeReport report)
         {
             var proj = Path.Combine(topoDir, "TopologyManager.topologyproj");
