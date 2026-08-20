@@ -30,7 +30,6 @@ namespace CodeGen.Hmi
         string LibraryName,
         string LibraryVersion,
         string LogicalDeviceType,
-        string LogicalDeviceName,
         IReadOnlyList<HmiArtefactSpec> Artefacts,
         string SwitchEquipmentFile)
     {
@@ -61,42 +60,28 @@ namespace CodeGen.Hmi
                                             };
     }
 
-    internal static class HmiDeviceLoader
+    // The deployment half of the ONE definition. It is read from the SAME already-parsed hmi.yml
+    // node tree as everything else - there is no second file, no second cache and no second read.
+    // HmiDefinitionLoader calls Bind() while it is building the root definition, and the result
+    // hangs off HmiDefinition.Device.
+    internal static class HmiDeviceBinder
     {
-        internal const string FileName = HmiDefinitionLoader.FileName;
         private static readonly string[] Roots = { "system", "device", "topology" };
 
-        private static readonly HmiYaml.Cache<HmiDeviceDefinition> Cached = new(FileName, Parse);
-
-        internal static HmiDeviceDefinition Load() => Cached.Load();
-
-        internal static HmiDeviceDefinition Parse(string yaml)
+        internal static HmiDeviceDefinition Bind(HmiYaml.Node root, HmiYaml.Validator v)
         {
-            var dto = HmiYaml.Deserialize<HmiDefinitionDto>(FileName, yaml);
-            var v = new HmiYaml.Validator(FileName);
+            var id = root.Sec("identities");
+            var net = root.Sec("network");
+            var lib = root.Sec("library");
+            var dev = root.Sec("logicalDevice");
 
-            var id = v.Section(dto.Identities, "identities");
-            var net = v.Section(dto.Network, "network");
-            var lib = v.Section(dto.Library, "library");
-            var dev = v.Section(dto.LogicalDevice, "logicalDevice");
-            var sw = v.Section(dto.Switch, "switch");
-
-            string G(string? value, string key) => v.Guid(value, "identities." + key);
-
-            var guids = new (string Key, string Value)[]
+            var keys = new[]
             {
-                ("device", G(id.Device, "device")),
-                ("workstation", G(id.Workstation, "workstation")),
-                ("workstationNic", G(id.WorkstationNic, "workstationNic")),
-                ("workstationRuntime", G(id.WorkstationRuntime, "workstationRuntime")),
-                ("panel", G(id.Panel, "panel")),
-                ("panelRuntime", G(id.PanelRuntime, "panelRuntime")),
-                ("panelContainer", G(id.PanelContainer, "panelContainer")),
-                ("panelContainerRuntime", G(id.PanelContainerRuntime, "panelContainerRuntime")),
-                ("runtimeType", G(id.RuntimeType, "runtimeType")),
-                ("containerRuntimeType", G(id.ContainerRuntimeType, "containerRuntimeType")),
-                ("simulationService", G(id.SimulationService, "simulationService")),
+                "device", "workstation", "workstationNic", "workstationRuntime",
+                "panel", "panelRuntime", "panelContainer", "panelContainerRuntime",
+                "runtimeType", "containerRuntimeType", "simulationService",
             };
+            var guids = keys.Select(k => (Key: k, Value: id.Guid(k))).ToArray();
 
             // Every identity must be distinct. nullDevice is excluded because it is deliberately the
             // shared null GUID; two REAL identities colliding would silently bind the HMI to the
@@ -104,39 +89,39 @@ namespace CodeGen.Hmi
             v.Distinct(guids.Where(g => g.Value.Length > 0)
                             .Select(g => ("identities." + g.Key, g.Value.ToLowerInvariant())), "identity GUID");
 
-            var nullDevice = G(id.NullDevice, "nullDevice");
+            var nullDevice = id.Guid("nullDevice");
             if (nullDevice.Length > 0 && Guid.TryParse(nullDevice, out var parsed) && parsed != Guid.Empty)
                 v.Fail("'identities.nullDevice' must be the all-zero GUID.");
 
-            var hostIp = v.Ip(net.HostIp, "network.hostIp");
-            var internalIp = v.Ip(net.InternalRuntimeIp, "network.internalRuntimeIp");
+            var hostIp = net.Ip("hostIp");
+            var internalIp = net.Ip("internalRuntimeIp");
             if (hostIp.Length > 0 && hostIp == internalIp)
                 v.Fail("'network.hostIp' and 'network.internalRuntimeIp' must differ - the workstation " +
                        "NIC and the panel container are distinct endpoints.");
 
-            var logicalPort = v.Port(net.LogicalPort, "network.logicalPort");
-            var securePort = v.Port(net.SecurePort, "network.securePort");
+            var logicalPort = net.Int("logicalPort", 1, 65535);
+            var securePort = net.Int("securePort", 1, 65535);
             if (logicalPort == securePort) v.Fail("'network.logicalPort' and 'network.securePort' must differ.");
 
             var artefacts = new List<HmiArtefactSpec>();
-            foreach (var a in v.List(dto.Artefacts, "artefacts"))
+            foreach (var a in root.Seq("artefacts"))
             {
-                var template = v.SafeFileName(a.Template, "artefacts[].template");
-                var name = v.Text(a.Name, $"artefacts[{template}].name");
-                var into = v.Text(a.Into, $"artefacts[{template}].into").ToLowerInvariant();
+                var template = a.SafeFileName("template");
+                var name = a.Text("name");
+                var into = a.Text("into").ToLowerInvariant();
                 if (into.Length > 0 && !Roots.Contains(into))
-                    v.Fail($"'artefacts[{template}].into' must be one of {string.Join("/", Roots)} (got '{into}').");
+                    v.Fail($"'{a.Path}.into' must be one of {string.Join("/", Roots)} (got '{into}').");
 
                 // The destination may carry a {DeviceId} token, so it is checked for traversal rather
                 // than as a plain file name.
                 if (name.Contains("..", StringComparison.Ordinal) || name.Contains('/') || name.Contains('\\'))
-                    v.Fail($"'artefacts[{template}].name' must stay inside its directory (got '{name}').");
+                    v.Fail($"'{a.Path}.name' must stay inside its directory (got '{name}').");
 
-                var register = (a.Register ?? string.Empty).Trim();
-                if (register.Length > 0 && !string.Equals(register, "topologyProj", StringComparison.Ordinal))
-                    v.Fail($"'artefacts[{template}].register' may only be 'topologyProj' (got '{register}').");
+                var register = a.Opt("register");
+                if (register != null && !string.Equals(register, "topologyProj", StringComparison.Ordinal))
+                    v.Fail($"'{a.Path}.register' may only be 'topologyProj' (got '{register}').");
 
-                artefacts.Add(new HmiArtefactSpec(template, into, name, register.Length > 0));
+                artefacts.Add(new HmiArtefactSpec(template, into, name, register != null));
             }
 
             v.Distinct(artefacts.Select(a => ("artefacts." + a.Template, a.Template)), "template");
@@ -145,22 +130,20 @@ namespace CodeGen.Hmi
             // Every remaining field is validated into a local BEFORE Throw(), so a malformed value
             // here is reported alongside the others rather than being silently accepted because the
             // validator had already decided the file was clean.
-            var subnet = v.Ip(net.Subnet, "network.subnet");
-            var libName = v.Text(lib.Name, "library.name");
-            var libVersion = v.Text(lib.Version, "library.version");
-            var devType = v.Text(dev.Type, "logicalDevice.type");
-            var devName = v.Text(dev.Name, "logicalDevice.name");
-            var switchFile = v.SafeFileName(sw.EquipmentFile, "switch.equipmentFile");
+            var subnet = net.Ip("subnet");
+            var libName = lib.Text("name");
+            var libVersion = lib.Text("version");
+            var devType = dev.Text("type");
+            var switchFile = root.Sec("switch").SafeFileName("equipmentFile");
 
-            v.Throw();
-
-            // Constructed exclusively from already-validated locals.
+            // No Throw here: the ROOT loader owns the single Throw, so a deployment fault is reported
+            // together with every presentation and capability fault instead of masking them.
             return new HmiDeviceDefinition(
                 guids[0].Value, guids[1].Value, guids[2].Value, guids[3].Value,
                 guids[4].Value, guids[5].Value, guids[6].Value, guids[7].Value,
                 guids[8].Value, guids[9].Value, guids[10].Value, nullDevice,
                 hostIp, internalIp, subnet, logicalPort, securePort,
-                libName, libVersion, devType, devName,
+                libName, libVersion, devType,
                 artefacts, switchFile);
         }
     }
