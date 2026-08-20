@@ -1,16 +1,15 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Xml.Linq;
+using static CodeGen.Services.FbtXmlEditor;
+using System.IO;
 using CodeGen.Configuration;
 using CodeGen.Translation.Interlocks;
-using static CodeGen.Services.FbtXmlEditor;
 
 namespace CodeGen.Services
 {
-    // Deploy-time interlock/target patches: the InterlockRule/InterlockTable/TargetStates datatypes
-    // and the actuator-CAT + CommonInterlockEvaluator struct collapses (gated by interlock.yaml).
+    // Deploy-time interlock patches, gated by interlock.yaml. No other FBT patching lives here.
     internal static class InterlockCatPatcher
     {
         internal static void DeployInterlockRuleDatatype(MapperConfig cfg, string eaeProjectDir, DeployResult result)
@@ -166,8 +165,7 @@ namespace CodeGen.Services
                 }
             }, notFoundNote: $"{catFileName} not found; Target normalize skipped.");
 
-        // Fold the CommonInterlockEvaluator's three target InputVars into one Target : TargetStates + rewrite
-        // the Work1/Work2/Home algorithms to Target.Work1/Work2/Home; reduce==false restores scalars.
+        // The same fold on the evaluator, plus rewriting its algorithms to Target.Work1/Work2/Home.
         internal static void NormalizeCommonInterlockEvaluatorTargets(
             string eaeProjectDir, bool reduce, DeployResult result)
             => EditDeployedFbt(eaeProjectDir, "CommonInterlockEvaluator.fbt", "CommonInterlockEvaluator Target normalize failed", result,
@@ -274,8 +272,7 @@ namespace CodeGen.Services
             ["RuleBlockedState"] = "BlockedState",
         };
 
-        // Interlock-struct reduction on an actuator CAT (gated by interlock.yaml useStruct): collapse the
-        // four parallel Rule arrays into one RuleTable : InterlockRule[10]; reduce==false restores the arrays.
+        // Collapse an actuator CAT's four Rule arrays into one RuleTable; reduce==false restores them.
         internal static void NormalizeFiveStateRuleArrays(
             string eaeProjectDir, string catFileName, string interlockFbName,
             bool reduce, DeployResult result)
@@ -422,9 +419,7 @@ namespace CodeGen.Services
                 }
             }, notFoundNote: $"{catFileName} not found; RuleTable normalize skipped.");
 
-        // Interlock-struct reduction on the CommonInterlockEvaluator Basic FB (gated by interlock.yaml
-        // useStruct): collapse the four Rule arrays into RuleTable : InterlockRule[10] across the InputVars,
-        // the event With lists, AND the Evaluate ST; reduce==false restores the four arrays.
+        // The same collapse on the evaluator, across InputVars, event With lists AND the Evaluate ST.
         internal static void NormalizeCommonInterlockEvaluatorRules(
             string eaeProjectDir, bool reduce, DeployResult result)
             => EditDeployedFbt(eaeProjectDir, "CommonInterlockEvaluator.fbt", "CommonInterlockEvaluator RuleTable normalize failed", result,
@@ -549,8 +544,7 @@ namespace CodeGen.Services
                 }
             }, notFoundNote: "CommonInterlockEvaluator.fbt not found; RuleTable normalize skipped.");
 
-        // Restores Five_State_Actuator_CAT's TargetWork1State/TargetHomeState as wired inputs (VarDecl +
-        // INIT With + Input pin + InterlockManager DataConnection), stripping any baked-on params.
+        // Restores the scalar target InputVars as wired inputs, stripping any baked-on params.
         internal static void NormalizeFiveStateInterlockConstants(
             string eaeProjectDir, DeployResult result)
             => EditDeployedFbt(eaeProjectDir, "Five_State_Actuator_CAT.fbt", "Five_State_Actuator_CAT interlock-constant normalize failed", result,
@@ -648,8 +642,7 @@ namespace CodeGen.Services
                 }
             }, notFoundNote: "Five_State_Actuator_CAT.fbt not found; interlock-constant normalize skipped.");
 
-        // The interlock struct/target normalizers as one unit — both actuator CATs + the shared evaluator flip
-        // TOGETHER. Extracted so the consistency guard can re-run it as a self-heal.
+        // One unit: both actuator CATs and the shared evaluator must flip TOGETHER.
         internal static void ApplyInterlockNormalizers(MapperConfig cfg,
             string eaeProjectDir, bool interlockStruct, bool targetStruct, DeployResult result)
         {
@@ -671,11 +664,9 @@ namespace CodeGen.Services
             NormalizeCommonInterlockEvaluatorTargets(eaeProjectDir, targetStruct, result);
         }
 
-        // Guard: every data member an actuator CAT connects to its interlock FB MUST exist as an InputVar on
-        // the shared CommonInterlockEvaluator (the exact EAE ERR_MEMBER_VAR_NOTFOUND condition). A mismatch =
-        // a stale scalar/struct interlock mix (e.g. EAE held a CAT .fbt locked so its reshape could not save
-        // while the evaluator's did). One self-heal re-run (the lock may have released); if it persists, ABORT
-        // the Generate so the broken tree is never deployed — an actionable message beats cryptic build errors.
+        // Guard: every member an actuator CAT connects to its interlock FB MUST be an InputVar on the
+        // shared evaluator (EAE's ERR_MEMBER_VAR_NOTFOUND). A mismatch is a stale scalar/struct mix, so
+        // re-run once, then ABORT rather than deploy it.
         internal static void AssertInterlockInterfaceConsistent(MapperConfig cfg,
             string eaeProjectDir, bool interlockStruct, bool targetStruct, DeployResult result)
         {
@@ -698,8 +689,7 @@ namespace CodeGen.Services
                 "then Generate again. Generation ABORTED so the broken tree is never deployed.");
         }
 
-        // Every data member each actuator CAT connects into its interlock FB, checked against the evaluator's
-        // InputVars. Read-only (no locks). Returns human-readable mismatch strings (empty = consistent).
+        // Read-only (no locks). Returns human-readable mismatch strings; empty means consistent.
         static List<string> FindInterlockInterfaceMismatches(string eaeProjectDir)
         {
             var mismatches = new List<string>();
