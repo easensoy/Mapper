@@ -6,7 +6,6 @@ using System.Linq;
 using System.Net;
 using YamlDotNet.Core;
 using YamlDotNet.Serialization;
-using YamlDotNet.Serialization.NamingConventions;
 
 namespace CodeGen.Hmi
 {
@@ -16,17 +15,15 @@ namespace CodeGen.Hmi
             : base($"[Hmi] Config/{file} is invalid: {message}") { }
     }
 
-    // Shared strict-YAML infrastructure for the two HMI configuration files.
+    // Strict-YAML infrastructure for hmi.yml.
     //
-    // Strict on purpose. Unlike the other config loaders these do NOT ignore unmatched properties:
-    // a key the schema does not know is a typo or a stale edit, and silently dropping it would leave
-    // the generator running on a default the YAML appears to override. There are no C#-side defaults
-    // to fall back to, so every required value must be present.
+    // The document is read as a plain node tree and addressed by path, so the schema lives in the one
+    // place that consumes it instead of being mirrored into a parallel set of nullable transport
+    // types. Strictness is kept: every path a load reads is recorded, and any key the load never
+    // touched is reported - which covers the whole tree rather than one type at a time.
     internal static class HmiYaml
     {
-        private static readonly IDeserializer Strict = new DeserializerBuilder()
-            .WithNamingConvention(CamelCaseNamingConvention.Instance)
-            .Build();       // no IgnoreUnmatchedProperties: unknown keys throw
+        private static readonly IDeserializer Untyped = new DeserializerBuilder().Build();
 
         internal static string PathOf(string file) =>
             Path.Combine(AppContext.BaseDirectory, "Config", file);
@@ -41,44 +38,14 @@ namespace CodeGen.Hmi
             return File.ReadAllText(path);
         }
 
-        internal static T Deserialize<T>(string file, string yaml) where T : class
+        internal static object Parse(string file, string yaml)
         {
-            try { return Strict.Deserialize<T>(yaml) ?? throw new HmiConfigException(file, "empty document."); }
-            catch (YamlException ex) { throw new HmiConfigException(file, ex.Message); }
-        }
-
-        // Caches a parsed definition against the file's timestamp so repeated generations in one
-        // process re-read only when the file actually changes.
-        internal sealed class Cache<T> where T : class
-        {
-            private readonly string _file;
-            private readonly Func<string, T> _parse;
-            private readonly object _gate = new();
-            private T? _value;
-            private DateTime _stampUtc;
-
-            internal Cache(string file, Func<string, T> parse) { _file = file; _parse = parse; }
-
-            internal T Load()
+            try
             {
-                var path = PathOf(_file);
-                if (_value != null && Stamp(path) == _stampUtc) return _value;
-                lock (_gate)
-                {
-                    // The stamp is re-read INSIDE the lock and captured BEFORE the content, so a file
-                    // rewritten between the two can never be cached under the older timestamp - which
-                    // would pin stale content until the next unrelated edit.
-                    var stamp = Stamp(path);
-                    if (_value != null && stamp == _stampUtc) return _value;
-                    var parsed = _parse(Read(_file));
-                    _value = parsed;
-                    _stampUtc = stamp;
-                    return parsed;
-                }
+                return Untyped.Deserialize<object>(yaml)
+                    ?? throw new HmiConfigException(file, "empty document.");
             }
-
-            private static DateTime Stamp(string path) =>
-                File.Exists(path) ? File.GetLastWriteTimeUtc(path) : DateTime.MinValue;
+            catch (YamlException ex) { throw new HmiConfigException(file, ex.Message); }
         }
 
         // Accumulates every problem so one run reports the whole set rather than the first typo.
@@ -86,10 +53,49 @@ namespace CodeGen.Hmi
         {
             private readonly string _file;
             protected readonly List<string> _problems = new();
+            private readonly HashSet<string> _read = new(StringComparer.Ordinal);
+            private readonly HashSet<string> _whole = new(StringComparer.Ordinal);
+            private object? _root;
 
             internal Validator(string file) => _file = file;
 
+            internal Node Root(string yaml)
+            {
+                _root = Parse(_file, yaml);
+                return new Node(this, _root, string.Empty);
+            }
+
             internal void Fail(string message) => _problems.Add(message);
+
+            internal void Note(string path) => _read.Add(path);
+
+            internal void NoteSubtree(string path) { _read.Add(path); _whole.Add(path); }
+
+            // Every key the load never addressed is a typo or a stale edit; reporting it is what
+            // stops the generator running on a value the file appears to override.
+            internal void Unknown()
+            {
+                Walk(_root, string.Empty);
+
+                void Walk(object? node, string path)
+                {
+                    if (_whole.Contains(path)) return;
+                    switch (node)
+                    {
+                        case IDictionary<object, object> map:
+                            foreach (var kv in map)
+                            {
+                                var child = path.Length == 0 ? $"{kv.Key}" : $"{path}.{kv.Key}";
+                                if (!_read.Contains(child)) { _problems.Add($"unknown key '{child}'."); continue; }
+                                Walk(kv.Value, child);
+                            }
+                            break;
+                        case IList<object> list:
+                            for (var i = 0; i < list.Count; i++) Walk(list[i], $"{path}[{i}]");
+                            break;
+                    }
+                }
+            }
 
             internal void Throw()
             {
@@ -98,107 +104,190 @@ namespace CodeGen.Hmi
                         string.Join(Environment.NewLine + "  - ", _problems));
             }
 
-            internal T Section<T>(T? section, string path) where T : class
+            internal void Distinct<T>(IEnumerable<(string Path, T Value)> entries, string what)
             {
-                if (section != null) return section;
-                _problems.Add($"missing required section '{path}'.");
-                Throw();
+                foreach (var dup in entries.GroupBy(e => e.Value).Where(g => g.Count() > 1))
+                    _problems.Add($"{what} '{dup.Key}' is used by {string.Join(", ", dup.Select(d => d.Path))}.");
+            }
+        }
+
+        // One addressable position in the document. Reading through a Node validates the value and
+        // records the path, so the schema, the error message and the strictness check all come from
+        // the single call site that needs the value.
+        internal sealed class Node
+        {
+            private readonly Validator _v;
+            private readonly object? _raw;
+
+            internal Node(Validator v, object? raw, string path) { _v = v; _raw = raw; Path = path; }
+
+            internal string Path { get; }
+
+            private string At(string rel) =>
+                rel.Length == 0 ? Path : Path.Length == 0 ? rel : Path + "." + rel;
+
+            private object? Raw(string rel)
+            {
+                var cur = _raw;
+                var path = Path;
+                foreach (var part in rel.Split('.', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    path = path.Length == 0 ? part : path + "." + part;
+                    if (cur is IDictionary<object, object> map && map.TryGetValue(part, out var next))
+                    { _v.Note(path); cur = next; }
+                    else return null;
+                }
+                return cur;
+            }
+
+            private void Missing(string rel, string what) =>
+                _v.Fail($"missing required {what} '{At(rel)}'.");
+
+            internal bool Has(string rel) => Raw(rel) != null;
+
+            // ---- structure --------------------------------------------------------------------
+
+            internal Node Sec(string rel)
+            {
+                var raw = Raw(rel);
+                if (raw is IDictionary<object, object>) return new Node(_v, raw, At(rel));
+                Missing(rel, "section");
+                _v.Throw();
                 throw new InvalidOperationException();   // unreachable: Throw always throws here
             }
 
-            internal T Required<T>(T? value, string path) where T : struct
+            internal IReadOnlyList<Node> Seq(string rel)
             {
-                if (value.HasValue) return value.Value;
-                _problems.Add($"missing required value '{path}'.");
-                return default;
+                if (Raw(rel) is IList<object> list && list.Count > 0)
+                    return list.Select((x, i) => new Node(_v, x, $"{At(rel)}[{i}]")).ToList();
+                _v.Fail($"'{At(rel)}' must declare at least one entry.");
+                return Array.Empty<Node>();
             }
 
-            internal int Positive(int? value, string path)
+            // ---- scalars ----------------------------------------------------------------------
+
+            internal string? Opt(string rel)
             {
-                var v = Required(value, path);
-                if (v <= 0) _problems.Add($"'{path}' must be greater than zero (got {v}).");
-                return v;
+                var t = Raw(rel) as string;
+                return string.IsNullOrWhiteSpace(t) ? null : t.Trim();
             }
 
-            internal int NonNegative(int? value, string path)
+            internal string Text(string rel)
             {
-                var v = Required(value, path);
-                if (v < 0) _problems.Add($"'{path}' must not be negative (got {v}).");
-                return v;
-            }
-
-            internal string Text(string? value, string path)
-            {
-                if (!string.IsNullOrWhiteSpace(value)) return value!.Trim();
-                _problems.Add($"missing required value '{path}'.");
+                var t = Opt(rel);
+                if (t != null) return t;
+                Missing(rel, "value");
                 return string.Empty;
             }
 
-            // Anything used as a C# identifier or file stem must be safe to emit verbatim.
-            internal string Identifier(string? value, string path)
+            internal string Identifier(string rel)
             {
-                var t = Text(value, path);
+                var t = Text(rel);
                 if (t.Length > 0 && !t.All(ch => char.IsLetterOrDigit(ch) || ch == '_'))
-                    _problems.Add($"'{path}' must be a bare identifier (got '{t}').");
+                    _v.Fail($"'{At(rel)}' must be letters, digits or underscore (got '{t}').");
                 return t;
             }
 
-            internal string Guid(string? value, string path)
+            internal string Guid(string rel)
             {
-                var t = Text(value, path);
+                var t = Text(rel);
                 if (t.Length > 0 && !System.Guid.TryParse(t, out _))
-                    _problems.Add($"'{path}' is not a valid GUID (got '{t}').");
+                    _v.Fail($"'{At(rel)}' is not a GUID (got '{t}').");
                 return t;
             }
 
-            internal string Ip(string? value, string path)
+            internal string Ip(string rel)
             {
-                var t = Text(value, path);
+                var t = Text(rel);
                 if (t.Length > 0 && !IPAddress.TryParse(t, out _))
-                    _problems.Add($"'{path}' is not a valid IP address (got '{t}').");
+                    _v.Fail($"'{At(rel)}' is not an IP address (got '{t}').");
                 return t;
-            }
-
-            internal int Port(int? value, string path)
-            {
-                var v = Required(value, path);
-                if (v is < 1 or > 65535) _problems.Add($"'{path}' must be 1-65535 (got {v}).");
-                return v;
             }
 
             // A template or destination name must stay inside its directory: no rooted paths, no
             // traversal, no directory separators at all.
-            internal string SafeFileName(string? value, string path)
+            internal string SafeFileName(string rel)
             {
-                var t = Text(value, path);
+                var t = Text(rel);
                 if (t.Length == 0) return t;
-                if (Path.IsPathRooted(t) || t.Contains("..", StringComparison.Ordinal) ||
+                if (System.IO.Path.IsPathRooted(t) || t.Contains("..", StringComparison.Ordinal) ||
                     t.Contains('/') || t.Contains('\\'))
-                    _problems.Add($"'{path}' must be a plain file name (got '{t}').");
+                    _v.Fail($"'{At(rel)}' must be a plain file name (got '{t}').");
                 return t;
             }
 
-            internal IReadOnlyList<string> Strings(List<string>? value, string path)
+            internal int Int(string rel)
             {
-                if (value == null) { _problems.Add($"missing required list '{path}'."); return Array.Empty<string>(); }
-                var cleaned = value.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.Trim()).ToList();
+                var t = Opt(rel);
+                if (t == null) { Missing(rel, "value"); return 0; }
+                if (int.TryParse(t, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n)) return n;
+                _v.Fail($"'{At(rel)}' must be a whole number (got '{t}').");
+                return 0;
+            }
+
+            // One bounds check. The message names the range it was given, so a bad canvas width and
+            // a bad port read the same way without four near-identical wrappers.
+            internal int Int(string rel, int min, int max)
+            {
+                var n = Int(rel);
+                if (n >= min && n <= max) return n;
+                _v.Fail(max == int.MaxValue
+                    ? $"'{At(rel)}' must be at least {min} (got {n})."
+                    : $"'{At(rel)}' must be {min}-{max} (got {n}).");
+                return n;
+            }
+
+            internal bool Flag(string rel)
+            {
+                var t = Opt(rel);
+                if (t == null) { Missing(rel, "value"); return false; }
+                if (bool.TryParse(t, out var b)) return b;
+                _v.Fail($"'{At(rel)}' must be true or false (got '{t}').");
+                return false;
+            }
+
+            internal bool FlagOr(string rel, bool fallback) => Has(rel) ? Flag(rel) : fallback;
+
+            // ---- collections ------------------------------------------------------------------
+
+            private List<string> Items(string rel)
+            {
+                _v.NoteSubtree(At(rel));
+                return Raw(rel) is IList<object> list
+                    ? list.OfType<string>().Where(s => !string.IsNullOrWhiteSpace(s))
+                          .Select(s => s.Trim()).ToList()
+                    : new List<string>();
+            }
+
+            internal IReadOnlyList<string> Strings(string rel)
+            {
+                if (Raw(rel) is not IList<object>) { Missing(rel, "list"); return Array.Empty<string>(); }
+                var cleaned = Items(rel);
                 foreach (var dup in cleaned.GroupBy(s => s, StringComparer.Ordinal).Where(g => g.Count() > 1))
-                    _problems.Add($"'{path}' repeats '{dup.Key}'.");
+                    _v.Fail($"'{At(rel)}' repeats '{dup.Key}'.");
                 return cleaned;
             }
 
-            internal IReadOnlyList<T> List<T>(List<T>? value, string path)
+            internal IReadOnlyList<string> OptStrings(string rel) =>
+                Raw(rel) is IList<object> ? Items(rel) : Array.Empty<string>();
+
+            internal IReadOnlyList<IReadOnlyList<string>> StringLists(string rel)
             {
-                if (value != null && value.Count > 0) return value;
-                _problems.Add($"'{path}' must declare at least one entry.");
-                return Array.Empty<T>();
+                _v.NoteSubtree(At(rel));
+                return Raw(rel) is IList<object> list
+                    ? list.Select(x => (IReadOnlyList<string>)(x is IList<object> inner
+                        ? inner.OfType<string>().Select(s => s.Trim()).ToList()
+                        : new List<string>())).ToList()
+                    : Array.Empty<IReadOnlyList<string>>();
             }
 
-            internal void Distinct<T>(IEnumerable<(string Path, T Value)> entries, string what)
+            internal IReadOnlyDictionary<string, string> Map(string rel)
             {
-                foreach (var dup in entries.GroupBy(e => e.Value)
-                             .Where(g => g.Count() > 1))
-                    _problems.Add($"{what} '{dup.Key}' is used by {string.Join(", ", dup.Select(d => d.Path))}.");
+                _v.NoteSubtree(At(rel));
+                var map = new Dictionary<string, string>(StringComparer.Ordinal);
+                if (Raw(rel) is IDictionary<object, object> d)
+                    foreach (var kv in d) map[$"{kv.Key}"] = $"{kv.Value}";
+                return map;
             }
         }
     }
