@@ -2,53 +2,42 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Xml.Linq;
-using CodeGen.Configuration;
 using CodeGen.Devices.Core;
 using CodeGen.Devices.M262;
 using CodeGen.Translation;
 using CodeGen.Mapping;
+using System.Xml.Linq;
+using CodeGen.Configuration;
 
 namespace CodeGen.Devices.RevPi
 {
-    // The Revolution Pi as an EAE deployment target.
-    //
-    // It is NOT a new kind of controller: its .sysdev is Type="Soft_dPAC" exactly like the BX1's, so the
-    // whole device shell — sysdev, sysres, Properties, Simulation.Binding, hardware config, dfbproj and
-    // topologyproj registration — comes from the shared Station2DeviceEmitter.EmitOnePlc. What it hosts
-    // comes from the run's allocation, the I/O from the bindings workbook, the bridge from the coupler's
-    // own type. This file holds only the RevPi DELTA: the equipment document (a Workstation host with a
-    // CHILD NIC equipment, and a Soft dPAC container on a Docker macvlan parented to that NIC), the
-    // Modbus hardware config, and moving relocated components off whichever resource used to host them.
-    //
-    // The Mapper never runs docker. It emits the topology; EAE's Soft dPAC Manager reads the declaration
-    // and creates the network and the container. See Docs/REVPI_PROVISIONING.md.
+    // The Revolution Pi as an EAE deployment target. It is NOT a new kind of controller: its .sysdev is
+    // Type="Soft_dPAC" like the BX1's, so the whole device shell comes from Station2DeviceEmitter.EmitOnePlc.
+    // Only the RevPi DELTA lives here: the equipment document (a Workstation host with a child NIC, and a
+    // Soft dPAC container on a Docker macvlan parented to it), the Modbus hardware config, and moving
+    // relocated components off whichever resource used to host them. See Docs/REVPI_PROVISIONING.md.
     public static class RevPiDeviceEmitter
     {
         // Continues the M262/M580/BX1 (…002/003/004) series. Also named in Devices/Common/FoldersXmlEmitter.cs.
         internal const string SysdevId = "00000000-0000-0000-0000-000000000005";
         static readonly string DeviceName = TargetRegistry.Of(CodeGen.Translation.PlcAssignment.RevPi).DeviceName!;
         const string EquipmentJsonName = "Equipment_Revolution_Pi.json";
-        // Topology uuids. The NIC uuid is also named in Devices/Common/TopologyNetworkEmitter.cs, which
-        // wires NIC_2[Port1] to the switch — the reference does the same (Wire 275).
+        // Topology uuids. NicUuid is also named in TopologyNetworkEmitter, which wires NIC_2[Port1] to the switch.
         const string EquipmentUuid = "11111111-2222-3333-4444-000000000050";
         internal const string NicUuid = "11111111-2222-3333-4444-000000000051";
         const string ContainerUuid = "11111111-2222-3333-4444-000000000052";
         const string RuntimeUuid = "11111111-2222-3333-4444-000000000053";
-        // EAE schema constants: the Soft dPAC runtime type, and DeviceNetwork_1 (192.168.1.0/24), the
-        // broadcast domain BroadcastDomainEmitter declares and both endpoints join.
+        // EAE schema constants: the Soft dPAC runtime type, and the broadcast domain both endpoints join.
         const string SoftDpacTypeId = CodeGen.Devices.Core.Station2DeviceEmitter.SoftDpacTypeId;
         const string DeviceNetworkUuid = CodeGen.Devices.Core.Station2DeviceEmitter.Bx1SoftdpacDomainUuid;
         const string NoDomainUuid = "00000000-0000-0000-0000-000000000000";
 
-        // The supported RevPi target profile: a Revolution Pi's primary NIC, and the ARM Soft dPAC image
-        // (an x86 image exec-format-fails on the Pi). Not user choices — one profile is supported.
+        // One supported profile: the Pi's primary NIC and the ARM Soft dPAC image (an x86 image exec-format-fails).
         const string HostInterface = "eth0";
         const string SoftDpacImage = "softdpac";
         const string SoftDpacImageVersion = "v24.1.25090.08";
 
-        // Simulation-binding ports continue the per-device series (M580 51500/51497, BX1 51501/51498);
-        // every coexisting resource needs its own pair.
+        // Simulation-binding ports: every coexisting resource needs its own pair.
         const int SimulationDeployPort = 51502, SimulationArchivePort = 51499;
 
         public static SystemInjector.BindingApplicationReport EmitDevice(GenerationContext ctx,
@@ -64,18 +53,15 @@ namespace CodeGen.Devices.RevPi
                 return report;
             }
 
-            // Resolves the signals from the coupler type + the bindings workbook, and the resource and
-            // broker ids from the Modbus hardware config. Throws with a precise reason if they disagree,
-            // BEFORE anything is written.
+            // Throws with a precise reason BEFORE anything is written if coupler, workbook and hcf disagree.
             var coupler = RevPiIoBrokerInjector.Resolve(cfg.TemplateLibraryPath);
             var hosted = HostedComponents(ctx, coupler);
 
-            // A component instance may exist on exactly ONE resource — the same instance on two is EAE's
-            // "Repair Instances" / duplicate-key load failure. Whichever resource used to host it, that is
-            // the one it leaves; nothing here assumes which controller that was.
+            // A component instance may exist on exactly ONE resource; the same instance on two is EAE's
+            // "Repair Instances" / duplicate-key load failure. Nothing here assumes which resource it leaves.
             SweepFromOtherResources(systemGuidDir, hosted, report);
 
-            var solutionId = M262TopologyEmitter.ReadProjectGuid(eaeRoot!) ?? NoDomainUuid;
+            var solutionId = EaeProjectLayout.ReadProjectGuid(eaeRoot!) ?? NoDomainUuid;
             var shell = new Station2DeviceEmitter.EmitResult();
             Station2DeviceEmitter.EmitOnePlc(cfg, eaeRoot!, systemGuidDir, shell,
                 sysdevId: SysdevId,
@@ -92,15 +78,12 @@ namespace CodeGen.Devices.RevPi
                 simulationBindingArchivePort: SimulationArchivePort);
             foreach (var w in shell.Warnings) report.Missing.Add($"[RevPi] {w}");
 
-            // A missing hardware config is an EAE "Missing Project Files" report (the dfbproj registers
-            // it). EmitOnePlc force-copies it; EnsureHcf re-copies over a stale in-place tree.
+            // A missing hardware config is an EAE "Missing Project Files" report; EnsureHcf re-copies it.
             var sysres = SysresPath(systemGuidDir, coupler.ResourceId);
             EnsureHcf(cfg, systemGuidDir, coupler.ResourceId, report);
 
-            // Mirror what the allocation routed here, with the mechanism every other controller uses.
-            // Each resource needs its OWN boot pair — EAE indexes FBs by id in one global model, so a
-            // shared boot id is a duplicate-key load failure; seeding on the resource name makes them
-            // unique by construction and stable across runs.
+            // Each resource needs its OWN boot pair: EAE indexes FBs by id in one global model, so a shared
+            // boot id is a duplicate-key load failure. Seeding on the resource name keeps them unique.
             var syslay = cfg.ActiveSyslayPath;
             if (File.Exists(sysres) && !string.IsNullOrWhiteSpace(syslay) && File.Exists(syslay))
             {
@@ -110,8 +93,7 @@ namespace CodeGen.Devices.RevPi
                 int mirrored = SysresFbMirror.MirrorFbsIntoSysres(sysres, fbs,
                     TargetBootstrap.For(PlcAssignment.RevPi, ctx.Layout));
                 report.Missing.Add($"[RevPi] device emitted; resource mirrored {mirrored} component(s)");
-                // EAE fails to LOAD a resource whose {resId}/opcua.xml companion folder is absent.
-                // SysresFbMirror — unlike Station2SysresMirror — does not create it.
+                // EAE fails to LOAD a resource whose {resId}/opcua.xml companion folder is absent, and SysresFbMirror does not create it.
                 CodeGen.Artefacts.OpcuaCompanionEmitter.EmitForArtefact(sysres);
             }
             else report.Missing.Add("[RevPi] sysres or application layer missing — component mirror skipped");
@@ -119,8 +101,7 @@ namespace CodeGen.Devices.RevPi
             return report;
         }
 
-        // Order matters: the shared wiring pass rebuilds the resource's connections, so the broker is
-        // placed after it or its edges are lost.
+        // Order matters: the shared wiring pass rebuilds the resource's connections, so the broker is placed after it or its edges are lost.
         public static void WireResource(GenerationContext ctx,
             SystemInjector.BindingApplicationReport report)
         {
@@ -169,14 +150,11 @@ namespace CodeGen.Devices.RevPi
         static string SysresPath(string systemGuidDir, string resourceId) =>
             Path.Combine(systemGuidDir, SysdevId, $"{resourceId}.sysres");
 
-        // The reference Modbus master hardware config, staged in the template library. Its ResourceId and
-        // MB_Read/Write LinkNames are what the resource and the broker instance must satisfy.
+        // Its ResourceId and MB_Read/Write LinkNames are what the resource and the broker instance must satisfy.
         static string HcfTemplatePath(MapperConfig cfg) =>
             Path.Combine(cfg.TemplateLibraryPath ?? string.Empty, "RevPi", "RevPiIO.modbus.hcf");
 
-        // What this run routed here, in the coupler's own signal order so the result is stable whatever
-        // order the operator picked. The selection itself is guarded before generation by
-        // RevPiSelectionValidator, which rejects anything the coupler cannot serve.
+        // In the coupler's own signal order, so the result is stable whatever order the operator picked.
         static IReadOnlyList<string> HostedComponents(GenerationContext ctx, RevPiIoBrokerInjector.Coupler c) =>
             c.Signals.Select(s => s.Component)
                 .Where(n => ctx.Profile.RevPiComponents.Contains(n))
@@ -223,16 +201,14 @@ namespace CodeGen.Devices.RevPi
                                 ((string?)c.Attribute("Source") ?? "").StartsWith(n + ".", StringComparison.Ordinal) ||
                                 ((string?)c.Attribute("Destination") ?? "").StartsWith(n + ".", StringComparison.Ordinal)))
                             .ToList().ForEach(c => c.Remove());
-                    // EAE holds the file locked while the resource is open and a bare save fails silently,
-                    // which would leave the duplicate in place. Ride out a transient lock.
+                    // EAE locks an open resource and a bare save fails silently, leaving the duplicate in place.
                     CodeGen.Services.FbtXmlEditor.SaveXmlWithRetry(doc, sysres);
                     report.Missing.Add($"[RevPi] swept {stale.Count} relocated component(s) off " +
                         $"'{Path.GetFileName(sysres)}' — prevents a duplicate instance.");
                 }
                 catch (Exception ex)
                 {
-                    // Early cleanup only: the shared wiring pass is the final writer of each resource and
-                    // drops them again, so a duplicate cannot reach EAE even if this is skipped.
+                    // Early cleanup only: the wiring pass writes each resource last and drops them again.
                     report.Missing.Add($"[RevPi] early sweep of '{Path.GetFileName(sysres)}' deferred " +
                         $"({ex.GetType().Name}); the wiring pass drops them from the final file.");
                 }
@@ -240,18 +216,12 @@ namespace CodeGen.Devices.RevPi
         }
 
         // Structurally identical to the reference solution's own "Equipment_Revolution Pi.json"; only the
-        // uuids, the identifier and the diagram position are generated rather than copied.
-        //
-        // dockerVlans is NOT decorative. EAE validates that a Soft dPAC interface's logical network is
-        // associated with a Docker network ("The logical network selected for interface ... is not
-        // associated with a Docker network of ..." — SchneiderElectric.Automation.Nxt.dll), and it is the
-        // Manager, not this generator, that then creates it. type 0 == VLanType.MacVLan (reflected from
-        // SchneiderElectric.Automation.Topology.dll 1.0.25093.1); a macvlan child holds its own MAC, which
-        // is what lets the switch — and EAE Deploy/Login — see the container as its own endpoint.
-        //
-        // Host vs container is a ROLE split: the host NIC carries the Manager (8080) and its address stays
-        // editable; the container carries the runtime and its address is dictated by the vlan, hence
-        // domainReadOnly true. They must never be equal (TopologyAddressValidator enforces it).
+        // uuids, identifier and diagram position are generated rather than copied.
+        // dockerVlans is NOT decorative: EAE validates that a Soft dPAC interface's logical network is
+        // associated with a Docker network, and type 0 == VLanType.MacVLan, whose own MAC is what lets the
+        // switch and EAE Deploy/Login see the container as its own endpoint. The Manager creates it, not us.
+        // Host vs container is a ROLE split: the host NIC carries the Manager (8080) with an editable address,
+        // the container's address is dictated by the vlan. They must never be equal (TopologyAddressValidator).
         static string EquipmentJson(string solutionId, string hostIp, string containerIp) =>
 $$"""
 {
