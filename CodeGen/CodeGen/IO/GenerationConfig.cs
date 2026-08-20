@@ -3,6 +3,7 @@
     public sealed class GenerationConfig
     {
         public int RecipeArraySize { get; set; }
+        public int StateTableCapacity { get; set; } = 24;
         public int DefaultMotionMs { get; set; }
         public int CoverMotionMs { get; set; }
         public int BearingPnpHomeBrakeMs { get; set; }
