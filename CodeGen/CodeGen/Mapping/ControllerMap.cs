@@ -2,8 +2,8 @@
 using System.Collections.Generic;
 using System.Linq;
 using CodeGen.Translation;
-
 using CodeGen.Mapping;
+
 namespace CodeGen.Mapping
 {
     // Allocation questions answered from the target registry, which owns the facts. Kept as a named lens
@@ -15,6 +15,5 @@ namespace CodeGen.Mapping
         public static bool IsFeedController(PlcAssignment plc) =>
             TargetRegistry.IsRegistered(plc) && TargetRegistry.Of(plc).HostsFeedStation;
 
-        public static PlcAssignment FeedController => TargetRegistry.FeedTarget;
     }
 }
