@@ -35,46 +35,32 @@ namespace CodeGen.Hmi
     }
 
     // One compiled recipe row, taken from ctx.Recipes rather than parsed from the syslay blob.
-    internal sealed record HmiRecipeRow(
-        int Index,
-        int StepType,
-        string CmdTarget,
-        int CmdState,
-        int WaitSlot,
-        int WaitState,
-        int NextStep,
-        string Text);           // operator-readable rendering built from twin names
-
     // A capability the deployed contract advertises, plus whether it can honestly be offered.
     internal sealed record HmiCapability(
         HmiCapabilityPurpose Purpose,
         string OutputEvent,
         IReadOnlyList<string> OutputData,
-        IReadOnlyList<string> RequiredFeedback,
         bool Supported,
-        HmiUnavailableReason Reason);
+        HmiUnavailableReason Reason,
+        // Generated at resolve time, naming the exact element that was missing. Shown to the
+        // operator instead of a dead control; the Reason enum only classifies it.
+        string Detail);
 
     internal sealed record HmiComponent(
         string ComponentId,            // Control.xml identity
         string InstanceName,           // the emitted syslay FB name
         string DisplayName,            // operator label
-        string SourceType,             // Control.xml <Type>
         string CatType,                // the CAT actually emitted
         string TagName,                // syslay FB ID - the only EAE binding
         PlcAssignment Controller,
         string Resource,
-        string? OwningProcess,
         int Slot,                      // state_table slot, -1 when unallocated
         IReadOnlyList<HmiStateName> States,
         IReadOnlyList<HmiInterlockRule> Interlocks,
         IReadOnlyList<HmiCapability> Capabilities,
         string? Ring = null)           // report-ring identity; the scope a Slot is meaningful in
     {
-        internal bool Can(HmiCapabilityPurpose p) =>
-            Capabilities.Any(c => c.Purpose == p && c.Supported);
 
-        internal HmiCapability? Capability(HmiCapabilityPurpose p) =>
-            Capabilities.FirstOrDefault(c => c.Purpose == p);
 
         internal string StateName(int value) =>
             States.FirstOrDefault(s => s.Value == value)?.Name ?? value.ToString();
@@ -89,18 +75,11 @@ namespace CodeGen.Hmi
         string TagName,
         string CatType,
         int Slot,
-        IReadOnlyList<HmiRecipeRow> Rows,
         IReadOnlyList<string> Owned,      // instance names this recipe commands
-        IReadOnlyList<string> Observed,   // instance names this recipe waits on
-        IReadOnlyList<HmiStateName> Phases,
         IReadOnlyList<HmiCapability> Capabilities,
         string? Ring = null)
     {
-        internal bool Can(HmiCapabilityPurpose p) =>
-            Capabilities.Any(c => c.Purpose == p && c.Supported);
 
-        internal HmiCapability? Capability(HmiCapabilityPurpose p) =>
-            Capabilities.FirstOrDefault(c => c.Purpose == p);
     }
 
     // A station/area infrastructure instance - the mode chain nodes.
@@ -120,10 +99,14 @@ namespace CodeGen.Hmi
         IReadOnlyList<HmiComponent> Components,
         IReadOnlyList<string> Diagnostics)
     {
-        internal HmiComponent? ByInstance(string name) =>
-            Components.FirstOrDefault(c => string.Equals(c.InstanceName, name, StringComparison.Ordinal));
 
-        internal IEnumerable<HmiComponent> On(PlcAssignment plc) =>
-            Components.Where(c => c.Controller == plc);
+        // Every capability this plant resolved, with the instance that owns it. The planner, the
+        // validator and the evidence writer each need the same walk; it lives here so they cannot
+        // disagree about what the plant offers.
+        internal IEnumerable<(string Owner, HmiCapability Cap)> AllCapabilities() =>
+            Stations.SelectMany(s => s.Capabilities.Select(c => (s.InstanceName, c)))
+                .Concat(Processes.SelectMany(p => p.Capabilities.Select(c => (p.InstanceName, c))))
+                .Concat(Components.SelectMany(x => x.Capabilities.Select(c => (x.InstanceName, c))));
+
     }
 }
