@@ -5,10 +5,8 @@ using CodeGen.Models;
 
 namespace CodeGen.Domain.Twin
 {
-    // The digital twin, resolved once. Control.xml names components and states by loose id strings;
-    // every stage used to rescan the component list for them, which is how two stages came to answer
-    // the same question differently. Resolution happens here, at construction, and every later question
-    // is an index lookup. Model facts only - slots, ids, CAT types and controllers belong to the plan.
+    // The digital twin, resolved once at construction, so every later question is an index lookup.
+    // Model facts only - slots, ids, CAT types and controllers belong to the plan.
     public sealed class TwinModel
     {
         private readonly Dictionary<string, TwinComponent> _byId;
@@ -27,39 +25,55 @@ namespace CodeGen.Domain.Twin
             Processes = components.Where(c => c.IsProcess).ToList();
         }
 
-        // Trimmed, case-insensitive - the lookup every caller open-coded before.
         public TwinComponent? ById(string? componentId) =>
             string.IsNullOrEmpty(componentId) ? null
                 : _byId.TryGetValue(componentId.Trim(), out var c) ? c : null;
 
-        // First declaration wins where a name repeats, as FirstOrDefault gave before.
-        // The process that DRIVES a component, read off the model the same way the recipe compiler reads
-        // command ownership: an actuator transition whose condition names a Process/State is that process
-        // stating it issues the command. A sensor has no owner in that sense, so it falls back to the
-        // process that observes it. Null when nothing in the model refers to it.
-        public TwinComponent? OwningProcess(TwinComponent component)
+        // Processes that COMMAND this component: its own transition naming a Process/State is the model
+        // stating that process state issues the driving command. The strong relationship, since a
+        // component runs on the controller that commands it.
+        public IReadOnlyList<TwinComponent> CommandingProcesses(TwinComponent component)
         {
-            if (component is null || component.IsProcess) return null;
-            // An actuator names its driver on its own transitions.
+            if (component is null || component.IsProcess) return Array.Empty<TwinComponent>();
+            var found = new List<TwinComponent>();
             foreach (var st in component.States)
                 foreach (var tr in st.Transitions)
-                    foreach (var c in tr.Conditions)
-                        if (c.Component.IsProcess) return c.Component;
-            // A sensor is named BY the process that waits on it.
+                    foreach (var c in tr.Leaves)
+                        if (c.Component.IsProcess && !found.Any(f => ReferenceEquals(f, c.Component)))
+                            found.Add(c.Component);
+            return found;
+        }
+
+        // Processes that merely OBSERVE this component. Weaker than a command, since a process routinely
+        // watches hardware another controller drives, so it only places a component nothing commands.
+        public IReadOnlyList<TwinComponent> ObservingProcesses(TwinComponent component)
+        {
+            if (component is null || component.IsProcess) return Array.Empty<TwinComponent>();
+            var found = new List<TwinComponent>();
             foreach (var proc in Processes)
                 foreach (var st in proc.States)
                     foreach (var tr in st.Transitions)
-                        foreach (var c in tr.Conditions)
-                            if (ReferenceEquals(c.Component, component)) return proc;
-            return null;
+                        foreach (var c in tr.Leaves)
+                            if (ReferenceEquals(c.Component, component) &&
+                                !found.Any(f => ReferenceEquals(f, proc)))
+                                found.Add(proc);
+            return found;
         }
+
+        // The inverse of CommandingProcesses, and what anchors a process to a controller when one is pinned.
+        public IReadOnlyList<TwinComponent> CommandedBy(TwinComponent process) =>
+            process is null || !process.IsProcess
+                ? Array.Empty<TwinComponent>()
+                : Components.Where(c => !c.IsProcess &&
+                        CommandingProcesses(c).Any(p => ReferenceEquals(p, process)))
+                    .ToList();
 
         public TwinComponent? ByName(string? name) =>
             string.IsNullOrWhiteSpace(name) ? null
                 : _byName.TryGetValue(name.Trim(), out var c) ? c : null;
 
-        // The component and state a condition points at. A reference that does not close is a model
-        // error, not an absence: the guard would otherwise be dropped without a word.
+        // A reference that does not close is a model error, not an absence: the guard would otherwise
+        // be dropped without a word.
         internal TwinRef? Resolve(VueOneCondition? condition, string site, List<string> problems)
         {
             if (condition == null) return null;
@@ -103,7 +117,6 @@ namespace CodeGen.Domain.Twin
                                  $"'{byId[id].Name}' and '{component.Name}'.");
 
                 var name = (source.Name ?? string.Empty).Trim();
-                // First wins, as the scans this replaces did; reported because a later reference is ambiguous.
                 if (name.Length > 0 && !byName.TryAdd(name, component))
                     problems.Add($"two components share the name '{name}'; a reference to it is ambiguous.");
             }
@@ -124,7 +137,6 @@ namespace CodeGen.Domain.Twin
         }
     }
 
-    // A resolved pointer into the twin: the component a reference names and the state within it.
     public sealed record TwinRef(TwinComponent Component, TwinState State);
 
     public sealed class TwinComponent
@@ -217,6 +229,8 @@ namespace CodeGen.Domain.Twin
         // Resolved interlock guards; a dangling one is dropped, but the resolver reports it.
         public IReadOnlyList<TwinRef> Interlocks { get; private set; } = Array.Empty<TwinRef>();
 
+        public ConditionExpr? InterlockGuard => Source.InterlockGuard;
+
         internal TwinState(VueOneState source)
         {
             Source = source;
@@ -238,7 +252,22 @@ namespace CodeGen.Domain.Twin
         public TwinComponent? Owner { get; private set; }
         public TwinState? Destination { get; private set; }
 
-        public IReadOnlyList<TwinRef> Conditions { get; private set; } = Array.Empty<TwinRef>();
+        // Resolved leaves in guard order. This answers EXISTENCE questions ("does any leaf name X"),
+        // where grouping cannot matter. A question about sequence or alternatives walks Guard.
+        public IReadOnlyList<TwinRef> Leaves { get; private set; } = Array.Empty<TwinRef>();
+
+        private Dictionary<VueOneCondition, TwinRef> _resolved = new();
+
+        // The resolved target of one leaf of Guard.
+        public TwinRef? Resolved(VueOneCondition leaf) =>
+            leaf != null && _resolved.TryGetValue(leaf, out var r) ? r : null;
+
+        // The guard as VueOne structured it. Conditions is its leaves in the same order, so a caller
+        // that only needs the references never has to walk the tree.
+        public ConditionExpr? Guard => Source.Guard;
+
+        // The guard offers a choice the flat reference list cannot express.
+        public bool HasAlternatives => Source.Guard?.HasAlternatives == true;
 
         internal TwinTransition(VueOneTransition source)
         {
@@ -251,9 +280,19 @@ namespace CodeGen.Domain.Twin
             Destination = destination;
         }
 
-        internal void BindConditions(TwinModel model, string site, List<string> problems) =>
-            Conditions = Source.Conditions
-                .Select(c => model.Resolve(c, site, problems))
-                .Where(r => r != null).Select(r => r!).ToList();
+        internal void BindConditions(TwinModel model, string site, List<string> problems)
+        {
+            var leaves = new List<TwinRef>();
+            var index = new Dictionary<VueOneCondition, TwinRef>();
+            foreach (var c in Source.Guard?.References() ?? (IReadOnlyList<VueOneCondition>)Array.Empty<VueOneCondition>())
+            {
+                var r = model.Resolve(c, site, problems);
+                if (r == null) continue;
+                leaves.Add(r);
+                index[c] = r;
+            }
+            Leaves = leaves;
+            _resolved = index;
+        }
     }
 }
