@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using CodeGen.Configuration;
@@ -6,9 +6,8 @@ using CodeGen.Services;
 
 namespace CodeGen.Artefacts
 {
-    // EAE Solution Integrity requires each deployed artefact ({stem}.sysres/syslay/sysdev)
-    // to have a sibling {stem}/ folder with an opcua.xml whose UID = the parent folder GUID.
-    // Only opcua.xml is Mapper-written; EAE produces offline.xml/opcuaclient.xml on open.
+    // EAE Solution Integrity requires each deployed artefact to have a sibling {stem}/ folder holding an opcua.xml
+    // whose UID is the parent folder GUID. Only opcua.xml is Mapper-written; EAE produces the rest on open.
     public static class OpcuaCompanionEmitter
     {
         // Writes opcua.xml into a {stem}/ folder beside the artefact (UID = container GUID).
@@ -24,15 +23,12 @@ namespace CodeGen.Artefacts
             try { Directory.CreateDirectory(opcuaDir); }
             catch { return; }
 
-            // UID = parent folder name (the container GUID).
             var uid = Path.GetFileName(parentDir);
 
             WriteOpcuaFile(Path.Combine(opcuaDir, "opcua.xml"), uid);
         }
 
-        // Fills any missing opcua.xml (UID = parent container GUID) in every companion folder
-        // (a subfolder beside a .sysres/.syslay/.sysdev) so EAE's "Missing Project Files"
-        // check passes. Non-destructive — only fills missing files.
+        // Fills any missing opcua.xml in every companion folder so EAE's Missing Project Files check passes.
         public static int EnsureOpcuaInAllResourceFolders(string eaeRoot)
         {
             if (string.IsNullOrWhiteSpace(eaeRoot)) return 0;
@@ -87,8 +83,7 @@ namespace CodeGen.Artefacts
             return false;
         }
 
-        // The two public entry points are linked by the VueOne hidden runner, so they keep their
-        // signatures and the template root is resolved here instead of being threaded through.
+        // The two public entry points are linked by the VueOne hidden runner, so their signatures must not change.
         internal static string BuildOpcuaCompanion(string uid)
         {
             MapperConfig? cfg = null;
@@ -101,7 +96,6 @@ namespace CodeGen.Artefacts
         {
             var content = BuildOpcuaCompanion(uid);
 
-            // Best-effort — a transient lock isn't fatal; the next regen retries.
             for (int attempt = 0; attempt < 4; attempt++)
             {
                 try
