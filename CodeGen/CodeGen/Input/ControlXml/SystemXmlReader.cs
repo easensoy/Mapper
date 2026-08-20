@@ -43,6 +43,10 @@ namespace CodeGen.IO
                 else
                     LastError += $" — unrecognised Type '{fileType}'";
             }
+            catch (InvalidOperationException)
+            {
+                throw;   // a schema the compiler does not understand: never read as "no components"
+            }
             catch (Exception ex)
             {
                 LastError = $"Exception: {ex.Message}";
@@ -127,6 +131,7 @@ namespace CodeGen.IO
                     if (!string.Equals(c.Type, "NonControl", StringComparison.OrdinalIgnoreCase))
                         components.Add(c);
                 }
+                catch (InvalidOperationException) { throw; }   // a schema we cannot read, not a bad row
                 catch (Exception ex) { LastError += $", ParseError:{ex.Message}"; }
             }
         }
@@ -186,27 +191,53 @@ namespace CodeGen.IO
             foreach (var transElem in elem.Elements().Where(e => e.Name.LocalName == "Transition"))
                 state.Transitions.Add(ParseTransition(transElem));
 
-            // VueOne stores actuator interlocks in a STATE-level <Interlock_Condition> block (NOT the
-            // transition's Sequence_Condition); capture every <Condition> descendant for translation.
-            var ilk = elem.Elements()
-                .FirstOrDefault(e => e.Name.LocalName == "Interlock_Condition");
-            if (ilk != null)
-            {
-                foreach (var cond in ilk.Descendants()
-                    .Where(e => e.Name.LocalName == "Condition"))
-                {
-                    state.InterlockConditions.Add(new VueOneCondition
-                    {
-                        ID = cond.Attribute("ID")?.Value ?? string.Empty,
-                        Name = cond.Attribute("Name")?.Value ?? string.Empty,
-                        ComponentID = cond.Attribute("ComponentID")?.Value ?? string.Empty,
-                        Operator = cond.Attribute("Operator")?.Value ?? string.Empty
-                    });
-                }
-            }
+            // VueOne stores actuator interlocks in a STATE-level <Interlock_Condition> block, NOT in
+            // the transition's Sequence_Condition. Both nest the same way, so both read the same way.
+            state.InterlockGuard = ReadGuard(elem, "Interlock_Condition");
 
             return state;
         }
+
+        // Control.xml nests <holder> -> ConditionValue -> ConditionGroup* -> Condition*. The groups
+        // are alternatives and the conditions inside one hold together, so the guard is read as a sum
+        // of products. Reading it structurally rather than as a flat Descendants() sweep is what lets
+        // a multi-group guard be recognised as a choice instead of silently becoming a longer list.
+        private static ConditionExpr? ReadGuard(XElement owner, string holderName)
+        {
+            var holder = owner.Elements().FirstOrDefault(e => e.Name.LocalName == holderName);
+            if (holder == null) return null;
+
+            // A guard with no ConditionValue wrapper still reads: the groups are found either way.
+            var groups = holder.Descendants().Where(e => e.Name.LocalName == "ConditionGroup").ToList();
+            foreach (var g in groups)
+            {
+                var op = (g.Attribute("Operator")?.Value ?? string.Empty).Trim();
+                if (op.Length > 0)
+                    throw new InvalidOperationException(
+                        $"[Twin] ConditionGroup '{g.Attribute("GroupName")?.Value}' declares Operator " +
+                        $"'{op}'. This compiler reads a group as one alternative and knows no other " +
+                        "combinator, so it will not guess what that operator means.");
+            }
+            if (groups.Count > 0)
+                return ConditionExpr.Disjunction(groups.Select(g => ConditionExpr.Conjunction(
+                    g.Elements().Where(e => e.Name.LocalName == "Condition")
+                        .Select(c => new ConditionExpr.Ref(ReadCondition(c))))!)!);
+
+            // Ungrouped conditions: every one has to hold.
+            return ConditionExpr.Conjunction(holder.Descendants()
+                .Where(e => e.Name.LocalName == "Condition")
+                .Select(c => new ConditionExpr.Ref(ReadCondition(c))));
+        }
+
+        // A <Condition> element, wherever it appears: the twin spells them the same way under an
+        // interlock and under a transition, so they are read the same way.
+        private static VueOneCondition ReadCondition(XElement cond) => new()
+        {
+            ID = cond.Attribute("ID")?.Value ?? string.Empty,
+            Name = cond.Attribute("Name")?.Value ?? string.Empty,
+            ComponentID = cond.Attribute("ComponentID")?.Value ?? string.Empty,
+            Operator = cond.Attribute("Operator")?.Value ?? string.Empty,
+        };
 
         private VueOneTransition ParseTransition(XElement elem)
         {
@@ -220,20 +251,7 @@ namespace CodeGen.IO
                 TransitionType = string.IsNullOrWhiteSpace(rawType) ? "SINGLE" : rawType.ToUpperInvariant()
             };
 
-            var seq = elem.Elements().FirstOrDefault(e => e.Name.LocalName == "Sequence_Condition");
-            if (seq != null)
-            {
-                foreach (var cond in seq.Descendants().Where(e => e.Name.LocalName == "Condition"))
-                {
-                    trans.Conditions.Add(new VueOneCondition
-                    {
-                        ID = cond.Attribute("ID")?.Value ?? string.Empty,
-                        Name = cond.Attribute("Name")?.Value ?? string.Empty,
-                        ComponentID = cond.Attribute("ComponentID")?.Value ?? string.Empty,
-                        Operator = cond.Attribute("Operator")?.Value ?? string.Empty
-                    });
-                }
-            }
+            trans.Guard = ReadGuard(elem, "Sequence_Condition");
 
             return trans;
         }
