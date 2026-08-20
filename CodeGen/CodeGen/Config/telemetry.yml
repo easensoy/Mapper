@@ -1,4 +1,4 @@
-# Telemetry / MQTT connection settings (consumed by CodeGen.Configuration.TelemetrySettings).
+﻿# Telemetry / MQTT connection settings (consumed by CodeGen.Configuration.TelemetrySettings).
 # Values match the prior hard-coded defaults exactly, so behaviour is unchanged.
 
 # Wrap each resource MQTT_CONNECTION in the Telemetry_CAT composite (Config/Health structs).
@@ -19,12 +19,37 @@ validateCert: 0
 # Shared ConnectionID binding key (every resource's MQTT_CONNECTION + embedded MQTT_PUBLISH).
 connectionName: SMC
 
-# Per-resource broker ClientIdentifier (unique so mosquitto keeps all connected).
-clientBx1: SMC_BX1
-clientM262: SMC_M262
-clientM580: SMC_M580
-# Feed controller when the RevPi hosts the Feed station instead of M262.
-clientRevPi: SMC_RevPi
+# One connection per resource, because a resource's embedded MQTT_PUBLISH binds to a connection on its
+# OWN resource: without one, every publisher there silently drops. Each is brought up by infrastructure
+# that resource already has, so no bring-up wire crosses a device.
+#
+# instance     the FB name on the shared canvas when the Telemetry composite is used
+# rawInstance  its name when the raw MQTT_CONNECTION is emitted instead (useTelemetryCat: false)
+# client       broker ClientIdentifier -- unique per resource, or mosquitto evicts the duplicates
+# initFrom     the infrastructure role whose INITO brings it up; ringHead = the head of the report ring
+#              this resource participates in, for a resource that has no infrastructure of its own
+connections:
+  - plc: BX1
+    instance: Telemetry_BX1
+    rawInstance: MqttConn
+    client: SMC_BX1
+  - plc: M262
+    instance: Telemetry_M262
+    rawInstance: MqttConn_M262
+    client: SMC_M262
+    initFrom: area
+  - plc: M580
+    instance: Telemetry_M580
+    rawInstance: MqttConn_M580
+    client: SMC_M580
+    initFrom: station
+  # Emitted only when part of the Feed station is relocated here and its publishers need a local
+  # connection alongside the Feed controller's own.
+  - plc: RevPi
+    instance: Telemetry_RevPi
+    rawInstance: MqttConn_RevPi
+    client: SMC_RevPi
+    initFrom: ringHead
 
 # Publish policy. These were previously C# defaults shadowed by mapper_config.json; telemetry.yml is
 # the single owner of every MQTT setting, so they live here with the connection they belong to.
