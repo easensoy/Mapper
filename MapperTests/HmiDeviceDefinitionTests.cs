@@ -31,7 +31,7 @@ namespace MapperTests
         [Fact]
         public void ShippedDefinitionLoadsAndIsComplete()
         {
-            var def = HmiDeviceLoader.Parse(ShippedYaml());
+            var def = HmiDefinitionLoader.Parse(ShippedYaml()).Device;
 
             Assert.True(Guid.TryParse(def.DeviceId, out _));
             Assert.NotEmpty(def.Artefacts);
@@ -46,7 +46,7 @@ namespace MapperTests
         [Fact]
         public void ShippedPortsMatchTheReferenceRuntime()
         {
-            var def = HmiDeviceLoader.Parse(ShippedYaml());
+            var def = HmiDefinitionLoader.Parse(ShippedYaml()).Device;
 
             Assert.Equal(61999, def.LogicalPort);
             Assert.Equal(51443, def.SecurePort);
@@ -56,7 +56,7 @@ namespace MapperTests
         [Fact]
         public void HostAndInternalRuntimeAddressesAreDistinctAndOnTheConfiguredSubnet()
         {
-            var def = HmiDeviceLoader.Parse(ShippedYaml());
+            var def = HmiDefinitionLoader.Parse(ShippedYaml()).Device;
 
             Assert.NotEqual(def.HostIp, def.InternalRuntimeIp);
 
@@ -72,7 +72,7 @@ namespace MapperTests
         [Fact]
         public void TokensCoverEveryPlaceholderTheShippedTemplatesUse()
         {
-            var def = HmiDeviceLoader.Parse(ShippedYaml());
+            var def = HmiDefinitionLoader.Parse(ShippedYaml()).Device;
             var supplied = def.Tokens("solution-id", "switch-id").Keys
                 .Concat(new[] { "NetworkId", "FirstCanvas" })   // derived from the generated project
                 .ToHashSet(StringComparer.Ordinal);
@@ -96,7 +96,7 @@ namespace MapperTests
         [Fact]
         public void ArtefactDestinationsAreDistinctAndConfined()
         {
-            var def = HmiDeviceLoader.Parse(ShippedYaml());
+            var def = HmiDefinitionLoader.Parse(ShippedYaml()).Device;
 
             var destinations = def.Artefacts.Select(a => a.Into + "/" + a.Name).ToList();
             Assert.Equal(destinations.Count, destinations.Distinct(StringComparer.Ordinal).Count());
@@ -116,7 +116,7 @@ namespace MapperTests
         [Fact]
         public void DoubleBracePlaceholdersAreSubstitutedBeforeSingleBraceOnes()
         {
-            var tokens = HmiDeviceLoader.Parse(ShippedYaml()).Tokens("solution-id", "switch-id");
+            var tokens = HmiDefinitionLoader.Parse(ShippedYaml()).Device.Tokens("solution-id", "switch-id");
 
             var rendered = HmiRuntimeEmitter.Substitute("port={{LogicalPort}} file={DeviceId}.sysdev", tokens);
 
@@ -129,7 +129,7 @@ namespace MapperTests
         [Fact]
         public void RenderedDeploymentArtefactsCarryTheConfiguredPorts()
         {
-            var def = HmiDeviceLoader.Parse(ShippedYaml());
+            var def = HmiDefinitionLoader.Parse(ShippedYaml()).Device;
             var tokens = def.Tokens("solution-id", "switch-id")
                 .Concat(new[]
                 {
@@ -165,7 +165,7 @@ namespace MapperTests
         public void UnknownKeyIsRejected()
         {
             var ex = Assert.ThrowsAny<Exception>(
-                () => HmiDeviceLoader.Parse(ShippedYaml() + "\nthisKeyDoesNotExist: 1\n"));
+                () => HmiDefinitionLoader.Parse(ShippedYaml() + "\nthisKeyDoesNotExist: 1\n"));
             Assert.Contains("hmi.yml", ex.Message, StringComparison.OrdinalIgnoreCase);
         }
 
@@ -184,7 +184,7 @@ namespace MapperTests
             Assert.Contains(find, yaml);   // guards against a silently-ineffective mutation
 
             var ex = Assert.Throws<HmiConfigException>(
-                () => HmiDeviceLoader.Parse(yaml.Replace(find, replace)));
+                () => HmiDefinitionLoader.Parse(yaml.Replace(find, replace)));
             Assert.Contains(expected, ex.Message, StringComparison.OrdinalIgnoreCase);
         }
 
@@ -196,7 +196,7 @@ namespace MapperTests
                 "  panel:                  25e3cc7c-d98a-486a-963b-c5ab645331c9",
                 "  panel:                  a441cfb6-5523-4d2c-a152-aacecdcef78e");
 
-            var ex = Assert.Throws<HmiConfigException>(() => HmiDeviceLoader.Parse(yaml));
+            var ex = Assert.Throws<HmiConfigException>(() => HmiDefinitionLoader.Parse(yaml));
             Assert.Contains("identity", ex.Message, StringComparison.OrdinalIgnoreCase);
         }
 
@@ -211,7 +211,7 @@ namespace MapperTests
                 .Replace("  type: HMI_NET", "  type: ''")
                 .Replace("  equipmentFile: Equipment_Switch_1.json", "  equipmentFile: ''");
 
-            var ex = Assert.Throws<HmiConfigException>(() => HmiDeviceLoader.Parse(yaml));
+            var ex = Assert.Throws<HmiConfigException>(() => HmiDefinitionLoader.Parse(yaml));
 
             foreach (var path in new[] { "logicalPort", "library.name", "logicalDevice.type", "equipmentFile" })
                 Assert.Contains(path, ex.Message, StringComparison.OrdinalIgnoreCase);
