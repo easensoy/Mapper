@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Created by EcoStruxure Automation Expert.
  * User:  
  * Date: 10/7/2025
@@ -67,7 +67,10 @@ namespace HMI.Main.Symbols.Five_State_Actuator_CAT
 			this.Work1Interlock = new System.HMI.Symbols.Base.Led<bool>();
 			this.HomeInterlock = new System.HMI.Symbols.Base.Led<bool>();
 			this.component_name_1 = new System.HMI.Symbols.Base.FreeText();
+			this.toHome = new System.HMI.Symbols.Base.CheckButton();
+			this.toWork = new System.HMI.Symbols.Base.CheckButton();
 			this.component_name_2 = new System.HMI.Symbols.Base.Label();
+			this.drawnButton1 = new NxtControl.GuiFramework.DrawnButton();
 			// 
 			// current_state_to_process
 			// 
@@ -313,6 +316,38 @@ namespace HMI.Main.Symbols.Five_State_Actuator_CAT
 			this.component_name_1.TextAngle = 0F;
 			this.component_name_1.EndInit();
 			// 
+			// toHome
+			// 
+			this.toHome.BeginInit();
+			this.toHome.DesignMatrix = new NxtControl.Drawing.Matrix2D(1.3D, 0D, 0D, 1D, 24D, 208D);
+			this.toHome.FalseImage = new NxtControl.Drawing.ImageHolder();
+			this.toHome.FalseImageDisabled = new NxtControl.Drawing.ImageHolder();
+			this.toHome.FalseText = "To Home";
+			this.toHome.Font = new NxtControl.Drawing.Font("ButtonFont");
+			this.toHome.FontScale = false;
+			this.toHome.Name = "toHome";
+			this.toHome.TagName = "toHome";
+			this.toHome.TrueImage = new NxtControl.Drawing.ImageHolder();
+			this.toHome.TrueImageDisabled = new NxtControl.Drawing.ImageHolder();
+			this.toHome.Value = false;
+			this.toHome.EndInit();
+			// 
+			// toWork
+			// 
+			this.toWork.BeginInit();
+			this.toWork.DesignMatrix = new NxtControl.Drawing.Matrix2D(1.2D, 0D, 0D, 1D, 152D, 208D);
+			this.toWork.FalseImage = new NxtControl.Drawing.ImageHolder();
+			this.toWork.FalseImageDisabled = new NxtControl.Drawing.ImageHolder();
+			this.toWork.FalseText = "To Work";
+			this.toWork.Font = new NxtControl.Drawing.Font("ButtonFont");
+			this.toWork.FontScale = false;
+			this.toWork.Name = "toWork";
+			this.toWork.TagName = "toWork";
+			this.toWork.TrueImage = new NxtControl.Drawing.ImageHolder();
+			this.toWork.TrueImageDisabled = new NxtControl.Drawing.ImageHolder();
+			this.toWork.Value = false;
+			this.toWork.EndInit();
+			// 
 			// component_name_2
 			// 
 			this.component_name_2.BeginInit();
@@ -325,6 +360,20 @@ namespace HMI.Main.Symbols.Five_State_Actuator_CAT
 			this.component_name_2.Pen = new NxtControl.Drawing.Pen("LabelPen");
 			this.component_name_2.TagName = "component_name";
 			this.component_name_2.EndInit();
+			// 
+			// drawnButton1
+			// 
+			this.drawnButton1.Bounds = new NxtControl.Drawing.RectF(((float)(216D)), ((float)(0D)), ((float)(72D)), ((float)(37D)));
+			this.drawnButton1.Brush = new NxtControl.Drawing.Brush("Transparent");
+			this.drawnButton1.Font = new NxtControl.Drawing.Font("ButtonFont");
+			this.drawnButton1.InnerBorderColor = new NxtControl.Drawing.Color("ButtonInnerBorderColor");
+			this.drawnButton1.Name = "drawnButton1";
+			this.drawnButton1.OpenFaceplates.Add(new NxtControl.GuiFramework.OpenFaceplate("sFault", NxtControl.GuiFramework.MouseButtonType.Click));
+			this.drawnButton1.Pen = new NxtControl.Drawing.Pen("ButtonPen");
+			this.drawnButton1.Radius = 4D;
+			this.drawnButton1.TextColor = new NxtControl.Drawing.Color("ButtonTextColor");
+			this.drawnButton1.TextColorMouseDown = new NxtControl.Drawing.Color("ButtonTextColorMouseDown");
+			this.drawnButton1.Use3DEffect = false;
 			// 
 			// sSetup
 			// 
@@ -347,7 +396,10 @@ namespace HMI.Main.Symbols.Five_State_Actuator_CAT
 			this.Work1Interlock,
 			this.HomeInterlock,
 			this.component_name_1,
-			this.component_name_2});
+			this.toHome,
+			this.toWork,
+			this.component_name_2,
+			this.drawnButton1});
 			this.SymbolSize = new System.Drawing.Size(300, 244);
 
 		}
@@ -369,7 +421,10 @@ namespace HMI.Main.Symbols.Five_State_Actuator_CAT
 		private System.HMI.Symbols.Base.Led<bool> Work1Interlock;
 		private System.HMI.Symbols.Base.Led<bool> HomeInterlock;
 		private System.HMI.Symbols.Base.FreeText component_name_1;
+		private System.HMI.Symbols.Base.CheckButton toHome;
+		private System.HMI.Symbols.Base.CheckButton toWork;
 		private System.HMI.Symbols.Base.Label component_name_2;
+		private NxtControl.GuiFramework.DrawnButton drawnButton1;
 		#endregion
 	}
 }
