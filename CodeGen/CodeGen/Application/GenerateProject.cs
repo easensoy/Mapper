@@ -1,26 +1,25 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Xml.Linq;
 using CodeGen.Artefacts;
-using CodeGen.Configuration;
 using CodeGen.Devices.BX1;
-using CodeGen.Mapping;
-using CodeGen.Devices.Core;
 using CodeGen.Devices.M262;
 using CodeGen.Devices.M580;
 using CodeGen.Devices.RevPi;
+using CodeGen.Validation.Plan;
+using System.Diagnostics;
+using System.Xml.Linq;
+using CodeGen.Configuration;
+using CodeGen.Mapping;
+using CodeGen.Devices.Core;
 using CodeGen.Services;
 using CodeGen.Translation;
 using CodeGen.Validation.Output;
-using CodeGen.Validation.Plan;
 
 namespace CodeGen.Application
 {
-    // What to generate. Immutable: the orchestration reads it and never writes back, so a caller cannot
-    // have its inputs mutated underneath it by a generation step.
+    // Immutable: the orchestration never writes back, so a generation step cannot mutate a caller's inputs.
     public sealed record GenerationRequest(
         string ControlXmlPath,
         MapperConfig Config,
@@ -33,10 +32,7 @@ namespace CodeGen.Application
         public int BoundCount => Report.Bound.Count;
     }
 
-    // The one generation path from Control.xml to EAE artefacts.
-    //
-    // Synchronous by design: callers that need responsiveness wrap the single call, rather than each step
-    // deciding its own threading. `log` is invoked on the calling thread.
+    // The one generation path from Control.xml to EAE artefacts. Synchronous: `log` runs on the caller's thread.
     public static class GenerateProject
     {
         public static GenerationResult Execute(GenerationRequest request, Action<string> log)
@@ -44,34 +40,29 @@ namespace CodeGen.Application
             if (request is null) throw new ArgumentNullException(nameof(request));
             if (log is null) throw new ArgumentNullException(nameof(log));
 
-            // Work on a copy so a run cannot write back into the caller's config. MapperUI keeps one
-            // instance for the life of the process, so in-place mutation leaked between runs.
+            // Work on a copy: MapperUI keeps one config for the process lifetime, so mutation leaks between runs.
             var cfg = request.Config.Clone();
             cfg.UseRecipeStruct = true;
 
-            // The Feed station stays on M262 and the RevPi COEXISTS with it: PLC_RW_REVPI carries IO for
-            // only Feeder/Checker/PartInHopper, so a whole-station swap would strand Transfer/Ejector/
-            // Robot/PartAtAssembly with no physical IO. RevPiSelectionValidator rejects the full swap.
+            // The RevPi coupler carries IO for only part of the Feed station, so it coexists with M262.
             var profile = new DeploymentProfile(request.RevPiComponents, LayoutCatalog.Load());
             RevPiSelectionValidator.ThrowIfInvalid(profile);
 
-            // Parse once, plan once, render once: everything the run decides is settled here, before the
-            // first artefact is written, so a model the backend cannot express fails with a diagnostic
-            // instead of a half-generated project.
+            // Plan before the first artefact is written, so an inexpressible model fails with a diagnostic.
             var ctx = GenerationContext.Plan(cfg, request.ControlXmlPath, profile);
 
             DeepClean(cfg, log);
             LogM262SysdevState(cfg, log);
 
             var injector = new SystemInjector();
-            LogCleanup(injector.PrepareDemonstratorForGeneration(cfg), log);
+            foreach (var finding in ctx.SemanticFindings) log($"[Semantics] {finding}");
+            LogCleanup(Artefacts.DemonstratorPreparer.PrepareDemonstratorForGeneration(cfg), log);
 
-            // AFTER cleanup: cleanup deletes flat root-level Basic FB files, so deploying first would drop
-            // the patched core.
+            // AFTER cleanup: cleanup deletes flat Basic FB files, so deploying first would drop the patched core.
             DeployTemplates(ctx, log);
 
             var bindings = LoadBindings(cfg, log);
-            var path = injector.GenerateStation1TestSyslay(ctx, bindings, out var report);
+            var path = injector.EmitApplicationLayer(ctx, bindings, out var report);
             LogBindings(report, log);
 
             FinalizeDeviceStack(ctx, log);
@@ -94,9 +85,7 @@ namespace CodeGen.Application
             return new GenerationResult(path, report);
         }
 
-        // git reset/clean where the Demonstrator is a repo, then the deep FB/canvas/device wipe. The root
-        // is DERIVED from the configured project so a retargeted output root cleans itself rather than
-        // C:\Demonstrator.
+        // The root is DERIVED from the configured project, so a retargeted output root cleans itself.
         static void DeepClean(MapperConfig cfg, Action<string> log)
         {
             var eae = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
@@ -148,8 +137,7 @@ namespace CodeGen.Application
             return (p.ExitCode, string.IsNullOrEmpty(stderr) ? stdout : stdout + stderr);
         }
 
-        // The Mapper owns the M262 logical device: an existing .sysdev is preserved (trust kept), an
-        // absent one is bootstrapped. Diagnostic only — never aborts.
+        // An existing .sysdev is preserved to keep its trust binding, an absent one is bootstrapped.
         static void LogM262SysdevState(MapperConfig cfg, Action<string> log)
         {
             var exists = false;
@@ -178,9 +166,7 @@ namespace CodeGen.Application
             }
         }
 
-        // A missing IO-bindings xlsx means NO actuator athome/atwork/coil bindings — every Five_State
-        // sensor unbound and nothing triggers. Self-heal from the project source if present, else fail
-        // loudly rather than emit a blank HCF.
+        // A missing workbook leaves every actuator channel unbound, so self-heal or fail loudly.
         static IoBindings? LoadBindings(MapperConfig cfg, Action<string> log)
         {
             try
@@ -229,10 +215,7 @@ namespace CodeGen.Application
             }
         }
 
-        // A relative IoBindingsPath used to be resolved against whatever the host happened to expose:
-        // the UI used AppContext.BaseDirectory, the runner Environment.CurrentDirectory. Hosting the same
-        // generation anywhere else then produced a blank Feed HCF and a rig where nothing triggers, with
-        // no error. First existing wins, so every host resolves the same file.
+        // First existing wins, so every host resolves a relative path to the same file.
         static string ResolveBindingsPath(string configured)
         {
             if (Path.IsPathRooted(configured)) return configured;
@@ -244,7 +227,7 @@ namespace CodeGen.Application
             return Path.Combine(AppContext.BaseDirectory, configured);
         }
 
-        static void LogCleanup(SystemInjector.CleanupReport report, Action<string> log)
+        static void LogCleanup(Artefacts.DemonstratorPreparer.CleanupReport report, Action<string> log)
         {
             log($"[Cleanup] Removed {report.RemovedFbs.Count} universal FB(s), {report.RemovedConnections} connection(s)");
             foreach (var name in report.RemovedFbs) log($"  - {name}");
@@ -273,8 +256,8 @@ namespace CodeGen.Application
                 if (keep(report.Missing[i])) log(report.Missing[i]);
         }
 
-        // MANDATORY after the syslay is (re)written: Prepare cleans the .sysres, wiping the earlier FB
-        // mirror, so without this the .sysres ends up empty and every FB is unmapped on the EAE canvas.
+        // MANDATORY after the syslay is written: Prepare wiped the FB mirror, so skipping this leaves the
+        // .sysres empty and every FB unmapped on the EAE canvas.
         static void FinalizeDeviceStack(GenerationContext ctx, Action<string> log)
         {
             var cfg = ctx.Config;
@@ -298,8 +281,7 @@ namespace CodeGen.Application
             }
             catch (Exception ex) { log($"[M262][Error] sysdev emit: {ex.Message}"); }
 
-            // Topology always runs: solutionData (trust) is preserved, but Equipment JSON (placement)
-            // MUST be re-written every run or the M262dPAC never re-appears after a wipe.
+            // Equipment JSON must be re-written every run or the device never re-appears after a wipe.
             try
             {
                 if (!string.IsNullOrEmpty(sysdevId))
@@ -318,8 +300,7 @@ namespace CodeGen.Application
 
             if (m262DeviceExists) log("[Device] M262 sysdev preserved (trust binding intact)");
         
-            // Partial swap: the RevPi coexists WITH M262 — emit its Soft_dPAC device AFTER the M262 device
-            // so the System GUID folder exists. M262 is not swept in partial mode.
+            // Emit the RevPi device AFTER the M262 device, so the System GUID folder exists.
             if (ctx.Profile.PartialRevPi)
             {
                 try
@@ -342,8 +323,7 @@ namespace CodeGen.Application
             }
             catch (Exception ex) { log($"[Stn2][Error] Station 2 emit: {ex.Message}"); }
 
-            // EAE caches the OLD layout per device and surfaces stale "2 instances of EMB_RES_ECO"-class
-            // errors its own Clean does not flush. Runs early so later emitters write into a clean cache.
+            // EAE's own Clean does not flush its per-device cache; run early so later emitters write clean.
             try
             {
                 var purge = CompileCachePurger.Purge(cfg);
@@ -353,8 +333,7 @@ namespace CodeGen.Application
             }
             catch (Exception ex) { log($"[Topology][Error] cache purge: {ex.Message}"); }
 
-            // A sysdev not listed in Folders.xml is silently dropped from EAE's Solution Explorer and
-            // Deploy & Diagnostic.
+            // A sysdev missing from Folders.xml is silently dropped from EAE's Solution Explorer and Deploy.
             try
             {
                 var fx = FoldersXmlEmitter.Register(cfg, partialRevPi: ctx.Profile.PartialRevPi);
@@ -371,8 +350,7 @@ namespace CodeGen.Application
             }
             catch (Exception ex) { log($"[Topology][Error] BroadcastDomain emit: {ex.Message}"); }
 
-            // The BX1 Equipment binds a non-default domain; without its BroadcastDomain JSON on disk EAE
-            // rejects the whole topology import.
+            // BX1 binds a non-default domain; without its BroadcastDomain JSON EAE rejects the whole topology.
             try
             {
                 var dom = BroadcastDomainEmitter.EnsureReferencedDomains(cfg);
@@ -403,13 +381,10 @@ namespace CodeGen.Application
             }
             catch (Exception ex) { log($"[Topology][Error] network emit: {ex.Message}"); }
 
-            // The HMI PROJECT is generated with the syslay; its DEPLOYMENT must wait until here,
-            // because the panel binds to the broadcast domain and the switch the topology emitters
-            // have only just written. Both are resolved from those files rather than restated.
+            // Deployment waits until here: the panel binds to the domain and switch just written above.
             CodeGen.Hmi.HmiGenerator.EmitDeployment(ctx);
 
-            // Runs AFTER the sysdev/sysres shells exist, else the .sysres stay empty and EAE reports
-            // "Repair Instances" / "Missing Project Files".
+            // Runs AFTER the sysdev/sysres shells exist, else they stay empty and EAE reports "Repair Instances".
             try
             {
                 var s2 = Station2SysresMirror.EmitStation2Sysres(ctx);
@@ -431,18 +406,17 @@ namespace CodeGen.Application
             {
                 try
                 {
-                    var hcf = M262HwConfigCopier.Copy(cfg);
+                    var hcf = HwConfigVerbatimCopier.CopyFor(cfg, PlcAssignment.M262, cfg.M262HcfTemplatePath);
                     log($"[M262] hcf re-patched; {hcf.ParametersOverwritten.Count} channel symlink(s) written");
                     foreach (var w in hcf.Warnings) log($"[M262][Warn] {w}");
                 }
                 catch (Exception ex) { log($"[M262][Error] hcf patch: {ex.Message}"); }
             }
 
-            // Authoritative final pass: copies the authored .hcf verbatim (re-rooted with the resource ID)
-            // so it refills even after a wipe. Channel symlinks preserved byte-for-byte.
+            // Copies the authored .hcf verbatim, re-rooted with the resource ID, so it refills after a wipe.
             try
             {
-                var hcf = M580HwConfigCopier.Copy(cfg);
+                var hcf = HwConfigVerbatimCopier.CopyFor(cfg, PlcAssignment.M580, cfg.M580HcfTemplatePath);
                 log($"[M580] hcf deployed; {hcf.FilesCopied} file(s) copied → {hcf.HcfPath}");
                 foreach (var w in hcf.Warnings) log($"[M580][Warn] {w}");
             }
@@ -456,8 +430,7 @@ namespace CodeGen.Application
             }
             catch (Exception ex) { log($"[BX1][Error] hcf deploy: {ex.Message}"); }
 
-            // After a wipe the dfbproj can still reference EAE-owned compile artifacts deleted with the
-            // device folders. EAE regenerates them on Build; never touches the device files.
+            // A wipe can leave dfbproj refs to EAE-owned compile artefacts; EAE regenerates them on Build.
             try
             {
                 var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
@@ -478,8 +451,7 @@ namespace CodeGen.Application
             catch { return string.Empty; }
         }
 
-        // Event + data wires into the Feed sysres FBNetwork (init chain, adapter wires, I/O bindings);
-        // without these EAE deploys but nothing inits.
+        // Without these wires EAE deploys the Feed resource but nothing inits.
         static void WireFeedResource(GenerationContext ctx, SystemInjector.BindingApplicationReport report, Action<string> log)
         {
             var before = report.Missing.Count;
@@ -488,9 +460,8 @@ namespace CodeGen.Application
             LogNew(report, before, l => l.StartsWith("[Wire]") || l.StartsWith("[Sysres"), log);
         }
 
-        // The mirror MUST run before the wiring: it creates the FBs the wiring connects. Re-mirroring also
-        // re-syncs each component's CAT type every run; a stale Type trips "Found References to Missing
-        // Instances".
+        // The mirror MUST precede the wiring: it creates the FBs, and re-syncs each CAT type (a stale Type
+        // trips "Found References to Missing Instances").
         static void MirrorAndWireStation2(GenerationContext ctx, SystemInjector.BindingApplicationReport report, Action<string> log)
         {
             try
@@ -512,8 +483,7 @@ namespace CodeGen.Application
             catch (Exception ex) { log($"[Wire][Stn2][Error] {ex.Message}"); }
         }
 
-        // Instantiates BX1_IO (PLC_RW_BX1) so the .hcf's EIP_Input/Output_Word_1 symlinks resolve. Runs
-        // after the Station-2 mirror/wire so the cover FBs exist.
+        // Runs after the Station-2 mirror/wire so the cover FBs the broker's symlinks resolve to exist.
         static void InjectBx1Broker(GenerationContext ctx, string syslayPath,
             SystemInjector.BindingApplicationReport report, Action<string> log)
         {
@@ -532,28 +502,23 @@ namespace CodeGen.Application
         {
             var cfg = ctx.Config;
             var hcfBefore = report.Missing.Count;
-            HcfPatchService.PatchDeployed(ctx, path, bindings, report);
+            HcfPatchService.PatchDeployed(ctx, bindings, report);
             LogNew(report, hcfBefore, l => l.StartsWith("[Hcf]"), log);
 
-            // Station 2 symbol binding only: the IO-bindings xlsx has no Station-2 pin rows, so each
-            // symlink is unquoted and its resource head re-aligned to the deployed sysres ID.
+            // The workbook has no Station-2 pin rows, so those symlinks are re-aligned to the deployed sysres ID.
             try
             {
                 var bindBefore = report.Missing.Count;
                 M580SymbolBinder.BindM580(cfg, report);
-                BX1SymbolBinder.BindBX1(cfg, report);
                 LogNew(report, bindBefore, l => l.StartsWith("[HcfBind]"), log);
             }
             catch (Exception ex) { log($"[HcfBind][Error] {ex.Message}"); }
         }
 
-        // Every deployed .hcf DI/DO binding MUST resolve to an FB + pin on the SAME resource's sysres; a
-        // legacy symbolic name or a GUID triple pointing at an absent FB never resolves.
+        // Every DI/DO binding must resolve to an FB and pin on the SAME resource's sysres.
         static void ValidateHcfReferences(MapperConfig cfg, Action<string> log)
         {
-            // FATAL. A binding that resolves to no FB or no pin is I/O the runtime cannot reach: the
-            // project imports, deploys and reports success while the channel is dead. Only the read
-            // itself is survivable -- a defect found is not.
+            // FATAL: the project still imports, deploys and reports success while the channel is dead.
             List<HcfReferenceValidator.Violation> violations;
             try
             {
@@ -575,9 +540,8 @@ namespace CodeGen.Application
                 "not on the resource; the first is: " + violations[0]);
         }
 
-        // Every generated connection names endpoints that exist and leaves each input driven once. Both
-        // failures are silent in EAE — an unresolvable wire is dropped, a double-driven input resolves by
-        // evaluation order — so they surface here or not at all.
+        // Both failures are silent in EAE: an unresolvable wire is dropped and a double-driven input resolves
+        // by evaluation order, so they surface here or not at all.
         static void ValidateConnections(MapperConfig cfg, Action<string> log)
         {
             var violations = ConnectionIntegrityValidator.Validate(EaeProjectLayout.DeriveEaeProjectRoot(cfg));
@@ -602,8 +566,8 @@ namespace CodeGen.Application
             catch (Exception ex) { log($"[Test Runtime][Sync][Warn] final sysres parameter sync failed: {ex.Message}"); }
         }
 
-        // The device-create + .hcf-id-realignment path can leave an empty "RES0" sysres under the OLD id.
-        // Runs LATE so each device folder ends with exactly its live resource.
+        // .hcf-id realignment can leave an empty sysres under the old id; runs LATE so each device folder
+        // ends with exactly its live resource.
         static void SweepOrphans(MapperConfig cfg, Action<string> log)
         {
             try
@@ -631,8 +595,7 @@ namespace CodeGen.Application
             }
             catch (Exception ex) { log($"[Sysres][Strip][Warn] post-sweep dfbproj strip failed: {ex.Message}"); }
 
-            // The centre-home CAT's two work-to-home E_DELAY timers feed only ReturnToHomeHandler events
-            // the No_Sensor ECC ignores.
+            // The centre-home CAT's work-to-home timers feed only events the No_Sensor ECC ignores.
             try
             {
                 var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
@@ -644,8 +607,8 @@ namespace CodeGen.Application
             catch (Exception ex) { log($"[Sysres][TimerStrip][Warn] home-timer param strip failed: {ex.Message}"); }
         }
 
-        // HARD guard: the deployable sysres MUST be a faithful projection of the syslay, else EAE deploys
-        // the OLD logic silently. A FAIL usually means EAE held a sysres locked during the sync.
+        // HARD guard: a sysres that is not a faithful projection of the syslay makes EAE deploy the OLD
+        // logic silently. A FAIL usually means EAE held a sysres locked during the sync.
         static void ValidateParity(GenerationContext ctx, string path, Action<string> log)
         {
             var cfg = ctx.Config;
@@ -685,10 +648,8 @@ namespace CodeGen.Application
             }
         }
 
-        // An IP collision is only visible ACROSS emitters — the RevPi device and the HMI panel are written
-        // by unrelated paths into the SAME broadcast domain — so no single-file check can catch it. A
-        // duplicated Soft dPAC CONTAINER address is fatal (it is EAE's deploy/login target); duplicated
-        // host NICs are reported but tolerated, because the shipped tree and the reference both carry one.
+        // An IP collision is only visible ACROSS emitters writing into one broadcast domain, so no single-file
+        // check can catch it. A duplicated container address is fatal; duplicated host NICs are tolerated.
         static void ValidateAddresses(GenerationContext ctx, Action<string> log)
         {
             var cfg = ctx.Config;
@@ -729,8 +690,7 @@ namespace CodeGen.Application
             catch (Exception ex) { log($"[MQTT][Error] {ex.Message}"); }
         }
 
-        // SAFETY: the BX1 cover safe-start reaches the TM3BC coupler only if the scanner carries the .210
-        // device; an empty EIPSCANNER2.xml fails the generation.
+        // The cover safe-start reaches the coupler only if the scanner carries the coupler device.
         static void ValidateBx1Scanner(MapperConfig cfg, Action<string> log)
         {
             bool fatal = false;
@@ -743,9 +703,7 @@ namespace CodeGen.Application
                 fatal = scan.Fatal;
             }
             catch (Exception ex) { log($"[BX1][Scanner][Error] {ex.Message}"); }
-            // FATAL, outside the catch so the throw is not swallowed by it: an empty scanner means the
-            // cover I/O and the CoverPNP_Hr safe-start never reach the coupler, which is a project that
-            // deploys and cannot move a cover.
+            // Thrown outside the catch so it is not swallowed: an empty scanner deploys but cannot move a cover.
             if (fatal)
                 throw new InvalidOperationException(
                     "[BX1][Scanner] the BX1 EtherNet/IP scanner would compile EMPTY; the cover I/O and the " +
