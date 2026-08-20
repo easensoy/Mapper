@@ -1,20 +1,19 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
+using CodeGen.Translation;
+using System.IO;
 using System.Xml.Linq;
 using CodeGen.Configuration;
 using CodeGen.Devices.Core;
 using CodeGen.Mapping;
-using CodeGen.Translation;
 
 namespace CodeGen.Devices.Core
 {
     public static class Station2SysresMirror
     {
-        // Mirrors the Station-2 FBs from the syslay onto the M580 and BX1 resources (bucketed by
-        // BucketFor), so those PLCs carry their own FBs not empty shells. Runs AFTER
-        // Station2DeviceEmitter.EmitAll wrote the sysdev/sysres shells. Returns (M580 count, BX1 count).
+        // Mirrors the Station-2 FBs from the syslay onto the M580 and BX1 resources so those PLCs carry
+        // their own FBs, not empty shells. Runs AFTER Station2DeviceEmitter.EmitAll wrote the shells.
         public static (int M580, int BX1) EmitStation2Sysres(GenerationContext ctx)
         {
             if (ctx == null) throw new ArgumentNullException(nameof(ctx));
@@ -39,9 +38,8 @@ namespace CodeGen.Devices.Core
             return (m580, bx1);
         }
 
-        // Copy of bucket translated so its bounding box's top-left lands on the device-local canvas
-        // origin — the syslay's global coords (M580 at x=12200+) would otherwise land off-screen on each
-        // device-local canvas. Preserves relative spacing exactly. Same origin the syslay pass uses.
+        // Translated so the bounding box's top-left lands on the device-local canvas origin: the syslay's
+        // global coords would otherwise sit off-screen. Relative spacing is preserved exactly.
         static List<SysresFbMirror.SyslayFb> TranslateBucketToCanvasOrigin(
             List<SysresFbMirror.SyslayFb> bucket, CanvasPoint origin)
         {
@@ -74,19 +72,17 @@ namespace CodeGen.Devices.Core
             if (sysres == null) return 0;
             var added = SysresFbMirror.MirrorFbsIntoSysres(sysres, bucket, systemFbs);
 
-            // SysresFbMirror keeps x/y untouched on an existing FB (so EAE doesn't see it as new), so
-            // existing M580/BX1 FBs keep OLD global-syslay coords — restamp the canvas-origin x/y here.
+            // SysresFbMirror leaves x/y alone on an existing FB, so restamp the canvas-origin x/y here.
             ApplyTranslatedPositionsToSysres(sysres, bucket);
 
-            // EAE Solution Integrity requires a sibling "{resId}/" folder with an opcua.xml whose UID =
-            // the parent sysdev-folder GUID (same helper as the M262 path).
+            // EAE Solution Integrity requires a sibling "{resId}/" folder with an opcua.xml whose UID is
+            // the parent sysdev-folder GUID.
             SystemInjector.EnsureOpcuaXmlBesideArtefact(sysres);
 
             return added;
         }
 
-        // Restamps each <FB> x/y on the sysres from translatedBucket (idempotent: saves only on change).
-        // FBs not in the bucket (FB1/FB2, MqttConn, out-of-scope) are left alone.
+        // Idempotent: saves only on change, and FBs outside the bucket (FB1/FB2, MqttConn) are left alone.
         static void ApplyTranslatedPositionsToSysres(string sysresPath,
             List<SysresFbMirror.SyslayFb> translatedBucket)
         {
