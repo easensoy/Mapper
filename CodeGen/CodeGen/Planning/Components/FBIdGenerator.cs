@@ -1,6 +1,12 @@
-using System;
+﻿using System;
 using System.Security.Cryptography;
 using System.Text;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Xml.Linq;
+using CodeGen.Configuration;
+using CodeGen.Mapping;
 
 namespace CodeGen.Translation
 {
