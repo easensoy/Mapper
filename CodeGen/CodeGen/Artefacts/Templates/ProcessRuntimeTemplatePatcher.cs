@@ -1,31 +1,22 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Xml.Linq;
-using CodeGen.Configuration;
 using static CodeGen.Services.FbtXmlEditor;
+using System.IO;
+using CodeGen.Configuration;
 
 namespace CodeGen.Services
 {
     internal static class ProcessRuntimeTemplatePatcher
     {
-        // The engine emits SCNF from four ECStates, one of which is WAIT_STEP. WAIT_STEP is re-entered
-        // from WAIT_HOLD on every `state_change`, i.e. on every ring message from any component, and
-        // check_wait does not touch CurrentProcessState — so publishing off SCNF republishes the same
-        // phase hundreds of times while a process merely waits. IDLE1 is entered exactly once per recipe
-        // row (from INIT, from ADVANCE, and from WAIT_STEP once the wait is satisfied), so a dedicated
-        // event emitted there is the one publish-per-step signal the telemetry needs.
+        // Emitted from IDLE1, which is entered exactly once per recipe row. SCNF is emitted from four ECStates
+        // incl. WAIT_STEP, which re-enters on every ring message and would republish the same phase.
         internal const string PhaseEventName = "PHASECNF";
 
-        // TELEMETRY ONLY. The engine reports progress as CurrentStep, a compiled recipe-row index that
-        // means nothing outside the generator. This adds a parallel row->VueOne-State_Number lookup and
-        // one derived output so the phase the model actually names can be published.
-        //
-        // It cannot change control flow: ProcessStateByRow is read nowhere else, CurrentProcessState is
-        // written and never tested, and the assignment is appended to algorithms that already run on
-        // every step change. No ECC state, transition, event or existing algorithm line is altered.
-        // Reverting is a no-op because the strip path removes both declarations and both assignments.
+        // TELEMETRY ONLY: a parallel recipe-row -> VueOne State_Number lookup plus one derived output, so the
+        // phase the model names can be published alongside the meaningless compiled CurrentStep index.
+        // Cannot change control flow: CurrentProcessState is written and never tested, and the strip path reverts it.
         internal static void PatchProcessTelemetryState(string eaeProjectDir, MapperConfig cfg, DeployResult result)
         {
             var candidates = new[]
@@ -64,8 +55,7 @@ namespace CodeGen.Services
                     foreach (var act in root.Descendants(ns + "ECAction")
                                  .Where(a => (string?)a.Attribute("Output") == PhaseEventName).ToList())
                     {
-                        // Standalone when we added it; if anything ever merged it onto an algorithm
-                        // action, drop only the emission so the algorithm keeps running.
+                        // If anything ever merged the emission onto an algorithm action, drop only the emission.
                         if (act.Attribute("Algorithm") != null) act.SetAttributeValue("Output", null);
                         else act.Remove();
                     }
@@ -97,8 +87,7 @@ namespace CodeGen.Services
                                 new System.Xml.Linq.XAttribute("Comment",
                                     "Telemetry only: the VueOne State_Number of the active row. Never tested by control logic.")));
 
-                            // Appended to the algorithms that already set CurrentStep, so the derived value
-                            // tracks the active row without adding an event, a transition or an FB.
+                            // Appended to the algorithms that already set CurrentStep, so no event, transition or FB is added.
                             foreach (var name in new[] { "LoadStep", "AdvanceStep" })
                             {
                                 var alg = root.Descendants(ns + "Algorithm")
@@ -114,11 +103,8 @@ namespace CodeGen.Services
                                     st.Value.TrimEnd() + "\nCurrentProcessState := ProcessStateByRow[CurrentStep];"));
                             }
 
-                            // An OutputVar is only sampled onto its data connections when an event it is
-                            // WITH-associated to fires; with no association the value never leaves the FB
-                            // and every subscriber reads the initial 0 forever. Associating it here rather
-                            // than on SCNF is what makes the phase publish once per step instead of on
-                            // every ring message (see PhaseEventName).
+                            // An OutputVar only reaches its data connections when a WITH-associated event fires;
+                            // unassociated it stays at 0 forever. Associating here, not on SCNF, gives one publish per step.
                             var evOut = iface.Element(ns + "EventOutputs");
                             if (evOut == null)
                                 result.Warnings.Add(
@@ -132,9 +118,7 @@ namespace CodeGen.Services
                                     new System.Xml.Linq.XElement(ns + "With",
                                         new System.Xml.Linq.XAttribute("Var", "CurrentProcessState"))));
 
-                            // Appended after the existing action, so LoadStep has already refreshed the
-                            // value by the time the event fires. Adding an emission cannot alter control
-                            // flow: no transition tests it and only the publisher consumes it.
+                            // Appended after the existing action, so LoadStep has refreshed the value before the event fires.
                             var idle = root.Descendants(ns + "ECState")
                                 .FirstOrDefault(s => (string?)s.Attribute("Name") == "IDLE1");
                             if (idle == null)
@@ -267,15 +251,8 @@ namespace CodeGen.Services
                 TemplateDocument.Load(cfg, @"DataType\RecipeStep.dt"), result, "(sim Recipe struct)");
 
         // Promote the process-phase receiver slot from a literal inside the composite to an instance input.
-        //
-        // The shipped Process1_Generic pins the slot as a Parameter on its internal ProcessStateBusHandler,
-        // so EVERY Process FB in a project receives its transported phase into the same state_table index --
-        // one consumer per project, and only if that one literal happens to equal its producer's id.
-        // Declaring rdy_id on the TYPE's interface and wiring it to the handler makes the slot a per-instance
-        // parameter, which is what lets each consumer name its own producer.
-        //
-        // Modelled on process_id, which is the same shape: an INT InputVar sampled WITH INIT and connected
-        // straight through to the handler. Idempotent, and structurally verified before it returns.
+        // The shipped Process1_Generic pins it as a Parameter on its internal ProcessStateBusHandler, so every
+        // Process FB in a project receives its phase into the same state_table index. Modelled on process_id.
         internal static void PromoteProcessPhaseReceiverSlot(string eaeProjectDir)
             => RequireDeployedFbt(eaeProjectDir, "Process1_Generic.fbt",
                 "Process1_Generic receiver-slot promotion failed", (doc, root, ns, fbt) =>
@@ -293,8 +270,7 @@ namespace CodeGen.Services
                 var dataConns = net.Element(ns + "DataConnections")
                     ?? throw new InvalidOperationException($"{fbt}: FBNetwork has no DataConnections.");
 
-                // By TYPE, not by instance name: the handler is the FB that declares the slot, and a renamed
-                // instance must not silently skip the wiring.
+                // By TYPE, not by instance name, so a renamed instance cannot silently skip the wiring.
                 var handler = net.Elements(ns + "FB")
                         .FirstOrDefault(f => (string?)f.Attribute("Type") == "ProcessStateBusHandler")
                     ?? throw new InvalidOperationException(
@@ -322,14 +298,12 @@ namespace CodeGen.Services
                 var wires = new ConnectionSet(dataConns, ns);
                 if (!wires.HasSource(Slot)) wires.Append(Slot, destination);
 
-                // The internal literal has to go: a Parameter and a data connection on the same input are two
-                // sources for one value, and the literal is exactly the project-wide slot being removed.
+                // The internal literal must go: a Parameter and a data connection on one input are two sources for one value.
                 RemoveElems(handler.Elements(ns + "Parameter"), p => (string?)p.Attribute("Name") == Slot);
 
                 SaveXmlWithRetry(doc, fbt);
 
-                // Re-read what was written. An in-memory edit that never reached disk would leave every
-                // instance parameter addressing a pin the deployed type does not declare.
+                // Re-read from disk: an edit that never landed would leave every instance addressing a pin the type does not declare.
                 var check = LoadXmlWithRetry(fbt, LoadOptions.PreserveWhitespace).Root
                     ?? throw new InvalidOperationException($"{fbt}: unreadable after the receiver-slot promotion.");
                 var cns = check.GetDefaultNamespace();
@@ -773,32 +747,40 @@ namespace CodeGen.Services
                 "ProcessRuntime_Generic_v1.fbt"), "ProcessRuntime_Generic_v1.fbt");
         }
 
+        // state_table is declared by the engine, the bus handler and the ring relay; all three must carry the
+        // SAME ArraySize, else a report indexed on a shorter declaration writes past the end of that one.
+        private static readonly string[] StateTableOwners =
+        {
+            "ProcessRuntime_Generic_v1.fbt",
+            "ProcessStateBusHandler.fbt",
+            "updateComponentState.fbt",
+        };
+
+        internal static void PatchStateTableCapacity(string eaeProjectDir, int capacity, DeployResult result)
+        {
+            var decl = new System.Text.RegularExpressions.Regex(
+                @"(<VarDeclaration Name=""state_table"" Type=""Component_State"" Namespace=""Main"" ArraySize="")(\d+)("")");
+            foreach (var file in StateTableOwners)
+            {
+                var path = FindDeployedFbt(eaeProjectDir, file);
+                if (string.IsNullOrEmpty(path)) continue;
+                var text = File.ReadAllText(path);
+                var m = decl.Match(text);
+                if (!m.Success) continue;
+                if (m.Groups[2].Value == capacity.ToString()) continue;
+                File.WriteAllText(path, decl.Replace(text, "${1}" + capacity + "${3}"));
+                result.PatchesApplied.Add(
+                    $"{file}: state_table ArraySize {m.Groups[2].Value} -> {capacity}");
+                MapperLogger.Info($"[Deploy] {file}: state_table ArraySize {m.Groups[2].Value} -> {capacity}");
+            }
+        }
+
         internal static void PatchKnownArraySizeBugs(string eaeProjectDir, DeployResult result)
         {
             var fbtPath = Path.Combine(eaeProjectDir, "IEC61499", "ProcessRuntime_Generic_v1.fbt");
             if (!File.Exists(fbtPath)) return;
 
             var text = File.ReadAllText(fbtPath);
-            // The size is StateTableAllocation.Capacity, not a literal: the engine, the bus handler, the
-            // ring relay and the interlock evaluator all declare state_table and must agree, or a report
-            // writes past the end of one of them.
-            int cap = CodeGen.Translation.StateTableAllocation.Capacity;
-            const string declPrefix =
-                "<VarDeclaration Name=\"state_table\" Type=\"Component_State\" Namespace=\"Main\" ArraySize=\"";
-            string oldDecl = declPrefix + "1\" />";
-            string newDecl = declPrefix + cap + "\" />";
-
-            if (text.Contains(newDecl)) return;
-            if (!text.Contains(oldDecl))
-            {
-                result.Warnings.Add(
-                    "ProcessRuntime_Generic_v1.fbt: state_table is neither ArraySize=\"1\" (the shape this " +
-                    $"repairs) nor ArraySize=\"{cap}\" (the shape the template ships). Verify by hand.");
-                return;
-            }
-            File.WriteAllText(fbtPath, text.Replace(oldDecl, newDecl));
-            result.PatchesApplied.Add($"ProcessRuntime_Generic_v1.state_table ArraySize 1 -> {cap}");
-            MapperLogger.Info($"[Deploy] Patched ProcessRuntime_Generic_v1.state_table ArraySize 1 -> {cap}");
 
             // Fix the shipped check_wait typo (RHS Wait1Id -> Wait1State) or no wait can ever be satisfied.
             const string brokenCheckWait =
