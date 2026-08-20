@@ -1,16 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-using System.IO.Compression;
 using System.Linq;
 using System.Xml.Linq;
 using CodeGen.Configuration;
 using CodeGen.Translation;
-using CodeGen.Models;
-using CodeGen.Mapping;
-using CodeGen.Translation.Interlocks;
 using CodeGen.Devices.M262;
-using CodeGen.Devices.Core;
 using static CodeGen.Services.TemplateArtifactDeployer;
 using static CodeGen.Services.FbtXmlEditor;
 using static CodeGen.Services.HmiTemplatePatcher;
@@ -20,6 +15,11 @@ using static CodeGen.Services.ActuatorCatTemplatePatcher;
 using static CodeGen.Services.RingRelayPatcher;
 using static CodeGen.Services.SwivelCatPatcher;
 using static CodeGen.Services.InterlockCatPatcher;
+using System.IO.Compression;
+using CodeGen.Models;
+using CodeGen.Mapping;
+using CodeGen.Translation.Interlocks;
+using CodeGen.Devices.Core;
 
 namespace CodeGen.Services
 {
@@ -37,14 +37,8 @@ namespace CodeGen.Services
             if (string.IsNullOrWhiteSpace(eaeProjectDir))
                 throw new InvalidOperationException("Cannot determine EAE project directory from syslay path.");
 
-            // ExtractToEae is copy-if-absent, so force-re-extract the artefacts reshaped by later patches (delete first).
-            // CommonInterlockEvaluator is the shared interlock FB the CATs connect to; it MUST refresh together with
-            // them (all flip to/from the RuleTable/Target struct as one), or a stale evaluator drifts out of sync
-            // with a freshly-reshaped CAT -> EAE "member 'RuleCount'/'TargetWork1State' does not exist" errors. It
-            // was the only interlock artefact left copy-if-absent.
-            // ProcessStateBusHandler joins the refresh list: the CycleReady handoff adds SETRDY/ready_evt/CMDRDYST to
-            // it, and Process1_Generic (force-re-extracted) wires those ports -- if the handler stayed copy-if-absent a
-            // plain re-Generate would keep the stale one and EAE would fail ("port does not exist on ProcessStateBusHandler").
+            // ExtractToEae is copy-if-absent, so delete first to force-re-extract anything later patches reshape.
+            // An artefact left stale against a freshly reshaped CAT is an EAE "member/port does not exist" error.
             foreach (var ext in new[] { ".fbt", ".doc.xml", ".meta.xml" })
             foreach (var basic in TemplateManifest.ForceRefresh(ArtefactKind.Basic))
             {
@@ -54,7 +48,6 @@ namespace CodeGen.Services
                 { MapperLogger.Info($"[Deploy][Refresh] could not remove stale {stale}: {ex.Message}"); }
             }
 
-            // ExtractToEae is copy-if-absent, so force-re-extract the CATs reshaped by later patches (delete first).
             foreach (var catRefresh in TemplateManifest.ForceRefresh(ArtefactKind.Cat))
             {
                 var dir = Path.Combine(eaeProjectDir, "IEC61499", catRefresh);
@@ -80,13 +73,16 @@ namespace CodeGen.Services
             foreach (var name in TemplateManifest.Deployed(ArtefactKind.Cat))
                 DeployArtifact(libPath, "CAT", name, eaeProjectDir, result, isBasic: false, isCat: true);
 
-            DeployArtifact(libPath, "Basic", "Robot_Task_Core", eaeProjectDir, result, isBasic: true);
-            DeployArtifact(libPath, "CAT", "Robot_Task_CAT", eaeProjectDir, result, isBasic: false, isCat: true);
+            // Held back so their .dfbproj entries land after every other artefact of their kind.
+            foreach (var name in TemplateManifest.DeployedLast(ArtefactKind.Basic))
+                DeployArtifact(libPath, "Basic", name, eaeProjectDir, result, isBasic: true);
+            foreach (var name in TemplateManifest.DeployedLast(ArtefactKind.Cat))
+                DeployArtifact(libPath, "CAT", name, eaeProjectDir, result, isBasic: false, isCat: true);
 
             if (cfg.DeployBx1IoBroker)
             {
                 DeployArtifact(libPath, "Basic", "changeEventM262_2", eaeProjectDir, result, isBasic: true);
-                // Force-re-extract the safe-start gate (copy-if-absent) so a corrected type reaches an already-generated tree.
+                // Force-re-extract so a corrected safe-start type reaches an already-generated tree.
                 if (cfg.Bx1CoverSafeStart)
                 {
                     var fsFbt = Path.Combine(eaeProjectDir, "IEC61499", "Bx1CoverFailsafe.fbt");
@@ -94,9 +90,7 @@ namespace CodeGen.Services
                     DeployArtifact(libPath, "Basic", "Bx1CoverFailsafe", eaeProjectDir, result, isBasic: true);
                 }
                 DeployArtifact(libPath, "Composite", "PLC_RW_BX1", eaeProjectDir, result, isBasic: false);
-                // Decode the input word at INIT so a cover already in place at power-on is reported without a
-                // physical remove-and-replace. Applies in BOTH bridge modes, so it sits here rather than inside
-                // the embed path (which is skipped when the bridge is external).
+                // Applies in BOTH bridge modes, so it sits here rather than in the embed path.
                 if (CodeGen.Devices.BX1.Bx1IoBrokerInjector.EnsureInitWordDecodeInComposite(
                         Path.Combine(eaeProjectDir, "IEC61499", "PLC_RW_BX1.fbt")))
                     result.PatchesApplied.Add("PLC_RW_BX1: decode the EtherNet/IP input word at INIT so the cover "
@@ -104,22 +98,18 @@ namespace CodeGen.Services
                 if (cfg.Bx1BridgeInsideComposite)
                     CodeGen.Devices.BX1.Bx1IoBrokerInjector.EmbedCoverBridgeInComposite(
                         Path.Combine(eaeProjectDir, "IEC61499", "PLC_RW_BX1.fbt"));
-                // SAFE: cover_hr safe-start gate — forced HOME on start; does NOT cover EAE Clean/STOP (needs TM3BC ToHome fallback 16#0002).
+                // Forces cover_hr HOME on start only; EAE Clean/STOP still needs the TM3BC ToHome fallback 16#0002.
                 if (cfg.Bx1CoverSafeStart &&
                     CodeGen.Devices.BX1.Bx1IoBrokerInjector.InjectCoverFailsafeIntoBrokerType(eaeProjectDir))
                     result.Warnings.Add("[Deploy][BX1] CoverPNP_Hr safe-start gate (Bx1CoverFailsafe) " +
                         "inserted into PLC_RW_BX1 — cover_hr forced HOME on every start.");
             }
 
-            // RevPi Feed-station Modbus IO broker type (the reference PLC_RW_REVPI). Deployed whenever the
-            // RevPi is used — the FULL swap (RevPi hosts the whole Feed station) OR the PARTIAL swap
-            // (Feeder/Checker on RevPi). Without it EAE cannot instantiate the RevPI_IO broker
-            // (ERR_NO_SUCH_TYPE). Pure M262 mode never deploys it, so M262 output stays byte-identical.
+            // Without the broker type EAE cannot instantiate RevPI_IO; pure M262 mode never deploys it.
             if (ctx.Profile.PartialRevPi)
             {
                 DeployArtifact(libPath, "Composite", "PLC_RW_REVPI", eaeProjectDir, result, isBasic: false);
-                // Internalize the Modbus symlink bridge INTO PLC_RW_REVPI so the RevPi sysres instantiates only
-                // RevPI_IO (tight/DRY). The RevPiIoBrokerInjector then emits just the RevPI_IO instance.
+                // Internalise the Modbus symlink bridge so the RevPi sysres instantiates only RevPI_IO.
                     CodeGen.Devices.RevPi.RevPiIoBrokerInjector.EmbedBridgeInComposite(
                         Path.Combine(eaeProjectDir, "IEC61499", "PLC_RW_REVPI.fbt"));
 
@@ -127,6 +117,8 @@ namespace CodeGen.Services
 
             DeployDataTypes(libPath, eaeProjectDir, result);
             PatchKnownArraySizeBugs(eaeProjectDir, result);
+            // Every FB that declares state_table gets the size THIS plan needs, together.
+            PatchStateTableCapacity(eaeProjectDir, ctx.StateTableCapacity, result);
             PatchProcessRuntimeCompatibility(eaeProjectDir, result);
             PatchSensorBoolCatDstQi(eaeProjectDir, result);
             PatchCatSymlinkQi(eaeProjectDir, "Five_State_Actuator_CAT", result);
@@ -134,9 +126,8 @@ namespace CodeGen.Services
             // QI=TRUE on the SYMLINKMULTIVARDST/SRC or the subscriber is dropped and the core is islanded from its IO.
             PatchCatSymlinkQi(eaeProjectDir, TemplateMap.SevenStateCentreHomeCat, result);
             EnsureSevenStateStateOut(eaeProjectDir, result);
-            foreach (var hmiCat in new[] { "Five_State_Actuator_CAT", TemplateMap.SevenStateCentreHomeCat,
-                                           "Sensor_Bool_CAT", "Robot_Task_CAT" })
-                FixCatHmiOpcuaFrame(eaeProjectDir, hmiCat, result);
+            foreach (var cat in TemplateManifest.WithHmiFaceplate)
+                FixCatHmiOpcuaFrame(eaeProjectDir, cat.Name, result);
             PatchActuatorModeInitialValue(eaeProjectDir, "FiveStateActuator.fbt", result);
             PatchActuatorModeInitialValue(eaeProjectDir, "SevenStateCentreHomeActuator.fbt", result);
             PatchSwivelStartup(eaeProjectDir, ctx, result);
@@ -153,52 +144,30 @@ namespace CodeGen.Services
             PatchProcess1RecipeArraySize(eaeProjectDir, result);
             PatchProcessNameStringSize(eaeProjectDir, result);
 
-            // Additive, gated by MqttPublishEnabled; PUBLISH binds to the injected MQTT_CONNECTION by matching ConnectionID value (no wire).
+            // PUBLISH binds to the injected MQTT_CONNECTION by matching ConnectionID value, with no wire.
             if (cfg.MqttPublishEnabled)
             {
                 DeployMqttFormatter(cfg, eaeProjectDir, result);
-                PatchCatMqttPublish(eaeProjectDir, "Five_State_Actuator_CAT",
-                    stateEventSource: "ActuatorCore.pst_out",
-                    stateDataSource: "ActuatorCore.current_state_to_process",
-                    initSource: "StateHandling.INITO",
-                    topicNameSource: "actuator_name", cfg, result);
-                PatchCatMqttPublish(eaeProjectDir, TemplateMap.SevenStateCentreHomeCat,
-                    stateEventSource: "ActuatorCore.pst_out",
-                    stateDataSource: "ActuatorCore.current_state_to_process",
-                    initSource: "StateHandling.INITO",
-                    topicNameSource: "actuator_name", cfg, result);
-                PatchCatMqttPublish(eaeProjectDir, "Robot_Task_CAT",
-                    stateEventSource: "StateMachine.pst_out",
-                    stateDataSource: "StateMachine.current_state_to_process",
-                    initSource: "StateHandling.INITO",
-                    topicNameSource: "actuator_name", cfg, result);
-                PatchCatMqttPublish(eaeProjectDir, "Sensor_Bool_CAT",
-                    stateEventSource: "FB1.CNF",
-                    stateDataSource: "FB1.Status",
-                    initSource: "StateHandling.INITO",
-                    topicNameSource: "name", cfg, result);
+                foreach (var cat in TemplateManifest.WithTelemetryTap)
+                    PatchCatMqttPublish(eaeProjectDir, cat.Name,
+                        cat.Telemetry!.StateEventSource, cat.Telemetry.StateDataSource,
+                        cat.Telemetry.InitSource, cat.Telemetry.TopicNameSource, cfg, result);
             }
 
-            // Process-state telemetry. Runs unconditionally: when MQTT is off both calls STRIP, so a
-            // telemetry-off tree carries no publisher, no derived output and no stale array declaration.
+            // Runs unconditionally: with MQTT off both calls STRIP, leaving no publisher or stale declaration.
             ProcessRuntimeTemplatePatcher.PatchProcessTelemetryState(eaeProjectDir, cfg, result);
             PatchProcessMqttPublish(eaeProjectDir, cfg, result);
 
-            // Interlock/target interface -> struct (gated by interlock.yaml useStruct/useTargetStruct; false
-            // restores the arrays/scalars). Both actuator CATs + the shared CommonInterlockEvaluator flip
-            // TOGETHER; the normalizer saves retry through transient EAE locks (SaveXmlWithRetry), and the guard
-            // ABORTS if they still drift into a stale scalar/struct mix — the recurring "TargetWork1State does
-            // not exist in CommonInterlockEvaluator" build errors (EAE holding a CAT .fbt locked so its reshape
-            // couldn't save while the evaluator's did). Aborting beats shipping a tree that fails EAE Build.
+            // Both actuator CATs and the shared CommonInterlockEvaluator flip to/from the struct TOGETHER.
+            // The guard aborts on a stale scalar/struct mix, which beats shipping a tree that fails EAE Build.
             bool interlockStruct = InterlockConfig.Current.UseStruct;
             bool targetStruct = InterlockConfig.Current.UseTargetStruct;
             ApplyInterlockNormalizers(cfg, eaeProjectDir, interlockStruct, targetStruct, result);
             AssertInterlockInterfaceConsistent(cfg, eaeProjectDir, interlockStruct, targetStruct, result);
 
-            // Wrap each resource MQTT_CONNECTION in the 'Telemetry' composite (gated by UseTelemetryCat); false emits the raw MQTT_CONNECTION.
             if (cfg.UseTelemetryCat)
             {
-                // Sweep first (copy-if-absent staleness): removes current + legacy 'Telemetry_CAT' artifacts before deploying fresh.
+                // Sweep first: copy-if-absent would otherwise keep current and legacy Telemetry artefacts.
                 SweepTelemetryCat(eaeProjectDir, result);
                 DeployTelemetryConfigDatatype(cfg, eaeProjectDir, result);
                 DeployTelemetryHealthDatatype(cfg, eaeProjectDir, result);
@@ -212,22 +181,17 @@ namespace CodeGen.Services
             }
             NormalizeSwivelSimSensorSource(eaeProjectDir, result);
             StripCatHomeSensorPoll(eaeProjectDir, TemplateMap.SevenStateCentreHomeCat, result);
-            // Broker-fed BX1 sensors (TopCoverSenosr) have no I/O-scan event, so give Sensor_Bool_CAT a scoped
-            // RD re-read event; the BX1 broker fires it on the cover-detect change (HCF M262/M580 unaffected).
+            // Broker-fed BX1 sensors have no I/O-scan event, so give them a scoped RD re-read the broker fires.
             EnsureSensorBoolReadEvent(eaeProjectDir, result);
-            // A sensor reports only on a level change, so a level already true at power-on is announced once and
-            // then never again. Give Sensor_Bool an addressed refresh (sample, then report even if unchanged) so
-            // the recipe can ask before it waits; the CAT wiring above serialises request -> sample -> report.
+            // A sensor reports only on a level change, so add an addressed refresh that reports even if unchanged.
             EnsureSensorBoolRefreshPath(eaeProjectDir, result);
             NormalizeFiveStateSimSensorSource(eaeProjectDir, result);
             NormalizeFiveStateFaultEnables(eaeProjectDir, result);
-            // Recipe-struct collapse on Process1_Generic + engine (gated by UseRecipeStruct); false reverts to the 6 arrays.
             bool recipeStruct = cfg.UseRecipeStruct;
             if (recipeStruct)
                 DeployRecipeStepDatatype(cfg, eaeProjectDir, result);
             NormalizeProcess1RecipeArrays(eaeProjectDir, recipeStruct, result);
-            // Per-instance process-phase receiver slot. Required, not best-effort: the syslay emits rdy_id as
-            // an instance parameter, which EAE ignores unless the type declares the pin.
+            // Required, not best-effort: EAE ignores the syslay's rdy_id parameter unless the type declares the pin.
             ProcessRuntimeTemplatePatcher.PromoteProcessPhaseReceiverSlot(eaeProjectDir);
             NormalizeProcessRuntimeRecipeArrays(eaeProjectDir, recipeStruct, result);
             NormalizeProcessEngineDebugWatch(eaeProjectDir, result);
@@ -291,7 +255,7 @@ namespace CodeGen.Services
 
             try
             {
-                var hcf = M262HwConfigCopier.Copy(cfg);
+                var hcf = HwConfigVerbatimCopier.CopyFor(cfg, CodeGen.Translation.PlcAssignment.M262, cfg.M262HcfTemplatePath);
                 result.HcfPath = hcf.HcfPath;
                 result.HcfParametersOverwritten.AddRange(hcf.ParametersOverwritten);
                 foreach (var w in hcf.Warnings)
@@ -354,7 +318,7 @@ namespace CodeGen.Services
             }
         }
 
-        // Fan an MQTT_PUBLISH off the CAT's post-update state event (additive). MQTT_PUBLISH does NOT resolve $${PATH} at runtime → topicNameSource must be a concrete per-instance name.
+        // MQTT_PUBLISH does not resolve $${PATH} at runtime, so topicNameSource must be a concrete per-instance name.
         static void PatchCatMqttPublish(string eaeProjectDir, string catName,
             string stateEventSource, string stateDataSource, string initSource,
             string topicNameSource,
@@ -377,7 +341,7 @@ namespace CodeGen.Services
                 var net = root.Element(ns + "FBNetwork");
                 if (net == null) { result.Warnings.Add($"{catName}.fbt: no FBNetwork; MQTT patch skipped."); return; }
 
-                // Remove existing MqttPub/MqttFmt FBs + wires before re-emitting (CAT folder is copy-if-absent).
+                // The CAT folder is copy-if-absent, so clear the previous emission before re-emitting.
                 var staleFbs = net.Elements(ns + "FB")
                     .Where(f => (string?)f.Attribute("Name") is "MqttPub" or "MqttFmt")
                     .ToList();
@@ -407,7 +371,7 @@ namespace CodeGen.Services
                     result.PatchesApplied.Add(
                         $"{catName}: removed stale MQTT patch ({removedFbs} FB(s), {removedWires} wire(s)) before re-emit");
 
-                // Allocate FB IDs from max(existing FB ID)+1, not the IDCounter alone (later-added FBs sit past the counter and would collide).
+                // Allocate from max(existing ID)+1, not the IDCounter alone: later-added FBs sit past the counter.
                 var idAttr = root.Elements(ns + "Attribute")
                     .FirstOrDefault(a => (string?)a.Attribute("Name") == "Configuration.FB.IDCounter");
                 int idc = 0;
@@ -429,7 +393,7 @@ namespace CodeGen.Services
                     new System.Xml.Linq.XAttribute("y", "2580"),
                     new System.Xml.Linq.XAttribute("Namespace", "Main"));
 
-                // A configured generic FB is a hashed variant in namespace "Main"; the hash is derived from InterfaceParams (CNTX:=1) and changes if the channel count changes.
+                // The hash names a generic variant, and its numbered channel ports exist only once CNTX:=1 is set.
                 const string MqttPublishVariant = "MQTT_PUBLISH_115480E69E664F878";
                 var pubFb = new System.Xml.Linq.XElement(ns + "FB",
                     new System.Xml.Linq.XAttribute("ID", pubId),
@@ -438,7 +402,6 @@ namespace CodeGen.Services
                     new System.Xml.Linq.XAttribute("x", "8600"),
                     new System.Xml.Linq.XAttribute("y", "2580"),
                     new System.Xml.Linq.XAttribute("Namespace", "Main"));
-                // The numbered channel ports (Topic1/Payload1/... + PUBLISH1) do not exist until CNTX:=1 sets the channel count via InterfaceParams.
                 pubFb.Add(new System.Xml.Linq.XElement(ns + "Attribute",
                     new System.Xml.Linq.XAttribute("Name", "Configuration.GenericFBType.InterfaceParams"),
                     new System.Xml.Linq.XAttribute("Value", "Runtime.NetConnectivity#CNTX:=1")));
@@ -447,7 +410,7 @@ namespace CodeGen.Services
                         new System.Xml.Linq.XAttribute("Name", n),
                         new System.Xml.Linq.XAttribute("Value", v)));
                 P(pubFb, "QI", "TRUE");
-                // ConnectionID is the shared binding key: the MQTT_CONNECTION and every embedded publisher carry the same value (not the unique ClientIdentifier).
+                // ConnectionID is the shared binding key, not the unique ClientIdentifier.
                 P(pubFb, "ConnectionID", Q(cfg.MqttConnectionName));
 
                 P(pubFb, "RootPath", Q(cfg.MqttTopicRoot));
@@ -459,7 +422,7 @@ namespace CodeGen.Services
                 if (lastFb != null) { lastFb.AddAfterSelf(pubFb); lastFb.AddAfterSelf(fmtFb); }
                 else { net.Add(fmtFb); net.Add(pubFb); }
 
-                // A <Frame> with <Parameter> children is invalid inside a CAT FBNetwork; strip any stale FRAME_MQTT.
+                // A <Frame> with <Parameter> children is invalid inside a CAT FBNetwork.
                 net.Elements(ns + "Frame")
                    .Where(fr => (string?)fr.Attribute("Name") == "FRAME_MQTT").Remove();
 
@@ -487,12 +450,8 @@ namespace CodeGen.Services
             }
         }
 
-        // Process-state telemetry: one embedded formatter + publisher inside Process1_Generic, fanned off
-        // the engine's dedicated phase event, which fires once per recipe row. Passive by construction —
-        // nothing waits on the publish and a broker outage cannot stall the recipe.
-        //
-        // Topic is <root>/process/<process_name>; payload is the shared {state:N} convention, where N is
-        // the VueOne State_Number carried by ProcessStateByRow, NOT CurrentStep (a recipe-row index).
+        // Passive by construction: nothing waits on the publish, so a broker outage cannot stall the recipe.
+        // The payload state is the VueOne State_Number from ProcessStateByRow, NOT CurrentStep (a row index).
         static void PatchProcessMqttPublish(string eaeProjectDir, MapperConfig cfg, DeployResult result)
         {
             var fbt = FindDeployedFbt(eaeProjectDir, "Process1_Generic.fbt");
@@ -510,8 +469,7 @@ namespace CodeGen.Services
                 var net = root.Element(ns + "FBNetwork");
                 if (net == null) { result.Warnings.Add("Process1_Generic.fbt: no FBNetwork; process MQTT patch skipped."); return; }
 
-                // Strip any previous emission first: the CAT folder is copy-if-absent, and telemetry-off
-                // must leave no residue.
+                // Strip any previous emission: the folder is copy-if-absent and telemetry-off must leave no residue.
                 net.Elements(ns + "FB")
                    .Where(f => (string?)f.Attribute("Name") is "MqttFmt" or "MqttPub")
                    .ToList().ForEach(f => f.Remove());
@@ -584,8 +542,7 @@ namespace CodeGen.Services
                         new System.Xml.Linq.XAttribute("Name", n),
                         new System.Xml.Linq.XAttribute("Value", v)));
                 P(pubFb, "QI", "TRUE");
-                // Same shared binding key as the component publishers, so the process publisher binds to
-                // whichever telemetry connection lives on its own resource. No new connection is added.
+                // Same binding key as the component publishers, so this binds to its own resource's connection.
                 P(pubFb, "ConnectionID", Q(cfg.MqttConnectionName));
                 P(pubFb, "RootPath", Q(cfg.MqttTopicRoot + "/process"));
                 P(pubFb, "QoS1", cfg.MqttQoS.ToString());
