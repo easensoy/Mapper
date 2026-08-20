@@ -1,10 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
+using CodeGen.Mapping;
+using System.IO;
 using System.Xml.Linq;
 using CodeGen.Configuration;
-using CodeGen.Mapping;
 using CodeGen.Translation;
 
 namespace CodeGen.Devices.Core
@@ -32,8 +32,7 @@ namespace CodeGen.Devices.Core
             return Project(net.Elements(ns + "FB"));
         }
 
-        // The FB projection both readers share. Children are matched by local name so it serves the
-        // namespaced .syslay and the namespace-free System.hash alike.
+        // Children matched by local name, so this serves the namespaced .syslay and System.hash alike.
         static List<SyslayFb> Project(IEnumerable<XElement> fbs) =>
             fbs.Select(e => new SyslayFb(
                     Id:        (string?)e.Attribute("ID")        ?? string.Empty,
@@ -111,9 +110,9 @@ namespace CodeGen.Devices.Core
 
             foreach (var spec in systemFbs) EnsureSystemFb(network, ns, spec);
 
-            // DEDUP the id-flip: a component's sysres FB id can flip between regens (mirror id = syslay
-            // id with its top hex bit flipped), leaving a stale previous-id copy that declares the
-            // component TWICE and turns all M262 I/O red. Name-scoped so FB1/FB2 are never touched.
+            // DEDUP the id-flip: a sysres FB id can flip between regens (mirror id = syslay id with its
+            // top hex bit flipped), leaving a stale copy that declares the component TWICE. Name-scoped,
+            // so FB1/FB2 are never touched.
             var currentSyslayIds = new HashSet<string>(
                 syslayFbs.Where(f => !string.IsNullOrEmpty(f.Id)).Select(f => f.Id),
                 StringComparer.Ordinal);
@@ -128,13 +127,11 @@ namespace CodeGen.Devices.Core
                 bool mirrored = !string.IsNullOrEmpty(map);   // mirrored FBs carry a Mapping; FB1/FB2 do not
                 if (syslayNames.Contains(nm) && !currentSyslayIds.Contains(map))
                 {
-                    // Same-named FB with a stale mapping (the id-flip dup).
                     fb.Remove();
                     deduped++;
                 }
                 else if (mirrored && !syslayNames.Contains(nm))
                 {
-                    // A previously-mirrored FB whose Name is no longer in the syslay.
                     fb.Remove();
                     deduped++;
                 }
@@ -153,8 +150,7 @@ namespace CodeGen.Devices.Core
 
             var keepTypes = TemplateManifest.Mirrored;
 
-            // Name -> existing sysres FB, so an already-mirrored FB is UPDATED (params replaced), not
-            // skipped with stale values. Its ID/Mapping/x/y stay unchanged (stable instance handle).
+            // An already-mirrored FB is UPDATED, not skipped; its ID/Mapping/x/y stay put as its handle.
             var existingByName = new Dictionary<string, XElement>(StringComparer.Ordinal);
             foreach (var fb in network.Elements(ns + "FB"))
             {
@@ -170,9 +166,8 @@ namespace CodeGen.Devices.Core
 
                 if (existingByName.TryGetValue(fb.Name, out var existing))
                 {
-                    // Keep ID/Mapping/x/y but SYNC Type/Namespace to the syslay — a component's CAT
-                    // type can change between regens (Bearing_PnP Five_State stub <-> Seven_State), and
-                    // a stale Type trips EAE's "Found References to Missing Instances".
+                    // SYNC Type/Namespace to the syslay: a component's CAT type can change between
+                    // regens, and a stale Type trips EAE's "Found References to Missing Instances".
                     existing.SetAttributeValue("Type",      fb.Type);
                     existing.SetAttributeValue("Namespace", fb.Namespace);
                     // Upsert <Attribute> children (don't blanket-remove — EAE may add its own).
@@ -207,8 +202,7 @@ namespace CodeGen.Devices.Core
                     new XAttribute("x",         fb.X),
                     new XAttribute("y",         fb.Y));
 
-                // Carry <Attribute> children (a mirrored MQTT_PUBLISH keeps its channel-count config,
-                // else EAE rejects the FB on import).
+                // A mirrored MQTT_PUBLISH must keep its channel-count Attribute, else EAE rejects it.
                 foreach (var a in fb.Attributes)
                 {
                     fbElement.Add(new XElement(ns + "Attribute",
@@ -231,14 +225,9 @@ namespace CodeGen.Devices.Core
             return added + updated;
         }
 
-        // Refresh a sysres FB's Parameters from the syslay FB it mirrors. The syslay is the authority:
-        // the wiring pass rewrites the FBNetwork, so a resource that kept its old parameters would deploy
-        // a stale recipe with no error. Matched by Name, then by the Mapping attribute (I-9: an FB's
-        // Mapping is a separate GUID that carries the syslay id).
-        //
-        // Two entry points over ONE implementation: every mirrored FB, or only the process engines. They
-        // differ in nothing but which FBs they select, and keeping two copies of the compare-and-replace
-        // is how the two came to disagree about what "changed" means.
+        // Refresh a sysres FB's Parameters from the syslay, which is the authority: a resource keeping
+        // its old parameters would deploy a stale recipe with no error. Matched by Name, then by the
+        // Mapping attribute (I-9: an FB's Mapping is a separate GUID carrying the syslay id).
         public static int SyncProcessRecipesFromSyslay(string syslayPath, string sysresPath) =>
             SyncFromSyslay(syslayPath, sysresPath, IsProcessEngine);
 
@@ -342,16 +331,13 @@ namespace CodeGen.Devices.Core
             network.Add(fb);
         }
 
-        // Which PLC resource a syslay FB belongs on: the ControllerMap partition, plus the MQTT/legacy
-        // special cases below. Unknown falls back to M262 so nothing is dropped.
+        // Which PLC resource a syslay FB belongs on: the ControllerMap partition plus the MQTT cases below.
         public static PlcAssignment BucketFor(string fbName, ControllerAllocation allocation)
         {
             if (string.IsNullOrEmpty(fbName)) return PlcAssignment.Unknown;
 
-            // One MQTT connection per resource, so the embedded MqttPub binds the LOCAL one. The six
-            // MqttConn*/Telemetry_* the roster declares route through it like any other FB.
-            // RevPi's own connection — partial swap emits it explicitly alongside Telemetry_M262 (full swap
-            // routes it here via the Feed-controller fallback below, but partial keeps M262 as the controller).
+            // One MQTT connection per resource, so the embedded MqttPub binds the LOCAL one. A partial
+            // swap emits RevPi's explicitly, since it keeps M262 as the controller.
             if (string.Equals(fbName, "MqttConn_RevPi", StringComparison.Ordinal) ||
                 string.Equals(fbName, "Telemetry_RevPi", StringComparison.Ordinal))
                 return PlcAssignment.RevPi;
@@ -367,8 +353,7 @@ namespace CodeGen.Devices.Core
                 return PlcAssignment.BX1;
 
             var p = allocation.Of(fbName);
-            // Unknown falls back to whichever controller currently hosts the Feed station (M262 or RevPi),
-            // so nothing is dropped and no FB lands on a non-emitted device.
+            // Unknown falls back to whichever controller hosts the Feed station, so nothing is dropped.
             return p == PlcAssignment.Unknown
                 ? PlcAssignment.M262
                 : p;
