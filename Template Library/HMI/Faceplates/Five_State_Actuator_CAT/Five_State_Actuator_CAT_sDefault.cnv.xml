@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Mapping>
   <EventInputs>
     <Event Name="output_event">toWorkPLC;toHomePLC</Event>
@@ -9,7 +9,9 @@
     <Event Name="mode_event">ModeCMD</Event>
     <Event Name="interlock_event">Work1Interlock;HomeInterlock;MoveAllowed;ActiveRuleIndex;ActiveSourceID;ActiveBlockedState</Event>
   </EventInputs>
-  <EventOutputs />
+  <EventOutputs>
+    <Event Name="cmd_event">toWork;toHome</Event>
+  </EventOutputs>
   <Inputs>
     <Input Name="toHomePLC" Type="BOOL" />
     <Input Name="toWorkPLC" Type="BOOL" />
@@ -27,5 +29,8 @@
     <Input Name="ActiveSourceID" Type="INT" />
     <Input Name="ActiveBlockedState" Type="INT" />
   </Inputs>
-  <Outputs />
+  <Outputs>
+    <Output Name="toHome" Type="BOOL" />
+    <Output Name="toWork" Type="BOOL" />
+  </Outputs>
 </Mapping>
