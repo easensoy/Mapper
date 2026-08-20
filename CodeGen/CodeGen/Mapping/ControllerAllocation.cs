@@ -31,18 +31,6 @@ namespace CodeGen.Mapping
 
         public bool IsOn(string? componentName, PlcAssignment plc) => Of(componentName) == plc;
 
-        // The report ring a component's announcements circulate on. Each controller runs its own ring, so
-        // the controller IS the ring -- unless the topology folds them into one, which makes every
-        // announcement reachable from every process and collapses the distinction.
-        public string RingOf(string? componentName, bool ringsMerged) =>
-            ringsMerged ? MergedRing : Of(componentName).ToString();
-
-        public bool SameRing(string? a, string? b, bool ringsMerged) =>
-            string.Equals(RingOf(a, ringsMerged), RingOf(b, ringsMerged), StringComparison.Ordinal);
-
-        // The one ring every component sits on once the topology merges them.
-        private const string MergedRing = "*";
-
         private ComponentEntry? Lookup(string? componentName)
         {
             if (string.IsNullOrWhiteSpace(componentName)) return null;
