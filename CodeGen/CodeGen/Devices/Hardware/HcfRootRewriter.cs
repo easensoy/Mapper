@@ -1,8 +1,8 @@
 ﻿using System;
-using CodeGen.Configuration;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
+using CodeGen.Configuration;
+using System.IO;
 using System.Xml.Linq;
 
 namespace CodeGen.Devices.Core
@@ -68,36 +68,11 @@ namespace CodeGen.Devices.Core
                 Indent = true,
                 Encoding = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true),
             };
-            int MaxAttempts = GenerationConfig.Current.FileWriteRetries;
-            int delayMs = 50;
-            for (int attempt = 1; attempt <= MaxAttempts; attempt++)
-            {
-                try
-                {
-                    using var fs = new FileStream(hcfPath,
-                        FileMode.Create, FileAccess.Write, FileShare.Read);
-                    using var w = System.Xml.XmlWriter.Create(fs, settings);
-                    var outDoc = new XDocument(
-                        new XDeclaration("1.0", "utf-8", null),
-                        newRoot);
-                    outDoc.Save(w);
-                    result.Rewrote = true;
-                    result.ChildrenWrapped = keep.Count;
-                    if (attempt > 1)
-                        result.Warnings.Add($"write succeeded on attempt {attempt}");
-                    return result;
-                }
-                catch (IOException) when (attempt < MaxAttempts)
-                {
-                    System.Threading.Thread.Sleep(delayMs);
-                    delayMs *= 2;
-                }
-                catch (UnauthorizedAccessException) when (attempt < MaxAttempts)
-                {
-                    System.Threading.Thread.Sleep(delayMs);
-                    delayMs *= 2;
-                }
-            }
+            int attempt = Services.FbtXmlEditor.SaveXmlRetrying(hcfPath, settings, w =>
+                new XDocument(new XDeclaration("1.0", "utf-8", null), newRoot).Save(w));
+            result.Rewrote = true;
+            result.ChildrenWrapped = keep.Count;
+            if (attempt > 1) result.Warnings.Add($"write succeeded on attempt {attempt}");
             return result;
         }
 
