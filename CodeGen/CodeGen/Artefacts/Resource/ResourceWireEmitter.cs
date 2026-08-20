@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
+using System.IO;
 using System.Text;
 using System.Xml;
 using System.Xml.Linq;
@@ -16,14 +16,14 @@ namespace CodeGen.Devices.Core
         public sealed record Wire(string Source, string Destination);
 
 
-        // Built-in FBs emitted with the literal name (no FBNetwork lookup, no port validation); START/E_RESTART vary by EMB_RES_ECO canvas variant.
+        // Emitted with the literal name, no port validation; these vary by EMB_RES_ECO canvas variant.
         private static readonly HashSet<string> BuiltInRuntimeFbs = new(StringComparer.Ordinal)
         {
             "START",
             "E_RESTART",
         };
 
-        // Wires one deployed sysres FBNetwork; components discovered from the sysres (CaSBusOrder then declaration order) so chains/ring are N-component-safe. BX1 (no Station/Process/Terminator) gets only the init fan-out + report ring.
+        // Wires one deployed sysres FBNetwork, from the components the sysres actually carries.
         public static void EmitForResource(GenerationContext ctx, string sysresPath,
             ResourcePlan plan, SystemInjector.BindingApplicationReport report)
         {
@@ -47,16 +47,8 @@ namespace CodeGen.Devices.Core
                     return;
                 }
 
-                // PARTIAL RevPi (ROOT-CAUSE FIX for the recurring "Repair Instances"): the relocated Feed
-                // components (Feeder/Checker/PartInHopper) belong ONLY on the RevPi sysres. This wire pass is
-                // the LAST writer of the M262 (and M580/BX1) sysres and it PRESERVES the FB elements it reads,
-                // so a stale/EAE-locked tree that still lists them here (e.g. the early RevPi sweep couldn't
-                // save because EAE held the file) would get them re-written -> a duplicate instance across
-                // M262+RevPi -> EAE "Repair Instances". Drop them (+ their connections) here, on the FINAL
-                // write, for every NON-RevPi resource. No-op on the RevPi sysres (tag "RevPi"), on M580/BX1
-                // (they never carry Feed FBs), and when not in partial mode. Yields exactly the clean partition
-                // the gate proves valid; the M262 Feed ring then wires around the remaining components, leaving
-                // the cross-device seam open for EAE to bridge to RevPi.
+                // This is the LAST writer of every sysres, so a relocated component left here is duplicated
+                // across two resources. See Docs/PATCH_RATIONALES P-6.
                 if (ctx.Profile.PartialRevPi && !plan.Capabilities.ReceivesRelocatedComponents)
                 {
                     var relocated = ctx.Profile.RevPiComponents;
@@ -91,7 +83,7 @@ namespace CodeGen.Devices.Core
                     if (!string.IsNullOrEmpty(t) && !byType.ContainsKey(t)) byType[t] = fb;
                 }
 
-                // M580/BX1 sysres canvases are device-local, so translate the present FBs to the local origin; M262 keeps raw coords (its FBs already start at x=2000).
+                // M580/BX1 sysres canvases are device-local; M262 keeps raw coords (its FBs start at x=2000).
                 bool translateToOrigin = plan.Capabilities.DeviceLocalCanvas;
                 ApplyCanonicalLayout(ctx, byName, report, tag, translateToOrigin);
 
@@ -159,7 +151,6 @@ namespace CodeGen.Devices.Core
                     report.Missing.Add($"[{tag}] {srcName}.{srcPort} -> {dstName}.{dstPort}");
                 }
 
-                // Component-driven init chain + CaSBus station chain + report ring, built from the components present (CaSBus order then extras) so a missing component never severs them.
                 bool IsSensor(XElement fb) =>
                     TemplateManifest.SensorTypes.Contains((string?)fb.Attribute("Type") ?? string.Empty);
                 bool IsActuator(XElement fb) =>
@@ -184,23 +175,17 @@ namespace CodeGen.Devices.Core
                 }
                 string Nm(XElement fb) => (string?)fb.Attribute("Name") ?? string.Empty;
                 var initNames = orderedComps.Select(Nm).Where(s => s.Length > 0).ToList();
-                // The cross-device segment is driven by the M262->M580 splice, so it stays OFF the local
-                // Feed ring; on both it would be double-driven. Read from the plan, so the two halves of
-                // the deploy cannot disagree about its membership.
+                // Driven by the M262->M580 splice, so OFF the local Feed ring; on both it is double-driven.
                 var crossSegment = ctx.CrossRingSegment;
                 bool robotTail = crossSegment.Count > 0;
                 var ringNames = orderedComps.Select(Nm)
                     .Where(s => s.Length > 0)
                     .Where(s => !crossSegment.Contains(s, StringComparer.OrdinalIgnoreCase))
-                    // TopCoverSenosr stays ON the ring so its cover-presence report reaches Assembly's
-                    // state_table (the clamp-model interlock). The old opt-out filter here was dead —
-                    // it read `true || …`, so it never excluded anything.
+                    // TopCoverSenosr stays ON the ring so its report reaches Assembly's state_table.
                     .ToList();
                 var actNames = orderedComps.Where(c => IsActuator(c) && HasStationAdapter(c))
                     .Select(Nm).Where(s => s.Length > 0).ToList();
 
-                // Every Process1_Generic on this resource, anchor first; the chains and ring below thread
-                // through every one.
                 var processNames = new List<string>();
                 if (Present(plan.ProcessFb, byName))
                     processNames.Add(plan.ProcessFb!);
@@ -213,25 +198,20 @@ namespace CodeGen.Devices.Core
                 }
                 bool haveProcess = processNames.Count > 0;
 
-                // Init chain FB1.INITO->[Area]->[Station]->components...->[Process]; absent roles collapse out so FB1.INITO fans straight into the first component.
                 var eventWires = TargetBootstrap.BringUpWires.Select(w => new Wire(w.Source, w.Destination)).ToList();
                 var initChain = new List<string> { "FB1" };
                 if (Present(plan.AreaFb, byName)) initChain.Add(plan.AreaFb!);
                 if (Present(plan.StationFb, byName)) initChain.Add(plan.StationFb!);
-                // The segment's ACTUATORS init LAST so a stall in their cross-PLC bring-up cannot block
-                // Feed_Station.INIT. Its sensor reports inward and needs no bring-up order, so it is not
-                // held back. Same declaration as the ring exclusion above; off -> byte-identical.
-                var robotTailInit = new HashSet<string>(
-                    crossSegment.Where(n => !RigCatalog.Current.SynthSensors
-                        .Any(s => string.Equals(s.Name, n, StringComparison.OrdinalIgnoreCase))),
-                    StringComparer.Ordinal);
+                // Members another controller commands init LAST, so their bring-up cannot block this process.
+                var robotTailInit = new HashSet<string>(ctx.Rings.DischargeTail, StringComparer.Ordinal);
                 initChain.AddRange(initNames.Where(n => !robotTailInit.Contains(n)));
                 initChain.AddRange(processNames);
                 initChain.AddRange(initNames.Where(n => robotTailInit.Contains(n)));
                 for (int i = 0; i < initChain.Count - 1; i++)
                     eventWires.Add(new Wire($"{initChain[i]}.INITO", $"{initChain[i + 1]}.INIT"));
 
-                // MqttConn bring-up MUST be re-emitted onto the sysres (EAE runs the sysres event graph, not the syslay); without it the broker never opens and every embedded MQTT_PUBLISH silently drops. Match by TYPE (each resource has its own MqttConn) not name.
+                // EAE runs the sysres event graph, not the syslay, so MqttConn bring-up must be re-emitted
+                // here or the broker never opens. Matched by TYPE: each resource has its own.
                 foreach (var mqttKv in byName)
                 {
                     var mqttType = (string?)mqttKv.Value.Attribute("Type");
@@ -239,7 +219,6 @@ namespace CodeGen.Devices.Core
                         !string.Equals(mqttType, "Telemetry", StringComparison.Ordinal))
                         continue;
                     var mqttName = mqttKv.Key;
-                    // INIT off the resource boot anchor: Area (M262), else Station (M580), else FB1 (BX1). Self INITO -> CONNECT opens the broker once.
                     var mqttInit = Present(plan.AreaFb, byName) ? plan.AreaFb!
                                  : Present(plan.StationFb, byName) ? plan.StationFb!
                                  : "FB1";
@@ -249,7 +228,7 @@ namespace CodeGen.Devices.Core
 
                 var adapterWires = plan.AdapterRelations.Select(r => new Wire(r.Source, r.Destination)).ToList();
 
-                // CaSBus station chain [Station]->actuators...->[Process]->[Terminator]; needs both a Station and a Process anchor, so BX1 skips it (actuators still init + report via the ring).
+                // Needs a Station and a Process anchor, so BX1 skips it and reaches the ring only.
                 var chain = plan.StationChain;
                 bool haveStation = chain != null && Present(plan.StationFb, byName);
                 if (haveStation && haveProcess)
@@ -270,7 +249,7 @@ namespace CodeGen.Devices.Core
                         "skipping CaS station chain (init fan-out + report ring still wired)");
                 }
 
-                // stateRprtCmd report ring, closed comp(N).out->comp(N+1).in; with a Process it closes through it, else (BX1) comp(last)->comp(0). Process1_Generic uses the *Adptr suffix; CATs use stateRprtCmd_*.
+                // Report ring. Process1_Generic uses the *Adptr port suffix; CATs use stateRprtCmd_*.
                 if (ringNames.Count > 0)
                 {
                     for (int i = 0; i < ringNames.Count - 1; i++)
@@ -278,7 +257,7 @@ namespace CodeGen.Devices.Core
                             $"{ringNames[i + 1]}.stateRprtCmd_in"));
                     if (haveProcess)
                     {
-                        // Cover detour (M580): when covers splice onto the M580 ring, OMIT the local compN->P0 close so the boundary plug isn't double-driven (EAE bridges via syslay). Distinct seam from the robot-tail open below.
+                        // Cover detour (M580): omit the local close, else the boundary plug is double-driven.
                         bool openCoverSeam = plan.Capabilities.OpensCoverSeam;
                         if (openCoverSeam)
                             report.Missing.Add(
@@ -291,12 +270,10 @@ namespace CodeGen.Devices.Core
                         for (int i = 0; i < processNames.Count - 1; i++)
                             adapterWires.Add(new Wire($"{processNames[i]}.stateRptCmdAdptr_out",
                                 $"{processNames[i + 1]}.stateRptCmdAdptr_in"));
-                        // Boundary-open on a cross-controller seam (the robot tail on M580, the merged ring on the Feed
-                        // controller): OMIT the local close-back so the boundary plug is not double-driven; EAE bridges it
-                        // from the syslay.
+                        // Cross-controller seam: same boundary-open rule.
                         bool openBoundary =
                             (robotTail && plan.Capabilities.OpensCoverSeam) ||
-                            (ctx.RingsMerged && plan.Capabilities.HostsFeedRing);
+                            (ctx.Rings.RingsMerged && plan.Capabilities.HostsFeedRing);
                         if (openBoundary)
                             report.Missing.Add(
                                 $"[{tag}] cross-PLC ring: left {processNames[^1]}.stateRptCmdAdptr_out OPEN " +
@@ -307,8 +284,7 @@ namespace CodeGen.Devices.Core
                     }
                     else if (ringNames.Count > 1)
                     {
-                        // Cover detour (BX1): when covers are commanded by the M580 ring the BX1 cover chain is OPEN at both ends — OMIT the self-close (EAE bridges via syslay). Off -> BX1 self-closes the broadcast loop locally.
-                        // Partial RevPi: the Feeder/Checker segment is commanded by the M262 Feed_Station ring, so it too is OPEN at both ends (in from PartAtAssembly, out to Transfer/Feed_Station) — EAE bridges via syslay.
+                        // A chain commanded by another controller's ring is OPEN at both ends.
                         bool openCoverChain = plan.Capabilities.CarriesDetouredChain;
                         if (openCoverChain)
                             report.Missing.Add(
@@ -320,7 +296,7 @@ namespace CodeGen.Devices.Core
                     }
                 }
 
-                // M262 cross-ring segment (intra-M262 chain kept OFF the Feed ring); seg[0].in and seg[^1].out stay OPEN (EAE bridges via syslay). No-op on M580/BX1 and when both flags are off.
+                // M262 cross-ring segment: kept OFF the Feed ring, both ends left OPEN for EAE to bridge.
                 var crossSeg = crossSegment
                     .Where(byName.ContainsKey).ToList();
                 for (int i = 0; i < crossSeg.Count - 1; i++)
@@ -328,9 +304,9 @@ namespace CodeGen.Devices.Core
                         $"{crossSeg[i]}.stateRprtCmd_out", $"{crossSeg[i + 1]}.stateRprtCmd_in"));
                 if (crossSeg.Count > 0)
                 {
-                    if (ctx.RingsMerged && ringNames.Count > 0 && plan.Capabilities.HostsFeedRing)
+                    if (ctx.Rings.RingsMerged && ringNames.Count > 0 && plan.Capabilities.HostsFeedRing)
                     {
-                        // Merged-ring seam (M262): the segment tail feeds the Feed head locally so discharge segment + Feed chain are one continuous chain; seg[0].in and Feed_Station.out stay OPEN (EAE bridges via syslay).
+                        // Merged-ring seam (M262): the segment tail feeds the Feed head locally.
                         adapterWires.Add(new Wire(
                             $"{crossSeg[^1]}.stateRprtCmd_out", $"{ringNames[0]}.stateRprtCmd_in"));
                         report.Missing.Add(
@@ -359,7 +335,7 @@ namespace CodeGen.Devices.Core
                             new XAttribute("Destination", d)));
                     fbNet.Add(ec);
                 }
-                // Always emit <DataConnections />, even empty, so EAE sees an explicit "no data wires" rather than a missing block.
+                // Always emit <DataConnections />, even empty: EAE wants "no data wires" stated, not missing.
                 var dc = new XElement(ns + "DataConnections");
                 foreach (var (s, d) in emittedData)
                     dc.Add(new XElement(ns + "Connection",
@@ -400,9 +376,7 @@ namespace CodeGen.Devices.Core
         private static bool Present(string? name, Dictionary<string, XElement> byName)
             => !string.IsNullOrEmpty(name) && byName.ContainsKey(name);
 
-        // Projected from the run's roster so the canvas table never drifts from the allocation; applied to
-        // both the sysres and the syslay.
-        // translateToOrigin=true (M580/BX1) shifts the group's bounding-box top-left to the device-local origin; false (syslay + M262 sysres) keeps global coordinates.
+        // Projected from the run's roster so the canvas table never drifts from the allocation.
         private static void ApplyCanonicalLayout(GenerationContext ctx, Dictionary<string, XElement> byName,
             SystemInjector.BindingApplicationReport report, string source,
             bool translateToOrigin)
@@ -418,7 +392,6 @@ namespace CodeGen.Devices.Core
                 return;
             }
 
-            // Delta translates the component bucket (all but the FB1/FB2 boot pair, which stay fixed) onto the device-local origin.
             int dx = 0, dy = 0;
             if (translateToOrigin)
             {
@@ -439,7 +412,7 @@ namespace CodeGen.Devices.Core
                 var fb = byName[kv.Key];
                 var oldX = (string?)fb.Attribute("x") ?? "?";
                 var oldY = (string?)fb.Attribute("y") ?? "?";
-                // FB1/FB2 keep their fixed boot-row positions on every PLC; only the component bucket translates.
+                // FB1/FB2 keep their fixed boot-row positions on every PLC.
                 bool isBootPair = string.Equals(kv.Key, "FB1", StringComparison.Ordinal)
                                 || string.Equals(kv.Key, "FB2", StringComparison.Ordinal);
                 int newX = kv.Value.X + (isBootPair ? 0 : dx);
@@ -479,7 +452,7 @@ namespace CodeGen.Devices.Core
                 {
                     OmitXmlDeclaration = false,
                     Indent = true,
-                    // Emit the UTF-8 BOM so a re-run stays byte-identical to the broker's own BOM save (no spurious encoding diff).
+                    // Emit the UTF-8 BOM so a re-run stays byte-identical to the broker's own BOM save.
                     Encoding = new UTF8Encoding(true),
                 };
                 using var fs = new FileStream(syslayPath, FileMode.Create, FileAccess.Write, FileShare.Read);
@@ -492,7 +465,7 @@ namespace CodeGen.Devices.Core
             }
         }
 
-        // Frame membership uses BucketFor (the same partition as the FB mirror) so frames and the resource mirror agree. Keys MUST match the emitted frame Names.
+        // Membership uses BucketFor, the same partition as the FB mirror. Keys MUST match the frame Names.
         private static readonly Dictionary<string, PlcAssignment> FrameBucket = new(StringComparer.Ordinal)
         {
             { "FRAME_Station1",      PlcAssignment.M262 },
@@ -501,7 +474,6 @@ namespace CodeGen.Devices.Core
         };
 
 
-        // Grow each zone <Frame> to enclose the FBs its PLC owns (BucketFor); origins clamped to >=0. Best-effort: a frame with no FBs in its bucket is left as-is.
         private static void ResizeFramesToFitFbs(GenerationContext ctx, XElement net, XNamespace ns,
             SystemInjector.BindingApplicationReport report)
         {
@@ -523,7 +495,6 @@ namespace CodeGen.Devices.Core
             {
                 var fname = (string?)frame.Attribute("Name") ?? string.Empty;
                 if (!FrameBucket.TryGetValue(fname, out var bucket)) continue;
-                // RevPi Feed FBs live in the M262 (Feed) zone frame — byte-identical for M262 (none guess RevPi).
                 var inZone = fbs.Where(f =>
                 {
                     var b = SysresFbMirror.BucketFor(f.Name, ctx.Allocation);
@@ -537,7 +508,7 @@ namespace CodeGen.Devices.Core
                 double maxX = inZone.Max(f => f.X + body.Width);
                 double maxY = inZone.Max(f => f.Y + body.HeightOf(f.Type));
 
-                // Derive W/H from the edges (not width/height directly) so the origin clamp never shrinks the bottom/right coverage.
+                // Derive W/H from the edges, so the origin clamp never shrinks bottom/right coverage.
                 double fx = Math.Max(0, minX - pad.Left);
                 double fy = Math.Max(0, minY - pad.Top);
                 double fw = (maxX + pad.Right) - fx;
@@ -556,7 +527,7 @@ namespace CodeGen.Devices.Core
         private static bool PortExists(HashSet<string> ports, string portName)
             => ports.Count == 0 /* unknown FB type — be lenient */ || ports.Contains(portName);
 
-        // Returns the InterfaceList port Names for typeName; empty if not found (caller treats empty as "skip validation" for library-external types like DPAC_FULLINIT/plcStart).
+        // Empty when the type is not found; the caller reads that as "skip validation".
         private static HashSet<string> LoadFbtPorts(string libRoot, string typeName)
         {
             var set = new HashSet<string>(StringComparer.Ordinal);
@@ -569,7 +540,6 @@ namespace CodeGen.Devices.Core
             }
             if (fbtPath == null)
             {
-                // Fallback glob for types that ship as flat files (Area, Station, CaSAdptrTerminator).
                 foreach (var f in Directory.EnumerateFiles(libRoot, typeName + ".fbt", SearchOption.AllDirectories))
                 { fbtPath = f; break; }
             }
