@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using CodeGen.Configuration;
@@ -6,17 +6,14 @@ using CodeGen.Services;
 
 namespace CodeGen.Devices.Core
 {
-    // Clean deletes the application (.sysapp + content folder); this recreates it
-    // create-if-absent on the next Generate. Bootstrap is required BEFORE Generate's
-    // PrepareDemonstratorForGeneration (it throws if the .syslay is missing, and
-    // AlignApplicationName only renames an existing .sysapp).
+    // Clean deletes the application; this recreates it create-if-absent. It must run BEFORE
+    // PrepareDemonstratorForGeneration, which throws when the .syslay is missing.
     public static class ApplicationShellEmitter
     {
         public const string SystemId = "00000000-0000-0000-0000-000000000000";
         public const string AppId    = "00000000-0000-0000-0000-000000000001";
 
-        // Recreates the application shell + re-registers it in the .dfbproj, only when the
-        // .sysapp is absent. Runs at the start of Generate, before Prepare needs the layout.
+        // Only acts when the .sysapp is absent.
         public static bool EnsureApplicationShell(MapperConfig cfg, string? eaeRoot, Action<string>? log = null)
         {
             if (string.IsNullOrEmpty(eaeRoot)) return false;
@@ -36,8 +33,7 @@ namespace CodeGen.Devices.Core
                 File.WriteAllText(sysappPath, TemplateDocument.Load(cfg, @"Application\Application.sysapp",
                     new Dictionary<string, string> { ["AppId"] = AppId }));
 
-                // Placeholder so PrepareDemonstratorForGeneration's File.Exists check passes;
-                // GenerateStation1TestSyslay overwrites this with the real layout.
+                // Placeholder so Prepare's File.Exists check passes; the real layout overwrites it.
                 var syslayPath = Path.Combine(appDir, SystemId + ".syslay"); // == SyslayPath2
                 if (!File.Exists(syslayPath))
                     File.WriteAllText(syslayPath, TemplateDocument.Load(cfg, @"Application\Empty.syslay"));
@@ -60,9 +56,8 @@ namespace CodeGen.Devices.Core
             }
         }
 
-        // Deletes the .sysapp + its content folder; keeps the container, .system root and
-        // dfbproj shell. Best-effort per item — an EAE-locked file is logged, not fatal
-        // (close EAE before Clean).
+        // Keeps the container, .system root and dfbproj shell. Best-effort: an EAE-locked file is
+        // logged, not fatal, so close EAE before Clean.
         public static int DeleteApplicationShell(string iecDir, Action<string>? log = null)
         {
             var systemDir = Path.Combine(iecDir, "System");
