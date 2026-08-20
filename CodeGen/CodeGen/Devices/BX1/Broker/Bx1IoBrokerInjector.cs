@@ -1,15 +1,14 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
-using System.Xml.Linq;
 using CodeGen.Configuration;
+using System.IO;
+using System.Xml.Linq;
 using CodeGen.Translation;
 
 namespace CodeGen.Devices.BX1
 {
-    // BX1 EtherNet/IP cover-I/O broker injection (gated by cfg.DeployBx1IoBroker). Broker id
-    // F6C04A4BA6FA8593 is the id the copied BX1 .hcf binds to; the IN/OUT bit map is on CoverSensors/CoverCoils below.
+    // BX1 cover-I/O broker injection (cfg.DeployBx1IoBroker). Broker id F6C04A4BA6FA8593 must stay the id the copied BX1 .hcf binds to.
     public static class Bx1IoBrokerInjector
     {
         static readonly XNamespace Ns = CodeGen.Devices.Core.Station2DeviceEmitter.LibElNs;
@@ -26,12 +25,10 @@ namespace CodeGen.Devices.BX1
         const string ScanFbName = "BX1_IO_Cycle";
         const string ScanPeriod = "T#50ms";
 
-        // The coupler word as the rig wired it, from Config/device.yml. Neither the plant names nor the
-        // bit numbers live here: this file wires and gates what the profile describes.
+        // The coupler word as the rig wired it, from Config/device.yml: no plant name or bit number lives here.
         static Configuration.Bx1IoProfile Io => Configuration.DeviceConfig.Current.Bx1Io;
 
-        // The cover whose INITO roots the broker fan-out: the LAST on the profile's chain, so every
-        // cover ahead of it has already initialised when the broker and its scan start.
+        // Init-root cover: the LAST on the profile's chain, so every cover ahead of it has initialised first.
         static string InitRootCover => Io.Covers[^1].Component;
 
         static (string Cover, string? SensorFromHome, string? SensorFromWork,
@@ -39,10 +36,8 @@ namespace CodeGen.Devices.BX1
             Io.Covers.Select(c => (c.Component, c.SensorFromHome?.Signal, c.SensorFromWork?.Signal,
                                    c.Event, c.CoilToHome?.Signal, c.CoilToWork?.Signal)).ToArray();
 
-        // symlink name -> word bit, for the publisher (sensors) and the subscriber (coils). The cover
-        // sensor bit is published for the top-cover sensor too, under EVERY spelling the profile lists:
-        // it is the only cover-present bit the coupler carries, and the broker is a shared TYPE that
-        // cannot know which spelling a twin uses. A SYMLINKMULTIVARSRC nothing subscribes to is inert.
+        // symlink name -> word bit. The cover-present bit is published under EVERY top-cover spelling the profile
+        // lists: the broker is a shared TYPE and cannot know which one a twin uses; an unsubscribed SRC is inert.
         static (string Sym, int Bit)[] CoverSensors =>
             Io.Covers
                 .SelectMany(c => new[]
@@ -53,7 +48,7 @@ namespace CodeGen.Devices.BX1
                 .Where(t => t.Item1 != null)
                 .Concat(Io.Covers
                     .Where(c => c.SensorFromWork != null && c.SensorFromHome == null)
-                    .SelectMany(c => Mapping.TemplateMap.TopCoverSensorNames
+                    .SelectMany(c => Configuration.RigCatalog.Current.Roles.TopCoverSensor
                         .Select(n => ($"{n}.Input", c.SensorFromWork!.Bit))))
                 .ToArray();
 
@@ -67,9 +62,8 @@ namespace CodeGen.Devices.BX1
                 .Where(t => t.Item1 != null)
                 .ToArray();
 
-        // EAE generates SYMLINKMULTIVAR{SRC,DST}_<hash> per BOOL arity; the hash is GUI-computed (not
-        // derivable), SRC/DST of one arity share it. Only these arities exist -> pick the smallest >= the
-        // value count (surplus VALUEs inert); 5-BOOL does not exist, so the 5-sensor publisher uses 7.
+        // EAE generates SYMLINKMULTIVAR{SRC,DST}_<hash> per BOOL arity; the hash is GUI-computed, not derivable,
+        // and SRC/DST of one arity share it. Pick the smallest arity >= the value count; 5-BOOL does not exist.
         static readonly (int Arity, string Hash)[] BoolSymlinkTypes =
         {
             (1, "1559B0FF8170C9BA0"), (2, "277E97BEC1451D2C"), (3, "151ACB50A2F8223B2"),
@@ -78,8 +72,7 @@ namespace CodeGen.Devices.BX1
         };
 
         // Transforms the deployed PLC_RW_BX1.fbt into the internalized broker (CoverSensorPublisher +
-        // CoverCoilSubscriber + ScanCycle); new FBs inserted BEFORE Input/Output/connections. Idempotent.
-        // EAE-runtime unknown: whether ABSOLUTE cross-instance symlink names resolve from inside a composite.
+        // CoverCoilSubscriber + ScanCycle); new FBs must be inserted BEFORE Input/Output/connections. Idempotent.
         public static void EmbedCoverBridgeInComposite(string fbtPath, string resourceName = "BX1_RES")
         {
             if (!File.Exists(fbtPath)) return;
@@ -159,8 +152,8 @@ namespace CodeGen.Devices.BX1
                     : $"{resourceName}.{BrokerFbName}.CoverCoilSpare{i + 1}";
             AddFb("CoverCoilSubscriber", cType, cArity, cNames, 5000, 700);
 
-            // ScanCycle (E_DELAY) heartbeat: the cover CAT publishes coils via an internal symlink with no
-            // boundary event, so CoverCoilSubscriber must be REQ'd each cycle or the output word freezes.
+            // ScanCycle heartbeat: coils are published via an internal symlink with no boundary event, so the
+            // subscriber must be REQ'd each cycle or the output word freezes.
             var scan = new XElement("FB",
                 new XAttribute("ID", nextId++), new XAttribute("Name", "ScanCycle"),
                 new XAttribute("Type", "E_DELAY"), new XAttribute("x", "700"),
@@ -182,8 +175,11 @@ namespace CodeGen.Devices.BX1
             for (int i = 0; i < CoverCoils.Length; i++)
                 Da($"CoverCoilSubscriber.VALUE{i + 1}", $"EIPOutput_Bits.bit{CoverCoils[i].Bit}");
 
-            // Remove the superseded cover-InputVar -> BitsToWord connections (two data sources per bit is an EAE error).
-            var inputVarSources = new[] { "Cover_Pnp_Hr_ToWork", "Cover_Pnp_Hr_ToHome", "Cover_Pnp_Vr_Q", "Cover_Gripper_Q" };
+            // Remove the superseded cover-InputVar -> BitsToWord connections: two data sources per bit is an EAE error.
+            var inputVarSources = Io.Covers
+                .SelectMany(c => new[] { c.CoilToWork?.Signal, c.CoilToHome?.Signal })
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .ToArray();
             foreach (var conn in dc.Elements("Connection").Where(c =>
                          ((string?)c.Attribute("Destination"))?.StartsWith("EIPOutput_Bits.bit") == true &&
                          inputVarSources.Contains((string?)c.Attribute("Source"))).ToList())
@@ -194,23 +190,9 @@ namespace CodeGen.Devices.BX1
             doc.Save(fbtPath);
         }
 
-        // Decode the EtherNet/IP input word ONCE at INIT, so a cover already in place at power-on is reported
-        // without a physical remove-and-replace.
-        // EIPInputs_Bool (WordToBits) computes bit0..bit15 only on REQ, and its ONLY REQ driver is
-        // EIP_Input_Word.CNF, which fires from the composite REQ i.e. from the scan. The change detector IS
-        // already clocked at INIT (EIP_Input_Word.INITO -> FB2.Scan_Event) but it is handed UNDECODED bits, so
-        // CoverPnpSensor reads FALSE against a PreVal that is also FALSE, no change is seen, and the cover level
-        // goes unannounced until the first scan. INITO does carry the sampled word (SYMLINKMULTIVARDST declares
-        // INITO With QO, STATUS, VALUE${I}, and every INIT produces an INITO), so decoding on INITO hands the
-        // detector the real bit5 while PreVal is still FALSE.
-        // Bounded by construction: fires once per INIT and adds nothing to the scan, so it cannot reintroduce the
-        // per-scan ring publish removed earlier. Order-safe either way round the INITO fan-out - if the detector
-        // is evaluated first it simply sees the old all-FALSE bits and updates no PreVal, then the decode's CNF
-        // re-clocks it with the real ones. Idempotent, and applied on the already-embedded path too because the
-        // deployed composite is copy-if-absent and would otherwise never receive it.
-        // Applies to the deployed broker composite in BOTH bridge modes (the internals it wires — EIP_Input_Word,
-        // EIPInputs_Bool, FB2 — are part of the composite whether or not the cover bridge is embedded), so it is
-        // driven from the deployer beside DeployArtifact("PLC_RW_BX1") rather than from the embed path.
+        // Decode the EtherNet/IP input word ONCE at INIT so a cover already in place at power-on is reported
+        // without a physical remove-and-replace: INITO carries the sampled word, so the change detector sees the
+        // real bit while its PreVal is still FALSE. Fires once per INIT, adds nothing to the scan, idempotent.
         public static bool EnsureInitWordDecodeInComposite(string fbtPath)
         {
             if (!File.Exists(fbtPath)) return false;
@@ -238,12 +220,9 @@ namespace CodeGen.Devices.BX1
             return true;
         }
 
-        // SAFETY (cover safe-start: the profile's safeStartComponent vs the swivel it shares space with;
-        // gated by cfg.Bx1CoverSafeStart). Inserts a Bx1CoverFailsafe gate that on start forces that cover
-        // HOME (its ToWork coil 0, its ToHome coil 1,
-        // double-acting Hr needs ToHome=1 to return) and holds until the Hr at-home sensor (input bit0). Fires
-        // only while the logic RUNS — NOT on EAE Clean/STOP/fault; homing while stopped needs the TM3BC coupler
-        // output fallback word 16#0002 (TM3DQ16T ToHome channel -> 1), set on the coupler's web server, which the Mapper can't emit.
+        // SAFETY (cover safe-start, gated by cfg.Bx1CoverSafeStart): a Bx1CoverFailsafe gate forces the profile's
+        // safeStartComponent HOME on start and holds until its at-home sensor (input bit0). Fires only while the
+        // logic RUNS, NOT on EAE Clean/STOP/fault — homing while stopped needs the coupler fallback word 16#0002.
         public static bool InjectCoverFailsafeIntoBrokerType(string eaeRoot)
         {
             var fbt = Path.Combine(eaeRoot, "IEC61499", "PLC_RW_BX1.fbt");
@@ -289,7 +268,6 @@ namespace CodeGen.Devices.BX1
             dc.Add(new XElement("Connection", new XAttribute("Source", "EIPInputs_Bool.bit0"),
                 new XAttribute("Destination", "CoverFailsafe.AtHome")));
 
-            // The output-word write trigger fires the gate first; the gate's CNF writes the word.
             foreach (var c in ec.Elements("Connection")
                          .Where(c => (string?)c.Attribute("Destination") == "EIPOutput_Bits.REQ").ToList())
                 c.SetAttributeValue("Destination", "CoverFailsafe.REQ");
@@ -303,7 +281,6 @@ namespace CodeGen.Devices.BX1
             return true;
         }
 
-        // Lays the embedded broker FBs + pins out in left-to-right columns; deterministic, safe to re-run.
         static void ApplyBrokerLayout(XElement net)
         {
             var fbXY = new Dictionary<string, (int x, int y)>
@@ -394,8 +371,8 @@ namespace CodeGen.Devices.BX1
             if (hasGripper)
                 AddEvent(ec, $"{InitRootCover}.INITO", $"{BrokerFbName}.INIT");
 
-            // INTERNALIZED (cfg.Bx1BridgeInsideComposite, default): the bridge lives inside the PLC_RW_BX1
-            // composite, so the resource carries only BX1_IO — sweep any external bridge a prior deploy left.
+            // INTERNALIZED (cfg.Bx1BridgeInsideComposite, default): the bridge lives inside PLC_RW_BX1, so the
+            // resource carries only BX1_IO — sweep any external bridge a prior deploy left.
             if (internalized)
             {
                 static string FbOf(string? ep) =>
@@ -411,11 +388,8 @@ namespace CodeGen.Devices.BX1
                                              IsExtBridge(FbOf((string?)c.Attribute("Destination")))).ToList())
                         conn.Remove();
 
-                // The composite publishes bit5 into the top-cover sensor's Input, but it cannot fire that
-                // sensor's RD from inside (a composite has no path to a sibling instance's event input). So
-                // the one wire that has to stay at resource level is the re-sample trigger — no FB, just an
-                // event from the broker's own change detector. Without it the sensor never re-reads and a
-                // cover already in place at power-on is never reported (see the 'sample THEN report' contract).
+                // A composite has no path to a sibling instance's event input, so the ONE wire that must stay at
+                // resource level is the top-cover re-sample trigger; without it a cover in place at power-on is never reported.
                 var tcFb = net.Elements(Ns + "FB").FirstOrDefault(f =>
                     (string?)f.Attribute("Type") == "Sensor_Bool_CAT" &&
                     ((string?)f.Attribute("Name") ?? "").ToLowerInvariant().Contains("cover"));
@@ -451,8 +425,8 @@ namespace CodeGen.Devices.BX1
                 if (c.CoilToHome != null) AddData(dc, $"{dstName}.VALUE1", $"{BrokerFbName}.{c.CoilToHome}");
                 if (c.CoilToWork != null) AddData(dc, $"{dstName}.VALUE2", $"{BrokerFbName}.{c.CoilToWork}");
 
-                // A SYMLINKMULTIVAR{SRC,DST} registers its symlink (QI=TRUE) only when its INIT fires, else it
-                // stays DISABLED and ignores every scan REQ — fan from the init-root cover before the first EO.
+                // A SYMLINKMULTIVAR registers its symlink (QI=TRUE) only when INIT fires; otherwise it stays
+                // DISABLED and ignores every scan REQ.
                 if (hasGripper)
                 {
                     AddEvent(ec, $"{InitRootCover}.INITO", $"{srcName}.INIT");
@@ -461,14 +435,11 @@ namespace CodeGen.Devices.BX1
                 slot++;
             }
 
-            // Route the cover-detect input (BX1_IO.CoverPnpSensor = input-word bit5, already the gripper grip-
-            // detect and the only cover-present bit the coupler carries) to the TOP-COVER sensor so it reports
-            // over MQTT. The passive Sensor_Bool_CAT re-reads via its deploy-injected RD event
-            // (EnsureSensorBoolReadEvent); here we only publish bit5 into the sensor's Input, boot-INIT'd and
-            // fired on the CoverSensorEvent change alone -- that detector already covers boot, see below.
+            // Publish the cover-detect input (bit5, the only cover-present bit the coupler carries) into the
+            // top-cover sensor's Input; the passive Sensor_Bool_CAT re-reads via its deploy-injected RD event.
             var topCoverFb = net.Elements(Ns + "FB").FirstOrDefault(f =>
-                (string?)f.Attribute("Type") == "Sensor_Bool_CAT" &&
-                ((string?)f.Attribute("Name") ?? "").ToLowerInvariant().Contains("cover"));
+                (string?)f.Attribute("Type") == Mapping.TemplateManifest.SensorType.Name &&
+                Configuration.RigCatalog.Current.Roles.IsTopCover((string?)f.Attribute("Name")));
             if (topCoverFb != null && hasGripper)
             {
                 var tcName = (string)topCoverFb.Attribute("Name")!;
@@ -478,40 +449,28 @@ namespace CodeGen.Devices.BX1
                     $"'{resourceName}.{tcName}.Input'", null);
                 AddEvent(ec, $"{InitRootCover}.INITO", $"{tcSrc}.INIT");
                 AddEvent(ec, $"{BrokerFbName}.CoverSensorEvent", $"{tcSrc}.REQ");
-                // The publisher is fired by the CHANGE DETECTOR ALONE, never by the free-running scan.
-                // BX1_IO.CoverSensorEvent comes from FB2 (changeEventM262_2), which is clocked on EVERY broker
-                // read (EIPInputs_Bool.CNF -> FB2.Scan_Event) but emits only when the bit differs from its
-                // retained previous value. That retained value is a plain BOOL with no InitialValue and FB2's
-                // INIT algorithm is empty, so at power-on it is FALSE: a cover ALREADY in place reads
-                // TRUE <> FALSE on the very first scan and DOES produce the event. The detector therefore
-                // covers boot establishment as well as every later change, and it does so inside the broker
-                // where it costs nothing. Also driving the publisher from the cyclic scan only re-fires it at
-                // the scan rate forever, and because SRC.CNF drives the sensor CAT's RD, every one of those
-                // fires re-reads the CAT (RD -> FB2.REQ -> FB2.CNF -> FB1.REQ) — so the sensor's event counters
-                // climb without bound while the rig is idle. Reconciled rather than merely not-added, so a tree
-                // already deployed with the cyclic wire self-heals on the next deploy.
+                // Fired by the CHANGE DETECTOR alone; the cyclic scan would re-read the sensor CAT forever while
+                // the rig is idle. Reconciled, so a tree deployed with the cyclic wire self-heals. See Docs/PATCH_RATIONALES P-5.
                 foreach (var stale in ec.Elements(Ns + "Connection")
                              .Where(c => (string?)c.Attribute("Source") == $"{ScanFbName}.EO" &&
                                          (string?)c.Attribute("Destination") == $"{tcSrc}.REQ").ToList())
                     stale.Remove();
                 AddData(dc, $"{BrokerFbName}.CoverPnpSensor", $"{tcSrc}.VALUE1");
-                // After the SRC publishes the fresh bit into the sensor's Input, fire the sensor's RD re-read
-                // (Sensor_Bool_CAT gains RD via EnsureSensorBoolReadEvent) so it re-samples + re-reports on change.
+                // After the SRC publishes the fresh bit, fire the sensor's RD so it re-samples and re-reports on change.
                 AddEvent(ec, $"{tcSrc}.CNF", $"{tcName}.RD");
             }
 
             AddFbIfAbsent(net, Hex16($"{ScanFbName}|{fileTag}"), ScanFbName, "E_DELAY", "IEC61499.Standard",
                 isSysres, isSysres ? 15000 : 39000, 1300, ifaceParams: null, name1: null, name2: null,
                 extraParams: new[] { ("DT", ScanPeriod) });
-            // Kick the scan from the init-root cover (also drives BX1_IO.INIT, so the broker is ready at
-            // the first EO); the broker's PLC_EVENT does not fire on a plain INIT (kept as a redundant kick).
+            // Kick the scan from the init-root cover; the broker's PLC_EVENT does not fire on a plain INIT.
             if (hasGripper)
                 AddEvent(ec, $"{InitRootCover}.INITO", $"{ScanFbName}.START");
             AddEvent(ec, $"{BrokerFbName}.PLC_EVENT", $"{ScanFbName}.START");
             AddEvent(ec, $"{ScanFbName}.EO", $"{ScanFbName}.START");
             AddEvent(ec, $"{ScanFbName}.EO", $"{BrokerFbName}.REQ");
-            // Output write via a CAUSAL CHAIN over the non-gripper coil readers so no coil is stale when the
-            // word is packed — a parallel fan-out RACES and can leave the safe-start cover's home command stale.
+            // Output write via a CAUSAL CHAIN over the coil readers: a parallel fan-out races and can leave the
+            // safe-start cover's home command stale when the word is packed.
             foreach (var conn in ec.Elements(Ns + "Connection")
                          .Where(c => { var d = (string?)c.Attribute("Destination") ?? "";
                                        return (d.StartsWith("BX1IO_Coil_") && d.EndsWith(".REQ"))
