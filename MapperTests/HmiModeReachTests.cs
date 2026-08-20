@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using CodeGen.Hmi;
 using Xunit;
 
@@ -30,7 +30,7 @@ namespace MapperTests
         {
             var path = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".syslay");
             File.WriteAllText(path, Syslay);
-            try { return HmiModeReach.FromSyslay(path); }
+            try { return HmiModeReach.From(HmiSyslay.Load(path), _ => true, System.Array.Empty<string>()); }
             finally { File.Delete(path); }
         }
 
