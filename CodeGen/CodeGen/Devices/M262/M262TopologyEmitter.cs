@@ -1,9 +1,9 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
-using System.Xml.Linq;
 using CodeGen.Configuration;
+using System.IO;
+using System.Xml.Linq;
 using CodeGen.Devices.Core;
 
 namespace CodeGen.Devices.M262
@@ -31,7 +31,7 @@ namespace CodeGen.Devices.M262
                 return result;
             }
 
-            string solutionId = ReadProjectGuid(eaeRoot)
+            string solutionId = EaeProjectLayout.ReadProjectGuid(eaeRoot)
                 ?? FallbackSolutionUuid;
             if (solutionId == FallbackSolutionUuid)
                 result.Warnings.Add(
@@ -76,7 +76,7 @@ namespace CodeGen.Devices.M262
             var topologyProj = Path.Combine(topologyDir, "TopologyManager.topologyproj");
             if (File.Exists(topologyProj))
             {
-                result.TopologyProjEntriesAdded = RegisterInTopologyProj(topologyProj, new[]
+                result.TopologyProjEntriesAdded = EaeProjectLayout.RegisterInTopologyProj(topologyProj, new[]
                 {
                     Path.GetFileName(equipmentFile),
                     Path.GetFileName(solutionDataFile),
@@ -124,20 +124,6 @@ namespace CodeGen.Devices.M262
                 doc.Save(topologyProjPath);
             }
             catch { /* topologyproj malformed; not fatal */ }
-        }
-
-        public static string? ReadProjectGuid(string eaeRoot)
-        {
-            var path = Path.Combine(eaeRoot, "General", "ProjectInfo.xml");
-            if (!File.Exists(path)) return null;
-            try
-            {
-                var doc = XDocument.Load(path);
-                var raw = (string?)doc.Root?.Attribute("Guid");
-                if (string.IsNullOrWhiteSpace(raw)) return null;
-                return raw.Trim().Trim('{', '}').ToLowerInvariant();
-            }
-            catch { return null; }
         }
 
         static string BuildEquipmentJson(MapperConfig cfg, string sysdevId, string solutionId) => $$"""
@@ -284,28 +270,6 @@ namespace CodeGen.Devices.M262
   "solutionName": "Demonstrator"
 }
 """;
-        }
-
-        public static int RegisterInTopologyProj(string topologyProjPath, IEnumerable<string> jsonFileNames)
-        {
-            var doc = XDocument.Load(topologyProjPath);
-            var ns = doc.Root!.GetDefaultNamespace();
-            var noneGroup = doc.Descendants(ns + "ItemGroup")
-                .FirstOrDefault(g => g.Elements(ns + "None").Any())
-                ?? new XElement(ns + "ItemGroup");
-            if (noneGroup.Parent == null) doc.Root!.Add(noneGroup);
-
-            int added = 0;
-            foreach (var name in jsonFileNames)
-            {
-                bool exists = noneGroup.Elements(ns + "None").Any(e =>
-                    string.Equals((string?)e.Attribute("Include"), name, StringComparison.OrdinalIgnoreCase));
-                if (exists) continue;
-                noneGroup.Add(new XElement(ns + "None", new XAttribute("Include", name)));
-                added++;
-            }
-            if (added > 0) doc.Save(topologyProjPath);
-            return added;
         }
 
     }
