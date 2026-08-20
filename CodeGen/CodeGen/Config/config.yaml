@@ -1,6 +1,12 @@
 ﻿# Global generation constants. Sizes must match the deployed FBT ArraySize patches.
 recipeArraySize: 100    # Process1_Generic recipe arrays
 
+# How many reporters one ring can carry. It is the ArraySize of state_table on
+# ProcessRuntime_Generic_v1, ProcessStateBusHandler and updateComponentState -- all three are patched
+# together, because a report that writes past the end of one of them corrupts the others' memory. The
+# plan RAISES this when a model needs more slots; it is never lowered, so existing ids stay put.
+stateTableCapacity: 24
+
 # Actuator settle times (ms) written into the syslay when Control.xml gives none.
 defaultMotionMs: 2000   # default toWork/toHome
 # BX1 cover P&P toWork/toHome. Fault watchdog is 2x this. The covers are sensor-driven across the
