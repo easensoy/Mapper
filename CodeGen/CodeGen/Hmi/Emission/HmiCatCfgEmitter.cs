@@ -1,4 +1,5 @@
-﻿using System.IO;
+﻿using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 
@@ -35,7 +36,12 @@ namespace CodeGen.Hmi
         // Renders <CAT>.cfg into a STAGING directory as <CAT>.cfg. The caller copies it into the
         // IEC61499 tree only after every validator has passed, so a rejected generation never leaves
         // a half-updated registration behind.
-        internal static void EmitTo(string stagingDir, HmiCatTemplate tpl, HmiDeploymentPolicy policy)
+        // `selected` names the symbols this generation actually placed. The .cfg must register
+        // exactly those: a symbol the plan pruned has no files on disk, and EAE fails the build on a
+        // .cfg entry whose canvas is missing. Null means "every symbol the template ships", which is
+        // what the deploy-time pass uses before any plan exists.
+        internal static void EmitTo(string stagingDir, HmiCatTemplate tpl, HmiDeploymentPolicy policy,
+                                    IReadOnlyCollection<string>? selected = null)
         {
             var cat = tpl.CatType;
             Directory.CreateDirectory(stagingDir);
@@ -54,8 +60,9 @@ namespace CodeGen.Hmi
             // Placeable symbols first, then pop-up faceplates - the order EAE itself writes.
             foreach (var sym in tpl.Symbols.OrderBy(s => s.IsFaceplate).ThenBy(s => s.Name, StringComparer.Ordinal))
             {
-                // Setup canvases exist only to drive the plant; a monitoring HMI never registers them.
-                if (policy.IsCommandSymbol(sym.Name)) continue;
+                // Register only what this generation deployed. Without the plan (the deploy-time
+                // pass) fall back to the template's own symbol list.
+                if (selected != null && !selected.Contains(sym.Name)) continue;
 
                 var stem = $"..\\HMI\\{cat}\\{cat}_{sym.Name}";
                 var faceplate = sym.IsFaceplate ? " IsFaceplate=\"true\"" : string.Empty;
