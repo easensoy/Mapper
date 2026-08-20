@@ -2,26 +2,23 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using CodeGen.Translation;
 using System.Xml.Linq;
 using CodeGen.Configuration;
 using CodeGen.Devices.Core;
-using CodeGen.Translation;
 using CodeGen.Mapping;
 
 namespace CodeGen.Devices.M262
 {
     public static class HcfPatchService
     {
-        public static void PatchDeployed(GenerationContext ctx,
-            string syslayPath, IoBindings? bindings,
+        public static void PatchDeployed(GenerationContext ctx, IoBindings? bindings,
             SystemInjector.BindingApplicationReport report)
         {
-            var syslayFbNames = ReadSyslayFbNames(syslayPath);
-            PatchDeployed(ctx.Config, ctx.Profile, syslayFbNames, bindings, report);
+            PatchDeployed(ctx.Config, ctx.Profile, bindings, report);
         }
 
         public static void PatchDeployed(MapperConfig? config, DeploymentProfile profile,
-            HashSet<string> syslayFbNames,
             IoBindings? bindings,
             SystemInjector.BindingApplicationReport report)
         {
@@ -49,8 +46,8 @@ namespace CodeGen.Devices.M262
                 }
                 var (sysdevDir, resourceId, sysresPath) = loc.Value;
 
-                // TM3 channels bind their symlink directly to the consumer FB instance
-                // (e.g. "Feeder.athome") — no M262IO/PLC_RW_M262 broker FB; the CATs are the I/O.
+                // TM3 channels bind straight to the consumer FB instance: there is no broker FB, the CATs
+                // are the I/O.
                 var fbIdByName = ReadFbIdByName(sysresPath);
                 if (fbIdByName.Count == 0)
                 {
@@ -100,7 +97,6 @@ namespace CodeGen.Devices.M262
                     if (type != TargetRegistry.Of(CodeGen.Translation.PlcAssignment.M262).DeviceType || nspace != TargetDescriptor.DeviceNamespace) continue;
                     XNamespace ns = root.GetDefaultNamespace();
                     var resources = root.Element(ns + "Resources");
-                    // The M262 device always has exactly one resource child.
                     var m262Res = resources?.Elements(ns + "Resource").FirstOrDefault();
                     if (m262Res == null) continue;
 
@@ -111,9 +107,8 @@ namespace CodeGen.Devices.M262
                     var sysresPath = Directory.EnumerateFiles(sysdevDir, "*.sysres").FirstOrDefault()
                         ?? Path.Combine(sysdevDir, "RES0.sysres");
 
-                    // EAE's .hcf ResourceId is a 16-char hex matching the sysres root ID; if the
-                    // sysdev ID is zero/empty, mint one and persist it to sysdev + sysres so all
-                    // three carry the same non-zero GUID.
+                    // EAE's .hcf ResourceId is a 16-char hex matching the sysres root ID. A zero/empty
+                    // sysdev ID is minted and persisted to sysdev + sysres so all three agree.
                     var resourceId = (string?)m262Res.Attribute("ID") ?? string.Empty;
                     if (IsZeroOrEmptyId(resourceId))
                     {
@@ -131,16 +126,14 @@ namespace CodeGen.Devices.M262
 
         private static readonly XNamespace XsiNs = "http://www.w3.org/2001/XMLSchema-instance";
 
-        // Idempotent merge into the deployed .hcf. ParameterValue targets use the symlink
-        // convention {resourceId}.{componentFbId}.{port}.
+        // Idempotent merge into the deployed .hcf; ParameterValue targets are {resourceId}.{fbId}.{port}.
         private static void WriteHcfMerged(DeploymentProfile profile, string hcfPath, string resourceId,
             IoBindings? bindings, Dictionary<string, string> fbIdByName,
             List<string> sensorNames,
             SystemInjector.BindingApplicationReport report)
         {
-            // Effective pin -> (component, port). Seed from the xlsx actuator PinAssignments,
-            // then auto-assign each Sensor_Bool_CAT "Input" to the next free DI (xlsx has no
-            // sensor pin column); sensors fill the lowest free DI slots in name order.
+            // Seeded from the xlsx actuator PinAssignments. The xlsx has no sensor pin column, so each
+            // Sensor_Bool_CAT "Input" takes the next free DI in name order.
             var effective = new Dictionary<string, (string Comp, string Port)>(StringComparer.OrdinalIgnoreCase);
             var usedDi = new HashSet<int>();
             if (bindings != null)
@@ -152,14 +145,12 @@ namespace CodeGen.Devices.M262
                         int.TryParse(kv.Key.Substring(2), out var di)) usedDi.Add(di);
                 }
             }
-            // The xlsx pre-seeds DI/DO channels with EMPTY values, so a pin is truly free to
-            // bind in code when it is absent, empty, OR points at a component not on this sysres.
+            // The xlsx pre-seeds DI/DO channels with EMPTY values, so a pin is only truly free when it is
+            // absent, empty, OR points at a component not on this sysres.
             bool PinBlank(string p) => !effective.TryGetValue(p, out var v)
                 || string.IsNullOrEmpty(v.Comp) || !fbIdByName.ContainsKey(v.Comp);
-            // The cross-PLC discharge tail's physical channels, exactly as Config/smc-rig.yml declares
-            // them. The binder and the parity validator read this one list, so an edit there changes what
-            // is emitted AND what is checked. A channel binds only when its component is on this
-            // resource's own sysres and the IO workbook has not already claimed the pin.
+            // The discharge tail's physical channels, from Config/smc-rig.yml. The binder and the parity
+            // validator read this one list, so an edit there changes what is emitted AND what is checked.
             {
                 foreach (var dc in RigCatalog.Current.DischargeChannels)
                 {
@@ -190,12 +181,8 @@ namespace CodeGen.Devices.M262
                 report.Missing.Add($"[Hcf] auto-bound {pin} = {sensor}.Input (sensor not in xlsx pin columns)");
             }
 
-            // INVARIANT (user: "by default Feeder/Checker belong to M262; only touch their IO if the user moves
-            // that component to RevPi"). Every Feed component that has an expected M262 channel and is NOT
-            // explicitly on RevPi MUST be on this sysres, else its M262 IO silently blanks. If one is missing
-            // it is a stale partial-RevPi leftover (a component routed off M262 with no RevPi device to host it)
-            // -> flag it LOUDLY so it is never silently shipped. A plain Clean + re-Generate restores it (pure
-            // M262 puts the component back on the M262 sysres and this HCF re-binds it).
+            // INVARIANT: a Feed component with an expected M262 channel that is not explicitly on RevPi
+            // MUST be on this sysres, else its M262 IO silently blanks. Flag it loudly rather than ship it.
             var expectedM262 = new HashSet<string>(
                 (bindings?.PinAssignments.Values.Select(v => v.ComponentName) ?? Enumerable.Empty<string>())
                     .Concat(sensorNames)
@@ -258,8 +245,7 @@ namespace CodeGen.Devices.M262
             SaveHcfWithRetry(doc, hcfPath, report);
         }
 
-        // Load the existing .hcf, or mint a skeleton with the xmlns:xsd/xmlns:xsi prefix
-        // declarations EAE expects on the root (also patched onto a loaded file if missing).
+        // The root must carry the xmlns:xsd/xmlns:xsi prefixes EAE expects, minted or loaded alike.
         private static XDocument LoadOrCreateHcf(string hcfPath)
         {
             XDocument? doc = null;
@@ -373,7 +359,6 @@ namespace CodeGen.Devices.M262
                 var pin = $"{pinPrefix}{i:D2}";
                 var value = sym(pin);
 
-                // Remove any same-Name ParameterValue before re-adding, for idempotency.
                 freshPv.Elements()
                     .Where(e => e.Name.LocalName == "ParameterValue" &&
                                 (string?)e.Attribute("Name") == pin)
@@ -388,7 +373,6 @@ namespace CodeGen.Devices.M262
             }
         }
 
-        // Block builders — each returns a detached XElement matching the .hcf shape EAE accepts.
 
         private static XElement BuildBmtm3Shell() => new XElement("ConfigurationBaseItem",
             new XElement("Name", "BMTM3"),
@@ -506,27 +490,10 @@ namespace CodeGen.Devices.M262
                 NewLineHandling = System.Xml.NewLineHandling.Replace,
             };
 
-            int MaxAttempts = GenerationConfig.Current.FileWriteRetries;
-            int delayMs = 50;
-            for (int attempt = 1; attempt <= MaxAttempts; attempt++)
-            {
-                try
-                {
-                    using var fs = new FileStream(hcfPath,
-                        FileMode.Create, FileAccess.Write, FileShare.Read);
-                    using var w = System.Xml.XmlWriter.Create(fs, settings);
-                    doc.Save(w);
-                    if (attempt > 1)
-                        report.Missing.Add(
-                            $"[Hcf] write succeeded on attempt {attempt} (EAE briefly held a lock).");
-                    return;
-                }
-                catch (IOException) when (attempt < MaxAttempts)
-                {
-                    System.Threading.Thread.Sleep(delayMs);
-                    delayMs = Math.Min(delayMs * 2, 800);
-                }
-            }
+            int attempt = Services.FbtXmlEditor.SaveXmlRetrying(hcfPath, settings, doc.Save);
+            if (attempt > 1)
+                report.Missing.Add(
+                    $"[Hcf] write succeeded on attempt {attempt} (EAE briefly held a lock).");
         }
 
         private static Dictionary<string, string> ReadFbIdByName(string sysresPath)
@@ -553,7 +520,6 @@ namespace CodeGen.Devices.M262
             return map;
         }
 
-        // FB instance names on the sysres whose Type is Sensor_Bool_CAT.
         private static List<string> ReadSensorNames(string sysresPath)
         {
             var list = new List<string>();
@@ -579,22 +545,6 @@ namespace CodeGen.Devices.M262
             return list;
         }
 
-        private static HashSet<string> ReadSyslayFbNames(string syslayPath)
-        {
-            var names = new HashSet<string>(StringComparer.Ordinal);
-            try
-            {
-                if (string.IsNullOrEmpty(syslayPath) || !File.Exists(syslayPath)) return names;
-                var doc = XDocument.Load(syslayPath);
-                foreach (var fb in doc.Descendants().Where(e => e.Name.LocalName == "FB"))
-                {
-                    var name = (string?)fb.Attribute("Name");
-                    if (!string.IsNullOrEmpty(name)) names.Add(name);
-                }
-            }
-            catch { /* best-effort */ }
-            return names;
-        }
 
         private static void SaveXml(XDocument doc, string path)
         {
@@ -609,8 +559,8 @@ namespace CodeGen.Devices.M262
             doc.Save(w);
         }
 
-        // EAE resolves symlinks by ID equality across sysdev -> sysres -> .hcf; all three must
-        // carry the same non-zero ID or the Symbolic Links view goes red.
+        // EAE resolves symlinks by ID equality across sysdev -> sysres -> .hcf; all three need the same
+        // non-zero ID or the Symbolic Links view goes red.
         private static void PropagateResourceIdToSysres(string sysresPath, string newId)
         {
             try
@@ -634,8 +584,7 @@ namespace CodeGen.Devices.M262
             return true;
         }
 
-        // Deterministic 16-char uppercase hex ID matching the format EAE writes into baseline
-        // .sysres/.hcf files; same seed -> same ID so the ResourceId stays stable across runs.
+        // Deterministic 16-char uppercase hex, the format EAE writes; same seed -> same stable ID.
         private static string NewShortHexId(string seed)
         {
             using var sha = System.Security.Cryptography.SHA1.Create();
