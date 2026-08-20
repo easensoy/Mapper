@@ -1,49 +1,38 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
+using System.Linq;
+using CodeGen.Configuration;
+using CodeGen.Mapping;
 using System.IO;
 using System.IO.Compression;
-using System.Linq;
 using System.Xml.Linq;
-using CodeGen.Configuration;
 using CodeGen.Devices.Core;
-using CodeGen.Mapping;
 using CodeGen.Translation;
 
 namespace CodeGen.Devices.RevPi
 {
-    // The Revolution Pi's field I/O: what the Modbus coupler carries, and the symlink bridge connecting
-    // it to the actuator CATs.
-    //
-    // NOTHING about pushers, checkers or hoppers is written down here or in YAML. The coupler type states
-    // which signals exist and which word bit each uses; the I/O bindings workbook states which component
-    // and port owns each channel; the Modbus hardware config states the broker's FB id and the bus cycle.
-    // Change the coupler or the workbook and this follows with no edit.
+    // The Revolution Pi's field I/O: the Modbus coupler and the symlink bridge to the actuator CATs.
+    // No component is named here or in YAML. The coupler type states which signals exist and their word
+    // bits, the workbook their owner, the hardware config the broker id and bus cycle.
     public static class RevPiIoBrokerInjector
     {
         // SyslaySysresParityValidator looks for this exact instance name on the RevPi resource.
         internal const string BrokerName = "RevPI_IO";
         internal const string BrokerType = "PLC_RW_REVPI";
 
-        // Relative to the template library root. The coupler type ships as a Composite zip; the Modbus
-        // master hardware config ships beside it.
         const string BrokerTypeZip = @"Composite\PLC_RW_REVPI.zip";
         const string HcfTemplate = @"RevPi\RevPiIO.modbus.hcf";
-        // Bridge instances. They exist only because a symlink carries a value with no event to ride on,
-        // and they are swept by these names so a re-deploy converges instead of accumulating.
+        // Bridge instances, swept by these names so a re-deploy converges instead of accumulating.
         const string Publisher = "RevPiSensorPublisher";
         const string Subscriber = "RevPiCoilSubscriber";
         const string ScanFb = "RevPI_IO_Cycle";
         static readonly string[] Bridge = { Publisher, Subscriber, ScanFb };
 
-        // The coupler's own canvas, below its pristine blocks. Not plant layout — this is the inside of a
-        // function block type.
+        // Coordinates inside the coupler's own function block type, not plant layout.
         const int BridgeX = 400, BridgeY = 4400, BridgeColumn = 2600, BridgeRow = 800;
-        // Sensor_Bool_CAT's field input. The workbook gives a sensor a tag but no channel, so a sensor
-        // signal is matched by tag and takes this port — the same port the M262 hardware config binds.
+        // The workbook gives a sensor a tag but no channel, so a sensor is matched by tag and takes this port.
         const string SensorPort = "Input";
 
-        // One field signal, fully resolved: the pin inside the coupler, the physical channel that pin is
-        // bit-wired to, and the component/port that owns it.
         internal sealed record Signal(bool IsCoil, string Pin, string Component, string Port)
         {
             public string Symlink(string resource) => $"{resource}.{Component}.{Port}";
@@ -58,17 +47,13 @@ namespace CodeGen.Devices.RevPi
                 new HashSet<string>(Signals.Select(s => s.Component), StringComparer.OrdinalIgnoreCase);
         }
 
-        // ── the surface anything outside this folder asks for ─────────────────────────────────────────
-        // Read by the pre-generation selection guard and the MapperUI device column. Deliberately
-        // propagates a resolution failure rather than answering "nothing": an empty set would quietly
-        // turn every RevPi selection into a rejection with no explanation.
+        // Propagates a resolution failure; answering "nothing" would silently reject every RevPi selection.
         public static IReadOnlySet<string> CoveredComponents => Current.Components;
 
         // Read from the hardware config, whose Modbus LinkNames resolve against it.
         public static string BrokerFbId => Current.BrokerFbId;
 
-        // Called by the template deployer once the pristine coupler type is in place, so the resource
-        // instantiates only the broker itself.
+        // Called by the deployer once the pristine coupler type is in place, so the resource holds only the broker.
         public static void EmbedBridgeInComposite(string fbtPath) =>
             EmbedBridge(Current, ControllerMap.ResourceForPlc(PlcAssignment.RevPi), fbtPath);
 
@@ -83,9 +68,8 @@ namespace CodeGen.Devices.RevPi
                 ?? throw Fail($"the hardware config '{HcfTemplate}' is not in the template library");
             var bindings = IoBindingsLoader.LoadBindings(ResolveBindings(MapperConfig.Load().IoBindingsPath));
 
-            // The PRISTINE type is the specification. The deployed copy is one this adapter has already
-            // rewritten (the boundary wires into the packer are superseded by the subscriber), so reading
-            // it back would find a coupler with no coils.
+            // The PRISTINE type is the specification. The deployed copy has already been rewritten here,
+            // so reading it back would find a coupler with no coils.
             using var zip = ZipFile.OpenRead(lib);
             var entry = zip.Entries.First(e => e.FullName.EndsWith($"{BrokerType}.fbt", StringComparison.OrdinalIgnoreCase));
             using var stream = entry.Open();
@@ -103,8 +87,7 @@ namespace CodeGen.Devices.RevPi
                 .Select(c => (S: (string?)c.Attribute("Source") ?? "", D: (string?)c.Attribute("Destination") ?? ""))
                 .ToList();
 
-            // A sensor is an internal pin feeding a boundary output; a coil is a boundary input feeding an
-            // internal pin. That direction is the whole definition — no list of names is needed.
+            // A sensor is an internal pin feeding a boundary output, a coil the reverse; direction is the whole definition.
             var sensors = edges.Where(e => outs.Contains(e.D) && e.S.Contains('.')).ToList();
             var coils = edges.Where(e => ins.Contains(e.S) && e.D.Contains('.')).ToList();
 
@@ -137,10 +120,8 @@ namespace CodeGen.Devices.RevPi
                 (string)read.Attribute("Name")!, cycle, fbIds[0], resId);
         }
 
-        // Two independent routes into the workbook, and they must agree: by CHANNEL, which is the wiring
-        // itself, and by FIELD TAG, which the coupler's boundary variable names. Sensors carry a tag but
-        // no channel, and a vendor typo in a boundary name defeats the tag route, so together they cover
-        // the coupler and a disagreement is a real fault.
+        // Two routes into the workbook, by channel and by field tag; neither covers the coupler alone, and a
+        // disagreement between them is a real wiring fault.
         static Signal Bind(bool isCoil, string pin, string var, IoBindings b)
         {
             var channel = Channel(isCoil, pin);
@@ -170,8 +151,7 @@ namespace CodeGen.Devices.RevPi
             return default;
         }
 
-        // A word-block pin is numbered from one; the bit and the channel it is wired to are numbered from
-        // zero, so pin n is channel n-1.
+        // Word-block pins count from one, channels from zero, so pin n is channel n-1.
         static string Channel(bool isCoil, string pin)
         {
             var digits = new string(pin[(pin.IndexOf('.') + 1)..].SkipWhile(c => !char.IsDigit(c)).ToArray());
@@ -185,9 +165,7 @@ namespace CodeGen.Devices.RevPi
         static InvalidOperationException Fail(string why) =>
             new($"The Revolution Pi I/O cannot be resolved: {why}. Nothing has been written.");
 
-        // The template library and the workbook are hard prerequisites of any generation, so they are
-        // located the way everything else locates them: the configured root first, then beside this
-        // build, then out towards the checkout.
+        // Configured root first, then beside this build, then out towards the checkout.
         static string? Locate(string? root, string relative)
         {
             var roots = new List<string?> { root };
@@ -204,8 +182,7 @@ namespace CodeGen.Devices.RevPi
                   .Select(o => Path.Combine(o, configured)).FirstOrDefault(File.Exists)
               ?? Path.Combine(AppContext.BaseDirectory, configured);
 
-        // Only the resource copy carries the Mapping that ties the two together; an unmapped resource FB
-        // is the orphan EAE offers to "repair".
+        // Only the resource copy carries the Mapping; an unmapped resource FB is the orphan EAE offers to repair.
         internal static bool PlaceBroker(Coupler coupler, string path, bool isResource,
             IReadOnlyList<string> hosted, LayoutCatalog layout, string bootFb)
         {
@@ -227,8 +204,6 @@ namespace CodeGen.Devices.RevPi
             var events = Section(net, N("EventConnections"));
             Sweep(net, N, owned, events, Section(net, N("DataConnections")));
 
-            // The broker takes the column after the last component this controller hosts, on the row its
-            // components sit on — the RevPi shares the Feed band and keeps the global canvas coordinates.
             var band = layout.Band(PlcAssignment.RevPi);
             var fb = new XElement(N("FB"),
                 new XAttribute("ID", coupler.BrokerFbId), new XAttribute("Name", BrokerName),
@@ -254,8 +229,7 @@ namespace CodeGen.Devices.RevPi
         internal static void EmbedBridge(Coupler c, string resourceName, string fbtPath)
         {
             if (!File.Exists(fbtPath)) return;
-            // No PreserveWhitespace: saving re-indents so each added FB lands on its own line, which EAE
-            // requires of this file.
+            // No PreserveWhitespace: saving re-indents so each FB lands on its own line, as EAE requires here.
             var doc = XDocument.Load(fbtPath);
             var net = doc.Root?.Element("FBNetwork");
             var ec = net?.Element("EventConnections");
@@ -265,8 +239,7 @@ namespace CodeGen.Devices.RevPi
             var owned = new HashSet<string>(Bridge, StringComparer.Ordinal);
             Sweep(net, n => n, owned, ec, dc);
 
-            // Ids sit above whatever the surviving content uses, measured AFTER the sweep — the stored
-            // counter advances on every render, so the same input applied twice would never settle.
+            // Measure ids AFTER the sweep: the stored counter advances every render, so reusing it never settles.
             int id = net.Elements("FB").Select(f => int.TryParse((string?)f.Attribute("ID"), out var v) ? v : 0)
                 .DefaultIfEmpty(0).Max() + 1;
             int uid = id;
@@ -285,9 +258,8 @@ namespace CodeGen.Devices.RevPi
             var (ca, ct) = SymlinkBridge.Pick("DST", coils.Count);
             Add(SymlinkBridge.BuildFb("", id++, uid++, Subscriber, ct, ca,
                 coils.Select(s => s.Symlink(resourceName)).ToList(), BridgeX + BridgeColumn, BridgeY));
-            // The actuator CATs publish their coils through a symlink with no boundary event, so the read
-            // and write must be re-requested on a clock or the words freeze. The coupler's own bus cycle
-            // is that clock.
+            // A coil symlink carries no boundary event, so read and write must be re-requested on the
+            // coupler's own bus cycle or the words freeze.
             Add(new XElement("FB", new XAttribute("ID", id++), new XAttribute("Name", ScanFb),
                 new XAttribute("Type", "E_DELAY"),
                 new XAttribute("x", BridgeX.ToString()), new XAttribute("y", (BridgeY + BridgeRow).ToString()),
@@ -307,8 +279,8 @@ namespace CodeGen.Devices.RevPi
             for (int i = 0; i < sensors.Count; i++) Da(sensors[i].Pin, $"{Publisher}.VALUE{i + 1}");
             for (int i = 0; i < coils.Count; i++) Da($"{Subscriber}.VALUE{i + 1}", coils[i].Pin);
 
-            // The pristine boundary wire into each coil pin is superseded by the subscriber, and two
-            // sources on one destination is an EAE error.
+            // The subscriber supersedes the pristine wire into each coil pin; two sources on one
+            // destination is an EAE error.
             foreach (var conn in dc.Elements("Connection")
                          .Where(x => coils.Any(k => (string?)x.Attribute("Destination") == k.Pin) &&
                                      Node((string?)x.Attribute("Source") ?? "") != Subscriber).ToList())
@@ -334,8 +306,8 @@ namespace CodeGen.Devices.RevPi
             foreach (var fb in net.Elements(N("FB"))
                          .Where(f => owned.Contains((string?)f.Attribute("Name") ?? "")).ToList())
             {
-                // Take the element's indentation with it, else a PreserveWhitespace document grows a blank
-                // line on every re-deploy and sweep-and-re-add is never byte-idempotent.
+                // Take the element's indentation with it, else the document grows a blank line per re-deploy
+                // and sweep-and-re-add is never byte-idempotent.
                 if (fb.PreviousNode is XText ws && string.IsNullOrWhiteSpace(ws.Value)) ws.Remove();
                 fb.Remove();
             }
