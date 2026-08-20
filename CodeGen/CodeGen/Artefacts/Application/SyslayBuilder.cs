@@ -91,8 +91,7 @@ namespace CodeGen.Translation
         public SyslayBuilder AddFrame(string name, double x, double y,
             double width, double height,
             string backgroundColor, string text,
-            string textAlignment = "TopCenter",
-            string font = "Microsoft Sans Serif, 36pt, style=Bold")
+            string textColor, string textAlignment, string font)
         {
             var inv = System.Globalization.CultureInfo.InvariantCulture;
             var frame = new XElement(Ns + "Frame",
@@ -108,7 +107,7 @@ namespace CodeGen.Translation
                     new XAttribute("Name", n), new XAttribute("Value", v)));
 
             AddParam("BackgroundColor", backgroundColor);
-            AddParam("TextColor", "Black");
+            AddParam("TextColor", textColor);
             AddParam("Font", font);
             AddParam("TextAlignment", textAlignment);
             // MoveStyle="None" pins the frame at the emitted X/Y/Width/Height.
@@ -191,78 +190,5 @@ namespace CodeGen.Translation
             return new XDocument(new XDeclaration("1.0", "utf-8", null), _layer);
         }
 
-        public static string FormatString(string value) => $"'{value}'";
-        public static string FormatInt(int value) => value.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        public static string FormatBool(bool value) => value ? "TRUE" : "FALSE";
-        public static string FormatTimeMs(int ms) => $"T#{ms.ToString(System.Globalization.CultureInfo.InvariantCulture)}ms";
-
-        // Formats an INT array as an EAE square-bracket literal, e.g. [1, 2, 9] (empty list -> "[]").
-        public static string FormatIntArray(IEnumerable<int> values)
-        {
-            var formatted = string.Join(", ",
-                values.Select(v => v.ToString(System.Globalization.CultureInfo.InvariantCulture)));
-            return $"[{formatted}]";
-        }
-
-        // InterlockRule array-of-struct literal, e.g. [(FromState:=2, ToState:=4, SourceID:=6,
-        // BlockedState:=2), ...]. Emits every slot; RuleCount bounds the evaluator so trailing zero-rows unread.
-        public static string FormatRuleTable(
-            IReadOnlyList<int> from, IReadOnlyList<int> to,
-            IReadOnlyList<int> src, IReadOnlyList<int> blk)
-        {
-            var elems = new List<string>();
-            for (int i = 0; i < from.Count; i++)
-                elems.Add($"(FromState:={from[i]}, ToState:={to[i]}, SourceID:={src[i]}, BlockedState:={blk[i]})");
-            return "[" + string.Join(", ", elems) + "]";
-        }
-
-        // InterlockTable nested-struct literal: (Count:=N, Rules:=[(FromState:=…, …), …]).
-        public static string FormatInterlockTable(
-            IReadOnlyList<int> from, IReadOnlyList<int> to,
-            IReadOnlyList<int> src, IReadOnlyList<int> blk, int count)
-            => $"(Count:={count}, Rules:={FormatRuleTable(from, to, src, blk)})";
-
-        // TargetStates struct literal: (Work1:=N, Work2:=N, Home:=N).
-        public static string FormatTargetStates(int work1, int work2, int home)
-            => $"(Work1:={work1}, Work2:={work2}, Home:={home})";
-
-        // TelemetryConfig STRUCT literal for a Telemetry_CAT Config input, e.g. (QI:=TRUE,
-        // ConnectionID:='SMC', URL:='mqtt://...', ClientIdentifier:='SMC_M262', ValidateCert:=0, CACert:='').
-        public static string FormatTelemetryConfig(bool qi, string connectionId, string url,
-            string clientIdentifier, int validateCert, string caCert)
-            => $"(QI:={FormatBool(qi)}, ConnectionID:={FormatString(connectionId)}, " +
-               $"URL:={FormatString(url)}, ClientIdentifier:={FormatString(clientIdentifier)}, " +
-               $"ValidateCert:={validateCert}, CACert:={FormatString(caCert)})";
-
-        // STRING array as an EAE square-bracket literal of single-quoted entries, e.g.
-        // ['Feeder', '', 'PartInHopper']. Internal quotes doubled (IEC 61131-3 STRING escaping).
-        public static string FormatStringArray(IEnumerable<string> values)
-        {
-            var formatted = string.Join(", ",
-                values.Select(v => "'" + (v ?? string.Empty).Replace("'", "''") + "'"));
-            return $"[{formatted}]";
-        }
-
-
-        // RecipeStep array-of-struct literal (mixed INT + STRING), e.g. [(StepType:=2,
-        // CmdTargetName:='feeder', CmdStateArr:=1, Wait1Id:=0, Wait1State:=0, NextStep:=1), ...]. Emits
-        // every row; STRING member single-quoted, internal quotes doubled (IEC 61131-3).
-        public static string FormatRecipeTable(
-            IReadOnlyList<int> stepType, IReadOnlyList<string> cmdTargetName,
-            IReadOnlyList<int> cmdStateArr, IReadOnlyList<int> wait1Id,
-            IReadOnlyList<int> wait1State, IReadOnlyList<int> nextStep)
-        {
-            int n = stepType.Count;
-            var elems = new List<string>();
-            for (int i = 0; i < n; i++)
-            {
-                var name = "'" + (cmdTargetName[i] ?? string.Empty).Replace("'", "''") + "'";
-                elems.Add(
-                    $"(StepType:={stepType[i]}, CmdTargetName:={name}, " +
-                    $"CmdStateArr:={cmdStateArr[i]}, Wait1Id:={wait1Id[i]}, " +
-                    $"Wait1State:={wait1State[i]}, NextStep:={nextStep[i]})");
-            }
-            return "[" + string.Join(", ", elems) + "]";
-        }
     }
 }
