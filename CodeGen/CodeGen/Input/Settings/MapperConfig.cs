@@ -1,8 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.IO;
 
 namespace CodeGen.Configuration
 {
@@ -10,17 +10,24 @@ namespace CodeGen.Configuration
     {
         private const string ConfigFileName = "mapper_config.json";
 
-        // Engine END->0 loop-back (ProcessRuntimeTemplatePatcher). Readonly: nothing assigns it, and a
-        // writable static here would be generation state one run could change under another.
+        // Engine END->0 loop-back. Readonly: a writable static would be state one run could change under another.
         public static readonly bool EnableCyclicRestart = true;
 
-        public static int RobotActuatorId         => RigCatalog.Current.RobotActuatorId;
-
-        // Real rig DI sensors the twin doesn't model; kept OFF the M262 Feed ring, riding the M262->M580 cross-device segment so the report lands only in M580 state_table[id].
+        // Real rig DI sensors the twin does not model; kept OFF the M262 Feed ring so the report lands only in M580 state_table[id]. The slot is the stableSlot on the sensor's own layout row.
         public static (string Name, int Id)[] M262SynthSensors =>
             RigCatalog.Current.SynthSensors
-                .Select(s => (s.Name, s.Id))
+                .Select(s => (s.Name, Id: Configuration.LayoutCatalog.Load().StableSlotOf(s.Name)))
+                .Where(s => s.Id >= 0)
                 .ToArray();
+
+        public string RequireTemplateLibraryPath() => Require(TemplateLibraryPath, nameof(TemplateLibraryPath));
+        public string RequireIoFolderPath() => Require(IoFolderPath, nameof(IoFolderPath));
+
+        private static string Require(string value, string key) =>
+            !string.IsNullOrWhiteSpace(value) ? value
+            : throw new InvalidOperationException(
+                $"[Config] mapper_config.json declares no {key}, so the generator has no library to read " +
+                "from. Set it beside the runner rather than relying on a path that only exists on one machine.");
 
         public string MappingRulesPath { get; set; } = string.Empty;
         public string TemplateLibraryPath { get; set; } = string.Empty;
@@ -48,7 +55,7 @@ namespace CodeGen.Configuration
 
         public string DefaultNetworkGateway { get; set; } = DeviceConfig.Current.DefaultNetwork.Gateway;
 
-        // Must match Topology/BroadcastDomain_Default Network.json; same UUID on the M580 endpoint binding and the BroadcastDomain JSON so they cross-reference.
+        // Same UUID on the M580 endpoint binding and the BroadcastDomain JSON so they cross-reference.
         public string DefaultNetworkUuid { get; set; }
             = "2131fbdd-0a41-4e41-abfb-a14a5ca9218d";
 
@@ -58,33 +65,21 @@ namespace CodeGen.Configuration
         // HMIB1X panel host IP: setting this makes BX1 a REMOTE panel not a local Workstation (whose runtime EAE resolves to 127.0.0.1 -- the "cannot connect to BX1" error).
         public string BX1HostIp { get; set; } = DeviceConfig.Current.Bx1.HostIp;
 
-        // Revolution Pi (Soft_dPAC) Feed station. From Config/device.yml, which documents the roles:
-        // RevPiTargetIp = the Soft dPAC CONTAINER on the EAE-managed macvlan (runtime; EAE deploys here).
-        // RevPiHostIp   = the RevPi Linux HOST NIC (Soft dPAC Manager on 8080). The two must differ —
-        // RevPiAddressValidator fails generation if they are equal or collide with another endpoint.
+        // TargetIp = the Soft dPAC CONTAINER (EAE deploys here); HostIp = the RevPi Linux HOST NIC. The two
+        // must differ: RevPiAddressValidator fails generation if they are equal or collide with an endpoint.
         public string RevPiTargetIp { get; set; } = DeviceConfig.Current.RevPi.TargetIp;
         public string RevPiHostIp { get; set; } = DeviceConfig.Current.RevPi.HostIp;
 
 
-        // The generated HMI is a MONITORING panel and must not present a control the controller cannot
-        // honour: the Station/Area STOP button fires CycleType=0, but ProcessRuntime_Generic_v1's ECC
-        // has no transition that reads Mode or CycleType (INIT->IDLE1 and END->ADVANCE are
-        // unconditional), so STOP cannot stop recipe execution. Setting this false does NOT enable
-        // command screens -- generation fails until an approved command contract exists in the control
-        // logic. A real operational Stop needs a process-engine change; the safety stop stays in the
-        // certified hardware safety system either way.
 
         // EAE constraint: an FDT project copied verbatim from another solution can make the topology server throw a 500 on import.
         public bool EmitBx1EtherNetIpDevice { get; set; } = true;
 
         public bool DeployBx1IoBroker { get; set; } = true;
 
-        // TRUE: the cover I/O bridge (BX1IO_Sense_*/BX1IO_Coil_*/BX1_IO_Cycle) lives INSIDE the
-        // PLC_RW_BX1 composite, so BX1_RES instantiates only BX1_IO -- the same shape M262 has with
-        // PLC_RW_M262. Same sensors, same coils, same 50 ms scan; only the nesting changes.
-        // ⚠ Rig-verify: a SYMLINKMULTIVAR with an ABSOLUTE cross-instance NAME
-        // (BX1_RES.CoverPNP_Vr.OutputToWork) must resolve from INSIDE a composite type. Proven by
-        // spike (EIP_Output_Word 16#0004); set false to restore the external bridge in one rebuild.
+        // TRUE: the cover I/O bridge lives INSIDE the PLC_RW_BX1 composite, so BX1_RES instantiates only
+        // BX1_IO. This relies on a SYMLINKMULTIVAR with an ABSOLUTE cross-instance NAME resolving from
+        // inside a composite type; set false to restore the external bridge in one rebuild.
         public bool Bx1BridgeInsideComposite { get; set; } = true;
 
         // SAFETY: on start forces CoverPNP_Hr HOME (ToWork=0,ToHome=1) until the at-home sensor is TRUE so cover_hr can't auto-energise Work (swivel-collision). Run-time only: does NOT act on EAE Clean/STOP/fault. Homing while STOPPED needs the TM3BC coupler ToHome fallback (word 16#0002) set on its own web server (192.168.1.210).
@@ -104,22 +99,15 @@ namespace CodeGen.Configuration
         // CmdTargetName must be STRING[150] so long names (coverpnp_gripper) do not overflow.
         public bool UseRecipeStruct { get; set; } = true;
 
-        // Every MQTT setting is READ-ONLY here and answers from Config/telemetry.yml, which is their one
-        // owner. They stay on MapperConfig because the prebuilt VueOne runner links these properties, but
-        // having no setter is what stops a stale mapper_config.json shadowing the broker or client identity
-        // -- the failure mode where a YAML edit appeared to do nothing.
-        // Scheme note: mqtt:// vs mqtts:// is derived from SecureTls, never spelled in the URL. EAE 24.1
-        // MQTT_CONNECTION is secure-by-default: plain mqtt:// needs the device "Insecure Application"
-        // override (else RC101); mqtts:// needs a TLS broker with a certfile (else RC100).
+        // Every MQTT setting is READ-ONLY here and owned by Config/telemetry.yml. They stay on MapperConfig
+        // because the prebuilt VueOne runner links them, but having no setter is what stops a stale
+        // mapper_config.json shadowing the broker or client identity. mqtt:// vs mqtts:// is derived from
+        // SecureTls, never spelled in the URL; EAE 24.1 MQTT_CONNECTION is secure-by-default.
         public bool MqttPublishEnabled => TelemetrySettings.Current.PublishEnabled;
         public string MqttBrokerUrl => TelemetrySettings.Current.BrokerUrl;
         public bool MqttSecureTls => TelemetrySettings.Current.SecureTls;
         public string MqttCaCert => TelemetrySettings.Current.CaCert;
         public int MqttValidateCert => TelemetrySettings.Current.ValidateCert;
-        public string MqttClientId => TelemetrySettings.Current.ClientBx1;
-        public string MqttClientM262 => TelemetrySettings.Current.ClientM262;
-        public string MqttClientRevPi => TelemetrySettings.Current.ClientRevPi;
-        public string MqttClientM580 => TelemetrySettings.Current.ClientM580;
         public string MqttConnectionName => TelemetrySettings.Current.ConnectionName;
         public bool UseTelemetryCat => TelemetrySettings.Current.UseTelemetryCat;
         public int MqttQoS => TelemetrySettings.Current.Qos;
@@ -132,21 +120,17 @@ namespace CodeGen.Configuration
         public string ActiveSysresPath =>
             !string.IsNullOrEmpty(SysresPath2) ? SysresPath2 : SysresPath;
 
-        // A generation run needs to settle a few values (UseRecipeStruct) without writing back into the
-        // caller's instance. MapperUI holds one cached config for the life of the process, so mutating it
-        // in place made each run start from the last run's leftovers.
+        // A run settles a few values without writing back into the caller's instance: MapperUI holds one
+        // cached config for the life of the process, so mutating it leaks into the next run.
         public MapperConfig Clone() =>
             JsonSerializer.Deserialize<MapperConfig>(JsonSerializer.Serialize(this))
                 ?? throw new InvalidOperationException("MapperConfig could not be cloned.");
 
-        // An explicit configuration root, when the host knows where its configuration lives. Set this and
-        // nothing else is consulted.
+        // An explicit configuration root: set this and nothing else is consulted.
         public static string? ConfigurationRoot { get; set; }
 
-        // Where an authored mapper_config.json may legitimately sit, most specific first. The process
-        // WORKING DIRECTORY is included only because the prebuilt VueOne runner sets it before calling in
-        // and cannot be changed; it is never consulted alone, and a disagreement between candidates is
-        // fatal rather than resolved by order.
+        // Where an authored mapper_config.json may sit, most specific first. The working directory is
+        // included only because the prebuilt VueOne runner sets it; a disagreement is fatal, not ordered.
         private static IEnumerable<string> CandidateRoots()
         {
             if (!string.IsNullOrWhiteSpace(ConfigurationRoot)) { yield return ConfigurationRoot!; yield break; }
@@ -175,8 +159,7 @@ namespace CodeGen.Configuration
                     "means the build did not run or the deployment is incomplete. Generation stops rather " +
                     "than inventing defaults, because the defaults point at the live Demonstrator tree.");
 
-            // Two authored copies that disagree is the ambiguity this resolution exists to remove: the
-            // effective configuration would then depend on where the process happened to be launched.
+            // Two copies that disagree would make the effective config depend on the launch directory.
             var distinct = found.Select(f => Normalise(f.Json)).Distinct(StringComparer.Ordinal).Count();
             if (distinct > 1)
                 throw new InvalidOperationException(
@@ -196,28 +179,6 @@ namespace CodeGen.Configuration
             return string.Join("", doc.RootElement.EnumerateObject()
                 .Select(p => p.Name + "=" + p.Value.ToString())
                 .OrderBy(x => x, StringComparer.Ordinal));
-        }
-
-        private static MapperConfig CreateDefault() => new()
-        {
-            MappingRulesPath = @"Input\VueOne_IEC61499_Mapping.xlsx",
-            TemplateLibraryPath = @"C:\VueOneMapper\Template Library",
-            SyslayPath = @"C:\Station1\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000001\00000000-0000-0000-0000-000000000000.syslay",
-            SysresPath = @"C:\Station1\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000002\00000000-0000-0000-0000-000000000000.sysres",
-            SyslayPath2 = @"C:\Demonstrator\Demonstrator\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000001\00000000-0000-0000-0000-000000000000.syslay",
-            SysresPath2 = @"C:\Demonstrator\Demonstrator\IEC61499\System\00000000-0000-0000-0000-000000000000\00000000-0000-0000-0000-000000000002\00000000-0000-0000-0000-000000000000.sysres",
-            IoBindingsPath = @"Input\SMC_Rig_IO_Bindings.xlsx",
-            IoFolderPath = @"C:\VueOneMapper\IO",
-            M262HcfTemplatePath = @"C:\VueOneMapper\IO\M262IO.hcf",
-            M580HcfTemplatePath = @"C:\VueOneMapper\IO\M580IO.hcf",
-            BX1HcfTemplatePath = @"C:\VueOneMapper\IO\BX1IO.ethernetip.hcf",
-        };
-
-        private static void Save(string path, MapperConfig config)
-        {
-            var json = JsonSerializer.Serialize(config,
-                new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(path, json);
         }
     }
 }
