@@ -73,8 +73,8 @@ namespace CodeGen.Hmi
             foreach (var c in s.Captions)
             {
                 b.Append($"\t\t\t// \r\n\t\t\t// {c.Name}\r\n\t\t\t// \r\n");
-                var col = c.Detail ? st.DetailColor : c.Emphasis ? st.EmphasisColor : st.CaptionColor;
-                var font = c.Detail ? st.DetailFont : st.CaptionFont;
+                var col = c.Emphasis ? st.EmphasisColor : st.CaptionColor;
+                var font = st.CaptionFont;
                 b.Append($"\t\t\tthis.{c.Name}.Color = new NxtControl.Drawing.Color(((byte)({col.R})), ((byte)({col.G})), ((byte)({col.B})));\r\n");
                 b.Append($"\t\t\tthis.{c.Name}.Font = {Font(font)};\r\n");
                 b.Append($"\t\t\tthis.{c.Name}.Location = new NxtControl.Drawing.PointF({c.X}D, {c.Y}D);\r\n");
