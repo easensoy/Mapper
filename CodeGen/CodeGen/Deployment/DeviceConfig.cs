@@ -5,13 +5,15 @@
         public DeviceNet M262 { get; set; } = new();
         public DeviceNet M580 { get; set; } = new();
         public DeviceNet Bx1 { get; set; } = new();
-        // TargetIp = Soft dPAC CONTAINER (macvlan child, runtime + EAE deploy target).
-        // HostIp   = RevPi Linux/Docker HOST NIC (Soft dPAC Manager on 8080). Must differ from TargetIp.
+        // TargetIp = Soft dPAC container (EAE deploy target); HostIp = RevPi host NIC. Must differ.
         public DeviceNet RevPi { get; set; } = new();
         public DeviceNet DefaultNetwork { get; set; } = new();
 
         // The BX1 coupler word, as the rig wired it. See Config/device.yml.
         public Bx1IoProfile Bx1Io { get; set; } = new();
+
+        // EAE resource and device identity per target. Facts only; backend behaviour stays in C#.
+        public System.Collections.Generic.List<TargetIdentity> Targets { get; set; } = new();
 
         private static readonly YamlConfigFile<DeviceConfig> _file = new("Config", "device.yml");
 
@@ -22,8 +24,7 @@
     {
         public string TargetIp { get; set; } = string.Empty;
 
-        // Components this target must host whenever it hosts anything, because its own I/O hardware
-        // is the only thing that can read them.
+        // Components only this target's own I/O hardware can read, so it must host them.
         public System.Collections.Generic.List<string> AlwaysHosts { get; set; } = new();
         public string HostIp { get; set; } = string.Empty;
         public string CouplerIp { get; set; } = string.Empty;
@@ -33,14 +34,12 @@
     }
 
 
-    // One signal on the coupler word: the name the broker composite exposes and the bit it occupies.
     public sealed class Bx1Signal
     {
         public string Signal { get; set; } = string.Empty;
         public int Bit { get; set; }
     }
 
-    // One cover actuator's physical I/O.
     public sealed class Bx1Cover
     {
         public string Component { get; set; } = string.Empty;
@@ -49,6 +48,24 @@
         public Bx1Signal? SensorFromWork { get; set; }
         public Bx1Signal? CoilToWork { get; set; }
         public Bx1Signal? CoilToHome { get; set; }
+    }
+
+    public sealed class TargetIdentity
+    {
+        public CodeGen.Translation.PlcAssignment Plc { get; set; }
+        public string ResourceName { get; set; } = string.Empty;
+        public string DeviceType { get; set; } = string.Empty;
+        // Null where the Type already identifies the device on its own.
+        public string? DeviceName { get; set; }
+        public string HcfTemplate { get; set; } = string.Empty;
+
+        // Each flag selects a path in a device emitter, so declare a target only once its emitter
+        // exists; see TargetRegistry.
+        public bool HostsFeedStation { get; set; }
+        public bool DeviceLocalCanvas { get; set; }
+        public bool ReceivesRelocatedComponents { get; set; }
+        public bool OpensCoverSeam { get; set; }
+        public bool CarriesDetouredChain { get; set; }
     }
 
     public sealed class Bx1IoProfile
