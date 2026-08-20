@@ -112,54 +112,87 @@
     <value>2.0</value>
   </resheader>
   <resheader name="reader">
-    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
   <resheader name="writer">
-    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <metadata name="System_Cycle_Type.Name" xml:space="preserve">
-    <value>System_Cycle_Type</value>
-  </metadata>
-  <metadata name="System_Mode.Name" xml:space="preserve">
-    <value>System_Mode</value>
-  </metadata>
-  <metadata name="$this.LayerVisible" xml:space="preserve">
-    <value>1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1</value>
-  </metadata>
-  <metadata name="drawnTextBox1.Name" xml:space="preserve">
-    <value>drawnTextBox1</value>
-  </metadata>
-  <metadata name="$this.GridSize" type="System.Drawing.Size, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
-    <value>2, 2</value>
-  </metadata>
-  <metadata name="$this.SnapToGrid" type="System.Boolean, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
-    <value>True</value>
-  </metadata>
-  <metadata name="$this.LayerActive" type="System.Int32, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
-    <value>0</value>
-  </metadata>
   <metadata name="rectangle1.Name" xml:space="preserve">
     <value>rectangle1</value>
   </metadata>
-  <metadata name="freeText4.Name" xml:space="preserve">
-    <value>freeText4</value>
-  </metadata>
-  <metadata name="freeText3.Name" xml:space="preserve">
-    <value>freeText3</value>
-  </metadata>
-  <metadata name="$this.LayerSelectable" xml:space="preserve">
-    <value>1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1</value>
-  </metadata>
-  <metadata name="Area_Name_1.Name" xml:space="preserve">
-    <value>Area_Name_1</value>
+  <metadata name="Fault_Reset.Name" xml:space="preserve">
+    <value>Fault_Reset</value>
   </metadata>
   <metadata name="LL_Fault_Status.Name" xml:space="preserve">
     <value>LL_Fault_Status</value>
   </metadata>
-  <metadata name="$this.Size" type="System.Drawing.Size, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
+  <metadata name="drawnTextBox1.Name" xml:space="preserve">
+    <value>drawnTextBox1</value>
+  </metadata>
+  <metadata name="freeText3.Name" xml:space="preserve">
+    <value>freeText3</value>
+  </metadata>
+  <metadata name="freeText4.Name" xml:space="preserve">
+    <value>freeText4</value>
+  </metadata>
+  <metadata name="System_Mode.Name" xml:space="preserve">
+    <value>System_Mode</value>
+  </metadata>
+  <metadata name="System_Cycle_Type.Name" xml:space="preserve">
+    <value>System_Cycle_Type</value>
+  </metadata>
+  <metadata name="Area_Name_1.Name" xml:space="preserve">
+    <value>Area_Name_1</value>
+  </metadata>
+  <metadata name="AutoButton.Name" xml:space="preserve">
+    <value>AutoButton</value>
+  </metadata>
+  <metadata name="ManualButton.Name" xml:space="preserve">
+    <value>ManualButton</value>
+  </metadata>
+  <metadata name="SetupButton.Name" xml:space="preserve">
+    <value>SetupButton</value>
+  </metadata>
+  <metadata name="InitialPositionButton.Name" xml:space="preserve">
+    <value>InitialPositionButton</value>
+  </metadata>
+  <metadata name="StopButton.Name" xml:space="preserve">
+    <value>StopButton</value>
+  </metadata>
+  <metadata name="RunContiuouslyButton.Name" xml:space="preserve">
+    <value>RunContiuouslyButton</value>
+  </metadata>
+  <metadata name="StopAtEndOfCycleButton.Name" xml:space="preserve">
+    <value>StopAtEndOfCycleButton</value>
+  </metadata>
+  <metadata name="SingleCycleRunButton.Name" xml:space="preserve">
+    <value>SingleCycleRunButton</value>
+  </metadata>
+  <metadata name="OpenManualScreenButton.Name" xml:space="preserve">
+    <value>OpenManualScreenButton</value>
+  </metadata>
+  <metadata name="OpenSetupScreenButton.Name" xml:space="preserve">
+    <value>OpenSetupScreenButton</value>
+  </metadata>
+  <metadata name="$this.Size" type="System.Drawing.Size, System.Drawing, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
     <value>1000, 190</value>
   </metadata>
-  <metadata name="$this.ShowGrid" type="System.Boolean, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
+  <metadata name="$this.ShowGrid" type="System.Boolean, mscorlib, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
     <value>True</value>
+  </metadata>
+  <metadata name="$this.SnapToGrid" type="System.Boolean, mscorlib, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
+    <value>True</value>
+  </metadata>
+  <metadata name="$this.GridSize" type="System.Drawing.Size, System.Drawing, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
+    <value>2, 2</value>
+  </metadata>
+  <metadata name="$this.LayerActive" type="System.Int32, mscorlib, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
+    <value>0</value>
+  </metadata>
+  <metadata name="$this.LayerVisible" xml:space="preserve">
+    <value>1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1</value>
+  </metadata>
+  <metadata name="$this.LayerSelectable" xml:space="preserve">
+    <value>1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1</value>
   </metadata>
 </root>
