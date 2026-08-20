@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
+using System.IO;
 using System.Xml.Linq;
 
 namespace CodeGen.Devices.Core
@@ -51,15 +51,12 @@ namespace CodeGen.Devices.Core
                 new XElement(ns + "Plugin", "OPCUAConfigurator"),
                 new XElement(ns + "IEC61499Type", "CAT_OPCUA"));
 
-            // Save only on a real change (an unconditional save bumps the mtime -> spurious EAE
-            // "Reload Solution" prompt).
+            // Save only on a real change: an unconditional save bumps the mtime and prompts EAE to reload.
             if (a > 0) Save(xml, dfbprojPath);
             return a;
         }
 
-        // Registers a hardware-device CAT type folder (e.g. the EtherNet/IP coupler the BX1 .hcf scanner
-        // instantiates). Unlike RegisterCat it does NOT register the actuator-CAT siblings (offline/
-        // opcua/HMI xml) — a hardware type has none, and registering missing files = Missing Project Files.
+        // Registers a hardware-device CAT type folder. Unlike RegisterCat it registers no actuator-CAT siblings: a hardware type has none.
         public static int RegisterHardwareDeviceCat(string dfbprojPath, string typeName)
         {
             var hmi = typeName + "_HMI";
@@ -89,7 +86,6 @@ namespace CodeGen.Devices.Core
             return a;
         }
 
-        // Removes the entries RegisterHardwareDeviceCat added for the named type. Idempotent.
         public static int UnregisterHardwareDeviceCat(string dfbprojPath, string typeName)
         {
             if (!File.Exists(dfbprojPath)) return 0;
@@ -140,8 +136,7 @@ namespace CodeGen.Devices.Core
             return a;
         }
 
-        // Register an SE library <Reference>, else FBs of those types fail ERR_NO_SUCH_TYPE. Idempotent
-        // (an existing reference is left alone, preserving a hand-pinned Version).
+        // Register an SE library <Reference>, else FBs of those types fail ERR_NO_SUCH_TYPE. An existing reference keeps its pinned Version.
         public static int RegisterReference(string dfbprojPath, string libraryName, string version)
         {
             var xml = XDocument.Load(dfbprojPath);
@@ -162,8 +157,7 @@ namespace CodeGen.Devices.Core
             return 1;
         }
 
-        // Registers a .sysdev (<Compile SystemDevice>) plus its sibling .hcf/Properties.xml (<None
-        // SystemDevice>, DependentUpon the .sysdev). Idempotent; de-duplicates repeated children.
+        // Registers a .sysdev (<Compile SystemDevice>) plus its sibling .hcf/Properties.xml, DependentUpon it.
         public static int RegisterSystemDevice(string dfbprojPath, string eaeProjectDir, string sysdevPath)
         {
             if (!File.Exists(dfbprojPath)) return 0;
@@ -181,21 +175,16 @@ namespace CodeGen.Devices.Core
             var (cg, ng) = Groups(xml, ns);
             int added = 0;
 
-            // .sysdev <Compile SystemDevice> DependentUpon the parent .system — TopologyManager binds
-            // Logical Device -> System through it, else the sysdev stays orphaned and Deploy &
-            // Diagnostic filters it out.
+            // The .sysdev must be DependentUpon the parent .system: TopologyManager binds Logical Device ->
+            // System through it, else Deploy & Diagnostic filters the sysdev out as orphaned.
             const string SystemFileName = "00000000-0000-0000-0000-000000000000.system";
             Add(cg, ns, "Compile", sysdevRel, ref added,
                 new XElement(ns + "DependentUpon", SystemFileName),
                 new XElement(ns + "IEC61499Type", "SystemDevice"));
 
-            // Siblings go under <None SystemDevice>, EXCEPT the Soft_dPACs, whose .sysres must be
-            // <Compile SystemResource> or EAE compiles no HWConfig for them. M262/M580 keep the legacy
-            // <None> (they are rig-proven that way).
-            //   ...0004 = BX1  — EtherNet/IP scanner; without this the Deploy export emits an EMPTY scanner.
-            //   ...0005 = RevPi — Modbus MASTER (RevPiIO.modbus.hcf). Same class of hardware config, so the
-            //             same rule applies: registered as <None> its Modbus master is not compiled and the
-            //             RevPi deploys with no I/O — silently, which is the worst failure mode.
+            // Siblings go under <None SystemDevice>, EXCEPT the Soft_dPACs (…0004 BX1, …0005 RevPi), whose
+            // .sysres must be <Compile SystemResource> or EAE compiles no HWConfig for them — the BX1 scanner
+            // exports empty and the RevPi deploys with no I/O. M262/M580 keep the rig-proven legacy <None>.
             bool isBx1Resource = sysdevFileName.StartsWith(
                 "00000000-0000-0000-0000-000000000004", StringComparison.OrdinalIgnoreCase);
             bool isRevPiResource = sysdevFileName.StartsWith(
@@ -235,8 +224,7 @@ namespace CodeGen.Devices.Core
             int removed = DeduplicateChildren(ng, ns, "None", sysdevFileName)
                         + DeduplicateChildren(cg, ns, "Compile", sysdevFileName);
 
-            // Backfill a missing DependentUpon on an existing Compile entry (else the device disappears
-            // from EAE's Deploy & Diagnostic tab).
+            // Backfill a missing DependentUpon on an existing Compile entry, else the device disappears from Deploy & Diagnostic.
             int backfilled = 0;
             foreach (var compile in cg.Elements(ns + "Compile"))
             {
@@ -248,13 +236,11 @@ namespace CodeGen.Devices.Core
                 backfilled++;
             }
 
-            // Save only on a real change (else a spurious EAE "Reload Solution" prompt).
             if (added > 0 || removed > 0 || backfilled > 0) Save(xml, dfbprojPath);
             return added;
         }
 
-        // Idempotently ensures the four APPLICATION dfbproj entries exist: .sysapp (SystemApplication)
-        // + .syslay (SystemLayer) under <Compile>, aspmap/opcua companions under <Content>.
+        // Ensures the four APPLICATION entries exist: .sysapp + .syslay under <Compile>, aspmap/opcua under <Content>.
         public static int RegisterApplicationShell(string dfbprojPath)
         {
             if (!File.Exists(dfbprojPath)) return 0;
@@ -280,7 +266,6 @@ namespace CodeGen.Devices.Core
                 new XElement(ns + "DependentUpon", AppId + ".sysapp"),
                 new XElement(ns + "IEC61499Type", "SystemLayer"));
 
-            // aspmap/opcua go under <Content>.
             var content = xml.Descendants(ns + "ItemGroup")
                 .FirstOrDefault(g => g.Elements(ns + "Content").Any()) ?? AddGroup(xml, ns);
 
@@ -298,8 +283,7 @@ namespace CodeGen.Devices.Core
             return added;
         }
 
-        // Strips every Content/None/Compile entry whose Include references a sysres-stem directory (or
-        // .sysres file) absent on disk, so EAE's Solution Integrity doesn't flag them as missing.
+        // Strips entries referencing a sysres-stem directory or .sysres file absent on disk, so Solution Integrity stays clean.
         public static int StripStaleSysresStemEntries(string dfbprojPath, string eaeProjectDir)
         {
             if (!File.Exists(dfbprojPath) || !Directory.Exists(eaeProjectDir)) return 0;
@@ -353,9 +337,7 @@ namespace CodeGen.Devices.Core
             return removed;
         }
 
-        // Removes dfbproj entries pointing at an EAE-owned per-resource compile artifact (opcua/offline/
-        // opcuaclient/symlink.xml) whose file is absent — EAE regenerates them on Build, so a dangling
-        // ref = Missing Project File. Never touches .sysdev/.sysres/.hcf/.Properties.xml.
+        // Removes entries pointing at an absent EAE-owned compile artifact (EAE regenerates them on Build). Never touches .sysdev/.sysres/.hcf.
         public static int StripDanglingResourceArtifactEntries(string eaeProjectDir)
         {
             if (string.IsNullOrEmpty(eaeProjectDir)) return 0;
@@ -421,8 +403,7 @@ namespace CodeGen.Devices.Core
             return children.Count - 1;
         }
 
-        // Safety-net pass: registers any .dt/.adp/.fbt in the IEC61499 folder not yet in the project, so
-        // an external file drop is still picked up by the compiler.
+        // Safety net: registers any .dt/.adp/.fbt in IEC61499 not yet in the project, so an external file drop still compiles.
         public static int SweepIec61499Folder(string dfbprojPath, string iec61499Dir)
         {
             if (!File.Exists(dfbprojPath) || !Directory.Exists(iec61499Dir)) return 0;
@@ -448,8 +429,7 @@ namespace CodeGen.Devices.Core
                 added += RegisterBasicFb(dfbprojPath, name, isComposite ? "Composite" : "Basic");
             }
 
-            // Register flat sibling files at IEC61499 root as <None> — a Composite FB fails to resolve
-            // its child FB type without the .composite.offline.xml registered.
+            // A Composite FB fails to resolve its child FB type unless its .composite.offline.xml is registered.
             string[] siblingPatterns = {
                 "*.composite.offline.xml",
                 "*.doc.xml",
@@ -478,9 +458,7 @@ namespace CodeGen.Devices.Core
             return (cg, ng);
         }
 
-        // Groups() creates a Compile and a None group up front, so a pass that registers nothing (or a
-        // strip that emptied one) leaves an empty ItemGroup behind. MSBuild ignores them, but they
-        // accumulate on every generation, so the project file never converges. Drop them on the way out.
+        // Drop any ItemGroup left empty: MSBuild ignores them but they accumulate every generation.
         static void Save(XDocument xml, string dfbprojPath)
         {
             XNamespace ns = xml.Root!.Name.Namespace;
