@@ -1,12 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Xml.Linq;
 
 namespace CodeGen.Hmi
 {
-    // Which instances a mode broadcast can actually reach, derived from the generated syslay's
-    // adapter graph.
+    // Which instances a mode broadcast can actually reach, read off the emitted adapter graph.
     //
     // This is never assumed. The CaS chain is emitted per model - a station whose AreaAdptrIN has no
     // source is simply not on the chain, and every actuator downstream of it keeps whatever mode its
@@ -16,15 +14,13 @@ namespace CodeGen.Hmi
     {
         private readonly HashSet<string> _reached;
         private readonly IReadOnlyDictionary<string, List<string>> _edges;
-        private readonly IReadOnlyList<string> _sources;
         private readonly IReadOnlyDictionary<string, string> _drives;
 
         private HmiModeReach(HashSet<string> reached, IReadOnlyDictionary<string, List<string>> edges,
-                             IReadOnlyList<string> sources, IReadOnlyDictionary<string, string> drives)
+                             IReadOnlyDictionary<string, string> drives)
         {
             _reached = reached;
             _edges = edges;
-            _sources = sources;
             _drives = drives;
         }
 
@@ -43,47 +39,44 @@ namespace CodeGen.Hmi
 
         internal bool Reaches(string instanceName) => _reached.Contains(instanceName);
 
-        // The chain heads - an instance an HMI faceplate feeds directly. Placing that faceplate is
-        // what makes the chain operable; the wiring alone only makes it possible.
-        internal IReadOnlyList<string> Sources => _sources;
-
         internal IReadOnlyList<string> Unreached(IEnumerable<string> candidates) =>
             candidates.Where(c => !_reached.Contains(c)).OrderBy(c => c, StringComparer.Ordinal).ToList();
 
-        internal static HmiModeReach FromSyslay(string syslayPath)
+        // `canDrive` decides whether a faceplate FB is a LIVE mode source. A station whose HMI
+        // adapter is wired but whose placed symbol cannot raise the mode event is not a source: the
+        // adapter exists, the operator has no way to use it, and everything downstream keeps the
+        // mode its CAT initialises to. Counting it would report Setup as available on actuators that
+        // can never leave Automatic.
+        internal static HmiModeReach From(
+            HmiSyslay syslay, Func<string, bool> canDrive, IReadOnlyList<string> chainPorts)
         {
+            // Only the CaS chain carries the mode. The component report ring is an adapter chain as
+            // well, and following it would walk from one station's actuators, round the ring and into
+            // another controller's - reporting Setup as available on components no mode can reach.
+            bool OnChain(SyslayEdge e) =>
+                chainPorts.Count == 0 ||
+                (chainPorts.Any(x => e.SourcePort.StartsWith(x, StringComparison.Ordinal)) &&
+                 chainPorts.Any(x => e.TargetPort.StartsWith(x, StringComparison.Ordinal)));
+
             var edges = new Dictionary<string, List<string>>(StringComparer.Ordinal);
             var sources = new List<string>();
             var drives = new Dictionary<string, string>(StringComparer.Ordinal);
 
-            XDocument doc;
-            try { doc = XDocument.Load(syslayPath); }
-            catch { return new HmiModeReach(new HashSet<string>(StringComparer.Ordinal), edges, sources, drives); }
-
-            var adapters = doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "AdapterConnections");
-            if (adapters == null)
-                return new HmiModeReach(new HashSet<string>(StringComparer.Ordinal), edges, sources, drives);
-
-            foreach (var c in adapters.Elements().Where(e => e.Name.LocalName == "Connection"))
+            foreach (var e in syslay.Adapters)
             {
-                var src = (string?)c.Attribute("Source");
-                var dst = (string?)c.Attribute("Destination");
-                if (string.IsNullOrEmpty(src) || string.IsNullOrEmpty(dst)) continue;
-
-                var (sFb, sPort) = Split(src!);
-                var (dFb, dPort) = Split(dst!);
-                if (sFb.Length == 0 || dFb.Length == 0) continue;
+                if (!OnChain(e)) continue;
 
                 // A faceplate feeding a station/area core is where an operator mode selection enters.
-                if (dPort.IndexOf("HMIAdptrIN", StringComparison.OrdinalIgnoreCase) >= 0)
+                if (e.TargetPort.IndexOf("HMIAdptrIN", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
-                    if (!sources.Contains(dFb, StringComparer.Ordinal)) sources.Add(dFb);
-                    drives[sFb] = dFb;   // remember which core this faceplate drives
+                    drives[e.SourceFb] = e.TargetFb;   // remember which core this faceplate drives
+                    if (canDrive(e.SourceFb) && !sources.Contains(e.TargetFb, StringComparer.Ordinal))
+                        sources.Add(e.TargetFb);
                     continue;   // the faceplate itself is not a plant node
                 }
 
-                if (!edges.TryGetValue(sFb, out var list)) edges[sFb] = list = new List<string>();
-                if (!list.Contains(dFb, StringComparer.Ordinal)) list.Add(dFb);
+                if (!edges.TryGetValue(e.SourceFb, out var list)) edges[e.SourceFb] = list = new List<string>();
+                if (!list.Contains(e.TargetFb, StringComparer.Ordinal)) list.Add(e.TargetFb);
             }
 
             var reached = new HashSet<string>(StringComparer.Ordinal);
@@ -97,14 +90,7 @@ namespace CodeGen.Hmi
                     if (reached.Add(d)) queue.Enqueue(d);
             }
 
-            sources.Sort(StringComparer.Ordinal);
-            return new HmiModeReach(reached, edges, sources, drives);
-        }
-
-        private static (string Fb, string Port) Split(string endpoint)
-        {
-            var dot = endpoint.IndexOf('.');
-            return dot <= 0 ? (endpoint, string.Empty) : (endpoint[..dot], endpoint[(dot + 1)..]);
+            return new HmiModeReach(reached, edges, drives);
         }
     }
 }
