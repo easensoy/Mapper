@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
@@ -14,10 +14,9 @@ namespace CodeGen.Services
         internal static string Load(MapperConfig? cfg, string relativePath,
             IReadOnlyDictionary<string, string>? tokens = null)
         {
-            var root = string.IsNullOrWhiteSpace(cfg?.TemplateLibraryPath)
-                ? @"C:\VueOneMapper\Template Library"
-                : cfg!.TemplateLibraryPath;
-            var path = Path.Combine(root, relativePath);
+            var path = Path.Combine(
+                (cfg ?? throw new ArgumentNullException(nameof(cfg))).RequireTemplateLibraryPath(),
+                relativePath);
             if (!File.Exists(path))
                 throw new FileNotFoundException($"Template Library document not found: {path}", path);
 
