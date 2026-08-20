@@ -1,3 +1,4 @@
+﻿using System.Collections.Generic;
 using CodeGen.Mapping;
 using CodeGen.Models;
 
@@ -13,13 +14,15 @@ namespace CodeGen.Translation.Interlocks
         public const int ReturnedFinished = 4;
 
         // A five-state actuator passes through ReturnedFinished only momentarily before settling to
-        // Home, so a rule written against it could never match — report the stable value instead. The
-        // centre-home swivel is excluded: its 4 is Work2, a real stop, so "block while it is at Work2"
-        // has to survive.
-        public static int Settled(VueOneComponent? source, int stateNumber) =>
+        // Home, so a rule written against it could never match — report the stable value instead. A CAT
+        // whose protocol gives that value a stop of its own is excluded: on the centre-home swivel 4 is
+        // Work2, a real place, so "block while it is at Work2" has to survive.
+        public static int Settled(VueOneComponent? source, int stateNumber,
+            IReadOnlyDictionary<string, string> catTypes) =>
             stateNumber == ReturnedFinished &&
             ComponentType.IsActuator(source) &&
-            !TemplateMap.IsBranchedSevenState(source!)
+            catTypes.TryGetValue((source!.Name ?? string.Empty).Trim(), out var cat) &&
+            TemplateManifest.ProtocolOrNull(cat)?.SettlesAt(ReturnedFinished) != true
                 ? Home
                 : stateNumber;
     }
