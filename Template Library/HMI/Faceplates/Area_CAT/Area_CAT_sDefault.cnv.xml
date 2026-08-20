@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Mapping>
   <EventInputs>
     <Event Name="MSTS">System_Mode</Event>
@@ -6,12 +6,20 @@
     <Event Name="LLFSTS">LL_Fault_Status</Event>
     <Event Name="INIT_NAME">Area_Name</Event>
   </EventInputs>
-  <EventOutputs />
+  <EventOutputs>
+    <Event Name="MCNF">Mode</Event>
+    <Event Name="CTCNF">CycleType</Event>
+    <Event Name="FRCNF">Fault_Reset</Event>
+  </EventOutputs>
   <Inputs>
     <Input Name="System_Mode" Type="INT" />
     <Input Name="System_Cycle_Type" Type="INT" />
     <Input Name="LL_Fault_Status" Type="BOOL" />
     <Input Name="Area_Name" Type="STRING" />
   </Inputs>
-  <Outputs />
+  <Outputs>
+    <Output Name="Mode" Type="INT" />
+    <Output Name="CycleType" Type="INT" />
+    <Output Name="Fault_Reset" Type="BOOL" />
+  </Outputs>
 </Mapping>
