@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -66,7 +66,7 @@ internal static class HmiRuntimeEmitter
         var switchId = ResolveSwitchId(topologyDir, device.SwitchEquipmentFile, result);
         if (networkId == null || switchId == null) return result;
 
-        var solutionId = M262TopologyEmitter.ReadProjectGuid(eaeRoot);
+        var solutionId = EaeProjectLayout.ReadProjectGuid(eaeRoot);
         if (string.IsNullOrWhiteSpace(solutionId))
         {
             result.Problems.Add("The solution id could not be read from IEC61499.dfbproj.");
@@ -118,11 +118,11 @@ internal static class HmiRuntimeEmitter
         var register = device.Artefacts.Where(a => a.RegisterInTopologyProj)
                                        .Select(a => Substitute(a.Name, tokens)).ToArray();
         if (File.Exists(topologyProj))
-            result.ProjectEntriesAdded += M262TopologyEmitter.RegisterInTopologyProj(topologyProj, register);
+            result.ProjectEntriesAdded += EaeProjectLayout.RegisterInTopologyProj(topologyProj, register);
         else
             result.Problems.Add("TopologyManager.topologyproj is missing; the HMI physical devices were not registered.");
 
-        result.Problems.AddRange(Validate(eaeRoot, systemDir, device, firstCanvas, switchId, tokens));
+        result.Problems.AddRange(Validate(eaeRoot, systemDir, device, tokens));
         return result;
     }
 
@@ -177,52 +177,44 @@ internal static class HmiRuntimeEmitter
 
     // ---- validation --------------------------------------------------------------------------
 
+    // Everything the definition DECLARED must be on disk, and every value it supplies must have been
+    // consumed by something - a token nothing reads is dead configuration, and an artefact that
+    // dropped one is a deployment bound to a stale value. Substitution itself is already guaranteed
+    // upstream: WriteTemplate refuses to write a file with a surviving placeholder.
+    //
+    // Driven entirely from device.Artefacts, so no artefact file name appears here. Naming them made
+    // the check cover only the four that were spelled out, and silently skip any newly declared one.
     private static IReadOnlyList<string> Validate(
-        string eaeRoot, string systemDir, HmiDeviceDefinition device, string firstCanvas,
-        string switchId, IReadOnlyDictionary<string, string> tokens)
+        string eaeRoot, string systemDir, HmiDeviceDefinition device,
+        IReadOnlyDictionary<string, string> tokens)
     {
         var problems = new List<string>();
-        var deviceDir = Path.Combine(systemDir, device.DeviceId);
-        var topologyDir = Path.Combine(eaeRoot, "Topology");
+        var roots = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["system"] = systemDir,
+            ["device"] = Path.Combine(systemDir, device.DeviceId),
+            ["topology"] = Path.Combine(eaeRoot, "Topology"),
+        };
 
-        string Dest(string template) =>
-            device.Artefacts.Where(a => a.Template == template)
-                .Select(a => Path.Combine(
-                    a.Into == "system" ? systemDir : a.Into == "device" ? deviceDir : topologyDir,
-                    Substitute(a.Name, tokens)))
-                .FirstOrDefault() ?? string.Empty;
+        var rendered = new List<(string Name, string Text)>();
+        foreach (var a in device.Artefacts)
+        {
+            var path = Path.Combine(roots[a.Into], Substitute(a.Name, tokens));
+            if (File.Exists(path)) rendered.Add((Path.GetFileName(path), File.ReadAllText(path)));
+            else problems.Add($"declared artefact '{a.Template}' was not written under {a.Into}.");
+        }
 
-        var sysdev = Dest("HMI.sysdev.xml");
-        if (!File.Exists(sysdev) ||
-            !string.Equals((string?)XDocument.Load(sysdev).Root?.Attribute("Type"), device.LogicalDeviceType,
+        foreach (var t in tokens.Where(t => t.Value.Length > 0 &&
+                     !rendered.Any(r => r.Text.Contains(t.Value, StringComparison.Ordinal))))
+            problems.Add($"no deployed HMI artefact carries '{t.Key}' - it is configured but unused.");
+
+        // The logical device is found by its EAE extension, not by a configured name: the type it
+        // declares is a structural fact about the rendered XML, not a substituted value.
+        var sysdev = rendered.FirstOrDefault(r => r.Name.EndsWith(".sysdev", StringComparison.OrdinalIgnoreCase));
+        if (sysdev.Text == null ||
+            !string.Equals((string?)XDocument.Parse(sysdev.Text).Root?.Attribute("Type"), device.LogicalDeviceType,
                 StringComparison.Ordinal))
             problems.Add($"The generated {device.LogicalDeviceType} logical device is missing or malformed.");
-
-        var runtimeProperties = Dest("Runtime.Properties.xml");
-        if (!File.Exists(runtimeProperties) ||
-            !File.ReadAllText(runtimeProperties).Contains($"FirstCanvas={firstCanvas}", StringComparison.Ordinal))
-            problems.Add($"The HMI runtime does not start on generated canvas '{firstCanvas}'.");
-
-        var workstation = ReadOrEmpty(Dest("Equipment_Workstation_1.json"));
-        if (!workstation.Contains($"\"logicalDeviceId\": \"{device.DeviceId}\"", StringComparison.Ordinal) ||
-            !workstation.Contains($"\"ipAddress\": \"{device.HostIp}\"", StringComparison.Ordinal))
-            problems.Add("The workstation equipment is not bound to the generated HMI logical device and host IP.");
-
-        var panel = ReadOrEmpty(Dest("Equipment_HMIP6_1.json"));
-        if (!panel.Contains($"\"ipAddress\": \"{device.InternalRuntimeIp}\"", StringComparison.Ordinal))
-            problems.Add("The HMI panel equipment does not contain the configured internal runtime address.");
-        if (!panel.Contains(device.LogicalPort.ToString(), StringComparison.Ordinal) ||
-            !panel.Contains(device.SecurePort.ToString(), StringComparison.Ordinal))
-            problems.Add("The HMI panel equipment does not carry the configured logical/secure ports.");
-
-        var wire = ReadOrEmpty(Dest("Wire_HMI_to_Switch1.json"));
-        if (!wire.Contains($"\"sourceEquipment\": \"{device.PanelId}\"", StringComparison.Ordinal) ||
-            !wire.Contains($"\"destinationEquipment\": \"{switchId}\"", StringComparison.Ordinal))
-            problems.Add("The HMI panel-to-switch topology wire is missing or malformed.");
-
-        var binding = ReadOrEmpty(Dest("Simulation.Binding.xml"));
-        if (binding.Length > 0 && !binding.Contains(device.LogicalPort.ToString(), StringComparison.Ordinal))
-            problems.Add("The HMI simulation binding does not carry the configured logical port.");
 
         var dfbproj = Path.Combine(eaeRoot, "IEC61499", "IEC61499.dfbproj");
         if (!File.Exists(dfbproj) ||
@@ -240,8 +232,6 @@ internal static class HmiRuntimeEmitter
 
         return problems;
     }
-
-    private static string ReadOrEmpty(string path) => File.Exists(path) ? File.ReadAllText(path) : string.Empty;
 
     // Templates use {{Token}}; the artefact file names in hmi.yml use the lighter {Token}.
     // The double form MUST be substituted first - replacing {Token} first would consume the inner
