@@ -38,7 +38,7 @@ namespace MapperTests
 
         // A plan reduced to the facts a later step reads, so two plans can be compared for equality.
         private sealed record Fingerprint(
-            string Profile, bool RingsMerged, int TopCoverSlot,
+            string Profile, bool RingsMerged, string Slots,
             string Allocation, string Recipes, string ReceiverSlots);
 
         private static Fingerprint Plan(string model, DeploymentProfile profile)
@@ -59,7 +59,11 @@ namespace MapperTests
                 .OrderBy(k => k, StringComparer.Ordinal)
                 .Select(k => k + "=" + (ctx.Handoffs.ReceiverSlotOf(k)?.ToString() ?? "-")));
 
-            return new Fingerprint(profile.ToString(), ctx.RingsMerged, ctx.TopCoverSensorSlot,
+            // Every reporter's slot, not one named reporter's: a leak anywhere in the allocation shows.
+            var allSlots = string.Join(";", ctx.Slots
+                .OrderBy(kv => kv.Key, StringComparer.Ordinal)
+                .Select(kv => kv.Key + "=" + kv.Value));
+            return new Fingerprint(profile.ToString(), ctx.Rings.RingsMerged, allSlots,
                 allocation, recipes, slots);
         }
 
