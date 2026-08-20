@@ -112,87 +112,96 @@
     <value>2.0</value>
   </resheader>
   <resheader name="reader">
-    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
   <resheader name="writer">
-    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <metadata name="freeText4.Name" xml:space="preserve">
-    <value>freeText4</value>
+  <metadata name="current_state_to_process.Name" xml:space="preserve">
+    <value>current_state_to_process</value>
   </metadata>
   <metadata name="rectangle1.Name" xml:space="preserve">
     <value>rectangle1</value>
   </metadata>
-  <metadata name="component_name.Name" xml:space="preserve">
-    <value>component_name</value>
-  </metadata>
-  <metadata name="$this.GridSize" type="System.Drawing.Size, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
-    <value>8, 8</value>
-  </metadata>
-  <metadata name="current_state_to_process.Name" xml:space="preserve">
-    <value>current_state_to_process</value>
-  </metadata>
-  <metadata name="freeText5.Name" xml:space="preserve">
-    <value>freeText5</value>
-  </metadata>
-  <metadata name="$this.Size" type="System.Drawing.Size, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
-    <value>300, 244</value>
-  </metadata>
-  <metadata name="toHomePLC.Name" xml:space="preserve">
-    <value>toHomePLC</value>
-  </metadata>
-  <metadata name="HomeInterlock.Name" xml:space="preserve">
-    <value>HomeInterlock</value>
-  </metadata>
-  <metadata name="$this.LayerActive" type="System.Int32, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
-    <value>0</value>
-  </metadata>
-  <metadata name="$this.LayerSelectable" xml:space="preserve">
-    <value>1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1</value>
-  </metadata>
-  <metadata name="component_name_2.Name" xml:space="preserve">
-    <value>component_name_2</value>
-  </metadata>
-  <metadata name="Work1Interlock.Name" xml:space="preserve">
-    <value>Work1Interlock</value>
-  </metadata>
-  <metadata name="freeText6.Name" xml:space="preserve">
-    <value>freeText6</value>
-  </metadata>
-  <metadata name="atWork.Name" xml:space="preserve">
-    <value>atWork</value>
-  </metadata>
-  <metadata name="$this.SnapToGrid" type="System.Boolean, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
-    <value>True</value>
-  </metadata>
-  <metadata name="freeText2.Name" xml:space="preserve">
-    <value>freeText2</value>
-  </metadata>
-  <metadata name="freeText1.Name" xml:space="preserve">
-    <value>freeText1</value>
-  </metadata>
-  <metadata name="component_name_1.Name" xml:space="preserve">
-    <value>component_name_1</value>
-  </metadata>
-  <metadata name="$this.ShowGrid" type="System.Boolean, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
-    <value>True</value>
-  </metadata>
-  <metadata name="freeText7.Name" xml:space="preserve">
-    <value>freeText7</value>
+  <metadata name="toWorkPLC.Name" xml:space="preserve">
+    <value>toWorkPLC</value>
   </metadata>
   <metadata name="atHome.Name" xml:space="preserve">
     <value>atHome</value>
   </metadata>
+  <metadata name="atWork.Name" xml:space="preserve">
+    <value>atWork</value>
+  </metadata>
+  <metadata name="freeText1.Name" xml:space="preserve">
+    <value>freeText1</value>
+  </metadata>
+  <metadata name="freeText2.Name" xml:space="preserve">
+    <value>freeText2</value>
+  </metadata>
   <metadata name="freeText3.Name" xml:space="preserve">
     <value>freeText3</value>
+  </metadata>
+  <metadata name="toHomePLC.Name" xml:space="preserve">
+    <value>toHomePLC</value>
+  </metadata>
+  <metadata name="freeText4.Name" xml:space="preserve">
+    <value>freeText4</value>
   </metadata>
   <metadata name="fault_code.Name" xml:space="preserve">
     <value>fault_code</value>
   </metadata>
-  <metadata name="toWorkPLC.Name" xml:space="preserve">
-    <value>toWorkPLC</value>
+  <metadata name="freeText5.Name" xml:space="preserve">
+    <value>freeText5</value>
+  </metadata>
+  <metadata name="component_name.Name" xml:space="preserve">
+    <value>component_name</value>
+  </metadata>
+  <metadata name="freeText6.Name" xml:space="preserve">
+    <value>freeText6</value>
+  </metadata>
+  <metadata name="freeText7.Name" xml:space="preserve">
+    <value>freeText7</value>
+  </metadata>
+  <metadata name="Work1Interlock.Name" xml:space="preserve">
+    <value>Work1Interlock</value>
+  </metadata>
+  <metadata name="HomeInterlock.Name" xml:space="preserve">
+    <value>HomeInterlock</value>
+  </metadata>
+  <metadata name="component_name_1.Name" xml:space="preserve">
+    <value>component_name_1</value>
+  </metadata>
+  <metadata name="toHome.Name" xml:space="preserve">
+    <value>toHome</value>
+  </metadata>
+  <metadata name="toWork.Name" xml:space="preserve">
+    <value>toWork</value>
+  </metadata>
+  <metadata name="component_name_2.Name" xml:space="preserve">
+    <value>component_name_2</value>
+  </metadata>
+  <metadata name="drawnButton1.Name" xml:space="preserve">
+    <value>drawnButton1</value>
+  </metadata>
+  <metadata name="$this.Size" type="System.Drawing.Size, System.Drawing, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
+    <value>300, 244</value>
+  </metadata>
+  <metadata name="$this.ShowGrid" type="System.Boolean, mscorlib, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
+    <value>True</value>
+  </metadata>
+  <metadata name="$this.SnapToGrid" type="System.Boolean, mscorlib, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
+    <value>True</value>
+  </metadata>
+  <metadata name="$this.GridSize" type="System.Drawing.Size, System.Drawing, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
+    <value>8, 8</value>
+  </metadata>
+  <metadata name="$this.LayerActive" type="System.Int32, mscorlib, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
+    <value>0</value>
   </metadata>
   <metadata name="$this.LayerVisible" xml:space="preserve">
+    <value>1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1</value>
+  </metadata>
+  <metadata name="$this.LayerSelectable" xml:space="preserve">
     <value>1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1</value>
   </metadata>
 </root>
