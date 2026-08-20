@@ -1,6 +1,6 @@
 ﻿using System;
-using System.IO;
 using System.Linq;
+using System.IO;
 using System.Xml.Linq;
 using CodeGen.Configuration;
 
