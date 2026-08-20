@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Created by EcoStruxure Automation Expert.
  * User: Evans_A
  * Date: 7/23/2025
@@ -43,6 +43,7 @@ namespace HMI.Main.Symbols.Area_CAT
 			NxtControl.GuiFramework.PropertyDictionary propertyDictionary17 = new NxtControl.GuiFramework.PropertyDictionary();
 			NxtControl.GuiFramework.PropertyDictionary propertyDictionary11 = new NxtControl.GuiFramework.PropertyDictionary();
 			this.rectangle1 = new NxtControl.GuiFramework.Rectangle();
+			this.Fault_Reset = new System.HMI.Symbols.Base.CheckButton();
 			this.LL_Fault_Status = new System.HMI.Symbols.Base.Led<bool>();
 			this.drawnTextBox1 = new NxtControl.GuiFramework.DrawnTextBox();
 			this.freeText3 = new NxtControl.GuiFramework.FreeText();
@@ -50,12 +51,40 @@ namespace HMI.Main.Symbols.Area_CAT
 			this.System_Mode = new System.HMI.Symbols.Base.FreeText<short>();
 			this.System_Cycle_Type = new System.HMI.Symbols.Base.FreeText<short>();
 			this.Area_Name_1 = new System.HMI.Symbols.Base.Label();
+			this.AutoButton = new NxtControl.GuiFramework.DrawnButton();
+			this.ManualButton = new NxtControl.GuiFramework.DrawnButton();
+			this.SetupButton = new NxtControl.GuiFramework.DrawnButton();
+			this.InitialPositionButton = new NxtControl.GuiFramework.DrawnButton();
+			this.StopButton = new NxtControl.GuiFramework.DrawnButton();
+			this.RunContiuouslyButton = new NxtControl.GuiFramework.DrawnButton();
+			this.StopAtEndOfCycleButton = new NxtControl.GuiFramework.DrawnButton();
+			this.SingleCycleRunButton = new NxtControl.GuiFramework.DrawnButton();
+			this.OpenManualScreenButton = new NxtControl.GuiFramework.ChangeCanvasButton();
+			this.OpenSetupScreenButton = new NxtControl.GuiFramework.ChangeCanvasButton();
 			// 
 			// rectangle1
 			// 
 			this.rectangle1.Bounds = new NxtControl.Drawing.RectF(((float)(0D)), ((float)(0D)), ((float)(1000D)), ((float)(182D)));
 			this.rectangle1.Font = new NxtControl.Drawing.Font("HMI Sans Serif", 9F, System.Drawing.FontStyle.Regular);
 			this.rectangle1.Name = "rectangle1";
+			// 
+			// Fault_Reset
+			// 
+			this.Fault_Reset.BeginInit();
+			this.Fault_Reset.DesignMatrix = new NxtControl.Drawing.Matrix2D(1.8500000000000003D, 0D, 0D, 1.9333333333333333D, 632D, 48D);
+			this.Fault_Reset.FalseImage = new NxtControl.Drawing.ImageHolder();
+			this.Fault_Reset.FalseImageDisabled = new NxtControl.Drawing.ImageHolder();
+			this.Fault_Reset.FalseText = "RESET";
+			this.Fault_Reset.Font = new NxtControl.Drawing.Font("BigCanvasTopologyButtonFont");
+			this.Fault_Reset.FontScale = true;
+			this.Fault_Reset.Name = "Fault_Reset";
+			this.Fault_Reset.TagName = "Fault_Reset";
+			this.Fault_Reset.TrueImage = new NxtControl.Drawing.ImageHolder();
+			this.Fault_Reset.TrueImageDisabled = new NxtControl.Drawing.ImageHolder();
+			this.Fault_Reset.TrueText = "RESET";
+			this.Fault_Reset.Value = false;
+			this.Fault_Reset.Visible = false;
+			this.Fault_Reset.EndInit();
 			// 
 			// LL_Fault_Status
 			// 
@@ -191,21 +220,189 @@ namespace HMI.Main.Symbols.Area_CAT
 			this.Area_Name_1.TextColor = new NxtControl.Drawing.Color("MedAir");
 			this.Area_Name_1.EndInit();
 			// 
+			// AutoButton
+			// 
+			this.AutoButton.Bounds = new NxtControl.Drawing.RectF(((float)(16D)), ((float)(48D)), ((float)(148D)), ((float)(57D)));
+			this.AutoButton.Brush = new NxtControl.Drawing.Brush("ButtonBrush");
+			this.AutoButton.Font = new NxtControl.Drawing.Font("BigCanvasTopologyButtonFont");
+			this.AutoButton.FontScale = true;
+			this.AutoButton.InnerBorderColor = new NxtControl.Drawing.Color("ButtonInnerBorderColor");
+			this.AutoButton.Name = "AutoButton";
+			this.AutoButton.Pen = new NxtControl.Drawing.Pen("ButtonPen");
+			this.AutoButton.Radius = 4D;
+			this.AutoButton.Text = "AUTO";
+			this.AutoButton.TextColor = new NxtControl.Drawing.Color("ButtonTextColor");
+			this.AutoButton.TextColorMouseDown = new NxtControl.Drawing.Color("ButtonTextColorMouseDown");
+			this.AutoButton.Use3DEffect = false;
+			this.AutoButton.Click += new System.EventHandler(this.AutoButtonClick);
+			// 
+			// ManualButton
+			// 
+			this.ManualButton.Bounds = new NxtControl.Drawing.RectF(((float)(171D)), ((float)(48D)), ((float)(148D)), ((float)(57D)));
+			this.ManualButton.Brush = new NxtControl.Drawing.Brush("ButtonBrush");
+			this.ManualButton.Font = new NxtControl.Drawing.Font("BigCanvasTopologyButtonFont");
+			this.ManualButton.FontScale = true;
+			this.ManualButton.InnerBorderColor = new NxtControl.Drawing.Color("ButtonInnerBorderColor");
+			this.ManualButton.Name = "ManualButton";
+			this.ManualButton.Pen = new NxtControl.Drawing.Pen("ButtonPen");
+			this.ManualButton.Radius = 4D;
+			this.ManualButton.Text = "MANUAL";
+			this.ManualButton.TextColor = new NxtControl.Drawing.Color("ButtonTextColor");
+			this.ManualButton.TextColorMouseDown = new NxtControl.Drawing.Color("ButtonTextColorMouseDown");
+			this.ManualButton.Use3DEffect = false;
+			this.ManualButton.Click += new System.EventHandler(this.ManualButtonClick);
+			// 
+			// SetupButton
+			// 
+			this.SetupButton.Bounds = new NxtControl.Drawing.RectF(((float)(326D)), ((float)(48D)), ((float)(148D)), ((float)(57D)));
+			this.SetupButton.Brush = new NxtControl.Drawing.Brush("ButtonBrush");
+			this.SetupButton.Font = new NxtControl.Drawing.Font("BigCanvasTopologyButtonFont");
+			this.SetupButton.FontScale = true;
+			this.SetupButton.InnerBorderColor = new NxtControl.Drawing.Color("ButtonInnerBorderColor");
+			this.SetupButton.Name = "SetupButton";
+			this.SetupButton.Pen = new NxtControl.Drawing.Pen("ButtonPen");
+			this.SetupButton.Radius = 4D;
+			this.SetupButton.Text = "SETUP";
+			this.SetupButton.TextColor = new NxtControl.Drawing.Color("ButtonTextColor");
+			this.SetupButton.TextColorMouseDown = new NxtControl.Drawing.Color("ButtonTextColorMouseDown");
+			this.SetupButton.Use3DEffect = false;
+			this.SetupButton.Click += new System.EventHandler(this.SetupButtonClick);
+			// 
+			// InitialPositionButton
+			// 
+			this.InitialPositionButton.Bounds = new NxtControl.Drawing.RectF(((float)(480D)), ((float)(48D)), ((float)(148D)), ((float)(57D)));
+			this.InitialPositionButton.Brush = new NxtControl.Drawing.Brush("ButtonBrush");
+			this.InitialPositionButton.Font = new NxtControl.Drawing.Font("BigCanvasTopologyButtonFont");
+			this.InitialPositionButton.FontScale = true;
+			this.InitialPositionButton.InnerBorderColor = new NxtControl.Drawing.Color("ButtonInnerBorderColor");
+			this.InitialPositionButton.Name = "InitialPositionButton";
+			this.InitialPositionButton.Pen = new NxtControl.Drawing.Pen("ButtonPen");
+			this.InitialPositionButton.Radius = 4D;
+			this.InitialPositionButton.Text = "HOME";
+			this.InitialPositionButton.TextColor = new NxtControl.Drawing.Color("ButtonTextColor");
+			this.InitialPositionButton.TextColorMouseDown = new NxtControl.Drawing.Color("ButtonTextColorMouseDown");
+			this.InitialPositionButton.Use3DEffect = false;
+			this.InitialPositionButton.Click += new System.EventHandler(this.InitialPositionButtonClick);
+			// 
+			// StopButton
+			// 
+			this.StopButton.Bounds = new NxtControl.Drawing.RectF(((float)(16D)), ((float)(114D)), ((float)(148D)), ((float)(57D)));
+			this.StopButton.Brush = new NxtControl.Drawing.Brush("ButtonBrush");
+			this.StopButton.Font = new NxtControl.Drawing.Font("BigCanvasTopologyButtonFont");
+			this.StopButton.FontScale = true;
+			this.StopButton.InnerBorderColor = new NxtControl.Drawing.Color("ButtonInnerBorderColor");
+			this.StopButton.Name = "StopButton";
+			this.StopButton.Pen = new NxtControl.Drawing.Pen("ButtonPen");
+			this.StopButton.Radius = 4D;
+			this.StopButton.Text = "STOP";
+			this.StopButton.TextColor = new NxtControl.Drawing.Color("ButtonTextColor");
+			this.StopButton.TextColorMouseDown = new NxtControl.Drawing.Color("ButtonTextColorMouseDown");
+			this.StopButton.Use3DEffect = false;
+			this.StopButton.Click += new System.EventHandler(this.StopButtonClick);
+			// 
+			// RunContiuouslyButton
+			// 
+			this.RunContiuouslyButton.Bounds = new NxtControl.Drawing.RectF(((float)(170D)), ((float)(114D)), ((float)(148D)), ((float)(57D)));
+			this.RunContiuouslyButton.Brush = new NxtControl.Drawing.Brush("ButtonBrush");
+			this.RunContiuouslyButton.Font = new NxtControl.Drawing.Font("BigCanvasTopologyButtonFont");
+			this.RunContiuouslyButton.FontScale = true;
+			this.RunContiuouslyButton.InnerBorderColor = new NxtControl.Drawing.Color("ButtonInnerBorderColor");
+			this.RunContiuouslyButton.Name = "RunContiuouslyButton";
+			this.RunContiuouslyButton.Pen = new NxtControl.Drawing.Pen("ButtonPen");
+			this.RunContiuouslyButton.Radius = 4D;
+			this.RunContiuouslyButton.Text = "RUN";
+			this.RunContiuouslyButton.TextColor = new NxtControl.Drawing.Color("ButtonTextColor");
+			this.RunContiuouslyButton.TextColorMouseDown = new NxtControl.Drawing.Color("ButtonTextColorMouseDown");
+			this.RunContiuouslyButton.Use3DEffect = false;
+			this.RunContiuouslyButton.Click += new System.EventHandler(this.RunContiuouslyButtonClick);
+			// 
+			// StopAtEndOfCycleButton
+			// 
+			this.StopAtEndOfCycleButton.Bounds = new NxtControl.Drawing.RectF(((float)(324D)), ((float)(114D)), ((float)(148D)), ((float)(57D)));
+			this.StopAtEndOfCycleButton.Brush = new NxtControl.Drawing.Brush("ButtonBrush");
+			this.StopAtEndOfCycleButton.Font = new NxtControl.Drawing.Font("BigCanvasTopologyButtonFont");
+			this.StopAtEndOfCycleButton.FontScale = true;
+			this.StopAtEndOfCycleButton.InnerBorderColor = new NxtControl.Drawing.Color("ButtonInnerBorderColor");
+			this.StopAtEndOfCycleButton.Name = "StopAtEndOfCycleButton";
+			this.StopAtEndOfCycleButton.Pen = new NxtControl.Drawing.Pen("ButtonPen");
+			this.StopAtEndOfCycleButton.Radius = 4D;
+			this.StopAtEndOfCycleButton.Text = "STOP AT END";
+			this.StopAtEndOfCycleButton.TextColor = new NxtControl.Drawing.Color("ButtonTextColor");
+			this.StopAtEndOfCycleButton.TextColorMouseDown = new NxtControl.Drawing.Color("ButtonTextColorMouseDown");
+			this.StopAtEndOfCycleButton.Use3DEffect = false;
+			this.StopAtEndOfCycleButton.Click += new System.EventHandler(this.StopAtEndOfCycleButtonClick);
+			// 
+			// SingleCycleRunButton
+			// 
+			this.SingleCycleRunButton.Bounds = new NxtControl.Drawing.RectF(((float)(478D)), ((float)(114D)), ((float)(148D)), ((float)(57D)));
+			this.SingleCycleRunButton.Brush = new NxtControl.Drawing.Brush("ButtonBrush");
+			this.SingleCycleRunButton.Font = new NxtControl.Drawing.Font("BigCanvasTopologyButtonFont");
+			this.SingleCycleRunButton.FontScale = true;
+			this.SingleCycleRunButton.InnerBorderColor = new NxtControl.Drawing.Color("ButtonInnerBorderColor");
+			this.SingleCycleRunButton.Name = "SingleCycleRunButton";
+			this.SingleCycleRunButton.Pen = new NxtControl.Drawing.Pen("ButtonPen");
+			this.SingleCycleRunButton.Radius = 4D;
+			this.SingleCycleRunButton.Text = "SINGLE RUN";
+			this.SingleCycleRunButton.TextColor = new NxtControl.Drawing.Color("ButtonTextColor");
+			this.SingleCycleRunButton.TextColorMouseDown = new NxtControl.Drawing.Color("ButtonTextColorMouseDown");
+			this.SingleCycleRunButton.Use3DEffect = false;
+			this.SingleCycleRunButton.Click += new System.EventHandler(this.SingleCycleRunButtonClick);
+			// 
+			// OpenManualScreenButton
+			// 
+			this.OpenManualScreenButton.Bounds = new NxtControl.Drawing.RectF(((float)(632D)), ((float)(46D)), ((float)(148D)), ((float)(62D)));
+			this.OpenManualScreenButton.Brush = new NxtControl.Drawing.Brush("ButtonFalseBrush");
+			this.OpenManualScreenButton.CanvasName = "ManualScreen";
+			this.OpenManualScreenButton.Enabled = false;
+			this.OpenManualScreenButton.Font = new NxtControl.Drawing.Font("BigCanvasTopologyButtonFont");
+			this.OpenManualScreenButton.Name = "OpenManualScreenButton";
+			this.OpenManualScreenButton.Pen = new NxtControl.Drawing.Pen(new NxtControl.Drawing.Color(((byte)(255)), ((byte)(255)), ((byte)(255))), 1F, NxtControl.Drawing.DashStyle.Dash);
+			this.OpenManualScreenButton.Text = "Open Manual Control";
+			this.OpenManualScreenButton.TextColor = new NxtControl.Drawing.Color(((byte)(255)), ((byte)(255)), ((byte)(255)));
+			this.OpenManualScreenButton.TextColorMouseDown = new NxtControl.Drawing.Color(((byte)(255)), ((byte)(255)), ((byte)(255)));
+			this.OpenManualScreenButton.Visible = false;
+			// 
+			// OpenSetupScreenButton
+			// 
+			this.OpenSetupScreenButton.Bounds = new NxtControl.Drawing.RectF(((float)(630D)), ((float)(112D)), ((float)(148D)), ((float)(62D)));
+			this.OpenSetupScreenButton.Brush = new NxtControl.Drawing.Brush("ButtonFalseBrush");
+			this.OpenSetupScreenButton.CanvasName = "SetupScreen";
+			this.OpenSetupScreenButton.Enabled = false;
+			this.OpenSetupScreenButton.Font = new NxtControl.Drawing.Font("BigCanvasTopologyButtonFont");
+			this.OpenSetupScreenButton.Name = "OpenSetupScreenButton";
+			this.OpenSetupScreenButton.Pen = new NxtControl.Drawing.Pen(new NxtControl.Drawing.Color(((byte)(255)), ((byte)(255)), ((byte)(255))), 1F, NxtControl.Drawing.DashStyle.Dash);
+			this.OpenSetupScreenButton.Text = "Open Setup Control";
+			this.OpenSetupScreenButton.TextColor = new NxtControl.Drawing.Color(((byte)(255)), ((byte)(255)), ((byte)(255)));
+			this.OpenSetupScreenButton.TextColorMouseDown = new NxtControl.Drawing.Color(((byte)(255)), ((byte)(255)), ((byte)(255)));
+			this.OpenSetupScreenButton.Visible = false;
+			// 
 			// sDefault
 			// 
 			this.Shapes.AddRange(new System.ComponentModel.IComponent[] {
 			this.rectangle1,
+			this.Fault_Reset,
 			this.LL_Fault_Status,
 			this.drawnTextBox1,
 			this.freeText3,
 			this.freeText4,
 			this.System_Mode,
 			this.System_Cycle_Type,
-			this.Area_Name_1});
+			this.Area_Name_1,
+			this.AutoButton,
+			this.ManualButton,
+			this.SetupButton,
+			this.InitialPositionButton,
+			this.StopButton,
+			this.RunContiuouslyButton,
+			this.StopAtEndOfCycleButton,
+			this.SingleCycleRunButton,
+			this.OpenManualScreenButton,
+			this.OpenSetupScreenButton});
 			this.SymbolSize = new System.Drawing.Size(1000, 190);
 
 		}
 		private NxtControl.GuiFramework.Rectangle rectangle1;
+		private System.HMI.Symbols.Base.CheckButton Fault_Reset;
 		private System.HMI.Symbols.Base.Led<bool> LL_Fault_Status;
 		private NxtControl.GuiFramework.DrawnTextBox drawnTextBox1;
 		private NxtControl.GuiFramework.FreeText freeText3;
@@ -213,6 +410,16 @@ namespace HMI.Main.Symbols.Area_CAT
 		private System.HMI.Symbols.Base.FreeText<short> System_Mode;
 		private System.HMI.Symbols.Base.FreeText<short> System_Cycle_Type;
 		private System.HMI.Symbols.Base.Label Area_Name_1;
+		private NxtControl.GuiFramework.DrawnButton AutoButton;
+		private NxtControl.GuiFramework.DrawnButton ManualButton;
+		private NxtControl.GuiFramework.DrawnButton SetupButton;
+		private NxtControl.GuiFramework.DrawnButton InitialPositionButton;
+		private NxtControl.GuiFramework.DrawnButton StopButton;
+		private NxtControl.GuiFramework.DrawnButton RunContiuouslyButton;
+		private NxtControl.GuiFramework.DrawnButton StopAtEndOfCycleButton;
+		private NxtControl.GuiFramework.DrawnButton SingleCycleRunButton;
+		private NxtControl.GuiFramework.ChangeCanvasButton OpenManualScreenButton;
+		private NxtControl.GuiFramework.ChangeCanvasButton OpenSetupScreenButton;
 		#endregion
 	}
 }
