@@ -112,72 +112,72 @@
     <value>2.0</value>
   </resheader>
   <resheader name="reader">
-    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
   <resheader name="writer">
-    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
   <metadata name="component_name.Name" xml:space="preserve">
     <value>component_name</value>
   </metadata>
-  <metadata name="$this.LayerActive" type="System.Int32, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
-    <value>0</value>
-  </metadata>
-  <metadata name="freeText9.Name" xml:space="preserve">
-    <value>freeText9</value>
-  </metadata>
-  <metadata name="$this.GridSize" type="System.Drawing.Size, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
-    <value>8, 8</value>
-  </metadata>
   <metadata name="fault_active.Name" xml:space="preserve">
     <value>fault_active</value>
-  </metadata>
-  <metadata name="atWork.Name" xml:space="preserve">
-    <value>atWork</value>
-  </metadata>
-  <metadata name="txtFaultDescription.Name" xml:space="preserve">
-    <value>txtFaultDescription</value>
-  </metadata>
-  <metadata name="atHome.Name" xml:space="preserve">
-    <value>atHome</value>
-  </metadata>
-  <metadata name="$this.SnapToGrid" type="System.Boolean, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
-    <value>True</value>
   </metadata>
   <metadata name="freeText1.Name" xml:space="preserve">
     <value>freeText1</value>
   </metadata>
+  <metadata name="freeText3.Name" xml:space="preserve">
+    <value>freeText3</value>
+  </metadata>
   <metadata name="freeText4.Name" xml:space="preserve">
     <value>freeText4</value>
   </metadata>
-  <metadata name="freeText3.Name" xml:space="preserve">
-    <value>freeText3</value>
+  <metadata name="atHome.Name" xml:space="preserve">
+    <value>atHome</value>
   </metadata>
   <metadata name="freeText5.Name" xml:space="preserve">
     <value>freeText5</value>
   </metadata>
-  <metadata name="$this.LayerSelectable" xml:space="preserve">
-    <value>1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1</value>
-  </metadata>
   <metadata name="freeText6.Name" xml:space="preserve">
     <value>freeText6</value>
   </metadata>
-  <metadata name="$this.ShowGrid" type="System.Boolean, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
-    <value>True</value>
-  </metadata>
-  <metadata name="txtOperatorChecks.Name" xml:space="preserve">
-    <value>txtOperatorChecks</value>
+  <metadata name="atWork.Name" xml:space="preserve">
+    <value>atWork</value>
   </metadata>
   <metadata name="freeText7.Name" xml:space="preserve">
     <value>freeText7</value>
   </metadata>
+  <metadata name="txtFaultDescription.Name" xml:space="preserve">
+    <value>txtFaultDescription</value>
+  </metadata>
+  <metadata name="freeText9.Name" xml:space="preserve">
+    <value>freeText9</value>
+  </metadata>
+  <metadata name="txtOperatorChecks.Name" xml:space="preserve">
+    <value>txtOperatorChecks</value>
+  </metadata>
+  <metadata name="txtFaultType.Name" xml:space="preserve">
+    <value>txtFaultType</value>
+  </metadata>
   <metadata name="workAreaControl1.Name" xml:space="preserve">
     <value>workAreaControl1</value>
+  </metadata>
+  <metadata name="$this.ShowGrid" type="System.Boolean, mscorlib, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
+    <value>True</value>
+  </metadata>
+  <metadata name="$this.SnapToGrid" type="System.Boolean, mscorlib, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
+    <value>True</value>
+  </metadata>
+  <metadata name="$this.GridSize" type="System.Drawing.Size, System.Drawing, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
+    <value>8, 8</value>
+  </metadata>
+  <metadata name="$this.LayerActive" type="System.Int32, mscorlib, Version=2.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
+    <value>0</value>
   </metadata>
   <metadata name="$this.LayerVisible" xml:space="preserve">
     <value>1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1</value>
   </metadata>
-  <metadata name="txtFaultType.Name" xml:space="preserve">
-    <value>txtFaultType</value>
+  <metadata name="$this.LayerSelectable" xml:space="preserve">
+    <value>1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1</value>
   </metadata>
 </root>
