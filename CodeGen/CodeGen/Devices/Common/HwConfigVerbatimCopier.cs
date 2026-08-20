@@ -2,6 +2,7 @@
 using System.IO;
 using System.Linq;
 using System.Xml.Linq;
+using CodeGen.Configuration;
 
 namespace CodeGen.Devices.Core
 {
@@ -11,21 +12,29 @@ namespace CodeGen.Devices.Core
     // bindings are carried byte-for-byte; only the outer root wrapper changes.
     public static class HwConfigVerbatimCopier
     {
-        private const string DefaultIoFolder = @"C:\VueOneMapper\IO";
-
         // Prefer the configured path, then ioFolderPath + fileName, then the default IO folder; null if none exist.
+        // The authored .hcf for one target, carried byte-for-byte into its device folder. A transform
+        // could silently drop an authored channel binding, so this never rewrites the file.
+        public static HwConfigCopyResult CopyFor(
+            MapperConfig cfg, CodeGen.Translation.PlcAssignment plc, string? configuredPath)
+        {
+            if (cfg == null) throw new ArgumentNullException(nameof(cfg));
+            var target = Mapping.TargetRegistry.Of(plc);
+            return Deploy(
+                EaeProjectLayout.DeriveEaeProjectRoot(cfg),
+                target.DeviceType,
+                Mapping.TargetDescriptor.DeviceNamespace,
+                ResolveTemplatePath(configuredPath, cfg.RequireIoFolderPath(), target.HcfTemplate));
+        }
+
         public static string? ResolveTemplatePath(
             string? configuredPath, string? ioFolderPath, string fileName)
         {
             if (!string.IsNullOrWhiteSpace(configuredPath) && File.Exists(configuredPath))
                 return configuredPath;
-            if (!string.IsNullOrWhiteSpace(ioFolderPath))
-            {
-                var p = Path.Combine(ioFolderPath, fileName);
-                if (File.Exists(p)) return p;
-            }
-            var def = Path.Combine(DefaultIoFolder, fileName);
-            return File.Exists(def) ? def : null;
+            if (string.IsNullOrWhiteSpace(ioFolderPath)) return null;
+            var p = Path.Combine(ioFolderPath, fileName);
+            return File.Exists(p) ? p : null;
         }
 
         public static HwConfigCopyResult Deploy(
@@ -52,22 +61,7 @@ namespace CodeGen.Devices.Core
                 return result;
             }
 
-            string? sysdevFile = null;
-            foreach (var sd in Directory.EnumerateFiles(systemDir, "*.sysdev", SearchOption.AllDirectories))
-            {
-                try
-                {
-                    var root = XDocument.Load(sd).Root;
-                    if (root == null || root.Name.LocalName != "Device") continue;
-                    if ((string?)root.Attribute("Type") == deviceType &&
-                        (string?)root.Attribute("Namespace") == deviceNamespace)
-                    {
-                        sysdevFile = sd;
-                        break;
-                    }
-                }
-                catch { }
-            }
+            var sysdevFile = EaeProjectLayout.FindSysdevByDeviceType(eaeRoot, deviceType);
             if (sysdevFile == null)
             {
                 result.Warnings.Add(
