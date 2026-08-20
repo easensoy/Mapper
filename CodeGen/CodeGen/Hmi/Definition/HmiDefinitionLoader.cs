@@ -1,263 +1,269 @@
 ﻿using System;
+using System.IO;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 namespace CodeGen.Hmi
 {
     // Loads and validates Config/hmi.yml into an immutable definition. Reading, strict parsing,
-    // caching and the shared validators all come from HmiYaml.
+    // caching and the path-addressed node reader all come from HmiYaml.
     internal static class HmiDefinitionLoader
     {
         internal const string FileName = "hmi.yml";
 
-        private static readonly HmiYaml.Cache<HmiDefinition> Cached = new(FileName, Parse);
+        private static readonly object Gate = new();
+        private static HmiDefinition? _cached;
+        private static DateTime _stampUtc;
 
-        internal static HmiDefinition Load() => Cached.Load();
+        // Re-read only when the file itself changes, so repeated generations in one process parse once.
+        // The stamp is captured INSIDE the lock and BEFORE the content: a file rewritten between the
+        // two would otherwise be cached under the older timestamp and pin stale content.
+        internal static HmiDefinition Load()
+        {
+            var path = HmiYaml.PathOf(FileName);
+            DateTime Stamp() => File.Exists(path) ? File.GetLastWriteTimeUtc(path) : DateTime.MinValue;
+            if (_cached != null && Stamp() == _stampUtc) return _cached;
+            lock (Gate)
+            {
+                var stamp = Stamp();
+                if (_cached != null && stamp == _stampUtc) return _cached;
+                _cached = Parse(HmiYaml.Read(FileName));
+                _stampUtc = stamp;
+                return _cached;
+            }
+        }
 
         internal static HmiDefinition Parse(string yaml)
         {
-            var dto = HmiYaml.Deserialize<HmiDefinitionDto>(FileName, yaml);
+            var v = new HmiYaml.Validator(FileName);
+            var root = v.Root(yaml);
 
-            var v = new Validator();
-
-            var schema = v.Required(dto.SchemaVersion, "schemaVersion");
+            var schema = root.Int("schemaVersion");
             if (schema != HmiDefinition.SupportedSchemaVersion)
                 v.Fail($"schemaVersion {schema} is not supported (this build understands " +
                        $"{HmiDefinition.SupportedSchemaVersion}).");
 
-            var policy = v.Section(dto.Policy, "policy");
-            var geo = v.Section(dto.Geometry, "geometry");
-            var style = v.Section(dto.Style, "style");
-            var screens = v.Section(dto.Screens, "screens");
-            var proto = v.Section(dto.Protocol, "protocol");
-            var caps = v.Section(dto.Capabilities, "capabilities");
-            var deploy = v.Section(dto.Deployment, "deployment");
+            var policy = root.Sec("policy");
+            var geo = root.Sec("geometry");
+            var style = root.Sec("style");
+            var screens = root.Sec("screens");
+            var proto = root.Sec("protocol");
+            var caps = root.Sec("capabilities");
+            var deploy = root.Sec("deployment");
+            var rt = root.Sec("runtime");
 
-            var unknown = (policy.UnknownContract ?? string.Empty).Trim().ToLowerInvariant();
+            var unknown = policy.Text("unknownContract").ToLowerInvariant();
             if (unknown is not ("fail" or "skip")) v.Fail("policy.unknownContract must be 'fail' or 'skip'.");
 
-            var btn = v.Section(geo.Button, "geometry.button");
-            var fallback = v.Section(geo.SymbolFallback, "geometry.symbolFallback");
-
             var geometry = new HmiGeometry(
-                v.Positive(geo.CanvasWidth, "geometry.canvasWidth"),
-                v.Positive(geo.CanvasHeight, "geometry.canvasHeight"),
-                v.NonNegative(geo.NavigationBarHeight, "geometry.navigationBarHeight"),
-                v.NonNegative(geo.Margin, "geometry.margin"),
-                v.NonNegative(geo.Gap, "geometry.gap"),
-                v.NonNegative(geo.CaptionHeight, "geometry.captionHeight"),
-                v.NonNegative(geo.BannerY, "geometry.bannerY"),
-                v.NonNegative(geo.TitleY, "geometry.titleY"),
-                v.NonNegative(geo.ContentTop, "geometry.contentTop"),
-                v.Positive(btn.Width, "geometry.button.width"),
-                v.Positive(btn.Height, "geometry.button.height"),
-                v.NonNegative(btn.BottomInset, "geometry.button.bottomInset"),
-                new HmiSize(v.Positive(fallback.Width, "geometry.symbolFallback.width"),
-                            v.Positive(fallback.Height, "geometry.symbolFallback.height")));
+                geo.Int("canvasWidth", 1, int.MaxValue),
+                geo.Int("canvasHeight", 1, int.MaxValue),
+                geo.Int("navigationBarHeight", 0, int.MaxValue),
+                geo.Int("margin", 0, int.MaxValue),
+                geo.Int("gap", 0, int.MaxValue),
+                geo.Int("captionHeight", 0, int.MaxValue),
+                geo.Int("titleY", 0, int.MaxValue),
+                geo.Int("contentTop", 0, int.MaxValue),
+                geo.Int("button.width", 1, int.MaxValue),
+                geo.Int("button.height", 1, int.MaxValue),
+                geo.Int("button.bottomInset", 0, int.MaxValue));
 
             if (geometry.WorkHeight <= geometry.ContentTop)
                 v.Fail("geometry.navigationBarHeight leaves no work area below geometry.contentTop.");
 
+            // A font is either a named theme font (family only) or an explicit triple. Anything in
+            // between - a size without a weight, a weight without a size - is ambiguous and rejected
+            // rather than silently completed with a default this file claims not to have.
+            HmiFont Font(string rel)
+            {
+                var d = style.Sec(rel);
+                var family = d.Text("family");
+                bool hasSize = d.Has("size"), hasBold = d.Has("bold");
+                if (!hasSize && !hasBold) return new HmiFont(family, 0, false);
+                if (!hasSize) v.Fail($"'{d.Path}.size' is required when '{d.Path}.bold' is set.");
+                if (!hasBold) v.Fail($"'{d.Path}.bold' is required when '{d.Path}.size' is set.");
+                var size = hasSize ? d.Int("size") : 0;
+                if (hasSize && size <= 0) v.Fail($"'{d.Path}.size' must be greater than zero.");
+                return new HmiFont(family, size, hasBold && d.Flag("bold"));
+            }
+
+            HmiColor Color(string rel)
+            {
+                var d = style.Sec(rel);
+                return new HmiColor(d.Int("r", 0, 255), d.Int("g", 0, 255), d.Int("b", 0, 255));
+            }
+
             var hmiStyle = new HmiStyle(
-                v.Text(style.CanvasBrush, "style.canvasBrush"),
-                v.Text(style.ButtonBrush, "style.buttonBrush"),
-                v.Font(style.ButtonFont, "style.buttonFont"),
-                v.Font(style.CaptionFont, "style.captionFont"),
-                v.Font(style.DetailFont, "style.detailFont"),
-                v.Color(style.ButtonTextColor, "style.buttonTextColor"),
-                v.Color(style.CaptionColor, "style.captionColor"),
-                v.Color(style.EmphasisColor, "style.emphasisColor"),
-                v.Color(style.DetailColor, "style.detailColor"));
+                style.Text("canvasBrush"), style.Text("buttonBrush"),
+                Font("buttonFont"), Font("captionFont"),
+                Color("buttonTextColor"), Color("captionColor"), Color("emphasisColor"));
 
-            var detail = v.Section(screens.Detail, "screens.detail");
-            var screenPolicy = new HmiScreenPolicy(
-                v.Identifier(screens.HubName, "screens.hubName"),
-                v.Text(screens.HubTitle, "screens.hubTitle"),
-                v.Identifier(screens.ResidualName, "screens.residualName"),
-                v.Text(screens.ResidualTitle, "screens.residualTitle"),
-                v.Identifier(screens.Suffix, "screens.suffix"),
-                v.Text(screens.HubButtonText, "screens.hubButtonText"),
-                v.Text(screens.PreviousText, "screens.previousText"),
-                v.Text(screens.NextText, "screens.nextText"),
-                v.Required(detail.ShowStates, "screens.detail.showStates"),
-                v.Required(detail.ShowInterlocks, "screens.detail.showInterlocks"),
-                v.Required(detail.ShowAllocation, "screens.detail.showAllocation"),
-                v.Required(detail.ShowProtocolLegend, "screens.detail.showProtocolLegend"),
-                v.Positive(detail.MaxStateChars, "screens.detail.maxStateChars"),
-                v.Positive(detail.MaxInterlockChars, "screens.detail.maxInterlockChars"),
-                v.Positive(detail.MaxProtocolChars, "screens.detail.maxProtocolChars"));
+            // The screen families. Every role and capability name is validated here, so a typo in
+            // hmi.yml fails the load rather than silently producing an empty screen.
+            var families = new List<HmiScreenFamily>();
+            foreach (var f in screens.Seq("families"))
+            {
+                var name = f.Identifier("name");
+                if (families.Any(x => x.Name == name)) v.Fail($"duplicate screen family '{name}'.");
 
-            var modes = v.ValueLabels(proto.Modes, "protocol.modes");
-            var cycles = v.ValueLabels(proto.CycleTypes, "protocol.cycleTypes");
+                var roles = new List<HmiRole>();
+                foreach (var r in f.Strings("include"))
+                    if (Enum.TryParse<HmiRole>(r, ignoreCase: true, out var role)) roles.Add(role);
+                    else v.Fail($"'{f.Path}.include' names unknown role '{r}'.");
+                if (roles.Count == 0) v.Fail($"'{f.Path}.include' must name at least one role.");
+
+                var variant = new Dictionary<HmiRole, string>();
+                foreach (var (k, sym) in f.Map("variant"))
+                    if (Enum.TryParse<HmiRole>(k, ignoreCase: true, out var role)) variant[role] = sym.Trim();
+                    else v.Fail($"'{f.Path}.variant' names unknown role '{k}'.");
+
+                HmiCapabilityPurpose? requires = null;
+                var wants = f.Opt("requires");
+                if (wants != null)
+                {
+                    if (Enum.TryParse<HmiCapabilityPurpose>(wants, ignoreCase: false, out var p2)) requires = p2;
+                    else v.Fail($"'{f.Path}.requires' names unknown capability '{wants}'.");
+                }
+
+                families.Add(new HmiScreenFamily(name, f.Text("title"), roles, variant,
+                                                 requires, f.FlagOr("onlySupported", false)));
+            }
+            if (families.Count == 0) v.Fail("'screens.families' declares no screens.");
+
+            var screenPolicy = new HmiScreenPolicy(families, screens.Identifier("hubName"),
+                                                 screens.Identifier("detailName"), screens.Text("detailTitle"));
 
             var profiles = new List<HmiStatesProfile>();
-            foreach (var p in v.List(proto.StatesProfiles, "protocol.statesProfiles"))
+            foreach (var p in proto.Seq("statesProfiles"))
             {
-                var id = v.Identifier(p.Id, "protocol.statesProfiles[].id");
+                var id = p.Identifier("id");
                 if (profiles.Any(x => x.Id == id)) v.Fail($"duplicate state profile id '{id}'.");
-                var match = v.Section(p.Match, $"protocol.statesProfiles[{id}].match");
-                var carries = v.Strings(match.InputEventCarries, $"protocol.statesProfiles[{id}].match.inputEventCarries");
-                var labels = v.Strings(p.Labels, $"protocol.statesProfiles[{id}].labels");
+                var carries = p.Strings("match.inputEventCarries");
+                var labels = p.Strings("labels");
                 if (labels.Count == 0) v.Fail($"state profile '{id}' declares no labels.");
                 profiles.Add(new HmiStatesProfile(id, carries, labels));
             }
 
             var rules = new List<HmiCapabilityRule>();
-            foreach (var c in v.List(caps.Commands, "capabilities.commands"))
+            foreach (var c in caps.Seq("commands"))
             {
-                var purposeText = v.Text(c.Purpose, "capabilities.commands[].purpose");
+                var purposeText = c.Text("purpose");
                 if (!Enum.TryParse<HmiCapabilityPurpose>(purposeText, ignoreCase: false, out var purpose))
                     v.Fail($"unknown capability purpose '{purposeText}'.");
                 if (rules.Any(r => r.Purpose == purpose)) v.Fail($"duplicate capability purpose '{purposeText}'.");
 
-                var variants = (c.OutputDataVariants ?? new List<List<string>>())
-                    .Select(x => (IReadOnlyList<string>)(x ?? new List<string>())).ToList();
-                var data = (IReadOnlyList<string>)(c.OutputData ?? new List<string>());
-                if (variants.Count == 0 && c.OutputData == null)
-                    v.Fail($"capability '{purposeText}' declares neither outputData nor outputDataVariants.");
+                var data = c.StringLists("outputData");
+                if (data.Count == 0)
+                    v.Fail($"capability '{purposeText}' declares no outputData shape - a command that " +
+                           "carries no data still declares one empty shape.");
+
+                // Every command must declare how the CONTROLLER proves it honours the value. A rule
+                // with no tokens would silently reduce to "the port exists", which is the exact
+                // mistake this clause exists to prevent, so an empty token list is rejected.
+                var spec = c.Sec("consumption");
+                var tokens = spec.Strings("tokens");
+                if (tokens.Count == 0)
+                    v.Fail($"'{spec.Path}.tokens' must name at least one ECC token - without it the " +
+                           "command would be offered on port existence alone.");
 
                 rules.Add(new HmiCapabilityRule(
-                    purpose,
-                    v.Text(c.OutputEvent, $"capabilities.commands[{purposeText}].outputEvent"),
-                    data, variants,
-                    string.IsNullOrWhiteSpace(c.AlsoRequiresOutputEvent) ? null : c.AlsoRequiresOutputEvent!.Trim(),
-                    v.Strings(c.AnyFeedback, $"capabilities.commands[{purposeText}].anyFeedback"),
-                    v.Required(c.NeedsModeChain, $"capabilities.commands[{purposeText}].needsModeChain"),
-                    v.Required(c.NeedsRecipeEngine, $"capabilities.commands[{purposeText}].needsRecipeEngine")));
+                    purpose, c.Text("outputEvent"), data,
+                    c.Opt("alsoRequiresOutputEvent"), c.Strings("anyFeedback"), c.Flag("needsModeChain"),
+                    c.OptStrings("chainPorts"),
+                    new HmiConsumptionSpec(spec.Opt("inType"), tokens, spec.OptStrings("anyOf"))));
             }
 
-            var interlock = v.Section(caps.InterlockDiagnostics, "capabilities.interlockDiagnostics");
-            var probe = v.Section(caps.EngineProbe, "capabilities.engineProbe");
+            // Actions. Every one must name a capability the rule table declares, and must fire
+            // exactly one way - a call or a tag - so the gate always knows how to suppress it.
+            var actions = new List<HmiOperatorAction>();
+            foreach (var a in caps.Seq("actions"))
+            {
+                var id = a.Identifier("id");
+                if (actions.Any(x => x.Id == id)) v.Fail($"duplicate action id '{id}'.");
+
+                var provedText = a.Text("provedBy");
+                if (!Enum.TryParse<HmiCapabilityPurpose>(provedText, ignoreCase: false, out var proved))
+                    v.Fail($"action '{id}' names unknown purpose '{provedText}'.");
+                else if (rules.All(r => r.Purpose != proved))
+                    v.Fail($"action '{id}' is proved by '{provedText}', which declares no command rule.");
+
+                var fires = a.Opt("fires");
+                var writes = a.Opt("writes");
+                if ((fires == null) == (writes == null))
+                    v.Fail($"action '{id}' must declare exactly one of 'fires' or 'writes'.");
+
+                string? evt = null, payload = null;
+                if (fires != null)
+                {
+                    var m = Regex.Match(fires, @"^(?<e>[A-Za-z_][A-Za-z0-9_]*)\((?<p>[^)]*)\)$");
+                    if (!m.Success) v.Fail($"action '{id}' fires '{fires}', which is not EVENT(payload).");
+                    else { evt = m.Groups["e"].Value; payload = m.Groups["p"].Value.Trim(); }
+                }
+
+                HmiActionProof? proof = null;
+                if (a.Has("alsoRequires"))
+                {
+                    var r = a.Sec("alsoRequires");
+                    proof = new HmiActionProof(r.Text("guard"), r.Opt("distinctFrom"), r.Opt("interlockedBy"));
+                    if (proof.DistinctFrom == null && proof.InterlockedBy == null)
+                        v.Fail($"action '{id}' declares alsoRequires with no distinctFrom or interlockedBy.");
+                }
+
+                actions.Add(new HmiOperatorAction(id, a.Text("label"), proved, evt, payload, writes, proof));
+            }
 
             var deployment = new HmiDeploymentPolicy(
-                v.Text(deploy.HmiFolderName, "deployment.hmiFolderName"),
-                v.Identifier(deploy.CanvasNamespaceSuffix, "deployment.canvasNamespaceSuffix"),
-                v.Identifier(deploy.SymbolNamespaceSuffix, "deployment.symbolNamespaceSuffix"),
-                v.Identifier(deploy.DefaultLibraryNamespace, "deployment.defaultLibraryNamespace"),
-                v.Text(deploy.GeneratedBanner, "deployment.generatedBanner"),
-                v.Text(deploy.OwnershipManifest, "deployment.ownershipManifest"),
-                v.Identifier(deploy.PrimarySymbol, "deployment.primarySymbol"),
-                v.Strings(deploy.CommandSymbols, "deployment.commandSymbols"));
+                deploy.Text("hmiFolderName"),
+                deploy.Identifier("canvasNamespaceSuffix"),
+                deploy.Identifier("symbolNamespaceSuffix"),
+                deploy.Identifier("defaultLibraryNamespace"),
+                deploy.Text("generatedBanner"),
+                deploy.Text("ownershipManifest"),
+                deploy.Identifier("primarySymbol"));
 
-            var rt = v.Section(dto.Runtime, "runtime");
-            var chrome = v.Section(rt.Chrome, "runtime.chrome");
-
-            HmiResolutionPolicy Resolution(HmiDefinitionDto.RuntimeDto.ResolutionDto? spec, string path)
+            HmiResolutionPolicy Resolution(string rel)
             {
-                var r = v.Section(spec, path);
+                var r = rt.Sec(rel);
                 return new HmiResolutionPolicy(
-                    v.Text(r.Name, path + ".name"),
-                    r.Template ?? string.Empty,               // deliberately empty on the fallback entry
-                    v.Text(r.ResizeBehaviour, path + ".resizeBehaviour"),
-                    v.Positive(r.CanvasButtonHeight, path + ".canvasButtonHeight"),
-                    r.SiblingButtonCount ?? 0,
-                    r.ChildButtonCount ?? 0);
+                    r.Text("name"),
+                    r.Opt("template") ?? string.Empty,        // deliberately empty on the fallback entry
+                    r.Text("resizeBehaviour"),
+                    r.Int("canvasButtonHeight", 1, int.MaxValue),
+                    r.Has("siblingButtonCount") ? r.Int("siblingButtonCount") : 0,
+                    r.Has("childButtonCount") ? r.Int("childButtonCount") : 0);
             }
 
             var runtime = new HmiRuntimePolicy(
-                v.Text(rt.SchemaVersion, "runtime.schemaVersion"),
-                v.Identifier(rt.StartCanvas, "runtime.startCanvas"),
-                Resolution(rt.Resolution, "runtime.resolution"),
-                Resolution(rt.FallbackResolution, "runtime.fallbackResolution"),
+                rt.Text("schemaVersion"), rt.Identifier("startCanvas"),
+                Resolution("resolution"), Resolution("fallbackResolution"),
                 new HmiChromePolicy(
-                    v.Required(chrome.Logger, "runtime.chrome.logger"),
-                    v.Required(chrome.Login, "runtime.chrome.login"),
-                    v.Required(chrome.CurrentUser, "runtime.chrome.currentUser"),
-                    v.Required(chrome.LanguageButton, "runtime.chrome.languageButton"),
-                    v.Required(chrome.RuntimeConnection, "runtime.chrome.runtimeConnection"),
-                    v.Required(chrome.NavigationBar, "runtime.chrome.navigationBar"),
-                    v.Required(chrome.NewVersionDeployed, "runtime.chrome.newVersionDeployed"),
-                    v.Required(chrome.NavigationControl, "runtime.chrome.navigationControl")));
+                    rt.Flag("chrome.logger"), rt.Flag("chrome.login"),
+                    rt.Flag("chrome.currentUser"), rt.Flag("chrome.languageButton"),
+                    rt.Flag("chrome.runtimeConnection"), rt.Flag("chrome.navigationBar"),
+                    rt.Flag("chrome.newVersionDeployed"), rt.Int("chrome.navigationControl")));
 
             // Every remaining field is validated into a local BEFORE Throw(), so a fault here is
             // reported alongside the others instead of being accepted because the validator had
             // already decided the file was clean.
-            var readOnly = v.Required(policy.ReadOnly, "policy.readOnly");
-            var banner = v.Text(policy.BannerText, "policy.bannerText");
-            var notice = v.Text(policy.UnsupportedCommandNotice, "policy.unsupportedCommandNotice");
-            var reasons = v.Reasons(policy.UnavailableReasons, "policy.unavailableReasons");
-            var feedback = v.Strings(interlock.RequiredFeedback, "capabilities.interlockDiagnostics.requiredFeedback");
-            var engineProbe = new HmiEngineProbeSpec(
-                v.Text(probe.TypeName, "capabilities.engineProbe.typeName"),
-                v.Strings(probe.AutoGatingTokens, "capabilities.engineProbe.autoGatingTokens"),
-                v.Strings(probe.ManualSteppingTokens, "capabilities.engineProbe.manualSteppingTokens"));
+            var notice = policy.Text("unsupportedCommandNotice");
+            var noContract = policy.Text("noContractNotice");
+            var withheldMarker = policy.Text("withheldMarker");
+            var withheldHeading = policy.Text("withheldHeading");
+            var feedback = caps.Strings("interlockDiagnostics.requiredFeedback");
+            // The device/deployment half of the same document - one file, one parse, one Throw.
+            var device = HmiDeviceBinder.Bind(root, v);
 
+            v.Unknown();
             v.Throw();
 
             // Constructed exclusively from already-validated locals.
             return new HmiDefinition(
-                schema, readOnly, unknown == "fail", banner, notice, reasons,
+                schema, unknown == "fail", notice, noContract, withheldMarker, withheldHeading,
                 geometry, hmiStyle, screenPolicy,
-                modes, cycles, profiles, rules, feedback,
-                engineProbe, runtime, deployment);
+                profiles, rules, actions, feedback,
+                runtime, deployment, device);
         }
 
-        // hmi.yml adds two checks the shared validator does not need: a font is either a named
-        // theme font or a complete triple, and every withheld-capability reason must have text.
-        private sealed class Validator : HmiYaml.Validator
-        {
-            internal Validator() : base(HmiDefinitionLoader.FileName) { }
-
-            // A font is either a named theme font (family only) or an explicit triple. Anything in
-            // between - a size without a weight, a weight without a size - is ambiguous and rejected
-            // rather than silently completed with a default this file claims not to have.
-            internal HmiFont Font(HmiDefinitionDto.FontDto? dto, string path)
-            {
-                var d = Section(dto, path);
-                var family = Text(d.Family, path + ".family");
-                if (d.Size == null && d.Bold == null) return new HmiFont(family, 0, false);
-                if (d.Size == null) _problems.Add($"'{path}.size' is required when '{path}.bold' is set.");
-                if (d.Bold == null) _problems.Add($"'{path}.bold' is required when '{path}.size' is set.");
-                if (d.Size is <= 0) _problems.Add($"'{path}.size' must be greater than zero.");
-                return new HmiFont(family, d.Size ?? 0, d.Bold ?? false);
-            }
-
-            internal IReadOnlyDictionary<HmiUnavailableReason, string> Reasons(
-                Dictionary<string, string>? dto, string path)
-            {
-                var map = new Dictionary<HmiUnavailableReason, string>();
-                if (dto == null) { _problems.Add($"missing required section '{path}'."); return map; }
-
-                foreach (var kv in dto)
-                {
-                    if (!Enum.TryParse<HmiUnavailableReason>(kv.Key, ignoreCase: false, out var reason) ||
-                        reason == HmiUnavailableReason.None)
-                    { _problems.Add($"'{path}' declares unknown reason '{kv.Key}'."); continue; }
-                    if (string.IsNullOrWhiteSpace(kv.Value))
-                    { _problems.Add($"'{path}.{kv.Key}' is empty."); continue; }
-                    map[reason] = kv.Value.Trim();
-                }
-
-                foreach (var r in Enum.GetValues<HmiUnavailableReason>())
-                    if (r != HmiUnavailableReason.None && !map.ContainsKey(r))
-                        _problems.Add($"'{path}' is missing '{r}'.");
-                return map;
-            }
-
-            internal HmiColor Color(HmiDefinitionDto.ColorDto? dto, string path)
-            {
-                var d = Section(dto, path);
-                int Channel(int? c, string n)
-                {
-                    var v = Required(c, $"{path}.{n}");
-                    if (v is < 0 or > 255) _problems.Add($"'{path}.{n}' must be 0-255 (got {v}).");
-                    return v;
-                }
-                return new HmiColor(Channel(d.R, "r"), Channel(d.G, "g"), Channel(d.B, "b"));
-            }
-
-            internal IReadOnlyDictionary<int, string> ValueLabels(
-                List<HmiDefinitionDto.ValueLabelDto>? list, string path)
-            {
-                var map = new Dictionary<int, string>();
-                foreach (var e in List(list, path))
-                {
-                    var value = Required(e.Value, path + "[].value");
-                    var label = Text(e.Label, path + "[].label");
-                    if (!map.TryAdd(value, label)) _problems.Add($"'{path}' repeats value {value}.");
-                }
-                return map;
-            }
-        }
     }
 }
