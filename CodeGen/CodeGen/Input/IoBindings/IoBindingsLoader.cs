@@ -24,15 +24,13 @@ namespace CodeGen.Translation
         public Dictionary<string, ActuatorBinding> Actuators { get; init; } = new(StringComparer.Ordinal);
         public Dictionary<string, SensorBinding> Sensors { get; init; } = new(StringComparer.Ordinal);
 
-        // Pin id (e.g. "DI00") -> assignment; empty when the optional pin_* columns are absent
-        // (ResolveSymbol then returns null and the .hcf keeps its baseline values).
+        // Pin id (e.g. "DI00") -> assignment; empty when the optional pin_* columns are absent.
         public Dictionary<string, PinAssignment> PinAssignments { get; init; } =
             new(StringComparer.OrdinalIgnoreCase);
 
         public string SourcePath { get; init; } = string.Empty;
 
-        // Returns 'RES0.<component>.<port>' (literal quotes — EAE .hcf schema requires them) for a
-        // mapped pin, else null (the .hcf rewriter then leaves the baseline Value untouched).
+        // The literal quotes are required by the EAE .hcf schema. Null leaves the baseline Value untouched.
         public string? ResolveSymbol(string pin)
         {
             if (string.IsNullOrWhiteSpace(pin)) return null;
@@ -55,9 +53,8 @@ namespace CodeGen.Translation
             if (!File.Exists(xlsxPath))
                 throw new FileNotFoundException($"IO bindings file not found: {xlsxPath}");
 
-            // Keyed on path AND write time, mirroring YamlConfigFile: MapperUI generates in-process, so a
-            // path-only key serves the first run's bindings for the rest of the session even after the xlsx
-            // is edited -- and stale bindings surface as an unbound HCF channel, not an error.
+            // Keyed on path AND write time: MapperUI generates in-process, so a path-only key would serve
+            // the first run's bindings all session.
             var stampUtc = File.GetLastWriteTimeUtc(xlsxPath);
 
             lock (Lock)
@@ -96,7 +93,6 @@ namespace CodeGen.Translation
                         $"Actuators sheet column {i} expected '{expected[i]}', got '{(i < header.Count ? header[i] : "<missing>")}'");
             }
 
-            // Optional pin columns, indexed by header name; absent columns just mean no pin assignment.
             int idxPinDiAthome     = header.FindIndex(h => string.Equals(h, "pin_di_athome",      StringComparison.OrdinalIgnoreCase));
             int idxPinDiAtwork     = header.FindIndex(h => string.Equals(h, "pin_di_atwork",      StringComparison.OrdinalIgnoreCase));
             int idxPinDoToWork     = header.FindIndex(h => string.Equals(h, "pin_do_outputToWork", StringComparison.OrdinalIgnoreCase));
@@ -122,8 +118,7 @@ namespace CodeGen.Translation
                 AddPinIfPresent(bindings, idxPinDoToWork, row, name, "OutputToWork");
                 AddPinIfPresent(bindings, idxPinDoToHome, row, name, "OutputToHome");
 
-                // Notes-column fallback drives the .hcf from the hand-crafted Notes cell (tokens like
-                // "DI00=PusherAtHome") — NEVER regenerate the xlsx, so no schema change is possible here.
+                // Fallback to the hand-crafted Notes cell (tokens like "DI00=PusherAtHome").
                 if (idxNotes >= 0)
                 {
                     var notes = Get(row, idxNotes);
