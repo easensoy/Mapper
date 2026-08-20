@@ -1,11 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
-using System.Xml.Linq;
-using CodeGen.Configuration;
 using CodeGen.Devices.Core;
 using CodeGen.Translation;
+using System.IO;
+using System.Xml.Linq;
+using CodeGen.Configuration;
 using CodeGen.Mapping;
 
 namespace CodeGen.Devices.M262
@@ -17,7 +17,7 @@ namespace CodeGen.Devices.M262
         const string DeviceName = "M262";
         const string DefaultResourceName = "RES0";
 
-        // GUID + resource ID must match what EAE created (the .hcf Form-1 binding + FB mirror key off them).
+        // Must match what EAE created: the .hcf Form-1 binding and the FB mirror key off these.
         internal const string M262SysdevId   = "00000000-0000-0000-0000-000000000002";
         const string M262ResourceId = "1459BCD12760907D";
 
@@ -70,7 +70,6 @@ namespace CodeGen.Devices.M262
                 ? DefaultResourceName
                 : cfg.ResourceName;
 
-            // Bootstrap the M262 sysdev from scratch when absent (the empty-start path after Clean).
             bool justBootstrapped = false;
             var sysdevPath = FindSysdev(eaeRoot);
             if (sysdevPath == null)
@@ -83,7 +82,6 @@ namespace CodeGen.Devices.M262
                         "cannot bootstrap M262 (the .system project root must exist).");
             }
 
-            // Preserve an existing device (skip device-layer writes) to keep EAE's controller trust intact.
             bool preserveDevice =
                 PreserveExistingM262Device && IsM262SysdevFile(sysdevPath) && !justBootstrapped;
 
@@ -95,7 +93,6 @@ namespace CodeGen.Devices.M262
                 var sysresPathForRename = EaeProjectLayout.FindSysresFor(sysdevPath);
                 if (sysresPathForRename != null)
                     RenameSysresName(sysresPathForRename, resourceName);
-                // NOCONF the M262 Ethernet interfaces (IP 0.0.0.0) — the user wires the network after deploy.
                 SetTopologyEquipmentToNoConf(eaeRoot);
             }
 
@@ -186,7 +183,6 @@ namespace CodeGen.Devices.M262
         {
             var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
             if (!Directory.Exists(systemDir)) return null;
-            // Match the M262 device specifically (Type="M262_dPAC") — never a sibling M580/BX1 sysdev.
             return Directory.EnumerateFiles(systemDir, "*.sysdev", SearchOption.AllDirectories)
                 .FirstOrDefault(IsM262SysdevFile);
         }
@@ -199,7 +195,7 @@ namespace CodeGen.Devices.M262
                 .FirstOrDefault();
         }
 
-        // Creates the M262 logical device from scratch when none exists (the empty-start path after Clean).
+        // Creates the M262 logical device from scratch, the empty-start path after a Clean.
         static string? BootstrapM262Device(MapperConfig cfg, string eaeRoot, string resourceName)
         {
             var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
@@ -257,7 +253,6 @@ namespace CodeGen.Devices.M262
             SetAttr(root, "Namespace", "SE.DPAC");
             SetAttr(root, "Locked", "false");
 
-            // Strip any IPV4Address parameter so EAE renders the device as NoCONF (no preset network).
             foreach (var ipParam in root.Elements(ns + "Parameter")
                 .Where(e => string.Equals((string?)e.Attribute("Name"),
                     "IPV4Address", StringComparison.Ordinal)).ToList())
@@ -329,7 +324,7 @@ namespace CodeGen.Devices.M262
             catch { /* best-effort — emit pipeline continues even if sysres write fails */ }
         }
 
-        // Force every M262 Topology Equipment Ethernet endpoint to ipAddress 0.0.0.0 + zero domain (NOCONF).
+        // NOCONF every M262 Ethernet endpoint (0.0.0.0 + zero domain); the network is wired after deploy.
         static void SetTopologyEquipmentToNoConf(string eaeRoot)
         {
             try
