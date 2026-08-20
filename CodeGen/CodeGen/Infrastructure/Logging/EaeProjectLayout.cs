@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
+using System.IO;
 using System.Xml.Linq;
 using CodeGen.Configuration;
 
@@ -23,8 +23,7 @@ namespace CodeGen.Devices.Core
             return null;
         }
 
-        // The single System GUID folder (IEC61499/System/<guid>/) that holds every device's sysdev; the
-        // application + all devices live under it. null if the project root has no such folder yet.
+        // The single IEC61499/System/<guid>/ folder holding every device's sysdev; null if not there yet.
         public static string? FindSystemGuidDir(string eaeRoot)
         {
             var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
@@ -48,15 +47,13 @@ namespace CodeGen.Devices.Core
             if (sysresFiles.Count == 0) return null;
             if (sysresFiles.Count == 1) return sysresFiles[0];
 
-            // With >1 .sysres (an orphan alongside the live one), return the ACTIVE resource —
-            // the stem the sysdev's <Resource ID="..."/> references — not FirstOrDefault.
+            // With an orphan alongside the live one, return the resource the sysdev's <Resource ID> names.
             var activeIds = ReadActiveResourceIds(sysdevPath);
             var active = sysresFiles.FirstOrDefault(f =>
                 activeIds.Contains(Path.GetFileNameWithoutExtension(f)));
             return active ?? sysresFiles[0];
         }
 
-        // The resource IDs a sysdev references via <Resources><Resource ID="..."/>.
         static HashSet<string> ReadActiveResourceIds(string sysdevPath)
         {
             var ids = new HashSet<string>(StringComparer.Ordinal);
@@ -76,17 +73,22 @@ namespace CodeGen.Devices.Core
             return ids;
         }
 
-        // Enforces one .sysres per device folder: deletes any .sysres (+ sister folder) whose stem
-        // is not one of the sysdev's active <Resource ID> values. Conservative — a malformed sysdev
-        // (no active id) is skipped so nothing is deleted blind. Returns the count removed.
+        // Every deployed sysdev, or nothing when the project has no System tree yet.
+        static IEnumerable<string> EverySysdev(string? eaeRoot)
+        {
+            if (string.IsNullOrEmpty(eaeRoot)) return Array.Empty<string>();
+            var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
+            return Directory.Exists(systemDir)
+                ? Directory.EnumerateFiles(systemDir, "*.sysdev", SearchOption.AllDirectories)
+                : Array.Empty<string>();
+        }
+
+        // One .sysres per device folder: deletes any whose stem is not an active <Resource ID>. A
+        // malformed sysdev is skipped so nothing is deleted blind.
         public static int SweepOrphanSysres(string? eaeRoot, Action<string>? log = null)
         {
-            if (string.IsNullOrEmpty(eaeRoot)) return 0;
-            var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
-            if (!Directory.Exists(systemDir)) return 0;
-
             int removed = 0;
-            foreach (var sysdev in Directory.EnumerateFiles(systemDir, "*.sysdev", SearchOption.AllDirectories))
+            foreach (var sysdev in EverySysdev(eaeRoot))
             {
                 var activeIds = ReadActiveResourceIds(sysdev);
                 if (activeIds.Count == 0) continue;   // can't distinguish active from orphan -> leave alone
@@ -97,9 +99,8 @@ namespace CodeGen.Devices.Core
 
                 var present = Directory
                     .EnumerateFiles(folder, "*.sysres", SearchOption.TopDirectoryOnly).ToList();
-                // The sweep identifies the live resource by filename == active id. Where an active id has
-                // no file that convention does not hold here, so every file looks like an orphan and the
-                // sweep would delete the resource it was meant to keep.
+                // The live resource is identified by filename == active id. Where an active id has no
+                // file that convention does not hold, so every file would look like an orphan.
                 if (!activeIds.All(id => present.Any(f =>
                         string.Equals(Path.GetFileNameWithoutExtension(f), id, StringComparison.Ordinal))))
                 {
@@ -132,17 +133,12 @@ namespace CodeGen.Devices.Core
             return removed;
         }
 
-        // File-level guard for EAE's "max 1 resource per device": in a sysdev listing >1 <Resource>,
-        // keep the one whose ID has a matching {ID}.sysres on disk (else the first) and drop the rest.
-        // Idempotent. Returns the count removed.
+        // EAE allows one resource per device: where a sysdev lists more, keep the one whose ID has a
+        // matching {ID}.sysres on disk (else the first). Idempotent.
         public static int DedupeSysdevResources(string? eaeRoot, Action<string>? log = null)
         {
-            if (string.IsNullOrEmpty(eaeRoot)) return 0;
-            var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
-            if (!Directory.Exists(systemDir)) return 0;
-
             int removed = 0;
-            foreach (var sysdev in Directory.EnumerateFiles(systemDir, "*.sysdev", SearchOption.AllDirectories))
+            foreach (var sysdev in EverySysdev(eaeRoot))
             {
                 try
                 {
@@ -177,8 +173,7 @@ namespace CodeGen.Devices.Core
             return removed;
         }
 
-        // Removes the dead work1ToHomeTime/work2ToHomeTime <Parameter> values from every
-        // Seven_State_Actuator_Centre_Home_CAT instance in every deployed sysres. Returns count removed.
+        // Removes the dead work1ToHomeTime/work2ToHomeTime parameters from every centre-home swivel instance.
         public static int StripStaleHomeTimerParams(string? eaeRoot, Action<string>? log = null)
         {
             if (string.IsNullOrEmpty(eaeRoot)) return 0;
@@ -213,7 +208,7 @@ namespace CodeGen.Devices.Core
                     }
                     if (changed)
                     {
-                        // EAE write-locks the per-device sysres while the project is open — retry to catch a free window.
+                        // EAE write-locks the sysres while the project is open; retry for a free window.
                         for (int attempt = 0; ; attempt++)
                         {
                             try { doc.Save(sysres); break; }
@@ -237,12 +232,10 @@ namespace CodeGen.Devices.Core
             return removed;
         }
 
-        // Locates the deployed sysdev whose root <Device> has the given Type in the SE.DPAC namespace.
         public static string? FindSysdevByDeviceType(string eaeRoot, string deviceType) =>
             FindSysdev(eaeRoot, deviceType, deviceName: null);
 
-        // Type + Name variant — disambiguates two devices of the same Type (BX1 vs Revolution_Pi, both
-        // Soft_dPAC). deviceName == null matches on Type alone.
+        // Disambiguates two devices of the same Type (BX1 and Revolution_Pi are both Soft_dPAC).
         public static string? FindSysdevByDeviceTypeAndName(string eaeRoot, string deviceType, string deviceName) =>
             FindSysdev(eaeRoot, deviceType, deviceName);
 
@@ -265,6 +258,50 @@ namespace CodeGen.Devices.Core
                 catch { /* skip malformed */ }
             }
             return null;
+        }
+
+        // ---- project-level topology facts -------------------------------------------------
+        //
+        // Neither of these is M262-specific: one reads General/ProjectInfo.xml, the other edits
+        // TopologyManager.topologyproj. They were the de-facto shared helper already - the M262,
+        // BX1/M580, RevPi, broadcast-domain, network and HMI emitters all called them through the
+        // M262 type - so they live with the rest of the project layout. Moved verbatim: same
+        // bodies, same signatures, same behaviour.
+
+        public static string? ReadProjectGuid(string eaeRoot)
+        {
+            var path = Path.Combine(eaeRoot, "General", "ProjectInfo.xml");
+            if (!File.Exists(path)) return null;
+            try
+            {
+                var doc = XDocument.Load(path);
+                var raw = (string?)doc.Root?.Attribute("Guid");
+                if (string.IsNullOrWhiteSpace(raw)) return null;
+                return raw.Trim().Trim('{', '}').ToLowerInvariant();
+            }
+            catch { return null; }
+        }
+
+        public static int RegisterInTopologyProj(string topologyProjPath, IEnumerable<string> jsonFileNames)
+        {
+            var doc = XDocument.Load(topologyProjPath);
+            var ns = doc.Root!.GetDefaultNamespace();
+            var noneGroup = doc.Descendants(ns + "ItemGroup")
+                .FirstOrDefault(g => g.Elements(ns + "None").Any())
+                ?? new XElement(ns + "ItemGroup");
+            if (noneGroup.Parent == null) doc.Root!.Add(noneGroup);
+
+            int added = 0;
+            foreach (var name in jsonFileNames)
+            {
+                bool exists = noneGroup.Elements(ns + "None").Any(e =>
+                    string.Equals((string?)e.Attribute("Include"), name, StringComparison.OrdinalIgnoreCase));
+                if (exists) continue;
+                noneGroup.Add(new XElement(ns + "None", new XAttribute("Include", name)));
+                added++;
+            }
+            if (added > 0) doc.Save(topologyProjPath);
+            return added;
         }
     }
 }
