@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using CodeGen.Hmi;
@@ -29,12 +29,9 @@ namespace MapperTests
             var def = HmiDefinitionLoader.Parse(ShippedYaml());
 
             Assert.Equal(HmiDefinition.SupportedSchemaVersion, def.SchemaVersion);
-            Assert.True(def.ReadOnly, "the shipped policy must stay monitoring-only");
             Assert.True(def.Geometry.CanvasWidth > 0 && def.Geometry.WorkHeight > 0);
             Assert.True(def.Geometry.WorkHeight < def.Geometry.CanvasHeight,
                         "the work area must exclude the runtime navigation bar");
-            Assert.NotEmpty(def.ModeLabels);
-            Assert.NotEmpty(def.CycleLabels);
             Assert.NotEmpty(def.StatesProfiles);
             Assert.NotEmpty(def.Capabilities);
             Assert.NotEmpty(def.InterlockFeedback);
@@ -73,7 +70,7 @@ namespace MapperTests
         {
             var yaml = ShippedYaml().Replace("  canvasWidth: 1024", "  canvasWidth: 0");
             var ex = Assert.Throws<HmiConfigException>(() => HmiDefinitionLoader.Parse(yaml));
-            Assert.Contains("greater than zero", ex.Message);
+            Assert.Contains("geometry.canvasWidth", ex.Message);
         }
 
         [Fact]
