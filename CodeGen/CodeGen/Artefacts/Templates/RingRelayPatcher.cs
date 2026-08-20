@@ -1,9 +1,9 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
-using System.Xml.Linq;
 using static CodeGen.Services.FbtXmlEditor;
+using System.IO;
+using System.Xml.Linq;
 
 namespace CodeGen.Services
 {
@@ -11,16 +11,10 @@ namespace CodeGen.Services
     // CNF only on a dest_name match, and REQ clears the reused Component_State_Msg dest_name.
     internal static class RingRelayPatcher
     {
-        // Ring relay: `state_cmd` LATCHES the last command addressed to this component (BREQ does
-        // `state_cmd := component_state_in.state` on a dest_name match) and nothing ever resets it, while the
-        // stock INIT algorithm is empty. `state_cmd` is wired straight to the actuator core's `state_val`, and the
-        // centre-home swivel accepts a work command as a pure LEVEL (`AtHomeInit -> ToWork1` tests
-        // `mode = 1 AND state_val = 1` with no pst_event), so a command latched before an EAE Clean/redeploy is
-        // re-read the moment the core reaches AtHomeInit and the arm moves with no recipe command behind it.
-        // Clearing the latch at INIT makes lifecycle initialisation deterministic: 0 is not a command in ANY
-        // core (five-state and Robot_Task require `pst_event` and match only 1/3 resp. 1/2; the swivel matches
-        // 1/3/5), so the actuator stays put until a recipe genuinely addresses it. Only the transient command is
-        // cleared — `state_sts`, `state_table` and every sensor/current-state record are untouched.
+        // `state_cmd` LATCHES the last command addressed to this component and nothing resets it, while the stock
+        // INIT algorithm is empty. It drives the core's `state_val`, and the centre-home swivel accepts a work
+        // command as a pure LEVEL, so a latch surviving a redeploy moves the arm with no recipe behind it.
+        // Clearing it at INIT is safe: 0 is not a command in any core, and state_sts/state_table are untouched.
         internal static void PatchRingClearCommandLatchOnInit(string eaeProjectDir, DeployResult result)
             => EditDeployedFbt(eaeProjectDir, "updateComponentState.fbt",
                 "updateComponentState.fbt command-latch INIT clear failed", result,
@@ -52,9 +46,8 @@ namespace CodeGen.Services
                     + "retained across Clean/redeploy cannot drive an actuator before the recipe asks");
             });
 
-        // Ring relay: REQ (a component reporting its OWN state) must clear component_state_out.dest_name —
-        // Component_State_Msg is a reused struct, so a stale dest_name spuriously satisfies a target
-        // actuator's BREQ match (dest_name==name) and clobbers its state_cmd.
+        // REQ (a component reporting its OWN state) must clear component_state_out.dest_name: Component_State_Msg
+        // is a reused struct, so a stale dest_name satisfies another actuator's BREQ match and clobbers its state_cmd.
         internal static void PatchRingReportClearDest(string eaeProjectDir, DeployResult result)
             => EditDeployedFbt(eaeProjectDir, "updateComponentState.fbt",
                 "updateComponentState.fbt report-dest-clear patch failed", result,
@@ -83,8 +76,7 @@ namespace CodeGen.Services
                 MapperLogger.Info("[Deploy] updateComponentState.fbt: REQ clears dest_name (ring report-vs-command leftover fix)");
             });
 
-        // Ring relay: BCNF always forwards, but CNF fires into the actuator core only on dest match — else an
-        // unrelated report replays the last retained state_cmd through ActuatorCore.pst_event.
+        // CNF fires into the actuator core only on a dest match, else an unrelated report replays the retained state_cmd.
         internal static void PatchRingCommandCnfOnlyOnDestination(string eaeProjectDir, DeployResult result)
             => EditDeployedFbt(eaeProjectDir, "updateComponentState.fbt",
                 "updateComponentState.fbt destination-gated CNF patch failed", result,
