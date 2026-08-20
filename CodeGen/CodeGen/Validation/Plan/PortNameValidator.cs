@@ -1,8 +1,8 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.IO;
 using System.IO.Compression;
-using System.Linq;
 using System.Xml.Linq;
 using CodeGen.Mapping;
 
@@ -17,11 +17,6 @@ namespace CodeGen.Translation
 
     public static class PortNameValidator
     {
-        // Casing invariant: the FB TYPE is "CaSAdptrTerminator" (capital S) but the PORT is
-        // "CasAdptrIN" (lowercase s). Defined once so the capitalisation can't drift.
-        public const string CaSAdptrTerminatorInPort = "CasAdptrIN";
-
-
         public static List<PortNameMismatch> Validate(string templateLibraryPath)
         {
             var mismatches = new List<PortNameMismatch>();
