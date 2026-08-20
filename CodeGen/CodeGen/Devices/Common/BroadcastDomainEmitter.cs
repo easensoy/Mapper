@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
@@ -6,8 +6,8 @@ using CodeGen.Configuration;
 
 namespace CodeGen.Devices.Core
 {
-    // The broadcast-domain JSON subnet/gateway must match the device it binds to, or EAE's
-    // connect-to-device verification flags the subnet/gateway rows.
+    // A broadcast domain's subnet/gateway must match the device it binds to, or EAE's
+    // connect-to-device verification flags those rows.
     public static class BroadcastDomainEmitter
     {
         public sealed class EmitResult
@@ -48,9 +48,8 @@ namespace CodeGen.Devices.Core
             return result;
         }
 
-        // An Equipment referencing a broadcast-domain UUID with no declaring BroadcastDomain_*.json
-        // fails EAE's topology import — create the missing domain at 192.168.1.0/24. Only writes
-        // BroadcastDomain JSON files; never touches Equipment/sysdev/sysres/device-trust state.
+        // An Equipment referencing a domain UUID that no BroadcastDomain_*.json declares fails EAE's
+        // topology import. Only writes BroadcastDomain JSON; never touches Equipment or device state.
         public static EmitResult EnsureReferencedDomains(MapperConfig cfg)
         {
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
@@ -68,7 +67,6 @@ namespace CodeGen.Devices.Core
             var uuidRx = new Regex("\"domain\"\\s*:\\s*\"([0-9a-fA-F-]{36})\"");
             var defRx  = new Regex("\"uuid\"\\s*:\\s*\"([0-9a-fA-F-]{36})\"");
 
-            // Domain UUIDs referenced by any Equipment.
             var referenced = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var eq in Directory.EnumerateFiles(topologyDir, "Equipment_*.json"))
             {
@@ -82,7 +80,6 @@ namespace CodeGen.Devices.Core
                 }
             }
 
-            // Domain UUIDs already defined by a BroadcastDomain file.
             var defined = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var bd in Directory.EnumerateFiles(topologyDir, "BroadcastDomain_*.json"))
             {
@@ -92,9 +89,8 @@ namespace CodeGen.Devices.Core
                 if (m.Success) defined.Add(m.Groups[1].Value);
             }
 
-            // Create any referenced-but-undefined domain on the device network. It is the M262
-            // subnet, not DefaultNetwork: the domains that go undefined are the ones the dPACs
-            // reference, and they all sit on the rig network.
+            // Undefined domains are the ones the dPACs reference, so they take the M262 rig
+            // subnet, not DefaultNetwork.
             var dev = DeviceConfig.Current.M262;
             int n = 1;
             foreach (var uuid in referenced)
@@ -117,14 +113,13 @@ namespace CodeGen.Devices.Core
                 File.WriteAllText(path, json);
                 result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, path));
 
-                // Some EAE import paths only honour REGISTERED topology items, so register the
-                // new domain in TopologyManager.topologyproj (the file on disk is the primary fix).
+                // Some EAE import paths honour only REGISTERED topology items.
                 var topoProj = Path.Combine(topologyDir, "TopologyManager.topologyproj");
                 if (File.Exists(topoProj))
                 {
                     try
                     {
-                        CodeGen.Devices.M262.M262TopologyEmitter.RegisterInTopologyProj(
+                        EaeProjectLayout.RegisterInTopologyProj(
                             topoProj, new[] { Path.GetFileName(path) });
                     }
                     catch { /* registration best-effort */ }
@@ -136,14 +131,8 @@ namespace CodeGen.Devices.Core
                     $"import failure). Pinned to 192.168.1.0/24.");
             }
 
-            // ARCHIVE COMPLETENESS. EAE's Archive packs only files REGISTERED in TopologyManager.topologyproj,
-            // so a domain written but never registered is silently dropped from the .sln archive -- notably
-            // "BroadcastDomain_Default Network.json" (written by Emit above, which does not register it). The
-            // UNARCHIVED solution then has an Equipment referencing a domain that no file declares, and EAE's
-            // TopologyManager rejects the WHOLE topology with "Unable to import topology / Internal Server
-            // Error" -- it resolves every reference before parsing any device, so one dangling domain loses
-            // the lot. It only shows up after archive/unarchive (or on another machine), because locally the
-            // unregistered file is still sitting in the folder. Register every domain file present.
+            // EAE's Archive packs only files REGISTERED in TopologyManager.topologyproj, so an unregistered
+            // domain is dropped from the .sln and the unarchived solution fails topology import entirely.
             var projPath = Path.Combine(topologyDir, "TopologyManager.topologyproj");
             if (File.Exists(projPath))
             {
@@ -157,7 +146,7 @@ namespace CodeGen.Devices.Core
                 {
                     try
                     {
-                        CodeGen.Devices.M262.M262TopologyEmitter.RegisterInTopologyProj(
+                        EaeProjectLayout.RegisterInTopologyProj(
                             projPath, allDomains.ToArray());
                     }
                     catch { /* registration best-effort; the files on disk remain the primary fix */ }
