@@ -137,16 +137,28 @@ namespace MapperUI
 
             var twin = TwinModel.Build(components);
 
+            // The preview shows what generation will produce, so it reads the SAME plan rather than
+            // re-deriving an allocation, a slot map and a recipe of its own.
+            CodeGen.Translation.GenerationContext? plan = null;
+            string? planError = null;
+            try
+            {
+                plan = CodeGen.Translation.GenerationContext.Plan(
+                    new CodeGen.Configuration.MapperConfig(), components,
+                    CodeGen.Mapping.DeploymentProfile.M262Only(CodeGen.Configuration.LayoutCatalog.Load()));
+            }
+            catch (Exception ex) { planError = ex.Message; }
+
             foreach (var process in twin.Processes.Select(p => p.Source))
             {
-                AddTransitionRows(transitionRows, process, components, twin);
-                AddRecipeRows(recipeRows, notes, process, components, twin);
+                AddTransitionRows(transitionRows, plan, process, components, twin);
+                AddRecipeRows(recipeRows, notes, process, components, twin, plan, planError);
             }
 
             return new Snapshot(recipeRows, transitionRows, notes);
         }
 
-        static void AddTransitionRows(DataTable table, VueOneComponent process,
+        static void AddTransitionRows(DataTable table, CodeGen.Translation.GenerationContext? plan, VueOneComponent process,
             IReadOnlyList<VueOneComponent> components, TwinModel twin)
         {
             int stateIndex = 0;
@@ -154,7 +166,7 @@ namespace MapperUI
             {
                 if (state.Transitions.Count == 0)
                 {
-                    AddTransitionRow(table, process, stateIndex, state, null, null, 0, components, twin);
+                    AddTransitionRow(table, plan, process, stateIndex, state, null, null, 0, components, twin);
                     stateIndex++;
                     continue;
                 }
@@ -163,19 +175,19 @@ namespace MapperUI
                 {
                     if (transition.Conditions.Count == 0)
                     {
-                        AddTransitionRow(table, process, stateIndex, state, transition, null, 0, components, twin);
+                        AddTransitionRow(table, plan, process, stateIndex, state, transition, null, 0, components, twin);
                         continue;
                     }
 
                     for (int i = 0; i < transition.Conditions.Count; i++)
-                        AddTransitionRow(table, process, stateIndex, state, transition,
+                        AddTransitionRow(table, plan, process, stateIndex, state, transition,
                             transition.Conditions[i], i + 1, components, twin);
                 }
                 stateIndex++;
             }
         }
 
-        static void AddTransitionRow(DataTable table, VueOneComponent process,
+        static void AddTransitionRow(DataTable table, CodeGen.Translation.GenerationContext? plan, VueOneComponent process,
             int stateIndex, VueOneState state, VueOneTransition? transition,
             VueOneCondition? condition, int conditionIndex,
             IReadOnlyList<VueOneComponent> components, TwinModel twin)
@@ -192,7 +204,7 @@ namespace MapperUI
                     string.Equals(s.StateID, condition.ID, StringComparison.OrdinalIgnoreCase));
 
             table.Rows.Add(
-                StationOf(process),
+                StationOf(process, plan),
                 process.Name,
                 stateIndex,
                 state.InitialState ? "Yes" : "",
@@ -210,30 +222,13 @@ namespace MapperUI
         }
 
         static void AddRecipeRows(DataTable table, DataTable notes,
-            VueOneComponent process, IReadOnlyList<VueOneComponent> components, TwinModel twin)
+            VueOneComponent process, IReadOnlyList<VueOneComponent> components, TwinModel twin,
+            CodeGen.Translation.GenerationContext? plan, string? planError)
         {
-            var contents = BuildGlobalContents(process, components);
-
-            // The preview compiles the same rows the generator would, so it needs the same allocation.
-            // Reading it from a fresh roster keeps the preview independent of any run in flight.
-            var allocation = new CodeGen.Mapping.ControllerAllocation(
-                new CodeGen.Mapping.DeploymentRoster(
-                    CodeGen.Mapping.DeploymentProfile.M262Only(CodeGen.Configuration.LayoutCatalog.Load())));
-            bool ringsMerged = CodeGen.Translation.Process.Recipes.FeedRingMerge.Needed(twin, allocation);
-
-            RecipeArrays recipe;
-            try
+            if (plan == null || !plan.Recipes.TryGetValue(process.Name?.Trim() ?? string.Empty, out var recipe))
             {
-                var slots = CodeGen.Translation.StateTableAllocation
-                    .Slots(contents, allocation, ringsMerged);
-                int topCover = CodeGen.Mapping.TemplateMap.TopCoverSensorNames
-                    .Select(n => slots.TryGetValue(n, out int s) ? s : -1).FirstOrDefault(s => s >= 0);
-                recipe = ProcessRecipeArrayGenerator.Generate(
-                    process, contents, twin, slots, allocation, ringsMerged, topCover);
-            }
-            catch (Exception ex)
-            {
-                notes.Rows.Add(StationOf(process), process.Name, "Error", ex.Message);
+                notes.Rows.Add(StationOf(process, plan), process.Name, "Error",
+                    planError ?? "the plan compiled no recipe for this process");
                 return;
             }
 
@@ -257,7 +252,7 @@ namespace MapperUI
                         StringComparison.OrdinalIgnoreCase));
 
                 table.Rows.Add(
-                    StationOf(process),
+                    StationOf(process, plan),
                     process.Name,
                     i,
                     StepTypeName(recipe.StepType[i]),
@@ -272,28 +267,12 @@ namespace MapperUI
                     recipe.NextStep[i]);
             }
 
-            foreach (var line in recipe.SkippedConditions)
-                notes.Rows.Add(StationOf(process), process.Name, "Skipped", line);
             foreach (var line in recipe.Warnings)
-                notes.Rows.Add(StationOf(process), process.Name, "Warning", line);
+                notes.Rows.Add(StationOf(process, plan), process.Name, "Warning", line);
             foreach (var line in recipe.TransitionTable)
-                notes.Rows.Add(StationOf(process), process.Name, "TransitionChain", line);
+                notes.Rows.Add(StationOf(process, plan), process.Name, "TransitionChain", line);
         }
 
-        static StationContents BuildGlobalContents(VueOneComponent process,
-            IReadOnlyList<VueOneComponent> components)
-        {
-            var sensors = components
-                .Where(c => string.Equals(c.Type, "Sensor", StringComparison.OrdinalIgnoreCase))
-                .ToList();
-            var actuators = components
-                .Where(c =>
-                    string.Equals(c.Type, "Actuator", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(c.Type, "Robot", StringComparison.OrdinalIgnoreCase))
-                .Where(c => c.States.Count > 0)
-                .ToList();
-            return new StationContents(process, actuators, sensors);
-        }
 
         static DataTable CreateRecipeTable()
         {
@@ -398,16 +377,13 @@ namespace MapperUI
         static bool IsSevenState(VueOneComponent component) =>
             component.States.Count == 7 || TemplateMap.IsBranchedSevenState(component);
 
-        static string StationOf(VueOneComponent process)
+        // Where the plan runs this process. A name-recognition table here would report the twin's own
+        // station wrongly the moment a model renamed one.
+        static string StationOf(VueOneComponent process,
+            CodeGen.Translation.GenerationContext? plan)
         {
-            var name = process.Name ?? string.Empty;
-            if (name.Equals("Feed_Station", StringComparison.OrdinalIgnoreCase))
-                return "Station 1 / M262";
-            if (name.Equals("Assembly_Station", StringComparison.OrdinalIgnoreCase))
-                return "Station 2 / M580";
-            if (name.Contains("Disassembly", StringComparison.OrdinalIgnoreCase))
-                return "Station 2 / M580";
-            return "Process";
+            var plc = plan?.Allocation.Of(process.Name) ?? CodeGen.Translation.PlcAssignment.Unknown;
+            return plc == CodeGen.Translation.PlcAssignment.Unknown ? "Process" : plc.ToString();
         }
     }
 
