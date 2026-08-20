@@ -13,26 +13,28 @@
 schemaVersion: 1
 
 policy:
-  # The generated HMI is monitoring-only. The generator refuses to run with this false, because
-  # the deployed controller cannot honour a command (see capabilities.engineProbe).
-  readOnly: true
+  # There is NO global read-only switch. Every command is decided independently, and only from what
+  # the deployed artefacts prove: the HMI contract must carry the output event and its data, the
+  # contract must expose feedback that shows acceptance, the event must reach the target through the
+  # generated application, and some deployed ECC must actually guard on the value. An unknown
+  # capability is DISABLED, never assumed.
+  #
   # What to do when a deployed CAT declares an HMI contract no profile matches.
   # fail = abort generation; skip = do not place, record a diagnostic.
   unknownContract: skip
-  bannerText: "MONITORING ONLY - HMI COMMANDS DISABLED"
+  # Shown on a screen that carries at least one deliberately disabled control.
   unsupportedCommandNotice: >-
-    Controller Start/Stop and Setup control are unavailable by contract;
-    control-logic support is required before they can be enabled safely.
+    Controls shown greyed are not offered because the deployed controller does not implement them;
+    each states its own reason.
   # Operator-facing text for every reason a capability can be withheld. One entry per
   # HmiUnavailableReason member; a missing or unknown key is rejected by the loader.
-  unavailableReasons:
-    NoContract:             "the deployed CAT ships no HMI contract"
-    NoOutputEvent:          "the deployed HMI contract declares no output event for this command"
-    NoAcceptedFeedback:     "the contract exposes no accepted-state feedback, so acceptance could not be shown"
-    ModeChainUnreachable:   "the station mode chain does not reach this controller"
-    EngineDoesNotImplement: "the deployed process engine declares the port but its ECC never reads it"
-    ReadOnlyPolicy:         "the generated HMI is monitoring-only"
-
+  noContractNotice: "the deployed CAT ships no HMI contract"
+  # Stamped into the staged faceplate where a command call was removed, so the emitted
+  # source itself says why the control cannot fire and the validator can find it.
+  withheldMarker: "WITHHELD BY MAPPER -"
+  # Rendered on any screen carrying a withheld action, in the caption style the
+  # reference already uses. The operator sees the reason instead of a dead button.
+  withheldHeading: "Unavailable on this build:"
 # ---------------------------------------------------------------------------------------------
 # Geometry. All values are EAE design units; the work area is the canvas minus the runtime
 # navigation bar declared by CanvasesResolutionList.
@@ -43,71 +45,74 @@ geometry:
   margin: 16
   gap: 16
   captionHeight: 22
-  bannerY: 8
   titleY: 34
   contentTop: 68
   button:
     width: 208
     height: 64
     bottomInset: 10
-  # Used only when a symbol template declares no geometry at all.
-  symbolFallback:
-    width: 300
-    height: 204
 
 style:
   canvasBrush: CanvasBrush
   buttonBrush: ButtonFalseBrush
   buttonFont: { family: "HMI Sans Serif", size: 12, bold: false }
   captionFont: { family: BigCanvasTopologyButtonFont }
-  detailFont: { family: "HMI Sans Serif", size: 9, bold: false }
   buttonTextColor: { r: 255, g: 255, b: 255 }
   captionColor: { r: 0, g: 0, b: 0 }
   emphasisColor: { r: 176, g: 0, b: 0 }
-  detailColor: { r: 64, g: 64, b: 64 }
 
 screens:
+  # ---------------------------------------------------------------------------------------------
+  # The screen FAMILIES, reproducing the July 30 architecture. Each family is a role selector plus a
+  # symbol choice; one generic paginating renderer draws them all, so adding a family is a config
+  # edit and never new C#.
+  #
+  #   include  - which roles from the semantic model belong on it. Roles are DERIVED: a component a
+  #              process commands is an actuator, one it only observes is a sensor. No CAT names,
+  #              no instance names, no state counts.
+  #   variant  - the symbol to place for a role, when the family wants something other than the
+  #              primary one (the Automatic process tile, the Setup jog canvas).
+  #   requires - the capability that makes the family's CONTROLS live. The family is still generated
+  #              when unsupported; its controls render disabled with the generated reason. Setup
+  #              additionally places only the instances whose own capability passed.
+  #   onlySupported - drop an instance from this family when `requires` is unsupported for it.
+  families:
+    - name: MainScreen
+      title: "Main Screen"
+      # The overview is the plant's COMMAND surface: the areas/stations that carry mode, cycle and
+      # fault-reset, and the processes running on them. Actuators are not repeated here - they have
+      # their own family, and drawing each one twice paginated the overview into eight pages.
+      include: [station, process]
+      variant:
+        process: sAutomatic
+
+    - name: ActuatorsScreen
+      title: "Actuators Screen"
+      include: [actuator, sensor]
+
+    - name: ManualScreen
+      title: "Manual Screen"
+      include: [process]
+      variant:
+        process: sManual
+      requires: ManualStep
+
+    - name: SetupScreen
+      title: "Setup Screen"
+      include: [actuator]
+      variant:
+        actuator: sSetup
+      requires: SetupJog
+      onlySupported: true
+
+  # A read-only surface for the model data the faceplates cannot show: the generated state
+  # legend behind each fixed label, the interlock rules the controller will actually run, and
+  # where each instance is allocated. Rendered on the deployed panel, not only in a side file.
+  detailName: PlantDetail
+  detailTitle: Plant detail
+
   hubName: MainScreen
-  hubTitle: "Plant Monitoring"
-  residualName: PlantOverviewScreen
-  residualTitle: "Plant Overview"
-  suffix: Screen
-  hubButtonText: "Main Screen"
-  previousText: "Previous Page"
-  nextText: "Next Page"
-  # Model-derived detail rendered as compiled, bound-adjacent text under each tile.
-  detail:
-    showStates: true
-    showInterlocks: true
-    showAllocation: true
-    # The mode/cycle vocabulary a station can actually be commanded into. Shown ONLY on a station
-    # that receives the mode chain - printing it on one that does not would tell the operator the
-    # panel understands a selection the controller will never see.
-    showProtocolLegend: true
-    maxStateChars: 96
-    maxInterlockChars: 150
-    maxProtocolChars: 150
-
-# ---------------------------------------------------------------------------------------------
-# Protocol. Values the deployed Station/Area CAT vocabulary exchanges. These are properties of
-# the generated FB contract, not of any model.
 protocol:
-  modes:
-    - { value: 0,   label: "No Mode Selected" }
-    - { value: 1,   label: "Automatic" }
-    - { value: 2,   label: "Manual" }
-    - { value: 3,   label: "Setup" }
-    - { value: 9,   label: "Initial Position" }
-    - { value: 100, label: "Undetermined" }
-  cycleTypes:
-    - { value: 0, label: "Stop" }
-    - { value: 1, label: "Run Continuous" }
-    - { value: 2, label: "Stop At End Of Cycle" }
-    - { value: 3, label: "Single Cycle" }
-
-  # Runtime-state vocabularies: the values a CAT publishes on current_state_to_process.
-  # `match` selects the profile from the DEPLOYED contract signature, never from a CAT name.
-  # `labels` is the fallback vocabulary used when the twin's stops cannot be mapped one-to-one.
   statesProfiles:
     - id: twoPosition
       match: { inputEventCarries: [atHome, atWork] }
@@ -124,53 +129,177 @@ protocol:
 # HMI would need, what data it must carry, and which accepted-state feedback proves the command
 # landed. `anyFeedback` means at least one must be present.
 capabilities:
+  # Each command declares the FULL proof it needs. A capability is offered only when every clause
+  # passes; anything unproven is disabled and carries a generated reason naming what was missing.
+  #
+  #   outputEvent / outputData  - the HMI symbol contract must be able to SEND it. outputData is a
+  #                               list of accepted shapes; the widest the contract carries wins, which
+  #                               is how a two-position jog is told from a three-position one without
+  #                               counting states or reading a CAT name. A command that carries no
+  #                               data declares one empty shape.
+  #   anyFeedback               - the contract must be able to SHOW it was accepted
+  #   needsModeChain            - the generated application must actually deliver it
+  #   consumption               - some deployed ECC must GUARD on the value. This is the clause that
+  #                               separates "the port exists" from "the controller implements it".
+  #                               inType restricts the search to one deployed FB type.
   commands:
     - purpose: ModeSelection
       outputEvent: MCNF
-      outputData: [Mode]
+      outputData: [[Mode]]
       anyFeedback: [System_Mode, LL_Mode, LocalMode, ModeCMD]
       needsModeChain: false
-      needsRecipeEngine: false
+      # Every actuator core guards its motion on mode, so selecting a mode genuinely changes plant
+      # behaviour. Searched across all deployed types, not one named FB.
+      consumption:
+        tokens: [mode]
+      # The CaS adapter ports the mode command travels on. The component REPORT ring is an adapter
+      # chain too, and walking it would conclude that every component on the ring can be put into
+      # Setup - including the BX1 covers, whose stationAdptr_in has no source at all. These are EAE
+      # adapter port names, i.e. protocol, which is why they are named rather than guessed.
+      chainPorts: [AreaAdptr, AreaHMIAdptr, CasAdptr, StationAdaptr, StationHMIAdptr, stationAdptr]
+
     - purpose: CycleControl
       outputEvent: CTCNF
-      outputData: [CycleType]
+      outputData: [[CycleType]]
       anyFeedback: [System_Cycle_Type, LL_CycleType, LocalCycleType]
       needsModeChain: false
-      needsRecipeEngine: true
+      # The station cycle state machine acts on the selection (AUTO -> CONTINUOUS/SINGLE/STOP_AT_END).
+      consumption:
+        tokens: [AreaCycleTypeCmd, StationCycleTypeCmd]
+
+    - purpose: CycleStop
+      outputEvent: CTCNF
+      outputData: [[CycleType]]
+      anyFeedback: [System_Cycle_Type, LL_CycleType, LocalCycleType]
+      needsModeChain: false
+      # A STOP is only real if the component that RUNS the recipe honours it. The station returning
+      # to its AUTO state does not halt a recipe already executing, so the proof is deliberately
+      # restricted to the recipe engine.
+      consumption:
+        inType: ProcessRuntime_Generic_v1
+        tokens: [CycleType]
+
     - purpose: FaultReset
       outputEvent: FRCNF
-      outputData: []
+      outputData: [[]]
       anyFeedback: [LL_Fault_Status, LL_Fault, fault_active, fault_code]
       needsModeChain: false
-      needsRecipeEngine: false
+      consumption:
+        tokens: [RESET]
+
     - purpose: ManualStep
       outputEvent: MREQO
-      outputData: []
+      outputData: [[]]
       alsoRequiresOutputEvent: NSREQO
       anyFeedback: [ManualStepReady, ManualStepComplete]
       needsModeChain: false
-      needsRecipeEngine: true
+      # Manual stepping requires the engine to gate on the mode AND to consume both operator events.
+      consumption:
+        inType: ProcessRuntime_Generic_v1
+        tokens: [Mode, MREQ, NSREQ]
+
     - purpose: SetupJog
       outputEvent: cmd_event
-      # The widest matching set wins, which is also what distinguishes a two-position actuator
-      # from a three-position one - no state-count guess.
-      outputDataVariants:
+      outputData:
         - [toWork1, toWork2, toHome]
         - [toWork, toHome]
       anyFeedback: [current_state_to_process, atHome, atWork]
       needsModeChain: true
-      needsRecipeEngine: false
+      # The actuator core guards its jog transitions on the setup request. The two actuator
+      # families name the WORK direction differently (toWorkSetup vs toWork1Setup/toWork2Setup),
+      # so the home direction is required outright and the work direction is satisfied by
+      # whichever the deployed core actually uses - still proof, without naming a CAT.
+      consumption:
+        tokens: [toHomeSetup]
+        anyOf:  [toWorkSetup, toWork1Setup, toWork2Setup]
 
-  # A pure feedback capability: it commands nothing, so read-only never suppresses it.
+  # ---------------------------------------------------------------------------------------------
+  # OPERATOR ACTIONS. A capability proves the controller honours an EVENT; an action is one PAYLOAD
+  # on that event - which is what the operator actually presses. CycleControl and CycleStop share
+  # CTCNF and mean opposite things, so the verdict that gates a control has to be per action.
+  #
+  #   fires        - the exact call the staged faceplate makes, e.g. MCNF(1). This is how an action
+  #                  is located in the faceplate source: no control name, no handler name, no symbol
+  #                  name is written down, so a renamed button cannot silently escape the gate.
+  #   writes       - a tag-bound action instead: the control writes this declared <Output> and the
+  #                  carrying event is raised with no code at all.
+  #   provedBy     - the capability whose gates prove the controller honours the event
+  #   alsoRequires - an extra proof THIS PAYLOAD needs, read from the deployed ECC:
+  #                    guard         the condition fragment a transition must be guarded on
+  #                    distinctFrom  fails when every such transition also accepts this other
+  #                                  fragment - i.e. the payload changes nothing
+  #                    interlockedBy fails when any such transition omits this fragment - i.e. the
+  #                                  payload can move plant with the interlock bypassed
+  actions:
+    - id: AutoMode
+      label: Automatic mode
+      provedBy: ModeSelection
+      fires: MCNF(1)
+    - id: ManualMode
+      label: Manual mode
+      provedBy: ModeSelection
+      fires: MCNF(2)
+      alsoRequires: { guard: "mode = 2", distinctFrom: "mode = 1" }
+    - id: SetupMode
+      label: Setup mode
+      provedBy: ModeSelection
+      fires: MCNF(3)
+    - id: InitialPosition
+      label: Initial position
+      provedBy: ModeSelection
+      fires: MCNF(9)
+      alsoRequires: { guard: "mode = 9", interlockedBy: Interlock }
+    # Every cycle selection is proved by the RECIPE ENGINE, not by the station tracking the choice.
+    # A station that changes its own cycle state while the engine runs on regardless has accepted a
+    # command that does not reach the plant, so all four share the strict proof.
+    - id: CycleContinuous
+      label: Run continuously
+      provedBy: CycleStop
+      fires: CTCNF(1)
+    - id: CycleStopAtEnd
+      label: Stop at end of cycle
+      provedBy: CycleStop
+      fires: CTCNF(2)
+    - id: CycleSingle
+      label: Single cycle
+      provedBy: CycleStop
+      fires: CTCNF(3)
+    - id: CycleStopRunning
+      label: Stop
+      provedBy: CycleStop
+      fires: CTCNF(0)
+    - id: FaultReset
+      label: Fault reset
+      provedBy: FaultReset
+      writes: Fault_Reset
+    - id: ManualExecute
+      label: Execute step
+      provedBy: ManualStep
+      fires: MREQO(true)
+    - id: ManualNext
+      label: Next step
+      provedBy: ManualStep
+      fires: NSREQO(true)
+    - id: JogHome
+      label: Jog home
+      provedBy: SetupJog
+      writes: toHome
+    - id: JogWork
+      label: Jog to work
+      provedBy: SetupJog
+      writes: toWork
+    - id: JogWork1
+      label: Jog to work 1
+      provedBy: SetupJog
+      writes: toWork1
+    - id: JogWork2
+      label: Jog to work 2
+      provedBy: SetupJog
+      writes: toWork2
+
+  # A pure feedback capability: it commands nothing, so it is judged on feedback alone.
   interlockDiagnostics:
     requiredFeedback: [ActiveSourceID, ActiveBlockedState]
-
-  # What the deployed process engine must actually honour. A port the ECC never reads is a port
-  # the controller ignores, so a control bound to it would be inert.
-  engineProbe:
-    typeName: ProcessRuntime_Generic_v1
-    autoGatingTokens: [Mode, CycleType]
-    manualSteppingTokens: [Mode, MREQ, NSREQ]
 
 # ---------------------------------------------------------------------------------------------
 # Deployment. HMI project registration data that is otherwise embedded in the emitters.
@@ -216,7 +345,6 @@ deployment:
   ownershipManifest: .hmi-generated.txt
   primarySymbol: sDefault
   # Symbol families that exist only to command the plant. Never deployed, never registered.
-  commandSymbols: [sSetup, setup, sManual]
 
 # =================================================================================================
 # DEPLOYMENT / DEVICE FACTS
@@ -279,7 +407,6 @@ library:
 # The logical-device type/name the generated .sysdev must declare, checked after emission.
 logicalDevice:
   type: HMI_NET
-  name: HMI_NET
 
 # ---------------------------------------------------------------------------------------------
 # Deployment artefacts. Each entry is one template rendered to one destination; the emitter walks
