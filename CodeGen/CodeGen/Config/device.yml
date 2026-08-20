@@ -73,3 +73,48 @@ bx1Io:
       coilToWork:     { signal: Cover_Gripper_Q, bit: 3 }
   # The cover actuator forced HOME on start so it cannot auto-energise Work into the swivel.
   safeStartComponent: CoverPNP_Hr
+
+# Per-target EAE resource and device identity. These are DEPLOYMENT facts an engineer may edit: renaming
+# a resource, or disambiguating two devices that share a Type, is not a code change. What each backend
+# DOES -- whether it hosts the Feed station, whether its canvas is device-local -- stays in C# beside the
+# emitter that implements it, and nothing here names a CLR type.
+#
+# resourceName is load-bearing: the authored M580 .hcf symlinks read 'RES0.M580IO.*', and M262's file
+# output is byte-identical only under M262_RES.
+# Each flag is a fact about the TOPOLOGY the target sits in, which an engineer may edit; what the flag
+# selects is backend code that must exist before the target can be named here at all.
+#   hostsFeedStation           runs the Feed station, so components upstream of the assembly side land here
+#   deviceLocalCanvas          its sysres canvas is device-local, so FBs translate to a local origin
+#   receivesRelocatedComponents  receives components moved off another target -> never swept from its sysres
+#   opensCoverSeam             hands the cover detour out, so its ring closes across the seam
+#   carriesDetouredChain       carries a chain another target commands, so it is open at both ends
+#   hcfTemplate                the authored hardware-config file carried verbatim into its device folder
+targets:
+  - plc: M262
+    resourceName: M262_RES
+    deviceType: M262_dPAC
+    hcfTemplate: M262IO.hcf
+    hostsFeedStation: true
+  - plc: M580
+    resourceName: RES0
+    deviceType: M580_dPAC
+    hcfTemplate: M580IO.hcf
+    deviceLocalCanvas: true
+    opensCoverSeam: true
+  # BX1 and the RevPi are both Soft_dPAC, so Type alone does not identify either: each carries a name.
+  - plc: BX1
+    resourceName: BX1_RES
+    deviceType: Soft_dPAC
+    deviceName: BX1
+    hcfTemplate: BX1IO.hcf
+    deviceLocalCanvas: true
+    carriesDetouredChain: true
+  - plc: RevPi
+    resourceName: RevPi_RES
+    deviceType: Soft_dPAC
+    deviceName: Revolution_Pi
+    hostsFeedStation: true
+    # Components move HERE from their home controller while their process stays behind, so its ring
+    # is what closes around them. That is relocation, not a detour: the chain is not commanded by
+    # another controller, it is the same controller reaching a component that moved.
+    receivesRelocatedComponents: true
