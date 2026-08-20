@@ -4,7 +4,6 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.Xml.Linq;
 
 namespace CodeGen.Hmi
 {
@@ -17,72 +16,179 @@ namespace CodeGen.Hmi
     internal static class HmiPlanner
     {
         internal static HmiPlan Plan(
-            HmiPlant plant, IReadOnlyList<HmiCatTemplate> templates, HmiDefinition def)
+            HmiPlant plant, IReadOnlyList<HmiCatTemplate> templates, HmiEccIndex ecc, HmiDefinition def)
         {
-            var readOnly = def.ReadOnly;
             var diagnostics = new List<string>(plant.Diagnostics);
             var byType = templates.ToDictionary(t => t.CatType, StringComparer.OrdinalIgnoreCase);
 
             var drawable = Drawable(plant, byType, def, diagnostics);
 
-            // Ownership comes from the compiled recipe in GenerationContext, not from re-parsing the
-            // serialised Recipe parameter back out of the syslay. Same answer, one source of truth.
-            var owners = plant.Processes
-                .Where(p => drawable.ContainsKey(p.InstanceName))
-                .ToDictionary(
-                    p => p.InstanceName,
-                    p => p.Owned.Concat(p.Observed)
-                          .Where(drawable.ContainsKey)
-                          .Distinct(StringComparer.Ordinal)
-                          .ToList(),
-                    StringComparer.Ordinal);
+            // ROLES, derived from the model: a component a process COMMANDS is an actuator, one it
+            // only OBSERVES is a sensor. This is the compiled recipe talking - no CAT names, no
+            // instance names, no state counts, and it holds for clamp and no-clamp alike.
+            var commanded = new HashSet<string>(plant.Processes.SelectMany(p => p.Owned), StringComparer.Ordinal);
 
+            HmiRole RoleOf(string instance) =>
+                plant.Stations.Any(s => s.InstanceName == instance) ? HmiRole.Station
+                : plant.Processes.Any(p => p.InstanceName == instance) ? HmiRole.Process
+                : commanded.Contains(instance) ? HmiRole.Actuator
+                : HmiRole.Sensor;
+
+            // One family per declared screen, drawn by the SAME paginator. A family is always
+            // generated even when its capability is unsupported - the operator still needs to see the
+            // process, with its controls disabled and the reason stated.
             var families = new List<(string Base, string Title, List<Drawn> Items)>();
 
-            foreach (var proc in owners.Keys.OrderBy(n => n, StringComparer.Ordinal))
+            foreach (var fam in def.Screens.Families)
             {
-                var members = new List<Drawn> { drawable[proc] };
-                members.AddRange(owners[proc].OrderBy(n => n, StringComparer.Ordinal).Select(n => drawable[n]));
-                families.Add((ScreenBase(proc, def), Humanise(proc), members));
+                var members = new List<Drawn>();
+
+                foreach (var name in drawable.Keys.OrderBy(n => n, StringComparer.Ordinal))
+                {
+                    var role = RoleOf(name);
+                    if (!fam.Include.Contains(role)) continue;
+
+                    // A family may place only the instances whose own capability passed (Setup jog).
+                    if (fam.OnlySupported && fam.Requires is { } need &&
+                        !CapabilitiesOf(plant, name).Any(c => c.Purpose == need && c.Supported))
+                        continue;
+
+                    // The family's symbol for this role - the Automatic process tile, the Setup jog
+                    // canvas - falling back to the primary when the template does not ship it.
+                    var d = drawable[name];
+                    var wanted = fam.SymbolFor(role, def.Deployment.PrimarySymbol);
+                    var symbol = d.Template.Placeable(wanted) ?? d.Symbol;
+
+                    // A command symbol whose EVERY action is withheld is not shipped: the operator
+                    // gets the monitoring variant instead, so the screen still shows the live values
+                    // and the compiled panel carries no control that could raise a refused command.
+                    if (!ReferenceEquals(symbol, d.Symbol) && Offers(symbol, def) &&
+                        !Verdicts(plant, name, d.Template.CatType, symbol, ecc, def).Any(v => v.Effective) &&
+                        !Offers(d.Symbol, def))
+                        symbol = d.Symbol;
+
+                    if (symbol.Width <= 0 || symbol.Height <= 0) continue;
+                    members.Add(d with { Symbol = symbol });
+                }
+
+                if (members.Count == 0)
+                {
+                    diagnostics.Add($"screen family '{fam.Name}' has no members in this model - not generated.");
+                    continue;
+                }
+                families.Add((fam.Name, fam.Title, members));
             }
 
-            var claimed = new HashSet<string>(owners.SelectMany(o => o.Value).Concat(owners.Keys), StringComparer.Ordinal);
-            var residual = drawable.Keys.Where(n => !claimed.Contains(n))
-                .OrderBy(n => n, StringComparer.Ordinal).Select(n => drawable[n]).ToList();
-            if (residual.Count > 0) families.Add((def.Screens.ResidualName, def.Screens.ResidualTitle, residual));
-
             var screens = new List<HmiScreen>();
-            var hub = new List<(string First, string Label)>();
+
 
             foreach (var fam in families)
             {
-                var pages = Paginate(fam.Items, plant, def);
+                var pages = Paginate(fam.Items, plant, ecc, def);
                 for (var i = 0; i < pages.Count; i++)
                 {
                     var title = pages.Count > 1 ? $"{fam.Title} ({i + 1}/{pages.Count})" : fam.Title;
                     screens.Add(new HmiScreen(PageName(fam.Base, i), title,
                         pages[i].Items, Array.Empty<HmiNavButton>(), pages[i].Captions));
                 }
-                hub.Add((PageName(fam.Base, 0), fam.Title));
             }
 
-            var all = new List<HmiScreen>
-            {
-                new(def.Screens.HubName, def.Screens.HubTitle, Array.Empty<HmiPlaceable>(), NavHub(hub, def), Array.Empty<HmiCaption>())
-            };
-            all.AddRange(screens.Select(s => s with { Buttons = PageNav(s.Name, screens, def) }));
+            screens.AddRange(Detail(plant, def));
 
-            // Every screen carries the banner and its own title.
-            all = all.Select(s => s with { Captions = Chrome(s, def).Concat(s.Captions).ToList() }).ToList();
+            var all = screens
+                .Select(s => s with
+                {
+                    Buttons = Nav(s.Name, screens, def)
+                })
+                .ToList();
+
+            // Every screen carries its title, and - where it actually has one - a line naming the
+            // actions this build withholds. The reason reaches the operator on the panel instead of
+            // living only in a log line and a side file.
+            all = all.Select(s => s with
+            {
+                Captions = Chrome(s, def).Concat(Withheld(s, def)).Concat(s.Captions).ToList()
+            }).ToList();
 
             var used = families.SelectMany(f => f.Items).Select(i => i.Template)
                 .GroupBy(t => t.CatType, StringComparer.Ordinal).Select(g => g.First()).ToList();
 
-            if (readOnly) diagnostics.Add(def.UnsupportedCommandNotice);
-            return new HmiPlan(all, used, diagnostics, readOnly);
+            var selected = SelectSymbols(families.SelectMany(f => f.Items).ToList(), plant, ecc, def);
+
+            foreach (var v in all.SelectMany(x => x.Items).SelectMany(i => i.Actions)
+                         .Where(v => !v.Effective)
+                         .GroupBy(v => (v.Symbol, v.ActionId)).Select(g => g.First()))
+                diagnostics.Add($"{def.UnsupportedCommandNotice} '{v.Label}' on '{v.Symbol}': {v.Detail}");
+
+            // Judged over EVERY symbol of every deployed CAT, because the CAT-shared partial
+            // classes are compiled whether or not a canvas places the symbol.
+            var allVerdicts = used.SelectMany(tpl =>
+                    drawable.Values.Where(d => d.Template.CatType == tpl.CatType)
+                        .SelectMany(d => tpl.Symbols.SelectMany(sym =>
+                            Verdicts(plant, d.Name, tpl.CatType, sym, ecc, def))))
+                .ToList();
+
+            return new HmiPlan(all, used, diagnostics, selected, allVerdicts);
         }
 
         private sealed record Drawn(string Name, string TagName, HmiCatTemplate Template, HmiSymbol Symbol);
+
+        // The symbols this generation owns. Three kinds, and the distinction is what stops a dormant
+        // command canvas shipping:
+        //   * the PLACED tile symbol - always kept
+        //   * a pop-up FACEPLATE that only displays (fault, interlock) - kept, because the placed
+        //     symbol opens it
+        //   * a pop-up COMMAND faceplate (setup/jog) - kept ONLY where the capability that drives it
+        //     is actually supported on an instance of that CAT. Registering it otherwise compiles a
+        //     canvas whose controls the controller would ignore.
+        private static IReadOnlyList<HmiSelectedSymbol> SelectSymbols(
+            IReadOnlyList<Drawn> placed, HmiPlant plant, HmiEccIndex ecc, HmiDefinition def)
+        {
+            var selected = new HashSet<HmiSelectedSymbol>();
+
+            foreach (var group in placed.GroupBy(p => p.Template.CatType, StringComparer.OrdinalIgnoreCase))
+            {
+                var tpl = group.First().Template;
+
+                foreach (var d in group) selected.Add(new HmiSelectedSymbol(tpl.CatType, d.Symbol.Name));
+
+                // Does ANY instance of this CAT support a command? Judged from the resolved
+                // capabilities, never from the symbol's name.
+                var supportsCommand = group.Select(d => d.Name).Distinct(StringComparer.Ordinal)
+                    .Any(n => tpl.Symbols.Any(sym =>
+                        Verdicts(plant, n, tpl.CatType, sym, ecc, def).Any(v => v.Effective)));
+
+                foreach (var sym in tpl.Symbols)
+                {
+                    // Already selected as a placed tile.
+                    if (selected.Contains(new HmiSelectedSymbol(tpl.CatType, sym.Name))) continue;
+
+                    // A command canvas ships only where the capability driving it is supported.
+                    // This is the whole point of the selection: an unsupported one is dead source.
+                    if (sym.CommandCapable) { if (supportsCommand) selected.Add(new HmiSelectedSymbol(tpl.CatType, sym.Name)); continue; }
+
+                    // A display pop-up (fault, interlock) is opened BY the placed tile, so it ships
+                    // with it. A non-placed, non-command, non-pop-up symbol is genuinely unused.
+                    if (sym.IsFaceplate) selected.Add(new HmiSelectedSymbol(tpl.CatType, sym.Name));
+                }
+            }
+
+            return selected
+                .OrderBy(s => s.CatType, StringComparer.Ordinal)
+                .ThenBy(s => s.Symbol, StringComparer.Ordinal)
+                .ToList();
+        }
+
+        // The ONE effective verdict per placed symbol. Everything downstream reads this.
+        private static IReadOnlyList<HmiActionVerdict> Verdicts(
+            HmiPlant plant, string instance, string catType, HmiSymbol symbol,
+            HmiEccIndex ecc, HmiDefinition def) =>
+            HmiActionResolver.For(instance, catType, symbol,
+                                  CapabilitiesOf(plant, instance).ToList(), ecc, def);
+
+        // Does this symbol put any operator command in front of the operator at all?
+        private static bool Offers(HmiSymbol symbol, HmiDefinition def) =>
+            def.Actions.Any(symbol.Presents);
 
         // Everything drawable, taken from the semantic model. A component reaches this point only if
         // the twin declared it AND the deployment emitted it, so a placement can never dangle.
@@ -90,7 +196,6 @@ namespace CodeGen.Hmi
             HmiPlant plant, IReadOnlyDictionary<string, HmiCatTemplate> byType,
             HmiDefinition def, List<string> diagnostics)
         {
-            var readOnly = def.ReadOnly;
             var result = new Dictionary<string, Drawn>(StringComparer.Ordinal);
             var missing = new SortedSet<string>(StringComparer.Ordinal);
 
@@ -103,13 +208,20 @@ namespace CodeGen.Hmi
 
                 var symbol = tpl.Primary(def.Deployment.PrimarySymbol);
                 if (symbol == null) { missing.Add(catType); return; }
-                if (readOnly && symbol.CommandCapable)
+
+                // A symbol with no usable footprint is REJECTED rather than placed at a guessed size:
+                // EAE lays out by the declared size, so a wrong one silently overlaps its neighbour.
+                if (symbol.Width <= 0 || symbol.Height <= 0)
                 {
                     diagnostics.Add(
-                        $"'{name}' ({catType}) is not placed: its '{symbol.Name}' symbol declares controller " +
-                        $"outputs ({symbol.Outputs}). Monitoring for this component is lost.");
+                        $"'{name}' ({catType}) is not placed: its '{symbol.Name}' symbol declares no usable " +
+                        "size, so its footprint on the canvas is unknown.");
                     return;
                 }
+
+                // A command-capable symbol IS placed. Whether its controls are live is decided per
+                // capability from the deployed contract - not by refusing the whole tile, which used
+                // to cost the operator the monitoring as well.
                 result[name] = new Drawn(Identifier(name), tag, tpl, symbol);
             }
 
@@ -125,11 +237,12 @@ namespace CodeGen.Hmi
 
         private sealed record Page(List<HmiPlaceable> Items, List<HmiCaption> Captions);
 
-        // Shelf packing over the symbol's DECLARED footprint (what EAE uses for placement), with a
-        // caption above each tile and MODEL-DERIVED detail lines below it. Those detail lines are the
-        // point: state labels, the decoded interlock rules and the controller allocation land in a
-        // compiled canvas, so the deployed panel shows model data instead of a side file nothing reads.
-        private static List<Page> Paginate(List<Drawn> items, HmiPlant plant, HmiDefinition def)
+        // Shelf packing over the symbol's DECLARED footprint (what EAE uses for placement), with one
+        // caption above each tile. The tile itself shows the LIVE values, bound by TagName; the
+        // model-derived text a faceplate cannot show - state legend, interlock rules, allocation -
+        // goes on the read-only detail canvases rather than under every tile, where it would both
+        // overflow the canvas and sit as static text beside a live one.
+        private static List<Page> Paginate(List<Drawn> items, HmiPlant plant, HmiEccIndex ecc, HmiDefinition def)
         {
             var g = def.Geometry;
             var pages = new List<Page>();
@@ -138,8 +251,7 @@ namespace CodeGen.Hmi
 
             foreach (var it in items)
             {
-                var detail = Detail(it.Name, plant, def);
-                var cellH = it.Symbol.Height + g.CaptionHeight + detail.Count * g.CaptionHeight;
+                var cellH = it.Symbol.Height + g.CaptionHeight;
                 if (x > g.Margin && x + it.Symbol.Width > g.ContentRight) { x = g.Margin; y += rowH + g.Gap; rowH = 0; }
                 if (y + cellH > g.ContentBottom && page.Items.Count > 0)
                 {
@@ -149,11 +261,9 @@ namespace CodeGen.Hmi
                 }
 
                 page.Captions.Add(new HmiCaption($"cap_{it.Name}", Humanise(it.Name), x, y, false));
-                page.Items.Add(new HmiPlaceable(it.Name, it.TagName, it.Template.CatType, it.Symbol, x, y + g.CaptionHeight));
-
-                var dy = y + g.CaptionHeight + it.Symbol.Height;
-                for (var i = 0; i < detail.Count; i++)
-                    page.Captions.Add(new HmiCaption($"det{i}_{it.Name}", detail[i], x, dy + i * g.CaptionHeight, false, true));
+                page.Items.Add(new HmiPlaceable(it.Name, it.TagName, it.Template.CatType, it.Symbol, x,
+                                                y + g.CaptionHeight,
+                                                Verdicts(plant, it.Name, it.Template.CatType, it.Symbol, ecc, def)));
 
                 x += it.Symbol.Width + g.Gap;
                 rowH = Math.Max(rowH, cellH);
@@ -163,115 +273,104 @@ namespace CodeGen.Hmi
             return pages;
         }
 
-        // The model-derived lines for one placed instance. Everything here comes from Control.xml via
-        // the semantic model or from the exact emitted RuleTable - never from a template.
-        private static IReadOnlyList<string> Detail(string instance, HmiPlant plant, HmiDefinition def)
+        // The model data the faceplates cannot show, on a read-only surface.
+        //
+        // A faceplate renders a live NUMBER and fixed labels; the twin's own state names, the rules
+        // the interlock evaluator will actually run and the controller each instance is allocated to
+        // exist only in the plan. Putting them on a compiled canvas is what makes the deployed panel
+        // explain itself instead of a side file nothing on the rig can open.
+        //
+        // The HMI never computes or enforces an interlock. Every rule below is read from
+        // GenerationContext.Interlocks and only joined to names - the controller stays authoritative.
+        private static IReadOnlyList<HmiScreen> Detail(HmiPlant plant, HmiDefinition def)
         {
+            var g = def.Geometry;
             var lines = new List<string>();
-            var d = def.Screens;
 
-            var c = plant.ByInstance(instance);
-            if (c != null)
+            foreach (var c in plant.Components.OrderBy(x => x.InstanceName, StringComparer.Ordinal))
             {
-                if (d.ShowAllocation)
-                    lines.Add($"{c.Controller} / {c.Resource}" + (c.Slot >= 0 ? $" / slot {c.Slot}" : string.Empty));
-
-                if (d.ShowStates && c.States.Count > 0)
-                    lines.Add(Clip("States: " + string.Join(", ", c.States.Select(s => $"{s.Value}={s.Name}")),
-                                   d.MaxStateChars));
-
-                if (d.ShowInterlocks)
-                    foreach (var r in c.Interlocks)
-                        lines.Add(Clip(r.Explain(c.DisplayName), d.MaxInterlockChars));
-                return lines;
+                lines.Add($"{c.DisplayName}  -  {c.Controller}/{c.Resource}" +
+                          (c.Slot >= 0 ? $"  slot {c.Slot}" : "  unallocated") +
+                          (c.Ring == null ? string.Empty : $"  ring {c.Ring}"));
+                if (c.States.Count > 0)
+                    lines.Add("    states: " + string.Join("  ", c.States.Select(s => $"{s.Value} {s.Name}")));
+                foreach (var r in c.Interlocks) lines.Add("    " + r.Explain(c.DisplayName));
             }
 
-            var p = plant.Processes.FirstOrDefault(x => string.Equals(x.InstanceName, instance, StringComparison.Ordinal));
-            if (p != null)
-            {
-                if (d.ShowAllocation)
-                    lines.Add($"{p.Controller} / {p.Resource}" + (p.Slot >= 0 ? $" / slot {p.Slot}" : string.Empty));
-                if (d.ShowStates && p.Phases.Count > 0)
-                    lines.Add(Clip("Phases: " + string.Join(", ", p.Phases.Select(s => $"{s.Value}={s.Name}")),
-                                   d.MaxStateChars));
-                lines.Add($"Recipe: {p.Rows.Count} step(s), owns {p.Owned.Count}, observes {p.Observed.Count}");
-                return lines;
-            }
+            foreach (var p in plant.Processes.OrderBy(x => x.InstanceName, StringComparer.Ordinal))
+                lines.Add($"{p.DisplayName}  -  {p.Controller}/{p.Resource}" +
+                          (p.Slot >= 0 ? $"  slot {p.Slot}" : string.Empty) +
+                          (p.Owned.Count > 0 ? $"  commands {p.Owned.Count}" : string.Empty));
 
-            var st = plant.Stations.FirstOrDefault(x => string.Equals(x.InstanceName, instance, StringComparison.Ordinal));
-            if (st != null)
-            {
-                if (d.ShowAllocation)
-                    lines.Add($"{st.Controller} / {st.Resource}" +
-                              (st.ReceivesModeBroadcast ? " / mode chain" : " / no mode broadcast"));
+            if (lines.Count == 0) return Array.Empty<HmiScreen>();
 
-                // The mode/cycle vocabulary decodes the live LL_Mode / LL_CycleType the faceplate
-                // already binds; without it the operator reads a bare number. Printed ONLY where the
-                // station actually receives the mode chain - on one that does not, the numbers never
-                // change and the legend would imply a selection the controller cannot see.
-                if (d.ShowProtocolLegend && st.ReceivesModeBroadcast)
-                {
-                    lines.Add(Clip("Modes: " + Vocabulary(def.ModeLabels), d.MaxProtocolChars));
-                    lines.Add(Clip("Cycle: " + Vocabulary(def.CycleLabels), d.MaxProtocolChars));
-                }
+            var perPage = Math.Max(1, (g.ContentBottom - g.ContentTop) / g.CaptionHeight);
+            var screens = new List<HmiScreen>();
+            for (var page = 0; page * perPage < lines.Count; page++)
+            {
+                var take = lines.Skip(page * perPage).Take(perPage).ToList();
+                var captions = take.Select((t, i) => new HmiCaption(
+                    $"det{page}_{i}", t, g.Margin, g.ContentTop + i * g.CaptionHeight, false)).ToList();
+                var pages = (lines.Count + perPage - 1) / perPage;
+                screens.Add(new HmiScreen(
+                    PageName(def.Screens.DetailName, page),
+                    pages > 1 ? $"{def.Screens.DetailTitle} ({page + 1}/{pages})" : def.Screens.DetailTitle,
+                    Array.Empty<HmiPlaceable>(), Array.Empty<HmiNavButton>(), captions));
             }
-            return lines;
+            return screens;
         }
 
-        private static string Vocabulary(IReadOnlyDictionary<int, string> labels) =>
-            string.Join(", ", labels.OrderBy(kv => kv.Key).Select(kv => $"{kv.Key}={kv.Value}"));
+        // One line per screen naming what it cannot do, drawn in the caption style the reference
+        // already uses. Nothing new is invented: a withheld action is stated, not silently missing.
+        private static IReadOnlyList<HmiCaption> Withheld(HmiScreen s, HmiDefinition def)
+        {
+            var refused = s.Items.SelectMany(i => i.Actions).Where(v => !v.Effective)
+                .Select(v => v.Label).Distinct(StringComparer.Ordinal)
+                .OrderBy(x => x, StringComparer.Ordinal).ToList();
+            if (refused.Count == 0) return Array.Empty<HmiCaption>();
 
-        private static string Clip(string text, int max) =>
-            text.Length <= max ? text : text.Substring(0, Math.Max(0, max - 3)) + "...";
+            var g = def.Geometry;
+            return new[]
+            {
+                new HmiCaption("withheld", $"{def.WithheldHeading} {string.Join(", ", refused)}",
+                               g.Margin, g.TitleY + g.CaptionHeight, false),
+            };
+        }
 
         private static IReadOnlyList<HmiCaption> Chrome(HmiScreen s, HmiDefinition def)
         {
             var g = def.Geometry;
-            var chrome = new List<HmiCaption> { new("screenTitle", s.Title, g.Margin, g.TitleY, true) };
-            if (def.ReadOnly) chrome.Insert(0, new HmiCaption("roBanner", def.BannerText, g.Margin, g.BannerY, true));
-            return chrome;
+            return new[] { new HmiCaption("screenTitle", s.Title, g.Margin, g.TitleY, true) };
         }
 
-        private static IReadOnlyList<HmiNavButton> NavHub(List<(string First, string Label)> families, HmiDefinition def)
+        // Navigation is ONE band at the foot of every canvas: the family links (on the hub) or the
+        // way back to it (everywhere else), then this screen's own previous/next page.
+        //
+        // The band's height is decided BEFORE pagination and taken off the content area, so a button
+        // can never land on a tile - which is what happened when the hub drew its family row at
+        // ContentTop, on top of the first row of faceplates. Rows grow UPWARD from the foot into
+        // space pagination has already given up, never downward off the canvas.
+        // Navigation, as the reference draws it: at most ONE ChangeCanvasButton, bottom-right, named
+        // after the canvas it opens. Everything else is the EAE runtime's own canvas-topology panel,
+        // which the canvas list already registers every screen with - so a screen needs no in-canvas
+        // button to be reachable, and the reference gives its second pages none.
+        //
+        // Forward through the emitted order, so clicking through also walks the whole panel.
+        private static IReadOnlyList<HmiNavButton> Nav(string screenName, List<HmiScreen> screens, HmiDefinition def)
         {
-            var g = def.Geometry;
-            var buttons = new List<HmiNavButton>();
-            int x = g.Margin, y = g.ContentTop;
-            foreach (var f in families)
-            {
-                if (x + g.ButtonWidth > g.ContentRight) { x = g.Margin; y += g.ButtonHeight + g.Gap; }
-                buttons.Add(new HmiNavButton(f.First, f.First, f.Label, x, y));
-                x += g.ButtonWidth + g.Gap;
-            }
-            return buttons;
-        }
-
-        private static IReadOnlyList<HmiNavButton> PageNav(string screenName, List<HmiScreen> screens, HmiDefinition def)
-        {
-            var g = def.Geometry;
-            var buttons = new List<HmiNavButton>
-            {
-                new(def.Screens.HubName, def.Screens.HubName, def.Screens.HubButtonText, g.Margin, g.NavBandY)
-            };
-
             var idx = screens.FindIndex(s => s.Name == screenName);
-            var baseName = BaseOf(screenName);
-            var prev = screens.Take(idx).LastOrDefault(s => BaseOf(s.Name) == baseName);
-            var next = screens.Skip(idx + 1).FirstOrDefault(s => BaseOf(s.Name) == baseName);
+            if (idx < 0 || idx + 1 >= screens.Count) return Array.Empty<HmiNavButton>();
 
-            var x = g.Margin + g.ButtonWidth + g.Gap;
-            if (prev != null)
-            {
-                buttons.Add(new HmiNavButton("prev_" + prev.Name, prev.Name, def.Screens.PreviousText, x, g.NavBandY));
-                x += g.ButtonWidth + g.Gap;
-            }
-            if (next != null)
-                buttons.Add(new HmiNavButton("next_" + next.Name, next.Name, def.Screens.NextText, x, g.NavBandY));
-            return buttons;
+            var g = def.Geometry;
+            var next = screens[idx + 1];
+            return new[] { new HmiNavButton(next.Name, next.Name, next.Title,
+                                            g.ContentRight - g.ButtonWidth, g.NavBandY) };
         }
 
-        // A component name becomes a C# field, so it must be a legal identifier. Component identity
-        // travels in TagName, never in this name, so sanitising here is safe.
+        private static IEnumerable<HmiCapability> CapabilitiesOf(HmiPlant plant, string instance) =>
+            plant.AllCapabilities()
+                .Where(x => string.Equals(x.Owner, instance, StringComparison.Ordinal)).Select(x => x.Cap);
+
         private static string Identifier(string name)
         {
             var s = new string(name.Select(ch => char.IsLetterOrDigit(ch) || ch == '_' ? ch : '_').ToArray());
@@ -299,36 +398,5 @@ namespace CodeGen.Hmi
 
         private static string PageName(string baseName, int index) => index == 0 ? baseName : baseName + (index + 1);
 
-        private static string ScreenBase(string processName, HmiDefinition def) =>
-            Identifier(processName).Replace("_", string.Empty) + def.Screens.Suffix;
-    }
-
-    internal sealed record SyslayFb(string Id, string Name, string Type, IReadOnlyDictionary<string, string> Parameters)
-    {
-        public string? Param(string name) => Parameters.TryGetValue(name, out var v) ? v : null;
-    }
-
-    internal static class SyslayReader
-    {
-        internal static IReadOnlyList<SyslayFb> Read(string syslayPath)
-        {
-            var doc = XDocument.Load(syslayPath);
-            var list = new List<SyslayFb>();
-            foreach (var fb in doc.Descendants().Where(e => e.Name.LocalName == "FB"))
-            {
-                var id = (string?)fb.Attribute("ID");
-                var name = (string?)fb.Attribute("Name");
-                var type = (string?)fb.Attribute("Type");
-                if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(name) || string.IsNullOrEmpty(type)) continue;
-
-                var ps = fb.Elements().Where(e => e.Name.LocalName == "Parameter")
-                    .GroupBy(e => (string?)e.Attribute("Name") ?? string.Empty, StringComparer.Ordinal)
-                    .Where(g => g.Key.Length > 0)
-                    .ToDictionary(g => g.Key, g => (string?)g.First().Attribute("Value") ?? string.Empty, StringComparer.Ordinal);
-
-                list.Add(new SyslayFb(id!, name!, type!, ps));
-            }
-            return list;
-        }
     }
 }
