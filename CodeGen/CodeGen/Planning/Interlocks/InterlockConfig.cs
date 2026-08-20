@@ -1,4 +1,4 @@
-using CodeGen.Configuration;
+﻿using CodeGen.Configuration;
 
 namespace CodeGen.Translation.Interlocks
 {
@@ -8,16 +8,9 @@ namespace CodeGen.Translation.Interlocks
         public int RuleArraySize { get; set; }
         public bool UseStruct { get; set; }
         public bool UseTargetStruct { get; set; }
-        public CentreHomeRange CentreHome { get; set; } = new();
 
         private static readonly YamlConfigFile<InterlockConfig> _file = new("Config", "interlock.yaml");
 
         public static InterlockConfig Current => _file.Load();
-    }
-
-    public sealed class CentreHomeRange
-    {
-        public int MinState { get; set; }
-        public int MaxState { get; set; }
     }
 }
