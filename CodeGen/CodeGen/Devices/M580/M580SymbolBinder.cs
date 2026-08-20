@@ -2,34 +2,28 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Xml.Linq;
-using CodeGen.Configuration;
-using CodeGen.Devices.Core;
 using CodeGen.Devices.M262;
 using CodeGen.Mapping;
 using CodeGen.Translation;
+using System.Xml.Linq;
+using CodeGen.Configuration;
+using CodeGen.Devices.Core;
 
 namespace CodeGen.Devices.M580
 {
-    // Binds the deployed M580 .hcf channel symlinks so EAE's Symbolic Link view resolves them
-    // (M580 sibling of the M262 HcfPatchService). DIRECT binding to the consumer CAT instance:
-    // each channel value is {resourceId}.{consumerFbId}.{port} (unquoted, GUID-headed). The CATs do
-    // direct $${PATH} symlink I/O (no PLC_RW_M580 broker FB is emitted), so the authored broker
-    // symlink name (trailing segment, e.g. ClampAtWork) is translated to the CAT port via
-    // M580ChannelMap and bound direct. Idempotent; literal/empty channels ('', scanner ids, T#…)
-    // are never touched.
+    // Binds the deployed M580 .hcf channel symlinks direct to the consumer CAT instance:
+    // {resourceId}.{consumerFbId}.{port}, unquoted and GUID-headed. No PLC_RW_M580 broker FB is emitted,
+    // so the authored symlink name is translated to a CAT port. Literal/empty channels are never touched.
     public static class M580SymbolBinder
     {
-        // The authored .hcf channel symlink name -> the component + CAT port it binds, from
-        // Config/smc-rig.yml. The rig owns which physical channel carries which signal; this file only
-        // resolves the ids and writes the Form-1 triples.
+        // The authored channel symlink name -> the component + CAT port it binds, from Config/smc-rig.yml.
+        // The rig owns which channel carries which signal; this file only resolves ids and writes triples.
         private static Dictionary<string, (string Comp, string Port)> ChannelMap(string? catType)
         {
             var cat = RigCatalog.Current;
             var m = new Dictionary<string, (string Comp, string Port)>(StringComparer.OrdinalIgnoreCase);
             foreach (var b in cat.M580Channels) m[b.Channel] = (b.Component, b.Port);
-            // The swivel set follows the CAT the twin's own state graph selected, so a two-position model
-            // and a centre-home model bind the same physical channels to different ports.
+            // A two-position swivel and a centre-home one bind the same channels to different ports.
             var swivel = string.Equals(catType, TemplateMap.SevenStateCentreHomeCat, StringComparison.OrdinalIgnoreCase)
                 ? cat.SwivelChannels.CentreHome
                 : cat.SwivelChannels.TwoPosition;
@@ -37,7 +31,6 @@ namespace CodeGen.Devices.M580
             return m;
         }
 
-        // Direct-bind the deployed M580 X80 .hcf channels to the consumer CAT ports.
         public static void BindM580(MapperConfig? config,
             SystemInjector.BindingApplicationReport report)
         {
@@ -59,8 +52,7 @@ namespace CodeGen.Devices.M580
 
                 var (resId, resName) = HcfBindingSupport.ReadSysresIdentity(folder);
                 if (string.IsNullOrEmpty(resId)) { Log("skipped, deployed sysres ID not resolvable"); return; }
-                // resName is the live Resource Name attribute EAE's $${PATH} macro resolves to as the
-                // leading segment of every per-instance symlink the CAT body declares.
+                // resName is what EAE's $${PATH} macro resolves to as the leading symlink segment.
                 if (string.IsNullOrWhiteSpace(resName)) resName = CodeGen.Mapping.ControllerMap.ResourceForPlc(PlcAssignment.M580);
 
                 var compId = HcfBindingSupport.BuildComponentIdMap(folder);
@@ -75,11 +67,9 @@ namespace CodeGen.Devices.M580
                 try { doc = XDocument.Load(hcfPath); }
                 catch (Exception ex) { Log($"skipped, .hcf parse failed: {ex.GetType().Name}: {ex.Message}"); return; }
 
-                // Resolve the channel map for THIS generation: the swivel's ports follow whichever CAT its
-                // own state graph selected, read back from the deployed FB Type.
+                // The swivel's ports follow whichever CAT its state graph selected, read back from the
+                // deployed FB Type; which component IS the swivel comes from the catalog's swivel rows.
                 var typeOf = HcfBindingSupport.BuildComponentTypeMap(folder);
-                // Which component IS the swivel comes from the catalog's own swivel rows, not a name
-                // this binder knows.
                 var swivelComponent = RigCatalog.Current.SwivelChannels.CentreHome
                     .Concat(RigCatalog.Current.SwivelChannels.TwoPosition)
                     .Select(b => b.Component).FirstOrDefault() ?? string.Empty;
@@ -106,9 +96,8 @@ namespace CodeGen.Devices.M580
                     {
                         if (map.Port.Length == 0)
                         {
-                            // The selected CAT has no port for this physical channel (e.g. the centre sensor
-                            // of a swivel the twin models with only two stops). Blank it for the same reason
-                            // a missing component is blanked: EAE cannot convert a dangling symbolic value.
+                            // The selected CAT has no port for this channel (e.g. the centre sensor of a
+                            // two-stop swivel). EAE cannot convert a dangling symbolic value, so blank it.
                             if (!string.IsNullOrEmpty(raw))
                             {
                                 pv.SetAttributeValue("Value", "");
@@ -122,11 +111,9 @@ namespace CodeGen.Devices.M580
                         }
                         if (!compId.TryGetValue(map.Comp, out var fbId))
                         {
-                            // Component (e.g. Clamp in the no-clamp _vc twin) not on this resource: the .hcf
-                            // template still declares its channels as symbolic 'RES0.M580IO.<name>', which EAE
-                            // CANNOT convert at compile ("HW Configuration could not convert the symbolic
-                            // value") and fails the build. Blank the channel (unconfigured IO) so the compile
-                            // succeeds. Clamp model is unaffected: the Clamp FB is present -> binds normally.
+                            // Component not on this resource (e.g. Clamp in the no-clamp twin), but the .hcf
+                            // template still declares its channels symbolically, which EAE cannot convert at
+                            // compile. Blank the channel so the build succeeds.
                             missingComp++;
                             pv.SetAttributeValue("Value", "");
                             blanked++;
@@ -135,9 +122,8 @@ namespace CodeGen.Devices.M580
                                 "not on the M580 resource — blanked (unconfigured; was dangling symbolic)");
                             continue;
                         }
-                        // Form 1 direct GUID triple "<resId>.<fbId>.<port>" (as M262 uses): populates
-                        // BOTH EAE's device-tree IO view AND the Symbolic Link panel. A quoted
-                        // per-instance symbolic (Form 2) leaves the device-tree Value column blank.
+                        // The direct GUID triple populates BOTH EAE's device-tree IO view and the Symbolic
+                        // Link panel; a quoted per-instance symbolic leaves the Value column blank.
                         var boundVal = $"{resId}.{fbId}.{map.Port}";
                         if (!string.Equals(raw, boundVal, StringComparison.Ordinal))
                         {
@@ -151,8 +137,7 @@ namespace CodeGen.Devices.M580
                         continue;
                     }
 
-                    // Already bound: middle segment matches a component FB id (Form 1) or FB name
-                    // (Form 2, kept only for idempotent rerun detection). No-op on rerun.
+                    // Already bound: the middle segment matches a component FB id or name. No-op on rerun.
                     if (compFbIds.Contains(mid) || compFbNames.Contains(mid))
                     { already++; continue; }
 
