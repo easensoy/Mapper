@@ -1,9 +1,9 @@
-using System;
-using System.IO;
+﻿using System;
 using System.Linq;
+using static CodeGen.Services.FbtXmlEditor;
+using System.IO;
 using System.Xml.Linq;
 using CodeGen.Configuration;
-using static CodeGen.Services.FbtXmlEditor;
 
 namespace CodeGen.Services
 {
