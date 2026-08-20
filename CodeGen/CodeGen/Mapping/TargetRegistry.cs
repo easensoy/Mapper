@@ -1,28 +1,23 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using CodeGen.Translation;
 
 namespace CodeGen.Mapping
 {
-    // One supported deployment target, fully described. Everything the generic planner needs to know
-    // about a controller lives on its descriptor, so planning selects a target by key instead of running
-    // a switch per question -- and a question nobody answered is a missing field here rather than a
-    // silently-empty string somewhere downstream.
-    //
-    // Backend RENDERERS stay typed C#: an EAE device is not configuration, and its emitter cannot be
-    // named in YAML. What the registry removes is the per-question switch, not the backend.
+    // One supported deployment target, fully described. Everything the planner needs about a controller
+    // lives on its descriptor, so planning selects a target by key instead of running a switch per
+    // question. Backend RENDERERS stay typed C#: an EAE device cannot be named in YAML.
     public sealed record TargetDescriptor(
         PlcAssignment Plc,
         // EAE resource name. Load-bearing: the authored M580 .hcf symlinks read 'RES0.M580IO.*'.
         string ResourceName,
         // The sysdev Type. BX1 and the RevPi are both Soft_dPAC, so Type alone does not identify a device.
         string DeviceType,
-        // Disambiguates two targets that share a DeviceType; null when the Type is unique.
+        // Disambiguates two targets sharing a DeviceType; null when the Type is unique.
         string? DeviceName,
-        // Runs the Feed station, so components upstream of the assembly side land here.
+        string HcfTemplate,
         bool HostsFeedStation,
-        // Its sysres canvas is device-local, so FBs translate to a local origin.
         bool DeviceLocalCanvas,
         // Receives components relocated off another target, so they must not be swept from its sysres.
         bool ReceivesRelocatedComponents,
@@ -37,30 +32,71 @@ namespace CodeGen.Mapping
 
     public static class TargetRegistry
     {
-        private static readonly TargetDescriptor[] Targets =
+        // The targets this codebase can actually GENERATE. Naming one in device.yml with no emitter here
+        // would allocate a component to a device nothing can write, so the implemented set stays in C#.
+        private static readonly PlcAssignment[] Implemented =
         {
-            new(PlcAssignment.M262,  "M262_RES",  "M262_dPAC", null,
-                HostsFeedStation: true,  DeviceLocalCanvas: false, ReceivesRelocatedComponents: false,
-                OpensCoverSeam: false,   CarriesDetouredChain: false),
-            new(PlcAssignment.M580,  "RES0",      "M580_dPAC", null,
-                HostsFeedStation: false, DeviceLocalCanvas: true,  ReceivesRelocatedComponents: false,
-                OpensCoverSeam: true,    CarriesDetouredChain: false),
-            new(PlcAssignment.BX1,   "BX1_RES",   "Soft_dPAC", "BX1",
-                HostsFeedStation: false, DeviceLocalCanvas: true,  ReceivesRelocatedComponents: false,
-                OpensCoverSeam: false,   CarriesDetouredChain: true),
-            new(PlcAssignment.RevPi, "RevPi_RES", "Soft_dPAC", "Revolution_Pi",
-                HostsFeedStation: true,  DeviceLocalCanvas: false, ReceivesRelocatedComponents: true,
-                OpensCoverSeam: false,   CarriesDetouredChain: true),
+            PlcAssignment.M262, PlcAssignment.M580, PlcAssignment.BX1, PlcAssignment.RevPi,
         };
 
-        // Throws rather than returning a blank: an unregistered target used to yield an empty resource
-        // name, which produced a device with no resource instead of a diagnostic.
+        // Joined once per configuration load; the checks in Join catch either half being absent.
+        private static readonly object _gate = new();
+        private static IReadOnlyList<TargetDescriptor>? _targets;
+        private static IReadOnlyList<Configuration.TargetIdentity>? _from;
+
+        private static IReadOnlyList<TargetDescriptor> Targets
+        {
+            get
+            {
+                var declared = Configuration.DeviceConfig.Current.Targets;
+                lock (_gate)
+                {
+                    if (_targets != null && ReferenceEquals(_from, declared)) return _targets;
+                    _from = declared;
+                    return _targets = Join(declared);
+                }
+            }
+        }
+
+        private static IReadOnlyList<TargetDescriptor> Join(
+            IReadOnlyList<Configuration.TargetIdentity> declared)
+        {
+            var errors = new List<string>();
+            foreach (var d in declared)
+                if (!Implemented.Contains(d.Plc))
+                    errors.Add($"device.yml declares target '{d.Plc}', which no backend implements");
+            foreach (var plc in Implemented)
+                if (declared.All(d => d.Plc != plc))
+                    errors.Add($"backend '{plc}' has no device.yml targets entry, so it has no resource name");
+            foreach (var g in declared.GroupBy(d => d.Plc).Where(g => g.Count() > 1))
+                errors.Add($"device.yml declares target '{g.Key}' {g.Count()} times");
+            foreach (var d in declared)
+                if (string.IsNullOrWhiteSpace(d.ResourceName) || string.IsNullOrWhiteSpace(d.DeviceType))
+                    errors.Add($"device.yml target '{d.Plc}' is missing a resourceName or deviceType");
+            if (errors.Count > 0)
+                throw new InvalidOperationException(
+                    "device.yml targets do not match the supported backends:" + Environment.NewLine +
+                    "  - " + string.Join(Environment.NewLine + "  - ", errors));
+
+            return Implemented.Select(plc =>
+            {
+                var d = declared.First(i => i.Plc == plc);
+                return new TargetDescriptor(
+                    plc, d.ResourceName, d.DeviceType,
+                    string.IsNullOrWhiteSpace(d.DeviceName) ? null : d.DeviceName,
+                    d.HcfTemplate,
+                    d.HostsFeedStation, d.DeviceLocalCanvas, d.ReceivesRelocatedComponents,
+                    d.OpensCoverSeam, d.CarriesDetouredChain);
+            }).ToList();
+        }
+
+        // Throws rather than returning a blank, which would emit a device with no resource name.
         public static TargetDescriptor Of(PlcAssignment plc) =>
             Targets.FirstOrDefault(t => t.Plc == plc)
             ?? throw new InvalidOperationException(
                 $"[Target] '{plc}' is not a supported deployment target. Registered: " +
                 string.Join(", ", Targets.Select(t => t.Plc)) +
-                ". A new controller needs a descriptor here and a backend emitter; it is not configuration.");
+                ". A new controller needs a backend emitter and a device.yml targets entry.");
 
         public static bool IsRegistered(PlcAssignment plc) => Targets.Any(t => t.Plc == plc);
 
