@@ -1,11 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using static CodeGen.Translation.Process.Recipes.TransitionChainParser;
 using CodeGen.Configuration;
 using CodeGen.Models;
-using CodeGen.Devices.Core;
 using CodeGen.Mapping;
-using static CodeGen.Translation.Process.Recipes.TransitionChainParser;
 
 namespace CodeGen.Translation.Process
 {
@@ -23,22 +22,14 @@ namespace CodeGen.Translation.Process
         public Dictionary<string, int> ComponentIds { get; } =
             new(StringComparer.OrdinalIgnoreCase);
 
-        // TELEMETRY ONLY. Parallel to the six control arrays: for each recipe row, a 1-based ordinal
-        // identifying the VueOne process state that owns it. A state compiles to several rows, so
-        // consecutive entries repeat. Nothing in the control path reads this — it exists so the engine
-        // can publish the phase the model names rather than CurrentStep, which is a compiled row index.
-        //
-        // The ordinal is deliberately NOT the twin's State_Number. State_Number is a broadcast slot
-        // announcing a phase to a peer process, so the twin only fills it in where a peer is watching:
-        // most states carry 0 and a process reuses the same number for unrelated phases. That is correct
-        // for handshakes and useless for telling phases apart, which is what telemetry needs.
+        // TELEMETRY ONLY, parallel to the six control arrays: a 1-based ordinal per row naming the VueOne
+        // process state that owns it. Deliberately NOT the twin's State_Number, which is a broadcast slot
+        // filled in only where a peer watches, so most states carry 0 and numbers repeat across phases.
         public List<int> ProcessStateByRow { get; } = new();
 
-        // TELEMETRY ONLY. ordinal -> the state's name in the twin, so a subscriber can render the phase
-        // rather than a bare number. Emitted alongside the generated project; never read by the runtime.
+        // TELEMETRY ONLY. ordinal -> the state's name in the twin; emitted beside the project, never read by the runtime.
         public Dictionary<int, string> ProcessPhaseNames { get; } = new();
 
-        public List<string> SkippedConditions { get; } = new();
 
         public List<string> Warnings { get; } = new();
 
@@ -53,11 +44,9 @@ namespace CodeGen.Translation.Process
     {
         public static int RecipeArraySize => GenerationConfig.Current.RecipeArraySize;
 
-        // The same slots StateTableAllocation assigned, keyed by ComponentID for the callers that hold a
-        // condition's reference rather than a name. A projection, not a second allocation: a recipe
-        // Wait1Id, an interlock SourceID and the layout's actuator_id are then the same number by
-        // construction rather than because two allocators happened to agree.
-        public static Dictionary<string, int> ScopedIds(
+        // The same slots StateTableAllocation assigned, keyed by ComponentID. A projection, NOT a second
+        // allocation: recipe Wait1Id, interlock SourceID and actuator_id are one number by construction.
+        internal static Dictionary<string, int> ScopedIds(
             StationContents contents, IReadOnlyDictionary<string, int> slots)
         {
             var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -70,23 +59,11 @@ namespace CodeGen.Translation.Process
             return map;
         }
 
-        // The model's process-to-process handoffs with their transports resolved, for the backend to render
-        // wiring from. Derived from the same Ctx the recipe rows are compiled from, so the wiring and the
-        // WAIT rows can never disagree about which producer reaches which consumer.
-        internal static Recipes.ProcessHandoffPlan HandoffPlan(CodeGen.Domain.Twin.TwinModel twin,
-            IReadOnlyDictionary<string, int> slots, ControllerAllocation allocation, bool ringsMerged) =>
-            Recipes.ProcessCompiler.HandoffPlan(BuildCompilerCtx(
-                twin, new Dictionary<string, int>(), slots, allocation, ringsMerged, topCoverSlot: null));
-
-        public static RecipeArrays Generate(VueOneComponent process,
-            StationContents stationContents, CodeGen.Domain.Twin.TwinModel twin,
-            IReadOnlyDictionary<string, int> slots, ControllerAllocation allocation, bool ringsMerged,
-            int topCoverSlot)
+        // Everything topological is decided before this runs, so compiling a recipe is a pure function.
+        internal static RecipeArrays Generate(VueOneComponent process, int processId,
+            Recipes.ProcessCompiler.Ctx inputs, Recipes.ProcessHandoffPlan handoffs)
         {
-            int processId = slots[process.Name.Trim()];
-            var scopedRegistry = ScopedIds(stationContents, slots);
-            var arrays = Recipes.ProcessCompiler.Compile(process, processId,
-                BuildCompilerCtx(twin, scopedRegistry, slots, allocation, ringsMerged, topCoverSlot));
+            var arrays = Recipes.ProcessCompiler.Compile(process, processId, inputs, handoffs);
 
             ValidateProcessIdInvariant(arrays, processId);
             ValidateSingleEndMarker(arrays);
@@ -98,64 +75,19 @@ namespace CodeGen.Translation.Process
             return arrays;
         }
 
-        // `topCoverSlot` is null when only the handoff plan is wanted: that derivation reads process
-        // states, never a component slot, so the deployment-allocated overrides below have nothing to add.
-        private static Recipes.ProcessCompiler.Ctx BuildCompilerCtx(
-            CodeGen.Domain.Twin.TwinModel twin, IReadOnlyDictionary<string, int> scopedIds,
-            IReadOnlyDictionary<string, int> slots, ControllerAllocation allocation, bool ringsMerged,
-            int? topCoverSlot)
-        {
-            var cat = RigCatalog.Current;
-            var present = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            foreach (var si in cat.SensorInterlocks) present[si.Sensor] = si.PresentState;
-            // Deployment-allocated slots override the local positional ones: these components report on a slot the
-            // injector pinned (cross-controller covers/robot/synth sensors, and the top-cover sensor whose slot is
-            // computed per ring topology). A recipe that waited on the positional id would read a different
-            // component's slot entirely.
-            var byName = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            // The covers are NOT listed here. They are ordinary components the injector numbers positionally, and
-            // that positional number is exactly what it writes as their actuator_id -- so the scoped map already
-            // gives the slot they report on. A static override could only ever be right for one layout: pinning
-            // them to 14/15/16 matches the clamp models, but a no-clamp model has no Clamp to occupy a slot, so
-            // its covers land on 13/14/15 and every cover WAIT read the NEXT component's slot. That is why a
-            // no-clamp Assembly commanded coverpnp_vr and then waited on coverpnp_gripper, which nothing had yet
-            // been told to move, and the cover sequence stopped dead with the gripper never gripping.
-            foreach (var s in cat.SynthSensors) byName[s.Name] = s.Id;
-            if (!string.IsNullOrWhiteSpace(cat.Roles.TaskArm))
-                byName[cat.Roles.TaskArm] = cat.RobotActuatorId;
-            if (topCoverSlot is int coverSlot)
-                foreach (var n in TemplateMap.TopCoverSensorNames) byName[n] = coverSlot;
-            // The material bridge is whichever synthesised sensor rides the cross-controller ring segment: that
-            // membership is what makes its level readable on the far controller, so it is taken from the topology
-            // rather than named here. A merged (no-clamp) ring announces every process directly and needs none.
-            var bridge = cat.SynthSensors.FirstOrDefault(s =>
-                cat.CrossRingSegment.Any(n => string.Equals(n, s.Name, StringComparison.OrdinalIgnoreCase)));
-            return new Recipes.ProcessCompiler.Ctx
-            {
-                Ids = scopedIds,
-                IdsByName = byName,
-                ProcessIdByName = slots,
-                SensorPresent = present,
-                // Ring membership from controller allocation: two processes share a ring when the same
-                // controller hosts them. Topology, not process identity.
-                Twin = twin,
-                Allocation = allocation,
-                RingsMerged = ringsMerged,
-                MaterialBridgeId = bridge?.Id ?? -1,
-            };
-        }
-
         private static void ValidateProcessIdInvariant(RecipeArrays arrays, int processId)
         {
+            // Only a WAIT row reads Wait1Id; on every other row it carries the unset default, which
+            // is a real slot the moment a process is allocated one low in the table.
             for (int i = 0; i < arrays.Wait1Id.Count; i++)
             {
-                if (arrays.Wait1Id[i] == processId)
+                if (arrays.StepType[i] == StepType.Wait && arrays.Wait1Id[i] == processId)
                     throw new InvalidOperationException(
                         $"Recipe generator emitted Wait1Id[{i}]={processId} which equals " +
                         $"the Process FB's process_id ({processId}). Process is not a ring " +
                         "participant and cannot publish its own wait state. Likely cause: " +
                         "a stray ComponentID in Control.xml conditions landed on the process_id " +
-                        "value via the registry. Inspect ComponentIds / SkippedConditions.");
+                        "value via the registry. Inspect ComponentIds.");
             }
         }
 
