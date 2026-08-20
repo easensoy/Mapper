@@ -11,14 +11,9 @@ namespace CodeGen.Mapping
         string Id, string Name, string Type, string Namespace, int X, int Y,
         IReadOnlyList<(string Name, string Value)> Parameters);
 
-    // Which system FBs each controller's resource carries, and under which identity. EAE identifies an
-    // FB by its ID, so a deployed resource's ids are frozen: regenerating with a different one makes EAE
-    // treat the FB as a new instance. The RevPi's are derived from its resource name because it was
-    // added after the others were already in the field.
-    //
-    // The Feed controller carries no I/O broker on its resource: its .hcf channels publish symlinks
-    // straight to the consumer FBs, so a PLC_RW_M262 instance would be dead weight. That is a platform
-    // policy, which is why it is stated here and not in the generic mirror that renders the result.
+    // Which system FBs each controller's resource carries, and under which identity. EAE identifies an FB by its
+    // ID, so a deployed resource's ids are FROZEN: regenerating with a different one makes EAE treat it as a new
+    // instance. The Feed controller carries no I/O broker — its .hcf publishes symlinks straight to consumer FBs.
     public static class TargetBootstrap
     {
         private static readonly (string Name, string Value)[] NoParameters = Array.Empty<(string, string)>();
@@ -37,8 +32,7 @@ namespace CodeGen.Mapping
             [PlcAssignment.BX1]  = new[] { "0FE5E1B2C3D4A5B6", "1A2B3C4D5E6F7081" },
         };
 
-        // The resource's runtime bring-up: EAE's START fires the full-init FB, and plcStart acknowledges
-        // its own first-init. Emitted before any component wire, in this order.
+        // The resource's runtime bring-up, emitted before any component wire and in this order.
         public static readonly IReadOnlyList<(string Source, string Destination)> BringUpWires = new[]
         {
             ("START.COLD",          "FB1.INIT"),
