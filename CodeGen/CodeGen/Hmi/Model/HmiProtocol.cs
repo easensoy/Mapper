@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 
 namespace CodeGen.Hmi
 {
@@ -13,6 +13,7 @@ namespace CodeGen.Hmi
         Monitor,
         ModeSelection,
         CycleControl,
+        CycleStop,
         ManualStep,
         SetupJog,
         FaultReset,
@@ -27,7 +28,10 @@ namespace CodeGen.Hmi
         NoOutputEvent,           // nothing on the contract can reach the controller
         NoAcceptedFeedback,      // we could send it but could never show it was accepted
         ModeChainUnreachable,    // the station/area mode chain does not reach this instance
-        EngineDoesNotImplement,  // the deployed process engine ignores the port
-        ReadOnlyPolicy,          // the configured monitoring-only policy
+        NotConsumed,             // the port is declared but no deployed ECC transition reads it
+        // Gate 5 - the EMITTED canvas. The controller may honour a command perfectly and the panel
+        // still be unable to send it, which is exactly what a monitoring faceplate does.
+        SymbolCannotSend,        // the selected .cnv.xml declares no output events at all
+        SymbolContractMismatch   // it sends, but not this event / not carrying this data
     }
 }
