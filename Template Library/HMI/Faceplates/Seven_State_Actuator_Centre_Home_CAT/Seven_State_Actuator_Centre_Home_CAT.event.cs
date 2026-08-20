@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Created by EcoStruxure Automation Expert.
  * User:  
  * Date: 10/7/2025
@@ -861,3 +861,180 @@ stack Trace:
 #endregion #Seven_State_Actuator_Centre_Home_CAT_HMI;
 
 #endregion Definitions;
+
+namespace HMI.Main.Symbols.Seven_State_Actuator_Centre_Home_CAT
+{
+  partial class sSetup
+  {
+
+    private event EventHandler<HMI.Main.Symbols.Seven_State_Actuator_Centre_Home_CAT.output_eventEventArgs> output_event_Fired;
+
+    private event EventHandler<HMI.Main.Symbols.Seven_State_Actuator_Centre_Home_CAT.pst_eventEventArgs> pst_event_Fired;
+
+    private event EventHandler<HMI.Main.Symbols.Seven_State_Actuator_Centre_Home_CAT.input_eventEventArgs> input_event_Fired;
+
+    private event EventHandler<HMI.Main.Symbols.Seven_State_Actuator_Centre_Home_CAT.FAULT_EVENTEventArgs> FAULT_EVENT_Fired;
+
+    private event EventHandler<HMI.Main.Symbols.Seven_State_Actuator_Centre_Home_CAT.name_eventEventArgs> name_event_Fired;
+
+    private event EventHandler<HMI.Main.Symbols.Seven_State_Actuator_Centre_Home_CAT.mode_eventEventArgs> mode_event_Fired;
+
+    private event EventHandler<HMI.Main.Symbols.Seven_State_Actuator_Centre_Home_CAT.interlock_eventEventArgs> interlock_event_Fired;
+
+    protected override void OnEndInit()
+    {
+      if (output_event_Fired != null)
+        AttachEventInput(0);
+      if (pst_event_Fired != null)
+        AttachEventInput(1);
+      if (input_event_Fired != null)
+        AttachEventInput(2);
+      if (FAULT_EVENT_Fired != null)
+        AttachEventInput(3);
+      if (name_event_Fired != null)
+        AttachEventInput(4);
+      if (mode_event_Fired != null)
+        AttachEventInput(5);
+      if (interlock_event_Fired != null)
+        AttachEventInput(6);
+
+    }
+
+    protected override void FireEventCallback(int channelId, int cookie, int eventIndex)
+    {
+      switch(eventIndex)
+      {
+        default:
+          break;
+        case 0:
+          if (output_event_Fired != null)
+          {
+            try
+            {
+              output_event_Fired(this, new HMI.Main.Symbols.Seven_State_Actuator_Centre_Home_CAT.output_eventEventArgs(channelId, cookie, eventIndex));
+            }
+            catch (System.Exception e)
+            {
+              NxtControl.Services.LoggingService.ErrorFormatted(@"In Event Callback for event:'{0}' Type:'{1}' CAT:'{2}' came exception:{3}
+stack Trace:
+{4}","output_event_Fired", this.GetType().Name, this.CATName, e.Message, e.StackTrace);
+            }
+          }
+        break; 
+        case 1:
+          if (pst_event_Fired != null)
+          {
+            try
+            {
+              pst_event_Fired(this, new HMI.Main.Symbols.Seven_State_Actuator_Centre_Home_CAT.pst_eventEventArgs(channelId, cookie, eventIndex));
+            }
+            catch (System.Exception e)
+            {
+              NxtControl.Services.LoggingService.ErrorFormatted(@"In Event Callback for event:'{0}' Type:'{1}' CAT:'{2}' came exception:{3}
+stack Trace:
+{4}","pst_event_Fired", this.GetType().Name, this.CATName, e.Message, e.StackTrace);
+            }
+          }
+        break; 
+        case 2:
+          if (input_event_Fired != null)
+          {
+            try
+            {
+              input_event_Fired(this, new HMI.Main.Symbols.Seven_State_Actuator_Centre_Home_CAT.input_eventEventArgs(channelId, cookie, eventIndex));
+            }
+            catch (System.Exception e)
+            {
+              NxtControl.Services.LoggingService.ErrorFormatted(@"In Event Callback for event:'{0}' Type:'{1}' CAT:'{2}' came exception:{3}
+stack Trace:
+{4}","input_event_Fired", this.GetType().Name, this.CATName, e.Message, e.StackTrace);
+            }
+          }
+        break; 
+        case 3:
+          if (FAULT_EVENT_Fired != null)
+          {
+            try
+            {
+              FAULT_EVENT_Fired(this, new HMI.Main.Symbols.Seven_State_Actuator_Centre_Home_CAT.FAULT_EVENTEventArgs(channelId, cookie, eventIndex));
+            }
+            catch (System.Exception e)
+            {
+              NxtControl.Services.LoggingService.ErrorFormatted(@"In Event Callback for event:'{0}' Type:'{1}' CAT:'{2}' came exception:{3}
+stack Trace:
+{4}","FAULT_EVENT_Fired", this.GetType().Name, this.CATName, e.Message, e.StackTrace);
+            }
+          }
+        break; 
+        case 4:
+          if (name_event_Fired != null)
+          {
+            try
+            {
+              name_event_Fired(this, new HMI.Main.Symbols.Seven_State_Actuator_Centre_Home_CAT.name_eventEventArgs(channelId, cookie, eventIndex));
+            }
+            catch (System.Exception e)
+            {
+              NxtControl.Services.LoggingService.ErrorFormatted(@"In Event Callback for event:'{0}' Type:'{1}' CAT:'{2}' came exception:{3}
+stack Trace:
+{4}","name_event_Fired", this.GetType().Name, this.CATName, e.Message, e.StackTrace);
+            }
+          }
+        break; 
+        case 5:
+          if (mode_event_Fired != null)
+          {
+            try
+            {
+              mode_event_Fired(this, new HMI.Main.Symbols.Seven_State_Actuator_Centre_Home_CAT.mode_eventEventArgs(channelId, cookie, eventIndex));
+            }
+            catch (System.Exception e)
+            {
+              NxtControl.Services.LoggingService.ErrorFormatted(@"In Event Callback for event:'{0}' Type:'{1}' CAT:'{2}' came exception:{3}
+stack Trace:
+{4}","mode_event_Fired", this.GetType().Name, this.CATName, e.Message, e.StackTrace);
+            }
+          }
+        break; 
+        case 6:
+          if (interlock_event_Fired != null)
+          {
+            try
+            {
+              interlock_event_Fired(this, new HMI.Main.Symbols.Seven_State_Actuator_Centre_Home_CAT.interlock_eventEventArgs(channelId, cookie, eventIndex));
+            }
+            catch (System.Exception e)
+            {
+              NxtControl.Services.LoggingService.ErrorFormatted(@"In Event Callback for event:'{0}' Type:'{1}' CAT:'{2}' came exception:{3}
+stack Trace:
+{4}","interlock_event_Fired", this.GetType().Name, this.CATName, e.Message, e.StackTrace);
+            }
+          }
+        break; 
+
+      }
+    }
+    public bool FireEvent_cmd_event(System.Boolean toWork1, System.Boolean toHome, System.Boolean toWork2)
+    {
+      return ((IHMIAccessorOutput)this).FireEvent(0, new object[] {toWork1, toHome, toWork2});
+    }
+    public bool FireEvent_cmd_event(HMI.Main.Symbols.Seven_State_Actuator_Centre_Home_CAT.cmd_eventEventArgs ea)
+    {
+      object[] _values_ = new object[3];
+      if (ea.toWork1.HasValue) _values_[0] = ea.toWork1.Value;
+      if (ea.toHome.HasValue) _values_[1] = ea.toHome.Value;
+      if (ea.toWork2.HasValue) _values_[2] = ea.toWork2.Value;
+      return ((IHMIAccessorOutput)this).FireEvent(0, _values_);
+    }
+    public bool FireEvent_cmd_event(System.Boolean toWork1, bool ignore_toWork1, System.Boolean toHome, bool ignore_toHome, System.Boolean toWork2, bool ignore_toWork2)
+    {
+      object[] _values_ = new object[3];
+      if (!ignore_toWork1) _values_[0] = toWork1;
+      if (!ignore_toHome) _values_[1] = toHome;
+      if (!ignore_toWork2) _values_[2] = toWork2;
+      return ((IHMIAccessorOutput)this).FireEvent(0, _values_);
+    }
+
+  }
+}
+
