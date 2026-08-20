@@ -1,7 +1,9 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using CodeGen.Models;
+using CodeGen.Configuration;
+using CodeGen.Mapping;
 
 namespace CodeGen.Translation.Process.Recipes
 {
@@ -9,15 +11,11 @@ namespace CodeGen.Translation.Process.Recipes
     // (Initial_State -> transition.DestinationStateID, NOT State_Number order). No shared state / I/O.
     public static class TransitionChainParser
     {
-        // The VueOne Initialisation boot-assertion state (InitialState=true OR Name "Initialisation"/
-        // "Initialization"). Dropped from the recipe (boot precondition, not a work-cycle step).
-        public static bool IsInitialisationState(VueOneState s)
-        {
-            if (s.InitialState) return true;
-            var n = (s.Name ?? string.Empty).Trim();
-            return n.Equals("Initialisation", StringComparison.OrdinalIgnoreCase) ||
-                   n.Equals("Initialization", StringComparison.OrdinalIgnoreCase);
-        }
+        // The boot-assertion state the twin FLAGS as its entry (<Initial_State>). Dropped from the
+        // recipe: a precondition, not a work-cycle step. The flag is the model's own answer, so a
+        // process whose entry is not called "Initialisation" is read correctly - which the shipped
+        // twins need, one of them naming it "Initialize".
+        public static bool IsInitialisationState(VueOneState s) => s.InitialState;
 
         // Orders a Process's states in EXECUTION order by walking the transition chain from the initial
         // state, NOT by State_Number. Why: incrementally-authored VueOne models leave State_Number=0 on
@@ -74,7 +72,7 @@ namespace CodeGen.Translation.Process.Recipes
                     byId.TryGetValue(dest, out var destState))
                     dest = destState.Name;
 
-                var cond = tr.Conditions?.FirstOrDefault();
+                var cond = tr.Guard?.References().FirstOrDefault();
                 string on = cond == null || string.IsNullOrWhiteSpace(cond.Name)
                     ? "(no condition)"
                     : cond.Name.Trim();
