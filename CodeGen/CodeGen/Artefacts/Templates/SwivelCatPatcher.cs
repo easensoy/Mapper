@@ -1,21 +1,19 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Xml.Linq;
 using CodeGen.Configuration;
+using static CodeGen.Services.FbtXmlEditor;
+using System.IO;
 using CodeGen.Mapping;
 using CodeGen.Models;
-using static CodeGen.Services.FbtXmlEditor;
 
 namespace CodeGen.Services
 {
-    // Deploy-time patches for the centre-home swivel CAT (Seven_State_Actuator_Centre_Home): the
-    // physical-sensor restore, the home-poll strip, and the AtHome coil/brake/recovery behaviours.
+    // Deploy-time patches for the centre-home swivel CAT (Seven_State_Actuator_Centre_Home).
     internal static class SwivelCatPatcher
     {
-        // Keeps the centre-home swivel's Inputs block on the real sensor symlinks and strips sim-position
-        // wiring; hard-fails if SimCentreHomeSensor_7SCH survives (the rig can't use sim wiring).
+        // Keeps Inputs on the real sensor symlinks; hard-fails if SimCentreHomeSensor_7SCH survives.
         internal static void NormalizeSwivelSimSensorSource(string eaeProjectDir, DeployResult result)
         {
             var fbt = FindDeployedFbt(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT.fbt");
@@ -133,7 +131,6 @@ namespace CodeGen.Services
                     }
                 }
 
-                // Inputs stays subscribed to the real physical sensor names.
                 SetParam(inputs, "NAME1", "'$${PATH}athome'");
                 SetParam(inputs, "NAME2", "'$${PATH}atwork1'");
                 SetParam(inputs, "NAME3", "'$${PATH}atWork2'");
@@ -201,9 +198,8 @@ namespace CodeGen.Services
             }
         }
 
-        // Bearing_PnP home is recipe-only: strips any injected poll machinery (HomePoll/PollGate1/PollGate2/
-        // PollWindow + connections), adds nothing. The CAT's 'Inputs' SYMLINKMULTIVARDST is sample-on-REQ —
-        // if the core stops re-observing positions, fix the CAT/interface, don't re-add a polling FB.
+        // Strips any injected poll machinery and adds nothing: home is recipe-only. If the core stops
+        // re-observing positions, fix the CAT/interface rather than re-adding a polling FB.
         internal static void StripCatHomeSensorPoll(string eaeProjectDir, string catName, DeployResult result)
         {
             var fbt = FindDeployedFbt(eaeProjectDir, catName + ".fbt");
@@ -259,7 +255,6 @@ namespace CodeGen.Services
             }
         }
 
-        // Establish the initial sensor level and support explicit broker re-reads.
         internal static void EnsureSensorBoolReadEvent(string eaeProjectDir, DeployResult result)
             => EditDeployedFbt(eaeProjectDir, "Sensor_Bool_CAT.fbt", "Sensor_Bool_CAT RD event inject failed", result,
                 (doc, root, ns, fbt) =>
@@ -287,13 +282,8 @@ namespace CodeGen.Services
                     changed = true;
                 }
 
-                // RD must NOT reach StateHandling.REQ. Sensor_Bool's ECC has no same-level self-transition
-                // (Sensor_TRUE/Sensor_FALSE are entered only on a genuine level change), so the chain
-                // RD -> FB2.REQ -> FB2.CNF -> FB1.REQ -> FB1.CNF -> StateHandling.REQ publishes onto the ring
-                // exactly when the level changes, and INITO -> FB2.REQ still establishes the level at boot.
-                // A direct RD -> StateHandling.REQ bypasses that gate and makes every cyclic re-read emit a
-                // ring frame, so a broker-fed sensor driven by a free-running scan publishes forever — the
-                // process engines then see state_change (and therefore SCNF) climb without bound while idle.
+                // RD must NOT reach StateHandling.REQ: that bypasses Sensor_Bool's change gate, so every
+                // cyclic re-read emits a ring frame and a scan-driven sensor publishes forever.
                 // Reconciled rather than merely not-added, so a tree deployed with the bypass self-heals.
                 foreach (var stale in ec.Elements(ns + "Connection")
                              .Where(c => (string?)c.Attribute("Source") == "RD" &&
@@ -314,8 +304,6 @@ namespace CodeGen.Services
                     changed = true;
                 }
 
-                // An unconditional per-frame re-sample buys nothing: FB1 reports only on a level change, so a
-                // sensor whose ECC already holds the right level stays silent no matter how often it re-reads.
                 // Superseded by the addressed refresh below; reconciled away so a tree deployed with it heals.
                 foreach (var stale in ec.Elements(ns + "Connection")
                              .Where(c => (string?)c.Attribute("Source") == "stateRprtCmd_in.CNF" &&
@@ -326,24 +314,9 @@ namespace CodeGen.Services
                     changed = true;
                 }
 
-                // Addressed refresh: sample the physical input, THEN report it even when it has not changed.
-                // A sensor announces a level exactly once, on the edge that produced it. A level that was
-                // already true before this PLC started produces no edge at all, and the single frame emitted at
-                // INIT is lost if the consuming ring is not up yet -- after which nothing can re-announce it and
-                // the consumer's WAIT is dead until the sensor is physically toggled.
-                //
-                // StateHandling.CNF fires ONLY from updateComponentState's BREQ state, which is entered only when
-                // component_state_in.dest_name = name. Reports set dest_name := '', so no report can trigger any
-                // sensor: only a frame that names this component does. That makes the refresh strictly bounded --
-                // one request in, one report out, nothing while the line is idle.
-                //
-                // The order matters and must be serial, not fanned out. Driving StateHandling.REQ from the same
-                // event as the sample would publish the CACHED state_sts, which for an active-low input can
-                // briefly report the wrong level and release a gate early. So the request enters FB1 (RPT), FB1
-                // emits SMP, SMP samples FB2, FB2.CNF re-enters FB1 (REQ) and only then does FB1.CNF publish:
-                //     StateHandling.CNF -> FB1.RPT -> FB1.SMP -> FB2.REQ -> FB2.CNF -> FB1.REQ -> FB1.CNF -> publish
-                // RPT parks FB1's ECC in START, where both level transitions are unconditionally available, so the
-                // following sample always emits CNF -- that is what makes an unchanged level report.
+                // Addressed refresh: sample the input, THEN report it even when unchanged. Serial, never
+                // fanned out -- publishing from the sampling event would republish the CACHED level.
+                // See Docs/PATCH_RATIONALES P-4.
                 foreach (var (src, dst) in new[]
                          {
                              ("StateHandling.CNF", "FB1.RPT"),
@@ -368,17 +341,9 @@ namespace CodeGen.Services
             }, notFoundNote: "Sensor_Bool_CAT.fbt not found; RD event inject skipped.");
 
         // Gives Sensor_Bool the two ports the addressed refresh needs, and the one ECC state that makes an
-        // UNCHANGED level report. The ECC is otherwise change-only: Sensor_TRUE/Sensor_FALSE are entered solely
-        // on the opposite level, so once a level is latched no amount of re-sampling emits anything.
-        //
-        // RPT parks the ECC in START via a transient Arm state whose only action is SMP (the sample request).
-        // From START both level transitions are unconditionally available, so the sample that SMP triggers
-        // always fires one of them and therefore always emits CNF -- carrying the value just read, not a cached
-        // one. Arm returns to START unconditionally, so the ECC never lingers there.
-        //
-        // Nothing else drives RPT: it comes only from updateComponentState's addressed CNF, so the free-running
-        // I/O-scan push (FB2.CNF -> REQ, which every HCF-bound sensor relies on) keeps its change gate intact
-        // and cannot be turned into a per-scan publisher.
+        // UNCHANGED level report: RPT parks the ECC in START, where both level transitions are available,
+        // so the sample always emits CNF. Only the addressed CNF drives RPT, so the free-running I/O-scan
+        // push keeps its change gate and cannot become a per-scan publisher.
         internal static void EnsureSensorBoolRefreshPath(string eaeProjectDir, DeployResult result)
             => EditDeployedFbt(eaeProjectDir, "Sensor_Bool.fbt", "Sensor_Bool refresh path inject failed", result,
                 (doc, root, ns, fbt) =>
@@ -419,8 +384,7 @@ namespace CodeGen.Services
                     changed = true;
                 }
 
-                // Every level state must be able to accept a refresh, otherwise a sensor sitting in
-                // Sensor_TRUE/Sensor_FALSE (the normal case) could not be asked.
+                // Every level state must accept a refresh, else a sensor already latched cannot be asked.
                 foreach (var (from, to, cond) in new[]
                          {
                              ("START", "Arm", "RPT"),
@@ -451,7 +415,6 @@ namespace CodeGen.Services
 
         // Swivel work-arrival latch: relax=true (rig) fires ToWorkN->AtWorkN on atWorkN=TRUE alone;
         // strict=false (sim) also requires atWorkOther=FALSE.
-        // The swivel-core patches all edit the deployed SevenStateCentreHomeActuator core .fbt.
         private static void EditSwivelCore(string eaeProjectDir, string failNote, DeployResult result,
             Action<XDocument, XElement, XNamespace, string> edit)
             => EditDeployedFbt(eaeProjectDir, "SevenStateCentreHomeActuator.fbt", failNote, result, edit);
@@ -532,9 +495,8 @@ namespace CodeGen.Services
 
 
 
-        // Gated SwivelBrakeHome: a timed reverse-coil brake at centre so the swivel homes directly from
-        // AtWork1 (Disassembly) without coasting into the ejector. Directional — at AtHome the algorithm
-        // reverses the coil only when homing from AtWork1; from AtWork2 (Assembly) it de-energises unchanged.
+        // Gated SwivelBrakeHome: a reverse-coil brake at centre so the swivel homes directly from AtWork1
+        // without coasting into the ejector. Directional; from AtWork2 it de-energises unchanged.
         // No-op when disabled; the ECC/CAT are force-refreshed so a flag flip reverts.
         internal static void PatchSwivelBrakeHome(string eaeProjectDir, bool enabled, int brakeMs, DeployResult result)
         {
@@ -577,20 +539,19 @@ namespace CodeGen.Services
                 if (atHome != null && !atHome.Elements(ns + "ECAction").Any(a => (string?)a.Attribute("Output") == "brake_start"))
                     atHome.Add(new XElement(ns + "ECAction", new XAttribute("Output", "brake_start")));
 
-                // AtHome -> AtHomeInit non-sensor arc = brake_done (a safety cap only; the sensor arc below is primary).
+                // brake_done is a safety cap only; the sensor arc below is primary.
                 root.Descendants(ns + "ECTransition").FirstOrDefault(t =>
                         (string?)t.Attribute("Source") == "AtHome" && (string?)t.Attribute("Destination") == "AtHomeInit"
                         && (string?)t.Attribute("Condition") != "atHome = FALSE")
                     ?.SetAttributeValue("Condition", "brake_done");
 
-                // CRITICAL: AtHomeInit must emit output_event (drives the Output SYMLINKMULTIVARSRC to write
-                // both coils FALSE) — stock emits only pst_out, so the reverse coil stays energised and overshoots to AtWork1.
+                // CRITICAL: AtHomeInit must emit output_event so both coils are written FALSE. Stock emits
+                // only pst_out, leaving the reverse coil energised so the arm overshoots to AtWork1.
                 var atHomeInit = root.Descendants(ns + "ECState").FirstOrDefault(s => (string?)s.Attribute("Name") == "AtHomeInit");
                 if (atHomeInit != null && !atHomeInit.Elements(ns + "ECAction").Any(a => (string?)a.Attribute("Output") == "output_event"))
                     atHomeInit.Add(new XElement(ns + "ECAction", new XAttribute("Output", "output_event")));
 
-                // SENSOR-STOPPED de-energise (the real fix): AtHome -> AtHomeInit on atHome=FALSE cuts the
-                // coil at the DI02 centre-window edge, not after the fixed brake_done timer (which over-drove to AtWork1).
+                // Sensor-stopped de-energise: cut the coil at the DI02 centre-window edge, not on a timer.
                 var brakeDoneArc = root.Descendants(ns + "ECTransition").FirstOrDefault(t =>
                     (string?)t.Attribute("Source") == "AtHome" && (string?)t.Attribute("Destination") == "AtHomeInit" &&
                     (string?)t.Attribute("Condition") == "brake_done");
@@ -662,25 +623,16 @@ namespace CodeGen.Services
             catch (Exception ex) { result.Warnings.Add($"Swivel brake composite patch failed: {ex.Message}"); }
         }
 
-        // SOLE writer of the swivel core's INIT arcs, derived from the twin.
-        //
-        // The model states where a cycle begins: the actuator's Initial_State. Startup therefore has one job --
-        // establish that state before any recipe command runs -- and the CAT contract offers exactly two ways to
-        // do it, so the arcs write themselves: where the work sensors read nothing the arm already is at its
-        // centre reference and is CLASSIFIED there; where one of them reads, the arm is at that work position and
-        // is DRIVEN to centre. Nothing is assumed about a position no sensor reports.
-        //
-        // A model whose swivel does not declare its centre stop as the initial state cannot be honoured by this
-        // CAT, and generation fails rather than invent a startup policy: an unheld three-position pneumatic that
-        // is neither classified nor driven simply drifts, and the first recipe command then starts from an
-        // unknown place -- which is a collision, not a warning.
+        // SOLE writer of the swivel core's INIT arcs, derived from the twin's Initial_State. Where the work
+        // sensors read nothing the arm is CLASSIFIED at centre; where one reads, it is DRIVEN to centre.
+        // Nothing is assumed about a position no sensor reports, and a swivel that does not declare its centre
+        // stop as its initial state fails generation rather than get an invented startup policy.
         internal static void PatchSwivelStartup(string eaeProjectDir,
             CodeGen.Translation.GenerationContext ctx, DeployResult result)
         {
             var startup = ResolveStartupState(ctx);
-            // No centre-home swivel in this model: the type is deployed but never instantiated, so its
-            // startup is not ours to rewrite. Leaving the shipped template alone is what keeps an
-            // uninstantiated type from shipping with an ECC that can never leave INIT.
+            // No centre-home swivel in this model: the type is deployed but never instantiated, so leave
+            // the shipped template alone rather than ship an ECC that can never leave INIT.
             if (startup.Count == 0) return;
             EditSwivelCore(eaeProjectDir, "SevenStateCentreHomeActuator.fbt startup patch failed", result,
                 (doc, root, ns, fbt) =>
@@ -717,16 +669,14 @@ namespace CodeGen.Services
             });
         }
 
-        // The CAT's startup vocabulary: which ECC state each sensor reading resolves to. AtHomeInit classifies
-        // (both coils FALSE, reports 0); ToHome drives the arm to its centre reference.
+        // Startup vocabulary: AtHomeInit classifies (both coils FALSE, reports 0); ToHome drives to centre.
         private static readonly (string Sensor, string Destination)[] StartupFromWorkSensor =
         {
             ("atWork1", "ToHome"),
             ("atWork2", "ToHome"),
         };
 
-        // INIT arcs for the one startup the model declares. Every centre-home swivel in the project must agree:
-        // the arcs live on the shared TYPE, so two instances with different declared starts cannot both be honoured.
+        // The arcs live on the shared TYPE, so two instances with different declared starts cannot both be honoured.
         private static List<(string Destination, string Condition)> ResolveStartupState(CodeGen.Translation.GenerationContext ctx)
         {
             var swivels = ctx.Station.Actuators
@@ -770,8 +720,7 @@ namespace CodeGen.Services
         // The centre-home CAT settles its centre stop to 0; the recipe commands use the same encoding.
         private const int CentreHomeStop = 0;
 
-        // Wires AtHome to the coil-clearing 'atHome' algorithm + output_event so the Output
-        // SYMLINKMULTIVARSRC writes both work coils FALSE (swaps which existing algorithm AtHome runs).
+        // Wires AtHome to the coil-clearing 'atHome' algorithm + output_event so both work coils go FALSE.
         internal static void PatchSwivelAtHomeCoilClear(string eaeProjectDir, bool clearCoils, DeployResult result)
             => EditSwivelCore(eaeProjectDir, "SevenStateCentreHomeActuator.fbt AtHome coil-clear patch failed", result,
                 (doc, root, ns, fbt) =>
