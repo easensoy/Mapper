@@ -1,34 +1,21 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
+using System.IO;
 using System.Xml.Linq;
 
 namespace CodeGen.Validation.Output
 {
-    // Every generated connection must name endpoints that exist, and every VALUE-carrying input must be
-    // driven once.
-    //
-    // Two failure modes this catches, both silent at generation time and both expensive on the rig:
-    //
-    //  * A DOUBLE-DRIVEN data or adapter input. Two sources on one such destination is not an error EAE
-    //    reports; it resolves the conflict by evaluation order, so what a consumer reads is whichever wire
-    //    happened to win. That is how a component spliced onto both a local ring and the cross-controller
-    //    segment reported through one path on one build and the other path on the next.
-    //
-    //  * An endpoint naming an FB that is not in the artefact, or a port the FB's type does not declare.
-    //    EAE drops what it cannot resolve, so the wire simply is not there at runtime.
-    //
-    // EVENT inputs are deliberately exempt from the one-source rule: an event input is a trigger, and
-    // OR-ing triggers is the normal IEC 61499 idiom -- the resource bootstrap fires FB1.INIT from both
-    // START.COLD and START.WARM on purpose. Only a value has a single well-defined writer.
-    //
-    // Port checking is skipped for a type whose .fbt is not deployed (library FBs), so an unknown type
-    // degrades to endpoint-existence rather than a false failure.
+    // Every generated connection must name endpoints that exist, and every VALUE-carrying input must be driven
+    // exactly once. Both failures are silent in EAE: two sources on one data or adapter input is not reported,
+    // EAE resolves it by evaluation order so a consumer reads whichever wire wins; and an endpoint naming a
+    // missing FB or an undeclared port is simply dropped, so the wire is absent at runtime.
+    // EVENT inputs are exempt from the one-source rule — OR-ing triggers is the normal IEC 61499 idiom.
+    // Port checking is skipped where a type's .fbt is not deployed (library FBs), so an unknown type degrades
+    // to endpoint-existence rather than a false failure.
     public static class ConnectionIntegrityValidator
     {
-        // The resource's implicit start FB. EAE provides it; a sysres never declares it, so an endpoint
-        // addressing it is resolved by the runtime rather than by the artefact.
+        // The resource's implicit start FB: EAE provides it, so a sysres never declares it.
         private const string ImplicitResourceStartFb = "START";
 
         public sealed record Violation(string Artefact, string Kind, string Detail)
@@ -72,8 +59,7 @@ namespace CodeGen.Validation.Output
                 var name = (string?)fb.Attribute("Name");
                 if (!string.IsNullOrEmpty(name)) fbTypeOf[name!] = (string?)fb.Attribute("Type") ?? string.Empty;
             }
-            // Frames are canvas decoration, not FBs, but a connection never names one; listing them keeps
-            // an endpoint check from mistaking a decoration for a missing FB.
+            // Frames are canvas decoration; listing them stops an endpoint check mistaking one for a missing FB.
             foreach (var frame in doc.Descendants().Where(e => e.Name.LocalName == "Frame"))
             {
                 var name = (string?)frame.Attribute("Name");
@@ -108,8 +94,7 @@ namespace CodeGen.Validation.Output
             }
         }
 
-        // `X.Y` addresses port Y on FB X; a bare name is the enclosing artefact's own boundary pin, which
-        // has no FB to resolve against.
+        // `X.Y` addresses port Y on FB X; a bare name is the artefact's own boundary pin, with no FB to resolve.
         private static void CheckEndpoint(string artefact, string kind, string endpoint, bool isSource,
             IReadOnlyDictionary<string, string> fbTypeOf, IReadOnlyDictionary<string, Ports> byType,
             List<Violation> violations)
@@ -132,12 +117,10 @@ namespace CodeGen.Validation.Output
             {
                 "EventConnections" => isSource ? ports.EventOut.Contains(port) : ports.EventIn.Contains(port),
                 "DataConnections" => isSource ? ports.DataOut.Contains(port) : ports.DataIn.Contains(port),
-                // An adapter wire runs plug -> socket, and an adapter's own events are addressed through
-                // the declaration (stateRptCmdAdptr_in.CNF), so accept either half plus its members.
+                // An adapter wire runs plug -> socket and its events are addressed through the declaration
+                // (stateRptCmdAdptr_in.CNF), so accept either half plus its members.
                 _ => ports.Plugs.Contains(port) || ports.Sockets.Contains(port),
             };
-            // Adapter members and the composite's own boundary pins are addressed as <declaration>.<member>;
-            // the declaration itself is what this validator can resolve, so a dotted remainder is accepted.
             if (!known && (ports.Sockets.Contains(port) || ports.Plugs.Contains(port))) known = true;
             if (!known)
                 violations.Add(new Violation(artefact, kind,
