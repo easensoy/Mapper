@@ -31,13 +31,14 @@ namespace CodeGen.Translation.Process.Recipes
             public CodeGen.Domain.Twin.TwinModel Twin = null!;
             public ReportGraph Rings = null!;
 
-            // CAT, command protocol and task-arm role are decided by the plan, never by the CAT router.
+            // CAT, command protocol and command sequence are decided by the plan, never by the CAT router.
             public IReadOnlyDictionary<string, string> CatType = new Dictionary<string, string>();
             public IReadOnlyDictionary<string, CatProtocol> Protocol = new Dictionary<string, CatProtocol>();
-            public IReadOnlySet<string> TaskArms = new HashSet<string>();
+            // Components whose CAT runs a declared sequence instead of being walked to a numbered stop.
+            public IReadOnlyDictionary<string, CatExecution> Execution = new Dictionary<string, CatExecution>();
 
-            public bool IsTaskArm(VueOneComponent? c) =>
-                c != null && TaskArms.Contains((c.Name ?? string.Empty).Trim());
+            public CatExecution? ExecutionOf(VueOneComponent? c) =>
+                c != null && Execution.TryGetValue((c.Name ?? string.Empty).Trim(), out var e) ? e : null;
 
             public string CatTypeOf(VueOneComponent c) =>
                 CatType.TryGetValue((c.Name ?? string.Empty).Trim(), out var t) ? t : string.Empty;
@@ -205,16 +206,15 @@ namespace CodeGen.Translation.Process.Recipes
         {
             int id = SlotOf(target, ctx, process, state);
 
-            // A task arm runs its whole modelled move on one StartTask, so every movement folds into the
-            // single start(1)->done(2)->reset(2)->ready(0) handshake. It never commands 3 or 5.
-            if (ctx.IsTaskArm(target))
+            // The twin says WHEN a movement happens; where the CAT declares a sequence, the CAT says HOW.
+            // A sequence that runs ONCE folds every movement the twin models into one handshake, so it is
+            // emitted whole the first time and never again.
+            var exec = ctx.ExecutionOf(target);
+            if (exec is { RunsOnce: true })
             {
                 if (pos.ContainsKey(target.ComponentID)) return;
-                rows.Add(Row.Cmd(TemplateMap.RingKey(target.Name), 1, state.StateID));
-                rows.Add(Row.Wait(id, 2, state.StateID));
-                rows.Add(Row.Cmd(TemplateMap.RingKey(target.Name), 2, state.StateID));
-                rows.Add(Row.Wait(id, 0, state.StateID));
-                pos[target.ComponentID] = 0;
+                EmitSequence(exec.Steps, target, id, state, rows);
+                pos[target.ComponentID] = exec.FinalSettled;
                 return;
             }
 
@@ -223,20 +223,28 @@ namespace CodeGen.Translation.Process.Recipes
                     $"owns '{target.Name}' transition '{move.TransitionId}' toward '{g.NameOf(move.DestinationStateId)}', " +
                     "from which the actuator reaches no physical stop, so no command can be derived");
 
-            // A jaw's direction is a physical wiring fact (REVERTED_FIXES R-12: the rig is wired
-            // energise-to-GRIP while the twin models energise-to-OPEN), so the twin must never pick it. The
-            // model says WHEN: the first action on a jaw grips and they alternate from there.
-            if (IsGripper(target, ctx))
+            // An ALTERNATING sequence is one step per movement, resuming from where the last one settled.
+            if (exec is { Alternates: true })
             {
-                var (gc, gs) = !pos.TryGetValue(target.ComponentID, out int jaw) ? (1, 2) : jaw == 2 ? (3, 0) : (1, 2);
-                rows.Add(Row.Cmd(TemplateMap.RingKey(target.Name), gc, state.StateID));
-                rows.Add(Row.Wait(id, gs, state.StateID));
-                pos[target.ComponentID] = gs;
+                var step = exec.StepFrom(pos.TryGetValue(target.ComponentID, out int last) ? last : null);
+                EmitSequence(new[] { step }, target, id, state, rows);
+                pos[target.ComponentID] = step.Settled;
                 at[target.ComponentID] = stopId;
                 return;
             }
 
             DriveTo(process, state, target, id, stopId, move.OriginStateId, at, g, rows, ctx);
+        }
+
+        // One command and the WAIT that proves it arrived, per declared step, in order.
+        private static void EmitSequence(IReadOnlyList<ExecutionStep> steps, VueOneComponent target,
+            int id, VueOneState state, List<Row> rows)
+        {
+            foreach (var s in steps)
+            {
+                rows.Add(Row.Cmd(TemplateMap.RingKey(target.Name), s.Command, state.StateID));
+                rows.Add(Row.Wait(id, s.Settled, state.StateID));
+            }
         }
 
         // A guard is a sum of products, and both operators keep their meaning. ALL operands are
@@ -373,9 +381,9 @@ namespace CodeGen.Translation.Process.Recipes
             var named = PeerState(target, cond, ctx)
                 ?? throw Fail(process, state, $"condition '{cond.Name}' does not name a state of '{target.Name}'");
 
-            // A jaw and the task arm do not report the twin's stop numbering (R-12; the arm folds its move into
-            // one handshake). Their arrival is proved by the owning command's WAIT, so an observation adds nothing.
-            if (IsGripper(target, ctx) || ctx.IsTaskArm(target))
+            // A CAT that runs a declared sequence reports its OWN handshake, not the twin's stop numbering,
+            // so its arrival is proved by the owning command's WAIT and an observation adds nothing.
+            if (ctx.ExecutionOf(target) != null)
             {
                 if (!Owns(owned, state, target))
                     arrays.Warnings.Add(
@@ -813,9 +821,6 @@ namespace CodeGen.Translation.Process.Recipes
 
         private static bool IsProcess(VueOneComponent? c) => ComponentType.IsProcess(c);
         private static bool IsSensor(VueOneComponent c) => ComponentType.IsSensor(c);
-        // Grippers are Type "Robot" but not the task arm: a Five-state jaw whose two strokes share one rest sensor.
-        private static bool IsGripper(VueOneComponent c, Ctx ctx) =>
-            ComponentType.Is(c, ComponentType.Robot) && !ctx.IsTaskArm(c);
         private static bool SameName(VueOneComponent a, VueOneComponent b) => string.Equals(a.Name?.Trim(), b.Name?.Trim(), StringComparison.OrdinalIgnoreCase);
         private static bool SameRing(VueOneComponent a, VueOneComponent b, Ctx ctx) =>
             ctx.Rings.SameDomain(a.Name, b.Name);
