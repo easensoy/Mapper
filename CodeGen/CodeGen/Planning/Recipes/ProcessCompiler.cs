@@ -60,8 +60,7 @@ namespace CodeGen.Translation.Process.Recipes
             public readonly List<string> Findings = new();
         }
 
-        public static RecipeArrays Compile(VueOneComponent process, int processId, Ctx ctx,
-            ProcessHandoffPlan plan)
+        public static RecipeArrays Compile(VueOneComponent process, Ctx ctx, ProcessHandoffPlan plan)
         {
             var arrays = new RecipeArrays();
             foreach (var kv in ctx.Ids) arrays.ComponentIds[kv.Key] = kv.Value;
@@ -96,7 +95,7 @@ namespace CodeGen.Translation.Process.Recipes
                         rows.Add(Row.Cmd(ProcessPhaseTransport.CommandToken, state.StateNumber, state.StateID));
                 }
                 // The movements this state owns; each ends in its command's arrival WAIT.
-                void Work() => EmitOwnedMoves(process, state, owned, ctx, pos, at, graphs, rows, arrays);
+                void Work() => EmitOwnedMoves(process, state, owned, ctx, pos, at, graphs, rows);
                 if (!entryPhase) { Work(); Announcement(); }
                 foreach (var t in state.Transitions.OrderBy(t => t.Priority))
                 {
@@ -168,8 +167,7 @@ namespace CodeGen.Translation.Process.Recipes
         // last left it. Two legs leaving the SAME origin is a fork the model does not resolve.
         private static void EmitOwnedMoves(VueOneComponent process, VueOneState state,
             Dictionary<string, List<OwnedMove>> owned, Ctx ctx, Dictionary<string, int> pos,
-            Dictionary<string, string> at, Dictionary<string, ActuatorGraph> graphs, List<Row> rows,
-            RecipeArrays arrays)
+            Dictionary<string, string> at, Dictionary<string, ActuatorGraph> graphs, List<Row> rows)
         {
             if (!owned.TryGetValue(state.StateID, out var moves)) return;
 
@@ -241,13 +239,12 @@ namespace CodeGen.Translation.Process.Recipes
             DriveTo(process, state, target, id, stopId, move.OriginStateId, at, g, rows, ctx);
         }
 
-        // A guard is a sum of products. ALL operands are separate requirements. ANY operands are
-        // ALTERNATIVES, and a linear recipe cannot express a choice: the engine tests one
-        // (slot, value) per row. Where the alternatives reduce to the same requirement the choice is
-        // vacuous and one row stands for all of them (Restates proves it). Where they do not, they are
-        // emitted as a CONJUNCTION, which can only make the step wait LONGER than the model asks and
-        // never release it earlier - the safe direction on a rig - and the guard is reported so the
-        // choice the recipe could not make is visible rather than silent.
+        // A guard is a sum of products, and both operators keep their meaning. ALL operands are
+        // separate requirements, emitted one after another. ANY operands are ALTERNATIVES: the step
+        // releases when the FIRST of them holds, which a row cannot say on its own, so the alternatives
+        // are laid down as one WAIT GROUP the engine evaluates as a disjunction (RecipeStep.AltCount /
+        // TermCount). Where every alternative reduces to the same requirement the choice is vacuous and
+        // one plain row stands for all of them, which is what a guard with no real choice produces.
         private static void EmitGuard(ConditionExpr? guard, VueOneComponent process, VueOneState state,
             int gateCount, Ctx ctx, ProcessHandoffPlan plan, Dictionary<string, int> pos,
             Dictionary<string, string> at, Dictionary<string, ActuatorGraph> graphs, List<Row> rows,
@@ -267,18 +264,81 @@ namespace CodeGen.Translation.Process.Recipes
                             arrays, settledHere, owned, entryPhase, armed);
                     return;
                 case ConditionExpr.Any any:
-                    int before = rows.Count;
-                    foreach (var op in any.Operands)
-                        EmitGuard(op, process, state, gateCount, ctx, plan, pos, at, graphs, rows,
-                            arrays, settledHere, owned, entryPhase, armed);
-                    if (any.Operands.Count > 1 && rows.Count - before > 1)
-                        ctx.Findings.Add(
-                            $"'{process.Name}' state '{state.Name}': the twin offers " +
-                            $"{any.Operands.Count} alternative guards that do not reduce to one " +
-                            $"requirement, so all {rows.Count - before} are required. The step waits " +
-                            "for every alternative rather than the first.");
+                    EmitAlternatives(any, process, state, gateCount, ctx, plan, pos, at, graphs, rows,
+                        arrays, settledHere, owned, entryPhase, armed);
                     return;
+                default:
+                    throw Fail(process, state,
+                        $"guard node {guard.GetType().Name} is one this compiler has no reading for");
             }
+        }
+
+        // Each alternative is compiled AS IF IT STOOD ALONE - its own dedup scopes - so one alternative
+        // cannot silence a term another one needs. Only then are they compared: identical alternatives
+        // are the same requirement written twice and collapse to one row.
+        private static void EmitAlternatives(ConditionExpr.Any any, VueOneComponent process,
+            VueOneState state, int gateCount, Ctx ctx, ProcessHandoffPlan plan,
+            Dictionary<string, int> pos, Dictionary<string, string> at,
+            Dictionary<string, ActuatorGraph> graphs, List<Row> rows, RecipeArrays arrays,
+            Dictionary<string, int> settledHere, Dictionary<string, List<OwnedMove>> owned,
+            bool entryPhase, HashSet<string> armed)
+        {
+            var alternatives = new List<List<Row>>();
+            foreach (var op in any.Operands)
+            {
+                var sub = new List<Row>();
+                EmitGuard(op, process, state, gateCount, ctx, plan,
+                    new Dictionary<string, int>(pos, StringComparer.OrdinalIgnoreCase),
+                    new Dictionary<string, string>(at, StringComparer.OrdinalIgnoreCase),
+                    graphs, sub, arrays,
+                    new Dictionary<string, int>(settledHere, StringComparer.OrdinalIgnoreCase),
+                    owned, entryPhase, armed);
+                alternatives.Add(sub);
+            }
+
+            // An alternative that adds no requirement is already met, so the disjunction is already met
+            // and the step waits for none of it. Two things produce that, and the report says both rather
+            // than claiming to know which: this recipe already proved the position, or the alternative
+            // names something whose arrival this recipe cannot observe (a jaw or the task arm, whose
+            // reported states are the CAT handshake). Either way the twin wrote a guard here.
+            if (alternatives.Any(a => a.All(r => r.Step != StepType.Wait)))
+            {
+                ctx.Findings.Add(
+                    $"'{process.Name}' state '{state.Name}': one of the {any.Operands.Count} alternative " +
+                    "guards adds no requirement to this recipe - either already established here, or " +
+                    "naming an arrival this recipe cannot observe - so the step does not wait on it.");
+                return;
+            }
+
+            // A refresh is an ASK, not a requirement: it belongs before the group so every alternative
+            // is tested against a level that was re-announced.
+            foreach (var cmd in alternatives.SelectMany(a => a).Where(r => r.Step == StepType.Cmd))
+                if (!rows.Any(r => r.Step == StepType.Cmd && string.Equals(r.Target, cmd.Target, StringComparison.Ordinal)))
+                    rows.Add(cmd);
+
+            var distinct = new List<List<Row>>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var alt in alternatives)
+            {
+                var waits = alt.Where(r => r.Step == StepType.Wait).ToList();
+                if (seen.Add(string.Join("|", waits.Select(w => w.WaitId + ":" + w.WaitState))))
+                    distinct.Add(waits);
+            }
+
+            int head = rows.Count;
+            foreach (var alt in distinct)
+            {
+                alt[0].Terms = alt.Count;
+                rows.AddRange(alt);
+            }
+            // One alternative is a plain requirement and stays a plain row, so a guard with no real
+            // choice in it produces exactly what it always did.
+            if (distinct.Count > 1)
+            {
+                rows[head].Alt = distinct.Count;
+                rows[head].GroupLen = rows.Count - head;
+            }
+            else rows[head].Terms = 0;
         }
 
         private static void EmitCondition(VueOneComponent process, VueOneState state, VueOneCondition cond,
@@ -678,8 +738,13 @@ namespace CodeGen.Translation.Process.Recipes
                 arrays.CmdStateArr.Add(r.CmdState);
                 arrays.Wait1Id.Add(r.WaitId);
                 arrays.Wait1State.Add(r.WaitState);
-                bool last = i + 1 >= rows.Count || rows[i + 1].StateId != r.StateId;
-                arrays.NextStep.Add(last ? DestRow(r.StateId) : i + 1);
+                arrays.AltCount.Add(r.Alt);
+                arrays.TermCount.Add(r.Terms);
+                // A wait GROUP is one requirement, so the row that heads it steps past the whole group;
+                // the rows inside it are only ever read by the head's own evaluation.
+                int after = r.GroupLen > 0 ? i + r.GroupLen : i + 1;
+                bool last = after >= rows.Count || rows[after].StateId != r.StateId;
+                arrays.NextStep.Add(last ? DestRow(r.StateId) : after);
                 // Telemetry only: the row's owning VueOne state, resolved from the StateId it was built under.
                 arrays.ProcessStateByRow.Add(
                     r.StateId != null && ordinalOf.TryGetValue(r.StateId, out var ord) ? ord : 0);
@@ -691,6 +756,8 @@ namespace CodeGen.Translation.Process.Recipes
             arrays.Wait1Id.Add(0);
             arrays.Wait1State.Add(0);
             arrays.NextStep.Add(TerminalLoopsHome(states) ? 0 : end);
+            arrays.AltCount.Add(0);
+            arrays.TermCount.Add(0);
             // END carries the last row's phase so the final publish does not report a phantom state 0.
             arrays.ProcessStateByRow.Add(
                 arrays.ProcessStateByRow.Count > 0 ? arrays.ProcessStateByRow[^1] : 0);
@@ -760,6 +827,10 @@ namespace CodeGen.Translation.Process.Recipes
         private sealed class Row
         {
             public int Step; public string? Target; public int CmdState; public int WaitId; public int WaitState; public string StateId = "";
+            // A WAIT row that HEADS a group carries how many alternatives start here and how many
+            // rows the group spans; a row that heads an alternative carries how many terms hold
+            // together. Zero everywhere is a plain single-slot wait.
+            public int Alt; public int Terms; public int GroupLen;
             public static Row Cmd(string t, int s, string id) => new() { Step = StepType.Cmd, Target = t, CmdState = s, StateId = id };
             public static Row Wait(int i, int s, string id) => new() { Step = StepType.Wait, WaitId = i, WaitState = s, StateId = id };
         }
