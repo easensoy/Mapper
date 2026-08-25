@@ -23,6 +23,9 @@ namespace CodeGen.Translation
             public List<(string Pin, string Value)> HcfPinAssignments { get; } = new();
         }
 
+        // The row a connection drawn at the head of its band sits on: above every station, clear of them.
+        private const int MqttConnectionRowY = 200;
+
 
         private static string DescribeBinding(ActuatorBinding b) =>
             $"athome={b.AthomeTag ?? "-"} atwork={b.AtworkTag ?? "-"} outputToWork={b.OutputToWorkTag ?? "-"} outputToHome={b.OutputToHomeTag ?? "-"}";
@@ -270,51 +273,60 @@ namespace CodeGen.Translation
                 }
 
                 bool tele = config.UseTelemetryCat;
-                // The Feed controller's connection follows the Feed station onto M262 or RevPi (FB name +
-                // ClientIdentifier). ConnectionID stays the shared 'SMC' so the embedded MqttPub topic/
-                // payload is byte-for-byte unchanged. Byte-identical for M262 (suffix M262, ClientM262).
-                const string feedSuffix = "M262";
-                string feedClientId = TelemetrySettings.Current.For(PlcAssignment.M262).Client;
-                string bx1Name  = TelemetrySettings.Current.For(PlcAssignment.BX1).NameFor(tele);
-                string feedName = tele ? $"Telemetry_{feedSuffix}" : $"MqttConn_{feedSuffix}";
-                string m580Name = tele ? "Telemetry_M580" : "MqttConn_M580";
 
-                var mqttEntry = ctx.Roster.Get(bx1Name);
-                int bx1X = mqttEntry?.X ?? 29000;
-                int bx1Y = mqttEntry?.Y ?? 200;
-                // Each conn is routed to its own sysres via SysresFbMirror.BucketFor; BX1 bring-up is in BuildBx1Wiring, Feed/M580 below.
-                InjectMqttConn(bx1Name, config.MqttConnectionName, TelemetrySettings.Current.For(PlcAssignment.BX1).Client, bx1X, bx1Y);
-                InjectMqttConn(feedName, config.MqttConnectionName, feedClientId,
-                    ctx.Layout.Band(PlcAssignment.M262).ColumnBaseX, 200);
-                InjectMqttConn(m580Name, config.MqttConnectionName, TelemetrySettings.Current.For(PlcAssignment.M580).Client,
-                    ctx.Layout.Band(PlcAssignment.M580).ColumnBaseX, 200);
-                builder.AddEventConnection($"{feedName}.INITO", $"{feedName}.CONNECT");
-                builder.AddEventConnection($"{m580Name}.INITO", $"{m580Name}.CONNECT");
-                // Each connection is brought up by its own resource's infrastructure, whatever that
-                // resource calls it.
-                builder.AddEventConnection(
-                    $"{ctx.ResourceFor(PlcAssignment.M262).AreaFb}.INITO", $"{feedName}.INIT");
-                builder.AddEventConnection(
-                    $"{ctx.ResourceFor(PlcAssignment.M580).StationFb}.INITO", $"{m580Name}.INIT");
-                // A resource that RECEIVES relocated components hosts publishers of its own, so it needs
-                // its own connection alongside the one the components came from. It is brought up from
-                // the head of the ring it participates in - a component the plan already put there - so
-                // no bring-up wire crosses a device and no instance name is spelled here.
-                var relocated = ctx.ResourceFor(PlcAssignment.RevPi);
-                if (relocated.Capabilities.ReceivesRelocatedComponents && ctx.Profile.PartialRevPi
-                    && !string.IsNullOrWhiteSpace(relocated.InitAnchor))
+                // One connection per resource that this run emits, in telemetry.yml's declaration order -
+                // which is the order they land on the canvas. A resource whose publishers have no local
+                // connection drops every message silently, so the connection follows the RESOURCE, and
+                // which resources exist is the roster's answer, not a controller name here.
+                var connections = TelemetrySettings.Current.Connections
+                    .Where(c => TargetRegistry.IsRegistered(c.Plc) && ctx.Emits(c.Plc)).ToList();
+
+                string NameOf(MqttConnectionDeclaration c) => c.NameFor(tele);
+
+                // The role whose INITO starts it, resolved against the resource the plan already built.
+                string? StarterOf(MqttConnectionDeclaration c)
                 {
-                    var conn = TelemetrySettings.Current.For(PlcAssignment.RevPi);
-                    string revpiName = conn.NameFor(tele);
-                    InjectMqttConn(revpiName, config.MqttConnectionName, conn.Client,
-                        ctx.Layout.Band(PlcAssignment.RevPi).ColumnBaseX, 200);
-                    builder.AddEventConnection($"{revpiName}.INITO", $"{revpiName}.CONNECT");
-                    builder.AddEventConnection($"{relocated.InitAnchor}.INITO", $"{revpiName}.INIT");
+                    var resource = ctx.ResourceFor(c.Plc);
+                    return c.BroughtUpBy switch
+                    {
+                        MqttConnectionDeclaration.ByArea     => resource.AreaFb,
+                        MqttConnectionDeclaration.ByStation  => resource.StationFb,
+                        MqttConnectionDeclaration.ByRingHead => resource.InitAnchor,
+                        _ => null,
+                    };
                 }
+
+                foreach (var c in connections)
+                {
+                    var name = NameOf(c);
+                    var row = c.IsDrawnAtRosterRow ? ctx.Roster.Get(name) : null;
+                    int x = row?.X ?? ctx.Layout.Band(c.Plc).ColumnBaseX;
+                    int y = row?.Y ?? MqttConnectionRowY;
+                    InjectMqttConn(name, config.MqttConnectionName, c.Client, x, y);
+                }
+
+                // Wired in the order the artefact carries: every connection the base topology already
+                // has, then any connection added because this run relocated components onto a resource
+                // that would otherwise have none.
+                bool AddedByRelocation(MqttConnectionDeclaration c) =>
+                    TargetRegistry.Of(c.Plc).ReceivesRelocatedComponents;
+
+                var wired = connections.Where(c => StarterOf(c) is { Length: > 0 }).ToList();
+                foreach (var c in wired.Where(c => !AddedByRelocation(c)))
+                    builder.AddEventConnection($"{NameOf(c)}.INITO", $"{NameOf(c)}.CONNECT");
+                foreach (var c in wired.Where(c => !AddedByRelocation(c)))
+                    builder.AddEventConnection($"{StarterOf(c)}.INITO", $"{NameOf(c)}.INIT");
+                foreach (var c in wired.Where(AddedByRelocation))
+                {
+                    builder.AddEventConnection($"{NameOf(c)}.INITO", $"{NameOf(c)}.CONNECT");
+                    builder.AddEventConnection($"{StarterOf(c)}.INITO", $"{NameOf(c)}.INIT");
+                }
+
                 report.Missing.Add(
-                    $"[MQTT] {(tele ? "Telemetry" : "MQTT_CONNECTION")} injected per resource — BX1 " +
-                    $"(ClientId SMC_BX1) + Feed:{feedSuffix} ({feedClientId}) + M580 (SMC_M580), shared ConnectionID=" +
-                    $"{config.MqttConnectionName} so each resource's embedded MqttPub binds locally; URL={brokerUrl}.");
+                    $"[MQTT] {(tele ? "Telemetry" : "MQTT_CONNECTION")} injected per resource — " +
+                    string.Join(" + ", connections.Select(c => $"{NameOf(c)} ({c.Client})")) +
+                    $", shared ConnectionID={config.MqttConnectionName} so each resource's embedded " +
+                    $"MqttPub binds locally; URL={brokerUrl}.");
             }
 
 
