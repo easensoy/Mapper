@@ -10,9 +10,6 @@ namespace CodeGen.Configuration
     {
         private const string ConfigFileName = "mapper_config.json";
 
-        // Engine END->0 loop-back. Readonly: a writable static would be state one run could change under another.
-        public static readonly bool EnableCyclicRestart = true;
-
         // Real rig DI sensors the twin does not model; kept OFF the M262 Feed ring so the report lands only in M580 state_table[id]. The slot is the stableSlot on the sensor's own layout row.
         public static (string Name, int Id)[] M262SynthSensors =>
             RigCatalog.Current.SynthSensors
@@ -31,8 +28,6 @@ namespace CodeGen.Configuration
 
         public string MappingRulesPath { get; set; } = string.Empty;
         public string TemplateLibraryPath { get; set; } = string.Empty;
-        public string SyslayPath { get; set; } = string.Empty;
-        public string SysresPath { get; set; } = string.Empty;
         public string SyslayPath2 { get; set; } = string.Empty;
         public string SysresPath2 { get; set; } = string.Empty;
 
@@ -45,9 +40,12 @@ namespace CodeGen.Configuration
         // EAE constraint: a device with no concrete IP is not listed in Deploy & Diagnostic, so this must be a real address, not a placeholder.
         public string M580TargetIp { get; set; } = DeviceConfig.Current.M580.TargetIp;
 
-        // Must match Topology/BroadcastDomain_Default Network.json. M262 is intentionally left on NOCONF -- do not touch it.
-        public string M580BroadcastDomainUuid { get; set; }
-            = "2131fbdd-0a41-4e41-abfb-a14a5ca9218d";
+        // The M580 endpoint binding and the BroadcastDomain JSON cross-reference one uuid, so it is
+        // written once. Must match Topology/BroadcastDomain_Default Network.json. M262 is intentionally
+        // left on NOCONF -- do not touch it.
+        const string DefaultNetworkDomainUuid = "2131fbdd-0a41-4e41-abfb-a14a5ca9218d";
+
+        public string M580BroadcastDomainUuid { get; set; } = DefaultNetworkDomainUuid;
 
         public string DefaultNetworkSubnetAddress { get; set; } = DeviceConfig.Current.DefaultNetwork.SubnetAddress;
 
@@ -55,9 +53,7 @@ namespace CodeGen.Configuration
 
         public string DefaultNetworkGateway { get; set; } = DeviceConfig.Current.DefaultNetwork.Gateway;
 
-        // Same UUID on the M580 endpoint binding and the BroadcastDomain JSON so they cross-reference.
-        public string DefaultNetworkUuid { get; set; }
-            = "2131fbdd-0a41-4e41-abfb-a14a5ca9218d";
+        public string DefaultNetworkUuid { get; set; } = DefaultNetworkDomainUuid;
 
         // BX1 softdpac runtime IP (EAE deploys/logs in here); same Deploy & Diagnostic real-IP constraint as M580.
         public string BX1TargetIp { get; set; } = DeviceConfig.Current.Bx1.TargetIp;
@@ -70,22 +66,9 @@ namespace CodeGen.Configuration
         public string RevPiTargetIp { get; set; } = DeviceConfig.Current.RevPi.TargetIp;
         public string RevPiHostIp { get; set; } = DeviceConfig.Current.RevPi.HostIp;
 
-
-
-        // EAE constraint: an FDT project copied verbatim from another solution can make the topology server throw a 500 on import.
-        public bool EmitBx1EtherNetIpDevice { get; set; } = true;
-
-        public bool DeployBx1IoBroker { get; set; } = true;
-
-        // TRUE: the cover I/O bridge lives INSIDE the PLC_RW_BX1 composite, so BX1_RES instantiates only
-        // BX1_IO. This relies on a SYMLINKMULTIVAR with an ABSOLUTE cross-instance NAME resolving from
-        // inside a composite type; set false to restore the external bridge in one rebuild.
-        public bool Bx1BridgeInsideComposite { get; set; } = true;
-
-        // SAFETY: on start forces CoverPNP_Hr HOME (ToWork=0,ToHome=1) until the at-home sensor is TRUE so cover_hr can't auto-energise Work (swivel-collision). Run-time only: does NOT act on EAE Clean/STOP/fault. Homing while STOPPED needs the TM3BC coupler ToHome fallback (word 16#0002) set on its own web server (192.168.1.210).
-        public bool Bx1CoverSafeStart { get; set; } = true;
-
-        public string ResourceName { get; set; } = "M262_RES";
+        // Retained because the prebuilt VueOne runner links this property; device.yml's targets entry is
+        // what generation actually reads, so nothing here decides a resource name any more.
+        public string ResourceName { get; set; } = string.Empty;
 
         // Per-PLC HCF templates: copied verbatim; only the DI/DO symbol bindings are rewritten from IoBindings.xlsx. Bus topology is fixed by rig wiring, never synthesised from Control.xml.
         public string IoFolderPath { get; set; } = string.Empty;
@@ -95,9 +78,6 @@ namespace CodeGen.Configuration
         public string M580HcfTemplatePath { get; set; } = string.Empty;
 
         public string BX1HcfTemplatePath { get; set; } = string.Empty;
-
-        // CmdTargetName must be STRING[150] so long names (coverpnp_gripper) do not overflow.
-        public bool UseRecipeStruct { get; set; } = true;
 
         // Every MQTT setting is READ-ONLY here and owned by Config/telemetry.yml. They stay on MapperConfig
         // because the prebuilt VueOne runner links them, but having no setter is what stops a stale
@@ -114,11 +94,11 @@ namespace CodeGen.Configuration
         public bool MqttRetain => TelemetrySettings.Current.Retain;
         public string MqttTopicRoot => TelemetrySettings.Current.TopicRoot;
 
-        public string ActiveSyslayPath =>
-            !string.IsNullOrEmpty(SyslayPath2) ? SyslayPath2 : SyslayPath;
+        // The configured artefact roots. Generation refuses to run without them, so there is no
+        // second pair to fall back to.
+        public string ActiveSyslayPath => SyslayPath2;
 
-        public string ActiveSysresPath =>
-            !string.IsNullOrEmpty(SysresPath2) ? SysresPath2 : SysresPath;
+        public string ActiveSysresPath => SysresPath2;
 
         // A run settles a few values without writing back into the caller's instance: MapperUI holds one
         // cached config for the life of the process, so mutating it leaks into the next run.
