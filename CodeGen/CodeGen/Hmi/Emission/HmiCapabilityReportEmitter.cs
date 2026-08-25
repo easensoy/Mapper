@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Xml.Linq;
+using CodeGen.Translation.Process;
 
 namespace CodeGen.Hmi
 {
@@ -79,6 +80,78 @@ namespace CodeGen.Hmi
                                 new XAttribute("honoured", g.Count(x => x.Cap.Supported)),
                                 new XAttribute("of", g.Count()),
                                 Reason(g)))),
+
+                    // The PROCESSES, with their allocation and their compiled recipe. This is the
+                    // one place a row is serialised: the operator TEXT was generated once in
+                    // HmiRecipePresenter and both the canvas and this file render that same string.
+                    new XElement("Processes",
+                        plant.Processes.OrderBy(p => p.InstanceName, StringComparer.Ordinal)
+                            .Select(p => new XElement("Process",
+                                new XAttribute("name", p.InstanceName),
+                                new XAttribute("display", p.DisplayName),
+                                new XAttribute("tag", p.TagName),
+                                new XAttribute("catType", p.CatType),
+                                new XAttribute("controller", p.Controller),
+                                new XAttribute("resource", p.Resource),
+                                new XAttribute("slot", p.Slot),
+                                new XAttribute("ring", p.Ring ?? "none"),
+                                new XAttribute("rows", p.Rows.Count),
+                                new XAttribute("unresolvedRows", p.Rows.Count(r => !r.Resolved)),
+                                new XElement("Capabilities",
+                                    p.Capabilities.Where(c => c.Purpose != HmiCapabilityPurpose.Monitor)
+                                        .OrderBy(c => c.Purpose.ToString(), StringComparer.Ordinal)
+                                        .Select(c => new XElement("Capability",
+                                            new XAttribute("purpose", c.Purpose),
+                                            new XAttribute("supported", c.Supported),
+                                            c.Supported || string.IsNullOrEmpty(c.Detail)
+                                                ? null : new XAttribute("reason", c.Detail)))),
+                                new XElement("Commands", string.Join(", ", p.Owned)),
+                                new XElement("Observes", string.Join(", ", p.Observed)),
+                                new XElement("Phases",
+                                    p.Phases.Select(x => new XElement("Phase",
+                                        new XAttribute("value", x.Value), new XAttribute("name", x.Name)))),
+                                new XElement("Recipe",
+                                    p.Rows.Select(r => new XElement("Step",
+                                        new XAttribute("index", r.Index),
+                                        new XAttribute("stepType", r.StepType),
+                                        new XAttribute("kind", r.Kind),
+                                        new XAttribute("phase", r.PhaseValue),
+                                        r.PhaseName.Length == 0 ? null : new XAttribute("phaseName", r.PhaseName),
+                                        r.CmdTargetKey == null ? null : new XAttribute("cmdTarget", r.CmdTargetKey),
+                                        r.CmdTargetDisplay == null ? null : new XAttribute("cmdTargetName", r.CmdTargetDisplay),
+                                        r.StepType == StepType.Wait ? null : new XAttribute("cmdState", r.CmdState),
+                                        r.CmdStateName == null ? null : new XAttribute("cmdStateName", r.CmdStateName),
+                                        r.StepType != StepType.Wait ? null : new XAttribute("waitSlot", r.WaitSlot),
+                                        r.WaitSourceKey == null ? null : new XAttribute("waitSource", r.WaitSourceKey),
+                                        r.WaitSourceDisplay == null ? null : new XAttribute("waitSourceName", r.WaitSourceDisplay),
+                                        r.WaitCrossRing ? new XAttribute("waitCrossRing", true) : null,
+                                        r.StepType != StepType.Wait ? null : new XAttribute("waitState", r.WaitState),
+                                        r.WaitStateName == null ? null : new XAttribute("waitStateName", r.WaitStateName),
+                                        new XAttribute("nextStep", r.NextStep),
+                                        r.Resolved ? null : new XAttribute("resolved", false),
+                                        r.Text)))))),
+
+                    // Bindings the DEPLOYED service interface cannot serve. Each was unbound in the
+                    // emitted source; listing them is how the gap stays visible instead of silent.
+                    new XElement("UnservedBindings",
+                        plan.DeadBindings.OrderBy(d => d.CatType, StringComparer.Ordinal)
+                            .ThenBy(d => d.Symbol, StringComparer.Ordinal)
+                            .ThenBy(d => d.Tag, StringComparer.Ordinal)
+                            .Select(d => new XElement("Binding",
+                                new XAttribute("catType", d.CatType),
+                                new XAttribute("symbol", d.Symbol),
+                                new XAttribute("tag", d.Tag),
+                                new XAttribute("reason", d.Reason)))),
+
+                    // The generation report, beside the panel it describes.
+                    //
+                    // A row the model does not let us name renders as "(unresolved - see the
+                    // generation report)". That sentence is only honest if the report is reachable
+                    // from the same place as the panel: MapperLogger feeds the MapperUI activity
+                    // grid, which nobody on the rig is looking at. Each line already names the
+                    // process, the row and the cause, so no reason is restated here.
+                    new XElement("Diagnostics",
+                        plan.Diagnostics.Select(d => new XElement("Note", d))),
 
                     // Why a move is refused, in the operator's words. These are the rules the
                     // evaluator will actually run - GenerationContext.Interlocks, joined to twin names.
