@@ -11,6 +11,10 @@ namespace CodeGen.Configuration
 
         // Each CAT's command vocabulary; see the smc-rig.yml section for what the columns mean.
         public List<CatProtocolDeclaration> Protocols { get; set; } = new();
+
+        // How a CAT executes a movement, where its reported states are the CAT's own handshake rather
+        // than the twin's stop numbering. Declaration ORDER decides which row claims a component.
+        public List<CatExecutionDeclaration> Execution { get; set; } = new();
         public List<string> CrossRingSegment { get; set; } = new();
         public List<DischargeChannel> DischargeChannels { get; set; } = new();
 
@@ -105,6 +109,32 @@ public static RigCatalog Current => RigCatalogLoader.Catalog;
         public int CrossingFaultTimeoutMs { get; set; }
         public RawStateRange? RawStateRange { get; set; }
         public List<string> EnforcedTargets { get; set; } = new();
+    }
+
+    // A fixed command sequence a CAT runs, instead of being walked to a stop the twin numbers. A row
+    // claims a component when every field it DECLARES matches, so a row naming only a cat claims every
+    // component on that cat and a row naming only a componentType claims every component of that type.
+    public sealed class CatExecutionDeclaration
+    {
+        public string Cat { get; set; } = string.Empty;
+        public string ComponentType { get; set; } = string.Empty;
+        // The whole sequence is emitted the first time the recipe moves it, and never again.
+        public bool RunsOnce { get; set; }
+        // One step per movement, resuming from wherever the last one settled.
+        public bool Alternates { get; set; }
+        public List<ExecutionStepDeclaration> Steps { get; set; } = new();
+
+        public bool Claims(string? catType, string? componentType) =>
+            (Cat.Length == 0 || string.Equals(Cat, catType, System.StringComparison.OrdinalIgnoreCase)) &&
+            (ComponentType.Length == 0 ||
+             string.Equals(ComponentType, componentType, System.StringComparison.OrdinalIgnoreCase));
+    }
+
+    // A command value and the settled value that means the CAT arrived.
+    public sealed class ExecutionStepDeclaration
+    {
+        public int Command { get; set; }
+        public int Settled { get; set; }
     }
 
     // The values one CAT's core can publish as CurrentRawState. Declared only by a CAT whose core
