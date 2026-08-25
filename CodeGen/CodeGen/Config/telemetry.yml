@@ -26,7 +26,6 @@ connectionName: SMC
 # instance     the FB name on the shared canvas when the Telemetry composite is used
 # rawInstance  its name when the raw MQTT_CONNECTION is emitted instead (useTelemetryCat: false)
 # client       broker ClientIdentifier -- unique per resource, or mosquitto evicts the duplicates
-# initFrom     the infrastructure role whose INITO brings it up; ringHead = the head of the report ring
 #              this resource participates in, for a resource that has no infrastructure of its own
 connections:
   - plc: BX1
@@ -37,19 +36,16 @@ connections:
     instance: Telemetry_M262
     rawInstance: MqttConn_M262
     client: SMC_M262
-    initFrom: area
   - plc: M580
     instance: Telemetry_M580
     rawInstance: MqttConn_M580
     client: SMC_M580
-    initFrom: station
   # Emitted only when part of the Feed station is relocated here and its publishers need a local
   # connection alongside the Feed controller's own.
   - plc: RevPi
     instance: Telemetry_RevPi
     rawInstance: MqttConn_RevPi
     client: SMC_RevPi
-    initFrom: ringHead
 
 # Publish policy. These were previously C# defaults shadowed by mapper_config.json; telemetry.yml is
 # the single owner of every MQTT setting, so they live here with the connection they belong to.
