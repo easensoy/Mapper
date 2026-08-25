@@ -11,6 +11,14 @@ namespace CodeGen.Devices.Core
     // Idempotent; save is skipped when nothing changed (no spurious "Reload Solution" prompt).
     public static class FoldersXmlEmitter
     {
+        // Only the devices this emitter registers are ever removed again: anything else in the file was
+        // put there by EAE or by hand and is not this generator's to sweep.
+        private static bool Owned(string sysdevId) =>
+            sysdevId.Equals(M262SysdevId, StringComparison.OrdinalIgnoreCase) ||
+            sysdevId.Equals(M580SysdevId, StringComparison.OrdinalIgnoreCase) ||
+            sysdevId.Equals(BX1SysdevId, StringComparison.OrdinalIgnoreCase) ||
+            sysdevId.Equals(RevPiSysdevId, StringComparison.OrdinalIgnoreCase);
+
         // Each device emitter owns its own sysdev id; restating them here is how they drift.
         const string M262SysdevId  = CodeGen.Devices.M262.M262SysdevEmitter.M262SysdevId;
         const string M580SysdevId  = Station2DeviceEmitter.M580SysdevId;
@@ -20,6 +28,7 @@ namespace CodeGen.Devices.Core
         public sealed class EmitResult
         {
             public int ItemsAdded { get; set; }
+            public int ItemsRemoved { get; set; }
             public System.Collections.Generic.List<string> Warnings { get; } = new();
             public string? FilePath { get; set; }
         }
@@ -95,7 +104,19 @@ namespace CodeGen.Devices.Core
                 result.ItemsAdded++;
             }
 
-            if (result.ItemsAdded > 0)
+            // A device this run does NOT emit must lose its registration, or EAE keeps enumerating one
+            // that is no longer on disk: the previous run's selection would survive into this one.
+            var registered = new System.Collections.Generic.HashSet<string>(
+                feedSysdevIds.Concat(new[] { M580SysdevId, BX1SysdevId })
+                             .Concat(additionalSysdevIds ?? Array.Empty<string>()),
+                StringComparer.OrdinalIgnoreCase);
+            var stale = items.Elements(ns + "item")
+                .Where(e => Owned((e.Value ?? string.Empty).Trim()) &&
+                            !registered.Contains((e.Value ?? string.Empty).Trim()))
+                .ToList();
+            foreach (var e in stale) { e.Remove(); result.ItemsRemoved++; }
+
+            if (result.ItemsAdded > 0 || result.ItemsRemoved > 0)
                 doc.Save(foldersPath);
             return result;
         }
