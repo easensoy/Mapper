@@ -248,3 +248,15 @@ Checker `[(0,2,6,2),(0,2,4,2)]`, Transfer `[(0,2,5,2),(0,2,4,2)]`, Ejector `[(0,
 - Every actuator with Control.xml interlock conditions emits its surviving rules — the cover-detour zeroing
   + guard exemption are removed (Correction 2). CoverPNP_Hr emits its Shaft_Hr/AtWork rule; Vr/Gripper stay
   0 only because they have no conditions.
+
+## 2026-08-20 — the restore paths are gone
+
+`useStruct` and `useTargetStruct` were flags with two working shapes each, kept as a way back to the
+scalar interface. Both are removed: the struct is what the CATs, the evaluator and the plan all speak,
+and a second answer to "what shape is this interface" is a way for the two halves to disagree. The
+deploy-time normalisers still MIGRATE a scalar CAT to the struct — that is what makes an older tree
+converge — they just no longer go back.
+
+The rules themselves also stopped being a flat list in the same pass: an interlock is now a sum of
+products, so `InterlockRule` carries `TermCount` and the evaluator blocks only when one whole
+alternative holds. See `Planning/Interlocks/InterlockPlan.cs` for the row encoding.
