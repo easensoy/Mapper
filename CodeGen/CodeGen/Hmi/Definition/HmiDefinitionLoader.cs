@@ -131,8 +131,15 @@ namespace CodeGen.Hmi
             }
             if (families.Count == 0) v.Fail("'screens.families' declares no screens.");
 
+            var texts = screens.Sec("recipeText");
+            var recipeText = new HmiRecipeTextPolicy(
+                texts.Text("command"), texts.Text("wait"), texts.Text("phase"),
+                texts.Text("end"), texts.Text("unresolved"));
+
             var screenPolicy = new HmiScreenPolicy(families, screens.Identifier("hubName"),
-                                                 screens.Identifier("detailName"), screens.Text("detailTitle"));
+                                                 screens.Identifier("detailName"), screens.Text("detailTitle"),
+                                                 screens.Identifier("processDetailName"),
+                                                 screens.Text("processDetailTitle"), recipeText);
 
             var profiles = new List<HmiStatesProfile>();
             foreach (var p in proto.Seq("statesProfiles"))
