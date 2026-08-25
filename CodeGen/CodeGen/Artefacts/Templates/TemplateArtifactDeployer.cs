@@ -260,40 +260,5 @@ namespace CodeGen.Services
             }
         }
 
-        internal static string ReadSysdevId(string sysdevPath)
-        {
-            if (string.IsNullOrEmpty(sysdevPath) || !File.Exists(sysdevPath)) return string.Empty;
-            try
-            {
-                var doc = System.Xml.Linq.XDocument.Load(sysdevPath);
-                return (string?)doc.Root?.Attribute("ID") ?? string.Empty;
-            }
-            catch { return string.Empty; }
-        }
-
-        internal static string? DeriveEaeProjectDir(MapperConfig cfg)
-        {
-            var syslayPath = cfg.ActiveSyslayPath;
-            if (string.IsNullOrWhiteSpace(syslayPath)) return null;
-
-            var dir = Path.GetDirectoryName(syslayPath);
-            while (dir != null)
-            {
-                var parent = Path.GetDirectoryName(dir);
-                if (parent != null && Directory.Exists(Path.Combine(dir, "..")))
-                {
-                    var iec = Path.Combine(dir);
-                    var checkDir = dir;
-                    while (checkDir != null)
-                    {
-                        if (Directory.GetFiles(checkDir, "*.dfbproj").Any())
-                            return Path.GetDirectoryName(checkDir);
-                        checkDir = Path.GetDirectoryName(checkDir);
-                    }
-                }
-                dir = Path.GetDirectoryName(dir);
-            }
-            return null;
-        }
     }
 }
