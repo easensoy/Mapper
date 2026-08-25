@@ -88,7 +88,9 @@ namespace CodeGen.Hmi
             {
                 HmiTemplateLibrary.CopyDirectory(shell, staging);
 
-                var plan = HmiPlanner.Plan(plant, templates, types.Ecc, def);
+                var plan = HmiPlanner.Plan(plant, templates, types.Ecc,
+                                           cat => types.Contracts.TryGetValue(cat, out var c)
+                                               ? c : HmiContract.None, def);
                 foreach (var d in plan.Diagnostics.Except(plant.Diagnostics)) MapperLogger.Warn("[Hmi] " + d);
 
                 // Only the faceplates the plan places are staged, and only the symbols it selected.
@@ -108,7 +110,7 @@ namespace CodeGen.Hmi
                 // Make every withheld action non-fireable in the STAGED faceplate before anything is
                 // validated or committed. A reported-disabled control that still raises the event is
                 // the defect this closes; the validator below proves the outcome on the staged source.
-                foreach (var note in HmiFaceplatePatcher.Suppress(staging, deployed, plan.AllVerdicts, def))
+                foreach (var note in HmiFaceplatePatcher.Suppress(staging, deployed, plan.AllVerdicts, plan.DeadBindings, def))
                     MapperLogger.Warn("[Hmi] " + note);
 
                 var owned = new List<string>();
