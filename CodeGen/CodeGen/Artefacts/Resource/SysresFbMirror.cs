@@ -228,17 +228,11 @@ namespace CodeGen.Devices.Core
         // Refresh a sysres FB's Parameters from the syslay, which is the authority: a resource keeping
         // its old parameters would deploy a stale recipe with no error. Matched by Name, then by the
         // Mapping attribute (I-9: an FB's Mapping is a separate GUID carrying the syslay id).
-        public static int SyncProcessRecipesFromSyslay(string syslayPath, string sysresPath) =>
-            SyncFromSyslay(syslayPath, sysresPath, IsProcessEngine);
-
         public static int SyncProcessRecipesFromSyslay(string syslayPath, XDocument sysresDoc) =>
             SyncFromSyslay(syslayPath, sysresDoc, IsProcessEngine);
 
         public static int SyncMirroredFbParametersFromSyslay(string syslayPath, string sysresPath) =>
             SyncFromSyslay(syslayPath, sysresPath, _ => true);
-
-        public static int SyncMirroredFbParametersFromSyslay(string syslayPath, XDocument sysresDoc) =>
-            SyncFromSyslay(syslayPath, sysresDoc, _ => true);
 
         private static bool IsProcessEngine(string type) =>
             string.Equals(type, "Process1_Generic", StringComparison.Ordinal);
