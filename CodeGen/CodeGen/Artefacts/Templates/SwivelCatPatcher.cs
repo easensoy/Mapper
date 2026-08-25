@@ -413,44 +413,42 @@ namespace CodeGen.Services
                 MapperLogger.Info("[Deploy] Sensor_Bool.fbt: addressed-refresh ECC path (RPT/SMP/Arm)");
             }, notFoundNote: "Sensor_Bool.fbt not found; addressed-refresh path skipped.");
 
-        // Swivel work-arrival latch: relax=true (rig) fires ToWorkN->AtWorkN on atWorkN=TRUE alone;
-        // strict=false (sim) also requires atWorkOther=FALSE.
         private static void EditSwivelCore(string eaeProjectDir, string failNote, DeployResult result,
             Action<XDocument, XElement, XNamespace, string> edit)
             => EditDeployedFbt(eaeProjectDir, "SevenStateCentreHomeActuator.fbt", failNote, result, edit);
 
-        internal static void PatchSwivelRelaxWorkLatch(string eaeProjectDir, bool relax, DeployResult result)
+        // The arm arrives when its OWN sensor says so. Requiring the opposite sensor to read FALSE as
+        // well leaves it latched whenever both read TRUE mid-travel, which the rig does.
+        internal static void PatchSwivelRelaxWorkLatch(string eaeProjectDir, DeployResult result)
             => EditSwivelCore(eaeProjectDir, "SevenStateCentreHomeActuator.fbt work-latch patch failed", result,
                 (doc, root, ns, fbt) =>
             {
                 var latches = new[]
                 {
-                    ("ToWork1", "AtWork1", "atWork1 = TRUE", "atWork1 = TRUE AND atWork2 = FALSE"),
-                    ("ToWork2", "AtWork2", "atWork2 = TRUE", "atWork2 = TRUE AND atWork1 = FALSE"),
+                    ("ToWork1", "AtWork1", "atWork1 = TRUE"),
+                    ("ToWork2", "AtWork2", "atWork2 = TRUE"),
                 };
                 int changed = 0;
-                foreach (var (src, dst, relaxed, strict) in latches)
+                foreach (var (src, dst, want) in latches)
                 {
                     var tr = root.Descendants(ns + "ECTransition").FirstOrDefault(t =>
                         (string?)t.Attribute("Source") == src &&
                         (string?)t.Attribute("Destination") == dst);
-                    if (tr == null) continue;
-                    var want = relax ? relaxed : strict;
-                    if ((string?)tr.Attribute("Condition") != want)
-                    {
-                        tr.SetAttributeValue("Condition", want);
-                        changed++;
-                    }
+                    if (tr == null || (string?)tr.Attribute("Condition") == want) continue;
+                    tr.SetAttributeValue("Condition", want);
+                    changed++;
                 }
                 if (changed > 0)
                 {
                     doc.Save(fbt);
                     result.PatchesApplied.Add(
-                        $"SevenStateCentreHomeActuator.fbt: work-arrival latch {(relax ? "RELAXED (atWorkN=TRUE only)" : "restored (mutually exclusive)")} on {changed} transition(s)");
+                        "SevenStateCentreHomeActuator.fbt: work-arrival latch RELAXED (atWorkN=TRUE only) " +
+                        $"on {changed} transition(s)");
                 }
             });
 
-        internal static void PatchSwivelInterlockEventCarriesStateVal(string eaeProjectDir, bool add, DeployResult result)
+        // The interlock verdict must arrive with the command it judges, so ilck_event samples state_val.
+        internal static void PatchSwivelInterlockEventCarriesStateVal(string eaeProjectDir, DeployResult result)
             => EditSwivelCore(eaeProjectDir, "SevenStateCentreHomeActuator.fbt ilck_event state_val patch failed", result,
                 (doc, root, ns, fbt) =>
             {
@@ -462,45 +460,24 @@ namespace CodeGen.Services
                     return;
                 }
 
-                bool hasStateVal = ilckEvent.Elements(ns + "With")
-                    .Any(w => (string?)w.Attribute("Var") == "state_val");
-                bool changed = false;
+                if (ilckEvent.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == "state_val"))
+                    return;
 
-                if (add && !hasStateVal)
-                {
-                    ilckEvent.AddFirst(new System.Xml.Linq.XElement(ns + "With",
-                        new System.Xml.Linq.XAttribute("Var", "state_val")));
-                    changed = true;
-                }
-                else if (!add && hasStateVal)
-                {
-                    foreach (var w in ilckEvent.Elements(ns + "With")
-                                 .Where(w => (string?)w.Attribute("Var") == "state_val")
-                                 .ToList())
-                    {
-                        w.Remove();
-                        changed = true;
-                    }
-                }
-
-                if (changed)
-                {
-                    doc.Save(fbt);
-                    result.PatchesApplied.Add(
-                        $"SevenStateCentreHomeActuator.fbt: ilck_event {(add ? "samples" : "no longer samples")} state_val");
-                    MapperLogger.Info(
-                        $"[Deploy] SevenStateCentreHomeActuator.fbt: ilck_event state_val sampling add={add}");
-                }
+                ilckEvent.AddFirst(new System.Xml.Linq.XElement(ns + "With",
+                    new System.Xml.Linq.XAttribute("Var", "state_val")));
+                doc.Save(fbt);
+                result.PatchesApplied.Add(
+                    "SevenStateCentreHomeActuator.fbt: ilck_event samples state_val");
+                MapperLogger.Info(
+                    "[Deploy] SevenStateCentreHomeActuator.fbt: ilck_event samples state_val");
             });
 
 
 
-        // Gated SwivelBrakeHome: a reverse-coil brake at centre so the swivel homes directly from AtWork1
-        // without coasting into the ejector. Directional; from AtWork2 it de-energises unchanged.
-        // No-op when disabled; the ECC/CAT are force-refreshed so a flag flip reverts.
-        internal static void PatchSwivelBrakeHome(string eaeProjectDir, bool enabled, int brakeMs, DeployResult result)
+        // A reverse-coil brake at centre so the swivel homes directly from AtWork1 without coasting into
+        // the ejector. Directional; from AtWork2 it de-energises unchanged.
+        internal static void PatchSwivelBrakeHome(string eaeProjectDir, int brakeMs, DeployResult result)
         {
-            if (!enabled) return;
             if (brakeMs <= 0) brakeMs = 500;
 
             var ecc = Path.Combine(eaeProjectDir, "IEC61499", "SevenStateCentreHomeActuator.fbt");
@@ -721,7 +698,9 @@ namespace CodeGen.Services
         private const int CentreHomeStop = 0;
 
         // Wires AtHome to the coil-clearing 'atHome' algorithm + output_event so both work coils go FALSE.
-        internal static void PatchSwivelAtHomeCoilClear(string eaeProjectDir, bool clearCoils, DeployResult result)
+        // At centre the swivel publishes its arrival and drops BOTH coils; holding one is what let the
+        // arm creep past the reference.
+        internal static void PatchSwivelAtHomeCoilClear(string eaeProjectDir, DeployResult result)
             => EditSwivelCore(eaeProjectDir, "SevenStateCentreHomeActuator.fbt AtHome coil-clear patch failed", result,
                 (doc, root, ns, fbt) =>
             {
@@ -745,7 +724,7 @@ namespace CodeGen.Services
                     .Select(a => (string?)a.Attribute("Name"))
                     .Where(n => n != null)
                     .ToHashSet();
-                string want = clearCoils ? "atHome" : "AtHomeEnd";
+                const string want = "atHome";
                 if (!algoNames.Contains(want))
                 {
                     result.Warnings.Add(
@@ -761,20 +740,11 @@ namespace CodeGen.Services
                     changed = true;
                 }
 
-                var outputEventAction = atHomeState.Elements(ns + "ECAction")
-                    .FirstOrDefault(a => (string?)a.Attribute("Output") == "output_event");
-                if (clearCoils)
+                if (!atHomeState.Elements(ns + "ECAction")
+                        .Any(a => (string?)a.Attribute("Output") == "output_event"))
                 {
-                    if (outputEventAction == null)
-                    {
-                        atHomeState.Add(new XElement(ns + "ECAction",
-                            new XAttribute("Output", "output_event")));
-                        changed = true;
-                    }
-                }
-                else if (outputEventAction != null)
-                {
-                    outputEventAction.Remove();
+                    atHomeState.Add(new XElement(ns + "ECAction",
+                        new XAttribute("Output", "output_event")));
                     changed = true;
                 }
 
@@ -783,12 +753,10 @@ namespace CodeGen.Services
 
                 result.PatchesApplied.Add(
                     $"SevenStateCentreHomeActuator.fbt: AtHome ECState now runs '{want}' " +
-                    (clearCoils
-                        ? "and emits output_event (clears both coils at home)"
-                        : "without output_event (legacy no-clear mode)"));
+                    "and emits output_event (clears both coils at home)");
                 MapperLogger.Info(
                     $"[Deploy] SevenStateCentreHomeActuator.fbt: AtHome -> '{want}' " +
-                    (clearCoils ? "(coils cleared and published at home)" : "(coils held)"));
+                    "(coils cleared and published at home)");
             });
 
     }
