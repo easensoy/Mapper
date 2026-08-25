@@ -30,9 +30,15 @@ namespace CodeGen.Hmi
         // Withheld actions, keyed by the symbol that presents them.
         internal static IReadOnlyList<string> Suppress(
             string stagingDir, IReadOnlyList<HmiCatTemplate> deployed,
-            IReadOnlyList<HmiActionVerdict> verdicts, HmiDefinition def)
+            IReadOnlyList<HmiActionVerdict> verdicts,
+            IReadOnlyList<HmiDeadBinding> deadBindings, HmiDefinition def)
         {
             var notes = new List<string>();
+
+            // A binding the deployed interface cannot serve is unbound for the same reason a
+            // withheld command is: a control showing a value that never arrives reads as data.
+            // The control itself is left exactly where the reference draws it.
+            notes.AddRange(Unbind(stagingDir, deadBindings, def));
 
             // One decision per (CAT, symbol, action): an action is withheld if EVERY placed instance
             // that presents it was refused. A symbol's source is shared by every instance of the CAT,
@@ -112,6 +118,34 @@ namespace CodeGen.Hmi
                     File.WriteAllText(code, text);
                     if (File.Exists(designer)) File.WriteAllText(designer, design);
                 }
+            }
+
+            return notes;
+        }
+
+        // Remove the TagName assignment for every dead binding, in the staged Designer only.
+        private static IReadOnlyList<string> Unbind(
+            string stagingDir, IReadOnlyList<HmiDeadBinding> dead, HmiDefinition def)
+        {
+            var notes = new List<string>();
+
+            foreach (var g in dead.Where(d => !d.Tag.Contains('.', StringComparison.Ordinal))
+                         .GroupBy(d => (d.CatType, d.Symbol)))
+            {
+                var designer = Path.Combine(stagingDir, g.Key.CatType,
+                                            $"{g.Key.CatType}_{g.Key.Symbol}.cnv.Designer.cs");
+                if (!File.Exists(designer)) continue;
+
+                var text = File.ReadAllText(designer);
+                var before = text;
+                foreach (var d in g)
+                    text = Regex.Replace(text,
+                        @"this\.[A-Za-z_]\w*\.TagName\s*=\s*" + Quote + Regex.Escape(d.Tag) + Quote + @"\s*;",
+                        $"// {def.WithheldMarker} unserved binding '{d.Tag}': {d.Reason}");
+
+                if (text != before) File.WriteAllText(designer, text);
+                else notes.Add($"{g.Key.CatType}_{g.Key.Symbol}: no TagName assignment found to unbind " +
+                               $"({string.Join(", ", g.Select(x => x.Tag))}).");
             }
 
             return notes;
