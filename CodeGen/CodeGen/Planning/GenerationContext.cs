@@ -180,15 +180,9 @@ namespace CodeGen.Translation
                 .Where(c => c is { IsProcess: true })
                 .Select(c => c!.Source);
 
-        // The report ring a resource participates in, named by a component it hosts. A resource with no
-        // components of its own takes the ring of the target hosting the station it belongs to.
-        private string RingDomainOf(PlcAssignment plc)
-        {
-            var own = Station.Sensors.Concat(Station.Actuators)
-                .Select(c => (c.Name ?? string.Empty).Trim())
-                .FirstOrDefault(n => n.Length > 0 && Allocation.Of(n) == plc);
-            return Rings.Domain(own ?? plc.ToString());
-        }
+        // The report ring a resource participates in. Asked of the TARGET, so a resource with no
+        // components of its own still answers from the planned topology rather than from a name.
+        private ReportDomainId RingDomainOf(PlcAssignment plc) => Rings.DomainOf(plc);
 
         public ResourcePlan ResourceFor(PlcAssignment plc)
         {
@@ -227,8 +221,7 @@ namespace CodeGen.Translation
 
             var anchor = Station.Sensors.Concat(Station.Actuators)
                 .Select(c => (c.Name ?? string.Empty).Trim())
-                .FirstOrDefault(n => n.Length > 0 &&
-                    string.Equals(Rings.Domain(n), RingDomainOf(plc), StringComparison.Ordinal));
+                .FirstOrDefault(n => n.Length > 0 && Rings.DomainId(n) == RingDomainOf(plc));
 
             return new ResourcePlan(plc, profile.Label,
                 Role("area"), Role("station"),
@@ -252,6 +245,13 @@ namespace CodeGen.Translation
                                              (target.ReceivesRelocatedComponents && Profile.PartialRevPi),
                 HostsFeedRing:               target.HostsFeedStation && !target.ReceivesRelocatedComponents);
         }
+
+        // Whether this run emits a resource for that target at all. A target that only exists when
+        // something is relocated onto it is not emitted when nothing is, so anything planned there would
+        // be written to a device the run never creates.
+        public bool Emits(PlcAssignment plc) =>
+            TargetRegistry.IsRegistered(plc) &&
+            (!TargetRegistry.Of(plc).ReceivesRelocatedComponents || Profile.PartialRevPi);
 
         // The order a resource's stack is declared in, which is the order it is emitted in.
         private static readonly string[] InfraRoleOrder =
@@ -494,9 +494,14 @@ namespace CodeGen.Translation
             foreach (var kv in catTypeOf)
                 if (TemplateManifest.ProtocolOrNull(kv.Value) is { } proto) protocolOf[kv.Key] = proto;
 
-            var taskArms = new HashSet<string>(
-                twin.Components.Where(c => TemplateMap.IsRobotTaskArm(c.Source)).Select(c => c.Name),
-                StringComparer.OrdinalIgnoreCase);
+            // Which components run a declared command sequence rather than a walk to a numbered stop.
+            // The CAT and the twin's own type decide it, so the compiler never has to know what a
+            // component is - only what its CAT does with a movement.
+            var executionOf = new Dictionary<string, CatExecution>(StringComparer.OrdinalIgnoreCase);
+            foreach (var c in twin.Components)
+                if (catTypeOf.TryGetValue(c.Name, out var cat) &&
+                    TemplateManifest.ExecutionFor(cat, c.Source?.Type) is { } exec)
+                    executionOf[c.Name] = exec;
 
             return new ProcessCompiler.Ctx
             {
@@ -508,7 +513,7 @@ namespace CodeGen.Translation
                 Rings = rings,
                 CatType = catTypeOf,
                 Protocol = protocolOf,
-                TaskArms = taskArms,
+                Execution = executionOf,
                 MaterialBridgeId = bridge != null && slots.TryGetValue(bridge, out int bid) ? bid : -1,
             };
         }
