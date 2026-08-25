@@ -12,19 +12,16 @@ namespace CodeGen.Devices.Core
 {
     public static class Station2WireEmitter
     {
-        public static void EmitStation2Resources(GenerationContext ctx,
+        public static void WireResource(GenerationContext ctx, CodeGen.Translation.PlcAssignment plc,
             SystemInjector.BindingApplicationReport report)
         {
-            var cfg = ctx.Config;
-            var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
+            var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(ctx.Config);
             if (eaeRoot == null)
             {
-                report.Missing.Add("[Wire][Stn2] skipped, EAE project root not derivable");
+                report.Missing.Add("[Wire] skipped, EAE project root not derivable");
                 return;
             }
-
-            Wire(ctx, eaeRoot, CodeGen.Translation.PlcAssignment.M580, report);
-            Wire(ctx, eaeRoot, CodeGen.Translation.PlcAssignment.BX1, report);
+            Wire(ctx, eaeRoot, plc, report);
         }
 
         // Parameters are synced from the syslay BOTH sides of the wiring pass: before, so the wiring
