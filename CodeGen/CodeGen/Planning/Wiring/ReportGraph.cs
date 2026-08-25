@@ -18,15 +18,12 @@ namespace CodeGen.Translation
     // the discharge segment. An edge no carrier covers is named and generation stops.
     public sealed class ReportGraph
     {
-        private const string FeedRing = "feed";
-        private const string AssemblyRing = "assembly";
-        private const string OneRing = "*";
-
         private readonly ControllerAllocation _allocation;
         private readonly bool _merged;
-        private readonly HashSet<string> _reHomed;
-
-        public IReadOnlyList<TransportEdge> Edges { get; }
+        // Which ring each target's components report on once every carrier the model selected is applied.
+        private readonly IReadOnlyDictionary<PlcAssignment, ReportDomainId> _domainOf;
+        // Components a carrier lifts off their own target's ring onto the ring of the target commanding them.
+        private readonly IReadOnlyDictionary<string, PlcAssignment> _carriedOnto;
 
         // The discharge members another controller COMMANDS. Their bring-up crosses a device boundary, so
         // both canvases init them after the process rather than in front of it.
@@ -35,28 +32,38 @@ namespace CodeGen.Translation
         public IReadOnlyList<string> DetouredChain { get; }
         public bool RingsMerged => _merged;
 
-        private ReportGraph(ControllerAllocation allocation, bool merged, IEnumerable<string> reHomed,
-            IReadOnlyList<TransportEdge> edges, IReadOnlyList<string> discharge, IReadOnlyList<string> detour,
+        private ReportGraph(ControllerAllocation allocation, bool merged,
+            IReadOnlyDictionary<PlcAssignment, ReportDomainId> domainOf,
+            IReadOnlyDictionary<string, PlcAssignment> carriedOnto,
+            IReadOnlyList<string> discharge, IReadOnlyList<string> detour,
             IReadOnlyList<string> dischargeTail)
         {
             DischargeTail = dischargeTail;
             _allocation = allocation;
             _merged = merged;
-            _reHomed = new HashSet<string>(reHomed, StringComparer.OrdinalIgnoreCase);
-            Edges = edges;
+            _domainOf = domainOf;
+            _carriedOnto = carriedOnto;
             DischargeSegment = discharge;
             DetouredChain = detour;
         }
 
-        // The ring a component's announcements reach in the finished topology.
-        public string Domain(string? name) =>
-            _merged ? OneRing
-            : _allocation.IsFeedSide(name) && !_reHomed.Contains((name ?? string.Empty).Trim())
-                ? FeedRing
-                : AssemblyRing;
+        // The ring a component's announcements reach in the finished topology: its own target's, unless a
+        // carrier lifted it onto the ring of the target that commands it.
+        public ReportDomainId DomainId(string? name)
+        {
+            var trimmed = (name ?? string.Empty).Trim();
+            return DomainOf(_carriedOnto.TryGetValue(trimmed, out var host) ? host : _allocation.Of(trimmed));
+        }
 
-        public bool SameDomain(string? a, string? b) =>
-            string.Equals(Domain(a), Domain(b), StringComparison.Ordinal);
+        // The same identity as an opaque grouping key, for a consumer that only partitions by it. It is a
+        // rendering of the id, never a name anything matches on.
+        public string Domain(string? name) => DomainId(name).ToString();
+
+        // The ring a TARGET reports on, for a resource with no components of its own to ask about.
+        public ReportDomainId DomainOf(PlcAssignment target) =>
+            _domainOf.TryGetValue(target, out var d) ? d : ReportDomainId.Unplaced;
+
+        public bool SameDomain(string? a, string? b) => DomainId(a) == DomainId(b);
 
         // Wiring topology, not recipe: do the per-controller report rings fold into one?
         //
@@ -145,11 +152,13 @@ namespace CodeGen.Translation
                 twin.Processes.Select(p => allocation.Of(p.Name)).Where(t => t != PlcAssignment.Unknown));
             bool OnDetour(TransportEdge e) => !hostsAProcess.Contains(e.To);
 
+            // The rings BEFORE any carrier: targets hosting one station share theirs, everything else is
+            // its own. This is what decides whether an edge needs a carrier at all.
+            var native = Partition(t => t.HostsFeedStation);
+
             // A merged ring already spans both ends, as does a pair on one native ring.
             bool Spanned(TransportEdge e) =>
-                merged ||
-                string.Equals(NativeOf(allocation, e.Source), NativeOf(allocation, e.Target),
-                    StringComparison.Ordinal);
+                merged || native.Find(allocation.Of(e.Source)) == native.Find(allocation.Of(e.Target));
 
             var unrouted = edges
                 .Where(e => !Spanned(e) && !OnDischarge(e) && !OnDetour(e)).ToList();
@@ -169,14 +178,31 @@ namespace CodeGen.Translation
             var commanded = new HashSet<string>(
                 edges.Where(e => e.Kind == TransportEdge.Command).Select(e => e.Target),
                 StringComparer.OrdinalIgnoreCase);
-            return new ReportGraph(allocation, merged,
-                discharge.Concat(detouredChain), edges, discharge, detouredChain,
-                discharge.Where(commanded.Contains).ToList());
+
+            // The FINISHED rings: the native partition, plus every carrier the model just selected. A
+            // detoured device joins the ring of whichever target drives it; a merged ring joins them all.
+            var finished = Partition(t => t.HostsFeedStation);
+            foreach (var e in edges.Where(OnDetour)) finished.Union(e.From, e.To);
+            if (merged) finished.UnionAll();
+
+            // A discharge member stays on its own target but reports onto the commanding target's ring,
+            // so it is carried per COMPONENT rather than by folding two targets together.
+            var carriedOnto = new Dictionary<string, PlcAssignment>(StringComparer.OrdinalIgnoreCase);
+            foreach (var e in edges.Where(OnDischarge)) carriedOnto[e.Target] = e.From;
+
+            return new ReportGraph(allocation, merged, finished.Domains(), carriedOnto,
+                discharge, detouredChain, discharge.Where(commanded.Contains).ToList());
         }
 
-        // The ring a component reports on BEFORE any splice: what decides whether an edge needs a carrier.
-        private static string NativeOf(ControllerAllocation a, string? name) =>
-            a.IsFeedSide(name) ? FeedRing : a.Of(name).ToString();
+        // Targets grouped by the ring they share. Every declared target starts alone; a carrier joins two.
+        private static TargetPartition Partition(Func<TargetDescriptor, bool> sharesOneRing)
+        {
+            var p = new TargetPartition(TargetRegistry.All.Select(t => t.Plc));
+            var together = TargetRegistry.All.Where(sharesOneRing).Select(t => t.Plc).ToList();
+            for (int i = 1; i < together.Count; i++) p.Union(together[0], together[i]);
+            return p;
+        }
+
 
         // Everything the twin makes one controller depend on another for: a process commanding a component
         // it does not host, and a process watching one. Phase handoffs go to ProcessHandoffPlan instead.
@@ -206,6 +232,51 @@ namespace CodeGen.Translation
             }
             return edges;
         }
+    }
+
+    // One report ring in the finished topology. Its identity is the set of targets that share it, so it
+    // has no name to spell and renaming a station cannot change which components land in one state_table.
+    public readonly record struct ReportDomainId(PlcAssignment Representative)
+    {
+        // A component the roster places nowhere reports onto no ring, and so shares one with nothing.
+        public static ReportDomainId Unplaced => new(PlcAssignment.Unknown);
+
+        public override string ToString() => $"ring[{Representative}]";
+    }
+
+    // Which targets share a ring. Every target starts alone and a carrier joins two; the ring is then the
+    // connected component, whatever the targets are called.
+    internal sealed class TargetPartition
+    {
+        private readonly Dictionary<PlcAssignment, PlcAssignment> _parent = new();
+
+        public TargetPartition(IEnumerable<PlcAssignment> targets)
+        {
+            foreach (var t in targets) _parent[t] = t;
+        }
+
+        public PlcAssignment Find(PlcAssignment t)
+        {
+            if (!_parent.TryGetValue(t, out var up)) return PlcAssignment.Unknown;
+            while (!up.Equals(_parent[up])) up = _parent[up] = _parent[_parent[up]];
+            return up;
+        }
+
+        public void Union(PlcAssignment a, PlcAssignment b)
+        {
+            var (ra, rb) = (Find(a), Find(b));
+            if (ra == PlcAssignment.Unknown || rb == PlcAssignment.Unknown || ra.Equals(rb)) return;
+            _parent[rb] = ra;
+        }
+
+        public void UnionAll()
+        {
+            var all = _parent.Keys.ToList();
+            for (int i = 1; i < all.Count; i++) Union(all[0], all[i]);
+        }
+
+        public IReadOnlyDictionary<PlcAssignment, ReportDomainId> Domains() =>
+            _parent.Keys.ToDictionary(t => t, t => new ReportDomainId(Find(t)));
     }
 
     // One dependency the model places across a controller boundary.
