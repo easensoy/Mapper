@@ -53,17 +53,19 @@ with a fixed set of CATs. The Mapper picks one per Control.xml component.
 
 | CAT type                             | When picked                                   | Sensors / outputs                       |
 |--------------------------------------|-----------------------------------------------|-----------------------------------------|
-| `Five_State_Actuator_CAT`            | Default actuator: 5-state cylinders, mechanical grippers (Type=Robot, 5 states), plus the Bearing_PnP stub when `StubSevenStateActuatorsAsFiveState=true` | `athome`, `atwork` / `OutputToWork`, `OutputToHome` |
+| `Five_State_Actuator_CAT`            | Default actuator: 5-state cylinders, mechanical grippers (Type=Robot, 5 states), and a swivel the twin models with only two positions | `athome`, `atwork` / `OutputToWork`, `OutputToHome` |
 | `Five_State_Actuator_No_Sensors_CAT` | 4-state actuators                             | (no external sensor — internal timer)   |
-| `Seven_State_Actuator_CAT`           | 3-position swivel: 7-state OR branched (PARALLEL+ALTERNATIVE) — Bearing_PnP when `StubSevenStateActuatorsAsFiveState=false` | `athome`, `atwork1`, `atwork2` / `current_state1_to_plc`, `current_state2_to_plc` |
+| `Seven_State_Actuator_Centre_Home_CAT` | 3-position swivel: 7-state OR branched (PARALLEL+ALTERNATIVE) in the twin | `athome`, `atwork1`, `atWork2` / `OutputToWork1`, `OutputToWork2` |
 | `Vacuum_Gripper_CAT`                 | Named vacuum gripper instances                | vacuum-specific                          |
 | `Sensor_Bool_CAT`                    | 2-state sensors                                | `Input`                                 |
 | `Process1_Generic`                   | Every `<Component Type="Process">` — Feed_Station, Assembly_Station, Disassembly | INITO + 2 adapter plugs (`stateRptCmdAdptr_out`, `stationAdptr_out`); **no data/event outputs** |
 | `Station_CAT`                        | One per station (Station1, Station2)          | HMI + station-bus host                   |
 
-The actuator CAT routing decision lives in
-`SystemLayoutInjector.cs` around lines 1585-1606 (the helper just above
-`IsBranchedSevenState`), gated by `MapperConfig.StubSevenStateActuatorsAsFiveState`.
+The actuator CAT routing decision lives in `TemplateMap.ResolveActuatorCatType`
+and is taken from the TWIN's own state graph — a state count, or the
+PARALLEL+ALTERNATIVE transition structure `IsBranchedSevenState` detects. No
+flag selects it: change the twin's swivel from three positions to two and the
+CAT follows.
 
 ## 4. Two command channels (this is the most-misunderstood part of the system)
 
@@ -92,87 +94,75 @@ this chain. The exclusion set lives in TWO places that must stay in sync:
 
 - `ResourceWireEmitter.cs` — `NoStationAdapterTypes` (sysres side).
 - `SystemLayoutInjector.cs` — `BuildStation2Wiring`'s `stationChain` loop
-  (syslay side). Excludes Seven_State by checking the CAT type computed from
-  `StubSevenStateActuatorsAsFiveState` + `IsBranchedSevenState`.
+  (syslay side). Excludes any CAT the manifest declares as carrying no station
+  adapter (`TemplateMap.NoStationAdapterCatTypes`), which is what the
+  centre-home swivel is.
 
 If you wire Seven into the stationChain, EAE rejects on import with
 "unresolved adapter" / Missing Instances.
 
-## 5. The generation pipeline (what runs per button)
+## 5. The generation pipeline
 
-### `MainForm.btnTestStation1_Click` ("Test Runtime", **rig path**)
+One entry point: `GenerateProject.Execute(GenerationRequest, log)`. MapperUI's
+**Test Runtime** button, the VueOne runner and the in-repo gate all call it, so
+there is no second sequence to drift from.
 
-1. `PrepareDemonstratorForGeneration` — DemonstratorWiper cleanup.
-2. `injector.GenerateStation1TestSyslay` — writes the shared syslay (all 3 PLCs
-   plus the 3 Processes plus all actuators/sensors/Robots).
-3. `FinalizeM262StackAsync` (private to MainForm) —
-   `M262SysdevEmitter.Emit` (emits M262 sysdev + mirrors FBs into M262 sysres),
-   `M262TopologyEmitter.Emit`, `Station2DeviceEmitter.EmitAll` (M580 + BX1
-   sysdev + sysres + HCF copy), `CompileCachePurger.Purge` (deletes
-   `IEC61499/bin/` and `obj/` and resets `snapshot.xml`), `FoldersXmlEmitter`,
-   `BroadcastDomainEmitter`.
-4. `Station2SysresMirror.EmitStation2Sysres` — mirrors Station-2 FBs onto the
-   M580 + BX1 sysres files (this was added 2026-05-29 to fix the recurring
-   "Missing Instances: Bearing_PnP" EAE error — see `Docs/REVERTED_FIXES.md`
-   for what we tried before).
-5. `Station2WireEmitter.EmitStation2Resources` — wires the Station-2 sysres.
-6. `M580SymbolBinder.BindM580` + `BX1SymbolBinder.BindBX1` — patches the
-   deployed `.hcf` so EAE's Symbolic Link view resolves. Emits Form-1 GUID
-   triples (`{resourceId}.{fbId}.{port}`).
+```
+Control.xml  --SystemXmlReader-->  VueOneComponent[]        (frontend)
+             --TwinModel.Build-->  resolved semantic IR     (every reference closed)
+             --GenerationContext.Plan-->  the plan          (validated, immutable)
+             --emitters + backends-->  EAE IEC 61499        (backend)
+```
 
-### Test Simulator path — REMOVED (2026-06-16)
+`GenerationContext.Plan` decides EVERYTHING before a single file is touched:
+controller allocation, CAT selection, state-table slots, the report/transport
+graph, recipes, handoffs, interlocks, rule capacity and per-instance motion
+timing. A model the backend cannot render throws HERE, which is before
+`DeepClean`, so a rejected model leaves the project exactly as it was.
 
-The `MainForm_simulator.btnGenerateFullSystemSimulator_Click` handler and
-`CodeGen/Services/SimulatorPostProcessor.cs` (the sim post-processors —
-`InjectSimHopperForce`, `OverrideSimActuatorsNoSensor`, `InjectSimSwivelForce`,
-`VerifySimActuatorsNoSensorOrAbort`, `DumpSimRecipeAndInterlockArrays`) were
-**deleted**, along with `MapperTests/SimulatorEndToEndHarness.cs`. The `SimulatorFullSystem` flag and all
-its branches were deleted (see I-12); only `SimulatorRecipeMode` survives, set
-true solely by the `StateTransitionTableForm` debug utility to build its recipe
-preview. EAE's **"Local Test"** *network profile* is unrelated and can
-still run the rig project locally on the soft-dPAC (one PLC instance at a time).
+After the plan: deep clean, template deploy, application layer, then each
+registered target backend takes its turn (device, hardware config, resource
+wiring, channel binding), then the output validators. The pipeline itself names
+no controller - `TargetRegistry.Backends` does.
 
 ## 6. The CAT instance routing decision
 
-For each `<Component Type="Actuator">` in Control.xml, the Mapper picks a CAT
-type (`SystemLayoutInjector.cs` ~line 1585-1606):
-
-```
-if (name is in VacuumGripperNames)                          → Vacuum_Gripper_CAT
-if (!stub && (States.Count == 7 || IsBranchedSevenState))   → Seven_State_Actuator_CAT
-if (States.Count == 4)                                      → Five_State_Actuator_No_Sensors_CAT
-else                                                        → Five_State_Actuator_CAT
-```
-
-`Robots` (Type="Robot", 5-state — Bearing_Gripper, Shaft_Gripper, etc.) are
-routed through `Robots()` and currently also emit as `Five_State_Actuator_CAT`.
-
-`StubSevenStateActuatorsAsFiveState` is the master switch for whether
-Bearing_PnP is a 2-position Five_State stub or the real 3-position Seven_State
-swivel. Both sim and rig paths read the same flag — there is no per-path
-override.
+A CAT is chosen by the actuator's STATE GRAPH against the protocols declared in
+`Config/smc-rig.yml`, never by its name. Each protocol row declares the stop
+counts it serves, the command value that drives each stop, the value that means
+"arrived", its target states and whether it crosses a shared volume both ways.
+`TemplateMap.ResolveActuatorCatType` picks the row whose declared shape the
+graph fits; a graph no row serves is REFUSED, naming the actuator and its stop
+count, rather than defaulted to something that would compile and mis-drive.
 
 ## 7. The recipe
 
-Each Process1_Generic instance carries a `Recipe` parameter that is a
-serialised `ARRAY[100] OF RecipeStep` STRUCT. Each row is:
+Each `Process1_Generic` instance carries a `Recipe` parameter: a serialised
+`ARRAY OF RecipeStep`. Each row is:
 
 ```
 StepType        : 1=CMD, 2=WAIT, 9=END
-CmdTargetName   : the actuator the row commands / waits on (lower-cased)
-CmdStateArr     : the state value (or 0)
-Wait1Id         : actuator/sensor id to wait on
-Wait1State      : the state value the wait satisfies on
-NextStep        : 1-based row index of the next step (loops back at END)
+CmdTargetName   : the ring key the row commands (lower-cased), or a sensor name verbatim
+CmdStateArr     : the state value the command carries
+Wait1Id         : the state_table slot this term tests
+Wait1State      : the value that satisfies it
+NextStep        : the row to run next (an arbitrary index: loops are back-edges)
+AltCount        : on the row that HEADS a wait, how many alternatives start here
+TermCount       : on the row that heads an alternative, how many rows hold together
 ```
 
-Built by `ProcessRecipeArrayGenerator.Generate` from the Control.xml
-transitions. For Seven_State-commandable targets,
-`MapSevenStateCommandFromConditionName` translates the condition's name
-keyword (`place` → 2, `pick` → 1, `home`/`returned` → 0) into the `state_val`
-the SevenStateActuator2 ECC expects. Defaults match
-`SystemLayoutInjector.BuildMinimalActuatorParameters`'s Seven branch
-(`TargetPickState=1`, `TargetPlaceState=2`, `TargetHomeState=0`).
+`AltCount`/`TermCount` are what make a guard keep its truth. VueOne writes a
+guard as `ConditionValue -> ConditionGroup* -> Condition*`: the groups are
+ALTERNATIVES and the conditions inside one hold together. A row tests one
+`(slot, value)`, so alternatives are laid down as one WAIT GROUP and the engine
+evaluates it as a disjunction - it releases on the FIRST alternative that holds.
+Both counts zero is one alternative of one term, which is the plain single-slot
+wait every guard without a choice in it produces.
+
+`check_wait` gates every term on `state_table[..].name <> ''`, so a slot nothing
+has written cannot satisfy a wait. `CommonInterlockEvaluator` applies the same
+principle in the safe direction: a rule whose source has never reported REFUSES
+the move rather than reading a phantom zero as a real position.
 
 ## 8. Repo layout
 
@@ -217,8 +207,8 @@ VueOneMapper/
 ├── MapperUI/MapperUI/                  # WinForms front-end
 │   ├── MainForm.cs                       # btnTestStation1_Click — rig path (the one button)
 │   └── MainForm.Designer.cs
-├── MapperTests/                        # quarantined legacy tests (no active gate)
-│   ├── MapperTests.csproj                # all tests under <Compile Remove>; runs 0 tests
+├── MapperTests/                        # the unit gate: 199 tests, all active
+│   ├── MapperTests.csproj
 │   ├── ITERATIONS.md                     # loop log
 │   └── TestData/
 │       ├── Feed_Station_Fixture.xml       # 8-component Feed-only (legacy)
@@ -241,6 +231,6 @@ VueOneMapper/
 - **EAE** — EcoStruxure Automation Expert.
 - **ECC** — Execution Control Chart (an IEC 61499 state machine inside a basic FB).
 - **VueOne** — the digital-twin platform whose `Control.xml` is our input.
-- **Stub flag** — `MapperConfig.StubSevenStateActuatorsAsFiveState`. When TRUE,
-  Bearing_PnP is emitted as `Five_State_Actuator_CAT`; when FALSE, as
-  `Seven_State_Actuator_CAT`.
+- **CAT protocol** — the per-CAT command/settled/interlock/target state
+  vocabulary, declared once per CAT in `Config/smc-rig.yml` and consumed as a
+  typed `CatProtocol`. Nothing infers it from a CAT's name.
