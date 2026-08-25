@@ -135,6 +135,35 @@ roles:
 # enforcedTargets    the stops whose interlock verdict the CAT's CORE actually gates a move on. A rule
 #                    aimed at any other stop would be computed and then read by nobody, so generation
 #                    refuses it instead of shipping a safety rule that cannot fire.
+execution:
+  # How a CAT executes a movement the twin asks for, where its OWN reported states are a handshake
+  # rather than the twin's stop numbering, so no trajectory can be walked to reach them. A CAT claimed
+  # by no row here is driven by walking the twin's graph to the commanded stop - what a cylinder does.
+  #
+  # A row claims a component when every field it declares matches, and the FIRST claiming row wins, so
+  # the task arm's CAT is listed before the jaw's type.
+  #
+  # cat / componentType   what the row claims; omit either to claim on the other alone
+  # runsOnce              emit the whole sequence the first time the recipe moves it, never again
+  # alternates            emit one step per movement, resuming from where the last one settled
+  # steps                 the value that drives it -> the settled value that means it arrived
+  #
+  # The task arm runs a whole taught program on one start, so every movement the twin models folds into
+  # the single start -> done -> reset -> ready handshake. It never commands a stop.
+  - cat: Robot_Task_CAT
+    runsOnce: true
+    steps:
+      - { command: 1, settled: 2 }
+      - { command: 2, settled: 0 }
+  # A jaw: two strokes sharing one rest sensor, and wired energise-to-GRIP while the twin models
+  # energise-to-OPEN (REVERTED_FIXES R-12), so direction is a physical fact the twin must never pick.
+  # The twin says WHEN: the first action grips and they alternate from there.
+  - componentType: Robot
+    alternates: true
+    steps:
+      - { command: 1, settled: 2 }
+      - { command: 3, settled: 0 }
+
 protocols:
   # One work stop: 1 drives to work, 3 drives home; the core settles at 2 and 0.
   - cat: Five_State_Actuator_CAT
