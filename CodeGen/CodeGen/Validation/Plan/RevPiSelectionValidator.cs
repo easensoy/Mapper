@@ -20,7 +20,10 @@ namespace CodeGen.Validation.Plan
             public InvalidRevPiSelectionException(string message) : base(message) { }
         }
 
-        public static IReadOnlyList<string> Validate(DeploymentProfile profile)
+        // ioBearing: the selected names that actually need a physical channel. A process needs none, so
+        // hosting one here is a placement decision rather than an IO one and the coupler has no say.
+        public static IReadOnlyList<string> Validate(
+            DeploymentProfile profile, IReadOnlyCollection<string> ioBearing)
         {
             var problems = new List<string>();
             var covered = RevPiIoBrokerInjector.CoveredComponents;
@@ -28,7 +31,7 @@ namespace CodeGen.Validation.Plan
             // A component moved off the M262 that owns its channels deploys with no IO unless the coupler serves it.
             if (profile.PartialRevPi)
             {
-                var uncovered = profile.RevPiComponents
+                var uncovered = ioBearing
                     .Where(c => !covered.Contains(c))
                     .OrderBy(n => n, StringComparer.Ordinal)
                     .ToList();
@@ -44,9 +47,10 @@ namespace CodeGen.Validation.Plan
         }
 
         // Convenience for call sites that want the selection to be fatal (the generation pipeline).
-        public static void ThrowIfInvalid(DeploymentProfile profile)
+        public static void ThrowIfInvalid(
+            DeploymentProfile profile, IReadOnlyCollection<string> ioBearing)
         {
-            var problems = Validate(profile);
+            var problems = Validate(profile, ioBearing);
             if (problems.Count > 0)
                 throw new InvalidRevPiSelectionException(
                     "Invalid RevPi selection:" + Environment.NewLine + " - " +
