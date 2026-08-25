@@ -110,6 +110,20 @@ screens:
   # where each instance is allocated. Rendered on the deployed panel, not only in a side file.
   detailName: PlantDetail
   detailTitle: Plant detail
+  processDetailName: ProcessDetail
+  processDetailTitle: Process detail
+
+  # The FIXED grammar a compiled recipe row is read out in. These are sentence templates and
+  # nothing else: every {token} is filled from the model at generation time. No component name,
+  # process name, state name, slot, allocation or row ever appears in this file - if one did,
+  # the panel would stop following the twin, which is the whole point of generating it.
+  recipeText:
+    command: "Command {target} to {state}"
+    wait: "Wait until {source} is {state}"
+    phase: "Phase: {phase}"
+    end: "Recipe complete"
+    # Shown INSTEAD of a plausible label when a target, slot or state cannot be resolved.
+    unresolved: "(unresolved - see the generation report)"
 
   hubName: MainScreen
 protocol:
