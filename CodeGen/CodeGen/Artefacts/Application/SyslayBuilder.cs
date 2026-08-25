@@ -39,7 +39,6 @@ namespace CodeGen.Translation
 
         public SyslayBuilder AddFB(string id, string name, string type, string ns, double x, double y,
             IDictionary<string, string>? parameters = null,
-            IDictionary<string, IDictionary<string, string>>? nestedFbParameters = null,
             IDictionary<string, string>? attributes = null)
         {
             var fb = new XElement(Ns + "FB",
@@ -74,13 +73,6 @@ namespace CodeGen.Translation
                         new XAttribute("Value", kv.Value)));
                 }
             }
-
-            // Nested FB overrides intentionally NOT emitted: EAE rejects FBs containing nested
-            // FB elements as schema-invalid. Inner FB parameter overrides are not part of the
-            // syslay surface; they belong inside the CAT's .fbt initialize algorithm or via PLC
-            // I/O variable renames. The nestedFbParameters parameter is preserved for binary
-            // compatibility but ignored.
-            _ = nestedFbParameters;
 
             _subAppNetwork.Add(fb);
             return this;
