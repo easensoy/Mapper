@@ -146,21 +146,21 @@ namespace MapperTests
         public void Default_M262_selection_raises_no_problems()
         {
             var profile = M262;
-            Assert.Empty(RevPiSelectionValidator.Validate(profile));
+            Assert.Empty(RevPiSelectionValidator.Validate(profile, profile.RevPiComponents));
         }
 
         [Fact]
         public void Supported_per_component_swap_raises_no_problems()
         {
             var profile = RevPiComponents("Feeder", "Checker", "PartInHopper");
-            Assert.Empty(RevPiSelectionValidator.Validate(profile));
+            Assert.Empty(RevPiSelectionValidator.Validate(profile, profile.RevPiComponents));
         }
 
         [Fact] // a component with no Modbus signal would deploy unable to actuate
         public void Routing_an_uncovered_component_to_the_RevPi_is_rejected()
         {
             var profile = RevPiComponents("Transfer");
-            var problems = RevPiSelectionValidator.Validate(profile);
+            var problems = RevPiSelectionValidator.Validate(profile, profile.RevPiComponents);
             Assert.NotEmpty(problems);
             Assert.Contains(problems, p => p.Contains("Transfer", StringComparison.Ordinal));
         }
