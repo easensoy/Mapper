@@ -83,6 +83,7 @@ namespace CodeGen.Mapping
                     errors.Add($"device.yml target '{d.Plc}' is missing a resourceName or deviceType");
             var sequence = Configuration.DeviceConfig.Current.BootSequence;
             errors.AddRange(BootProfileErrors(declared, sequence));
+            errors.AddRange(BringUpErrors(Configuration.DeviceConfig.Current.BringUp, sequence));
             if (errors.Count > 0)
                 throw new InvalidOperationException(
                     "device.yml targets do not match the supported backends:" + Environment.NewLine +
@@ -163,6 +164,38 @@ namespace CodeGen.Mapping
                                      $"'{d.Plc}'; EAE loads a duplicate instance id as one FB";
                     else seen[id] = d.Plc;
                 }
+            }
+        }
+
+        // A bring-up wire names boot ROLES, so a role no target boots with is a connection to an FB the
+        // resource never emits - which EAE rejects on import. It is refused here, before a plan exists.
+        internal static IEnumerable<string> BringUpErrors(
+            IReadOnlyList<Configuration.BringUpWire> wires,
+            IReadOnlyList<Configuration.BootFbDeclaration> sequence)
+        {
+            if (wires.Count == 0)
+            {
+                yield return "device.yml declares no bringUp, so no resource is started at all";
+                yield break;
+            }
+            var roles = new HashSet<string>(sequence.Select(s => s.Role), StringComparer.Ordinal)
+            {
+                Configuration.BringUpWire.ResourceEntry,
+            };
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var w in wires)
+            {
+                foreach (var (endpoint, side) in new[] { (w.From, "from"), (w.To, "to") })
+                {
+                    var role = Configuration.BringUpWire.RoleOf(endpoint);
+                    if (role == null)
+                        yield return $"device.yml bringUp {side} '{endpoint}' is not a '<role>.<PORT>' endpoint";
+                    else if (!roles.Contains(role))
+                        yield return $"device.yml bringUp {side} '{endpoint}' names boot role '{role}', which " +
+                                     "no bootSequence role and not the resource entry declares";
+                }
+                if (!seen.Add($"{w.From}->{w.To}"))
+                    yield return $"device.yml bringUp declares '{w.From} -> {w.To}' more than once";
             }
         }
 
