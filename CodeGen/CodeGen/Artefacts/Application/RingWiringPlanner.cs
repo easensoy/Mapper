@@ -29,11 +29,10 @@ namespace CodeGen.Translation
                 $"{chain[^1].Name}.{TemplateManifest.StationOut(chain[^1].Type)}", ends.Value.To);
         }
 
-        internal static void BuildFeedStationWiring(SyslayBuilder builder, GenerationContext ctx)
+        internal static void BuildFeedStationWiring(SyslayBuilder builder, GenerationContext ctx,
+            IReadOnlyList<string> procFbs)
         {
             var contents = ctx.Station;
-            var processInstanceName = InstanceNameResolver.Resolve(contents.Process);
-            if (string.IsNullOrWhiteSpace(processInstanceName)) processInstanceName = "Process1";
 
             // Per-PLC filter: EAE renders a resource-boundary-crossing wire as unresolved and blocks deploy.
             var allocation = ctx.Allocation;
@@ -57,7 +56,7 @@ namespace CodeGen.Translation
                 if (OnFeedController(s.Name)) initChain.Add(s.Name);
             foreach (var a in contents.Actuators)
                 if (OnFeedController(a.Name) && !IsRobotTailName(a.Name)) initChain.Add(a.Name);
-            initChain.Add(processInstanceName);
+            initChain.AddRange(procFbs);
             foreach (var a in contents.Actuators)
                 if (OnFeedController(a.Name) && IsRobotTailName(a.Name)) initChain.Add(a.Name);
 
@@ -78,7 +77,7 @@ namespace CodeGen.Translation
                 if (TemplateMap.LacksStationAdapter(fbType)) continue;
                 stationChain.Add((a.Name, fbType));
             }
-            stationChain.Add((processInstanceName, TemplateManifest.ProcessType.Name));
+            foreach (var proc in procFbs) stationChain.Add((proc, TemplateManifest.ProcessType.Name));
 
             ThreadStationChain(builder, stationChain, feed.StationChain);
 
@@ -89,7 +88,7 @@ namespace CodeGen.Translation
             foreach (var a in contents.Actuators)
                 if (OnFeedController(a.Name) && !OnCrossSegment(a.Name))
                     ringComponents.Add((a.Name, ctx.CatTypes[a.Name.Trim()]));
-            ringComponents.Add((processInstanceName, TemplateManifest.ProcessType.Name));
+            foreach (var proc in procFbs) ringComponents.Add((proc, TemplateManifest.ProcessType.Name));
 
             if (ringComponents.Count > 1)
             {
@@ -212,7 +211,8 @@ namespace CodeGen.Translation
         }
 
         // BX1 has no Process FB of its own; Assembly_Station commands it over the cross-PLC ring.
-        internal static void BuildBx1Wiring(SyslayBuilder builder, GenerationContext ctx)
+        internal static void BuildBx1Wiring(SyslayBuilder builder, GenerationContext ctx,
+            IReadOnlyList<string> procFbs)
         {
             var allocation = ctx.Allocation;
             var contents = ctx.Station;
@@ -230,6 +230,8 @@ namespace CodeGen.Translation
             if (mqttEnabled) initChain.Add(bx1Conn);
             foreach (var s in contents.Sensors)    if (IsBx1(s.Name)) initChain.Add(s.Name);
             foreach (var a in contents.Actuators)  if (IsBx1(a.Name)) initChain.Add(a.Name);
+            // A process on this resource inits after the components it drives, as on every other one.
+            initChain.AddRange(procFbs);
             for (int i = 0; i < initChain.Count - 1; i++)
                 builder.AddEventConnection($"{initChain[i]}.INITO", $"{initChain[i + 1]}.INIT");
 
@@ -243,6 +245,9 @@ namespace CodeGen.Translation
             foreach (var a in contents.Actuators)
                 if (IsBx1(a.Name) && !ctx.IsDetoured(a.Name))
                     ring.Add((a.Name, ctx.CatTypes[a.Name.Trim()]));
+
+            // and its process, so a resource that runs one closes its ring through it.
+            foreach (var proc in procFbs) ring.Add((proc, TemplateManifest.ProcessType.Name));
 
             if (ring.Count > 1)
             {
