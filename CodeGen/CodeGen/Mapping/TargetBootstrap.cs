@@ -16,15 +16,21 @@ namespace CodeGen.Mapping
     // joined to each target's bootFbs, and TargetRegistry validates that join before a plan exists.
     public static class TargetBootstrap
     {
-        // The resource's runtime bring-up, emitted before any component wire and in this order. It names
-        // boot ROLES, so it is protocol rather than target data and does not vary per controller.
-        public static readonly IReadOnlyList<(string Source, string Destination)> BringUpWires = new[]
-        {
-            ("START.COLD",          "FB1.INIT"),
-            ("START.WARM",          "FB1.INIT"),
-            ("START.ONLINECHANGE",  "FB1.OC_RETRIGGER"),
-            ("FB2.FIRST_INIT",      "FB2.ACK_FIRST"),
-        };
+        // The declared bring-up, in declaration order - which is emission order. TargetRegistry has
+        // already proved every endpoint names a role some target boots with.
+        public static IEnumerable<(string Source, string Destination)> BringUp =>
+            DeviceConfig.Current.BringUp.Select(w => (w.From, w.To));
+
+        // Every declared boot role. A boot FB is emitted under its role name, so this is also the set of
+        // instance names a resource boots with, which is what tells a component apart from a boot FB.
+        public static IReadOnlySet<string> BootRoles =>
+            DeviceConfig.Current.BootSequence.Select(b => b.Role).ToHashSet(StringComparer.Ordinal);
+
+        // The role whose INITO heads a resource's init chain: the first FB the boot sequence declares.
+        public static string InitRole =>
+            DeviceConfig.Current.BootSequence.FirstOrDefault()?.Role
+            ?? throw new InvalidOperationException(
+                "[Bootstrap] device.yml declares no bootSequence, so no resource has an FB to init from.");
 
         public static IReadOnlyList<SystemFbSpec> For(PlcAssignment plc, LayoutCatalog layout) =>
             TargetRegistry.Of(plc).BootFbs.Select(b =>
