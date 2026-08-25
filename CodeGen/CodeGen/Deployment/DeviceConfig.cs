@@ -15,6 +15,9 @@
         // EAE resource and device identity per target. Facts only; backend behaviour stays in C#.
         public System.Collections.Generic.List<TargetIdentity> Targets { get; set; } = new();
 
+        // The system FBs every resource boots with, in emission order. Shape once; ids per target.
+        public System.Collections.Generic.List<BootFbDeclaration> BootSequence { get; set; } = new();
+
         private static readonly YamlConfigFile<DeviceConfig> _file = new("Config", "device.yml");
 
         public static DeviceConfig Current => _file.Load();
@@ -66,6 +69,33 @@
         public bool ReceivesRelocatedComponents { get; set; }
         public bool OpensCoverSeam { get; set; }
         public bool CarriesDetouredChain { get; set; }
+
+        // One frozen EAE instance id per bootSequence role, in that order.
+        public System.Collections.Generic.List<TargetBootFb> BootFbs { get; set; } = new();
+    }
+
+    // One boot FB's SHAPE: what it is on every target. Its identity is per target, in TargetBootFb.
+    public sealed class BootFbDeclaration
+    {
+        public string Role { get; set; } = string.Empty;
+        public string Type { get; set; } = string.Empty;
+        public string Namespace { get; set; } = string.Empty;
+        // The layout.yml bootFbs row that gives this FB its canvas position.
+        public string LayoutKey { get; set; } = string.Empty;
+        // A list, not a map: parameters are emitted as child elements and their order is artefact bytes.
+        public System.Collections.Generic.List<BootFbParameter> Parameters { get; set; } = new();
+    }
+
+    public sealed class BootFbParameter
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Value { get; set; } = string.Empty;
+    }
+
+    public sealed class TargetBootFb
+    {
+        public string Role { get; set; } = string.Empty;
+        public string Id { get; set; } = string.Empty;
     }
 
     public sealed class Bx1IoProfile
