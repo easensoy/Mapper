@@ -132,6 +132,9 @@ roles:
 # command/settled/interlock   stop -> the value that drives there / that a WAIT accepts / that the
 #                    interlock manager is given. settled and interlock differ for the centre-home
 #                    swivel's home: the core publishes 6 on arrival and then settles to 0.
+# enforcedTargets    the stops whose interlock verdict the CAT's CORE actually gates a move on. A rule
+#                    aimed at any other stop would be computed and then read by nobody, so generation
+#                    refuses it instead of shipping a safety rule that cannot fire.
 protocols:
   # One work stop: 1 drives to work, 3 drives home; the core settles at 2 and 0.
   - cat: Five_State_Actuator_CAT
@@ -142,6 +145,8 @@ protocols:
     # What its own interlock manager compares against: the raw core states, which are not
     # the settled values a RULE names when this actuator is the source.
     target:    { work1: 2, home: 4 }
+    # Its core takes toWorkInterlock and toHomeInterlock, so both directions are gated.
+    enforcedTargets: [work1, home]
 
   # The same vocabulary on a CAT with no arrival sensors.
   - cat: Five_State_Actuator_No_Sensors_CAT
@@ -162,6 +167,9 @@ protocols:
     settled:   { work1: 2, work2: 4, home: 0 }
     interlock: { work1: 2, work2: 4, home: 6 }
     target:    { work1: 2, work2: 4, home: 6 }
+    # Its core takes homeWork1Interlock/homeWork2Interlock - PATH interlocks, each gating both legs of
+    # one side - and no toHome input of its own, so a rule aimed at home can be evaluated by nothing.
+    enforcedTargets: [work1, work2]
     # Its per-side crossing watchdog. Declared, not derived from the leg time: the crossing is
     # allowed far longer than one leg because it passes through the centre reference.
     crossingFaultTimeoutMs: 10000
