@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -91,7 +91,8 @@ namespace MapperTests
             foreach (var tpl in deployed)
                 HmiTemplateLibrary.CopyDirectory(tpl.SourceDir, Path.Combine(_staging, tpl.CatType));
 
-            HmiFaceplatePatcher.Suppress(_staging, deployed, verdicts, Def());
+            HmiFaceplatePatcher.Suppress(_staging, deployed, verdicts,
+                                         System.Array.Empty<HmiDeadBinding>(), Def());
             return _staging;
         }
 
