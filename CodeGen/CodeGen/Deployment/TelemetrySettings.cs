@@ -41,8 +41,6 @@ namespace CodeGen.Configuration
         public string Instance { get; set; } = string.Empty;
         public string RawInstance { get; set; } = string.Empty;
         public string Client { get; set; } = string.Empty;
-        // The infrastructure role whose INITO brings it up; "ringHead" = the report ring's own head.
-        public string InitFrom { get; set; } = string.Empty;
 
         public string NameFor(bool telemetryComposite) => telemetryComposite ? Instance : RawInstance;
     }
