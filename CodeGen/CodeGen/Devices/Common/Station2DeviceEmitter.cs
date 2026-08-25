@@ -60,69 +60,49 @@ namespace CodeGen.Devices.Core
             public int DfbprojEntriesAdded { get; set; }
         }
 
-        public static EmitResult EmitAll(MapperConfig cfg)
+        // The M580 dPAC. Its sysres is NAME-scoped, so the resource keeps its declared name.
+        public static EmitResult EmitM580(MapperConfig cfg, DeviceScope scope)
         {
-            if (cfg == null) throw new ArgumentNullException(nameof(cfg));
             var result = new EmitResult();
-
-            var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg)!;
-            if (string.IsNullOrEmpty(eaeRoot))
-            {
-                result.Warnings.Add("Cannot derive EAE project root — Station 2 emit skipped.");
-                return result;
-            }
-
-            var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
-            var systemGuidDir = EaeProjectLayout.FindSystemGuidDir(eaeRoot);
-            if (systemGuidDir == null)
-            {
-                result.Warnings.Add(
-                    $"No System GUID folder under {systemDir} — run Test Runtime once " +
-                    "so M262 emit creates it, then re-run.");
-                return result;
-            }
-
-            string solutionId = EaeProjectLayout.ReadProjectGuid(eaeRoot)
-                ?? FallbackSolutionUuid;
-            if (solutionId == FallbackSolutionUuid)
-                result.Warnings.Add(
-                    "ProjectInfo.xml Guid not readable — Station 2 Topology emitted " +
-                    "with zero SolutionId; EAE may reject the import. Restore General/ProjectInfo.xml.");
-
             // Two Equipment JSONs declaring the SAME uuid make EAE reject the whole topology.
-            CleanupStaleTopologyJson(eaeRoot, "Equipment_Soft_dPAC_BX1.json", result);
-            // The equipment identifier must differ from the sysdev Name, so BX1's identifier is HMIB1X_1.
-            CleanupStaleTopologyJson(eaeRoot, "Equipment_Workstation_BX1.json", result);
-            CleanupStaleTopologyJson(eaeRoot, "Equipment_BX1.json",            result);
             for (int n = 2; n <= 9; n++)
-                CleanupStaleTopologyJson(eaeRoot, $"Equipment_M580dPAC_{n}.json", result);
+                CleanupStaleTopologyJson(scope.EaeRoot, $"Equipment_M580dPAC_{n}.json", result);
 
-            // The sysres must adopt the .hcf's resource scoping or EAE cannot bind it: M580 is NAME-scoped, BX1 GUID-scoped.
-            var bx1HcfPath = ResolveBx1HcfPath(cfg);
-            var bx1Ident = ReadHcfResourceIdentity(bx1HcfPath);
-
-            var m580ResourceName = M580ResourceName;
-            var bx1ResourceId = bx1Ident.GuidId ?? BX1ResourceId;
-            if (!string.Equals(bx1ResourceId, BX1ResourceId, StringComparison.Ordinal))
-                result.Warnings.Add(
-                    $"[BX1] sysres ID aligned to '{bx1ResourceId}' from the BX1 .hcf ResourceId (default was '{BX1ResourceId}').");
-
-            EmitOnePlc(cfg, eaeRoot, systemGuidDir, result,
+            EmitOnePlc(cfg, scope.EaeRoot, scope.SystemGuidDir, result,
                 sysdevId: M580SysdevId,
                 deviceName: "M580",
                 deviceType: TargetRegistry.Of(CodeGen.Translation.PlcAssignment.M580).DeviceType,
                 resourceId: M580ResourceId,
-                resourceName: m580ResourceName,
+                resourceName: M580ResourceName,
                 hcfTemplatePath: cfg.M580HcfTemplatePath,
                 equipmentJsonName: "Equipment_M580dPAC_1.json",
-                equipmentBuilder: () => BuildM580EquipmentJson(cfg, M580SysdevId, solutionId,
+                equipmentBuilder: () => BuildM580EquipmentJson(cfg, M580SysdevId, scope.SolutionId,
                                           cfg.M580TargetIp, cfg.M580BroadcastDomainUuid),
                 deployPluginPropertiesXml: BuildDeployPluginPropertiesXml(cfg, bootProject: false,
                     cfg.MqttPublishEnabled && !cfg.MqttSecureTls),
                 simulationBindingDeployPort: 51500,
                 simulationBindingArchivePort: 51497);
+            return result;
+        }
 
-            EmitOnePlc(cfg, eaeRoot, systemGuidDir, result,
+        // The BX1 Soft dPAC and, when declared, the EtherNet/IP coupler its scanner drives. Its sysres is
+        // GUID-scoped, so the resource id is adopted from the authored .hcf.
+        public static EmitResult EmitBx1(MapperConfig cfg, DeviceScope scope)
+        {
+            var result = new EmitResult();
+            CleanupStaleTopologyJson(scope.EaeRoot, "Equipment_Soft_dPAC_BX1.json", result);
+            // The equipment identifier must differ from the sysdev Name, so BX1's identifier is HMIB1X_1.
+            CleanupStaleTopologyJson(scope.EaeRoot, "Equipment_Workstation_BX1.json", result);
+            CleanupStaleTopologyJson(scope.EaeRoot, "Equipment_BX1.json", result);
+
+            var bx1HcfPath = ResolveBx1HcfPath(cfg);
+            var bx1ResourceId = ReadHcfResourceIdentity(bx1HcfPath).GuidId ?? BX1ResourceId;
+            if (!string.Equals(bx1ResourceId, BX1ResourceId, StringComparison.Ordinal))
+                result.Warnings.Add(
+                    $"[BX1] sysres ID aligned to '{bx1ResourceId}' from the BX1 .hcf ResourceId " +
+                    $"(default was '{BX1ResourceId}').");
+
+            EmitOnePlc(cfg, scope.EaeRoot, scope.SystemGuidDir, result,
                 sysdevId: BX1SysdevId,
                 deviceName: "BX1",
                 deviceType: TargetRegistry.Of(CodeGen.Translation.PlcAssignment.BX1).DeviceType,
@@ -130,45 +110,33 @@ namespace CodeGen.Devices.Core
                 resourceName: BX1ResourceName,
                 hcfTemplatePath: bx1HcfPath,
                 equipmentJsonName: "Equipment_HMIB1X_1.json",
-                equipmentBuilder: () => BuildBX1HmiB1XEquipmentJson(cfg, BX1SysdevId, solutionId, cfg.BX1TargetIp, cfg.BX1HostIp),
-                // Insecure-app override (EAE GUI "Security -> Insecure Application -> Enable") lets a plain mqtt:// connection avoid RC101.
+                equipmentBuilder: () => BuildBX1HmiB1XEquipmentJson(cfg, BX1SysdevId, scope.SolutionId,
+                                          cfg.BX1TargetIp, cfg.BX1HostIp),
+                // The insecure-app override lets a plain mqtt:// connection avoid RC101.
                 deployPluginPropertiesXml: BuildSoftDpacDeployPluginPropertiesXml(cfg,
                     cfg.MqttPublishEnabled && !cfg.MqttSecureTls),
                 simulationBindingDeployPort: 51501,
                 simulationBindingArchivePort: 51498);
 
-            if (cfg.EmitBx1EtherNetIpDevice)
-            {
-                EmitBx1EtherNetIpDevice(cfg, eaeRoot, result, solutionId);
-                // The BX1 .hcf scanner instantiates coupler type Main.TM3BC_Ethe_yYhtt9jWKUOJs; without its saved .fbt BX1 fails ERR_NO_SUCH_TYPE.
-                DeployBx1EtherNetIpType(cfg, eaeRoot, result);
-                // The scanner model must be deployed by DeployBx1ScannerModelFinalPass, AFTER the HwConfig copiers rebuild HwConfiguration/.
-            }
-            else
-            {
-                CleanupStaleTopologyJson(eaeRoot, "Equipment_EtherNetIPDevice_1.json", result);
-                CleanupStaleTopologyJson(eaeRoot,
-                    Path.Combine("Content", $"{BX1EtherNetIpUuid}_FdtProject.prj"), result);
-                CleanupStaleTopologyJson(eaeRoot,
-                    Path.Combine("Content", $"{BX1EtherNetIpUuid}_IOProfile.xml"), result);
-                SweepBx1EtherNetIpType(eaeRoot, result);
-                SweepBx1HwConfigScannerModel(eaeRoot, result);
+            EmitBx1EtherNetIpDevice(cfg, scope.EaeRoot, result, scope.SolutionId);
+            // The scanner instantiates coupler type Main.TM3BC_Ethe_yYhtt9jWKUOJs; without its saved
+            // .fbt the device fails ERR_NO_SUCH_TYPE.
+            DeployBx1EtherNetIpType(cfg, scope.EaeRoot, result);
+            return result;
+        }
+
+        // A stale <None ...sysres> entry is a Missing Project File that aborts the topology import, so it
+        // is swept once after every device has taken its turn rather than by each of them.
+        public static EmitResult StripStaleSysresEntries(string eaeRoot)
+        {
+            var result = new EmitResult();
+            var dfbproj = EaeProjectLayout.FindDfbproj(eaeRoot);
+            if (dfbproj == null) return result;
+            int stripped = DfbprojRegistrar.StripStaleSysresStemEntries(dfbproj, eaeRoot);
+            if (stripped > 0)
                 result.Warnings.Add(
-                    "[BX1] EtherNet/IP field device HELD OUT (cfg.EmitBx1EtherNetIpDevice=false) — " +
-                    "isolating the topology-import failure; equipment + FDT Content + device type swept.");
-            }
-
-            // A stale <None …sysres> entry is a Missing Project File that aborts the topology import.
-            var dfbprojForStrip = FindDfbproj(eaeRoot);
-            if (dfbprojForStrip != null)
-            {
-                int stripped = DfbprojRegistrar.StripStaleSysresStemEntries(dfbprojForStrip, eaeRoot);
-                if (stripped > 0)
-                    result.Warnings.Add(
-                        $"Removed {stripped} stale sysres reference(s) from the .dfbproj " +
-                        "(resource id realigned to the .hcf ResourceId).");
-            }
-
+                    $"Removed {stripped} stale sysres reference(s) from the .dfbproj " +
+                    "(resource id realigned to the .hcf ResourceId).");
             return result;
         }
 
@@ -295,7 +263,7 @@ namespace CodeGen.Devices.Core
                     "written but not registered with TopologyManager build target.");
             }
 
-            var dfbproj = FindDfbproj(eaeRoot);
+            var dfbproj = EaeProjectLayout.FindDfbproj(eaeRoot);
             if (dfbproj != null)
             {
                 try
@@ -533,7 +501,7 @@ namespace CodeGen.Devices.Core
                 if (Directory.Exists(srcHmi)) CopyDirectory(srcHmi, dstHmi);
                 result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, dstIec));
 
-                var dfbproj = FindDfbproj(eaeRoot);
+                var dfbproj = EaeProjectLayout.FindDfbproj(eaeRoot);
                 if (dfbproj != null)
                 {
                     int added = DfbprojRegistrar.RegisterHardwareDeviceCat(dfbproj, Bx1EtherNetIpDeviceType);
@@ -563,7 +531,7 @@ namespace CodeGen.Devices.Core
                 var dstHmi = Path.Combine(eaeRoot, "HMI", Bx1EtherNetIpDeviceType);
                 if (Directory.Exists(dstIec)) Directory.Delete(dstIec, recursive: true);
                 if (Directory.Exists(dstHmi)) Directory.Delete(dstHmi, recursive: true);
-                var dfbproj = FindDfbproj(eaeRoot);
+                var dfbproj = EaeProjectLayout.FindDfbproj(eaeRoot);
                 if (dfbproj != null)
                     DfbprojRegistrar.UnregisterHardwareDeviceCat(dfbproj, Bx1EtherNetIpDeviceType);
             }
@@ -642,7 +610,7 @@ namespace CodeGen.Devices.Core
         // Deploys the scanner HwConfiguration model as the FINAL pass, AFTER the HwConfig copiers rebuild HwConfiguration/.
         public static void DeployBx1ScannerModelFinalPass(MapperConfig cfg)
         {
-            if (cfg == null || !cfg.EmitBx1EtherNetIpDevice) return;
+            if (cfg == null) return;
             var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg)!;
             var result = new EmitResult();
             DeployBx1HwConfigScannerModel(cfg, eaeRoot, result);
@@ -651,7 +619,7 @@ namespace CodeGen.Devices.Core
         // Aborts the Generate if the scanner model is not deployed, else EAE compiles an empty scanner.
         public static void ValidateBx1ScannerModelOrThrow(MapperConfig cfg)
         {
-            if (cfg == null || !cfg.EmitBx1EtherNetIpDevice) return;
+            if (cfg == null) return;
             var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg)!;
             var scannerXml = Path.Combine(eaeRoot, "HwConfiguration", "EIPSolutionsV2", Bx1HwConfigScannerId, "scanner.xml");
             var hwproj = Path.Combine(eaeRoot, "HwConfiguration", "HwConfiguration.hwconfigproj");
@@ -805,17 +773,6 @@ namespace CodeGen.Devices.Core
             {
                 result.Warnings.Add($"Cleanup of {jsonName} failed: {ex.Message}");
             }
-        }
-
-        static string? FindDfbproj(string eaeRoot)
-        {
-            try
-            {
-                var iec = Path.Combine(eaeRoot, "IEC61499");
-                if (!Directory.Exists(iec)) return null;
-                return Directory.EnumerateFiles(iec, "*.dfbproj").FirstOrDefault();
-            }
-            catch { return null; }
         }
 
         // Reads the resource identity an authored .hcf expects so the sysres can adopt it: GUID-scoped for BX1,
