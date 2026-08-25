@@ -180,7 +180,9 @@ namespace CodeGen.Services
                 var dtDir = Path.Combine(eaeProjectDir, "IEC61499", "DataType");
                 Directory.CreateDirectory(dtDir);
                 var dtPath = Path.Combine(dtDir, name + ".dt");
-                if (!File.Exists(dtPath)) File.WriteAllText(dtPath, dtXml);
+                // Written every deploy, never copy-if-absent: a datatype this plan SIZES would
+                // otherwise keep the previous run's array length while the literal grew past it.
+                File.WriteAllText(dtPath, dtXml);
                 if (!result.DataTypesDeployed.Contains(name)) result.DataTypesDeployed.Add(name);
                 result.PatchesApplied.Add($"{name}.dt deployed + registered{(patchNote is null ? "" : " " + patchNote)}");
                 MapperLogger.Info($"[Deploy] {name}.dt written + registered");
