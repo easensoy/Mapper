@@ -106,6 +106,25 @@ public bool Has(string stop) => Command.ContainsKey(stop);
             EnforcedTargets.Any(s => string.Equals(s, stop, StringComparison.OrdinalIgnoreCase));
     }
 
+    // A fixed command sequence a CAT runs for any movement, instead of being walked to a stop the twin
+    // numbers. Where this is declared, the values the component reports are the CAT's own handshake, so
+    // an observation of it adds nothing a driving command has not already proved.
+    public sealed record CatExecution(
+        // Emit the whole sequence the first time the recipe moves it, and never again.
+        bool RunsOnce,
+        // Emit one step per movement, resuming from wherever the last one settled.
+        bool Alternates,
+        IReadOnlyList<ExecutionStep> Steps)
+    {
+        // Where it resumes: the step after the one whose arrival value it is already resting at.
+        public ExecutionStep StepFrom(int? settledAt) =>
+            Steps[settledAt.HasValue && settledAt.Value == Steps[0].Settled ? 1 : 0];
+
+        public int FinalSettled => Steps[Steps.Count - 1].Settled;
+    }
+
+    public sealed record ExecutionStep(int Command, int Settled);
+
     // One row per FB type the Mapper owns. Declaration ORDER IS LOAD-BEARING: DeployOrder walks it, and a
     // basic must precede the CAT that instantiates it.
     // Where a CAT's own state lives, so the deployer can wire a publisher in without knowing the CAT.
@@ -236,6 +255,22 @@ public bool Has(string stop) => Command.ContainsKey(stop);
         // Declaration order breaks a tie, so the sensored five-state CAT wins over the no-sensors variant.
         public static TemplateType? ForGraph(int stateCount, bool branched) =>
             Types.FirstOrDefault(t => t.Protocol is { } p && p.Serves(stateCount, branched));
+
+        // The declared sequence for a component on this CAT, or null where it is driven by walking the
+        // twin's graph. Declaration order breaks a tie, so the task arm's CAT claims it before the jaw
+        // row does. A row with steps missing is a declaration error, not a silent fall-through.
+        public static CatExecution? ExecutionFor(string? catType, string? componentType)
+        {
+            var d = Configuration.RigCatalog.Current.Execution
+                .FirstOrDefault(e => e.Claims(catType, componentType));
+            if (d == null) return null;
+            if (d.Steps.Count < 2)
+                throw new InvalidOperationException(
+                    $"[CAT] the execution row claiming '{catType}'/'{componentType}' declares " +
+                    $"{d.Steps.Count} step(s); a command sequence needs at least two.");
+            return new CatExecution(d.RunsOnce, d.Alternates,
+                d.Steps.Select(s => new ExecutionStep(s.Command, s.Settled)).ToList());
+        }
 
         // A CAT commanded by a handshake rather than stop values declares no protocol; asking is not an error.
         public static CatProtocol? ProtocolOrNull(string? catType) => Find(catType)?.Protocol;
