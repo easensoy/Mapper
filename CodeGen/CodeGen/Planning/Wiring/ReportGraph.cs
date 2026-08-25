@@ -64,7 +64,7 @@ namespace CodeGen.Translation
         // controller's process in the MIDDLE of its own cycle is holding material for the downstream
         // station and must observe it live, which a boundary handshake cannot express, so the rings must
         // become one. Derived from the transition chain and the allocation; no process name participates.
-        public static bool RingsMustMerge(TwinModel twin, ControllerAllocation allocation)
+        private static bool ProcessesNeedOneRing(TwinModel twin, ControllerAllocation allocation)
         {
             foreach (var proc in twin.Processes)
             {
@@ -90,8 +90,49 @@ namespace CodeGen.Translation
                     && !string.Equals(target.Name, proc.Name, StringComparison.OrdinalIgnoreCase)
                     && allocation.Of(target.Name) != allocation.Of(proc.Name));
 
+        // The finished topology, decided here so nothing downstream re-answers it. A recipe wait needs
+        // its source on the same ring; so does an INTERLOCK, because the rule reads the source's slot in
+        // the consumer's own state_table. Both are proved against the same graph.
         public static ReportGraph Build(
-            TwinModel twin, ControllerAllocation allocation, bool ringsMerged,
+            TwinModel twin, ControllerAllocation allocation,
+            IReadOnlyList<string> declaredDischarge, IReadOnlyList<string> detouredChain)
+        {
+            var graph = Assemble(twin, allocation, ProcessesNeedOneRing(twin, allocation),
+                declaredDischarge, detouredChain);
+
+            // Folding the rings into one is the declared carrier that spans every domain, so it is what
+            // an interlock reaching across them needs. Applied only when something actually needs it.
+            if (!graph.RingsMerged && Crossings(twin, graph).Count > 0)
+                graph = Assemble(twin, allocation, merged: true, declaredDischarge, detouredChain);
+
+            var stranded = Crossings(twin, graph);
+            if (stranded.Count > 0)
+                throw new InvalidOperationException(
+                    $"[Transport] {stranded.Count} interlock(s) name a source that does not report onto " +
+                    "the ring their consumer reads, so the rule would guard whichever component holds " +
+                    $"that slot there: {string.Join("; ", stranded)}. Generation stops rather than " +
+                    "emitting a safety rule that does not mean what the model says.");
+            return graph;
+        }
+
+        // Every (source, consumer) an interlock depends on that the finished topology cannot carry.
+        private static IReadOnlyList<string> Crossings(TwinModel twin, ReportGraph graph)
+        {
+            var crossings = new List<string>();
+            foreach (var actuator in twin.Components.Where(c => c.IsActuator))
+                foreach (var state in actuator.States)
+                    foreach (var reference in state.Interlocks)
+                    {
+                        var source = reference.Component;
+                        if (source == null || source.IsProcess) continue;
+                        if (graph.SameDomain(source.Name, actuator.Name)) continue;
+                        crossings.Add($"{actuator.Name} blocked on {source.Name}");
+                    }
+            return crossings;
+        }
+
+        private static ReportGraph Assemble(
+            TwinModel twin, ControllerAllocation allocation, bool merged,
             IReadOnlyList<string> declaredDischarge, IReadOnlyList<string> detouredChain)
         {
             var edges = RequiredEdges(twin, allocation);
@@ -106,7 +147,7 @@ namespace CodeGen.Translation
 
             // A merged ring already spans both ends, as does a pair on one native ring.
             bool Spanned(TransportEdge e) =>
-                ringsMerged ||
+                merged ||
                 string.Equals(NativeOf(allocation, e.Source), NativeOf(allocation, e.Target),
                     StringComparison.Ordinal);
 
@@ -128,7 +169,7 @@ namespace CodeGen.Translation
             var commanded = new HashSet<string>(
                 edges.Where(e => e.Kind == TransportEdge.Command).Select(e => e.Target),
                 StringComparer.OrdinalIgnoreCase);
-            return new ReportGraph(allocation, ringsMerged,
+            return new ReportGraph(allocation, merged,
                 discharge.Concat(detouredChain), edges, discharge, detouredChain,
                 discharge.Where(commanded.Contains).ToList());
         }
