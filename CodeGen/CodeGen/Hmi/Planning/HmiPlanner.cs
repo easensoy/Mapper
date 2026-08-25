@@ -16,7 +16,8 @@ namespace CodeGen.Hmi
     internal static class HmiPlanner
     {
         internal static HmiPlan Plan(
-            HmiPlant plant, IReadOnlyList<HmiCatTemplate> templates, HmiEccIndex ecc, HmiDefinition def)
+            HmiPlant plant, IReadOnlyList<HmiCatTemplate> templates, HmiEccIndex ecc,
+            Func<string, HmiContract> contractOf, HmiDefinition def)
         {
             var diagnostics = new List<string>(plant.Diagnostics);
             var byType = templates.ToDictionary(t => t.CatType, StringComparer.OrdinalIgnoreCase);
@@ -93,7 +94,10 @@ namespace CodeGen.Hmi
                 }
             }
 
-            screens.AddRange(Detail(plant, def));
+            screens.AddRange(TextPages(def.Screens.DetailName, def.Screens.DetailTitle,
+                                       PlantLines(plant), def));
+            screens.AddRange(TextPages(def.Screens.ProcessDetailName, def.Screens.ProcessDetailTitle,
+                                       ProcessLines(plant), def));
 
             var all = screens
                 .Select(s => s with
@@ -128,7 +132,19 @@ namespace CodeGen.Hmi
                             Verdicts(plant, d.Name, tpl.CatType, sym, ecc, def))))
                 .ToList();
 
-            return new HmiPlan(all, used, diagnostics, selected, allVerdicts);
+            // Every symbol this plan actually ships, audited against the interface it will be
+            // connected to. A faceplate authored for a richer CAT binds fields this deployment
+            // does not serve; those bindings are dead and are reported here once.
+            var dead = used.SelectMany(tpl => tpl.Symbols
+                    .SelectMany(sym =>
+                        HmiBindingAudit.DeadInputs(tpl.CatType, sym, contractOf(tpl.CatType))
+                            .Concat(HmiBindingAudit.DeadOutputs(tpl.CatType, sym, contractOf(tpl.CatType)))))
+                .ToList();
+
+            foreach (var d in dead)
+                diagnostics.Add($"DEAD BINDING {d.CatType}_{d.Symbol} '{d.Tag}': {d.Reason}");
+
+            return new HmiPlan(all, used, diagnostics, selected, allVerdicts, dead);
         }
 
         private sealed record Drawn(string Name, string TagName, HmiCatTemplate Template, HmiSymbol Symbol);
@@ -282,39 +298,68 @@ namespace CodeGen.Hmi
         //
         // The HMI never computes or enforces an interlock. Every rule below is read from
         // GenerationContext.Interlocks and only joined to names - the controller stays authoritative.
-        private static IReadOnlyList<HmiScreen> Detail(HmiPlant plant, HmiDefinition def)
+        private static IReadOnlyList<string> PlantLines(HmiPlant plant)
         {
-            var g = def.Geometry;
             var lines = new List<string>();
-
             foreach (var c in plant.Components.OrderBy(x => x.InstanceName, StringComparer.Ordinal))
             {
-                lines.Add($"{c.DisplayName}  -  {c.Controller}/{c.Resource}" +
-                          (c.Slot >= 0 ? $"  slot {c.Slot}" : "  unallocated") +
-                          (c.Ring == null ? string.Empty : $"  ring {c.Ring}"));
+                lines.Add(Allocation(c.DisplayName, c.Controller.ToString(), c.Resource, c.Slot, c.Ring));
                 if (c.States.Count > 0)
                     lines.Add("    states: " + string.Join("  ", c.States.Select(s => $"{s.Value} {s.Name}")));
                 foreach (var r in c.Interlocks) lines.Add("    " + r.Explain(c.DisplayName));
             }
+            return lines;
+        }
 
+        // The compiled recipe, as the operator reads it: allocation, phases, what the process drives,
+        // what it only watches, then every row in execution order. Entirely model-derived - the row
+        // objects are the ones HmiRecipePresenter built from the typed RecipeArrays, so the panel and
+        // the controller are reading one recipe, not two descriptions of it.
+        private static IReadOnlyList<string> ProcessLines(HmiPlant plant)
+        {
+            var lines = new List<string>();
             foreach (var p in plant.Processes.OrderBy(x => x.InstanceName, StringComparer.Ordinal))
-                lines.Add($"{p.DisplayName}  -  {p.Controller}/{p.Resource}" +
-                          (p.Slot >= 0 ? $"  slot {p.Slot}" : string.Empty) +
-                          (p.Owned.Count > 0 ? $"  commands {p.Owned.Count}" : string.Empty));
+            {
+                lines.Add(Allocation(p.DisplayName, p.Controller.ToString(), p.Resource, p.Slot, p.Ring) +
+                          $"  tag {p.TagName}  {p.CatType}");
+                if (p.Phases.Count > 0)
+                    lines.Add("    phases: " + string.Join("  ", p.Phases.Select(x => $"{x.Value} {x.Name}")));
+                if (p.Owned.Count > 0) lines.Add("    commands: " + string.Join(", ", p.Owned));
+                if (p.Observed.Count > 0) lines.Add("    observes: " + string.Join(", ", p.Observed));
+                lines.Add($"    recipe: {p.Rows.Count} step(s)");
+                foreach (var r in p.Rows) lines.Add("      " + Row(r));
+            }
+            return lines;
+        }
 
+        // The ONE row line-format. Everything that renders a row renders it through here.
+        private static string Row(HmiRecipeRow r) =>
+            $"[{r.Index,3}] {r.Text}" +
+            (r.NextStep == r.Index + 1 ? string.Empty : $"   -> {r.NextStep}");
+
+        private static string Allocation(string name, string controller, string resource, int slot, string? ring) =>
+            $"{name}  -  {controller}/{resource}" +
+            (slot >= 0 ? $"  slot {slot}" : "  unallocated") +
+            (ring == null ? string.Empty : $"  ring {ring}");
+
+        // One paginator for every read-only text surface.
+        private static IReadOnlyList<HmiScreen> TextPages(
+            string baseName, string title, IReadOnlyList<string> lines, HmiDefinition def)
+        {
             if (lines.Count == 0) return Array.Empty<HmiScreen>();
 
+            var g = def.Geometry;
             var perPage = Math.Max(1, (g.ContentBottom - g.ContentTop) / g.CaptionHeight);
+            var pages = (lines.Count + perPage - 1) / perPage;
             var screens = new List<HmiScreen>();
-            for (var page = 0; page * perPage < lines.Count; page++)
+
+            for (var page = 0; page < pages; page++)
             {
-                var take = lines.Skip(page * perPage).Take(perPage).ToList();
-                var captions = take.Select((t, i) => new HmiCaption(
-                    $"det{page}_{i}", t, g.Margin, g.ContentTop + i * g.CaptionHeight, false)).ToList();
-                var pages = (lines.Count + perPage - 1) / perPage;
+                var captions = lines.Skip(page * perPage).Take(perPage).Select((t, i) => new HmiCaption(
+                    $"{baseName}_{page}_{i}", t, g.Margin, g.ContentTop + i * g.CaptionHeight, false)).ToList();
                 screens.Add(new HmiScreen(
-                    PageName(def.Screens.DetailName, page),
-                    pages > 1 ? $"{def.Screens.DetailTitle} ({page + 1}/{pages})" : def.Screens.DetailTitle,
+                    PageName(baseName, page),
+                    pages > 1 ? $"{title} ({page + 1}/{pages})" : title,
                     Array.Empty<HmiPlaceable>(), Array.Empty<HmiNavButton>(), captions));
             }
             return screens;
