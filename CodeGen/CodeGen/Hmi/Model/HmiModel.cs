@@ -32,7 +32,11 @@ namespace CodeGen.Hmi
         // Bound, but by a control the faceplate switches off and never switches back on. The
         // action is still REPORTED - silently dropping it would hide the fact from the operator -
         // and it is always withheld.
-        IReadOnlyList<string> DeadTags)
+        IReadOnlyList<string> DeadTags,
+        // What each declared output event CARRIES, per the symbol's own contract. An event that
+        // matches the deployed interface by name while carrying different data is not the same
+        // event, and only this map can tell the two apart.
+        IReadOnlyDictionary<string, IReadOnlyList<string>> OutputEventData)
     {
         // The contract's PROMISE: this canvas is allowed to reach the controller.
         public bool CommandCapable => OutputEvents.Count > 0 || OutputTags.Count > 0;
@@ -113,7 +117,10 @@ namespace CodeGen.Hmi
         // Every (instance x symbol) verdict for the CATs this plan deploys - not only the symbol
         // finally placed. A symbol the CAT partial classes force into the build is compiled even
         // when no canvas places it, so its live calls have to be suppressed as well.
-        IReadOnlyList<HmiActionVerdict> AllVerdicts)
+        IReadOnlyList<HmiActionVerdict> AllVerdicts,
+        // Bindings the DEPLOYED service interface cannot serve. Suppressed in the staged
+        // faceplate and reported; never left to display a value that never arrives.
+        IReadOnlyList<HmiDeadBinding> DeadBindings)
     {
         public string FirstCanvas => Screens.Count > 0 ? Screens[0].Name : string.Empty;
     }
