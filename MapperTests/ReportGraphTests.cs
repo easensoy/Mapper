@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using CodeGen.Configuration;
@@ -58,6 +58,7 @@ namespace MapperTests
         private const string FeedProcess = "Feed_Station";
         private const string AssemblyProcess = "Assembly_Station";
         private const string FeedActuator = "Feeder";
+        private const string AssemblyActuator = "Clamp";
 
         [Fact]
         public void A_command_across_controllers_with_no_carrier_fails_and_names_the_edge()
@@ -70,7 +71,7 @@ namespace MapperTests
             var twin = TwinModel.Build(new[] { feed, assembly, driven });
 
             var ex = Assert.Throws<InvalidOperationException>(() => ReportGraph.Build(
-                twin, Allocation(twin), ringsMerged: false,
+                twin, Allocation(twin),
                 RigCatalog.Current.CrossRingSegment, Array.Empty<string>()));
 
             Assert.Contains("[Transport]", ex.Message, StringComparison.Ordinal);
@@ -79,18 +80,28 @@ namespace MapperTests
         }
 
         [Fact]
-        public void A_merged_ring_carries_what_would_otherwise_be_unroutable()
+        public void An_interlock_across_the_rings_is_carried_rather_than_reading_a_foreign_slot()
         {
+            // A rule reads its source's slot in the CONSUMER's state_table, so a source reporting on
+            // another ring would guard whichever component holds that slot there. Folding the rings into
+            // one is the declared carrier that spans them, and the graph applies it rather than emitting
+            // a rule that does not mean what the model says.
             var feed = Process("C-feed", FeedProcess);
             var assembly = Process("C-asm", AssemblyProcess);
-            var driven = Actuator("C-act", FeedActuator, "C-asm", "C-asm-s0");
-            var twin = TwinModel.Build(new[] { feed, assembly, driven });
+            var here = Actuator("C-act", FeedActuator, "C-feed", "C-feed-s0");
+            var there = Actuator("C-far", AssemblyActuator, "C-asm", "C-asm-s0");
+            // The assembly-side actuator is blocked while the feed-side one is at work.
+            there.States[0].InterlockConditions = new[]
+            {
+                new VueOneCondition { ComponentID = "C-act", ID = "C-act-work", Name = "blocked" },
+            };
+            var twin = TwinModel.Build(new[] { feed, assembly, here, there });
 
-            var g = ReportGraph.Build(twin, Allocation(twin), ringsMerged: true,
+            var g = ReportGraph.Build(twin, Allocation(twin),
                 RigCatalog.Current.CrossRingSegment, Array.Empty<string>());
 
-            // One ring: every reporter shares a state_table, so nothing needs a splice.
-            Assert.True(g.SameDomain(FeedActuator, AssemblyProcess));
+            Assert.True(g.RingsMerged);
+            Assert.True(g.SameDomain(FeedActuator, AssemblyActuator));
         }
 
         [Fact]
@@ -102,7 +113,7 @@ namespace MapperTests
             var driven = Actuator("C-act", FeedActuator, "C-feed", "C-feed-s0");
             var twin = TwinModel.Build(new[] { feed, driven });
 
-            var g = ReportGraph.Build(twin, Allocation(twin), ringsMerged: false,
+            var g = ReportGraph.Build(twin, Allocation(twin),
                 RigCatalog.Current.CrossRingSegment, Array.Empty<string>());
 
             Assert.Empty(g.DischargeSegment);
