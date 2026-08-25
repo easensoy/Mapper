@@ -261,7 +261,7 @@ namespace CodeGen.Devices.Core
         // instance, plus the .hcf whose LinkNames resolve to it. Without all three the Feed IO does not bind.
         static void ValidateRevPiIo(string eaeRoot, string syslayPath, List<Violation> violations)
         {
-            const string BrokerFbId = "A6B61E2425DB1C30";   // == RevPiIoBrokerInjector.BrokerFbId
+            var BrokerFbId = CodeGen.Devices.RevPi.RevPiIoBrokerInjector.BrokerFbId;
             const string BrokerName = CodeGen.Devices.RevPi.RevPiIoBrokerInjector.BrokerName;
 
             var sysdev = EaeProjectLayout.FindSysdevByDeviceTypeAndName(eaeRoot, TargetRegistry.Of(CodeGen.Translation.PlcAssignment.RevPi).DeviceType, TargetRegistry.Of(CodeGen.Translation.PlcAssignment.RevPi).DeviceName!);
