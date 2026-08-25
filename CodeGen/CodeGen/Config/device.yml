@@ -74,6 +74,24 @@ bx1Io:
   # The cover actuator forced HOME on start so it cannot auto-energise Work into the swivel.
   safeStartComponent: CoverPNP_Hr
 
+# The system FBs every resource boots with, in EMISSION ORDER: the sysres appends them as listed and
+# the bring-up wires below name them by role. Shape is deployment protocol and is the same on every
+# target, so it is stated once here; only the instance IDs differ, and those are per target below.
+# layoutKey names the layout.yml bootFbs row that gives the FB its canvas position.
+bootSequence:
+  - role: FB1
+    type: DPAC_FULLINIT
+    namespace: SE.DPAC
+    layoutKey: FB1
+  - role: FB2
+    type: plcStart
+    namespace: SE.AppBase
+    layoutKey: FB2
+    # A list, not a map: these are emitted as child elements and their order is part of the artefact.
+    parameters:
+      - { name: Prio,  value: "10" }
+      - { name: Delay, value: "T#1000ms" }
+
 # Per-target EAE resource and device identity. These are DEPLOYMENT facts an engineer may edit: renaming
 # a resource, or disambiguating two devices that share a Type, is not a code change. What each backend
 # DOES -- whether it hosts the Feed station, whether its canvas is device-local -- stays in C# beside the
@@ -89,18 +107,29 @@ bx1Io:
 #   opensCoverSeam             hands the cover detour out, so its ring closes across the seam
 #   carriesDetouredChain       carries a chain another target commands, so it is open at both ends
 #   hcfTemplate                the authored hardware-config file carried verbatim into its device folder
+#   bootFbs                    the frozen EAE instance id per bootSequence role. EAE identifies an FB by
+#                              its ID, so a deployed resource's boot ids can never be regenerated: a new
+#                              one makes EAE treat it as a new instance and strand the old.
 targets:
   - plc: M262
     resourceName: M262_RES
     deviceType: M262_dPAC
     hcfTemplate: M262IO.hcf
     hostsFeedStation: true
+    bootFbs:
+      - { role: FB1, id: 593A8F4FDEA0A668 }
+      - { role: FB2, id: 3DB1FB0F578E5F1E }
+
   - plc: M580
     resourceName: RES0
     deviceType: M580_dPAC
     hcfTemplate: M580IO.hcf
     deviceLocalCanvas: true
     opensCoverSeam: true
+    bootFbs:
+      - { role: FB1, id: 66C40EEF3F39D969 }
+      - { role: FB2, id: ACED009B79DFCE69 }
+
   # BX1 and the RevPi are both Soft_dPAC, so Type alone does not identify either: each carries a name.
   - plc: BX1
     resourceName: BX1_RES
@@ -109,6 +138,10 @@ targets:
     hcfTemplate: BX1IO.hcf
     deviceLocalCanvas: true
     carriesDetouredChain: true
+    bootFbs:
+      - { role: FB1, id: 0FE5E1B2C3D4A5B6 }
+      - { role: FB2, id: 1A2B3C4D5E6F7081 }
+
   - plc: RevPi
     resourceName: RevPi_RES
     deviceType: Soft_dPAC
@@ -118,3 +151,6 @@ targets:
     # is what closes around them. That is relocation, not a detour: the chain is not commanded by
     # another controller, it is the same controller reaching a component that moved.
     receivesRelocatedComponents: true
+    bootFbs:
+      - { role: FB1, id: 2AF90BCA49743BD3 }
+      - { role: FB2, id: 8D2BF4F239038BF7 }
