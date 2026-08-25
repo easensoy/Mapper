@@ -47,10 +47,8 @@ If you propose anything that contradicts these, you are wrong. Read first.
   touch the **Test Runtime** path (`MainForm.btnTestStation1_Click` and
   everything it calls) or propose changes that only take effect on the rig until
   cleared explicitly. Sim-only work is the default scope.
-- **Verification gate:** the `SimulatorEndToEndHarness` was removed and
-  `MapperTests` runs no active tests today. Prove a behaviour-preserving change
-  with the byte-identical generated-Demonstrator gate (see below) — every
-  `.syslay` / `.sysres` / `.hcf` must be byte-identical pre/post.
+- **Verification gate:** `MapperTests` (187 tests) and `Gate/` (8 combinations,
+  determinism, A->B->A, placement on every target). See below.
 - **Generation runs only via the MapperUI WinForms buttons.** After any CodeGen
   change, the user must close MapperUI, rebuild MapperUI (which recompiles
   CodeGen), and relaunch before clicking Test Runtime. State that in any
@@ -58,26 +56,38 @@ If you propose anything that contradicts these, you are wrong. Read first.
 - **Never commit unless explicitly asked.** Per global instructions, an agent
   must not create commits on its own.
 
-## How to verify a behaviour-preserving change
+## How to verify a change
 
-`MapperTests` runs no active tests today (all quarantined; the old
-`SimulatorEndToEndHarness` was deleted). The real gate is the byte-identical
-generated-Demonstrator diff — it reads a fixed base (`C:\_gate\base`), generates
-into `C:\_gate\work`, and NEVER writes the live `C:\Demonstrator`:
+Two gates, both live, answering different questions. Run both.
 
-```powershell
-cd C:\VueOneMapper
-dotnet build _gate\Gate.csproj -c Debug
-_gate\bin\Debug\net10.0\gate.exe C:\_gate\snap_pre     # before the change
-# ...make the change, rebuild _gate (recompiles CodeGen)...
-_gate\bin\Debug\net10.0\gate.exe C:\_gate\snap_post    # after the change
-# then SHA256-diff snap_pre vs snap_post
+```bash
+dotnet test MapperTests/MapperTests.csproj          # meaning: guards, plans, refusals
+dotnet build Gate/Gate.csproj
+Gate/bin/Debug/net10.0/gate.exe all                 # behaviour: 8 combinations, determinism, A->B->A, placement
 ```
 
-A behaviour-preserving change must produce a **byte-identical** snapshot (all
-`.syslay` / `.sysres` / `.hcf` identical). The gate also runs the
-`HcfReferenceValidator` + `SyslaySysresParityValidator` + `MqttConnectionValidator`
-and exits non-zero on a split-brain or parity divergence.
+`Gate/` is versioned with the compiler and calls the same
+`GenerateProject.Execute` that VueOne and MapperUI call, so it validates the
+production path rather than a stand-in. `gate all` exits non-zero if ANY
+combination fails to generate, if a repeat generation differs, if A->B->A does
+not close, or if a process the roster places on a target is not emitted on that
+target's resource.
+
+WHAT it gates is data: `Gate/gate.fixtures.json` declares the twins, the
+per-component target selections and the baseline project. The twins are checked
+in under `Gate/fixtures/models`, so a default run reproduces anywhere; set
+`VUEONE_MODELS` to gate authored twins instead. It writes only beneath `C:\_gate`
+(override with `VUEONE_GATE_ROOT`) and refuses a root overlapping the live
+project, which it derives from the configured output root unless the manifest or
+`VUEONE_LIVE_PROJECT` names one. A missing manifest, a missing twin or an
+overlapping root each fail with a message and exit 1.
+
+`gate snapshot <label>` and `gate compare <a> <b> [--core]` are there for a
+byte-comparison across a change; `--core` leaves out the HMI project, which is
+owned separately.
+
+A behaviour-PRESERVING change should compare byte-identical. A change that moves
+bytes on purpose has to say so and show why.
 
 ## What "ridiculous output" usually means here
 
