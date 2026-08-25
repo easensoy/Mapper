@@ -18,6 +18,9 @@
         // The system FBs every resource boots with, in emission order. Shape once; ids per target.
         public System.Collections.Generic.List<BootFbDeclaration> BootSequence { get; set; } = new();
 
+        // The runtime bring-up wires every resource emits, in emission order. Endpoints name boot roles.
+        public System.Collections.Generic.List<BringUpWire> BringUp { get; set; } = new();
+
         private static readonly YamlConfigFile<DeviceConfig> _file = new("Config", "device.yml");
 
         public static DeviceConfig Current => _file.Load();
@@ -96,6 +99,22 @@
     {
         public string Role { get; set; } = string.Empty;
         public string Id { get; set; } = string.Empty;
+    }
+
+    // One bring-up connection. Both endpoints are '<role>.<PORT>': a bootSequence role, or the START
+    // pseudo-role that is the resource's own entry rather than an FB the Mapper emits.
+    public sealed class BringUpWire
+    {
+        public const string ResourceEntry = "START";
+
+        public string From { get; set; } = string.Empty;
+        public string To { get; set; } = string.Empty;
+
+        public static string? RoleOf(string endpoint)
+        {
+            int dot = (endpoint ?? string.Empty).IndexOf('.');
+            return dot <= 0 || dot == endpoint!.Length - 1 ? null : endpoint.Substring(0, dot);
+        }
     }
 
     public sealed class Bx1IoProfile
