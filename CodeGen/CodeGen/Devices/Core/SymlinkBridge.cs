@@ -8,8 +8,7 @@ namespace CodeGen.Devices.Core
     // symlinks (the pattern PLC_RW_BX1/BX1_IO uses for the covers, and PLC_RW_REVPI/RevPI_IO uses for the
     // Feed actuators). EAE generates SYMLINKMULTIVAR{SRC,DST}_<hash> per BOOL arity; the hash is GUI-computed
     // (not derivable), and SRC/DST of one arity share it. Only these arities exist — pick the smallest that
-    // covers the value count (surplus VALUEs are inert). (Bx1IoBrokerInjector keeps its own copy: it is the
-    // rig-proven path and must not be disturbed.)
+    // covers the value count (surplus VALUEs are inert).
     internal static class SymlinkBridge
     {
         static readonly (int Arity, string Hash)[] BoolSymlinkTypes =
