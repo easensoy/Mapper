@@ -50,6 +50,17 @@ namespace CodeGen.Devices.RevPi
         // Propagates a resolution failure; answering "nothing" would silently reject every RevPi selection.
         public static IReadOnlySet<string> CoveredComponents => Current.Components;
 
+        // The same table split by what the coupler drives versus what it reads, so a caller that needs
+        // one kind does not have to guess which of the covered names is which.
+        public static IReadOnlyList<string> CoveredActuators =>
+            Current.Coils.Select(s => s.Component).Distinct(StringComparer.OrdinalIgnoreCase)
+                   .OrderBy(n => n, StringComparer.Ordinal).ToList();
+
+        public static IReadOnlyList<string> CoveredSensors =>
+            Current.Sensors.Select(s => s.Component).Distinct(StringComparer.OrdinalIgnoreCase)
+                   .Except(Current.Coils.Select(s => s.Component), StringComparer.OrdinalIgnoreCase)
+                   .OrderBy(n => n, StringComparer.Ordinal).ToList();
+
         // Read from the hardware config, whose Modbus LinkNames resolve against it.
         public static string BrokerFbId => Current.BrokerFbId;
 
