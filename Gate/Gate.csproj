@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>gate</AssemblyName>
+    <RootNamespace>VueOneMapper.Gate</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- A project reference, not a DLL path: MSBuild copies the CURRENT CodeGen and its Config
+         beside the gate on every build, so the gate cannot validate a stale build. -->
+    <ProjectReference Include="..\CodeGen\CodeGen\CodeGen.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- What to gate, as data beside the gate: a run is reproducible only if the twins, the target
+         selections and the baseline project are declared rather than compiled in. -->
+    <None Include="gate.fixtures.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="fixtures\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The hand-crafted per-CAT I/O binding workbook the generator reads. Linked rather than
+         copied, so the gate and MapperUI can never bind different channels. -->
+    <None Include="..\MapperUI\MapperUI\Input\SMC_Rig_IO_Bindings.xlsx"
+          Link="Input\SMC_Rig_IO_Bindings.xlsx" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
