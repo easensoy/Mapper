@@ -273,6 +273,17 @@ namespace CodeGen.Hmi
                 }
             }
 
+            // No binding the deployed interface cannot serve may remain in the emitted source.
+            // This is what stops a faceplate authored for a richer CAT displaying a frozen value.
+            foreach (var d in plan.DeadBindings.Where(x => !x.Tag.Contains('.', StringComparison.Ordinal)))
+            {
+                var designer = Path.Combine(hmiDir, d.CatType, $"{d.CatType}_{d.Symbol}.cnv.Designer.cs");
+                if (File.Exists(designer) &&
+                    File.ReadAllText(designer).Contains($"TagName = \"{d.Tag}\"", StringComparison.Ordinal))
+                    problems.Add($"UNSERVED BINDING: '{d.CatType}_{d.Symbol}' still binds '{d.Tag}', which " +
+                                 $"the deployed {d.CatType}_HMI interface does not serve.");
+            }
+
             // A withheld FIRED action must also leave its control disabled, so the panel shows the
             // operator it is unavailable rather than accepting a click that does nothing.
             foreach (var group in actions.Where(a => a.Call != null)
