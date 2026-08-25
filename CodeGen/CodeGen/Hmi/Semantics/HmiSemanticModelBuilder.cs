@@ -95,26 +95,33 @@ namespace CodeGen.Hmi
             var processes = new List<HmiProcess>();
             var owner = new Dictionary<string, string>(StringComparer.Ordinal);
 
+            // TWO PASSES, and the reason is a real correctness point: a WAIT row can name ANOTHER
+            // process's phase (the cross-process handshake), and that number is only meaningful in
+            // the OWNING process's phase table. Naming it from the observer's table would label a
+            // handshake confidently and wrongly, so every process's phases are collected first.
+            var found = new List<(VueOneComponent P, string Key, SyslayFb Fb, RecipeArrays Arrays)>();
             foreach (var p in ctx.Components.Where(ComponentType.IsProcess))
             {
                 var key = p.Name?.Trim() ?? string.Empty;
                 if (!ctx.Recipes.TryGetValue(key, out var arrays)) continue;
-
                 var tag = FBIdGenerator.GenerateFBId(p.ComponentID ?? key);
-                if (!byId.TryGetValue(tag, out var fb)) continue;
+                if (byId.TryGetValue(tag, out var fb)) found.Add((p, key, fb, arrays));
+            }
 
+            var phasesOf = found.ToDictionary(
+                x => x.Fb.Name,
+                x => (IReadOnlyDictionary<int, string>)x.Arrays.ProcessPhaseNames,
+                StringComparer.OrdinalIgnoreCase);
+
+            foreach (var (p, key, fb, arrays) in found)
+            {
                 var plc = ctx.Allocation.Of(fb.Name);
-                // The ROLE derivation, straight off the compiled recipe: a component this process
-                // issues a CMD to is an actuator, one it only waits on is a sensor. Read from the
-                // typed RecipeArrays - nothing is rendered, and no row objects are kept.
-                var ownedSet = new List<string>();
-                for (var i = 0; i < arrays.Count; i++)
-                {
-                    if (arrays.StepType[i] != StepType.Cmd) continue;
-                    var t = ResolveCommandTarget(arrays.CmdTargetName[i] ?? string.Empty, components);
-                    if (t == null || ownedSet.Contains(t.InstanceName, StringComparer.Ordinal)) continue;
-                    ownedSet.Add(t.InstanceName);
-                }
+
+                // The compiled recipe, once, as rows. Roles are then DERIVED FROM THE ROWS, so the
+                // panel's "this process commands that actuator" and the row an operator reads can
+                // never disagree - they are the same objects.
+                var rows = HmiRecipePresenter.Rows(
+                    arrays, fb.Name, components, phasesOf, rings, def, diagnostics);
 
                 processes.Add(new HmiProcess(
                     ComponentId: p.ComponentID ?? key,
@@ -125,9 +132,12 @@ namespace CodeGen.Hmi
                     TagName: fb.Id,
                     CatType: fb.Type,
                     Slot: ctx.Slots.TryGetValue(fb.Name, out var s) ? s : -1,
-                    Owned: ownedSet,
+                    Owned: HmiRecipePresenter.Owned(rows),
                     Capabilities: HmiCapabilityResolver.Resolve(
                         Contract(fb.Type), fb.Name, reach, ecc, def),
+                    Rows: rows,
+                    Observed: HmiRecipePresenter.Observed(rows, components),
+                    Phases: HmiRecipePresenter.Phases(rows),
                     Ring: rings.RingOf(fb.Name)));
             }
 
@@ -262,17 +272,5 @@ namespace CodeGen.Hmi
             return rules;
         }
 
-        // CmdTargetName is one of three things and each is matched on its own terms: an actuator ring
-        // key (lower-cased), a sensor refresh (verbatim name), or a process phase announcement, which
-        // resolves to no component - correctly, not as a gap.
-        private static HmiComponent? ResolveCommandTarget(string target, IReadOnlyList<HmiComponent> components)
-        {
-            var t = target.Trim();
-            if (t.Length == 0) return null;
-            return components.FirstOrDefault(c =>
-                       string.Equals(TemplateMap.RingKey(c.InstanceName), t, StringComparison.Ordinal))
-                ?? components.FirstOrDefault(c =>
-                       string.Equals(c.InstanceName, t, StringComparison.OrdinalIgnoreCase));
-        }
     }
 }
