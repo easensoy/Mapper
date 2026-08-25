@@ -496,7 +496,7 @@ namespace MapperUI
                         CodeGen.Configuration.LayoutCatalog.Load()));
                 foreach (var comp in _loadedComponents)
                 {
-                    var vr = Validate(comp, validator, cfg);
+                    var vr = Validate(comp, validator);
                     _validationRows.Add(vr);
 
                     var reg = roster.Get(comp.Name);
@@ -613,7 +613,7 @@ namespace MapperUI
         }
 
 
-        static ComponentValidationRow Validate(VueOneComponent comp, ComponentValidator validator, MapperConfig cfg)
+        static ComponentValidationRow Validate(VueOneComponent comp, ComponentValidator validator)
         {
             switch (comp.Type.ToLowerInvariant())
             {
