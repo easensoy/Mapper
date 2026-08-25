@@ -76,7 +76,10 @@ namespace CodeGen.Hmi
                 symbols.Add(new HmiSymbol(name, isFaceplate, w, h, hasContract,
                                           outEvents.Select(e => e.Name).ToList(), outTags,
                                           behaviour.Events, behaviour.Calls, behaviour.Tags,
-                                          behaviour.Dead));
+                                          behaviour.Dead,
+                                          outEvents.GroupBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
+                                                   .ToDictionary(g => g.Key, g => g.First().With,
+                                                                 StringComparer.OrdinalIgnoreCase)));
             }
 
             return new HmiCatTemplate(cat, catDir, symbols);
