@@ -231,6 +231,12 @@ namespace CodeGen.Domain.Twin
 
         public ConditionExpr? InterlockGuard => Source.InterlockGuard;
 
+        private Dictionary<VueOneCondition, TwinRef> _resolvedInterlocks = new();
+
+        // The resolved target of one leaf of InterlockGuard.
+        public TwinRef? ResolvedInterlock(VueOneCondition leaf) =>
+            leaf != null && _resolvedInterlocks.TryGetValue(leaf, out var r) ? r : null;
+
         internal TwinState(VueOneState source)
         {
             Source = source;
@@ -240,10 +246,19 @@ namespace CodeGen.Domain.Twin
             Transitions = source.Transitions.Select(t => new TwinTransition(t)).ToList();
         }
 
-        internal void BindInterlocks(TwinModel model, string site, List<string> problems) =>
-            Interlocks = Source.InterlockConditions
-                .Select(c => model.Resolve(c, site, problems))
-                .Where(r => r != null).Select(r => r!).ToList();
+        internal void BindInterlocks(TwinModel model, string site, List<string> problems)
+        {
+            var bound = new List<TwinRef>();
+            _resolvedInterlocks = new Dictionary<VueOneCondition, TwinRef>();
+            foreach (var leaf in Source.InterlockConditions)
+            {
+                var resolved = model.Resolve(leaf, site, problems);
+                if (resolved == null) continue;
+                bound.Add(resolved);
+                _resolvedInterlocks[leaf] = resolved;
+            }
+            Interlocks = bound;
+        }
     }
 
     public sealed class TwinTransition
