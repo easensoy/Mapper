@@ -186,9 +186,9 @@ namespace CodeGen.Devices.Core
             // .sysres must be <Compile SystemResource> or EAE compiles no HWConfig for them — the BX1 scanner
             // exports empty and the RevPi deploys with no I/O. M262/M580 keep the rig-proven legacy <None>.
             bool isBx1Resource = sysdevFileName.StartsWith(
-                "00000000-0000-0000-0000-000000000004", StringComparison.OrdinalIgnoreCase);
+                CodeGen.Devices.Core.Station2DeviceEmitter.BX1SysdevId, StringComparison.OrdinalIgnoreCase);
             bool isRevPiResource = sysdevFileName.StartsWith(
-                "00000000-0000-0000-0000-000000000005", StringComparison.OrdinalIgnoreCase);
+                CodeGen.Devices.RevPi.RevPiDeviceEmitter.SysdevId, StringComparison.OrdinalIgnoreCase);
             bool isSoftDpacResource = isBx1Resource || isRevPiResource;
             if (Directory.Exists(sysdevFolder))
             {
