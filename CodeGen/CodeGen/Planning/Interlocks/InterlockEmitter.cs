@@ -10,9 +10,6 @@ namespace CodeGen.Translation.Interlocks
     // param write and the inert-safety-net guard. The CAT shapes differ only in filters and guard text.
     public static class InterlockEmitter
     {
-        private static int Cap => InterlockConfig.Current.RuleArraySize;
-
-
         // Every actuator's rules, planned once from the twin. A CAT with no rule interface is absent.
         public static IReadOnlyDictionary<string, InterlockPlan> PlanAll(
             IEnumerable<VueOneComponent> actuators, IReadOnlyDictionary<string, string> catTypes,
@@ -35,85 +32,79 @@ namespace CodeGen.Translation.Interlocks
                     ? TemplateManifest.ProtocolOrNull(cat) : null;
                 if (protocol?.RawStateRange is { } range) plan = FilterToRawStateRange(plan, range);
                 if (protocol?.CrossesBothWays == true) plan = WithReverseCrossings(plan);
+                AssertEveryRuleIsEnforceable(name, cat, protocol, plan);
                 // Never ship an InterlockManager that passes everything through: if conditions
                 // survived translation but nothing was emitted, the safety net is false.
-                int inScope = InterlockPlanner.CountInScopeConditions(a, scopedIds, catTypes, twin, rings, allocation);
+                int inScope = InterlockPlanner.CountInScopeAlternatives(a, scopedIds, catTypes, twin, rings, allocation);
                 if (inScope > 0 && plan.Count == 0)
                     throw new InvalidOperationException(
                         $"[Recipe] Actuator '{name}' has {inScope} in-scope Control.xml interlock " +
-                        "condition(s) but emitted RuleCount=0 - refusing to generate code whose " +
+                        "alternative(s) but emitted RuleCount=0 - refusing to generate code whose " +
                         "InterlockManager passes everything through (false safety net).");
                 plans[name] = plan;
             }
             return plans;
         }
 
-        // Keep only rules inside the core's DECLARED CurrentRawState range; outside it a rule can never match.
-        // Do NOT re-drop Blocked==0 here: BuildRules keeps the cross-controller readiness gates on purpose.
+        // A verdict nobody reads is not a safety rule. The evaluator computes one verdict per TARGET
+        // stop and the core gates a move only on the verdicts it takes as inputs, so a rule aimed at a
+        // stop the CAT does not enforce - or at no declared target at all - would be computed and
+        // discarded. That is exactly the shape of an inert safety rule, so generation STOPS. The remedy
+        // is the CAT (give its core that input) or the twin (state the interlock on the move the CAT
+        // does gate); silently emitting it is not one.
+        private static void AssertEveryRuleIsEnforceable(
+            string name, string? cat, CatProtocol? protocol, InterlockPlan plan)
+        {
+            if (plan.Count == 0) return;
+            if (protocol?.Target is not { Count: > 0 })
+                throw new InvalidOperationException(
+                    $"[Interlock] '{name}' was planned {plan.Count} rule(s) but its CAT " +
+                    $"'{cat ?? "(none)"}' declares no interlock target interface, so nothing would " +
+                    "evaluate them.");
+
+            foreach (var alternative in plan.Alternatives())
+            {
+                var stop = protocol.TargetStopFor(alternative.To);
+                if (stop != null && protocol.Enforces(stop)) continue;
+                throw new InvalidOperationException(
+                    $"[Interlock] '{name}' is interlocked on the move to state {alternative.To}, which " +
+                    (stop == null
+                        ? $"CAT '{cat}' compares against no interlock target"
+                        : $"CAT '{cat}' computes a '{stop}' verdict for but does not gate the move on") +
+                    " - the rule could never fire. Refusing to generate an inert safety rule.");
+            }
+        }
+
+        // Keep only alternatives inside the core DECLARED CurrentRawState range; outside it a rule can
+        // never match. Judged per alternative, because an alternative IS one rule.
+        // Do NOT re-drop at-rest terms here: BuildRules keeps the cross-controller readiness gates.
         private static InterlockPlan FilterToRawStateRange(
             InterlockPlan plan, Configuration.RawStateRange r)
         {
-            var b = new Builder(Cap);
-            for (int i = 0; i < plan.Count && i < Cap; i++)
-            {
-                if (plan.From[i] < r.Min || plan.From[i] > r.Max ||
-                    plan.To[i] < r.Min || plan.To[i] > r.Max) continue;
-                b.Add(plan.From[i], plan.To[i], plan.Src[i], plan.Blocked[i]);
-            }
+            var b = new InterlockPlan.Builder();
+            foreach (var a in plan.Alternatives())
+                if (a.From >= r.Min && a.From <= r.Max && a.To >= r.Min && a.To <= r.Max)
+                    b.Add(a);
             return b.ToPlan();
         }
 
-        // The shared volume is crossed both ways, so every crossing rule needs its reverse.
+        // The shared volume is crossed both ways, so every crossing alternative needs its reverse, with
+        // the same terms: what blocks the move one way blocks it coming back.
         private static InterlockPlan WithReverseCrossings(InterlockPlan plan)
         {
-            var b = new Builder(Cap);
-            for (int i = 0; i < plan.Count && i < Cap; i++)
-                b.Add(plan.From[i], plan.To[i], plan.Src[i], plan.Blocked[i]);
-            for (int i = 0; i < plan.Count && i < Cap; i++)
-                if (plan.From[i] != plan.To[i])                       // a crossing, not a self-loop
-                    b.Add(plan.To[i], plan.From[i], plan.Src[i], plan.Blocked[i]);
+            var b = new InterlockPlan.Builder();
+            foreach (var a in plan.Alternatives()) b.Add(a);
+            foreach (var a in plan.Alternatives())
+                if (a.From != a.To)                                  // a crossing, not a self-loop
+                    b.Add(a with { From = a.To, To = a.From });
             return b.ToPlan();
         }
 
-        // Fixed-capacity rule accumulator with dedup, as both post-filters need.
-        private sealed class Builder
+        public static void Write(Dictionary<string, string> p, InterlockPlan plan, int capacity)
         {
-            private readonly int[] _f, _t, _s, _b;
-            private readonly int _cap;
-            private int _n;
-
-            public Builder(int cap)
-            {
-                _cap = cap;
-                _f = new int[cap]; _t = new int[cap]; _s = new int[cap]; _b = new int[cap];
-            }
-
-            public void Add(int from, int to, int src, int blocked)
-            {
-                for (int j = 0; j < _n; j++)
-                    if (_f[j] == from && _t[j] == to && _s[j] == src && _b[j] == blocked) return;
-                if (_n >= _cap) return;
-                _f[_n] = from; _t[_n] = to; _s[_n] = src; _b[_n] = blocked; _n++;
-            }
-
-            public InterlockPlan ToPlan() => new(_n, _f, _t, _s, _b);
-        }
-
-
-        public static void Write(Dictionary<string, string> p, InterlockPlan plan)
-        {
-            if (InterlockConfig.Current.UseStruct)
-            {
-                p["RuleTable"] = Iec61499Literal.FormatInterlockTable(plan.From, plan.To, plan.Src, plan.Blocked, plan.Count);
-            }
-            else
-            {
-                p["RuleCount"]        = Iec61499Literal.FormatInt(plan.Count);
-                p["RuleFromState"]    = Iec61499Literal.FormatIntArray(plan.From);
-                p["RuleToState"]      = Iec61499Literal.FormatIntArray(plan.To);
-                p["RuleSourceID"]     = Iec61499Literal.FormatIntArray(plan.Src);
-                p["RuleBlockedState"] = Iec61499Literal.FormatIntArray(plan.Blocked);
-            }
+                            p["RuleTable"] = Iec61499Literal.FormatInterlockTable(
+                plan.From, plan.To, plan.Src, plan.Blocked, plan.TermCount, capacity);
+            
         }
 
     }
