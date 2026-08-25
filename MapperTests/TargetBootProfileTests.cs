@@ -102,6 +102,67 @@ namespace MapperTests
             Assert.Contains(errors, e => e.Contains("FB2") && e.Contains("layoutKey"));
         }
 
+        private static List<BringUpWire> Wires(params (string From, string To)[] rows) =>
+            rows.Select(r => new BringUpWire { From = r.From, To = r.To }).ToList();
+
+        private static List<string> WireErrors(List<BringUpWire> wires) =>
+            TargetRegistry.BringUpErrors(wires, Sequence()).ToList();
+
+        [Fact]
+        public void A_bring_up_naming_only_declared_roles_raises_nothing()
+        {
+            Assert.Empty(WireErrors(Wires(
+                ("START.COLD", "FB1.INIT"), ("FB2.FIRST_INIT", "FB2.ACK_FIRST"))));
+        }
+
+        [Fact]
+        public void A_wire_to_a_role_no_target_boots_with_is_refused()
+        {
+            var errors = WireErrors(Wires(("START.COLD", "FB9.INIT")));
+            Assert.Contains(errors, e => e.Contains("FB9") && e.Contains("no bootSequence role"));
+        }
+
+        [Theory]
+        [InlineData("FB1")]        // no port
+        [InlineData(".INIT")]      // no role
+        [InlineData("FB1.")]       // port missing after the dot
+        public void A_malformed_endpoint_is_refused(string endpoint)
+        {
+            var errors = WireErrors(Wires(("START.COLD", endpoint)));
+            Assert.Contains(errors, e => e.Contains("is not a") && e.Contains("<role>.<PORT>"));
+        }
+
+        [Fact]
+        public void The_same_wire_declared_twice_is_refused()
+        {
+            var errors = WireErrors(Wires(("START.COLD", "FB1.INIT"), ("START.COLD", "FB1.INIT")));
+            Assert.Contains(errors, e => e.Contains("more than once"));
+        }
+
+        [Fact]
+        public void Two_wires_into_one_destination_are_kept_because_cold_and_warm_both_start_it()
+        {
+            Assert.Empty(WireErrors(Wires(("START.COLD", "FB1.INIT"), ("START.WARM", "FB1.INIT"))));
+        }
+
+        [Fact]
+        public void A_bring_up_with_no_wires_is_refused_rather_than_starting_nothing()
+        {
+            Assert.Contains(WireErrors(new List<BringUpWire>()), e => e.Contains("no bringUp"));
+        }
+
+        [Fact]
+        public void The_shipped_bring_up_is_ordered_and_every_endpoint_resolves()
+        {
+            var wires = DeviceConfig.Current.BringUp;
+            Assert.NotEmpty(wires);
+            Assert.Empty(TargetRegistry.BringUpErrors(wires, DeviceConfig.Current.BootSequence));
+            // Emission order is the artefact's order, so the rendered pairs follow the declaration.
+            Assert.Equal(
+                wires.Select(w => (w.From, w.To)).ToList(),
+                TargetBootstrap.BringUp.ToList());
+        }
+
         [Fact]
         public void Every_shipped_target_carries_a_complete_boot_profile()
         {
