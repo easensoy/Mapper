@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -67,6 +67,49 @@ namespace CodeGen.Models
         // when it has no grouping to preserve.
         public static ConditionExpr? FromFlat(IEnumerable<VueOneCondition>? conditions) =>
             Conjunction((conditions ?? Enumerable.Empty<VueOneCondition>()).Select(c => new Ref(c)));
+
+        // The guard as a SUM OF PRODUCTS: alternatives, each a list of leaves that hold together. An
+        // interlock table is exactly that shape - it blocks when ANY alternative is wholly satisfied -
+        // so this is the form the interlock planner compiles against. Exhaustive over the three node
+        // kinds, so a fourth cannot be added without the compiler pointing here.
+        //
+        // Distributing All over Any is what makes it canonical and is also the only place it can grow:
+        // (A|B) AND (C|D) is four products. A guard that expands past the cap is REFUSED rather than
+        // truncated, because a dropped product is a lifted interlock - silent, and wrong on a rig.
+        public IReadOnlyList<IReadOnlyList<Ref>> SumOfProducts(int maxProducts = 64)
+        {
+            var products = Distribute(this, maxProducts);
+            if (products.Count > maxProducts) throw TooMany(products.Count, maxProducts);
+            return products;
+        }
+
+        private static List<IReadOnlyList<Ref>> Distribute(ConditionExpr e, int cap) => e switch
+        {
+            Ref r => new List<IReadOnlyList<Ref>> { new[] { r } },
+            Any any => any.Operands.SelectMany(o => Distribute(o, cap)).ToList(),
+            All all => all.Operands.Aggregate(
+                new List<IReadOnlyList<Ref>> { Array.Empty<Ref>() },
+                (acc, operand) => Cross(acc, Distribute(operand, cap), cap)),
+            _ => throw new InvalidOperationException(
+                $"[Guard] {e.GetType().Name} is a guard node this compiler has no reading for."),
+        };
+
+        // Document order on both axes: the left operand's alternatives vary slowest, and within one
+        // product the leaves stay in the order the twin wrote them.
+        private static List<IReadOnlyList<Ref>> Cross(
+            List<IReadOnlyList<Ref>> left, List<IReadOnlyList<Ref>> right, int cap)
+        {
+            if ((long)left.Count * right.Count > cap) throw TooMany(left.Count * right.Count, cap);
+            var crossed = new List<IReadOnlyList<Ref>>(left.Count * right.Count);
+            foreach (var l in left)
+                foreach (var r in right)
+                    crossed.Add(l.Concat(r).ToList());
+            return crossed;
+        }
+
+        private static InvalidOperationException TooMany(long got, int cap) =>
+            new($"[Guard] this guard expands to {got} alternatives, more than the {cap} a plan may " +
+                "carry. Nothing here can drop one without changing what the model asks for.");
 
         // True when the guard offers alternatives, i.e. more than one ConditionGroup. Reported rather
         // than silently flattened, because a list of references cannot express a choice.
