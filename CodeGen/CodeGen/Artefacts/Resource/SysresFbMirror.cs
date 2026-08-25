@@ -330,27 +330,21 @@ namespace CodeGen.Devices.Core
         {
             if (string.IsNullOrEmpty(fbName)) return PlcAssignment.Unknown;
 
-            // One MQTT connection per resource, so the embedded MqttPub binds the LOCAL one. A partial
-            // swap emits RevPi's explicitly, since it keeps M262 as the controller.
-            if (string.Equals(fbName, "MqttConn_RevPi", StringComparison.Ordinal) ||
-                string.Equals(fbName, "Telemetry_RevPi", StringComparison.Ordinal))
-                return PlcAssignment.RevPi;
-
-            // Standalone MQTT bridge publishers (MqttFmt_<comp>/MqttPub_<comp>) live on BX1.
-            if (fbName.StartsWith("MqttPub_", StringComparison.Ordinal) ||
-                fbName.StartsWith("MqttFmt_", StringComparison.Ordinal))
-                return PlcAssignment.BX1;
-
-            if (string.Equals(fbName, "M580_CoverRingGate", StringComparison.Ordinal))
-                return PlcAssignment.M580;
-            if (string.Equals(fbName, "BX1_CoverRingGate", StringComparison.Ordinal))
-                return PlcAssignment.BX1;
+            // One MQTT connection per resource, so the embedded MqttPub binds the LOCAL one. The
+            // connection declares which resource it belongs to, which is the answer even for a resource
+            // the roster gives no rows of its own.
+            var declared = Configuration.TelemetrySettings.Current.Connections.FirstOrDefault(c =>
+                string.Equals(c.Instance, fbName, StringComparison.Ordinal) ||
+                string.Equals(c.RawInstance, fbName, StringComparison.Ordinal));
+            if (declared != null) return declared.Plc;
 
             var p = allocation.Of(fbName);
-            // Unknown falls back to whichever controller hosts the Feed station, so nothing is dropped.
-            return p == PlcAssignment.Unknown
-                ? PlcAssignment.M262
-                : p;
+            if (p != PlcAssignment.Unknown) return p;
+
+            // Nothing places it, so it falls to the resource that hosts the Feed station itself - never
+            // one that merely RECEIVES part of it, which exists only when something was relocated there.
+            return TargetRegistry.All
+                .First(t => t.HostsFeedStation && !t.ReceivesRelocatedComponents).Plc;
         }
 
         static string ComputeMirrorId(string syslayId)
