@@ -77,6 +77,13 @@ namespace CodeGen.Hmi
         int Slot,
         IReadOnlyList<string> Owned,      // instance names this recipe commands
         IReadOnlyList<HmiCapability> Capabilities,
+        // The compiled recipe as the operator reads it. Built once, in HmiRecipePresenter,
+        // from the SAME typed RecipeArrays the controller executes.
+        IReadOnlyList<HmiRecipeRow> Rows,
+        // Instances this recipe only WAITS on - it never commands them.
+        IReadOnlyList<string> Observed,
+        // The phases it passes through, in the order the rows reach them.
+        IReadOnlyList<HmiStateName> Phases,
         string? Ring = null)
     {
 
