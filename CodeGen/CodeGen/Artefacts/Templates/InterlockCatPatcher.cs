@@ -16,13 +16,13 @@ namespace CodeGen.Services
             => DeployDatatype(eaeProjectDir, "InterlockRule",
                 TemplateDocument.Load(cfg, @"DataType\InterlockRule.dt"), result);
 
-        internal static void DeployInterlockTableDatatype(MapperConfig cfg, string eaeProjectDir, DeployResult result)
+        internal static void DeployInterlockTableDatatype(
+            MapperConfig cfg, string eaeProjectDir, int capacity, DeployResult result)
             => DeployDatatype(eaeProjectDir, "InterlockTable",
                 TemplateDocument.Load(cfg, @"DataType\InterlockTable.dt", new Dictionary<string, string>
                 {
-                    ["RuleArraySize"] = InterlockConfig.Current.RuleArraySize.ToString(
-                        System.Globalization.CultureInfo.InvariantCulture),
-                }), result, "(encapsulated interlock input)");
+                    ["RuleArraySize"] = capacity.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                }), result, $"(rule capacity {capacity})");
 
         internal static void DeployTargetStatesDatatype(MapperConfig cfg, string eaeProjectDir, DeployResult result)
             => DeployDatatype(eaeProjectDir, "TargetStates",
@@ -34,23 +34,11 @@ namespace CodeGen.Services
             ["TargetWork2State"] = "Work2",
             ["TargetHomeState"]  = "Home",
         };
-        static readonly Dictionary<string, (string X, string Y)> TargetVarCoords = new()
-        {
-            ["TargetWork1State"] = ("1380", "2092"),
-            ["TargetWork2State"] = ("1440", "2172"),
-            ["TargetHomeState"]  = ("1380", "2192"),
-        };
-        static readonly Dictionary<string, string> EvaluatorEventToTargetVar = new()
-        {
-            ["INIT"]      = "TargetWork1State",
-            ["REQ_WORK2"] = "TargetWork2State",
-            ["REQ_HOME"]  = "TargetHomeState",
-        };
-
-        // Fold an actuator CAT's target InputVars into one Target : TargetStates; reduce==false restores scalars.
+        // Fold an actuator CAT's target InputVars into one Target : TargetStates, which is the shape the
+        // evaluator takes and the shape the plan writes.
         internal static void NormalizeTargetStates(
             string eaeProjectDir, string catFileName, string interlockFbName,
-            string[] targetInputs, bool reduce, DeployResult result)
+            string[] targetInputs, DeployResult result)
             => EditDeployedFbt(eaeProjectDir, catFileName, $"{catFileName} Target normalize failed", result,
                 (doc, root, ns, fbt) =>
             {
@@ -70,104 +58,62 @@ namespace CodeGen.Services
                 var dataConns = net.Element(ns + "DataConnections");
                 bool changed = false;
 
-                if (reduce)
+                var tgtVar = inputVars?.Elements(ns + "VarDeclaration").FirstOrDefault(v => (string?)v.Attribute("Name") == "Target");
+                if (tgtVar == null && inputVars != null)
                 {
-                    var tgtVar = inputVars?.Elements(ns + "VarDeclaration").FirstOrDefault(v => (string?)v.Attribute("Name") == "Target");
-                    if (tgtVar == null && inputVars != null)
-                    {
-                        var t = new System.Xml.Linq.XElement(ns + "VarDeclaration",
-                            new System.Xml.Linq.XAttribute("Name", "Target"),
-                            new System.Xml.Linq.XAttribute("Type", "TargetStates"),
-                            new System.Xml.Linq.XAttribute("Namespace", "Main"));
-                        var first = inputVars.Elements(ns + "VarDeclaration").FirstOrDefault(v => targetInputs.Contains((string?)v.Attribute("Name")));
-                        if (first != null) first.AddBeforeSelf(t); else inputVars.Add(t);
-                        changed = true;
-                    }
-                    foreach (var a in targetInputs)
-                    {
-                        changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == a);
-                        changed |= RemoveElems(initEvent?.Elements(ns + "With"), w => (string?)w.Attribute("Var") == a);
-                        changed |= RemoveElems(net.Elements(ns + "Input"), i => (string?)i.Attribute("Name") == a);
-                        changed |= RemoveElems(dataConns?.Elements(ns + "Connection"), c => (string?)c.Attribute("Source") == a);
-                    }
-                    if (initEvent != null && !initEvent.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == "Target"))
-                    {
-                        initEvent.Add(new System.Xml.Linq.XElement(ns + "With", new System.Xml.Linq.XAttribute("Var", "Target")));
-                        changed = true;
-                    }
-                    if (!net.Elements(ns + "Input").Any(i => (string?)i.Attribute("Name") == "Target"))
-                    {
-                        var pin = new System.Xml.Linq.XElement(ns + "Input",
-                            new System.Xml.Linq.XAttribute("Name", "Target"),
-                            new System.Xml.Linq.XAttribute("x", "1380"),
-                            new System.Xml.Linq.XAttribute("y", "2092"),
-                            new System.Xml.Linq.XAttribute("Type", "Data"));
-                        var lastInput = net.Elements(ns + "Input").LastOrDefault();
-                        if (lastInput != null) lastInput.AddAfterSelf(pin); else net.Add(pin);
-                        changed = true;
-                    }
-                    if (dataConns != null && !dataConns.Elements(ns + "Connection").Any(c => (string?)c.Attribute("Source") == "Target"))
-                    {
-                        dataConns.Add(new System.Xml.Linq.XElement(ns + "Connection",
-                            new System.Xml.Linq.XAttribute("Source", "Target"),
-                            new System.Xml.Linq.XAttribute("Destination", interlockFbName + ".Target")));
-                        changed = true;
-                    }
+                    var t = new System.Xml.Linq.XElement(ns + "VarDeclaration",
+                        new System.Xml.Linq.XAttribute("Name", "Target"),
+                        new System.Xml.Linq.XAttribute("Type", "TargetStates"),
+                        new System.Xml.Linq.XAttribute("Namespace", "Main"));
+                    var first = inputVars.Elements(ns + "VarDeclaration").FirstOrDefault(v => targetInputs.Contains((string?)v.Attribute("Name")));
+                    if (first != null) first.AddBeforeSelf(t); else inputVars.Add(t);
+                    changed = true;
                 }
-                else
+                foreach (var a in targetInputs)
                 {
-                    changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == "Target");
-                    changed |= RemoveElems(initEvent?.Elements(ns + "With"), w => (string?)w.Attribute("Var") == "Target");
-                    changed |= RemoveElems(net.Elements(ns + "Input"), i => (string?)i.Attribute("Name") == "Target");
-                    changed |= RemoveElems(dataConns?.Elements(ns + "Connection"), c => (string?)c.Attribute("Source") == "Target");
-                    foreach (var a in targetInputs)
-                    {
-                        if (inputVars != null && !inputVars.Elements(ns + "VarDeclaration").Any(v => (string?)v.Attribute("Name") == a))
-                        {
-                            inputVars.Add(new System.Xml.Linq.XElement(ns + "VarDeclaration",
-                                new System.Xml.Linq.XAttribute("Name", a), new System.Xml.Linq.XAttribute("Type", "INT")));
-                            changed = true;
-                        }
-                        if (initEvent != null && !initEvent.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == a))
-                        {
-                            initEvent.Add(new System.Xml.Linq.XElement(ns + "With", new System.Xml.Linq.XAttribute("Var", a)));
-                            changed = true;
-                        }
-                        if (!net.Elements(ns + "Input").Any(i => (string?)i.Attribute("Name") == a))
-                        {
-                            var (x, y) = TargetVarCoords[a];
-                            var pin = new System.Xml.Linq.XElement(ns + "Input",
-                                new System.Xml.Linq.XAttribute("Name", a),
-                                new System.Xml.Linq.XAttribute("x", x), new System.Xml.Linq.XAttribute("y", y),
-                                new System.Xml.Linq.XAttribute("Type", "Data"));
-                            var lastInput = net.Elements(ns + "Input").LastOrDefault();
-                            if (lastInput != null) lastInput.AddAfterSelf(pin); else net.Add(pin);
-                            changed = true;
-                        }
-                        if (dataConns != null && !dataConns.Elements(ns + "Connection").Any(c => (string?)c.Attribute("Source") == a))
-                        {
-                            dataConns.Add(new System.Xml.Linq.XElement(ns + "Connection",
-                                new System.Xml.Linq.XAttribute("Source", a),
-                                new System.Xml.Linq.XAttribute("Destination", interlockFbName + "." + a)));
-                            changed = true;
-                        }
-                    }
+                    changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == a);
+                    changed |= RemoveElems(initEvent?.Elements(ns + "With"), w => (string?)w.Attribute("Var") == a);
+                    changed |= RemoveElems(net.Elements(ns + "Input"), i => (string?)i.Attribute("Name") == a);
+                    changed |= RemoveElems(dataConns?.Elements(ns + "Connection"), c => (string?)c.Attribute("Source") == a);
                 }
+                if (initEvent != null && !initEvent.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == "Target"))
+                {
+                    initEvent.Add(new System.Xml.Linq.XElement(ns + "With", new System.Xml.Linq.XAttribute("Var", "Target")));
+                    changed = true;
+                }
+                if (!net.Elements(ns + "Input").Any(i => (string?)i.Attribute("Name") == "Target"))
+                {
+                    var pin = new System.Xml.Linq.XElement(ns + "Input",
+                        new System.Xml.Linq.XAttribute("Name", "Target"),
+                        new System.Xml.Linq.XAttribute("x", "1380"),
+                        new System.Xml.Linq.XAttribute("y", "2092"),
+                        new System.Xml.Linq.XAttribute("Type", "Data"));
+                    var lastInput = net.Elements(ns + "Input").LastOrDefault();
+                    if (lastInput != null) lastInput.AddAfterSelf(pin); else net.Add(pin);
+                    changed = true;
+                }
+                if (dataConns != null && !dataConns.Elements(ns + "Connection").Any(c => (string?)c.Attribute("Source") == "Target"))
+                {
+                    dataConns.Add(new System.Xml.Linq.XElement(ns + "Connection",
+                        new System.Xml.Linq.XAttribute("Source", "Target"),
+                        new System.Xml.Linq.XAttribute("Destination", interlockFbName + ".Target")));
+                    changed = true;
+                }
+            
+
 
                 if (changed)
                 {
                     SaveXmlWithRetry(doc, fbt);
                     var catLabel = Path.GetFileNameWithoutExtension(catFileName);
-                    result.PatchesApplied.Add(reduce
-                        ? $"{catLabel}: target states -> Target : TargetStates (encapsulated)"
-                        : $"{catLabel}: Target -> scalar target states (legacy)");
-                    MapperLogger.Info($"[Deploy] {catLabel} Target normalize: reduce={reduce}");
+                    result.PatchesApplied.Add($"{catLabel}: target states -> Target : TargetStates");
+                    MapperLogger.Info($"[Deploy] {catLabel} Target normalize");
                 }
             }, notFoundNote: $"{catFileName} not found; Target normalize skipped.");
 
         // The same fold on the evaluator, plus rewriting its algorithms to Target.Work1/Work2/Home.
         internal static void NormalizeCommonInterlockEvaluatorTargets(
-            string eaeProjectDir, bool reduce, DeployResult result)
+            string eaeProjectDir, DeployResult result)
             => EditDeployedFbt(eaeProjectDir, "CommonInterlockEvaluator.fbt", "CommonInterlockEvaluator Target normalize failed", result,
                 (doc, root, ns, fbt) =>
             {
@@ -183,57 +129,32 @@ namespace CodeGen.Services
                 var targetVars = TargetVarToField.Keys.ToArray();
                 bool changed = false;
 
-                if (reduce)
+                var tgtVar = inputVars?.Elements(ns + "VarDeclaration").FirstOrDefault(v => (string?)v.Attribute("Name") == "Target");
+                if (tgtVar == null && inputVars != null)
                 {
-                    var tgtVar = inputVars?.Elements(ns + "VarDeclaration").FirstOrDefault(v => (string?)v.Attribute("Name") == "Target");
-                    if (tgtVar == null && inputVars != null)
+                    var t = new System.Xml.Linq.XElement(ns + "VarDeclaration",
+                        new System.Xml.Linq.XAttribute("Name", "Target"),
+                        new System.Xml.Linq.XAttribute("Type", "TargetStates"),
+                        new System.Xml.Linq.XAttribute("Namespace", "Main"));
+                    var first = inputVars.Elements(ns + "VarDeclaration").FirstOrDefault(v => targetVars.Contains((string?)v.Attribute("Name")));
+                    if (first != null) first.AddBeforeSelf(t); else inputVars.Add(t);
+                    changed = true;
+                }
+                foreach (var a in targetVars)
+                    changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == a);
+                foreach (var ev in eventInputs?.Elements(ns + "Event") ?? Enumerable.Empty<System.Xml.Linq.XElement>())
+                {
+                    if (!ev.Elements(ns + "With").Any(w => targetVars.Contains((string?)w.Attribute("Var")) || (string?)w.Attribute("Var") == "Target")) continue;
+                    foreach (var a in targetVars)
+                        changed |= RemoveElems(ev.Elements(ns + "With"), w => (string?)w.Attribute("Var") == a);
+                    if (!ev.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == "Target"))
                     {
-                        var t = new System.Xml.Linq.XElement(ns + "VarDeclaration",
-                            new System.Xml.Linq.XAttribute("Name", "Target"),
-                            new System.Xml.Linq.XAttribute("Type", "TargetStates"),
-                            new System.Xml.Linq.XAttribute("Namespace", "Main"));
-                        var first = inputVars.Elements(ns + "VarDeclaration").FirstOrDefault(v => targetVars.Contains((string?)v.Attribute("Name")));
-                        if (first != null) first.AddBeforeSelf(t); else inputVars.Add(t);
+                        ev.Add(new System.Xml.Linq.XElement(ns + "With", new System.Xml.Linq.XAttribute("Var", "Target")));
                         changed = true;
                     }
-                    foreach (var a in targetVars)
-                        changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == a);
-                    foreach (var ev in eventInputs?.Elements(ns + "Event") ?? Enumerable.Empty<System.Xml.Linq.XElement>())
-                    {
-                        if (!ev.Elements(ns + "With").Any(w => targetVars.Contains((string?)w.Attribute("Var")) || (string?)w.Attribute("Var") == "Target")) continue;
-                        foreach (var a in targetVars)
-                            changed |= RemoveElems(ev.Elements(ns + "With"), w => (string?)w.Attribute("Var") == a);
-                        if (!ev.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == "Target"))
-                        {
-                            ev.Add(new System.Xml.Linq.XElement(ns + "With", new System.Xml.Linq.XAttribute("Var", "Target")));
-                            changed = true;
-                        }
-                    }
                 }
-                else
-                {
-                    changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == "Target");
-                    if (inputVars != null)
-                        foreach (var a in targetVars)
-                            if (!inputVars.Elements(ns + "VarDeclaration").Any(v => (string?)v.Attribute("Name") == a))
-                            {
-                                inputVars.Add(new System.Xml.Linq.XElement(ns + "VarDeclaration",
-                                    new System.Xml.Linq.XAttribute("Name", a), new System.Xml.Linq.XAttribute("Type", "INT")));
-                                changed = true;
-                            }
-                    foreach (var ev in eventInputs?.Elements(ns + "Event") ?? Enumerable.Empty<System.Xml.Linq.XElement>())
-                    {
-                        if (!ev.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == "Target")) continue;
-                        changed |= RemoveElems(ev.Elements(ns + "With"), w => (string?)w.Attribute("Var") == "Target");
-                        var evName = (string?)ev.Attribute("Name");
-                        if (evName != null && EvaluatorEventToTargetVar.TryGetValue(evName, out var tv)
-                            && !ev.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == tv))
-                        {
-                            ev.Add(new System.Xml.Linq.XElement(ns + "With", new System.Xml.Linq.XAttribute("Var", tv)));
-                            changed = true;
-                        }
-                    }
-                }
+            
+
 
                 foreach (var alg in basic.Elements(ns + "Algorithm"))
                 {
@@ -242,8 +163,7 @@ namespace CodeGen.Services
                     var st = stEl.Value;
                     var before = st;
                     foreach (var kv in TargetVarToField)
-                        st = reduce ? st.Replace(kv.Key, "Target." + kv.Value)
-                                    : st.Replace("Target." + kv.Value, kv.Key);
+                        st = st.Replace(kv.Key, "Target." + kv.Value);
                     if (st != before)
                     {
                         stEl.ReplaceNodes(new System.Xml.Linq.XCData(st));
@@ -254,28 +174,28 @@ namespace CodeGen.Services
                 if (changed)
                 {
                     SaveXmlWithRetry(doc, fbt);
-                    result.PatchesApplied.Add(reduce
-                        ? "CommonInterlockEvaluator: target states -> Target : TargetStates + algorithms (encapsulated)"
-                        : "CommonInterlockEvaluator: Target -> scalar target states + algorithms (legacy)");
-                    MapperLogger.Info($"[Deploy] CommonInterlockEvaluator Target normalize: reduce={reduce}");
+                    result.PatchesApplied.Add(
+                        "CommonInterlockEvaluator: target states -> Target : TargetStates + algorithms");
+                    MapperLogger.Info("[Deploy] CommonInterlockEvaluator Target normalize");
                 }
             }, notFoundNote: "CommonInterlockEvaluator.fbt not found; Target normalize skipped.");
 
         // Order matches struct field order.
         static readonly string[] RuleArrayNames =
-            { "RuleFromState", "RuleToState", "RuleSourceID", "RuleBlockedState" };
+            { "RuleFromState", "RuleToState", "RuleSourceID", "RuleBlockedState", "RuleTermCount" };
         static readonly Dictionary<string, string> RuleArrayToField = new()
         {
             ["RuleFromState"] = "FromState",
             ["RuleToState"] = "ToState",
             ["RuleSourceID"] = "SourceID",
             ["RuleBlockedState"] = "BlockedState",
+            ["RuleTermCount"] = "TermCount",
         };
 
-        // Collapse an actuator CAT's four Rule arrays into one RuleTable; reduce==false restores them.
+        // Collapse an actuator CAT's rule arrays into the one RuleTable the evaluator takes.
         internal static void NormalizeFiveStateRuleArrays(
             string eaeProjectDir, string catFileName, string interlockFbName,
-            bool reduce, DeployResult result)
+            DeployResult result)
             => EditDeployedFbt(eaeProjectDir, catFileName, $"{catFileName} RuleTable normalize failed", result,
                 (doc, root, ns, fbt) =>
             {
@@ -299,11 +219,8 @@ namespace CodeGen.Services
 
                 bool changed = false;
                 var scalarAndArrays = RuleArrayNames.Concat(new[] { "RuleCount" }).ToArray();
-                string cap = InterlockConfig.Current.RuleArraySize.ToString();
 
-                if (reduce)
-                {
-                    var rtVar = inputVars?.Elements(ns + "VarDeclaration").FirstOrDefault(v => (string?)v.Attribute("Name") == "RuleTable");
+                                    var rtVar = inputVars?.Elements(ns + "VarDeclaration").FirstOrDefault(v => (string?)v.Attribute("Name") == "RuleTable");
                     if (rtVar != null)
                     {
                         if ((string?)rtVar.Attribute("Type") != "InterlockTable" || rtVar.Attribute("ArraySize") != null)
@@ -354,74 +271,21 @@ namespace CodeGen.Services
                             new System.Xml.Linq.XAttribute("Destination", interlockFbName + ".RuleTable")));
                         changed = true;
                     }
-                }
-                else
-                {
-                    changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == "RuleTable");
-                    changed |= RemoveElems(initEvent?.Elements(ns + "With"), w => (string?)w.Attribute("Var") == "RuleTable");
-                    changed |= RemoveElems(net.Elements(ns + "Input"), i => (string?)i.Attribute("Name") == "RuleTable");
-                    changed |= RemoveElems(dataConns?.Elements(ns + "Connection"), c => (string?)c.Attribute("Source") == "RuleTable");
-
-                    var coords = new Dictionary<string, (string X, string Y)>
-                    {
-                        ["RuleCount"] = ("1440", "1492"),
-                        ["RuleFromState"] = ("1320", "2052"),
-                        ["RuleToState"] = ("1320", "1752"),
-                        ["RuleSourceID"] = ("1300", "1852"),
-                        ["RuleBlockedState"] = ("1320", "1952"),
-                    };
-                    foreach (var a in scalarAndArrays)
-                    {
-                        if (inputVars != null && !inputVars.Elements(ns + "VarDeclaration").Any(v => (string?)v.Attribute("Name") == a))
-                        {
-                            var vd = new System.Xml.Linq.XElement(ns + "VarDeclaration",
-                                new System.Xml.Linq.XAttribute("Name", a),
-                                new System.Xml.Linq.XAttribute("Type", "INT"));
-                            if (a != "RuleCount") vd.SetAttributeValue("ArraySize", cap);
-                            inputVars.Add(vd);
-                            changed = true;
-                        }
-                        if (initEvent != null && !initEvent.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == a))
-                        {
-                            initEvent.Add(new System.Xml.Linq.XElement(ns + "With", new System.Xml.Linq.XAttribute("Var", a)));
-                            changed = true;
-                        }
-                        if (!net.Elements(ns + "Input").Any(i => (string?)i.Attribute("Name") == a))
-                        {
-                            var (x, y) = coords[a];
-                            var pin = new System.Xml.Linq.XElement(ns + "Input",
-                                new System.Xml.Linq.XAttribute("Name", a),
-                                new System.Xml.Linq.XAttribute("x", x),
-                                new System.Xml.Linq.XAttribute("y", y),
-                                new System.Xml.Linq.XAttribute("Type", "Data"));
-                            var lastInput = net.Elements(ns + "Input").LastOrDefault();
-                            if (lastInput != null) lastInput.AddAfterSelf(pin); else net.Add(pin);
-                            changed = true;
-                        }
-                        if (dataConns != null && !dataConns.Elements(ns + "Connection").Any(c => (string?)c.Attribute("Source") == a))
-                        {
-                            dataConns.Add(new System.Xml.Linq.XElement(ns + "Connection",
-                                new System.Xml.Linq.XAttribute("Source", a),
-                                new System.Xml.Linq.XAttribute("Destination", interlockFbName + "." + a)));
-                            changed = true;
-                        }
-                    }
-                }
+                
 
                 if (changed)
                 {
                     SaveXmlWithRetry(doc, fbt);
                     var catLabel = Path.GetFileNameWithoutExtension(catFileName);
-                    result.PatchesApplied.Add(reduce
-                        ? $"{catLabel}: 4 arrays + RuleCount -> RuleTable : InterlockTable (encapsulated)"
-                        : $"{catLabel}: RuleTable -> 4 arrays + RuleCount (legacy interface)");
-                    MapperLogger.Info($"[Deploy] {catLabel} RuleTable normalize: reduce={reduce}");
+                    result.PatchesApplied.Add(
+                        $"{catLabel}: rule arrays -> RuleTable : InterlockTable");
+                    MapperLogger.Info($"[Deploy] {catLabel} RuleTable normalize");
                 }
             }, notFoundNote: $"{catFileName} not found; RuleTable normalize skipped.");
 
         // The same collapse on the evaluator, across InputVars, event With lists AND the Evaluate ST.
         internal static void NormalizeCommonInterlockEvaluatorRules(
-            string eaeProjectDir, bool reduce, DeployResult result)
+            string eaeProjectDir, DeployResult result)
             => EditDeployedFbt(eaeProjectDir, "CommonInterlockEvaluator.fbt", "CommonInterlockEvaluator RuleTable normalize failed", result,
                 (doc, root, ns, fbt) =>
             {
@@ -438,11 +302,8 @@ namespace CodeGen.Services
 
                 bool changed = false;
                 var scalarAndArrays = RuleArrayNames.Concat(new[] { "RuleCount" }).ToArray();
-                string cap = InterlockConfig.Current.RuleArraySize.ToString();
 
-                if (reduce)
-                {
-                    var rtVar = inputVars?.Elements(ns + "VarDeclaration").FirstOrDefault(v => (string?)v.Attribute("Name") == "RuleTable");
+                                    var rtVar = inputVars?.Elements(ns + "VarDeclaration").FirstOrDefault(v => (string?)v.Attribute("Name") == "RuleTable");
                     if (rtVar != null)
                     {
                         if ((string?)rtVar.Attribute("Type") != "InterlockTable" || rtVar.Attribute("ArraySize") != null)
@@ -476,33 +337,7 @@ namespace CodeGen.Services
                             changed = true;
                         }
                     }
-                }
-                else
-                {
-                    changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == "RuleTable");
-                    if (inputVars != null)
-                        foreach (var a in scalarAndArrays)
-                            if (!inputVars.Elements(ns + "VarDeclaration").Any(v => (string?)v.Attribute("Name") == a))
-                            {
-                                var vd = new System.Xml.Linq.XElement(ns + "VarDeclaration",
-                                    new System.Xml.Linq.XAttribute("Name", a),
-                                    new System.Xml.Linq.XAttribute("Type", "INT"));
-                                if (a != "RuleCount") vd.SetAttributeValue("ArraySize", cap);
-                                inputVars.Add(vd);
-                                changed = true;
-                            }
-                    foreach (var ev in eventInputs?.Elements(ns + "Event") ?? Enumerable.Empty<System.Xml.Linq.XElement>())
-                    {
-                        if (!ev.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == "RuleTable")) continue;
-                        changed |= RemoveElems(ev.Elements(ns + "With"), w => (string?)w.Attribute("Var") == "RuleTable");
-                        foreach (var a in scalarAndArrays)
-                            if (!ev.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == a))
-                            {
-                                ev.Add(new System.Xml.Linq.XElement(ns + "With", new System.Xml.Linq.XAttribute("Var", a)));
-                                changed = true;
-                            }
-                    }
-                }
+                
 
                 var stEl = basic.Elements(ns + "Algorithm")
                     .FirstOrDefault(a => (string?)a.Attribute("Name") == "Evaluate")?
@@ -511,22 +346,15 @@ namespace CodeGen.Services
                 {
                     var st = stEl.Value;
                     var before = st;
-                    if (reduce)
-                    {
-                        st = st.Replace("RuleCount", "RuleTable.Count");
-                        st = st.Replace("RuleTable[i].", "RuleTable.Rules[i].");          // migrate a flat RuleTable[i].X form
+                                            st = st.Replace("RuleCount", "RuleTable.Count");
+                        st = System.Text.RegularExpressions.Regex.Replace(
+                            st, @"RuleTable\[([^\]]+)\]\.", "RuleTable.Rules[$1].");   // flat RuleTable[x].F form
+                        // Any subscript, not just [i]: the evaluation walks the terms of an alternative
+                        // on a second index, and an unconverted access would not compile.
                         foreach (var a in RuleArrayNames)
-                            st = st.Replace(a + "[i]", "RuleTable.Rules[i]." + RuleArrayToField[a]);
-                    }
-                    else
-                    {
-                        st = st.Replace("RuleTable.Count", "RuleCount");
-                        foreach (var a in RuleArrayNames)
-                        {
-                            st = st.Replace("RuleTable.Rules[i]." + RuleArrayToField[a], a + "[i]");
-                            st = st.Replace("RuleTable[i]." + RuleArrayToField[a], a + "[i]"); // legacy flat
-                        }
-                    }
+                            st = System.Text.RegularExpressions.Regex.Replace(
+                                st, a + @"\s*\[([^\]]+)\]", "RuleTable.Rules[$1]." + RuleArrayToField[a]);
+                    
                     if (st != before)
                     {
                         stEl.ReplaceNodes(new System.Xml.Linq.XCData(st));
@@ -537,10 +365,8 @@ namespace CodeGen.Services
                 if (changed)
                 {
                     SaveXmlWithRetry(doc, fbt);
-                    result.PatchesApplied.Add(reduce
-                        ? "CommonInterlockEvaluator: 4 arrays + RuleCount -> RuleTable : InterlockTable + Evaluate ST (encapsulated)"
-                        : "CommonInterlockEvaluator: RuleTable -> 4 arrays + RuleCount + Evaluate ST (legacy)");
-                    MapperLogger.Info($"[Deploy] CommonInterlockEvaluator RuleTable normalize: reduce={reduce}");
+                    result.PatchesApplied.Add("CommonInterlockEvaluator: 4 arrays + RuleCount -> RuleTable : InterlockTable + Evaluate ST (encapsulated)");
+                    MapperLogger.Info("[Deploy] CommonInterlockEvaluator RuleTable normalize: struct");
                 }
             }, notFoundNote: "CommonInterlockEvaluator.fbt not found; RuleTable normalize skipped.");
 
@@ -644,37 +470,35 @@ namespace CodeGen.Services
 
         // One unit: both actuator CATs and the shared evaluator must flip TOGETHER.
         internal static void ApplyInterlockNormalizers(MapperConfig cfg,
-            string eaeProjectDir, bool interlockStruct, bool targetStruct, DeployResult result)
+            string eaeProjectDir, int capacity, DeployResult result)
         {
-            if (interlockStruct)
             {
                 DeployInterlockRuleDatatype(cfg, eaeProjectDir, result);
-                DeployInterlockTableDatatype(cfg, eaeProjectDir, result);
+                DeployInterlockTableDatatype(cfg, eaeProjectDir, capacity, result);
             }
-            NormalizeFiveStateRuleArrays(eaeProjectDir, "Five_State_Actuator_CAT.fbt", "InterlockManager", interlockStruct, result);
-            NormalizeFiveStateRuleArrays(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT.fbt", "CommonInterlockManager", interlockStruct, result);
-            NormalizeCommonInterlockEvaluatorRules(eaeProjectDir, interlockStruct, result);
+            NormalizeFiveStateRuleArrays(eaeProjectDir, "Five_State_Actuator_CAT.fbt", "InterlockManager", result);
+            NormalizeFiveStateRuleArrays(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT.fbt", "CommonInterlockManager", result);
+            NormalizeCommonInterlockEvaluatorRules(eaeProjectDir, result);
 
-            if (targetStruct)
-                DeployTargetStatesDatatype(cfg, eaeProjectDir, result);
+            DeployTargetStatesDatatype(cfg, eaeProjectDir, result);
             NormalizeTargetStates(eaeProjectDir, "Five_State_Actuator_CAT.fbt", "InterlockManager",
-                new[] { "TargetWork1State", "TargetHomeState" }, targetStruct, result);
+                new[] { "TargetWork1State", "TargetHomeState" }, result);
             NormalizeTargetStates(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT.fbt", "CommonInterlockManager",
-                new[] { "TargetWork1State", "TargetWork2State", "TargetHomeState" }, targetStruct, result);
-            NormalizeCommonInterlockEvaluatorTargets(eaeProjectDir, targetStruct, result);
+                new[] { "TargetWork1State", "TargetWork2State", "TargetHomeState" }, result);
+            NormalizeCommonInterlockEvaluatorTargets(eaeProjectDir, result);
         }
 
         // Guard: every member an actuator CAT connects to its interlock FB MUST be an InputVar on the
         // shared evaluator (EAE's ERR_MEMBER_VAR_NOTFOUND). A mismatch is a stale scalar/struct mix, so
         // re-run once, then ABORT rather than deploy it.
         internal static void AssertInterlockInterfaceConsistent(MapperConfig cfg,
-            string eaeProjectDir, bool interlockStruct, bool targetStruct, DeployResult result)
+            string eaeProjectDir, int capacity, DeployResult result)
         {
             var missing = FindInterlockInterfaceMismatches(eaeProjectDir);
             if (missing.Count == 0) return;
 
             MapperLogger.Info("[Interlock][Guard] interface mismatch detected; re-running the interlock normalizers to self-heal.");
-            ApplyInterlockNormalizers(cfg, eaeProjectDir, interlockStruct, targetStruct, result);
+            ApplyInterlockNormalizers(cfg, eaeProjectDir, capacity, result);
             missing = FindInterlockInterfaceMismatches(eaeProjectDir);
             if (missing.Count == 0)
             {
