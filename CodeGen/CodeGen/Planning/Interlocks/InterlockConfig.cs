@@ -6,8 +6,6 @@ namespace CodeGen.Translation.Interlocks
     public sealed class InterlockConfig
     {
         public int RuleArraySize { get; set; }
-        public bool UseStruct { get; set; }
-        public bool UseTargetStruct { get; set; }
 
         private static readonly YamlConfigFile<InterlockConfig> _file = new("Config", "interlock.yaml");
 
