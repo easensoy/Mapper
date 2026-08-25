@@ -198,8 +198,8 @@ namespace CodeGen.Devices.Core
                 }
                 bool haveProcess = processNames.Count > 0;
 
-                var eventWires = TargetBootstrap.BringUpWires.Select(w => new Wire(w.Source, w.Destination)).ToList();
-                var initChain = new List<string> { "FB1" };
+                var eventWires = TargetBootstrap.BringUp.Select(w => new Wire(w.Source, w.Destination)).ToList();
+                var initChain = new List<string> { TargetBootstrap.InitRole };
                 if (Present(plan.AreaFb, byName)) initChain.Add(plan.AreaFb!);
                 if (Present(plan.StationFb, byName)) initChain.Add(plan.StationFb!);
                 // Members another controller commands init LAST, so their bring-up cannot block this process.
@@ -221,7 +221,7 @@ namespace CodeGen.Devices.Core
                     var mqttName = mqttKv.Key;
                     var mqttInit = Present(plan.AreaFb, byName) ? plan.AreaFb!
                                  : Present(plan.StationFb, byName) ? plan.StationFb!
-                                 : "FB1";
+                                 : TargetBootstrap.InitRole;
                     eventWires.Add(new Wire($"{mqttInit}.INITO", $"{mqttName}.INIT"));
                     eventWires.Add(new Wire($"{mqttName}.INITO", $"{mqttName}.CONNECT"));
                 }
@@ -393,10 +393,11 @@ namespace CodeGen.Devices.Core
             }
 
             int dx = 0, dy = 0;
+            // A boot FB is emitted under its declared role name, so the roles ARE the boot instances.
+            var bootRoles = TargetBootstrap.BootRoles;
             if (translateToOrigin)
             {
-                var bootPair = new HashSet<string>(StringComparer.Ordinal) { "FB1", "FB2" };
-                var components = present.Where(kv => !bootPair.Contains(kv.Key)).ToList();
+                var components = present.Where(kv => !bootRoles.Contains(kv.Key)).ToList();
                 if (components.Count > 0)
                 {
                     int minX = components.Min(kv => kv.Value.X);
@@ -412,11 +413,10 @@ namespace CodeGen.Devices.Core
                 var fb = byName[kv.Key];
                 var oldX = (string?)fb.Attribute("x") ?? "?";
                 var oldY = (string?)fb.Attribute("y") ?? "?";
-                // FB1/FB2 keep their fixed boot-row positions on every PLC.
-                bool isBootPair = string.Equals(kv.Key, "FB1", StringComparison.Ordinal)
-                                || string.Equals(kv.Key, "FB2", StringComparison.Ordinal);
-                int newX = kv.Value.X + (isBootPair ? 0 : dx);
-                int newY = kv.Value.Y + (isBootPair ? 0 : dy);
+                // A boot FB keeps its fixed boot-row position on every target.
+                bool isBoot = bootRoles.Contains(kv.Key);
+                int newX = kv.Value.X + (isBoot ? 0 : dx);
+                int newY = kv.Value.Y + (isBoot ? 0 : dy);
                 fb.SetAttributeValue("x", newX.ToString(System.Globalization.CultureInfo.InvariantCulture));
                 fb.SetAttributeValue("y", newY.ToString(System.Globalization.CultureInfo.InvariantCulture));
                 report.Missing.Add(
