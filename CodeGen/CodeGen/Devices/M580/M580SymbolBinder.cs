@@ -42,7 +42,8 @@ namespace CodeGen.Devices.M580
                 var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(config);
                 if (string.IsNullOrEmpty(eaeRoot)) { Log("skipped, could not derive EAE project root"); return; }
 
-                var sysdevFile = HcfBindingSupport.FindSysdevByType(eaeRoot, TargetRegistry.Of(CodeGen.Translation.PlcAssignment.M580).DeviceType, TargetDescriptor.DeviceNamespace);
+                var sysdevFile = EaeProjectLayout.FindSysdevByDeviceType(
+                    eaeRoot, TargetRegistry.Of(CodeGen.Translation.PlcAssignment.M580).DeviceType);
                 if (sysdevFile == null) { Log("skipped, no deployed M580 sysdev (Type=M580_dPAC)"); return; }
 
                 var stem = Path.GetFileNameWithoutExtension(sysdevFile);
