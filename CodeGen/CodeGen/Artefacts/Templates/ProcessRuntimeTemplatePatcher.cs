@@ -327,9 +327,9 @@ namespace CodeGen.Services
                 MapperLogger.Info($"[Deploy] Process1_Generic: {Slot} promoted to an instance input -> {destination}");
             });
 
-        // Recipe-struct collapse on Process1_Generic (gated by UseRecipeStruct); reduce==false restores the 6 arrays.
+        // The recipe is one Recipe : RecipeStep array. This collapses the six legacy parallel arrays onto it.
         internal static void NormalizeProcess1RecipeArrays(
-            string eaeProjectDir, bool reduce, DeployResult result)
+            string eaeProjectDir, DeployResult result)
             => EditDeployedFbt(eaeProjectDir, "Process1_Generic.fbt", "Process1_Generic recipe-struct normalize failed", result,
                 (doc, root, ns, fbt) =>
             {
@@ -349,9 +349,7 @@ namespace CodeGen.Services
 
                 bool changed = false;
 
-                if (reduce)
-                {
-                    foreach (var (nm, _) in RecipeArrays)
+                                    foreach (var (nm, _) in RecipeArrays)
                     {
                         changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == nm);
                         changed |= RemoveElems(initEvent?.Elements(ns + "With"), w => (string?)w.Attribute("Var") == nm);
@@ -387,66 +385,19 @@ namespace CodeGen.Services
                             new System.Xml.Linq.XAttribute("Destination", "ProcessEngine.Recipe")));
                         changed = true;
                     }
-                }
-                else
-                {
-                    changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == "Recipe");
-                    changed |= RemoveElems(initEvent?.Elements(ns + "With"), w => (string?)w.Attribute("Var") == "Recipe");
-                    changed |= RemoveElems(net.Elements(ns + "Input"), i => (string?)i.Attribute("Name") == "Recipe");
-                    changed |= RemoveElems(dataConns?.Elements(ns + "Connection"), c => (string?)c.Attribute("Source") == "Recipe");
-                    var coords = new Dictionary<string, (string X, string Y)>
-                    {
-                        ["StepType"] = ("300", "1300"), ["CmdTargetName"] = ("300", "1750"),
-                        ["CmdStateArr"] = ("300", "2200"), ["Wait1Id"] = ("300", "2650"),
-                        ["Wait1State"] = ("300", "3100"), ["NextStep"] = ("300", "3550"),
-                    };
-                    foreach (var (nm, ty) in RecipeArrays)
-                    {
-                        if (inputVars != null && !inputVars.Elements(ns + "VarDeclaration").Any(v => (string?)v.Attribute("Name") == nm))
-                        {
-                            inputVars.Add(new System.Xml.Linq.XElement(ns + "VarDeclaration",
-                                new System.Xml.Linq.XAttribute("Name", nm),
-                                new System.Xml.Linq.XAttribute("Type", ty),
-                                new System.Xml.Linq.XAttribute("ArraySize", size)));
-                            changed = true;
-                        }
-                        if (initEvent != null && !initEvent.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == nm))
-                        { initEvent.Add(new System.Xml.Linq.XElement(ns + "With", new System.Xml.Linq.XAttribute("Var", nm))); changed = true; }
-                        if (!net.Elements(ns + "Input").Any(i => (string?)i.Attribute("Name") == nm))
-                        {
-                            var (x, y) = coords[nm];
-                            var pin = new System.Xml.Linq.XElement(ns + "Input",
-                                new System.Xml.Linq.XAttribute("Name", nm),
-                                new System.Xml.Linq.XAttribute("x", x),
-                                new System.Xml.Linq.XAttribute("y", y),
-                                new System.Xml.Linq.XAttribute("Type", "Data"));
-                            var last = net.Elements(ns + "Input").LastOrDefault();
-                            if (last != null) last.AddAfterSelf(pin); else net.Add(pin);
-                            changed = true;
-                        }
-                        if (dataConns != null && !dataConns.Elements(ns + "Connection").Any(c => (string?)c.Attribute("Source") == nm))
-                        {
-                            dataConns.Add(new System.Xml.Linq.XElement(ns + "Connection",
-                                new System.Xml.Linq.XAttribute("Source", nm),
-                                new System.Xml.Linq.XAttribute("Destination", "ProcessEngine." + nm)));
-                            changed = true;
-                        }
-                    }
-                }
+                
 
                 if (changed)
                 {
                     doc.Save(fbt);
-                    result.PatchesApplied.Add(reduce
-                        ? "Process1_Generic: 6 recipe arrays -> Recipe struct (sim)"
-                        : "Process1_Generic: Recipe struct -> 6 recipe arrays (hardware)");
-                    MapperLogger.Info($"[Deploy] Process1_Generic recipe normalize: reduce={reduce}");
+                    result.PatchesApplied.Add("Process1_Generic: recipe arrays -> Recipe struct");
+                    MapperLogger.Info("[Deploy] Process1_Generic recipe normalize");
                 }
             }, notFoundNote: "Process1_Generic.fbt not found; recipe-struct normalize skipped.");
 
-        // Recipe-struct collapse on ProcessRuntime_Generic_v1 incl. every algorithm's ST (gated by UseRecipeStruct); reduce==false restores the 6 arrays.
+        // The same collapse on the engine, including every algorithm's ST.
         internal static void NormalizeProcessRuntimeRecipeArrays(
-            string eaeProjectDir, bool reduce, DeployResult result)
+            string eaeProjectDir, DeployResult result)
             => EditDeployedFbt(eaeProjectDir, "ProcessRuntime_Generic_v1.fbt", "ProcessRuntime_Generic_v1 recipe-struct normalize failed", result,
                 (doc, root, ns, fbt) =>
             {
@@ -464,9 +415,7 @@ namespace CodeGen.Services
 
                 bool changed = false;
 
-                if (reduce)
-                {
-                    foreach (var (nm, _) in RecipeArrays)
+                                    foreach (var (nm, _) in RecipeArrays)
                         changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == nm);
                     if (inputVars != null && !inputVars.Elements(ns + "VarDeclaration").Any(v => (string?)v.Attribute("Name") == "Recipe"))
                     {
@@ -485,29 +434,7 @@ namespace CodeGen.Services
                         if (!ev.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == "Recipe"))
                         { ev.Add(new System.Xml.Linq.XElement(ns + "With", new System.Xml.Linq.XAttribute("Var", "Recipe"))); changed = true; }
                     }
-                }
-                else
-                {
-                    changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == "Recipe");
-                    if (inputVars != null)
-                        foreach (var (nm, ty) in RecipeArrays)
-                            if (!inputVars.Elements(ns + "VarDeclaration").Any(v => (string?)v.Attribute("Name") == nm))
-                            {
-                                inputVars.Add(new System.Xml.Linq.XElement(ns + "VarDeclaration",
-                                    new System.Xml.Linq.XAttribute("Name", nm),
-                                    new System.Xml.Linq.XAttribute("Type", ty),
-                                    new System.Xml.Linq.XAttribute("ArraySize", size)));
-                                changed = true;
-                            }
-                    foreach (var ev in eventInputs?.Elements(ns + "Event") ?? Enumerable.Empty<System.Xml.Linq.XElement>())
-                    {
-                        if (!ev.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == "Recipe")) continue;
-                        changed |= RemoveElems(ev.Elements(ns + "With"), w => (string?)w.Attribute("Var") == "Recipe");
-                        foreach (var (nm, _) in RecipeArrays)
-                            if (!ev.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == nm))
-                            { ev.Add(new System.Xml.Linq.XElement(ns + "With", new System.Xml.Linq.XAttribute("Var", nm))); changed = true; }
-                    }
-                }
+                
 
                 foreach (var alg in basic.Elements(ns + "Algorithm"))
                 {
@@ -519,7 +446,7 @@ namespace CodeGen.Services
                     {
                         var arr = nm + "[CurrentStep]";
                         var str = "Recipe[CurrentStep]." + nm;
-                        st = reduce ? st.Replace(arr, str) : st.Replace(str, arr);
+                        st = st.Replace(arr, str);
                     }
                     if (st != before) { stEl.ReplaceNodes(new System.Xml.Linq.XCData(st)); changed = true; }
                 }
@@ -527,15 +454,13 @@ namespace CodeGen.Services
                 if (changed)
                 {
                     doc.Save(fbt);
-                    result.PatchesApplied.Add(reduce
-                        ? "ProcessRuntime_Generic_v1: 6 recipe arrays -> Recipe struct + ST rewritten (sim)"
-                        : "ProcessRuntime_Generic_v1: Recipe struct -> 6 recipe arrays + ST restored (hardware)");
-                    MapperLogger.Info($"[Deploy] ProcessRuntime_Generic_v1 recipe normalize: reduce={reduce}");
+                    result.PatchesApplied.Add("ProcessRuntime_Generic_v1: recipe arrays -> Recipe struct");
+                    MapperLogger.Info("[Deploy] ProcessRuntime_Generic_v1 recipe normalize");
                 }
             }, notFoundNote: "ProcessRuntime_Generic_v1.fbt not found; recipe-struct normalize skipped.");
 
         // END->END dead-end self-loop (run-once) silences WRN_ECC_DEAD_END; cyclic routes END->ADVANCE instead.
-        internal static void PatchProcessRuntimeEccDeadEnd(string fbtPath, bool cyclic, DeployResult result)
+        internal static void PatchProcessRuntimeEccDeadEnd(string fbtPath, DeployResult result)
         {
             var doc = System.Xml.Linq.XDocument.Load(fbtPath, System.Xml.Linq.LoadOptions.PreserveWhitespace);
             var root = doc.Root!;
@@ -556,7 +481,7 @@ namespace CodeGen.Services
                 return;
             }
 
-            string dest = cyclic ? "ADVANCE" : "END";
+            const string dest = "ADVANCE";
 
             var endTrans = ecc.Elements(ns + "ECTransition")
                 .Where(t => (string?)t.Attribute("Source") == "END").ToList();
@@ -580,10 +505,9 @@ namespace CodeGen.Services
             doc.Save(fbtPath);
             result.PatchesApplied.Add(
                 $"ProcessRuntime_Generic_v1: END -> {dest} " +
-                (cyclic ? "(CYCLIC restart: AdvanceStep wraps CurrentStep to the END row's NextStep=0)"
-                        : "(run-once dead-end: engine parks at END)"));
+                "(CYCLIC restart: AdvanceStep wraps CurrentStep to the END row's NextStep=0)");
             MapperLogger.Info(
-                $"[Deploy] Patched ProcessRuntime_Generic_v1.fbt END -> {dest} ({(cyclic ? "cyclic loop" : "park")})");
+                $"[Deploy] Patched ProcessRuntime_Generic_v1.fbt END -> {dest} (cyclic loop)");
         }
 
         // START's only outgoing transition must be START->INIT (remove the Mode-guard IDLE1 bypass, else INIT never runs).
@@ -807,7 +731,7 @@ namespace CodeGen.Services
 
             try
             {
-                PatchProcessRuntimeEccDeadEnd(enginePath, MapperConfig.EnableCyclicRestart, result);
+                PatchProcessRuntimeEccDeadEnd(enginePath, result);
                 PatchProcessRuntimeStartBypass(enginePath, result);
                 PatchProcessRuntimeEndSequenceNoOp(enginePath, result);
             }
