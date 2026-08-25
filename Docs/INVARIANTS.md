@@ -54,7 +54,18 @@ and the recipe stalls. The Mapper guarantees lowercase via
 
 ---
 
-## I-3. `SevenStateActuator2` ECC gates **every commanded transition** on `process_state_name = actuator_name`
+## I-3. RETIRED (2026-08-25). The `SevenStateActuator2` name-gate is not in the shipped path.
+
+The swivel ships as `Seven_State_Actuator_Centre_Home_CAT` over
+`SevenStateCentreHomeActuator`, which is commanded on `state_val` alone; no
+emitter parameterises `process_state_name` any more, and there is no
+`SevenStateActuator2.fbt` in the Template Library. What replaced it: the CAT is
+selected from the twin's state graph (`TemplateMap.ResolveActuatorCatType`) and
+its command vocabulary is declared in `Config/smc-rig.yml`. The historical text
+is kept below because a `SevenStateActuator2` row still stands in
+`TemplateManifest`, and anyone reviving that type inherits this trap.
+
+### Historical: `SevenStateActuator2` ECC gated every commanded transition on `process_state_name = actuator_name`
 
 **Where:** `SevenStateActuator2.fbt`. All four commanded transitions
 (`START→ToPick`, `AtPick→ToPlace`, `*→timerStart`, `START→ToPlace`) carry
@@ -80,7 +91,17 @@ bare `tohome` event moves it.
 
 ---
 
-## I-4. `MapperConfig.StubSevenStateActuatorsAsFiveState` gates Bearing_PnP between Five_State and Seven_State **at multiple sites that must stay consistent**
+## I-4. RETIRED (2026-08-25). The stub flag is deleted; the twin decides the CAT.
+
+`StubSevenStateActuatorsAsFiveState` no longer exists. Every site listed below
+now reads one answer computed from the TWIN: `TemplateMap.ResolveActuatorCatType`
+routes on the actuator's own state count and transition structure, and the
+per-CAT protocol (`command`/`settled`/`interlock`/`target`) is declared in
+`Config/smc-rig.yml`. There is nothing left to keep consistent by hand — which
+is the point. The site list is kept as a map of what a CAT-routing change still
+touches.
+
+### Historical: the sites the flag used to gate
 
 **Where:** `CodeGen/CodeGen/Configuration/MapperConfig.cs` line 42 (or thereabouts).
 
@@ -224,12 +245,9 @@ number is kept as a placeholder so the I-11..I-15 cross-references stay stable.
 
 ## I-11. `SimulatorEndToEndHarness` gate — REMOVED (2026-06-16)
 
-`MapperTests/SimulatorEndToEndHarness.cs` was **deleted** and `MapperTests` now
-runs no active tests (all quarantined under `<Compile Remove>`). The
-behaviour-preserving gate is now the **byte-identical generated-Demonstrator
-diff** (`_gate/`, golden under `C:\_gate`) — see `AGENTS.md` "How to verify a
-behaviour-preserving change". It reads a fixed base and never writes the live
-`C:\Demonstrator`.
+`MapperTests/SimulatorEndToEndHarness.cs` was **deleted**. What replaced it is
+NOT "no tests": `MapperTests` is live again and `Gate/` is the behaviour gate.
+See I-15 for what each one answers.
 
 ---
 
@@ -250,10 +268,11 @@ references resolved on the single SIM ring.
 
 ## I-13. Recipe `state_val` for Seven_State instances is `1=pick`, `2=place`, `0=home/returned`
 
-**Where:** `ProcessRecipeArrayGenerator.MapSevenStateCommandFromConditionName`
-(line ~1248-1261). Lock-step with
-`SystemLayoutInjector.BuildMinimalActuatorParameters` Seven branch's defaults
-(`TargetPickState = 1`, `TargetPlaceState = 2`, `TargetHomeState = 0`).
+**Where:** `Config/smc-rig.yml`, the `command:` and `target:` rows on the
+swivel's CAT protocol entry — today `command: { work1: 1, work2: 3, home: 5 }`
+and `target: { work1: 2, work2: 4, home: 6 }`. The compiler emits the `command`
+value and the instance is parameterised from `target`, so the two are read from
+one declaration rather than kept in step by hand.
 
 **Why it matters:** the recipe's `CmdStateArr` and the CAT's
 `TargetPick/Place/HomeState` parameters MUST match, or the `state_val` arm of
@@ -280,21 +299,26 @@ from it = that actuator never receives commands.
 
 ---
 
-## I-15. `MapperTests` runs **no active tests**; every test is quarantined under `<Compile Remove>`
+## I-15. `MapperTests` and `Gate/` are BOTH live, and they check different things
 
-**Where:** `MapperTests/MapperTests.csproj` — every legacy test `.cs` file is
-under `<Compile Remove>` because they reference `CodeGen.Devices.Shared` (a
-namespace renamed to `CodeGen.Devices.Core`), and the one formerly-active test
-(`SimulatorEndToEndHarness`) was deleted 2026-06-16. So the project builds but
-runs 0 tests — it is NOT a behaviour gate (use the `_gate` byte-identical
-Demonstrator diff instead).
+**Where:** `MapperTests/MapperTests.csproj` compiles every `.cs` beside it - there
+is no `<Compile Remove>` - and the suite runs on `dotnet test`. `Gate/Gate.csproj`
+is the behaviour gate, versioned with the compiler it gates.
 
-**Why it matters:** restoring a legacy test means removing it from the
-`<Compile Remove>` list AND fixing its using statements (`Shared` → `Core`).
-Don't reintroduce the old `Shared` namespace.
+**Why it matters:** they answer different questions and neither replaces the
+other. The tests pin MEANING (a guard keeps its truth, a renamed plant compiles
+to the same plan, a model the backend cannot render is refused). The gate pins
+BEHAVIOUR end to end (all eight model x controller combinations generate, twice
+identically, and a generation carries nothing into the next).
 
-**What breaks if you change it:** a re-enabled test that still references the old
-`Shared` namespace fails to compile and breaks the `MapperTests` build.
+**What breaks if you change it:** a change that keeps the tests green can still
+move generated bytes, and a byte-identical change can still be semantically
+wrong. Run both.
+
+```bash
+dotnet test MapperTests/MapperTests.csproj
+dotnet build Gate/Gate.csproj && Gate/bin/Debug/net10.0/gate.exe all
+```
 
 ---
 
@@ -317,5 +341,52 @@ reference and holds it there. The generated
 **What breaks if you change it:** leaving both work coils FALSE at startup, or
 letting a second patch rewrite the same `INIT` arcs, reintroduces first-cycle
 movement that only appears on cycle one, so later cycles look correct.
+
+---
+
+## I-17. A guard's boolean shape is load-bearing: ConditionGroups are OR, conditions inside one are AND
+
+**Where:** `SystemXmlReader.ReadGuard` builds `ConditionExpr`;
+`ConditionExpr.SumOfProducts` canonicalises it; `InterlockPlanner.Resolve` and
+`ProcessCompiler.EmitGuard` are the two consumers.
+
+**Why it matters:** VueOne uses both shapes deliberately, and the four shipped
+twins prove it. `Bearing_PnP/TurningPlace` is three separate ConditionGroups —
+block on Shaft_Hr OR CoverPNP_Hr OR Transfer. `Feeder/Advancing` is ONE group of
+two — block only while Checker is down AND Transfer is advanced. Flattening the
+tree turns every AND into an OR, which blocks a machine the twin means to let
+run; ANDing the alternatives instead makes a step wait for something the twin
+offered as a choice.
+
+**How it is carried:** a recipe WAIT is a group of rows (`AltCount`/`TermCount`
+on `RecipeStep`); an interlock is a flattened sum of products (`TermCount` on
+`InterlockRule`, `>= 1` heading an alternative and `0` continuing it). Both
+runtimes release/block on the first WHOLE alternative.
+
+**What breaks if you change it:** `SemanticFidelityTests` fails, and on the rig
+the Feeder, the Checker, Shaft_Hr and CoverPNP_Hr each block on one term of a
+guard that names several.
+
+---
+
+## I-18. A safety rule the CAT cannot act on is REFUSED, never emitted
+
+**Where:** `InterlockEmitter.AssertEveryRuleIsEnforceable`, against
+`enforcedTargets` on the CAT's protocol row in `Config/smc-rig.yml`.
+
+**Why it matters:** `CommonInterlockEvaluator` computes one verdict per target
+stop, and a core acts only on the verdicts it takes as inputs. The five-state
+core takes `toHomeInterlock`, so a home-direction rule is real — but only
+because its CAT drives `REQ_HOME`; before 2026-08-21 nothing did, and the
+verdict was computed and discarded. The centre-home core takes only
+`homeWork1Interlock`/`homeWork2Interlock` (one per side, gating both legs) and
+has no to-home input at all, so a rule aimed at its home can be evaluated by
+nothing.
+
+**What breaks if you change it:** dropping the assertion ships a rule that never
+fires, and the generation reports a guarded machine that is not guarded.
+Removing `StateHandling.BCNF -> InterlockManager.REQ_HOME` from
+`Five_State_Actuator_CAT` does the same silently, because the input it feeds
+simply keeps its initial FALSE.
 
 ---
