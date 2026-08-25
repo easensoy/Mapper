@@ -62,9 +62,6 @@ namespace CodeGen.Devices.Core
             return map;
         }
 
-        public static string? FindSysdevByType(string eaeRoot, string deviceType, string deviceNamespace) =>
-            EaeProjectLayout.FindSysdevByDeviceType(eaeRoot, deviceType);
-
         // Read the deployed resource ID (prefers the .sysres root ID attribute, else the file stem) and Name.
         public static (string Id, string? Name) ReadSysresIdentity(string sysdevFolder)
         {
