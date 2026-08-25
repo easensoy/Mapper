@@ -51,7 +51,15 @@ namespace CodeGen.Hmi
         string HubName,
         // The read-only surface for model data no faceplate can show.
         string DetailName,
-        string DetailTitle);
+        string DetailTitle,
+        string ProcessDetailName,
+        string ProcessDetailTitle,
+        HmiRecipeTextPolicy RecipeText);
+
+    // The fixed sentence templates a compiled recipe row is rendered with. Tokens only - the
+    // values come from the model, never from configuration.
+    internal sealed record HmiRecipeTextPolicy(
+        string Command, string Wait, string Phase, string End, string Unresolved);
 
     // A runtime-state vocabulary, selected by the DEPLOYED contract signature rather than a CAT name.
     internal sealed record HmiStatesProfile(string Id, IReadOnlyList<string> InputEventCarries,
