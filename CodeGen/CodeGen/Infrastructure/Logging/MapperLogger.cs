@@ -7,13 +7,7 @@ namespace CodeGen.Services
     {
         INFO,
         WARN,
-        ERROR,
-        PARSE,
-        VALIDATE,
-        DIFF,
-        WRITE,
-        TOUCH,
-        REMAP
+        ERROR
     }
 
     public record LogEntry(DateTime Timestamp, LogStep Step, string Action);
@@ -43,11 +37,8 @@ namespace CodeGen.Services
             OnEntry?.Invoke(entry);
         }
 
-        public static void Parse(string action) => Fire(LogStep.PARSE, action);
-        public static void Validate(string action) => Fire(LogStep.VALIDATE, action);
         public static void Info(string action) => Fire(LogStep.INFO, action);
         public static void Warn(string action) => Fire(LogStep.WARN, action);
         public static void Error(string action) => Fire(LogStep.ERROR, action);
-        public static void Write(string action) => Fire(LogStep.WRITE, action);
     }
 }
