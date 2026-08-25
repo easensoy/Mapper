@@ -119,7 +119,8 @@ namespace CodeGen.Devices.RevPi
             ResourceWireEmitter.EmitForResource(ctx, sysres, ctx.ResourceFor(PlcAssignment.RevPi), report);
 
             var hosted = HostedComponents(ctx, coupler);
-            var bootFb = ctx.Layout.BootFbs.Count > 0 ? ctx.Layout.BootFbs[0].Name : "FB1";
+            var bootFb = ctx.Layout.BootFbs.Count > 0
+                ? ctx.Layout.BootFbs[0].Name : Mapping.TargetBootstrap.InitRole;
             int written = 0;
             foreach (var (label, path, isResource) in new[]
                      {
