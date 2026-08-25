@@ -9,6 +9,18 @@ namespace CodeGen.Devices.Core
 {
     public static class EaeProjectLayout
     {
+        // The project file EAE registers artefacts in. One per project, beside IEC61499.
+        public static string? FindDfbproj(string eaeRoot)
+        {
+            try
+            {
+                var iec = Path.Combine(eaeRoot, "IEC61499");
+                if (!Directory.Exists(iec)) return null;
+                return Directory.EnumerateFiles(iec, "*.dfbproj").FirstOrDefault();
+            }
+            catch { return null; }
+        }
+
         public static string? DeriveEaeProjectRoot(MapperConfig cfg)
         {
             var path = cfg.ActiveSyslayPath;
@@ -21,6 +33,14 @@ namespace CodeGen.Devices.Core
                 dir = Path.GetDirectoryName(dir);
             }
             return null;
+        }
+
+        // A device's own EAE id, which its artefacts are registered under.
+        public static string ReadSysdevId(string sysdevPath)
+        {
+            if (string.IsNullOrEmpty(sysdevPath) || !File.Exists(sysdevPath)) return string.Empty;
+            try { return (string?)XDocument.Load(sysdevPath).Root?.Attribute("ID") ?? string.Empty; }
+            catch { return string.Empty; }
         }
 
         // The single IEC61499/System/<guid>/ folder holding every device's sysdev; null if not there yet.
