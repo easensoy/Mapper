@@ -71,7 +71,10 @@ namespace CodeGen.Mapping
         // interface, so nothing is written for it.
         IReadOnlyDictionary<string, int>? Target = null,
         // Watchdog for a crossing between the two work stops, which outlasts a single leg.
-        int CrossingFaultTimeoutMs = 0)
+        int CrossingFaultTimeoutMs = 0,
+        // The stops whose interlock verdict this CAT's core actually GATES A MOVE ON. A rule aimed at
+        // any other stop would be evaluated by nobody, so it is refused rather than shipped inert.
+        IReadOnlyList<string>? EnforcedTargets = null)
     {
         public const string Home = "home";
         public const string Work = "work";
@@ -83,8 +86,7 @@ namespace CodeGen.Mapping
 
         public int CommandFor(string stop) => Command[stop];
         public int SettledFor(string stop) => Settled[stop];
-        public int InterlockFor(string stop) => Interlock[stop];
-        public bool Has(string stop) => Command.ContainsKey(stop);
+public bool Has(string stop) => Command.ContainsKey(stop);
 
         // Two work stops either side of a centre reference: the shared volume is crossed both ways,
         // so a rule guarding one direction has to guard the other.
@@ -92,6 +94,16 @@ namespace CodeGen.Mapping
 
         // Whether the CAT gives this arrival value a stop of its own, rather than passing through it.
         public bool SettlesAt(int value) => Settled.Values.Contains(value);
+
+        // The stop a rule aimed at this state would guard, or null if the CAT compares against no such
+        // target. Target is the raw core vocabulary a RULE is written in, which is why it is the map.
+        public string? TargetStopFor(int state) =>
+            Target?.FirstOrDefault(kv => kv.Value == state).Key;
+
+        // Whether a move toward that stop is actually gated by the interlock verdict.
+        public bool Enforces(string stop) =>
+            EnforcedTargets != null &&
+            EnforcedTargets.Any(s => string.Equals(s, stop, StringComparison.OrdinalIgnoreCase));
     }
 
     // One row per FB type the Mapper owns. Declaration ORDER IS LOAD-BEARING: DeployOrder walks it, and a
@@ -113,7 +125,8 @@ namespace CodeGen.Mapping
                 .FirstOrDefault(p => string.Equals(p.Cat, cat, StringComparison.OrdinalIgnoreCase));
             return d == null ? null : new CatProtocol(
                 d.StateCounts, d.ServesBranched, d.Command, d.Settled, d.Interlock,
-                d.StopsAreGeometric, d.RawStateRange, d.Target, d.CrossingFaultTimeoutMs);
+                d.StopsAreGeometric, d.RawStateRange, d.Target, d.CrossingFaultTimeoutMs,
+                d.EnforcedTargets);
         }
 
         static readonly TemplateType[] Types =
