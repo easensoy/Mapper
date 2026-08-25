@@ -8,7 +8,7 @@ using CodeGen.Translation;
 
 namespace CodeGen.Devices.BX1
 {
-    // BX1 cover-I/O broker injection (cfg.DeployBx1IoBroker). Broker id F6C04A4BA6FA8593 must stay the id the copied BX1 .hcf binds to.
+    // BX1 cover-I/O broker injection. Broker id F6C04A4BA6FA8593 must stay the id the copied BX1 .hcf binds to.
     public static class Bx1IoBrokerInjector
     {
         static readonly XNamespace Ns = CodeGen.Devices.Core.Station2DeviceEmitter.LibElNs;
@@ -17,11 +17,8 @@ namespace CodeGen.Devices.BX1
         public const string BrokerFbName = "BX1_IO";
         public const string BrokerFbType = "PLC_RW_BX1";
 
-        const string Sym2BoolSrc = "SYMLINKMULTIVARSRC_277E97BEC1451D2C";
-        const string Sym2BoolDst = "SYMLINKMULTIVARDST_277E97BEC1451D2C";
-        const string TwoBoolIfaceParams = "Runtime.System#I:=2;VALUE${I}:BOOL,BOOL";
-        const string Sym1BoolSrc = "SYMLINKMULTIVARSRC_1559B0FF8170C9BA0";
-        const string OneBoolIfaceParams = "Runtime.System#I:=1;VALUE${I}:BOOL";
+        // Derived from the one arity->hash table rather than restated: a second copy of an EAE type name
+        // is a second thing to keep right.
         const string ScanFbName = "BX1_IO_Cycle";
         const string ScanPeriod = "T#50ms";
 
@@ -62,15 +59,6 @@ namespace CodeGen.Devices.BX1
                 .Where(t => t.Item1 != null)
                 .ToArray();
 
-        // EAE generates SYMLINKMULTIVAR{SRC,DST}_<hash> per BOOL arity; the hash is GUI-computed, not derivable,
-        // and SRC/DST of one arity share it. Pick the smallest arity >= the value count; 5-BOOL does not exist.
-        static readonly (int Arity, string Hash)[] BoolSymlinkTypes =
-        {
-            (1, "1559B0FF8170C9BA0"), (2, "277E97BEC1451D2C"), (3, "151ACB50A2F8223B2"),
-            (4, "19628BFC3C74F1AB1"), (7, "238520AAD20108C65"), (10, "2183AAEC3B58E76C9"),
-            (15, "2217C9CA39686140D"),
-        };
-
         // Transforms the deployed PLC_RW_BX1.fbt into the internalized broker (CoverSensorPublisher +
         // CoverCoilSubscriber + ScanCycle); new FBs must be inserted BEFORE Input/Output/connections. Idempotent.
         public static void EmbedCoverBridgeInComposite(string fbtPath, string resourceName = "BX1_RES")
@@ -108,13 +96,8 @@ namespace CodeGen.Devices.BX1
             int uid = 20;
             var firstInput = net.Elements("Input").FirstOrDefault();
 
-            string Iface(int n) =>
-                "Runtime.System#I:=" + n + ";VALUE${I}:" + string.Join(",", Enumerable.Repeat("BOOL", n));
-            (int arity, string type) Pick(string sd, int need)
-            {
-                var t = BoolSymlinkTypes.Where(x => x.Arity >= need).OrderBy(x => x.Arity).First();
-                return (t.Arity, $"SYMLINKMULTIVAR{sd}_{t.Hash}");
-            }
+            string Iface(int n) => Core.SymlinkBridge.Iface(n);
+            (int arity, string type) Pick(string sd, int need) => Core.SymlinkBridge.Pick(sd, need);
             void AddFb(string name, string type, int arity, string[] names, int x, int y)
             {
                 var fb = new XElement("FB",
@@ -220,7 +203,7 @@ namespace CodeGen.Devices.BX1
             return true;
         }
 
-        // SAFETY (cover safe-start, gated by cfg.Bx1CoverSafeStart): a Bx1CoverFailsafe gate forces the profile's
+        // SAFETY (cover safe-start): a Bx1CoverFailsafe gate forces the profile's
         // safeStartComponent HOME on start and holds until its at-home sensor (input bit0). Fires only while the
         // logic RUNS, NOT on EAE Clean/STOP/fault — homing while stopped needs the coupler fallback word 16#0002.
         public static bool InjectCoverFailsafeIntoBrokerType(string eaeRoot)
@@ -326,8 +309,7 @@ namespace CodeGen.Devices.BX1
                     if (string.IsNullOrEmpty(path) || !File.Exists(path)) continue;
                     try
                     {
-                        if (InjectInto(path, isSysres, label, resourceName,
-                                cfg.Bx1BridgeInsideComposite, report)) touched++;
+                        if (InjectInto(path, isSysres, label, resourceName, report)) touched++;
                     }
                     catch (IOException)
                     {
@@ -352,7 +334,7 @@ namespace CodeGen.Devices.BX1
         }
 
         static bool InjectInto(string path, bool isSysres, string label, string resourceName,
-            bool internalized, SystemInjector.BindingApplicationReport report)
+            SystemInjector.BindingApplicationReport report)
         {
             var doc = XDocument.Load(path, LoadOptions.PreserveWhitespace);
             var net = FindCoverNetwork(doc);
@@ -366,14 +348,12 @@ namespace CodeGen.Devices.BX1
             var dc = net.Element(Ns + "DataConnections")  ?? AddSection(net, "DataConnections");
 
             // The broker FB (forced id so the copied .hcf matches).
-            AddFbIfAbsent(net, BrokerFbId, BrokerFbName, BrokerFbType, "Main", isSysres,
-                isSysres ? 9500 : 32000, 5800, ifaceParams: null, name1: null, name2: null);
+            AddBrokerFbIfAbsent(net, isSysres, isSysres ? 9500 : 32000, 5800);
             if (hasGripper)
                 AddEvent(ec, $"{InitRootCover}.INITO", $"{BrokerFbName}.INIT");
 
-            // INTERNALIZED (cfg.Bx1BridgeInsideComposite, default): the bridge lives inside PLC_RW_BX1, so the
-            // resource carries only BX1_IO — sweep any external bridge a prior deploy left.
-            if (internalized)
+            // The bridge lives INSIDE PLC_RW_BX1, so the resource carries only BX1_IO. An older deploy put
+            // the bridge at resource level, so any such FB is swept here and the tree converges.
             {
                 static string FbOf(string? ep) =>
                     ep == null ? "" : (ep.Contains('.') ? ep[..ep.IndexOf('.')] : ep);
@@ -400,122 +380,21 @@ namespace CodeGen.Devices.BX1
                 SaveWithRetry(doc, path);
                 report.Missing.Add($"[BX1][Broker] BX1_IO injected into {label} (resource " +
                     $"{resourceName}); cover bridge INTERNALIZED in PLC_RW_BX1 — swept any external " +
-                    "BX1IO_Sense_*/BX1IO_Coil_*/BX1_IO_Cycle FBs (cfg.Bx1BridgeInsideComposite).");
+                    "BX1IO_Sense_*/BX1IO_Coil_*/BX1_IO_Cycle FBs.");
                 return true;
             }
-
-            // The EXTERNAL symlink bridge + scan cycle (when Bx1BridgeInsideComposite=false).
-            int xSrc = isSysres ? 11000 : 35000;
-            int xDst = isSysres ? 13000 : 37000;
-            int slot = 0;
-            foreach (var c in Covers)
-            {
-                var srcName = $"BX1IO_Sense_{c.Cover}";
-                AddFbIfAbsent(net, Hex16($"{srcName}|{fileTag}"), srcName, Sym2BoolSrc, "Main", isSysres,
-                    xSrc, 1500 + slot * 500, TwoBoolIfaceParams,
-                    $"'{resourceName}.{c.Cover}.athome'", $"'{resourceName}.{c.Cover}.atwork'");
-                AddEvent(ec, $"{BrokerFbName}.{c.Event}", $"{srcName}.REQ");
-                if (c.SensorFromHome != null) AddData(dc, $"{BrokerFbName}.{c.SensorFromHome}", $"{srcName}.VALUE1");
-                if (c.SensorFromWork != null) AddData(dc, $"{BrokerFbName}.{c.SensorFromWork}", $"{srcName}.VALUE2");
-
-                var dstName = $"BX1IO_Coil_{c.Cover}";
-                AddFbIfAbsent(net, Hex16($"{dstName}|{fileTag}"), dstName, Sym2BoolDst, "Main", isSysres,
-                    xDst, 1500 + slot * 500, TwoBoolIfaceParams,
-                    $"'{resourceName}.{c.Cover}.OutputToHome'", $"'{resourceName}.{c.Cover}.OutputToWork'");
-                if (c.CoilToHome != null) AddData(dc, $"{dstName}.VALUE1", $"{BrokerFbName}.{c.CoilToHome}");
-                if (c.CoilToWork != null) AddData(dc, $"{dstName}.VALUE2", $"{BrokerFbName}.{c.CoilToWork}");
-
-                // A SYMLINKMULTIVAR registers its symlink (QI=TRUE) only when INIT fires; otherwise it stays
-                // DISABLED and ignores every scan REQ.
-                if (hasGripper)
-                {
-                    AddEvent(ec, $"{InitRootCover}.INITO", $"{srcName}.INIT");
-                    AddEvent(ec, $"{InitRootCover}.INITO", $"{dstName}.INIT");
-                }
-                slot++;
-            }
-
-            // Publish the cover-detect input (bit5, the only cover-present bit the coupler carries) into the
-            // top-cover sensor's Input; the passive Sensor_Bool_CAT re-reads via its deploy-injected RD event.
-            var topCoverFb = net.Elements(Ns + "FB").FirstOrDefault(f =>
-                (string?)f.Attribute("Type") == Mapping.TemplateManifest.SensorType.Name &&
-                Configuration.RigCatalog.Current.Roles.IsTopCover((string?)f.Attribute("Name")));
-            if (topCoverFb != null && hasGripper)
-            {
-                var tcName = (string)topCoverFb.Attribute("Name")!;
-                const string tcSrc = "BX1IO_Sense_TopCover";
-                AddFbIfAbsent(net, Hex16($"{tcSrc}|{fileTag}"), tcSrc, Sym1BoolSrc, "Main", isSysres,
-                    xSrc, 1500 + slot * 500, OneBoolIfaceParams,
-                    $"'{resourceName}.{tcName}.Input'", null);
-                AddEvent(ec, $"{InitRootCover}.INITO", $"{tcSrc}.INIT");
-                AddEvent(ec, $"{BrokerFbName}.CoverSensorEvent", $"{tcSrc}.REQ");
-                // Fired by the CHANGE DETECTOR alone; the cyclic scan would re-read the sensor CAT forever while
-                // the rig is idle. Reconciled, so a tree deployed with the cyclic wire self-heals. See Docs/PATCH_RATIONALES P-5.
-                foreach (var stale in ec.Elements(Ns + "Connection")
-                             .Where(c => (string?)c.Attribute("Source") == $"{ScanFbName}.EO" &&
-                                         (string?)c.Attribute("Destination") == $"{tcSrc}.REQ").ToList())
-                    stale.Remove();
-                AddData(dc, $"{BrokerFbName}.CoverPnpSensor", $"{tcSrc}.VALUE1");
-                // After the SRC publishes the fresh bit, fire the sensor's RD so it re-samples and re-reports on change.
-                AddEvent(ec, $"{tcSrc}.CNF", $"{tcName}.RD");
-            }
-
-            AddFbIfAbsent(net, Hex16($"{ScanFbName}|{fileTag}"), ScanFbName, "E_DELAY", "IEC61499.Standard",
-                isSysres, isSysres ? 15000 : 39000, 1300, ifaceParams: null, name1: null, name2: null,
-                extraParams: new[] { ("DT", ScanPeriod) });
-            // Kick the scan from the init-root cover; the broker's PLC_EVENT does not fire on a plain INIT.
-            if (hasGripper)
-                AddEvent(ec, $"{InitRootCover}.INITO", $"{ScanFbName}.START");
-            AddEvent(ec, $"{BrokerFbName}.PLC_EVENT", $"{ScanFbName}.START");
-            AddEvent(ec, $"{ScanFbName}.EO", $"{ScanFbName}.START");
-            AddEvent(ec, $"{ScanFbName}.EO", $"{BrokerFbName}.REQ");
-            // Output write via a CAUSAL CHAIN over the coil readers: a parallel fan-out races and can leave the
-            // safe-start cover's home command stale when the word is packed.
-            foreach (var conn in ec.Elements(Ns + "Connection")
-                         .Where(c => { var d = (string?)c.Attribute("Destination") ?? "";
-                                       return (d.StartsWith("BX1IO_Coil_") && d.EndsWith(".REQ"))
-                                           || d == $"{BrokerFbName}.REQ_INT_BOOL"; }).ToList())
-                conn.Remove();
-            var writeChain = Covers.Where(c => !c.Cover.ToLowerInvariant().Contains("gripper")).ToList();
-            var parallelReads = Covers.Where(c => c.Cover.ToLowerInvariant().Contains("gripper")).ToList();
-            for (int i = 0; i < writeChain.Count; i++)
-                AddEvent(ec, i == 0 ? $"{ScanFbName}.EO" : $"BX1IO_Coil_{writeChain[i - 1].Cover}.CNF",
-                    $"BX1IO_Coil_{writeChain[i].Cover}.REQ");
-            if (writeChain.Count > 0)
-                AddEvent(ec, $"BX1IO_Coil_{writeChain[^1].Cover}.CNF", $"{BrokerFbName}.REQ_INT_BOOL");
-            foreach (var c in parallelReads)
-                AddEvent(ec, $"{ScanFbName}.EO", $"BX1IO_Coil_{c.Cover}.REQ");
-
-            SaveWithRetry(doc, path);
-            report.Missing.Add($"[BX1][Broker] BX1_IO + cover symlink bridge ({Covers.Length} covers, " +
-                $"E_DELAY {ScanPeriod} scan) injected into {label} (resource {resourceName})" +
-                (hasGripper ? "." : " — no gripper anchor; INIT not wired."));
-            return true;
         }
 
-        static void AddFbIfAbsent(XElement net, string id, string name, string type, string nsAttr,
-            bool isSysres, int x, int y, string? ifaceParams, string? name1, string? name2,
-            (string Name, string Value)[]? extraParams = null)
+        // The broker instance itself. It carries no symlink names and no interface arity: the bridge that
+        // needed those now lives inside PLC_RW_BX1.
+        static void AddBrokerFbIfAbsent(XElement net, bool isSysres, int x, int y)
         {
-            if (net.Elements(Ns + "FB").Any(f => (string?)f.Attribute("Name") == name)) return;
+            if (net.Elements(Ns + "FB").Any(f => (string?)f.Attribute("Name") == BrokerFbName)) return;
             var fb = new XElement(Ns + "FB",
-                new XAttribute("ID", id), new XAttribute("Name", name),
-                new XAttribute("Type", type), new XAttribute("Namespace", nsAttr));
-            if (isSysres) fb.Add(new XAttribute("Mapping", id));
+                new XAttribute("ID", BrokerFbId), new XAttribute("Name", BrokerFbName),
+                new XAttribute("Type", BrokerFbType), new XAttribute("Namespace", "Main"));
+            if (isSysres) fb.Add(new XAttribute("Mapping", BrokerFbId));
             fb.Add(new XAttribute("x", x.ToString()), new XAttribute("y", y.ToString()));
-            if (ifaceParams != null)
-                fb.Add(new XElement(Ns + "Attribute",
-                    new XAttribute("Name", "Configuration.GenericFBType.InterfaceParams"),
-                    new XAttribute("Value", ifaceParams)));
-            if (name1 != null)
-                fb.Add(new XElement(Ns + "Parameter", new XAttribute("Name", "QI"), new XAttribute("Value", "TRUE")));
-            if (name1 != null)
-                fb.Add(new XElement(Ns + "Parameter", new XAttribute("Name", "NAME1"), new XAttribute("Value", name1)));
-            if (name2 != null)
-                fb.Add(new XElement(Ns + "Parameter", new XAttribute("Name", "NAME2"), new XAttribute("Value", name2)));
-            if (extraParams != null)
-                foreach (var (pn, pv) in extraParams)
-                    fb.Add(new XElement(Ns + "Parameter", new XAttribute("Name", pn), new XAttribute("Value", pv)));
 
             var firstConn = net.Element(Ns + "EventConnections")
                          ?? net.Element(Ns + "DataConnections")
@@ -529,13 +408,6 @@ namespace CodeGen.Devices.BX1
             if (ec.Elements(Ns + "Connection").Any(c =>
                 (string?)c.Attribute("Source") == src && (string?)c.Attribute("Destination") == dst)) return;
             ec.Add(new XElement(Ns + "Connection", new XAttribute("Source", src), new XAttribute("Destination", dst)));
-        }
-
-        static void AddData(XElement dc, string src, string dst)
-        {
-            if (dc.Elements(Ns + "Connection").Any(c =>
-                (string?)c.Attribute("Source") == src && (string?)c.Attribute("Destination") == dst)) return;
-            dc.Add(new XElement(Ns + "Connection", new XAttribute("Source", src), new XAttribute("Destination", dst)));
         }
 
         static XElement? FindCoverNetwork(XDocument doc)
@@ -573,15 +445,6 @@ namespace CodeGen.Devices.BX1
                 }
             }
             doc.Save(path);
-        }
-
-        static string Hex16(string seed)
-        {
-            using var sha = System.Security.Cryptography.SHA1.Create();
-            var b = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(seed));
-            var sb = new System.Text.StringBuilder(16);
-            for (int i = 0; i < 8; i++) sb.Append(b[i].ToString("X2"));
-            return sb.ToString();
         }
 
         static string? ReadResourceName(string? sysresPath)
