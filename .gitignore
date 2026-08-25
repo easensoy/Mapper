@@ -20,8 +20,7 @@ venv/
 .env
 
 # --- VueOneMapper: throwaway/runtime/local noise (keep git status trustworthy) ---
-# Throwaway verification harnesses (gate, dis, devlife, rigrepro, verify*)
-/_gate/
+# Throwaway verification harnesses (the versioned gate lives in Gate/ and IS tracked)
 /_dis/
 /_devlife/
 /_rigrepro/
