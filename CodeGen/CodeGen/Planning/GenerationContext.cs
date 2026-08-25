@@ -13,7 +13,6 @@ namespace CodeGen.Translation
 {
     // The station slice a layout emits. Order is load-bearing: it assigns every state_table id.
     public record StationContents(
-        VueOneComponent Process,
         List<VueOneComponent> Actuators,
         List<VueOneComponent> Sensors)
     {
@@ -66,7 +65,7 @@ namespace CodeGen.Translation
         string Label,
         string? AreaFb,
         string? StationFb,
-        string? ProcessFb,
+        IReadOnlyList<string> Processes,
         string? TerminatorFb,
         // Head of the report ring this resource participates in. Bring-up follows that ring, so anything
         // added to it later hangs off this rather than an emitter naming a component to init from.
@@ -74,12 +73,7 @@ namespace CodeGen.Translation
         IReadOnlyList<(string Source, string Destination)> AdapterRelations,
         IReadOnlyList<InfraInstance> Infrastructure,
         (string From, string To)? StationChain,
-        ResourceCapabilities Capabilities)
-    {
-        // The instance filling one infrastructure role on this resource, or null where it declares none.
-        public InfraInstance? Infra(string role) =>
-            Infrastructure.FirstOrDefault(i => string.Equals(i.Role, role, StringComparison.OrdinalIgnoreCase));
-    }
+        ResourceCapabilities Capabilities);
 
     // Everything one generation decided before any artefact was written. Parse once, plan once, render
     // once. Passed explicitly, so a second generation cannot read the first one's answers.
@@ -91,6 +85,15 @@ namespace CodeGen.Translation
         // Where each component runs and is drawn; on the profile, so nothing below reaches the catalog.
         public LayoutCatalog Layout => Profile.Layout;
         public DeploymentRoster Roster { get; }
+
+        // The name each component is EMITTED under: the overrides workbook, else the suffix-stripping
+        // convention. Decided here so the layout, the resource plan and every wiring pass agree by
+        // construction rather than each re-resolving it.
+        public IReadOnlyDictionary<string, string> InstanceNames { get; }
+
+        public string InstanceName(string? twinName) =>
+            twinName != null && InstanceNames.TryGetValue(twinName.Trim(), out var n)
+                ? n : (twinName ?? string.Empty).Trim();
         public ControllerAllocation Allocation { get; }
 
         // The twin, parsed and resolved once; no later stage re-scans the component list.
@@ -126,6 +129,48 @@ namespace CodeGen.Translation
 
         // state_table size this plan needs; every FBT that declares state_table is patched to exactly this.
         public int StateTableCapacity => StateTableAllocation.Required(Slots);
+
+        // Rule capacity this plan needs. One past nothing: the widest table any actuator asked for,
+        // never below the declared floor. Every FB that declares the rule array is patched to exactly
+        // this, so a rule is never dropped to make the model fit the type.
+        public int InterlockCapacity => Math.Max(
+            InterlockConfig.Current.RuleArraySize,
+            Interlocks.Count == 0 ? 0 : Interlocks.Values.Max(p => p.Count));
+
+        // A target that only EXISTS when something is relocated onto it is not emitted when nothing is,
+        // so anything else the roster placed there would be planned onto a device the run never writes
+        // and would silently run nowhere. The capability is declared per target; no controller is named.
+        private static void AssertEveryPlacementHasADevice(
+            StationContents station, ControllerAllocation allocation, DeploymentProfile profile)
+        {
+            if (profile.PartialRevPi) return;                    // every declared target is emitted
+            var absent = profile.Layout.Resources
+                .Select(r => r.Plc)
+                .Where(plc => TargetRegistry.Of(plc).ReceivesRelocatedComponents)
+                .ToHashSet();
+            if (absent.Count == 0) return;
+
+            var stranded = station.Actuators.Concat(station.Sensors)
+                .Select(c => (c.Name ?? string.Empty).Trim())
+                .Concat(station.Processes.Select(p => p.Trim()))
+                .Where(n => n.Length > 0 && absent.Contains(allocation.Of(n)))
+                .OrderBy(n => n, StringComparer.Ordinal)
+                .ToList();
+            if (stranded.Count == 0) return;
+
+            throw new InvalidOperationException(
+                "[Placement] " + string.Join(", ", stranded) + " " +
+                (stranded.Count == 1 ? "is" : "are") + " placed on a target this run does not emit, " +
+                "because that target only exists when components are relocated onto it and none were. " +
+                "Relocate them there or place them on a target the run writes; generation stops rather " +
+                "than planning work onto a device that will not exist.");
+        }
+
+        // Of these names, the ones the twin declares as something with a physical channel. A process is
+        // logic and needs none, so a target's IO contract has nothing to say about hosting one.
+        public IReadOnlyCollection<string> IoBearing(IEnumerable<string> names) =>
+            names.Where(n => Twin.ByName(n) is { } c && (c.IsActuator || c.IsSensor))
+                 .ToList();
 
         // The processes a controller runs, in roster order, which is the order the layout emits them.
         public IEnumerable<VueOneComponent> ProcessesOn(PlcAssignment plc) =>
@@ -187,7 +232,7 @@ namespace CodeGen.Translation
 
             return new ResourcePlan(plc, profile.Label,
                 Role("area"), Role("station"),
-                ProcessesOn(plc).FirstOrDefault()?.Name?.Trim(),
+                ProcessesOn(plc).Select(p => InstanceName(p.Name)).ToList(),
                 Role("terminator"), anchor, wires, infra, chain, CapabilitiesOf(plc));
         }
 
@@ -247,8 +292,10 @@ namespace CodeGen.Translation
             ProcessCompiler.Ctx recipeInputs, ProcessHandoffPlan handoffs,
             IReadOnlyDictionary<string, RecipeArrays> recipes,
             IReadOnlyDictionary<string, InterlockPlan> interlocks,
-            IReadOnlyDictionary<string, ActuatorTiming> actuatorTiming)
+            IReadOnlyDictionary<string, ActuatorTiming> actuatorTiming,
+            IReadOnlyDictionary<string, string> instanceNames)
         {
+            InstanceNames = instanceNames;
             RecipeInputs = recipeInputs;
             Interlocks = interlocks;
             SemanticFindings = recipeInputs.Findings.ToList();
@@ -301,6 +348,7 @@ namespace CodeGen.Translation
             var allocation = new ControllerAllocation(roster);
 
             var station = ResolveStation(components, roster);
+            AssertEveryPlacementHasADevice(station, allocation, profile);
             // Every actuator the twin declares, decided once; the station set is a subset of it.
             var catTypeOf = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var c in twin.Components.Where(c => c.IsActuator).Select(c => c.Source))
@@ -319,9 +367,9 @@ namespace CodeGen.Translation
             var detouredChain = station.Actuators
                 .Select(a => (a.Name ?? string.Empty).Trim())
                 .Where(n => carried.Contains(allocation.Of(n))).ToList();
-            bool ringsMerged = ReportGraph.RingsMustMerge(twin, allocation);
             var rings = ReportGraph.Build(
-                twin, allocation, ringsMerged, profile.Facts.CarrierSegment, detouredChain);
+                twin, allocation, profile.Facts.CarrierSegment, detouredChain);
+            bool ringsMerged = rings.RingsMerged;
             var crossRingSegment = rings.DischargeSegment;
             // Every fixed slot the profile declares, from the one stableSlot column.
             var reservations = profile.Layout.Components
@@ -332,7 +380,7 @@ namespace CodeGen.Translation
                 .Select(n => slots.TryGetValue(n, out int s) ? s : -1).FirstOrDefault(s => s >= 0, -1);
 
             var recipeInputs = BuildRecipeInputs(twin, station, slots, rings, topCover, catTypeOf, profile.Facts);
-            var actuatorTiming = PlanActuatorTiming(twin, station, catTypes, detouredChain,
+            var actuatorTiming = PlanActuatorTiming(twin, station, detouredChain,
                 ringsMerged, profile.Facts);
             var interlocks = InterlockEmitter.PlanAll(
                 station.Actuators, catTypes, recipeInputs.Ids, twin, rings, allocation,
@@ -348,9 +396,18 @@ namespace CodeGen.Translation
                     process, slots[name], recipeInputs, handoffs);
             }
 
+            // Resolved once, from the same workbook the emitters used to each load for themselves.
+            var overrides = string.IsNullOrWhiteSpace(config.MappingRulesPath)
+                ? new InstanceNameOverridesLoader.Overrides()
+                : InstanceNameOverridesLoader.Load(config.MappingRulesPath);
+            var instanceNames = twin.Components.ToDictionary(
+                c => (c.Name ?? string.Empty).Trim(),
+                c => InstanceNameResolver.Resolve(c.Source, overrides.ByComponentId, overrides.ByVueOneName),
+                StringComparer.OrdinalIgnoreCase);
+
             return new GenerationContext(config, profile, roster, allocation,
                 twin, station, rings, catTypes, detouredChain, crossRingSegment, slots,
-                recipeInputs, handoffs, recipes, interlocks, actuatorTiming);
+                recipeInputs, handoffs, recipes, interlocks, actuatorTiming, instanceNames);
         }
 
 
@@ -358,7 +415,7 @@ namespace CodeGen.Translation
         // Sensed means some other component's transition observes that arrival state, so a real DI
         // closes the wait; nothing observing it means only the CAT's own timer can acknowledge.
         private static IReadOnlyDictionary<string, ActuatorTiming> PlanActuatorTiming(
-            TwinModel twin, StationContents station, IReadOnlyDictionary<string, string> catTypes,
+            TwinModel twin, StationContents station,
             IReadOnlyList<string> detoured, bool ringsMerged, PlantFacts facts)
         {
             // One sweep of every observed state, rather than one sweep per actuator per state set.
@@ -464,12 +521,6 @@ namespace CodeGen.Translation
                     types.Any(t => string.Equals(c.Type, t, StringComparison.OrdinalIgnoreCase)) &&
                     string.Equals(c.Name, name, StringComparison.Ordinal));
 
-            var process = roster.All
-                .Where(e => ControllerMap.IsFeedController(e.Plc))
-                .Select(e => ByName(e.Name, ComponentType.Process))
-                .FirstOrDefault(p => p != null)
-                ?? throw new InvalidOperationException(
-                    "The roster allocates no Process to the Feed controller, so there is no station to emit.");
 
             // idRank is an ordered RESERVATION, not an allowlist: ranked names keep the slots they already
             // have and anything else is APPENDED, so a new component can never renumber an existing one.
@@ -487,7 +538,7 @@ namespace CodeGen.Translation
             bool IsRole(VueOneComponent c, params string[] types) =>
                 types.Any(t => string.Equals(c.Type, t, StringComparison.OrdinalIgnoreCase));
 
-            return new StationContents(process,
+            return new StationContents(
                 Ordered(roster.IdOrderActuators,
                         n => ByName(n, ComponentType.Actuator, ComponentType.Robot),
                         components.Where(c => IsRole(c, ComponentType.Actuator, ComponentType.Robot))),
