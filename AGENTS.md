@@ -47,7 +47,7 @@ If you propose anything that contradicts these, you are wrong. Read first.
   touch the **Test Runtime** path (`MainForm.btnTestStation1_Click` and
   everything it calls) or propose changes that only take effect on the rig until
   cleared explicitly. Sim-only work is the default scope.
-- **Verification gate:** `MapperTests` (187 tests) and `Gate/` (8 combinations,
+- **Verification gate:** `MapperTests` (216 tests) and `Gate/` (8 combinations,
   determinism, A->B->A, placement on every target). See below.
 - **Generation runs only via the MapperUI WinForms buttons.** After any CodeGen
   change, the user must close MapperUI, rebuild MapperUI (which recompiles
