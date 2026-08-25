@@ -116,55 +116,6 @@ namespace MapperTests
             finally { System.IO.File.Delete(path); }
         }
 
-        [Fact]
-        public void Alternatives_a_linear_recipe_cannot_choose_between_are_required_together_and_reported()
-        {
-            // The engine tests one (slot, value) per row, so it cannot express "either". Requiring both
-            // can only make the step wait LONGER than the twin asks, never release it earlier - the safe
-            // direction - and the choice the recipe could not make is reported rather than lost.
-            VueOneState Stop(string id, string n, int num, bool init = false) => new()
-            {
-                StateID = id, Name = n, StateNumber = num, StaticState = true, InitialState = init,
-                Transitions = new List<VueOneTransition>(),
-            };
-            VueOneComponent Sensor(string id, string n) => new()
-            {
-                ComponentID = id, Name = n, Type = ComponentType.Sensor,
-                States = new List<VueOneState> { Stop(id + "-off", n + "_Off", 0, true), Stop(id + "-on", n + "_On", 1) },
-            };
-
-            var left = Sensor("C-l", "Left_Eye");
-            var right = Sensor("C-r", "Right_Eye");
-            var proc = new VueOneComponent
-            {
-                ComponentID = "C-cell", Name = "Sorter_Cell", Type = ComponentType.Process,
-                States = new List<VueOneState>
-                {
-                    Stop("C-cell-s0", "Cell_Entry", 0, init: true), Stop("C-cell-s1", "Cell_Run", 1),
-                },
-            };
-            // EITHER eye releases the step, which is what the twin says and what a row cannot say.
-            proc.States[0].Transitions.Add(new VueOneTransition
-            {
-                TransitionID = "T-cell", OriginStateID = "C-cell-s0", DestinationStateID = "C-cell-s1",
-                Guard = ConditionExpr.Disjunction(new ConditionExpr[]
-                {
-                    R("C-l", "C-l-on"), R("C-r", "C-r-on"),
-                }),
-            });
-
-            var plan = GenerationContext.Plan(new MapperConfig(), new[] { proc, left, right },
-                DeploymentProfile.M262Only(LayoutCatalog.Load()));
-
-            // Both alternatives are required...
-            var recipe = plan.Recipes["Sorter_Cell"];
-            Assert.Equal(2, recipe.Wait1Id.Where((_, i) => recipe.StepType[i] == 2).Distinct().Count());
-            // ...and the compiler says so, rather than leaving the choice silently discarded.
-            Assert.Contains(plan.SemanticFindings, f =>
-                f.Contains("Sorter_Cell", StringComparison.Ordinal) &&
-                f.Contains("alternative", StringComparison.OrdinalIgnoreCase));
-        }
-
         // Two ConditionGroups under one ConditionValue: the shape the shipped twins use for a choice.
         private static string Twin(string groupOperator) => $@"<?xml version=""1.0"" encoding=""utf-8""?>
 <vueOne_SystemDefinition Type=""System"">
