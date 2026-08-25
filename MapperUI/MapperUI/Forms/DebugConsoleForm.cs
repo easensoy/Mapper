@@ -35,12 +35,6 @@ namespace MapperUI
             {
                 LogStep.ERROR => Color.OrangeRed,
                 LogStep.WARN => Color.Yellow,
-                LogStep.REMAP => Color.LimeGreen,
-                LogStep.WRITE => Color.DeepSkyBlue,
-                LogStep.TOUCH => Color.Plum,
-                LogStep.VALIDATE => Color.Aquamarine,
-                LogStep.DIFF => Color.LightSkyBlue,
-                LogStep.PARSE => Color.LightSalmon,
                 _ => Color.LimeGreen
             };
 
