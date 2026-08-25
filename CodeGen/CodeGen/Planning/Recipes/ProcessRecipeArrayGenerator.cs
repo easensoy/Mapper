@@ -8,7 +8,7 @@ using CodeGen.Mapping;
 
 namespace CodeGen.Translation.Process
 {
-    // Six parallel recipe arrays for ProcessRuntime_Generic_v1's ECC. StepType 1=CMD/2=WAIT/9=END; Wait1Id from in-scope sensors+actuators (out-of-scope conditions skipped).
+    // The recipe ProcessRuntime_Generic_v1's ECC executes, row by row. StepType 1=CMD/2=WAIT/9=END; Wait1Id from in-scope sensors+actuators (out-of-scope conditions skipped).
     public sealed class RecipeArrays
     {
         public List<int> StepType       { get; } = new();
@@ -17,6 +17,14 @@ namespace CodeGen.Translation.Process
         public List<int> Wait1Id        { get; } = new();
         public List<int> Wait1State     { get; } = new();
         public List<int> NextStep       { get; } = new();
+
+        // A WAIT is a sum of products. On the row that HEADS a wait, AltCount is how many
+        // alternatives start there; on the row that heads an alternative, TermCount is how many rows
+        // hold together. One and one is the plain single-slot wait, which is every row a guard with
+        // no choice in it produces. Wait1Id/Wait1State stay the per-row term, so a reader that only
+        // wants "what does this row test" is unchanged.
+        public List<int> AltCount       { get; } = new();
+        public List<int> TermCount      { get; } = new();
 
         // ComponentID -> local id (sensors first, actuators next). Process is NOT in this map.
         public Dictionary<string, int> ComponentIds { get; } =
@@ -63,7 +71,7 @@ namespace CodeGen.Translation.Process
         internal static RecipeArrays Generate(VueOneComponent process, int processId,
             Recipes.ProcessCompiler.Ctx inputs, Recipes.ProcessHandoffPlan handoffs)
         {
-            var arrays = Recipes.ProcessCompiler.Compile(process, processId, inputs, handoffs);
+            var arrays = Recipes.ProcessCompiler.Compile(process, inputs, handoffs);
 
             ValidateProcessIdInvariant(arrays, processId);
             ValidateSingleEndMarker(arrays);
