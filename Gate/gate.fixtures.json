@@ -1,0 +1,26 @@
+{
+  // Which twins the gate compiles, and how a twin's Control.xml is found under the models root.
+  // A relative modelsRoot resolves against this file, so the default is the repository's own
+  // fixtures. Set VUEONE_MODELS to gate authored twins that live elsewhere.
+  "modelsRoot": "fixtures/models",
+  "controlPath": "{model}/Control.xml",
+
+  "models": [
+    { "name": "SMC_Vue2VC_With_Processes_se" },
+    { "name": "SMC_Vue2VC_With_Processes_vc" },
+    { "name": "SMC_Vue2VC_With_Processes_sw5" },
+    { "name": "SMC_Vue2VC_With_Processes_sw5_noclamp" }
+  ],
+
+  // The target-selection axis. RevPi names the components a run relocates onto the Revolution Pi,
+  // which is a property of the twins above rather than of the compiler.
+  "selections": [
+    { "name": "M262", "revPi": [] },
+    { "name": "RevPi", "revPi": [ "Feeder", "Checker" ] }
+  ],
+
+  // The EAE project every run starts from and none may write. Empty derives it from the configured
+  // output root, so the protection holds for whatever project this machine is set up against;
+  // VUEONE_LIVE_PROJECT overrides it.
+  "liveProject": ""
+}
