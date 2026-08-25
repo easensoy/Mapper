@@ -77,8 +77,7 @@ namespace CodeGen.Devices.Core
                 "Wire_Switch1_to_M580.json",
             };
 
-            // BX1 EtherNet/IP daisy-chain, only when the coupler is emitted: Switch Port3 -> coupler -> HMIB1X LAN1.
-            if (cfg.EmitBx1EtherNetIpDevice)
+            // BX1 EtherNet/IP daisy-chain: Switch Port3 -> coupler -> HMIB1X LAN1.
             {
                 ForceWriteJson(topologyDir, "Wire_Switch1_to_EtherNetIP.json", BuildWireJson(
                     identifier:                 "Switch1_to_EtherNetIP",
@@ -122,15 +121,13 @@ namespace CodeGen.Devices.Core
             }
 
             // A wire whose endpoint UUID is declared by no Equipment makes TopologyManager 500 the entire import.
-            SweepOrphanWires(topologyDir, Path.Combine(topologyDir, "TopologyManager.topologyproj"),
-                result, eaeRoot);
+            SweepOrphanWires(topologyDir, Path.Combine(topologyDir, "TopologyManager.topologyproj"), result);
 
             return result;
         }
 
         // Deletes + de-registers orphan wires. Conservative: if no equipment UUIDs are readable it sweeps nothing.
-        static void SweepOrphanWires(string topologyDir, string topologyProj,
-            EmitResult result, string eaeRoot)
+        static void SweepOrphanWires(string topologyDir, string topologyProj, EmitResult result)
         {
             try
             {
@@ -177,22 +174,20 @@ namespace CodeGen.Devices.Core
             }
         }
 
+        // A registration left behind for a file that is gone is the dangling reference EAE rejects the
+        // whole topology on, so a failure here is reported by the caller rather than swallowed.
         static void UnregisterFromTopologyProj(string topologyProj, string fileName)
         {
             if (!File.Exists(topologyProj)) return;
-            try
-            {
-                var doc = XDocument.Load(topologyProj);
-                var ns = doc.Root!.GetDefaultNamespace();
-                var nodes = doc.Descendants(ns + "None")
-                    .Where(e => string.Equals((string?)e.Attribute("Include"), fileName,
-                        StringComparison.OrdinalIgnoreCase))
-                    .ToList();
-                if (nodes.Count == 0) return;
-                foreach (var n in nodes) n.Remove();
-                doc.Save(topologyProj);
-            }
-            catch { }
+            var doc = XDocument.Load(topologyProj);
+            var ns = doc.Root!.GetDefaultNamespace();
+            var nodes = doc.Descendants(ns + "None")
+                .Where(e => string.Equals((string?)e.Attribute("Include"), fileName,
+                    StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (nodes.Count == 0) return;
+            foreach (var n in nodes) n.Remove();
+            doc.Save(topologyProj);
         }
 
         // Delete before rewrite so a manual import or EAE merge cannot leave hybrid content behind.
