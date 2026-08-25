@@ -25,6 +25,10 @@ namespace CodeGen.Services
 {
     public static class TemplateLibraryDeployer
     {
+        // The EAE library ships MQTT_PUBLISH under a hash-suffixed variant name; stated once so the two
+        // emitters below cannot disagree about which one they instantiate.
+        const string MqttPublishVariant = "MQTT_PUBLISH_115480E69E664F878";
+
         public static DeployResult DeployUniversalArchitecture(GenerationContext ctx)
         {
             var cfg = ctx.Config;
@@ -33,7 +37,7 @@ namespace CodeGen.Services
             if (string.IsNullOrWhiteSpace(libPath) || !Directory.Exists(libPath))
                 throw new DirectoryNotFoundException($"Template Library not found: {libPath}");
 
-            var eaeProjectDir = DeriveEaeProjectDir(cfg);
+            var eaeProjectDir = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
             if (string.IsNullOrWhiteSpace(eaeProjectDir))
                 throw new InvalidOperationException("Cannot determine EAE project directory from syslay path.");
 
@@ -79,31 +83,21 @@ namespace CodeGen.Services
             foreach (var name in TemplateManifest.DeployedLast(ArtefactKind.Cat))
                 DeployArtifact(libPath, "CAT", name, eaeProjectDir, result, isBasic: false, isCat: true);
 
-            if (cfg.DeployBx1IoBroker)
-            {
-                DeployArtifact(libPath, "Basic", "changeEventM262_2", eaeProjectDir, result, isBasic: true);
-                // Force-re-extract so a corrected safe-start type reaches an already-generated tree.
-                if (cfg.Bx1CoverSafeStart)
-                {
-                    var fsFbt = Path.Combine(eaeProjectDir, "IEC61499", "Bx1CoverFailsafe.fbt");
-                    if (File.Exists(fsFbt)) { try { File.Delete(fsFbt); } catch { /* locked -> keep existing */ } }
-                    DeployArtifact(libPath, "Basic", "Bx1CoverFailsafe", eaeProjectDir, result, isBasic: true);
-                }
-                DeployArtifact(libPath, "Composite", "PLC_RW_BX1", eaeProjectDir, result, isBasic: false);
-                // Applies in BOTH bridge modes, so it sits here rather than in the embed path.
-                if (CodeGen.Devices.BX1.Bx1IoBrokerInjector.EnsureInitWordDecodeInComposite(
-                        Path.Combine(eaeProjectDir, "IEC61499", "PLC_RW_BX1.fbt")))
-                    result.PatchesApplied.Add("PLC_RW_BX1: decode the EtherNet/IP input word at INIT so the cover "
-                        + "change detector sees the real bits at power-on, not one scan later.");
-                if (cfg.Bx1BridgeInsideComposite)
-                    CodeGen.Devices.BX1.Bx1IoBrokerInjector.EmbedCoverBridgeInComposite(
-                        Path.Combine(eaeProjectDir, "IEC61499", "PLC_RW_BX1.fbt"));
-                // Forces cover_hr HOME on start only; EAE Clean/STOP still needs the TM3BC ToHome fallback 16#0002.
-                if (cfg.Bx1CoverSafeStart &&
-                    CodeGen.Devices.BX1.Bx1IoBrokerInjector.InjectCoverFailsafeIntoBrokerType(eaeProjectDir))
-                    result.Warnings.Add("[Deploy][BX1] CoverPNP_Hr safe-start gate (Bx1CoverFailsafe) " +
-                        "inserted into PLC_RW_BX1 — cover_hr forced HOME on every start.");
-            }
+            DeployArtifact(libPath, "Basic", "changeEventM262_2", eaeProjectDir, result, isBasic: true);
+            // Force-re-extract so a corrected safe-start type reaches an already-generated tree.
+            var fsFbt = Path.Combine(eaeProjectDir, "IEC61499", "Bx1CoverFailsafe.fbt");
+            if (File.Exists(fsFbt)) { try { File.Delete(fsFbt); } catch { /* locked -> keep existing */ } }
+            DeployArtifact(libPath, "Basic", "Bx1CoverFailsafe", eaeProjectDir, result, isBasic: true);
+            DeployArtifact(libPath, "Composite", "PLC_RW_BX1", eaeProjectDir, result, isBasic: false);
+            var brokerFbt = Path.Combine(eaeProjectDir, "IEC61499", "PLC_RW_BX1.fbt");
+            if (CodeGen.Devices.BX1.Bx1IoBrokerInjector.EnsureInitWordDecodeInComposite(brokerFbt))
+                result.PatchesApplied.Add("PLC_RW_BX1: decode the EtherNet/IP input word at INIT so the cover "
+                    + "change detector sees the real bits at power-on, not one scan later.");
+            CodeGen.Devices.BX1.Bx1IoBrokerInjector.EmbedCoverBridgeInComposite(brokerFbt);
+            // Forces cover_hr HOME on start only; EAE Clean/STOP still needs the TM3BC ToHome fallback 16#0002.
+            if (CodeGen.Devices.BX1.Bx1IoBrokerInjector.InjectCoverFailsafeIntoBrokerType(eaeProjectDir))
+                result.Warnings.Add("[Deploy][BX1] CoverPNP_Hr safe-start gate (Bx1CoverFailsafe) " +
+                    "inserted into PLC_RW_BX1 — cover_hr forced HOME on every start.");
 
             // Without the broker type EAE cannot instantiate RevPI_IO; pure M262 mode never deploys it.
             if (ctx.Profile.PartialRevPi)
@@ -131,12 +125,11 @@ namespace CodeGen.Services
             PatchActuatorModeInitialValue(eaeProjectDir, "FiveStateActuator.fbt", result);
             PatchActuatorModeInitialValue(eaeProjectDir, "SevenStateCentreHomeActuator.fbt", result);
             PatchSwivelStartup(eaeProjectDir, ctx, result);
-            PatchSwivelAtHomeCoilClear(eaeProjectDir, clearCoils: true, result);
+            PatchSwivelAtHomeCoilClear(eaeProjectDir, result);
             // Runs LAST: the directional brake rewrites the whole atHome algorithm.
-            PatchSwivelBrakeHome(eaeProjectDir, true,
-                GenerationConfig.Current.BearingPnpHomeBrakeMs, result);
-            PatchSwivelRelaxWorkLatch(eaeProjectDir, relax: true, result);
-            PatchSwivelInterlockEventCarriesStateVal(eaeProjectDir, add: true, result);
+            PatchSwivelBrakeHome(eaeProjectDir, GenerationConfig.Current.BearingPnpHomeBrakeMs, result);
+            PatchSwivelRelaxWorkLatch(eaeProjectDir, result);
+            PatchSwivelInterlockEventCarriesStateVal(eaeProjectDir, result);
             PatchRingClearCommandLatchOnInit(eaeProjectDir, result);
             PatchRingReportClearDest(eaeProjectDir, result);
             PatchRingCommandCnfOnlyOnDestination(eaeProjectDir, result);
@@ -160,10 +153,8 @@ namespace CodeGen.Services
 
             // Both actuator CATs and the shared CommonInterlockEvaluator flip to/from the struct TOGETHER.
             // The guard aborts on a stale scalar/struct mix, which beats shipping a tree that fails EAE Build.
-            bool interlockStruct = InterlockConfig.Current.UseStruct;
-            bool targetStruct = InterlockConfig.Current.UseTargetStruct;
-            ApplyInterlockNormalizers(cfg, eaeProjectDir, interlockStruct, targetStruct, result);
-            AssertInterlockInterfaceConsistent(cfg, eaeProjectDir, interlockStruct, targetStruct, result);
+            ApplyInterlockNormalizers(cfg, eaeProjectDir, ctx.InterlockCapacity, result);
+            AssertInterlockInterfaceConsistent(cfg, eaeProjectDir, ctx.InterlockCapacity, result);
 
             if (cfg.UseTelemetryCat)
             {
@@ -187,19 +178,22 @@ namespace CodeGen.Services
             EnsureSensorBoolRefreshPath(eaeProjectDir, result);
             NormalizeFiveStateSimSensorSource(eaeProjectDir, result);
             NormalizeFiveStateFaultEnables(eaeProjectDir, result);
-            bool recipeStruct = cfg.UseRecipeStruct;
-            if (recipeStruct)
-                DeployRecipeStepDatatype(cfg, eaeProjectDir, result);
-            NormalizeProcess1RecipeArrays(eaeProjectDir, recipeStruct, result);
+            DeployRecipeStepDatatype(cfg, eaeProjectDir, result);
+            NormalizeProcess1RecipeArrays(eaeProjectDir, result);
             // Required, not best-effort: EAE ignores the syslay's rdy_id parameter unless the type declares the pin.
             ProcessRuntimeTemplatePatcher.PromoteProcessPhaseReceiverSlot(eaeProjectDir);
-            NormalizeProcessRuntimeRecipeArrays(eaeProjectDir, recipeStruct, result);
+            NormalizeProcessRuntimeRecipeArrays(eaeProjectDir, result);
             NormalizeProcessEngineDebugWatch(eaeProjectDir, result);
 
             CodeGen.Hmi.HmiCatCfgEmitter.EmitAll(eaeProjectDir, cfg.TemplateLibraryPath);
             RegisterInDfbproj(eaeProjectDir, result);
 
             VerifyArraySizeConsistency(eaeProjectDir, result);
+
+            // NOTE: M262Backend emits this same device, topology and hardware config in the backend pass,
+            // so there are two owners for one artefact. Collapsing onto the backend was tried and REVERTED:
+            // emitting later moves the M262 entries in IEC61499.dfbproj, which is a generated-byte change.
+            // Removing it needs the dfbproj registration to be order-independent first.
 
             // Trust-preservation guard: when an M262 sysdev exists, device-layer writes are skipped; application content still runs.
             bool m262DeviceExists = M262SysdevEmitter.M262SysdevAlreadyExists(cfg);
@@ -211,7 +205,7 @@ namespace CodeGen.Services
                 result.SysdevPath = sysdev.SysdevPath;
                 result.SystemFilePath = sysdev.SystemFilePath;
                 result.MappingsAdded = sysdev.MappingsAdded;
-                sysdevId = ReadSysdevId(sysdev.SysdevPath);
+                sysdevId = EaeProjectLayout.ReadSysdevId(sysdev.SysdevPath);
                 if (sysdev.DevicePreserved)
                 {
                     MapperLogger.Info(
@@ -394,7 +388,6 @@ namespace CodeGen.Services
                     new System.Xml.Linq.XAttribute("Namespace", "Main"));
 
                 // The hash names a generic variant, and its numbered channel ports exist only once CNTX:=1 is set.
-                const string MqttPublishVariant = "MQTT_PUBLISH_115480E69E664F878";
                 var pubFb = new System.Xml.Linq.XElement(ns + "FB",
                     new System.Xml.Linq.XAttribute("ID", pubId),
                     new System.Xml.Linq.XAttribute("Name", "MqttPub"),
@@ -526,7 +519,6 @@ namespace CodeGen.Services
                     new System.Xml.Linq.XAttribute("y", "3200"),
                     new System.Xml.Linq.XAttribute("Namespace", "Main"));
 
-                const string MqttPublishVariant = "MQTT_PUBLISH_115480E69E664F878";
                 var pubFb = new System.Xml.Linq.XElement(ns + "FB",
                     new System.Xml.Linq.XAttribute("ID", pubId),
                     new System.Xml.Linq.XAttribute("Name", "MqttPub"),
