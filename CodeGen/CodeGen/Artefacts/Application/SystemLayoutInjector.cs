@@ -64,110 +64,49 @@ namespace CodeGen.Translation
             // stay above the component id space, so no Wait1Id collides with one. A slot may still coincide
             // with a Feed component id (10 == Shaft_Hr): harmless once the rings merge, because Feed only
             // WAITs there and its CMD states 1/3 are values Shaft_Hr never reports.
-            int processId = ctx.Slots[contents.Process.Name];
-
-
-
-
-            // No top-level PLC_Start FB: Area_CAT/Station_CAT each hold their own plcStart; an external one double-bootstraps (EAE rejects).
+            // No top-level PLC_Start FB: Area_CAT/Station_CAT each hold their own plcStart; an external
+            // one double-bootstraps and EAE rejects it.
 
             // Each resource's area/station stack, as layout.yml names it and the manifest types it.
             EmitInfrastructure(builder, ctx, role => role != "terminator" && role != "areaTerminator");
 
-            // Instance name: Instance_Name_Overrides sheet, else suffix-stripping convention, else "Process1".
-            var overrides = (config != null && !string.IsNullOrWhiteSpace(config.MappingRulesPath))
-                ? InstanceNameOverridesLoader.Load(config.MappingRulesPath)
-                : new InstanceNameOverridesLoader.Overrides();
-
-            var processInstanceName = InstanceNameResolver.Resolve(contents.Process,
-                overrides.ByComponentId, overrides.ByVueOneName);
-            if (string.IsNullOrWhiteSpace(processInstanceName)) processInstanceName = "Process1";
-
-            // ordinal -> phase name per process, emitted beside the project so a telemetry subscriber can
-            // render the number it receives. Collected as each process is built; written once at the end.
+            // Instance names come from the plan, so the layout, the resource plan and every wiring pass
+            // name the same FB. ordinal -> phase name per process is collected as each one is built and
+            // written beside the project once at the end.
             var phaseNames = new Dictionary<string, IReadOnlyDictionary<int, string>>(StringComparer.Ordinal);
 
-            var (processOuter, processNested, processRecipe) = BuildProcessFbParameters(
-                ctx, contents.Process, processInstanceName, processId, withRecipe: true);
-            if (processRecipe != null) phaseNames[processInstanceName] = processRecipe.ProcessPhaseNames;
-
-            // EAE rejects a Parameter not declared as an InputVar on the FBType (ERR_MEMBER_VAR_NOTFOUND).
-
-            // SAFETY: every actuator with a work command (CmdState=1) must also have a return-to-home (CmdState=3).
-            if (processRecipe != null)
+            // Every process the roster placed, emitted on whichever resource owns it. One loop over the
+            // declared resources: a renamed process, or a second one on any target, is a roster row.
+            var processesOn = new Dictionary<PlcAssignment, List<string>>();
+            foreach (var resource in ctx.Profile.Layout.Resources)
             {
-                var adv = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                var ret = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                for (int i = 0; i < processRecipe.StepType.Count; i++)
+                var placed = new List<string>();
+                foreach (var proc in ctx.ProcessesOn(resource.Plc))
                 {
-                    if (processRecipe.StepType[i] != 1) continue;
-                    var t = (processRecipe.CmdTargetName[i] ?? string.Empty).Trim();
-                    if (t.Length == 0) continue;
-                    // A process-announce CMD (a process publishing its own model-state, whether onto its own
-                    // process_id slot or across the phase transport) is not an actuator move; the retract
-                    // check applies only to real actuators.
-                    if (string.Equals(t, Process.Recipes.ProcessPhaseTransport.CommandToken, StringComparison.OrdinalIgnoreCase)) continue;
-                    if (ctx.Twin.ByName(t) is { IsProcess: true }) continue;
-                    if (processRecipe.CmdStateArr[i] == 1) adv.Add(t);
-                    else if (processRecipe.CmdStateArr[i] == 3) ret.Add(t);
+                    var instance = ctx.InstanceName(proc.Name);
+                    var (outer, recipe) = BuildProcessFbParameters(
+                        ctx, proc, instance, ctx.Slots[proc.Name], withRecipe: true);
+                    var at = ctx.Roster.Get(proc.Name);
+                    builder.AddFB(FBIdGenerator.GenerateFBId(proc.ComponentID), instance,
+                        TemplateManifest.ProcessType.Name, "Main", at?.X ?? 0, at?.Y ?? 0, outer);
+                    placed.Add(instance);
+                    if (recipe == null) continue;
+                    phaseNames[instance] = recipe.ProcessPhaseNames;
+                    AssertNothingStranded(ctx, recipe);
+                    ReportStation2Recipe(report, instance, recipe, resource.Label);
+                    AppendProcessRecipeComment(builder, instance, recipe);
+                    if (!string.IsNullOrWhiteSpace(recipe.OrderingSummary))
+                        report.Missing.Add($"recipe ordering ({instance}): {recipe.OrderingSummary}");
                 }
-                // Advancing and returning need not be the same process. Command ownership is declared on the
-                // actuator's own transitions, so a transfer that carries a part across stations is legitimately
-                // advanced by the upstream process and returned by the downstream one -- holding the part in
-                // between is the point. Stranded means NO process in the model commands it home.
-                var strandedAct = adv
-                    .Where(a => !ret.Contains(a) &&
-                                CodeGen.Translation.Process.Recipes.ProcessCompiler
-                                    .ProcessesCommandingHome(a, ctx.Twin, ctx.RecipeInputs).Count == 0)
-                    .ToList();
-                if (strandedAct.Count > 0)
-                    throw new InvalidOperationException(
-                        $"[Recipe] Actuator '{strandedAct[0]}' has no return-to-home cmd step" +
-                        (strandedAct.Count > 1
-                            ? $" ({strandedAct.Count} affected: {string.Join(", ", strandedAct)})"
-                            : string.Empty) +
-                        " — refusing to generate code that strands an actuator at work. " +
-                        "(no process state in the model owns a movement that drives it home.)");
+                processesOn[resource.Plc] = placed;
             }
 
-            builder.AddFB(FBIdGenerator.GenerateFBId(contents.Process.ComponentID),
-                processInstanceName, "Process1_Generic", "Main", 3360, 1460,
-                processOuter, processNested);
+            if (processesOn.Values.All(p => p.Count == 0))
+                throw new InvalidOperationException(
+                    "[Recipe] the roster places no Process on any resource, so there is nothing to run. " +
+                    "Every process the twin declares needs a target: pin it in layout.yml, or let it be " +
+                    "anchored by a component it commands.");
 
-            // Station 2's Process FBs are the ones the roster allocates to M580, in roster order. They
-            // reuse the SAME global sensors-first `contents`, so every Wait1Id matches the global FB id.
-            var crossProcInstances = new List<string> { processInstanceName };
-            var station2ProcFbs = new List<string>();
-            foreach (var proc in ctx.ProcessesOn(PlcAssignment.M580))
-            {
-                var procName = InstanceNameResolver.Resolve(proc,
-                    overrides.ByComponentId, overrides.ByVueOneName);
-                var (pOuter, pNested, pRecipe) = BuildProcessFbParameters(
-                    ctx, proc, procName, ctx.Slots[proc.Name], withRecipe: true);
-                builder.AddFB(FBIdGenerator.GenerateFBId(proc.ComponentID),
-                    procName, "Process1_Generic", "Main", 0, 0, pOuter, pNested);
-                crossProcInstances.Add(procName);
-                station2ProcFbs.Add(procName);
-                if (pRecipe != null) phaseNames[procName] = pRecipe.ProcessPhaseNames;
-                ReportStation2Recipe(report, procName, pRecipe, "M580");
-                AppendProcessRecipeComment(builder, procName, pRecipe);
-            }
-            if (station2ProcFbs.Count == 0)
-                report.Missing.Add(
-                    "[Recipe] the roster allocates no Process to M580 — " +
-                    "Station 2 will have actuators but no Process FB.");
-
-
-            if (processRecipe != null &&
-                !string.IsNullOrWhiteSpace(processRecipe.OrderingSummary))
-            {
-                builder.AppendTopComment(
-                    " Recipe step ordering (serialised — collision-safe; each actuator " +
-                    "returns home before any subsequent actuator advances; auto-retract " +
-                    "is nested in place, not batched at the end): " +
-                    processRecipe.OrderingSummary);
-                report.Missing.Add($"recipe ordering: {processRecipe.OrderingSummary}");
-            }
 
             // The planned slots, keyed by ComponentID: interlock RuleSourceID and the engine's Wait1Id
             // are the same number because both read the one allocation.
@@ -191,8 +130,7 @@ namespace CodeGen.Translation
                 var actuator = contents.Actuators[i];
                 int assignedId = ctx.Slots[actuator.Name.Trim()];
                 var fbType = ctx.CatTypes[actuator.Name.Trim()];
-                var displayName = InstanceNameResolver.Resolve(actuator,
-                    overrides.ByComponentId, overrides.ByVueOneName);
+                var displayName = ctx.InstanceName(actuator.Name);
                 var actPlc = plcIndex.ResolveComponent(actuator.Name, bindings, ctx.Allocation);
 
                 // The CAT declares which parameter groups its instance carries; the plan decided every
@@ -247,8 +185,7 @@ namespace CodeGen.Translation
                 int senCol = perPlcSensorCount[senPlc]++;
                 var (sX, sY) = PlcZonePosition(ctx.Layout, senPlc, senCol, LayoutRow.Sensor);
 
-                var senDisplayName = InstanceNameResolver.Resolve(sensor,
-                    overrides.ByComponentId, overrides.ByVueOneName);
+                var senDisplayName = ctx.InstanceName(sensor.Name);
 
                 builder.AddFB(FBIdGenerator.GenerateFBId(sensor.ComponentID),
                     senDisplayName, "Sensor_Bool_CAT", "Main",
@@ -381,9 +318,9 @@ namespace CodeGen.Translation
             }
 
 
-            RingWiringPlanner.BuildFeedStationWiring(builder, ctx);
-            RingWiringPlanner.BuildStation2Wiring(builder, ctx, station2ProcFbs);
-            RingWiringPlanner.BuildBx1Wiring(builder, ctx);
+            RingWiringPlanner.BuildFeedStationWiring(builder, ctx, processesOn[PlcAssignment.M262]);
+            RingWiringPlanner.BuildStation2Wiring(builder, ctx, processesOn[PlcAssignment.M580]);
+            RingWiringPlanner.BuildBx1Wiring(builder, ctx, processesOn[PlcAssignment.BX1]);
 
             // Cross-controller process-phase transport, one link per model-derived handoff whose producer and
             // consumer sit on different rings. CrossReference=True tells EAE to auto-generate the UDP proxy;
@@ -393,11 +330,11 @@ namespace CodeGen.Translation
             // single input group cannot carry, so every link here drives one input from one source.
             foreach (var link in handoffPlan.CrossControllerLinks())
             {
-                var producerFb = ResolveProcessFbName(link.ProducerName, ctx.Twin, overrides, contents.Process, processInstanceName)
+                var producerFb = ResolveProcessFbName(link.ProducerName, ctx)
                     ?? throw new InvalidOperationException(
                         $"[Handoff] producer process '{link.ProducerName}' (condition '{link.ConditionName}' on " +
                         $"'{link.ConsumerName}') has no emitted FB, so its phase has no transport.");
-                var consumerFb = ResolveProcessFbName(link.ConsumerName, ctx.Twin, overrides, contents.Process, processInstanceName)
+                var consumerFb = ResolveProcessFbName(link.ConsumerName, ctx)
                     ?? throw new InvalidOperationException(
                         $"[Handoff] consumer process '{link.ConsumerName}' has no emitted FB to receive " +
                         $"'{link.ProducerName}' phases.");
@@ -446,7 +383,7 @@ namespace CodeGen.Translation
         // Rules the plan decided for this actuator; a CAT with no rule interface has none.
         private static InterlockPlan Interlock(GenerationContext ctx, VueOneComponent actuator) =>
             ctx.Interlocks.TryGetValue((actuator.Name ?? string.Empty).Trim(), out var p)
-                ? p : InterlockPlan.Empty(InterlockConfig.Current.RuleArraySize);
+                ? p : InterlockPlan.Empty;
 
         // Placeholder placement; CanonicalLayout rewrites rostered names to their canvas coordinate post-syslay.
         private static (int X, int Y) PlcZonePosition(
@@ -492,7 +429,7 @@ namespace CodeGen.Translation
                 p["faultTimeoutWork1"] = Iec61499Literal.FormatTimeMs(protocol.CrossingFaultTimeoutMs);
                 p["faultTimeoutWork2"] = Iec61499Literal.FormatTimeMs(protocol.CrossingFaultTimeoutMs);
             }
-            if (protocol?.Target is { Count: > 0 }) InterlockEmitter.Write(p, Interlock(ctx, actuator));
+            if (protocol?.Target is { Count: > 0 }) InterlockEmitter.Write(p, Interlock(ctx, actuator), ctx.InterlockCapacity);
             return p;
         }
 
@@ -522,53 +459,58 @@ namespace CodeGen.Translation
             return ids;
         }
 
-        // Does any OTHER component's transition guard observe one of these states? That is what makes the
-        // actuator's position sensed rather than timed.
-        public static bool AnyComponentReferencesStates(
-            CodeGen.Domain.Twin.TwinModel twin,
-            VueOneComponent actuator,
-            HashSet<string> stateIds) =>
-            stateIds.Count > 0 && twin.Components
-                .Where(c => !string.Equals(c.Id, actuator.ComponentID, StringComparison.OrdinalIgnoreCase))
-                .SelectMany(c => c.States).SelectMany(s => s.Transitions).SelectMany(t => t.Leaves)
-                .Any(r => stateIds.Contains(r.State.Id));
-
-
-        private static readonly HashSet<string> UniversalCatTypes = new(StringComparer.Ordinal)
+        // SAFETY, for EVERY process: an actuator this recipe drives to work must be driven home by some
+        // process in the model. Advancing and returning need not be the same one - a transfer that carries
+        // a part across stations is advanced upstream and returned downstream, and holding it in between
+        // is the point - so stranded means NO process commands it home.
+        private static void AssertNothingStranded(GenerationContext ctx, RecipeArrays recipe)
         {
-            "Five_State_Actuator_CAT", "Sensor_Bool_CAT", "Process1_Generic",
-            "Station_CAT", "Area_CAT", "CaSAdptrTerminator", "Station", "Area"
-        };
-
-        // Stripped on cleanup: PLC_RW_M262 is re-emitted every run, so a stale instance would double-declare it on the sysres.
-        private static readonly HashSet<string> LegacyIoBridgeTypes = new(StringComparer.Ordinal)
-        {
-            "PLC_RW_M262"
-        };
-
-        // Twin process name -> the FB instance name emitted for it, so handoff wiring is addressed by model name.
-        private static string? ResolveProcessFbName(
-            string processName, CodeGen.Domain.Twin.TwinModel twin,
-            InstanceNameOverridesLoader.Overrides overrides,
-            VueOneComponent? feedProcess, string feedProcessFbName)
-        {
-            if (twin.ByName(processName) is not { IsProcess: true } resolved) return null;
-            var c = resolved.Source;
-            if (feedProcess != null && ReferenceEquals(c, feedProcess)) return feedProcessFbName;
-            var n = InstanceNameResolver.Resolve(c, overrides.ByComponentId, overrides.ByVueOneName);
-            return string.IsNullOrWhiteSpace(n) ? null : n;
+            var advanced = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var returned = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < recipe.StepType.Count; i++)
+            {
+                if (recipe.StepType[i] != Process.StepType.Cmd) continue;
+                var target = (recipe.CmdTargetName[i] ?? string.Empty).Trim();
+                if (target.Length == 0) continue;
+                // A process announcing its own phase is not an actuator move.
+                if (string.Equals(target, Process.Recipes.ProcessPhaseTransport.CommandToken,
+                        StringComparison.OrdinalIgnoreCase)) continue;
+                if (ctx.Twin.ByName(target) is { IsProcess: true }) continue;
+                // A CAT that declares no command protocol folds its whole move into one handshake, so it
+                // has no advance to pair with a return. Asked of the DECLARATION, never of the name.
+                if (!ctx.CatTypes.TryGetValue(target, out var cat) ||
+                    TemplateManifest.ProtocolOrNull(cat)?.Command is not { Count: > 0 }) continue;
+                if (recipe.CmdStateArr[i] == 1) advanced.Add(target);
+                else if (recipe.CmdStateArr[i] == 3) returned.Add(target);
+            }
+            var stranded = advanced
+                .Where(a => !returned.Contains(a) &&
+                            Process.Recipes.ProcessCompiler
+                                .ProcessesCommandingHome(a, ctx.Twin, ctx.RecipeInputs).Count == 0)
+                .OrderBy(a => a, StringComparer.Ordinal).ToList();
+            if (stranded.Count > 0)
+                throw new InvalidOperationException(
+                    $"[Recipe] Actuator '{stranded[0]}' has no return-to-home cmd step" +
+                    (stranded.Count > 1
+                        ? $" ({stranded.Count} affected: {string.Join(", ", stranded)})"
+                        : string.Empty) +
+                    " - refusing to generate code that strands an actuator at work. " +
+                    "(no process state in the model owns a movement that drives it home.)");
         }
 
-        public static (Dictionary<string, string> Outer,
-                       IDictionary<string, IDictionary<string, string>> Nested,
-                       RecipeArrays? Recipe)
+        private static string? ResolveProcessFbName(string processName, GenerationContext ctx) =>
+            ctx.Twin.ByName(processName) is { IsProcess: true } resolved
+                ? ctx.InstanceName(resolved.Name)
+                : null;
+        
+
+        public static (Dictionary<string, string> Outer, RecipeArrays? Recipe)
             BuildProcessFbParameters(GenerationContext ctx, VueOneComponent process,
                 string processName, int processId, bool withRecipe)
         {
             // Recipe arrays travel as Process1_Generic Parameter values; withRecipe=false emits only the
             // two scalars and returns a null Recipe.
             var config = ctx.Config;
-            bool useRecipeStruct = config.UseRecipeStruct;
             bool emitProcessTelemetry = config.MqttPublishEnabled;
             int? receiverSlot = ctx.Handoffs.ReceiverSlotOf(process.Name);
             var outer = new Dictionary<string, string>
@@ -588,30 +530,19 @@ namespace CodeGen.Translation
             if (withRecipe)
             {
                 recipe = ctx.Recipes[process.Name?.Trim() ?? string.Empty];
-                if (useRecipeStruct)
-                {
-                    // 6 arrays collapse into one Recipe struct; the deployer normalizers reshape the FBType to match under the same flag (else ERR_MEMBER_VAR_NOTFOUND).
+                                    // One Recipe struct array; the deployer normalizers reshape the FBType to match (else ERR_MEMBER_VAR_NOTFOUND).
                     outer["Recipe"] = Iec61499Literal.FormatRecipeTable(
                         recipe.StepType, recipe.CmdTargetName, recipe.CmdStateArr,
-                        recipe.Wait1Id, recipe.Wait1State, recipe.NextStep);
-                }
-                else
-                {
-                    outer["StepType"]      = Iec61499Literal.FormatIntArray(recipe.StepType);
-                    outer["CmdTargetName"] = Iec61499Literal.FormatStringArray(recipe.CmdTargetName);
-                    outer["CmdStateArr"]   = Iec61499Literal.FormatIntArray(recipe.CmdStateArr);
-                    outer["Wait1Id"]       = Iec61499Literal.FormatIntArray(recipe.Wait1Id);
-                    outer["Wait1State"]    = Iec61499Literal.FormatIntArray(recipe.Wait1State);
-                    outer["NextStep"]      = Iec61499Literal.FormatIntArray(recipe.NextStep);
-                }
+                        recipe.Wait1Id, recipe.Wait1State, recipe.NextStep,
+                        recipe.AltCount, recipe.TermCount);
+                
                 // Telemetry-only companion to the control arrays: row -> VueOne State_Number. Emitted
                 // only when MQTT publishing is on, so a telemetry-off tree carries no stale parameter.
                 if (emitProcessTelemetry)
                     outer["ProcessStateByRow"] = Iec61499Literal.FormatIntArray(recipe.ProcessStateByRow);
             }
 
-            var nested = new Dictionary<string, IDictionary<string, string>>(StringComparer.Ordinal);
-            return (outer, nested, recipe);
+            return (outer, recipe);
         }
 
         // Renders the planned infrastructure of every declared resource, in declaration order. A
