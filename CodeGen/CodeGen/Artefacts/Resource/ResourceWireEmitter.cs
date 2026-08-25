@@ -187,8 +187,8 @@ namespace CodeGen.Devices.Core
                     .Select(Nm).Where(s => s.Length > 0).ToList();
 
                 var processNames = new List<string>();
-                if (Present(plan.ProcessFb, byName))
-                    processNames.Add(plan.ProcessFb!);
+                foreach (var planned in plan.Processes)
+                    if (Present(planned, byName)) processNames.Add(planned);
                 foreach (var fb in fbNet.Elements(ns + "FB"))
                 {
                     var nm = (string?)fb.Attribute("Name") ?? string.Empty;
