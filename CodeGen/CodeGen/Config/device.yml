@@ -92,6 +92,17 @@ bootSequence:
       - { name: Prio,  value: "10" }
       - { name: Delay, value: "T#1000ms" }
 
+# The runtime bring-up every resource emits, before any component wire and IN THIS ORDER - the emitted
+# order is part of the artefact, so this is a list. Each endpoint is <role>.<PORT>, where the role is one
+# the bootSequence above declares or START, the resource's own cold/warm/online-change entry. Naming
+# roles rather than instances is what makes this protocol: it does not vary per target, and a role no
+# target declares is refused before a plan exists, so before anything is written.
+bringUp:
+  - { from: START.COLD,         to: FB1.INIT }
+  - { from: START.WARM,         to: FB1.INIT }
+  - { from: START.ONLINECHANGE, to: FB1.OC_RETRIGGER }
+  - { from: FB2.FIRST_INIT,     to: FB2.ACK_FIRST }
+
 # Per-target EAE resource and device identity. These are DEPLOYMENT facts an engineer may edit: renaming
 # a resource, or disambiguating two devices that share a Type, is not a code change. What each backend
 # DOES -- whether it hosts the Feed station, whether its canvas is device-local -- stays in C# beside the
