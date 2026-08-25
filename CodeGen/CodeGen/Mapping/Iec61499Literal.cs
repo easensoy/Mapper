@@ -22,22 +22,29 @@ namespace CodeGen.Mapping
         }
 
         // InterlockRule array-of-struct literal, e.g. [(FromState:=2, ToState:=4, SourceID:=6,
-        // BlockedState:=2), ...]. Emits every slot; RuleCount bounds the evaluator so trailing zero-rows unread.
+        // BlockedState:=2, TermCount:=1), ...]. Emits every slot; RuleCount bounds the evaluator so
+        // trailing zero-rows unread. TermCount>=1 heads an alternative, 0 continues the one above it.
         public static string FormatRuleTable(
             IReadOnlyList<int> from, IReadOnlyList<int> to,
-            IReadOnlyList<int> src, IReadOnlyList<int> blk)
+            IReadOnlyList<int> src, IReadOnlyList<int> blk, IReadOnlyList<int> terms, int capacity)
         {
+            if (from.Count > capacity)
+                throw new ArgumentOutOfRangeException(nameof(capacity),
+                    $"{from.Count} rules will not fit a table declared for {capacity}.");
             var elems = new List<string>();
-            for (int i = 0; i < from.Count; i++)
-                elems.Add($"(FromState:={from[i]}, ToState:={to[i]}, SourceID:={src[i]}, BlockedState:={blk[i]})");
+            for (int i = 0; i < capacity; i++)
+                elems.Add(i < from.Count
+                    ? $"(FromState:={from[i]}, ToState:={to[i]}, SourceID:={src[i]}, " +
+                      $"BlockedState:={blk[i]}, TermCount:={terms[i]})"
+                    : "(FromState:=0, ToState:=0, SourceID:=0, BlockedState:=0, TermCount:=0)");
             return "[" + string.Join(", ", elems) + "]";
         }
 
         // InterlockTable nested-struct literal: (Count:=N, Rules:=[(FromState:=…, …), …]).
         public static string FormatInterlockTable(
             IReadOnlyList<int> from, IReadOnlyList<int> to,
-            IReadOnlyList<int> src, IReadOnlyList<int> blk, int count)
-            => $"(Count:={count}, Rules:={FormatRuleTable(from, to, src, blk)})";
+            IReadOnlyList<int> src, IReadOnlyList<int> blk, IReadOnlyList<int> terms, int capacity)
+            => $"(Count:={from.Count}, Rules:={FormatRuleTable(from, to, src, blk, terms, capacity)})";
 
         // TargetStates struct literal: (Work1:=N, Work2:=N, Home:=N).
         public static string FormatTargetStates(int work1, int work2, int home)
@@ -53,21 +60,15 @@ namespace CodeGen.Mapping
 
         // STRING array as an EAE square-bracket literal of single-quoted entries, e.g.
         // ['Feeder', '', 'PartInHopper']. Internal quotes doubled (IEC 61131-3 STRING escaping).
-        public static string FormatStringArray(IEnumerable<string> values)
-        {
-            var formatted = string.Join(", ",
-                values.Select(v => "'" + (v ?? string.Empty).Replace("'", "''") + "'"));
-            return $"[{formatted}]";
-        }
-
-
         // RecipeStep array-of-struct literal (mixed INT + STRING), e.g. [(StepType:=2,
-        // CmdTargetName:='feeder', CmdStateArr:=1, Wait1Id:=0, Wait1State:=0, NextStep:=1), ...]. Emits
+        // CmdTargetName:='feeder', CmdStateArr:=1, Wait1Id:=0, Wait1State:=0, NextStep:=1,
+        // AltCount:=1, TermCount:=1), ...]. Emits
         // every row; STRING member single-quoted, internal quotes doubled (IEC 61131-3).
         public static string FormatRecipeTable(
             IReadOnlyList<int> stepType, IReadOnlyList<string> cmdTargetName,
             IReadOnlyList<int> cmdStateArr, IReadOnlyList<int> wait1Id,
-            IReadOnlyList<int> wait1State, IReadOnlyList<int> nextStep)
+            IReadOnlyList<int> wait1State, IReadOnlyList<int> nextStep,
+            IReadOnlyList<int> altCount, IReadOnlyList<int> termCount)
         {
             int n = stepType.Count;
             var elems = new List<string>();
@@ -77,7 +78,8 @@ namespace CodeGen.Mapping
                 elems.Add(
                     $"(StepType:={stepType[i]}, CmdTargetName:={name}, " +
                     $"CmdStateArr:={cmdStateArr[i]}, Wait1Id:={wait1Id[i]}, " +
-                    $"Wait1State:={wait1State[i]}, NextStep:={nextStep[i]})");
+                    $"Wait1State:={wait1State[i]}, NextStep:={nextStep[i]}, " +
+                    $"AltCount:={altCount[i]}, TermCount:={termCount[i]})");
             }
             return "[" + string.Join(", ", elems) + "]";
         }
