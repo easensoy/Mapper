@@ -25,11 +25,7 @@ namespace CodeGen.Configuration
 
         public SemanticRoles Roles { get; set; } = new();
 
-        public FeedbackMode? FeedbackFor(string? component) =>
-            FeedbackModes.FirstOrDefault(f =>
-                string.Equals(f.Component, component, System.StringComparison.OrdinalIgnoreCase));
-
-        public static RigCatalog Current => RigCatalogLoader.Catalog;
+public static RigCatalog Current => RigCatalogLoader.Catalog;
 
     }
 
@@ -108,6 +104,7 @@ namespace CodeGen.Configuration
         public Dictionary<string, int> Target { get; set; } = new(System.StringComparer.OrdinalIgnoreCase);
         public int CrossingFaultTimeoutMs { get; set; }
         public RawStateRange? RawStateRange { get; set; }
+        public List<string> EnforcedTargets { get; set; } = new();
     }
 
     // The values one CAT's core can publish as CurrentRawState. Declared only by a CAT whose core
