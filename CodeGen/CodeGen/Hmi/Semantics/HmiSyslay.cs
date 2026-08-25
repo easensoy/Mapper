@@ -106,6 +106,18 @@ namespace CodeGen.Hmi
         internal string? Resolve(string observerInstance, int slot) =>
             _owner.TryGetValue((_ringOf(observerInstance), slot), out var owner) ? owner : null;
 
+        // A cross-ring reference - the handshake case, where a consumer waits on a slot another
+        // ring writes and a transport carries it across. Answered ONLY when exactly one instance
+        // in the whole plan owns that number: the moment two rings reuse it (slot 6 is Transfer
+        // on Feed and TopCoverSensor on assembly) the answer would be a coin toss, and a
+        // confidently wrong component name is worse than none.
+        internal string? ResolveAnywhere(int slot)
+        {
+            var owners = _owner.Where(kv => kv.Key.Item2 == slot)
+                .Select(kv => kv.Value).Distinct(StringComparer.Ordinal).ToList();
+            return owners.Count == 1 ? owners[0] : null;
+        }
+
         internal static HmiSlotIndex Build(Func<string, string> ringOf, IReadOnlyDictionary<string, int> slots)
         {
             var owner = new Dictionary<(string, int), string>();
