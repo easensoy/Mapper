@@ -370,7 +370,7 @@ namespace MapperUI
         static CodeGen.Configuration.CatProtocolDeclaration? Protocol(VueOneComponent component,
             CodeGen.Translation.GenerationContext? plan) =>
             plan != null && plan.CatTypes.TryGetValue((component.Name ?? string.Empty).Trim(), out var cat)
-                ? TemplateManifest.ProtocolOrNull(cat)
+                ? plan.Manifest.ProtocolOrNull(cat)
                 : null;
 
         // Where the plan runs this process. A name-recognition table here would report the twin's own
