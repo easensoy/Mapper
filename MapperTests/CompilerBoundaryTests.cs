@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -74,6 +74,29 @@ namespace MapperTests
             }
             Assert.True(breaches.Count == 0,
                 "the semantic layers reference the backend or the UI:" +
+                Environment.NewLine + "  - " + string.Join(Environment.NewLine + "  - ", breaches.Distinct()));
+        }
+
+        // Mapping answers what a TARGET is, so it may name the backend INTERFACE - but constructing a
+        // concrete controller is the composition root's job. Without this, adding a controller means
+        // editing a table in the middle of the compiler instead of one list at the entry point.
+        [Fact]
+        public void Mapping_names_the_backend_contract_but_never_constructs_a_controller()
+        {
+            var dir = Path.Combine(RepoRoot(), "CodeGen", "CodeGen", "Mapping");
+            Assert.True(Directory.Exists(dir), $"the Mapping layer is missing: {dir}");
+
+            var breaches = new List<string>();
+            foreach (var file in Directory.EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories))
+            {
+                var code = CodeOf(file);
+                foreach (Match m in Regex.Matches(code, @"\bnew\s+(?:CodeGen\.)?Devices\.[\w.]+\("))
+                    breaches.Add($"{Path.GetFileName(file)} -> {m.Value.Trim()}");
+                foreach (Match m in Regex.Matches(code, @"\bnew\s+\w*Backend\s*\("))
+                    breaches.Add($"{Path.GetFileName(file)} -> {m.Value.Trim()}");
+            }
+            Assert.True(breaches.Count == 0,
+                "Mapping constructs a concrete target backend:" +
                 Environment.NewLine + "  - " + string.Join(Environment.NewLine + "  - ", breaches.Distinct()));
         }
 
