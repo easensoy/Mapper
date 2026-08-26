@@ -17,6 +17,9 @@ namespace CodeGen.Configuration
         // The one controller a thing runs on when the model anchors it nowhere: declared, never a fallback.
         public PlcAssignment DefaultTarget { get; set; } = PlcAssignment.Unknown;
         public List<RoleRelation> ResourceRelations { get; set; } = new();
+
+        // In declaration order: the emitted order of a resource's infrastructure stack.
+        public List<string> InfraEmitOrder { get; set; } = new();
         public List<RosterEntry> Components { get; set; } = new();
         public FbBodySize FbBody { get; set; } = new();
         public Dictionary<string, string> Aliases { get; set; } = new(StringComparer.OrdinalIgnoreCase);
@@ -43,6 +46,16 @@ namespace CodeGen.Configuration
         public CanvasPoint DeviceCanvasOrigin { get; set; } = new();
         public FramePad FramePadding { get; set; } = new();
         public Dictionary<string, int> RowY { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+        // Where a deployment-injected reporter is drawn: its own column, one pitch per reporter.
+        public InjectedReporterGrid InjectedReporters { get; set; } = new();
+    }
+
+    public sealed class InjectedReporterGrid
+    {
+        public int X { get; set; }
+        public int Y { get; set; }
+        public int RowPitch { get; set; }
     }
 
     public sealed class CanvasPoint
