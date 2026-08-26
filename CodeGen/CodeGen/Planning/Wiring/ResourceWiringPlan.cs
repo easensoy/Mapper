@@ -60,14 +60,15 @@ namespace CodeGen.Translation
         // CAT that decides how each one's ports are spelled. ONE derivation: the resource being planned
         // and the ring being asked about read the same roll, so they cannot disagree about membership.
         private sealed record MemberRoll(
-            List<string> Members, HashSet<string> Sensors, IReadOnlyDictionary<string, string> CatTypes)
+            List<string> Members, HashSet<string> Sensors, IReadOnlyDictionary<string, string> CatTypes,
+            Mapping.TemplateIndex Manifest)
         {
             public bool IsSensor(string n) => Sensors.Contains(n);
 
             public RingMember Member(string n) => new(n,
                 CatTypes.TryGetValue(n, out var t) ? t
-                : IsSensor(n) ? TemplateManifest.SensorType.Name
-                : TemplateManifest.ProcessType.Name);
+                : IsSensor(n) ? Manifest.SensorType.Name
+                : Manifest.ProcessType.Name);
         }
 
         private static MemberRoll Roll(GenerationContext ctx, ChainOrder order)
@@ -84,7 +85,7 @@ namespace CodeGen.Translation
                     ? ByCaSBus(ctx, sensors, actuators)
                     : sensors.Concat(actuators).ToList(),
                 new HashSet<string>(sensors, StringComparer.OrdinalIgnoreCase),
-                ctx.CatTypes);
+                ctx.CatTypes, ctx.Manifest);
         }
 
         public static ResourceWiringPlan For(
@@ -102,19 +103,13 @@ namespace CodeGen.Translation
             // Where a component's reports circulate: the target that hosts it, unless a relocation
             // moved it off the target that owns its station's ring - then the ring is still the
             // station's. Answered by the one owner of that question.
-            PlcAssignment RingHostOf(string name)
-            {
-                var on = allocation.Of(name);
-                return TargetRegistry.IsRegistered(on) ? RingHost.Of(TargetRegistry.Of(on)) : on;
-            }
-
             // WHICH RESOURCE a member belongs to depends on which document is rendered. On the shared
             // canvas a ring is drawn whole, so membership is the ring's HOST. On a resource's own
             // network only the FBs mirrored there exist, so membership is where the component RUNS. The
             // two coincide until a partial swap relocates a component off the target hosting its ring,
             // which is exactly when a resource must wire what it holds rather than what it drives.
             bool Hosted(string name) =>
-                resourceOrder ? allocation.Of(name) == plc : RingHostOf(name) == plc;
+                resourceOrder ? allocation.Of(name) == plc : RingHostOf(ctx, name) == plc;
 
             // --- ordered station members ----------------------------------------------------------
             var roll = Roll(ctx, order);
@@ -131,7 +126,7 @@ namespace CodeGen.Translation
             var connectionLinks = new List<(string, string)>();
             if (resourceOrder && connection is { } r)
             {
-                var starter = resource.AreaFb ?? resource.StationFb ?? TargetBootstrap.InitRole;
+                var starter = resource.AreaFb ?? resource.StationFb ?? ctx.Targets.InitRole;
                 connectionLinks.Add(($"{starter}.INITO", $"{r.Name}.INIT"));
                 connectionLinks.Add(($"{r.Name}.INITO", $"{r.Name}.CONNECT"));
             }
@@ -142,7 +137,7 @@ namespace CodeGen.Translation
             bool IsTail(string name) => Named(tail, name);
 
             var init = new List<string>();
-            if (resourceOrder) init.Add(TargetBootstrap.InitRole);
+            if (resourceOrder) init.Add(ctx.Targets.InitRole);
             if (selfStarted != null) init.Add(selfStarted);
             if (resource.AreaFb != null) init.Add(resource.AreaFb);
             if (resource.StationFb != null) init.Add(resource.StationFb);
@@ -158,9 +153,9 @@ namespace CodeGen.Translation
             // --- CaS chain ------------------------------------------------------------------------
             // A CAT with no station adapter dangles on this chain and EAE rejects the resource.
             var processes = resource.Processes
-                .Select(p => new RingMember(p, TemplateManifest.ProcessType.Name)).ToList();
+                .Select(p => new RingMember(p, ctx.Manifest.ProcessType.Name)).ToList();
             var station = members.Where(n => !IsSensor(n) && Hosted(n)).Select(Member)
-                .Where(m => !TemplateMap.LacksStationAdapter(m.Type))
+                .Where(m => !ctx.Manifest.LacksStationAdapter(m.Type))
                 .ToList();
             station.AddRange(processes);
 
@@ -168,11 +163,11 @@ namespace CodeGen.Translation
             if (station.Count > 0 && resource.StationChain is { } ends &&
                 (!resourceOrder || processes.Count > 0))
             {
-                stationLinks.Add((ends.From, $"{station[0].Name}.{TemplateManifest.StationIn(station[0].Type)}"));
+                stationLinks.Add((ends.From, $"{station[0].Name}.{ctx.Manifest.StationIn(station[0].Type)}"));
                 for (int i = 0; i < station.Count - 1; i++)
-                    stationLinks.Add(($"{station[i].Name}.{TemplateManifest.StationOut(station[i].Type)}",
-                                      $"{station[i + 1].Name}.{TemplateManifest.StationIn(station[i + 1].Type)}"));
-                stationLinks.Add(($"{station[^1].Name}.{TemplateManifest.StationOut(station[^1].Type)}", ends.To));
+                    stationLinks.Add(($"{station[i].Name}.{ctx.Manifest.StationOut(station[i].Type)}",
+                                      $"{station[i + 1].Name}.{ctx.Manifest.StationIn(station[i + 1].Type)}"));
+                stationLinks.Add(($"{station[^1].Name}.{ctx.Manifest.StationOut(station[^1].Type)}", ends.To));
             }
 
             // --- report ring ----------------------------------------------------------------------
@@ -197,7 +192,7 @@ namespace CodeGen.Translation
                 if (resourceOrder && ring.Count > 0 && ctx.Rings.RingsMerged && caps.HostsFeedRing)
                 {
                     segmentLinks.Add(($"{segment[^1]}.stateRprtCmd_out",
-                                      $"{ring[0].Name}.{TemplateManifest.RingIn(ring[0].Type)}"));
+                                      $"{ring[0].Name}.{ctx.Manifest.RingIn(ring[0].Type)}"));
                     seams.Add($"merged-ring seam: {segment[^1]}.stateRprtCmd_out -> {ring[0].Name} " +
                               "(ring head, local); the segment head and the process tail stay open");
                 }
@@ -219,13 +214,13 @@ namespace CodeGen.Translation
             var links = new List<(string, string)>();
             var chain = ring.Concat(processes).ToList();
             for (int i = 0; i < chain.Count - 1; i++)
-                links.Add(Link(chain[i], chain[i + 1]));
+                links.Add(Link(ctx.Manifest, chain[i], chain[i + 1]));
             if (chain.Count <= 1) return links;
 
             bool splicesSegment = segment.Count > 0 && ctx.Rings.CarrierOf(segment[0]) == plc;
             var acrossTo = HeadOfNextRing(ctx, plc);
-            var from = $"{chain[^1].Name}.{TemplateManifest.RingOut(chain[^1].Type)}";
-            var ownHead = $"{chain[0].Name}.{TemplateManifest.RingIn(chain[0].Type)}";
+            var from = $"{chain[^1].Name}.{ctx.Manifest.RingOut(chain[^1].Type)}";
+            var ownHead = $"{chain[0].Name}.{ctx.Manifest.RingIn(chain[0].Type)}";
             if (splicesSegment)
             {
                 links.Add((from, $"{segment[0]}.stateRprtCmd_in"));
@@ -244,16 +239,16 @@ namespace CodeGen.Translation
         {
             var links = new List<(string, string)>();
             if (ring.Count == 0) return links;
-            for (int i = 0; i < ring.Count - 1; i++) links.Add(Link(ring[i], ring[i + 1]));
+            for (int i = 0; i < ring.Count - 1; i++) links.Add(Link(ctx.Manifest, ring[i], ring[i + 1]));
 
             if (processes.Count > 0)
             {
                 if (caps.OpensCoverSeam)
                     seams.Add($"cover detour: {ring[^1].Name} reports across to the carried chain and " +
                               $"{processes[0].Name} is fed back from it — EAE bridges via the canvas");
-                else links.Add(Link(ring[^1], processes[0]));
+                else links.Add(Link(ctx.Manifest, ring[^1], processes[0]));
 
-                for (int i = 0; i < processes.Count - 1; i++) links.Add(Link(processes[i], processes[i + 1]));
+                for (int i = 0; i < processes.Count - 1; i++) links.Add(Link(ctx.Manifest, processes[i], processes[i + 1]));
 
                 // The ring leaves this controller either because the carried chain took it across, or
                 // because a merged topology hands it to the next ring host.
@@ -262,21 +257,30 @@ namespace CodeGen.Translation
                 if (openBoundary)
                     seams.Add($"cross-controller ring: {processes[^1].Name} reports across the seam and " +
                               $"{ring[0].Name} is fed from it — EAE bridges via the canvas");
-                else links.Add(Link(processes[^1], ring[0]));
+                else links.Add(Link(ctx.Manifest, processes[^1], ring[0]));
             }
             else if (ring.Count > 1)
             {
                 if (caps.CarriesDetouredChain)
                     seams.Add($"carried chain {ring[0].Name}…{ring[^1].Name} is OPEN at both ends: " +
                               "another controller commands it");
-                else links.Add(Link(ring[^1], ring[0]));
+                else links.Add(Link(ctx.Manifest, ring[^1], ring[0]));
             }
             return links;
         }
 
-        private static (string, string) Link(RingMember from, RingMember to) =>
-            ($"{from.Name}.{TemplateManifest.RingOut(from.Type)}",
-             $"{to.Name}.{TemplateManifest.RingIn(to.Type)}");
+        // WHICH TARGET HOSTS a component's ring. Not where the component RUNS: a partial swap can move
+        // it off the target that owns its station's ring, and the ring is still the station's. Written
+        // twice in two methods until now, which is how the two could have come to disagree.
+        private static PlcAssignment RingHostOf(GenerationContext ctx, string name)
+        {
+            var on = ctx.Allocation.Of(name);
+            return ctx.Targets.IsRegistered(on) ? ctx.Targets.RingHostOf(ctx.Targets.Of(on)) : on;
+        }
+
+        private static (string, string) Link(Mapping.TemplateIndex m, RingMember from, RingMember to) =>
+            ($"{from.Name}.{m.RingOut(from.Type)}",
+             $"{to.Name}.{m.RingIn(to.Type)}");
 
         // casBusRank order for the members that declare one, then the rest in roster order. A component
         // with no casBusRank is not ON the station bus; it still boots, so it is appended rather than
@@ -314,19 +318,14 @@ namespace CodeGen.Translation
 
             bool Carried(string n) =>
                 facts.TakesRingScopedSlot(n) || ctx.IsDetoured(n) || Named(segment, n);
-            PlcAssignment RingHostOf(string n)
-            {
-                var on = ctx.Allocation.Of(n);
-                return TargetRegistry.IsRegistered(on) ? RingHost.Of(TargetRegistry.Of(on)) : on;
-            }
-            bool Hosted(string n) => resourceOrder ? ctx.Allocation.Of(n) == plc : RingHostOf(n) == plc;
+            bool Hosted(string n) => resourceOrder ? ctx.Allocation.Of(n) == plc : RingHostOf(ctx, n) == plc;
 
             var ring = resourceOrder
                 ? members.Where(n => Hosted(n) && !Named(segment, n)).Select(Member).ToList()
                 : members.Where(n => Hosted(n) && !Carried(n)).Select(Member).ToList();
 
-            if (!resourceOrder && TargetRegistry.IsRegistered(plc) &&
-                TargetRegistry.Of(plc).OpensCoverSeam)
+            if (!resourceOrder && ctx.Targets.IsRegistered(plc) &&
+                ctx.Targets.Of(plc).OpensCoverSeam)
             {
                 var carriedReporter = contents.Sensors.Select(Name)
                     .FirstOrDefault(n => n.Length > 0 && facts.TakesRingScopedSlot(n));
@@ -345,7 +344,7 @@ namespace CodeGen.Translation
             GenerationContext ctx, PlcAssignment plc)
         {
             var domain = ctx.Rings.DomainOf(plc);
-            return TargetRegistry.All
+            return ctx.Targets.All
                 .Select(t => t.Plc)
                 .Where(t => ctx.Emits(t)
                             && ctx.Rings.DomainOf(t) == domain
@@ -362,7 +361,7 @@ namespace CodeGen.Translation
             if (next == null) return null;
 
             var head = RingOf(ctx, next.Value, ChainOrder.Application).FirstOrDefault();
-            return head == null ? null : $"{head.Name}.{TemplateManifest.RingIn(head.Type)}";
+            return head == null ? null : $"{head.Name}.{ctx.Manifest.RingIn(head.Type)}";
         }
 
         // The member after this one, cyclically. Null where there is no OTHER member - a lone host has
