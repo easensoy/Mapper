@@ -1,0 +1,98 @@
+{
+  "catalogReference": "M060_V01.00_01.00",
+  "uuid": "{{EquipmentUuid}}",
+  "identifier": "M262dPAC_1",
+  "path": "Topology",
+  "partNumber": "TM262L01MDESE8T",
+  "properties": [
+    {
+      "propertyName": "IsUnderConstruction",
+      "propertyValue": "False"
+    },
+    {
+      "propertyName": "DomainTag",
+      "propertyValue": "{{SolutionId}}"
+    }
+  ],
+  "references": [
+    {
+      "diagramPath": "Physical Views",
+      "x": -195,
+      "y": -193
+    }
+  ],
+  "components": [
+    {
+      "interfaces": [
+        {
+          "identifier": "MDESE_ETH1",
+          "disabled": false,
+          "physicalAddress": "",
+          "endpoints": [
+            {
+              "identifier": "IP Address",
+              "isReadOnly": false,
+              "domainReadOnly": false,
+              "ipAddress": "{{TargetIp}}",
+              "domain": "{{NoConfDomain}}"
+            }
+          ]
+        },
+        {
+          "identifier": "MDESE_ETH2",
+          "disabled": false,
+          "physicalAddress": "",
+          "endpoints": [
+            {
+              "identifier": "IP Address",
+              "isReadOnly": false,
+              "domainReadOnly": false,
+              "ipAddress": "0.0.0.0",
+              "domain": "00000000-0000-0000-0000-000000000000"
+            }
+          ]
+        }
+      ],
+      "ports": [
+        { "identifier": "Ethernet1",   "side": "Default" },
+        { "identifier": "Ethernet2_1", "side": "Default" },
+        { "identifier": "Ethernet2_2", "side": "Default" }
+      ],
+      "componentType": "EthernetDEO"
+    },
+    {
+      "bridgePriority": 0,
+      "serviceEnabled": false,
+      "componentType": "RstpDEO"
+    },
+    {
+      "endpoint": "MDESE_ETH1\\IP Address",
+      "connectionTypes": "None",
+      "componentType": "EthernetMasterDEO"
+    },
+    {
+      "enabled": false,
+      "securityMode": 0,
+      "componentType": "SysLogClientDEO"
+    },
+    {
+      "mode": 0,
+      "componentType": "CyberSecurityDEO"
+    },
+    {
+      "uuid": "{{RuntimeUuid}}",
+      "typeId": "{{RuntimeTypeId}}",
+      "logicalDeviceId": "{{SysdevId}}",
+      "runtimeServices": [
+        {
+          "identifier": "Deployment"
+        },
+        {
+          "identifier": "Archive Service",
+          "logicalPortSecured": "0"
+        }
+      ],
+      "componentType": "RuntimeDEO"
+    }
+  ]
+}
