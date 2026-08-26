@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using CodeGen.Configuration;
@@ -21,7 +21,7 @@ namespace MapperTests
             private readonly string _stage;
             public Failing(string stage) => _stage = stage;
             public readonly List<string> Log = new();
-            public override PlcAssignment Target => PlcAssignment.M262;
+            public override PlcAssignment Target => PlcAssignment.Named("M262");
 
             public override void EmitDevice(GenerationContext ctx, DeviceScope scope, Action<string> log) =>
                 Run("device emit", log);
@@ -68,7 +68,7 @@ namespace MapperTests
 
             var failure = Assert.Throws<TargetStageException>(Drive);
 
-            Assert.Equal(PlcAssignment.M262, failure.Target);
+            Assert.Equal(PlcAssignment.Named("M262"), failure.Target);
             Assert.Equal(stage, failure.Stage);
             Assert.Contains("the authored file was not there", failure.Message, StringComparison.Ordinal);
             Assert.IsType<IOException>(failure.InnerException);
@@ -101,7 +101,8 @@ namespace MapperTests
             Directory.CreateDirectory(empty);
             try
             {
-                var cfg = new MapperConfig { SyslayPath2 = Path.Combine(empty, "nothing.syslay") };
+                var cfg = CompilerConfiguration.Load(
+                    new MapperConfig { SyslayPath2 = Path.Combine(empty, "nothing.syslay") });
                 var failure = Assert.Throws<InvalidOperationException>(() => DeviceScope.Open(cfg));
                 Assert.Contains("no device can be emitted", failure.Message, StringComparison.Ordinal);
             }
