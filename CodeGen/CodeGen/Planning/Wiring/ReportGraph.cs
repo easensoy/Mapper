@@ -108,15 +108,16 @@ namespace CodeGen.Translation
         public static ReportGraph Build(
             TwinModel twin, ControllerAllocation allocation,
             IReadOnlyList<string> declaredDischarge, IReadOnlyList<string> detouredChain,
-            IReadOnlyDictionary<string, CodeGen.Domain.Twin.ProcessGraph> graphs)
+            IReadOnlyDictionary<string, CodeGen.Domain.Twin.ProcessGraph> graphs, Mapping.TargetIndex targets)
         {
             var graph = Assemble(twin, allocation, ProcessesNeedOneRing(twin, allocation, graphs),
-                declaredDischarge, detouredChain);
+                declaredDischarge, detouredChain, targets);
 
             // Folding the rings into one is the declared carrier that spans every domain, so it is what
             // an interlock reaching across them needs. Applied only when something actually needs it.
             if (!graph.RingsMerged && Crossings(twin, graph).Count > 0)
-                graph = Assemble(twin, allocation, merged: true, declaredDischarge, detouredChain);
+                graph = Assemble(twin, allocation, merged: true, targets: targets,
+                    declaredDischarge: declaredDischarge, detouredChain: detouredChain);
 
             var stranded = Crossings(twin, graph);
             if (stranded.Count > 0)
@@ -146,7 +147,8 @@ namespace CodeGen.Translation
 
         private static ReportGraph Assemble(
             TwinModel twin, ControllerAllocation allocation, bool merged,
-            IReadOnlyList<string> declaredDischarge, IReadOnlyList<string> detouredChain)
+            IReadOnlyList<string> declaredDischarge, IReadOnlyList<string> detouredChain,
+            Mapping.TargetIndex targets)
         {
             var edges = RequiredEdges(twin, allocation);
 
@@ -156,11 +158,11 @@ namespace CodeGen.Translation
             // the commanding ring. Declared, not inferred from running no process of its own: a target
             // can legitimately host none and still not be something another controller reaches into.
             bool OnDetour(TransportEdge e) =>
-                TargetRegistry.IsRegistered(e.To) && TargetRegistry.Of(e.To).CarriesDetouredChain;
+                targets.IsRegistered(e.To) && targets.Of(e.To).CarriesDetouredChain;
 
             // The rings BEFORE any carrier: targets hosting one station share theirs, everything else is
             // its own. This is what decides whether an edge needs a carrier at all.
-            var native = Partition(t => t.HostsFeedStation);
+            var native = Partition(t => t.HostsFeedStation, targets);
 
             // A merged ring already spans both ends, as does a pair on one native ring.
             bool Spanned(TransportEdge e) =>
@@ -187,7 +189,7 @@ namespace CodeGen.Translation
 
             // The FINISHED rings: the native partition, plus every carrier the model just selected. A
             // detoured device joins the ring of whichever target drives it; a merged ring joins them all.
-            var finished = Partition(t => t.HostsFeedStation);
+            var finished = Partition(t => t.HostsFeedStation, targets);
             foreach (var e in edges.Where(OnDetour)) finished.Union(e.From, e.To);
             if (merged) finished.UnionAll();
 
@@ -201,10 +203,10 @@ namespace CodeGen.Translation
         }
 
         // Targets grouped by the ring they share. Every declared target starts alone; a carrier joins two.
-        private static TargetPartition Partition(Func<TargetDescriptor, bool> sharesOneRing)
+        private static TargetPartition Partition(Func<TargetDescriptor, bool> sharesOneRing, Mapping.TargetIndex targets)
         {
-            var p = new TargetPartition(TargetRegistry.All.Select(t => t.Plc));
-            var together = TargetRegistry.All.Where(sharesOneRing).Select(t => t.Plc).ToList();
+            var p = new TargetPartition(targets.All.Select(t => t.Plc));
+            var together = targets.All.Where(sharesOneRing).Select(t => t.Plc).ToList();
             for (int i = 1; i < together.Count; i++) p.Union(together[0], together[i]);
             return p;
         }
