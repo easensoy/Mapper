@@ -23,17 +23,31 @@ namespace CodeGen.Services
             public int HwConfigFilesDeleted { get; set; }
         }
 
-        // Folders under IEC61499/ nuked entirely (Mapper-deployed FB types or build cache).
-        static readonly string[] FoldersToDelete = new[]
+        // Names a WIPE must still recognise although templates.yml no longer declares them: a tree
+        // deployed by an older Mapper still carries them, and a type left behind is one EAE compiles.
+        static readonly string[] RetiredTypeFolders =
         {
-            "Area_CAT", "Station_CAT", "Five_State_Actuator_CAT",
-            "Sensor_Bool_CAT", "Process1_Generic", "Seven_State_Actuator_CAT",
-            CodeGen.Mapping.TemplateMap.SevenStateCentreHomeCat,
-            "Robot_Task_CAT", "Actuator_Fault_CAT", "PLC_RW_M262",
-            "DataType",
-            "Configuration", "Languages", "License", "Log", "SnapshotCompiles",
-            "obj", "bin",
+            "Seven_State_Actuator_CAT",   // superseded by the centre-home swivel
+            "PLC_RW_M262",                // the M262 binds its IO directly; it has no broker
         };
+
+        // EAE's own build cache and per-solution folders. Not FB types, so no declaration owns them.
+        static readonly string[] BuildFolders =
+        {
+            "DataType", "Configuration", "Languages", "License", "Log", "SnapshotCompiles", "obj", "bin",
+        };
+
+        // Folders under IEC61499/ nuked entirely. The FB-TYPE half is DERIVED from the template
+        // catalogue rather than restated: a CAT extracts into a folder of its own name, so the set of
+        // folders the Mapper owns IS the set of CATs it declares. A second hand-kept list here could
+        // only fall behind - which is how a retired type survives a wipe and gets compiled.
+        static IEnumerable<string> FoldersToDelete =>
+            CodeGen.Mapping.TemplateManifest.Types
+                .Where(t => t.Kind is ArtefactKind.Cat or ArtefactKind.HmiCat)
+                .Select(t => t.Name)
+                .Concat(RetiredTypeFolders)
+                .Concat(BuildFolders)
+                .Distinct(StringComparer.OrdinalIgnoreCase);
 
         // System/ .system/.syslay/.sysres/.hcf are NOT touched here; the canvas-empty pass handles them.
         static readonly string[] FileExtensionsToDelete = new[]
@@ -48,12 +62,15 @@ namespace CodeGen.Services
         // The VueOne hidden runner links against this one-argument signature, so it must stay.
         public static WipeReport Wipe(string demonstratorRepoRoot)
         {
-            MapperConfig? cfg = null;
-            try { cfg = MapperConfig.Load(); } catch { /* fall back to the default template root */ }
+            // This overload is a compatibility entry point the prebuilt VueOne runner links, so it has
+            // no configuration handed to it and reads its own - which makes it a composition root.
+            Configuration.CompilerConfiguration? cfg = null;
+            try { cfg = Configuration.CompilerConfiguration.Load(MapperConfig.Load()); }
+            catch { /* fall back to the default template root */ }
             return Wipe(cfg!, demonstratorRepoRoot);
         }
 
-        public static WipeReport Wipe(MapperConfig cfg, string demonstratorRepoRoot)
+        public static WipeReport Wipe(Configuration.CompilerConfiguration cfg, string demonstratorRepoRoot)
         {
             var report = new WipeReport();
             if (string.IsNullOrEmpty(demonstratorRepoRoot) || !Directory.Exists(demonstratorRepoRoot))
@@ -102,7 +119,7 @@ namespace CodeGen.Services
                 .FirstOrDefault();
         }
 
-        static void EmptyAllCanvases(MapperConfig cfg, string iecDir, WipeReport report)
+        static void EmptyAllCanvases(Configuration.CompilerConfiguration cfg, string iecDir, WipeReport report)
         {
             var systemDir = Path.Combine(iecDir, "System");
             if (!Directory.Exists(systemDir))
@@ -141,13 +158,13 @@ namespace CodeGen.Services
         }
 
         // Clean BLANKS the layer name (identified by ID); Test Runtime restores Name="SMC_Rig".
-        static string BuildEmptySyslay(MapperConfig cfg, string path) =>
+        static string BuildEmptySyslay(Configuration.CompilerConfiguration cfg, string path) =>
             TemplateDocument.Load(cfg, @"Clean\Empty.syslay", new Dictionary<string, string>
             {
                 ["LayerId"] = TryReadAttr(path, "Layer", "ID") ?? "00000000-0000-0000-0000-000000000000",
             });
 
-        static string BuildEmptySysres(MapperConfig cfg, string path) =>
+        static string BuildEmptySysres(Configuration.CompilerConfiguration cfg, string path) =>
             TemplateDocument.Load(cfg, @"Clean\Empty.sysres", new Dictionary<string, string>
             {
                 ["ResourceId"]   = TryReadAttr(path, "Resource", "ID")        ?? "00000000-0000-0000-0000-000000000000",
@@ -157,7 +174,7 @@ namespace CodeGen.Services
             });
 
         // Clean BLANKS the application name (the template carries Name=""); Test Runtime restores "WMG".
-        static string BuildEmptySysapp(MapperConfig cfg, string path) =>
+        static string BuildEmptySysapp(Configuration.CompilerConfiguration cfg, string path) =>
             TemplateDocument.Load(cfg, @"Clean\Empty.sysapp", new Dictionary<string, string>
             {
                 ["AppId"] = TryReadAttr(path, "Application", "ID") ?? "00000000-0000-0000-0000-000000000001",
