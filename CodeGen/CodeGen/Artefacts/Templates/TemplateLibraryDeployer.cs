@@ -303,7 +303,7 @@ namespace CodeGen.Services
         {
             try
             {
-                var dst = Path.Combine(eaeProjectDir, "IEC61499", "MqttStateFormatter.fbt");
+                var dst = Path.Combine(eaeProjectDir, "IEC61499", TemplateManifest.FbtOf("mqttFormatter"));
                 File.WriteAllText(dst, TemplateDocument.Load(cfg,
                     @"Basic\MqttStateFormatter\IEC61499\MqttStateFormatter.fbt"));
                 result.PatchesApplied.Add("MqttStateFormatter.fbt deployed (INT→STRING[255] payload)");
