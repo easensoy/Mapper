@@ -95,7 +95,7 @@ namespace CodeGen.Translation
                         ctx, proc, instance, ctx.Slots[proc.Name], withRecipe: true);
                     var at = ctx.Roster.Get(proc.Name);
                     builder.AddFB(FBIdGenerator.GenerateFBId(proc.ComponentID), instance,
-                        TemplateManifest.ProcessType.Name, Configuration.GenerationConfig.Namespace, at?.X ?? 0, at?.Y ?? 0, outer);
+                        ctx.Manifest.ProcessType.Name, Configuration.GenerationConfig.Namespace, at?.X ?? 0, at?.Y ?? 0, outer);
                     placed.Add(instance);
                     if (recipe == null) continue;
                     phaseNames[instance] = recipe.ProcessPhaseNames;
@@ -141,7 +141,7 @@ namespace CodeGen.Translation
                 var actParams = BuildActuatorParameters(actuator, assignedId, fbType, ctx);
                 actParams["actuator_name"] = Iec61499Literal.FormatString(
                     TemplateMap.RingKey(displayName));
-                if (Interlock(ctx, actuator).Count > 0 || TemplateManifest.ProtocolOrNull(fbType)?.CrossesBothWays == true)
+                if (Interlock(ctx, actuator).Count > 0 || ctx.Manifest.ProtocolOrNull(fbType)?.CrossesBothWays == true)
                     report.Bound.Add((actuator.Name,
                         $"interlock RuleCount={Interlock(ctx, actuator).Count}"));
 
@@ -183,7 +183,7 @@ namespace CodeGen.Translation
                 var senDisplayName = ctx.InstanceName(sensor.Name);
 
                 builder.AddFB(FBIdGenerator.GenerateFBId(sensor.ComponentID),
-                    senDisplayName, TemplateManifest.SensorType.Name, Configuration.GenerationConfig.Namespace,
+                    senDisplayName, ctx.Manifest.SensorType.Name, Configuration.GenerationConfig.Namespace,
                     sX, sY,
                     new Dictionary<string, string>
                     {
@@ -201,13 +201,13 @@ namespace CodeGen.Translation
                 int synthY = grid.Y;
                 string prevSynthInit = contents.Sensors
                     .Select(s => (s.Name ?? string.Empty).Trim())
-                    .First(n => TargetRegistry.Of(ctx.Allocation.Of(n)).HostsFeedStation);
+                    .First(n => ctx.Targets.Of(ctx.Allocation.Of(n)).HostsFeedStation);
                 foreach (var (synthName, synthId) in MapperConfig.M262SynthSensors)
                 {
                     if (!ctx.InjectedReporters.Contains(synthName, StringComparer.OrdinalIgnoreCase))
                         continue;
                     builder.AddFB(FBIdGenerator.GenerateFBId("m262rigsensor-" + synthName),
-                        synthName, TemplateManifest.SensorType.Name,
+                        synthName, ctx.Manifest.SensorType.Name,
                         Configuration.GenerationConfig.Namespace, grid.X, synthY,
                         new Dictionary<string, string>
                         {
@@ -243,9 +243,9 @@ namespace CodeGen.Translation
                             true, connectionId, brokerUrl, clientIdentifier,
                             config.Telemetry.SecureTls ? config.Telemetry.ValidateCert : 0,
                             config.Telemetry.SecureTls ? (config.Telemetry.CaCert ?? string.Empty) : string.Empty);
-                        var wrapped = TemplateManifest.ForInfraRole("mqttConnectionWrapped");
+                        var wrapped = ctx.Manifest.ForInfraRole("mqttConnectionWrapped");
                         builder.AddFB(FBIdGenerator.GenerateFBId(fbName), fbName,
-                            wrapped.Name, TemplateManifest.NamespaceOf(wrapped), x, y,
+                            wrapped.Name, ctx.Manifest.NamespaceOf(wrapped), x, y,
                             new Dictionary<string, string> { ["Config"] = cfgLit });
                         return;
                     }
@@ -262,9 +262,9 @@ namespace CodeGen.Translation
                         if (!string.IsNullOrWhiteSpace(config.Telemetry.CaCert))
                             p["CACert"] = Iec61499Literal.FormatString(config.Telemetry.CaCert);
                     }
-                    var raw = TemplateManifest.ForInfraRole("mqttConnection");
+                    var raw = ctx.Manifest.ForInfraRole("mqttConnection");
                     builder.AddFB(FBIdGenerator.GenerateFBId(fbName), fbName,
-                        raw.Name, TemplateManifest.NamespaceOf(raw), x, y, p);
+                        raw.Name, ctx.Manifest.NamespaceOf(raw), x, y, p);
                 }
 
                 bool tele = config.Telemetry.UseTelemetryCat;
@@ -274,7 +274,7 @@ namespace CodeGen.Translation
                 // connection drops every message silently, so the connection follows the RESOURCE, and
                 // which resources exist is the roster's answer, not a controller name here.
                 var connections = ctx.Cfg.Telemetry.Connections
-                    .Where(c => TargetRegistry.IsRegistered(c.Plc) && ctx.Emits(c.Plc)).ToList();
+                    .Where(c => ctx.Targets.IsRegistered(c.Plc) && ctx.Emits(c.Plc)).ToList();
 
                 string NameOf(MqttConnectionDeclaration c) => c.NameFor(tele);
 
@@ -306,7 +306,7 @@ namespace CodeGen.Translation
                 // has, then any connection added because this run relocated components onto a resource
                 // that would otherwise have none.
                 bool AddedByRelocation(MqttConnectionDeclaration c) =>
-                    TargetRegistry.Of(c.Plc).ReceivesRelocatedComponents;
+                    ctx.Targets.Of(c.Plc).ReceivesRelocatedComponents;
 
                 var wired = connections.Where(c => StarterOf(c) is { Length: > 0 }).ToList();
                 foreach (var c in wired.Where(c => !AddedByRelocation(c)))
@@ -329,7 +329,7 @@ namespace CodeGen.Translation
 
             // One loop over the resources this run emits: each is wired from its own planned topology,
             // so a new target is a device.yml row and a backend, not another wiring builder here.
-            foreach (var target in TargetRegistry.All)
+            foreach (var target in ctx.Targets.All)
                 if (ctx.Emits(target.Plc))
                     RingWiringPlanner.Render(builder, ResourceWiringPlanner.For(ctx, target.Plc));
 
@@ -349,10 +349,10 @@ namespace CodeGen.Translation
                     ?? throw new InvalidOperationException(
                         $"[Handoff] consumer process '{link.ConsumerName}' has no emitted FB to receive " +
                         $"'{link.ProducerName}' phases.");
-                builder.AddEventConnection($"{producerFb}.{Process.Recipes.ProcessPhaseTransport.EventOut}",
-                    $"{consumerFb}.{Process.Recipes.ProcessPhaseTransport.EventIn}", crossReference: true);
-                builder.AddDataConnection($"{producerFb}.{Process.Recipes.ProcessPhaseTransport.DataOut}",
-                    $"{consumerFb}.{Process.Recipes.ProcessPhaseTransport.DataIn}", crossReference: true);
+                builder.AddEventConnection($"{producerFb}.{ctx.Manifest.PhaseTransport.EventOut}",
+                    $"{consumerFb}.{ctx.Manifest.PhaseTransport.EventIn}", crossReference: true);
+                builder.AddDataConnection($"{producerFb}.{ctx.Manifest.PhaseTransport.DataOut}",
+                    $"{consumerFb}.{ctx.Manifest.PhaseTransport.DataIn}", crossReference: true);
             }
 
             _ = config;
@@ -408,8 +408,8 @@ namespace CodeGen.Translation
         public static Dictionary<string, string> BuildActuatorParameters(
             VueOneComponent actuator, int assignedId, string fbType, GenerationContext ctx)
         {
-            var type = TemplateManifest.Find(fbType);
-            var protocol = TemplateManifest.ProtocolOrNull(fbType);
+            var type = ctx.Manifest.Find(fbType);
+            var protocol = ctx.Manifest.ProtocolOrNull(fbType);
             var p = new Dictionary<string, string>
             {
                 ["actuator_name"] = Iec61499Literal.FormatString(TemplateMap.RingKey(actuator.Name)),
@@ -458,13 +458,13 @@ namespace CodeGen.Translation
                 var target = (recipe.CmdTargetName[i] ?? string.Empty).Trim();
                 if (target.Length == 0) continue;
                 // A process announcing its own phase is not an actuator move.
-                if (string.Equals(target, Process.Recipes.ProcessPhaseTransport.CommandToken,
+                if (string.Equals(target, ctx.Manifest.PhaseTransport.CommandToken,
                         StringComparison.OrdinalIgnoreCase)) continue;
                 if (ctx.Twin.ByName(target) is { IsProcess: true }) continue;
                 // A CAT that declares no command protocol folds its whole move into one handshake, so it
                 // has no advance to pair with a return. Asked of the DECLARATION, never of the name.
                 if (!ctx.CatTypes.TryGetValue(target, out var cat) ||
-                    TemplateManifest.ProtocolOrNull(cat) is not { Command.Count: > 0 } protocol) continue;
+                    ctx.Manifest.ProtocolOrNull(cat) is not { Command.Count: > 0 } protocol) continue;
                 // WHICH command value drives it out and which drives it home is the CAT's declaration,
                 // so a CAT that numbers its commands differently is read correctly here.
                 var stop = protocol.Command.FirstOrDefault(kv => kv.Value == recipe.CmdStateArr[i]).Key;
@@ -513,7 +513,7 @@ namespace CodeGen.Translation
             // when the plan gives this process no cross-controller producer, so a consumer that receives
             // nothing carries no slot rather than a misleading default.
             if (receiverSlot is int slot)
-                outer[Process.Recipes.ProcessPhaseTransport.ReceiverSlotParam] = Iec61499Literal.FormatInt(slot);
+                outer[ctx.Manifest.PhaseTransport.ReceiverSlotParam] = Iec61499Literal.FormatInt(slot);
 
 
             RecipeArrays? recipe = null;
