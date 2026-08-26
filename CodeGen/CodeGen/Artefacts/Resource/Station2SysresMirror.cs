@@ -30,12 +30,12 @@ namespace CodeGen.Devices.Core
                 : SysresFbMirror.ReadTopLevelFbsWithSystemModelFallback(syslayPath);
             if (all.Count == 0) return none;
 
-            return TargetRegistry.All
+            return ctx.Targets.All
                 .Where(t => t.DeviceLocalCanvas && ctx.Emits(t.Plc))
                 .Select(t => (t.Plc, MirrorBucket(eaeRoot, t.DeviceType,
                     all.Where(f => SysresFbMirror.BucketFor(f.Name, ctx.Allocation, ctx.Cfg) == t.Plc).ToList(),
                     ctx.Layout.Geometry.DeviceCanvasOrigin,
-                    TargetBootstrap.For(t.Plc, ctx.Layout))))
+                    ctx.Targets.BootFor(t.Plc, ctx.Layout), ctx.Manifest)))
                 .ToList();
         }
 
@@ -63,7 +63,7 @@ namespace CodeGen.Devices.Core
         }
 
         static int MirrorBucket(string eaeRoot, string deviceType, List<SysresFbMirror.SyslayFb> bucket,
-            CanvasPoint origin, IReadOnlyList<SystemFbSpec> systemFbs)
+            CanvasPoint origin, IReadOnlyList<SystemFbSpec> systemFbs, Mapping.TemplateIndex manifest)
         {
             if (bucket.Count == 0) return 0;
             bucket = TranslateBucketToCanvasOrigin(bucket, origin);
@@ -71,7 +71,7 @@ namespace CodeGen.Devices.Core
             if (sysdev == null) return 0;
             var sysres = EaeProjectLayout.FindSysresFor(sysdev);
             if (sysres == null) return 0;
-            var added = SysresFbMirror.MirrorFbsIntoSysres(sysres, bucket, systemFbs);
+            var added = SysresFbMirror.MirrorFbsIntoSysres(sysres, bucket, systemFbs, manifest);
 
             // SysresFbMirror leaves x/y alone on an existing FB, so restamp the canvas-origin x/y here.
             ApplyTranslatedPositionsToSysres(sysres, bucket);
