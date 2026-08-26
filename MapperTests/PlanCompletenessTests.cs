@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using CodeGen.Configuration;
@@ -59,8 +59,8 @@ namespace MapperTests
             Leads(proc.States[0], proc.States[1]);
             Leads(proc.States[1], proc.States[2], On("C-ram", "C-ram-s2", "Charge_Ram/Ram_Forward"));
 
-            return GenerationContext.Plan(new MapperConfig(), new[] { proc, act },
-                DeploymentProfile.M262Only(LayoutCatalog.Load()));
+            return GenerationContext.Plan(TestConfig.Cfg, new[] { proc, act },
+                DeploymentProfile.AsPlaced(TestConfig.Cfg));
         }
 
         [Fact]
