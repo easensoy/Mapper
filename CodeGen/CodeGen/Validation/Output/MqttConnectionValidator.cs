@@ -22,11 +22,12 @@ namespace CodeGen.Devices.Core
                 (Impossible ? "[IMPOSSIBLE] " : "[INFO] ") + $"{Resource}.{Fb}: {Detail}";
         }
 
-        // Plain-MQTT ports (no TLS); mqtts:// against these fails with RC100.
-        static readonly HashSet<int> PlainMqttPorts = new() { 1883, 1884 };
-
-        public static (List<Row> Rows, List<Finding> Findings) Inspect(string? eaeRoot)
+        public static (List<Row> Rows, List<Finding> Findings) Inspect(
+            Configuration.CompilerConfiguration cfg, string? eaeRoot)
         {
+            // Declared in telemetry.yml: which ports the broker serves without TLS.
+            var plainMqttPorts = cfg.Telemetry.PlainMqttPorts.ToHashSet();
+
             var rows = new List<Row>();
             var findings = new List<Finding>();
             if (string.IsNullOrEmpty(eaeRoot)) return (rows, findings);
@@ -76,7 +77,7 @@ namespace CodeGen.Devices.Core
                                   url.StartsWith("ws://", StringComparison.OrdinalIgnoreCase);
                     int port = PortOf(url);
 
-                    if (isMqtts && PlainMqttPorts.Contains(port))
+                    if (isMqtts && plainMqttPorts.Contains(port))
                         findings.Add(new(resLabel, name,
                             $"mqtts:// (TLS) to port {port} (a plain-MQTT port) — the TLS handshake will FAIL " +
                             "-> MQTT_CONNECTION ReturnCode 100. Use mqtt:// (+ enable EAE 'Insecure Application' " +
@@ -86,7 +87,7 @@ namespace CodeGen.Devices.Core
                     {
                         // Verify the device 'Insecure Application' override is present; without it a plain
                         // mqtt:// faults RC101 ('Secure URL required') — EAE is secure-by-default.
-                        bool hasOverride = DeviceHasInsecureAppOverride(sysres);
+                        bool hasOverride = DeviceHasInsecureAppOverride(cfg, sysres);
                         findings.Add(new(resLabel, name,
                             hasOverride
                                 ? "insecure mqtt:// — the device 'Insecure Application' override IS present in the " +
@@ -97,7 +98,7 @@ namespace CodeGen.Devices.Core
                                 : "insecure mqtt:// but the device 'Insecure Application' override is MISSING from the " +
                                   "device Properties (F513CAE3 .Properties.xml) -> MQTT_CONNECTION WILL fault RC101 " +
                                   "('Secure URL required'). The Mapper writes this override only for the BX1 Soft-dPAC " +
-                                  "in insecure MQTT mode (cfg.MqttPublishEnabled && !cfg.MqttSecureTls).",
+                                  "in insecure MQTT mode (cfg.Paths.MqttPublishEnabled && !cfg.Paths.MqttSecureTls).",
                             Impossible: !hasOverride));
                     }
                     else if (!isMqtts)
@@ -127,13 +128,13 @@ namespace CodeGen.Devices.Core
 
         // True if the device carries the 'Insecure Application' override (InsecureApplication.Enable=True)
         // in its F513CAE3 Properties — the per-device setting EAE needs to accept a plain mqtt:// URL.
-        static bool DeviceHasInsecureAppOverride(string sysresPath)
+        static bool DeviceHasInsecureAppOverride(Configuration.CompilerConfiguration cfg, string sysresPath)
         {
             try
             {
                 var dir = Path.GetDirectoryName(sysresPath);
                 if (string.IsNullOrEmpty(dir)) return false;
-                var props = Path.Combine(dir, CodeGen.Devices.Core.Station2DeviceEmitter.DeployPluginPropertiesFile);
+                var props = Path.Combine(dir, CodeGen.Devices.Core.Station2DeviceEmitter.DeployPluginPropertiesFile(cfg));
                 if (!File.Exists(props)) return false;
                 return XDocument.Load(props).Descendants()
                     .Any(e => e.Name.LocalName == "Property"
