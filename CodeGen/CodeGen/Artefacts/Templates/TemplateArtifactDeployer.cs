@@ -196,7 +196,8 @@ namespace CodeGen.Services
             }
         }
 
-        internal static void RegisterInDfbproj(string eaeProjectDir, DeployResult result)
+        internal static void RegisterInDfbproj(string eaeProjectDir,
+            Configuration.CompilerConfiguration cfg, DeployResult result)
         {
             var iec61499Dir = Path.Combine(eaeProjectDir, "IEC61499");
             if (!Directory.Exists(iec61499Dir)) return;
@@ -220,31 +221,11 @@ namespace CodeGen.Services
             foreach (var dt in result.DataTypesDeployed)
                 changed += DfbprojRegistrar.RegisterDataType(dfbproj, $@"DataType\{dt}.dt");
 
-            changed += DfbprojRegistrar.RegisterReference(dfbproj, "SE.DPAC",   "24.1.0.33");
-            changed += DfbprojRegistrar.RegisterReference(dfbproj, "SE.AppBase", "24.1.0.21");
-            // SE.IoTMx / SE.IoX80 declare the TM3 / X80 module types the .hcf need, else EAE shows the
-            // Hardware Configurator empty or refuses the import.
-            changed += DfbprojRegistrar.RegisterReference(dfbproj, "SE.IoTMx",   "24.1.0.19");
-            changed += DfbprojRegistrar.RegisterReference(dfbproj, "SE.IoX80",   "24.1.0.19");
-
-            // The topology server resolves every Equipment catalogReference against these; one missing
-            // reference fails the whole topology import.
-            changed += DfbprojRegistrar.RegisterReference(dfbproj, "SE.HwCommon",                  "24.1.0.19");
-            changed += DfbprojRegistrar.RegisterReference(dfbproj, "SE.FieldDevice",               "24.1.0.31");
-            changed += DfbprojRegistrar.RegisterReference(dfbproj, "SE.IoNet",                     "24.1.0.11");
-            changed += DfbprojRegistrar.RegisterReference(dfbproj, "Standard.IoEtherNetIP",        "24.1.0.27");
-            changed += DfbprojRegistrar.RegisterReference(dfbproj, "SE.IoATV",                     "24.1.0.26");
-            changed += DfbprojRegistrar.RegisterReference(dfbproj, "SE.ModbusGateway",             "24.1.0.17");
-            changed += DfbprojRegistrar.RegisterReference(dfbproj, "Standard.IoModbus",            "24.1.0.32");
-            changed += DfbprojRegistrar.RegisterReference(dfbproj, "Standard.IoModbusSlave",       "24.1.0.25");
-            changed += DfbprojRegistrar.RegisterReference(dfbproj, "Standard.OPCUAClient",         "24.1.0.8");
-            changed += DfbprojRegistrar.RegisterReference(dfbproj, "SE.AppCommonProcess",          "24.1.0.21");
-            changed += DfbprojRegistrar.RegisterReference(dfbproj, "SE.AppConveying",              "24.1.0.21");
-            changed += DfbprojRegistrar.RegisterReference(dfbproj, "SE.AppSequence",               "24.1.0.21");
-            changed += DfbprojRegistrar.RegisterReference(dfbproj, "SE.AppStateManagement",        "24.1.0.21");
-            changed += DfbprojRegistrar.RegisterReference(dfbproj, "SE.AppLiquidFood",             "24.1.0.21");
-            changed += DfbprojRegistrar.RegisterReference(dfbproj, "SE.AppSingleLinePowerMonitoring", "24.1.0.21");
-            changed += DfbprojRegistrar.RegisterReference(dfbproj, "SE.AppWWW",                    "24.1.0.21");
+            // Declared in device.yml, in declaration order, because the emitted order is the
+            // artefact. A missing or malformed row is refused at load rather than producing a
+            // .dfbproj whose topology import fails on one unresolved catalogReference.
+            foreach (var lib in cfg.Devices.Libraries)
+                changed += DfbprojRegistrar.RegisterReference(dfbproj, lib.Name, lib.Version);
 
             changed += DfbprojRegistrar.SweepIec61499Folder(dfbproj, iec61499Dir);
 
