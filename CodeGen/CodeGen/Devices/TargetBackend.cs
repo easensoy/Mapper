@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using CodeGen.Configuration;
 using CodeGen.Devices.Core;
@@ -19,6 +19,17 @@ namespace CodeGen.Devices
     {
         PlcAssignment Target { get; }
 
+        // The components this target's own hardware can serve, or empty when it serves whatever the
+        // roster puts on it. A coupler carries the channels it carries, so the answer is the TARGET's -
+        // the UI and the validator both ask here rather than each naming a particular injector.
+        System.Collections.Generic.IReadOnlySet<string> ServableComponents { get; }
+
+        // Whether this target can actually serve what the run assigned to it. Its own hardware decides -
+        // a coupler carries the channels it carries - so the answer lives with the target rather than in
+        // the compiler. Runs after the plan and BEFORE anything is written, so an unsupportable
+        // assignment costs nothing.
+        void ValidateAssignment(GenerationContext ctx);
+
         // The device: its sysdev, its resource shell and the topology that declares it to EAE.
         void EmitDevice(GenerationContext ctx, DeviceScope scope, Action<string> log);
 
@@ -32,6 +43,15 @@ namespace CodeGen.Devices
         // Physical channels bound to the FBs this target hosts.
         void BindHardware(GenerationContext ctx, IoBindings? bindings,
             SystemInjector.BindingApplicationReport report, Action<string> log);
+
+        // Anything this target must do to the shared canvas AFTER every resource is wired - an IO
+        // broker whose symlinks resolve to FBs the wiring created, for instance. On the backend so the
+        // pipeline drives the run without knowing which target has such a thing.
+        void FinishApplication(GenerationContext ctx, string syslayPath,
+            SystemInjector.BindingApplicationReport report, Action<string> log);
+
+        // The last word on this target's own artefacts, once everything is written.
+        void ValidateOutput(GenerationContext ctx, Action<string> log);
     }
 
     // What every device emit needs and none of them should derive twice: where the project is, which
@@ -40,7 +60,7 @@ namespace CodeGen.Devices
     {
         // No scope means no device can be written at all. Skipping would leave an application with
         // nothing to run it on and still report a generated project, so the run STOPS here.
-        public static DeviceScope Open(MapperConfig cfg)
+        public static DeviceScope Open(Configuration.CompilerConfiguration cfg)
         {
             var root = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
             if (string.IsNullOrEmpty(root))
@@ -62,6 +82,13 @@ namespace CodeGen.Devices
     {
         public abstract PlcAssignment Target { get; }
 
+        // Most targets serve whatever the roster puts on them; only one with its own IO contract lists.
+        public virtual System.Collections.Generic.IReadOnlySet<string> ServableComponents { get; } =
+            new System.Collections.Generic.HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+
+        // Most targets serve whatever the roster puts on them; only one with its own IO contract says no.
+        public virtual void ValidateAssignment(GenerationContext ctx) { }
+
         public virtual void EmitDevice(GenerationContext ctx, DeviceScope scope, Action<string> log) { }
 
         public virtual void CopyHardwareConfig(GenerationContext ctx, Action<string> log) { }
@@ -71,6 +98,11 @@ namespace CodeGen.Devices
 
         public virtual void BindHardware(GenerationContext ctx, IoBindings? bindings,
             SystemInjector.BindingApplicationReport report, Action<string> log) { }
+
+        public virtual void FinishApplication(GenerationContext ctx, string syslayPath,
+            SystemInjector.BindingApplicationReport report, Action<string> log) { }
+
+        public virtual void ValidateOutput(GenerationContext ctx, Action<string> log) { }
 
         // Every stage here is REQUIRED: a backend only declares one for work its target genuinely needs
         // (an optional step is simply not overridden). A failed stage leaves a partial device, and a
