@@ -14,7 +14,7 @@ namespace CodeGen.Translation.Process
 
         // Written OUTSIDE the EAE solution (the project root's parent): EAE enumerates its own tree and
         // an unregistered file inside it raises a Solution Integrity complaint.
-        internal static string? Emit(MapperConfig cfg,
+        internal static string? Emit(Configuration.CompilerConfiguration cfg,
             IReadOnlyDictionary<string, IReadOnlyDictionary<int, string>> byProcess,
             Action<string>? warn = null)
         {
@@ -35,7 +35,7 @@ namespace CodeGen.Translation.Process
 
                 var payload = new Dictionary<string, object>(StringComparer.Ordinal)
                 {
-                    ["topicRoot"] = cfg.MqttTopicRoot + "/process",
+                    ["topicRoot"] = cfg.Paths.MqttTopicRoot + "/process",
                     ["note"] = "Maps the integer published on <topicRoot>/<process> to the VueOne state "
                              + "name. Ordinals are the twin's declaration order, 1-based; 0 means no "
                              + "owning state. Telemetry only - the rig does not read this file.",
