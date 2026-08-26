@@ -116,7 +116,7 @@ namespace MapperTests
             try
             {
                 var result = new DeployResult();
-                ProcessRuntimeTemplatePatcher.PatchStateTableCapacity(new FbtEditScope(root, TestConfig.Cfg.Generation.FileWriteRetries), 40, result);
+                ProcessRuntimeTemplatePatcher.PatchStateTableCapacity(FbtEditScope.For(root, TestConfig.Cfg), 40, result);
 
                 foreach (var f in owners)
                     Assert.Contains("ArraySize=\"40\"", File.ReadAllText(Path.Combine(dir, f)), StringComparison.Ordinal);
