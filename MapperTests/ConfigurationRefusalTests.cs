@@ -189,7 +189,7 @@ namespace MapperTests
         [Fact]
         public void One_backend_per_target_and_one_target_row_per_backend()
         {
-            var backends = TargetRegistry.Backends.Select(b => b.Target).ToList();
+            var backends = TargetBackends.All.Select(b => b.Target).ToList();
             Assert.Equal(backends.Count, backends.Distinct().Count());
 
             var declared = DeviceConfig.Current.Targets.Select(t => t.Plc).ToList();
@@ -206,8 +206,8 @@ namespace MapperTests
             // The supported set IS the registered backends: nothing else enumerates the targets, so a
             // new controller cannot be half-added by editing one list and forgetting another.
             foreach (var t in TargetRegistry.All)
-                Assert.Contains(t.Plc, TargetRegistry.Backends.Select(b => b.Target));
-            foreach (var b in TargetRegistry.Backends)
+                Assert.Contains(t.Plc, TargetBackends.All.Select(b => b.Target));
+            foreach (var b in TargetBackends.All)
                 Assert.Contains(b.Target, TargetRegistry.All.Select(t => t.Plc));
         }
 
