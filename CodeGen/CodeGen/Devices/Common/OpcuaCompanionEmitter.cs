@@ -86,8 +86,11 @@ namespace CodeGen.Artefacts
         // The two public entry points are linked by the VueOne hidden runner, so their signatures must not change.
         internal static string BuildOpcuaCompanion(string uid)
         {
-            MapperConfig? cfg = null;
-            try { cfg = MapperConfig.Load(); } catch { /* fall back to the default template root */ }
+            // This overload is a compatibility entry point the prebuilt VueOne runner links, so it has
+            // no configuration handed to it and reads its own - which makes it a composition root.
+            Configuration.CompilerConfiguration? cfg = null;
+            try { cfg = Configuration.CompilerConfiguration.Load(MapperConfig.Load()); }
+            catch { /* fall back to the default template root */ }
             return TemplateDocument.Load(cfg, @"Companion\opcua.xml",
                 new Dictionary<string, string> { ["Uid"] = uid });
         }
