@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 using CodeGen.Application;
 using CodeGen.Configuration;
@@ -296,7 +296,7 @@ internal static class Program
                 // selects it. And where the target's hardware declares which components it can serve,
                 // the plant's two components take those names - the plant itself is the same either
                 // way. Both are declared capabilities, so nothing here names a controller.
-                bool relocated = TargetRegistry.Of(Enum.Parse<PlcAssignment>(target)).ReceivesRelocatedComponents;
+                bool relocated = TargetRegistry.Of(PlcAssignment.Named(target)).ReceivesRelocatedComponents;
                 var names = relocated
                     ? PlacementFixture.Write(control,
                         RevPiIoBrokerInjector.CoveredActuators.FirstOrDefault(),
