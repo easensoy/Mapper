@@ -44,15 +44,18 @@ namespace CodeGen.Devices.Core
             var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
             if (string.IsNullOrEmpty(eaeRoot))
             {
-                result.Warnings.Add("EAE project root not found — Topology network not emitted.");
-                return result;
+                throw new InvalidOperationException(
+                    "[Topology] the EAE project root was not found, so the network and its wires were "
+                    + "not emitted. EAE rejects a topology whose wires reference devices it cannot "
+                    + "resolve, so the whole import would fail. Generation ABORTED.");
             }
 
             var topologyDir = Path.Combine(eaeRoot, "Topology");
             if (!Directory.Exists(topologyDir))
             {
-                result.Warnings.Add($"Topology folder missing at {topologyDir} — network not emitted.");
-                return result;
+                throw new InvalidOperationException(
+                    $"[Topology] the Topology folder is missing at '{topologyDir}', so the network and "
+                    + "its wires were not emitted. Generation ABORTED.");
             }
 
             // DomainTag must be the live SolutionId; a zero DomainTag fails topology-import.
@@ -172,7 +175,10 @@ namespace CodeGen.Devices.Core
             }
             catch (Exception ex)
             {
-                result.Warnings.Add($"[Topology] Orphan-wire sweep failed: {ex.Message}");
+                throw new InvalidOperationException(
+                    $"[Topology] the orphan-wire sweep failed: {ex.Message} A wire left pointing at a "
+                    + "device no Equipment file declares makes EAE reject the entire topology import. "
+                    + "Generation ABORTED.", ex);
             }
         }
 
