@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using CodeGen.Configuration;
+using CodeGen.Services;
 using System.IO;
 using System.Xml.Linq;
 using CodeGen.Devices.Core;
@@ -11,15 +12,18 @@ namespace CodeGen.Devices.M262
     public static class M262TopologyEmitter
     {
         const string FallbackSolutionUuid      = "00000000-0000-0000-0000-000000000000";
-        internal const string DefaultM262Uuid = "11111111-2222-3333-4444-000000000010";
-        const string DefaultRuntimeUuid        = "11111111-2222-3333-4444-000000000030";
-        const string RuntimeDeoTypeId          = "b0723d05-50bb-4c15-94a4-d8b5981bcb56";
+        static Configuration.DeviceIdentity M262Id =>
+            Configuration.DeviceConfig.Identity(CodeGen.Translation.PlcAssignment.Named("M262"));
+
+        internal static string DefaultM262Uuid => M262Id.Equipment;
+        static string DefaultRuntimeUuid => M262Id.Runtime;
+        static string RuntimeDeoTypeId => M262Id.RuntimeType;
 
         // Zero UUID = EAE Topology "NOCONF": the IP endpoint is statically bound but not associated
         // with any BroadcastDomain, so the M262dPAC shows its IP in Physical Views with no network.
         const string NoConfDomainUuid          = "00000000-0000-0000-0000-000000000000";
 
-        public static TopologyEmitResult Emit(MapperConfig cfg, string sysdevId)
+        public static TopologyEmitResult Emit(Configuration.CompilerConfiguration cfg, string sysdevId)
         {
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
             var result = new TopologyEmitResult();
@@ -65,7 +69,7 @@ namespace CodeGen.Devices.M262
             // one byte-for-byte — overwriting invalidates the trust on the next deploy.
             if (!File.Exists(solutionDataFile))
             {
-                File.WriteAllText(solutionDataFile, BuildSolutionDataJson(solutionId));
+                File.WriteAllText(solutionDataFile, BuildSolutionDataJson(cfg, solutionId));
                 result.FilesWritten.Add(Path.GetFileName(solutionDataFile));
             }
 
@@ -94,24 +98,24 @@ namespace CodeGen.Devices.M262
             return result;
         }
 
-        static void DeleteEmittedBroadcastDomain(string topologyDir, MapperConfig cfg)
+        static void DeleteEmittedBroadcastDomain(string topologyDir, Configuration.CompilerConfiguration cfg)
         {
             try
             {
                 var domainFile = Path.Combine(topologyDir,
-                    $"BroadcastDomain_{cfg.M262LogicalNetworkName}.json");
+                    $"BroadcastDomain_{cfg.Paths.M262LogicalNetworkName}.json");
                 if (File.Exists(domainFile)) File.Delete(domainFile);
             }
             catch { /* file lock; harmless — EAE will see the topologyproj has no reference */ }
         }
 
-        static void UnregisterBroadcastDomainFromTopologyProj(string topologyProjPath, MapperConfig cfg)
+        static void UnregisterBroadcastDomainFromTopologyProj(string topologyProjPath, Configuration.CompilerConfiguration cfg)
         {
             try
             {
                 var doc = XDocument.Load(topologyProjPath);
                 var ns = doc.Root!.GetDefaultNamespace();
-                var staleName = $"BroadcastDomain_{cfg.M262LogicalNetworkName}.json";
+                var staleName = $"BroadcastDomain_{cfg.Paths.M262LogicalNetworkName}.json";
                 var nodesToRemove = doc.Descendants(ns + "None")
                     .Where(e =>
                     {
@@ -126,108 +130,20 @@ namespace CodeGen.Devices.M262
             catch { /* topologyproj malformed; not fatal */ }
         }
 
-        static string BuildEquipmentJson(MapperConfig cfg, string sysdevId, string solutionId) => $$"""
-            {
-              "catalogReference": "M060_V01.00_01.00",
-              "uuid": "{{DefaultM262Uuid}}",
-              "identifier": "M262dPAC_1",
-              "path": "Topology",
-              "partNumber": "TM262L01MDESE8T",
-              "properties": [
+        static string BuildEquipmentJson(Configuration.CompilerConfiguration cfg, string sysdevId, string solutionId) =>
+            TemplateDocument.Load(cfg, @"Topology\Equipment_M262dPAC.json",
+                new System.Collections.Generic.Dictionary<string, string>
                 {
-                  "propertyName": "IsUnderConstruction",
-                  "propertyValue": "False"
-                },
-                {
-                  "propertyName": "DomainTag",
-                  "propertyValue": "{{solutionId}}"
-                }
-              ],
-              "references": [
-                {
-                  "diagramPath": "Physical Views",
-                  "x": -195,
-                  "y": -193
-                }
-              ],
-              "components": [
-                {
-                  "interfaces": [
-                    {
-                      "identifier": "MDESE_ETH1",
-                      "disabled": false,
-                      "physicalAddress": "",
-                      "endpoints": [
-                        {
-                          "identifier": "IP Address",
-                          "isReadOnly": false,
-                          "domainReadOnly": false,
-                          "ipAddress": "{{cfg.M262TargetIp}}",
-                          "domain": "{{NoConfDomainUuid}}"
-                        }
-                      ]
-                    },
-                    {
-                      "identifier": "MDESE_ETH2",
-                      "disabled": false,
-                      "physicalAddress": "",
-                      "endpoints": [
-                        {
-                          "identifier": "IP Address",
-                          "isReadOnly": false,
-                          "domainReadOnly": false,
-                          "ipAddress": "0.0.0.0",
-                          "domain": "00000000-0000-0000-0000-000000000000"
-                        }
-                      ]
-                    }
-                  ],
-                  "ports": [
-                    { "identifier": "Ethernet1",   "side": "Default" },
-                    { "identifier": "Ethernet2_1", "side": "Default" },
-                    { "identifier": "Ethernet2_2", "side": "Default" }
-                  ],
-                  "componentType": "EthernetDEO"
-                },
-                {
-                  "bridgePriority": 0,
-                  "serviceEnabled": false,
-                  "componentType": "RstpDEO"
-                },
-                {
-                  "endpoint": "MDESE_ETH1\\IP Address",
-                  "connectionTypes": "None",
-                  "componentType": "EthernetMasterDEO"
-                },
-                {
-                  "enabled": false,
-                  "securityMode": 0,
-                  "componentType": "SysLogClientDEO"
-                },
-                {
-                  "mode": 0,
-                  "componentType": "CyberSecurityDEO"
-                },
-                {
-                  "uuid": "{{DefaultRuntimeUuid}}",
-                  "typeId": "{{RuntimeDeoTypeId}}",
-                  "logicalDeviceId": "{{sysdevId}}",
-                  "runtimeServices": [
-                    {
-                      "identifier": "Deployment"
-                    },
-                    {
-                      "identifier": "Archive Service",
-                      "logicalPortSecured": "0"
-                    }
-                  ],
-                  "componentType": "RuntimeDEO"
-                }
-              ]
-            }
-            """;
+                    ["EquipmentUuid"] = DefaultM262Uuid,
+                    ["RuntimeUuid"] = DefaultRuntimeUuid,
+                    ["RuntimeTypeId"] = RuntimeDeoTypeId,
+                    ["NoConfDomain"] = NoConfDomainUuid,
+                    ["SysdevId"] = sysdevId,
+                    ["SolutionId"] = solutionId,
+                    ["TargetIp"] = cfg.Paths.M262TargetIp,
+                });
 
-        static string BuildSolutionDataJson(string solutionId)
+        static string BuildSolutionDataJson(Configuration.CompilerConfiguration cfg, string solutionId)
         {
             const string Q = "\\u0022";
 
@@ -255,21 +171,21 @@ namespace CodeGen.Devices.M262
             string anonUserInfo = $"{{{Q}users_list{Q}:[{{{Q}user_name{Q}:{Q}Anonymous{Q},{Q}password{Q}:{Q}{AnonPwHash}{Q},{Q}state{Q}:{Q}Active{Q},{Q}AccountStartDate{Q}:null,{Q}assigned_role{Q}:[{Q}Anonymous{Q}]}}],{Q}version{Q}:{Q}1{Q}}}";
             string anonRoleInfo = $"{{{Q}roles_list{Q}:[{{{Q}name{Q}:{Q}Anonymous{Q},{Q}permission_name{Q}:[{Q}Security Management{Q},{Q}File Transfer{Q},{Q}IP Configuration{Q},{Q}Firmware Management{Q},{Q}LaunchCanvas{Q},{Q}OpenFacePlate{Q},{Q}EditSymbol{Q},{Q}Level_15{Q}]}}],{Q}version{Q}:{Q}1{Q}}}";
 
-            return $$"""
-{
-  "SolutionId": "{{solutionId}}",
-  "CsConfHash": "{{CsConfHash}}",
-  "AnonymousCsConfHash": "{{AnonCsConfHash}}",
-  "CertThumbprint": "{{CertThumbprintChain}}",
-  "deviceConfiguration": "{{deviceCfg}}",
-  "userInformation": "{{userInfo}}",
-  "roleInformation": "{{roleInfo}}",
-  "anonymousDeviceConfiguration": "{{anonDeviceCfg}}",
-  "anonymousUserInformation": "{{anonUserInfo}}",
-  "anonymousRoleInformation": "{{anonRoleInfo}}",
-  "solutionName": "Demonstrator"
-}
-""";
+            return TemplateDocument.Load(cfg, @"Topology\Solution.solutionData",
+                new System.Collections.Generic.Dictionary<string, string>
+                {
+                    ["SolutionId"] = solutionId,
+                    ["CsConfHash"] = CsConfHash,
+                    ["AnonCsConfHash"] = AnonCsConfHash,
+                    ["CertThumbprintChain"] = CertThumbprintChain,
+                    ["DeviceCfg"] = deviceCfg,
+                    ["AnonDeviceCfg"] = anonDeviceCfg,
+                    ["UserInfo"] = userInfo,
+                    ["RoleInfo"] = roleInfo,
+                    ["AnonUserInfo"] = anonUserInfo,
+                    ["AnonRoleInfo"] = anonRoleInfo,
+                });
+
         }
 
     }
