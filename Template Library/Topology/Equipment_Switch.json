@@ -1,0 +1,28 @@
+{
+  "catalogReference": "GenericL2UnmanagedSwitch8Ports_V01.00_01.00",
+  "uuid": "{{SwitchUuid}}",
+  "identifier": "Switch_1",
+  "path": "Topology",
+  "properties": [
+    { "propertyName": "IsUnderConstruction", "propertyValue": "False" },
+    { "propertyName": "DomainTag",            "propertyValue": "{{SolutionId}}" }
+  ],
+  "references": [
+    { "diagramPath": "Physical Views", "x": 200, "y": -200 }
+  ],
+  "components": [
+    {
+      "ports": [
+        { "identifier": "Port1", "side": "Default" },
+        { "identifier": "Port2", "side": "Default" },
+        { "identifier": "Port3", "side": "Default" },
+        { "identifier": "Port4", "side": "Default" },
+        { "identifier": "Port5", "side": "Default" },
+        { "identifier": "Port6", "side": "Default" },
+        { "identifier": "Port7", "side": "Default" },
+        { "identifier": "Port8", "side": "Default" }
+      ],
+      "componentType": "EthernetDEO"
+    }
+  ]
+}
