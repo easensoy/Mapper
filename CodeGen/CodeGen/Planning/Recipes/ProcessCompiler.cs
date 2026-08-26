@@ -29,6 +29,8 @@ namespace CodeGen.Translation.Process.Recipes
             // Which controller hosts each component, and so which report ring it publishes onto.
             public CodeGen.Domain.Twin.TwinModel Twin = null!;
             public ReportGraph Rings = null!;
+            // THIS run's declared types; nothing here reaches a process-wide manifest.
+            public Mapping.TemplateIndex Manifest = null!;
 
             // CAT, command protocol and command sequence are decided by the plan, never by the CAT router.
             public IReadOnlyDictionary<string, string> CatType = new Dictionary<string, string>();
@@ -122,7 +124,7 @@ namespace CodeGen.Translation.Process.Recipes
                     if (kind.HasFlag(HandoffTransport.Ring))
                         rows.Add(Row.Cmd(process.Name?.Trim() ?? string.Empty, state.StateNumber, state.StateID));
                     if (kind.HasFlag(HandoffTransport.CrossController))
-                        rows.Add(Row.Cmd(ProcessPhaseTransport.CommandToken, state.StateNumber, state.StateID));
+                        rows.Add(Row.Cmd(ctx.Manifest.PhaseTransport.CommandToken, state.StateNumber, state.StateID));
                 }
                 // The movements this state owns; each ends in its command's arrival WAIT.
                 void Work() => EmitOwnedMoves(process, state, owned, ctx, pos, at, graphs, rows);
@@ -655,7 +657,7 @@ namespace CodeGen.Translation.Process.Recipes
                 // Which number names a stop - and whether two states at one place are one stop - is
                 // the CAT's declaration, answered by the one owner of that question.
                 foreach (var s in c.States.Where(s => s.StaticState))
-                    _stop[s.StateID] = Interlocks.ActuatorStateEncoding.CanonicalNumber(c, s, ctx.CatType);
+                    _stop[s.StateID] = Interlocks.ActuatorStateEncoding.CanonicalNumber(c, s, ctx.CatType, ctx.Manifest);
 
                 StartId = (c.States.FirstOrDefault(s => s.InitialState) ?? c.States.FirstOrDefault())?.StateID ?? string.Empty;
             }
@@ -832,7 +834,7 @@ namespace CodeGen.Translation.Process.Recipes
         // Cross-process conditions with each transport resolved. No cache, so nothing survives a generation.
         internal static ProcessHandoffPlan HandoffPlan(Ctx ctx) =>
             ProcessHandoffPlan.Derive(ctx.Twin, ctx.ProcessIdByName, ctx.Graphs,
-                (producer, consumer) => SameRing(producer, consumer, ctx));
+                (producer, consumer) => SameRing(producer, consumer, ctx), ctx.Manifest);
 
         private static void Serialize(VueOneComponent process, CodeGen.Domain.Twin.ProcessGraph graph,
             List<Row> rows, Dictionary<string, int> firstRow, RecipeArrays arrays)
