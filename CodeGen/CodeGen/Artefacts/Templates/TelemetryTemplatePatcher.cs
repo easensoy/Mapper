@@ -15,14 +15,14 @@ namespace CodeGen.Services
     {
 
         // Deploy the TelemetryConfig datatype (the Telemetry_CAT Config input). Idempotent.
-        internal static void DeployTelemetryConfigDatatype(MapperConfig cfg, string eaeProjectDir, DeployResult result)
-            => DeployDatatype(eaeProjectDir, "TelemetryConfig",
+        internal static void DeployTelemetryConfigDatatype(Configuration.CompilerConfiguration cfg, FbtEditScope scope, DeployResult result)
+            => DeployDatatype(scope, "TelemetryConfig",
                 TemplateDocument.Load(cfg, @"DataType\TelemetryConfig.dt"), result);
 
 
         // Deploy the TelemetryHealth datatype (the Telemetry_CAT Health output). Idempotent.
-        internal static void DeployTelemetryHealthDatatype(MapperConfig cfg, string eaeProjectDir, DeployResult result)
-            => DeployDatatype(eaeProjectDir, "TelemetryHealth",
+        internal static void DeployTelemetryHealthDatatype(Configuration.CompilerConfiguration cfg, FbtEditScope scope, DeployResult result)
+            => DeployDatatype(scope, "TelemetryHealth",
                 TemplateDocument.Load(cfg, @"DataType\TelemetryHealth.dt"), result);
 
         // Removes deployed Telemetry wrapper artifacts (files + .dfbproj entries): the composite (BOTH the
@@ -30,11 +30,11 @@ namespace CodeGen.Services
         // .composite.offline.xml, the helper FBs TelemetryUnpack/TelemetryPack.fbt, and the datatypes
         // TelemetryConfig/TelemetryHealth.dt. Called on the flag-OFF path and at the top of flag-ON (clean
         // slate before a fresh deploy). Idempotent.
-        internal static void SweepTelemetryCat(string eaeProjectDir, DeployResult result)
+        internal static void SweepTelemetryCat(FbtEditScope scope, DeployResult result)
         {
             try
             {
-                var iec = Path.Combine(eaeProjectDir, "IEC61499");
+                var iec = Path.Combine(scope.Root, "IEC61499");
                 int filesGone = 0;
                 foreach (var rel in new[]
                 {
@@ -77,7 +77,10 @@ namespace CodeGen.Services
             }
             catch (Exception ex)
             {
-                result.Warnings.Add($"SweepTelemetryCat failed: {ex.Message}");
+                throw new InvalidOperationException(
+                    $"SweepTelemetryCat failed: {ex.Message} — the superseded Telemetry artefacts could "
+                    + "not be removed, so copy-if-absent would keep them beside the current ones and EAE "
+                    + "would compile both. Generation ABORTED.", ex);
             }
         }
     }
