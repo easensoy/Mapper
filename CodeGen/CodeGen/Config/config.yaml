@@ -21,3 +21,22 @@ bearingPnpHomeBrakeMs: 160
 # EAE holds a generated file open while its editor is on that artefact, so a write can fail with a
 # sharing violation that clears on its own. Retry rather than abort the whole generation.
 fileWriteRetries: 8
+
+# How often a broker re-reads its coupler word. The BX1 cover IO has no change event of its own -
+# a symlink carries a VALUE, not an event - so the broker polls, and this is how fast.
+bx1IoScanPeriodMs: 50
+
+# The M262 TM3 bus: cycle time, the tolerance EAE allows before it calls a cycle missed, and what
+# it does when one is. Facts about the physical bus, not about the plant on it.
+m262BusCycleMs: 80
+m262BusCycleTolerance: 30
+m262BusCycleActionWhenMissed: 1
+
+# How often a sensor-fitted five-state actuator re-samples its own DIs. Its Inputs symlink is
+# sample-on-REQ, so without this nothing re-reads an arrival after the ring goes quiet.
+actuatorInputPollMs: 200
+
+# The EAE namespace every type and instance the Mapper emits lives in. A project-identity fact of
+# the generated solution, spelled once here rather than at each of the two dozen places that emit a
+# Namespace attribute.
+projectNamespace: Main
