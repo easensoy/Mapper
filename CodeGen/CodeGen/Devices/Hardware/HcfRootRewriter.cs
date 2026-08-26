@@ -12,7 +12,7 @@ namespace CodeGen.Devices.Core
     // form. Idempotent; channel ParameterValue (DI00..DO15 symlink) contents are untouched.
     public static class HcfRootRewriter
     {
-        public static RewriteResult RewriteIfNeeded(string hcfPath, string resourceId)
+        public static RewriteResult RewriteIfNeeded(string hcfPath, string resourceId, int retries)
         {
             var result = new RewriteResult { HcfPath = hcfPath };
             if (string.IsNullOrWhiteSpace(hcfPath) || !File.Exists(hcfPath))
@@ -68,10 +68,9 @@ namespace CodeGen.Devices.Core
                 Indent = true,
                 Encoding = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true),
             };
-            int attempt = Services.FbtXmlEditor.SaveXmlRetrying(hcfPath, settings, w =>
+            int attempt = Services.FbtXmlEditor.SaveXmlRetrying(retries, hcfPath, settings, w =>
                 new XDocument(new XDeclaration("1.0", "utf-8", null), newRoot).Save(w));
             result.Rewrote = true;
-            result.ChildrenWrapped = keep.Count;
             if (attempt > 1) result.Warnings.Add($"write succeeded on attempt {attempt}");
             return result;
         }
@@ -80,8 +79,7 @@ namespace CodeGen.Devices.Core
         {
             public string HcfPath { get; set; } = string.Empty;
             public bool Rewrote { get; set; }
-            public int ChildrenWrapped { get; set; }
-            public string Skipped { get; set; } = string.Empty;
+                public string Skipped { get; set; } = string.Empty;
             public List<string> Warnings { get; } = new();
         }
     }
