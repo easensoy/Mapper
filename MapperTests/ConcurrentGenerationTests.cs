@@ -22,10 +22,10 @@ namespace MapperTests
     {
         private static readonly string[] Models = { "_se", "_vc", "_sw5", "_sw5_noclamp" };
 
-        private static string ModelPath(string suffix) => Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            "OneDrive", "Documents", "VueOne", "system",
-            "SMC_Vue2VC_With_Processes" + suffix, "Control.xml");
+        // Through TestTwin: two authored twins carry an interlock the compiler refuses, so a test that
+        // wants to exercise the rest of the compiler against those plants gets a corrected COPY. The
+        // authored file is never written, and the refusal itself is proved separately.
+        private static string ModelPath(string suffix) => TestTwin.CompilablePath(suffix);
 
         // Same prerequisite the other model-driven tests in this project use: the VueOne source models.
         private static string Require(string suffix)
