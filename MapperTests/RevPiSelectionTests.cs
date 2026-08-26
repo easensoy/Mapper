@@ -19,6 +19,19 @@ namespace MapperTests
     /// global to save or restore.
     public abstract class RevPiTestBase
     {
+        // The addresses live in device.yml, so a scenario overrides the DECLARATION rather than a
+        // facade property. The snapshot is projected, never mutated.
+        protected static CompilerConfiguration WithRevPi(string? hostIp = null, string? targetIp = null)
+        {
+            var devices = CodeGen.Configuration.YamlDeclarations.Reader.Deserialize<DeviceConfig>(
+                System.IO.File.ReadAllText(
+                    System.IO.Path.Combine(AppContext.BaseDirectory, "Config", "device.yml")))!;
+            var net = devices.RevPi;
+            if (hostIp != null) net.HostIp = hostIp;
+            if (targetIp != null) net.TargetIp = targetIp;
+            return TestConfig.Cfg.With(devices);
+        }
+
         protected static DeploymentProfile M262 => DeploymentProfile.AsPlaced(TestConfig.Cfg);
 
         /// The supported mode: the named components are assigned to the relocation target, the rest
@@ -217,8 +230,7 @@ namespace MapperTests
         public void Equal_host_and_container_addresses_are_rejected()
         {
             var profile = RevPiComponents("Feeder", "Checker", "PartInHopper");
-            var cfg = CompilerConfiguration.Load(
-                new MapperConfig { RevPiHostIp = "192.168.1.7", RevPiTargetIp = "192.168.1.7" });
+            var cfg = WithRevPi(hostIp: "192.168.1.7", targetIp: "192.168.1.7");
             var problems = TopologyAddressValidator.ValidateRevPiRoles(cfg, profile).ToList();
             Assert.Contains(problems, p => p.IsError && p.Detail.Contains("cannot share one address", StringComparison.Ordinal));
         }
@@ -228,10 +240,10 @@ namespace MapperTests
         {
             var profile = RevPiComponents("Feeder", "Checker", "PartInHopper");
             Assert.Contains(
-                TopologyAddressValidator.ValidateRevPiRoles(CompilerConfiguration.Load(new MapperConfig { RevPiHostIp = "not-an-ip" }), profile),
+                TopologyAddressValidator.ValidateRevPiRoles(WithRevPi(hostIp: "not-an-ip"), profile),
                 p => p.IsError);
             Assert.Contains(
-                TopologyAddressValidator.ValidateRevPiRoles(CompilerConfiguration.Load(new MapperConfig { RevPiTargetIp = "" }), profile),
+                TopologyAddressValidator.ValidateRevPiRoles(WithRevPi(targetIp: ""), profile),
                 p => p.IsError);
         }
 
@@ -239,8 +251,7 @@ namespace MapperTests
         public void Address_role_checks_are_silent_when_no_RevPi_is_selected()
         {
             var profile = M262;
-            var cfg = CompilerConfiguration.Load(
-                new MapperConfig { RevPiHostIp = "192.168.1.7", RevPiTargetIp = "192.168.1.7" });
+            var cfg = WithRevPi(hostIp: "192.168.1.7", targetIp: "192.168.1.7");
             Assert.Empty(TopologyAddressValidator.ValidateRevPiRoles(cfg, profile));
         }
     }
