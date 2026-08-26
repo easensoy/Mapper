@@ -14,7 +14,7 @@ namespace CodeGen.Devices.Core
         public const string AppId    = "00000000-0000-0000-0000-000000000001";
 
         // Only acts when the .sysapp is absent.
-        public static bool EnsureApplicationShell(MapperConfig cfg, string? eaeRoot, Action<string>? log = null)
+        public static bool EnsureApplicationShell(Configuration.CompilerConfiguration cfg, string? eaeRoot, Action<string>? log = null)
         {
             if (string.IsNullOrEmpty(eaeRoot)) return false;
             var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
