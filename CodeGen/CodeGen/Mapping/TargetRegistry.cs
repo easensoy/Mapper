@@ -25,11 +25,41 @@ namespace CodeGen.Mapping
         bool OpensCoverSeam,
         // Carries a chain another target commands, so it is open at both ends.
         bool CarriesDetouredChain,
+        // The IO broker FB this target hosts, or null. Ownership of an emitted FB that is not a plant
+        // component: without it the mirror has no way to say which resource such an FB belongs on.
+        string? IoBroker,
+        // The EAE simulation binding's deploy and archive service ports for this device.
+        int SimulationDeployPort,
+        int SimulationArchivePort,
+
+        // The hardware modules this device carries, in bus order.
+        IReadOnlyList<Configuration.HardwareModule> HardwareModules,
+
+        // The EtherNet/IP coupler type this target's scanner instantiates, and the HwConfiguration
+        // model folders that carry it. Empty on a target whose IO is not EtherNet/IP.
+        string EtherNetIpDeviceType,
+        IReadOnlyList<string> HwConfigModelFolders,
         // The system FBs this resource boots with, in emission order, each already joined to its shape.
         IReadOnlyList<BootFbSpec> BootFbs)
     {
         // Every EAE device the Mapper emits lives in the same vendor namespace.
         public const string DeviceNamespace = "SE.DPAC";
+    }
+
+    // Which target OWNS a station's ring. A target that merely RECEIVES components relocated off
+    // another one is not that ring's host: the components moved, their station did not. Three passes
+    // used to spell this out for themselves - a capability, a planner and a frame owner - so they could
+    // disagree about where a relocated component's reports circulate.
+    public static class RingHost
+    {
+        public static bool Owns(TargetDescriptor t) => !t.ReceivesRelocatedComponents;
+
+        // The target hosting the same station as this one, without receiving anything onto it.
+        public static PlcAssignment Of(TargetDescriptor t) =>
+            Owns(t) ? t.Plc
+                : TargetRegistry.All.FirstOrDefault(
+                      o => o.HostsFeedStation == t.HostsFeedStation && Owns(o))?.Plc
+                  ?? t.Plc;
     }
 
     // One boot FB, fully specified: what it is (role, type, namespace, parameters, order) joined to who
@@ -40,13 +70,6 @@ namespace CodeGen.Mapping
 
     public static class TargetRegistry
     {
-        // The targets this codebase can actually GENERATE. Naming one in device.yml with no emitter here
-        // would allocate a component to a device nothing can write, so the implemented set stays in C#.
-        private static readonly PlcAssignment[] Implemented =
-        {
-            PlcAssignment.M262, PlcAssignment.M580, PlcAssignment.BX1, PlcAssignment.RevPi,
-        };
-
         // Joined once per configuration load; the checks in Join catch either half being absent.
         private static readonly object _gate = new();
         private static IReadOnlyList<TargetDescriptor>? _targets;
@@ -70,17 +93,40 @@ namespace CodeGen.Mapping
             IReadOnlyList<Configuration.TargetIdentity> declared)
         {
             var errors = new List<string>();
-            foreach (var d in declared)
-                if (!Implemented.Contains(d.Plc))
-                    errors.Add($"device.yml declares target '{d.Plc}', which no backend implements");
-            foreach (var plc in Implemented)
-                if (declared.All(d => d.Plc != plc))
-                    errors.Add($"backend '{plc}' has no device.yml targets entry, so it has no resource name");
+            // Backend-vs-declaration agreement is checked in UseBackends: the registry is not allowed to
+            // know a concrete backend, so it cannot ask that question while it is loading the declaration.
             foreach (var g in declared.GroupBy(d => d.Plc).Where(g => g.Count() > 1))
                 errors.Add($"device.yml declares target '{g.Key}' {g.Count()} times");
             foreach (var d in declared)
                 if (string.IsNullOrWhiteSpace(d.ResourceName) || string.IsNullOrWhiteSpace(d.DeviceType))
                     errors.Add($"device.yml target '{d.Plc}' is missing a resourceName or deviceType");
+            // An FB has ONE owner. Two targets claiming one broker would mirror it onto both resources,
+            // and EAE rejects the deploy for a duplicated instance rather than picking one.
+            foreach (var g in declared
+                         .Where(d => !string.IsNullOrWhiteSpace(d.IoBroker))
+                         .GroupBy(d => d.IoBroker!.Trim(), StringComparer.Ordinal)
+                         .Where(g => g.Count() > 1))
+                errors.Add($"ioBroker '{g.Key}' is claimed by {g.Count()} targets " +
+                           $"({string.Join(", ", g.Select(d => d.Plc))}); an emitted FB has one owner");
+
+            // A device's own two services cannot share a port, and no two devices may claim one port
+            // for the same role - either would bind one service and silently drop the other.
+            foreach (var d in declared)
+            {
+                if (d.SimulationDeployPort <= 0 || d.SimulationArchivePort <= 0)
+                    errors.Add($"target '{d.Plc}' declares no simulationDeployPort/simulationArchivePort");
+                else if (d.SimulationDeployPort == d.SimulationArchivePort)
+                    errors.Add($"target '{d.Plc}' claims port {d.SimulationDeployPort} for BOTH its " +
+                               "deploy and archive service");
+            }
+            foreach (var (role, port) in new[] { ("deploy", 0), ("archive", 1) })
+                foreach (var g in declared
+                             .Select(d => (d.Plc, Port: port == 0 ? d.SimulationDeployPort : d.SimulationArchivePort))
+                             .Where(x => x.Port > 0)
+                             .GroupBy(x => x.Port).Where(g => g.Count() > 1))
+                    errors.Add($"port {g.Key} is claimed as the {role} service by " +
+                               $"{string.Join(" and ", g.Select(x => x.Plc))}");
+
             var sequence = Configuration.DeviceConfig.Current.BootSequence;
             errors.AddRange(BootProfileErrors(declared, sequence));
             errors.AddRange(BringUpErrors(Configuration.DeviceConfig.Current.BringUp, sequence));
@@ -89,15 +135,21 @@ namespace CodeGen.Mapping
                     "device.yml targets do not match the supported backends:" + Environment.NewLine +
                     "  - " + string.Join(Environment.NewLine + "  - ", errors));
 
-            return Implemented.Select(plc =>
+            // In DECLARATION order: every target is both declared and implemented by now, and the order a
+            // descriptor list is walked in reaches artefacts, so it is the declaration that fixes it.
+            return declared.Select(d =>
             {
-                var d = declared.First(i => i.Plc == plc);
                 return new TargetDescriptor(
-                    plc, d.ResourceName, d.DeviceType,
+                    d.Plc, d.ResourceName, d.DeviceType,
                     string.IsNullOrWhiteSpace(d.DeviceName) ? null : d.DeviceName,
                     d.HcfTemplate,
                     d.HostsFeedStation, d.DeviceLocalCanvas, d.ReceivesRelocatedComponents,
                     d.OpensCoverSeam, d.CarriesDetouredChain,
+                    string.IsNullOrWhiteSpace(d.IoBroker) ? null : d.IoBroker!.Trim(),
+                    d.SimulationDeployPort, d.SimulationArchivePort,
+                    d.HardwareModules,
+                    d.EtherNetIpDeviceType,
+                    d.HwConfigModelFolders,
                     BootProfile(d, sequence));
             }).ToList();
         }
@@ -178,26 +230,50 @@ namespace CodeGen.Mapping
                 yield return "device.yml declares no bringUp, so no resource is started at all";
                 yield break;
             }
-            var roles = new HashSet<string>(sequence.Select(s => s.Role), StringComparer.Ordinal)
-            {
-                Configuration.BringUpWire.ResourceEntry,
-            };
+            var typeOfRole = sequence.ToDictionary(s => s.Role, s => s.Type, StringComparer.Ordinal);
             var seen = new HashSet<string>(StringComparer.Ordinal);
             foreach (var w in wires)
             {
                 foreach (var (endpoint, side) in new[] { (w.From, "from"), (w.To, "to") })
                 {
                     var role = Configuration.BringUpWire.RoleOf(endpoint);
-                    if (role == null)
+                    var port = Configuration.BringUpWire.PortOf(endpoint);
+                    if (role == null || port == null)
+                    {
                         yield return $"device.yml bringUp {side} '{endpoint}' is not a '<role>.<PORT>' endpoint";
-                    else if (!roles.Contains(role))
+                        continue;
+                    }
+                    if (role == Configuration.BringUpWire.ResourceEntry)
+                    {
+                        // The resource's own entry events. A misspelling here wires a start nothing raises.
+                        if (!ResourceEntryEvents.Contains(port))
+                            yield return $"device.yml bringUp {side} '{endpoint}' names entry event '{port}', " +
+                                         "which a resource does not raise; it raises " +
+                                         string.Join(", ", ResourceEntryEvents);
+                        continue;
+                    }
+                    if (!typeOfRole.TryGetValue(role, out var type))
+                    {
                         yield return $"device.yml bringUp {side} '{endpoint}' names boot role '{role}', which " +
                                      "no bootSequence role and not the resource entry declares";
+                        continue;
+                    }
+                    // Checked against the type's own contract wherever the Mapper OWNS that type. A boot
+                    // FB from the vendor library has no authored interface in this repo to check against,
+                    // so its port is taken as declared until such a type is one we ship.
+                    var contract = TemplateManifest.Find(type);
+                    if (contract is { Ports.Count: > 0 } && !contract.Ports.Contains(port, StringComparer.Ordinal))
+                        yield return $"device.yml bringUp {side} '{endpoint}' names port '{port}', which " +
+                                     $"'{type}' does not declare";
                 }
                 if (!seen.Add($"{w.From}->{w.To}"))
                     yield return $"device.yml bringUp declares '{w.From} -> {w.To}' more than once";
             }
         }
+
+        // What a resource itself raises, which is EAE's contract rather than anything the Mapper emits.
+        private static readonly IReadOnlySet<string> ResourceEntryEvents =
+            new HashSet<string>(StringComparer.Ordinal) { "COLD", "WARM", "ONLINECHANGE" };
 
         private static readonly System.Text.RegularExpressions.Regex BootId =
             new("^[0-9A-F]{16}$", System.Text.RegularExpressions.RegexOptions.Compiled);
@@ -214,18 +290,40 @@ namespace CodeGen.Mapping
 
         public static IReadOnlyList<TargetDescriptor> All => Targets;
 
-        // The backends that can actually GENERATE a target, in the order a run drives them: a device
-        // whose System folder another one creates has to come after it. Registering a target here is
-        // what makes it implemented; device.yml supplies what it IS.
-        private static readonly CodeGen.Devices.ITargetBackend[] Implementations =
-        {
-            new CodeGen.Devices.M262.M262Backend(),
-            new CodeGen.Devices.RevPi.RevPiBackend(),
-            new CodeGen.Devices.M580.M580Backend(),
-            new CodeGen.Devices.BX1.Bx1Backend(),
-        };
+        // Handed in by the composition root, which is the one place that may know a concrete backend.
+        // The registry answers what a target IS from device.yml and never constructs one.
+        private static IReadOnlyList<CodeGen.Devices.ITargetBackend> _backends =
+            Array.Empty<CodeGen.Devices.ITargetBackend>();
 
-        public static IReadOnlyList<CodeGen.Devices.ITargetBackend> Backends => Implementations;
+        public static IReadOnlyList<CodeGen.Devices.ITargetBackend> Backends => _backends;
+
+        // Called once, before anything is planned. A target is IMPLEMENTED because a backend claims it
+        // and DECLARED because device.yml has a row for it; the two must agree exactly, or a run would
+        // either emit a device with no resource name or silently skip one the deployment expects.
+        public static void UseBackends(IReadOnlyList<CodeGen.Devices.ITargetBackend> backends)
+        {
+            if (backends is null || backends.Count == 0)
+                throw new ArgumentException("no target backends were registered, so no device can be emitted",
+                    nameof(backends));
+
+            var errors = new List<string>();
+            foreach (var g in backends.GroupBy(b => b.Target).Where(g => g.Count() > 1))
+                errors.Add($"two backends both claim target '{g.Key}', so which one emits it is undecided");
+            var implemented = backends.Select(b => b.Target).ToList();
+            var declared = Configuration.DeviceConfig.Current.Targets;
+            foreach (var d in declared)
+                if (!implemented.Contains(d.Plc))
+                    errors.Add($"device.yml declares target '{d.Plc}', which no backend implements");
+            foreach (var plc in implemented)
+                if (declared.All(d => d.Plc != plc))
+                    errors.Add($"backend '{plc}' has no device.yml targets entry, so it has no resource name");
+            if (errors.Count > 0)
+                throw new InvalidOperationException(
+                    "Target registration is inconsistent:" + Environment.NewLine +
+                    "  - " + string.Join(Environment.NewLine + "  - ", errors));
+
+            _backends = backends;
+        }
 
         // The controller that runs the Feed station when nothing has relocated it.
         public static PlcAssignment FeedTarget =>
