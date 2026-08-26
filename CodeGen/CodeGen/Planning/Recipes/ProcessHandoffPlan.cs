@@ -16,29 +16,6 @@ namespace CodeGen.Translation.Process.Recipes
         CrossController = 2 // separate rings: the phase travels the process-phase cross-reference path
     }
 
-    // The process type's own phase-announcement contract, read from the type that declares it. It is
-    // backend vocabulary rather than a planning decision, and it belongs to the shipped FB - so a
-    // different process type brings its own ports with it instead of needing this class edited.
-    internal static class ProcessPhaseTransport
-    {
-        private static CatPhaseHandoff Declared =>
-            TemplateManifest.ProcessType.PhaseHandoff
-            ?? throw new InvalidOperationException(
-                $"[Templates] '{TemplateManifest.ProcessType.Name}' is the process type but declares no " +
-                "phaseHandoff, so a phase announcement has no ports to travel over. Declare it in " +
-                "templates.yml, or no cross-controller handoff can be planned.");
-
-        public static string CommandToken => Declared.CommandToken;   // CMD target the producer publishes on
-        public static string EventOut => Declared.EventOut;
-        public static string DataOut => Declared.DataOut;
-        public static string EventIn => Declared.EventIn;
-        public static string DataIn => Declared.DataIn;
-        public static string ReceiverSlotParam => Declared.ReceiverSlotParam;
-
-        // A consumer carries this many (EventIn, DataIn, receiver-slot) groups; the producer fans out freely.
-        public static int ProducersPerConsumer => Declared.ProducersPerConsumer;
-    }
-
     // One model-derived handoff: a consumer transition condition that names a state of another process.
     public sealed record ProcessHandoff(
         string ProducerName,
@@ -78,15 +55,25 @@ namespace CodeGen.Translation.Process.Recipes
             new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<Pair, HandoffTransport> _transportByPair = new();
         private readonly Dictionary<string, int> _receiverSlot = new(StringComparer.OrdinalIgnoreCase);
+        // The process type's own announcement ports, taken from the run's index at construction.
+        private readonly CatPhaseHandoff _transport;
+
+        private readonly string _processTypeName;
+
+        private ProcessHandoffPlan(Mapping.TemplateIndex manifest)
+        {
+            _transport = manifest.PhaseTransport;
+            _processTypeName = manifest.ProcessType.Name;
+        }
 
         // The producer is the process a condition names; the consumer is the one whose transition carries it.
         public static ProcessHandoffPlan Derive(
             CodeGen.Domain.Twin.TwinModel twin,
             IReadOnlyDictionary<string, int> processIdByName,
             IReadOnlyDictionary<string, CodeGen.Domain.Twin.ProcessGraph> graphs,
-            Func<VueOneComponent, VueOneComponent, bool> sameRing)
+            Func<VueOneComponent, VueOneComponent, bool> sameRing, Mapping.TemplateIndex manifest)
         {
-            var plan = new ProcessHandoffPlan();
+            var plan = new ProcessHandoffPlan(manifest);
             foreach (var consumer in twin.Processes.Select(p => p.Source))
             {
                 foreach (var st in consumer.States)
@@ -134,14 +121,14 @@ namespace CodeGen.Translation.Process.Recipes
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .OrderBy(n => n, StringComparer.Ordinal)
                     .ToList();
-                if (producers.Count <= ProcessPhaseTransport.ProducersPerConsumer) continue;
+                if (producers.Count <= _transport.ProducersPerConsumer) continue;
                 throw new InvalidOperationException(
                     $"[Handoff] '{group.Key}' consumes phases from {producers.Count} processes on other " +
                     $"controllers ({string.Join(", ", producers)}), but the process-phase transport carries " +
-                    $"{ProcessPhaseTransport.ProducersPerConsumer} producer per consumer: " +
-                    $"{TemplateManifest.ProcessType.Name} declares one " +
-                    $"{ProcessPhaseTransport.EventIn}/{ProcessPhaseTransport.DataIn} " +
-                    $"input group and one {ProcessPhaseTransport.ReceiverSlotParam} slot. Conditions involved: " +
+                    $"{_transport.ProducersPerConsumer} producer per consumer: " +
+                    $"{_processTypeName} declares one " +
+                    $"{_transport.EventIn}/{_transport.DataIn} " +
+                    $"input group and one {_transport.ReceiverSlotParam} slot. Conditions involved: " +
                     string.Join("; ", group.Select(h => $"'{h.ConditionName}' on state '{h.ConsumingStateId}'")) + ".");
             }
         }
