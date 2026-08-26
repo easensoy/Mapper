@@ -52,6 +52,13 @@ namespace CodeGen.Configuration
             new(paths ?? throw new ArgumentNullException(nameof(paths)),
                 Devices, Generation, Telemetry, Rig, Interlocks, Templates, Layout, Security);
 
+        // The same run against different device declarations. A caller that needs to ask "what would
+        // this validator say about THESE addresses" gets a new snapshot rather than mutating a shared
+        // one, so two callers cannot see each other's overrides.
+        public CompilerConfiguration With(DeviceConfig devices) =>
+            new(Paths, devices ?? throw new ArgumentNullException(nameof(devices)),
+                Generation, Telemetry, Rig, Interlocks, Templates, Layout, Security);
+
         public CompilerConfiguration With(LayoutCatalog layout) =>
             new(Paths, Devices, Generation, Telemetry, Rig, Interlocks, Templates,
                 layout ?? throw new ArgumentNullException(nameof(layout)), Security);
