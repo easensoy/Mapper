@@ -13,7 +13,8 @@ namespace CodeGen.Devices.BX1
     {
         public static HwConfigCopyResult Copy(Configuration.CompilerConfiguration cfg)
         {
-            var copied = HwConfigVerbatimCopier.CopyFor(cfg, CodeGen.Translation.PlcAssignment.Named("BX1"), cfg.Paths.BX1HcfTemplatePath);
+            var copied = HwConfigVerbatimCopier.CopyFor(cfg, CodeGen.Translation.PlcAssignment.Named("BX1"),
+                Station2DeviceEmitter.ResolveBx1HcfPath(cfg));
             // Must run AFTER HwConfiguration/ is rebuilt: an in-EmitAll deploy no-ops here, leaving an
             // EMPTY EIPSCANNER2.xml so the cover I/O never reaches the coupler.
             Station2DeviceEmitter.DeployBx1ScannerModelFinalPass(cfg);
