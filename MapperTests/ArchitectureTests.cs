@@ -185,6 +185,26 @@ namespace MapperTests
         }
 
         // ------------------------------------------------------------------------------------
+        // A deploy-time patch addresses a type by ROLE, never by filename.
+        // ------------------------------------------------------------------------------------
+        [Fact]
+        public void No_patch_addresses_a_deployed_type_by_spelling_its_filename()
+        {
+            // templates.yml says which type serves which role. A patch that spells the filename makes
+            // the patch and the catalogue two owners of one fact, and the one that is wrong fails
+            // SILENTLY - an absent .fbt is skipped, so the type simply never gains what the instance
+            // parameters name. Resolving through the manifest means a renamed type is one YAML edit.
+            var breaches = new List<string>();
+            foreach (var f in Production())
+                foreach (Match m in Regex.Matches(CodeOf(f),
+                             @"(EditDeployedFbt|RequireDeployedFbt|FindDeployedFbt)\s*\([^)]*""[\w]+\.fbt"""))
+                    breaches.Add(Rel(f) + " -> " + m.Value.Split('(')[0] + " with a literal filename");
+            NoBreaches(breaches,
+                "a deploy-time patch names a .fbt directly instead of asking templates.yml which type " +
+                "serves the role it is patching");
+        }
+
+        // ------------------------------------------------------------------------------------
         // Every target is declared once, has one backend kind, and claims no identity twice.
         // ------------------------------------------------------------------------------------
         [Fact]
