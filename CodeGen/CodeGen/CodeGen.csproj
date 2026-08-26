@@ -19,6 +19,7 @@
     <None Update="Config\smc-rig.yml" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Config\templates.yml" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Config\telemetry.yml" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Config\security.yml" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Config\hmi.yml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Config\mapper_config.json" Link="mapper_config.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
