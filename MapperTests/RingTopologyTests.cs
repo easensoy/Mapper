@@ -101,7 +101,7 @@ namespace MapperTests
             // registering targets in another order reorders the cycle, with no pairing written down.
             var ctx = Plant(OnA, OnB);
             var hosts = ResourceWiringPlanner.RingHostsSharing(ctx, ctx.Allocation.Of(OnA));
-            var declared = TargetRegistry.All.Select(t => t.Plc).ToList();
+            var declared = TestConfig.Cfg.Targets.All.Select(t => t.Plc).ToList();
 
             Assert.Equal(hosts, declared.Where(hosts.Contains).ToList());
         }
@@ -142,7 +142,7 @@ namespace MapperTests
             var moved = Plant(OnA, OnB, relocate: OnA);
 
             IReadOnlyList<string> All(GenerationContext c) =>
-                TargetRegistry.All.SelectMany(t =>
+                TestConfig.Cfg.Targets.All.SelectMany(t =>
                         c.Emits(t.Plc)
                             ? ResourceWiringPlanner.RingOf(c, t.Plc, ChainOrder.Resource).Select(m => m.Name)
                             : Enumerable.Empty<string>())
