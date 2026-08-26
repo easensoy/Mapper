@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using CodeGen.Configuration;
 using CodeGen.Devices.Core;
@@ -100,6 +100,18 @@ internal sealed class GateFixtures
 internal sealed class GateModel
 {
     public string Name { get; set; } = string.Empty;
+
+    // A twin whose authored model the compiler REFUSES, and the text its refusal must contain.
+    // Declaring the expected refusal keeps an invalid twin inside the gate as a negative fixture:
+    // the run has to fail, deterministically, for the stated reason. An empty value means the twin
+    // is expected to compile, so a refusal is a regression rather than the point of the fixture.
+    public string ExpectRefusal { get; set; } = string.Empty;
+
+    // Why the model is invalid and what the model owner has to change, carried in the manifest so a
+    // reader of the gate output does not have to find the twin to understand the failure.
+    public string RefusalReason { get; set; } = string.Empty;
+
+    public bool IsNegativeFixture => !string.IsNullOrWhiteSpace(ExpectRefusal);
 }
 
 internal sealed class GateSelection
