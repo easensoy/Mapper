@@ -102,7 +102,7 @@ namespace MapperTests
         }
 
         private static IReadOnlyList<PlcAssignment> Emitted(GenerationContext ctx) =>
-            TargetRegistry.All.Select(t => t.Plc).Where(ctx.Emits).ToList();
+            TestConfig.Cfg.Targets.All.Select(t => t.Plc).Where(ctx.Emits).ToList();
 
         private static ResourceWiringPlan Plan(GenerationContext ctx, PlcAssignment plc, ChainOrder order) =>
             ResourceWiringPlanner.For(ctx, plc, order);
@@ -194,7 +194,7 @@ namespace MapperTests
             {
                 var app = Plan(ctx, plc, ChainOrder.Application).InitChain.ToHashSet(StringComparer.OrdinalIgnoreCase);
                 var res = Plan(ctx, plc, ChainOrder.Resource).InitChain
-                    .Where(n => !string.Equals(n, TargetBootstrap.InitRole, StringComparison.Ordinal))
+                    .Where(n => !string.Equals(n, TestConfig.Cfg.Targets.InitRole, StringComparison.Ordinal))
                     .Where(n => !injected.Contains(n, StringComparer.OrdinalIgnoreCase))
                     .ToHashSet(StringComparer.OrdinalIgnoreCase);
                 // The canvas may additionally head the chain with a connection nothing else starts.
