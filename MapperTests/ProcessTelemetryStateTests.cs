@@ -30,8 +30,10 @@ namespace MapperTests
         private const string ModelRoot =
             @"C:\Users\alper\OneDrive\Documents\VueOne\system\SMC_Vue2VC_With_Processes";
 
-        private static string ModelPath(string suffix) =>
-            Path.Combine(ModelRoot + suffix, "Control.xml");
+        // Through TestTwin: two authored twins carry an interlock the compiler refuses, so a test that
+        // wants to exercise the rest of the compiler against those plants gets a corrected COPY. The
+        // authored file is never written, and the refusal itself is proved separately.
+        private static string ModelPath(string suffix) => TestTwin.CompilablePath(suffix);
 
         private static bool ModelAvailable(string suffix) => File.Exists(ModelPath(suffix));
 
