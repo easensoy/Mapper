@@ -140,7 +140,7 @@ namespace CodeGen.Devices.M262
                     ["NoConfDomain"] = NoConfDomainUuid,
                     ["SysdevId"] = sysdevId,
                     ["SolutionId"] = solutionId,
-                    ["TargetIp"] = cfg.Paths.M262TargetIp,
+                    ["TargetIp"] = cfg.Devices.M262.TargetIp,
                 });
 
         // The .solutionData security payload. The JSON SHAPE below is EAE's own document grammar and
