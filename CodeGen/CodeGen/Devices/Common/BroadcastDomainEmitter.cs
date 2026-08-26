@@ -51,8 +51,8 @@ namespace CodeGen.Devices.Core
 
             var path = Path.Combine(topologyDir, "BroadcastDomain_Default Network.json");
             File.WriteAllText(path, Domain(cfg,
-                cfg.Paths.DefaultNetworkUuid, "Default Network",
-                cfg.Paths.DefaultNetworkSubnetAddress, cfg.Paths.DefaultNetworkSubnetMask, cfg.Paths.DefaultNetworkGateway));
+                cfg.Devices.DefaultNetwork.DomainUuid, "Default Network",
+                cfg.Devices.DefaultNetwork.SubnetAddress, cfg.Devices.DefaultNetwork.SubnetMask, cfg.Devices.DefaultNetwork.Gateway));
             result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, path));
             return result;
         }
