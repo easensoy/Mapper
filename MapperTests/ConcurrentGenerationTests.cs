@@ -43,7 +43,7 @@ namespace MapperTests
 
         private static Fingerprint Plan(string model, DeploymentProfile profile)
         {
-            var ctx = GenerationContext.Plan(new MapperConfig(), Require(model), profile);
+            var ctx = GenerationContext.Plan(TestConfig.Cfg, Require(model), profile);
 
             var allocation = string.Join(";", ctx.Components
                 .Select(c => c.Name + "=" + ctx.Allocation.Of(c.Name))
@@ -70,13 +70,13 @@ namespace MapperTests
         [Fact] // four models planned at once must each get their own answers
         public void Concurrent_plans_of_different_models_do_not_leak_into_each_other()
         {
-            var sequential = Models.ToDictionary(m => m, m => Plan(m, DeploymentProfile.M262Only(LayoutCatalog.Load())));
+            var sequential = Models.ToDictionary(m => m, m => Plan(m, DeploymentProfile.AsPlaced(TestConfig.Cfg)));
 
             // 8 planners over 4 models, interleaved, so any shared mutable state is very likely to be
             // observed by a run that did not write it.
             var concurrent = new Fingerprint[Models.Length * 2];
             Parallel.For(0, concurrent.Length,
-                i => concurrent[i] = Plan(Models[i % Models.Length], DeploymentProfile.M262Only(LayoutCatalog.Load())));
+                i => concurrent[i] = Plan(Models[i % Models.Length], DeploymentProfile.AsPlaced(TestConfig.Cfg)));
 
             for (int i = 0; i < concurrent.Length; i++)
                 Assert.Equal(sequential[Models[i % Models.Length]], concurrent[i]);
@@ -85,8 +85,8 @@ namespace MapperTests
         [Fact] // the same model planned under two profiles at once must not blend them
         public void Concurrent_plans_of_different_profiles_do_not_leak_into_each_other()
         {
-            var m262 = DeploymentProfile.M262Only(LayoutCatalog.Load());
-            var revPi = new DeploymentProfile(new[] { "Feeder", "Checker" }, LayoutCatalog.Load());
+            var m262 = DeploymentProfile.AsPlaced(TestConfig.Cfg);
+            var revPi = DeploymentProfile.Relocating(new[] { "Feeder", "Checker" }, TestConfig.Cfg);
             var expectedM262 = Plan("_se", m262);
             var expectedRevPi = Plan("_se", revPi);
 
@@ -106,23 +106,23 @@ namespace MapperTests
         {
             foreach (var model in Models)
             {
-                var first = Plan(model, DeploymentProfile.M262Only(LayoutCatalog.Load()));
-                _ = Plan("_vc", new DeploymentProfile(new[] { "Feeder" }, LayoutCatalog.Load()));   // a different run in between
-                Assert.Equal(first, Plan(model, DeploymentProfile.M262Only(LayoutCatalog.Load())));
+                var first = Plan(model, DeploymentProfile.AsPlaced(TestConfig.Cfg));
+                _ = Plan("_vc", DeploymentProfile.Relocating(new[] { "Feeder" }, TestConfig.Cfg));   // a different run in between
+                Assert.Equal(first, Plan(model, DeploymentProfile.AsPlaced(TestConfig.Cfg)));
             }
         }
 
         [Fact] // a roster is a value: building one cannot disturb another that already exists
         public void Rosters_built_concurrently_under_different_profiles_stay_independent()
         {
-            var m262 = new DeploymentRoster(DeploymentProfile.M262Only(LayoutCatalog.Load()));
+            var m262 = new DeploymentRoster(DeploymentProfile.AsPlaced(TestConfig.Cfg));
             var expected = m262.All.ToDictionary(e => e.Name, e => e.Plc, StringComparer.Ordinal);
 
             Parallel.For(0, 64, i =>
             {
-                var other = new DeploymentRoster(new DeploymentProfile(new[] { "Feeder", "Checker" }, LayoutCatalog.Load()));
-                Assert.Equal(PlcAssignment.RevPi, other.Get("Feeder")!.Plc);
-                Assert.Equal(PlcAssignment.M262, m262.Get("Feeder")!.Plc);
+                var other = new DeploymentRoster(DeploymentProfile.Relocating(new[] { "Feeder", "Checker" }, TestConfig.Cfg));
+                Assert.Equal(PlcAssignment.Named("RevPi"), other.Get("Feeder")!.Plc);
+                Assert.Equal(PlcAssignment.Named("M262"), m262.Get("Feeder")!.Plc);
             });
 
             foreach (var (name, plc) in expected)
@@ -140,8 +140,8 @@ namespace MapperTests
                     File.ReadAllText(Require("_se")).Replace(
                         "<Name>Checker</Name>", "<Name>Widget_Nobody_Allocated</Name>"));
 
-                var ctx = GenerationContext.Plan(new MapperConfig(), doctored,
-                    DeploymentProfile.M262Only(LayoutCatalog.Load()));
+                var ctx = GenerationContext.Plan(TestConfig.Cfg, doctored,
+                    DeploymentProfile.AsPlaced(TestConfig.Cfg));
 
                 // Placed on a real controller, given a state_table slot, and typed from its state graph --
                 // all without a roster row or a line of C# naming it.
