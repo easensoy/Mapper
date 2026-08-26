@@ -14,15 +14,14 @@ namespace CodeGen.Translation.Interlocks
         public static IReadOnlyDictionary<string, InterlockPlan> PlanAll(
             IEnumerable<VueOneComponent> actuators, IReadOnlyDictionary<string, string> catTypes,
             IReadOnlyDictionary<string, int> scopedIds, Domain.Twin.TwinModel twin,
-            ReportGraph rings, ControllerAllocation allocation,
-            IReadOnlyDictionary<string, int> slots, List<string> findings)
+            List<string> findings)
         {
             var plans = new Dictionary<string, InterlockPlan>(StringComparer.OrdinalIgnoreCase);
             foreach (var a in actuators)
             {
                 var name = (a.Name ?? string.Empty).Trim();
                 if (name.Length == 0 || plans.ContainsKey(name)) continue;
-                var plan = InterlockPlanner.BuildRules(a, scopedIds, catTypes, twin, rings, allocation, slots, findings);
+                var plan = InterlockPlanner.BuildRules(a, scopedIds, catTypes, twin, findings);
                 // Two CAT capabilities shape the rules, and each is DECLARED, never inferred from
                 // the CAT's name: a core that publishes a narrow raw-state range cannot match a
                 // rule outside it, and a CAT with a work stop either side of a centre reference
@@ -30,17 +29,13 @@ namespace CodeGen.Translation.Interlocks
                 // gate belongs to the recipe.
                 var protocol = catTypes.TryGetValue(name, out var cat)
                     ? TemplateManifest.ProtocolOrNull(cat) : null;
-                if (protocol?.RawStateRange is { } range) plan = FilterToRawStateRange(plan, range);
+                if (protocol?.RawStateRange is { } range) AssertEveryMoveIsPublished(plan, range, name, cat);
                 if (protocol?.CrossesBothWays == true) plan = WithReverseCrossings(plan);
                 AssertEveryRuleIsEnforceable(name, cat, protocol, plan);
-                // Never ship an InterlockManager that passes everything through: if conditions
-                // survived translation but nothing was emitted, the safety net is false.
-                int inScope = InterlockPlanner.CountInScopeAlternatives(a, scopedIds, catTypes, twin, rings, allocation);
-                if (inScope > 0 && plan.Count == 0)
-                    throw new InvalidOperationException(
-                        $"[Recipe] Actuator '{name}' has {inScope} in-scope Control.xml interlock " +
-                        "alternative(s) but emitted RuleCount=0 - refusing to generate code whose " +
-                        "InterlockManager passes everything through (false safety net).");
+                // The inert-safety-net guard that stood here compared a second walk of the guard tree
+                // against this plan. Nothing drops an alternative any more - the planner emits every one
+                // the model states or the run stops - so a guard the model wrote can no longer reach
+                // RuleCount=0, and the walk it compared against is gone with it.
                 plans[name] = plan;
             }
             return plans;
@@ -75,17 +70,24 @@ namespace CodeGen.Translation.Interlocks
             }
         }
 
-        // Keep only alternatives inside the core DECLARED CurrentRawState range; outside it a rule can
-        // never match. Judged per alternative, because an alternative IS one rule.
-        // Do NOT re-drop at-rest terms here: BuildRules keeps the cross-controller readiness gates.
-        private static InterlockPlan FilterToRawStateRange(
-            InterlockPlan plan, Configuration.RawStateRange r)
+        // A rule matches on CurrentRawState, so a move outside the range the core DECLARES it publishes
+        // can never match. That is a rule the selected CAT cannot represent - not a rule to leave out,
+        // because leaving it out ships an actuator the twin says is guarded and the plant is not.
+        private static void AssertEveryMoveIsPublished(
+            InterlockPlan plan, Configuration.RawStateRange r, string name, string? cat)
         {
-            var b = new InterlockPlan.Builder();
-            foreach (var a in plan.Alternatives())
-                if (a.From >= r.Min && a.From <= r.Max && a.To >= r.Min && a.To <= r.Max)
-                    b.Add(a);
-            return b.ToPlan();
+            var outside = plan.Alternatives()
+                .Where(a => a.From < r.Min || a.From > r.Max || a.To < r.Min || a.To > r.Max)
+                .Select(a => $"{a.From} -> {a.To}")
+                .Distinct(StringComparer.Ordinal).ToList();
+            if (outside.Count == 0) return;
+
+            throw new InvalidOperationException(
+                $"[Interlock] '{name}' is interlocked on the move(s) {string.Join(", ", outside)}, which fall " +
+                $"outside the raw-state range {r.Min}..{r.Max} its CAT '{cat ?? "(none)"}' publishes, so the " +
+                "rule could never match. Either the twin numbers that branch outside the CAT's state space, " +
+                "or the CAT selected for this actuator is not the one the twin describes. Generation stops " +
+                "rather than emitting a rule that cannot fire.");
         }
 
         // The shared volume is crossed both ways, so every crossing alternative needs its reverse, with
