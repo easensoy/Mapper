@@ -53,6 +53,10 @@ namespace CodeGen.Configuration
                 "publishers with nothing to publish through.");
 
         public static TelemetrySettings Current => _file.Load();
+
+        /// The same declaration read from a run's OWN profile bundle. A root of null is the
+        /// bundle shipped beside CodeGen.dll, which is what a normal run reads.
+        public static TelemetrySettings LoadFrom(string? root) => _file.Load(root);
     }
 
     // Where a connection's FB is drawn. Typed, so a misspelling fails the load rather than reading as
