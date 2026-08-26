@@ -155,6 +155,15 @@ namespace CodeGen.Application
             ValidateMqtt(cfg, log);
             foreach (var backend in TargetRegistry.Backends) backend.ValidateOutput(ctx, log);
 
+            // LAST, against the finished staged tree: everything EAE would reject on import that can be
+            // answered without EAE. A required stage, so a project that would not load never publishes.
+            try
+            {
+                var (registrations, types) = Validation.Output.ProjectIntegrityValidator.Validate(cfg);
+                log($"[Integrity] {registrations} project registration(s) resolve, {types} referenced type(s) deployed");
+            }
+            catch (Exception ex) { StageFailed("project integrity", StageKind.Required, ex, log); }
+
             TouchDfbproj(cfg, log);
 
             // Every validator passed against the staged tree, so it is fit to become the project.
@@ -295,12 +304,16 @@ namespace CodeGen.Application
                         if (recovered != null) break;
                     }
                     if (recovered == null)
-                    {
-                        log($"[IoBindings][ERROR] IO-bindings file '{fileName}' NOT FOUND at {path} and no project copy under any parent Input\\ folder. " +
-                            "Actuator athome/atwork/coil channels will NOT bind — the generated HCF will be blank for Feeder/Checker/Transfer and NOTHING WILL TRIGGER. " +
-                            "Restore Input\\" + fileName + " (from MapperUI\\MapperUI\\Input or MapperTests\\TestData) and regenerate.");
-                        return null;
-                    }
+                        // Not a warning: without these the actuator athome/atwork/coil channels bind
+                        // to nothing, the HCF is emitted blank, and the project deploys and then does
+                        // not move. That is indistinguishable from a wiring fault on the rig, so the
+                        // run stops here instead of shipping it.
+                        throw new FileNotFoundException(
+                            $"[IoBindings] '{fileName}' was not found at '{path}', and no project " +
+                            "copy exists under any parent Input folder. Every actuator channel would " +
+                            "bind to nothing and the generated HCF would be blank, so the project " +
+                            "would deploy and then do nothing. Restore the workbook under Input and " +
+                            "generate again. Generation ABORTED.", path);
                     try
                     {
                         File.Copy(recovered, path, overwrite: true);
