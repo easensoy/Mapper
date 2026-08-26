@@ -98,7 +98,7 @@ namespace CodeGen.Devices.Core
                                 : "insecure mqtt:// but the device 'Insecure Application' override is MISSING from the " +
                                   "device Properties (F513CAE3 .Properties.xml) -> MQTT_CONNECTION WILL fault RC101 " +
                                   "('Secure URL required'). The Mapper writes this override only for the BX1 Soft-dPAC " +
-                                  "in insecure MQTT mode (cfg.Paths.MqttPublishEnabled && !cfg.Paths.MqttSecureTls).",
+                                  "in insecure MQTT mode (cfg.Telemetry.PublishEnabled && !cfg.Telemetry.SecureTls).",
                             Impossible: !hasOverride));
                     }
                     else if (!isMqtts)
