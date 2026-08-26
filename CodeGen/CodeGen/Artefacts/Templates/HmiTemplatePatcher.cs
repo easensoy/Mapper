@@ -10,60 +10,6 @@ namespace CodeGen.Services
     // stay unqualified.
     internal static class HmiTemplatePatcher
     {
-        // Repair the deployed Seven-State centre-home CAT's boundary state output: a stale deploy can leave
-        // the OutputVar current_state_to_process orphaned (no WITH clause), which EAE rejects. The _HMI
-        // faceplate references it (must NOT be removed), so re-add state_out (WITH current_state_to_process)
-        // + the ActuatorCore.pst_out -> state_out event connection. Idempotent.
-        internal static void EnsureSevenStateStateOut(string eaeProjectDir, DeployResult result)
-        {
-            try
-            {
-                var fbt = Path.Combine(eaeProjectDir, "IEC61499",
-                    "Seven_State_Actuator_Centre_Home_CAT", "Seven_State_Actuator_Centre_Home_CAT.fbt");
-                if (!File.Exists(fbt)) return;
-                var doc = XDocument.Load(fbt, LoadOptions.PreserveWhitespace);
-                var root = doc.Root;
-                if (root == null) return;
-                XNamespace ns = root.GetDefaultNamespace();
-                var iface = root.Element(ns + "InterfaceList");
-                var net = root.Element(ns + "FBNetwork");
-                if (iface == null || net == null) return;
-
-                // Only repair a stale-bridge CAT that still carries the boundary current_state_to_process.
-                var outputVars = iface.Element(ns + "OutputVars");
-                bool hasBoundaryVar = outputVars?.Elements(ns + "VarDeclaration")
-                    .Any(v => (string?)v.Attribute("Name") == "current_state_to_process") == true;
-                if (!hasBoundaryVar) return;   // fresh committed CAT -> nothing to repair
-
-                var eventOutputs = iface.Element(ns + "EventOutputs");
-                if (eventOutputs == null) return;
-                if (eventOutputs.Elements(ns + "Event").Any(e => (string?)e.Attribute("Name") == "state_out"))
-                    return;   // already consistent
-
-                // Re-pair: state_out WITH current_state_to_process, driven by ActuatorCore.pst_out.
-                eventOutputs.Add(new XElement(ns + "Event",
-                    new XAttribute("Name", "state_out"),
-                    new XAttribute("Comment", "Re-paired with current_state_to_process so the boundary var has a WITH clause (HMI reads it)"),
-                    new XElement(ns + "With",
-                        new XAttribute("Var", "current_state_to_process"))));
-
-                var ec = net.Element(ns + "EventConnections");
-                if (ec == null) { ec = new XElement(ns + "EventConnections"); net.Add(ec); }
-                if (!ec.Elements(ns + "Connection").Any(c => (string?)c.Attribute("Destination") == "state_out"))
-                    ec.Add(new XElement(ns + "Connection",
-                        new XAttribute("Source", "ActuatorCore.pst_out"),
-                        new XAttribute("Destination", "state_out")));
-
-                doc.Save(fbt, SaveOptions.DisableFormatting);
-                result.PatchesApplied.Add("Seven_State_Actuator_Centre_Home_CAT: re-paired state_out WITH current_state_to_process (HMI keeps the var)");
-                MapperLogger.Info("[Deploy] Seven_State state_out re-paired (current_state_to_process valid again)");
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"EnsureSevenStateStateOut failed: {ex.Message}");
-            }
-        }
-
         // VISUAL-only: keep the "HMI & OPCUA Connectivity" section frame from spilling into the section
         // below (MoveStyle "AnyContained"->"None", cap height, pull IThis up inside). No wiring change.
         internal static void FixCatHmiOpcuaFrame(string eaeProjectDir, string catName, DeployResult result)
@@ -98,7 +44,8 @@ namespace CodeGen.Services
             }
             catch (Exception ex)
             {
-                result.Warnings.Add($"FixCatHmiOpcuaFrame({catName}) failed: {ex.Message}");
+                throw new InvalidOperationException(
+                    $"FixCatHmiOpcuaFrame({catName}) failed: {ex.Message} — a deploy-time patch could not be applied, so the deployed type does not have the shape the planner's parameters name. Usually EAE holding the .fbt open during Generate: CLOSE EAE and Generate again. Generation ABORTED rather than shipping a tree EAE will not run.", ex);
             }
         }
     }
