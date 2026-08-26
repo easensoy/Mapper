@@ -91,7 +91,7 @@ namespace CodeGen.Devices.Core
         }
 
         public static int MirrorFbsIntoSysres(string sysresPath, List<SyslayFb> syslayFbs,
-            IReadOnlyList<SystemFbSpec> systemFbs)
+            IReadOnlyList<SystemFbSpec> systemFbs, Mapping.TemplateIndex manifest)
         {
             if (!File.Exists(sysresPath)) return 0;
             var doc = XDocument.Load(sysresPath);
@@ -148,7 +148,7 @@ namespace CodeGen.Devices.Core
                     .Where(s => !string.IsNullOrEmpty(s)),
                 StringComparer.Ordinal);
 
-            var keepTypes = TemplateManifest.Mirrored;
+            var keepTypes = manifest.Mirrored;
 
             // An already-mirrored FB is UPDATED, not skipped; its ID/Mapping/x/y stay put as its handle.
             var existingByName = new Dictionary<string, XElement>(StringComparer.Ordinal);
@@ -228,14 +228,15 @@ namespace CodeGen.Devices.Core
         // Refresh a sysres FB's Parameters from the syslay, which is the authority: a resource keeping
         // its old parameters would deploy a stale recipe with no error. Matched by Name, then by the
         // Mapping attribute (I-9: an FB's Mapping is a separate GUID carrying the syslay id).
-        public static int SyncProcessRecipesFromSyslay(string syslayPath, XDocument sysresDoc) =>
-            SyncFromSyslay(syslayPath, sysresDoc, IsProcessEngine);
+        public static int SyncProcessRecipesFromSyslay(string syslayPath, XDocument sysresDoc,
+            Mapping.TemplateIndex manifest) =>
+            SyncFromSyslay(syslayPath, sysresDoc, t => IsProcessEngine(t, manifest));
 
         public static int SyncMirroredFbParametersFromSyslay(string syslayPath, string sysresPath) =>
             SyncFromSyslay(syslayPath, sysresPath, _ => true);
 
-        private static bool IsProcessEngine(string type) =>
-            string.Equals(type, TemplateManifest.ProcessType.Name, StringComparison.Ordinal);
+        private static bool IsProcessEngine(string type, Mapping.TemplateIndex manifest) =>
+            string.Equals(type, manifest.ProcessType.Name, StringComparison.Ordinal);
 
         private static int SyncFromSyslay(string syslayPath, string sysresPath, Func<string, bool> selects)
         {
@@ -345,7 +346,7 @@ namespace CodeGen.Devices.Core
             // An emitted FB that is not a plant component still belongs to exactly one resource. The
             // target profile declares the IO broker it hosts, which is the only such FB the generator
             // creates, and TargetRegistry refuses two targets claiming one broker.
-            var hosting = TargetRegistry.All
+            var hosting = cfg.Targets.All
                 .Where(t => string.Equals(t.IoBroker, fbName, StringComparison.Ordinal))
                 .Select(t => (PlcAssignment?)t.Plc)
                 .FirstOrDefault();
