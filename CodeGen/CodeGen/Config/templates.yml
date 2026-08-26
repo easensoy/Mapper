@@ -1,0 +1,274 @@
+﻿# The template manifest: one row per FB type the Mapper owns, and the whole of each type's CONTRACT.
+#
+# This file is DATA. How an artefact is rendered into EAE XML stays in C#, and no EAE element or
+# attribute name appears here - a port is an interface name the authored FBT already declares, not
+# markup. Physical plant facts (jaw polarity, sensor polarity, timer acknowledgement, which instance
+# plays a semantic role) stay in smc-rig.yml, because they describe the RIG rather than the template.
+#
+# DECLARATION ORDER IS LOAD-BEARING. It is the deploy order - a basic must precede the CAT that
+# instantiates it - and it breaks ties: the first CAT whose protocol serves a twin's state graph wins,
+# which is what puts the sensored five-state CAT ahead of the no-sensors variant.
+#
+# name            the FB type name, exactly as EAE knows it
+# kind            basic | adapter | composite | hmiCat | cat | dataType   (where its archive lives)
+# role            actuator | sensor | process | infrastructure            (what it IS to the generator)
+# deploy          extracted into the project every run
+# mirrorToSysres  mirrored from the shared canvas onto its resource
+# emitted         instantiated every run, so a stale instance is swept first
+# forceRefresh    a deploy-time patch reshapes it, so copy-if-absent would keep a stale one
+# deployLast      deployed after every other artefact of its kind
+# hmiFaceplate    ships a faceplate whose OPCUA frame the deployer squares up
+# sensorTimed     its instances carry the sensor-fitted / motion-timer parameter set
+# stationAdapter  declares the stationAdptr port pair (default true; false = ring ports only)
+# ports           boundary ports the deployed artefact must declare
+# nameParameter   the parameter its instance name is written into
+# infraRoles      resource-infrastructure roles it serves; layout.yml names the instance per role
+# telemetry       where its own state lives, so a publisher can be wired in without knowing the CAT
+# protocol        its command vocabulary; see the protocol keys below
+#
+# protocol keys
+#   stateCounts        the twin state-graph sizes this CAT serves
+#   servesBranched     also serves a branched graph (parallel/alternative), whatever its size
+#   stopsAreGeometric  it re-visits one physical place under two branch numberings, so a stop is
+#                      identified by the twin's <Position> rather than by its State_Number
+#   command/settled/interlock   stop -> the value that drives there / that a WAIT accepts / that the
+#                      interlock manager is given. settled and interlock differ for the centre-home
+#                      swivel's home: the core publishes 6 on arrival and then settles to 0.
+#   target             what its OWN interlock manager compares against: raw core states, which are not
+#                      the settled values a RULE names when this actuator is the source
+#   enforcedTargets    the stops whose interlock verdict its core actually gates a move on. A rule
+#                      aimed at any other stop would be computed and read by nobody, so generation
+#                      refuses it instead of shipping a safety rule that cannot fire.
+#   rawStateRange      the values its core can publish; a rule outside the range can never match
+#   crossingFaultTimeoutMs  watchdog for a crossing between two work stops, which outlasts one leg
+
+templates:
+  - { name: FiveStateActuator,            kind: basic, role: infrastructure, deploy: true, forceRefresh: true }
+  - { name: Sensor_Bool,                  kind: basic, role: infrastructure, deploy: true, forceRefresh: true }
+  - { name: Station_Core,                 kind: basic, role: infrastructure, deploy: true }
+  - { name: Station_Fault,                kind: basic, role: infrastructure, deploy: true }
+  - { name: Station_Status,               kind: basic, role: infrastructure, deploy: true }
+  - { name: ProcessRuntime_Generic_v1,    kind: basic, role: infrastructure, deploy: true, forceRefresh: true }
+  - { name: ProcessStateBusHandler,       kind: basic, role: infrastructure, deploy: true, forceRefresh: true }
+  - { name: FaultLatch,                   kind: basic, role: infrastructure, deploy: true }
+  - { name: actuatorStateEvents,          kind: basic, role: infrastructure, deploy: true }
+  - { name: updateComponentState,         kind: basic, role: infrastructure, deploy: true, forceRefresh: true }
+  - { name: updateComponentState_Sensor,  kind: basic, role: infrastructure, deploy: true }
+  - { name: No_Sensor_Handler,            kind: basic, role: infrastructure, deploy: true }
+  - { name: CommonInterlockEvaluator,     kind: basic, role: infrastructure, deploy: true, forceRefresh: true }
+  - { name: changeEventProcess1,          kind: basic, role: infrastructure, deploy: true }
+  - { name: changeEventProcess2,          kind: basic, role: infrastructure, deploy: true }
+  - { name: SevenStateCentreHomeActuator, kind: basic, role: infrastructure, deploy: true, forceRefresh: true }
+  - { name: No_Sensor_Handler_7SCH,       kind: basic, role: infrastructure, deploy: true, forceRefresh: true }
+  - { name: FaultLatch_7SCH,              kind: basic, role: infrastructure, deploy: true }
+  - { name: actuatorStateEvents_7SCH,     kind: basic, role: infrastructure, deploy: true }
+
+  - { name: CaSAdptr,                     kind: adapter, role: infrastructure, deploy: true }
+  - { name: AreaHMIAdptr,                 kind: adapter, role: infrastructure, deploy: true }
+  - { name: StationHMIAdptr,              kind: adapter, role: infrastructure, deploy: true }
+  - { name: stateRptCmdAdptr,             kind: adapter, role: infrastructure, deploy: true }
+
+  - name: Area
+    kind: composite
+    role: infrastructure
+    deploy: true
+    mirrorToSysres: true
+    emitted: true
+    ports: [AreaHMIAdptrIN, AreaAdptrOUT]
+    infraRoles: [area]
+    nameParameter: AreaName
+  - name: Station
+    kind: composite
+    role: infrastructure
+    deploy: true
+    mirrorToSysres: true
+    emitted: true
+    ports: [AreaAdptrIN, StationHMIAdptrIN, AreaAdptrOUT, StationAdaptrOUT]
+    infraRoles: [station]
+    nameParameter: StationName
+  - name: CaSAdptrTerminator
+    kind: composite
+    role: infrastructure
+    deploy: true
+    mirrorToSysres: true
+    emitted: true
+    ports: [CasAdptrIN]
+    infraRoles: [terminator, areaTerminator]
+  - { name: faultDetection,               kind: composite, role: infrastructure, deploy: true }
+  - { name: faultDetection_7SCH,          kind: composite, role: infrastructure, deploy: true }
+
+  - { name: Area_CAT,    kind: hmiCat, role: infrastructure, deploy: true, mirrorToSysres: true, emitted: true, infraRoles: [areaHmi] }
+  - { name: Station_CAT, kind: hmiCat, role: infrastructure, deploy: true, mirrorToSysres: true, emitted: true, infraRoles: [stationHmi] }
+
+  # symlinkQi: this CAT reaches its IO through SYMLINKMULTIVARDST/SRC subscribers, which EAE drops
+  # unless QI is TRUE - a core islanded from its IO deploys perfectly and simply never sees a sensor.
+  - name: Five_State_Actuator_CAT
+    symlinkQi: true
+    kind: cat
+    role: actuator
+    deploy: true
+    mirrorToSysres: true
+    emitted: true
+    forceRefresh: true
+    hmiFaceplate: true
+    sensorTimed: true
+    ports: [stationAdptr_in, stateRprtCmd_in, stationAdptr_out, stateRprtCmd_out]
+    telemetry:
+      stateEventSource: ActuatorCore.pst_out
+      stateDataSource: ActuatorCore.current_state_to_process
+      initSource: StateHandling.INITO
+      topicNameSource: actuator_name
+    # One work stop: 1 drives to work, 3 drives home; the core settles at 2 and 0.
+    protocol:
+      stateCounts: [3, 5, 6]
+      command:   { work: 1, home: 3 }
+      settled:   { work: 2, home: 0 }
+      interlock: { work: 2, home: 0 }
+      target:    { work1: 2, home: 4 }
+      # Which twin State_Numbers name each stop. A twin numbers the rest it RETURNS to 4 and the rest it
+      # STARTS at 0; this core passes through 4 and settles at 0, so both name home. Declared here so a
+      # command, an interlock and a timing leg all read one answer instead of three constants.
+      stops:
+        home: [0, 4]
+        work: [2]
+      # The twin's motion state for each leg, which is where that leg's duration is read from.
+      legs: { work: 1, home: 3 }
+      # Its core takes toWorkInterlock and toHomeInterlock, so both directions are gated.
+      enforcedTargets: [work1, home]
+
+  - name: Sensor_Bool_CAT
+    symlinkQi: true
+    kind: cat
+    role: sensor
+    deploy: true
+    mirrorToSysres: true
+    emitted: true
+    forceRefresh: true
+    hmiFaceplate: true
+    ports: [stateRprtCmd_in, stateRprtCmd_out]
+    telemetry:
+      stateEventSource: FB1.CNF
+      stateDataSource: FB1.Status
+      initSource: StateHandling.INITO
+      topicNameSource: name
+
+  - name: Process1_Generic
+    kind: cat
+    role: process
+    deploy: true
+    mirrorToSysres: true
+    emitted: true
+    forceRefresh: true
+    ports: [stateRptCmdAdptr_in, stationAdptr_in, stateRptCmdAdptr_out, stationAdptr_out]
+    # How one process's phase announcement reaches another's state_table. These are this shipped
+    # type's own interface, so they belong to the type, not to the planner that routes over them.
+    # producersPerConsumer is a capacity of the contract: a consumer carries ONE (eventIn, dataIn,
+    # receiverSlotParam) group, so a second producer wired into it would overwrite the first.
+    # Where this type's own state lives. ProcessEngine is the engine instance inside the composite,
+    # and PHASECNF is raised once per recipe row - unlike SCNF, which repeats while a step waits.
+    # topicSuffix keeps a process phase out of the component subtree: the two are different subjects.
+    telemetry:
+      stateEventSource: ProcessEngine.PHASECNF
+      stateDataSource: ProcessEngine.CurrentProcessState
+      initSource: INIT
+      topicNameSource: process_name
+      topicSuffix: /process
+      rowDataVar: ProcessStateByRow
+      publisherY: 3200
+    phaseHandoff:
+      commandToken: cycle_ready
+      eventOut: CycleReadyEventOut
+      dataOut: CycleReadyOut
+      eventIn: CycleReadyEvent
+      dataIn: CycleReady
+      receiverSlotParam: rdy_id
+      producersPerConsumer: 1
+
+  - name: Seven_State_Actuator_Centre_Home_CAT
+    symlinkQi: true
+    kind: cat
+    role: actuator
+    deploy: true
+    mirrorToSysres: true
+    forceRefresh: true
+    hmiFaceplate: true
+    ports: [stationAdptr_in, stateRprtCmd_in, stationAdptr_out, stateRprtCmd_out]
+    telemetry:
+      stateEventSource: ActuatorCore.pst_out
+      stateDataSource: ActuatorCore.current_state_to_process
+      initSource: StateHandling.INITO
+      topicNameSource: actuator_name
+    # Two work stops either side of a centre reference.
+    protocol:
+      stateCounts: [7]
+      servesBranched: true
+      stopsAreGeometric: true
+      # Its core publishes CurrentRawState in 0..6, so a rule whose From/To falls outside can never
+      # match and is dropped as inert.
+      rawStateRange: { min: 0, max: 6 }
+      command:   { work1: 1, work2: 3, home: 5 }
+      settled:   { work1: 2, work2: 4, home: 0 }
+      interlock: { work1: 2, work2: 4, home: 6 }
+      target:    { work1: 2, work2: 4, home: 6 }
+      # Three real places, so 4 is Work2 here rather than a second name for home - which is exactly why
+      # this belongs to the CAT and not to the compiler.
+      stops:
+        home:  [0]
+        work1: [2]
+        work2: [4]
+      legs: { work1: 1, work2: 3, home: 5 }
+      # Its core takes homeWork1Interlock/homeWork2Interlock - PATH interlocks, each gating both legs
+      # of one side - and no toHome input of its own, so a rule aimed at home can be evaluated by nothing.
+      enforcedTargets: [work1, work2]
+      # Declared, not derived from the leg time: the crossing is allowed far longer than one leg
+      # because it passes through the centre reference.
+      crossingFaultTimeoutMs: 10000
+
+  - { name: Robot_Task_Core, kind: basic, role: infrastructure, deploy: true, deployLast: true }
+  - name: Robot_Task_CAT
+    kind: cat
+    role: actuator
+    deploy: true
+    mirrorToSysres: true
+    deployLast: true
+    hmiFaceplate: true
+    stationAdapter: false
+    # The CAT that renders whatever instance the rig profile names as the task arm.
+    infraRoles: [taskArm]
+    ports: [stateRprtCmd_in, stateRprtCmd_out]
+    telemetry:
+      stateEventSource: StateMachine.pst_out
+      stateDataSource: StateMachine.current_state_to_process
+      initSource: StateHandling.INITO
+      topicNameSource: actuator_name
+
+  - name: Five_State_Actuator_No_Sensors_CAT
+    kind: cat
+    role: actuator
+    mirrorToSysres: true
+    # The same vocabulary on a CAT with no arrival sensors.
+    protocol:
+      stateCounts: [4]
+      command:   { work: 1, home: 3 }
+      settled:   { work: 2, home: 0 }
+      interlock: { work: 2, home: 0 }
+      stops:
+        home: [0]
+        work: [2]
+      legs: { work: 1, home: 3 }
+
+  - { name: Actuator_Fault_CAT,   kind: cat, role: infrastructure }
+
+  # Emitted by the device/telemetry emitters, mirrored onto their own resource.
+  - { name: PLC_RW_M262,          kind: composite, role: infrastructure, mirrorToSysres: true, emitted: true }
+  # The two ways a resource's MQTT connection is emitted. telemetry.yml's useTelemetryCat picks
+  # between the roles; neither name is spelled at the emitter.
+  - { name: MQTT_CONNECTION,      kind: basic,     role: infrastructure, mirrorToSysres: true,
+      infraRoles: [mqttConnection], namespace: Runtime.NetConnectivity }
+  - { name: Telemetry,            kind: composite, role: infrastructure, mirrorToSysres: true,
+      infraRoles: [mqttConnectionWrapped] }
+  - { name: MqttStateFormatter,   kind: basic,     role: infrastructure, mirrorToSysres: true }
+  - { name: MQTT_PUBLISH_115480E69E664F878, kind: basic, role: infrastructure, mirrorToSysres: true }
+
+  - { name: Component_State,     kind: dataType, role: infrastructure, deploy: true }
+  - { name: Component_State_Msg, kind: dataType, role: infrastructure, deploy: true }
