@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using CodeGen.Devices.Core;
 using CodeGen.IO;
 using CodeGen.Mapping;
@@ -10,13 +10,17 @@ namespace CodeGen.Devices.M262
     // physical channels.
     public sealed class M262Backend : TargetBackend
     {
-        public override PlcAssignment Target => PlcAssignment.M262;
+        // The target this instance emits, handed in by the composition root from the row that
+        // declared it. A second controller of this kind is another row, not another class.
+        public override PlcAssignment Target { get; }
+
+        public M262Backend(PlcAssignment target) => Target = target;
 
         // An existing device is PRESERVED rather than re-created: re-emitting the sysdev would break the
         // trust binding EAE holds against it, and the application layer is mirrored either way.
         public override void EmitDevice(GenerationContext ctx, DeviceScope scope, Action<string> log)
         {
-            var cfg = ctx.Config;
+            var cfg = ctx.Cfg;
             bool existed = false;
             try { existed = M262SysdevEmitter.M262SysdevAlreadyExists(cfg); } catch { }
 
@@ -52,7 +56,7 @@ namespace CodeGen.Devices.M262
             Stage("hcf patch", log, () =>
             {
                 var hcf = HwConfigVerbatimCopier.CopyFor(
-                    ctx.Config, PlcAssignment.M262, ctx.Config.M262HcfTemplatePath);
+                    ctx.Cfg, Target, ctx.Config.M262HcfTemplatePath);
                 log($"[M262] hcf re-patched; {hcf.ParametersOverwritten.Count} channel symlink(s) written");
                 foreach (var w in hcf.Warnings) log($"[M262][Warn] {w}");
             });
@@ -60,7 +64,13 @@ namespace CodeGen.Devices.M262
         // Without these wires EAE deploys the resource but nothing inits.
         public override void WireResource(GenerationContext ctx,
             SystemInjector.BindingApplicationReport report, Action<string> log) =>
-            Stage("resource wire", log, () => M262SysresWireEmitter.Emit(ctx, report));
+            Stage("resource wire", log, () =>
+            {
+                ResourceWireEmitter.WireResource(ctx, Target, report);
+                // The canvas is shared, so its layout is refreshed once, from the target that hosts the
+                // station every other resource hangs off.
+                ResourceWireEmitter.ApplyLayoutToSyslay(ctx, ctx.Config.ActiveSyslayPath, report);
+            });
 
         // The workbook's DI/DO rows: this is the only target whose channels come from it.
         public override void BindHardware(GenerationContext ctx, IoBindings? bindings,
