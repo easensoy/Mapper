@@ -9,3 +9,12 @@ CodeGen/CodeGen/Devices/RevPi/RevPiDeviceEmitter.cs      text eol=crlf
 CodeGen/CodeGen/Input/ControlXml/SystemXmlReader.cs      text eol=crlf
 CodeGen/CodeGen/Hmi/Templates/HmiTemplateLibrary.cs      text eol=crlf
 CodeGen/CodeGen/Hmi/Validation/HmiPlanValidator.cs       text eol=crlf
+
+# Template documents are byte-faithful: TemplateDocument reads them with UTF8Encoding(false) and
+# never touches newlines, so a checkout that converts them changes the artefacts they produce.
+"Template Library/Topology/BroadcastDomain.json" text eol=lf
+"Template Library/Topology/Equipment_Switch.json" text eol=lf
+"Template Library/Topology/Wire.json" text eol=lf
+"Template Library/Topology/Equipment_M262dPAC.json" text eol=crlf
+"Template Library/Topology/Equipment_RevolutionPi.json" text eol=crlf
+"Template Library/Topology/Solution.solutionData" text eol=crlf
