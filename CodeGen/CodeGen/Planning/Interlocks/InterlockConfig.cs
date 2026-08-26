@@ -10,5 +10,9 @@ namespace CodeGen.Translation.Interlocks
         private static readonly YamlConfigFile<InterlockConfig> _file = new("Config", "interlock.yaml");
 
         public static InterlockConfig Current => _file.Load();
+
+        /// The same declaration read from a run's OWN profile bundle. A root of null is the
+        /// bundle shipped beside CodeGen.dll, which is what a normal run reads.
+        public static InterlockConfig LoadFrom(string? root) => _file.Load(root);
     }
 }
