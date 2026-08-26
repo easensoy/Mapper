@@ -143,41 +143,65 @@ namespace CodeGen.Devices.M262
                     ["TargetIp"] = cfg.Paths.M262TargetIp,
                 });
 
-        static string BuildSolutionDataJson(Configuration.CompilerConfiguration cfg, string solutionId)
+        // The .solutionData security payload. The JSON SHAPE below is EAE's own document grammar and
+        // stays here; every VALUE - the trust chain, the account names, the password hashes, the roles
+        // and their permissions - is declared in Config/security.yml. Nothing here is logged.
+        // internal so the document can be pinned by test: it is written ONLY into a project that has
+        // none, so no gate run reaches it, and an untested path that emits credentials is exactly the
+        // one worth pinning.
+        internal static string BuildSolutionDataJson(Configuration.CompilerConfiguration cfg, string solutionId)
         {
+            // A quote INSIDE the JSON string this document embeds, so it is the six characters
+            // \u0022 rather than a quote character.
             const string Q = "\\u0022";
+            var sec = cfg.Security;
 
-            const string CsConfHash         = "f0916269882ea2879f122ff1d3066e32efbf54856420312a16cbebab4a6a3b83";
-            const string AnonCsConfHash     = "a2b76b73c2ef2047823fd066d51eb2daf2cf813f9ec1e9c35255f4d325126cb9";
-            const string CertThumbprintChain =
-                "8449F2BD01B8FD9456C76774479DC419867161C5;" +
-                "6772E25CF62EF2011DFC22AD268BC9BD8DC690EA;" +
-                "E1136C66DBA76781956DE186296D4A45C5F2C2C4;" +
-                "93D07395A2FC29498BBBE6BD54FF7BB7EDBCB90C;" +
-                "A7F7DE0AF53A55B277C978EE08917BC31DDD3767;" +
-                "F640A64FFBC94A70FA30359207FA2D1746078BF8;" +
-                "04C57C9F793980D4B647D3E3BD39E0BF206292DF;" +
-                "04C57C9F793980D4B647D3E3BD39E0BF206292DF;" +
-                "494A5814A9A24A02B06F1AC8D3D3850F349308B8;" +
-                "93D07395A2FC29498BBBE6BD54FF7BB7EDBCB90C;";
-            const string AsgPwHash          = "$1$A1C337A6652A9ABCCE903AD7FD5F8F3559FC4544100BC4A17291866BB80258E9$DFD5A7DEA0BD092D78E99A4B2BDDB03A1D30F1192D6745A807AB8F4E4D5F0AD4";
-            const string AnonPwHash         = "cb366a250499db16cfa075932fd153c2baf2dfdda46a14082b7ddf3eab1118d5";
+            string Json(params string[] parts) => "{" + string.Join(",", parts) + "}";
+            string Field(string name, string value) => $"{Q}{name}{Q}:{Q}{value}{Q}";
+            string Raw(string name, string value) => $"{Q}{name}{Q}:{value}";
+            string List(IEnumerable<string> items) =>
+                "[" + string.Join(",", items.Select(i => $"{Q}{i}{Q}")) + "]";
 
-            string deviceCfg = $"{{{Q}solutionId{Q}:{Q}{solutionId}{Q},{Q}csConfHash{Q}:{Q}{CsConfHash}{Q}}}";
-            string anonDeviceCfg = $"{{{Q}solutionId{Q}:{Q}{solutionId}{Q},{Q}csConfHash{Q}:{Q}{AnonCsConfHash}{Q}}}";
+            string deviceCfg = Json(Field("solutionId", solutionId), Field("csConfHash", sec.CsConfHash));
+            string anonDeviceCfg = Json(Field("solutionId", solutionId), Field("csConfHash", sec.AnonCsConfHash));
 
-            string userInfo = $"{{{Q}version{Q}:{Q}1{Q},{Q}users_list{Q}:[{{{Q}user_name{Q}:{Q}ASG!{Q},{Q}password{Q}:{Q}{AsgPwHash}{Q},{Q}state{Q}:{Q}Active{Q},{Q}AccountStartDate{Q}:{Q}{Q},{Q}assigned_role{Q}:[{Q}ASG!{Q}]}}]}}";
-            string roleInfo = $"{{{Q}version{Q}:{Q}1{Q},{Q}roles_list{Q}:[{{{Q}name{Q}:{Q}ASG!{Q},{Q}permission_name{Q}:[{Q}Security Management{Q},{Q}File Transfer{Q},{Q}IP Configuration{Q},{Q}Firmware Management{Q},{Q}LaunchCanvas{Q},{Q}OpenFacePlate{Q},{Q}EditSymbol{Q},{Q}Level_15{Q}]}}]}}";
-            string anonUserInfo = $"{{{Q}users_list{Q}:[{{{Q}user_name{Q}:{Q}Anonymous{Q},{Q}password{Q}:{Q}{AnonPwHash}{Q},{Q}state{Q}:{Q}Active{Q},{Q}AccountStartDate{Q}:null,{Q}assigned_role{Q}:[{Q}Anonymous{Q}]}}],{Q}version{Q}:{Q}1{Q}}}";
-            string anonRoleInfo = $"{{{Q}roles_list{Q}:[{{{Q}name{Q}:{Q}Anonymous{Q},{Q}permission_name{Q}:[{Q}Security Management{Q},{Q}File Transfer{Q},{Q}IP Configuration{Q},{Q}Firmware Management{Q},{Q}LaunchCanvas{Q},{Q}OpenFacePlate{Q},{Q}EditSymbol{Q},{Q}Level_15{Q}]}}],{Q}version{Q}:{Q}1{Q}}}";
+            // The two account documents differ in field order and in how an absent start date is
+            // written - EAE emits them that way, so they are spelled separately rather than shared.
+            string userInfo = Json(Field("version", "1"),
+                Raw("users_list", "[" + Json(
+                    Field("user_name", sec.Principal.UserName),
+                    Field("password", sec.Principal.PasswordHash),
+                    Field("state", sec.Principal.State),
+                    Field("AccountStartDate", string.Empty),
+                    Raw("assigned_role", List(new[] { sec.Principal.RoleName }))) + "]"));
+
+            string roleInfo = Json(Field("version", "1"),
+                Raw("roles_list", "[" + Json(
+                    Field("name", sec.Principal.RoleName),
+                    Raw("permission_name", List(sec.Principal.Permissions))) + "]"));
+
+            string anonUserInfo = Json(
+                Raw("users_list", "[" + Json(
+                    Field("user_name", sec.Anonymous.UserName),
+                    Field("password", sec.Anonymous.PasswordHash),
+                    Field("state", sec.Anonymous.State),
+                    Raw("AccountStartDate", "null"),
+                    Raw("assigned_role", List(new[] { sec.Anonymous.RoleName }))) + "]"),
+                Field("version", "1"));
+
+            string anonRoleInfo = Json(
+                Raw("roles_list", "[" + Json(
+                    Field("name", sec.Anonymous.RoleName),
+                    Raw("permission_name", List(sec.Anonymous.Permissions))) + "]"),
+                Field("version", "1"));
 
             return TemplateDocument.Load(cfg, @"Topology\Solution.solutionData",
                 new System.Collections.Generic.Dictionary<string, string>
                 {
                     ["SolutionId"] = solutionId,
-                    ["CsConfHash"] = CsConfHash,
-                    ["AnonCsConfHash"] = AnonCsConfHash,
-                    ["CertThumbprintChain"] = CertThumbprintChain,
+                    ["CsConfHash"] = sec.CsConfHash,
+                    ["AnonCsConfHash"] = sec.AnonCsConfHash,
+                    ["CertThumbprintChain"] = sec.ChainLiteral,
                     ["DeviceCfg"] = deviceCfg,
                     ["AnonDeviceCfg"] = anonDeviceCfg,
                     ["UserInfo"] = userInfo,
@@ -185,7 +209,6 @@ namespace CodeGen.Devices.M262
                     ["AnonUserInfo"] = anonUserInfo,
                     ["AnonRoleInfo"] = anonRoleInfo,
                 });
-
         }
 
     }
