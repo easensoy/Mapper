@@ -1,0 +1,54 @@
+# The security payload EAE writes into a solution's .solutionData: which certificates the controller
+# trusts, and which accounts and roles it accepts. It is DEPLOYMENT configuration, not compiler logic,
+# so it is declared here rather than compiled into the generator - a site that uses different
+# credentials edits this file instead of rebuilding CodeGen.
+#
+# ⚠ THESE ARE CREDENTIALS. They are one-way hashes, not plaintext, but they are still the material an
+# offline attack works against, and the certificate chain is what the controller trusts.
+#   - Treat this file as sensitive. Nothing in the generator logs any value from it.
+#   - Replace every value below before deploying to a plant you did not commission.
+#   - The JSON SHAPE these values are written into is EAE's own document grammar and stays in the
+#     backend, next to the rest of the .solutionData structure. Only the values live here.
+
+# The configuration hash EAE stamps for each account set. Paired with the users below.
+csConfHash: f0916269882ea2879f122ff1d3066e32efbf54856420312a16cbebab4a6a3b83
+anonCsConfHash: a2b76b73c2ef2047823fd066d51eb2daf2cf813f9ec1e9c35255f4d325126cb9
+
+# The certificates the controller trusts, in order. EAE joins them with ';' and expects a trailing
+# separator, which the emitter adds - the ORDER here is the emitted order.
+certThumbprintChain:
+  - 8449F2BD01B8FD9456C76774479DC419867161C5
+  - 6772E25CF62EF2011DFC22AD268BC9BD8DC690EA
+  - E1136C66DBA76781956DE186296D4A45C5F2C2C4
+  - 93D07395A2FC29498BBBE6BD54FF7BB7EDBCB90C
+  - A7F7DE0AF53A55B277C978EE08917BC31DDD3767
+  - F640A64FFBC94A70FA30359207FA2D1746078BF8
+  - 04C57C9F793980D4B647D3E3BD39E0BF206292DF
+  - 04C57C9F793980D4B647D3E3BD39E0BF206292DF
+  - 494A5814A9A24A02B06F1AC8D3D3850F349308B8
+  - 93D07395A2FC29498BBBE6BD54FF7BB7EDBCB90C
+
+# The named account. Its role carries the permissions the account is granted.
+principal:
+  userName: "ASG!"
+  passwordHash: "$1$A1C337A6652A9ABCCE903AD7FD5F8F3559FC4544100BC4A17291866BB80258E9$DFD5A7DEA0BD092D78E99A4B2BDDB03A1D30F1192D6745A807AB8F4E4D5F0AD4"
+  state: Active
+  roleName: "ASG!"
+  permissions: &permissions
+    - Security Management
+    - File Transfer
+    - IP Configuration
+    - Firmware Management
+    - LaunchCanvas
+    - OpenFacePlate
+    - EditSymbol
+    - Level_15
+
+# The unauthenticated account. EAE writes it as a separate document with its own field order, which is
+# why it is declared separately rather than as a second row of one list.
+anonymous:
+  userName: Anonymous
+  passwordHash: cb366a250499db16cfa075932fd153c2baf2dfdda46a14082b7ddf3eab1118d5
+  state: Active
+  roleName: Anonymous
+  permissions: *permissions
