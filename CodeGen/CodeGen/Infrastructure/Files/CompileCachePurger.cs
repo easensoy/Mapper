@@ -17,7 +17,7 @@ namespace CodeGen.Devices.Core
             public System.Collections.Generic.List<string> Warnings { get; } = new();
         }
 
-        public static PurgeResult Purge(MapperConfig cfg)
+        public static PurgeResult Purge(Configuration.CompilerConfiguration cfg)
         {
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
             var result = new PurgeResult();
