@@ -19,6 +19,12 @@ internal static class Program
     // What to gate is fixture data, declared beside the gate. Resolved once: a run that cannot resolve
     // its fixtures has nothing to prove, and says so rather than silently gating less.
     private static GateFixtures Fixtures => _fixtures ??= GateFixtures.Load();
+
+    // What the gate itself needs to ask about a target, read from the same shipped bundle a run
+    // reads - so the harness and the compiler cannot disagree about which targets exist.
+    private static CodeGen.Configuration.CompilerConfiguration Declarations =>
+        _declarations ??= CodeGen.Configuration.CompilerConfiguration.Load(MapperConfig.Load());
+    private static CodeGen.Configuration.CompilerConfiguration? _declarations;
     private static GateFixtures? _fixtures;
 
     // The live EAE project the fixtures name. The gate reads it to seed a baseline and writes it
@@ -327,13 +333,13 @@ internal static class Program
                 // selects it. And where the target's hardware declares which components it can serve,
                 // the plant's two components take those names - the plant itself is the same either
                 // way. Both are declared capabilities, so nothing here names a controller.
-                bool relocated = TargetRegistry.Of(PlcAssignment.Named(target)).ReceivesRelocatedComponents;
+                bool relocated = Declarations.Targets.Of(PlcAssignment.Named(target)).ReceivesRelocatedComponents;
                 var names = relocated
                     ? PlacementFixture.Write(control,
                         RevPiIoBrokerInjector.CoveredActuators.FirstOrDefault(),
                         RevPiIoBrokerInjector.CoveredSensors.FirstOrDefault())
                     : PlacementFixture.Write(control);
-                var rostered = relocated ? TargetRegistry.FeedTarget.ToString() : target;
+                var rostered = relocated ? Declarations.Targets.FeedTarget.ToString() : target;
                 var selection = relocated ? names : Array.Empty<string>();
 
                 File.WriteAllText(layoutPath, WithFixtureOn(Encoding.UTF8.GetString(original), rostered, names));
