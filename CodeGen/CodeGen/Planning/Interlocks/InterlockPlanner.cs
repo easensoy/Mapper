@@ -103,21 +103,21 @@ namespace CodeGen.Translation.Interlocks
                     // every term to hold at once, so two terms naming one source at different stops can
                     // never both be true, and such an alternative blocks nothing however it is written.
                     // That is a defect in the MODEL, not something for the compiler to reinterpret: an
-                    // AND is what a single ConditionGroup means. It is reported in the strongest terms
-                    // the report has, because the actuator is then guarded by nothing on that move.
+                    // AND is what a single ConditionGroup means, and dropping a term to make the guard
+                    // fire would invent a rule the twin never wrote.
+                    //
+                    // So it REFUSES. A rule that can never fire is worse than no rule: the model claims
+                    // the move is guarded, the rule table is emitted with a non-zero count, and the
+                    // actuator moves freely. Shipping that is how a plant is commissioned believing in
+                    // a protection that does not exist. The run stops here - before anything is
+                    // written - naming the exact process, component, state and conditions, and the
+                    // edit that makes the model mean what it appears to say.
                     var clash = from.GroupBy(t => t.Term.Src)
                         .FirstOrDefault(g => g.Select(t => t.Term.Blocked).Distinct().Count() > 1);
                     if (clash != null)
-                        findings?.Add(
-                            $"UNSATISFIABLE INTERLOCK: '{actuator.Name}' state '{st.Name}' is interlocked on " +
-                            string.Join(" AND ", clash.Select(t =>
-                                $"'{t.Source}/{t.State}' (settles at {t.Term.Blocked})")) +
-                            $" - '{clash.First().Source}' at several stops at once, which it can never be. " +
-                            "The rule is emitted as the twin states it and can therefore never fire, so " +
-                            $"'{actuator.Name}' is guarded by nothing on this move. VueOne writes one " +
-                            "ConditionGroup as a conjunction; stating these in SEPARATE ConditionGroups " +
-                            "makes them alternatives, which is what a guard naming two ends of one axis " +
-                            "means.");
+                        throw new UnsatisfiableInterlockException(
+                            actuator.Name, st.Name, clash.First().Source,
+                            clash.Select(t => ($"{t.Source}/{t.State}", t.Term.Blocked)).ToList());
 
                     foreach (var destination in destinations)
                         yield return new Alternative(fromState,
