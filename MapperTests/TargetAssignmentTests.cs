@@ -60,7 +60,7 @@ namespace MapperTests
         {
             // A hardware contract of the TARGET, declared beside its addresses - so assigning one
             // component can legitimately bring others with it, and the profile says which.
-            var target = TargetRegistry.All.First(t => t.ReceivesRelocatedComponents).Plc;
+            var target = TestConfig.Cfg.Targets.All.First(t => t.ReceivesRelocatedComponents).Plc;
             var required = DeviceConfig.Current.AlwaysHostedBy(target);
             var profile = DeploymentProfile.Relocating(new[] { "Feeder" }, TestConfig.Cfg);
 
@@ -79,7 +79,7 @@ namespace MapperTests
             Assert.Equal(typeof(IReadOnlySet<string>), property!.PropertyType);
 
             var profile = DeploymentProfile.Relocating(new[] { "Feeder", "Checker" }, TestConfig.Cfg);
-            var target = TargetRegistry.All.First(t => t.ReceivesRelocatedComponents).Plc;
+            var target = TestConfig.Cfg.Targets.All.First(t => t.ReceivesRelocatedComponents).Plc;
             Assert.Equal(target, profile.AssignedTarget("Feeder"));
             Assert.Equal(target, profile.AssignedTarget("Checker"));
             Assert.Null(profile.AssignedTarget("Clamp"));
@@ -96,7 +96,7 @@ namespace MapperTests
             foreach (var backend in TargetBackends.All)
             {
                 Assert.IsAssignableFrom<ITargetBackend>(backend);
-                Assert.True(TargetRegistry.IsRegistered(backend.Target));
+                Assert.True(TestConfig.Cfg.Targets.IsRegistered(backend.Target));
             }
             var targets = TargetBackends.All.Select(b => b.Target).ToList();
             Assert.Equal(targets.Count, targets.Distinct().Count());
