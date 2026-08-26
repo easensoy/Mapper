@@ -79,7 +79,15 @@ namespace CodeGen.Translation
     // once. Passed explicitly, so a second generation cannot read the first one's answers.
     public sealed class GenerationContext
     {
-        public MapperConfig Config { get; }
+        // The one immutable configuration this run compiles against, taken at the composition root.
+        // Nothing below re-reads a declaration file: a stage that asked again could see a different
+        // answer than the stage before it, and the two would disagree about the same generation.
+        public Configuration.CompilerConfiguration Cfg { get; }
+
+        // Machine-local paths - a PROJECTION of the snapshot, not a second object. The emitters and
+        // the prebuilt VueOne runner both take this type, so it stays reachable under its own name.
+        public MapperConfig Config => Cfg.Paths;
+
         public DeploymentProfile Profile { get; }
 
         // Where each component runs and is drawn; on the profile, so nothing below reaches the catalog.
@@ -122,19 +130,35 @@ namespace CodeGen.Translation
         // the sysres must exclude exactly the same names, else a node gets two sources on one stateRprtCmd_in.
         public IReadOnlyList<string> CrossRingSegment { get; }
 
+        // Reporters this deployment injects that the twin does not declare, and that this run actually
+        // emits. An injected reporter rides the cross-controller segment, so without that segment there
+        // is nothing for it to ride and no FB is created: asked once here, so the emitter that creates
+        // it and the plan that wires it cannot disagree about whether it exists.
+        public IReadOnlyList<string> InjectedReporters =>
+            CrossRingSegment.Count == 0
+                ? System.Array.Empty<string>()
+                : Profile.Facts.InjectedReporters
+                    .Where(n => !Station.Sensors.Concat(Station.Actuators)
+                        .Any(c => string.Equals(c.Name?.Trim(), n, StringComparison.OrdinalIgnoreCase)))
+                    .Where(Roster.Contains).ToList();
+
         // state_table slot the top-cover sensor reports on; see StateTableAllocation for why it is computed.
 
         // Every reporter's state_table slot, processes included; see StateTableAllocation.
         public IReadOnlyDictionary<string, int> Slots { get; }
 
         // state_table size this plan needs; every FBT that declares state_table is patched to exactly this.
-        public int StateTableCapacity => StateTableAllocation.Required(Slots);
+        public int StateTableCapacity => StateTableAllocation.Required(Cfg.Generation.StateTableCapacity, Slots);
+
+        // Recipe rows the engine types must be able to hold. Declared, and every FBT that declares a
+        // recipe array is patched to exactly this - so the type can always carry what the plan emits.
+        public int RecipeCapacity => Cfg.Generation.RecipeArraySize;
 
         // Rule capacity this plan needs. One past nothing: the widest table any actuator asked for,
         // never below the declared floor. Every FB that declares the rule array is patched to exactly
         // this, so a rule is never dropped to make the model fit the type.
         public int InterlockCapacity => Math.Max(
-            InterlockConfig.Current.RuleArraySize,
+            Cfg.Interlocks.RuleArraySize,
             Interlocks.Count == 0 ? 0 : Interlocks.Values.Max(p => p.Count));
 
         // A target that only EXISTS when something is relocated onto it is not emitted when nothing is,
@@ -143,7 +167,7 @@ namespace CodeGen.Translation
         private static void AssertEveryPlacementHasADevice(
             StationContents station, ControllerAllocation allocation, DeploymentProfile profile)
         {
-            if (profile.PartialRevPi) return;                    // every declared target is emitted
+            if (profile.HasAssignments) return;                    // every declared target is emitted
             var absent = profile.Layout.Resources
                 .Select(r => r.Plc)
                 .Where(plc => TargetRegistry.Of(plc).ReceivesRelocatedComponents)
@@ -203,7 +227,7 @@ namespace CodeGen.Translation
 
             // Geometry is the roster's, so the emitter carries no coordinates of its own.
             var infra = new List<InfraInstance>();
-            foreach (var role in InfraRoleOrder)
+            foreach (var role in Layout.InfraEmitOrder)
             {
                 var name = Role(role);
                 if (name == null) continue;
@@ -216,7 +240,8 @@ namespace CodeGen.Translation
                 var parameters = template.NameParameter == null
                     ? (IReadOnlyDictionary<string, string>)EmptyParameters
                     : new Dictionary<string, string> { [template.NameParameter] = Iec61499Literal.FormatString(name) };
-                infra.Add(new InfraInstance(role, name, template, InfraNamespace, row.X, row.Y, parameters));
+                infra.Add(new InfraInstance(role, name, template,
+                    Configuration.GenerationConfig.Namespace, row.X, row.Y, parameters));
             }
 
             var anchor = Station.Sensors.Concat(Station.Actuators)
@@ -242,8 +267,8 @@ namespace CodeGen.Translation
                 // Open at both ends either because another controller commands the chain, or because
                 // this run relocated components here and their own process stayed where it was.
                 CarriesDetouredChain:        target.CarriesDetouredChain ||
-                                             (target.ReceivesRelocatedComponents && Profile.PartialRevPi),
-                HostsFeedRing:               target.HostsFeedStation && !target.ReceivesRelocatedComponents);
+                                             (target.ReceivesRelocatedComponents && Profile.HasAssignments),
+                HostsFeedRing:               target.HostsFeedStation && RingHost.Owns(target));
         }
 
         // Whether this run emits a resource for that target at all. A target that only exists when
@@ -251,14 +276,7 @@ namespace CodeGen.Translation
         // be written to a device the run never creates.
         public bool Emits(PlcAssignment plc) =>
             TargetRegistry.IsRegistered(plc) &&
-            (!TargetRegistry.Of(plc).ReceivesRelocatedComponents || Profile.PartialRevPi);
-
-        // The order a resource's stack is declared in, which is the order it is emitted in.
-        private static readonly string[] InfraRoleOrder =
-            { "areaHmi", "area", "station", "stationHmi", "terminator", "areaTerminator" };
-
-        // Every infrastructure composite the Mapper emits lives in the project's own namespace.
-        private const string InfraNamespace = "Main";
+            (!TargetRegistry.Of(plc).ReceivesRelocatedComponents || Profile.HasAssignments);
 
         private static readonly Dictionary<string, string> EmptyParameters = new(StringComparer.Ordinal);
 
@@ -268,6 +286,9 @@ namespace CodeGen.Translation
         // Everything compiling a recipe needs, resolved ONCE; the compiler never re-asks the rig catalog,
         // the allocation or the topology per process.
         internal ProcessCompiler.Ctx RecipeInputs { get; }
+
+        // Each process's validated control flow. One owner: nothing walks a process state machine for
+        // itself, so the execution order, the successor and the entry state have one answer each.
 
         // The compiled recipe per process, keyed by the twin's own component name.
         public IReadOnlyDictionary<string, RecipeArrays> Recipes { get; }
@@ -279,11 +300,15 @@ namespace CodeGen.Translation
         // other semantics the backend could not represent. Read by the run, never by an emitter.
         public IReadOnlyList<string> SemanticFindings { get; }
 
+        // Every guard leaf the twin declares and what became of it. The plan proves it is complete
+        // before returning, so a reader can ask what happened to any condition in the model.
+        public GuardCoverage GuardCoverage => RecipeInputs.Coverage;
+
         // What the plan decided about each actuator instance: whether its arrival is SENSED or
         // timed, and how long each leg is allowed. The emitter formats these; it decides none.
         public IReadOnlyDictionary<string, ActuatorTiming> ActuatorTiming { get; }
 
-        private GenerationContext(MapperConfig config, DeploymentProfile profile,
+        private GenerationContext(Configuration.CompilerConfiguration cfg, DeploymentProfile profile,
             DeploymentRoster roster, ControllerAllocation allocation,
             TwinModel twin, StationContents station,
             ReportGraph rings, IReadOnlyDictionary<string, string> catTypes, IReadOnlyList<string> detouredChain,
@@ -300,7 +325,7 @@ namespace CodeGen.Translation
             Interlocks = interlocks;
             SemanticFindings = recipeInputs.Findings.ToList();
             ActuatorTiming = actuatorTiming;
-            Config = config;
+            Cfg = cfg;
             Profile = profile;
             Roster = roster;
             Allocation = allocation;
@@ -318,7 +343,8 @@ namespace CodeGen.Translation
 
         // Nothing here touches the deployed tree: planning completes before the first artefact is written,
         // so a model the backend cannot express fails with a diagnostic, not a half-generated project.
-        public static GenerationContext Plan(MapperConfig config, string controlXmlPath, DeploymentProfile profile)
+        public static GenerationContext Plan(Configuration.CompilerConfiguration config,
+            string controlXmlPath, DeploymentProfile profile)
         {
             if (config == null) throw new ArgumentNullException(nameof(config));
             if (profile == null) throw new ArgumentNullException(nameof(profile));
@@ -333,8 +359,8 @@ namespace CodeGen.Translation
 
         // The same plan from components already parsed, so the UI's state-transition preview shows what
         // generation will actually produce rather than approximating it.
-        public static GenerationContext Plan(
-            MapperConfig config, IReadOnlyList<VueOneComponent> components, DeploymentProfile profile)
+        public static GenerationContext Plan(Configuration.CompilerConfiguration config,
+            IReadOnlyList<VueOneComponent> components, DeploymentProfile profile)
         {
             if (config == null) throw new ArgumentNullException(nameof(config));
             if (profile == null) throw new ArgumentNullException(nameof(profile));
@@ -367,24 +393,32 @@ namespace CodeGen.Translation
             var detouredChain = station.Actuators
                 .Select(a => (a.Name ?? string.Empty).Trim())
                 .Where(n => carried.Contains(allocation.Of(n))).ToList();
+            // Every process's control flow, resolved and VALIDATED before anything else reads it: a
+            // state machine the recipe engine cannot represent is refused here, which is before any
+            // file is touched. Built for every declared process, not only the ones a recipe is for.
+            var graphs = components.Where(ComponentType.IsProcess).ToDictionary(
+                p => (p.Name ?? string.Empty).Trim(),
+                CodeGen.Domain.Twin.ProcessGraph.Build,
+                StringComparer.OrdinalIgnoreCase);
+
             var rings = ReportGraph.Build(
-                twin, allocation, profile.Facts.CarrierSegment, detouredChain);
+                twin, allocation, profile.Facts.CarrierSegment, detouredChain, graphs);
             bool ringsMerged = rings.RingsMerged;
             var crossRingSegment = rings.DischargeSegment;
             // Every fixed slot the profile declares, from the one stableSlot column.
             var reservations = profile.Layout.Components
                 .Where(e => e.StableSlot.HasValue)
                 .ToDictionary(e => e.Name, e => e.StableSlot!.Value, StringComparer.OrdinalIgnoreCase);
-            var slots = StateTableAllocation.Slots(station, rings, reservations, profile.Facts);
+            var slots = StateTableAllocation.Slots(station, rings, reservations, profile.Facts, config.Generation.StateTableCapacity);
             int topCover = profile.Facts.RingScopedSlotReporters
                 .Select(n => slots.TryGetValue(n, out int s) ? s : -1).FirstOrDefault(s => s >= 0, -1);
 
             var recipeInputs = BuildRecipeInputs(twin, station, slots, rings, topCover, catTypeOf, profile.Facts);
-            var actuatorTiming = PlanActuatorTiming(twin, station, detouredChain,
-                ringsMerged, profile.Facts);
+            recipeInputs.Graphs = graphs;
+            var actuatorTiming = PlanActuatorTiming(config.Generation, twin, station, catTypeOf,
+                detouredChain, ringsMerged, profile.Facts);
             var interlocks = InterlockEmitter.PlanAll(
-                station.Actuators, catTypes, recipeInputs.Ids, twin, rings, allocation,
-                slots, recipeInputs.Findings);
+                station.Actuators, catTypes, recipeInputs.Ids, twin, recipeInputs.Findings);
             var handoffs = ProcessCompiler.HandoffPlan(recipeInputs);
 
             // Compile every process once, so the layout and the sysres mirror read the same rows.
@@ -393,13 +427,32 @@ namespace CodeGen.Translation
             {
                 var name = process.Name?.Trim() ?? string.Empty;
                 recipes[name] = ProcessRecipeArrayGenerator.Generate(
-                    process, slots[name], recipeInputs, handoffs);
+                    process, slots[name], recipeInputs, handoffs, config.Generation.RecipeArraySize);
+            }
+
+            // Every guard leaf the twin declares reached a decision. Not "was warned about": a control
+            // semantic that reaches nothing is a defect, so an unaccounted leaf stops the run here -
+            // which is before any file is written.
+            recipeInputs.Coverage.AssertCovers(components.Where(ComponentType.IsProcess)
+                .SelectMany(ProcessCompiler.DeclaredLeaves).ToList());
+
+            // An FB has ONE owner. A target's declared broker and a roster row of the same name are two
+            // statements about where it runs, and the mirror reads the roster first - so a contradiction
+            // would silently place the broker on a resource its target never wired.
+            foreach (var target in TargetRegistry.All.Where(t => t.IoBroker != null))
+            {
+                var placed = allocation.Of(target.IoBroker!);
+                if (placed != PlcAssignment.Unknown && placed != target.Plc)
+                    throw new InvalidOperationException(
+                        $"[Deployment] '{target.IoBroker}' is declared as {target.Plc}'s ioBroker but " +
+                        $"layout.yml places it on {placed}. An emitted FB has one owner; the two " +
+                        "declarations must name the same target.");
             }
 
             // Resolved once, from the same workbook the emitters used to each load for themselves.
-            var overrides = string.IsNullOrWhiteSpace(config.MappingRulesPath)
+            var overrides = string.IsNullOrWhiteSpace(config.Paths.MappingRulesPath)
                 ? new InstanceNameOverridesLoader.Overrides()
-                : InstanceNameOverridesLoader.Load(config.MappingRulesPath);
+                : InstanceNameOverridesLoader.Load(config.Paths.MappingRulesPath);
             var instanceNames = twin.Components.ToDictionary(
                 c => (c.Name ?? string.Empty).Trim(),
                 c => InstanceNameResolver.Resolve(c.Source, overrides.ByComponentId, overrides.ByVueOneName),
@@ -415,7 +468,8 @@ namespace CodeGen.Translation
         // Sensed means some other component's transition observes that arrival state, so a real DI
         // closes the wait; nothing observing it means only the CAT's own timer can acknowledge.
         private static IReadOnlyDictionary<string, ActuatorTiming> PlanActuatorTiming(
-            TwinModel twin, StationContents station,
+            Configuration.GenerationConfig generation,
+            TwinModel twin, StationContents station, IReadOnlyDictionary<string, string> catTypeOf,
             IReadOnlyList<string> detoured, bool ringsMerged, PlantFacts facts)
         {
             // One sweep of every observed state, rather than one sweep per actuator per state set.
@@ -427,23 +481,43 @@ namespace CodeGen.Translation
                             if (!string.Equals(r.Component.Id, c.Id, StringComparison.OrdinalIgnoreCase))
                                 observed.Add(r.Component.Id + "|" + r.State.Id);
 
-            int defaultMs = GenerationConfig.Current.DefaultMotionMs;
+            int defaultMs = generation.DefaultMotionMs;
             var result = new Dictionary<string, ActuatorTiming>(StringComparer.OrdinalIgnoreCase);
             foreach (var a in station.Actuators)
             {
                 var name = (a.Name ?? string.Empty).Trim();
                 if (name.Length == 0 || result.ContainsKey(name)) continue;
 
-                bool Sensed(HashSet<string> ids) =>
-                    ids.Any(id => observed.Contains(a.ComponentID + "|" + id));
-                bool work = Sensed(SystemInjector.ResolveAtWorkStateIds(a));
-                bool home = Sensed(SystemInjector.ResolveAtHomeStateIds(a));
-                int toWork = SystemInjector.ResolveStateTimeMs(a, 1, defaultMs);
-                int toHome = SystemInjector.ResolveStateTimeMs(a, 3, defaultMs);
+                // Which twin states are a stop, and which is the motion leg toward it, is the CAT's
+                // declaration. A CAT that declares no stop vocabulary runs a handshake instead and
+                // carries no timing at all, so there is nothing here to decide for it.
+                var protocol = catTypeOf.TryGetValue(name, out var cat)
+                    ? TemplateManifest.ProtocolOrNull(cat) : null;
+                if (protocol == null || protocol.Stops.Count == 0) continue;
+
+                // SENSED means some OTHER component's transition observes that arrival, so a real DI
+                // closes the wait; nothing observing it means only the CAT's own timer can acknowledge.
+                bool Sensed(string stop) =>
+                    a.States.Any(st => st.StaticState &&
+                        protocol.StopNumbersFor(stop).Contains(st.StateNumber) &&
+                        observed.Contains(a.ComponentID + "|" + st.StateID));
+                int LegMs(string stop)
+                {
+                    var leg = protocol.LegFor(stop);
+                    var st = leg == null ? null
+                        : a.States.FirstOrDefault(x => x.StateNumber == leg.Value);
+                    return st == null || st.Time <= 0 ? defaultMs : st.Time;
+                }
+
+                var workStop = protocol.Has(CatProtocol.Work) ? CatProtocol.Work : CatProtocol.Work1;
+                bool work = Sensed(workStop);
+                bool home = Sensed(CatProtocol.Home);
+                int toWork = LegMs(workStop);
+                int toHome = LegMs(CatProtocol.Home);
 
                 // A chain another controller commands settles on the declared detour duration.
                 if (detoured.Contains(name, StringComparer.OrdinalIgnoreCase))
-                    toWork = toHome = GenerationConfig.Current.CoverMotionMs;
+                    toWork = toHome = generation.CoverMotionMs;
 
                 // The plant may contradict what the twin implies: an arrival the deployment
                 // declares TIMER-ACKNOWLEDGED has no usable DI, so a sensed wait would never satisfy.
@@ -485,10 +559,12 @@ namespace CodeGen.Translation
             if (topCoverSlot >= 0)
                 foreach (var n in facts.RingScopedSlotReporters) byName[n] = topCoverSlot;
 
-            // The material bridge is whichever injected sensor rides the cross-controller segment: that
-            // membership is what makes its level readable on the far controller. A merged ring needs none.
-            var bridge = facts.InjectedReporters.FirstOrDefault(n =>
-                rings.DischargeSegment.Contains(n, StringComparer.OrdinalIgnoreCase));
+            // A DECLARED carrier's slot. Only a reporter the deployment names may stand for a phase, and
+            // only where its level is readable on the far controller - which is what riding the
+            // cross-controller segment, or sharing the ring, gives it.
+            var carrierSlots = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var declared in facts.Handoff.Carriers)
+                if (slots.TryGetValue(declared.Carrier, out int cid)) carrierSlots[declared.Carrier] = cid;
 
             var protocolOf = new Dictionary<string, CatProtocol>(StringComparer.OrdinalIgnoreCase);
             foreach (var kv in catTypeOf)
@@ -514,7 +590,8 @@ namespace CodeGen.Translation
                 CatType = catTypeOf,
                 Protocol = protocolOf,
                 Execution = executionOf,
-                MaterialBridgeId = bridge != null && slots.TryGetValue(bridge, out int bid) ? bid : -1,
+                Handoff = facts.Handoff,
+                CarrierSlots = carrierSlots,
             };
         }
 
