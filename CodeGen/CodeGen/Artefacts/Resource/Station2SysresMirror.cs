@@ -12,30 +12,31 @@ namespace CodeGen.Devices.Core
 {
     public static class Station2SysresMirror
     {
-        // Mirrors the Station-2 FBs from the syslay onto the M580 and BX1 resources so those PLCs carry
-        // their own FBs, not empty shells. Runs AFTER Station2DeviceEmitter.EmitAll wrote the shells.
-        public static (int M580, int BX1) EmitStation2Sysres(GenerationContext ctx)
+        // Mirrors the syslay's FBs onto every resource that draws its own device-local canvas, so those
+        // targets carry their own FBs rather than empty shells. Which targets those are is declared;
+        // running the mirror on a target whose canvas is the shared one would move its FBs.
+        // Runs AFTER the device emitters wrote the shells.
+        public static IReadOnlyList<(PlcAssignment Plc, int Count)> EmitStation2Sysres(GenerationContext ctx)
         {
             if (ctx == null) throw new ArgumentNullException(nameof(ctx));
-            var cfg = ctx.Config;
+            var none = Array.Empty<(PlcAssignment, int)>();
+            var cfg = ctx.Cfg;
             var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
-            if (string.IsNullOrEmpty(eaeRoot)) return (0, 0);
+            if (string.IsNullOrEmpty(eaeRoot)) return none;
 
-            var syslayPath = cfg.ActiveSyslayPath;
+            var syslayPath = cfg.Paths.ActiveSyslayPath;
             var all = (string.IsNullOrWhiteSpace(syslayPath) || !File.Exists(syslayPath))
                 ? new List<SysresFbMirror.SyslayFb>()
                 : SysresFbMirror.ReadTopLevelFbsWithSystemModelFallback(syslayPath);
-            if (all.Count == 0) return (0, 0);
+            if (all.Count == 0) return none;
 
-            int m580 = MirrorBucket(eaeRoot, TargetRegistry.Of(CodeGen.Translation.PlcAssignment.M580).DeviceType,
-                all.Where(f => SysresFbMirror.BucketFor(f.Name, ctx.Allocation) == PlcAssignment.M580).ToList(),
-                ctx.Layout.Geometry.DeviceCanvasOrigin,
-                TargetBootstrap.For(PlcAssignment.M580, ctx.Layout));
-            int bx1 = MirrorBucket(eaeRoot, TargetRegistry.Of(CodeGen.Translation.PlcAssignment.BX1).DeviceType,
-                all.Where(f => SysresFbMirror.BucketFor(f.Name, ctx.Allocation) == PlcAssignment.BX1).ToList(),
-                ctx.Layout.Geometry.DeviceCanvasOrigin,
-                TargetBootstrap.For(PlcAssignment.BX1, ctx.Layout));
-            return (m580, bx1);
+            return TargetRegistry.All
+                .Where(t => t.DeviceLocalCanvas && ctx.Emits(t.Plc))
+                .Select(t => (t.Plc, MirrorBucket(eaeRoot, t.DeviceType,
+                    all.Where(f => SysresFbMirror.BucketFor(f.Name, ctx.Allocation, ctx.Cfg) == t.Plc).ToList(),
+                    ctx.Layout.Geometry.DeviceCanvasOrigin,
+                    TargetBootstrap.For(t.Plc, ctx.Layout))))
+                .ToList();
         }
 
         // Translated so the bounding box's top-left lands on the device-local canvas origin: the syslay's
