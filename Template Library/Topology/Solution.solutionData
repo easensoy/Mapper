@@ -1,0 +1,13 @@
+{
+  "SolutionId": "{{SolutionId}}",
+  "CsConfHash": "{{CsConfHash}}",
+  "AnonymousCsConfHash": "{{AnonCsConfHash}}",
+  "CertThumbprint": "{{CertThumbprintChain}}",
+  "deviceConfiguration": "{{DeviceCfg}}",
+  "userInformation": "{{UserInfo}}",
+  "roleInformation": "{{RoleInfo}}",
+  "anonymousDeviceConfiguration": "{{AnonDeviceCfg}}",
+  "anonymousUserInformation": "{{AnonUserInfo}}",
+  "anonymousRoleInformation": "{{AnonRoleInfo}}",
+  "solutionName": "Demonstrator"
+}
