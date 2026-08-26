@@ -19,10 +19,10 @@ namespace CodeGen.Translation.Interlocks
         // against, and no count for a guard to compare with.
         public static InterlockPlan BuildRules(VueOneComponent actuator,
             IReadOnlyDictionary<string, int> scopedIds, IReadOnlyDictionary<string, string> catTypes,
-            Domain.Twin.TwinModel twin, List<string> findings)
+            Domain.Twin.TwinModel twin, List<string> findings, Mapping.TemplateIndex manifest)
         {
             var plan = new InterlockPlan.Builder();
-            foreach (var alternative in Resolve(actuator, scopedIds, catTypes, twin, findings))
+            foreach (var alternative in Resolve(actuator, scopedIds, catTypes, twin, findings, manifest))
                 plan.Add(alternative);
             return plan.ToPlan();
         }
@@ -35,7 +35,7 @@ namespace CodeGen.Translation.Interlocks
 
         private static IEnumerable<Alternative> Resolve(VueOneComponent actuator,
             IReadOnlyDictionary<string, int> scopedIds, IReadOnlyDictionary<string, string> catTypes,
-            Domain.Twin.TwinModel twin, List<string>? findings)
+            Domain.Twin.TwinModel twin, List<string>? findings, Mapping.TemplateIndex manifest)
         {
             var owner = twin.ById(actuator.ComponentID);
             if (owner == null) yield break;
@@ -69,7 +69,7 @@ namespace CodeGen.Translation.Interlocks
                     .FirstOrDefault(p => p.Transitions.Any(tr => ReferenceEquals(tr.Destination, st)))
                     ?? st;
                 int fromState = ActuatorStateEncoding.CanonicalNumber(
-                    actuator, predecessor.Source, catTypes);
+                    actuator, predecessor.Source, catTypes, manifest);
 
                 foreach (var product in st.InterlockGuard.SumOfProducts())
                 {
@@ -91,7 +91,7 @@ namespace CodeGen.Translation.Interlocks
                                 "so it can never publish the state the rule names.");
 
                         int blocked = ActuatorStateEncoding.StopAt(
-                            reference.Component.Source, reference.State.Source, catTypes);
+                            reference.Component.Source, reference.State.Source, catTypes, manifest);
 
                         var term = new Term(srcId, blocked);
                         terms.Add(term);
@@ -121,7 +121,7 @@ namespace CodeGen.Translation.Interlocks
 
                     foreach (var destination in destinations)
                         yield return new Alternative(fromState,
-                            ActuatorStateEncoding.CanonicalNumber(actuator, destination.Source, catTypes),
+                            ActuatorStateEncoding.CanonicalNumber(actuator, destination.Source, catTypes, manifest),
                             terms);
                 }
             }
