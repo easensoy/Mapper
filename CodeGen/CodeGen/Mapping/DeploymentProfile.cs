@@ -64,6 +64,10 @@ namespace CodeGen.Mapping
     {
         public LayoutCatalog Layout { get; }
 
+        // The run's own target index, carried so the roster and every consumer of a profile resolve a
+        // target against the same declarations the profile was built from.
+        public TargetIndex Targets { get; }
+
         // The plant facts a PLAN needs, resolved once here. Planning reasons about capabilities and
         // reachability; which instance fills a role, and which components a carrier already spans,
         // are declarations of THIS deployment, so they enter the compiler through the profile.
@@ -82,12 +86,13 @@ namespace CodeGen.Mapping
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
             var devices = cfg.Devices;
             Layout = cfg.Layout;
+            Targets = cfg.Targets;
             Facts = facts ?? PlantFacts.Declared(cfg.Rig);
 
             var placed = new Dictionary<string, PlcAssignment>(StringComparer.OrdinalIgnoreCase);
             foreach (var kv in assignments ?? new Dictionary<string, PlcAssignment>())
             {
-                if (!TargetRegistry.IsRegistered(kv.Value))
+                if (!Targets.IsRegistered(kv.Value))
                     throw new ArgumentException(
                         $"[Deployment] '{kv.Key}' is assigned to {kv.Value}, which no backend implements.",
                         nameof(assignments));
@@ -113,7 +118,7 @@ namespace CodeGen.Mapping
         public static DeploymentProfile Relocating(
             IEnumerable<string>? names, Configuration.CompilerConfiguration cfg, PlantFacts? facts = null)
         {
-            var target = TargetRegistry.All.FirstOrDefault(t => t.ReceivesRelocatedComponents)?.Plc;
+            var target = cfg.Targets.All.FirstOrDefault(t => t.ReceivesRelocatedComponents)?.Plc;
             var map = new Dictionary<string, PlcAssignment>(StringComparer.OrdinalIgnoreCase);
             if (target != null)
                 foreach (var name in names ?? Array.Empty<string>()) map[name] = target.Value;
