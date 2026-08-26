@@ -92,9 +92,9 @@ namespace CodeGen.Devices.Core
                 hcfTemplatePath: cfg.Paths.M580HcfTemplatePath,
                 equipmentJsonName: "Equipment_M580dPAC_1.json",
                 equipmentBuilder: () => BuildM580EquipmentJson(cfg, M580SysdevId, scope.SolutionId,
-                                          cfg.Paths.M580TargetIp, cfg.Paths.M580BroadcastDomainUuid),
+                                          cfg.Devices.M580.TargetIp, cfg.Paths.M580BroadcastDomainUuid),
                 deployPluginPropertiesXml: BuildDeployPluginPropertiesXml(cfg, bootProject: false,
-                    cfg.Paths.MqttPublishEnabled && !cfg.Paths.MqttSecureTls),
+                    cfg.Telemetry.PublishEnabled && !cfg.Telemetry.SecureTls),
                 simulationBindingDeployPort: TargetRegistry.Of(CodeGen.Translation.PlcAssignment.Named("M580")).SimulationDeployPort,
                 simulationBindingArchivePort: TargetRegistry.Of(CodeGen.Translation.PlcAssignment.Named("M580")).SimulationArchivePort);
             return result;
@@ -126,10 +126,10 @@ namespace CodeGen.Devices.Core
                 hcfTemplatePath: bx1HcfPath,
                 equipmentJsonName: "Equipment_HMIB1X_1.json",
                 equipmentBuilder: () => BuildBX1HmiB1XEquipmentJson(cfg, BX1SysdevId, scope.SolutionId,
-                                          cfg.Paths.BX1TargetIp, cfg.Paths.BX1HostIp),
+                                          cfg.Devices.Bx1.TargetIp, cfg.Devices.Bx1.HostIp),
                 // The insecure-app override lets a plain mqtt:// connection avoid RC101.
                 deployPluginPropertiesXml: BuildSoftDpacDeployPluginPropertiesXml(cfg,
-                    cfg.Paths.MqttPublishEnabled && !cfg.Paths.MqttSecureTls),
+                    cfg.Telemetry.PublishEnabled && !cfg.Telemetry.SecureTls),
                 simulationBindingDeployPort: TargetRegistry.Of(CodeGen.Translation.PlcAssignment.Named("BX1")).SimulationDeployPort,
                 simulationBindingArchivePort: TargetRegistry.Of(CodeGen.Translation.PlcAssignment.Named("BX1")).SimulationArchivePort);
 
