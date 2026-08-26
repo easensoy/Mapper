@@ -74,9 +74,11 @@ namespace MapperTests
         private static ConditionExpr.Ref R(string component, string state) => new(On(component, state));
 
         private static GenerationContext Compile(IReadOnlyList<VueOneComponent> plant,
-            LayoutCatalog? layout = null) =>
-            GenerationContext.Plan(new MapperConfig(), plant,
-                DeploymentProfile.M262Only(layout ?? LayoutCatalog.Load()));
+            LayoutCatalog? layout = null)
+        {
+            var cfg = layout == null ? TestConfig.Cfg : TestConfig.Cfg.With(layout);
+            return GenerationContext.Plan(cfg, plant, DeploymentProfile.AsPlaced(cfg));
+        }
 
         // ---- 1. a guard keeps its truth ----------------------------------------------------------
 
@@ -412,13 +414,14 @@ namespace MapperTests
 
         // ---- 4. a process runs on whichever target owns it ---------------------------------------
 
-        [Theory]
-        [InlineData(PlcAssignment.M262)]
-        [InlineData(PlcAssignment.M580)]
-        [InlineData(PlcAssignment.BX1)]
-        [InlineData(PlcAssignment.RevPi)]
-        public void A_process_the_roster_places_on_any_target_is_planned_onto_that_resource(
-            PlcAssignment target)
+        // Every DECLARED target, so adding one to device.yml is covered without editing this list.
+        [Fact]
+        public void A_process_the_roster_places_on_any_target_is_planned_onto_that_resource()
+        {
+            foreach (var t in TargetRegistry.All) PlaceAProcessOn(t.Plc);
+        }
+
+        private static void PlaceAProcessOn(PlcAssignment target)
         {
             // A roster row is DATA. Placing a process on a different target must not need a C# branch, so
             // the same plant is compiled four times and only the row moves. A target that exists only
@@ -439,9 +442,10 @@ namespace MapperTests
             Leads(line.States[0], line.States[1]);
             Leads(line.States[1], line.States[2], flat: On("C-ram", "C-ram-s2"));
 
-            var plan = GenerationContext.Plan(new MapperConfig(), new[] { line, ram },
-                new DeploymentProfile(
-                    relocated ? new[] { "Kiln_Line", "Charge_Ram" } : System.Array.Empty<string>(), layout));
+            var cfg = TestConfig.Cfg.With(layout);
+            var plan = GenerationContext.Plan(cfg, new[] { line, ram },
+                DeploymentProfile.Relocating(
+                    relocated ? new[] { "Kiln_Line", "Charge_Ram" } : System.Array.Empty<string>(), cfg));
 
             Assert.Contains("Kiln_Line", plan.ResourceFor(target).Processes);
             Assert.Contains(plan.Recipes.Keys, k => k == "Kiln_Line");
@@ -455,10 +459,7 @@ namespace MapperTests
         private static LayoutCatalog FreshLayout()
         {
             var path = Path.Combine(AppContext.BaseDirectory, "Config", "layout.yml");
-            return new YamlDotNet.Serialization.DeserializerBuilder()
-                .WithNamingConvention(YamlDotNet.Serialization.NamingConventions.CamelCaseNamingConvention.Instance)
-                .IgnoreUnmatchedProperties()
-                .Build()
+            return YamlDeclarations.Reader
                 .Deserialize<LayoutCatalog>(File.ReadAllText(path));
         }
     }
