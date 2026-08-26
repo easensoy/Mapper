@@ -75,9 +75,6 @@ namespace MapperUI
             base.OnLoad(e);
             StartLlmEngine();
             StartHealthPolling();
-            // The UI asks targets what they can serve, so it composes the same backends a run does -
-            // from the same list, so the grid can never describe a different set than Generate uses.
-            CodeGen.Mapping.TargetRegistry.UseBackends(CodeGen.Application.GenerateProject.Backends());
             PopulateDeviceColumn();
             LogInputFolderContents();
             lblStatus.Text = "Ready";
@@ -144,11 +141,12 @@ namespace MapperUI
                   $"{targets.Count} controllers are registered.";
         }
 
-        // What a target's own hardware can serve is the TARGET's answer. The UI reads it off the
-        // registered backend rather than naming a particular device's injector, so a project whose
-        // relocation host is different hardware needs no edit here.
+        // What a target's own hardware can serve is the TARGET's answer. The UI composes the SAME
+        // backend list a run does rather than naming a particular device's injector, so the grid can
+        // never describe a different set than Generate uses, and a project whose relocation host is
+        // different hardware needs no edit here.
         static IReadOnlySet<string> ServableBy(CodeGen.Translation.PlcAssignment plc) =>
-            CodeGen.Mapping.TargetRegistry.Backends
+            CodeGen.Application.GenerateProject.Backends()
                 .FirstOrDefault(b => b.Target == plc)?.ServableComponents
             ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
