@@ -121,84 +121,51 @@ roles:
     - TopCoverSenosr
     - TopCoverSensor
 
-# Which twin state graphs each CAT can serve, and the values that drive it, that mean it arrived, and
-# that its interlock manager is given. A CAT with a different command vocabulary is a row here rather
-# than a branch in the compiler; what a CAT DOES is backend code.
+# HOW A CROSS-PROCESS REFERENCE IS COMPILED WHERE A PLAIN WAIT WILL NOT DO.
 #
-# stateCounts        the twin state-graph sizes this CAT serves
-# servesBranched     also serves a branched graph (parallel/alternative transitions), whatever its size
-# stopsAreGeometric  the CAT re-visits one physical place under two branch numberings, so a stop is
-#                    identified by the twin's <Position> rather than by its State_Number
-# command/settled/interlock   stop -> the value that drives there / that a WAIT accepts / that the
-#                    interlock manager is given. settled and interlock differ for the centre-home
-#                    swivel's home: the core publishes 6 on arrival and then settles to 0.
-# enforcedTargets    the stops whose interlock verdict the CAT's CORE actually gates a move on. A rule
-#                    aimed at any other stop would be computed and then read by nobody, so generation
-#                    refuses it instead of shipping a safety rule that cannot fire.
+# Both entries below are DEPLOYMENT decisions, not compiler ones, and both are refused when absent:
+# each reading drives the plant differently, so picking one silently is the difference between the gate
+# the twin asked for and no gate at all.
+handoff:
+  # A reference to a producer's ENTRY phase. On this rig every process announces its entry once per
+  # cycle as a boot-readiness assertion: the consumer is telling the model "that station exists and has
+  # started", not "that station finished a work phase". So it is answered by the plant having started
+  # rather than by a runtime wait. Set runtimePhase to make it an ordinary phase instead, which then
+  # needs a transport that carries it - and is refused where none exists.
+  peerEntryPhase: readinessAssertion
+
+  # A material carrier may stand in for a producer's phase ONLY where a row here says the two
+  # propositions coincide on this plant. A carrier reports that material arrived; a phase reports that a
+  # producer got somewhere. Nothing is listed: on this rig every cross-controller phase the twins state
+  # is carried by a shared ring, a merged ring or the declared phase channel, so no substitution is
+  # authorised and the compiler refuses any reference that would need one.
+  carriers: []
+
 execution:
   # How a CAT executes a movement the twin asks for, where its OWN reported states are a handshake
   # rather than the twin's stop numbering, so no trajectory can be walked to reach them. A CAT claimed
   # by no row here is driven by walking the twin's graph to the commanded stop - what a cylinder does.
   #
-  # A row claims a component when every field it declares matches, and the FIRST claiming row wins, so
-  # the task arm's CAT is listed before the jaw's type.
+  # A row claims a component when every field it declares matches. Rows must be DISJOINT: exactly one
+  # may claim a component, so no order decides which machine it runs.
   #
   # cat / componentType   what the row claims; omit either to claim on the other alone
-  # runsOnce              emit the whole sequence the first time the recipe moves it, never again
-  # alternates            emit one step per movement, resuming from where the last one settled
+  # mode                  stopDriven | runOnce | alternate
   # steps                 the value that drives it -> the settled value that means it arrived
   #
   # The task arm runs a whole taught program on one start, so every movement the twin models folds into
   # the single start -> done -> reset -> ready handshake. It never commands a stop.
   - cat: Robot_Task_CAT
-    runsOnce: true
+    mode: runOnce
     steps:
       - { command: 1, settled: 2 }
       - { command: 2, settled: 0 }
   # A jaw: two strokes sharing one rest sensor, and wired energise-to-GRIP while the twin models
   # energise-to-OPEN (REVERTED_FIXES R-12), so direction is a physical fact the twin must never pick.
   # The twin says WHEN: the first action grips and they alternate from there.
-  - componentType: Robot
-    alternates: true
+  - cat: Five_State_Actuator_CAT
+    componentType: Robot
+    mode: alternate
     steps:
       - { command: 1, settled: 2 }
       - { command: 3, settled: 0 }
-
-protocols:
-  # One work stop: 1 drives to work, 3 drives home; the core settles at 2 and 0.
-  - cat: Five_State_Actuator_CAT
-    stateCounts: [3, 5, 6]
-    command:   { work: 1, home: 3 }
-    settled:   { work: 2, home: 0 }
-    interlock: { work: 2, home: 0 }
-    # What its own interlock manager compares against: the raw core states, which are not
-    # the settled values a RULE names when this actuator is the source.
-    target:    { work1: 2, home: 4 }
-    # Its core takes toWorkInterlock and toHomeInterlock, so both directions are gated.
-    enforcedTargets: [work1, home]
-
-  # The same vocabulary on a CAT with no arrival sensors.
-  - cat: Five_State_Actuator_No_Sensors_CAT
-    stateCounts: [4]
-    command:   { work: 1, home: 3 }
-    settled:   { work: 2, home: 0 }
-    interlock: { work: 2, home: 0 }
-
-  # Two work stops either side of a centre reference.
-  - cat: Seven_State_Actuator_Centre_Home_CAT
-    stateCounts: [7]
-    servesBranched: true
-    stopsAreGeometric: true
-    # Its core publishes CurrentRawState in 0..6 (0 Home, 2 AtWork1, 4 AtWork2, 6 AtHome), so a
-    # rule whose From/To falls outside can never match and is dropped as inert.
-    rawStateRange: { min: 0, max: 6 }
-    command:   { work1: 1, work2: 3, home: 5 }
-    settled:   { work1: 2, work2: 4, home: 0 }
-    interlock: { work1: 2, work2: 4, home: 6 }
-    target:    { work1: 2, work2: 4, home: 6 }
-    # Its core takes homeWork1Interlock/homeWork2Interlock - PATH interlocks, each gating both legs of
-    # one side - and no toHome input of its own, so a rule aimed at home can be evaluated by nothing.
-    enforcedTargets: [work1, work2]
-    # Its per-side crossing watchdog. Declared, not derived from the leg time: the crossing is
-    # allowed far longer than one leg because it passes through the centre reference.
-    crossingFaultTimeoutMs: 10000
