@@ -19,11 +19,12 @@ namespace MapperTests
     /// global to save or restore.
     public abstract class RevPiTestBase
     {
-        protected static DeploymentProfile M262 => DeploymentProfile.M262Only(LayoutCatalog.Load());
+        protected static DeploymentProfile M262 => DeploymentProfile.AsPlaced(TestConfig.Cfg);
 
-        /// The supported RevPi mode: named Feed components move, M262 keeps the rest.
+        /// The supported mode: the named components are assigned to the relocation target, the rest
+        /// keep their layout rows.
         protected static DeploymentProfile RevPiComponents(params string[] names) =>
-            new(names, LayoutCatalog.Load());
+            DeploymentProfile.Relocating(names, TestConfig.Cfg);
 
         protected static DeploymentRoster Roster(DeploymentProfile profile) => new(profile);
 
@@ -40,22 +41,22 @@ namespace MapperTests
         public void Default_selection_is_M262_and_keeps_the_feed_station_on_M262()
         {
             var profile = M262;
-            Assert.False(profile.PartialRevPi);
+            Assert.False(profile.HasAssignments);
             var byName = Roster(profile).All.ToDictionary(e => e.Name, e => e, StringComparer.Ordinal);
-            Assert.Equal(PlcAssignment.M262, byName["Feeder"].Plc);
-            Assert.Equal(PlcAssignment.M262, byName["Checker"].Plc);
-            Assert.DoesNotContain(byName.Values, e => e.Plc == PlcAssignment.RevPi);
+            Assert.Equal(PlcAssignment.Named("M262"), byName["Feeder"].Plc);
+            Assert.Equal(PlcAssignment.Named("M262"), byName["Checker"].Plc);
+            Assert.DoesNotContain(byName.Values, e => e.Plc == PlcAssignment.Named("RevPi"));
         }
 
         [Fact] // (16) Feeder/Checker are allocated to the RevPi when selected
         public void Selecting_Feeder_and_Checker_relocates_them_onto_the_RevPi()
         {
             var profile = RevPiComponents("Feeder", "Checker", "PartInHopper");
-            Assert.True(profile.PartialRevPi);
+            Assert.True(profile.HasAssignments);
             var byName = Roster(profile).All.ToDictionary(e => e.Name, e => e, StringComparer.Ordinal);
-            Assert.Equal(PlcAssignment.RevPi, byName["Feeder"].Plc);
-            Assert.Equal(PlcAssignment.RevPi, byName["Checker"].Plc);
-            Assert.Equal(PlcAssignment.RevPi, byName["PartInHopper"].Plc);
+            Assert.Equal(PlcAssignment.Named("RevPi"), byName["Feeder"].Plc);
+            Assert.Equal(PlcAssignment.Named("RevPi"), byName["Checker"].Plc);
+            Assert.Equal(PlcAssignment.Named("RevPi"), byName["PartInHopper"].Plc);
         }
 
         [Fact] // (17) they are absent from M262 once relocated — no dual hosting
@@ -63,7 +64,7 @@ namespace MapperTests
         {
             var profile = RevPiComponents("Feeder", "Checker", "PartInHopper");
             var m262 = Roster(profile).All.ToDictionary(e => e.Name, e => e, StringComparer.Ordinal).Values
-                .Where(e => e.Plc == PlcAssignment.M262)
+                .Where(e => e.Plc == PlcAssignment.Named("M262"))
                 .Select(e => e.Name)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
             Assert.DoesNotContain("Feeder", m262);
@@ -76,8 +77,8 @@ namespace MapperTests
         {
             var profile = RevPiComponents("Feeder", "Checker", "PartInHopper");
             var byName = Roster(profile).All.ToDictionary(e => e.Name, e => e, StringComparer.Ordinal);
-            Assert.Equal(PlcAssignment.M262, byName["Transfer"].Plc);
-            Assert.Contains(byName.Values, e => e.Plc == PlcAssignment.M262);
+            Assert.Equal(PlcAssignment.Named("M262"), byName["Transfer"].Plc);
+            Assert.Contains(byName.Values, e => e.Plc == PlcAssignment.Named("M262"));
         }
 
         [Fact] // (19) no component may be owned by two controllers
@@ -90,8 +91,7 @@ namespace MapperTests
             // Every DEVICE-HOSTED component must name a real controller. Boot rows (FB1/FB2-class
             // scaffolding, Column -1) are deliberately unassigned and are excluded by design.
             foreach (var e in byName.Values.Where(e => e.Row != LayoutRow.Boot))
-                Assert.True(e.Plc is PlcAssignment.M262 or PlcAssignment.M580
-                                  or PlcAssignment.BX1 or PlcAssignment.RevPi,
+                Assert.True(TargetRegistry.IsRegistered(e.Plc),
                     $"component '{e.Name}' has no controller assignment ({e.Plc})");
         }
 
@@ -99,7 +99,9 @@ namespace MapperTests
         public void RevPi_selection_never_moves_M580_or_BX1_components()
         {
             var before = Roster(M262).All
-                .Where(e => e.Plc is PlcAssignment.M580 or PlcAssignment.BX1)
+                .Where(e => TargetRegistry.IsRegistered(e.Plc) &&
+                            e.Plc != TargetRegistry.FeedTarget &&
+                            !TargetRegistry.Of(e.Plc).ReceivesRelocatedComponents)
                 .ToDictionary(e => e.Name, e => e.Plc, StringComparer.Ordinal);
 
             var after = Roster(RevPiComponents("Feeder", "Checker", "PartInHopper"));
@@ -121,7 +123,7 @@ namespace MapperTests
         public void Relocated_components_are_bound_to_the_RevPi_resource()
         {
             var profile = RevPiComponents("Feeder", "Checker", "PartInHopper");
-            var expected = ControllerMap.ResourceForPlc(PlcAssignment.RevPi);
+            var expected = TargetRegistry.Of(PlcAssignment.Named("RevPi")).ResourceName;
             Assert.False(string.IsNullOrWhiteSpace(expected));
             Assert.Equal(expected, Roster(profile).Get("Feeder")!.Resource);
         }
@@ -146,21 +148,21 @@ namespace MapperTests
         public void Default_M262_selection_raises_no_problems()
         {
             var profile = M262;
-            Assert.Empty(RevPiSelectionValidator.Validate(profile, profile.RevPiComponents));
+            Assert.Empty(RevPiSelectionValidator.Validate(profile, profile.Assignments.Keys.ToList()));
         }
 
         [Fact]
         public void Supported_per_component_swap_raises_no_problems()
         {
             var profile = RevPiComponents("Feeder", "Checker", "PartInHopper");
-            Assert.Empty(RevPiSelectionValidator.Validate(profile, profile.RevPiComponents));
+            Assert.Empty(RevPiSelectionValidator.Validate(profile, profile.Assignments.Keys.ToList()));
         }
 
         [Fact] // a component with no Modbus signal would deploy unable to actuate
         public void Routing_an_uncovered_component_to_the_RevPi_is_rejected()
         {
             var profile = RevPiComponents("Transfer");
-            var problems = RevPiSelectionValidator.Validate(profile, profile.RevPiComponents);
+            var problems = RevPiSelectionValidator.Validate(profile, profile.Assignments.Keys.ToList());
             Assert.NotEmpty(problems);
             Assert.Contains(problems, p => p.Contains("Transfer", StringComparison.Ordinal));
         }
@@ -215,7 +217,8 @@ namespace MapperTests
         public void Equal_host_and_container_addresses_are_rejected()
         {
             var profile = RevPiComponents("Feeder", "Checker", "PartInHopper");
-            var cfg = new MapperConfig { RevPiHostIp = "192.168.1.7", RevPiTargetIp = "192.168.1.7" };
+            var cfg = CompilerConfiguration.Load(
+                new MapperConfig { RevPiHostIp = "192.168.1.7", RevPiTargetIp = "192.168.1.7" });
             var problems = TopologyAddressValidator.ValidateRevPiRoles(cfg, profile).ToList();
             Assert.Contains(problems, p => p.IsError && p.Detail.Contains("cannot share one address", StringComparison.Ordinal));
         }
@@ -225,10 +228,10 @@ namespace MapperTests
         {
             var profile = RevPiComponents("Feeder", "Checker", "PartInHopper");
             Assert.Contains(
-                TopologyAddressValidator.ValidateRevPiRoles(new MapperConfig { RevPiHostIp = "not-an-ip" }, profile),
+                TopologyAddressValidator.ValidateRevPiRoles(CompilerConfiguration.Load(new MapperConfig { RevPiHostIp = "not-an-ip" }), profile),
                 p => p.IsError);
             Assert.Contains(
-                TopologyAddressValidator.ValidateRevPiRoles(new MapperConfig { RevPiTargetIp = "" }, profile),
+                TopologyAddressValidator.ValidateRevPiRoles(CompilerConfiguration.Load(new MapperConfig { RevPiTargetIp = "" }), profile),
                 p => p.IsError);
         }
 
@@ -236,7 +239,8 @@ namespace MapperTests
         public void Address_role_checks_are_silent_when_no_RevPi_is_selected()
         {
             var profile = M262;
-            var cfg = new MapperConfig { RevPiHostIp = "192.168.1.7", RevPiTargetIp = "192.168.1.7" };
+            var cfg = CompilerConfiguration.Load(
+                new MapperConfig { RevPiHostIp = "192.168.1.7", RevPiTargetIp = "192.168.1.7" });
             Assert.Empty(TopologyAddressValidator.ValidateRevPiRoles(cfg, profile));
         }
     }
