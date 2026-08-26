@@ -15,10 +15,10 @@ namespace CodeGen.Devices.M262
         public static void PatchDeployed(GenerationContext ctx, IoBindings? bindings,
             SystemInjector.BindingApplicationReport report)
         {
-            PatchDeployed(ctx.Config, ctx.Profile, bindings, report);
+            PatchDeployed(ctx.Cfg, ctx.Profile, bindings, report);
         }
 
-        public static void PatchDeployed(MapperConfig? config, DeploymentProfile profile,
+        public static void PatchDeployed(Configuration.CompilerConfiguration? config, DeploymentProfile profile,
             IoBindings? bindings,
             SystemInjector.BindingApplicationReport report)
         {
@@ -71,7 +71,7 @@ namespace CodeGen.Devices.M262
                     }
                 }
                 var sensorNames = ReadSensorNames(sysresPath);
-                WriteHcfMerged(profile, hcfPath, resourceId, bindings, fbIdByName, sensorNames, report);
+                WriteHcfMerged(config, profile, hcfPath, resourceId, bindings, fbIdByName, sensorNames, report);
 
                 report.Missing.Add($"[Hcf] wrote   ← {hcfPath}");
             }
@@ -94,7 +94,7 @@ namespace CodeGen.Devices.M262
                     if (root == null || root.Name.LocalName != "Device") continue;
                     var type = (string?)root.Attribute("Type") ?? string.Empty;
                     var nspace = (string?)root.Attribute("Namespace") ?? string.Empty;
-                    if (type != TargetRegistry.Of(CodeGen.Translation.PlcAssignment.M262).DeviceType || nspace != TargetDescriptor.DeviceNamespace) continue;
+                    if (type != TargetRegistry.Of(CodeGen.Translation.PlcAssignment.Named("M262")).DeviceType || nspace != TargetDescriptor.DeviceNamespace) continue;
                     XNamespace ns = root.GetDefaultNamespace();
                     var resources = root.Element(ns + "Resources");
                     var m262Res = resources?.Elements(ns + "Resource").FirstOrDefault();
@@ -127,7 +127,8 @@ namespace CodeGen.Devices.M262
         private static readonly XNamespace XsiNs = "http://www.w3.org/2001/XMLSchema-instance";
 
         // Idempotent merge into the deployed .hcf; ParameterValue targets are {resourceId}.{fbId}.{port}.
-        private static void WriteHcfMerged(DeploymentProfile profile, string hcfPath, string resourceId,
+        private static void WriteHcfMerged(Configuration.CompilerConfiguration cfg,
+            DeploymentProfile profile, string hcfPath, string resourceId,
             IoBindings? bindings, Dictionary<string, string> fbIdByName,
             List<string> sensorNames,
             SystemInjector.BindingApplicationReport report)
@@ -152,7 +153,7 @@ namespace CodeGen.Devices.M262
             // The discharge tail's physical channels, from Config/smc-rig.yml. The binder and the parity
             // validator read this one list, so an edit there changes what is emitted AND what is checked.
             {
-                foreach (var dc in RigCatalog.Current.DischargeChannels)
+                foreach (var dc in cfg.Rig.DischargeChannels)
                 {
                     if (!fbIdByName.ContainsKey(dc.Component) || !PinBlank(dc.Channel)) continue;
                     effective[dc.Channel] = (dc.Component, dc.Port);
@@ -190,7 +191,7 @@ namespace CodeGen.Devices.M262
                 StringComparer.OrdinalIgnoreCase);
             foreach (var comp in expectedM262)
             {
-                if (profile.RunsOnRevPi(comp)) continue;   // explicitly on RevPi -> blank is correct
+                if (profile.AssignedTarget(comp) != null) continue;   // moved elsewhere -> blank is correct
                 if (fbIdByName.ContainsKey(comp)) continue;                  // present -> it will bind
                 report.Missing.Add($"[Hcf][M262][ORPHAN] '{comp}' is M262-default but MISSING from the M262 " +
                     "sysres, so its M262 IO is left blank. This is a stale partial-RevPi leftover — Clean " +
@@ -228,21 +229,30 @@ namespace CodeGen.Devices.M262
                 devItem.SetAttributeValue("ResourceId", resourceId);
             }
 
-            UpsertConfigurationBaseItem(devItem, "BMTM3", BuildBmtm3Shell(), report);
-            var bmtm3 = FindChildBlock(devItem, "BMTM3")!;
-            var items = bmtm3.Elements().FirstOrDefault(e => e.Name.LocalName == "Items");
-            if (items == null)
+            // The bus this device carries, module by module, in the order device.yml declares it. The
+            // XML SHAPE is EAE's schema and is written by ModuleBlock; WHICH modules there are, their
+            // frozen ids, their properties and which of them takes channel bindings are all declared.
+            var modules = TargetRegistry.Of(TargetRegistry.FeedTarget).HardwareModules;
+            XElement into = devItem;
+            string? previous = null;
+            foreach (var m in modules)
             {
-                items = new XElement("Items");
-                bmtm3.Add(items);
+                var block = ModuleBlock(cfg, m, previous);
+                if (string.IsNullOrEmpty(m.PinPrefix))
+                    UpsertConfigurationBaseItem(into, m.Name, block, report);
+                else
+                    UpsertModuleWithPins(into, m.Name, () => ModuleBlock(cfg, m, previous),
+                        m.PinPrefix!, Sym, report);
+                previous = m.Name;
+                if (!m.Nest) continue;
+
+                // A bus master holds the modules after it, so the chain continues inside it.
+                var master = FindChildBlock(into, m.Name)!;
+                into = master.Elements().FirstOrDefault(e => e.Name.LocalName == "Items")
+                       ?? Added(master, new XElement("Items"));
             }
 
-            UpsertConfigurationBaseItem(items, "TM262L01MDESE8T", BuildTm262Block(), report);
-
-            UpsertModuleWithPins(items, "TM3DI16_G", BuildTm3Di16Shell, "DI", Sym, report);
-            UpsertModuleWithPins(items, "TM3DQ16T_G", BuildTm3Dq16Shell, "DO", Sym, report);
-
-            SaveHcfWithRetry(doc, hcfPath, report);
+            SaveHcfWithRetry(cfg.Generation.FileWriteRetries, doc, hcfPath, report);
         }
 
         // The root must carry the xmlns:xsd/xmlns:xsi prefixes EAE expects, minted or loaded alike.
@@ -297,6 +307,73 @@ namespace CodeGen.Devices.M262
                 parent.Add(freshBlock);
                 report.Missing.Add($"[Hcf] appended new {blockName} block");
             }
+        }
+
+        private static XElement Added(XElement parent, XElement child)
+        {
+            parent.Add(child);
+            return child;
+        }
+
+        // ONE module block, from ONE declaration. Element and attribute ORDER here is the serialised
+        // order EAE reads, so it is the schema's, not a preference - the four hand-written shells this
+        // replaces each spelled the same shape and could each drift from it separately.
+        private static XElement ModuleBlock(Configuration.CompilerConfiguration cfg,
+            Configuration.HardwareModule m, string? previous)
+        {
+            var itemProps = new XElement("ItemProperties",
+                m.ItemProperties.Select(p => ItemProperty(cfg, p)));
+            for (int ch = 0; ch < m.Channels; ch++)
+                foreach (var p in m.ChannelProperties)
+                    itemProps.Add(ItemProperty(cfg, p, $"Channel_{ch}.{p.Name}"));
+
+            var block = new XElement("ConfigurationBaseItem",
+                new XElement("Name", m.Name),
+                new XElement("ID", m.Id),
+                new XElement("Type",
+                    new XElement("Name", m.Name),
+                    new XElement("Namespace", m.TypeNamespace)),
+                itemProps,
+                new XElement("ParameterValues",
+                    m.ParameterValues.Select(p => new XElement("ParameterValue",
+                        new XAttribute("Name", p.Name),
+                        new XAttribute("Value", DeclaredValue(cfg, p))))));
+
+            if (previous != null)
+                block.Add(new XElement("PreviousItem",
+                    new XElement("Name", previous),
+                    new XElement("PortName", "BusOut")));
+            if (!string.IsNullOrEmpty(m.MasterConfigFile))
+                block.Add(new XElement("MasterConfigFileName", m.MasterConfigFile));
+            block.Add(new XElement("Items"));
+            return block;
+        }
+
+        // A declared value names something config.yaml owns; anything else is the literal it states.
+        private static string DeclaredValue(Configuration.CompilerConfiguration cfg,
+            Configuration.HardwareModuleProperty p) =>
+            !string.Equals(p.Kind, "declared", StringComparison.OrdinalIgnoreCase) ? p.Value
+            : p.Value switch
+            {
+                "busCycleTime" => BusCycleTime(cfg),
+                "busCycleTolerance" => BusCycleTolerance(cfg),
+                "busCycleActionWhenMissed" => BusCycleActionWhenMissed(cfg),
+                _ => throw new InvalidOperationException(
+                    $"[Hcf] device.yml module property '{p.Name}' declares value '{p.Value}', which " +
+                    "config.yaml does not own. A declared value must name one this generator can supply."),
+            };
+
+        private static XElement ItemProperty(Configuration.CompilerConfiguration cfg,
+            Configuration.HardwareModuleProperty p, string? name = null)
+        {
+            var kind = string.Equals(p.Kind, "unsignedByte", StringComparison.OrdinalIgnoreCase)
+                ? "xsd:unsignedByte" : "xsd:string";
+            var el = new XElement("ItemProperty",
+                new XElement("Name", name ?? p.Name),
+                new XElement("Value", new XAttribute(XsiNs + "type", kind), DeclaredValue(cfg, p)));
+            if (p.HwParam != null)
+                el.Add(new XElement("HWParameters", new XElement("string", p.HwParam)));
+            return el;
         }
 
         private static XElement? FindChildBlock(XElement parent, string blockName) =>
@@ -374,112 +451,18 @@ namespace CodeGen.Devices.M262
         }
 
 
-        private static XElement BuildBmtm3Shell() => new XElement("ConfigurationBaseItem",
-            new XElement("Name", "BMTM3"),
-            new XElement("ID", "9510AF594EA1EDD1"),
-            new XElement("Type",
-                new XElement("Name", "BMTM3"),
-                new XElement("Namespace", "SE.IoTMx")),
-            new XElement("ItemProperties",
-                ItemPropertyStr("busid", "TM3Config", "BUS_ID"),
-                ItemPropertyByte("powerConsumption", "0", null),
-                ItemPropertyStr("buscycletime", "T#80ms", "busCycleTime"),
-                ItemPropertyStr("buscycletolerance", "30", "busCycleTolerance"),
-                ItemPropertyStr("buscycleactionwhenmissed", "1", "busCycleActionWhenMissed"),
-                ItemPropertyStr("enableSymlinkOC", "TRUE", "enableSymlinkOC")),
-            new XElement("ParameterValues",
-                new XElement("ParameterValue",
-                    new XAttribute("Name", "busId"), new XAttribute("Value", "'BMTM3'")),
-                new XElement("ParameterValue",
-                    new XAttribute("Name", "enableSymlinkOC"), new XAttribute("Value", "TRUE")),
-                new XElement("ParameterValue",
-                    new XAttribute("Name", "phase"), new XAttribute("Value", "T#0ms")),
-                new XElement("ParameterValue",
-                    new XAttribute("Name", "busCycleTime"), new XAttribute("Value", "T#80ms")),
-                new XElement("ParameterValue",
-                    new XAttribute("Name", "busCycleTolerance"), new XAttribute("Value", "30")),
-                new XElement("ParameterValue",
-                    new XAttribute("Name", "busCycleActionWhenMissed"), new XAttribute("Value", "1")),
-                new XElement("ParameterValue",
-                    new XAttribute("Name", "busStatusSymlink"), new XAttribute("Value", ""))),
-            new XElement("MasterConfigFileName",
-                @"${ProjectDir}\${SystemName}\RuntimeData\${DeviceName}\boot\${busid}.xml"),
-            new XElement("Items"));
+        // The TM3 bus contract, read once from config.yaml. It used to be spelled twice in this
+        // file - the module shell and the item-property block - which is two owners of one fact.
+        static string BusCycleTime(Configuration.CompilerConfiguration cfg) =>
+            Configuration.GenerationConfig.Duration(cfg.Generation.M262BusCycleMs);
+        static string BusCycleTolerance(Configuration.CompilerConfiguration cfg) =>
+            cfg.Generation.M262BusCycleTolerance.ToString();
+        static string BusCycleActionWhenMissed(Configuration.CompilerConfiguration cfg) =>
+            cfg.Generation.M262BusCycleActionWhenMissed.ToString();
 
-        private static XElement BuildTm262Block() => new XElement("ConfigurationBaseItem",
-            new XElement("Name", "TM262L01MDESE8T"),
-            new XElement("ID", "E2B036F9B0A5B0A4"),
-            new XElement("Type",
-                new XElement("Name", "TM262L01MDESE8T"),
-                new XElement("Namespace", "SE.IoTMx")),
-            new XElement("ItemProperties"),
-            new XElement("ParameterValues"),
-            new XElement("PreviousItem",
-                new XElement("Name", "BMTM3"),
-                new XElement("PortName", "BusOut")),
-            new XElement("Items"));
-
-        private static XElement BuildTm3Di16Shell()
-        {
-            var itemProps = new XElement("ItemProperties",
-                ItemPropertyByte("OptionalModule", "0", null));
-            for (int ch = 0; ch < 16; ch++)
-            {
-                itemProps.Add(ItemPropertyByte($"Channel_{ch}.Latch", "32", null));
-                itemProps.Add(ItemPropertyByte($"Channel_{ch}.Filter", "4", null));
-            }
-            return new XElement("ConfigurationBaseItem",
-                new XElement("Name", "TM3DI16_G"),
-                new XElement("ID", "52DB1E4920A80F90"),
-                new XElement("Type",
-                    new XElement("Name", "TM3DI16_G"),
-                    new XElement("Namespace", "SE.IoTMx")),
-                itemProps,
-                new XElement("ParameterValues"),
-                new XElement("PreviousItem",
-                    new XElement("Name", "TM262L01MDESE8T"),
-                    new XElement("PortName", "BusOut")),
-                new XElement("Items"));
-        }
-
-        private static XElement BuildTm3Dq16Shell() => new XElement("ConfigurationBaseItem",
-            new XElement("Name", "TM3DQ16T_G"),
-            new XElement("ID", "1256CB09958B4E27"),
-            new XElement("Type",
-                new XElement("Name", "TM3DQ16T_G"),
-                new XElement("Namespace", "SE.IoTMx")),
-            new XElement("ItemProperties",
-                ItemPropertyByte("OptionalModule", "0", null)),
-            new XElement("ParameterValues"),
-            new XElement("PreviousItem",
-                new XElement("Name", "TM3DI16_G"),
-                new XElement("PortName", "BusOut")),
-            new XElement("Items"));
-
-        private static XElement ItemPropertyStr(string name, string value, string? hwParam)
-        {
-            var el = new XElement("ItemProperty",
-                new XElement("Name", name),
-                new XElement("Value",
-                    new XAttribute(XsiNs + "type", "xsd:string"), value));
-            if (hwParam != null)
-                el.Add(new XElement("HWParameters", new XElement("string", hwParam)));
-            return el;
-        }
-
-        private static XElement ItemPropertyByte(string name, string value, string? hwParam)
-        {
-            var el = new XElement("ItemProperty",
-                new XElement("Name", name),
-                new XElement("Value",
-                    new XAttribute(XsiNs + "type", "xsd:unsignedByte"), value));
-            if (hwParam != null)
-                el.Add(new XElement("HWParameters", new XElement("string", hwParam)));
-            return el;
-        }
 
         // UTF-8 no BOM (EAE requirement); retries up to 8 times if EAE briefly holds a write lock.
-        private static void SaveHcfWithRetry(XDocument doc, string hcfPath,
+        private static void SaveHcfWithRetry(int retries, XDocument doc, string hcfPath,
             SystemInjector.BindingApplicationReport report)
         {
             var settings = new System.Xml.XmlWriterSettings
@@ -490,7 +473,7 @@ namespace CodeGen.Devices.M262
                 NewLineHandling = System.Xml.NewLineHandling.Replace,
             };
 
-            int attempt = Services.FbtXmlEditor.SaveXmlRetrying(hcfPath, settings, doc.Save);
+            int attempt = Services.FbtXmlEditor.SaveXmlRetrying(retries, hcfPath, settings, doc.Save);
             if (attempt > 1)
                 report.Missing.Add(
                     $"[Hcf] write succeeded on attempt {attempt} (EAE briefly held a lock).");
@@ -537,7 +520,7 @@ namespace CodeGen.Devices.M262
                     var t = (string?)fb.Attribute("Type") ?? string.Empty;
                     var n = (string?)fb.Attribute("Name") ?? string.Empty;
                     if (!string.IsNullOrEmpty(n) &&
-                        t.StartsWith("Sensor_Bool_CAT", StringComparison.Ordinal))
+                        t.StartsWith(TemplateManifest.SensorType.Name, StringComparison.Ordinal))
                         list.Add(n);
                 }
             }
