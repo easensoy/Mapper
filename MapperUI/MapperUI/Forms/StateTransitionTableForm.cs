@@ -23,7 +23,9 @@ namespace MapperUI
         readonly DataGridView _notesGrid = CreateGrid();
 
         public StateTransitionTableForm(string controlXmlPath,
-            IReadOnlyList<VueOneComponent> components)
+            IReadOnlyList<VueOneComponent> components,
+            CodeGen.Configuration.MapperConfig config,
+            CodeGen.Mapping.DeploymentProfile profile)
         {
             Text = "State-Transition Table";
             StartPosition = FormStartPosition.CenterParent;
@@ -44,14 +46,15 @@ namespace MapperUI
             Controls.Add(tabs);
             Controls.Add(_header);
 
-            Reload(controlXmlPath, components);
+            Reload(controlXmlPath, components, config, profile);
         }
 
-        public void Reload(string controlXmlPath, IReadOnlyList<VueOneComponent> components)
+        public void Reload(string controlXmlPath, IReadOnlyList<VueOneComponent> components,
+            CodeGen.Configuration.MapperConfig config, CodeGen.Mapping.DeploymentProfile profile)
         {
             _header.Text = $"Source: {Path.GetFileName(controlXmlPath)}   ({controlXmlPath})";
 
-            var snapshot = StateTransitionTableBuilder.Build(components);
+            var snapshot = StateTransitionTableBuilder.Build(components, config, profile);
             _recipeGrid.DataSource = snapshot.RecipeRows;
             _transitionGrid.DataSource = snapshot.TransitionRows;
             _notesGrid.DataSource = snapshot.Notes;
@@ -129,13 +132,15 @@ namespace MapperUI
             DataTable TransitionRows,
             DataTable Notes);
 
-        public static Snapshot Build(IReadOnlyList<VueOneComponent> components)
+        // The configuration and the placement are the RUN's, handed in. Constructing a default
+        // MapperConfig here planned with no instance-name overrides and an empty template library, and
+        // AsPlaced discarded the Device column - so the preview showed a project Generate never writes.
+        public static Snapshot Build(IReadOnlyList<VueOneComponent> components,
+            CodeGen.Configuration.MapperConfig config, CodeGen.Mapping.DeploymentProfile profile)
         {
             var recipeRows = CreateRecipeTable();
             var transitionRows = CreateTransitionTable();
             var notes = CreateNotesTable();
-
-            var twin = TwinModel.Build(components);
 
             // The preview shows what generation will produce, so it reads the SAME plan rather than
             // re-deriving an allocation, a slot map and a recipe of its own.
@@ -143,11 +148,16 @@ namespace MapperUI
             string? planError = null;
             try
             {
+                // The preview is its own composition root: it reads every declaration ONCE, exactly
+                // as a generation does, so what it shows is what a run would produce.
                 plan = CodeGen.Translation.GenerationContext.Plan(
-                    new CodeGen.Configuration.MapperConfig(), components,
-                    CodeGen.Mapping.DeploymentProfile.M262Only(CodeGen.Configuration.LayoutCatalog.Load()));
+                    CodeGen.Configuration.CompilerConfiguration.Load(config), components, profile);
             }
             catch (Exception ex) { planError = ex.Message; }
+
+            // The plan already resolved the twin; a second TwinModel over the same components would be
+            // a second answer to every reference this table renders.
+            var twin = plan?.Twin ?? TwinModel.Build(components);
 
             foreach (var process in twin.Processes.Select(p => p.Source))
             {
@@ -243,7 +253,7 @@ namespace MapperUI
 
             for (int i = 0; i < recipe.StepType.Count; i++)
             {
-                bool isWait = recipe.StepType[i] == 2;
+                bool isWait = recipe.StepType[i] == StepType.Wait;
                 var waitTarget = isWait && idToComponent.TryGetValue(recipe.Wait1Id[i], out var waitComp)
                     ? waitComp
                     : null;
@@ -259,11 +269,11 @@ namespace MapperUI
                     recipe.StepType[i],
                     recipe.CmdTargetName[i],
                     recipe.CmdStateArr[i],
-                    CommandMeaning(cmdTarget, recipe.CmdStateArr[i]),
+                    CommandMeaning(cmdTarget, recipe.CmdStateArr[i], plan),
                     isWait ? recipe.Wait1Id[i] : DBNull.Value,
                     waitTarget?.Name ?? "",
                     isWait ? recipe.Wait1State[i] : DBNull.Value,
-                    isWait ? WaitMeaning(waitTarget, recipe.Wait1State[i]) : "",
+                    isWait ? WaitMeaning(waitTarget, recipe.Wait1State[i], plan) : "",
                     recipe.NextStep[i]);
             }
 
@@ -324,58 +334,44 @@ namespace MapperUI
             return table;
         }
 
-        static string StepTypeName(int stepType) => stepType switch
-        {
-            1 => "CMD",
-            2 => "WAIT",
-            9 => "END",
-            _ => $"UNKNOWN {stepType}",
-        };
+        // What a recipe row IS. The engine's three step kinds are protocol, so they are read from the
+        // one place that declares them rather than re-listed for a grid.
+        static string StepTypeName(int stepType) =>
+            stepType == StepType.Cmd ? "CMD"
+            : stepType == StepType.Wait ? "WAIT"
+            : stepType == StepType.End ? "END"
+            : $"UNKNOWN {stepType}";
 
-        static string CommandMeaning(VueOneComponent? component, int cmdState)
+        // What a command VALUE means is the CAT's declaration - which stop that value drives it to -
+        // so it is asked of the protocol the plan selected for this component. Three tables of
+        // Pick/Place/Home used to live here and could disagree with the CAT the run actually deployed.
+        static string CommandMeaning(VueOneComponent? component, int cmdState,
+            CodeGen.Translation.GenerationContext? plan)
         {
             if (component == null || cmdState == 0) return "";
-            if (IsSevenState(component))
-                return cmdState switch
-                {
-                    1 => "Pick / Work1",
-                    3 => "Place / Work2",
-                    5 => "Home / Centre",
-                    _ => $"Seven cmd {cmdState}",
-                };
-            return cmdState switch
-            {
-                1 => "toWork",
-                3 => "toHome",
-                _ => $"cmd {cmdState}",
-            };
+            var stop = Protocol(component, plan)?.Command
+                .FirstOrDefault(kv => kv.Value == cmdState).Key;
+            return stop ?? $"cmd {cmdState}";
         }
 
-        static string WaitMeaning(VueOneComponent? component, int waitState)
+        // What a WAIT value means: for a sensor the twin's own state name, for an actuator the stop the
+        // CAT publishes that value at.
+        static string WaitMeaning(VueOneComponent? component, int waitState,
+            CodeGen.Translation.GenerationContext? plan)
         {
             if (component == null) return waitState == 0 ? "" : $"state {waitState}";
-            if (string.Equals(component.Type, "Sensor", StringComparison.OrdinalIgnoreCase))
-                return waitState == 1 ? "On / TRUE" : $"sensor state {waitState}";
-            if (IsSevenState(component))
-                return waitState switch
-                {
-                    0 => "AtHomeInit",
-                    2 => "AtPick / Work1",
-                    4 => "AtPlace / Work2",
-                    6 => "AtHome",
-                    _ => $"state {waitState}",
-                };
-            return waitState switch
-            {
-                0 => "AtHomeInit / settled",
-                2 => "AtWork",
-                4 => "AtHomeEnd",
-                _ => $"state {waitState}",
-            };
+            if (ComponentType.IsSensor(component))
+                return component.States.FirstOrDefault(s => s.StateNumber == waitState)?.Name
+                       ?? $"sensor state {waitState}";
+            return Protocol(component, plan)?.StopFor(waitState) ?? $"state {waitState}";
         }
 
-        static bool IsSevenState(VueOneComponent component) =>
-            component.States.Count == 7 || TemplateMap.IsBranchedSevenState(component);
+        // The CAT the PLAN selected, never one re-derived here from how the component's states look.
+        static CodeGen.Configuration.CatProtocolDeclaration? Protocol(VueOneComponent component,
+            CodeGen.Translation.GenerationContext? plan) =>
+            plan != null && plan.CatTypes.TryGetValue((component.Name ?? string.Empty).Trim(), out var cat)
+                ? TemplateManifest.ProtocolOrNull(cat)
+                : null;
 
         // Where the plan runs this process. A name-recognition table here would report the twin's own
         // station wrongly the moment a model renamed one.
