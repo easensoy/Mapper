@@ -52,7 +52,7 @@ namespace MapperTests
         }
 
         private static GenerationContext Compile(params VueOneComponent[] plant) =>
-            GenerationContext.Plan(new MapperConfig(), plant, DeploymentProfile.M262Only(LayoutCatalog.Load()));
+            GenerationContext.Plan(TestConfig.Cfg, plant, DeploymentProfile.AsPlaced(TestConfig.Cfg));
 
         // A plant that DOES compile, so each fixture below differs from it in exactly one defect.
         private static List<VueOneComponent> Working()
@@ -175,7 +175,7 @@ namespace MapperTests
                 var cfg = new MapperConfig { SyslayPath2 = Path.Combine(probe, "app.syslay") };
 
                 Assert.Throws<InvalidOperationException>(() => GenerationContext.Plan(
-                    cfg, plant, DeploymentProfile.M262Only(LayoutCatalog.Load())));
+                    CompilerConfiguration.Load(cfg), plant, DeploymentProfile.AsPlaced(TestConfig.Cfg)));
 
                 Assert.Empty(Directory.EnumerateFileSystemEntries(probe));
             }
