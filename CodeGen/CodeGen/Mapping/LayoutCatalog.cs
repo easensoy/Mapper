@@ -27,6 +27,9 @@ namespace CodeGen.Configuration
         // Read once at the entry point and carried on the run's DeploymentProfile, never reached ambiently.
         public static LayoutCatalog Load() => LayoutCatalogLoader.Catalog;
 
+        /// The same declaration read from a run's OWN profile bundle.
+        public static LayoutCatalog LoadFrom(string? root) => LayoutCatalogLoader.LoadFrom(root);
+
         public LayoutBand Band(PlcAssignment plc) =>
             Bands.FirstOrDefault(b => b.Plc == plc) ?? LayoutBand.OffCanvas;
 
@@ -165,6 +168,9 @@ namespace CodeGen.Configuration
             new("Config", "layout.yml") { OnLoaded = LayoutCatalogValidator.Validate };
 
         public static LayoutCatalog Catalog => _file.Load();
+
+        /// The same declaration read from a run's OWN profile bundle.
+        public static LayoutCatalog LoadFrom(string? root) => _file.Load(root);
     }
 
     internal static class LayoutCatalogValidator
