@@ -126,7 +126,7 @@ namespace MapperUI
         // device.yml - a target added there was silently blanked and a component list went stale.
         void PopulateDeviceColumn()
         {
-            var targets = CodeGen.Mapping.TargetRegistry.All;
+            var targets = Declarations().Targets.All;
             colDevice.Items.Clear();
             foreach (var t in targets) colDevice.Items.Add(t.Plc.ToString());
 
@@ -410,7 +410,7 @@ namespace MapperUI
                 MessageBox.Show(
                     "IEC 61499 code generated — end to end.\n\n" +
                     "Process recipes, interlock safety tables and I/O bindings were emitted across\n" +
-                    $"{CodeGen.Mapping.TargetRegistry.All.Count} controller(s) " +
+                    $"{Declarations().Targets.All.Count} controller(s) " +
                     $"({result.BoundCount} I/O channel(s) bound).\n\n" +
                     $"Demonstrator:\n{result.SyslayPath}\n\n" +
                     "Next: reload the solution in EAE, then Build and Deploy.",
@@ -434,7 +434,7 @@ namespace MapperUI
         // silently overrode that refusal, so an unservable pick looked accepted and quietly did nothing.
         IReadOnlySet<string> CollectRevPiSelection()
         {
-            var relocation = CodeGen.Mapping.TargetRegistry.All
+            var relocation = Declarations().Targets.All
                 .FirstOrDefault(t => t.ReceivesRelocatedComponents);
             if (relocation == null) return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -448,7 +448,7 @@ namespace MapperUI
         // Every name comes from the registry or device.yml, so a controller added there is reported.
         void LogControllerChoice(IReadOnlySet<string> relocated)
         {
-            var targets = CodeGen.Mapping.TargetRegistry.All;
+            var targets = Declarations().Targets.All;
             var home = targets.FirstOrDefault(t => t.HostsFeedStation && !t.ReceivesRelocatedComponents);
             var relocation = targets.FirstOrDefault(t => t.ReceivesRelocatedComponents);
             if (relocated.Count == 0 || relocation == null)
@@ -493,7 +493,7 @@ namespace MapperUI
                 try
                 {
                     foreach (var rule in MappingRuleEngine.GetRelevantRules(
-                        Cfg().MappingRulesPath, ShapesPresent(_loadedComponents)))
+                        Cfg().MappingRulesPath, ShapesPresent(_loadedComponents, Declarations().Manifest)))
                         AddMappingRuleRow(rule);
                 }
                 catch (Exception ex)
@@ -519,7 +519,7 @@ namespace MapperUI
                         CollectRevPiSelection(), Declarations()));
                 foreach (var comp in _loadedComponents)
                 {
-                    var vr = Validate(comp, validator);
+                    var vr = Validate(comp, validator, Declarations().Manifest);
                     _validationRows.Add(vr);
 
                     var reg = roster.Get(comp.Name);
@@ -529,7 +529,7 @@ namespace MapperUI
                     // A device the registry does not know is stored as null (blank) to avoid a DataError.
                     // Which controllers exist is device.yml's answer, so a target added there appears
                     // here without an edit instead of being silently blanked by a list in the UI.
-                    string? devCell = CodeGen.Mapping.TargetRegistry.All
+                    string? devCell = Declarations().Targets.All
                         .Any(t => string.Equals(t.Plc.ToString(), dev, StringComparison.Ordinal)) ? dev : null;
                     int idx = dgvComponents.Rows.Add(comp.Name, comp.Type, vr.TemplateName, devCell!);
                     var row = dgvComponents.Rows[idx];
@@ -583,7 +583,7 @@ namespace MapperUI
                 {
 
                     rules = MappingRuleEngine.GetRelevantRules(
-                        Cfg().MappingRulesPath, ShapesPresent(_loadedComponents));
+                        Cfg().MappingRulesPath, ShapesPresent(_loadedComponents, Declarations().Manifest));
                 }
                 else
                 {
@@ -641,16 +641,17 @@ namespace MapperUI
 
 
         // The grid REPORTS the compiler's decision; it does not make one. Which shapes a CAT serves is
-        // declared in templates.yml and answered by TemplateMap/TemplateManifest, so a CAT added there
+        // declared in templates.yml and answered by the run's TemplateIndex, so a CAT added there
         // shows up here with no edit - and the row can never name a template the run would not emit.
-        static ComponentValidationRow Validate(VueOneComponent comp, ComponentValidator validator)
+        static ComponentValidationRow Validate(VueOneComponent comp, ComponentValidator validator,
+            CodeGen.Mapping.TemplateIndex manifest)
         {
             if (ComponentType.IsProcess(comp))
-                return Pass(comp, CatFile(TemplateManifest.ProcessType.Name));
+                return Pass(comp, CatFile(manifest.ProcessType.Name));
 
             if (ComponentType.IsSensor(comp))
             {
-                var sensorFile = CatFile(TemplateManifest.SensorType.Name);
+                var sensorFile = CatFile(manifest.SensorType.Name);
                 var vr = validator.Validate(comp);
                 return vr.IsValid
                     ? Pass(comp, sensorFile)
@@ -664,7 +665,7 @@ namespace MapperUI
             // says which shapes ARE served, so the grid shows that rather than a second rule here.
             try
             {
-                return Pass(comp, CatFile(TemplateMap.ResolveActuatorCatType(comp)));
+                return Pass(comp, CatFile(manifest.ResolveActuatorCatType(comp)));
             }
             catch (InvalidOperationException ex)
             {
@@ -674,14 +675,15 @@ namespace MapperUI
 
         // Which CATs this twin actually needs, answered by the one resolver the run uses. A shape no
         // CAT serves is not this grid's decision to make, so it is skipped rather than misreported.
-        static IEnumerable<string> ShapesPresent(IEnumerable<VueOneComponent> components)
+        static IEnumerable<string> ShapesPresent(IEnumerable<VueOneComponent> components,
+            CodeGen.Mapping.TemplateIndex manifest)
         {
             var names = new List<string>();
             foreach (var c in components)
             {
-                if (ComponentType.IsSensor(c)) { names.Add(TemplateManifest.SensorType.Name); continue; }
+                if (ComponentType.IsSensor(c)) { names.Add(manifest.SensorType.Name); continue; }
                 if (!ComponentType.IsActuator(c) && !ComponentType.Is(c, ComponentType.Robot)) continue;
-                try { names.Add(TemplateMap.ResolveActuatorCatType(c)); }
+                try { names.Add(manifest.ResolveActuatorCatType(c)); }
                 catch (InvalidOperationException) { }
             }
             return names;
@@ -737,7 +739,7 @@ namespace MapperUI
         // counted here without an edit; a per-controller counter could only omit it.
         void RefreshDeviceSummary()
         {
-            var counts = CodeGen.Mapping.TargetRegistry.All
+            var counts = Declarations().Targets.All
                 .ToDictionary(t => t.Plc.ToString(), _ => 0, StringComparer.Ordinal);
             foreach (DataGridViewRow r in dgvComponents.Rows)
             {
@@ -752,8 +754,8 @@ namespace MapperUI
 
         // A target that only ever receives relocated components has nothing on it until something is
         // moved there, so it is left out of the summary until it does.
-        static bool IsRelocationTarget(string plc) =>
-            CodeGen.Mapping.TargetRegistry.All.Any(t =>
+        bool IsRelocationTarget(string plc) =>
+            Declarations().Targets.All.Any(t =>
                 string.Equals(t.Plc.ToString(), plc, StringComparison.Ordinal) &&
                 t.ReceivesRelocatedComponents);
 
