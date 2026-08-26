@@ -123,6 +123,8 @@ internal static class Program
         Directory.CreateDirectory(outDir);
 
         int failures = 0;
+        // EVERY model, including the negative fixtures: this is the stage that proves a twin the
+        // compiler must refuse is in fact refused, and refused for the declared reason.
         foreach (var model in Fixtures.Models)
             foreach (var selection in Fixtures.Selections)
             {
@@ -130,6 +132,26 @@ internal static class Program
                 Console.Write($"  {Label(name),-16} {controller,-6} ");
                 var work = Under("work", label, name, controller);
                 var error = Generate(model, selection.RevPi, work, seed: true);
+
+                // A negative fixture PASSES by being refused, and only for the declared reason: an
+                // invalid twin that suddenly compiles is exactly as much a regression as a valid one
+                // that stops compiling.
+                if (model.IsNegativeFixture)
+                {
+                    if (error == null)
+                    {
+                        Console.WriteLine("REFUSAL EXPECTED BUT THE MODEL COMPILED — " + model.RefusalReason);
+                        failures++;
+                    }
+                    else if (!error.Contains(model.ExpectRefusal, StringComparison.Ordinal))
+                    {
+                        Console.WriteLine($"REFUSED FOR THE WRONG REASON: expected '{model.ExpectRefusal}', got: {error}");
+                        failures++;
+                    }
+                    else Console.WriteLine($"REFUSED as declared  ({model.ExpectRefusal})");
+                    continue;
+                }
+
                 if (error != null) { Console.WriteLine($"GENERATION FAILED: {error}"); failures++; continue; }
 
                 var hashes = Hash(work);
@@ -225,7 +247,8 @@ internal static class Program
     private static int Determinism()
     {
         int failures = 0;
-        foreach (var model in Fixtures.Models)
+        // A refused twin produces no tree; its refusal is proved in the generation stage.
+        foreach (var model in Fixtures.Models.Where(m => !m.IsNegativeFixture))
             foreach (var selection in Fixtures.Selections)
             {
                 var (name, controller) = (model.Name, selection.Name);
@@ -255,8 +278,16 @@ internal static class Program
         Seed(work);
         // Two DIFFERENT combinations, so the middle run can leave something behind for the third to
         // find. A manifest with one of either still closes the loop; it just proves less.
-        var a = (Fixtures.Models[0], Fixtures.Selections[0].RevPi);
-        var b = (Fixtures.Models[^1], Fixtures.Selections[^1].RevPi);
+        // Two DIFFERENT COMPILABLE combinations: a refused twin never writes a tree, so it can
+        // neither leave residue behind nor prove that the third run found none.
+        var usable = Fixtures.Models.Where(m => !m.IsNegativeFixture).ToList();
+        if (usable.Count == 0)
+        {
+            Console.WriteLine("  NO COMPILABLE MODEL: every twin in the manifest is a negative fixture.");
+            return 1;
+        }
+        var a = (usable[0], Fixtures.Selections[0].RevPi);
+        var b = (usable[^1], Fixtures.Selections[^1].RevPi);
         var order = new[] { a, b, a };
         var results = new List<IReadOnlyDictionary<string, string>>();
         foreach (var (model, revPi) in order)
@@ -403,7 +434,8 @@ internal static class Program
     private static int Compare(string a, string b, bool coreOnly)
     {
         int diverged = 0;
-        foreach (var model in Fixtures.Models)
+        // A refused twin produces no tree; its refusal is proved in the generation stage.
+        foreach (var model in Fixtures.Models.Where(m => !m.IsNegativeFixture))
             foreach (var selection in Fixtures.Selections)
             {
                 var (name, controller) = (model.Name, selection.Name);
