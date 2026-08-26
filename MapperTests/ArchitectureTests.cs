@@ -56,9 +56,13 @@ namespace MapperTests
         // ------------------------------------------------------------------------------------
 
         // The only files that may reach a configuration global. Each is a LOADER (it owns the
-        // declaration), the COMPOSITION ROOT (it builds the snapshot), a REGISTRY frozen from a
-        // declaration on first use, or the compatibility facade the prebuilt VueOne runner links
-        // against by signature - which forwards and decides nothing.
+        // declaration), the COMPOSITION ROOT (it builds the snapshot), or a COMPATIBILITY FACADE that
+        // an external binary links by exact signature - which forwards and decides nothing.
+        //
+        // There used to be a fourth kind: a REGISTRY that froze a declaration on first use. There is
+        // no such thing any more - the target and template indexes are built from a snapshot and hold
+        // no declaration of their own - so the category is gone, and with it the place a newly frozen
+        // static could have hidden.
         static readonly string[] ConfigurationLayer =
         {
             "CodeGen/CodeGen/Configuration/CompilerConfiguration.cs",
@@ -67,13 +71,12 @@ namespace MapperTests
             "CodeGen/CodeGen/IO/TemplateCatalog.cs",
             "CodeGen/CodeGen/IO/RigCatalog.cs",
             "CodeGen/CodeGen/Deployment/DeviceConfig.cs",
+            "CodeGen/CodeGen/Deployment/SecurityProfile.cs",
             "CodeGen/CodeGen/Deployment/TelemetrySettings.cs",
+            "CodeGen/CodeGen/Mapping/LayoutCatalog.cs",
             "CodeGen/CodeGen/Planning/Interlocks/InterlockConfig.cs",
             "CodeGen/CodeGen/Input/Settings/MapperConfig.cs",
-            "CodeGen/CodeGen/Mapping/TargetRegistry.cs",
-            "CodeGen/CodeGen/Mapping/TargetBootstrap.cs",
-            "CodeGen/CodeGen/Mapping/TemplateManifest.cs",
-            "CodeGen/CodeGen/Mapping/TemplateMap.cs",
+            "CodeGen/CodeGen/Mapping/ControllerMap.cs",
         };
 
         // AN ALLOWLIST IS ONLY AS GOOD AS ITS ENTRIES. A list of file names that nothing checks
@@ -97,12 +100,12 @@ namespace MapperTests
                 bool snapshot = rel.EndsWith("Configuration/CompilerConfiguration.cs", StringComparison.Ordinal);
                 bool root = rel.EndsWith("Application/GenerateProject.cs", StringComparison.Ordinal);
                 bool facade = rel.EndsWith("Input/Settings/MapperConfig.cs", StringComparison.Ordinal);
-                // A registry projects one declaration and freezes it; it must hold no settable state,
-                // which the mutable-static rule proves separately.
-                bool registry = rel.Contains("/Mapping/", StringComparison.Ordinal);
+                // The HMI module and the prebuilt VueOne runner call this by exact signature and cannot
+                // be handed a run's snapshot, so it reads the named process-wide one and decides nothing.
+                bool compat = rel.EndsWith("Mapping/ControllerMap.cs", StringComparison.Ordinal);
 
-                if (!loader && !snapshot && !root && !facade && !registry)
-                    breaches.Add(rel + " -> not a loader, the snapshot, the composition root, the facade or a registry");
+                if (!loader && !snapshot && !root && !facade && !compat)
+                    breaches.Add(rel + " -> not a loader, the snapshot, the composition root or a compatibility facade");
             }
             NoBreaches(breaches,
                 "the configuration allowlist carries an entry that no longer justifies being on it");
@@ -116,12 +119,121 @@ namespace MapperTests
             {
                 if (ConfigurationLayer.Contains(Rel(f), StringComparer.OrdinalIgnoreCase)) continue;
                 foreach (Match m in Regex.Matches(CodeOf(f),
-                             @"(DeviceConfig|GenerationConfig|TelemetrySettings|RigCatalog|InterlockConfig|TemplateCatalog)[.]Current"))
+                             @"(DeviceConfig|GenerationConfig|TelemetrySettings|RigCatalog|InterlockConfig|TemplateCatalog|SecurityProfile)[.]Current|CompilerConfiguration[.]Default"))
                     breaches.Add(Rel(f) + " -> " + m.Value);
             }
             NoBreaches(breaches,
                 "a planner, validator, renderer or UI reloads configuration instead of being handed the " +
                 "immutable snapshot, so two parts of one run could see different declarations");
+        }
+
+        // ------------------------------------------------------------------------------------
+        // The SEMANTIC layers compile against the run they were handed, never a process-wide one.
+        // ------------------------------------------------------------------------------------
+
+        // Domain and Planning turn a twin into a plan. Whatever they resolve a target, a CAT, a port
+        // or a boot sequence against must arrive as an argument, because two generations can be in
+        // flight at once - a different twin, a different target selection, a different profile - and
+        // a shared registry is how one of them ends up compiled half against the other's declarations.
+        //
+        // This is stricter than the configuration rule above: that one bans re-READING a file, this
+        // one bans reaching for any process-wide RESOLUTION of one. The named types below no longer
+        // exist; the rule names them anyway so that re-introducing one fails here rather than quietly
+        // reintroducing the defect it was built to remove.
+        [Fact]
+        public void Planning_resolves_targets_and_templates_from_the_run_it_was_given()
+        {
+            var breaches = new List<string>();
+            foreach (var f in Production().Where(p =>
+                         Rel(p).StartsWith("CodeGen/CodeGen/Domain/", StringComparison.Ordinal) ||
+                         Rel(p).StartsWith("CodeGen/CodeGen/Planning/", StringComparison.Ordinal)))
+            {
+                if (Rel(f).EndsWith("Planning/Interlocks/InterlockConfig.cs", StringComparison.Ordinal))
+                    continue;                       // the loader of its own declaration
+                foreach (Match m in Regex.Matches(CodeOf(f),
+                             @"(?<![.\w])(TargetRegistry|TemplateManifest|TargetBootstrap|RingHost|ProcessPhaseTransport)(?![\w])|" +
+                             @"CompilerConfiguration[.]Default|" +
+                             @"(DeviceConfig|GenerationConfig|TelemetrySettings|RigCatalog|TemplateCatalog|SecurityProfile)[.]Current"))
+                    breaches.Add(Rel(f) + " -> " + m.Value);
+            }
+            NoBreaches(breaches,
+                "a Domain or Planning file resolves a target, template or boot sequence from process-wide " +
+                "state instead of the run's own snapshot, so two concurrent runs could compile against " +
+                "each other's declarations");
+        }
+
+        // A RESOLVED INDEX MUST NOT CACHE ITSELF. TargetIndex and TemplateIndex answer every question
+        // about a declared target or FB type; each is built from one snapshot's declarations. A static
+        // field on either would outlive the snapshot that filled it, which is precisely the shape this
+        // whole layer was built to remove.
+        [Fact]
+        public void The_resolved_indexes_hold_no_state_of_their_own()
+        {
+            var breaches = new List<string>();
+            foreach (var rel in new[] { "CodeGen/CodeGen/Mapping/TargetIndex.cs",
+                                        "CodeGen/CodeGen/Mapping/TemplateIndex.cs" })
+            {
+                var full = Path.Combine(Root(), rel.Replace('/', Path.DirectorySeparatorChar));
+                Assert.True(File.Exists(full), rel + " is missing; the per-run index is what replaced the frozen registry");
+                foreach (var raw in File.ReadAllLines(full))
+                {
+                    var line = raw.Trim();
+                    // A static FIELD: declared static, ends the statement, and is not a method or an
+                    // expression-bodied member. A const is a literal and carries no declaration.
+                    if (!line.StartsWith("static", StringComparison.Ordinal) &&
+                        !line.StartsWith("private static", StringComparison.Ordinal) &&
+                        !line.StartsWith("internal static", StringComparison.Ordinal) &&
+                        !line.StartsWith("public static", StringComparison.Ordinal)) continue;
+                    if (line.Contains("(", StringComparison.Ordinal)) continue;      // a method
+                    if (line.Contains("=>", StringComparison.Ordinal)) continue;     // an expression member
+                    if (line.Contains(" const ", StringComparison.Ordinal)) continue;
+                    if (!line.EndsWith(";", StringComparison.Ordinal)) continue;
+                    breaches.Add(rel + " -> " + line);
+                }
+            }
+            NoBreaches(breaches,
+                "a resolved index carries static state, so it would outlive the configuration snapshot " +
+                "that built it and answer a later run from an earlier run's declarations");
+        }
+
+        // ------------------------------------------------------------------------------------
+        // A snapshot is read. Nothing writes back into one.
+        // ------------------------------------------------------------------------------------
+
+        // The declaration DTOs carry settable collections because that is how YamlDotNet populates
+        // them; splitting each one into a parse type and a frozen model would add a parallel type per
+        // configuration file and buy nothing the rule below does not.
+        //
+        // What actually matters is that nobody WRITES through them. The loaders hand out an
+        // mtime-cached instance, so every run reading the shipped bundle holds the SAME object: one
+        // Add() during a generation would be visible to every other generation in the process, and to
+        // every later one until the file's timestamp changed. That is not a stale read - it is one run
+        // editing another's declarations. `ProfileIsolationTests` proves the sharing is real; this
+        // proves nothing exploits it.
+        [Fact]
+        public void No_production_code_writes_through_the_configuration_snapshot()
+        {
+            var snapshotMembers = string.Join("|", new[]
+            {
+                "Devices", "Generation", "Telemetry", "Rig", "Interlocks",
+                "Templates", "Layout", "Security", "Manifest", "Targets",
+            });
+            var mutators = string.Join("|", new[] { "Add", "AddRange", "Remove", "RemoveAt", "RemoveAll",
+                                                    "Clear", "Insert", "Sort", "Reverse" });
+
+            var breaches = new List<string>();
+            foreach (var f in Production())
+            {
+                // The loaders and the snapshot BUILD the declarations; everyone else only reads them.
+                if (ConfigurationLayer.Contains(Rel(f), StringComparer.OrdinalIgnoreCase)) continue;
+                foreach (Match m in Regex.Matches(CodeOf(f),
+                             @"[\w.]*(?:Cfg|cfg|config|Config)[.](?:" + snapshotMembers + @")[.][\w.\[\]]*[.](?:" + mutators + @")[(]"))
+                    breaches.Add(Rel(f) + " -> " + m.Value);
+            }
+            NoBreaches(breaches,
+                "production code mutates a collection reached through the configuration snapshot. The " +
+                "loaders hand every run the same cached instance, so that edit reaches other runs' " +
+                "declarations - copy what you need instead of writing back into the snapshot");
         }
 
         // ------------------------------------------------------------------------------------
@@ -210,7 +322,7 @@ namespace MapperTests
         [Fact]
         public void Every_target_is_declared_once_and_owns_its_identity_alone()
         {
-            var targets = TargetRegistry.All;
+            var targets = TestConfig.Cfg.Targets.All;
             Assert.NotEmpty(targets);
 
             foreach (var g in targets.GroupBy(t => t.Plc.Name, StringComparer.OrdinalIgnoreCase).Where(x => x.Count() > 1))
@@ -316,7 +428,7 @@ namespace MapperTests
         [Fact]
         public void Every_template_is_declared_once_and_every_role_resolves()
         {
-            var types = TemplateManifest.Types;
+            var types = TestConfig.Cfg.Manifest.Types;
             Assert.NotEmpty(types);
 
             foreach (var g in types.GroupBy(t => t.Name, StringComparer.Ordinal).Where(x => x.Count() > 1))
@@ -325,7 +437,7 @@ namespace MapperTests
             // ForInfraRole throws when a role is served by none or by more than one, which is exactly
             // the condition worth failing on: a coin toss over which vocabulary drives the plant.
             foreach (var role in types.SelectMany(t => t.InfraRoles).Distinct())
-                Assert.NotNull(TemplateManifest.ForInfraRole(role));
+                Assert.NotNull(TestConfig.Cfg.Manifest.ForInfraRole(role));
         }
     }
 }
