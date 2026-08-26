@@ -35,6 +35,13 @@ namespace CodeGen.Devices.Core
         // partialRevPi adds the RevPi sysdev alongside the M262 that keeps the rest of the Feed station.
         // The separately-owned HMI module registers its own device and hands the paths it was given;
         // a generation hands its whole configuration. One implementation, two ways of being asked.
+        // A sysdev missing from Folders.xml is silently dropped from EAE's Solution Explorer AND
+        // from Deploy - the project opens, looks right, and simply does not carry that device.
+        // Every path that would have returned without registering now aborts.
+        const string NotRegistered =
+            "The devices this run emits would not be registered, so EAE would open a project that "
+            + "silently omits them. Generation ABORTED.";
+
         public static EmitResult Register(MapperConfig paths, bool partialRevPi = false,
             params string[] additionalSysdevIds) =>
             Register(Configuration.CompilerConfiguration.Load(paths), partialRevPi, additionalSysdevIds);
@@ -47,29 +54,30 @@ namespace CodeGen.Devices.Core
             var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
             if (string.IsNullOrEmpty(eaeRoot))
             {
-                result.Warnings.Add("EAE project root not derivable — Folders.xml not updated.");
-                return result;
+                throw new InvalidOperationException(
+                    "[Folders] the EAE project root is not derivable, so no sysdev can be registered. "
+                    + NotRegistered);
             }
             var foldersPath = Path.Combine(eaeRoot, "General", "Folders.xml");
             if (!File.Exists(foldersPath))
             {
-                result.Warnings.Add($"General\\Folders.xml not found at {foldersPath}.");
-                return result;
+                throw new InvalidOperationException(
+                    $"[Folders] General\\Folders.xml is missing at '{foldersPath}'. " + NotRegistered);
             }
 
             XDocument doc;
             try { doc = XDocument.Load(foldersPath, LoadOptions.PreserveWhitespace); }
             catch (Exception ex)
             {
-                result.Warnings.Add($"Could not parse Folders.xml: {ex.Message}");
-                return result;
+                throw new InvalidOperationException(
+                    $"[Folders] Folders.xml could not be parsed: {ex.Message} " + NotRegistered, ex);
             }
 
             var ns = doc.Root?.GetDefaultNamespace();
             if (ns == null)
             {
-                result.Warnings.Add("Folders.xml has no root element.");
-                return result;
+                throw new InvalidOperationException(
+                    "[Folders] Folders.xml has no root element. " + NotRegistered);
             }
 
             // <Folder Type="SystemDevice" Name="Root"> is the bucket the SystemDevice tree node binds to.
@@ -79,8 +87,9 @@ namespace CodeGen.Devices.Core
                     string.Equals((string?)f.Attribute("Name"), "Root",         StringComparison.Ordinal));
             if (sysdevFolder == null)
             {
-                result.Warnings.Add("Folders.xml has no <Folder Type=\"SystemDevice\" Name=\"Root\"> element.");
-                return result;
+                throw new InvalidOperationException(
+                    "[Folders] Folders.xml has no <Folder Type=\"SystemDevice\" Name=\"Root\"> element. "
+                    + NotRegistered);
             }
             var items = sysdevFolder.Element(ns + "Items");
             if (items == null)
