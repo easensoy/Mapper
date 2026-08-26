@@ -1,0 +1,15 @@
+{
+  "references": [
+    {
+      "diagramPath": "Physical Views",
+      "sourceSide": 8,
+      "destinationSide": 8
+    }
+  ],
+  "label": "{{Identifier}}",
+  "identifier": "{{Identifier}}",
+  "sourceEquipment": "{{SourceEquipment}}",
+  "sourcePortIdentifier": "{{SourcePort}}",
+  "destinationEquipment": "{{DestinationEquipment}}",
+  "destinationPortIdentifier": "{{DestinationPort}}"
+}
