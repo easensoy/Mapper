@@ -56,7 +56,7 @@ namespace MapperTests
         public void Every_shipped_connection_names_a_target_a_backend_implements()
         {
             foreach (var c in TelemetrySettings.Current.Connections)
-                Assert.True(TargetRegistry.IsRegistered(c.Plc),
+                Assert.True(TestConfig.Cfg.Targets.IsRegistered(c.Plc),
                     $"telemetry.yml declares a connection for {c.Plc}, which no backend implements");
             var plcs = TelemetrySettings.Current.Connections.Select(c => c.Plc).ToList();
             Assert.Equal(plcs.Count, plcs.Distinct().Count());
@@ -163,7 +163,7 @@ namespace MapperTests
             // Asked the way the plan asks it: a claim that is ambiguous throws rather than picking.
             foreach (var t in TemplateCatalog.Current.Templates)
                 foreach (var componentType in new string?[] { null, "Actuator", "Robot", "Sensor" })
-                    TemplateManifest.ExecutionFor(t.Name, componentType);   // must not throw
+                    TestConfig.Cfg.Manifest.ExecutionFor(t.Name, componentType);   // must not throw
         }
 
         // ---- bring-up ---------------------------------------------------------------------------
@@ -171,17 +171,17 @@ namespace MapperTests
         [Fact]
         public void A_bring_up_naming_an_event_a_resource_does_not_raise_is_refused()
         {
-            var errors = TargetRegistry.BringUpErrors(
+            var errors = TargetIndex.BringUpErrors(
                 new List<BringUpWire> { new() { From = "START.HOT", To = "FB1.INIT" } },
-                DeviceConfig.Current.BootSequence).ToList();
+                DeviceConfig.Current.BootSequence, TestConfig.Cfg.Manifest).ToList();
             Assert.Contains(errors, e => e.Contains("HOT") && e.Contains("does not raise"));
         }
 
         [Fact]
         public void The_shipped_bring_up_names_only_events_a_resource_raises()
         {
-            Assert.Empty(TargetRegistry.BringUpErrors(
-                DeviceConfig.Current.BringUp, DeviceConfig.Current.BootSequence));
+            Assert.Empty(TargetIndex.BringUpErrors(
+                DeviceConfig.Current.BringUp, DeviceConfig.Current.BootSequence, TestConfig.Cfg.Manifest));
         }
 
         // ---- target registration -----------------------------------------------------------------
@@ -197,7 +197,7 @@ namespace MapperTests
             // Neither half may carry a target the other does not: the registry refuses the join, so a
             // registry that resolves at all is proof both agree.
             Assert.Equal(backends.OrderBy(p => p), declared.OrderBy(p => p));
-            Assert.Equal(declared.Count, TargetRegistry.All.Count);
+            Assert.Equal(declared.Count, TestConfig.Cfg.Targets.All.Count);
         }
 
         [Fact]
@@ -205,10 +205,10 @@ namespace MapperTests
         {
             // The supported set IS the registered backends: nothing else enumerates the targets, so a
             // new controller cannot be half-added by editing one list and forgetting another.
-            foreach (var t in TargetRegistry.All)
+            foreach (var t in TestConfig.Cfg.Targets.All)
                 Assert.Contains(t.Plc, TargetBackends.All.Select(b => b.Target));
             foreach (var b in TargetBackends.All)
-                Assert.Contains(b.Target, TargetRegistry.All.Select(t => t.Plc));
+                Assert.Contains(b.Target, TestConfig.Cfg.Targets.All.Select(t => t.Plc));
         }
 
         // ---- helpers -----------------------------------------------------------------------------
@@ -262,7 +262,7 @@ namespace MapperTests
 
             // A roster component, a declared telemetry connection, and a declared IO broker are the
             // three ways an FB gets an owner; each must resolve without the deleted fallback.
-            foreach (var target in TargetRegistry.All.Where(t => t.IoBroker != null))
+            foreach (var target in TestConfig.Cfg.Targets.All.Where(t => t.IoBroker != null))
                 Assert.Equal(target.Plc, SysresFbMirror.BucketFor(target.IoBroker!, allocation, Cfg()));
 
             foreach (var connection in TelemetrySettings.Current.Connections)
@@ -274,7 +274,7 @@ namespace MapperTests
         {
             // Proved on the shipped registry: no broker is claimed twice, and the join refuses one
             // that is. Both halves matter - the check is only worth having if it is also satisfied.
-            var claimed = TargetRegistry.All.Where(t => t.IoBroker != null)
+            var claimed = TestConfig.Cfg.Targets.All.Where(t => t.IoBroker != null)
                 .Select(t => t.IoBroker!).ToList();
             Assert.Equal(claimed.Count, claimed.Distinct(StringComparer.Ordinal).Count());
         }
