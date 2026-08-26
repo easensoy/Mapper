@@ -16,7 +16,7 @@ namespace CodeGen.Devices.Core
         // The authored .hcf for one target, carried byte-for-byte into its device folder. A transform
         // could silently drop an authored channel binding, so this never rewrites the file.
         public static HwConfigCopyResult CopyFor(
-            MapperConfig cfg, CodeGen.Translation.PlcAssignment plc, string? configuredPath)
+            Configuration.CompilerConfiguration cfg, CodeGen.Translation.PlcAssignment plc, string? configuredPath)
         {
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
             var target = Mapping.TargetRegistry.Of(plc);
@@ -24,7 +24,8 @@ namespace CodeGen.Devices.Core
                 EaeProjectLayout.DeriveEaeProjectRoot(cfg),
                 target.DeviceType,
                 Mapping.TargetDescriptor.DeviceNamespace,
-                ResolveTemplatePath(configuredPath, cfg.RequireIoFolderPath(), target.HcfTemplate));
+                ResolveTemplatePath(configuredPath, cfg.Paths.RequireIoFolderPath(), target.HcfTemplate),
+                cfg.Generation.FileWriteRetries);
         }
 
         public static string? ResolveTemplatePath(
@@ -38,7 +39,7 @@ namespace CodeGen.Devices.Core
         }
 
         public static HwConfigCopyResult Deploy(
-            string? eaeRoot, string deviceType, string deviceNamespace, string? templatePath)
+            string? eaeRoot, string deviceType, string deviceNamespace, string? templatePath, int retries)
         {
             var result = new HwConfigCopyResult();
 
@@ -99,7 +100,7 @@ namespace CodeGen.Devices.Core
                 return result;
             }
 
-            var rewrite = HcfRootRewriter.RewriteIfNeeded(hcfDest, resourceId);
+            var rewrite = HcfRootRewriter.RewriteIfNeeded(hcfDest, resourceId, retries);
             long bytes = 0;
             try { bytes = new FileInfo(hcfDest).Length; } catch { }
             result.Warnings.Add(rewrite.Rewrote
