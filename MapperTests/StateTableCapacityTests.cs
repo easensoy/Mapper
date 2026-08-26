@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -71,7 +71,7 @@ namespace MapperTests
             try
             {
                 var ctx = GenerationContext.Plan(
-                    new MapperConfig(), twin, DeploymentProfile.M262Only(LayoutCatalog.Load()));
+                    TestConfig.Cfg, twin, DeploymentProfile.AsPlaced(TestConfig.Cfg));
 
                 Assert.True(ctx.Slots.Count > declared,
                     $"the fixture must exceed the declared capacity; it planned {ctx.Slots.Count} reporters");
@@ -87,13 +87,13 @@ namespace MapperTests
         [Fact]
         public void Expanding_the_table_does_not_move_an_existing_id()
         {
-            var profile = DeploymentProfile.M262Only(LayoutCatalog.Load());
-            var before = GenerationContext.Plan(new MapperConfig(), Require("_se"), profile).Slots;
+            var profile = DeploymentProfile.AsPlaced(TestConfig.Cfg);
+            var before = GenerationContext.Plan(TestConfig.Cfg, Require("_se"), profile).Slots;
 
             string twin = TwinWithExtraSensors(GenerationConfig.Current.StateTableCapacity);
             try
             {
-                var after = GenerationContext.Plan(new MapperConfig(), twin, profile).Slots;
+                var after = GenerationContext.Plan(TestConfig.Cfg, twin, profile).Slots;
                 var moved = before.Where(kv => after[kv.Key] != kv.Value)
                     .Select(kv => $"{kv.Key} {kv.Value}->{after[kv.Key]}").ToList();
                 Assert.True(moved.Count == 0, "ids moved: " + string.Join(", ", moved));
@@ -116,7 +116,7 @@ namespace MapperTests
             try
             {
                 var result = new DeployResult();
-                ProcessRuntimeTemplatePatcher.PatchStateTableCapacity(root, 40, result);
+                ProcessRuntimeTemplatePatcher.PatchStateTableCapacity(new FbtEditScope(root, TestConfig.Cfg.Generation.FileWriteRetries), 40, result);
 
                 foreach (var f in owners)
                     Assert.Contains("ArraySize=\"40\"", File.ReadAllText(Path.Combine(dir, f)), StringComparison.Ordinal);
