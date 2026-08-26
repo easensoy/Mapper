@@ -38,7 +38,7 @@ namespace CodeGen.Devices.Core
                     Id:        (string?)e.Attribute("ID")        ?? string.Empty,
                     Name:      (string?)e.Attribute("Name")      ?? string.Empty,
                     Type:      (string?)e.Attribute("Type")      ?? string.Empty,
-                    Namespace: (string?)e.Attribute("Namespace") ?? "Main",
+                    Namespace: (string?)e.Attribute("Namespace") ?? Configuration.GenerationConfig.Namespace,
                     X:         (string?)e.Attribute("x")         ?? "0",
                     Y:         (string?)e.Attribute("y")         ?? "0",
                     Parameters: Named(e, "Parameter")
@@ -235,7 +235,7 @@ namespace CodeGen.Devices.Core
             SyncFromSyslay(syslayPath, sysresPath, _ => true);
 
         private static bool IsProcessEngine(string type) =>
-            string.Equals(type, "Process1_Generic", StringComparison.Ordinal);
+            string.Equals(type, TemplateManifest.ProcessType.Name, StringComparison.Ordinal);
 
         private static int SyncFromSyslay(string syslayPath, string sysresPath, Func<string, bool> selects)
         {
@@ -326,14 +326,15 @@ namespace CodeGen.Devices.Core
         }
 
         // Which PLC resource a syslay FB belongs on: the ControllerMap partition plus the MQTT cases below.
-        public static PlcAssignment BucketFor(string fbName, ControllerAllocation allocation)
+        public static PlcAssignment BucketFor(string fbName, ControllerAllocation allocation,
+            Configuration.CompilerConfiguration cfg)
         {
             if (string.IsNullOrEmpty(fbName)) return PlcAssignment.Unknown;
 
             // One MQTT connection per resource, so the embedded MqttPub binds the LOCAL one. The
             // connection declares which resource it belongs to, which is the answer even for a resource
             // the roster gives no rows of its own.
-            var declared = Configuration.TelemetrySettings.Current.Connections.FirstOrDefault(c =>
+            var declared = cfg.Telemetry.Connections.FirstOrDefault(c =>
                 string.Equals(c.Instance, fbName, StringComparison.Ordinal) ||
                 string.Equals(c.RawInstance, fbName, StringComparison.Ordinal));
             if (declared != null) return declared.Plc;
@@ -341,10 +342,23 @@ namespace CodeGen.Devices.Core
             var p = allocation.Of(fbName);
             if (p != PlcAssignment.Unknown) return p;
 
-            // Nothing places it, so it falls to the resource that hosts the Feed station itself - never
-            // one that merely RECEIVES part of it, which exists only when something was relocated there.
-            return TargetRegistry.All
-                .First(t => t.HostsFeedStation && !t.ReceivesRelocatedComponents).Plc;
+            // An emitted FB that is not a plant component still belongs to exactly one resource. The
+            // target profile declares the IO broker it hosts, which is the only such FB the generator
+            // creates, and TargetRegistry refuses two targets claiming one broker.
+            var hosting = TargetRegistry.All
+                .Where(t => string.Equals(t.IoBroker, fbName, StringComparison.Ordinal))
+                .Select(t => (PlcAssignment?)t.Plc)
+                .FirstOrDefault();
+            if (hosting != null) return hosting.Value;
+
+            // No fallback. An FB nobody owns would be mirrored onto whichever resource a default named,
+            // and a wrong owner deploys perfectly well and simply never runs - so the run stops instead.
+            throw new InvalidOperationException(
+                $"[Mirror] '{fbName}' is emitted but no target owns it: the roster places no component " +
+                "of that name, telemetry.yml declares no connection by it, and no target declares it as " +
+                "its ioBroker. Give it a layout.yml row, a telemetry connection, or a device.yml " +
+                "ioBroker on the target that hosts it. Generation stops rather than mirroring it onto " +
+                "a resource chosen by a default.");
         }
 
         static string ComputeMirrorId(string syslayId)
