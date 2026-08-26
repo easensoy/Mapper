@@ -12,13 +12,10 @@ namespace CodeGen.Translation
     // computed slots are placed here too. Pure, so a second generation cannot inherit the first's answer.
     public static class StateTableAllocation
     {
-        // The declared FLOOR on how many reporters one ring can carry, from Config/config.yaml. The
-        // capacity a run deploys is DERIVED (see Required), and the FBTs declaring state_table match it.
-        public static int Capacity => GenerationConfig.Current.StateTableCapacity;
-
-        // One past the highest slot any reporter took, never below the floor. Raising it only appends.
-        public static int Required(IReadOnlyDictionary<string, int> slots) =>
-            Math.Max(Capacity, slots.Count == 0 ? 0 : slots.Values.Max() + 1);
+        // One past the highest slot any reporter took, never below the declared floor (config.yaml
+        // stateTableCapacity, handed in by the plan). Raising the floor only appends.
+        public static int Required(int declaredFloor, IReadOnlyDictionary<string, int> slots) =>
+            Math.Max(declaredFloor, slots.Count == 0 ? 0 : slots.Values.Max() + 1);
 
         // Boundary between the positional component range and the slots reserved above it. Declared
         // rather than computed: moving it would renumber components.
@@ -26,8 +23,11 @@ namespace CodeGen.Translation
 
         // Name -> slot for everything that writes the table. On a clash the PROCESS moves, never the
         // component, whose slot is also its actuator_id, its interlock SourceID and its HCF binding.
+        // capacity is the declared floor from config.yaml, handed in by the plan: the allocator has
+        // to know how wide the table is to place a computed slot above the component range.
         public static IReadOnlyDictionary<string, int> Slots(StationContents contents,
-            ReportGraph rings, IReadOnlyDictionary<string, int> reservations, PlantFacts facts)
+            ReportGraph rings, IReadOnlyDictionary<string, int> reservations, PlantFacts facts,
+            int capacity)
         {
             int componentIdCeiling = facts.ComponentIdCeiling;
             // A PROCESS reservation is the one that may have to move, because a merged ring can put a
@@ -92,11 +92,11 @@ namespace CodeGen.Translation
                 // Component range first, so an existing model keeps the id it already has.
                 int slot = Enumerable.Range(0, componentIdCeiling + 1).Reverse().FirstOrDefault(Free, -1);
                 if (slot < 0)
-                    slot = Enumerable.Range(componentIdCeiling + 1, Capacity - componentIdCeiling - 1)
+                    slot = Enumerable.Range(componentIdCeiling + 1, capacity - componentIdCeiling - 1)
                         .Reverse().FirstOrDefault(Free, -1);
                 if (slot < 0)
                     throw new InvalidOperationException(
-                        $"[state_table] No free slot for the top-cover sensor '{cover}': all {Capacity} ids " +
+                        $"[state_table] No free slot for the top-cover sensor '{cover}': all {capacity} ids " +
                         "are claimed by reporters on its ring. The cover interlock cannot be placed without " +
                         "reading another component's report.");
                 byName[cover] = slot;
@@ -132,13 +132,14 @@ namespace CodeGen.Translation
                 taken.Add(slot);
             }
 
-            RejectAmbiguousSlots(byName, rings);
+            RejectAmbiguousSlots(byName, rings, capacity);
             return byName;
         }
 
         // Two reporters on one ring writing one slot makes every WAIT on it mean two things. Sharing
         // ACROSS rings is legitimate (each ring keeps its own table), so only same-ring pairs are refused.
-        private static void RejectAmbiguousSlots(IReadOnlyDictionary<string, int> byName, ReportGraph rings)
+        private static void RejectAmbiguousSlots(IReadOnlyDictionary<string, int> byName,
+            ReportGraph rings, int capacity)
         {
             var bad = byName
                 .GroupBy(kv => kv.Value)
@@ -153,7 +154,7 @@ namespace CodeGen.Translation
                 "[state_table] " + bad.Count + " slot(s) have two reporters on one ring — " +
                 string.Join("; ", bad) + ". Each writes the same state_table entry, so every WAIT on it " +
                 "is satisfied by whichever reported last. Give one of them a free slot in " +
-                $"Config/smc-rig.yml or Config/layout.yml, within the {Capacity}-slot table.");
+                $"Config/smc-rig.yml or Config/layout.yml, within the {capacity}-slot table.");
         }
 
     }
