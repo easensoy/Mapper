@@ -15,6 +15,13 @@ namespace CodeGen.Devices.Core
         // Prefer the configured path, then ioFolderPath + fileName, then the default IO folder; null if none exist.
         // The authored .hcf for one target, carried byte-for-byte into its device folder. A transform
         // could silently drop an authored channel binding, so this never rewrites the file.
+        // An .hcf that was not deployed is a REQUIRED output that is missing: the device still
+        // deploys, and nothing on the rig reads or writes a channel. Every path that would have
+        // returned without writing it now aborts instead.
+        const string Aborted =
+            " The device would deploy with no hardware configuration, which looks like success until "
+            + "nothing on the rig reads or writes a channel. Generation ABORTED.";
+
         public static HwConfigCopyResult CopyFor(
             Configuration.CompilerConfiguration cfg, CodeGen.Translation.PlcAssignment plc, string? configuredPath)
         {
@@ -45,29 +52,30 @@ namespace CodeGen.Devices.Core
 
             if (string.IsNullOrEmpty(eaeRoot) || !Directory.Exists(eaeRoot))
             {
-                result.Warnings.Add($"{deviceType}: EAE project root not found — .hcf not deployed.");
-                return result;
+                throw new InvalidOperationException(
+                    $"[Hcf] {deviceType}: the EAE project root was not found, so its .hcf cannot be "
+                    + "deployed." + Aborted);
             }
             if (string.IsNullOrWhiteSpace(templatePath) || !File.Exists(templatePath))
             {
-                result.Warnings.Add(
-                    $"{deviceType}: authored .hcf not found (looked for '{templatePath ?? "<unresolved>"}') — .hcf not deployed.");
-                return result;
+                throw new InvalidOperationException(
+                    $"[Hcf] {deviceType}: the authored .hcf is missing (looked for "
+                    + $"'{templatePath ?? "<unresolved>"}')." + Aborted);
             }
 
             var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
             if (!Directory.Exists(systemDir))
             {
-                result.Warnings.Add($"{deviceType}: IEC61499/System not found — .hcf not deployed.");
-                return result;
+                throw new InvalidOperationException(
+                    $"[Hcf] {deviceType}: IEC61499/System is missing from the project." + Aborted);
             }
 
             var sysdevFile = EaeProjectLayout.FindSysdevByDeviceType(eaeRoot, deviceType);
             if (sysdevFile == null)
             {
-                result.Warnings.Add(
-                    $"{deviceType}: no deployed sysdev of Type='{deviceType}' Namespace='{deviceNamespace}' — run device emit first.");
-                return result;
+                throw new InvalidOperationException(
+                    $"[Hcf] {deviceType}: no deployed sysdev of Type='{deviceType}' "
+                    + $"Namespace='{deviceNamespace}', so there is nothing to bind the .hcf to." + Aborted);
             }
 
             var sysdevStem = Path.GetFileNameWithoutExtension(sysdevFile);
@@ -96,8 +104,8 @@ namespace CodeGen.Devices.Core
             }
             catch (Exception ex)
             {
-                result.Warnings.Add($"{deviceType}: .hcf copy failed: {ex.Message}");
-                return result;
+                throw new InvalidOperationException(
+                    $"[Hcf] {deviceType}: copying the .hcf failed: {ex.Message}" + Aborted, ex);
             }
 
             var rewrite = HcfRootRewriter.RewriteIfNeeded(hcfDest, resourceId, retries);
