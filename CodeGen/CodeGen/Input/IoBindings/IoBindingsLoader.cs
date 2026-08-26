@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -28,7 +28,6 @@ namespace CodeGen.Translation
         public Dictionary<string, PinAssignment> PinAssignments { get; init; } =
             new(StringComparer.OrdinalIgnoreCase);
 
-        public string SourcePath { get; init; } = string.Empty;
 
         // The literal quotes are required by the EAE .hcf schema. Null leaves the baseline Value untouched.
         public string? ResolveSymbol(string pin)
@@ -64,7 +63,7 @@ namespace CodeGen.Translation
                     && _cachedStampUtc == stampUtc)
                     return _cache;
 
-                var bindings = new IoBindings { SourcePath = xlsxPath };
+                var bindings = new IoBindings();
 
                 var actuatorRows = XlsxRuleLoader.ReadXlsxSheet(xlsxPath, "Actuators");
                 ParseActuatorSheet(actuatorRows, bindings);
