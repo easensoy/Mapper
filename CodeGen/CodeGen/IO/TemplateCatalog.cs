@@ -3,16 +3,20 @@
 namespace CodeGen.Configuration
 {
     // Config/templates.yml, typed. One row per FB type the Mapper owns and the whole of its contract;
-    // TemplateManifest is the validated view over it. Declaration order is preserved because it is
+    // TemplateIndex is the run's resolved view over it. Declaration order is preserved because it is
     // deploy order and it breaks graph-shape ties.
     public sealed class TemplateCatalog
     {
         public List<TemplateDeclaration> Templates { get; set; } = new();
 
         private static readonly YamlConfigFile<TemplateCatalog> _file =
-            new("Config", "templates.yml") { OnLoaded = c => TemplateCatalogValidator.Validate(c, RigCatalog.Current) };
+            new("Config", "templates.yml");
 
         public static TemplateCatalog Current => _file.Load();
+
+        /// The same declaration read from a run's OWN profile bundle. A root of null is the
+        /// bundle shipped beside CodeGen.dll, which is what a normal run reads.
+        public static TemplateCatalog LoadFrom(string? root) => _file.Load(root);
     }
 
     // Where an artefact lives, which also fixes deploy order.
