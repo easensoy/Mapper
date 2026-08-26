@@ -75,9 +75,9 @@ namespace CodeGen.Devices.RevPi
                 resourceName: ResourceName,
                 hcfTemplatePath: HcfTemplatePath(cfg),
                 equipmentJsonName: EquipmentJsonName,
-                equipmentBuilder: () => EquipmentJson(cfg, solutionId, cfg.Paths.RevPiHostIp, cfg.Paths.RevPiTargetIp),
+                equipmentBuilder: () => EquipmentJson(cfg, solutionId, cfg.Devices.RevPi.HostIp, cfg.Devices.RevPi.TargetIp),
                 deployPluginPropertiesXml: Station2DeviceEmitter.BuildSoftDpacDeployPluginPropertiesXml(cfg,
-                    cfg.Paths.MqttPublishEnabled && !cfg.Paths.MqttSecureTls),
+                    cfg.Telemetry.PublishEnabled && !cfg.Telemetry.SecureTls),
                 simulationBindingDeployPort: TargetRegistry.Of(PlcAssignment.Named("RevPi")).SimulationDeployPort,
                 simulationBindingArchivePort: TargetRegistry.Of(PlcAssignment.Named("RevPi")).SimulationArchivePort);
             foreach (var w in shell.Warnings) report.Missing.Add($"[RevPi] {w}");
