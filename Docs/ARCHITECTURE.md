@@ -65,7 +65,9 @@ The actuator CAT routing decision lives in `TemplateMap.ResolveActuatorCatType`
 and is taken from the TWIN's own state graph — a state count, or the
 PARALLEL+ALTERNATIVE transition structure `IsBranchedSevenState` detects. No
 flag selects it: change the twin's swivel from three positions to two and the
-CAT follows.
+CAT follows. Where more than one CAT could serve a shape, the declared
+`protocol.priority` decides and an equal priority is REFUSED, so selection never
+depends on the order rows happen to be written in.
 
 ## 4. Two command channels (this is the most-misunderstood part of the system)
 
@@ -92,14 +94,16 @@ station-mode / fault propagation only. **Sensor_Bool_CAT and
 Seven_State_Actuator_CAT have no `stationAdptr` port** — they are excluded from
 this chain. The exclusion set lives in TWO places that must stay in sync:
 
-- `ResourceWireEmitter.cs` — `NoStationAdapterTypes` (sysres side).
-- `SystemLayoutInjector.cs` — `BuildStation2Wiring`'s `stationChain` loop
-  (syslay side). Excludes any CAT the manifest declares as carrying no station
-  adapter (`TemplateMap.NoStationAdapterCatTypes`), which is what the
-  centre-home swivel is.
+- `ResourceWiringPlan.cs` — `ResourceWiringPlanner.For`'s CaS-chain filter,
+  which reads the `stationAdapter` column of `Config/templates.yml`. ONE planner
+  answers it for both documents, so the canvas and the resource cannot disagree;
+  `ResourceWireEmitter` renders the plan and decides no membership of its own.
 
-If you wire Seven into the stationChain, EAE rejects on import with
-"unresolved adapter" / Missing Instances.
+If you wire a CAT with no `stationAdptr` port into the station chain, EAE
+rejects on import with "unresolved adapter" / Missing Instances. Since
+2026-08-25 (d) every port a chain uses is DECLARED in templates.yml and checked
+against the archive that ships the type before the project is cleaned, so a
+missing port is a diagnostic rather than an import failure.
 
 ## 5. The generation pipeline
 
@@ -110,9 +114,22 @@ there is no second sequence to drift from.
 ```
 Control.xml  --SystemXmlReader-->  VueOneComponent[]        (frontend)
              --TwinModel.Build-->  resolved semantic IR     (every reference closed)
+             --ProcessGraph.Build-->  per-process control flow (validated, one successor per state)
              --GenerationContext.Plan-->  the plan          (validated, immutable)
              --emitters + backends-->  EAE IEC 61499        (backend)
 ```
+
+`ProcessGraph` is where the twin's state machine meets the recipe engine. The
+engine executes a linear row list with ONE NextStep per row: it loops (a
+back-edge is a cycle) but has no branch row. So a process state with two
+outgoing transitions has no faithful lowering and is REFUSED by name; a state
+the entry cannot reach is REPORTED, because a state that cannot execute is a
+model fact rather than something to walk past silently.
+
+Every guard leaf the twin declares is accounted for. `GuardCoverage` records
+what became of each one — waited for, already required, proved by the command
+that drove it, or answered by a declaration the deployment makes — and
+`Plan` refuses to return if any leaf reached no decision at all.
 
 `GenerationContext.Plan` decides EVERYTHING before a single file is touched:
 controller allocation, CAT selection, state-table slots, the report/transport
@@ -186,7 +203,6 @@ VueOneMapper/
 │   │   ├── Core/                          # shared per-PLC emitters
 │   │   │   ├── ResourceWireEmitter.cs    # the per-resource wiring loop
 │   │   │   ├── Station2DeviceEmitter.cs
-│   │   │   ├── Station2WireEmitter.cs
 │   │   │   ├── Station2SysresMirror.cs
 │   │   │   ├── SysresFbMirror.cs
 │   │   │   ├── CompileCachePurger.cs
@@ -194,7 +210,6 @@ VueOneMapper/
 │   │   │   └── …
 │   │   ├── M262/                          # M262-specific emitters
 │   │   │   ├── M262SysdevEmitter.cs
-│   │   │   ├── M262SysresWireEmitter.cs
 │   │   │   ├── M262HwConfigCopier.cs
 │   │   │   ├── M262TopologyEmitter.cs
 │   │   │   └── HcfPatchService.cs
