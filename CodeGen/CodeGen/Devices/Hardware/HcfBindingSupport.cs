@@ -87,7 +87,7 @@ namespace CodeGen.Devices.Core
         }
 
         // Save with UTF-8 + BOM, retrying if EAE briefly holds a write lock.
-        public static void SaveHcf(XDocument doc, string hcfPath)
+        public static void SaveHcf(XDocument doc, string hcfPath, int retries)
         {
             var settings = new System.Xml.XmlWriterSettings
             {
@@ -95,7 +95,7 @@ namespace CodeGen.Devices.Core
                 Indent = true,
                 Encoding = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true),
             };
-            Services.FbtXmlEditor.SaveXmlRetrying(hcfPath, settings, doc.Save);
+            Services.FbtXmlEditor.SaveXmlRetrying(retries, hcfPath, settings, doc.Save);
         }
     }
 }
