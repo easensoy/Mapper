@@ -14,18 +14,21 @@ namespace CodeGen.Translation
             => XlsxRuleLoader.LoadAll(xlsxPath);
 
 
+        // The workbook's sheets are named after the CATs they document, so the caller hands in the CAT
+        // names the compiler resolved rather than a set of booleans this method turns back into names -
+        // which is how a retired CAT stayed spelled here after the generator stopped emitting it.
+        // A named sheet the workbook does not carry is simply skipped by the loader.
         public static IEnumerable<MappingRuleEntry> GetRelevantRules(
-            string xlsxPath, bool hasActuator5, bool hasActuator7, bool hasSensor)
+            string xlsxPath, IEnumerable<string> catNames)
         {
-            var sheets = new List<string>();
-            if (hasActuator5) sheets.Add("Five_State_Actuator_CAT");
-            if (hasActuator7) sheets.Add("Seven_State_Actuator_CAT");
-            if (hasSensor) sheets.Add("Sensor_Bool_CAT");
+            var sheets = (catNames ?? Enumerable.Empty<string>())
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
-            if (sheets.Count == 0)
-                return XlsxRuleLoader.LoadAll(xlsxPath);
-
-            return XlsxRuleLoader.LoadSheets(xlsxPath, sheets);
+            return sheets.Count == 0
+                ? XlsxRuleLoader.LoadAll(xlsxPath)
+                : XlsxRuleLoader.LoadSheets(xlsxPath, sheets);
         }
 
     }
