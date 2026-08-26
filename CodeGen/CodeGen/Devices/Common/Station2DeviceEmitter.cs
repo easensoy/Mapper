@@ -424,7 +424,10 @@ namespace CodeGen.Devices.Core
         }
 
         // Resolves the BX1 EtherNet/IP .hcf (the real export is BX1IO.ethernetip.hcf), falling back through the IO folder.
-        static string ResolveBx1HcfPath(Configuration.CompilerConfiguration cfg)
+        // THE one answer to "where is the BX1 .hcf". The configured setting names a file that does not
+        // ship; the authored one sits beside it under the declared IO folder. Both the device emit and
+        // the hardware-config copy resolve through here, so they cannot disagree about it.
+        internal static string ResolveBx1HcfPath(Configuration.CompilerConfiguration cfg)
         {
             if (!string.IsNullOrWhiteSpace(cfg.Paths.BX1HcfTemplatePath) &&
                 File.Exists(cfg.Paths.BX1HcfTemplatePath))
