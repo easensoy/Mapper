@@ -33,7 +33,7 @@ namespace CodeGen.Translation
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
             var idx = new HcfSymbolIndex();
             var onDisk = cfg.Paths.HcfTemplatesByFileName;
-            foreach (var target in TargetRegistry.All)
+            foreach (var target in cfg.Targets.All)
             {
                 var file = target.HcfTemplate;
                 if (string.IsNullOrWhiteSpace(file)) continue;   // a target with no authored config
