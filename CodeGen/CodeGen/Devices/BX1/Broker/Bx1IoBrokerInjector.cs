@@ -303,7 +303,7 @@ namespace CodeGen.Devices.BX1
             try
             {
                 var bx1Sysres = FindBx1Sysres(cfg, syslayPath);
-                var resourceName = ReadResourceName(bx1Sysres) ?? CodeGen.Mapping.TargetRegistry.Of(PlcAssignment.Named("BX1")).ResourceName;
+                var resourceName = ReadResourceName(bx1Sysres) ?? cfg.Targets.Of(PlcAssignment.Named("BX1")).ResourceName;
                 foreach (var (label, path, isSysres) in new[]
                 {
                     ("syslay", syslayPath,        false),
@@ -375,7 +375,7 @@ namespace CodeGen.Devices.BX1
                 // A composite has no path to a sibling instance's event input, so the ONE wire that must stay at
                 // resource level is the top-cover re-sample trigger; without it a cover in place at power-on is never reported.
                 var tcFb = net.Elements(Ns + "FB").FirstOrDefault(f =>
-                    (string?)f.Attribute("Type") == CodeGen.Mapping.TemplateManifest.SensorType.Name &&
+                    (string?)f.Attribute("Type") == cfg.Manifest.SensorType.Name &&
                     ((string?)f.Attribute("Name") ?? "").ToLowerInvariant().Contains("cover"));
                 if (tcFb != null)
                     AddEvent(ec, $"{BrokerFbName}.CoverSensorEvent",
