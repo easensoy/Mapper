@@ -38,7 +38,7 @@ namespace CodeGen.Devices.Core
                 new XAttribute("ID", id), new XAttribute("UID", uid),
                 new XAttribute("Name", name), new XAttribute("Type", type),
                 new XAttribute("x", x.ToString()), new XAttribute("y", y.ToString()),
-                new XAttribute("Namespace", "Main"),
+                new XAttribute("Namespace", Configuration.GenerationConfig.Namespace),
                 new XElement(N("Attribute"),
                     new XAttribute("Name", "Configuration.GenericFBType.InterfaceParams"),
                     new XAttribute("Value", Iface(arity))),
