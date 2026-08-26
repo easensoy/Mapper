@@ -163,6 +163,36 @@ namespace CodeGen.Application
             return new GenerationResult(published, report);
         }
 
+
+        // WHETHER A STAGE MAY FAIL IS DECLARED, NOT INFERRED FROM HOW ITS MESSAGE READS.
+        //
+        // A REQUIRED stage produces part of the project itself: topology, a resource, a sysres, an HCF
+        // binding, a connection, MQTT, or a registration that makes EAE load what was written. When one
+        // of those fails the tree is incomplete, and logging "[Error]" and carrying on to print
+        // "Generated:" is how a partial project reaches a controller. It aborts, and the transaction
+        // leaves the previous project in place.
+        //
+        // An OPTIONAL stage produces something EAE regenerates for itself or that only affects
+        // convenience. Its failure is reported and the run continues.
+        internal enum StageKind { Required, Optional }
+
+        // Thrown so the stage that failed is part of the diagnostic rather than buried in a message.
+        internal sealed class GenerationStageException : Exception
+        {
+            public string Stage { get; }
+            public GenerationStageException(string stage, Exception cause)
+                : base($"[Generate] the required stage '{stage}' failed: {cause.Message} — the project " +
+                       "would be incomplete, so generation ABORTED and the previous project is unchanged.",
+                       cause)
+                => Stage = stage;
+        }
+
+        static void StageFailed(string stage, StageKind kind, Exception ex, Action<string> log)
+        {
+            if (kind == StageKind.Required) throw new GenerationStageException(stage, ex);
+            log($"[Generate][Optional] '{stage}' did not run: {ex.Message}");
+        }
+
         // The root is DERIVED from the configured project, so a retargeted output root cleans itself.
         static void DeepClean(Configuration.CompilerConfiguration cfg, Action<string> log)
         {
@@ -239,7 +269,7 @@ namespace CodeGen.Application
             }
             catch (Exception ex)
             {
-                log($"[Deploy][Error] {ex.Message}");
+                StageFailed("template deploy", StageKind.Required, ex, log);
                 throw;
             }
         }
@@ -288,7 +318,7 @@ namespace CodeGen.Application
             }
             catch (Exception ex)
             {
-                log($"[IoBindings] Failed to load: {ex.Message}");
+                StageFailed("IO bindings load", StageKind.Required, ex, log);
                 return null;
             }
         }
@@ -355,7 +385,7 @@ namespace CodeGen.Application
                     log($"[Topology] compile cache purged: {purge.FoldersRemoved} folder(s), snapshot reset={purge.SnapshotReset}");
                 foreach (var w in purge.Warnings) log($"[Topology][Warn] cache purge: {w}");
             }
-            catch (Exception ex) { log($"[Topology][Error] cache purge: {ex.Message}"); }
+            catch (Exception ex) { StageFailed("EAE compile-cache purge", StageKind.Optional, ex, log); }
 
             // A sysdev missing from Folders.xml is silently dropped from EAE's Solution Explorer and Deploy.
             try
@@ -365,7 +395,7 @@ namespace CodeGen.Application
                 if (fx.ItemsRemoved > 0) log($"[Topology] Folders.xml: removed {fx.ItemsRemoved} sysdev GUID(s) this run does not emit");
                 foreach (var w in fx.Warnings) log($"[Topology][Warn] Folders.xml: {w}");
             }
-            catch (Exception ex) { log($"[Topology][Error] Folders.xml register: {ex.Message}"); }
+            catch (Exception ex) { StageFailed("Folders.xml sysdev registration", StageKind.Required, ex, log); }
 
             try
             {
@@ -373,7 +403,7 @@ namespace CodeGen.Application
                 foreach (var f in bd.FilesWritten) log($"[Topology]   {f}");
                 foreach (var w in bd.Warnings) log($"[Topology][Warn] {w}");
             }
-            catch (Exception ex) { log($"[Topology][Error] BroadcastDomain emit: {ex.Message}"); }
+            catch (Exception ex) { StageFailed("topology: broadcast domains", StageKind.Required, ex, log); }
 
             // BX1 binds a non-default domain; without its BroadcastDomain JSON EAE rejects the whole topology.
             try
@@ -382,7 +412,7 @@ namespace CodeGen.Application
                 foreach (var f in dom.FilesWritten) log($"[Topology]   {f}");
                 foreach (var w in dom.Warnings) log($"[Topology] {w}");
             }
-            catch (Exception ex) { log($"[Topology][Error] domain consistency: {ex.Message}"); }
+            catch (Exception ex) { StageFailed("topology: referenced-domain consistency", StageKind.Required, ex, log); }
 
             try
             {
@@ -394,7 +424,7 @@ namespace CodeGen.Application
                     log($"[Topology] stripped {n} stale dfbproj sysres-stem entries");
                 }
             }
-            catch (Exception ex) { log($"[Topology][Error] dfbproj stem sweep: {ex.Message}"); }
+            catch (Exception ex) { StageFailed("dfbproj: stale sysres-stem sweep", StageKind.Required, ex, log); }
 
             // Runs AFTER Station2DeviceEmitter so the Equipment UUIDs the wires reference are on disk.
             try
@@ -404,7 +434,7 @@ namespace CodeGen.Application
                 foreach (var f in net.FilesWritten) log($"[Topology]   {f}");
                 foreach (var w in net.Warnings) log($"[Topology][Warn] {w}");
             }
-            catch (Exception ex) { log($"[Topology][Error] network emit: {ex.Message}"); }
+            catch (Exception ex) { StageFailed("topology: network and wires", StageKind.Required, ex, log); }
 
             // Deployment waits until here: the panel binds to the domain and switch just written above.
             CodeGen.Hmi.HmiGenerator.EmitDeployment(ctx);
@@ -415,7 +445,7 @@ namespace CodeGen.Application
                 var s2 = Station2SysresMirror.EmitStation2Sysres(ctx);
                 log("[Stn2] mirrored FBs → " + string.Join(" ", s2.Select(r => $"{r.Plc}:{r.Count}")));
             }
-            catch (Exception ex) { log($"[Stn2][Error] sysres mirror: {ex.Message}"); }
+            catch (Exception ex) { StageFailed("sysres: FB mirror", StageKind.Required, ex, log); }
 
             try
             {
@@ -426,7 +456,7 @@ namespace CodeGen.Application
                     log($"[Artefacts] opcua.xml companions ensured: {n} created");
                 }
             }
-            catch (Exception ex) { log($"[Artefacts][Error] opcua sweep: {ex.Message}"); }
+            catch (Exception ex) { StageFailed("opcua.xml companions", StageKind.Optional, ex, log); }
 
             // The authored hardware configuration for each target, carried in by its own backend.
             foreach (var backend in TargetRegistry.Backends) backend.CopyHardwareConfig(ctx, log);
@@ -443,7 +473,7 @@ namespace CodeGen.Application
                             "(EAE regenerates them on Build) — Solution Integrity clean");
                 }
             }
-            catch (Exception ex) { log($"[Device][Warn] dfbproj artifact-ref cleanup: {ex.Message}"); }
+            catch (Exception ex) { StageFailed("dfbproj: dangling artefact references", StageKind.Required, ex, log); }
         }
 
         // The mirror MUST precede the wiring: it creates the FBs each resource is about to connect, and
@@ -522,7 +552,7 @@ namespace CodeGen.Application
                 var synced = RuntimeArtifactVerifier.SyncMappedSysresParametersFromSyslay(path, cfg, log);
                 if (synced > 0) log($"[Test Runtime] final sysres parameter sync: {synced} mapped FB(s).");
             }
-            catch (Exception ex) { log($"[Test Runtime][Sync][Warn] final sysres parameter sync failed: {ex.Message}"); }
+            catch (Exception ex) { StageFailed("sysres: final parameter sync", StageKind.Required, ex, log); }
         }
 
         // .hcf-id realignment can leave an empty sysres under the old id; runs LATE so each device folder
@@ -539,7 +569,7 @@ namespace CodeGen.Application
                 if (deduped > 0)
                     log($"[Sysdev][Dedupe] removed {deduped} extra <Resource> entry(ies); each device now declares exactly one resource.");
             }
-            catch (Exception ex) { log($"[Sysres][Sweep][Warn] orphan sysres sweep failed: {ex.Message}"); }
+            catch (Exception ex) { StageFailed("sysres: orphan sweep", StageKind.Required, ex, log); }
 
             // The sweep deletes a stale .sysres FILE but not its dfbproj entry, which then dangles.
             try
@@ -552,7 +582,7 @@ namespace CodeGen.Application
                     log($"[Sysres][Strip] removed {strippedLate} dangling .dfbproj sysres reference(s) after the orphan sweep " +
                         "(the realigned-away device default id, e.g. BX1 117867…).");
             }
-            catch (Exception ex) { log($"[Sysres][Strip][Warn] post-sweep dfbproj strip failed: {ex.Message}"); }
+            catch (Exception ex) { StageFailed("dfbproj: post-sweep strip", StageKind.Required, ex, log); }
 
             // The centre-home CAT's work-to-home timers feed only events the No_Sensor ECC ignores.
             try
@@ -563,7 +593,7 @@ namespace CodeGen.Application
                     log($"[Sysres][TimerStrip] removed {timerStripped} stale work1/work2ToHomeTime param(s) " +
                         "from the centre-home swivel sysres (dead timers; values no longer emitted).");
             }
-            catch (Exception ex) { log($"[Sysres][TimerStrip][Warn] home-timer param strip failed: {ex.Message}"); }
+            catch (Exception ex) { StageFailed("sysres: stale home-timer parameters", StageKind.Required, ex, log); }
         }
 
         // HARD guard: a sysres that is not a faithful projection of the syslay makes EAE deploy the OLD
@@ -602,7 +632,7 @@ namespace CodeGen.Application
             }
             catch (Exception ex)
             {
-                log($"[Parity][Error] {ex.Message}");
+                StageFailed("syslay/sysres parity", StageKind.Required, ex, log);
                 throw;
             }
         }
@@ -628,7 +658,7 @@ namespace CodeGen.Application
             }
             catch (Exception ex)
             {
-                log($"[Addr][Error] {ex.Message}");
+                StageFailed("topology address validation", StageKind.Required, ex, log);
                 throw;
             }
         }
@@ -646,7 +676,7 @@ namespace CodeGen.Application
                 if (findings.Any(f => f.Impossible))
                     log("[MQTT] IMPOSSIBLE config flagged — it will NOT reach ReturnCode 0. Fix the URL/mode.");
             }
-            catch (Exception ex) { log($"[MQTT][Error] {ex.Message}"); }
+            catch (Exception ex) { StageFailed("MQTT connection validation", StageKind.Required, ex, log); }
         }
 
         static void TouchDfbproj(Configuration.CompilerConfiguration cfg, Action<string> log)
@@ -664,7 +694,7 @@ namespace CodeGen.Application
                     log("[EAE] .dfbproj not found; EAE will not auto-detect external changes. Use File > Reload Solution.");
                 }
             }
-            catch (Exception ex) { log($"[EAE] Failed to touch .dfbproj: {ex.Message}"); }
+            catch (Exception ex) { StageFailed("dfbproj timestamp touch", StageKind.Optional, ex, log); }
         }
 
     }
