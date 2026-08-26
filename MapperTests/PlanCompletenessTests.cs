@@ -103,7 +103,7 @@ namespace MapperTests
             var plan = UnfamiliarPlant();
             var actuator = plan.Station.Actuators.Single();
             var cat = plan.CatTypes[actuator.Name.Trim()];
-            var declared = TemplateManifest.Find(cat);
+            var declared = TestConfig.Cfg.Manifest.Find(cat);
 
             var p = SystemInjector.BuildActuatorParameters(
                 actuator, plan.Slots[actuator.Name.Trim()], cat, plan);
@@ -114,7 +114,7 @@ namespace MapperTests
             Assert.Equal(declared!.SensorTimed, p.ContainsKey("WorkSensorFitted"));
             Assert.Equal(declared.SensorTimed, p.ContainsKey("toWorkTime"));
 
-            var protocol = TemplateManifest.ProtocolOrNull(cat);
+            var protocol = TestConfig.Cfg.Manifest.ProtocolOrNull(cat);
             bool declaresTargets = protocol?.Target is { Count: > 0 };
             Assert.Equal(declaresTargets, p.ContainsKey("Target") || p.ContainsKey("TargetHomeState"));
             Assert.Equal(protocol?.CrossesBothWays == true, p.ContainsKey("faultTimeoutWork1"));
