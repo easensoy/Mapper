@@ -41,18 +41,16 @@ namespace CodeGen.Mapping
             Profile = profile ?? throw new ArgumentNullException(nameof(profile));
             var layout = profile.Layout;
 
-            var revPiResource = ControllerMap.ResourceForPlc(PlcAssignment.RevPi);
             var rows = layout.BootFbs
                 .Select(b => new ComponentEntry(b.Name, PlcAssignment.Unknown, string.Empty,
                     -1, LayoutRow.Boot, b.X, b.Y))
                 .Concat(layout.Components.Select(e =>
                 {
+                    // An assignment moves where a component RUNS, not where it is DRAWN: it keeps its
+                    // canvas cell, so the layout still reads as the plant, not as the wiring.
+                    var plc = profile.AssignedTarget(e.Name) ?? e.Plc;
                     var band = layout.Band(e.Plc);
-                    // A partial swap keeps the relocated component's canvas X/Y, so it still renders in the M262 band.
-                    bool relocated = e.Plc == PlcAssignment.M262 && profile.RunsOnRevPi(e.Name);
-                    return new ComponentEntry(e.Name,
-                        relocated ? PlcAssignment.RevPi : e.Plc,
-                        relocated ? revPiResource : ControllerMap.ResourceForPlc(e.Plc),
+                    return new ComponentEntry(e.Name, plc, TargetRegistry.Of(plc).ResourceName,
                         e.Column, Enum.Parse<LayoutRow>(e.Row, ignoreCase: true),
                         band.ColumnBaseX + e.Column * layout.Geometry.ColumnPitchX,
                         layout.RowY(e.Row));
