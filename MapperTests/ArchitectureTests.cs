@@ -68,13 +68,45 @@ namespace MapperTests
             "CodeGen/CodeGen/IO/RigCatalog.cs",
             "CodeGen/CodeGen/Deployment/DeviceConfig.cs",
             "CodeGen/CodeGen/Deployment/TelemetrySettings.cs",
-            "CodeGen/CodeGen/Translation/Interlocks/InterlockConfig.cs",
+            "CodeGen/CodeGen/Planning/Interlocks/InterlockConfig.cs",
             "CodeGen/CodeGen/Input/Settings/MapperConfig.cs",
             "CodeGen/CodeGen/Mapping/TargetRegistry.cs",
             "CodeGen/CodeGen/Mapping/TargetBootstrap.cs",
             "CodeGen/CodeGen/Mapping/TemplateManifest.cs",
             "CodeGen/CodeGen/Mapping/TemplateMap.cs",
         };
+
+        // AN ALLOWLIST IS ONLY AS GOOD AS ITS ENTRIES. A list of file names that nothing checks
+        // widens silently: an entry for a deleted file is dead weight, and an entry added to make a
+        // failing test pass is the rule being edited rather than obeyed. So every entry must still
+        // exist AND still be one of the four kinds the rule actually permits.
+        [Fact]
+        public void Every_entry_in_the_configuration_allowlist_justifies_itself()
+        {
+            var breaches = new List<string>();
+            foreach (var rel in ConfigurationLayer)
+            {
+                var full = Path.Combine(Root(), rel.Replace('/', Path.DirectorySeparatorChar));
+                if (!File.Exists(full)) { breaches.Add(rel + " -> no such file (stale entry)"); continue; }
+
+                var code = CodeOf(full);
+                // A loader either declares the file itself or delegates to a loader type beside it.
+                bool loader = code.Contains("YamlConfigFile<", StringComparison.Ordinal) ||
+                              Regex.IsMatch(code, "Current +=> *[A-Za-z]+Loader[.]");
+                // The snapshot is what every other reader is handed instead of reaching for a global.
+                bool snapshot = rel.EndsWith("Configuration/CompilerConfiguration.cs", StringComparison.Ordinal);
+                bool root = rel.EndsWith("Application/GenerateProject.cs", StringComparison.Ordinal);
+                bool facade = rel.EndsWith("Input/Settings/MapperConfig.cs", StringComparison.Ordinal);
+                // A registry projects one declaration and freezes it; it must hold no settable state,
+                // which the mutable-static rule proves separately.
+                bool registry = rel.Contains("/Mapping/", StringComparison.Ordinal);
+
+                if (!loader && !snapshot && !root && !facade && !registry)
+                    breaches.Add(rel + " -> not a loader, the snapshot, the composition root, the facade or a registry");
+            }
+            NoBreaches(breaches,
+                "the configuration allowlist carries an entry that no longer justifies being on it");
+        }
 
         [Fact]
         public void Configuration_is_read_only_by_the_configuration_layer()
