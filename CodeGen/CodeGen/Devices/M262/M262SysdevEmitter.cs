@@ -91,7 +91,7 @@ namespace CodeGen.Devices.M262
             if (!preserveDevice)
             {
                 RewriteSysdev(sysdevPath, DeviceName, TargetRegistry.Of(CodeGen.Translation.PlcAssignment.Named("M262")).DeviceType,
-                    cfg.Paths.M262TargetIp ?? string.Empty, resourceName);
+                    cfg.Devices.M262.TargetIp ?? string.Empty, resourceName);
                 var sysresPathForRename = EaeProjectLayout.FindSysresFor(sysdevPath);
                 if (sysresPathForRename != null)
                     RenameSysresName(sysresPathForRename, resourceName);
@@ -100,7 +100,7 @@ namespace CodeGen.Devices.M262
 
             // DeployPlugin Properties is deploy config (not the trust certificate), so written every run.
             propsPath = WriteM262DevicePropertiesXml(cfg, sysdevPath,
-                cfg.Paths.MqttPublishEnabled && !cfg.Paths.MqttSecureTls);
+                cfg.Telemetry.PublishEnabled && !cfg.Telemetry.SecureTls);
 
             var systemFile = FindSystemFile(eaeRoot)
                 ?? throw new FileNotFoundException(
