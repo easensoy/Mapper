@@ -17,10 +17,10 @@ namespace MapperTests
     /// declares the array. These fail if it stops growing, grows inconsistently, or moves an existing id.
     public sealed class StateTableCapacityTests
     {
-        private static string ModelPath(string suffix) => Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            "OneDrive", "Documents", "VueOne", "system",
-            "SMC_Vue2VC_With_Processes" + suffix, "Control.xml");
+        // Through TestTwin: two authored twins carry an interlock the compiler refuses, so a test that
+        // wants to exercise the rest of the compiler against those plants gets a corrected COPY. The
+        // authored file is never written, and the refusal itself is proved separately.
+        private static string ModelPath(string suffix) => TestTwin.CompilablePath(suffix);
 
         private static string Require(string suffix)
         {
