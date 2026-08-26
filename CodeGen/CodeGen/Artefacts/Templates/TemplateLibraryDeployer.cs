@@ -129,7 +129,7 @@ namespace CodeGen.Services
             PatchSwivelBrakeHome(scope, cfg.Generation.BearingPnpHomeBrakeMs, result);
 
             // PUBLISH binds to the injected MQTT_CONNECTION by matching ConnectionID value, with no wire.
-            if (cfg.Paths.MqttPublishEnabled)
+            if (cfg.Telemetry.PublishEnabled)
             {
                 DeployMqttFormatter(cfg, eaeProjectDir, result);
                 foreach (var cat in TemplateManifest.WithTelemetryTap.Where(t => t.Role != TypeRole.Process))
@@ -144,7 +144,7 @@ namespace CodeGen.Services
             ProcessRuntimeTemplatePatcher.PatchProcessTelemetryState(scope, cfg, ctx.RecipeCapacity, result);
             // The process publisher fans off the phase event the call above creates, so it is wired
             // here rather than in the loop - the same injector, ordered after its source exists.
-            if (cfg.Paths.MqttPublishEnabled)
+            if (cfg.Telemetry.PublishEnabled)
             {
                 var proc = TemplateManifest.ProcessType;
                 PatchCatMqttPublish(eaeProjectDir, proc.Name,
@@ -159,7 +159,7 @@ namespace CodeGen.Services
             ApplyInterlockNormalizers(cfg, scope, ctx.InterlockCapacity, result);
             AssertInterlockInterfaceConsistent(cfg, scope, ctx.InterlockCapacity, result);
 
-            if (cfg.Paths.UseTelemetryCat)
+            if (cfg.Telemetry.UseTelemetryCat)
             {
                 // Sweep first: copy-if-absent would otherwise keep current and legacy Telemetry artefacts.
                 SweepTelemetryCat(scope, result);
@@ -410,12 +410,12 @@ namespace CodeGen.Services
                         new System.Xml.Linq.XAttribute("Value", v)));
                 P(pubFb, "QI", "TRUE");
                 // ConnectionID is the shared binding key, not the unique ClientIdentifier.
-                P(pubFb, "ConnectionID", Q(cfg.Paths.MqttConnectionName));
+                P(pubFb, "ConnectionID", Q(cfg.Telemetry.ConnectionName));
 
-                P(pubFb, "RootPath", Q(cfg.Paths.MqttTopicRoot + topicSuffix));
+                P(pubFb, "RootPath", Q(cfg.Telemetry.TopicRoot + topicSuffix));
                 // Topic1 wired below, not a parameter.
-                P(pubFb, "QoS1", cfg.Paths.MqttQoS.ToString());
-                P(pubFb, "Retain1", cfg.Paths.MqttRetain ? "TRUE" : "FALSE");
+                P(pubFb, "QoS1", cfg.Telemetry.Qos.ToString());
+                P(pubFb, "Retain1", cfg.Telemetry.Retain ? "TRUE" : "FALSE");
 
                 var lastFb = net.Elements(ns + "FB").LastOrDefault();
                 if (lastFb != null) { lastFb.AddAfterSelf(pubFb); lastFb.AddAfterSelf(fmtFb); }
@@ -446,7 +446,7 @@ namespace CodeGen.Services
                 doc.Save(fbt);
                 result.PatchesApplied.Add(
                     $"{catName}: MQTT publish injected (fan {stateEventSource} → MqttFmt → MqttPub.PUBLISH1, " +
-                    $"ConnectionID={cfg.Paths.MqttConnectionName}, Topic=$${{PATH}}state)");
+                    $"ConnectionID={cfg.Telemetry.ConnectionName}, Topic=$${{PATH}}state)");
                 MapperLogger.Info($"[Deploy][MQTT] {catName}.fbt: MQTT_PUBLISH wired off {stateEventSource}");
             }
             catch (Exception ex)
