@@ -14,28 +14,18 @@ namespace CodeGen.Translation.Interlocks
         // blocks when any ONE alternative is wholly satisfied - so an alternative is emitted as a head row
         // carrying its term count followed by the rest of its terms.
         //
-        // BuildRules and CountInScopeAlternatives both consume Resolve(), so the guard can never disagree
-        // with what was emitted, and neither stops early: an alternative the model states is either
-        // planned or the generation fails, never dropped to fit a fixed array.
+        // ONE traversal. Nothing here drops a term or an alternative, so what the model states and what
+        // is planned are the same set by construction - there is no second walk to check the first
+        // against, and no count for a guard to compare with.
         public static InterlockPlan BuildRules(VueOneComponent actuator,
             IReadOnlyDictionary<string, int> scopedIds, IReadOnlyDictionary<string, string> catTypes,
-            Domain.Twin.TwinModel twin,
-            ReportGraph rings, ControllerAllocation allocation,
-            IReadOnlyDictionary<string, int> slots, List<string> findings)
+            Domain.Twin.TwinModel twin, List<string> findings)
         {
             var plan = new InterlockPlan.Builder();
-            foreach (var alternative in
-                     Resolve(actuator, scopedIds, catTypes, twin, rings, allocation, slots, findings))
+            foreach (var alternative in Resolve(actuator, scopedIds, catTypes, twin, findings))
                 plan.Add(alternative);
             return plan.ToPlan();
         }
-
-        // Feeds the inert-safety-net guard: alternatives present but nothing emitted aborts.
-        public static int CountInScopeAlternatives(VueOneComponent actuator,
-            IReadOnlyDictionary<string, int> scopedIds, IReadOnlyDictionary<string, string> catTypes,
-            Domain.Twin.TwinModel twin,
-            ReportGraph rings, ControllerAllocation allocation)
-            => Resolve(actuator, scopedIds, catTypes, twin, rings, allocation, null, null).Count();
 
         // One alternative of one state's guard: the transition it blocks, and the terms that must all
         // hold for it to block.
@@ -45,9 +35,7 @@ namespace CodeGen.Translation.Interlocks
 
         private static IEnumerable<Alternative> Resolve(VueOneComponent actuator,
             IReadOnlyDictionary<string, int> scopedIds, IReadOnlyDictionary<string, string> catTypes,
-            Domain.Twin.TwinModel twin,
-            ReportGraph rings, ControllerAllocation allocation,
-            IReadOnlyDictionary<string, int>? slots, List<string>? findings)
+            Domain.Twin.TwinModel twin, List<string>? findings)
         {
             var owner = twin.ById(actuator.ComponentID);
             if (owner == null) yield break;
@@ -56,84 +44,92 @@ namespace CodeGen.Translation.Interlocks
             {
                 if (st.InterlockGuard == null) continue;
 
-                var destination = st.Transitions.Select(tr => tr.Destination).FirstOrDefault(d => d != null);
-                if (destination == null) continue;
+                // The rule blocks a MOVE. A guarded state may branch, and the guard protects EVERY move
+                // leaving it - so each destination gets its own rule. Taking the first would leave the
+                // other branches unguarded while the report still read as a compiled interlock.
+                if (st.Transitions.Count == 0)
+                    throw new InvalidOperationException(
+                        $"[Interlock] '{actuator.Name}' state '{st.Name}' carries an interlock guard but has " +
+                        "no transition out of it, so there is no move for the rule to block. Give the state " +
+                        "a destination, or take the guard off it.");
+                var destinations = new List<Domain.Twin.TwinState>();
+                foreach (var tr in st.Transitions)
+                    destinations.Add(tr.Destination
+                        ?? throw new InvalidOperationException(
+                            $"[Interlock] '{actuator.Name}' state '{st.Name}' carries an interlock guard and a " +
+                            "transition that resolves to no destination, so one of the moves the guard " +
+                            "protects cannot be named in a rule. Resolve the destination, or take the guard " +
+                            "off the state."));
 
                 // A rule matches only when CurrentRawState == FromState, i.e. the resting predecessor.
-                int fromState = owner.States
+                // Named through the CAT's stop vocabulary, exactly like the state the move ends at and
+                // like every term: a rule written against a branch numbering the core never publishes
+                // would compile, deploy, and match nothing.
+                var predecessor = owner.States
                     .FirstOrDefault(p => p.Transitions.Any(tr => ReferenceEquals(tr.Destination, st)))
-                    ?.Number ?? st.Number;
+                    ?? st;
+                int fromState = ActuatorStateEncoding.CanonicalNumber(
+                    actuator, predecessor.Source, catTypes);
 
                 foreach (var product in st.InterlockGuard.SumOfProducts())
                 {
                     var terms = new List<Term>();
+                    // What each term came from, for a refusal to be able to name it. Planning-stage
+                    // context: the rule table carries only the numbers.
+                    var from = new List<(Term Term, string Source, string State)>();
                     foreach (var leaf in product)
                     {
-                        var reference = st.ResolvedInterlock(leaf.Condition);
-                        if (reference == null) continue;
+                        var reference = st.ResolvedInterlock(leaf.Condition)
+                            ?? throw new InvalidOperationException(
+                                $"[Interlock] '{actuator.Name}' state '{st.Name}' is interlocked on " +
+                                $"'{leaf.Condition.Name}', which resolves to no component and state of this " +
+                                "model, so the rule names something that does not exist.");
                         if (!scopedIds.TryGetValue(reference.Component.Id, out var srcId))
                             throw new InvalidOperationException(
                                 $"[Interlock] '{actuator.Name}' is interlocked on " +
                                 $"'{reference.Component.Name}', which this plan gives no state_table slot, " +
                                 "so it can never publish the state the rule names.");
 
-                        int blocked = ActuatorStateEncoding.Settled(
-                            reference.Component.Source, reference.State.Number, catTypes);
+                        int blocked = ActuatorStateEncoding.StopAt(
+                            reference.Component.Source, reference.State.Source, catTypes);
 
-                        // "Block while the source is at rest" is inverted: a source at rest is OUT of the
-                        // crossing. Alone it deadlocks the move; inside a conjunction with a work position
-                        // of the SAME source it is worse - the alternative can never hold, so the rule is
-                        // inert and the actuator is guarded by nothing. Neither is shippable, so the term
-                        // is dropped and REPORTED. The one real at-rest guard is a readiness gate.
-                        if (blocked == ActuatorStateEncoding.Home &&
-                            !IsReadinessGate(actuator, reference.Component.Source, rings, allocation))
-                        {
-                            findings?.Add(
-                                $"'{actuator.Name}' state '{st.Name}' is interlocked on " +
-                                $"'{reference.Component.Name}/{reference.State.Name}', which settles at the " +
-                                "source's rest position. A rest position is out of the crossing, so the term " +
-                                "would block a move the twin means to allow; it is not emitted.");
-                            continue;
-                        }
-
-                        Report(actuator, reference, srcId, rings, slots, findings);
-                        terms.Add(new Term(srcId, blocked));
+                        var term = new Term(srcId, blocked);
+                        terms.Add(term);
+                        from.Add((term, reference.Component.Name, reference.State.Name));
                     }
 
-                    if (terms.Count == 0) continue;
-                    yield return new Alternative(fromState, destination.Number, terms);
+                    // The alternative is emitted exactly as the twin states it - nothing here drops a
+                    // term to make a guard fire. But the evaluator reads ONE state per source and needs
+                    // every term to hold at once, so two terms naming one source at different stops can
+                    // never both be true, and such an alternative blocks nothing however it is written.
+                    // That is a defect in the MODEL, not something for the compiler to reinterpret: an
+                    // AND is what a single ConditionGroup means. It is reported in the strongest terms
+                    // the report has, because the actuator is then guarded by nothing on that move.
+                    var clash = from.GroupBy(t => t.Term.Src)
+                        .FirstOrDefault(g => g.Select(t => t.Term.Blocked).Distinct().Count() > 1);
+                    if (clash != null)
+                        findings?.Add(
+                            $"UNSATISFIABLE INTERLOCK: '{actuator.Name}' state '{st.Name}' is interlocked on " +
+                            string.Join(" AND ", clash.Select(t =>
+                                $"'{t.Source}/{t.State}' (settles at {t.Term.Blocked})")) +
+                            $" - '{clash.First().Source}' at several stops at once, which it can never be. " +
+                            "The rule is emitted as the twin states it and can therefore never fire, so " +
+                            $"'{actuator.Name}' is guarded by nothing on this move. VueOne writes one " +
+                            "ConditionGroup as a conjunction; stating these in SEPARATE ConditionGroups " +
+                            "makes them alternatives, which is what a guard naming two ends of one axis " +
+                            "means.");
+
+                    foreach (var destination in destinations)
+                        yield return new Alternative(fromState,
+                            ActuatorStateEncoding.CanonicalNumber(actuator, destination.Source, catTypes),
+                            terms);
                 }
             }
         }
 
-        // Having a slot proves nothing: the slot is read on the CONSUMER's ring, so a source reporting
-        // elsewhere leaves the rule guarding whichever reporter holds that id there.
-        private static void Report(VueOneComponent actuator, Domain.Twin.TwinRef reference, int srcId,
-            ReportGraph rings, IReadOnlyDictionary<string, int>? slots, List<string>? findings)
-        {
-            if (findings == null || slots == null) return;
-            if (rings.SameDomain(reference.Component.Name, actuator.Name)) return;
-            var actuallyRead = slots
-                .Where(kv => kv.Value == srcId && rings.SameDomain(kv.Key, actuator.Name))
-                .Select(kv => $"'{kv.Key}'").ToList();
-            findings.Add(
-                $"'{actuator.Name}' is interlocked on '{reference.Component.Name}', which does not report " +
-                $"onto the ring '{actuator.Name}' reads. The rule reads state_table[{srcId}] there, " +
-                "which is " +
-                (actuallyRead.Count > 0
-                    ? string.Join(" / ", actuallyRead) + " - a different component."
-                    : "written by nothing on that ring, so it holds its initial value."));
-        }
-
-        // The one genuine at-rest interlock: an upstream FEED-controller source at home means "workpiece
-        // not yet delivered", which must keep blocking downstream. A collision partner that merely lives on
-        // another PLC is NOT a readiness gate; it returns home before the interlocked actuator moves.
-        private static bool IsReadinessGate(VueOneComponent actuator, VueOneComponent? srcComp,
-            ReportGraph rings, ControllerAllocation allocation)
-        {
-            if (!rings.RingsMerged || srcComp == null) return false;
-            var source = allocation.Of(srcComp.Name);
-            return source != allocation.Of(actuator.Name) && ControllerMap.IsFeedController(source);
-        }
+        // NOTE: whether an interlock source reaches its consumer's ring is NOT asked here. ReportGraph
+        // decides the finished topology and REFUSES a run in which any interlock source cannot reach the
+        // ring its consumer reads, so by the time rules are planned that question is already settled.
+        // Asking it again would be a second owner of the same answer, free to disagree with the first.
     }
 }
