@@ -96,7 +96,14 @@ namespace CodeGen.Application
             // snapshot travels through planning, validation and rendering. No stage below re-reads a
             // declaration, so a file saved while a run is in flight cannot make two stages of that run
             // compile against different configurations.
-            var cfg = Configuration.CompilerConfiguration.Load(request.Config.Clone());
+            var loaded = Configuration.CompilerConfiguration.Load(request.Config.Clone());
+
+            // THE TRANSACTION BOUNDARY. Everything below writes into a staging copy of the project on
+            // the same volume; the live tree is replaced only after every output validator has passed.
+            // A throw anywhere - a model the compiler cannot express, a failed patch, a validator that
+            // refuses - unwinds here and leaves the previous project exactly as it was.
+            using var txn = ProjectTransaction.Begin(loaded, log);
+            var cfg = txn.Configuration;
 
             // THE BOUNDARY. The request carries the selection the UI and the VueOne runner have always
             // sent - a set of component names bound for the relocation target. It becomes a generic
@@ -149,8 +156,11 @@ namespace CodeGen.Application
             foreach (var backend in TargetRegistry.Backends) backend.ValidateOutput(ctx, log);
 
             TouchDfbproj(cfg, log);
-            log($"Generated: {path}");
-            return new GenerationResult(path, report);
+
+            // Every validator passed against the staged tree, so it is fit to become the project.
+            var published = txn.Commit(path);
+            log($"Generated: {published}");
+            return new GenerationResult(published, report);
         }
 
         // The root is DERIVED from the configured project, so a retargeted output root cleans itself.
