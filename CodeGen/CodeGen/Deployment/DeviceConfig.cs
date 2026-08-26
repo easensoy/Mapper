@@ -128,6 +128,10 @@
 
         public static DeviceConfig Current => _file.Load();
 
+        /// The same declaration read from a run's OWN profile bundle. A root of null is the
+        /// bundle shipped beside CodeGen.dll, which is what a normal run reads.
+        public static DeviceConfig LoadFrom(string? root) => _file.Load(root);
+
         // The identities declared for one target. Asked for by target, never spelled at a call site.
         public DeviceIdentity IdentityOf(CodeGen.Translation.PlcAssignment plc) =>
             Targets.FirstOrDefault(t => t.Plc == plc)?.Identity
