@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using CodeGen.Mapping;
 using CodeGen.Translation;
 using Xunit;
@@ -9,28 +9,29 @@ namespace MapperTests
     // to be an error rather than a blank that flows downstream as a device with no resource.
     public class TargetRegistryTests
     {
-        [Theory]
-        [InlineData(PlcAssignment.M262, "M262_RES", "M262_dPAC")]
-        [InlineData(PlcAssignment.M580, "RES0", "M580_dPAC")]
-        [InlineData(PlcAssignment.BX1, "BX1_RES", "Soft_dPAC")]
-        [InlineData(PlcAssignment.RevPi, "RevPi_RES", "Soft_dPAC")]
-        public void RegisteredTargetsCarryTheirDeviceFacts(
-            PlcAssignment plc, string resource, string deviceType)
+        // Over the DECLARED targets, not a list repeated here: a target added to device.yml is covered
+        // by this test the moment it is declared, which is the point of the set being open.
+        [Fact]
+        public void EveryRegisteredTargetCarriesItsDeviceFacts()
         {
-            var t = TargetRegistry.Of(plc);
-            Assert.Equal(resource, t.ResourceName);
-            Assert.Equal(deviceType, t.DeviceType);
-            Assert.False(string.IsNullOrWhiteSpace(t.ResourceName));
+            Assert.NotEmpty(TargetRegistry.All);
+            foreach (var t in TargetRegistry.All)
+            {
+                Assert.Same(t, TargetRegistry.Of(t.Plc));
+                Assert.False(string.IsNullOrWhiteSpace(t.ResourceName));
+                Assert.False(string.IsNullOrWhiteSpace(t.DeviceType));
+                Assert.True(t.Plc.IsKnown);
+            }
         }
 
         [Fact]
         public void TwoTargetsSharingADeviceTypeAreDisambiguatedByName()
         {
             // BX1 and the RevPi are both Soft_dPAC, so Type alone cannot find either device.
-            Assert.Equal(TargetRegistry.Of(PlcAssignment.BX1).DeviceType,
-                         TargetRegistry.Of(PlcAssignment.RevPi).DeviceType);
-            Assert.NotEqual(TargetRegistry.Of(PlcAssignment.BX1).DeviceName,
-                            TargetRegistry.Of(PlcAssignment.RevPi).DeviceName);
+            Assert.Equal(TargetRegistry.Of(PlcAssignment.Named("BX1")).DeviceType,
+                         TargetRegistry.Of(PlcAssignment.Named("RevPi")).DeviceType);
+            Assert.NotEqual(TargetRegistry.Of(PlcAssignment.Named("BX1")).DeviceName,
+                            TargetRegistry.Of(PlcAssignment.Named("RevPi")).DeviceName);
         }
 
         [Fact]
