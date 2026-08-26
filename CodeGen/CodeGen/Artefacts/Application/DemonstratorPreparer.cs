@@ -5,6 +5,7 @@ using System.Xml.Linq;
 using CodeGen.Translation;
 using CodeGen.Configuration;
 using CodeGen.Mapping;
+using CodeGen.Devices.Core;
 
 namespace CodeGen.Artefacts
 {
@@ -22,20 +23,20 @@ namespace CodeGen.Artefacts
             public List<string> DeviceCleanupLog { get; } = new();
         }
 
-        public static CleanupReport PrepareDemonstratorForGeneration(MapperConfig config)
+        public static CleanupReport PrepareDemonstratorForGeneration(Configuration.CompilerConfiguration config)
         {
             var report = new CleanupReport();
 
             // Recreate the app shell (create-if-absent) BEFORE the SyslayPath2 check below.
             CodeGen.Devices.Core.ApplicationShellEmitter.EnsureApplicationShell(
-                config, DeriveDemonstratorEaeRoot(config),
+                config, EaeProjectLayout.DeriveEaeProjectRoot(config),
                 line => report.DeviceCleanupLog.Add(line));
 
-            if (string.IsNullOrEmpty(config.SyslayPath2) || !File.Exists(config.SyslayPath2))
+            if (string.IsNullOrEmpty(config.Paths.SyslayPath2) || !File.Exists(config.Paths.SyslayPath2))
                 throw new FileNotFoundException(
-                    $"Demonstrator syslay not configured or missing: '{config.SyslayPath2}'");
+                    $"Demonstrator syslay not configured or missing: '{config.Paths.SyslayPath2}'");
 
-            CleanFile(config.SyslayPath2, "SubAppNetwork", report);
+            CleanFile(config.Paths.SyslayPath2, "SubAppNetwork", report);
 
             // EAE renames the .sysres to the short-hex resource ID, so resolve the actual file by globbing the sysdev folder.
             foreach (var sysresPath in ResolveActualSysresPaths(config))
@@ -49,9 +50,9 @@ namespace CodeGen.Artefacts
         }
 
         // Remove stale MQTT bridge FBs (MqttFmt_/MqttPub_ names only, never MqttConn) + their connections from every .sysres in place.
-        private static void SweepBridgeFbsFromAllSysres(MapperConfig config, CleanupReport report)
+        private static void SweepBridgeFbsFromAllSysres(Configuration.CompilerConfiguration config, CleanupReport report)
         {
-            var syslayDir = Path.GetDirectoryName(config.SyslayPath2);
+            var syslayDir = Path.GetDirectoryName(config.Paths.SyslayPath2);
             if (string.IsNullOrEmpty(syslayDir)) return;
             var sysGuidDir = Path.GetDirectoryName(syslayDir);
             if (string.IsNullOrEmpty(sysGuidDir) || !Directory.Exists(sysGuidDir)) return;
@@ -109,10 +110,10 @@ namespace CodeGen.Artefacts
         }
 
         // Every .sysres that actually exists in the M262 sysdev folder (SysresPath2's directory).
-        private static IEnumerable<string> ResolveActualSysresPaths(MapperConfig config)
+        private static IEnumerable<string> ResolveActualSysresPaths(Configuration.CompilerConfiguration config)
         {
-            if (string.IsNullOrEmpty(config.SysresPath2)) yield break;
-            var dir = Path.GetDirectoryName(config.SysresPath2);
+            if (string.IsNullOrEmpty(config.Paths.SysresPath2)) yield break;
+            var dir = Path.GetDirectoryName(config.Paths.SysresPath2);
             if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) yield break;
             foreach (var f in Directory.EnumerateFiles(dir, "*.sysres",
                          SearchOption.TopDirectoryOnly))
@@ -120,11 +121,11 @@ namespace CodeGen.Artefacts
         }
 
         // Dedup <Resource> entries in the M262 sysdev (first survives); each dropped Resource's sibling .sysres is deleted, the .hcf left alone.
-        private static void CleanM262SysdevResources(MapperConfig config, CleanupReport report)
+        private static void CleanM262SysdevResources(Configuration.CompilerConfiguration config, CleanupReport report)
         {
             void Log(string line) => report.DeviceCleanupLog.Add($"[CleanDevice] {line}");
 
-            string? eaeRoot = DeriveDemonstratorEaeRoot(config);
+            string? eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(config);
             if (string.IsNullOrEmpty(eaeRoot))
             {
                 Log("could not derive EAE project root from MapperConfig.SyslayPath2; sysdev dedup skipped");
@@ -149,8 +150,9 @@ namespace CodeGen.Artefacts
                     if (root == null) continue;
                     var type  = (string?)root.Attribute("Type")      ?? string.Empty;
                     var nspac = (string?)root.Attribute("Namespace") ?? string.Empty;
-                    if (string.Equals(type,  TargetRegistry.Of(CodeGen.Translation.PlcAssignment.M262).DeviceType, StringComparison.Ordinal) &&
-                        string.Equals(nspac, "SE.DPAC",   StringComparison.Ordinal))
+                    if (string.Equals(type, TargetRegistry.Of(TargetRegistry.FeedTarget).DeviceType,
+                            StringComparison.Ordinal) &&
+                        string.Equals(nspac, TargetDescriptor.DeviceNamespace, StringComparison.Ordinal))
                     {
                         sysdevPath = candidate;
                         break;
@@ -260,21 +262,6 @@ namespace CodeGen.Artefacts
 
             Log($"removed {removed} duplicate Resource entries, kept {firstResourceId}");
             Log($"kept resource {firstResourceId}");
-        }
-
-        // Walks up from config.SyslayPath2 for the folder whose parent contains a .dfbproj.
-        private static string? DeriveDemonstratorEaeRoot(MapperConfig config)
-        {
-            var path = config?.SyslayPath2;
-            if (string.IsNullOrWhiteSpace(path)) return null;
-            var dir = Path.GetDirectoryName(path);
-            while (!string.IsNullOrEmpty(dir))
-            {
-                if (Directory.Exists(dir) && Directory.GetFiles(dir, "*.dfbproj").Length > 0)
-                    return Path.GetDirectoryName(dir);
-                dir = Path.GetDirectoryName(dir);
-            }
-            return null;
         }
 
         private static void CleanFile(string path, string netTag, CleanupReport report)
