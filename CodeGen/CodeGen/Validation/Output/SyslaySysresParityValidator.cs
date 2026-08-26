@@ -25,7 +25,7 @@ namespace CodeGen.Devices.Core
         // when something was, because otherwise the run writes no such device to check.
         static IEnumerable<(string DeviceType, string? DeviceName, PlcAssignment Plc, string Label)> Devices(
             GenerationContext ctx) =>
-            TargetRegistry.All.Where(t => ctx.Emits(t.Plc))
+            ctx.Targets.All.Where(t => ctx.Emits(t.Plc))
                 .Select(t => (t.DeviceType, t.DeviceName, t.Plc, t.Plc.ToString()));
 
         static string? LocateSysdev(string eaeRoot, string deviceType, string? deviceName) =>
@@ -48,7 +48,7 @@ namespace CodeGen.Devices.Core
         // A recipe CMD is claimed by the ONE component whose actuator_name equals its CmdTargetName, and
         // updateComponentState.BREQ compares them with case-sensitive ST string equality. A target nothing
         // answers to never faults: the command circles the ring unclaimed and the engine parks in silence.
-        private static IEnumerable<Violation> ValidateCommandTargetsAreClaimable(List<SysresFbMirror.SyslayFb> fbs)
+        private static IEnumerable<Violation> ValidateCommandTargetsAreClaimable(Mapping.TemplateIndex manifest, List<SysresFbMirror.SyslayFb> fbs)
         {
             static string Unquote(string? v) => (v ?? string.Empty).Trim().Trim('\'');
 
@@ -58,7 +58,7 @@ namespace CodeGen.Devices.Core
                 // straight through, so a sensor is claimable under `name` and an addressed refresh reaches it.
                 if (p.Name is "actuator_name" or "process_name" or "name") claimable.Add(Unquote(p.Value));
             // The runtime's own ready handshake, not a component.
-            claimable.Add(Translation.Process.Recipes.ProcessPhaseTransport.CommandToken);
+            claimable.Add(manifest.PhaseTransport.CommandToken);
 
             foreach (var fb in fbs)
             {
@@ -91,12 +91,12 @@ namespace CodeGen.Devices.Core
                 return violations;
             }
 
-            violations.AddRange(ValidateCommandTargetsAreClaimable(syslayFbs));
+            violations.AddRange(ValidateCommandTargetsAreClaimable(ctx.Manifest, syslayFbs));
 
             foreach (var (deviceType, deviceName, plc, label) in Devices(ctx))
             {
                 var expected = syslayFbs
-                    .Where(f => TemplateManifest.Mirrored.Contains(f.Type) &&
+                    .Where(f => ctx.Manifest.Mirrored.Contains(f.Type) &&
                                 SysresFbMirror.BucketFor(f.Name, ctx.Allocation, ctx.Cfg) == plc)
                     .ToList();
                 if (expected.Count == 0) continue;
@@ -153,11 +153,11 @@ namespace CodeGen.Devices.Core
             // With the cross-PLC discharge tail active the Feed controller's IO must carry it: on M262 the
             // four .hcf channels, on RevPi the discharge FBs hosted on the RevPi sysres.
             if (ctx.CrossRingSegment.Count > 0)
-                ValidateDischargeHcf(ctx.Cfg.Rig, eaeRoot, violations);
+                ValidateDischargeHcf(ctx.Cfg.Rig, eaeRoot, violations, ctx.Targets);
 
             // Independent of the discharge tail, which stays on the M262 that owns its channels.
             if (ctx.Profile.HasAssignments)
-                ValidateRevPiIo(eaeRoot, syslayPath, violations);
+                ValidateRevPiIo(eaeRoot, syslayPath, violations, ctx.Targets);
 
             return violations;
         }
@@ -175,9 +175,10 @@ namespace CodeGen.Devices.Core
 
         // The discharge channels belong to whichever target HOSTS the feed station and is not the one
         // that only receives relocated work - a capability, not a controller name.
-        static void ValidateDischargeHcf(RigCatalog rig, string eaeRoot, List<Violation> violations)
+        static void ValidateDischargeHcf(RigCatalog rig, string eaeRoot, List<Violation> violations,
+            Mapping.TargetIndex targets)
         {
-            var host = TargetRegistry.Of(TargetRegistry.FeedTarget);
+            var host = targets.Of(targets.FeedTarget);
             var sysdev = EaeProjectLayout.FindSysdevByDeviceType(eaeRoot, host.DeviceType);
             if (string.IsNullOrEmpty(sysdev))
             {
@@ -223,15 +224,16 @@ namespace CodeGen.Devices.Core
         // discharge FB named by Config/smc-rig.yml dischargeChannels landed there.
         // The one target declared to receive components relocated off another. Asked for by that
         // capability so a project with a different relocation host needs no edit here.
-        static TargetDescriptor RelocationTarget() =>
-            TargetRegistry.All.FirstOrDefault(t => t.ReceivesRelocatedComponents)
+        static TargetDescriptor RelocationTarget(Mapping.TargetIndex targets) =>
+            targets.All.FirstOrDefault(t => t.ReceivesRelocatedComponents)
             ?? throw new InvalidOperationException(
                 "device.yml declares no target that receives relocated components, so a relocated " +
                 "deployment cannot be validated.");
 
-        static void ValidateDischargeRevPi(RigCatalog rig, string eaeRoot, List<Violation> violations)
+        static void ValidateDischargeRevPi(RigCatalog rig, string eaeRoot, List<Violation> violations,
+            Mapping.TargetIndex targets)
         {
-            var relocation = RelocationTarget();
+            var relocation = RelocationTarget(targets);
             var sysdev = EaeProjectLayout.FindSysdevByDeviceTypeAndName(
                 eaeRoot, relocation.DeviceType, relocation.DeviceName!);
             var sysres = sysdev == null ? null : EaeProjectLayout.FindSysresFor(sysdev);
@@ -268,13 +270,14 @@ namespace CodeGen.Devices.Core
 
         // RevPi Feed IO = the Modbus broker RevPI_IO on the sysres carrying a Mapping to a matching application
         // instance, plus the .hcf whose LinkNames resolve to it. Without all three the Feed IO does not bind.
-        static void ValidateRevPiIo(string eaeRoot, string syslayPath, List<Violation> violations)
+        static void ValidateRevPiIo(string eaeRoot, string syslayPath, List<Violation> violations,
+            Mapping.TargetIndex targets)
         {
             var BrokerFbId = CodeGen.Devices.RevPi.RevPiIoBrokerInjector.BrokerFbId;
             const string BrokerName = CodeGen.Devices.RevPi.RevPiIoBrokerInjector.BrokerName;
 
             var sysdev = EaeProjectLayout.FindSysdevByDeviceTypeAndName(
-                eaeRoot, RelocationTarget().DeviceType, RelocationTarget().DeviceName!);
+                eaeRoot, RelocationTarget(targets).DeviceType, RelocationTarget(targets).DeviceName!);
             var sysres = sysdev == null ? null : EaeProjectLayout.FindSysresFor(sysdev);
             if (string.IsNullOrEmpty(sysres) || !File.Exists(sysres))
             {
