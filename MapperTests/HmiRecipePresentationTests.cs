@@ -28,7 +28,7 @@ namespace MapperTests
                 DisplayName: CodeGen.Hmi.HmiPlanner.Humanise(name),
                 CatType: "Five_State_Actuator_CAT",
                 TagName: "TAG" + name,
-                Controller: CodeGen.Translation.PlcAssignment.M262,
+                Controller: CodeGen.Translation.PlcAssignment.Named("M262"),
                 Resource: "RES0",
                 Slot: slot,
                 States: states.Select(s => new HmiStateName(s.Value, s.Name)).ToList(),
