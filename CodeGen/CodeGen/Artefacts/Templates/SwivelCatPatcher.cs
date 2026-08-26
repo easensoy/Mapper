@@ -14,9 +14,9 @@ namespace CodeGen.Services
     internal static class SwivelCatPatcher
     {
         // Keeps Inputs on the real sensor symlinks; hard-fails if SimCentreHomeSensor_7SCH survives.
-        internal static void NormalizeSwivelSimSensorSource(string eaeProjectDir, DeployResult result)
+        internal static void NormalizeSwivelSimSensorSource(FbtEditScope scope, DeployResult result)
         {
-            var fbt = FindDeployedFbt(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT.fbt");
+            var fbt = FindDeployedFbt(scope.Root, "Seven_State_Actuator_Centre_Home_CAT.fbt");
             if (string.IsNullOrEmpty(fbt))
             {
                 result.Warnings.Add("Seven_State_Actuator_Centre_Home_CAT.fbt not found; swivel sim-sensor normalize skipped.");
@@ -24,7 +24,7 @@ namespace CodeGen.Services
             }
             try
             {
-                var doc = LoadXmlWithRetry(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                var doc = LoadXmlWithRetry(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace, scope.Retries);
                 var root = doc.Root;
                 if (root == null) return;
                 System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
@@ -184,7 +184,7 @@ namespace CodeGen.Services
 
                 if (changed)
                 {
-                    SaveXmlWithRetry(doc, fbt);
+                    SaveXmlWithRetry(doc, fbt, scope.Retries);
                     result.PatchesApplied.Add("Seven_State_Actuator_Centre_Home_CAT: simulator position model removed; physical sensor wiring restored");
                     MapperLogger.Info("[Deploy] Centre-Home swivel sim-sensor source normalize: physical sensor wiring restored");
                 }
@@ -198,65 +198,8 @@ namespace CodeGen.Services
             }
         }
 
-        // Strips any injected poll machinery and adds nothing: home is recipe-only. If the core stops
-        // re-observing positions, fix the CAT/interface rather than re-adding a polling FB.
-        internal static void StripCatHomeSensorPoll(string eaeProjectDir, string catName, DeployResult result)
-        {
-            var fbt = FindDeployedFbt(eaeProjectDir, catName + ".fbt");
-            if (string.IsNullOrEmpty(fbt))
-            {
-                result.Warnings.Add($"{catName}.fbt not found; home-poll strip skipped.");
-                return;
-            }
-            try
-            {
-                var doc = LoadXmlWithRetry(fbt, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                var root = doc.Root;
-                if (root == null) return;
-                System.Xml.Linq.XNamespace ns = root.GetDefaultNamespace();
-                var net = root.Element(ns + "FBNetwork");
-                if (net == null) return;
-
-                var pollFbNames = new[] { "HomePoll", "PollWindow", "PollGate1", "PollGate2" };
-                bool Has(string n) => net.Elements(ns + "FB").Any(f => (string?)f.Attribute("Name") == n);
-                if (!pollFbNames.Any(Has)) return;
-
-                bool RefsPoll(string? ep)
-                {
-                    var e = ep ?? string.Empty;
-                    foreach (var n in pollFbNames)
-                        if (e.StartsWith(n + ".", StringComparison.Ordinal)) return true;
-                    return false;
-                }
-
-                foreach (var f in net.Elements(ns + "FB")
-                             .Where(f => pollFbNames.Contains((string?)f.Attribute("Name")))
-                             .ToList())
-                    f.Remove();
-                foreach (var secName in new[] { "EventConnections", "DataConnections" })
-                {
-                    var cc = net.Element(ns + secName);
-                    if (cc == null) continue;
-                    foreach (var c in cc.Elements(ns + "Connection")
-                                 .Where(c => RefsPoll((string?)c.Attribute("Source"))
-                                          || RefsPoll((string?)c.Attribute("Destination")))
-                                 .ToList())
-                        c.Remove();
-                }
-
-                SaveXmlWithRetry(doc, fbt);
-                result.PatchesApplied.Add(
-                    $"{catName}: removed HomePoll/PollGate1/PollGate2/PollWindow poll machinery + connections (Bearing_PnP home is recipe-only now).");
-                MapperLogger.Info($"[Deploy] {catName}.fbt: stripped HomePoll/PollGate/PollWindow (poll removed; home recipe-only)");
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"{catName} home-poll strip failed: {ex.Message}");
-            }
-        }
-
-        internal static void EnsureSensorBoolReadEvent(string eaeProjectDir, DeployResult result)
-            => EditDeployedFbt(eaeProjectDir, "Sensor_Bool_CAT.fbt", "Sensor_Bool_CAT RD event inject failed", result,
+        internal static void EnsureSensorBoolReadEvent(FbtEditScope scope, DeployResult result)
+            => EditDeployedFbt(scope, "Sensor_Bool_CAT.fbt", "Sensor_Bool_CAT RD event inject failed", result,
                 (doc, root, ns, fbt) =>
             {
                 var ei = root.Element(ns + "InterfaceList")?.Element(ns + "EventInputs");
@@ -340,150 +283,25 @@ namespace CodeGen.Services
                 MapperLogger.Info("[Deploy] Sensor_Bool_CAT.fbt: addressed refresh (sample-then-report) wired");
             }, notFoundNote: "Sensor_Bool_CAT.fbt not found; RD event inject skipped.");
 
-        // Gives Sensor_Bool the two ports the addressed refresh needs, and the one ECC state that makes an
-        // UNCHANGED level report: RPT parks the ECC in START, where both level transitions are available,
-        // so the sample always emits CNF. Only the addressed CNF drives RPT, so the free-running I/O-scan
-        // push keeps its change gate and cannot become a per-scan publisher.
-        internal static void EnsureSensorBoolRefreshPath(string eaeProjectDir, DeployResult result)
-            => EditDeployedFbt(eaeProjectDir, "Sensor_Bool.fbt", "Sensor_Bool refresh path inject failed", result,
-                (doc, root, ns, fbt) =>
-            {
-                var iface = root.Element(ns + "InterfaceList");
-                var ecc = root.Element(ns + "BasicFB")?.Element(ns + "ECC");
-                if (iface == null || ecc == null) return;
-                var ei = iface.Element(ns + "EventInputs");
-                var eo = iface.Element(ns + "EventOutputs");
-                if (ei == null || eo == null) return;
-
-                bool changed = false;
-
-                if (!ei.Elements(ns + "Event").Any(e => (string?)e.Attribute("Name") == "RPT"))
-                {
-                    ei.Add(new XElement(ns + "Event", new XAttribute("Name", "RPT"),
-                        new XAttribute("Comment",
-                            "Addressed refresh: sample the input, then report it even if it has not changed")));
-                    changed = true;
-                }
-
-                if (!eo.Elements(ns + "Event").Any(e => (string?)e.Attribute("Name") == "SMP"))
-                {
-                    eo.Add(new XElement(ns + "Event", new XAttribute("Name", "SMP"),
-                        new XAttribute("Comment", "Sample request issued before reporting")));
-                    changed = true;
-                }
-
-                if (!ecc.Elements(ns + "ECState").Any(s => (string?)s.Attribute("Name") == "Arm"))
-                {
-                    var arm = new XElement(ns + "ECState",
-                        new XAttribute("Name", "Arm"),
-                        new XAttribute("Comment", "Request a fresh sample, then re-enter START so the next REQ reports"),
-                        new XAttribute("x", "300"), new XAttribute("y", "1100"),
-                        new XElement(ns + "ECAction", new XAttribute("Output", "SMP")));
-                    var lastState = ecc.Elements(ns + "ECState").LastOrDefault();
-                    if (lastState != null) lastState.AddAfterSelf(arm); else ecc.AddFirst(arm);
-                    changed = true;
-                }
-
-                // Every level state must accept a refresh, else a sensor already latched cannot be asked.
-                foreach (var (from, to, cond) in new[]
-                         {
-                             ("START", "Arm", "RPT"),
-                             ("Sensor_TRUE", "Arm", "RPT"),
-                             ("Sensor_FALSE", "Arm", "RPT"),
-                             ("Arm", "START", "1"),
-                         })
-                {
-                    if (ecc.Elements(ns + "ECTransition").Any(t =>
-                            (string?)t.Attribute("Source") == from &&
-                            (string?)t.Attribute("Destination") == to &&
-                            (string?)t.Attribute("Condition") == cond)) continue;
-                    ecc.Add(new XElement(ns + "ECTransition",
-                        new XAttribute("Source", from), new XAttribute("Destination", to),
-                        new XAttribute("Condition", cond),
-                        new XAttribute("x", "300"), new XAttribute("y", "1100")));
-                    changed = true;
-                }
-
-                if (!changed) return;
-
-                doc.Save(fbt);
-                result.PatchesApplied.Add(
-                    "Sensor_Bool: RPT/SMP refresh ports + Arm state added - an addressed request samples the "
-                    + "input and reports it even when the level is unchanged.");
-                MapperLogger.Info("[Deploy] Sensor_Bool.fbt: addressed-refresh ECC path (RPT/SMP/Arm)");
-            }, notFoundNote: "Sensor_Bool.fbt not found; addressed-refresh path skipped.");
-
-        private static void EditSwivelCore(string eaeProjectDir, string failNote, DeployResult result,
+        private static void EditSwivelCore(FbtEditScope scope, string failNote, DeployResult result,
             Action<XDocument, XElement, XNamespace, string> edit)
-            => EditDeployedFbt(eaeProjectDir, "SevenStateCentreHomeActuator.fbt", failNote, result, edit);
-
-        // The arm arrives when its OWN sensor says so. Requiring the opposite sensor to read FALSE as
-        // well leaves it latched whenever both read TRUE mid-travel, which the rig does.
-        internal static void PatchSwivelRelaxWorkLatch(string eaeProjectDir, DeployResult result)
-            => EditSwivelCore(eaeProjectDir, "SevenStateCentreHomeActuator.fbt work-latch patch failed", result,
-                (doc, root, ns, fbt) =>
-            {
-                var latches = new[]
-                {
-                    ("ToWork1", "AtWork1", "atWork1 = TRUE"),
-                    ("ToWork2", "AtWork2", "atWork2 = TRUE"),
-                };
-                int changed = 0;
-                foreach (var (src, dst, want) in latches)
-                {
-                    var tr = root.Descendants(ns + "ECTransition").FirstOrDefault(t =>
-                        (string?)t.Attribute("Source") == src &&
-                        (string?)t.Attribute("Destination") == dst);
-                    if (tr == null || (string?)tr.Attribute("Condition") == want) continue;
-                    tr.SetAttributeValue("Condition", want);
-                    changed++;
-                }
-                if (changed > 0)
-                {
-                    doc.Save(fbt);
-                    result.PatchesApplied.Add(
-                        "SevenStateCentreHomeActuator.fbt: work-arrival latch RELAXED (atWorkN=TRUE only) " +
-                        $"on {changed} transition(s)");
-                }
-            });
-
-        // The interlock verdict must arrive with the command it judges, so ilck_event samples state_val.
-        internal static void PatchSwivelInterlockEventCarriesStateVal(string eaeProjectDir, DeployResult result)
-            => EditSwivelCore(eaeProjectDir, "SevenStateCentreHomeActuator.fbt ilck_event state_val patch failed", result,
-                (doc, root, ns, fbt) =>
-            {
-                var ilckEvent = root.Descendants(ns + "Event")
-                    .FirstOrDefault(e => (string?)e.Attribute("Name") == "ilck_event");
-                if (ilckEvent == null)
-                {
-                    result.Warnings.Add("SevenStateCentreHomeActuator.fbt: ilck_event not found; state_val sampling skipped.");
-                    return;
-                }
-
-                if (ilckEvent.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == "state_val"))
-                    return;
-
-                ilckEvent.AddFirst(new System.Xml.Linq.XElement(ns + "With",
-                    new System.Xml.Linq.XAttribute("Var", "state_val")));
-                doc.Save(fbt);
-                result.PatchesApplied.Add(
-                    "SevenStateCentreHomeActuator.fbt: ilck_event samples state_val");
-                MapperLogger.Info(
-                    "[Deploy] SevenStateCentreHomeActuator.fbt: ilck_event samples state_val");
-            });
-
-
+            => EditDeployedFbt(scope, "SevenStateCentreHomeActuator.fbt", failNote, result, edit);
 
         // A reverse-coil brake at centre so the swivel homes directly from AtWork1 without coasting into
         // the ejector. Directional; from AtWork2 it de-energises unchanged.
-        internal static void PatchSwivelBrakeHome(string eaeProjectDir, int brakeMs, DeployResult result)
+        internal static void PatchSwivelBrakeHome(FbtEditScope scope, int brakeMs, DeployResult result)
         {
-            if (brakeMs <= 0) brakeMs = 500;
+            // A second, undeclared default here would silently outrank config.yaml's declared one.
+            if (brakeMs <= 0)
+                throw new InvalidOperationException(
+                    "[Swivel] config.yaml declares no bearingPnpHomeBrakeMs, so the brake pulse that " +
+                    "stops the arm at its centre reference has no duration. Declare it; there is no " +
+                    "safe default for how long to hold a coil.");
 
-            var ecc = Path.Combine(eaeProjectDir, "IEC61499", "SevenStateCentreHomeActuator.fbt");
+            var ecc = Path.Combine(scope.Root, "IEC61499", "SevenStateCentreHomeActuator.fbt");
             if (!File.Exists(ecc))
             {
-                ecc = Directory.EnumerateFiles(Path.Combine(eaeProjectDir, "IEC61499"),
+                ecc = Directory.EnumerateFiles(Path.Combine(scope.Root, "IEC61499"),
                         "SevenStateCentreHomeActuator.fbt", SearchOption.AllDirectories).FirstOrDefault() ?? string.Empty;
                 if (string.IsNullOrEmpty(ecc)) { result.Warnings.Add("Swivel brake: core ECC not found; skipped."); return; }
             }
@@ -544,9 +362,13 @@ namespace CodeGen.Services
                 doc.Save(ecc);
                 result.PatchesApplied.Add("SevenStateCentreHomeActuator.fbt: SENSOR-STOPPED centre-home brake (atHome reverses the coil; AtHome->AtHomeInit on atHome=FALSE cuts at the centre-window edge; AtHomeInit now PUBLISHES output_event so the coil actually releases; brake_done = safety cap)");
             }
-            catch (Exception ex) { result.Warnings.Add($"Swivel brake core ECC patch failed: {ex.Message}"); return; }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    $"Swivel brake core ECC patch failed: {ex.Message} — a deploy-time patch could not be applied, so the deployed type does not have the shape the planner's parameters name. Usually EAE holding the .fbt open during Generate: CLOSE EAE and Generate again. Generation ABORTED rather than shipping a tree EAE will not run.", ex);
+            }
 
-            var cat = Directory.EnumerateFiles(Path.Combine(eaeProjectDir, "IEC61499"),
+            var cat = Directory.EnumerateFiles(Path.Combine(scope.Root, "IEC61499"),
                 "Seven_State_Actuator_Centre_Home_CAT.fbt", SearchOption.AllDirectories).FirstOrDefault();
             if (string.IsNullOrEmpty(cat) || !File.Exists(cat)) { result.Warnings.Add("Swivel brake: composite not found; skipped."); return; }
             try
@@ -597,21 +419,25 @@ namespace CodeGen.Services
                 result.PatchesApplied.Add($"Seven_State_Actuator_Centre_Home_CAT.fbt: brakeTimer E_DELAY (T#{brakeMs}ms) wired brake_start->START, EO->brake_done");
                 MapperLogger.Info($"[Deploy] centre-home BRAKE ON: reverse-coil pulse {brakeMs}ms at centre (errs toward AtWork1/away from ejector)");
             }
-            catch (Exception ex) { result.Warnings.Add($"Swivel brake composite patch failed: {ex.Message}"); }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    $"Swivel brake composite patch failed: {ex.Message} — a deploy-time patch could not be applied, so the deployed type does not have the shape the planner's parameters name. Usually EAE holding the .fbt open during Generate: CLOSE EAE and Generate again. Generation ABORTED rather than shipping a tree EAE will not run.", ex);
+            }
         }
 
         // SOLE writer of the swivel core's INIT arcs, derived from the twin's Initial_State. Where the work
         // sensors read nothing the arm is CLASSIFIED at centre; where one reads, it is DRIVEN to centre.
         // Nothing is assumed about a position no sensor reports, and a swivel that does not declare its centre
         // stop as its initial state fails generation rather than get an invented startup policy.
-        internal static void PatchSwivelStartup(string eaeProjectDir,
+        internal static void PatchSwivelStartup(FbtEditScope scope,
             CodeGen.Translation.GenerationContext ctx, DeployResult result)
         {
             var startup = ResolveStartupState(ctx);
             // No centre-home swivel in this model: the type is deployed but never instantiated, so leave
             // the shipped template alone rather than ship an ECC that can never leave INIT.
             if (startup.Count == 0) return;
-            EditSwivelCore(eaeProjectDir, "SevenStateCentreHomeActuator.fbt startup patch failed", result,
+            EditSwivelCore(scope, "SevenStateCentreHomeActuator.fbt startup patch failed", result,
                 (doc, root, ns, fbt) =>
             {
                 var basic = root.Descendants(ns + "BasicFB").FirstOrDefault();
@@ -696,68 +522,6 @@ namespace CodeGen.Services
 
         // The centre-home CAT settles its centre stop to 0; the recipe commands use the same encoding.
         private const int CentreHomeStop = 0;
-
-        // Wires AtHome to the coil-clearing 'atHome' algorithm + output_event so both work coils go FALSE.
-        // At centre the swivel publishes its arrival and drops BOTH coils; holding one is what let the
-        // arm creep past the reference.
-        internal static void PatchSwivelAtHomeCoilClear(string eaeProjectDir, DeployResult result)
-            => EditSwivelCore(eaeProjectDir, "SevenStateCentreHomeActuator.fbt AtHome coil-clear patch failed", result,
-                (doc, root, ns, fbt) =>
-            {
-                var atHomeState = root.Descendants(ns + "ECState")
-                    .FirstOrDefault(s => (string?)s.Attribute("Name") == "AtHome");
-                if (atHomeState == null)
-                {
-                    result.Warnings.Add(
-                        "SevenStateCentreHomeActuator.fbt: no AtHome ECState; coil-clear patch skipped.");
-                    return;
-                }
-                var ecAction = atHomeState.Elements(ns + "ECAction").FirstOrDefault();
-                if (ecAction == null)
-                {
-                    result.Warnings.Add(
-                        "SevenStateCentreHomeActuator.fbt: AtHome has no ECAction; coil-clear patch skipped.");
-                    return;
-                }
-
-                var algoNames = root.Descendants(ns + "Algorithm")
-                    .Select(a => (string?)a.Attribute("Name"))
-                    .Where(n => n != null)
-                    .ToHashSet();
-                const string want = "atHome";
-                if (!algoNames.Contains(want))
-                {
-                    result.Warnings.Add(
-                        $"SevenStateCentreHomeActuator.fbt: algorithm '{want}' not found; AtHome coil-clear patch skipped.");
-                    return;
-                }
-
-                var current = (string?)ecAction.Attribute("Algorithm");
-                bool changed = false;
-                if (current != want)
-                {
-                    ecAction.SetAttributeValue("Algorithm", want);
-                    changed = true;
-                }
-
-                if (!atHomeState.Elements(ns + "ECAction")
-                        .Any(a => (string?)a.Attribute("Output") == "output_event"))
-                {
-                    atHomeState.Add(new XElement(ns + "ECAction",
-                        new XAttribute("Output", "output_event")));
-                    changed = true;
-                }
-
-                if (!changed) return;
-                doc.Save(fbt);
-
-                result.PatchesApplied.Add(
-                    $"SevenStateCentreHomeActuator.fbt: AtHome ECState now runs '{want}' " +
-                    "and emits output_event (clears both coils at home)");
-                MapperLogger.Info(
-                    $"[Deploy] SevenStateCentreHomeActuator.fbt: AtHome -> '{want}' " +
-                    "(coils cleared and published at home)");
-            });
 
     }
 }
