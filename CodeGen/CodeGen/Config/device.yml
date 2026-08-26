@@ -3,6 +3,10 @@
 # section per controller, which is two places to state one fact - and a target added to `targets:`
 # silently had no network at all.
 defaultNetwork:
+  # The broadcast domain every device that is not on a named one binds to. Its uuid is the identity
+  # EAE resolves each Equipment's "domain" reference against, so it is declared beside the addresses
+  # rather than compiled in - a dangling domain reference makes EAE reject the WHOLE topology.
+  domainUuid: 2131fbdd-0a41-4e41-abfb-a14a5ca9218d
   subnetAddress: 192.168.0.0
   subnetMask: 255.255.255.0
   gateway: 192.168.0.254
