@@ -17,6 +17,7 @@
     <None Update="Config\device.yml" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Config\layout.yml" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Config\smc-rig.yml" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Config\templates.yml" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Config\telemetry.yml" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Config\hmi.yml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Config\mapper_config.json" Link="mapper_config.json" CopyToOutputDirectory="PreserveNewest" />
