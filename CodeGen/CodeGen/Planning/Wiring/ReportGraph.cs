@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using static CodeGen.Translation.Process.Recipes.TransitionChainParser;
 using CodeGen.Domain.Twin;
 using CodeGen.Mapping;
 
@@ -59,6 +58,11 @@ namespace CodeGen.Translation
         // rendering of the id, never a name anything matches on.
         public string Domain(string? name) => DomainId(name).ToString();
 
+        // The target whose ring carries this component's reports, where a carrier lifted it off its own.
+        // Null means it reports on the ring of the target that hosts it, like everything else.
+        public PlcAssignment? CarrierOf(string? name) =>
+            _carriedOnto.TryGetValue((name ?? string.Empty).Trim(), out var host) ? host : null;
+
         // The ring a TARGET reports on, for a resource with no components of its own to ask about.
         public ReportDomainId DomainOf(PlcAssignment target) =>
             _domainOf.TryGetValue(target, out var d) ? d : ReportDomainId.Unplaced;
@@ -67,17 +71,18 @@ namespace CodeGen.Translation
 
         // Wiring topology, not recipe: do the per-controller report rings fold into one?
         //
-        // The phase transport carries only a cycle's BOUNDARIES. A Feed-side process waiting on another
-        // controller's process in the MIDDLE of its own cycle is holding material for the downstream
+        // The phase transport carries only a cycle's BOUNDARIES. ANY process waiting on another
+        // controller's process in the MIDDLE of its own cycle is holding something for that other
         // station and must observe it live, which a boundary handshake cannot express, so the rings must
-        // become one. Derived from the transition chain and the allocation; no process name participates.
-        private static bool ProcessesNeedOneRing(TwinModel twin, ControllerAllocation allocation)
+        // become one. Asked of every process on every controller: which one it is cannot matter, only
+        // that the wait sits inside a cycle rather than at its edge.
+        private static bool ProcessesNeedOneRing(TwinModel twin, ControllerAllocation allocation,
+            IReadOnlyDictionary<string, CodeGen.Domain.Twin.ProcessGraph> graphs)
         {
             foreach (var proc in twin.Processes)
             {
-                if (!allocation.IsFeedSide(proc.Name)) continue;
-
-                var chain = OrderStatesByTransitionChain(proc.Source.States);
+                if (!graphs.TryGetValue(proc.Name, out var g)) continue;
+                var chain = g.Ordered;
                 // Index 0 is the cycle entry and the last link closes it; both are boundary handshakes.
                 for (int i = 1; i < chain.Count - 1; i++)
                     if (WaitsOnAnotherController(chain[i], proc, twin, allocation))
@@ -102,9 +107,10 @@ namespace CodeGen.Translation
         // the consumer's own state_table. Both are proved against the same graph.
         public static ReportGraph Build(
             TwinModel twin, ControllerAllocation allocation,
-            IReadOnlyList<string> declaredDischarge, IReadOnlyList<string> detouredChain)
+            IReadOnlyList<string> declaredDischarge, IReadOnlyList<string> detouredChain,
+            IReadOnlyDictionary<string, CodeGen.Domain.Twin.ProcessGraph> graphs)
         {
-            var graph = Assemble(twin, allocation, ProcessesNeedOneRing(twin, allocation),
+            var graph = Assemble(twin, allocation, ProcessesNeedOneRing(twin, allocation, graphs),
                 declaredDischarge, detouredChain);
 
             // Folding the rings into one is the declared carrier that spans every domain, so it is what
@@ -146,11 +152,11 @@ namespace CodeGen.Translation
 
             bool OnDischarge(TransportEdge e) =>
                 declaredDischarge.Contains(e.Target, StringComparer.OrdinalIgnoreCase);
-            // A device that runs no process of its own cannot act alone: all its components splice onto
-            // the ring driving them. Asked of the DEVICE, so a new component on it is carried too.
-            var hostsAProcess = new HashSet<PlcAssignment>(
-                twin.Processes.Select(p => allocation.Of(p.Name)).Where(t => t != PlcAssignment.Unknown));
-            bool OnDetour(TransportEdge e) => !hostsAProcess.Contains(e.To);
+            // A target that DECLARES it carries a chain another one commands splices its components onto
+            // the commanding ring. Declared, not inferred from running no process of its own: a target
+            // can legitimately host none and still not be something another controller reaches into.
+            bool OnDetour(TransportEdge e) =>
+                TargetRegistry.IsRegistered(e.To) && TargetRegistry.Of(e.To).CarriesDetouredChain;
 
             // The rings BEFORE any carrier: targets hosting one station share theirs, everything else is
             // its own. This is what decides whether an edge needs a carrier at all.
