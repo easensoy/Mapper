@@ -6,6 +6,7 @@ using System.IO;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using CodeGen.Configuration;
+using CodeGen.Services;
 using CodeGen.Translation;
 
 namespace CodeGen.Devices.Core
@@ -14,17 +15,18 @@ namespace CodeGen.Devices.Core
     // be the nested CPU UUID that owns ETH1, not the rack root.
     public static class TopologyNetworkEmitter
     {
-        const string Switch1Uuid          = "11111111-2222-3333-4444-000000000060";
+        static string Switch1Uuid(Configuration.CompilerConfiguration cfg) =>
+            cfg.Devices.Installation.SwitchEquipment;
 
         // Endpoint UUIDs MUST match what M262TopologyEmitter + Station2DeviceEmitter write.
-        const string M262EquipmentUuid    = CodeGen.Devices.M262.M262TopologyEmitter.DefaultM262Uuid;
-        const string M580CpuUuid          = Station2DeviceEmitter.M580CpuUuid;
+        static string M262EquipmentUuid => CodeGen.Devices.M262.M262TopologyEmitter.DefaultM262Uuid;
+        static string M580CpuUuid => Station2DeviceEmitter.M580CpuUuid;
         const string FallbackSolutionUuid = "00000000-0000-0000-0000-000000000000";
 
-        const string Bx1EtherNetIpUuid    = Station2DeviceEmitter.BX1EtherNetIpUuid;  // EtherNetIPDevice_1
-        const string Bx1HmiB1XUuid        = Station2DeviceEmitter.BX1EquipmentUuid;   // HMIB1X_1 (BX1 panel)
+        static string Bx1EtherNetIpUuid => Station2DeviceEmitter.BX1EtherNetIpUuid;  // EtherNetIPDevice_1
+        static string Bx1HmiB1XUuid => Station2DeviceEmitter.BX1EquipmentUuid;   // HMIB1X_1 (BX1 panel)
         // RevPi NIC_2 uuid — MUST match RevPiDeviceEmitter.RevPiNicUuid.
-        const string RevPiNicUuid         = CodeGen.Devices.RevPi.RevPiDeviceEmitter.NicUuid;
+        static string RevPiNicUuid => CodeGen.Devices.RevPi.RevPiDeviceEmitter.NicUuid;
 
         public sealed class EmitResult
         {
@@ -35,7 +37,7 @@ namespace CodeGen.Devices.Core
 
         public static EmitResult Emit(GenerationContext ctx)
         {
-            var cfg = ctx.Config;
+            var cfg = ctx.Cfg;
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
             var result = new EmitResult();
 
@@ -56,16 +58,16 @@ namespace CodeGen.Devices.Core
             // DomainTag must be the live SolutionId; a zero DomainTag fails topology-import.
             var solutionId = EaeProjectLayout.ReadProjectGuid(eaeRoot) ?? FallbackSolutionUuid;
 
-            ForceWriteJson(topologyDir, "Equipment_Switch_1.json", BuildSwitchJson(solutionId), result, eaeRoot);
-            ForceWriteJson(topologyDir, "Wire_M262_to_Switch1.json", BuildWireJson(
+            ForceWriteJson(topologyDir, "Equipment_Switch_1.json", BuildSwitchJson(cfg, solutionId), result, eaeRoot);
+            ForceWriteJson(topologyDir, "Wire_M262_to_Switch1.json", BuildWireJson(cfg,
                 identifier:                 "M262_to_Switch1",
                 sourceEquipmentUuid:        M262EquipmentUuid,
                 sourcePortIdentifier:       "Ethernet1",
-                destinationEquipmentUuid:   Switch1Uuid,
+                destinationEquipmentUuid:   Switch1Uuid(cfg),
                 destinationPortIdentifier:  "Port1"), result, eaeRoot);
-            ForceWriteJson(topologyDir, "Wire_Switch1_to_M580.json", BuildWireJson(
+            ForceWriteJson(topologyDir, "Wire_Switch1_to_M580.json", BuildWireJson(cfg,
                 identifier:                 "Switch1_to_M580",
-                sourceEquipmentUuid:        Switch1Uuid,
+                sourceEquipmentUuid:        Switch1Uuid(cfg),
                 sourcePortIdentifier:       "Port2",
                 destinationEquipmentUuid:   M580CpuUuid,
                 destinationPortIdentifier:  "ETH1"), result, eaeRoot);
@@ -79,13 +81,13 @@ namespace CodeGen.Devices.Core
 
             // BX1 EtherNet/IP daisy-chain: Switch Port3 -> coupler -> HMIB1X LAN1.
             {
-                ForceWriteJson(topologyDir, "Wire_Switch1_to_EtherNetIP.json", BuildWireJson(
+                ForceWriteJson(topologyDir, "Wire_Switch1_to_EtherNetIP.json", BuildWireJson(cfg,
                     identifier:                 "Switch1_to_EtherNetIP",
-                    sourceEquipmentUuid:        Switch1Uuid,
+                    sourceEquipmentUuid:        Switch1Uuid(cfg),
                     sourcePortIdentifier:       "Port3",
                     destinationEquipmentUuid:   Bx1EtherNetIpUuid,
                     destinationPortIdentifier:  "Port2"), result, eaeRoot);
-                ForceWriteJson(topologyDir, "Wire_EtherNetIP_to_BX1.json", BuildWireJson(
+                ForceWriteJson(topologyDir, "Wire_EtherNetIP_to_BX1.json", BuildWireJson(cfg,
                     identifier:                 "EtherNetIP_to_BX1",
                     sourceEquipmentUuid:        Bx1EtherNetIpUuid,
                     sourcePortIdentifier:       "Port1",
@@ -96,13 +98,13 @@ namespace CodeGen.Devices.Core
             }
 
             // RevPi connects to free Switch Port4 via its NIC_2 (Port1=M262, Port2=M580, Port3=BX1); without this wire it floats.
-            if (ctx.Profile.PartialRevPi)
+            if (ctx.Profile.HasAssignments)
             {
-                ForceWriteJson(topologyDir, "Wire_RevPi_to_Switch1.json", BuildWireJson(
+                ForceWriteJson(topologyDir, "Wire_RevPi_to_Switch1.json", BuildWireJson(cfg,
                     identifier:                 "RevPi_to_Switch1",
                     sourceEquipmentUuid:        RevPiNicUuid,
                     sourcePortIdentifier:       "Port1",
-                    destinationEquipmentUuid:   Switch1Uuid,
+                    destinationEquipmentUuid:   Switch1Uuid(cfg),
                     destinationPortIdentifier:  "Port4"), result, eaeRoot);
                 registerNames.Add("Wire_RevPi_to_Switch1.json");
             }
@@ -209,57 +211,27 @@ namespace CodeGen.Devices.Core
             result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, path));
         }
 
-        static string BuildSwitchJson(string solutionId) =>
-            $$"""
-            {
-              "catalogReference": "GenericL2UnmanagedSwitch8Ports_V01.00_01.00",
-              "uuid": "{{Switch1Uuid}}",
-              "identifier": "Switch_1",
-              "path": "Topology",
-              "properties": [
-                { "propertyName": "IsUnderConstruction", "propertyValue": "False" },
-                { "propertyName": "DomainTag",            "propertyValue": "{{solutionId}}" }
-              ],
-              "references": [
-                { "diagramPath": "Physical Views", "x": 200, "y": -200 }
-              ],
-              "components": [
+        // Both documents live in the Template Library, so their bytes - including their line
+        // endings - come from a file rather than from the newlines of this .cs.
+        static string BuildSwitchJson(Configuration.CompilerConfiguration cfg, string solutionId) =>
+            TemplateDocument.Load(cfg, @"Topology\Equipment_Switch.json",
+                new Dictionary<string, string>
                 {
-                  "ports": [
-                    { "identifier": "Port1", "side": "Default" },
-                    { "identifier": "Port2", "side": "Default" },
-                    { "identifier": "Port3", "side": "Default" },
-                    { "identifier": "Port4", "side": "Default" },
-                    { "identifier": "Port5", "side": "Default" },
-                    { "identifier": "Port6", "side": "Default" },
-                    { "identifier": "Port7", "side": "Default" },
-                    { "identifier": "Port8", "side": "Default" }
-                  ],
-                  "componentType": "EthernetDEO"
-                }
-              ]
-            }
-            """;
+                    ["SwitchUuid"] = Switch1Uuid(cfg),
+                    ["SolutionId"] = solutionId,
+                });
 
-        static string BuildWireJson(string identifier,
+        static string BuildWireJson(Configuration.CompilerConfiguration cfg, string identifier,
                                     string sourceEquipmentUuid, string sourcePortIdentifier,
                                     string destinationEquipmentUuid, string destinationPortIdentifier) =>
-            $$"""
-            {
-              "references": [
+            TemplateDocument.Load(cfg, @"Topology\Wire.json",
+                new Dictionary<string, string>
                 {
-                  "diagramPath": "Physical Views",
-                  "sourceSide": 8,
-                  "destinationSide": 8
-                }
-              ],
-              "label": "{{identifier}}",
-              "identifier": "{{identifier}}",
-              "sourceEquipment": "{{sourceEquipmentUuid}}",
-              "sourcePortIdentifier": "{{sourcePortIdentifier}}",
-              "destinationEquipment": "{{destinationEquipmentUuid}}",
-              "destinationPortIdentifier": "{{destinationPortIdentifier}}"
-            }
-            """;
+                    ["Identifier"] = identifier,
+                    ["SourceEquipment"] = sourceEquipmentUuid,
+                    ["SourcePort"] = sourcePortIdentifier,
+                    ["DestinationEquipment"] = destinationEquipmentUuid,
+                    ["DestinationPort"] = destinationPortIdentifier,
+                });
     }
 }
