@@ -118,23 +118,6 @@ namespace CodeGen.Services
             }
         }
 
-        // The .fbt schema identifies almost everything by attribute (Algorithm, ECState, FB, Parameter by Name).
-        internal static XElement? ByAttribute(this XContainer? scope, XNamespace ns,
-            string element, string attribute, string value) =>
-            scope?.Elements(ns + element)
-                .FirstOrDefault(e => string.Equals((string?)e.Attribute(attribute), value, StringComparison.Ordinal));
-
-        // Algorithms sit inside BasicFB, so they are reached by descendant rather than by child.
-        internal static XElement? FindAlgorithm(XContainer root, XNamespace ns, string name) =>
-            root.Descendants(ns + "Algorithm")
-                .FirstOrDefault(a => string.Equals((string?)a.Attribute("Name"), name, StringComparison.Ordinal));
-
-        // Source+Destination is the only stable key: transitions carry no name and a patch rewrites Condition.
-        internal static XElement? FindTransition(XContainer? ecc, XNamespace ns, string source, string destination) =>
-            ecc?.Elements(ns + "ECTransition").FirstOrDefault(t =>
-                string.Equals((string?)t.Attribute("Source"), source, StringComparison.Ordinal) &&
-                string.Equals((string?)t.Attribute("Destination"), destination, StringComparison.Ordinal));
-
         // The deployed CAT/type .fbt under IEC61499/ (excluding its _HMI faceplate); "" if absent.
         internal static string FindDeployedFbt(string eaeProjectDir, string fbtFileName)
             => Directory.EnumerateFiles(Path.Combine(eaeProjectDir, "IEC61499"), fbtFileName, SearchOption.AllDirectories)
