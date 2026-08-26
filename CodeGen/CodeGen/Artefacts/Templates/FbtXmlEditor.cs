@@ -11,10 +11,10 @@ namespace CodeGen.Services
     // WHERE the deployed types are and HOW LONG to keep trying one EAE is holding open - the two
     // facts every patch needs and neither should read for itself. Carried together so a patcher takes
     // one parameter, not two, and cannot pair a root with a budget from a different run.
-    internal readonly record struct FbtEditScope(string Root, int Retries)
+    internal readonly record struct FbtEditScope(string Root, int Retries, Mapping.TemplateIndex Manifest)
     {
         public static FbtEditScope For(string eaeProjectDir, Configuration.CompilerConfiguration cfg) =>
-            new(eaeProjectDir, cfg.Generation.FileWriteRetries);
+            new(eaeProjectDir, cfg.Generation.FileWriteRetries, cfg.Manifest);
     }
 
     internal static class FbtXmlEditor
