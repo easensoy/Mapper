@@ -93,7 +93,7 @@ namespace CodeGen.Mapping
             IReadOnlyList<Configuration.TargetIdentity> declared)
         {
             var errors = new List<string>();
-            // Backend-vs-declaration agreement is checked in UseBackends: the registry is not allowed to
+            // Backend-vs-declaration agreement is checked by CompilerSession: the registry is not allowed to
             // know a concrete backend, so it cannot ask that question while it is loading the declaration.
             foreach (var g in declared.GroupBy(d => d.Plc).Where(g => g.Count() > 1))
                 errors.Add($"device.yml declares target '{g.Key}' {g.Count()} times");
@@ -289,41 +289,6 @@ namespace CodeGen.Mapping
         public static bool IsRegistered(PlcAssignment plc) => Targets.Any(t => t.Plc == plc);
 
         public static IReadOnlyList<TargetDescriptor> All => Targets;
-
-        // Handed in by the composition root, which is the one place that may know a concrete backend.
-        // The registry answers what a target IS from device.yml and never constructs one.
-        private static IReadOnlyList<CodeGen.Devices.ITargetBackend> _backends =
-            Array.Empty<CodeGen.Devices.ITargetBackend>();
-
-        public static IReadOnlyList<CodeGen.Devices.ITargetBackend> Backends => _backends;
-
-        // Called once, before anything is planned. A target is IMPLEMENTED because a backend claims it
-        // and DECLARED because device.yml has a row for it; the two must agree exactly, or a run would
-        // either emit a device with no resource name or silently skip one the deployment expects.
-        public static void UseBackends(IReadOnlyList<CodeGen.Devices.ITargetBackend> backends)
-        {
-            if (backends is null || backends.Count == 0)
-                throw new ArgumentException("no target backends were registered, so no device can be emitted",
-                    nameof(backends));
-
-            var errors = new List<string>();
-            foreach (var g in backends.GroupBy(b => b.Target).Where(g => g.Count() > 1))
-                errors.Add($"two backends both claim target '{g.Key}', so which one emits it is undecided");
-            var implemented = backends.Select(b => b.Target).ToList();
-            var declared = Configuration.DeviceConfig.Current.Targets;
-            foreach (var d in declared)
-                if (!implemented.Contains(d.Plc))
-                    errors.Add($"device.yml declares target '{d.Plc}', which no backend implements");
-            foreach (var plc in implemented)
-                if (declared.All(d => d.Plc != plc))
-                    errors.Add($"backend '{plc}' has no device.yml targets entry, so it has no resource name");
-            if (errors.Count > 0)
-                throw new InvalidOperationException(
-                    "Target registration is inconsistent:" + Environment.NewLine +
-                    "  - " + string.Join(Environment.NewLine + "  - ", errors));
-
-            _backends = backends;
-        }
 
         // The controller that runs the Feed station when nothing has relocated it.
         public static PlcAssignment FeedTarget =>
