@@ -33,6 +33,9 @@ geometry:
   framePadding: { left: 500, top: 220, right: 250, bottom: 260 }
   # Y per row, spaced to clear the EAE-rendered FB body in the row above (Process1_Generic ~800,
   # Five_State ~1400) while keeping the canvas tight.
+  # Reporters a deployment injects sit off the column grid: they are not roster components, so they
+  # get their own column, below the actuator row, one pitch apart.
+  injectedReporters: { x: 2000, y: 5200, rowPitch: 500 }
   rowY:
     Floating: 200
     Hmi: 1200
@@ -116,6 +119,10 @@ resources:
 # Adapter wiring between infrastructure roles. Emitted in this order, and only where the resource
 # declares both endpoints. Ports are the CAT interface contract, so they stay spelled here beside the
 # role that owns them.
+# The order a resource's infrastructure stack is emitted in. Emitted order is the artefact, and a
+# role a resource does not declare is simply skipped, so this is one list for every target.
+infraEmitOrder: [areaHmi, area, station, stationHmi, terminator, areaTerminator]
+
 resourceRelations:
   - { from: areaHmi,    fromPort: AreaHMIAdptrOUT,    to: area,           toPort: AreaHMIAdptrIN }
   - { from: stationHmi, fromPort: StationHMIAdptrOUT, to: station,        toPort: StationHMIAdptrIN }
