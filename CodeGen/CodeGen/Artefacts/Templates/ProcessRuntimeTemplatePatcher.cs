@@ -6,6 +6,7 @@ using static CodeGen.Services.FbtXmlEditor;
 using System.IO;
 using CodeGen.Configuration;
 
+using CodeGen.Mapping;
 namespace CodeGen.Services
 {
     internal static class ProcessRuntimeTemplatePatcher
@@ -49,7 +50,7 @@ namespace CodeGen.Services
         {
             var candidates = new[]
             {
-                Path.Combine(scope.Root, "IEC61499", "ProcessRuntime_Generic_v1.fbt"),
+                Path.Combine(scope.Root, "IEC61499", TemplateManifest.FbtOf("processEngine")),
                 Path.Combine(scope.Root, "IEC61499",
                     CodeGen.Mapping.TemplateManifest.ProcessType.Name,
                     CodeGen.Mapping.TemplateManifest.ProcessType.Name + ".fbt"),
@@ -59,7 +60,7 @@ namespace CodeGen.Services
             foreach (var fbtPath in candidates)
             {
                 if (!File.Exists(fbtPath)) continue;
-                bool isEngine = fbtPath.EndsWith("ProcessRuntime_Generic_v1.fbt", StringComparison.OrdinalIgnoreCase);
+                bool isEngine = fbtPath.EndsWith(TemplateManifest.FbtOf("processEngine"), StringComparison.OrdinalIgnoreCase);
                 try
                 {
                     var doc = System.Xml.Linq.XDocument.Load(fbtPath, System.Xml.Linq.LoadOptions.PreserveWhitespace);
@@ -196,7 +197,7 @@ namespace CodeGen.Services
         // The shipped Process1_Generic pins it as a Parameter on its internal ProcessStateBusHandler, so every
         // Process FB in a project receives its phase into the same state_table index. Modelled on process_id.
         internal static void PromoteProcessPhaseReceiverSlot(FbtEditScope scope)
-            => RequireDeployedFbt(scope, "Process1_Generic.fbt",
+            => RequireDeployedFbt(scope, TemplateManifest.FbtOf("processCat"),
                 "Process1_Generic receiver-slot promotion failed", (doc, root, ns, fbt) =>
             {
                 string Slot = CodeGen.Translation.Process.Recipes.ProcessPhaseTransport.ReceiverSlotParam;
@@ -272,7 +273,7 @@ namespace CodeGen.Services
         // The recipe is one Recipe : RecipeStep array. This collapses the six legacy parallel arrays onto it.
         internal static void NormalizeProcess1RecipeArrays(
             FbtEditScope scope, int recipeCapacity, DeployResult result)
-            => EditDeployedFbt(scope, "Process1_Generic.fbt", "Process1_Generic recipe-struct normalize failed", result,
+            => EditDeployedFbt(scope, TemplateManifest.FbtOf("processCat"), "Process1_Generic recipe-struct normalize failed", result,
                 (doc, root, ns, fbt) =>
             {
 
@@ -332,7 +333,7 @@ namespace CodeGen.Services
         // The same collapse on the engine, including every algorithm's ST.
         internal static void NormalizeProcessRuntimeRecipeArrays(
             FbtEditScope scope, int recipeCapacity, DeployResult result)
-            => EditDeployedFbt(scope, "ProcessRuntime_Generic_v1.fbt", "ProcessRuntime_Generic_v1 recipe-struct normalize failed", result,
+            => EditDeployedFbt(scope, TemplateManifest.FbtOf("processEngine"), "ProcessRuntime_Generic_v1 recipe-struct normalize failed", result,
                 (doc, root, ns, fbt) =>
             {
 
@@ -388,9 +389,9 @@ namespace CodeGen.Services
         // SAME ArraySize, else a report indexed on a shorter declaration writes past the end of that one.
         private static readonly string[] StateTableOwners =
         {
-            "ProcessRuntime_Generic_v1.fbt",
-            "ProcessStateBusHandler.fbt",
-            "updateComponentState.fbt",
+            TemplateManifest.FbtOf("processEngine"),
+            TemplateManifest.FbtOf("processStateBus"),
+            TemplateManifest.FbtOf("ringRelay"),
         };
 
         internal static void PatchStateTableCapacity(FbtEditScope scope, int capacity, DeployResult result)
