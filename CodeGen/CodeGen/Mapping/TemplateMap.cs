@@ -13,8 +13,12 @@ namespace CodeGen.Mapping
 
         // A cover-sensor spelling the profile omits drops the sensor from id pin, ring splice and interlock.
         // VueOne types the task arm and the jaws alike as "Robot", so the profile names the arm instance.
+        // The declared roles, frozen: a per-call read of the declaration would let two components in
+        // one run be classified against different versions of it.
+        static readonly Configuration.SemanticRoles Roles = RigCatalog.Current.Roles;
+
         public static bool IsRobotTaskArm(VueOneComponent component) =>
-            component != null && RigCatalog.Current.Roles.Is(RigCatalog.Current.Roles.TaskArm, component.Name);
+            component != null && Roles.Is(Roles.TaskArm, component.Name);
 
         // Threading a CAT with no stationAdptr port dangles it and EAE rejects the whole resource.
         public static bool LacksStationAdapter(string? catType) =>
