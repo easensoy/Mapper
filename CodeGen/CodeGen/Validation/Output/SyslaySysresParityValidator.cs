@@ -20,18 +20,13 @@ namespace CodeGen.Devices.Core
             public override string ToString() => $"[{Scope}] {Detail}";
         }
 
-        // Logical PLC <-> EAE sysdev <-> short label, in deploy order. A non-null Name disambiguates two
-        // devices of the same Type (BX1 and Revolution_Pi are both Soft_dPAC).
+        // Every device this run emits, from the registry. A non-null Name disambiguates two devices of
+        // the same Type; a target that only exists when something is relocated onto it is covered only
+        // when something was, because otherwise the run writes no such device to check.
         static IEnumerable<(string DeviceType, string? DeviceName, PlcAssignment Plc, string Label)> Devices(
-            GenerationContext ctx)
-        {
-            yield return (TargetRegistry.Of(CodeGen.Translation.PlcAssignment.M262).DeviceType, null, PlcAssignment.M262, "M262");
-            // The partial swap leaves BOTH devices in place, so both need parity coverage.
-            if (ctx.Profile.PartialRevPi)
-                yield return (TargetRegistry.Of(CodeGen.Translation.PlcAssignment.RevPi).DeviceType, TargetRegistry.Of(CodeGen.Translation.PlcAssignment.RevPi).DeviceName!, PlcAssignment.RevPi, "RevPi");
-            yield return (TargetRegistry.Of(CodeGen.Translation.PlcAssignment.M580).DeviceType, null,  PlcAssignment.M580, "M580");
-            yield return (TargetRegistry.Of(CodeGen.Translation.PlcAssignment.BX1).DeviceType, TargetRegistry.Of(CodeGen.Translation.PlcAssignment.BX1).DeviceName!, PlcAssignment.BX1,  "BX1");
-        }
+            GenerationContext ctx) =>
+            TargetRegistry.All.Where(t => ctx.Emits(t.Plc))
+                .Select(t => (t.DeviceType, t.DeviceName, t.Plc, t.Plc.ToString()));
 
         static string? LocateSysdev(string eaeRoot, string deviceType, string? deviceName) =>
             deviceName == null
@@ -102,7 +97,7 @@ namespace CodeGen.Devices.Core
             {
                 var expected = syslayFbs
                     .Where(f => TemplateManifest.Mirrored.Contains(f.Type) &&
-                                SysresFbMirror.BucketFor(f.Name, ctx.Allocation) == plc)
+                                SysresFbMirror.BucketFor(f.Name, ctx.Allocation, ctx.Cfg) == plc)
                     .ToList();
                 if (expected.Count == 0) continue;
 
@@ -158,10 +153,10 @@ namespace CodeGen.Devices.Core
             // With the cross-PLC discharge tail active the Feed controller's IO must carry it: on M262 the
             // four .hcf channels, on RevPi the discharge FBs hosted on the RevPi sysres.
             if (ctx.CrossRingSegment.Count > 0)
-                ValidateDischargeHcf(eaeRoot, violations);
+                ValidateDischargeHcf(ctx.Cfg.Rig, eaeRoot, violations);
 
             // Independent of the discharge tail, which stays on the M262 that owns its channels.
-            if (ctx.Profile.PartialRevPi)
+            if (ctx.Profile.HasAssignments)
                 ValidateRevPiIo(eaeRoot, syslayPath, violations);
 
             return violations;
@@ -178,12 +173,16 @@ namespace CodeGen.Devices.Core
             return d;
         }
 
-        static void ValidateDischargeHcf(string eaeRoot, List<Violation> violations)
+        // The discharge channels belong to whichever target HOSTS the feed station and is not the one
+        // that only receives relocated work - a capability, not a controller name.
+        static void ValidateDischargeHcf(RigCatalog rig, string eaeRoot, List<Violation> violations)
         {
-            var sysdev = EaeProjectLayout.FindSysdevByDeviceType(eaeRoot, TargetRegistry.Of(CodeGen.Translation.PlcAssignment.M262).DeviceType);
+            var host = TargetRegistry.Of(TargetRegistry.FeedTarget);
+            var sysdev = EaeProjectLayout.FindSysdevByDeviceType(eaeRoot, host.DeviceType);
             if (string.IsNullOrEmpty(sysdev))
             {
-                violations.Add(new("M262-HCF", "discharge tail active but the M262 sysdev was not found"));
+                violations.Add(new($"{host.Plc}-HCF",
+                    $"discharge tail active but the {host.Plc} sysdev was not found"));
                 return;
             }
             var folder = Path.Combine(Path.GetDirectoryName(sysdev)!, Path.GetFileNameWithoutExtension(sysdev));
@@ -213,7 +212,7 @@ namespace CodeGen.Devices.Core
                 return;
             }
 
-            foreach (var dc in RigCatalog.Current.DischargeChannels)
+            foreach (var dc in rig.DischargeChannels)
                 if (!bound.TryGetValue(dc.Channel, out var val) || string.IsNullOrWhiteSpace(val))
                     violations.Add(new("M262-HCF",
                         $"discharge tail active but {dc.Channel} ({dc.Meaning}) is BLANK in '{Path.GetFileName(hcf)}' — " +
@@ -222,9 +221,19 @@ namespace CodeGen.Devices.Core
 
         // RevPi hosts the discharge tail on its own sysres, with no .hcf to bind yet, so assert each
         // discharge FB named by Config/smc-rig.yml dischargeChannels landed there.
-        static void ValidateDischargeRevPi(string eaeRoot, List<Violation> violations)
+        // The one target declared to receive components relocated off another. Asked for by that
+        // capability so a project with a different relocation host needs no edit here.
+        static TargetDescriptor RelocationTarget() =>
+            TargetRegistry.All.FirstOrDefault(t => t.ReceivesRelocatedComponents)
+            ?? throw new InvalidOperationException(
+                "device.yml declares no target that receives relocated components, so a relocated " +
+                "deployment cannot be validated.");
+
+        static void ValidateDischargeRevPi(RigCatalog rig, string eaeRoot, List<Violation> violations)
         {
-            var sysdev = EaeProjectLayout.FindSysdevByDeviceTypeAndName(eaeRoot, TargetRegistry.Of(CodeGen.Translation.PlcAssignment.RevPi).DeviceType, TargetRegistry.Of(CodeGen.Translation.PlcAssignment.RevPi).DeviceName!);
+            var relocation = RelocationTarget();
+            var sysdev = EaeProjectLayout.FindSysdevByDeviceTypeAndName(
+                eaeRoot, relocation.DeviceType, relocation.DeviceName!);
             var sysres = sysdev == null ? null : EaeProjectLayout.FindSysresFor(sysdev);
             if (string.IsNullOrEmpty(sysres) || !File.Exists(sysres))
             {
@@ -249,7 +258,7 @@ namespace CodeGen.Devices.Core
                 return;
             }
 
-            foreach (var fb in RigCatalog.Current.DischargeChannels
+            foreach (var fb in rig.DischargeChannels
                          .Select(dc => dc.Component).Distinct(StringComparer.Ordinal))
                 if (!fbNames.Contains(fb))
                     violations.Add(new("RevPi-Discharge",
@@ -264,7 +273,8 @@ namespace CodeGen.Devices.Core
             var BrokerFbId = CodeGen.Devices.RevPi.RevPiIoBrokerInjector.BrokerFbId;
             const string BrokerName = CodeGen.Devices.RevPi.RevPiIoBrokerInjector.BrokerName;
 
-            var sysdev = EaeProjectLayout.FindSysdevByDeviceTypeAndName(eaeRoot, TargetRegistry.Of(CodeGen.Translation.PlcAssignment.RevPi).DeviceType, TargetRegistry.Of(CodeGen.Translation.PlcAssignment.RevPi).DeviceName!);
+            var sysdev = EaeProjectLayout.FindSysdevByDeviceTypeAndName(
+                eaeRoot, RelocationTarget().DeviceType, RelocationTarget().DeviceName!);
             var sysres = sysdev == null ? null : EaeProjectLayout.FindSysresFor(sysdev);
             if (string.IsNullOrEmpty(sysres) || !File.Exists(sysres))
             {
