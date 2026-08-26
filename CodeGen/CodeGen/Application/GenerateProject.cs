@@ -89,21 +89,24 @@ namespace CodeGen.Application
             if (request is null) throw new ArgumentNullException(nameof(request));
             if (log is null) throw new ArgumentNullException(nameof(log));
 
-            TargetRegistry.UseBackends(Backends());
+            // ONE SESSION for this run: the declarations, the plan and the backends that will emit
+            // it, decided here and handed down. Nothing below reaches a global for any of them.
+            var session = CompilerSession.Begin(
+                Configuration.CompilerConfiguration.Load(request.Config.Clone()), Backends());
 
             // Work on a copy: MapperUI keeps one config for the process lifetime, so mutation leaks between runs.
             // THE CONFIGURATION COMPOSITION ROOT. Every declaration file is read ONCE, here, and one
             // snapshot travels through planning, validation and rendering. No stage below re-reads a
             // declaration, so a file saved while a run is in flight cannot make two stages of that run
             // compile against different configurations.
-            var loaded = Configuration.CompilerConfiguration.Load(request.Config.Clone());
 
             // THE TRANSACTION BOUNDARY. Everything below writes into a staging copy of the project on
             // the same volume; the live tree is replaced only after every output validator has passed.
             // A throw anywhere - a model the compiler cannot express, a failed patch, a validator that
             // refuses - unwinds here and leaves the previous project exactly as it was.
-            using var txn = ProjectTransaction.Begin(loaded, log);
-            var cfg = txn.Configuration;
+            using var txn = ProjectTransaction.Begin(session.Cfg, log);
+            session = session.With(txn.Configuration);
+            var cfg = session.Cfg;
 
             // THE BOUNDARY. The request carries the selection the UI and the VueOne runner have always
             // sent - a set of component names bound for the relocation target. It becomes a generic
@@ -115,7 +118,7 @@ namespace CodeGen.Application
 
             // Whether a target can actually serve what this run assigned to it is that TARGET's answer:
             // its own hardware decides. Still before anything is written - planning touches no file.
-            foreach (var backend in TargetRegistry.Backends) backend.ValidateAssignment(ctx);
+            foreach (var backend in session.Backends) backend.ValidateAssignment(ctx);
 
             // A dropped message and a connection nothing opens both look exactly like success, so the
             // telemetry declaration is proved against the planned resources here rather than on the rig.
@@ -139,12 +142,12 @@ namespace CodeGen.Application
             var path = injector.EmitApplicationLayer(ctx, bindings, out var report);
             LogBindings(report, log);
 
-            FinalizeDeviceStack(ctx, log);
-            WireResources(ctx, report, log);
+            FinalizeDeviceStack(session, ctx, log);
+            WireResources(session, ctx, report, log);
             // Anything a target must do to the canvas once every resource is wired.
-            foreach (var backend in TargetRegistry.Backends)
+            foreach (var backend in session.Backends)
                 backend.FinishApplication(ctx, path, report, log);
-            BindHardware(ctx, bindings, report, log);
+            BindHardware(session, ctx, bindings, report, log);
 
             ValidateHcfReferences(cfg, log);
             SyncSysresParameters(cfg, path, log);
@@ -153,7 +156,7 @@ namespace CodeGen.Application
             ValidateConnections(cfg, log);
             ValidateAddresses(ctx, log);
             ValidateMqtt(cfg, log);
-            foreach (var backend in TargetRegistry.Backends) backend.ValidateOutput(ctx, log);
+            foreach (var backend in session.Backends) backend.ValidateOutput(ctx, log);
 
             // LAST, against the finished staged tree: everything EAE would reject on import that can be
             // answered without EAE. A required stage, so a project that would not load never publishes.
@@ -379,14 +382,14 @@ namespace CodeGen.Application
 
         // MANDATORY after the syslay is written: Prepare wiped the FB mirror, so skipping this leaves the
         // .sysres empty and every FB unmapped on the EAE canvas.
-        static void FinalizeDeviceStack(GenerationContext ctx, Action<string> log)
+        static void FinalizeDeviceStack(CompilerSession session, GenerationContext ctx, Action<string> log)
         {
             var cfg = ctx.Cfg;
 
             // Every registered backend, in registration order: a device whose System folder another one
             // creates has to come after it, and that order is declared there rather than written here.
             var scope = DeviceScope.Open(cfg);
-            foreach (var backend in TargetRegistry.Backends) backend.EmitDevice(ctx, scope, log);
+            foreach (var backend in session.Backends) backend.EmitDevice(ctx, scope, log);
             foreach (var w in Station2DeviceEmitter.StripStaleSysresEntries(scope.EaeRoot).Warnings)
                 log($"[Device][Warn] {w}");
 
@@ -472,7 +475,7 @@ namespace CodeGen.Application
             catch (Exception ex) { StageFailed("opcua.xml companions", StageKind.Optional, ex, log); }
 
             // The authored hardware configuration for each target, carried in by its own backend.
-            foreach (var backend in TargetRegistry.Backends) backend.CopyHardwareConfig(ctx, log);
+            foreach (var backend in session.Backends) backend.CopyHardwareConfig(ctx, log);
 
             // A wipe can leave dfbproj refs to EAE-owned compile artefacts; EAE regenerates them on Build.
             try
@@ -492,7 +495,7 @@ namespace CodeGen.Application
         // The mirror MUST precede the wiring: it creates the FBs each resource is about to connect, and
         // re-syncs every CAT type (a stale Type trips "Found References to Missing Instances").
         // Without these wires EAE deploys a resource but nothing inits.
-        static void WireResources(GenerationContext ctx,
+        static void WireResources(CompilerSession session, GenerationContext ctx,
             SystemInjector.BindingApplicationReport report, Action<string> log)
         {
             // The wiring about to run connects the FBs this creates, so a failure here leaves every
@@ -503,16 +506,16 @@ namespace CodeGen.Application
                 " (CAT types synced to the canvas)");
 
             var before = report.Missing.Count;
-            foreach (var backend in TargetRegistry.Backends) backend.WireResource(ctx, report, log);
+            foreach (var backend in session.Backends) backend.WireResource(ctx, report, log);
             LogNew(report, before, _ => true, log);
         }
 
         // Physical channels bound to the FBs each target hosts.
-        static void BindHardware(GenerationContext ctx, IoBindings? bindings,
+        static void BindHardware(CompilerSession session, GenerationContext ctx, IoBindings? bindings,
             SystemInjector.BindingApplicationReport report, Action<string> log)
         {
             var before = report.Missing.Count;
-            foreach (var backend in TargetRegistry.Backends)
+            foreach (var backend in session.Backends)
                 backend.BindHardware(ctx, bindings, report, log);
             LogNew(report, before, l => l.StartsWith("[Hcf") || l.StartsWith("[HcfBind"), log);
         }
