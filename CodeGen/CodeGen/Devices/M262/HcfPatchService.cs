@@ -37,7 +37,7 @@ namespace CodeGen.Devices.M262
                     return;
                 }
 
-                var loc = LocateM262SysdevAndResource(eaeRoot);
+                var loc = LocateM262SysdevAndResource(config, eaeRoot);
                 if (loc == null)
                 {
                     report.Missing.Add(
@@ -70,7 +70,7 @@ namespace CodeGen.Devices.M262
                         try { File.Delete(stale); } catch { /* best-effort */ }
                     }
                 }
-                var sensorNames = ReadSensorNames(sysresPath);
+                var sensorNames = ReadSensorNames(sysresPath, config);
                 WriteHcfMerged(config, profile, hcfPath, resourceId, bindings, fbIdByName, sensorNames, report);
 
                 report.Missing.Add($"[Hcf] wrote   ← {hcfPath}");
@@ -81,7 +81,8 @@ namespace CodeGen.Devices.M262
             }
         }
 
-        private static (string sysdevDir, string resourceId, string sysresPath)? LocateM262SysdevAndResource(string eaeRoot)
+        private static (string sysdevDir, string resourceId, string sysresPath)? LocateM262SysdevAndResource(
+            Configuration.CompilerConfiguration cfg,string eaeRoot)
         {
             var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
             if (!Directory.Exists(systemDir)) return null;
@@ -94,7 +95,7 @@ namespace CodeGen.Devices.M262
                     if (root == null || root.Name.LocalName != "Device") continue;
                     var type = (string?)root.Attribute("Type") ?? string.Empty;
                     var nspace = (string?)root.Attribute("Namespace") ?? string.Empty;
-                    if (type != TargetRegistry.Of(CodeGen.Translation.PlcAssignment.Named("M262")).DeviceType || nspace != TargetDescriptor.DeviceNamespace) continue;
+                    if (type != cfg.Targets.Of(CodeGen.Translation.PlcAssignment.Named("M262")).DeviceType || nspace != TargetDescriptor.DeviceNamespace) continue;
                     XNamespace ns = root.GetDefaultNamespace();
                     var resources = root.Element(ns + "Resources");
                     var m262Res = resources?.Elements(ns + "Resource").FirstOrDefault();
@@ -232,7 +233,7 @@ namespace CodeGen.Devices.M262
             // The bus this device carries, module by module, in the order device.yml declares it. The
             // XML SHAPE is EAE's schema and is written by ModuleBlock; WHICH modules there are, their
             // frozen ids, their properties and which of them takes channel bindings are all declared.
-            var modules = TargetRegistry.Of(TargetRegistry.FeedTarget).HardwareModules;
+            var modules = cfg.Targets.Of(cfg.Targets.FeedTarget).HardwareModules;
             XElement into = devItem;
             string? previous = null;
             foreach (var m in modules)
@@ -503,7 +504,7 @@ namespace CodeGen.Devices.M262
             return map;
         }
 
-        private static List<string> ReadSensorNames(string sysresPath)
+        private static List<string> ReadSensorNames(string sysresPath, Configuration.CompilerConfiguration cfg)
         {
             var list = new List<string>();
             try
@@ -520,7 +521,7 @@ namespace CodeGen.Devices.M262
                     var t = (string?)fb.Attribute("Type") ?? string.Empty;
                     var n = (string?)fb.Attribute("Name") ?? string.Empty;
                     if (!string.IsNullOrEmpty(n) &&
-                        t.StartsWith(TemplateManifest.SensorType.Name, StringComparison.Ordinal))
+                        t.StartsWith(cfg.Manifest.SensorType.Name, StringComparison.Ordinal))
                         list.Add(n);
                 }
             }
