@@ -21,6 +21,12 @@ namespace CodeGen.Devices.Core
             catch { return null; }
         }
 
+        // Two entry points because two kinds of caller ask: a generation hands its whole configuration,
+        // while the separately-owned HMI module hands the paths it was given. Both read the ONE fact
+        // this needs - where the project being written lives - so neither is a second answer.
+        public static string? DeriveEaeProjectRoot(Configuration.CompilerConfiguration cfg) =>
+            DeriveEaeProjectRoot(cfg?.Paths!);
+
         public static string? DeriveEaeProjectRoot(MapperConfig cfg)
         {
             var path = cfg.ActiveSyslayPath;
