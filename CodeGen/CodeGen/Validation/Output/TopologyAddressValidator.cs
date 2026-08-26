@@ -88,13 +88,13 @@ namespace CodeGen.Validation.Output
         }
 
         // Config-level role checks: these still fire when generation aborts before any equipment JSON exists.
-        public static IEnumerable<Violation> ValidateRevPiRoles(MapperConfig cfg, DeploymentProfile profile)
+        public static IEnumerable<Violation> ValidateRevPiRoles(Configuration.CompilerConfiguration cfg, DeploymentProfile profile)
         {
-            bool revPiSelected = profile.PartialRevPi;
+            bool revPiSelected = profile.HasAssignments;
             if (!revPiSelected) yield break;
 
-            string host = cfg.RevPiHostIp ?? string.Empty;
-            string target = cfg.RevPiTargetIp ?? string.Empty;
+            string host = cfg.Paths.RevPiHostIp ?? string.Empty;
+            string target = cfg.Paths.RevPiTargetIp ?? string.Empty;
 
             foreach (var (label, value) in new[] { ("hostIp", host), ("targetIp", target) })
             {
