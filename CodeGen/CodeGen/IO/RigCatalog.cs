@@ -33,6 +33,9 @@ namespace CodeGen.Configuration
 
 public static RigCatalog Current => RigCatalogLoader.Catalog;
 
+        /// The same declaration read from a run's OWN profile bundle.
+        public static RigCatalog LoadFrom(string? root) => RigCatalogLoader.LoadFrom(root);
+
     }
 
     // Roles the twin cannot express, named here so no compiler branch spells a plant component.
