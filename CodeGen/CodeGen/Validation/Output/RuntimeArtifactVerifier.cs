@@ -13,7 +13,7 @@ namespace CodeGen.Services
     public static class RuntimeArtifactVerifier
     {
         public static int SyncMappedSysresParametersFromSyslay(
-            string syslayPath, MapperConfig cfg, Action<string>? log = null)
+            string syslayPath, Configuration.CompilerConfiguration cfg, Action<string>? log = null)
         {
             var eaeRoot = FindIec61499Root(syslayPath, cfg);
             if (string.IsNullOrEmpty(eaeRoot) || !File.Exists(syslayPath))
@@ -140,15 +140,15 @@ namespace CodeGen.Services
             return true;
         }
 
-        public static string? FindIec61499Root(string syslayPath, MapperConfig cfg)
+        public static string? FindIec61499Root(string syslayPath, Configuration.CompilerConfiguration cfg)
         {
             foreach (var candidate in new[]
                      {
                          syslayPath,
-                         cfg.SyslayPath2,
-                         cfg.SysresPath2,
-                         cfg.ActiveSyslayPath,
-                         cfg.ActiveSysresPath,
+                         cfg.Paths.SyslayPath2,
+                         cfg.Paths.SysresPath2,
+                         cfg.Paths.ActiveSyslayPath,
+                         cfg.Paths.ActiveSysresPath,
                      })
             {
                 var root = FindIec61499Root(candidate);
