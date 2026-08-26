@@ -113,8 +113,20 @@ namespace CodeGen.Application
             // component -> target assignment here, and nothing below this line names a controller.
             var profile = DeploymentProfile.Relocating(request.RevPiComponents, cfg);
 
+            // THE MODEL, RESOLVED ONCE. The composition root reads it and hands the same IR to the
+            // capability report and to planning, so the two cannot describe different twins.
+            var twin = Domain.Twin.TwinModel.Build(
+                new CodeGen.IO.SystemXmlReader().ReadAllComponents(request.ControlXmlPath));
+
+            // WHAT THIS COMPILER CAN DO WITH THIS MODEL, answered before planning starts. The refusals
+            // downstream still stand; this reports ALL of them at once and says of each whether it is
+            // the twin to change, a declaration to add, or a backend to write.
+            var capabilities = CompilerCapabilityReport.For(twin, cfg, session.Backends.Select(b => b.Target));
+            foreach (var line in capabilities.Summary()) log(line);
+            capabilities.AssertCompilable();
+
             // Plan before the first artefact is written, so an inexpressible model fails with a diagnostic.
-            var ctx = GenerationContext.Plan(cfg, request.ControlXmlPath, profile);
+            var ctx = GenerationContext.Plan(cfg, twin, profile);
 
             // Whether a target can actually serve what this run assigned to it is that TARGET's answer:
             // its own hardware decides. Still before anything is written - planning touches no file.
@@ -124,9 +136,9 @@ namespace CodeGen.Application
             // telemetry declaration is proved against the planned resources here rather than on the rig.
             TelemetryPlanValidator.Validate(ctx);
 
-            // And the template cfg are proved against the archives that ship the types. Still
+            // And the template contracts are proved against the archives that ship the types. Still
             // before anything is written: a drifted declaration must not cost the previous project.
-            PortNameValidator.AssertContractMatchesArchives(cfg.Paths.TemplateLibraryPath);
+            PortNameValidator.AssertContractMatchesArchives(cfg.Paths.TemplateLibraryPath, cfg.Manifest);
 
             DeepClean(cfg, log);
             LogFeedSysdevState(cfg, log);
