@@ -35,7 +35,7 @@ namespace CodeGen.Translation.Process
 
                 var payload = new Dictionary<string, object>(StringComparer.Ordinal)
                 {
-                    ["topicRoot"] = cfg.Paths.MqttTopicRoot + "/process",
+                    ["topicRoot"] = cfg.Telemetry.TopicRoot + "/process",
                     ["note"] = "Maps the integer published on <topicRoot>/<process> to the VueOne state "
                              + "name. Ordinals are the twin's declaration order, 1-based; 0 means no "
                              + "owning state. Telemetry only - the rig does not read this file.",
