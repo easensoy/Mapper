@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using static CodeGen.Translation.Process.Recipes.TransitionChainParser;
 using CodeGen.Mapping;
 using CodeGen.Models;
 using System.IO;
@@ -50,11 +49,27 @@ namespace CodeGen.Translation.Process.Recipes
                 ProtocolOrNull(c) ?? throw new InvalidOperationException(
                     $"[CAT] '{CatTypeOf(c)}' declares no command protocol, so nothing can say which value " +
                     "drives it or which value means it arrived.");
-            // The one sensor crossing from the Feed controller to the assembly controller. It is a material
-            // LEVEL, not a process state, so it stands in only as a fresh edge. -1 = no bridge available.
-            public int MaterialBridgeId = -1;
-            public int MaterialBridgeAsserted = 1;
-            public int MaterialBridgeDeasserted;
+            // Every guard leaf and what became of it. Filled as the compiler lowers; the plan then
+            // proves it accounts for every leaf the twin declares.
+            public readonly GuardCoverage Coverage = new();
+
+            // What this deployment says a cross-process reference means where a plain wait will not do.
+            public Configuration.HandoffPolicy Handoff = new();
+
+            // A declared carrier's state_table slot, resolved once. Empty where nothing is declared.
+            public IReadOnlyDictionary<string, int> CarrierSlots =
+                new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+            // Each process's validated control flow, resolved once. Nothing walks a state machine for
+            // itself: successor, entry state and execution order are all asked of the graph.
+            public IReadOnlyDictionary<string, CodeGen.Domain.Twin.ProcessGraph> Graphs =
+                new Dictionary<string, CodeGen.Domain.Twin.ProcessGraph>(StringComparer.OrdinalIgnoreCase);
+
+            public CodeGen.Domain.Twin.ProcessGraph GraphOf(VueOneComponent process) =>
+                Graphs.TryGetValue((process.Name ?? string.Empty).Trim(), out var g) ? g
+                : throw new InvalidOperationException(
+                    $"[Compile] '{process.Name}' has no resolved control flow; the plan builds one per " +
+                    "process before any recipe is compiled.");
 
             // What the backend could not represent exactly as the twin states it. Diagnostic only:
             // nothing here reaches an artefact, so a finding cannot move a byte.
@@ -66,8 +81,22 @@ namespace CodeGen.Translation.Process.Recipes
             var arrays = new RecipeArrays();
             foreach (var kv in ctx.Ids) arrays.ComponentIds[kv.Key] = kv.Value;
 
-            var states = OrderStatesByTransitionChain(process.States);
-            foreach (var line in BuildTransitionTable(process.States, states)) arrays.TransitionTable.Add(line);
+            var graph = ctx.GraphOf(process);
+            var states = graph.Ordered;
+            foreach (var line in graph.TransitionTable()) arrays.TransitionTable.Add(line);
+            // A state the entry cannot reach never runs, so its guards are not compiled. Said out loud:
+            // silently omitting model content is how a compiler stops being one.
+            foreach (var dead in graph.Unreachable)
+            {
+                ctx.Findings.Add(
+                    $"'{process.Name}' state '{dead.Name}' is not reachable from '{graph.Entry.Name}', " +
+                    "so it never executes and its guards are not compiled.");
+                foreach (var t in dead.Transitions)
+                    foreach (var leaf in Leaves(t))
+                        ctx.Coverage.Record(Leaf(process, dead, t, leaf,
+                            GuardLeafOutcome.Unreachable,
+                            $"'{dead.Name}' is not reachable from '{graph.Entry.Name}'"));
+            }
             var announce = plan.AnnouncementsOf(process.Name?.Trim() ?? string.Empty);
             var owned = BuildOwnership(process, ctx);
 
@@ -103,17 +132,52 @@ namespace CodeGen.Translation.Process.Recipes
                     // Two requirements naming the SAME component at the SAME stop are one requirement.
                     var settledHere = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
                     int leaves = t.Guard?.References().Count ?? 0;
-                    EmitGuard(t.Guard, process, state, leaves, ctx, plan, pos, at, graphs, rows,
+                    EmitGuard(t.Guard, process, state, t, leaves, ctx, plan, pos, at, graphs, rows,
                         arrays, settledHere, owned, entryPhase, armed);
                 }
                 if (entryPhase) { Work(); Announcement(); }
                 if (rows.Count > before) firstRow[state.StateID] = before;
             }
 
-            Serialize(process, states, rows, firstRow, arrays);
+            Serialize(process, graph, rows, firstRow, arrays);
             arrays.OrderingSummary = $"'{process.Name}' compiled from Control.xml: {arrays.StepType.Count} rows.";
             return arrays;
         }
+
+        // Every leaf a transition's guard declares, in document order.
+        internal static IReadOnlyList<VueOneCondition> Leaves(VueOneTransition t) =>
+            t.Guard?.References() ?? (IReadOnlyList<VueOneCondition>)Array.Empty<VueOneCondition>();
+
+        // What makes a leaf that leaf: the IDs the twin assigns, plus where the leaf sits in its own
+        // transition's guard. Computed in exactly one place so the declaring side and the deciding side
+        // cannot disagree about which leaf they are talking about.
+        internal static GuardLeafId LeafId(VueOneComponent process, VueOneState state,
+            VueOneTransition edge, VueOneCondition cond)
+        {
+            var leaves = Leaves(edge);
+            int ordinal = 0;
+            for (int i = 0; i < leaves.Count; i++)
+                if (ReferenceEquals(leaves[i], cond)) { ordinal = i; break; }
+            return new GuardLeafId(
+                process.ComponentID ?? string.Empty, state.StateID ?? string.Empty,
+                edge.TransitionID ?? string.Empty, cond.ComponentID ?? string.Empty,
+                cond.ID ?? string.Empty, ordinal);
+        }
+
+        private static GuardLeaf Leaf(VueOneComponent process, VueOneState state, VueOneTransition edge,
+            VueOneCondition cond, GuardLeafOutcome outcome, string why) =>
+            new(LeafId(process, state, edge, cond),
+                process.Name ?? string.Empty, state.Name ?? string.Empty,
+                cond.Name ?? string.Empty, outcome, why);
+
+        // Every leaf the twin declares for one process, with the outcome a compiler would have to give
+        // it. Used to prove the lowering accounted for all of them.
+        internal static IReadOnlyList<GuardLeaf> DeclaredLeaves(VueOneComponent process) =>
+            (process.States ?? new List<VueOneState>())
+                .SelectMany(st => (st.Transitions ?? new List<VueOneTransition>())
+                    .SelectMany(t => Leaves(t).Select(c =>
+                        Leaf(process, st, t, c, GuardLeafOutcome.Waited, string.Empty))))
+                .ToList();
 
         private sealed class OwnedMove
         {
@@ -210,7 +274,7 @@ namespace CodeGen.Translation.Process.Recipes
             // A sequence that runs ONCE folds every movement the twin models into one handshake, so it is
             // emitted whole the first time and never again.
             var exec = ctx.ExecutionOf(target);
-            if (exec is { RunsOnce: true })
+            if (exec is { Mode: ExecutionMode.RunOnce })
             {
                 if (pos.ContainsKey(target.ComponentID)) return;
                 EmitSequence(exec.Steps, target, id, state, rows);
@@ -224,7 +288,7 @@ namespace CodeGen.Translation.Process.Recipes
                     "from which the actuator reaches no physical stop, so no command can be derived");
 
             // An ALTERNATING sequence is one step per movement, resuming from where the last one settled.
-            if (exec is { Alternates: true })
+            if (exec is { Mode: ExecutionMode.Alternate })
             {
                 var step = exec.StepFrom(pos.TryGetValue(target.ComponentID, out int last) ? last : null);
                 EmitSequence(new[] { step }, target, id, state, rows);
@@ -254,7 +318,7 @@ namespace CodeGen.Translation.Process.Recipes
         // TermCount). Where every alternative reduces to the same requirement the choice is vacuous and
         // one plain row stands for all of them, which is what a guard with no real choice produces.
         private static void EmitGuard(ConditionExpr? guard, VueOneComponent process, VueOneState state,
-            int gateCount, Ctx ctx, ProcessHandoffPlan plan, Dictionary<string, int> pos,
+            VueOneTransition edge, int gateCount, Ctx ctx, ProcessHandoffPlan plan, Dictionary<string, int> pos,
             Dictionary<string, string> at, Dictionary<string, ActuatorGraph> graphs, List<Row> rows,
             RecipeArrays arrays, Dictionary<string, int> settledHere,
             Dictionary<string, List<OwnedMove>> owned, bool entryPhase, HashSet<string> armed)
@@ -263,16 +327,16 @@ namespace CodeGen.Translation.Process.Recipes
             {
                 case null: return;
                 case ConditionExpr.Ref r:
-                    EmitCondition(process, state, r.Condition, gateCount, ctx, plan, pos, at, graphs,
+                    EmitCondition(process, state, edge, r.Condition, gateCount, ctx, plan, pos, at, graphs,
                         rows, arrays, settledHere, owned, entryPhase, armed);
                     return;
                 case ConditionExpr.All all:
                     foreach (var op in all.Operands)
-                        EmitGuard(op, process, state, gateCount, ctx, plan, pos, at, graphs, rows,
+                        EmitGuard(op, process, state, edge, gateCount, ctx, plan, pos, at, graphs, rows,
                             arrays, settledHere, owned, entryPhase, armed);
                     return;
                 case ConditionExpr.Any any:
-                    EmitAlternatives(any, process, state, gateCount, ctx, plan, pos, at, graphs, rows,
+                    EmitAlternatives(any, process, state, edge, gateCount, ctx, plan, pos, at, graphs, rows,
                         arrays, settledHere, owned, entryPhase, armed);
                     return;
                 default:
@@ -285,7 +349,7 @@ namespace CodeGen.Translation.Process.Recipes
         // cannot silence a term another one needs. Only then are they compared: identical alternatives
         // are the same requirement written twice and collapse to one row.
         private static void EmitAlternatives(ConditionExpr.Any any, VueOneComponent process,
-            VueOneState state, int gateCount, Ctx ctx, ProcessHandoffPlan plan,
+            VueOneState state, VueOneTransition edge, int gateCount, Ctx ctx, ProcessHandoffPlan plan,
             Dictionary<string, int> pos, Dictionary<string, string> at,
             Dictionary<string, ActuatorGraph> graphs, List<Row> rows, RecipeArrays arrays,
             Dictionary<string, int> settledHere, Dictionary<string, List<OwnedMove>> owned,
@@ -295,7 +359,7 @@ namespace CodeGen.Translation.Process.Recipes
             foreach (var op in any.Operands)
             {
                 var sub = new List<Row>();
-                EmitGuard(op, process, state, gateCount, ctx, plan,
+                EmitGuard(op, process, state, edge, gateCount, ctx, plan,
                     new Dictionary<string, int>(pos, StringComparer.OrdinalIgnoreCase),
                     new Dictionary<string, string>(at, StringComparer.OrdinalIgnoreCase),
                     graphs, sub, arrays,
@@ -315,6 +379,13 @@ namespace CodeGen.Translation.Process.Recipes
                     $"'{process.Name}' state '{state.Name}': one of the {any.Operands.Count} alternative " +
                     "guards adds no requirement to this recipe - either already established here, or " +
                     "naming an arrival this recipe cannot observe - so the step does not wait on it.");
+                // One alternative already holds, so the disjunction holds and none of its terms is a
+                // requirement. Each leaf was compiled in the sub-pass; this is what became of it.
+                foreach (var leaf in any.References())
+                    ctx.Coverage.Record(Leaf(process, state, edge, leaf,
+                        GuardLeafOutcome.AlreadyRequired,
+                        "one alternative of this guard is already met, so the disjunction is met and " +
+                        "none of its terms is a requirement"));
                 return;
             }
 
@@ -349,14 +420,17 @@ namespace CodeGen.Translation.Process.Recipes
             else rows[head].Terms = 0;
         }
 
-        private static void EmitCondition(VueOneComponent process, VueOneState state, VueOneCondition cond,
-            int gateCount, Ctx ctx, ProcessHandoffPlan plan, Dictionary<string, int> pos,
+        private static void EmitCondition(VueOneComponent process, VueOneState state, VueOneTransition edge,
+            VueOneCondition cond, int gateCount, Ctx ctx, ProcessHandoffPlan plan, Dictionary<string, int> pos,
             Dictionary<string, string> at, Dictionary<string, ActuatorGraph> graphs, List<Row> rows,
             RecipeArrays arrays, Dictionary<string, int> settledHere,
             Dictionary<string, List<OwnedMove>> owned, bool entryPhase, HashSet<string> armed)
         {
             var target = Resolve(cond, ctx.Twin);
-            if (IsProcess(target)) { EmitHandoff(process, state, cond, gateCount, target, ctx, plan, rows, arrays, armed); return; }
+            void Covered(GuardLeafOutcome outcome, string why) =>
+                ctx.Coverage.Record(Leaf(process, state, edge, cond, outcome, why));
+
+            if (IsProcess(target)) { EmitHandoff(process, state, edge, cond, gateCount, target, ctx, plan, rows, arrays, armed); return; }
 
             int id = SlotOf(target, ctx, process, state);
             int reached = StateNumberOf(cond, target, process, state, ctx);
@@ -364,7 +438,10 @@ namespace CodeGen.Translation.Process.Recipes
             if (IsSensor(target))
             {
                 int wait = ctx.SensorPresent.TryGetValue(target.Name.Trim(), out int p) ? p : reached;
-                if (!pos.TryGetValue(target.ComponentID, out int c) || c != wait)
+                if (pos.TryGetValue(target.ComponentID, out int already) && already == wait)
+                    Covered(GuardLeafOutcome.AlreadyRequired,
+                        $"this recipe already waits for '{target.Name}' at {wait}");
+                else
                 {
                     // Ask before waiting: a level already true before this PLC started is announced once and
                     // never again. The name is VERBATIM, not the ring key, as BREQ's claim test is
@@ -372,6 +449,7 @@ namespace CodeGen.Translation.Process.Recipes
                     rows.Add(Row.Cmd(target.Name.Trim(), 0, state.StateID));
                     rows.Add(Row.Wait(id, wait, state.StateID));
                     pos[target.ComponentID] = wait;
+                    Covered(GuardLeafOutcome.Waited, $"waits for '{target.Name}' at {wait}");
                 }
                 return;
             }
@@ -385,20 +463,49 @@ namespace CodeGen.Translation.Process.Recipes
             // so its arrival is proved by the owning command's WAIT and an observation adds nothing.
             if (ctx.ExecutionOf(target) != null)
             {
-                if (!Owns(owned, state, target))
-                    arrays.Warnings.Add(
-                        $"'{process.Name}' state '{state.Name}': condition '{cond.Name}' observes " +
-                        $"'{target.Name}', whose reported states are the CAT's handshake rather than the twin's " +
-                        "stop numbering, and this state does not own its movement; the step is sequenced by the " +
-                        "owning process instead.");
+                if (Owns(owned, state, target))
+                {
+                    Covered(GuardLeafOutcome.ProvedByOwnedCommand,
+                        $"this state commands '{target.Name}'; the command's arrival WAIT is the requirement");
+                    return;
+                }
+                arrays.Warnings.Add(
+                    $"'{process.Name}' state '{state.Name}': condition '{cond.Name}' observes " +
+                    $"'{target.Name}', whose reported states are the CAT's handshake rather than the twin's " +
+                    "stop numbering, and this state does not own its movement; the step is sequenced by the " +
+                    "owning process instead.");
+                // Its CAT reports a handshake, not the twin's stops, so nothing can wait for the stop this
+                // names. That is only harmless where THIS recipe already drove it: an earlier command's
+                // arrival WAIT is the requirement. Where the recipe never drives it, nothing here can
+                // observe the arrival at all, so the leaf would simply vanish - and generation stops.
+                if (!OwnsAny(owned, target) || !at.ContainsKey(target.ComponentID))
+                    throw Fail(process, state,
+                        $"condition '{cond.Name}' observes '{target.Name}', whose CAT reports its own " +
+                        "handshake rather than the twin's stop numbering, and this recipe never commands " +
+                        "it - so the arrival it names can be observed by nothing here. Command it in this " +
+                        "process, or state the requirement on something this recipe can see");
+                Covered(GuardLeafOutcome.AlreadyRequired,
+                    $"'{target.Name}' reports its CAT's handshake; an earlier command in this recipe " +
+                    "already proved the position");
                 return;
             }
 
             // The CAT reports stops, so a motion state is already sequenced by the driving command's WAIT.
-            if (!g.IsStop(named.StateID)) return;
+            if (!g.IsStop(named.StateID))
+            {
+                Covered(GuardLeafOutcome.ProvedByOwnedCommand,
+                    $"'{named.Name}' is a motion state, not a stop; the command driving '{target.Name}' " +
+                    "through it is what sequences the step");
+                return;
+            }
 
             int settledAt = Settled(target, g.StopNumber(named.StateID), process, state, ctx);
-            if (Restates(settledHere, target, settledAt)) return;
+            if (Restates(settledHere, target, settledAt))
+            {
+                Covered(GuardLeafOutcome.AlreadyRequired,
+                    $"a sibling term of the same guard already requires '{target.Name}' at {settledAt}");
+                return;
+            }
 
             // An entry gate on an actuator this process never moves must consume a FRESH arrival. A process
             // that owns a movement of it is not armed, which would deadlock. See Docs/PATCH_RATIONALES P-2.
@@ -413,10 +520,16 @@ namespace CodeGen.Translation.Process.Recipes
             }
             // Already established by a command in this recipe: that command's arrival WAIT proved it.
             if (at.TryGetValue(target.ComponentID, out var cur) && g.IsStop(cur) &&
-                Settled(target, g.StopNumber(cur), process, state, ctx) == settledAt) return;
+                Settled(target, g.StopNumber(cur), process, state, ctx) == settledAt)
+            {
+                Covered(GuardLeafOutcome.AlreadyRequired,
+                    $"an earlier command in this recipe already left '{target.Name}' at {settledAt}");
+                return;
+            }
 
             rows.Add(Row.Wait(id, settledAt, state.StateID));
             at[target.ComponentID] = named.StateID;
+            Covered(GuardLeafOutcome.Waited, $"waits for '{target.Name}' at {settledAt}");
         }
 
         // An actuator advanced by one process and driven home by another is not stranded, it is being held.
@@ -434,13 +547,10 @@ namespace CodeGen.Translation.Process.Recipes
                 {
                     var stop = g.FirstStopVia(t.DestinationStateID);
                     if (stop == null || !g.IsStop(stop)) continue;
-                    // Home is the stop the CAT settles to 0 -- the same protocol the commands themselves use.
-                    int number = g.StopNumber(stop);
-                    var proto = ctx.ProtocolOf(actuator);
-                    int homeSettled = proto.SettledFor(CatProtocol.Home);
-                    bool home = number == homeSettled ||
-                                (!proto.Has(CatProtocol.Work1) && number == 4 && homeSettled == 0);
-                    if (!home) continue;
+                    // Which stop the number names is the CAT's declaration, asked in one place.
+                    if (!string.Equals(ctx.ProtocolOf(actuator).StopFor(g.StopNumber(stop)),
+                            CatProtocol.Home, StringComparison.OrdinalIgnoreCase))
+                        continue;
                     foreach (var cond in t.Guard?.References()
                         ?? (IReadOnlyList<VueOneCondition>)Array.Empty<VueOneCondition>())
                     {
@@ -501,11 +611,11 @@ namespace CodeGen.Translation.Process.Recipes
             VueOneComponent process, VueOneState state, Ctx ctx)
         {
             var p = ctx.ProtocolOf(target);
-            foreach (var name in p.Command.Keys)
-                if (p.SettledFor(name) == stop) return (p.CommandFor(name), p.SettledFor(name));
-            // A twin may number its returned-complete stop 4; both mean home, and the CAT publishes 0.
-            if (p.Has(CatProtocol.Home) && stop == 4 && !p.Has(CatProtocol.Work1))
-                return (p.CommandFor(CatProtocol.Home), p.SettledFor(CatProtocol.Home));
+            // Which stop a twin State_Number names is the CAT's declaration, so one number naming a
+            // place the CAT passes through - a returned-complete rest it settles away from - reads the
+            // same here as it does in an interlock and in a timing leg.
+            var named = p.StopFor(stop);
+            if (named != null && p.Has(named)) return (p.CommandFor(named), p.SettledFor(named));
             throw Fail(process, state,
                 $"'{target.Name}' stop State_Number {stop} is not a position its CAT " +
                 $"({ctx.CatTypeOf(target)}) can be commanded to " +
@@ -542,15 +652,10 @@ namespace CodeGen.Translation.Process.Recipes
                     _next[s.StateID] = s.Transitions.OrderBy(t => t.Priority)
                         .Select(t => t.DestinationStateID).Where(d => !string.IsNullOrEmpty(d) && _byId.ContainsKey(d)).ToList();
 
-                var byPosition = new Dictionary<double, int>();
-                // Whether a stop is a place or a number is the CAT's protocol, asked in one place.
-                bool foldByGeometry = !ComponentType.IsProcess(c) && !ComponentType.IsSensor(c) &&
-                    ctx.ProtocolOrNull(c) is { StopsAreGeometric: true };
-                if (foldByGeometry)
-                    foreach (var s in c.States.Where(s => s.StaticState))
-                        if (!byPosition.ContainsKey(s.Position)) byPosition[s.Position] = s.StateNumber;
+                // Which number names a stop - and whether two states at one place are one stop - is
+                // the CAT's declaration, answered by the one owner of that question.
                 foreach (var s in c.States.Where(s => s.StaticState))
-                    _stop[s.StateID] = foldByGeometry ? byPosition[s.Position] : s.StateNumber;
+                    _stop[s.StateID] = Interlocks.ActuatorStateEncoding.CanonicalNumber(c, s, ctx.CatType);
 
                 StartId = (c.States.FirstOrDefault(s => s.InitialState) ?? c.States.FirstOrDefault())?.StateID ?? string.Empty;
             }
@@ -626,19 +731,43 @@ namespace CodeGen.Translation.Process.Recipes
 
         // A cross-process condition becomes a WAIT on the peer's OWN announced State_Number wherever the plan
         // says it reaches this state_table. It is NEVER silently replaced by an unrelated level.
-        private static void EmitHandoff(VueOneComponent process, VueOneState state, VueOneCondition cond,
-            int gateCount, VueOneComponent peer, Ctx ctx, ProcessHandoffPlan plan, List<Row> rows,
+        private static void EmitHandoff(VueOneComponent process, VueOneState state, VueOneTransition edge,
+            VueOneCondition cond, int gateCount, VueOneComponent peer, Ctx ctx, ProcessHandoffPlan plan, List<Row> rows,
             RecipeArrays arrays, HashSet<string> armed)
         {
-            if (SameName(peer, process)) return;                                   // self: the recipe is already here
-            var refState = PeerState(peer, cond, ctx) ?? throw Fail(process, state, $"condition '{cond.Name}' does not name a state of '{peer.Name}'");
-            if (IsInitialisationState(refState))
+            void Covered(GuardLeafOutcome outcome, string why) =>
+                ctx.Coverage.Record(Leaf(process, state, edge, cond, outcome, why));
+
+            if (SameName(peer, process))
             {
-                // A peer's Initialisation state asserts boot readiness, not the completion of a work cycle.
-                arrays.Warnings.Add(
-                    $"'{process.Name}' state '{state.Name}': condition '{cond.Name}' names the peer's " +
-                    "Initialisation state, treated as a readiness assertion rather than a runtime phase.");
-                return;
+                Covered(GuardLeafOutcome.SelfReference, "the recipe is already in the process it names");
+                return;                                                            // self: already here
+            }
+            var refState = PeerState(peer, cond, ctx) ?? throw Fail(process, state, $"condition '{cond.Name}' does not name a state of '{peer.Name}'");
+            if (refState.InitialState)
+            {
+                // A producer's ENTRY phase. What that MEANS is a deployment decision - boot readiness, or
+                // an ordinary phase to be waited for - and the two drive the plant differently, so it is
+                // declared rather than assumed. An undeclared deployment is refused here.
+                if (ctx.Handoff.PeerEntryPhase == Configuration.PeerEntryPhaseMeaning.Undeclared)
+                    throw Fail(process, state,
+                        $"condition '{cond.Name}' names the entry phase of '{peer.Name}', and this " +
+                        "deployment does not declare what a producer's entry phase means " +
+                        "(smc-rig.yml handoff.peerEntryPhase: readinessAssertion | runtimePhase). " +
+                        "Reading it as boot readiness and reading it as a runtime phase drive the plant " +
+                        "differently, so the compiler will not choose");
+                if (ctx.Handoff.PeerEntryPhase == Configuration.PeerEntryPhaseMeaning.ReadinessAssertion)
+                {
+                    arrays.Warnings.Add(
+                        $"'{process.Name}' state '{state.Name}': condition '{cond.Name}' names the peer's " +
+                        "Initialisation state, treated as a readiness assertion rather than a runtime phase.");
+                    Covered(GuardLeafOutcome.SatisfiedByDeclaration,
+                        "smc-rig.yml declares a producer's entry phase to be a boot-readiness assertion, " +
+                        "which the plant answers by having started");
+                    return;
+                }
+                // runtimePhase: fall through and compile it like any other phase, which then needs a
+                // transport that carries it - and is refused below where none exists.
             }
             if (!ctx.ProcessIdByName.TryGetValue(peer.Name.Trim(), out int peerId))
                 throw Fail(process, state, $"peer process '{peer.Name}' has no deployment id");
@@ -649,7 +778,7 @@ namespace CodeGen.Translation.Process.Recipes
                 // counts. Only the FIRST wait on a producer arms, though -- a producer announces its entry
                 // once per cycle, so re-arming would park a consumer forever on a second announcement that
                 // never comes.
-                var entry = EntryState(peer);
+                var entry = ctx.GraphOf(peer).Entry;
                 int done = refState.StateNumber;
                 bool armHere = armed.Add(peer.Name?.Trim() ?? string.Empty);
                 if (armHere)
@@ -663,55 +792,53 @@ namespace CodeGen.Translation.Process.Recipes
                             "completion could never be told apart from a slot that was merely never written");
                 }
                 rows.Add(Row.Wait(peerId, done, state.StateID));
+                Covered(GuardLeafOutcome.Waited,
+                    $"waits for '{peer.Name}' to announce phase {done} on a transport that reaches here");
                 return;
             }
 
-            // The announcement does not reach this controller. The material bridge reports material ARRIVING,
-            // so it may only stand for a handoff that is the SOLE gate of the transition, and only as a fresh
-            // deasserted->asserted edge so a level already TRUE at boot cannot manufacture a cycle.
-            if (ctx.MaterialBridgeId >= 0 && gateCount == 1)
+            // The announcement does not reach this controller. A CARRIER may stand in for it - but only
+            // where the deployment declares that the carrier's proposition and the phase's coincide on
+            // this plant. A carrier reports that MATERIAL ARRIVED; a phase reports that a PRODUCER GOT
+            // SOMEWHERE, and nothing in the model makes those the same statement.
+            var substitution = ctx.Handoff.CarrierFor(peer.Name, refState.Name);
+            if (substitution != null &&
+                ctx.CarrierSlots.TryGetValue(substitution.Carrier, out int carrierId))
             {
                 arrays.Warnings.Add(
                     $"'{process.Name}' state '{state.Name}': '{cond.Name}' has no process-state route to this " +
-                    $"controller; carried by the material sensor on the cross-controller segment as a fresh " +
-                    $"deasserted->asserted handoff.");
-                rows.Add(Row.Wait(ctx.MaterialBridgeId, ctx.MaterialBridgeDeasserted, state.StateID));
-                rows.Add(Row.Wait(ctx.MaterialBridgeId, ctx.MaterialBridgeAsserted, state.StateID));
-                return;
-            }
-
-            // ANDed with others, this process is already mid-cycle: the material arrived upstream, so demanding
-            // a second arrival would stall it. The siblings sequence the step and this term is reported.
-            if (gateCount > 1)
-            {
-                arrays.Warnings.Add(
-                    $"'{process.Name}' state '{state.Name}': condition '{cond.Name}' has no route to this " +
-                    $"controller; the step is sequenced by the other {gateCount - 1} condition(s) of the same " +
-                    "transition. Add a transported phase to the model if this term must be evaluated.");
+                    $"controller; carried by '{substitution.Carrier}' as a fresh deasserted->asserted " +
+                    $"handoff, declared because {substitution.Because}.");
+                // A fresh edge, so a level already TRUE at boot cannot manufacture a cycle.
+                rows.Add(Row.Wait(carrierId, substitution.Deasserted, state.StateID));
+                rows.Add(Row.Wait(carrierId, substitution.Asserted, state.StateID));
+                Covered(GuardLeafOutcome.Waited,
+                    $"waits for the declared carrier '{substitution.Carrier}' to go " +
+                    $"{substitution.Deasserted} -> {substitution.Asserted}");
                 return;
             }
 
             throw Fail(process, state,
                 $"condition '{cond.Name}' names state '{refState.Name}' of '{peer.Name}', which is not " +
                 "transported to this controller: no shared report ring, no process-phase cross-reference, " +
-                "and no material bridge is configured to carry it");
+                "and smc-rig.yml handoff.carriers declares nothing that stands for it. A term with no " +
+                "route is a requirement the plant would never evaluate" +
+                (gateCount > 1
+                    ? $", and the other {gateCount - 1} condition(s) of this transition do not make it " +
+                      "one - they are separate requirements, not a substitute for this one"
+                    : string.Empty));
         }
 
         // Cross-process conditions with each transport resolved. No cache, so nothing survives a generation.
         internal static ProcessHandoffPlan HandoffPlan(Ctx ctx) =>
-            ProcessHandoffPlan.Derive(
-                ctx.Twin, ctx.ProcessIdByName,
-                (producer, consumer) => SameRing(producer, consumer, ctx),
-                EntryState,
-                (producer, cond) => PeerState(producer, cond, ctx),
-                cond => TryResolve(cond, ctx.Twin),
-                IsProcess,
-                IsInitialisationState);
+            ProcessHandoffPlan.Derive(ctx.Twin, ctx.ProcessIdByName, ctx.Graphs,
+                (producer, consumer) => SameRing(producer, consumer, ctx));
 
-        private static void Serialize(VueOneComponent process, List<VueOneState> states, List<Row> rows,
-            Dictionary<string, int> firstRow, RecipeArrays arrays)
+        private static void Serialize(VueOneComponent process, CodeGen.Domain.Twin.ProcessGraph graph,
+            List<Row> rows, Dictionary<string, int> firstRow, RecipeArrays arrays)
         {
             int end = rows.Count;
+            var states = graph.Ordered;
             var byId = states.ToDictionary(s => s.StateID, s => s, StringComparer.OrdinalIgnoreCase);
 
             // Telemetry: a 1-based ordinal per declared state, from the twin's own declaration order so it is
@@ -726,14 +853,16 @@ namespace CodeGen.Translation.Process.Recipes
                 arrays.ProcessPhaseNames[i + 1] = s.Name ?? string.Empty;
             }
 
+            // The row a state hands control to: its successor's first row, skipping states that laid
+            // none down. The successor is the graph's answer, so this cannot spell it differently.
             int DestRow(string fromStateId)
             {
-                var dst = byId[fromStateId].Transitions.OrderBy(t => t.Priority).FirstOrDefault()?.DestinationStateID;
+                var next = graph.Successor(byId[fromStateId]);
                 int guard = 0;
-                while (!string.IsNullOrEmpty(dst) && byId.ContainsKey(dst) && guard++ <= states.Count)
+                while (next != null && guard++ <= states.Count)
                 {
-                    if (firstRow.TryGetValue(dst, out int r)) return r;   // preserves loops (back-edge -> earlier row)
-                    dst = byId[dst].Transitions.OrderBy(t => t.Priority).FirstOrDefault()?.DestinationStateID;
+                    if (firstRow.TryGetValue(next.StateID, out int r)) return r;   // a back-edge is a loop
+                    next = graph.Successor(next);
                 }
                 return end;   // terminal -> END
             }
@@ -763,7 +892,7 @@ namespace CodeGen.Translation.Process.Recipes
             arrays.CmdStateArr.Add(0);
             arrays.Wait1Id.Add(0);
             arrays.Wait1State.Add(0);
-            arrays.NextStep.Add(TerminalLoopsHome(states) ? 0 : end);
+            arrays.NextStep.Add(graph.IsEntry(graph.TerminalDestination) ? 0 : end);
             arrays.AltCount.Add(0);
             arrays.TermCount.Add(0);
             // END carries the last row's phase so the final publish does not report a phantom state 0.
@@ -771,24 +900,9 @@ namespace CodeGen.Translation.Process.Recipes
                 arrays.ProcessStateByRow.Count > 0 ? arrays.ProcessStateByRow[^1] : 0);
         }
 
-        private static bool TerminalLoopsHome(List<VueOneState> states)
-        {
-            var dst = states.Count == 0 ? null : states[^1].Transitions.OrderBy(t => t.Priority).FirstOrDefault()?.DestinationStateID;
-            return states.Any(s => s.StateID == dst && IsInitialisationState(s));
-        }
 
-        private static VueOneState? EntryState(VueOneComponent process)
-        {
-            var ordered = OrderStatesByTransitionChain(process.States);
-            return ordered.Count > 0 ? ordered[0] : null;
-        }
-
-        // The peer state a condition names (by StateID, else by the name after the slash).
-        private static VueOneState? PeerState(VueOneComponent peer, VueOneCondition cond, Ctx ctx)
-        {
-            var c = ctx.Twin.ById(peer.ComponentID);
-            return (c?.StateById(cond.ID) ?? c?.StateByName(After(cond.Name)))?.Source;
-        }
+        private static VueOneState? PeerState(VueOneComponent peer, VueOneCondition cond, Ctx ctx) =>
+            ctx.Twin.StateOf(peer, cond);
 
         private static int SlotOf(VueOneComponent target, Ctx ctx, VueOneComponent process, VueOneState state)
         {
@@ -812,19 +926,14 @@ namespace CodeGen.Translation.Process.Recipes
             TryResolve(cond, twin) ?? throw new InvalidOperationException(
                 $"[Compile] condition '{cond.Name}' (ComponentID '{cond.ComponentID}') resolves to no component.");
 
-        private static VueOneComponent? TryResolve(VueOneCondition cond, CodeGen.Domain.Twin.TwinModel twin)
-        {
-            if (!string.IsNullOrWhiteSpace(cond.ComponentID)) return twin.ById(cond.ComponentID)?.Source;
-            var name = cond.Name?.IndexOf('/') is int i and >= 0 ? cond.Name.Substring(0, i).Trim() : cond.Name?.Trim();
-            return twin.ByName(name)?.Source;
-        }
+        private static VueOneComponent? TryResolve(VueOneCondition cond, CodeGen.Domain.Twin.TwinModel twin) =>
+            twin.ComponentOf(cond);
 
         private static bool IsProcess(VueOneComponent? c) => ComponentType.IsProcess(c);
         private static bool IsSensor(VueOneComponent c) => ComponentType.IsSensor(c);
         private static bool SameName(VueOneComponent a, VueOneComponent b) => string.Equals(a.Name?.Trim(), b.Name?.Trim(), StringComparison.OrdinalIgnoreCase);
         private static bool SameRing(VueOneComponent a, VueOneComponent b, Ctx ctx) =>
             ctx.Rings.SameDomain(a.Name, b.Name);
-        private static string After(string? s) => string.IsNullOrEmpty(s) ? string.Empty : (s.LastIndexOf('/') is int i and >= 0 ? s.Substring(i + 1) : s);
 
         private static InvalidOperationException Fail(VueOneComponent process, VueOneState? state, string why) =>
             new($"[Compile] '{process.Name}'{(state == null ? "" : $" state '{state.Name}'")}: {why}.");
