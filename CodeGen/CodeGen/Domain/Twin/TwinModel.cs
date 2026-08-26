@@ -72,6 +72,28 @@ namespace CodeGen.Domain.Twin
             string.IsNullOrWhiteSpace(name) ? null
                 : _byName.TryGetValue(name.Trim(), out var c) ? c : null;
 
+        // WHICH COMPONENT a condition names. By ComponentID where the model gives one, else by the name
+        // before the slash - which is how VueOne writes a reference. One owner, so two readers cannot
+        // resolve the same reference to two different components.
+        public VueOneComponent? ComponentOf(VueOneCondition? condition)
+        {
+            if (condition == null) return null;
+            if (!string.IsNullOrWhiteSpace(condition.ComponentID)) return ById(condition.ComponentID)?.Source;
+            var name = condition.Name?.IndexOf('/') is int i and >= 0
+                ? condition.Name.Substring(0, i).Trim() : condition.Name?.Trim();
+            return ByName(name)?.Source;
+        }
+
+        // WHICH STATE of that component it names: by StateID, else by the name after the slash.
+        public VueOneState? StateOf(VueOneComponent? owner, VueOneCondition? condition)
+        {
+            if (owner == null || condition == null) return null;
+            var c = ById(owner.ComponentID);
+            var after = condition.Name?.LastIndexOf('/') is int i and >= 0
+                ? condition.Name.Substring(i + 1) : condition.Name;
+            return (c?.StateById(condition.ID) ?? c?.StateByName(after))?.Source;
+        }
+
         // A reference that does not close is a model error, not an absence: the guard would otherwise
         // be dropped without a word.
         internal TwinRef? Resolve(VueOneCondition? condition, string site, List<string> problems)
