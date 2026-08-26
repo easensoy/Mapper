@@ -16,11 +16,11 @@ namespace CodeGen.Translation.Interlocks
         public const int Home = 0;
 
         public static int Settled(VueOneComponent? source, int stateNumber,
-            IReadOnlyDictionary<string, string> catTypes)
+            IReadOnlyDictionary<string, string> catTypes, Mapping.TemplateIndex manifest)
         {
             if (!ComponentType.IsActuator(source)) return stateNumber;
             if (!catTypes.TryGetValue((source!.Name ?? string.Empty).Trim(), out var cat)) return stateNumber;
-            var protocol = TemplateManifest.ProtocolOrNull(cat);
+            var protocol = manifest.ProtocolOrNull(cat);
             var stop = protocol?.StopFor(stateNumber);
             // A number the CAT gives no stop is a motion state or outside its vocabulary; either way it
             // is not a rule's business and is left exactly as the twin wrote it.
@@ -34,16 +34,16 @@ namespace CodeGen.Translation.Interlocks
         // Which of the two it is, is the CAT's declaration (StopsAreGeometric), so it is asked here
         // rather than decided again by every pass that needs a stop.
         public static int StopAt(VueOneComponent? source, VueOneState state,
-            IReadOnlyDictionary<string, string> catTypes) =>
-            Settled(source, CanonicalNumber(source, state, catTypes), catTypes);
+            IReadOnlyDictionary<string, string> catTypes, Mapping.TemplateIndex manifest) =>
+            Settled(source, CanonicalNumber(source, state, catTypes, manifest), catTypes, manifest);
 
         // The number the twin gives the FIRST state declared at this place. Under a geometric CAT two
         // states at one position are one stop, so they must resolve to one number or a rule written
         // against one branch would not match the other.
         public static int CanonicalNumber(VueOneComponent? source, VueOneState state,
-            IReadOnlyDictionary<string, string> catTypes)
+            IReadOnlyDictionary<string, string> catTypes, Mapping.TemplateIndex manifest)
         {
-            if (source == null || !Geometric(source, catTypes)) return state.StateNumber;
+            if (source == null || !Geometric(source, catTypes, manifest)) return state.StateNumber;
             var first = source.States
                 .FirstOrDefault(s => s.StaticState && s.Position == state.Position);
             return first?.StateNumber ?? state.StateNumber;
@@ -53,11 +53,11 @@ namespace CodeGen.Translation.Interlocks
         // The CAT is the one the PLAN selected, read from the same map every other pass reads, so this
         // cannot resolve a component to a different CAT than the rest of the run does.
         public static bool Geometric(VueOneComponent? source,
-            IReadOnlyDictionary<string, string> catTypes)
+            IReadOnlyDictionary<string, string> catTypes, Mapping.TemplateIndex manifest)
         {
             if (!ComponentType.IsActuator(source)) return false;
             return catTypes.TryGetValue((source!.Name ?? string.Empty).Trim(), out var cat)
-                   && TemplateManifest.ProtocolOrNull(cat) is { StopsAreGeometric: true };
+                   && manifest.ProtocolOrNull(cat) is { StopsAreGeometric: true };
         }
     }
 }
