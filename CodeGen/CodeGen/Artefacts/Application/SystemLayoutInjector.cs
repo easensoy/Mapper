@@ -225,24 +225,24 @@ namespace CodeGen.Translation
             EmitInfrastructure(builder, ctx, role => role == "areaTerminator");
 
             // Embedded MQTT_PUBLISH binds to a connection by matching ConnectionID value (no wire); gated so output is unchanged when off.
-            if (config != null && config.Paths.MqttPublishEnabled)
+            if (config != null && config.Telemetry.PublishEnabled)
             {
-                string brokerUrl = config.Paths.MqttBrokerUrl;
+                string brokerUrl = config.Telemetry.BrokerUrl;
                 // Scheme follows MqttSecureTls so it can't contradict the mode: insecure→mqtt:// (needs BX1 "Insecure Application", else RC101); secure→mqtts:// (needs a TLS broker, else RC100).
-                string mqttScheme = config.Paths.MqttSecureTls ? "mqtts" : "mqtt";
+                string mqttScheme = config.Telemetry.SecureTls ? "mqtts" : "mqtt";
                 brokerUrl = System.Text.RegularExpressions.Regex.Replace(
                     brokerUrl, @"^[A-Za-z][A-Za-z0-9+.\-]*://", mqttScheme + "://");
 
                 // One MQTT_CONNECTION per PLC: UNIQUE ClientIdentifier (mosquitto evicts duplicate ids), shared ConnectionID so each resource's embedded MqttPub binds locally.
                 void InjectMqttConn(string fbName, string connectionId, string clientIdentifier, int x, int y)
                 {
-                    if (config.Paths.UseTelemetryCat)
+                    if (config.Telemetry.UseTelemetryCat)
                     {
                         // Telemetry composite wraps the MQTT_CONNECTION with the same ConnectionID, so the embedded MqttPub still binds.
                         var cfgLit = Iec61499Literal.FormatTelemetryConfig(
                             true, connectionId, brokerUrl, clientIdentifier,
-                            config.Paths.MqttSecureTls ? config.Paths.MqttValidateCert : 0,
-                            config.Paths.MqttSecureTls ? (config.Paths.MqttCaCert ?? string.Empty) : string.Empty);
+                            config.Telemetry.SecureTls ? config.Telemetry.ValidateCert : 0,
+                            config.Telemetry.SecureTls ? (config.Telemetry.CaCert ?? string.Empty) : string.Empty);
                         var wrapped = TemplateManifest.ForInfraRole("mqttConnectionWrapped");
                         builder.AddFB(FBIdGenerator.GenerateFBId(fbName), fbName,
                             wrapped.Name, TemplateManifest.NamespaceOf(wrapped), x, y,
@@ -256,18 +256,18 @@ namespace CodeGen.Translation
                         ["URL"] = Iec61499Literal.FormatString(brokerUrl),
                         ["ClientIdentifier"] = Iec61499Literal.FormatString(clientIdentifier),
                     };
-                    if (config.Paths.MqttSecureTls)
+                    if (config.Telemetry.SecureTls)
                     {
-                        p["ValidateCert"] = config.Paths.MqttValidateCert.ToString();
-                        if (!string.IsNullOrWhiteSpace(config.Paths.MqttCaCert))
-                            p["CACert"] = Iec61499Literal.FormatString(config.Paths.MqttCaCert);
+                        p["ValidateCert"] = config.Telemetry.ValidateCert.ToString();
+                        if (!string.IsNullOrWhiteSpace(config.Telemetry.CaCert))
+                            p["CACert"] = Iec61499Literal.FormatString(config.Telemetry.CaCert);
                     }
                     var raw = TemplateManifest.ForInfraRole("mqttConnection");
                     builder.AddFB(FBIdGenerator.GenerateFBId(fbName), fbName,
                         raw.Name, TemplateManifest.NamespaceOf(raw), x, y, p);
                 }
 
-                bool tele = config.Paths.UseTelemetryCat;
+                bool tele = config.Telemetry.UseTelemetryCat;
 
                 // One connection per resource that this run emits, in telemetry.yml's declaration order -
                 // which is the order they land on the canvas. A resource whose publishers have no local
@@ -299,7 +299,7 @@ namespace CodeGen.Translation
                     // The head-of-band row, which is what layout.yml calls Floating: above every
                     // station and clear of them. Read, so it cannot drift from the roster's own rows.
                     int y = row?.Y ?? ctx.Layout.RowY(nameof(LayoutRow.Floating));
-                    InjectMqttConn(name, config.Paths.MqttConnectionName, c.Client, x, y);
+                    InjectMqttConn(name, config.Telemetry.ConnectionName, c.Client, x, y);
                 }
 
                 // Wired in the order the artefact carries: every connection the base topology already
@@ -322,7 +322,7 @@ namespace CodeGen.Translation
                 report.Missing.Add(
                     $"[MQTT] {(tele ? "Telemetry" : "MQTT_CONNECTION")} injected per resource — " +
                     string.Join(" + ", connections.Select(c => $"{NameOf(c)} ({c.Client})")) +
-                    $", shared ConnectionID={config.Paths.MqttConnectionName} so each resource's embedded " +
+                    $", shared ConnectionID={config.Telemetry.ConnectionName} so each resource's embedded " +
                     $"MqttPub binds locally; URL={brokerUrl}.");
             }
 
@@ -376,7 +376,7 @@ namespace CodeGen.Translation
 
             // Telemetry sidecar: lets a subscriber render the published phase ordinal as the twin's own
             // state name. Written outside the solution and read by nothing in the generated project.
-            if (config != null && config.Paths.MqttPublishEnabled && phaseNames.Count > 0)
+            if (config != null && config.Telemetry.PublishEnabled && phaseNames.Count > 0)
             {
                 var mapPath = ProcessPhaseMapEmitter.Emit(
                     config, phaseNames, CodeGen.Services.MapperLogger.Info);
@@ -501,7 +501,7 @@ namespace CodeGen.Translation
             // Recipe arrays travel as Process1_Generic Parameter values; withRecipe=false emits only the
             // two scalars and returns a null Recipe.
             var config = ctx.Cfg;
-            bool emitProcessTelemetry = config.Paths.MqttPublishEnabled;
+            bool emitProcessTelemetry = config.Telemetry.PublishEnabled;
             int? receiverSlot = ctx.Handoffs.ReceiverSlotOf(process.Name);
             var outer = new Dictionary<string, string>
             {
