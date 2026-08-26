@@ -1,6 +1,6 @@
-namespace CodeGen.Translation.Process
+﻿namespace CodeGen.Translation.Process
 {
-    internal static class StepType
+    public static class StepType
     {
         public const int Cmd = 1;
         public const int Wait = 2;
