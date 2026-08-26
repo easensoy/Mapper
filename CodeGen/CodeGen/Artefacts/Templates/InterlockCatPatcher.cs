@@ -7,6 +7,7 @@ using System.IO;
 using CodeGen.Configuration;
 using CodeGen.Translation.Interlocks;
 
+using CodeGen.Mapping;
 namespace CodeGen.Services
 {
     // Deploy-time interlock patches, gated by interlock.yaml. No other FBT patching lives here.
@@ -109,7 +110,7 @@ namespace CodeGen.Services
         // The same fold on the evaluator, plus rewriting its algorithms to Target.Work1/Work2/Home.
         internal static void NormalizeCommonInterlockEvaluatorTargets(
             FbtEditScope scope, DeployResult result)
-            => EditDeployedFbt(scope, "CommonInterlockEvaluator.fbt", "CommonInterlockEvaluator Target normalize failed", result,
+            => EditDeployedFbt(scope, CodeGen.Mapping.TemplateManifest.FbtOf("interlockEvaluator"), "CommonInterlockEvaluator Target normalize failed", result,
                 (doc, root, ns, fbt) =>
             {
                 var iface = root.Element(ns + "InterfaceList");
@@ -288,7 +289,7 @@ namespace CodeGen.Services
         // The same collapse on the evaluator, across InputVars, event With lists AND the Evaluate ST.
         internal static void NormalizeCommonInterlockEvaluatorRules(
             FbtEditScope scope, DeployResult result)
-            => EditDeployedFbt(scope, "CommonInterlockEvaluator.fbt", "CommonInterlockEvaluator RuleTable normalize failed", result,
+            => EditDeployedFbt(scope, CodeGen.Mapping.TemplateManifest.FbtOf("interlockEvaluator"), "CommonInterlockEvaluator RuleTable normalize failed", result,
                 (doc, root, ns, fbt) =>
             {
 
@@ -380,14 +381,14 @@ namespace CodeGen.Services
                 DeployInterlockRuleDatatype(cfg, scope, result);
                 DeployInterlockTableDatatype(cfg, scope, capacity, result);
             }
-            NormalizeFiveStateRuleArrays(scope, "Five_State_Actuator_CAT.fbt", "InterlockManager", result);
-            NormalizeFiveStateRuleArrays(scope, "Seven_State_Actuator_Centre_Home_CAT.fbt", "CommonInterlockManager", result);
+            NormalizeFiveStateRuleArrays(scope, CodeGen.Mapping.TemplateManifest.FbtOf("fiveStateCat"), "InterlockManager", result);
+            NormalizeFiveStateRuleArrays(scope, CodeGen.Mapping.TemplateManifest.FbtOf("centreHomeCat"), "CommonInterlockManager", result);
             NormalizeCommonInterlockEvaluatorRules(scope, result);
 
             DeployTargetStatesDatatype(cfg, scope, result);
-            NormalizeTargetStates(scope, "Five_State_Actuator_CAT.fbt", "InterlockManager",
+            NormalizeTargetStates(scope, CodeGen.Mapping.TemplateManifest.FbtOf("fiveStateCat"), "InterlockManager",
                 new[] { "TargetWork1State", "TargetHomeState" }, result);
-            NormalizeTargetStates(scope, "Seven_State_Actuator_Centre_Home_CAT.fbt", "CommonInterlockManager",
+            NormalizeTargetStates(scope, CodeGen.Mapping.TemplateManifest.FbtOf("centreHomeCat"), "CommonInterlockManager",
                 new[] { "TargetWork1State", "TargetWork2State", "TargetHomeState" }, result);
             NormalizeCommonInterlockEvaluatorTargets(scope, result);
         }
@@ -421,7 +422,7 @@ namespace CodeGen.Services
         static List<string> FindInterlockInterfaceMismatches(FbtEditScope scope)
         {
             var mismatches = new List<string>();
-            var evalPath = FindDeployedFbt(scope.Root, "CommonInterlockEvaluator.fbt");
+            var evalPath = FindDeployedFbt(scope.Root, CodeGen.Mapping.TemplateManifest.FbtOf("interlockEvaluator"));
             if (string.IsNullOrEmpty(evalPath)) return mismatches;   // absent -> nothing to check
             HashSet<string> evalInputs;
             try
@@ -436,8 +437,8 @@ namespace CodeGen.Services
             if (evalInputs.Count == 0) return mismatches;
 
             foreach (var (cat, fb) in new[] {
-                ("Five_State_Actuator_CAT.fbt", "InterlockManager"),
-                ("Seven_State_Actuator_Centre_Home_CAT.fbt", "CommonInterlockManager") })
+                (CodeGen.Mapping.TemplateManifest.FbtOf("fiveStateCat"), "InterlockManager"),
+                (CodeGen.Mapping.TemplateManifest.FbtOf("centreHomeCat"), "CommonInterlockManager") })
             {
                 var catPath = FindDeployedFbt(scope.Root, cat);
                 if (string.IsNullOrEmpty(catPath)) continue;
