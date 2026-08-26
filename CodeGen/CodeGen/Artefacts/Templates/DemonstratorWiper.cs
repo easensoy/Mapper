@@ -41,8 +41,8 @@ namespace CodeGen.Services
         // catalogue rather than restated: a CAT extracts into a folder of its own name, so the set of
         // folders the Mapper owns IS the set of CATs it declares. A second hand-kept list here could
         // only fall behind - which is how a retired type survives a wipe and gets compiled.
-        static IEnumerable<string> FoldersToDelete =>
-            CodeGen.Mapping.TemplateManifest.Types
+        static IEnumerable<string> FoldersToDelete(CodeGen.Mapping.TemplateIndex manifest) =>
+            manifest.Types
                 .Where(t => t.Kind is ArtefactKind.Cat or ArtefactKind.HmiCat)
                 .Select(t => t.Name)
                 .Concat(RetiredTypeFolders)
@@ -95,7 +95,7 @@ namespace CodeGen.Services
                 iec, line => report.Steps.Add(line));
 
             DeleteFlatTypeFiles(iec, report);
-            DeleteFolders(iec, report);
+            DeleteFolders(iec, report, cfg.Manifest);
             StripDfbproj(iec, report);
             DeleteRepoRootScratch(demonstratorRepoRoot, report);
 
@@ -209,10 +209,10 @@ namespace CodeGen.Services
             report.Steps.Add($"Deleted {n} flat FB-type file(s) at IEC61499/ root");
         }
 
-        static void DeleteFolders(string iecDir, WipeReport report)
+        static void DeleteFolders(string iecDir, WipeReport report, CodeGen.Mapping.TemplateIndex manifest)
         {
             int n = 0;
-            foreach (var folder in FoldersToDelete)
+            foreach (var folder in FoldersToDelete(manifest))
             {
                 var p = Path.Combine(iecDir, folder);
                 if (!Directory.Exists(p)) continue;
