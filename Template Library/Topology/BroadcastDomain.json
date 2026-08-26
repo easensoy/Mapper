@@ -1,0 +1,7 @@
+{
+  "uuid": "{{Uuid}}",
+  "identifier": "{{Identifier}}",
+  "ipV4Address": "{{SubnetAddress}}",
+  "ipV4Mask": "{{SubnetMask}}",
+  "ipV4Gateway": "{{Gateway}}"
+}
