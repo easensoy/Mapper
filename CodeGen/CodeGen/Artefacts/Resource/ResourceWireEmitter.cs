@@ -39,7 +39,7 @@ namespace CodeGen.Devices.Core
                 report.Missing.Add($"[Wire][{plan.Label}] skipped, EAE project root not derivable");
                 return;
             }
-            var sysdev = EaeProjectLayout.FindSysdevByDeviceType(eaeRoot, TargetRegistry.Of(plc).DeviceType);
+            var sysdev = EaeProjectLayout.FindSysdevByDeviceType(eaeRoot, ctx.Targets.Of(plc).DeviceType);
             var sysres = sysdev == null ? null : EaeProjectLayout.FindSysresFor(sysdev);
             if (sysres == null)
             {
@@ -104,7 +104,7 @@ namespace CodeGen.Devices.Core
                 }
 
                 var recipeSyncCount = SysresFbMirror.SyncProcessRecipesFromSyslay(
-                    cfg.Paths.ActiveSyslayPath, doc);
+                    cfg.Paths.ActiveSyslayPath, doc, cfg.Manifest);
                 if (recipeSyncCount > 0)
                     report.Missing.Add(
                         $"[Wire][{tag}] synced {recipeSyncCount} Process recipe(s) from syslay to sysres");
@@ -175,7 +175,7 @@ namespace CodeGen.Devices.Core
                 var graph = ResourceWiringPlanner.For(ctx, plan.Plc, ChainOrder.Resource);
                 bool Here(string? name) => Present(name, byName);
 
-                var eventWires = TargetBootstrap.BringUp.Select(w => new Wire(w.Source, w.Destination)).ToList();
+                var eventWires = ctx.Targets.BringUp.Select(w => new Wire(w.Source, w.Destination)).ToList();
                 var initChain = graph.InitChain.Where(Here).ToList();
                 for (int i = 0; i < initChain.Count - 1; i++)
                     eventWires.Add(new Wire($"{initChain[i]}.INITO", $"{initChain[i + 1]}.INIT"));
@@ -268,7 +268,7 @@ namespace CodeGen.Devices.Core
 
             int dx = 0, dy = 0;
             // A boot FB is emitted under its declared role name, so the roles ARE the boot instances.
-            var bootRoles = TargetBootstrap.BootRoles;
+            var bootRoles = ctx.Targets.BootRoles;
             if (translateToOrigin)
             {
                 var components = present.Where(kv => !bootRoles.Contains(kv.Key)).ToList();
@@ -343,10 +343,10 @@ namespace CodeGen.Devices.Core
         // A target that RECEIVES relocated components draws no zone of its own: the components came from
         // another target's station and are drawn inside that station's frame, which is the target hosting
         // the same station without receiving anything.
-        private static PlcAssignment FrameOwner(PlcAssignment bucket)
+        private static PlcAssignment FrameOwner(PlcAssignment bucket, Mapping.TargetIndex targets)
         {
-            return TargetRegistry.IsRegistered(bucket)
-                ? RingHost.Of(TargetRegistry.Of(bucket))
+            return targets.IsRegistered(bucket)
+                ? targets.RingHostOf(targets.Of(bucket))
                 : bucket;
         }
 
@@ -376,7 +376,7 @@ namespace CodeGen.Devices.Core
                 if (owner == null) continue;
                 // Membership uses BucketFor, the same partition as the FB mirror.
                 var inZone = fbs.Where(f =>
-                    FrameOwner(SysresFbMirror.BucketFor(f.Name, ctx.Allocation, ctx.Cfg)) == owner.Plc).ToList();
+                    FrameOwner(SysresFbMirror.BucketFor(f.Name, ctx.Allocation, ctx.Cfg), ctx.Targets) == owner.Plc).ToList();
                 if (inZone.Count == 0) continue;
 
                 double minX = inZone.Min(f => f.X);
