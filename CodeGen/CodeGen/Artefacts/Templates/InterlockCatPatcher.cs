@@ -12,34 +12,29 @@ namespace CodeGen.Services
     // Deploy-time interlock patches, gated by interlock.yaml. No other FBT patching lives here.
     internal static class InterlockCatPatcher
     {
-        internal static void DeployInterlockRuleDatatype(MapperConfig cfg, string eaeProjectDir, DeployResult result)
-            => DeployDatatype(eaeProjectDir, "InterlockRule",
+        internal static void DeployInterlockRuleDatatype(Configuration.CompilerConfiguration cfg, FbtEditScope scope, DeployResult result)
+            => DeployDatatype(scope, "InterlockRule",
                 TemplateDocument.Load(cfg, @"DataType\InterlockRule.dt"), result);
 
         internal static void DeployInterlockTableDatatype(
-            MapperConfig cfg, string eaeProjectDir, int capacity, DeployResult result)
-            => DeployDatatype(eaeProjectDir, "InterlockTable",
+            Configuration.CompilerConfiguration cfg, FbtEditScope scope, int capacity, DeployResult result)
+            => DeployDatatype(scope, "InterlockTable",
                 TemplateDocument.Load(cfg, @"DataType\InterlockTable.dt", new Dictionary<string, string>
                 {
                     ["RuleArraySize"] = capacity.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 }), result, $"(rule capacity {capacity})");
 
-        internal static void DeployTargetStatesDatatype(MapperConfig cfg, string eaeProjectDir, DeployResult result)
-            => DeployDatatype(eaeProjectDir, "TargetStates",
+        internal static void DeployTargetStatesDatatype(Configuration.CompilerConfiguration cfg, FbtEditScope scope, DeployResult result)
+            => DeployDatatype(scope, "TargetStates",
                 TemplateDocument.Load(cfg, @"DataType\TargetStates.dt"), result, "(encapsulated target input)");
 
-        static readonly Dictionary<string, string> TargetVarToField = new()
-        {
-            ["TargetWork1State"] = "Work1",
-            ["TargetWork2State"] = "Work2",
-            ["TargetHomeState"]  = "Home",
-        };
+
         // Fold an actuator CAT's target InputVars into one Target : TargetStates, which is the shape the
         // evaluator takes and the shape the plan writes.
         internal static void NormalizeTargetStates(
-            string eaeProjectDir, string catFileName, string interlockFbName,
+            FbtEditScope scope, string catFileName, string interlockFbName,
             string[] targetInputs, DeployResult result)
-            => EditDeployedFbt(eaeProjectDir, catFileName, $"{catFileName} Target normalize failed", result,
+            => EditDeployedFbt(scope, catFileName, $"{catFileName} Target normalize failed", result,
                 (doc, root, ns, fbt) =>
             {
                 var iface = root.Element(ns + "InterfaceList");
@@ -104,7 +99,7 @@ namespace CodeGen.Services
 
                 if (changed)
                 {
-                    SaveXmlWithRetry(doc, fbt);
+                    SaveXmlWithRetry(doc, fbt, scope.Retries);
                     var catLabel = Path.GetFileNameWithoutExtension(catFileName);
                     result.PatchesApplied.Add($"{catLabel}: target states -> Target : TargetStates");
                     MapperLogger.Info($"[Deploy] {catLabel} Target normalize");
@@ -113,8 +108,8 @@ namespace CodeGen.Services
 
         // The same fold on the evaluator, plus rewriting its algorithms to Target.Work1/Work2/Home.
         internal static void NormalizeCommonInterlockEvaluatorTargets(
-            string eaeProjectDir, DeployResult result)
-            => EditDeployedFbt(eaeProjectDir, "CommonInterlockEvaluator.fbt", "CommonInterlockEvaluator Target normalize failed", result,
+            FbtEditScope scope, DeployResult result)
+            => EditDeployedFbt(scope, "CommonInterlockEvaluator.fbt", "CommonInterlockEvaluator Target normalize failed", result,
                 (doc, root, ns, fbt) =>
             {
                 var iface = root.Element(ns + "InterfaceList");
@@ -173,12 +168,19 @@ namespace CodeGen.Services
 
                 if (changed)
                 {
-                    SaveXmlWithRetry(doc, fbt);
+                    SaveXmlWithRetry(doc, fbt, scope.Retries);
                     result.PatchesApplied.Add(
                         "CommonInterlockEvaluator: target states -> Target : TargetStates + algorithms");
                     MapperLogger.Info("[Deploy] CommonInterlockEvaluator Target normalize");
                 }
             }, notFoundNote: "CommonInterlockEvaluator.fbt not found; Target normalize skipped.");
+
+        static readonly Dictionary<string, string> TargetVarToField = new()
+        {
+            ["TargetWork1State"] = "Work1",
+            ["TargetWork2State"] = "Work2",
+            ["TargetHomeState"]  = "Home",
+        };
 
         // Order matches struct field order.
         static readonly string[] RuleArrayNames =
@@ -194,9 +196,9 @@ namespace CodeGen.Services
 
         // Collapse an actuator CAT's rule arrays into the one RuleTable the evaluator takes.
         internal static void NormalizeFiveStateRuleArrays(
-            string eaeProjectDir, string catFileName, string interlockFbName,
+            FbtEditScope scope, string catFileName, string interlockFbName,
             DeployResult result)
-            => EditDeployedFbt(eaeProjectDir, catFileName, $"{catFileName} RuleTable normalize failed", result,
+            => EditDeployedFbt(scope, catFileName, $"{catFileName} RuleTable normalize failed", result,
                 (doc, root, ns, fbt) =>
             {
 
@@ -275,7 +277,7 @@ namespace CodeGen.Services
 
                 if (changed)
                 {
-                    SaveXmlWithRetry(doc, fbt);
+                    SaveXmlWithRetry(doc, fbt, scope.Retries);
                     var catLabel = Path.GetFileNameWithoutExtension(catFileName);
                     result.PatchesApplied.Add(
                         $"{catLabel}: rule arrays -> RuleTable : InterlockTable");
@@ -285,8 +287,8 @@ namespace CodeGen.Services
 
         // The same collapse on the evaluator, across InputVars, event With lists AND the Evaluate ST.
         internal static void NormalizeCommonInterlockEvaluatorRules(
-            string eaeProjectDir, DeployResult result)
-            => EditDeployedFbt(eaeProjectDir, "CommonInterlockEvaluator.fbt", "CommonInterlockEvaluator RuleTable normalize failed", result,
+            FbtEditScope scope, DeployResult result)
+            => EditDeployedFbt(scope, "CommonInterlockEvaluator.fbt", "CommonInterlockEvaluator RuleTable normalize failed", result,
                 (doc, root, ns, fbt) =>
             {
 
@@ -364,7 +366,7 @@ namespace CodeGen.Services
 
                 if (changed)
                 {
-                    SaveXmlWithRetry(doc, fbt);
+                    SaveXmlWithRetry(doc, fbt, scope.Retries);
                     result.PatchesApplied.Add("CommonInterlockEvaluator: 4 arrays + RuleCount -> RuleTable : InterlockTable + Evaluate ST (encapsulated)");
                     MapperLogger.Info("[Deploy] CommonInterlockEvaluator RuleTable normalize: struct");
                 }
@@ -372,8 +374,8 @@ namespace CodeGen.Services
 
         // Restores the scalar target InputVars as wired inputs, stripping any baked-on params.
         internal static void NormalizeFiveStateInterlockConstants(
-            string eaeProjectDir, DeployResult result)
-            => EditDeployedFbt(eaeProjectDir, "Five_State_Actuator_CAT.fbt", "Five_State_Actuator_CAT interlock-constant normalize failed", result,
+            FbtEditScope scope, DeployResult result)
+            => EditDeployedFbt(scope, "Five_State_Actuator_CAT.fbt", "Five_State_Actuator_CAT interlock-constant normalize failed", result,
                 (doc, root, ns, fbt) =>
             {
                 var consts = new[]
@@ -456,7 +458,7 @@ namespace CodeGen.Services
 
                 if (changed)
                 {
-                    SaveXmlWithRetry(doc, fbt);
+                    SaveXmlWithRetry(doc, fbt, scope.Retries);
                     result.PatchesApplied.Add("Five_State_Actuator_CAT: interlock constants restored as wired inputs (hardware interface)");
                     MapperLogger.Info(
                         "[Deploy] Five_State_Actuator_CAT interlock-constant normalize: wired inputs restored");
@@ -469,37 +471,37 @@ namespace CodeGen.Services
             }, notFoundNote: "Five_State_Actuator_CAT.fbt not found; interlock-constant normalize skipped.");
 
         // One unit: both actuator CATs and the shared evaluator must flip TOGETHER.
-        internal static void ApplyInterlockNormalizers(MapperConfig cfg,
-            string eaeProjectDir, int capacity, DeployResult result)
+        internal static void ApplyInterlockNormalizers(Configuration.CompilerConfiguration cfg,
+            FbtEditScope scope, int capacity, DeployResult result)
         {
             {
-                DeployInterlockRuleDatatype(cfg, eaeProjectDir, result);
-                DeployInterlockTableDatatype(cfg, eaeProjectDir, capacity, result);
+                DeployInterlockRuleDatatype(cfg, scope, result);
+                DeployInterlockTableDatatype(cfg, scope, capacity, result);
             }
-            NormalizeFiveStateRuleArrays(eaeProjectDir, "Five_State_Actuator_CAT.fbt", "InterlockManager", result);
-            NormalizeFiveStateRuleArrays(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT.fbt", "CommonInterlockManager", result);
-            NormalizeCommonInterlockEvaluatorRules(eaeProjectDir, result);
+            NormalizeFiveStateRuleArrays(scope, "Five_State_Actuator_CAT.fbt", "InterlockManager", result);
+            NormalizeFiveStateRuleArrays(scope, "Seven_State_Actuator_Centre_Home_CAT.fbt", "CommonInterlockManager", result);
+            NormalizeCommonInterlockEvaluatorRules(scope, result);
 
-            DeployTargetStatesDatatype(cfg, eaeProjectDir, result);
-            NormalizeTargetStates(eaeProjectDir, "Five_State_Actuator_CAT.fbt", "InterlockManager",
+            DeployTargetStatesDatatype(cfg, scope, result);
+            NormalizeTargetStates(scope, "Five_State_Actuator_CAT.fbt", "InterlockManager",
                 new[] { "TargetWork1State", "TargetHomeState" }, result);
-            NormalizeTargetStates(eaeProjectDir, "Seven_State_Actuator_Centre_Home_CAT.fbt", "CommonInterlockManager",
+            NormalizeTargetStates(scope, "Seven_State_Actuator_Centre_Home_CAT.fbt", "CommonInterlockManager",
                 new[] { "TargetWork1State", "TargetWork2State", "TargetHomeState" }, result);
-            NormalizeCommonInterlockEvaluatorTargets(eaeProjectDir, result);
+            NormalizeCommonInterlockEvaluatorTargets(scope, result);
         }
 
         // Guard: every member an actuator CAT connects to its interlock FB MUST be an InputVar on the
         // shared evaluator (EAE's ERR_MEMBER_VAR_NOTFOUND). A mismatch is a stale scalar/struct mix, so
         // re-run once, then ABORT rather than deploy it.
-        internal static void AssertInterlockInterfaceConsistent(MapperConfig cfg,
-            string eaeProjectDir, int capacity, DeployResult result)
+        internal static void AssertInterlockInterfaceConsistent(Configuration.CompilerConfiguration cfg,
+            FbtEditScope scope, int capacity, DeployResult result)
         {
-            var missing = FindInterlockInterfaceMismatches(eaeProjectDir);
+            var missing = FindInterlockInterfaceMismatches(scope);
             if (missing.Count == 0) return;
 
             MapperLogger.Info("[Interlock][Guard] interface mismatch detected; re-running the interlock normalizers to self-heal.");
-            ApplyInterlockNormalizers(cfg, eaeProjectDir, capacity, result);
-            missing = FindInterlockInterfaceMismatches(eaeProjectDir);
+            ApplyInterlockNormalizers(cfg, scope, capacity, result);
+            missing = FindInterlockInterfaceMismatches(scope);
             if (missing.Count == 0)
             {
                 result.PatchesApplied.Add("[Interlock][Guard] scalar/struct interface mismatch self-healed on re-run.");
@@ -514,10 +516,10 @@ namespace CodeGen.Services
         }
 
         // Read-only (no locks). Returns human-readable mismatch strings; empty means consistent.
-        static List<string> FindInterlockInterfaceMismatches(string eaeProjectDir)
+        static List<string> FindInterlockInterfaceMismatches(FbtEditScope scope)
         {
             var mismatches = new List<string>();
-            var evalPath = FindDeployedFbt(eaeProjectDir, "CommonInterlockEvaluator.fbt");
+            var evalPath = FindDeployedFbt(scope.Root, "CommonInterlockEvaluator.fbt");
             if (string.IsNullOrEmpty(evalPath)) return mismatches;   // absent -> nothing to check
             HashSet<string> evalInputs;
             try
@@ -535,7 +537,7 @@ namespace CodeGen.Services
                 ("Five_State_Actuator_CAT.fbt", "InterlockManager"),
                 ("Seven_State_Actuator_Centre_Home_CAT.fbt", "CommonInterlockManager") })
             {
-                var catPath = FindDeployedFbt(eaeProjectDir, cat);
+                var catPath = FindDeployedFbt(scope.Root, cat);
                 if (string.IsNullOrEmpty(catPath)) continue;
                 try
                 {
