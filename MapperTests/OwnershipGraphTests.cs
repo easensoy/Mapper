@@ -62,14 +62,14 @@ namespace MapperTests
             var p = Process("C-p", "Fitting");
             var a = Actuator("C-a", "Clamp_X", "C-p", "C-p-s0");
             var pins = new Dictionary<string, PlcAssignment>(StringComparer.OrdinalIgnoreCase)
-                { ["Clamp_X"] = PlcAssignment.M580 };
+                { ["Clamp_X"] = PlcAssignment.Named("M580") };
 
             var g = DeploymentRoster.ResolvePlacement(Twin(p, a),
                 n => pins.TryGetValue(n, out var t) ? t : PlcAssignment.Unknown,
-                PlcAssignment.M262);
+                PlcAssignment.Named("M262"));
 
-            Assert.Equal(PlcAssignment.M580, Placed(g, "Fitting"));
-            Assert.Equal(PlcAssignment.M580, Placed(g, "Clamp_X"));
+            Assert.Equal(PlcAssignment.Named("M580"), Placed(g, "Fitting"));
+            Assert.Equal(PlcAssignment.Named("M580"), Placed(g, "Clamp_X"));
         }
 
         [Fact]
@@ -78,13 +78,13 @@ namespace MapperTests
             var p = Process("C-p", "Fitting");
             var a = Actuator("C-a", "Clamp_X", "C-p", "C-p-s0");
             var pins = new Dictionary<string, PlcAssignment>(StringComparer.OrdinalIgnoreCase)
-                { ["Fitting"] = PlcAssignment.BX1 };
+                { ["Fitting"] = PlcAssignment.Named("BX1") };
 
             var g = DeploymentRoster.ResolvePlacement(Twin(p, a),
                 n => pins.TryGetValue(n, out var t) ? t : PlcAssignment.Unknown,
-                PlcAssignment.M262);
+                PlcAssignment.Named("M262"));
 
-            Assert.Equal(PlcAssignment.BX1, Placed(g, "Clamp_X"));
+            Assert.Equal(PlcAssignment.Named("BX1"), Placed(g, "Clamp_X"));
         }
 
         [Fact]
@@ -95,14 +95,14 @@ namespace MapperTests
             var b = Actuator("C-b", "Clamp_Y", "C-p", "C-p-s0");
             var pins = new Dictionary<string, PlcAssignment>(StringComparer.OrdinalIgnoreCase)
             {
-                ["Clamp_X"] = PlcAssignment.M580,
-                ["Clamp_Y"] = PlcAssignment.BX1,
+                ["Clamp_X"] = PlcAssignment.Named("M580"),
+                ["Clamp_Y"] = PlcAssignment.Named("BX1"),
             };
 
             var ex = Assert.Throws<InvalidOperationException>(() => DeploymentRoster.ResolvePlacement(
                 Twin(p, a, b),
                 n => pins.TryGetValue(n, out var t) ? t : PlcAssignment.Unknown,
-                PlcAssignment.M262));
+                PlcAssignment.Named("M262")));
 
             Assert.Contains("Fitting", ex.Message, StringComparison.Ordinal);
             Assert.Contains("Clamp_X", ex.Message, StringComparison.Ordinal);
@@ -128,14 +128,14 @@ namespace MapperTests
             });
             var pins = new Dictionary<string, PlcAssignment>(StringComparer.OrdinalIgnoreCase)
             {
-                ["Fitting"] = PlcAssignment.M580,
-                ["Packing"] = PlcAssignment.BX1,
+                ["Fitting"] = PlcAssignment.Named("M580"),
+                ["Packing"] = PlcAssignment.Named("BX1"),
             };
 
             var ex = Assert.Throws<InvalidOperationException>(() => DeploymentRoster.ResolvePlacement(
                 Twin(p1, p2, shared),
                 n => pins.TryGetValue(n, out var t) ? t : PlcAssignment.Unknown,
-                PlcAssignment.M262));
+                PlcAssignment.Named("M262")));
 
             Assert.Contains("Clamp_X", ex.Message, StringComparison.Ordinal);
             Assert.Contains("Fitting", ex.Message, StringComparison.Ordinal);
@@ -149,9 +149,9 @@ namespace MapperTests
 
             var g = DeploymentRoster.ResolvePlacement(Twin(p),
                 _ => PlcAssignment.Unknown,
-                PlcAssignment.BX1);
+                PlcAssignment.Named("BX1"));
 
-            Assert.Equal(PlcAssignment.BX1, Placed(g, "Orphan_Station"));
+            Assert.Equal(PlcAssignment.Named("BX1"), Placed(g, "Orphan_Station"));
         }
 
         [Fact]
@@ -171,15 +171,15 @@ namespace MapperTests
             });
             var pins = new Dictionary<string, PlcAssignment>(StringComparer.OrdinalIgnoreCase)
             {
-                ["Fitting"] = PlcAssignment.M580,
-                ["Watcher"] = PlcAssignment.BX1,
+                ["Fitting"] = PlcAssignment.Named("M580"),
+                ["Watcher"] = PlcAssignment.Named("BX1"),
             };
 
             var g = DeploymentRoster.ResolvePlacement(Twin(commander, observer, a),
                 n => pins.TryGetValue(n, out var t) ? t : PlcAssignment.Unknown,
-                PlcAssignment.M262);
+                PlcAssignment.Named("M262"));
 
-            Assert.Equal(PlcAssignment.M580, Placed(g, "Clamp_X"));
+            Assert.Equal(PlcAssignment.Named("M580"), Placed(g, "Clamp_X"));
         }
     }
 }
